@@ -2,6 +2,7 @@ mod agent_call;
 mod composite;
 mod edit_file;
 mod fetch_url;
+mod filtered;
 mod find_replace;
 mod glob;
 mod grep;
@@ -11,6 +12,8 @@ mod plan_mode;
 mod read_file;
 mod shell;
 mod skills;
+#[cfg(feature = "sqlite-store")]
+mod state;
 #[cfg(feature = "sqlite-store")]
 mod tasks;
 #[cfg(feature = "sqlite-store")]
@@ -22,6 +25,7 @@ pub use agent_call::AgentCall;
 pub use composite::CompositeTools;
 pub use edit_file::EditFile;
 pub use fetch_url::FetchUrl;
+pub use filtered::FilteredTools;
 pub use find_replace::FindReplace;
 pub use glob::Glob;
 pub use grep::Grep;
@@ -30,6 +34,8 @@ pub use plan_mode::PlanMode;
 pub use read_file::ReadFile;
 pub use shell::Shell;
 pub use skills::SkillStore;
+#[cfg(feature = "sqlite-store")]
+pub use state::StateStore;
 #[cfg(feature = "sqlite-store")]
 pub use tasks::TaskStore;
 #[cfg(feature = "sqlite-store")]

@@ -13,6 +13,12 @@ pub struct CodexOAuthAdapter {
     client: reqwest::Client,
 }
 
+impl Default for CodexOAuthAdapter {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl CodexOAuthAdapter {
     pub fn new() -> Self {
         Self {
@@ -453,10 +459,10 @@ impl LlmTransport for CodexOAuthAdapter {
                 }
             }
         }
-        if !pending.trim().is_empty() {
-            if let Some(data) = pending.trim().strip_prefix("data:") {
-                event_lines.push(data.trim().to_string());
-            }
+        if !pending.trim().is_empty()
+            && let Some(data) = pending.trim().strip_prefix("data:")
+        {
+            event_lines.push(data.trim().to_string());
         }
         if !event_lines.is_empty() {
             let raw = event_lines.join("\n");

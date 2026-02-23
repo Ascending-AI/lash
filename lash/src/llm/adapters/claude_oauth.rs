@@ -13,6 +13,12 @@ pub struct ClaudeOAuthAdapter {
     client: reqwest::Client,
 }
 
+impl Default for ClaudeOAuthAdapter {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ClaudeOAuthAdapter {
     pub fn new() -> Self {
         Self {
@@ -28,21 +34,22 @@ impl ClaudeOAuthAdapter {
     }
 
     fn message_to_json(msg: &LlmMessage, req: &LlmRequest) -> Value {
-        if msg.kind == "image" && msg.image_idx >= 0 {
-            if let Some(att) = req.attachments.get(msg.image_idx as usize) {
-                let b64 = base64::engine::general_purpose::STANDARD.encode(&att.data);
-                return json!({
-                    "role": Self::claude_role(&msg.role),
-                    "content": [{
-                        "type": "image",
-                        "source": {
-                            "type": "base64",
-                            "media_type": att.mime,
-                            "data": b64,
-                        }
-                    }]
-                });
-            }
+        if msg.kind == "image"
+            && msg.image_idx >= 0
+            && let Some(att) = req.attachments.get(msg.image_idx as usize)
+        {
+            let b64 = base64::engine::general_purpose::STANDARD.encode(&att.data);
+            return json!({
+                "role": Self::claude_role(&msg.role),
+                "content": [{
+                    "type": "image",
+                    "source": {
+                        "type": "base64",
+                        "media_type": att.mime,
+                        "data": b64,
+                    }
+                }]
+            });
         }
 
         json!({
@@ -355,10 +362,10 @@ impl LlmTransport for ClaudeOAuthAdapter {
                 }
             }
         }
-        if !pending.trim().is_empty() {
-            if let Some(data) = pending.trim().strip_prefix("data:") {
-                event_lines.push(data.trim().to_string());
-            }
+        if !pending.trim().is_empty()
+            && let Some(data) = pending.trim().strip_prefix("data:")
+        {
+            event_lines.push(data.trim().to_string());
         }
         if !event_lines.is_empty() {
             let raw = event_lines.join("\n");

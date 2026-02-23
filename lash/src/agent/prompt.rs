@@ -1,6 +1,8 @@
 use std::collections::{HashMap, HashSet};
 use std::str::FromStr;
 
+use crate::capabilities::{AgentCapabilities, CapabilityId, capability_def};
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum PromptSectionName {
@@ -144,8 +146,7 @@ pub struct PromptComposeInput<'a> {
     pub tool_list: &'a str,
     pub tool_names: &'a [String],
     pub has_history: bool,
-    pub history_enabled: bool,
-    pub memory_enabled: bool,
+    pub capabilities: &'a AgentCapabilities,
     pub include_soul: bool,
     pub project_instructions: &'a str,
     pub overrides: &'a [PromptSectionOverride],
@@ -221,11 +222,11 @@ fn default_section(section: PromptSectionName, input: &PromptComposeInput<'_>) -
             }
         }
         PromptSectionName::ExecutionContract => Some(format!(
-            "## Execution Contract\n\nYour output can include prose and `<repl>` blocks.\n- `<repl>` blocks execute immediately when `</repl>` is reached\n- Use `<repl>` only when execution is needed; prose-only responses are valid when no execution is required\n- Variables persist across turns\n- `print(...)` output is model-visible only\n{}",
+            "## Execution Contract\n\nYour output can include prose and `<repl>` blocks.\n- `<repl>` blocks execute immediately when `</repl>` is reached\n- Maximum one `<repl>` block per turn\n- After a `<repl>` block executes, lash continues in a new internal turn with the execution output\n- Do not emit additional `<repl>` blocks in the same response after one has closed\n- Use `<repl>` only when execution is needed; prose-only responses are valid when no execution is required\n- Variables persist across turns\n- `print(...)` output is model-visible only\n{}",
             if profile.is_headless() {
                 "- In headless mode, prose-only turns are invalid; execute via `<repl>`"
             } else {
-                "- In interactive mode, if you execute `<repl>` without calling `done(...)`, lash auto-continues with execution output in the next internal turn"
+                "- In interactive mode, call `done(...)` only when your final user-facing answer is ready"
             }
         )),
         PromptSectionName::TerminationContract => Some(format!(
@@ -241,7 +242,12 @@ fn default_section(section: PromptSectionName, input: &PromptComposeInput<'_>) -
                 .to_string(),
         ),
         PromptSectionName::ToolGuides => {
-            let guide = tool_guides(input.tool_names, input.history_enabled, input.memory_enabled);
+            let guide = tool_guides(
+                input.tool_names,
+                input.capabilities.enabled(CapabilityId::History),
+                input.capabilities.enabled(CapabilityId::Memory),
+                input.capabilities.enabled(CapabilityId::Skills),
+            );
             if guide.is_empty() {
                 None
             } else {
@@ -259,23 +265,24 @@ fn default_section(section: PromptSectionName, input: &PromptComposeInput<'_>) -
         PromptSectionName::Builtins => Some(builtins_section(
             profile,
             input.tool_names,
-            input.history_enabled,
-            input.memory_enabled,
+            input.capabilities,
         )),
         PromptSectionName::Memory => {
-            if input.history_enabled || input.memory_enabled {
+            let history_enabled = input.capabilities.enabled(CapabilityId::History);
+            let memory_enabled = input.capabilities.enabled(CapabilityId::Memory);
+            if history_enabled || memory_enabled {
                 Some(memory_section(
                     input.has_history,
                     profile.is_subagent(),
-                    input.history_enabled,
-                    input.memory_enabled,
+                    history_enabled,
+                    memory_enabled,
                 ))
             } else {
                 None
             }
         }
         PromptSectionName::MemoryApi => {
-            if input.memory_enabled {
+            if input.capabilities.enabled(CapabilityId::Memory) {
                 Some(memory_api_section())
             } else {
                 None
@@ -298,7 +305,7 @@ fn default_section(section: PromptSectionName, input: &PromptComposeInput<'_>) -
             } else {
                 ""
             },
-            if !input.history_enabled {
+            if !input.capabilities.enabled(CapabilityId::History) {
                 ""
             } else if input.has_history {
                 "- Use `_history` and `_mem` only when prior-turn recall is actually needed"
@@ -312,9 +319,11 @@ fn default_section(section: PromptSectionName, input: &PromptComposeInput<'_>) -
 fn builtins_section(
     profile: PromptProfile,
     tool_names: &[String],
-    history_enabled: bool,
-    memory_enabled: bool,
+    capabilities: &AgentCapabilities,
 ) -> String {
+    let history_enabled = capabilities.enabled(CapabilityId::History);
+    let memory_enabled = capabilities.enabled(CapabilityId::Memory);
+    let skills_enabled = capabilities.enabled(CapabilityId::Skills);
     let has_skills_tool = tool_names
         .iter()
         .any(|name| name == "skills" || name == "load_skill");
@@ -330,7 +339,7 @@ fn builtins_section(
     }
     lines.push("- `list_tools(query=None)`".to_string());
     lines.push("- `search_tools(query, mode=\"hybrid\", regex=None, limit=10)`".to_string());
-    if has_skills_tool {
+    if skills_enabled && has_skills_tool {
         lines.push("- `search_skills(query, mode=\"hybrid\", regex=None, limit=10)`".to_string());
     }
     if history_enabled {
@@ -410,7 +419,12 @@ fn memory_api_section() -> String {
     .join("\n")
 }
 
-fn tool_guides(tool_names: &[String], history_enabled: bool, memory_enabled: bool) -> String {
+fn tool_guides(
+    tool_names: &[String],
+    history_enabled: bool,
+    memory_enabled: bool,
+    skills_enabled: bool,
+) -> String {
     let tools: HashSet<&str> = tool_names.iter().map(String::as_str).collect();
     let mut chunks = Vec::new();
 
@@ -489,11 +503,18 @@ fn tool_guides(tool_names: &[String], history_enabled: bool, memory_enabled: boo
                 .to_string(),
         );
     }
-    if tools.contains("load_skill") {
-        chunks.push(
-            "**Skills**\nIf user references `[SKILL:name]`, load with `tools.load_skill(name)` and follow its instructions."
-                .to_string(),
-        );
+    // Capability-defined prompt guidance (single source of truth).
+    for id in [CapabilityId::Delegation, CapabilityId::Skills] {
+        if (id == CapabilityId::Skills && !skills_enabled)
+            || (id == CapabilityId::Delegation && !tools.contains("agent_call"))
+        {
+            continue;
+        }
+        if let Some(def) = capability_def(id)
+            && let Some(section) = def.prompt_section
+        {
+            chunks.push(section.to_string());
+        }
     }
     chunks.join("\n\n")
 }
@@ -501,6 +522,7 @@ fn tool_guides(tool_names: &[String], history_enabled: bool, memory_enabled: boo
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::capabilities::CapabilityId;
 
     #[test]
     fn parses_prompt_section_names() {
@@ -535,8 +557,7 @@ mod tests {
             tool_list: "tools",
             tool_names: &[],
             has_history: false,
-            history_enabled: true,
-            memory_enabled: true,
+            capabilities: &AgentCapabilities::default(),
             include_soul: false,
             project_instructions: "",
             overrides: &overrides,
@@ -552,8 +573,7 @@ mod tests {
             tool_list: "tools",
             tool_names: &[],
             has_history: false,
-            history_enabled: true,
-            memory_enabled: true,
+            capabilities: &AgentCapabilities::default(),
             include_soul: false,
             project_instructions: "",
             overrides: &[],
@@ -575,12 +595,30 @@ mod tests {
             tool_list: "tools",
             tool_names: &[],
             has_history: false,
-            history_enabled: true,
-            memory_enabled: true,
+            capabilities: &AgentCapabilities::default(),
             include_soul: false,
             project_instructions: "",
             overrides: &overrides,
         });
         assert!(!text.contains("## Memory API"));
+    }
+
+    #[test]
+    fn skills_not_mentioned_when_skills_capability_disabled() {
+        let caps = AgentCapabilities::default().disable(CapabilityId::Skills);
+        let tools = vec!["load_skill".to_string(), "skills".to_string()];
+        let text = compose_system_prompt(PromptComposeInput {
+            profile: PromptProfile::RootInteractive,
+            context: "ctx",
+            tool_list: "tools",
+            tool_names: &tools,
+            has_history: false,
+            capabilities: &caps,
+            include_soul: false,
+            project_instructions: "",
+            overrides: &[],
+        });
+        assert!(!text.contains("search_skills("));
+        assert!(!text.contains("## Skills"));
     }
 }

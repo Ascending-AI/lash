@@ -11,7 +11,7 @@ mod theme;
 mod ui;
 mod util;
 
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -22,8 +22,9 @@ use crossterm::event::{Event as TermEvent, KeyCode, KeyEventKind, KeyModifiers};
 use lash_core::agent::{Message, MessageRole, Part, PartKind, PruneState};
 use lash_core::provider::{LashConfig, Provider};
 use lash_core::tools::{
-    AgentCall, CompositeTools, EditFile, FetchUrl, FindReplace, Glob, Grep, Ls, PlanMode, ReadFile,
-    Shell, SkillStore, TaskStore, ViewMessage, WebSearch, WriteFile,
+    AgentCall, CompositeTools, EditFile, FetchUrl, FilteredTools, FindReplace, Glob, Grep, Ls,
+    PlanMode, ReadFile, Shell, SkillStore, StateStore, TaskStore, ViewMessage, WebSearch,
+    WriteFile,
 };
 use lash_core::*;
 use ratatui::DefaultTerminal;
@@ -329,7 +330,9 @@ async fn main() -> anyhow::Result<()> {
             setup::run_setup_with_existing(existing_config.as_ref()).await?
         }
     } else {
-        let mut c = existing_config.expect("existing config already checked");
+        // SAFETY: else branch means existing_config.is_some() (checked above)
+        #[allow(clippy::unnecessary_unwrap)]
+        let mut c = existing_config.unwrap();
         if c.provider.ensure_fresh().await? {
             c.save()?; // persist refreshed tokens
         }
@@ -402,7 +405,12 @@ async fn main() -> anyhow::Result<()> {
 
     let task_store: Arc<TaskStore> = Arc::new(TaskStore::new(Arc::clone(&store)));
 
-    let mut base = CompositeTools::new()
+    let skill_dirs = vec![
+        PathBuf::from(&home).join(".lash").join("skills"),
+        PathBuf::from(".lash").join("skills"),
+    ];
+
+    let mut base_all = CompositeTools::new()
         .add(Shell::new())
         .add(ReadFile::new())
         .add(WriteFile)
@@ -412,45 +420,72 @@ async fn main() -> anyhow::Result<()> {
         .add(Grep)
         .add(Ls);
     if !headless {
-        base = base.add(PlanMode::new());
+        base_all = base_all.add(PlanMode::new());
     }
-    base = base.add_arc(Arc::clone(&task_store) as Arc<dyn ToolProvider>);
+    base_all = base_all.add_arc(Arc::clone(&task_store) as Arc<dyn ToolProvider>);
+    base_all = base_all.add(StateStore::new(
+        Arc::clone(&store),
+        vec![
+            PathBuf::from(&home).join(".lash").join("skills"),
+            PathBuf::from(".lash").join("skills"),
+        ],
+    ));
     // Headless runs are single-turn and autonomous; skip context archive lookups.
     if !headless {
-        base = base.add(ViewMessage::new(Arc::clone(&store)));
+        base_all = base_all.add(ViewMessage::new(Arc::clone(&store)));
     }
     if let Some(key) = lash_config.tavily_api_key() {
-        base = base.add(WebSearch::new(key)).add(FetchUrl::new(key));
+        base_all = base_all.add(WebSearch::new(key)).add(FetchUrl::new(key));
     }
-    let base_tools: Arc<dyn ToolProvider> = Arc::new(base);
-
-    // SkillStore — available to root + balanced/deep delegates, NOT search delegates
-    let skill_dirs = vec![
-        PathBuf::from(&home).join(".lash").join("skills"),
-        PathBuf::from(".lash").join("skills"),
-    ];
-    let tools_with_skills: Arc<dyn ToolProvider> = Arc::new(
-        CompositeTools::new()
-            .add_arc(Arc::clone(&base_tools))
-            .add(SkillStore::new(skill_dirs)),
-    );
+    base_all = base_all.add(SkillStore::new(skill_dirs));
+    let all_base_tools: Arc<dyn ToolProvider> = Arc::new(base_all);
 
     // Root cancel token — lives for the whole app lifetime, child tokens are created per run
     let root_cancel = CancellationToken::new();
-
-    let tools: Arc<dyn ToolProvider> = Arc::new(
-        CompositeTools::new()
-            .add_arc(Arc::clone(&tools_with_skills))
-            .add(AgentCall::new(
-                Arc::clone(&tools_with_skills),
-                &config,
-                lash_config.agent_models.clone(),
-                root_cancel.clone(),
-            )),
+    let probe_agent_call = AgentCall::new(
+        Arc::clone(&all_base_tools),
+        &config,
+        lash_config.agent_models.clone(),
+        root_cancel.clone(),
     );
+    let mut resolver_catalog = all_base_tools.definitions();
+    resolver_catalog.extend(probe_agent_call.definitions());
+    let resolved = resolve_features(&config.capabilities, &resolver_catalog);
+
+    let base_allowed: BTreeSet<String> = all_base_tools
+        .definitions()
+        .into_iter()
+        .map(|d| d.name)
+        .filter(|n| resolved.effective_tools.contains(n))
+        .collect();
+    let filtered_base: Arc<dyn ToolProvider> = Arc::new(FilteredTools::new(
+        Arc::clone(&all_base_tools),
+        base_allowed,
+    ));
+
+    let agent_allowed: BTreeSet<String> = probe_agent_call
+        .definitions()
+        .into_iter()
+        .map(|d| d.name)
+        .filter(|n| resolved.effective_tools.contains(n))
+        .collect();
+
+    let mut tools_comp = CompositeTools::new().add_arc(Arc::clone(&filtered_base));
+    if !agent_allowed.is_empty() {
+        let agent_call = AgentCall::new(
+            Arc::clone(&filtered_base),
+            &config,
+            lash_config.agent_models.clone(),
+            root_cancel.clone(),
+        );
+        let filtered_agent: Arc<dyn ToolProvider> =
+            Arc::new(FilteredTools::new(Arc::new(agent_call), agent_allowed));
+        tools_comp = tools_comp.add_arc(filtered_agent);
+    }
+    let tools: Arc<dyn ToolProvider> = Arc::new(tools_comp);
     let toolset_hash =
         hash12(&serde_json::to_vec(&tools.definitions()).unwrap_or_else(|_| b"[]".to_vec()));
-    let session = Session::new(tools, "root", headless, config.capabilities).await?;
+    let session = Session::new(tools, "root", headless, config.capabilities.clone()).await?;
 
     let initial_reasoning_effort = config.reasoning_effort.clone();
     let agent = Agent::new(session, config, Some("root".to_string()));

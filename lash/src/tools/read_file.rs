@@ -30,8 +30,7 @@ impl ToolProvider for ReadFile {
             description: format!(
                 "Read a file (default: up to {} lines). Text files return hashline-prefixed content in `LINE:8HEX|text` format. PDF files are extracted to text. Image files (png, jpg, gif, webp, bmp) are read for visual inspection. Use `ls` for directories.",
                 DEFAULT_LIMIT
-            )
-            .into(),
+            ),
             params: vec![
                 ToolParam::typed("path", "str"),
                 ToolParam {
@@ -46,15 +45,14 @@ impl ToolProvider for ReadFile {
                     description: format!(
                         "Maximum lines to read (default: {}). Use null or \"none\" for no cap.",
                         DEFAULT_LIMIT
-                    )
-                    .into(),
+                    ),
                     required: false,
                 },
             ],
             returns: "str".into(),
             examples: vec![],
-                hidden: false,
-                inject_into_prompt: true,
+            hidden: false,
+            inject_into_prompt: true,
         }]
     }
 

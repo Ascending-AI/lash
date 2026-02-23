@@ -13,6 +13,12 @@ pub struct OpenRouterAdapter {
     client: reqwest::Client,
 }
 
+impl Default for OpenRouterAdapter {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl OpenRouterAdapter {
     pub fn new() -> Self {
         Self {
@@ -29,18 +35,19 @@ impl OpenRouterAdapter {
     }
 
     fn message_to_json(&self, msg: &LlmMessage, req: &LlmRequest) -> Value {
-        if msg.kind == "image" && msg.image_idx >= 0 {
-            if let Some(att) = req.attachments.get(msg.image_idx as usize) {
-                let b64 = base64::engine::general_purpose::STANDARD.encode(&att.data);
-                let data_url = format!("data:{};base64,{}", att.mime, b64);
-                return json!({
-                    "role": Self::map_role(&msg.role),
-                    "content": [{
-                        "type": "image_url",
-                        "image_url": {"url": data_url}
-                    }]
-                });
-            }
+        if msg.kind == "image"
+            && msg.image_idx >= 0
+            && let Some(att) = req.attachments.get(msg.image_idx as usize)
+        {
+            let b64 = base64::engine::general_purpose::STANDARD.encode(&att.data);
+            let data_url = format!("data:{};base64,{}", att.mime, b64);
+            return json!({
+                "role": Self::map_role(&msg.role),
+                "content": [{
+                    "type": "image_url",
+                    "image_url": {"url": data_url}
+                }]
+            });
         }
 
         json!({
@@ -161,13 +168,12 @@ impl OpenRouterAdapter {
         if let Some(err) = event.get("error") {
             return Err(LlmTransportError::new("OpenRouter stream error").with_raw(err.to_string()));
         }
-        if let Some(new_usage) = Self::usage_from_value(&event) {
-            if new_usage.input_tokens > 0
+        if let Some(new_usage) = Self::usage_from_value(&event)
+            && (new_usage.input_tokens > 0
                 || new_usage.output_tokens > 0
-                || new_usage.cached_input_tokens > 0
-            {
-                *usage = new_usage;
-            }
+                || new_usage.cached_input_tokens > 0)
+        {
+            *usage = new_usage;
         }
         for piece in Self::extract_text_parts(&event) {
             Self::apply_stream_piece(full, deltas, &piece);
@@ -346,10 +352,10 @@ impl LlmTransport for OpenRouterAdapter {
                 }
             }
         }
-        if !pending.trim().is_empty() {
-            if let Some(data) = pending.trim().strip_prefix("data:") {
-                event_lines.push(data.trim().to_string());
-            }
+        if !pending.trim().is_empty()
+            && let Some(data) = pending.trim().strip_prefix("data:")
+        {
+            event_lines.push(data.trim().to_string());
         }
         if !event_lines.is_empty() {
             let raw = event_lines.join("\n");

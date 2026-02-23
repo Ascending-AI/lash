@@ -683,6 +683,7 @@ fn draw_provider_select(frame: &mut Frame, area: Rect, selected: usize) {
     frame.render_widget(paragraph, area);
 }
 
+#[allow(clippy::too_many_arguments)]
 fn draw_credential_input(
     frame: &mut Frame,
     area: Rect,

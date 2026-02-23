@@ -10,9 +10,10 @@ use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 
 use crate::ToolDefinition;
+use crate::capabilities::{AgentCapabilities, CapabilityId};
 use crate::instructions::{FsInstructionSource, InstructionSource};
 use crate::llm::factory::adapter_for;
-use crate::llm::types::{LlmAttachment, LlmRequest, LlmResponse, LlmStreamEvent};
+use crate::llm::types::{LlmAttachment, LlmRequest, LlmResponse, LlmStreamEvent, LlmUsage};
 use crate::provider::Provider;
 use crate::session::Session;
 
@@ -79,22 +80,6 @@ pub struct AgentConfig {
     pub prompt_overrides: Vec<PromptSectionOverride>,
     /// Host-provided instruction source (filesystem by default).
     pub instruction_source: Arc<dyn InstructionSource>,
-}
-
-/// Backend capability gates for REPL globals and prompt sections.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct AgentCapabilities {
-    pub memory: bool,
-    pub history: bool,
-}
-
-impl Default for AgentCapabilities {
-    fn default() -> Self {
-        Self {
-            memory: true,
-            history: true,
-        }
-    }
 }
 
 impl Default for AgentConfig {
@@ -294,7 +279,7 @@ impl Agent {
     }
 
     pub fn capabilities(&self) -> AgentCapabilities {
-        self.config.capabilities
+        self.config.capabilities.clone()
     }
 
     /// Reset the underlying Python session (clear namespace).
@@ -420,8 +405,8 @@ impl Agent {
         let mut context_pruned_turns: usize = 0;
         let session_start = std::time::Instant::now();
         let mut headless_prose_only_streak: usize = 0;
-        let history_enabled = self.config.capabilities.history;
-        let memory_enabled = self.config.capabilities.memory;
+        let history_enabled = self.config.capabilities.enabled(CapabilityId::History);
+        let memory_enabled = self.config.capabilities.enabled(CapabilityId::Memory);
 
         loop {
             if cancel.is_cancelled() {
@@ -528,24 +513,18 @@ impl Agent {
                 }
             }
 
-            let history_scope = if self.config.sub_agent {
-                if history_enabled {
-                    format!(
-                        "Context-pruned turns this run: {}. This count tracks pruning in this agent only; inherited parent history may also exist in `_history`.",
-                        context_pruned_turns
-                    )
+            let history_scope = if history_enabled {
+                let guidance = if self.config.sub_agent {
+                    "This count tracks pruning in this agent only; inherited parent history may also exist in `_history`."
                 } else {
-                    format!("Context-pruned turns this run: {}.", context_pruned_turns)
-                }
+                    "If this is 0, avoid `_history` mining detours unless prior-turn context is explicitly needed."
+                };
+                format!(
+                    "Context-pruned turns this run: {}. {}",
+                    context_pruned_turns, guidance
+                )
             } else {
-                if history_enabled {
-                    format!(
-                        "Context-pruned turns this run: {}. If this is 0, avoid `_history` mining detours unless prior-turn context is explicitly needed.",
-                        context_pruned_turns
-                    )
-                } else {
-                    format!("Context-pruned turns this run: {}.", context_pruned_turns)
-                }
+                format!("Context-pruned turns this run: {}.", context_pruned_turns)
             };
             let context = if base_context.is_empty() {
                 history_scope
@@ -667,8 +646,7 @@ impl Agent {
                         tool_list: &tool_list,
                         tool_names: &tool_names,
                         has_history,
-                        history_enabled,
-                        memory_enabled,
+                        capabilities: &self.config.capabilities,
                         include_soul,
                         project_instructions: &project_instructions,
                         overrides: &self.config.prompt_overrides,
@@ -689,6 +667,14 @@ impl Agent {
                         stream_events: None,
                     };
 
+                    tracing::info!(
+                        "LLM turn {} start: model={} messages={} attachments={}",
+                        iteration,
+                        model,
+                        llm_request.messages.len(),
+                        llm_request.attachments.len()
+                    );
+
                     let (llm_stream_tx, mut llm_stream_rx) =
                         tokio::sync::mpsc::unbounded_channel::<LlmStreamEvent>();
                     let llm_request = LlmRequest {
@@ -703,12 +689,41 @@ impl Agent {
                         (result, call_provider)
                     });
 
-                    let break_on_first_code = !self.is_root_interactive();
+                    // Turn semantics: a single model turn may contain prose or one REPL block.
+                    // After the first completed REPL block we stop consuming this completion,
+                    // reinject execution output, and ask the model for the next step.
+                    let break_on_first_code = true;
                     let mut streamed_delta_count = 0usize;
+                    let mut stream_event_count = 0usize;
+                    let mut usage_event_count = 0usize;
+                    let mut streamed_char_count = 0usize;
+                    let mut latest_stream_usage = LlmUsage::default();
                     let mut stop_stream_processing = false;
                     let mut retry_after_error = false;
+                    let mut wait_tick = tokio::time::interval(std::time::Duration::from_secs(15));
+                    wait_tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+                    // Consume the immediate first tick so periodic logs start after 15s.
+                    let _ = wait_tick.tick().await;
                     let mut llm_task = llm_task;
                     let llm_response: LlmResponse = loop {
+                        if stop_stream_processing
+                            && ((break_on_first_code && code_executed)
+                                || !acc.final_response.is_empty())
+                        {
+                            tracing::info!(
+                                "LLM turn {} cutting stream early after code execution (stream_events={} deltas={} delta_chars={} usage_events={}); reinjecting outputs",
+                                iteration,
+                                stream_event_count,
+                                streamed_delta_count,
+                                streamed_char_count,
+                                usage_event_count
+                            );
+                            llm_task.abort();
+                            break LlmResponse {
+                                usage: latest_stream_usage.clone(),
+                                ..LlmResponse::default()
+                            };
+                        }
                         tokio::select! {
                             _ = cancel.cancelled() => {
                                 llm_task.abort();
@@ -717,14 +732,29 @@ impl Agent {
                                 emit!(AgentEvent::Done);
                                 return (msgs, iteration);
                             }
+                            _ = wait_tick.tick() => {
+                                tracing::info!(
+                                    "LLM turn {} waiting: elapsed={}s stream_events={} deltas={} delta_chars={} usage_events={} stop_stream={} code_executed={}",
+                                    iteration,
+                                    llm_start.elapsed().as_secs(),
+                                    stream_event_count,
+                                    streamed_delta_count,
+                                    streamed_char_count,
+                                    usage_event_count,
+                                    stop_stream_processing,
+                                    code_executed,
+                                );
+                            }
                             maybe_event = llm_stream_rx.recv() => {
                                 let Some(event) = maybe_event else { continue };
+                                stream_event_count += 1;
                                 match event {
                                     LlmStreamEvent::Delta(delta) => {
                                         if stop_stream_processing || delta.is_empty() {
                                             continue;
                                         }
                                         streamed_delta_count += 1;
+                                        streamed_char_count += delta.len();
                                         response.push_str(&delta);
 
                                         while let Some(nl) = response[last_line_start..].find('\n') {
@@ -774,10 +804,30 @@ impl Agent {
                                             stop_stream_processing = true;
                                         }
                                     }
-                                    LlmStreamEvent::Usage(_) => {}
+                                    LlmStreamEvent::Usage(usage) => {
+                                        usage_event_count += 1;
+                                        latest_stream_usage = usage.clone();
+                                        tracing::debug!(
+                                            "LLM turn {} usage event: in={} out={} cached={} (stream_events={})",
+                                            iteration,
+                                            usage.input_tokens,
+                                            usage.output_tokens,
+                                            usage.cached_input_tokens,
+                                            stream_event_count
+                                        );
+                                    }
                                 }
                             }
                             join = &mut llm_task => {
+                                tracing::info!(
+                                    "LLM turn {} transport finished after {}ms (stream_events={} deltas={} delta_chars={} usage_events={})",
+                                    iteration,
+                                    llm_start.elapsed().as_millis(),
+                                    stream_event_count,
+                                    streamed_delta_count,
+                                    streamed_char_count,
+                                    usage_event_count
+                                );
                                 let (result, provider_after) = match join {
                                     Ok(v) => v,
                                     Err(e) => {
@@ -797,6 +847,13 @@ impl Agent {
                                 match result {
                                     Ok(resp) => break resp,
                                     Err(e) => {
+                                        tracing::warn!(
+                                            "LLM turn {} transport error after {}ms: {} (retryable={})",
+                                            iteration,
+                                            llm_start.elapsed().as_millis(),
+                                            e.message,
+                                            e.retryable
+                                        );
                                         if e.retryable && attempt < LLM_MAX_RETRIES {
                                             last_error = Some(e.message);
                                             retry_after_error = true;
@@ -830,6 +887,13 @@ impl Agent {
                         llm_response.request_body.clone(),
                         llm_response.http_summary.clone(),
                     ));
+                    tracing::info!(
+                        "LLM turn {} usage final: in={} out={} cached={}",
+                        iteration,
+                        llm_response.usage.input_tokens,
+                        llm_response.usage.output_tokens,
+                        llm_response.usage.cached_input_tokens
+                    );
 
                     if streamed_delta_count == 0 {
                         for delta in &llm_response.deltas {
@@ -1292,12 +1356,6 @@ Prose-only output is not a valid step. Continue with concrete tool execution; ca
                 max_steps_final = true;
             }
         }
-    }
-}
-
-impl Agent {
-    fn is_root_interactive(&self) -> bool {
-        !self.config.headless && !self.config.sub_agent
     }
 }
 

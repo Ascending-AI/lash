@@ -17,6 +17,12 @@ pub struct GoogleCloudCodeAdapter {
     client: reqwest::Client,
 }
 
+impl Default for GoogleCloudCodeAdapter {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl GoogleCloudCodeAdapter {
     pub fn new() -> Self {
         Self {
@@ -392,10 +398,10 @@ impl LlmTransport for GoogleCloudCodeAdapter {
             }
         }
 
-        if !pending.trim().is_empty() {
-            if let Some(data) = pending.trim().strip_prefix("data:") {
-                event_lines.push(data.trim().to_string());
-            }
+        if !pending.trim().is_empty()
+            && let Some(data) = pending.trim().strip_prefix("data:")
+        {
+            event_lines.push(data.trim().to_string());
         }
         if !event_lines.is_empty() {
             let raw = event_lines.join("\n");

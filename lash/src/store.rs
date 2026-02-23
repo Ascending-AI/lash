@@ -54,6 +54,38 @@ CREATE TABLE IF NOT EXISTS agents (
     output_tokens       INTEGER NOT NULL DEFAULT 0,
     cached_input_tokens INTEGER NOT NULL DEFAULT 0
 );
+
+CREATE TABLE IF NOT EXISTS history_turns (
+    agent_id         TEXT NOT NULL,
+    turn_index       INTEGER NOT NULL,
+    user_message     TEXT NOT NULL DEFAULT '',
+    prose            TEXT NOT NULL DEFAULT '',
+    code             TEXT NOT NULL DEFAULT '',
+    output           TEXT NOT NULL DEFAULT '',
+    error            TEXT,
+    tool_calls_json  TEXT NOT NULL DEFAULT '[]',
+    files_read_json  TEXT NOT NULL DEFAULT '[]',
+    files_written_json TEXT NOT NULL DEFAULT '[]',
+    PRIMARY KEY (agent_id, turn_index)
+);
+CREATE INDEX IF NOT EXISTS idx_history_turns_agent_turn
+ON history_turns(agent_id, turn_index);
+
+CREATE TABLE IF NOT EXISTS mem_state (
+    agent_id      TEXT PRIMARY KEY,
+    current_turn  INTEGER NOT NULL DEFAULT 0
+);
+
+CREATE TABLE IF NOT EXISTS mem_entries (
+    agent_id      TEXT NOT NULL,
+    key           TEXT NOT NULL,
+    description   TEXT NOT NULL DEFAULT '',
+    value         TEXT NOT NULL DEFAULT '',
+    turn          INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (agent_id, key)
+);
+CREATE INDEX IF NOT EXISTS idx_mem_entries_agent_turn
+ON mem_entries(agent_id, turn);
 ";
 
 fn apply_pragmas(conn: &Connection) -> rusqlite::Result<()> {
@@ -95,6 +127,27 @@ pub struct AgentState {
     pub input_tokens: i64,
     pub output_tokens: i64,
     pub cached_input_tokens: i64,
+}
+
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+pub struct HistoryTurnRecord {
+    pub index: i64,
+    pub user_message: String,
+    pub prose: String,
+    pub code: String,
+    pub output: String,
+    pub error: Option<String>,
+    pub tool_calls: Vec<serde_json::Value>,
+    pub files_read: Vec<String>,
+    pub files_written: Vec<String>,
+}
+
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+pub struct MemRecord {
+    pub key: String,
+    pub description: String,
+    pub value: String,
+    pub turn: i64,
 }
 
 type DependencyMap = HashMap<String, Vec<String>>;
@@ -756,7 +809,300 @@ impl Store {
         );
     }
 
+    // ─── History operations ───
+
+    pub fn history_add_turn(&self, agent_id: &str, turn: &serde_json::Value) {
+        let conn = self.conn.lock().unwrap();
+        Self::history_add_turn_locked(&conn, agent_id, turn);
+    }
+
+    pub fn history_export(&self, agent_id: &str) -> Vec<HistoryTurnRecord> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = match conn.prepare(
+            "SELECT turn_index, user_message, prose, code, output, error, tool_calls_json, files_read_json, files_written_json
+             FROM history_turns
+             WHERE agent_id = ?1
+             ORDER BY turn_index",
+        ) {
+            Ok(s) => s,
+            Err(_) => return Vec::new(),
+        };
+        let rows = match stmt.query_map(params![agent_id], |row| {
+            Ok((
+                row.get::<_, i64>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+                row.get::<_, String>(3)?,
+                row.get::<_, String>(4)?,
+                row.get::<_, Option<String>>(5)?,
+                row.get::<_, String>(6)?,
+                row.get::<_, String>(7)?,
+                row.get::<_, String>(8)?,
+            ))
+        }) {
+            Ok(r) => r,
+            Err(_) => return Vec::new(),
+        };
+
+        rows.filter_map(|r| r.ok())
+            .map(
+                |(
+                    index,
+                    user_message,
+                    prose,
+                    code,
+                    output,
+                    error,
+                    tool_calls_json,
+                    files_read_json,
+                    files_written_json,
+                )| {
+                    let tool_calls = serde_json::from_str(&tool_calls_json).unwrap_or_default();
+                    let files_read = serde_json::from_str(&files_read_json).unwrap_or_default();
+                    let files_written =
+                        serde_json::from_str(&files_written_json).unwrap_or_default();
+                    HistoryTurnRecord {
+                        index,
+                        user_message,
+                        prose,
+                        code,
+                        output,
+                        error,
+                        tool_calls,
+                        files_read,
+                        files_written,
+                    }
+                },
+            )
+            .collect()
+    }
+
+    pub fn history_load(&self, agent_id: &str, turns: &[serde_json::Value]) {
+        let mut conn = self.conn.lock().unwrap();
+        let tx = match conn.transaction() {
+            Ok(tx) => tx,
+            Err(_) => return,
+        };
+        let _ = tx.execute(
+            "DELETE FROM history_turns WHERE agent_id = ?1",
+            params![agent_id],
+        );
+        for turn in turns {
+            Self::history_add_turn_locked(&tx, agent_id, turn);
+        }
+        let _ = tx.commit();
+    }
+
+    // ─── Memory operations ───
+
+    pub fn mem_set_turn(&self, agent_id: &str, turn: i64) {
+        let conn = self.conn.lock().unwrap();
+        let _ = conn.execute(
+            "INSERT INTO mem_state (agent_id, current_turn) VALUES (?1, ?2)
+             ON CONFLICT(agent_id) DO UPDATE SET current_turn = excluded.current_turn",
+            params![agent_id, turn],
+        );
+    }
+
+    pub fn mem_set(&self, agent_id: &str, key: &str, description: &str, value: &str) {
+        let conn = self.conn.lock().unwrap();
+        let current_turn: i64 = conn
+            .query_row(
+                "SELECT current_turn FROM mem_state WHERE agent_id = ?1",
+                params![agent_id],
+                |row| row.get(0),
+            )
+            .unwrap_or(0);
+        let _ = conn.execute(
+            "INSERT OR REPLACE INTO mem_entries (agent_id, key, description, value, turn)
+             VALUES (?1, ?2, ?3, ?4, ?5)",
+            params![agent_id, key, description, value, current_turn],
+        );
+    }
+
+    pub fn mem_get(&self, agent_id: &str, key: &str) -> Option<MemRecord> {
+        let conn = self.conn.lock().unwrap();
+        conn.query_row(
+            "SELECT key, description, value, turn
+             FROM mem_entries
+             WHERE agent_id = ?1 AND key = ?2",
+            params![agent_id, key],
+            |row| {
+                Ok(MemRecord {
+                    key: row.get(0)?,
+                    description: row.get(1)?,
+                    value: row.get(2)?,
+                    turn: row.get(3)?,
+                })
+            },
+        )
+        .optional()
+        .ok()
+        .flatten()
+    }
+
+    pub fn mem_delete(&self, agent_id: &str, key: &str) -> bool {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "DELETE FROM mem_entries WHERE agent_id = ?1 AND key = ?2",
+            params![agent_id, key],
+        )
+        .unwrap_or(0)
+            > 0
+    }
+
+    pub fn mem_export(&self, agent_id: &str) -> Vec<MemRecord> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = match conn.prepare(
+            "SELECT key, description, value, turn
+             FROM mem_entries
+             WHERE agent_id = ?1
+             ORDER BY key",
+        ) {
+            Ok(s) => s,
+            Err(_) => return Vec::new(),
+        };
+        let rows = match stmt.query_map(params![agent_id], |row| {
+            Ok(MemRecord {
+                key: row.get(0)?,
+                description: row.get(1)?,
+                value: row.get(2)?,
+                turn: row.get(3)?,
+            })
+        }) {
+            Ok(r) => r,
+            Err(_) => return Vec::new(),
+        };
+        rows.filter_map(|r| r.ok()).collect()
+    }
+
+    pub fn mem_load(&self, agent_id: &str, entries: &[serde_json::Value]) {
+        let mut conn = self.conn.lock().unwrap();
+        let tx = match conn.transaction() {
+            Ok(tx) => tx,
+            Err(_) => return,
+        };
+        let _ = tx.execute(
+            "DELETE FROM mem_entries WHERE agent_id = ?1",
+            params![agent_id],
+        );
+        let mut max_turn = 0_i64;
+        for entry in entries {
+            let key = entry
+                .get("key")
+                .and_then(|v| v.as_str())
+                .unwrap_or_default()
+                .to_string();
+            if key.is_empty() {
+                continue;
+            }
+            let description = entry
+                .get("description")
+                .and_then(|v| v.as_str())
+                .unwrap_or_default()
+                .to_string();
+            let value = entry
+                .get("value")
+                .and_then(|v| v.as_str())
+                .unwrap_or_default()
+                .to_string();
+            let turn = entry.get("turn").and_then(|v| v.as_i64()).unwrap_or(0);
+            max_turn = max_turn.max(turn);
+            let _ = tx.execute(
+                "INSERT OR REPLACE INTO mem_entries (agent_id, key, description, value, turn)
+                 VALUES (?1, ?2, ?3, ?4, ?5)",
+                params![agent_id, key, description, value, turn],
+            );
+        }
+        let _ = tx.execute(
+            "INSERT INTO mem_state (agent_id, current_turn) VALUES (?1, ?2)
+             ON CONFLICT(agent_id) DO UPDATE SET current_turn = excluded.current_turn",
+            params![agent_id, max_turn],
+        );
+        let _ = tx.commit();
+    }
+
     // ─── Internal helpers (require caller to already hold the lock) ───
+
+    fn history_add_turn_locked(conn: &Connection, agent_id: &str, turn: &serde_json::Value) {
+        let index = turn.get("index").and_then(|v| v.as_i64()).unwrap_or(0);
+        let user_message = turn
+            .get("user_message")
+            .and_then(|v| v.as_str())
+            .unwrap_or_default()
+            .to_string();
+        let prose = turn
+            .get("prose")
+            .and_then(|v| v.as_str())
+            .unwrap_or_default()
+            .to_string();
+        let code = turn
+            .get("code")
+            .and_then(|v| v.as_str())
+            .unwrap_or_default()
+            .to_string();
+        let output = turn
+            .get("output")
+            .and_then(|v| v.as_str())
+            .unwrap_or_default()
+            .to_string();
+        let error = turn
+            .get("error")
+            .and_then(|v| v.as_str())
+            .map(str::to_string);
+        let tool_calls = turn
+            .get("tool_calls")
+            .and_then(|v| v.as_array())
+            .cloned()
+            .unwrap_or_default();
+
+        let mut files_read = std::collections::BTreeSet::new();
+        let mut files_written = std::collections::BTreeSet::new();
+        for tc in &tool_calls {
+            let tool = tc.get("tool").and_then(|v| v.as_str()).unwrap_or_default();
+            let path = tc
+                .get("args")
+                .and_then(|v| v.as_object())
+                .and_then(|obj| obj.get("path"))
+                .and_then(|v| v.as_str());
+            if let Some(path) = path {
+                match tool {
+                    "read_file" | "glob" | "grep" => {
+                        files_read.insert(path.to_string());
+                    }
+                    "write_file" | "edit_file" | "find_replace" => {
+                        files_written.insert(path.to_string());
+                    }
+                    _ => {}
+                }
+            }
+        }
+
+        let tool_calls_json = serde_json::to_string(&tool_calls).unwrap_or_else(|_| "[]".into());
+        let files_read_json = serde_json::to_string(&files_read.into_iter().collect::<Vec<_>>())
+            .unwrap_or_else(|_| "[]".into());
+        let files_written_json =
+            serde_json::to_string(&files_written.into_iter().collect::<Vec<_>>())
+                .unwrap_or_else(|_| "[]".into());
+
+        let _ = conn.execute(
+            "INSERT OR REPLACE INTO history_turns
+             (agent_id, turn_index, user_message, prose, code, output, error, tool_calls_json, files_read_json, files_written_json)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+            params![
+                agent_id,
+                index,
+                user_message,
+                prose,
+                code,
+                output,
+                error,
+                tool_calls_json,
+                files_read_json,
+                files_written_json
+            ],
+        );
+    }
 
     /// Build dependency maps in one pass:
     /// - blocks_map: blocker_id -> [blocked_id]

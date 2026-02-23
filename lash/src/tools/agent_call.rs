@@ -131,7 +131,7 @@ impl AgentCall {
         let (model, reasoning_effort) =
             pick_model_and_reasoning(&self.config, &self.agent_models, tier);
         AgentConfig {
-            capabilities: self.config.capabilities,
+            capabilities: self.config.capabilities.clone(),
             model,
             reasoning_effort,
             provider: self.config.provider.clone(),
@@ -207,7 +207,7 @@ impl AgentCall {
             session_tools,
             &agent_id,
             self.config.headless,
-            agent_config.capabilities,
+            agent_config.capabilities.clone(),
         )
         .await
         {

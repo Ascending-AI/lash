@@ -1,4 +1,5 @@
 pub mod agent;
+pub mod capabilities;
 pub mod embedded;
 pub mod instructions;
 pub mod llm;
@@ -14,8 +15,12 @@ pub mod tools;
 
 // Re-exports
 pub use agent::{
-    Agent, AgentCapabilities, AgentConfig, AgentEvent, Message, MessageRole, Part, PartKind,
-    PromptOverrideMode, PromptSectionName, PromptSectionOverride, PruneState, TokenUsage,
+    Agent, AgentConfig, AgentEvent, Message, MessageRole, Part, PartKind, PromptOverrideMode,
+    PromptSectionName, PromptSectionOverride, PruneState, TokenUsage,
+};
+pub use capabilities::{
+    AgentCapabilities, CapabilityId, ResolvedFeatures, capability_def, capability_for_tool,
+    default_enabled_capabilities, resolve_features,
 };
 pub use instructions::{FsInstructionSource, InstructionLoader, InstructionSource};
 pub use provider::{LashConfig, Provider};

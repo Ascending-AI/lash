@@ -7,12 +7,13 @@ use tokio_util::sync::CancellationToken;
 
 use crate::agent::message::IMAGE_REF_PREFIX;
 use crate::agent::{
-    Agent, AgentCapabilities, AgentConfig, AgentEvent, Message, MessageRole, Part, PartKind,
-    PromptSectionOverride, PruneState, TokenUsage,
+    Agent, AgentConfig, AgentEvent, Message, MessageRole, Part, PartKind, PromptSectionOverride,
+    PruneState, TokenUsage,
 };
+use crate::capabilities::AgentCapabilities;
 use crate::instructions::{FsInstructionSource, InstructionSource};
 use crate::provider::Provider;
-use crate::{Session, SessionError, ToolProvider};
+use crate::{CapabilityId, Session, SessionError, ToolProvider};
 
 /// Runtime execution mode for a turn.
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
@@ -172,11 +173,17 @@ impl RuntimeEngine {
         tools: Arc<dyn ToolProvider>,
         mut state: AgentStateEnvelope,
     ) -> Result<Self, SessionError> {
-        let capabilities = config.capabilities;
+        let capabilities = config.capabilities.clone();
         if state.agent_id.is_empty() {
             state.agent_id = "root".to_string();
         }
-        let session = Session::new(tools, &state.agent_id, config.headless, capabilities).await?;
+        let session = Session::new(
+            tools,
+            &state.agent_id,
+            config.headless,
+            capabilities.clone(),
+        )
+        .await?;
         let mut agent = Agent::new(session, config.into(), Some(state.agent_id.clone()));
         if let Some(snapshot) = state.repl_snapshot.clone() {
             agent.restore(&snapshot).await?;
@@ -326,7 +333,7 @@ impl RuntimeEngine {
                     None
                 } else {
                     let mut available = Vec::new();
-                    if self.capabilities.history {
+                    if self.capabilities.enabled(CapabilityId::History) {
                         available.push(
                             "- `_history.search(\"query\", mode=\"hybrid\")` — search planning exploration"
                                 .to_string(),
@@ -335,7 +342,7 @@ impl RuntimeEngine {
                             "- `_history.user_messages()` — original user requests".to_string(),
                         );
                     }
-                    if self.capabilities.memory {
+                    if self.capabilities.enabled(CapabilityId::Memory) {
                         available
                             .push("- `_mem` — persistent memory (fully preserved)".to_string());
                     }

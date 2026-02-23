@@ -23,8 +23,7 @@ impl ToolProvider for Grep {
             description: format!(
                 "Search file contents for a regex pattern (ripgrep-compatible regex). Returns matching lines with file paths and line numbers, plus context lines (ripgrep `-C`) around each match. Defaults: context={}, limit={}.",
                 DEFAULT_CONTEXT, MAX_RESULTS
-            )
-            .into(),
+            ),
             params: vec![
                 ToolParam::typed("pattern", "str"),
                 ToolParam {
@@ -46,8 +45,7 @@ impl ToolProvider for Grep {
                     description: format!(
                         "Number of context lines before/after each match (ripgrep `-C`, default: {}). Use 0 for match-only output.",
                         DEFAULT_CONTEXT
-                    )
-                    .into(),
+                    ),
                     required: false,
                 },
                 ToolParam {
@@ -56,15 +54,14 @@ impl ToolProvider for Grep {
                     description: format!(
                         "Maximum matches to return (default: {}). Use null or \"none\" for no cap.",
                         MAX_RESULTS
-                    )
-                    .into(),
+                    ),
                     required: false,
                 },
             ],
             returns: "list".into(),
             examples: vec![],
-                hidden: false,
-                inject_into_prompt: true,
+            hidden: false,
+            inject_into_prompt: true,
         }]
     }
 
@@ -222,14 +219,14 @@ fn maybe_append_truncation_line(
     limit: Option<usize>,
     total_matches: usize,
 ) {
-    if let Some(limit) = limit {
-        if total_matches > limit {
-            let omitted = total_matches - limit;
-            output.push(format!(
-                "[results truncated: showing {} of {} matches ({} omitted). {}]",
-                limit, total_matches, omitted, TRUNCATION_HINT
-            ));
-        }
+    if let Some(limit) = limit
+        && total_matches > limit
+    {
+        let omitted = total_matches - limit;
+        output.push(format!(
+            "[results truncated: showing {} of {} matches ({} omitted). {}]",
+            limit, total_matches, omitted, TRUNCATION_HINT
+        ));
     }
 }
 

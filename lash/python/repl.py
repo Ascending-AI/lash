@@ -12,8 +12,6 @@ import typing
 import asyncio
 import uuid
 import warnings
-import math
-from collections import Counter, defaultdict
 from enum import StrEnum
 
 import dill
@@ -152,20 +150,60 @@ class HistoryMatch:
 
 class TurnHistory:
     _MAX_TURNS = 2000
-    def __init__(self):
-        self._turns = []
+
+    def _raw_turns(self):
+        raw = _call_sync("history_export", {})
+        if isinstance(raw, list):
+            return [item for item in raw if isinstance(item, dict)]
+        return []
+
+    def _turn_from_dict(self, data):
+        tcs = []
+        for tc_data in data.get("tool_calls", []) or []:
+            if not isinstance(tc_data, dict):
+                continue
+            tool_name = _TOOL_NAME_MAP.get(tc_data.get("tool", ""), ToolName.OTHER)
+            args = tc_data.get("args", {})
+            if isinstance(args, str):
+                try:
+                    args = json.loads(args)
+                except Exception:
+                    args = {}
+            tcs.append(
+                ToolCall(
+                    tool=tool_name,
+                    args=args if isinstance(args, dict) else {},
+                    result=tc_data.get("result"),
+                    success=tc_data.get("success", False),
+                    duration_ms=tc_data.get("duration_ms", 0),
+                )
+            )
+        return Turn(
+            index=data.get("index", 0),
+            user_message=data.get("user_message", ""),
+            prose=data.get("prose", ""),
+            code=data.get("code", ""),
+            output=data.get("output", ""),
+            error=data.get("error"),
+            tool_calls=tcs,
+            files_read=data.get("files_read", []) or [],
+            files_written=data.get("files_written", []) or [],
+        )
 
     def __getitem__(self, key):
-        return self._turns[key]
+        turns = self._raw_turns()
+        if isinstance(key, slice):
+            return [self._turn_from_dict(t) for t in turns[key]]
+        return self._turn_from_dict(turns[key])
 
     def __len__(self):
-        return len(self._turns)
+        return len(self._raw_turns())
 
     def __iter__(self):
-        return iter(self._turns)
+        return iter(self[:])
 
     def __repr__(self):
-        n = len(self._turns)
+        n = len(self)
         files = len(self.files_modified())
         return f"TurnHistory({n} turns, {files} files touched)"
 
@@ -173,28 +211,20 @@ class TurnHistory:
         """All unique user messages across turns (what the user asked)."""
         seen = set()
         out = []
-        for t in self._turns:
+        for t in self:
             if t.user_message and t.user_message not in seen:
                 seen.add(t.user_message)
                 out.append(t.user_message)
         return out
 
     def search(self, query, mode="hybrid", regex=None, limit=10, fields=None, since_turn=None):
-        """Search turns using hybrid/literal/regex matching."""
-        return _search_history_matches(
-            turns=self._turns,
-            query=query,
-            mode=mode,
-            regex=regex,
-            limit=limit,
-            fields=fields,
-            since_turn=since_turn,
-        )
+        """Search turns via Rust ranking engine."""
+        return _search_history(query, mode=mode, regex=regex, limit=limit, fields=fields, since_turn=since_turn)
 
     def tool_calls(self, tool=None):
         """All tool calls, optionally filtered by tool name."""
         out = []
-        for t in self._turns:
+        for t in self:
             for tc in t.tool_calls:
                 if tool is None or tc.tool.value == tool or tc.tool == tool:
                     out.append(tc)
@@ -203,25 +233,26 @@ class TurnHistory:
     def files_read(self):
         """All unique files read across all turns."""
         s = set()
-        for t in self._turns:
+        for t in self:
             s.update(t.files_read)
         return sorted(s)
 
     def files_modified(self):
         """All unique files written/edited across all turns."""
         s = set()
-        for t in self._turns:
+        for t in self:
             s.update(t.files_written)
         return sorted(s)
 
     def errors(self):
         """Turns that had errors."""
-        return [t for t in self._turns if t.error]
+        return [t for t in self if t.error]
 
     def summary(self):
         """Auto-generated brief summary."""
-        n = len(self._turns)
-        tc = sum(len(t.tool_calls) for t in self._turns)
+        turns = list(self)
+        n = len(turns)
+        tc = sum(len(t.tool_calls) for t in turns)
         errs = len(self.errors())
         fr = self.files_read()
         fm = self.files_modified()
@@ -237,81 +268,25 @@ class TurnHistory:
 
     def _add_turn(self, json_str):
         """Deserialize a turn from JSON (called from Rust)."""
-        data = json.loads(json_str)
-        tcs = []
-        files_read = []
-        files_written = []
-        for tc_data in data.get("tool_calls", []):
-            tool_name = _TOOL_NAME_MAP.get(tc_data.get("tool", ""), ToolName.OTHER)
-            args = tc_data.get("args", {})
-            # Extract args dict from serde_json::Value
-            if isinstance(args, str):
-                try:
-                    args = json.loads(args)
-                except Exception:
-                    args = {}
-            tc = ToolCall(
-                tool=tool_name,
-                args=args if isinstance(args, dict) else {},
-                result=tc_data.get("result"),
-                success=tc_data.get("success", False),
-                duration_ms=tc_data.get("duration_ms", 0),
-            )
-            tcs.append(tc)
-            path = tc.args.get("path")
-            if path:
-                if tool_name in _READ_TOOLS:
-                    files_read.append(path)
-                if tool_name in _WRITE_TOOLS:
-                    files_written.append(path)
-        turn = Turn(
-            index=data.get("index", len(self._turns)),
-            user_message=data.get("user_message", ""),
-            prose=data.get("prose", ""),
-            code=data.get("code", ""),
-            output=data.get("output", ""),
-            error=data.get("error"),
-            tool_calls=tcs,
-            files_read=files_read,
-            files_written=files_written,
-        )
-        self._turns.append(turn)
-        if len(self._turns) > self._MAX_TURNS:
-            self._turns = self._turns[-self._MAX_TURNS:]
+        data = json.loads(json_str) if isinstance(json_str, str) else json_str
+        if not isinstance(data, dict):
+            return
+        _call_sync("history_add_turn", {"turn": data})
 
     def _serialize(self):
         """Serialize all turns to a JSON string for passing to sub-agents."""
-        turns = []
-        for t in self._turns:
-            turns.append({
-                "index": t.index,
-                "user_message": t.user_message,
-                "prose": t.prose,
-                "code": t.code,
-                "output": t.output,
-                "error": t.error,
-                "tool_calls": [
-                    {
-                        "tool": tc.tool.value,
-                        "args": tc.args,
-                        "result": tc.result,
-                        "success": tc.success,
-                        "duration_ms": tc.duration_ms,
-                    }
-                    for tc in t.tool_calls
-                ],
-            })
-        return json.dumps(turns)
+        return json.dumps(self._raw_turns())
 
     def _load(self, data):
         """Load turns from a list of dicts or JSON string (used to inherit parent agent state)."""
         if isinstance(data, str):
             data = json.loads(data)
+        if not isinstance(data, list):
+            return
         # Only load the most recent turns to respect the cap
         if len(data) > self._MAX_TURNS:
             data = data[-self._MAX_TURNS:]
-        for t_data in data:
-            self._add_turn(json.dumps(t_data))
+        _call_sync("history_load", {"turns": data})
 # ─── Agent Memory ───
 
 class MemEntry:
@@ -351,98 +326,110 @@ class MemMatch:
 class Mem:
     """Persistent key-value memory for the agent. Values are stringified on store."""
 
-    def __init__(self):
-        self._store = {}  # key -> MemEntry
-        self._current_turn = 0
+    def _entries(self):
+        raw = _call_sync("mem_export", {})
+        if not isinstance(raw, list):
+            return []
+        out = []
+        for item in raw:
+            if not isinstance(item, dict):
+                continue
+            out.append(
+                MemEntry(
+                    key=item.get("key", ""),
+                    description=item.get("description", ""),
+                    value=item.get("value", ""),
+                    turn=item.get("turn", 0),
+                )
+            )
+        return out
 
     def _set_turn(self, turn):
         """Called by the runtime to track the current turn number."""
-        self._current_turn = turn
+        _call_sync("mem_set_turn", {"turn": int(turn)})
 
     def set(self, key, description, value=None):
         """Store a value. The value is stringified via str(). Updates turn to current."""
-        self._store[key] = MemEntry(
-            key=key,
-            description=str(description),
-            value=str(value) if value is not None else str(description),
-            turn=self._current_turn,
+        _call_sync(
+            "mem_set",
+            {
+                "key": str(key),
+                "description": str(description),
+                "value": str(value) if value is not None else str(description),
+            },
         )
         return _Awaitable()
 
     def get(self, key):
         """Get the stored value string for a key, or None."""
-        entry = self._store.get(key)
-        return entry.value if entry else None
+        item = _call_sync("mem_get", {"key": str(key)})
+        if isinstance(item, dict):
+            return item.get("value")
+        return None
 
     def entry(self, key):
         """Get the full MemEntry for a key, or None."""
-        return self._store.get(key)
+        item = _call_sync("mem_get", {"key": str(key)})
+        if not isinstance(item, dict):
+            return None
+        return MemEntry(
+            key=item.get("key", ""),
+            description=item.get("description", ""),
+            value=item.get("value", ""),
+            turn=item.get("turn", 0),
+        )
 
     def delete(self, key):
         """Remove a key."""
-        self._store.pop(key, None)
+        _call_sync("mem_delete", {"key": str(key)})
         return _Awaitable()
 
     def all(self):
         """List all keys with descriptions and turn numbers."""
-        if not self._store:
+        entries = self._entries()
+        if not entries:
             return "(empty)"
         lines = []
-        for key, e in self._store.items():
-            lines.append(f"  [{e.turn}] {key}: {e.description}")
+        for e in entries:
+            lines.append(f"  [{e.turn}] {e.key}: {e.description}")
         return "\n".join(lines)
 
     def search(self, query, mode="hybrid", regex=None, limit=10, keys=None):
-        """Search memory entries using hybrid/literal/regex matching."""
-        return _search_mem_matches(
-            entries=list(self._store.values()),
-            query=query,
-            mode=mode,
-            regex=regex,
-            limit=limit,
-            keys=keys,
-        )
+        """Search memory via Rust ranking engine."""
+        return _search_mem(query, mode=mode, regex=regex, limit=limit, keys=keys)
 
     def since(self, turn):
         """Get all entries set/updated at or after the given turn."""
-        return [e for e in self._store.values() if e.turn >= turn]
+        return [e for e in self._entries() if e.turn >= turn]
 
     def recent(self, n=10):
         """Get entries from the last n turns."""
-        cutoff = max(0, self._current_turn - n)
+        entries = self._entries()
+        if not entries:
+            return []
+        latest_turn = max(e.turn for e in entries)
+        cutoff = max(0, latest_turn - n)
         return self.since(cutoff)
 
     def __repr__(self):
         return self.all()
 
     def __len__(self):
-        return len(self._store)
+        return len(self._entries())
 
 
     def _serialize(self):
         """Serialize all entries to a JSON string for passing to sub-agents."""
-        entries = []
-        for key, e in self._store.items():
-            entries.append({
-                "key": e.key,
-                "description": e.description,
-                "value": e.value,
-                "turn": e.turn,
-            })
-        return json.dumps(entries)
+        raw = _call_sync("mem_export", {})
+        return json.dumps(raw if isinstance(raw, list) else [])
 
     def _load(self, data):
         """Load entries from a list of dicts or JSON string (used to inherit parent agent state)."""
         if isinstance(data, str):
             data = json.loads(data)
-        entries = data
-        for e in entries:
-            self._store[e["key"]] = MemEntry(
-                key=e["key"],
-                description=e["description"],
-                value=e["value"],
-                turn=e["turn"],
-            )
+        if not isinstance(data, list):
+            return
+        _call_sync("mem_load", {"entries": data})
 # _rust_bridge is injected by the Rust runtime before any functions are called.
 # It provides:
 #   send_message(json_str) -> None
@@ -865,10 +852,54 @@ class ToolError(Exception):
         return False
 
 
+def _decode_tool_success(value):
+    # Wrap shell handles automatically
+    if isinstance(value, dict) and value.get("__handle__") == "shell":
+        return ShellHandle(value["id"])
+    # Wrap agent handles automatically
+    if isinstance(value, dict) and value.get("__handle__") == "agent":
+        return AgentHandle(value["id"])
+    # Wrap typed objects
+    if isinstance(value, dict) and "__type__" in value:
+        t = value["__type__"]
+        if t == "task":
+            return Task(value)
+        if t == "task_list":
+            return [Task(item) for item in value.get("items", [])]
+        if t == "skill":
+            return Skill(value)
+        if t == "skill_summary":
+            return SkillSummary(value)
+        if t == "skill_list":
+            return [SkillSummary(item) for item in value.get("items", [])]
+        if t == "edit_result":
+            return EditResult(value)
+        if t == "path_entries":
+            return PathEntries(value)
+    return value
+
+
+def _call_sync(name, params):
+    """Synchronous tool call, for sync proxy methods like _history/_mem APIs."""
+    call_id = str(uuid.uuid4())
+    payload = dict(params or {})
+    payload.setdefault("__agent_id__", _ns.get("__agent_id__", ""))
+    args_json = json.dumps(payload)
+    result_json = _rust_bridge.invoke_tool(call_id, name, args_json)
+    result = json.loads(result_json)
+    if result["success"]:
+        value = json.loads(result["result"]) if result["result"] else None
+        return _decode_tool_success(value)
+    error = json.loads(result["result"]) if result["result"] else "Tool call failed"
+    raise ToolError(name, error)
+
+
 async def _call(name, params):
     """Call a tool by name. Returns parsed JSON result or ToolError on failure."""
     call_id = str(uuid.uuid4())
-    args_json = json.dumps(params)
+    payload = dict(params or {})
+    payload.setdefault("__agent_id__", _ns.get("__agent_id__", ""))
+    args_json = json.dumps(payload)
 
     # Use run_in_executor to offload the blocking Rust call to a thread pool.
     # This keeps the asyncio loop responsive for concurrent tool calls.
@@ -880,33 +911,9 @@ async def _call(name, params):
     result = json.loads(result_json)
     if result["success"]:
         value = json.loads(result["result"]) if result["result"] else None
-        # Wrap shell handles automatically
-        if isinstance(value, dict) and value.get("__handle__") == "shell":
-            return ShellHandle(value["id"])
-        # Wrap agent handles automatically
-        if isinstance(value, dict) and value.get("__handle__") == "agent":
-            return AgentHandle(value["id"])
-        # Wrap typed objects
-        if isinstance(value, dict) and "__type__" in value:
-            t = value["__type__"]
-            if t == "task":
-                return Task(value)
-            if t == "task_list":
-                return [Task(item) for item in value.get("items", [])]
-            if t == "skill":
-                return Skill(value)
-            if t == "skill_summary":
-                return SkillSummary(value)
-            if t == "skill_list":
-                return [SkillSummary(item) for item in value.get("items", [])]
-            if t == "edit_result":
-                return EditResult(value)
-            if t == "path_entries":
-                return PathEntries(value)
-        return value
-    else:
-        error = json.loads(result["result"]) if result["result"] else "Tool call failed"
-        raise ToolError(name, error)
+        return _decode_tool_success(value)
+    error = json.loads(result["result"]) if result["result"] else "Tool call failed"
+    raise ToolError(name, error)
 
 
 _TYPE_MAP = {
@@ -919,7 +926,21 @@ _TYPE_MAP = {
 }
 
 _tool_defs = []
-_capabilities = {"memory": True, "history": True}
+_capabilities = {
+    "enabled_capabilities": [
+        "core",
+        "shell",
+        "tasks",
+        "planning",
+        "delegation",
+        "memory",
+        "history",
+        "skills",
+        "web",
+        "context",
+    ],
+    "enabled_tools": [],
+}
 _FIND_DEFAULT_LIMIT = 10
 _FIND_MAX_LIMIT = 100
 
@@ -948,164 +969,11 @@ def _normalize_list_arg(value):
     return [str(value).strip()]
 
 
-def _compile_regex(pattern):
-    if pattern is None:
-        return None
-    raw = str(pattern)
-    if not raw:
-        return None
-    try:
-        return re.compile(raw, re.IGNORECASE)
-    except re.error:
-        return re.compile(re.escape(raw), re.IGNORECASE)
-
-
-def _tokenize(text):
-    if text is None:
-        return []
-    return [t for t in re.split(r"[^a-zA-Z0-9_]+", str(text).lower()) if t]
-
-
 def _truncate_preview(text, limit=220):
     s = str(text or "").strip().replace("\n", " ")
     if len(s) <= limit:
         return s
     return s[: max(0, limit - 3)] + "..."
-
-
-def _document_haystack(doc, field_names):
-    return "\n".join(str(doc.get(field, "") or "") for field in field_names)
-
-
-def _bm25_scores(query_tokens, docs, field_weights, k1=1.5, b=0.75):
-    n_docs = len(docs)
-    if n_docs == 0:
-        return []
-
-    doc_tfs = []
-    doc_lens = []
-    doc_freq = defaultdict(int)
-
-    for doc in docs:
-        tf = defaultdict(float)
-        dlen = 0.0
-        for field, weight in field_weights.items():
-            if weight <= 0:
-                continue
-            tokens = _tokenize(doc.get(field, ""))
-            if not tokens:
-                continue
-            counts = Counter(tokens)
-            for tok, count in counts.items():
-                tf[tok] += float(count) * float(weight)
-            dlen += float(len(tokens)) * float(weight)
-        doc_tfs.append(tf)
-        doc_lens.append(dlen)
-        for tok in tf.keys():
-            doc_freq[tok] += 1
-
-    avgdl = sum(doc_lens) / float(n_docs) if n_docs else 1.0
-    if avgdl <= 0:
-        avgdl = 1.0
-
-    qtf = Counter(query_tokens)
-    scores = [0.0 for _ in range(n_docs)]
-
-    for i, tf in enumerate(doc_tfs):
-        dl = doc_lens[i]
-        norm = 1.0 - b + b * (dl / avgdl)
-        for tok, qcount in qtf.items():
-            freq = tf.get(tok, 0.0)
-            if freq <= 0:
-                continue
-            df = doc_freq.get(tok, 0)
-            idf = math.log(1.0 + ((n_docs - df + 0.5) / (df + 0.5)))
-            denom = freq + k1 * norm
-            if denom <= 0:
-                continue
-            term = idf * ((freq * (k1 + 1.0)) / denom)
-            scores[i] += term * (1.0 + math.log(float(qcount)))
-
-    return scores
-
-
-def _compute_field_hits(field_texts, query, mode, regex_filter):
-    mode = _coerce_find_mode(mode)
-    query = str(query or "")
-    query_lower = query.lower()
-    query_tokens = set(_tokenize(query))
-    hits = []
-    for field, value in field_texts.items():
-        text = str(value or "")
-        if not text:
-            continue
-        text_lower = text.lower()
-        hit = False
-        if mode == "regex":
-            hit = bool(regex_filter and regex_filter.search(text))
-        elif mode == "literal":
-            hit = bool(query and query_lower in text_lower)
-            if hit and regex_filter is not None:
-                hit = regex_filter.search(text) is not None
-        else:
-            if query_tokens:
-                field_tokens = set(_tokenize(text))
-                hit = any(tok in field_tokens for tok in query_tokens)
-            elif query:
-                hit = query_lower in text_lower
-            else:
-                hit = True
-            if hit and regex_filter is not None:
-                hit = regex_filter.search(text) is not None
-        if hit:
-            hits.append(field)
-    return hits
-
-
-def _rank_documents(docs, query, mode, regex, field_weights, field_names):
-    mode = _coerce_find_mode(mode)
-    query = str(query or "")
-    query_lower = query.lower()
-    query_tokens = _tokenize(query)
-
-    regex_filter = None
-    if mode == "regex":
-        regex_filter = _compile_regex(regex if regex is not None else query)
-    elif regex is not None:
-        regex_filter = _compile_regex(regex)
-
-    scores = [0.0] * len(docs)
-    if mode == "hybrid" and query_tokens:
-        scores = _bm25_scores(query_tokens, docs, field_weights)
-
-    ranked_indices = list(range(len(docs)))
-    if mode == "hybrid":
-        ranked_indices.sort(key=lambda i: (-scores[i], i))
-
-    out = []
-    for idx in ranked_indices:
-        haystack = _document_haystack(docs[idx], field_names)
-        haystack_lower = haystack.lower()
-
-        include = True
-        if mode == "regex":
-            include = bool(regex_filter and regex_filter.search(haystack))
-        elif mode == "literal":
-            include = bool(query and query_lower in haystack_lower)
-            if include and regex_filter is not None:
-                include = regex_filter.search(haystack) is not None
-        else:
-            if query:
-                if query_tokens:
-                    include = scores[idx] > 0 or query_lower in haystack_lower
-                else:
-                    include = query_lower in haystack_lower
-            if include and regex_filter is not None:
-                include = regex_filter.search(haystack) is not None
-
-        if include:
-            out.append((idx, scores[idx], regex_filter))
-    return out
 
 
 def _tool_signature(tool):
@@ -1219,40 +1087,17 @@ def _list_tools(query=None, injected_only=None, **_ignored):
 
 
 def _search_tools(query, mode="hybrid", regex=None, limit=10, injected_only=None, **_ignored):
-    """Search tools using hybrid/literal/regex matching across all tools."""
+    """Search tools via Rust ranking engine."""
     limit = _coerce_limit(limit)
-    candidates = []
-    for t in _tool_defs:
-        if injected_only is True and not t.get("inject_into_prompt", False):
-            continue
-        if injected_only is False and t.get("inject_into_prompt", False):
-            continue
-        candidates.append(t)
-
-    docs = [
-        {
-            "name": t.get("name", ""),
-            "description": t.get("description", ""),
-            "examples": "\n".join(str(x) for x in (t.get("examples", []) or [])),
-        }
-        for t in candidates
-    ]
-    field_weights = {"name": 4.0, "description": 2.0, "examples": 1.0}
-    field_names = list(field_weights.keys())
-    ranked = _rank_documents(
-        docs=docs,
-        query=query,
-        mode=mode,
-        regex=regex,
-        field_weights=field_weights,
-        field_names=field_names,
-    )
-
-    items = []
-    for idx, score, _ in ranked[:limit]:
-        tool_data = dict(candidates[idx])
-        tool_data["score"] = float(score)
-        items.append(ToolInfo(tool_data))
+    raw_items = _call_sync("search_tools", {
+        "query": str(query),
+        "mode": _coerce_find_mode(mode),
+        "regex": regex,
+        "limit": limit,
+        "injected_only": injected_only,
+        "catalog": _tool_defs,
+    })
+    items = [ToolInfo(item) for item in (raw_items or []) if isinstance(item, dict)]
     _print_tool_index(items)
     return items
 
@@ -1269,141 +1114,22 @@ def _print_skill_index(items):
 
 
 async def _search_skills(query, mode="hybrid", regex=None, limit=10):
-    """Search skill names/descriptions using hybrid/literal/regex matching."""
+    """Search skill names/descriptions via Rust ranking engine."""
     limit = _coerce_limit(limit)
     if not any(t.get("name") == "skills" for t in _tool_defs):
         return []
-
-    raw_items = await _call("skills", {})
-    summaries = []
-    for item in raw_items or []:
-        if isinstance(item, SkillSummary):
-            summaries.append(item)
-        elif isinstance(item, dict):
-            summaries.append(SkillSummary(item))
-
-    docs = [
+    raw_items = await _call(
+        "search_skills",
         {
-            "name": s.name,
-            "description": s.description,
-        }
-        for s in summaries
-    ]
-    field_weights = {"name": 4.0, "description": 2.0}
-    field_names = list(field_weights.keys())
-    ranked = _rank_documents(
-        docs=docs,
-        query=query,
-        mode=mode,
-        regex=regex,
-        field_weights=field_weights,
-        field_names=field_names,
+            "query": str(query),
+            "mode": _coerce_find_mode(mode),
+            "regex": regex,
+            "limit": limit,
+        },
     )
-
-    items = []
-    for idx, score, _ in ranked[:limit]:
-        s = summaries[idx]
-        items.append(
-            SkillSummary(
-                {
-                    "name": s.name,
-                    "description": s.description,
-                    "file_count": s.file_count,
-                    "score": float(score),
-                }
-            )
-        )
+    items = [SkillSummary(item) for item in (raw_items or []) if isinstance(item, dict)]
     _print_skill_index(items)
     return items
-
-
-def _normalize_history_fields(fields):
-    if fields is None:
-        return ["user_message", "code", "prose", "output", "tool_calls"]
-    mapping = {
-        "user": "user_message",
-        "user_message": "user_message",
-        "code": "code",
-        "prose": "prose",
-        "output": "output",
-        "tool_calls": "tool_calls",
-    }
-    selected = []
-    for f in _normalize_list_arg(fields) or []:
-        key = mapping.get(str(f).strip().lower())
-        if key and key not in selected:
-            selected.append(key)
-    return selected or ["user_message", "code", "prose", "output", "tool_calls"]
-
-
-def _search_history_matches(turns, query, mode="hybrid", regex=None, limit=10, fields=None, since_turn=None):
-    limit = _coerce_limit(limit)
-    selected_fields = _normalize_history_fields(fields)
-    filtered_turns = []
-    for t in turns:
-        if since_turn is not None:
-            try:
-                if int(t.index) < int(since_turn):
-                    continue
-            except (TypeError, ValueError):
-                pass
-        filtered_turns.append(t)
-
-    docs = []
-    for t in filtered_turns:
-        tool_text = " ".join(
-            f"{tc.tool.value} {json.dumps(tc.args, sort_keys=True)}"
-            for tc in t.tool_calls
-        )
-        docs.append(
-            {
-                "user_message": t.user_message,
-                "code": t.code,
-                "prose": t.prose,
-                "output": t.output,
-                "tool_calls": tool_text,
-            }
-        )
-
-    base_weights = {
-        "user_message": 3.5,
-        "code": 2.8,
-        "prose": 1.5,
-        "output": 1.0,
-        "tool_calls": 1.2,
-    }
-    field_weights = {k: v for k, v in base_weights.items() if k in selected_fields}
-    field_names = list(field_weights.keys())
-    ranked = _rank_documents(
-        docs=docs,
-        query=query,
-        mode=mode,
-        regex=regex,
-        field_weights=field_weights,
-        field_names=field_names,
-    )
-
-    out = []
-    for idx, score, regex_filter in ranked[:limit]:
-        t = filtered_turns[idx]
-        field_texts = {k: docs[idx].get(k, "") for k in field_names}
-        hits = _compute_field_hits(field_texts, query, mode, regex_filter)
-        preview_source = next(
-            (field_texts.get(h, "") for h in hits if field_texts.get(h, "")),
-            next((field_texts.get(k, "") for k in field_names if field_texts.get(k, "")), ""),
-        )
-        out.append(
-            HistoryMatch(
-                turn=t.index,
-                score=float(score),
-                field_hits=hits,
-                preview=_truncate_preview(preview_source),
-                tool_calls=[tc.tool.value for tc in t.tool_calls],
-                files_read=list(t.files_read),
-                files_written=list(t.files_written),
-            )
-        )
-    return out
 
 
 def _print_history_index(items):
@@ -1418,60 +1144,32 @@ def _print_history_index(items):
 
 
 def _search_history(query, mode="hybrid", regex=None, limit=10, fields=None, since_turn=None):
-    history = _ns.get("_history")
-    if history is None:
-        return []
-    items = history.search(
-        query=query,
-        mode=mode,
-        regex=regex,
-        limit=limit,
-        fields=fields,
-        since_turn=since_turn,
+    raw = _call_sync(
+        "search_history",
+        {
+            "query": str(query),
+            "mode": _coerce_find_mode(mode),
+            "regex": regex,
+            "limit": _coerce_limit(limit),
+            "fields": _normalize_list_arg(fields),
+            "since_turn": since_turn,
+        },
     )
+    items = [
+        HistoryMatch(
+            turn=int(item.get("turn", 0)),
+            score=float(item.get("score", 0.0)),
+            field_hits=item.get("field_hits", []) or [],
+            preview=item.get("preview", ""),
+            tool_calls=item.get("tool_calls", []) or [],
+            files_read=item.get("files_read", []) or [],
+            files_written=item.get("files_written", []) or [],
+        )
+        for item in (raw or [])
+        if isinstance(item, dict)
+    ]
     _print_history_index(items)
     return items
-
-
-def _search_mem_matches(entries, query, mode="hybrid", regex=None, limit=10, keys=None):
-    limit = _coerce_limit(limit)
-    key_filter = set(_normalize_list_arg(keys) or [])
-    filtered_entries = [e for e in entries if not key_filter or e.key in key_filter]
-    docs = [
-        {
-            "key": e.key,
-            "description": e.description,
-            "value": e.value,
-        }
-        for e in filtered_entries
-    ]
-    field_weights = {"key": 4.0, "description": 2.0, "value": 1.0}
-    field_names = list(field_weights.keys())
-    ranked = _rank_documents(
-        docs=docs,
-        query=query,
-        mode=mode,
-        regex=regex,
-        field_weights=field_weights,
-        field_names=field_names,
-    )
-
-    out = []
-    for idx, score, regex_filter in ranked[:limit]:
-        e = filtered_entries[idx]
-        field_texts = docs[idx]
-        hits = _compute_field_hits(field_texts, query, mode, regex_filter)
-        out.append(
-            MemMatch(
-                key=e.key,
-                description=e.description,
-                value=e.value,
-                turn=e.turn,
-                score=float(score),
-                field_hits=hits,
-            )
-        )
-    return out
 
 
 def _print_mem_index(items):
@@ -1488,10 +1186,28 @@ def _print_mem_index(items):
 
 
 def _search_mem(query, mode="hybrid", regex=None, limit=10, keys=None):
-    mem = _ns.get("_mem")
-    if mem is None:
-        return []
-    items = mem.search(query=query, mode=mode, regex=regex, limit=limit, keys=keys)
+    raw = _call_sync(
+        "search_mem",
+        {
+            "query": str(query),
+            "mode": _coerce_find_mode(mode),
+            "regex": regex,
+            "limit": _coerce_limit(limit),
+            "keys": _normalize_list_arg(keys),
+        },
+    )
+    items = [
+        MemMatch(
+            key=item.get("key", ""),
+            description=item.get("description", ""),
+            value=item.get("value", ""),
+            turn=int(item.get("turn", 0)),
+            score=float(item.get("score", 0.0)),
+            field_hits=item.get("field_hits", []) or [],
+        )
+        for item in (raw or [])
+        if isinstance(item, dict)
+    ]
     _print_mem_index(items)
     return items
 
@@ -1513,25 +1229,59 @@ def _reset_repl():
 
 def _register_tools(tools_json, agent_id="", headless=False, capabilities=None):
     """Register tool wrappers from JSON tool definitions."""
-    global _tools_initialized, _tool_defs, _headless, _async_method_names, _capabilities
+    global _tools_initialized, _tool_defs, _headless, _async_method_names, _capabilities, _helper_binding_names
     if _tools_initialized:
         return
     _headless = bool(headless)
-    caps = {"memory": True, "history": True}
+    caps = {"enabled_capabilities": [], "enabled_tools": []}
     if isinstance(capabilities, str):
         try:
             capabilities = json.loads(capabilities)
         except Exception:
             capabilities = None
     if isinstance(capabilities, dict):
-        if "memory" in capabilities:
-            caps["memory"] = bool(capabilities.get("memory"))
-        if "history" in capabilities:
-            caps["history"] = bool(capabilities.get("history"))
+        raw_caps = capabilities.get("enabled_capabilities")
+        if isinstance(raw_caps, (list, tuple, set)):
+            caps["enabled_capabilities"] = sorted(
+                {
+                    str(v).strip().lower()
+                    for v in raw_caps
+                    if str(v).strip()
+                }
+            )
+        raw_tools = capabilities.get("enabled_tools")
+        if isinstance(raw_tools, (list, tuple, set)):
+            caps["enabled_tools"] = sorted(
+                {
+                    str(v).strip()
+                    for v in raw_tools
+                    if str(v).strip()
+                }
+            )
     _capabilities = caps
     _ns["__agent_id__"] = agent_id
     _ns["__capabilities__"] = dict(caps)
     _tool_defs = json.loads(tools_json)
+    enabled_cap_set = set(caps.get("enabled_capabilities", []))
+    explicit_tools = set(caps.get("enabled_tools", []))
+    hidden_tool_caps = {
+        "search_history": "history",
+        "search_mem": "memory",
+        "search_skills": "skills",
+        "enter_plan_mode": "planning",
+        "exit_plan_mode": "planning",
+    }
+    for tool in _tool_defs:
+        if not isinstance(tool, dict):
+            continue
+        name = tool.get("name")
+        cap = hidden_tool_caps.get(name)
+        if (
+            tool.get("hidden", False)
+            and name in explicit_tools
+            and (cap is None or cap not in enabled_cap_set)
+        ):
+            tool["hidden"] = False
     tools_mod = types.ModuleType("tools")
     exported_tools = {}
     exported_names = []
@@ -1698,8 +1448,11 @@ def _register_tools(tools_json, agent_id="", headless=False, capabilities=None):
         _exit_plan_mode.__name__ = "exit_plan_mode"
         _exit_plan_mode.__qualname__ = "exit_plan_mode"
 
-    history_enabled = bool(_capabilities.get("history", True))
-    memory_enabled = bool(_capabilities.get("memory", True))
+    enabled_caps = set(_capabilities.get("enabled_capabilities", []))
+    history_enabled = "history" in enabled_caps
+    memory_enabled = "memory" in enabled_caps
+    skills_enabled = "skills" in enabled_caps
+    has_skills_tool = any(t.get("name") == "skills" for t in _tool_defs)
     if history_enabled:
         _ns["_history"] = TurnHistory()
     if memory_enabled:
@@ -1707,7 +1460,6 @@ def _register_tools(tools_json, agent_id="", headless=False, capabilities=None):
     bindings = {
         "json": json, "print": print, "done": _done,
         "asyncio": asyncio, "list_tools": _list_tools, "search_tools": _search_tools,
-        "search_skills": _search_skills,
         "reset_repl": _reset_repl,
         "Task": Task, "Skill": Skill, "SkillSummary": SkillSummary, "ToolError": ToolError,
         "Turn": Turn, "ToolCall": ToolCall, "ToolName": ToolName, "Intelligence": Intelligence,
@@ -1723,6 +1475,8 @@ def _register_tools(tools_json, agent_id="", headless=False, capabilities=None):
         bindings["Mem"] = Mem
         bindings["MemEntry"] = MemEntry
         bindings["MemMatch"] = MemMatch
+    if skills_enabled and has_skills_tool:
+        bindings["search_skills"] = _search_skills
     if has_plan_mode_tools:
         bindings["enter_plan_mode"] = _enter_plan_mode
         bindings["exit_plan_mode"] = _exit_plan_mode
@@ -1747,7 +1501,8 @@ def _register_tools(tools_json, agent_id="", headless=False, capabilities=None):
     # Auto-await bare imported tools and tools.<name>(...) calls.
     _async_tool_names.clear()
     _async_tool_names.update(tools_mod.__all__)
-    _async_tool_names.add("search_skills")
+    if skills_enabled and has_skills_tool:
+        _async_tool_names.add("search_skills")
     if not _headless:
         _async_tool_names.add("ask")
     if has_plan_mode_tools:
@@ -1755,6 +1510,22 @@ def _register_tools(tools_json, agent_id="", headless=False, capabilities=None):
         _async_tool_names.add("exit_plan_mode")
     _async_method_names = set(_BASE_ASYNC_METHOD_NAMES)
     _async_method_names.update(tools_mod.__all__)
+    _helper_binding_names = {
+        "list_tools",
+        "search_tools",
+        "reset_repl",
+        "ToolInfo",
+    }
+    if history_enabled:
+        _helper_binding_names.update({"search_history", "TurnHistory", "HistoryMatch"})
+    if memory_enabled:
+        _helper_binding_names.update({"search_mem", "Mem", "MemEntry", "MemMatch"})
+    if skills_enabled and has_skills_tool:
+        _helper_binding_names.add("search_skills")
+    if has_plan_mode_tools:
+        _helper_binding_names.update({"enter_plan_mode", "exit_plan_mode"})
+    if not _headless:
+        _helper_binding_names.add("ask")
 
     _tools_initialized = True
 
@@ -1764,6 +1535,7 @@ _ASYNC_FLAG = ast.PyCF_ALLOW_TOP_LEVEL_AWAIT
 
 # Names of async tool functions — auto-awaited if the LLM forgets `await`.
 _async_tool_names = set()
+_helper_binding_names = set()
 
 
 # Async method names on wrapper objects (Task, ShellHandle, Skill, etc.)
@@ -1907,16 +1679,10 @@ def _handle_snapshot(snap_id):
         "done",
         "list_tools",
         "search_tools",
-        "search_skills",
-        "search_history",
-        "search_mem",
         "reset_repl",
-        "ask",
         "tools",
-        "ToolInfo",
-        "HistoryMatch",
-        "MemMatch",
     }
+    skip.update(_helper_binding_names)
     skip.update(t["name"] for t in _tool_defs)
 
     data = {}

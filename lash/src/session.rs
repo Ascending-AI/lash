@@ -67,8 +67,12 @@ impl Session {
         let defs = session.tools.definitions();
         let tools_json = serde_json::to_string(&defs).unwrap_or_else(|_| "[]".to_string());
         let capabilities_json = serde_json::json!({
-            "memory": capabilities.memory,
-            "history": capabilities.history,
+            "enabled_capabilities": capabilities
+                .enabled_capabilities
+                .iter()
+                .map(|id| id.as_str())
+                .collect::<Vec<_>>(),
+            "enabled_tools": capabilities.enabled_tools.iter().collect::<Vec<_>>(),
         })
         .to_string();
         session.runtime.send(PythonRequest::Init {

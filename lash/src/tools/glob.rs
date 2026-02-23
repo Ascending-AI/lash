@@ -18,8 +18,7 @@ impl ToolProvider for Glob {
             description: format!(
                 "Find filesystem entries by glob pattern. Returns `PathEntry` objects sorted by `modified_at` (newest first). Each item has: `path`, `kind`, `size_bytes`, `lines` (or null), `modified_at` (RFC3339 UTC). Defaults: limit={}, with_lines=false.",
                 MAX_RESULTS
-            )
-            .into(),
+            ),
             params: vec![
                 ToolParam::typed("pattern", "str"),
                 ToolParam {
@@ -34,8 +33,7 @@ impl ToolProvider for Glob {
                     description: format!(
                         "Maximum results to return (default: {}). Use null or \"none\" for no cap.",
                         MAX_RESULTS
-                    )
-                    .into(),
+                    ),
                     required: false,
                 },
                 ToolParam {

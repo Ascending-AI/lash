@@ -18,8 +18,7 @@ impl ToolProvider for Ls {
             description: format!(
                 "List filesystem entries as `PathEntry` objects, respecting .gitignore. Each item has: `path`, `kind`, `size_bytes`, `lines` (or null), `modified_at` (RFC3339 UTC). Defaults: depth={}, limit={}, with_lines=false.",
                 DEFAULT_DEPTH, MAX_ENTRIES
-            )
-            .into(),
+            ),
             params: vec![
                 ToolParam {
                     name: "path".into(),
@@ -39,8 +38,7 @@ impl ToolProvider for Ls {
                     description: format!(
                         "Maximum directory depth to traverse (default: {}). Use null or \"none\" for no depth cap.",
                         DEFAULT_DEPTH
-                    )
-                    .into(),
+                    ),
                     required: false,
                 },
                 ToolParam {
@@ -49,8 +47,7 @@ impl ToolProvider for Ls {
                     description: format!(
                         "Maximum entries to return (default: {}). Use null or \"none\" for no cap.",
                         MAX_ENTRIES
-                    )
-                    .into(),
+                    ),
                     required: false,
                 },
                 ToolParam {
