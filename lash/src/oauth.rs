@@ -14,7 +14,8 @@ const GOOGLE_CLIENT_SECRET_ENV: &str = "LASH_GOOGLE_CLIENT_SECRET";
 const GOOGLE_AUTH_URL: &str = "https://accounts.google.com/o/oauth2/v2/auth";
 const GOOGLE_TOKEN_URL: &str = "https://oauth2.googleapis.com/token";
 const GOOGLE_REDIRECT_URI: &str = "https://codeassist.google.com/authcode";
-const GOOGLE_SCOPES: &str = "https://www.googleapis.com/auth/cloud-platform https://www.googleapis.com/auth/generative-language.retriever";
+const GOOGLE_SCOPES: &str = "https://www.googleapis.com/auth/cloud-platform https://www.googleapis.com/auth/userinfo.email https://www.googleapis.com/auth/userinfo.profile";
+const GOOGLE_PROMPT: &str = "consent select_account";
 
 #[derive(Debug)]
 pub struct OAuthTokens {
@@ -67,18 +68,19 @@ pub fn authorize_url(challenge: &str, verifier: &str) -> String {
 }
 
 /// Build the Google OAuth authorization URL for manual code entry.
-pub fn google_authorize_url(challenge: &str) -> String {
+pub fn google_authorize_url(challenge: &str) -> Result<String, OAuthError> {
     let state = uuid::Uuid::new_v4().to_string();
-    let client_id = google_client_id().unwrap_or_default();
-    format!(
-        "{}?client_id={}&response_type=code&redirect_uri={}&scope={}&access_type=offline&prompt=consent&code_challenge={}&code_challenge_method=S256&state={}",
+    let (client_id, _) = google_client_credentials()?;
+    Ok(format!(
+        "{}?client_id={}&response_type=code&redirect_uri={}&scope={}&access_type=offline&prompt={}&code_challenge={}&code_challenge_method=S256&state={}",
         GOOGLE_AUTH_URL,
         client_id,
         urlencoded(GOOGLE_REDIRECT_URI),
         urlencoded(GOOGLE_SCOPES),
+        urlencoded(GOOGLE_PROMPT),
         challenge,
         state,
-    )
+    ))
 }
 
 /// Exchange an authorization code for tokens.
@@ -264,13 +266,24 @@ fn google_client_secret() -> Option<String> {
 }
 
 fn google_client_credentials() -> Result<(String, String), OAuthError> {
-    let client_id = google_client_id().ok_or_else(|| {
-        OAuthError::TokenExchange(format!("Missing env var: {}", GOOGLE_CLIENT_ID_ENV))
-    })?;
-    let client_secret = google_client_secret().ok_or_else(|| {
-        OAuthError::TokenExchange(format!("Missing env var: {}", GOOGLE_CLIENT_SECRET_ENV))
-    })?;
-    Ok((client_id, client_secret))
+    let env_client_id = google_client_id();
+    let env_client_secret = google_client_secret();
+
+    match (env_client_id, env_client_secret) {
+        (Some(client_id), Some(client_secret)) => Ok((client_id, client_secret)),
+        (None, None) => Err(OAuthError::TokenExchange(format!(
+            "Missing Google OAuth env config: set both {} and {}.",
+            GOOGLE_CLIENT_ID_ENV, GOOGLE_CLIENT_SECRET_ENV
+        ))),
+        (Some(_), None) => Err(OAuthError::TokenExchange(format!(
+            "Invalid Google OAuth env config: set both {} and {}, or set neither.",
+            GOOGLE_CLIENT_ID_ENV, GOOGLE_CLIENT_SECRET_ENV
+        ))),
+        (None, Some(_)) => Err(OAuthError::TokenExchange(format!(
+            "Invalid Google OAuth env config: set both {} and {}, or set neither.",
+            GOOGLE_CLIENT_ID_ENV, GOOGLE_CLIENT_SECRET_ENV
+        ))),
+    }
 }
 
 fn extract_google_auth_code(input: &str) -> String {

@@ -166,6 +166,11 @@ fn normalize_stream_text(text: &str) -> String {
     out
 }
 
+/// Fast, coarse token estimate used only for live UI counters while streaming.
+fn estimate_tokens_from_char_count(chars: i64) -> i64 {
+    if chars <= 0 { 0 } else { (chars + 3) / 4 }
+}
+
 impl DisplayBlock {
     /// Number of visual lines this block takes when rendered at `width` columns.
     /// `viewport_height` is needed for Splash centering; pass 0 for non-Splash blocks.
@@ -286,7 +291,7 @@ pub struct App {
     /// Live streaming output lines from tool execution (e.g. bash).
     pub streaming_output: Vec<String>,
     /// Whether to render live `tool_output` chunks in history.
-    /// Default: off (prevents arbitrary log chatter from polluting TUI).
+    /// Default: on (can be disabled via `LASH_SHOW_TOOL_OUTPUT=0`).
     pub show_live_tool_output: bool,
     /// Loaded skills registry.
     pub skills: SkillRegistry,
@@ -306,6 +311,10 @@ pub struct App {
     pub context_window: Option<u64>,
     /// Latest iteration's input tokens (current context size, not cumulative).
     pub last_input_tokens: i64,
+    /// Estimated output character count from live streaming chunks.
+    pub live_output_chars_estimate: i64,
+    /// Estimated output tokens from live streamed chunks before final usage arrives.
+    pub live_output_tokens_estimate: i64,
     /// Current mode: Normal (read-write) or Plan (explore-only).
     pub mode: Mode,
     /// Path to the plan file for this session (generated on first plan entry).
@@ -368,12 +377,12 @@ impl App {
             height_cache_vh: 0,
             pending_images: Vec::new(),
             streaming_output: Vec::new(),
-            show_live_tool_output: matches!(
+            show_live_tool_output: !matches!(
                 std::env::var("LASH_SHOW_TOOL_OUTPUT")
                     .unwrap_or_default()
                     .to_ascii_lowercase()
                     .as_str(),
-                "1" | "true" | "yes" | "on"
+                "0" | "false" | "no" | "off"
             ),
             skills: SkillRegistry::load(),
             skill_picker: Vec::new(),
@@ -384,6 +393,8 @@ impl App {
             token_usage: TokenUsage::default(),
             context_window,
             last_input_tokens: 0,
+            live_output_chars_estimate: 0,
+            live_output_tokens_estimate: 0,
             mode: Mode::Normal,
             plan_file: None,
             plan_file_mtime: None,
@@ -439,6 +450,9 @@ impl App {
     pub fn handle_agent_event(&mut self, event: AgentEvent) {
         match event {
             AgentEvent::TextDelta { content } => {
+                self.live_output_chars_estimate += content.chars().count() as i64;
+                self.live_output_tokens_estimate =
+                    estimate_tokens_from_char_count(self.live_output_chars_estimate);
                 self.pending_text.push_str(&content);
                 // Don't normalize here — stripping trailing newlines between
                 // deltas breaks code fences (```python\n + # comment → ```python# comment).
@@ -518,13 +532,26 @@ impl App {
                     self.scroll_to_bottom();
                 } else if kind == "tool_output" {
                     // Explicit policy:
-                    // - live tool output is opt-in via env var
-                    // - only shell-family tool calls can stream text to the TUI
-                    let shell_streaming_active = matches!(
+                    // - live tool output can be disabled via env var
+                    // - shell + sub-agent result streams can render text to the TUI
+                    let is_delegate_stream = matches!(
                         self.status_text.as_deref(),
-                        Some("shell_result") | Some("shell") | Some("shell_output")
+                        Some("agent_call") | Some("agent_result")
                     );
-                    if self.show_live_tool_output && shell_streaming_active {
+                    if is_delegate_stream {
+                        self.live_output_chars_estimate += text.chars().count() as i64;
+                        self.live_output_tokens_estimate =
+                            estimate_tokens_from_char_count(self.live_output_chars_estimate);
+                    }
+                    let stream_active = matches!(
+                        self.status_text.as_deref(),
+                        Some("shell_result")
+                            | Some("shell")
+                            | Some("shell_output")
+                            | Some("agent_call")
+                            | Some("agent_result")
+                    );
+                    if self.show_live_tool_output && stream_active {
                         self.streaming_output.push(text);
                         self.scroll_to_bottom();
                     }
@@ -541,6 +568,25 @@ impl App {
             AgentEvent::LlmRequest { iteration, .. } => {
                 self.pending_text.clear();
                 self.iteration = iteration + 1;
+                self.status_text = Some("thinking".into());
+                self.live_output_chars_estimate = 0;
+                self.live_output_tokens_estimate = 0;
+            }
+            AgentEvent::RetryStatus {
+                wait_seconds,
+                attempt,
+                max_attempts,
+                reason,
+            } => {
+                let mut reason_short: String = reason.chars().take(60).collect();
+                if reason.chars().count() > 60 {
+                    reason_short.push_str("...");
+                }
+                self.status_text = Some(format!(
+                    "Retrying in {}s (attempt {}/{}): {}",
+                    wait_seconds, attempt, max_attempts, reason_short
+                ));
+                self.scroll_to_bottom();
             }
             AgentEvent::Done => {
                 let flushed = normalize_stream_text(&self.pending_text);
@@ -553,6 +599,8 @@ impl App {
                 self.status_text = None;
                 self.streaming_output.clear();
                 self.active_delegate = None;
+                self.live_output_chars_estimate = 0;
+                self.live_output_tokens_estimate = 0;
                 self.scroll_to_bottom();
             }
             AgentEvent::Error { message, .. } => {
@@ -563,6 +611,8 @@ impl App {
             AgentEvent::TokenUsage { usage, .. } => {
                 self.token_usage.add(&usage);
                 self.last_input_tokens = usage.input_tokens;
+                self.live_output_chars_estimate = 0;
+                self.live_output_tokens_estimate = 0;
             }
             AgentEvent::SubAgentDone {
                 task,
@@ -571,6 +621,9 @@ impl App {
                 iterations,
                 success,
             } => {
+                self.token_usage.add(&usage);
+                self.live_output_chars_estimate = 0;
+                self.live_output_tokens_estimate = 0;
                 // Mark previous SubAgentResult blocks as not-last, then add new one as last
                 for block in self.blocks.iter_mut().rev() {
                     match block {
@@ -627,6 +680,8 @@ impl App {
         self.active_delegate = None;
         self.token_usage = TokenUsage::default();
         self.last_input_tokens = 0;
+        self.live_output_chars_estimate = 0;
+        self.live_output_tokens_estimate = 0;
         self.invalidate_height_cache();
     }
 
@@ -1739,6 +1794,48 @@ mod tests {
         });
         // The newline between ```python and # comment must be preserved
         assert!(app.pending_text.contains("```python\n# comment"));
+    }
+
+    #[test]
+    fn text_delta_updates_live_token_estimate() {
+        let mut app = App::new("test-model".into(), "test".into(), None);
+        app.handle_agent_event(AgentEvent::LlmRequest {
+            iteration: 0,
+            message_count: 0,
+            tool_list: String::new(),
+        });
+        app.handle_agent_event(AgentEvent::TextDelta {
+            content: "abcd".into(),
+        });
+        assert_eq!(app.live_output_tokens_estimate, 1);
+        app.handle_agent_event(AgentEvent::TextDelta {
+            content: "efgh".into(),
+        });
+        assert_eq!(app.live_output_tokens_estimate, 2);
+    }
+
+    #[test]
+    fn token_usage_resets_live_token_estimate() {
+        let mut app = App::new("test-model".into(), "test".into(), None);
+        app.handle_agent_event(AgentEvent::TextDelta {
+            content: "abcdefgh".into(),
+        });
+        assert!(app.live_output_tokens_estimate > 0);
+        app.handle_agent_event(AgentEvent::TokenUsage {
+            iteration: 0,
+            usage: TokenUsage {
+                input_tokens: 10,
+                output_tokens: 5,
+                cached_input_tokens: 0,
+            },
+            cumulative: TokenUsage {
+                input_tokens: 10,
+                output_tokens: 5,
+                cached_input_tokens: 0,
+            },
+        });
+        assert_eq!(app.live_output_tokens_estimate, 0);
+        assert_eq!(app.last_input_tokens, 10);
     }
 
     #[test]

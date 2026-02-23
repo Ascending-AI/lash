@@ -1,5 +1,6 @@
 mod exec;
 pub mod message;
+mod prompt;
 
 use std::collections::HashSet;
 use std::path::PathBuf;
@@ -9,11 +10,9 @@ use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 
 use crate::ToolDefinition;
-use crate::baml_client::ClientRegistry;
-use crate::baml_client::async_client::B;
-use crate::baml_client::new_image_from_base64;
-pub use crate::baml_client::types::{ChatMsg, Image};
 use crate::instructions::{FsInstructionSource, InstructionSource};
+use crate::llm::factory::adapter_for;
+use crate::llm::types::{LlmAttachment, LlmRequest, LlmResponse, LlmStreamEvent};
 use crate::provider::Provider;
 use crate::session::Session;
 
@@ -21,6 +20,8 @@ pub use message::{Message, MessageRole, Part, PartKind, PruneState, messages_to_
 
 use exec::{ExecAccumulator, execute_and_collect};
 use message::IMAGE_REF_PREFIX;
+use prompt::{PromptComposeInput, PromptProfile, compose_system_prompt};
+pub use prompt::{PromptOverrideMode, PromptSectionName, PromptSectionOverride};
 
 /// Send an event to the channel if it's still open.
 pub(crate) async fn send_event(tx: &mpsc::Sender<AgentEvent>, event: AgentEvent) {
@@ -53,6 +54,9 @@ impl TokenUsage {
 /// Configuration for the agent loop.
 #[derive(Clone)]
 pub struct AgentConfig {
+    /// Enabled backend capabilities. Disabled capabilities are omitted from prompt guidance
+    /// and not registered in the REPL globals.
+    pub capabilities: AgentCapabilities,
     /// Model identifier (e.g. "anthropic/claude-sonnet-4.6")
     pub model: String,
     /// LLM provider (OpenRouter, Claude OAuth, Codex, or Google OAuth)
@@ -71,18 +75,32 @@ pub struct AgentConfig {
     pub llm_log_path: Option<PathBuf>,
     /// When true, use headless prompt (no ask(), no TUI references).
     pub headless: bool,
-    /// Custom preamble (identity/role). If None, uses the default lash preamble.
-    pub preamble: Option<String>,
-    /// Custom soul (personality principles). If None, uses the default Soul.
-    /// Set to Some("") to disable soul entirely.
-    pub soul: Option<String>,
+    /// Ordered prompt section overrides applied on top of the selected profile.
+    pub prompt_overrides: Vec<PromptSectionOverride>,
     /// Host-provided instruction source (filesystem by default).
     pub instruction_source: Arc<dyn InstructionSource>,
+}
+
+/// Backend capability gates for REPL globals and prompt sections.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct AgentCapabilities {
+    pub memory: bool,
+    pub history: bool,
+}
+
+impl Default for AgentCapabilities {
+    fn default() -> Self {
+        Self {
+            memory: true,
+            history: true,
+        }
+    }
 }
 
 impl Default for AgentConfig {
     fn default() -> Self {
         Self {
+            capabilities: AgentCapabilities::default(),
             model: "anthropic/claude-sonnet-4.6".to_string(),
             provider: Provider::OpenRouter {
                 api_key: String::new(),
@@ -95,8 +113,7 @@ impl Default for AgentConfig {
             include_soul: false,
             llm_log_path: None,
             headless: false,
-            preamble: None,
-            soul: None,
+            prompt_overrides: Vec::new(),
             instruction_source: Arc::new(FsInstructionSource::new()),
         }
     }
@@ -158,6 +175,13 @@ pub enum AgentEvent {
         usage: TokenUsage,
         cumulative: TokenUsage,
     },
+    #[serde(rename = "retry_status")]
+    RetryStatus {
+        wait_seconds: u64,
+        attempt: usize,
+        max_attempts: usize,
+        reason: String,
+    },
     #[serde(rename = "sub_agent_done")]
     SubAgentDone {
         task: String,
@@ -183,8 +207,6 @@ pub enum AgentEvent {
     },
 }
 
-/// Timeout for waiting on LLM streaming chunks.
-const LLM_STREAM_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(120);
 /// Max retries for rate-limited or empty LLM responses.
 const LLM_MAX_RETRIES: usize = 3;
 /// Delays between retries (exponential backoff).
@@ -271,6 +293,10 @@ impl Agent {
         self.config.reasoning_effort = reasoning_effort;
     }
 
+    pub fn capabilities(&self) -> AgentCapabilities {
+        self.config.capabilities
+    }
+
     /// Reset the underlying Python session (clear namespace).
     pub async fn reset_session(&mut self) -> Result<(), crate::SessionError> {
         self.session.reset().await
@@ -301,7 +327,10 @@ impl Agent {
                 emit!(make_error_event(
                     "token_refresh",
                     Some("refresh_failed"),
-                    format!("Token refresh failed: {}", e),
+                    format!(
+                        "Token refresh failed: {}. Re-authenticate with /provider and retry.",
+                        e
+                    ),
                     Some(e.to_string()),
                 ));
                 emit!(AgentEvent::Done);
@@ -310,17 +339,8 @@ impl Agent {
             _ => {}
         }
 
-        // Build ClientRegistry
-        let model = self.config.provider.resolve_model(&self.config.model);
-        let mut cr = ClientRegistry::new();
-        cr.add_llm_client(
-            "DefaultClient",
-            self.config.provider.baml_provider(),
-            self.config
-                .provider
-                .baml_options(&model, self.config.reasoning_effort.as_deref()),
-        );
-        cr.set_primary_client("DefaultClient");
+        let llm = adapter_for(&self.config.provider);
+        let model = llm.normalize_model(&self.config.model);
 
         // Generate tool docs, context, and dynamic prompt sections
         let all_tools = self.session.tools().definitions();
@@ -334,27 +354,44 @@ impl Agent {
         let omitted_tool_count = visible.iter().filter(|t| !t.inject_into_prompt).count();
         if omitted_tool_count > 0 {
             let note = format!(
-                "\n\n- **Note:** {omitted_tool_count} additional tool(s) are available but omitted from this prompt for brevity. Use `list_tools()` / `find_tools(...)` to discover them, then call via `T.<tool>(...)`."
+                "\n\n- **Note:** {omitted_tool_count} additional tool(s) are available but omitted from this prompt for brevity. Use `list_tools()` / `search_tools(...)` to discover them, then call via `tools.<tool>(...)`."
             );
             tool_list.push_str(&note);
         }
-        let context = build_context();
-        let tool_names: Vec<String> = prompt_tools.iter().map(|t| t.name.clone()).collect();
+        let base_context = build_context();
+        let tool_names: Vec<String> = visible.iter().map(|t| t.name.clone()).collect();
         let instruction_source = Arc::clone(&self.config.instruction_source);
         let project_instructions = instruction_source.system_instructions();
 
-        // Convert raw PNG bytes to BAML images
-        use base64::Engine;
-        let user_images: Vec<Image> = images
-            .iter()
-            .map(|png_bytes| {
-                let b64 = base64::engine::general_purpose::STANDARD.encode(png_bytes);
-                new_image_from_base64(&b64, Some("image/png"))
-            })
+        // Keep raw image bytes so provider-specific transports can materialize
+        // multimodal payloads in their native wire format.
+        let user_images: Vec<(String, Vec<u8>)> = images
+            .into_iter()
+            .map(|png_bytes| ("image/png".to_string(), png_bytes))
             .collect();
 
-        // Create collector for token tracking
-        let collector = crate::baml_client::new_collector(&self.agent_id);
+        // Initialize provider-specific runtime state (e.g., Cloud Code project resolution).
+        match llm.ensure_ready(&mut self.config.provider).await {
+            Ok(changed) => {
+                if changed {
+                    let _ = crate::provider::save_provider(&self.config.provider);
+                }
+            }
+            Err(e) => {
+                emit!(make_error_event(
+                    "llm_provider",
+                    e.code.as_deref(),
+                    format!(
+                        "LLM provider initialization failed: {}. Run /provider to reconfigure credentials, then retry.",
+                        e.message
+                    ),
+                    e.raw,
+                ));
+                emit!(AgentEvent::Done);
+                return (messages, run_offset);
+            }
+        }
+
         let mut cumulative_usage = TokenUsage::default();
         let mut last_input_tokens: usize = 0;
 
@@ -377,10 +414,14 @@ impl Agent {
 
         let mut msgs = messages;
         let mut iteration: usize = run_offset;
-        let mut tool_images: Vec<Image> = Vec::new();
+        let mut tool_images: Vec<(String, Vec<u8>)> = Vec::new();
         let mut max_steps_final = false;
         let mut has_history = false;
+        let mut context_pruned_turns: usize = 0;
         let session_start = std::time::Instant::now();
+        let mut headless_prose_only_streak: usize = 0;
+        let history_enabled = self.config.capabilities.history;
+        let memory_enabled = self.config.capabilities.memory;
 
         loop {
             if cancel.is_cancelled() {
@@ -435,6 +476,7 @@ impl Agent {
                     0
                 };
                 if collapsed_count > 0 {
+                    context_pruned_turns += collapsed_count;
                     has_history = true;
                     // Drain the pruned region
                     msgs.drain(1..keep_from);
@@ -451,14 +493,21 @@ impl Agent {
                     } else {
                         format!("{}s", elapsed.as_secs())
                     };
-                    let note = format!(
-                        "[Turn {}, {} elapsed. {} earlier turn(s) dropped from context (not summarized). \
-                         Use `_history` to access them at full fidelity:\n \
-                         `_history.user_messages()` -- what the user asked\n \
-                         `_history.find(\"query\", mode=\"hybrid\")` -- find past results\n \
-                         `_history[i]` -- specific turn]",
-                        iteration, elapsed_str, collapsed_count
-                    );
+                    let note = if history_enabled {
+                        format!(
+                            "[Turn {}, {} elapsed. {} earlier turn(s) dropped from context (not summarized). \
+                             Use `_history` to access them at full fidelity:\n \
+                             `_history.user_messages()` -- what the user asked\n \
+                             `_history.search(\"query\", mode=\"hybrid\")` -- search past results\n \
+                             `_history[i]` -- specific turn]",
+                            iteration, elapsed_str, collapsed_count
+                        )
+                    } else {
+                        format!(
+                            "[Turn {}, {} elapsed. {} earlier turn(s) dropped from context (not summarized).]",
+                            iteration, elapsed_str, collapsed_count
+                        )
+                    };
                     msgs.insert(
                         1,
                         Message {
@@ -478,6 +527,31 @@ impl Agent {
                     }
                 }
             }
+
+            let history_scope = if self.config.sub_agent {
+                if history_enabled {
+                    format!(
+                        "Context-pruned turns this run: {}. This count tracks pruning in this agent only; inherited parent history may also exist in `_history`.",
+                        context_pruned_turns
+                    )
+                } else {
+                    format!("Context-pruned turns this run: {}.", context_pruned_turns)
+                }
+            } else {
+                if history_enabled {
+                    format!(
+                        "Context-pruned turns this run: {}. If this is 0, avoid `_history` mining detours unless prior-turn context is explicitly needed.",
+                        context_pruned_turns
+                    )
+                } else {
+                    format!("Context-pruned turns this run: {}.", context_pruned_turns)
+                }
+            };
+            let context = if base_context.is_empty() {
+                history_scope
+            } else {
+                format!("{base_context}\n{history_scope}")
+            };
 
             let chat_msgs = messages_to_chat(&msgs);
 
@@ -545,6 +619,7 @@ impl Agent {
             let mut current_code = String::new();
             let mut last_line_start = 0usize; // byte offset of current incomplete line
             let mut code_executed = false;
+            let mut direct_usage: Option<(TokenUsage, Option<String>, Option<String>)> = None;
 
             // LLM call with retry on transient API errors
             let full_text = 'llm_retry: {
@@ -552,32 +627,30 @@ impl Agent {
                 for attempt in 0..=LLM_MAX_RETRIES {
                     if attempt > 0 {
                         let delay = LLM_RETRY_DELAYS[attempt - 1];
+                        let reason = last_error
+                            .clone()
+                            .unwrap_or_else(|| "transient provider error".to_string());
                         tracing::warn!(
                             "Retrying LLM call (attempt {}/{}) after {}s",
                             attempt + 1,
                             LLM_MAX_RETRIES + 1,
                             delay.as_secs()
                         );
-                        emit!(make_error_event(
-                            "llm_provider",
-                            Some("retrying"),
-                            format!(
-                                "Retrying in {}s (attempt {}/{})...",
-                                delay.as_secs(),
-                                attempt + 1,
-                                LLM_MAX_RETRIES + 1,
-                            ),
-                            None,
-                        ));
+                        emit!(AgentEvent::RetryStatus {
+                            wait_seconds: delay.as_secs(),
+                            attempt: attempt + 1,
+                            max_attempts: LLM_MAX_RETRIES + 1,
+                            reason,
+                        });
                         tokio::time::sleep(delay).await;
                     }
 
                     let llm_start = std::time::Instant::now();
 
-                    let all_images: Vec<Image> = user_images
+                    let all_images: Vec<(String, Vec<u8>)> = user_images
                         .iter()
                         .chain(tool_images.iter())
-                        .cloned()
+                        .map(|(mime, data)| (mime.clone(), data.clone()))
                         .collect();
                     tool_images.clear();
 
@@ -586,164 +659,238 @@ impl Agent {
                     } else {
                         true
                     };
-                    let preamble = self.config.preamble.clone().unwrap_or_default();
-                    let soul = self.config.soul.clone().unwrap_or_default();
-                    let mut call = match if self.config.sub_agent {
-                        B.SubAgentStep
-                            .with_client_registry(&cr)
-                            .with_collector(&collector)
-                            .stream(
-                                &chat_msgs,
-                                &tool_list,
-                                &context,
-                                &tool_names,
-                                &project_instructions,
-                                &all_images,
-                                include_soul,
-                                self.config.headless,
-                                has_history,
-                                &preamble,
-                                &soul,
-                            )
-                    } else {
-                        B.CodeActStep
-                            .with_client_registry(&cr)
-                            .with_collector(&collector)
-                            .stream(
-                                &chat_msgs,
-                                &tool_list,
-                                &context,
-                                &tool_names,
-                                &project_instructions,
-                                &all_images,
-                                include_soul,
-                                self.config.headless,
-                                has_history,
-                                &preamble,
-                                &soul,
-                            )
-                    } {
-                        Ok(c) => c,
-                        Err(e) => {
-                            let msg = format!("{}", e);
-                            if is_retryable(&msg) && attempt < LLM_MAX_RETRIES {
-                                last_error = Some(msg);
-                                continue;
-                            }
-                            let mut env = sanitize_llm_error(&msg);
-                            let http = last_http_call_summary(&collector)
-                                .map(|s| format!("\n{}", s))
-                                .unwrap_or_default();
-                            let display = format!("LLM error: {}{}", env.user_message, http);
-                            env.user_message = display.clone();
-                            emit!(AgentEvent::Error {
-                                message: display,
-                                envelope: Some(env),
-                            });
-                            break 'llm_retry String::new();
-                        }
+                    let profile =
+                        PromptProfile::from_flags(self.config.headless, self.config.sub_agent);
+                    let system_prompt = compose_system_prompt(PromptComposeInput {
+                        profile,
+                        context: &context,
+                        tool_list: &tool_list,
+                        tool_names: &tool_names,
+                        has_history,
+                        history_enabled,
+                        memory_enabled,
+                        include_soul,
+                        project_instructions: &project_instructions,
+                        overrides: &self.config.prompt_overrides,
+                    });
+
+                    let llm_request = LlmRequest {
+                        model: model.clone(),
+                        system_prompt: system_prompt.clone(),
+                        messages: chat_msgs.clone(),
+                        attachments: all_images
+                            .iter()
+                            .map(|(mime, data)| LlmAttachment {
+                                mime: mime.clone(),
+                                data: data.clone(),
+                            })
+                            .collect(),
+                        reasoning_effort: self.config.reasoning_effort.clone(),
+                        stream_events: None,
                     };
 
-                    // Stream LLM tokens with fence-aware parsing
-                    let mut stream_error = None;
-                    loop {
-                        if cancel.is_cancelled() {
-                            self.session.clear_message_sender();
-                            self.session.clear_prompt_sender();
-                            let _ = collect_usage(
-                                &collector,
-                                &mut cumulative_usage,
-                                iteration,
-                                &response,
-                                &self.config,
-                                &self.agent_id,
-                                &event_tx,
-                            )
-                            .await;
-                            emit!(AgentEvent::Done);
-                            return (msgs, iteration);
-                        }
-                        match tokio::time::timeout(LLM_STREAM_TIMEOUT, call.next()).await {
-                            Err(_timeout) => {
+                    let (llm_stream_tx, mut llm_stream_rx) =
+                        tokio::sync::mpsc::unbounded_channel::<LlmStreamEvent>();
+                    let llm_request = LlmRequest {
+                        stream_events: Some(llm_stream_tx),
+                        ..llm_request
+                    };
+
+                    let mut call_provider = self.config.provider.clone();
+                    let llm_task = tokio::spawn(async move {
+                        let llm = adapter_for(&call_provider);
+                        let result = llm.complete(&mut call_provider, llm_request).await;
+                        (result, call_provider)
+                    });
+
+                    let break_on_first_code = !self.is_root_interactive();
+                    let mut streamed_delta_count = 0usize;
+                    let mut stop_stream_processing = false;
+                    let mut retry_after_error = false;
+                    let mut llm_task = llm_task;
+                    let llm_response: LlmResponse = loop {
+                        tokio::select! {
+                            _ = cancel.cancelled() => {
+                                llm_task.abort();
                                 self.session.clear_message_sender();
                                 self.session.clear_prompt_sender();
-                                let _ = collect_usage(
-                                    &collector,
-                                    &mut cumulative_usage,
-                                    iteration,
-                                    &response,
-                                    &self.config,
-                                    &self.agent_id,
-                                    &event_tx,
-                                )
-                                .await;
-                                emit!(make_error_event(
-                                    "llm_provider",
-                                    Some("timeout"),
-                                    "LLM response timed out",
-                                    None,
-                                ));
                                 emit!(AgentEvent::Done);
                                 return (msgs, iteration);
                             }
-                            Ok(None) => {
-                                break;
-                            }
-                            Ok(Some(Ok(partial))) => {
-                                if partial.len() > response.len() {
-                                    let delta = &partial[response.len()..];
-                                    response.push_str(delta);
-
-                                    // Process complete lines from the response buffer
-                                    while let Some(nl) = response[last_line_start..].find('\n') {
-                                        let line_end = last_line_start + nl;
-                                        let line = response[last_line_start..line_end].to_string();
-                                        last_line_start = line_end + 1;
-
-                                        let parsed = parse_fence_line(
-                                            &line,
-                                            &mut in_code_fence,
-                                            &mut current_prose,
-                                            &mut current_code,
-                                            &mut prose_parts,
-                                        );
-
-                                        if !parsed.prose_delta.is_empty() {
-                                            emit!(AgentEvent::TextDelta {
-                                                content: format!("{}\n", parsed.prose_delta),
-                                            });
+                            maybe_event = llm_stream_rx.recv() => {
+                                let Some(event) = maybe_event else { continue };
+                                match event {
+                                    LlmStreamEvent::Delta(delta) => {
+                                        if stop_stream_processing || delta.is_empty() {
+                                            continue;
                                         }
+                                        streamed_delta_count += 1;
+                                        response.push_str(&delta);
 
-                                        if let Some(code) = parsed.code_to_execute {
-                                            code_parts.push(code.clone());
-                                            emit!(AgentEvent::CodeBlock { code: code.clone() });
-                                            if !acc.had_failure {
-                                                execute_and_collect(
-                                                    &mut self.session,
-                                                    &code,
-                                                    &mut acc,
-                                                    &event_tx,
-                                                )
-                                                .await;
+                                        while let Some(nl) = response[last_line_start..].find('\n') {
+                                            let line_end = last_line_start + nl;
+                                            let line = response[last_line_start..line_end].to_string();
+                                            last_line_start = line_end + 1;
+
+                                            let parsed = parse_fence_line(
+                                                &line,
+                                                &mut in_code_fence,
+                                                &mut current_prose,
+                                                &mut current_code,
+                                                &mut prose_parts,
+                                            );
+
+                                            if !parsed.prose_delta.is_empty() {
+                                                emit!(AgentEvent::TextDelta {
+                                                    content: format!("{}\n", parsed.prose_delta),
+                                                });
                                             }
-                                            code_executed = true;
-                                            break; // break line-processing loop
+
+                                            for code in parsed.codes_to_execute {
+                                                code_parts.push(code.clone());
+                                                emit!(AgentEvent::CodeBlock { code: code.clone() });
+                                                if !acc.had_failure {
+                                                    execute_and_collect(
+                                                        &mut self.session,
+                                                        &code,
+                                                        &mut acc,
+                                                        &event_tx,
+                                                    )
+                                                    .await;
+                                                }
+                                                code_executed = true;
+                                                if break_on_first_code || !acc.final_response.is_empty() {
+                                                    stop_stream_processing = true;
+                                                    break;
+                                                }
+                                            }
+                                            if stop_stream_processing {
+                                                break;
+                                            }
+                                        }
+                                        if (break_on_first_code && code_executed)
+                                            || !acc.final_response.is_empty()
+                                        {
+                                            stop_stream_processing = true;
                                         }
                                     }
-                                    if code_executed {
-                                        break; // break stream loop
+                                    LlmStreamEvent::Usage(_) => {}
+                                }
+                            }
+                            join = &mut llm_task => {
+                                let (result, provider_after) = match join {
+                                    Ok(v) => v,
+                                    Err(e) => {
+                                        emit!(AgentEvent::Error {
+                                            message: format!("LLM error: internal task failed: {e}"),
+                                            envelope: Some(ErrorEnvelope {
+                                                kind: "llm_provider".to_string(),
+                                                code: Some("task_join_failed".to_string()),
+                                                user_message: format!("LLM error: internal task failed: {e}"),
+                                                raw: None,
+                                            }),
+                                        });
+                                        break 'llm_retry String::new();
+                                    }
+                                };
+                                self.config.provider = provider_after;
+                                match result {
+                                    Ok(resp) => break resp,
+                                    Err(e) => {
+                                        if e.retryable && attempt < LLM_MAX_RETRIES {
+                                            last_error = Some(e.message);
+                                            retry_after_error = true;
+                                            break LlmResponse::default();
+                                        }
+                                        emit!(AgentEvent::Error {
+                                            message: format!("LLM error: {}", e.message),
+                                            envelope: Some(ErrorEnvelope {
+                                                kind: "llm_provider".to_string(),
+                                                code: e.code.clone(),
+                                                user_message: format!("LLM error: {}", e.message),
+                                                raw: e.raw.clone().map(|s| truncate_raw_error(&s)),
+                                            }),
+                                        });
+                                        break 'llm_retry String::new();
                                     }
                                 }
                             }
-                            Ok(Some(Err(e))) => {
-                                stream_error = Some(format!("{}", e));
+                        }
+                    };
+                    if retry_after_error {
+                        continue;
+                    }
+
+                    direct_usage = Some((
+                        TokenUsage {
+                            input_tokens: llm_response.usage.input_tokens,
+                            output_tokens: llm_response.usage.output_tokens,
+                            cached_input_tokens: llm_response.usage.cached_input_tokens,
+                        },
+                        llm_response.request_body.clone(),
+                        llm_response.http_summary.clone(),
+                    ));
+
+                    if streamed_delta_count == 0 {
+                        for delta in &llm_response.deltas {
+                            if cancel.is_cancelled() {
+                                self.session.clear_message_sender();
+                                self.session.clear_prompt_sender();
+                                emit!(AgentEvent::Done);
+                                return (msgs, iteration);
+                            }
+
+                            if delta.is_empty() {
+                                continue;
+                            }
+                            response.push_str(delta);
+
+                            while let Some(nl) = response[last_line_start..].find('\n') {
+                                let line_end = last_line_start + nl;
+                                let line = response[last_line_start..line_end].to_string();
+                                last_line_start = line_end + 1;
+
+                                let parsed = parse_fence_line(
+                                    &line,
+                                    &mut in_code_fence,
+                                    &mut current_prose,
+                                    &mut current_code,
+                                    &mut prose_parts,
+                                );
+
+                                if !parsed.prose_delta.is_empty() {
+                                    emit!(AgentEvent::TextDelta {
+                                        content: format!("{}\n", parsed.prose_delta),
+                                    });
+                                }
+
+                                for code in parsed.codes_to_execute {
+                                    code_parts.push(code.clone());
+                                    emit!(AgentEvent::CodeBlock { code: code.clone() });
+                                    if !acc.had_failure {
+                                        execute_and_collect(
+                                            &mut self.session,
+                                            &code,
+                                            &mut acc,
+                                            &event_tx,
+                                        )
+                                        .await;
+                                    }
+                                    code_executed = true;
+                                    if break_on_first_code || !acc.final_response.is_empty() {
+                                        break;
+                                    }
+                                }
+                            }
+                            if (break_on_first_code && code_executed)
+                                || !acc.final_response.is_empty()
+                            {
                                 break;
                             }
                         }
                     }
 
-                    // Code block detected mid-stream: drop stream, feed results back
-                    if code_executed {
+                    if (break_on_first_code && code_executed) || !acc.final_response.is_empty() {
                         emit!(AgentEvent::LlmResponse {
                             iteration,
                             content: response.clone(),
@@ -752,62 +899,16 @@ impl Agent {
                         break 'llm_retry response.clone();
                     }
 
-                    if let Some(err) = stream_error {
-                        if !acc.tool_calls.is_empty()
-                            || !acc.combined_output.is_empty()
-                            || acc.had_failure
-                        {
-                            emit!(make_error_event(
-                                "llm_provider",
-                                Some("stream_error_partial"),
-                                format!("LLM stream error (after partial execution): {}", err),
-                                Some(err),
-                            ));
-                            break 'llm_retry response.clone();
-                        }
-                        if is_retryable(&err) && attempt < LLM_MAX_RETRIES {
-                            last_error = Some(err);
-                            continue;
-                        }
-                        self.session.clear_message_sender();
-                        self.session.clear_prompt_sender();
-                        let _ = collect_usage(
-                            &collector,
-                            &mut cumulative_usage,
-                            iteration,
-                            &response,
-                            &self.config,
-                            &self.agent_id,
-                            &event_tx,
-                        )
-                        .await;
-                        let mut env = sanitize_llm_error(&err);
-                        let http = last_http_call_summary(&collector)
-                            .map(|s| format!("\n{}", s))
-                            .unwrap_or_default();
-                        let display = format!("LLM error: {}{}", env.user_message, http);
-                        env.user_message = display.clone();
-                        emit!(AgentEvent::Error {
-                            message: display,
-                            envelope: Some(env),
-                        });
-                        emit!(AgentEvent::Done);
-                        return (msgs, iteration);
-                    }
-
-                    // Finalize the BAML stream (for collector/usage tracking).
-                    match call.get_final_response().await {
-                        Ok(_) => {}
-                        Err(e) => tracing::warn!("get_final_response: {}", e),
-                    };
-
                     emit!(AgentEvent::LlmResponse {
                         iteration,
-                        content: response.clone(),
+                        content: if response.is_empty() {
+                            llm_response.full_text.clone()
+                        } else {
+                            response.clone()
+                        },
                         duration_ms: llm_start.elapsed().as_millis() as u64,
                     });
 
-                    // Handle any remaining incomplete line after stream end.
                     if last_line_start < response.len() {
                         let trailing = &response[last_line_start..];
                         let parsed = parse_fence_line(
@@ -822,7 +923,7 @@ impl Agent {
                                 content: parsed.prose_delta,
                             });
                         }
-                        if let Some(code) = parsed.code_to_execute {
+                        for code in parsed.codes_to_execute {
                             code_parts.push(code.clone());
                             emit!(AgentEvent::CodeBlock { code: code.clone() });
                             if !acc.had_failure {
@@ -830,10 +931,12 @@ impl Agent {
                                     .await;
                             }
                             code_executed = true;
+                            if break_on_first_code || !acc.final_response.is_empty() {
+                                break;
+                            }
                         }
                     }
 
-                    // If we ended while still in an unclosed fence, run what we have.
                     if in_code_fence && !current_code.trim().is_empty() {
                         code_parts.push(current_code.clone());
                         emit!(AgentEvent::CodeBlock {
@@ -852,11 +955,13 @@ impl Agent {
                         code_executed = true;
                     }
 
-                    // Flush any remaining prose.
                     let remaining_prose = current_prose.trim().to_string();
                     if !remaining_prose.is_empty() {
                         prose_parts.push(remaining_prose);
                         current_prose.clear();
+                    }
+                    if response.is_empty() && !llm_response.full_text.is_empty() {
+                        response = llm_response.full_text.clone();
                     }
 
                     break 'llm_retry response.clone();
@@ -867,7 +972,11 @@ impl Agent {
                     emit!(make_error_event(
                         "llm_provider",
                         Some("retries_exhausted"),
-                        format!("LLM failed after {} retries: {}", LLM_MAX_RETRIES + 1, err),
+                        format!(
+                            "LLM failed after {} attempts: {}. Use /retry to replay the same turn payload.",
+                            LLM_MAX_RETRIES + 1,
+                            err
+                        ),
                         Some(err),
                     ));
                 }
@@ -882,16 +991,28 @@ impl Agent {
 
             // Collect token usage for all paths that exit the retry block
             // (normal completion, stream error with partial exec, retries exhausted)
-            last_input_tokens = collect_usage(
-                &collector,
-                &mut cumulative_usage,
-                iteration,
-                &full_text,
-                &self.config,
-                &self.agent_id,
-                &event_tx,
-            )
-            .await;
+            if let Some((usage, request_body, http_summary)) = direct_usage.take() {
+                last_input_tokens = usage.input_tokens as usize;
+                cumulative_usage.add(&usage);
+                emit!(AgentEvent::TokenUsage {
+                    iteration,
+                    usage: usage.clone(),
+                    cumulative: cumulative_usage.clone(),
+                });
+                log_llm_debug(
+                    &self.config.llm_log_path,
+                    &self.agent_id,
+                    iteration,
+                    &usage,
+                    request_body,
+                    &full_text,
+                );
+                if let Some(http) = http_summary {
+                    tracing::debug!("llm turn {} transport: {}", iteration, http);
+                }
+            } else {
+                last_input_tokens = 0;
+            }
 
             // For mid-stream break: flush any remaining prose
             if code_executed {
@@ -914,20 +1035,19 @@ impl Agent {
                 emit!(make_error_event(
                     "llm_provider",
                     Some("empty_response"),
-                    "I didn't get a response — please try again.",
+                    "I didn't get a response. Use /retry to replay this turn, or /provider if credentials changed.",
                     None,
                 ));
                 emit!(AgentEvent::Done);
                 return (msgs, iteration);
             }
 
-            // Convert tool images to BAML Image for the next LLM turn and
+            // Keep tool images as raw bytes for the next LLM turn and
             // remember their image indices so we can inject multimodal refs.
             let mut next_tool_image_refs: Vec<(usize, String)> = Vec::new();
             let base_image_idx = user_images.len();
             for (i, img) in acc.images.iter().enumerate() {
-                let b64 = base64::engine::general_purpose::STANDARD.encode(&img.data);
-                tool_images.push(new_image_from_base64(&b64, Some(&img.mime)));
+                tool_images.push((img.mime.clone(), img.data.clone()));
                 next_tool_image_refs.push((base_image_idx + i, img.label.clone()));
             }
 
@@ -989,11 +1109,16 @@ impl Agent {
                     .to_string()
                     .replace('\\', "\\\\")
                     .replace('\'', "\\'");
-                let inject_code = format!(
-                    "_history._add_turn('{}'); _mem._set_turn({})",
-                    json_str, iteration
-                );
-                let _ = self.session.run_code(&inject_code).await;
+                let mut inject_stmts = Vec::new();
+                if history_enabled {
+                    inject_stmts.push(format!("_history._add_turn('{json_str}')"));
+                }
+                if memory_enabled {
+                    inject_stmts.push(format!("_mem._set_turn({iteration})"));
+                }
+                if !inject_stmts.is_empty() {
+                    let _ = self.session.run_code(&inject_stmts.join("; ")).await;
+                }
             }
 
             // Build structured feedback parts from accumulated execution state
@@ -1010,9 +1135,37 @@ impl Agent {
                         role: MessageRole::Assistant,
                         parts: asst_parts,
                     });
+                    if self.config.headless {
+                        headless_prose_only_streak += 1;
+                        let sys_id = format!("m{}", msgs.len());
+                        let guidance = "Headless mode requires execution via <repl>. \
+Prose-only output is not a valid step. Continue with concrete tool execution; call done(...) only from inside <repl> when fully complete.";
+                        msgs.push(Message {
+                            id: sys_id.clone(),
+                            role: MessageRole::System,
+                            parts: vec![Part {
+                                id: format!("{}.p0", sys_id),
+                                kind: PartKind::Error,
+                                content: guidance.to_string(),
+                                prune_state: PruneState::Intact,
+                            }],
+                        });
+                        if headless_prose_only_streak >= 3 {
+                            emit!(make_error_event(
+                                "runtime",
+                                Some("headless_prose_only"),
+                                "Headless run ended after repeated prose-only responses without execution.",
+                                None,
+                            ));
+                            emit!(AgentEvent::Done);
+                            return (msgs, iteration);
+                        }
+                        continue;
+                    }
                     emit!(AgentEvent::Done);
                     return (msgs, iteration);
                 }
+                headless_prose_only_streak = 0;
 
                 // Build feedback: code blocks wrapped in fences, then output/error
                 let mut feedback_parts: Vec<Part> = Vec::new();
@@ -1142,6 +1295,12 @@ impl Agent {
     }
 }
 
+impl Agent {
+    fn is_root_interactive(&self) -> bool {
+        !self.config.headless && !self.config.sub_agent
+    }
+}
+
 /// Log raw LLM request/response to a debug file (if configured).
 fn log_llm_debug(
     log_path: &Option<PathBuf>,
@@ -1173,120 +1332,6 @@ fn log_llm_debug(
     {
         use std::io::Write;
         let _ = writeln!(f, "{}", entry);
-    }
-}
-
-/// Best-effort HTTP call summary from the latest selected LLM call.
-/// Excludes sensitive headers/body; intended for transport debugging.
-fn last_http_call_summary(collector: &baml::Collector) -> Option<String> {
-    let log = collector.last()?;
-    let call = log.selected_call()?;
-    let req = call.http_request()?;
-    let method = req.method();
-    let url = req.url();
-    Some(format!("HTTP {} {}", method, url))
-}
-
-/// Trim noisy transport payloads and build a standardized provider-error envelope.
-fn sanitize_llm_error(raw: &str) -> ErrorEnvelope {
-    let trimmed = raw.trim();
-    let lower = trimmed.to_ascii_lowercase();
-    let user_message = if let Some(idx) = lower.find("<html") {
-        let head = trimmed[..idx]
-            .trim_end_matches(|c: char| c == ',' || c.is_whitespace())
-            .trim();
-        if head.is_empty() {
-            "request failed (HTML error body omitted)".to_string()
-        } else {
-            format!("{head} [HTML body omitted]")
-        }
-    } else {
-        trimmed.to_string()
-    };
-    ErrorEnvelope {
-        kind: "llm_provider".to_string(),
-        code: infer_provider_error_code(&lower).map(str::to_string),
-        user_message,
-        raw: Some(truncate_raw_error(trimmed)),
-    }
-}
-
-fn infer_provider_error_code(lower_msg: &str) -> Option<&'static str> {
-    if lower_msg.contains("timed out") || lower_msg.contains("timeout") {
-        return Some("timeout");
-    }
-    if lower_msg.contains("429") || lower_msg.contains("rate limit") {
-        return Some("rate_limited");
-    }
-    if lower_msg.contains("401") || lower_msg.contains("unauthorized") {
-        return Some("unauthorized");
-    }
-    if lower_msg.contains("403") || lower_msg.contains("forbidden") {
-        return Some("forbidden");
-    }
-    if lower_msg.contains("400") || lower_msg.contains("bad request") {
-        return Some("bad_request");
-    }
-    if lower_msg.contains("404") || lower_msg.contains("not found") {
-        return Some("not_found");
-    }
-    if lower_msg.contains("500")
-        || lower_msg.contains("502")
-        || lower_msg.contains("503")
-        || lower_msg.contains("504")
-        || lower_msg.contains("internal error")
-    {
-        return Some("server_error");
-    }
-    None
-}
-
-/// Read token usage from the collector, emit a TokenUsage event, and log debug info.
-/// Called after both stop-marker and normal LLM completion paths.
-/// Returns the input_tokens from this call (the actual context size seen by the API).
-async fn collect_usage(
-    collector: &baml::Collector,
-    cumulative_usage: &mut TokenUsage,
-    iteration: usize,
-    response_text: &str,
-    config: &AgentConfig,
-    agent_id: &str,
-    event_tx: &mpsc::Sender<AgentEvent>,
-) -> usize {
-    if let Some(log) = collector.last() {
-        let u = log.usage();
-        let usage = TokenUsage {
-            input_tokens: u.input_tokens(),
-            output_tokens: u.output_tokens(),
-            cached_input_tokens: u.cached_input_tokens().unwrap_or(0),
-        };
-        let this_input = usage.input_tokens as usize;
-        cumulative_usage.add(&usage);
-        send_event(
-            event_tx,
-            AgentEvent::TokenUsage {
-                iteration,
-                usage: usage.clone(),
-                cumulative: cumulative_usage.clone(),
-            },
-        )
-        .await;
-
-        let request_body = log
-            .selected_call()
-            .and_then(|c| c.http_request())
-            .and_then(|r| r.body().text().ok());
-        log_llm_debug(
-            &config.llm_log_path,
-            agent_id,
-            iteration,
-            &usage,
-            request_body,
-            response_text,
-        );
-        this_input
-    } else {
-        0
     }
 }
 
@@ -1322,18 +1367,97 @@ fn build_context() -> String {
         }
     }
 
+    match repl_third_party_packages() {
+        Some(pkgs) if pkgs.is_empty() => {
+            parts.push("REPL third-party packages: none".into());
+        }
+        Some(pkgs) => {
+            parts.push(format!("REPL third-party packages: {}", pkgs.join(", ")));
+        }
+        None => {
+            parts.push("REPL third-party packages: unknown".into());
+        }
+    }
+
     parts.join("\n")
 }
 
-/// Check if an LLM error is retryable (rate limits, server errors).
-fn is_retryable(error: &str) -> bool {
-    let lower = error.to_lowercase();
-    lower.contains("429")
-        || lower.contains("rate")
-        || lower.contains("503")
-        || lower.contains("502")
-        || lower.contains("overloaded")
-        || lower.contains("temporarily")
+/// Discover importable third-party packages available to the embedded REPL.
+/// Returns None if discovery fails.
+fn repl_third_party_packages() -> Option<Vec<String>> {
+    let lib_dir = crate::python_home::ensure_python_home().ok()?;
+    let site_packages = lib_dir.join("python3.14").join("site-packages");
+    if !site_packages.exists() {
+        return Some(Vec::new());
+    }
+
+    let ignored = [
+        "dill",
+        "pip",
+        "setuptools",
+        "wheel",
+        "pkg-resources",
+        "pkg_resources",
+    ];
+
+    let mut names: Vec<String> = Vec::new();
+    let entries = std::fs::read_dir(&site_packages).ok()?;
+    for entry in entries.flatten() {
+        let file_type = match entry.file_type() {
+            Ok(ft) => ft,
+            Err(_) => continue,
+        };
+        if !file_type.is_dir() {
+            continue;
+        }
+        let file_name = entry.file_name();
+        let file_name = file_name.to_string_lossy();
+        if !file_name.ends_with(".dist-info") {
+            continue;
+        }
+        let Some(name) = parse_dist_info_package_name(&entry.path(), &file_name) else {
+            continue;
+        };
+        let normalized = name.trim().to_ascii_lowercase();
+        if normalized.is_empty() || ignored.contains(&normalized.as_str()) {
+            continue;
+        }
+        names.push(normalized);
+    }
+
+    names.sort();
+    names.dedup();
+    Some(names)
+}
+
+fn parse_dist_info_package_name(dist_info_dir: &std::path::Path, dir_name: &str) -> Option<String> {
+    // Prefer canonical name from METADATA
+    let metadata = dist_info_dir.join("METADATA");
+    if let Ok(text) = std::fs::read_to_string(&metadata)
+        && let Some(line) = text.lines().find(|line| line.starts_with("Name:"))
+    {
+        let name = line.trim_start_matches("Name:").trim();
+        if !name.is_empty() {
+            return Some(name.to_string());
+        }
+    }
+
+    // Fallback: parse "<name>-<version>.dist-info"
+    let stem = dir_name.strip_suffix(".dist-info")?;
+    let split_idx = stem
+        .char_indices()
+        .find_map(|(i, c)| {
+            if c == '-' {
+                stem.get(i + 1..i + 2)
+                    .and_then(|s| s.chars().next())
+                    .filter(|n| n.is_ascii_digit())
+                    .map(|_| i)
+            } else {
+                None
+            }
+        })
+        .unwrap_or(stem.len());
+    Some(stem[..split_idx].to_string())
 }
 
 /// Build alternating Prose/Code parts for an assistant message.
@@ -1391,7 +1515,7 @@ fn build_assistant_parts(msg_id: &str, prose_parts: &[String], code_parts: &[Str
 
 struct FenceLineParse {
     prose_delta: String,
-    code_to_execute: Option<String>,
+    codes_to_execute: Vec<String>,
 }
 
 fn append_line_segment(target: &mut String, segment: &str, line_started: &mut bool) {
@@ -1408,8 +1532,8 @@ fn append_line_segment(target: &mut String, segment: &str, line_started: &mut bo
 }
 
 /// Parse one streamed line, accepting `<repl>` / `</repl>` tags inline as well as on
-/// standalone lines. Returns prose to emit as a text delta, and at most one code block
-/// to execute (we execute the first completed block, then return control to the model).
+/// standalone lines. Returns prose to emit as a text delta and any completed code
+/// blocks encountered on that line.
 fn parse_fence_line(
     line: &str,
     in_code_fence: &mut bool,
@@ -1422,12 +1546,19 @@ fn parse_fence_line(
 
     let mut out = FenceLineParse {
         prose_delta: String::new(),
-        code_to_execute: None,
+        codes_to_execute: Vec::new(),
     };
 
     let mut remaining = line;
     let mut prose_started_this_line = false;
     let mut code_started_this_line = false;
+
+    // Preserve intentional blank lines inside code fences (e.g. triple-quoted
+    // markdown passed to done(...)). Without this, markdown paragraphs collapse.
+    if *in_code_fence && line.is_empty() && !current_code.is_empty() {
+        current_code.push('\n');
+        return out;
+    }
 
     loop {
         if !*in_code_fence {
@@ -1462,8 +1593,7 @@ fn parse_fence_line(
             remaining = &remaining[idx + CLOSE_TAG.len()..];
             code_started_this_line = false;
             if !code.trim().is_empty() {
-                out.code_to_execute = Some(code);
-                return out;
+                out.codes_to_execute.push(code);
             }
             continue;
         }
@@ -1495,7 +1625,7 @@ mod tests {
         );
 
         assert_eq!(out.prose_delta, "preface ");
-        assert_eq!(out.code_to_execute.as_deref(), Some("print('x')"));
+        assert_eq!(out.codes_to_execute, vec!["print('x')"]);
         assert_eq!(prose_parts, vec!["preface"]);
         assert!(!in_code_fence);
         assert!(current_prose.is_empty());
@@ -1518,7 +1648,7 @@ mod tests {
         );
 
         assert_eq!(out.prose_delta, "note");
-        assert!(out.code_to_execute.is_none());
+        assert!(out.codes_to_execute.is_empty());
         assert_eq!(prose_parts, vec!["note"]);
         assert!(in_code_fence);
         assert_eq!(current_code, "x = 1");
@@ -1539,10 +1669,63 @@ mod tests {
             &mut prose_parts,
         );
 
-        assert_eq!(out.code_to_execute.as_deref(), Some("x = 1\nprint(x)"));
-        assert!(out.prose_delta.is_empty());
+        assert_eq!(out.codes_to_execute, vec!["x = 1\nprint(x)"]);
+        assert_eq!(out.prose_delta, " trailing text");
         assert!(!in_code_fence);
         assert!(current_code.is_empty());
+    }
+
+    #[test]
+    fn parses_multiple_inline_blocks_on_same_line() {
+        let mut in_code_fence = false;
+        let mut current_prose = String::new();
+        let mut current_code = String::new();
+        let mut prose_parts = Vec::new();
+
+        let out = parse_fence_line(
+            "<repl>a=1</repl><repl>b=2</repl>",
+            &mut in_code_fence,
+            &mut current_prose,
+            &mut current_code,
+            &mut prose_parts,
+        );
+
+        assert!(out.prose_delta.is_empty());
+        assert_eq!(out.codes_to_execute, vec!["a=1", "b=2"]);
+        assert!(!in_code_fence);
+    }
+
+    #[test]
+    fn preserves_blank_lines_inside_code_block() {
+        let mut in_code_fence = true;
+        let mut current_prose = String::new();
+        let mut current_code = String::new();
+        let mut prose_parts = Vec::new();
+
+        let _ = parse_fence_line(
+            "a = 1",
+            &mut in_code_fence,
+            &mut current_prose,
+            &mut current_code,
+            &mut prose_parts,
+        );
+        let _ = parse_fence_line(
+            "",
+            &mut in_code_fence,
+            &mut current_prose,
+            &mut current_code,
+            &mut prose_parts,
+        );
+        let out = parse_fence_line(
+            "b = 2</repl>",
+            &mut in_code_fence,
+            &mut current_prose,
+            &mut current_code,
+            &mut prose_parts,
+        );
+
+        assert_eq!(out.codes_to_execute, vec!["a = 1\n\nb = 2"]);
+        assert!(!in_code_fence);
     }
 }
 

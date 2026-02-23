@@ -7,7 +7,8 @@ use tokio_util::sync::CancellationToken;
 
 use crate::agent::message::IMAGE_REF_PREFIX;
 use crate::agent::{
-    Agent, AgentConfig, AgentEvent, Message, MessageRole, Part, PartKind, PruneState, TokenUsage,
+    Agent, AgentCapabilities, AgentConfig, AgentEvent, Message, MessageRole, Part, PartKind,
+    PromptSectionOverride, PruneState, TokenUsage,
 };
 use crate::instructions::{FsInstructionSource, InstructionSource};
 use crate::provider::Provider;
@@ -110,14 +111,14 @@ impl EventSink for NoopEventSink {
 /// Runtime config used by embedders to construct an engine.
 #[derive(Clone)]
 pub struct RuntimeConfig {
+    pub capabilities: AgentCapabilities,
     pub model: String,
     pub provider: Provider,
     pub max_context_tokens: Option<usize>,
     pub include_soul: bool,
     pub llm_log_path: Option<PathBuf>,
     pub headless: bool,
-    pub preamble: Option<String>,
-    pub soul: Option<String>,
+    pub prompt_overrides: Vec<PromptSectionOverride>,
     pub instruction_source: Arc<dyn InstructionSource>,
 }
 
@@ -125,14 +126,14 @@ impl Default for RuntimeConfig {
     fn default() -> Self {
         let cfg = AgentConfig::default();
         Self {
+            capabilities: cfg.capabilities,
             model: cfg.model,
             provider: cfg.provider,
             max_context_tokens: cfg.max_context_tokens,
             include_soul: cfg.include_soul,
             llm_log_path: cfg.llm_log_path,
             headless: cfg.headless,
-            preamble: cfg.preamble,
-            soul: cfg.soul,
+            prompt_overrides: cfg.prompt_overrides,
             instruction_source: Arc::new(FsInstructionSource::new()),
         }
     }
@@ -141,6 +142,7 @@ impl Default for RuntimeConfig {
 impl From<RuntimeConfig> for AgentConfig {
     fn from(value: RuntimeConfig) -> Self {
         Self {
+            capabilities: value.capabilities,
             model: value.model,
             provider: value.provider,
             max_context_tokens: value.max_context_tokens,
@@ -150,8 +152,7 @@ impl From<RuntimeConfig> for AgentConfig {
             include_soul: value.include_soul,
             llm_log_path: value.llm_log_path,
             headless: value.headless,
-            preamble: value.preamble,
-            soul: value.soul,
+            prompt_overrides: value.prompt_overrides,
             instruction_source: value.instruction_source,
         }
     }
@@ -161,6 +162,7 @@ impl From<RuntimeConfig> for AgentConfig {
 pub struct RuntimeEngine {
     agent: Option<Agent>,
     state: AgentStateEnvelope,
+    capabilities: AgentCapabilities,
 }
 
 impl RuntimeEngine {
@@ -170,10 +172,11 @@ impl RuntimeEngine {
         tools: Arc<dyn ToolProvider>,
         mut state: AgentStateEnvelope,
     ) -> Result<Self, SessionError> {
+        let capabilities = config.capabilities;
         if state.agent_id.is_empty() {
             state.agent_id = "root".to_string();
         }
-        let session = Session::new(tools, &state.agent_id, config.headless).await?;
+        let session = Session::new(tools, &state.agent_id, config.headless, capabilities).await?;
         let mut agent = Agent::new(session, config.into(), Some(state.agent_id.clone()));
         if let Some(snapshot) = state.repl_snapshot.clone() {
             agent.restore(&snapshot).await?;
@@ -181,14 +184,17 @@ impl RuntimeEngine {
         Ok(Self {
             agent: Some(agent),
             state,
+            capabilities,
         })
     }
 
     /// Wrap an existing agent (used by CLI adapter migration).
     pub fn from_agent(agent: Agent, state: AgentStateEnvelope) -> Self {
+        let capabilities = agent.capabilities();
         Self {
             agent: Some(agent),
             state,
+            capabilities,
         }
     }
 
@@ -319,18 +325,36 @@ impl RuntimeEngine {
                 if plan_content.is_empty() {
                     None
                 } else {
+                    let mut available = Vec::new();
+                    if self.capabilities.history {
+                        available.push(
+                            "- `_history.search(\"query\", mode=\"hybrid\")` — search planning exploration"
+                                .to_string(),
+                        );
+                        available.push(
+                            "- `_history.user_messages()` — original user requests".to_string(),
+                        );
+                    }
+                    if self.capabilities.memory {
+                        available
+                            .push("- `_mem` — persistent memory (fully preserved)".to_string());
+                    }
+                    let available_context = if available.is_empty() {
+                        "No persisted planning context capabilities are enabled for this agent."
+                            .to_string()
+                    } else {
+                        available.join("\n")
+                    };
                     Some(format!(
                         "## Executing Plan\n\n\
                         You are executing a plan from a previous planning session. \
-                        Your planning context (exploration, reasoning, findings) is in `_history`.\n\n\
+                        Use available context from this agent configuration.\n\n\
                         **Plan file:** `{}`\n\n\
                         ---\n{}\n---\n\n\
                         **Available context:**\n\
-                        - `_history.find(\"query\", mode=\"hybrid\")` — search planning exploration\n\
-                        - `_history.user_messages()` — original user requests\n\
-                        - `_mem` — persistent memory (fully preserved)\n\n\
+                        {}\n\n\
                         Execute the plan step by step.",
-                        path, plan_content
+                        path, plan_content, available_context
                     ))
                 }
             }),

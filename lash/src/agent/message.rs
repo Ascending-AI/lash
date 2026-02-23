@@ -1,4 +1,4 @@
-pub use crate::baml_client::types::ChatMsg;
+pub use crate::llm::types::{LlmMessage as ChatMsg, LlmRole};
 
 pub const IMAGE_REF_PREFIX: &str = "__LASH_IMAGE_IDX:";
 
@@ -106,11 +106,10 @@ impl Message {
         };
         ChatMsg {
             role: match self.role {
-                MessageRole::User => "user",
-                MessageRole::Assistant => "assistant",
-                MessageRole::System => "system",
-            }
-            .to_string(),
+                MessageRole::User => LlmRole::User,
+                MessageRole::Assistant => LlmRole::Assistant,
+                MessageRole::System => LlmRole::System,
+            },
             content,
             kind: "text".to_string(),
             image_idx: -1,
@@ -120,14 +119,6 @@ impl Message {
     /// Total character count of all parts (rendered).
     pub fn char_count(&self) -> usize {
         self.parts.iter().map(|p| p.render().len()).sum()
-    }
-}
-
-fn role_str(role: MessageRole) -> &'static str {
-    match role {
-        MessageRole::User => "user",
-        MessageRole::Assistant => "assistant",
-        MessageRole::System => "system",
     }
 }
 
@@ -155,7 +146,11 @@ pub fn messages_to_chat(msgs: &[Message]) -> Vec<ChatMsg> {
     for msg in msgs {
         if msg.parts.is_empty() {
             out.push(ChatMsg {
-                role: role_str(msg.role).to_string(),
+                role: match msg.role {
+                    MessageRole::User => LlmRole::User,
+                    MessageRole::Assistant => LlmRole::Assistant,
+                    MessageRole::System => LlmRole::System,
+                },
                 content: String::new(),
                 kind: "text".to_string(),
                 image_idx: -1,
@@ -170,7 +165,7 @@ pub fn messages_to_chat(msgs: &[Message]) -> Vec<ChatMsg> {
             {
                 // Route image payloads as user messages for broad provider compatibility.
                 out.push(ChatMsg {
-                    role: "user".to_string(),
+                    role: LlmRole::User,
                     content: String::new(),
                     kind: "image".to_string(),
                     image_idx: idx,
@@ -179,7 +174,11 @@ pub fn messages_to_chat(msgs: &[Message]) -> Vec<ChatMsg> {
             }
 
             out.push(ChatMsg {
-                role: role_str(msg.role).to_string(),
+                role: match msg.role {
+                    MessageRole::User => LlmRole::User,
+                    MessageRole::Assistant => LlmRole::Assistant,
+                    MessageRole::System => LlmRole::System,
+                },
                 content: rendered,
                 kind: "text".to_string(),
                 image_idx: -1,
@@ -212,7 +211,7 @@ mod tests {
 
         let out = messages_to_chat(&msgs);
         assert_eq!(out.len(), 1);
-        assert_eq!(out[0].role, "system");
+        assert_eq!(out[0].role, LlmRole::System);
         assert_eq!(out[0].kind, "text");
         assert_eq!(out[0].content, "<output>\nhello\n</output>");
     }
@@ -227,7 +226,7 @@ mod tests {
 
         let out = messages_to_chat(&msgs);
         assert_eq!(out.len(), 1);
-        assert_eq!(out[0].role, "user");
+        assert_eq!(out[0].role, LlmRole::User);
         assert_eq!(out[0].kind, "image");
         assert_eq!(out[0].image_idx, 3);
     }

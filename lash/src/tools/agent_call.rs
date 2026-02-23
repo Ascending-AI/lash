@@ -131,6 +131,7 @@ impl AgentCall {
         let (model, reasoning_effort) =
             pick_model_and_reasoning(&self.config, &self.agent_models, tier);
         AgentConfig {
+            capabilities: self.config.capabilities,
             model,
             reasoning_effort,
             provider: self.config.provider.clone(),
@@ -139,8 +140,7 @@ impl AgentCall {
             max_turns: None,
             llm_log_path: self.config.llm_log_path.clone(),
             headless: self.config.headless,
-            preamble: self.config.preamble.clone(),
-            soul: self.config.soul.clone(),
+            prompt_overrides: self.config.prompt_overrides.clone(),
             ..Default::default()
         }
     }
@@ -203,7 +203,14 @@ impl AgentCall {
 
         // Create a new session with tier-specific tools.
         let session_tools = self.session_tools_for_tier(&tier);
-        let mut session = match Session::new(session_tools, &agent_id, self.config.headless).await {
+        let mut session = match Session::new(
+            session_tools,
+            &agent_id,
+            self.config.headless,
+            agent_config.capabilities,
+        )
+        .await
+        {
             Ok(s) => s,
             Err(e) => {
                 return ToolResult::err_fmt(format_args!(

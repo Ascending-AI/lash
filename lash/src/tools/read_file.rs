@@ -20,13 +20,18 @@ const DEFAULT_LIMIT: usize = 2000;
 const MAX_LINE_LEN: usize = 2000;
 /// Max text file size we'll read (1 MB). Larger files must use offset/limit.
 const MAX_TEXT_BYTES: u64 = 1_000_000;
+const TRUNCATION_HINT: &str = "Pass `limit=null` for all lines.";
 
 #[async_trait::async_trait]
 impl ToolProvider for ReadFile {
     fn definitions(&self) -> Vec<ToolDefinition> {
         vec![ToolDefinition {
             name: "read_file".into(),
-            description: "Read a file (default: up to 2000 lines). Text files return hashline-prefixed content. PDF files are extracted to text. Image files (png, jpg, gif, webp, bmp) are read for visual inspection. Use `ls` for directories.".into(),
+            description: format!(
+                "Read a file (default: up to {} lines). Text files return hashline-prefixed content in `LINE:8HEX|text` format. PDF files are extracted to text. Image files (png, jpg, gif, webp, bmp) are read for visual inspection. Use `ls` for directories.",
+                DEFAULT_LIMIT
+            )
+            .into(),
             params: vec![
                 ToolParam::typed("path", "str"),
                 ToolParam {
@@ -38,7 +43,11 @@ impl ToolProvider for ReadFile {
                 ToolParam {
                     name: "limit".into(),
                     r#type: "int".into(),
-                    description: "Max lines to read (default 2000 — omit for whole-file reads, set only when needed)".into(),
+                    description: format!(
+                        "Maximum lines to read (default: {}). Use null or \"none\" for no cap.",
+                        DEFAULT_LIMIT
+                    )
+                    .into(),
                     required: false,
                 },
             ],
@@ -62,20 +71,54 @@ impl ToolProvider for ReadFile {
             .unwrap_or(1)
             .max(1);
 
-        let limit = args
-            .get("limit")
-            .and_then(|v| v.as_u64())
-            .map(|v| v as usize)
-            .unwrap_or(DEFAULT_LIMIT);
+        let limit = match parse_limit(args) {
+            Ok(l) => l,
+            Err(e) => return e,
+        };
 
         run_blocking(move || execute_read_file_sync(&path_str, offset, limit)).await
     }
 }
 
-fn execute_read_file_sync(path_str: &str, offset: usize, limit: usize) -> ToolResult {
+fn parse_limit(args: &serde_json::Value) -> Result<Option<usize>, ToolResult> {
+    match args.get("limit") {
+        None => Ok(Some(DEFAULT_LIMIT)),
+        Some(v) if v.is_null() => Ok(None),
+        Some(v) => {
+            if let Some(s) = v.as_str() {
+                if s.eq_ignore_ascii_case("none") {
+                    return Ok(None);
+                }
+                return Err(ToolResult::err_fmt(format_args!(
+                    "Invalid limit: expected int, null, or \"none\""
+                )));
+            }
+
+            let n = match v.as_u64() {
+                Some(n) => n,
+                None => {
+                    return Err(ToolResult::err_fmt(format_args!(
+                        "Invalid limit: expected int, null, or \"none\""
+                    )));
+                }
+            };
+
+            if n == 0 {
+                return Err(ToolResult::err_fmt(format_args!(
+                    "Invalid limit: must be >= 1, or use null/\"none\" for no cap"
+                )));
+            }
+            Ok(Some(n as usize))
+        }
+    }
+}
+
+fn execute_read_file_sync(path_str: &str, offset: usize, limit: Option<usize>) -> ToolResult {
     let path = Path::new(path_str);
     if !path.exists() {
-        return ToolResult::err_fmt(format_args!("Path does not exist: {path_str}"));
+        return ToolResult::err_fmt(format_args!(
+            "Path does not exist: {path_str}. Use `ls` or `glob` to locate the correct path."
+        ));
     }
 
     // Directory — still works but nudges toward ls
@@ -106,7 +149,9 @@ fn execute_read_file_sync(path_str: &str, offset: usize, limit: usize) -> ToolRe
 
     // Binary detection
     if is_likely_binary(path) {
-        return ToolResult::err_fmt(format_args!("Binary file detected: {path_str}"));
+        return ToolResult::err_fmt(format_args!(
+            "Binary file detected: {path_str}. Use `read_image` for images, or `shell` (`file`, `strings`, `xxd`) for binary inspection."
+        ));
     }
 
     // Check file size before reading
@@ -130,7 +175,10 @@ fn execute_read_file_sync(path_str: &str, offset: usize, limit: usize) -> ToolRe
 
     // offset is 1-based
     let start_idx = (offset - 1).min(total_lines);
-    let end_idx = (start_idx + limit).min(total_lines);
+    let end_idx = match limit {
+        Some(limit) => (start_idx + limit).min(total_lines),
+        None => total_lines,
+    };
     let selected: Vec<&str> = all_lines[start_idx..end_idx].to_vec();
 
     // Truncate long lines and format with hashlines
@@ -148,17 +196,28 @@ fn execute_read_file_sync(path_str: &str, offset: usize, limit: usize) -> ToolRe
 
     let mut formatted = hashline::format_hashlines(&truncated_content, offset);
 
-    if end_idx < total_lines {
-        formatted.push_str(&format!(
-            "\n[Showing lines {}-{} of {}. Use offset={} to continue.]",
-            offset,
-            offset + selected.len() - 1,
-            total_lines,
-            end_idx + 1,
-        ));
-    }
+    append_truncation_notice(&mut formatted, start_idx, end_idx, total_lines);
 
     ToolResult::ok(json!(formatted))
+}
+
+fn append_truncation_notice(
+    formatted: &mut String,
+    start_idx: usize,
+    end_idx: usize,
+    total_lines: usize,
+) {
+    if end_idx >= total_lines {
+        return;
+    }
+    let shown_start = start_idx + 1;
+    let shown_end = end_idx;
+    let omitted = total_lines - end_idx;
+    let next_offset = end_idx + 1;
+    formatted.push_str(&format!(
+        "\n[results truncated: showing lines {}-{} of {} ({} more lines). Use offset={} to continue. {}]",
+        shown_start, shown_end, total_lines, omitted, next_offset, TRUNCATION_HINT
+    ));
 }
 
 fn list_directory(path: &Path) -> ToolResult {
@@ -233,7 +292,7 @@ fn read_image(path: &Path, path_str: &str, mime: &str) -> ToolResult {
 }
 
 /// Extract text from a PDF file using the pdf-extract crate (pure Rust).
-fn read_pdf(path: &Path, path_str: &str, offset: usize, limit: usize) -> ToolResult {
+fn read_pdf(path: &Path, path_str: &str, offset: usize, limit: Option<usize>) -> ToolResult {
     let pdf_bytes = match std::fs::read(path) {
         Ok(b) => b,
         Err(e) => return ToolResult::err_fmt(format_args!("Failed to read PDF: {e}")),
@@ -253,7 +312,10 @@ fn read_pdf(path: &Path, path_str: &str, offset: usize, limit: usize) -> ToolRes
     let all_lines: Vec<&str> = text.lines().collect();
     let total_lines = all_lines.len();
     let start_idx = (offset - 1).min(total_lines);
-    let end_idx = (start_idx + limit).min(total_lines);
+    let end_idx = match limit {
+        Some(limit) => (start_idx + limit).min(total_lines),
+        None => total_lines,
+    };
     let selected = &all_lines[start_idx..end_idx];
 
     let truncated: String = selected
@@ -276,15 +338,7 @@ fn read_pdf(path: &Path, path_str: &str, offset: usize, limit: usize) -> ToolRes
     );
     formatted.insert_str(0, &header);
 
-    if end_idx < total_lines {
-        formatted.push_str(&format!(
-            "\n[Showing lines {}-{} of {}. Use offset={} to continue.]",
-            offset,
-            offset + selected.len() - 1,
-            total_lines,
-            end_idx + 1,
-        ));
-    }
+    append_truncation_notice(&mut formatted, start_idx, end_idx, total_lines);
 
     ToolResult::ok(json!(formatted))
 }
@@ -399,6 +453,29 @@ mod tests {
         assert!(text.contains("|line3"));
         assert!(!text.contains("|line1"));
         assert!(!text.contains("|line4"));
+        assert!(text.contains("results truncated"));
+        assert!(text.contains("2 more lines"));
+        assert!(text.contains("offset=4"));
+    }
+
+    #[tokio::test]
+    async fn test_read_limit_none() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("test.txt");
+        std::fs::write(&path, "line1\nline2\nline3").unwrap();
+        let tool = ReadFile;
+        let result = tool
+            .execute(
+                "read_file",
+                &json!({"path": path.to_str().unwrap(), "limit": null}),
+            )
+            .await;
+        assert!(result.success);
+        let text = result.result.as_str().unwrap();
+        assert!(text.contains("|line1"));
+        assert!(text.contains("|line2"));
+        assert!(text.contains("|line3"));
+        assert!(!text.contains("results truncated"));
     }
 
     #[tokio::test]

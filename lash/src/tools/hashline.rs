@@ -1,7 +1,10 @@
 use std::fmt::Write;
 
-/// Compute a 2-char hex hash for a line.
-/// xxHash32 of whitespace-stripped content, mod 256.
+/// Hashline hashes are emitted as fixed-width lowercase hex.
+const HASH_HEX_LEN: usize = 8;
+
+/// Compute an 8-char hex hash for a line.
+/// Uses full xxHash32 of whitespace-stripped content.
 pub fn compute_line_hash(line: &str) -> String {
     let mut hasher = xxhash_rust::xxh32::Xxh32::new(0);
     for &b in line.as_bytes() {
@@ -10,7 +13,7 @@ pub fn compute_line_hash(line: &str) -> String {
         }
     }
     let hash = hasher.digest();
-    format!("{:02x}", hash % 256)
+    format!("{:08x}", hash)
 }
 
 /// Format file content with hashline prefixes.
@@ -30,7 +33,7 @@ pub fn format_hashlines(content: &str, start_line: usize) -> String {
     out
 }
 
-/// Parse an anchor like "42:a3" into (line_number, hash).
+/// Parse an anchor like "42:a5c1d2e3" into (line_number, hash).
 pub fn parse_anchor(anchor: &str) -> Result<(usize, String), String> {
     let parts: Vec<&str> = anchor.splitn(2, ':').collect();
     if parts.len() != 2 {
@@ -42,14 +45,14 @@ pub fn parse_anchor(anchor: &str) -> Result<(usize, String), String> {
     let line_num: usize = parts[0]
         .parse()
         .map_err(|_| format!("Invalid line number in anchor '{}'", anchor))?;
-    let hash = parts[1].to_string();
-    if hash.len() != 2 {
+    let hash = parts[1];
+    if hash.len() != HASH_HEX_LEN || !hash.as_bytes().iter().all(|b| b.is_ascii_hexdigit()) {
         return Err(format!(
-            "Invalid hash in anchor '{}', expected 2 hex chars",
-            anchor
+            "Invalid hash in anchor '{}', expected {} hex chars (e.g. 42:a5c1d2e3)",
+            anchor, HASH_HEX_LEN
         ));
     }
-    Ok((line_num, hash))
+    Ok((line_num, hash.to_ascii_lowercase()))
 }
 
 /// Strip accidental `LINE:HASH|` prefixes from replacement text.
@@ -59,7 +62,7 @@ pub fn strip_hashline_prefix(text: &str) -> String {
         if i > 0 {
             out.push('\n');
         }
-        // Match pattern: digits:2hex|rest
+        // Match pattern: digits:8hex|rest
         if let Some(rest) = try_strip_prefix(line) {
             out.push_str(rest);
         } else {
@@ -84,14 +87,17 @@ fn try_strip_prefix(line: &str) -> Option<&str> {
         return None;
     }
     i += 1;
-    // Expect exactly 2 hex chars
-    if i + 2 > bytes.len() {
+    // Expect exactly HASH_HEX_LEN hex chars
+    if i + HASH_HEX_LEN > bytes.len() {
         return None;
     }
-    if !bytes[i].is_ascii_hexdigit() || !bytes[i + 1].is_ascii_hexdigit() {
+    if !bytes[i..i + HASH_HEX_LEN]
+        .iter()
+        .all(|b| b.is_ascii_hexdigit())
+    {
         return None;
     }
-    i += 2;
+    i += HASH_HEX_LEN;
     // Expect '|'
     if i >= bytes.len() || bytes[i] != b'|' {
         return None;
@@ -295,7 +301,7 @@ mod tests {
         // Should hash "helloworld"
         let hash2 = compute_line_hash("helloworld");
         assert_eq!(hash, hash2);
-        assert_eq!(hash.len(), 2);
+        assert_eq!(hash.len(), HASH_HEX_LEN);
     }
 
     #[test]
@@ -312,17 +318,17 @@ mod tests {
 
     #[test]
     fn test_parse_anchor() {
-        let (line, hash) = parse_anchor("42:a3").unwrap();
+        let (line, hash) = parse_anchor("42:a5c1d2e3").unwrap();
         assert_eq!(line, 42);
-        assert_eq!(hash, "a3");
+        assert_eq!(hash, "a5c1d2e3");
     }
 
     #[test]
     fn test_strip_hashline_prefix() {
-        assert_eq!(strip_hashline_prefix("1:ab|hello"), "hello");
+        assert_eq!(strip_hashline_prefix("1:a5c1d2e3|hello"), "hello");
         assert_eq!(strip_hashline_prefix("no prefix"), "no prefix");
         assert_eq!(
-            strip_hashline_prefix("1:ab|line1\n2:cd|line2"),
+            strip_hashline_prefix("1:a5c1d2e3|line1\n2:0fedcba9|line2"),
             "line1\nline2"
         );
     }
@@ -369,7 +375,7 @@ mod tests {
     fn test_hash_mismatch() {
         let content = "line1\nline2\nline3";
         let edits = vec![HashlineEdit::SetLine {
-            anchor: "2:ff".into(),
+            anchor: "2:ffffffff".into(),
             new_text: "replaced".into(),
         }];
         let result = apply_hashline_edits(content, edits);
@@ -381,7 +387,7 @@ mod tests {
 
     #[test]
     fn test_strip_hashline_prefix_mixed() {
-        let input = "1:ab|prefixed line\nnormal line\n42:ff|another prefixed";
+        let input = "1:a5c1d2e3|prefixed line\nnormal line\n42:ffffffff|another prefixed";
         let result = strip_hashline_prefix(input);
         assert_eq!(result, "prefixed line\nnormal line\nanother prefixed");
     }
@@ -432,17 +438,17 @@ mod tests {
     #[test]
     fn test_validate_anchor_hash_mismatch_message() {
         let lines = vec!["hello"];
-        let result = validate_anchor(&lines, "1:ff");
+        let result = validate_anchor(&lines, "1:ffffffff");
         assert!(result.is_err());
         let msg = result.unwrap_err();
         assert!(msg.contains("Hash mismatch at line 1"));
-        assert!(msg.contains("expected 'ff'"));
+        assert!(msg.contains("expected 'ffffffff'"));
     }
 
     #[test]
     fn test_validate_anchor_out_of_bounds() {
         let lines = vec!["hello"];
-        let result = validate_anchor(&lines, "5:ab");
+        let result = validate_anchor(&lines, "5:a5c1d2e3");
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("out of range"));
     }

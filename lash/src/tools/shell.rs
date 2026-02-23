@@ -248,7 +248,9 @@ impl Shell {
                 let output = buffer.lock().unwrap().clone();
                 self.processes.lock().unwrap().remove(id);
                 let mut result = output;
-                result.push_str("\n[timed out]");
+                result.push_str(
+                    "\n[timed out: process exceeded timeout; retry with a larger timeout or split into smaller commands]",
+                );
                 return ToolResult::err(json!(result));
             }
 

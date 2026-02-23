@@ -397,7 +397,9 @@ impl MdRenderer {
             }
             Event::SoftBreak => {
                 if !self.in_table {
-                    self.spans.push(Span::raw(" "));
+                    // Preserve model-emitted line breaks in chat output instead of
+                    // collapsing them into spaces.
+                    self.flush_line();
                 }
             }
             Event::HardBreak => {
@@ -547,6 +549,22 @@ mod tests {
             .collect();
         assert!(all_text.contains("bold"));
         assert!(all_text.contains("italic"));
+    }
+
+    #[test]
+    fn render_soft_break_as_newline() {
+        let lines = render_markdown("line one\nline two", 80);
+        let rendered: Vec<String> = lines
+            .iter()
+            .map(|line| line.spans.iter().map(|s| s.content.as_ref()).collect())
+            .collect();
+        assert!(rendered.iter().any(|line| line.contains("line one")));
+        assert!(rendered.iter().any(|line| line.contains("line two")));
+        assert!(
+            !rendered
+                .iter()
+                .any(|line| line.contains("line one") && line.contains("line two"))
+        );
     }
 
     #[test]

@@ -46,12 +46,23 @@ scripts/run-terminalbench.sh --sample --build-mode host   # use host binary inst
 | `/provider` | Open provider setup in-app |
 | `/login` | Alias for `/provider` |
 | `/logout` | Remove stored credentials from disk |
+| `/retry` | Replay the previous turn payload exactly |
 | `/resume [name]` | Browse/load previous sessions |
 | `/skills` | Browse loaded skills |
 | `/help`, `/?` | Show help |
 | `/exit`, `/quit` | Quit |
 
 `/logout` only clears persisted config. The active session may continue with in-memory credentials until you switch provider or restart.
+
+## Plan Mode
+
+Plan mode is a first-class runtime mode used for plan-then-execute workflows.
+
+- The agent enters plan mode by calling `enter_plan_mode`.
+- The TUI switches to plan mode and allocates a plan file in `.lash/plans/`.
+- Runtime injects plan-mode guardrails (read/explore/design, no project file edits) and points the model at that plan file.
+- `exit_plan_mode` returns plan content for user approval.
+- After approval, lash clears message history for a fresh execution phase while preserving REPL state.
 
 ## Keyboard Shortcuts
 
@@ -65,7 +76,7 @@ scripts/run-terminalbench.sh --sample --build-mode host   # use host binary inst
 | `Ctrl+Shift+V` | Paste text only |
 | `Ctrl+Y` | Copy last response |
 | `Ctrl+O` | Cycle tool expansion level |
-| `Ctrl+Shift+O` | Full expansion (code + stdout) |
+| `Alt+O` | Full expansion (code + stdout) |
 
 ## Provider Defaults
 
@@ -74,7 +85,7 @@ Default root model by provider:
 | Provider | Default model |
 |---|---|
 | `OpenRouter` | `anthropic/claude-sonnet-4.6` |
-| `Claude` | `claude-sonnet-4-6` |
+| `Claude` | `claude-opus-4-6` |
 | `Codex` | `gpt-5.3-codex` |
 | `Google OAuth` | `gemini-3.1-pro-preview` |
 
@@ -128,8 +139,23 @@ Tools define `inject_into_prompt: bool` (`lash/src/lib.rs`).
 Runtime discovery is available via:
 
 - `list_tools(...)`
-- `find_tools(query, mode="hybrid", ...)`
+- `search_tools(query, mode="hybrid", ...)`
 
-The REPL exposes the full tool namespace under `T` (for example `T.read_file(...)`, `T.find_tools(...)`).
+The REPL exposes the full tool namespace under `tools` (for example `tools.read_file(...)`, `tools.search_tools(...)`).
+It also implicitly runs `from tools import *`, so visible tools can be called directly.
+
+## Filesystem Listing Output
+
+`glob(...)` and `ls(...)` return typed filesystem entries (`PathEntry`) rather than plain path/tree strings.
+
+Each item includes:
+
+- `path`
+- `kind` (`file` / `dir` / `symlink` / `other`)
+- `size_bytes`
+- `lines` (`null` unless `with_lines=true`)
+- `modified_at` (RFC3339 UTC)
+
+Both tools support `limit` (`null` for uncapped) and expose truncation metadata on the returned object in REPL wrappers.
 
 All rights reserved.

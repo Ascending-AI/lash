@@ -30,7 +30,8 @@ Options:
   --build-mode <mode>           Binary build mode: docker-bookworm|host
                                 (default: docker-bookworm)
   --no-build                    Skip building lash binary (uses existing path for selected mode)
-  --no-delete                   Keep benchmark environments after run
+  --delete                      Delete benchmark environments after run
+  --no-delete                   Keep benchmark environments after run (default)
   --allow-no-config             Do not require ~/.lash/config.json
   --dry-run                     Print command and exit
   --help                        Show this help
@@ -60,7 +61,7 @@ ENV_BACKEND="docker"
 REGISTRY_URL="https://raw.githubusercontent.com/laude-institute/harbor/main/registry.json"
 BUILD_MODE="docker-bookworm"
 DO_BUILD=1
-DELETE_AFTER_RUN=1
+DELETE_AFTER_RUN=0
 REQUIRE_CONFIG=1
 DRY_RUN=0
 DEBUG=1
@@ -129,6 +130,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --no-build)
       DO_BUILD=0
+      shift
+      ;;
+    --delete)
+      DELETE_AFTER_RUN=1
       shift
       ;;
     --no-delete)
@@ -219,6 +224,20 @@ if [[ ! -x "${BINARY_PATH}" ]]; then
 fi
 
 export LASH_BENCH_BINARY="${BINARY_PATH}"
+
+if [[ -z "${LASH_PROMPT_REPLACE_IDENTITY:-}" ]]; then
+  export LASH_PROMPT_REPLACE_IDENTITY="$(cat <<EOF
+You are running inside a benchmark harness with an enforced wall-clock time budget.
+Work autonomously and prioritize passing the verifier over polish.
+Do not ask the user questions; there is no interactive user in this run.
+Make concrete progress continuously: inspect, edit, run checks, and converge quickly.
+If you are blocked or near timeout, return the best valid result you can and call done() with a concise status + remaining risks.
+EOF
+)"
+fi
+
+# Always capture LLM request/response traces for benchmark debugging.
+export LASH_LOG="debug"
 
 export PYTHONPATH="${REPO_ROOT}:${PYTHONPATH:-}"
 

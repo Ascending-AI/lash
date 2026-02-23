@@ -8,6 +8,7 @@ pub const COMMANDS: &[(&str, &str)] = &[
     ("/provider", "Open provider setup (in-app)"),
     ("/login", "Sign in or reconfigure provider"),
     ("/logout", "Remove stored credentials"),
+    ("/retry", "Replay the previous turn payload"),
     ("/resume", "Resume a previous session"),
     ("/skills", "Browse loaded skills"),
     ("/help", "Show commands and shortcuts"),
@@ -37,6 +38,8 @@ pub enum Command {
     ChangeProvider,
     /// Remove stored credentials
     Logout,
+    /// Replay the previous turn payload
+    Retry,
     /// Show available commands and shortcuts
     Help,
     /// Quit the application
@@ -70,6 +73,7 @@ pub fn parse(input: &str, skills: &SkillRegistry) -> Option<Command> {
             .map(|a| Command::Model(a.to_string())),
         "provider" | "login" => Some(Command::ChangeProvider),
         "logout" => Some(Command::Logout),
+        "retry" => Some(Command::Retry),
         "help" | "?" => Some(Command::Help),
         "exit" | "quit" => Some(Command::Exit),
         "resume" | "continue" => Some(Command::Resume(arg.map(|a| a.to_string()))),
@@ -103,5 +107,6 @@ mod tests {
             parse("/login", &skills),
             Some(Command::ChangeProvider)
         ));
+        assert!(matches!(parse("/retry", &skills), Some(Command::Retry)));
     }
 }

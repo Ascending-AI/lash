@@ -6,7 +6,7 @@ use serde_json::json;
 use tokio::sync::mpsc::UnboundedSender;
 
 use crate::embedded::{PythonRequest, PythonResponse, PythonRuntime};
-use crate::{SandboxMessage, ToolCallRecord, ToolImage, ToolProvider};
+use crate::{AgentCapabilities, SandboxMessage, ToolCallRecord, ToolImage, ToolProvider};
 
 /// A prompt from the agent asking the user a question.
 /// The `response_tx` travels all the way to the TUI, which sends the answer
@@ -45,6 +45,7 @@ impl Session {
         tools: Arc<dyn ToolProvider>,
         agent_id: &str,
         headless: bool,
+        capabilities: AgentCapabilities,
     ) -> Result<Self, SessionError> {
         let scratch_dir = tempfile::TempDir::new()?;
 
@@ -65,10 +66,16 @@ impl Session {
         // Send init with tool definitions and agent identity
         let defs = session.tools.definitions();
         let tools_json = serde_json::to_string(&defs).unwrap_or_else(|_| "[]".to_string());
+        let capabilities_json = serde_json::json!({
+            "memory": capabilities.memory,
+            "history": capabilities.history,
+        })
+        .to_string();
         session.runtime.send(PythonRequest::Init {
             tools_json,
             agent_id: agent_id.to_string(),
             headless,
+            capabilities_json,
         })?;
 
         // Wait for ready

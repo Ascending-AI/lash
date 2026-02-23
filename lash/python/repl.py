@@ -46,7 +46,6 @@ class ToolName(StrEnum):
     WRITE_FILE = "write_file"
     EDIT_FILE = "edit_file"
     FIND_REPLACE = "find_replace"
-    DIFF_FILE = "diff_file"
     GLOB = "glob"
     GREP = "grep"
     LS = "ls"
@@ -71,7 +70,7 @@ class Intelligence(StrEnum):
 # Tools whose "path" arg counts as a file read
 _READ_TOOLS = {ToolName.READ_FILE, ToolName.GLOB, ToolName.GREP}
 # Tools whose "path" arg counts as a file write
-_WRITE_TOOLS = {ToolName.WRITE_FILE, ToolName.EDIT_FILE, ToolName.FIND_REPLACE, ToolName.DIFF_FILE}
+_WRITE_TOOLS = {ToolName.WRITE_FILE, ToolName.EDIT_FILE, ToolName.FIND_REPLACE}
 
 
 class ToolCall:
@@ -180,9 +179,9 @@ class TurnHistory:
                 out.append(t.user_message)
         return out
 
-    def find(self, query, mode="hybrid", regex=None, limit=10, fields=None, since_turn=None):
-        """Find relevant turns using hybrid/literal/regex matching."""
-        return _find_history_matches(
+    def search(self, query, mode="hybrid", regex=None, limit=10, fields=None, since_turn=None):
+        """Search turns using hybrid/literal/regex matching."""
+        return _search_history_matches(
             turns=self._turns,
             query=query,
             mode=mode,
@@ -393,9 +392,9 @@ class Mem:
             lines.append(f"  [{e.turn}] {key}: {e.description}")
         return "\n".join(lines)
 
-    def find(self, query, mode="hybrid", regex=None, limit=10, keys=None):
-        """Find relevant memory entries using hybrid/literal/regex matching."""
-        return _find_mem_matches(
+    def search(self, query, mode="hybrid", regex=None, limit=10, keys=None):
+        """Search memory entries using hybrid/literal/regex matching."""
+        return _search_mem_matches(
             entries=list(self._store.values()),
             query=query,
             mode=mode,
@@ -483,6 +482,7 @@ def _send(msg):
 
 _MAX_OUTPUT_LEN = 20_000
 _MAX_STDOUT_LEN = 20_000
+_done_requested = False
 
 def _truncate_output(text, limit=_MAX_STDOUT_LEN):
     """Head+tail truncation for stdout captured during exec."""
@@ -508,10 +508,12 @@ def _format_value(value):
 
 def _done(value=""):
     """End the turn with a final result."""
+    global _done_requested
     text = _format_value(value)
     if text is None:
         text = ""
     _send({"type": "message", "text": text, "kind": "final"})
+    _done_requested = True
     return _Awaitable()
 
 
@@ -717,6 +719,7 @@ class SkillSummary:
         self.name = data.get("name", "")
         self.description = data.get("description", "")
         self.file_count = data.get("file_count", 0)
+        self.score = float(data.get("score", 0.0))
 
     def __repr__(self):
         return f"Skill('{self.name}')"
@@ -761,6 +764,86 @@ class Skill:
 
     async def read_file(self, path):
         return await _call("read_skill_file", {"skill_name": self.name, "path": path})
+
+
+class EditResult:
+    """Structured result returned by edit_file().
+
+    Fields:
+      .summary  -- short status line
+      .diff     -- unified diff text (may be empty)
+    """
+
+    def __init__(self, data):
+        self.summary = data.get("summary", "")
+        self.diff = data.get("diff", "")
+
+    def __repr__(self):
+        return self.summary
+
+    def __str__(self):
+        return self.summary
+
+
+class PathEntry:
+    """Filesystem entry returned by glob()/ls()."""
+
+    def __init__(self, data):
+        self.path = data.get("path", "")
+        self.kind = data.get("kind", "other")
+        self.size_bytes = data.get("size_bytes", 0)
+        self.lines = data.get("lines", None)
+        self.modified_at = data.get("modified_at", "")
+
+    def as_dict(self):
+        return {
+            "path": self.path,
+            "kind": self.kind,
+            "size_bytes": self.size_bytes,
+            "lines": self.lines,
+            "modified_at": self.modified_at,
+        }
+
+    def __repr__(self):
+        lines_part = f", lines={self.lines}" if self.lines is not None else ""
+        return (
+            f"PathEntry(path={self.path!r}, kind={self.kind!r}, size_bytes={self.size_bytes}"
+            f"{lines_part}, modified_at={self.modified_at!r})"
+        )
+
+
+class PathEntries(list):
+    """List-like wrapper for path entry results with truncation metadata."""
+
+    def __init__(self, data):
+        items = [PathEntry(item) for item in data.get("items", [])]
+        super().__init__(items)
+        self.truncated = data.get("truncated")
+
+    @property
+    def shown(self):
+        if isinstance(self.truncated, dict):
+            return self.truncated.get("shown")
+        return len(self)
+
+    @property
+    def total(self):
+        if isinstance(self.truncated, dict):
+            return self.truncated.get("total")
+        return len(self)
+
+    @property
+    def omitted(self):
+        if isinstance(self.truncated, dict):
+            return self.truncated.get("omitted")
+        return 0
+
+    def __repr__(self):
+        if isinstance(self.truncated, dict):
+            return (
+                f"PathEntries({len(self)} shown, total={self.total}, omitted={self.omitted})"
+            )
+        return f"PathEntries({len(self)})"
 
 
 class ToolError(Exception):
@@ -816,6 +899,10 @@ async def _call(name, params):
                 return SkillSummary(value)
             if t == "skill_list":
                 return [SkillSummary(item) for item in value.get("items", [])]
+            if t == "edit_result":
+                return EditResult(value)
+            if t == "path_entries":
+                return PathEntries(value)
         return value
     else:
         error = json.loads(result["result"]) if result["result"] else "Tool call failed"
@@ -832,6 +919,7 @@ _TYPE_MAP = {
 }
 
 _tool_defs = []
+_capabilities = {"memory": True, "history": True}
 _FIND_DEFAULT_LIMIT = 10
 _FIND_MAX_LIMIT = 100
 
@@ -1069,7 +1157,7 @@ def _default_example(tool):
 
 
 class ToolInfo:
-    """Structured tool metadata returned by list_tools/find_tools."""
+    """Structured tool metadata returned by list_tools/search_tools."""
 
     def __init__(self, data):
         self.name = data.get("name", "")
@@ -1092,62 +1180,6 @@ class ToolInfo:
 
     def __str__(self):
         return self.__repr__()
-
-
-class ToolNamespace:
-    """Namespace for discovered tools: T.read_file(...), T.find_tools(...), etc."""
-
-    def __init__(self):
-        self._tool_names = []
-
-    def _bind(self, name, fn):
-        setattr(self, name, fn)
-        self._tool_names.append(name)
-
-    def __dir__(self):
-        return sorted(
-            set(
-                self._tool_names
-                + ["list_tools", "find_tools", "find_history", "find_mem"]
-            )
-        )
-
-    def __repr__(self):
-        return f"ToolNamespace({len(self._tool_names)} tools)"
-
-    def list_tools(self, query=None, injected_only=None, **_ignored):
-        return _list_tools(
-            query=query,
-            injected_only=injected_only,
-        )
-
-    def find_tools(self, query, mode="hybrid", regex=None, limit=10, injected_only=None, **_ignored):
-        return _find_tools(
-            query=query,
-            mode=mode,
-            regex=regex,
-            limit=limit,
-            injected_only=injected_only,
-        )
-
-    def find_history(self, query, mode="hybrid", regex=None, limit=10, fields=None, since_turn=None):
-        return _find_history(
-            query=query,
-            mode=mode,
-            regex=regex,
-            limit=limit,
-            fields=fields,
-            since_turn=since_turn,
-        )
-
-    def find_mem(self, query, mode="hybrid", regex=None, limit=10, keys=None):
-        return _find_mem(
-            query=query,
-            mode=mode,
-            regex=regex,
-            limit=limit,
-            keys=keys,
-        )
 
 
 def _select_tools(query=None, injected_only=None):
@@ -1186,8 +1218,8 @@ def _list_tools(query=None, injected_only=None, **_ignored):
     return items
 
 
-def _find_tools(query, mode="hybrid", regex=None, limit=10, injected_only=None, **_ignored):
-    """Find tools using hybrid/literal/regex matching across all tools."""
+def _search_tools(query, mode="hybrid", regex=None, limit=10, injected_only=None, **_ignored):
+    """Search tools using hybrid/literal/regex matching across all tools."""
     limit = _coerce_limit(limit)
     candidates = []
     for t in _tool_defs:
@@ -1225,6 +1257,66 @@ def _find_tools(query, mode="hybrid", regex=None, limit=10, injected_only=None, 
     return items
 
 
+def _print_skill_index(items):
+    if not items:
+        print("No skills matched.")
+        return
+    print("Skill matches:")
+    for s in items:
+        score = f" [{s.score:.3f}]" if getattr(s, "score", 0.0) > 0 else ""
+        desc = f" - {s.description}" if s.description else ""
+        print(f"  {s.name}{score}{desc}")
+
+
+async def _search_skills(query, mode="hybrid", regex=None, limit=10):
+    """Search skill names/descriptions using hybrid/literal/regex matching."""
+    limit = _coerce_limit(limit)
+    if not any(t.get("name") == "skills" for t in _tool_defs):
+        return []
+
+    raw_items = await _call("skills", {})
+    summaries = []
+    for item in raw_items or []:
+        if isinstance(item, SkillSummary):
+            summaries.append(item)
+        elif isinstance(item, dict):
+            summaries.append(SkillSummary(item))
+
+    docs = [
+        {
+            "name": s.name,
+            "description": s.description,
+        }
+        for s in summaries
+    ]
+    field_weights = {"name": 4.0, "description": 2.0}
+    field_names = list(field_weights.keys())
+    ranked = _rank_documents(
+        docs=docs,
+        query=query,
+        mode=mode,
+        regex=regex,
+        field_weights=field_weights,
+        field_names=field_names,
+    )
+
+    items = []
+    for idx, score, _ in ranked[:limit]:
+        s = summaries[idx]
+        items.append(
+            SkillSummary(
+                {
+                    "name": s.name,
+                    "description": s.description,
+                    "file_count": s.file_count,
+                    "score": float(score),
+                }
+            )
+        )
+    _print_skill_index(items)
+    return items
+
+
 def _normalize_history_fields(fields):
     if fields is None:
         return ["user_message", "code", "prose", "output", "tool_calls"]
@@ -1244,7 +1336,7 @@ def _normalize_history_fields(fields):
     return selected or ["user_message", "code", "prose", "output", "tool_calls"]
 
 
-def _find_history_matches(turns, query, mode="hybrid", regex=None, limit=10, fields=None, since_turn=None):
+def _search_history_matches(turns, query, mode="hybrid", regex=None, limit=10, fields=None, since_turn=None):
     limit = _coerce_limit(limit)
     selected_fields = _normalize_history_fields(fields)
     filtered_turns = []
@@ -1325,11 +1417,11 @@ def _print_history_index(items):
         print(f"  turn {m.turn} [{score}] ({fields}) {m.preview}")
 
 
-def _find_history(query, mode="hybrid", regex=None, limit=10, fields=None, since_turn=None):
+def _search_history(query, mode="hybrid", regex=None, limit=10, fields=None, since_turn=None):
     history = _ns.get("_history")
     if history is None:
         return []
-    items = history.find(
+    items = history.search(
         query=query,
         mode=mode,
         regex=regex,
@@ -1341,7 +1433,7 @@ def _find_history(query, mode="hybrid", regex=None, limit=10, fields=None, since
     return items
 
 
-def _find_mem_matches(entries, query, mode="hybrid", regex=None, limit=10, keys=None):
+def _search_mem_matches(entries, query, mode="hybrid", regex=None, limit=10, keys=None):
     limit = _coerce_limit(limit)
     key_filter = set(_normalize_list_arg(keys) or [])
     filtered_entries = [e for e in entries if not key_filter or e.key in key_filter]
@@ -1395,11 +1487,11 @@ def _print_mem_index(items):
         )
 
 
-def _find_mem(query, mode="hybrid", regex=None, limit=10, keys=None):
+def _search_mem(query, mode="hybrid", regex=None, limit=10, keys=None):
     mem = _ns.get("_mem")
     if mem is None:
         return []
-    items = mem.find(query=query, mode=mode, regex=regex, limit=limit, keys=keys)
+    items = mem.search(query=query, mode=mode, regex=regex, limit=limit, keys=keys)
     _print_mem_index(items)
     return items
 
@@ -1411,23 +1503,39 @@ def _reset_repl():
     saved_defs = json.dumps(_tool_defs)
     saved_agent_id = _ns.get("__agent_id__", "")
     saved_headless = _headless
+    saved_capabilities = dict(_capabilities)
     _ns.clear()
     _tools_initialized = False
-    _register_tools(saved_defs, saved_agent_id, saved_headless)
+    _register_tools(saved_defs, saved_agent_id, saved_headless, saved_capabilities)
     print("REPL reset: namespace cleared, tools re-registered.")
     return _Awaitable("REPL reset complete")
 
 
-def _register_tools(tools_json, agent_id="", headless=False):
+def _register_tools(tools_json, agent_id="", headless=False, capabilities=None):
     """Register tool wrappers from JSON tool definitions."""
-    global _tools_initialized, _tool_defs, _headless
+    global _tools_initialized, _tool_defs, _headless, _async_method_names, _capabilities
     if _tools_initialized:
         return
-    _tools_initialized = True
     _headless = bool(headless)
+    caps = {"memory": True, "history": True}
+    if isinstance(capabilities, str):
+        try:
+            capabilities = json.loads(capabilities)
+        except Exception:
+            capabilities = None
+    if isinstance(capabilities, dict):
+        if "memory" in capabilities:
+            caps["memory"] = bool(capabilities.get("memory"))
+        if "history" in capabilities:
+            caps["history"] = bool(capabilities.get("history"))
+    _capabilities = caps
     _ns["__agent_id__"] = agent_id
+    _ns["__capabilities__"] = dict(caps)
     _tool_defs = json.loads(tools_json)
-    t_namespace = ToolNamespace()
+    tools_mod = types.ModuleType("tools")
+    exported_tools = {}
+    exported_names = []
+
     for tool in _tool_defs:
         name = tool["name"]
         desc = tool.get("description", "")
@@ -1498,22 +1606,9 @@ def _register_tools(tools_json, agent_id="", headless=False):
                 # Wrapped specially below to support schema + parent state transfer.
                 continue
             fn = make_fn(name, desc, param_info, returns)
-            t_namespace._bind(name, fn)
-            if tool.get("inject_into_prompt", False):
-                _ns[name] = fn
-
-    # Auto-await globals (only prompt-injected tool wrappers live in globals).
-    _async_tool_names.update(
-        t["name"]
-        for t in _tool_defs
-        if not t.get("hidden", False) and t.get("inject_into_prompt", False)
-    )
-    # Auto-await methods on T.<tool_name>(...)
-    _async_method_names.update(
-        t["name"] for t in _tool_defs if not t.get("hidden", False)
-    )
-    if not _headless:
-        _async_tool_names.add("ask")
+            setattr(tools_mod, name, fn)
+            exported_tools[name] = fn
+            exported_names.append(name)
 
     # Override agent_call wrapper: schema hydration + parent memory/history transfer.
     async def _agent_call(prompt, intelligence, schema=None, **kw):
@@ -1563,65 +1658,105 @@ def _register_tools(tools_json, agent_id="", headless=False):
         t.get("name") == "agent_call" and not t.get("hidden", False) for t in _tool_defs
     )
     if has_visible_agent_call:
-        t_namespace._bind("agent_call", _agent_call)
-    if any(
-        t.get("name") == "agent_call"
-        and not t.get("hidden", False)
-        and t.get("inject_into_prompt", False)
-        for t in _tool_defs
-    ):
-        _ns["agent_call"] = _agent_call
+        setattr(tools_mod, "agent_call", _agent_call)
+        exported_tools["agent_call"] = _agent_call
+        exported_names.append("agent_call")
+    tools_mod.__all__ = sorted(exported_names)
 
-    # Plan mode wrappers — call Rust tools + orchestrate approval flow
-    async def _enter_plan_mode():
-        """Enter plan mode. Returns the plan file path."""
-        result = await _call("enter_plan_mode", {})
-        plan_file = result.get("plan_file", "")
-        print(f"[Plan mode — write your plan to: {plan_file}]")
-        return plan_file
+    has_plan_mode_tools = any(
+        t.get("name") in {"enter_plan_mode", "exit_plan_mode"} for t in _tool_defs
+    )
+    if has_plan_mode_tools:
+        # Plan mode wrappers — call Rust tools + orchestrate approval flow
+        async def _enter_plan_mode():
+            """Enter plan mode. Returns the plan file path."""
+            result = await _call("enter_plan_mode", {})
+            plan_file = result.get("plan_file", "")
+            print(f"[Plan mode — write your plan to: {plan_file}]")
+            return plan_file
 
-    async def _exit_plan_mode():
-        """Exit plan mode. Interactive sessions ask for approval; headless proceeds autonomously."""
-        result = await _call("exit_plan_mode", {})
-        plan = result.get("plan_content", "")
-        if _headless:
-            if plan:
-                print("[Plan mode exited in headless mode — continue autonomously.]")
-                return "Plan finalized in headless mode. Continue executing autonomously."
-            return "Plan file is empty. Continue planning autonomously."
-        preview = plan[:2000] + ("..." if len(plan) > 2000 else "")
-        response = await _ask(
-            f"Plan ready for review:\n\n{preview}\n\nHow would you like to proceed?",
-            ["Execute plan", "Edit plan", "Reject"]
-        )
-        if response.startswith("1."):
-            _done("Plan approved — executing.")
-        return response
+        async def _exit_plan_mode():
+            """Exit plan mode. Interactive sessions ask for approval; headless proceeds autonomously."""
+            result = await _call("exit_plan_mode", {})
+            plan = result.get("plan_content", "")
+            if _headless:
+                if plan:
+                    print("[Plan mode exited in headless mode — continue autonomously.]")
+                    return "Plan finalized in headless mode. Continue executing autonomously."
+                return "Plan file is empty. Continue planning autonomously."
+            preview = plan[:2000] + ("..." if len(plan) > 2000 else "")
+            response = await _ask(
+                f"Plan ready for review:\n\n{preview}\n\nHow would you like to proceed?",
+                ["Execute plan", "Edit plan", "Reject"]
+            )
+            if response.startswith("1."):
+                _done("Plan approved — executing.")
+            return response
 
-    _enter_plan_mode.__name__ = "enter_plan_mode"
-    _enter_plan_mode.__qualname__ = "enter_plan_mode"
-    _exit_plan_mode.__name__ = "exit_plan_mode"
-    _exit_plan_mode.__qualname__ = "exit_plan_mode"
-    _async_tool_names.add("enter_plan_mode")
-    _async_tool_names.add("exit_plan_mode")
+        _enter_plan_mode.__name__ = "enter_plan_mode"
+        _enter_plan_mode.__qualname__ = "enter_plan_mode"
+        _exit_plan_mode.__name__ = "exit_plan_mode"
+        _exit_plan_mode.__qualname__ = "exit_plan_mode"
 
-    _ns["_history"] = TurnHistory()
-    _ns["_mem"] = Mem()
+    history_enabled = bool(_capabilities.get("history", True))
+    memory_enabled = bool(_capabilities.get("memory", True))
+    if history_enabled:
+        _ns["_history"] = TurnHistory()
+    if memory_enabled:
+        _ns["_mem"] = Mem()
     bindings = {
         "json": json, "print": print, "done": _done,
-        "asyncio": asyncio, "list_tools": _list_tools, "find_tools": _find_tools,
-        "find_history": _find_history, "find_mem": _find_mem,
+        "asyncio": asyncio, "list_tools": _list_tools, "search_tools": _search_tools,
+        "search_skills": _search_skills,
         "reset_repl": _reset_repl,
-        "enter_plan_mode": _enter_plan_mode, "exit_plan_mode": _exit_plan_mode,
         "Task": Task, "Skill": Skill, "SkillSummary": SkillSummary, "ToolError": ToolError,
-        "TurnHistory": TurnHistory, "Turn": Turn, "ToolCall": ToolCall, "ToolName": ToolName,
-        "Intelligence": Intelligence, "Mem": Mem, "MemEntry": MemEntry, "ToolInfo": ToolInfo,
-        "HistoryMatch": HistoryMatch, "MemMatch": MemMatch,
-        "T": t_namespace,
+        "Turn": Turn, "ToolCall": ToolCall, "ToolName": ToolName, "Intelligence": Intelligence,
+        "ToolInfo": ToolInfo,
+        "tools": tools_mod,
     }
+    if history_enabled:
+        bindings["search_history"] = _search_history
+        bindings["TurnHistory"] = TurnHistory
+        bindings["HistoryMatch"] = HistoryMatch
+    if memory_enabled:
+        bindings["search_mem"] = _search_mem
+        bindings["Mem"] = Mem
+        bindings["MemEntry"] = MemEntry
+        bindings["MemMatch"] = MemMatch
+    if has_plan_mode_tools:
+        bindings["enter_plan_mode"] = _enter_plan_mode
+        bindings["exit_plan_mode"] = _exit_plan_mode
     if not _headless:
         bindings["ask"] = _ask
+
+    # Fail fast if an exported tool would overwrite a reserved global/builtin.
+    reserved_names = set(dir(builtins))
+    reserved_names.update(bindings.keys())
+    reserved_names.add("__agent_id__")
+    collisions = sorted(name for name in tools_mod.__all__ if name in reserved_names)
+    if collisions:
+        names = ", ".join(collisions)
+        raise RuntimeError(f"Tool name collision with reserved REPL names: {names}")
+
+    # Publish synthetic module and implicitly import all tools into globals.
+    sys.modules["tools"] = tools_mod
     _ns.update(bindings)
+    for name in tools_mod.__all__:
+        _ns[name] = exported_tools[name]
+
+    # Auto-await bare imported tools and tools.<name>(...) calls.
+    _async_tool_names.clear()
+    _async_tool_names.update(tools_mod.__all__)
+    _async_tool_names.add("search_skills")
+    if not _headless:
+        _async_tool_names.add("ask")
+    if has_plan_mode_tools:
+        _async_tool_names.add("enter_plan_mode")
+        _async_tool_names.add("exit_plan_mode")
+    _async_method_names = set(_BASE_ASYNC_METHOD_NAMES)
+    _async_method_names.update(tools_mod.__all__)
+
+    _tools_initialized = True
 
 
 # Flag that lets exec/eval accept top-level `await` (CPython 3.10+).
@@ -1632,7 +1767,7 @@ _async_tool_names = set()
 
 
 # Async method names on wrapper objects (Task, ShellHandle, Skill, etc.)
-_async_method_names = {
+_BASE_ASYNC_METHOD_NAMES = {
     # Task
     "claim", "start", "done", "cancel", "delete", "block", "wait_on", "update",
     # ShellHandle
@@ -1642,6 +1777,7 @@ _async_method_names = {
     # Skill
     "read_file",
 }
+_async_method_names = set(_BASE_ASYNC_METHOD_NAMES)
 
 
 class _AutoAwait(ast.NodeTransformer):
@@ -1706,6 +1842,8 @@ def _displayhook(value):
 
 async def _handle_exec(exec_id, code):
     """Execute code using real REPL semantics (ast.Interactive + "single" mode)."""
+    global _done_requested
+    _done_requested = False
     stdout_buf = io.StringIO()
     old_stdout, old_stderr = sys.stdout, sys.stderr
     old_displayhook = sys.displayhook
@@ -1737,6 +1875,8 @@ async def _handle_exec(exec_id, code):
                     await types.FunctionType(co, _ns)()
                 else:
                     exec(co, _ns)
+                if _done_requested:
+                    break
                 _saved_fd = _mute_stderr()
             except Exception:
                 error = traceback.format_exc()
@@ -1766,12 +1906,13 @@ def _handle_snapshot(snap_id):
         "print",
         "done",
         "list_tools",
-        "find_tools",
-        "find_history",
-        "find_mem",
+        "search_tools",
+        "search_skills",
+        "search_history",
+        "search_mem",
         "reset_repl",
         "ask",
-        "T",
+        "tools",
         "ToolInfo",
         "HistoryMatch",
         "MemMatch",

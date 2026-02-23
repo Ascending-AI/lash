@@ -87,7 +87,10 @@ fn draw_status_bar(frame: &mut Frame, app: &App, area: Rect) {
     let left_3 = left_2 + if is_plan { sep_w + 4 } else { 0 };
 
     // ── Right-side: token components ──
-    let has_usage = app.token_usage.total() > 0;
+    let display_input_tokens = app.token_usage.input_tokens;
+    let display_output_tokens = app.token_usage.output_tokens + app.live_output_tokens_estimate;
+    let display_total_tokens = display_input_tokens + display_output_tokens;
+    let has_usage = display_total_tokens > 0;
     let ctx_pct: Option<u64> = app.context_window.and_then(|ctx_win| {
         if app.last_input_tokens > 0 && ctx_win > 0 {
             Some((app.last_input_tokens as f64 / ctx_win as f64 * 100.0) as u64)
@@ -99,17 +102,14 @@ fn draw_status_bar(frame: &mut Frame, app: &App, area: Rect) {
     let in_out = if has_usage {
         format!(
             "{} in \u{b7} {} out",
-            crate::app::format_tokens(app.token_usage.input_tokens),
-            crate::app::format_tokens(app.token_usage.output_tokens),
+            crate::app::format_tokens(display_input_tokens),
+            crate::app::format_tokens(display_output_tokens),
         )
     } else {
         String::new()
     };
     let total = if has_usage {
-        format!(
-            "{} total",
-            crate::app::format_tokens(app.token_usage.total()),
-        )
+        format!("{} total", crate::app::format_tokens(display_total_tokens),)
     } else {
         String::new()
     };

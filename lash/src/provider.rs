@@ -1,8 +1,8 @@
-use std::collections::HashMap;
 use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 
+use crate::llm::factory::adapter_for;
 use crate::oauth::{self, OAuthError};
 
 fn default_base_url() -> String {
@@ -20,12 +20,28 @@ pub struct AgentModels {
     pub thorough: Option<String>,
 }
 
+/// Auxiliary service secrets that are independent of LLM provider auth.
+#[derive(Clone, Debug, Serialize, Deserialize, Default)]
+pub struct AuxiliarySecrets {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tavily_api_key: Option<String>,
+}
+
+impl AuxiliarySecrets {
+    fn is_empty(&self) -> bool {
+        self.tavily_api_key.is_none()
+    }
+}
+
 /// Stored configuration: provider credentials + service API keys.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct LashConfig {
     pub provider: Provider,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub tavily_api_key: Option<String>,
+    #[serde(default, skip_serializing_if = "AuxiliarySecrets::is_empty")]
+    pub auxiliary_secrets: AuxiliarySecrets,
+    /// Legacy field (deserialize-only). Migrated into `auxiliary_secrets`.
+    #[serde(default, skip_serializing, rename = "tavily_api_key")]
+    legacy_tavily_api_key: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub agent_models: Option<AgentModels>,
 }
@@ -61,188 +77,29 @@ pub enum Provider {
 impl Provider {
     /// Default model for this provider.
     pub fn default_model(&self) -> &str {
-        match self {
-            Provider::OpenRouter { .. } => "anthropic/claude-sonnet-4.6",
-            Provider::Claude { .. } => "claude-sonnet-4-6",
-            Provider::Codex { .. } => "gpt-5.3-codex",
-            Provider::GoogleOAuth { .. } => "gemini-3.1-pro-preview",
-        }
+        adapter_for(self).default_root_model()
     }
 
     /// Recommended reasoning effort for a specific model on this provider.
     pub fn reasoning_effort_for_model(&self, model: &str) -> Option<&str> {
-        match self {
-            Provider::Codex { .. } if model == "gpt-5.3-codex" => Some("high"),
-            _ => None,
-        }
-    }
-
-    /// BAML provider string for ClientRegistry.
-    pub fn baml_provider(&self) -> &str {
-        match self {
-            Provider::OpenRouter { .. } => "openai-generic",
-            Provider::Claude { .. } => "anthropic",
-            Provider::Codex { .. } => "openai-responses",
-            Provider::GoogleOAuth { .. } => "openai-generic",
-        }
+        adapter_for(self).reasoning_effort_for_model(model)
     }
 
     /// Built-in model for an agent intelligence tier. Returns (model_name, optional_reasoning_effort).
     pub fn default_agent_model(&self, tier: &str) -> Option<(&str, Option<&str>)> {
-        match (self, tier) {
-            (Provider::Claude { .. }, "quick") => Some(("claude-haiku-4-5", None)),
-            (Provider::Claude { .. }, "balanced") => Some(("claude-sonnet-4-6", None)),
-            (Provider::Claude { .. }, "thorough") => Some(("claude-sonnet-4-6", None)),
-
-            (Provider::OpenRouter { .. }, "quick") => Some(("minimax/minimax-m2.5", None)),
-            (Provider::OpenRouter { .. }, "balanced") => Some(("z-ai/glm-5", None)),
-            (Provider::OpenRouter { .. }, "thorough") => {
-                Some(("anthropic/claude-sonnet-4.6", None))
-            }
-
-            (Provider::Codex { .. }, "quick") => Some(("gpt-5.3-codex-spark", None)),
-            (Provider::Codex { .. }, "balanced") => Some(("gpt-5.3-codex", Some("medium"))),
-            (Provider::Codex { .. }, "thorough") => Some(("gpt-5.3-codex", Some("high"))),
-
-            (Provider::GoogleOAuth { .. }, "quick") => Some(("gemini-3-flash-preview", None)),
-            (Provider::GoogleOAuth { .. }, "balanced") => Some(("gemini-3.1-pro-preview", None)),
-            (Provider::GoogleOAuth { .. }, "thorough") => Some(("gemini-3.1-pro-preview", None)),
-
-            _ => None,
-        }
-    }
-
-    /// Build BAML ClientRegistry options for this provider.
-    pub fn baml_options(
-        &self,
-        model: &str,
-        reasoning_effort: Option<&str>,
-    ) -> HashMap<String, serde_json::Value> {
-        match self {
-            Provider::OpenRouter { api_key, base_url } => HashMap::from([
-                ("base_url".into(), serde_json::json!(base_url)),
-                ("api_key".into(), serde_json::json!(api_key)),
-                ("model".into(), serde_json::json!(model)),
-                ("temperature".into(), serde_json::json!(0)),
-                ("max_tokens".into(), serde_json::json!(32768)),
-                // Disable BAML's wall-clock request timeout (default 5min).
-                // We handle per-chunk streaming timeouts ourselves.
-                ("http".into(), serde_json::json!({"request_timeout_ms": 0})),
-            ]),
-            Provider::Claude { access_token, .. } => HashMap::from([
-                ("api_key".into(), serde_json::json!("noop")),
-                ("model".into(), serde_json::json!(model)),
-                ("temperature".into(), serde_json::json!(0)),
-                ("max_tokens".into(), serde_json::json!(32768)),
-                (
-                    "headers".into(),
-                    serde_json::json!({
-                        "authorization": format!("Bearer {}", access_token),
-                        "anthropic-beta": "oauth-2025-04-20,interleaved-thinking-2025-05-14,prompt-caching-2024-07-31",
-                        "x-api-key": "",
-                    }),
-                ),
-                ("http".into(), serde_json::json!({"request_timeout_ms": 0})),
-            ]),
-            Provider::Codex {
-                access_token,
-                account_id,
-                ..
-            } => {
-                let mut headers = serde_json::json!({
-                    "originator": "lash",
-                });
-                if let Some(id) = account_id {
-                    headers["chatgpt-account-id"] = serde_json::json!(id);
-                }
-                let mut opts = HashMap::from([
-                    (
-                        "base_url".into(),
-                        serde_json::json!("https://chatgpt.com/backend-api/codex"),
-                    ),
-                    ("api_key".into(), serde_json::json!(access_token)),
-                    ("model".into(), serde_json::json!(model)),
-                    // ChatGPT Codex endpoint expects explicit streaming semantics.
-                    ("stream".into(), serde_json::json!(true)),
-                    ("store".into(), serde_json::json!(false)),
-                    // Required by ChatGPT Codex backend even when system content is present in input.
-                    ("instructions".into(), serde_json::json!("")),
-                    ("headers".into(), headers),
-                    ("http".into(), serde_json::json!({"request_timeout_ms": 0})),
-                ]);
-                if let Some(effort) = reasoning_effort {
-                    opts.insert("reasoning".into(), serde_json::json!({"effort": effort}));
-                }
-                opts
-            }
-            Provider::GoogleOAuth {
-                access_token,
-                project_id,
-                ..
-            } => {
-                let mut headers = serde_json::json!({
-                    "authorization": format!("Bearer {}", access_token),
-                });
-                if let Some(project) = project_id {
-                    headers["x-goog-user-project"] = serde_json::json!(project);
-                }
-                HashMap::from([
-                    (
-                        "base_url".into(),
-                        serde_json::json!(
-                            "https://generativelanguage.googleapis.com/v1beta/openai"
-                        ),
-                    ),
-                    ("api_key".into(), serde_json::json!("noop")),
-                    ("model".into(), serde_json::json!(model)),
-                    ("temperature".into(), serde_json::json!(0)),
-                    ("max_tokens".into(), serde_json::json!(32768)),
-                    ("headers".into(), headers),
-                    ("http".into(), serde_json::json!({"request_timeout_ms": 0})),
-                ])
-            }
-        }
+        adapter_for(self)
+            .default_agent_model(tier)
+            .map(|m| (m.model, m.reasoning_effort))
     }
 
     /// Resolve model name: strip "anthropic/" prefix for direct Claude API.
     pub fn resolve_model(&self, model: &str) -> String {
-        match self {
-            Provider::Claude { .. } => model
-                .strip_prefix("anthropic/")
-                .unwrap_or(model)
-                .to_string(),
-            Provider::OpenRouter { .. } | Provider::Codex { .. } | Provider::GoogleOAuth { .. } => {
-                model.to_string()
-            }
-        }
+        adapter_for(self).normalize_model(model)
     }
 
     /// Canonical model ID to use for context-window lookup.
     pub fn context_lookup_model(&self, model: &str) -> String {
-        match self {
-            Provider::Claude { .. } => {
-                if model.contains('/') {
-                    model.to_string()
-                } else {
-                    format!("anthropic/{model}")
-                }
-            }
-            Provider::Codex { .. } => {
-                if model.contains('/') {
-                    model.to_string()
-                } else {
-                    format!("openai/{model}")
-                }
-            }
-            Provider::GoogleOAuth { .. } => {
-                if model.contains('/') {
-                    model.to_string()
-                } else {
-                    format!("google/{model}")
-                }
-            }
-            Provider::OpenRouter { .. } => model.to_string(),
-        }
+        adapter_for(self).context_lookup_model(model)
     }
 
     /// Context window for a model under this provider.
@@ -333,6 +190,21 @@ impl Provider {
 }
 
 impl LashConfig {
+    fn migrate_legacy_fields(&mut self) {
+        if self.auxiliary_secrets.tavily_api_key.is_none() && self.legacy_tavily_api_key.is_some() {
+            self.auxiliary_secrets.tavily_api_key = self.legacy_tavily_api_key.take();
+        }
+    }
+
+    pub fn new(provider: Provider) -> Self {
+        Self {
+            provider,
+            auxiliary_secrets: AuxiliarySecrets::default(),
+            legacy_tavily_api_key: None,
+            agent_models: None,
+        }
+    }
+
     fn config_path() -> PathBuf {
         let home = std::env::var("HOME").unwrap_or_else(|_| ".".into());
         PathBuf::from(home).join(".lash").join("config.json")
@@ -342,8 +214,9 @@ impl LashConfig {
     pub fn load() -> Option<Self> {
         let path = Self::config_path();
         if let Ok(data) = std::fs::read_to_string(&path)
-            && let Ok(config) = serde_json::from_str(&data)
+            && let Ok(mut config) = serde_json::from_str::<Self>(&data)
         {
+            config.migrate_legacy_fields();
             return Some(config);
         }
 
@@ -368,6 +241,14 @@ impl LashConfig {
         Ok(())
     }
 
+    pub fn tavily_api_key(&self) -> Option<&str> {
+        self.auxiliary_secrets.tavily_api_key.as_deref()
+    }
+
+    pub fn set_tavily_api_key(&mut self, key: Option<String>) {
+        self.auxiliary_secrets.tavily_api_key = key;
+    }
+
     /// Delete ~/.lash/config.json
     pub fn clear() -> Result<(), std::io::Error> {
         let path = Self::config_path();
@@ -383,7 +264,8 @@ impl LashConfig {
 pub fn save_provider(provider: &Provider) -> Result<(), std::io::Error> {
     let mut config = LashConfig::load().unwrap_or_else(|| LashConfig {
         provider: provider.clone(),
-        tavily_api_key: None,
+        auxiliary_secrets: AuxiliarySecrets::default(),
+        legacy_tavily_api_key: None,
         agent_models: None,
     });
     config.provider = provider.clone();
@@ -430,9 +312,9 @@ mod tests {
     #[test]
     fn default_model() {
         assert_eq!(openrouter().default_model(), "anthropic/claude-sonnet-4.6");
-        assert_eq!(claude().default_model(), "claude-sonnet-4-6");
+        assert_eq!(claude().default_model(), "claude-opus-4-6");
         assert_eq!(codex().default_model(), "gpt-5.3-codex");
-        assert_eq!(google_oauth().default_model(), "gemini-3.1-pro-preview");
+        assert_eq!(google_oauth().default_model(), "gemini-3-pro-preview");
     }
 
     #[test]
@@ -446,14 +328,6 @@ mod tests {
             openrouter().reasoning_effort_for_model("anthropic/claude-sonnet-4.6"),
             None
         );
-    }
-
-    #[test]
-    fn baml_provider() {
-        assert_eq!(openrouter().baml_provider(), "openai-generic");
-        assert_eq!(claude().baml_provider(), "anthropic");
-        assert_eq!(codex().baml_provider(), "openai-responses");
-        assert_eq!(google_oauth().baml_provider(), "openai-generic");
     }
 
     #[test]
@@ -532,8 +406,8 @@ mod tests {
     fn resolve_model_google_passthrough() {
         let p = google_oauth();
         assert_eq!(
-            p.resolve_model("gemini-3.1-pro-preview"),
-            "gemini-3.1-pro-preview"
+            p.resolve_model("gemini-3-pro-preview"),
+            "gemini-3-pro-preview"
         );
     }
 
@@ -554,12 +428,12 @@ mod tests {
     fn context_lookup_model_google_adds_prefix() {
         let p = google_oauth();
         assert_eq!(
-            p.context_lookup_model("gemini-3.1-pro-preview"),
-            "google/gemini-3.1-pro-preview"
+            p.context_lookup_model("gemini-3-pro-preview"),
+            "google/gemini-3-pro-preview"
         );
         assert_eq!(
-            p.context_lookup_model("google/gemini-3.1-pro-preview"),
-            "google/gemini-3.1-pro-preview"
+            p.context_lookup_model("google/gemini-3-pro-preview"),
+            "google/gemini-3-pro-preview"
         );
     }
 
@@ -577,63 +451,19 @@ mod tests {
     }
 
     #[test]
-    fn baml_options_keys() {
-        let opts = openrouter().baml_options("test-model", None);
-        assert!(opts.contains_key("base_url"));
-        assert!(opts.contains_key("api_key"));
-        assert!(opts.contains_key("model"));
-        assert!(opts.contains_key("temperature"));
-        assert!(opts.contains_key("max_tokens"));
-        assert_eq!(opts["model"], serde_json::json!("test-model"));
-    }
-
-    #[test]
-    fn baml_options_codex_reasoning() {
-        let opts = codex().baml_options("gpt-5.3-codex", Some("high"));
-        assert!(opts.contains_key("reasoning"));
-        assert_eq!(opts["reasoning"]["effort"], serde_json::json!("high"));
-        assert_eq!(opts["stream"], serde_json::json!(true));
-        assert_eq!(opts["store"], serde_json::json!(false));
-        assert_eq!(opts["instructions"], serde_json::json!(""));
-    }
-
-    #[test]
-    fn baml_options_codex_no_reasoning() {
-        let opts = codex().baml_options("gpt-5.1-codex", None);
-        assert!(!opts.contains_key("reasoning"));
-        assert_eq!(opts["stream"], serde_json::json!(true));
-        assert_eq!(opts["store"], serde_json::json!(false));
-        assert_eq!(opts["instructions"], serde_json::json!(""));
-    }
-
-    #[test]
-    fn baml_options_google_oauth_has_openai_base_url() {
-        let opts = google_oauth().baml_options("gemini-3.1-pro-preview", None);
-        assert_eq!(
-            opts["base_url"],
-            serde_json::json!("https://generativelanguage.googleapis.com/v1beta/openai")
-        );
-        assert_eq!(opts["model"], serde_json::json!("gemini-3.1-pro-preview"));
-        assert_eq!(
-            opts["headers"]["x-goog-user-project"],
-            serde_json::json!("test-proj")
-        );
-    }
-
-    #[test]
     fn default_agent_model_google_oauth_tiers() {
         let p = google_oauth();
         assert_eq!(
             p.default_agent_model("quick"),
-            Some(("gemini-3-flash-preview", None))
+            Some(("gemini-2.5-flash", None))
         );
         assert_eq!(
             p.default_agent_model("balanced"),
-            Some(("gemini-3.1-pro-preview", None))
+            Some(("gemini-3-pro-preview", None))
         );
         assert_eq!(
             p.default_agent_model("thorough"),
-            Some(("gemini-3.1-pro-preview", None))
+            Some(("gemini-3-pro-preview", None))
         );
     }
 
@@ -658,5 +488,40 @@ mod tests {
             p.validate_model("this-model-does-not-exist-xyz-123")
                 .is_err()
         );
+    }
+
+    #[test]
+    fn legacy_tavily_field_migrates_to_auxiliary_secrets() {
+        let raw = serde_json::json!({
+            "provider": {
+                "type": "OpenRouter",
+                "api_key": "k",
+                "base_url": "https://openrouter.ai/api/v1"
+            },
+            "tavily_api_key": "legacy-key"
+        });
+
+        let mut cfg: LashConfig = serde_json::from_value(raw).expect("valid config json");
+        cfg.migrate_legacy_fields();
+        assert_eq!(cfg.tavily_api_key(), Some("legacy-key"));
+    }
+
+    #[test]
+    fn modern_auxiliary_secrets_preserved() {
+        let raw = serde_json::json!({
+            "provider": {
+                "type": "OpenRouter",
+                "api_key": "k",
+                "base_url": "https://openrouter.ai/api/v1"
+            },
+            "auxiliary_secrets": {
+                "tavily_api_key": "new-key"
+            },
+            "tavily_api_key": "legacy-key"
+        });
+
+        let mut cfg: LashConfig = serde_json::from_value(raw).expect("valid config json");
+        cfg.migrate_legacy_fields();
+        assert_eq!(cfg.tavily_api_key(), Some("new-key"));
     }
 }

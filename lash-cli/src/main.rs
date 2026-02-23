@@ -1,7 +1,9 @@
 mod app;
 mod command;
 mod event;
+mod input_items;
 mod markdown;
+mod prompt_overrides;
 mod session_log;
 mod setup;
 mod skill;
@@ -20,8 +22,8 @@ use crossterm::event::{Event as TermEvent, KeyCode, KeyEventKind, KeyModifiers};
 use lash_core::agent::{Message, MessageRole, Part, PartKind, PruneState};
 use lash_core::provider::{LashConfig, Provider};
 use lash_core::tools::{
-    AgentCall, CompositeTools, DiffFile, EditFile, FetchUrl, FindReplace, Glob, Grep, Ls, PlanMode,
-    ReadFile, Shell, SkillStore, TaskStore, ViewMessage, WebSearch, WriteFile,
+    AgentCall, CompositeTools, EditFile, FetchUrl, FindReplace, Glob, Grep, Ls, PlanMode, ReadFile,
+    Shell, SkillStore, TaskStore, ViewMessage, WebSearch, WriteFile,
 };
 use lash_core::*;
 use ratatui::DefaultTerminal;
@@ -31,12 +33,8 @@ use tokio_util::sync::CancellationToken;
 
 use app::{App, DisplayBlock};
 use event::AppEvent;
-
-const HEADLESS_PREAMBLE: &str = "You are an autonomous AI coding agent running in non-interactive mode.\n\
-Complete the task end-to-end without asking the user for input.\n\
-The `ask()` function is unavailable in headless mode.\n\
-Plan mode is available: use `enter_plan_mode()` and `exit_plan_mode()` to structure complex work, then continue execution autonomously.\n\
-Return a final result with done() when the task is complete.";
+use input_items::{build_items_from_editor_input, insert_inline_marker};
+use prompt_overrides::resolve_prompt_overrides;
 
 #[derive(Parser)]
 struct Args {
@@ -72,21 +70,33 @@ struct Args {
     #[arg(short = 'p', long = "print")]
     print_prompt: Option<String>,
 
-    /// Override system prompt preamble (identity/role text)
-    #[arg(long, env = "LASH_PREAMBLE", conflicts_with = "preamble_file")]
-    preamble: Option<String>,
+    /// Replace a prompt section: --prompt-replace section=text
+    #[arg(long = "prompt-replace", value_name = "SECTION=TEXT")]
+    prompt_replace: Vec<String>,
 
-    /// Read preamble override from file
-    #[arg(long, value_name = "PATH", conflicts_with = "preamble")]
-    preamble_file: Option<PathBuf>,
+    /// Replace a prompt section from file: --prompt-replace-file section=path
+    #[arg(long = "prompt-replace-file", value_name = "SECTION=PATH")]
+    prompt_replace_file: Vec<String>,
 
-    /// Override system prompt soul principles (pass empty string to disable)
-    #[arg(long, env = "LASH_SOUL", conflicts_with = "soul_file")]
-    soul: Option<String>,
+    /// Prepend text to a prompt section: --prompt-prepend section=text
+    #[arg(long = "prompt-prepend", value_name = "SECTION=TEXT")]
+    prompt_prepend: Vec<String>,
 
-    /// Read soul override from file (empty file disables soul)
-    #[arg(long, value_name = "PATH", conflicts_with = "soul")]
-    soul_file: Option<PathBuf>,
+    /// Prepend text to a prompt section from file: --prompt-prepend-file section=path
+    #[arg(long = "prompt-prepend-file", value_name = "SECTION=PATH")]
+    prompt_prepend_file: Vec<String>,
+
+    /// Append text to a prompt section: --prompt-append section=text
+    #[arg(long = "prompt-append", value_name = "SECTION=TEXT")]
+    prompt_append: Vec<String>,
+
+    /// Append text to a prompt section from file: --prompt-append-file section=path
+    #[arg(long = "prompt-append-file", value_name = "SECTION=PATH")]
+    prompt_append_file: Vec<String>,
+
+    /// Disable a prompt section entirely.
+    #[arg(long = "prompt-disable", value_name = "SECTION")]
+    prompt_disable: Vec<String>,
 }
 
 struct SessionLogger {
@@ -221,13 +231,7 @@ fn configure_terminal_ui(no_mouse: bool) -> anyhow::Result<()> {
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    // Suppress BAML's prompt/response logging — it writes to stderr which breaks the TUI
-    if std::env::var("BAML_LOG").is_err() {
-        // SAFETY: called before any threads are spawned
-        unsafe { std::env::set_var("BAML_LOG", "off") };
-    }
-
-    // Set up file-based tracing (logs go to ~/.lash/lash.log)
+    // Set up file-based structured tracing (JSON logs at ~/.lash/lash.log)
     {
         let home = std::env::var("HOME").unwrap_or_else(|_| ".".into());
         let log_dir = PathBuf::from(&home).join(".lash");
@@ -237,6 +241,10 @@ async fn main() -> anyhow::Result<()> {
         use tracing_subscriber::EnvFilter;
         let filter = EnvFilter::try_from_env("LASH_LOG").unwrap_or_else(|_| EnvFilter::new("warn"));
         tracing_subscriber::fmt()
+            .json()
+            .flatten_event(true)
+            .with_current_span(true)
+            .with_span_list(true)
             .with_env_filter(filter)
             .with_writer(log_file)
             .with_ansi(false)
@@ -244,13 +252,7 @@ async fn main() -> anyhow::Result<()> {
     }
 
     let args = Args::parse();
-    let preamble_override = resolve_prompt_override(
-        args.preamble.clone(),
-        args.preamble_file.as_deref(),
-        "preamble",
-    )?;
-    let soul_override =
-        resolve_prompt_override(args.soul.clone(), args.soul_file.as_deref(), "soul")?;
+    let prompt_overrides = resolve_prompt_overrides(&args)?;
 
     // Handle --reset before any TUI/provider setup
     if args.reset {
@@ -304,33 +306,30 @@ async fn main() -> anyhow::Result<()> {
     }
 
     // Resolve config before TUI init (may need interactive terminal)
-    let mut lash_config = if args.provider || LashConfig::load().is_none() {
+    let existing_config = LashConfig::load();
+    let mut lash_config = if args.provider || existing_config.is_none() {
         if let Some(ref key) = args.api_key {
             // Shortcut: env var or --api-key creates OpenRouter provider directly
-            LashConfig {
-                provider: Provider::OpenRouter {
-                    api_key: key.clone(),
-                    base_url: args.base_url.clone(),
-                },
-                tavily_api_key: args.tavily_api_key.clone(),
-                agent_models: None,
-            }
+            let mut cfg = LashConfig::new(Provider::OpenRouter {
+                api_key: key.clone(),
+                base_url: args.base_url.clone(),
+            });
+            cfg.set_tavily_api_key(args.tavily_api_key.clone());
+            cfg
         } else if let Ok(key) = std::env::var("ANTHROPIC_API_KEY") {
             // ANTHROPIC_API_KEY env var → use as direct Claude bearer token
-            LashConfig {
-                provider: Provider::Claude {
-                    access_token: key,
-                    refresh_token: String::new(),
-                    expires_at: u64::MAX,
-                },
-                tavily_api_key: args.tavily_api_key.clone(),
-                agent_models: None,
-            }
+            let mut cfg = LashConfig::new(Provider::Claude {
+                access_token: key,
+                refresh_token: String::new(),
+                expires_at: u64::MAX,
+            });
+            cfg.set_tavily_api_key(args.tavily_api_key.clone());
+            cfg
         } else {
-            setup::run_setup().await?
+            setup::run_setup_with_existing(existing_config.as_ref()).await?
         }
     } else {
-        let mut c = LashConfig::load().unwrap();
+        let mut c = existing_config.expect("existing config already checked");
         if c.provider.ensure_fresh().await? {
             c.save()?; // persist refreshed tokens
         }
@@ -339,7 +338,7 @@ async fn main() -> anyhow::Result<()> {
 
     // CLI env/flags override stored config
     if let Some(ref key) = args.tavily_api_key {
-        lash_config.tavily_api_key = Some(key.clone());
+        lash_config.set_tavily_api_key(Some(key.clone()));
     }
     if args.print_prompt.is_none() {
         lash_config.save()?;
@@ -387,8 +386,7 @@ async fn main() -> anyhow::Result<()> {
         }),
         llm_log_path,
         headless,
-        preamble: preamble_override.or_else(|| headless.then(|| HEADLESS_PREAMBLE.to_string())),
-        soul: soul_override,
+        prompt_overrides,
         ..Default::default()
     };
 
@@ -409,18 +407,19 @@ async fn main() -> anyhow::Result<()> {
         .add(ReadFile::new())
         .add(WriteFile)
         .add(EditFile)
-        .add(DiffFile)
         .add(FindReplace)
         .add(Glob)
         .add(Grep)
-        .add(Ls)
-        .add(PlanMode::new())
-        .add_arc(Arc::clone(&task_store) as Arc<dyn ToolProvider>);
+        .add(Ls);
+    if !headless {
+        base = base.add(PlanMode::new());
+    }
+    base = base.add_arc(Arc::clone(&task_store) as Arc<dyn ToolProvider>);
     // Headless runs are single-turn and autonomous; skip context archive lookups.
     if !headless {
         base = base.add(ViewMessage::new(Arc::clone(&store)));
     }
-    if let Some(ref key) = lash_config.tavily_api_key {
+    if let Some(key) = lash_config.tavily_api_key() {
         base = base.add(WebSearch::new(key)).add(FetchUrl::new(key));
     }
     let base_tools: Arc<dyn ToolProvider> = Arc::new(base);
@@ -451,7 +450,7 @@ async fn main() -> anyhow::Result<()> {
     );
     let toolset_hash =
         hash12(&serde_json::to_vec(&tools.definitions()).unwrap_or_else(|_| b"[]".to_vec()));
-    let session = Session::new(tools, "root", headless).await?;
+    let session = Session::new(tools, "root", headless, config.capabilities).await?;
 
     let initial_reasoning_effort = config.reasoning_effort.clone();
     let agent = Agent::new(session, config, Some("root".to_string()));
@@ -507,23 +506,6 @@ async fn main() -> anyhow::Result<()> {
     cleanup_terminal();
 
     result
-}
-
-fn resolve_prompt_override(
-    inline: Option<String>,
-    file: Option<&std::path::Path>,
-    label: &str,
-) -> anyhow::Result<Option<String>> {
-    if let Some(value) = inline {
-        return Ok(Some(value));
-    }
-    if let Some(path) = file {
-        let content = std::fs::read_to_string(path).map_err(|e| {
-            anyhow::anyhow!("Failed to read {} file {}: {}", label, path.display(), e)
-        })?;
-        return Ok(Some(content));
-    }
-    Ok(None)
 }
 
 /// Run the agent headlessly: send prompt, consume events, print final response to stdout.
@@ -584,6 +566,12 @@ struct RuntimeRunResult {
     result: TurnResult,
 }
 
+#[derive(Clone)]
+struct TurnReplayPayload {
+    display_input: String,
+    turn_input: TurnInput,
+}
+
 struct AppEventSink {
     tx: mpsc::UnboundedSender<AppEvent>,
 }
@@ -609,7 +597,7 @@ fn controls_text() -> String {
         "  Ctrl+Shift+V       Paste text only",
         "  Ctrl+Y             Copy last response to clipboard",
         "  Ctrl+O             Cycle tool expansion (ghost ↔ compact)",
-        "  Ctrl+Shift+O       Full expansion (code + stdout)",
+        "  Alt+O              Full expansion (code + stdout)",
         "  Up / Down          Input history",
         "  Shift+Drag         Select text (terminal native)",
         "  Ctrl+C             Quit",
@@ -816,6 +804,7 @@ fn help_text(skills: &skill::SkillRegistry) -> String {
         "  /provider          Open provider setup (in-app)".to_string(),
         "  /login             Sign in or reconfigure provider".to_string(),
         "  /logout            Remove stored credentials".to_string(),
+        "  /retry             Replay the previous turn payload".to_string(),
         "  /resume [name]     Browse or load a previous session".to_string(),
         "  /skills            Browse loaded skills".to_string(),
         "  /help, /?          Show this help".to_string(),
@@ -846,7 +835,7 @@ fn help_text(skills: &skill::SkillRegistry) -> String {
         "  Ctrl+Shift+V       Paste text only".to_string(),
         "  Ctrl+Y             Copy last response to clipboard".to_string(),
         "  Ctrl+O             Cycle tool expansion (ghost \u{2194} compact)".to_string(),
-        "  Ctrl+Shift+O       Full expansion (code + stdout)".to_string(),
+        "  Alt+O              Full expansion (code + stdout)".to_string(),
         "  Shift+Drag         Select text (terminal native)".to_string(),
         "  Up/Down            Input history".to_string(),
         "  Ctrl+C             Quit".to_string(),
@@ -949,6 +938,7 @@ async fn run_app(
 
     // Oneshot for receiving runtime back after a run completes
     let mut runtime_return_rx: Option<tokio::sync::oneshot::Receiver<RuntimeRunResult>> = None;
+    let mut last_turn: Option<TurnReplayPayload> = None;
 
     loop {
         // Check if runtime turn completed — reclaim runtime + updated history
@@ -957,6 +947,17 @@ async fn run_app(
                 Ok(done) => {
                     runtime = Some(done.runtime);
                     let mut state = done.result.state;
+                    tracing::info!(
+                        iteration = state.iteration,
+                        done = done.result.done,
+                        final_message_chars = done
+                            .result
+                            .final_message
+                            .as_ref()
+                            .map(|s| s.len())
+                            .unwrap_or(0),
+                        "runtime turn completed"
+                    );
 
                     // Snapshot REPL after each completed turn so resume can restore exact state.
                     let snapshot_hash = if let Some(rt) = runtime.as_mut() {
@@ -1004,10 +1005,10 @@ async fn run_app(
                     if let Some(queued) = app.take_queued_message() {
                         let (items, image_blobs) =
                             build_items_from_editor_input(&queued, Vec::new());
+                        let turn_input = make_turn_input(&mut app, items, image_blobs);
                         send_user_message(
-                            queued,
-                            items,
-                            image_blobs,
+                            queued.clone(),
+                            turn_input.clone(),
                             &mut app,
                             logger,
                             &mut runtime,
@@ -1016,6 +1017,10 @@ async fn run_app(
                             &mut cancel_token,
                             &app_tx,
                         );
+                        last_turn = Some(TurnReplayPayload {
+                            display_input: queued,
+                            turn_input,
+                        });
                     }
                 }
                 Err(tokio::sync::oneshot::error::TryRecvError::Closed) => {
@@ -1065,18 +1070,18 @@ async fn run_app(
                     break;
                 }
 
-                // CTRL+SHIFT+O: toggle full expand (level ↔ 2)
-                // Must check before CTRL+O since uppercase 'O' implies shift
-                if key.modifiers.contains(KeyModifiers::CONTROL)
-                    && key.modifiers.contains(KeyModifiers::SHIFT)
-                    && key.code == KeyCode::Char('O')
+                // ALT+O: reliable full expand toggle across most terminals.
+                if key.modifiers.contains(KeyModifiers::ALT)
+                    && matches!(key.code, KeyCode::Char(c) if c.eq_ignore_ascii_case(&'o'))
                 {
                     app.toggle_full_expand();
                     continue;
                 }
 
                 // CTRL+O: cycle expand (0↔1)
-                if key.modifiers.contains(KeyModifiers::CONTROL) && key.code == KeyCode::Char('o') {
+                if key.modifiers.contains(KeyModifiers::CONTROL)
+                    && matches!(key.code, KeyCode::Char(c) if c.eq_ignore_ascii_case(&'o'))
+                {
                     app.cycle_expand();
                     continue;
                 }
@@ -1346,7 +1351,7 @@ async fn run_app(
                                     }
                                     Err(_) => {
                                         app.blocks.push(DisplayBlock::Error(format!(
-                                            "Command '{}' timed out after 30s",
+                                            "Command '{}' timed out after 30s. Try a narrower command or run it in smaller steps.",
                                             cmd_str
                                         )));
                                     }
@@ -1365,6 +1370,7 @@ async fn run_app(
                                     app.clear();
                                     history.clear();
                                     turn_counter = 0;
+                                    last_turn = None;
                                     app.token_usage = TokenUsage::default();
                                     if let Some(rt) = runtime.as_mut() {
                                         let _ = rt.reset_session().await;
@@ -1427,7 +1433,9 @@ async fn run_app(
                                         );
                                     }
                                     cleanup_terminal();
-                                    let setup_result = setup::run_setup().await;
+                                    let existing_cfg = LashConfig::load();
+                                    let setup_result =
+                                        setup::run_setup_with_existing(existing_cfg.as_ref()).await;
                                     terminal = ratatui::init();
                                     configure_terminal_ui(args.no_mouse)?;
                                     paused.store(false, Ordering::Relaxed);
@@ -1548,6 +1556,26 @@ Use `/provider` or `/login` to sign in again without restarting.",
                                         format!("Failed to remove credentials: {}", e),
                                     ),
                                 },
+                                command::Command::Retry => {
+                                    if let Some(previous) = last_turn.clone() {
+                                        send_user_message(
+                                            previous.display_input.clone(),
+                                            previous.turn_input.clone(),
+                                            &mut app,
+                                            logger,
+                                            &mut runtime,
+                                            &mut history,
+                                            &mut runtime_return_rx,
+                                            &mut cancel_token,
+                                            &app_tx,
+                                        );
+                                    } else {
+                                        push_system_message(
+                                            &mut app,
+                                            "No previous turn payload to retry yet.",
+                                        );
+                                    }
+                                }
                                 command::Command::Controls => {
                                     push_system_message(&mut app, controls_text());
                                 }
@@ -1575,6 +1603,7 @@ Use `/provider` or `/login` to sign in again without restarting.",
                                                     &mut turn_counter,
                                                 )
                                                 .await;
+                                                last_turn = None;
 
                                                 app.invalidate_height_cache();
                                                 app.scroll_to_bottom();
@@ -1629,10 +1658,15 @@ Use `/provider` or `/login` to sign in again without restarting.",
                                         // Display original slash command input in UI, but send
                                         // structured SKILL payload to the runtime turn.
                                         let skill_item = InputItem::SkillRef { name, args };
-                                        send_user_message(
-                                            input.clone(),
+                                        let display_input = input.clone();
+                                        let turn_input = make_turn_input(
+                                            &mut app,
                                             vec![skill_item],
                                             HashMap::new(),
+                                        );
+                                        send_user_message(
+                                            display_input.clone(),
+                                            turn_input.clone(),
                                             &mut app,
                                             logger,
                                             &mut runtime,
@@ -1641,6 +1675,10 @@ Use `/provider` or `/login` to sign in again without restarting.",
                                             &mut cancel_token,
                                             &app_tx,
                                         );
+                                        last_turn = Some(TurnReplayPayload {
+                                            display_input,
+                                            turn_input,
+                                        });
                                     }
                                 }
                             }
@@ -1655,10 +1693,10 @@ Use `/provider` or `/login` to sign in again without restarting.",
                         // Regular user message — send to agent
                         let images = app.take_images();
                         let (items, image_blobs) = build_items_from_editor_input(&input, images);
+                        let turn_input = make_turn_input(&mut app, items, image_blobs);
                         send_user_message(
-                            input,
-                            items,
-                            image_blobs,
+                            input.clone(),
+                            turn_input.clone(),
                             &mut app,
                             logger,
                             &mut runtime,
@@ -1667,6 +1705,10 @@ Use `/provider` or `/login` to sign in again without restarting.",
                             &mut cancel_token,
                             &app_tx,
                         );
+                        last_turn = Some(TurnReplayPayload {
+                            display_input: input,
+                            turn_input,
+                        });
                     }
                     KeyCode::Backspace => {
                         if app.input.is_empty() && app.has_queued_message() {
@@ -1815,12 +1857,32 @@ Use `/provider` or `/login` to sign in again without restarting.",
     Ok(())
 }
 
-/// Send a user message to the runtime: push display block, transform refs, log, and spawn turn run.
+fn make_turn_input(
+    app: &mut App,
+    items: Vec<InputItem>,
+    image_blobs: HashMap<String, Vec<u8>>,
+) -> TurnInput {
+    let mode = match app.mode {
+        app::Mode::Normal => RunMode::Normal,
+        app::Mode::Plan => RunMode::Plan,
+    };
+    let plan_file = match app.mode {
+        app::Mode::Plan => Some(app.ensure_plan_file().display().to_string()),
+        app::Mode::Normal => app.plan_file.as_ref().map(|p| p.display().to_string()),
+    };
+    TurnInput {
+        items,
+        image_blobs,
+        mode: Some(mode),
+        plan_file,
+    }
+}
+
+/// Send a user message to the runtime: push display block, log, and spawn turn run.
 #[allow(clippy::too_many_arguments)]
 fn send_user_message(
     display_input: String,
-    turn_items: Vec<InputItem>,
-    image_blobs: HashMap<String, Vec<u8>>,
+    turn_input: TurnInput,
     app: &mut App,
     logger: &mut SessionLogger,
     runtime: &mut Option<RuntimeEngine>,
@@ -1841,18 +1903,25 @@ fn send_user_message(
         history.clear();
     }
 
-    let default_model_input = display_input.clone();
-    app.blocks.push(DisplayBlock::UserInput(display_input));
+    app.blocks
+        .push(DisplayBlock::UserInput(display_input.clone()));
     app.invalidate_height_cache();
     app.scroll_to_bottom();
     app.running = true;
     app.iteration = 0;
 
-    logger.log_user_input(&default_model_input);
+    logger.log_user_input(&display_input);
 
     let mut rt = runtime
         .take()
         .expect("runtime should be available when not running");
+    tracing::info!(
+        mode = ?turn_input.mode,
+        items = turn_input.items.len(),
+        images = turn_input.image_blobs.len(),
+        has_plan_file = turn_input.plan_file.is_some(),
+        "dispatching runtime turn"
+    );
     let (return_tx, return_rx) = tokio::sync::oneshot::channel();
     *runtime_return_rx = Some(return_rx);
 
@@ -1860,28 +1929,9 @@ fn send_user_message(
     *cancel_token = Some(cancel.clone());
 
     let sink_tx = app_tx.clone();
-    let mode = match app.mode {
-        app::Mode::Normal => RunMode::Normal,
-        app::Mode::Plan => RunMode::Plan,
-    };
-    let plan_file = match app.mode {
-        app::Mode::Plan => Some(app.ensure_plan_file().display().to_string()),
-        app::Mode::Normal => app.plan_file.as_ref().map(|p| p.display().to_string()),
-    };
     tokio::spawn(async move {
         let sink = AppEventSink { tx: sink_tx };
-        let result = rt
-            .run_turn(
-                TurnInput {
-                    items: turn_items,
-                    image_blobs,
-                    mode: Some(mode),
-                    plan_file,
-                },
-                &sink,
-                cancel,
-            )
-            .await;
+        let result = rt.run_turn(turn_input, &sink, cancel).await;
         let _ = return_tx.send(RuntimeRunResult {
             runtime: rt,
             result,
@@ -2049,161 +2099,6 @@ async fn restore_agent_state(
     }
 }
 
-/// Build structured turn items from editor input:
-/// - `@path` becomes `FileRef` or `DirRef` when resolvable
-/// - `[Image #n]` binds to pasted image `n` from this turn's image list
-/// - plain text remains `Text`
-fn build_items_from_editor_input(
-    input: &str,
-    images: Vec<Vec<u8>>,
-) -> (Vec<InputItem>, HashMap<String, Vec<u8>>) {
-    let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
-    let mut items: Vec<InputItem> = Vec::new();
-    let mut image_blobs: HashMap<String, Vec<u8>> = HashMap::new();
-    let mut image_slots: Vec<Option<(String, Vec<u8>)>> = images
-        .into_iter()
-        .enumerate()
-        .map(|(i, bytes)| (format!("img-{}", i + 1), bytes))
-        .map(Some)
-        .collect();
-
-    let mut text_buf = String::with_capacity(input.len());
-    let mut i = 0;
-    let bytes = input.as_bytes();
-
-    while i < bytes.len() {
-        if let Some((next_i, img_idx)) = parse_image_marker_at(input, i)
-            && let Some(slot) = image_slots
-                .get_mut(img_idx.saturating_sub(1))
-                .and_then(Option::take)
-        {
-            push_text_item(&mut items, &mut text_buf);
-            let (id, data) = slot;
-            image_blobs.insert(id.clone(), data);
-            items.push(InputItem::ImageRef { id });
-            i = next_i;
-            continue;
-        }
-
-        if bytes[i] == b'@' {
-            // Check: must be at start or preceded by whitespace
-            let at_start = i == 0 || bytes[i - 1].is_ascii_whitespace();
-            if at_start {
-                // Find the end of the token (next whitespace or end)
-                let token_start = i + 1;
-                let mut token_end = token_start;
-                while token_end < bytes.len() && !bytes[token_end].is_ascii_whitespace() {
-                    token_end += 1;
-                }
-                let token = &input[token_start..token_end];
-                if !token.is_empty() {
-                    let path = if token.starts_with('/') {
-                        PathBuf::from(token)
-                    } else {
-                        cwd.join(token)
-                    };
-                    if path.is_file() {
-                        push_text_item(&mut items, &mut text_buf);
-                        items.push(InputItem::FileRef {
-                            path: path.display().to_string(),
-                        });
-                        i = token_end;
-                        continue;
-                    } else if path.is_dir() {
-                        push_text_item(&mut items, &mut text_buf);
-                        items.push(InputItem::DirRef {
-                            path: path.display().to_string(),
-                        });
-                        i = token_end;
-                        continue;
-                    }
-                }
-            }
-        }
-        let ch = input[i..].chars().next().unwrap();
-        text_buf.push(ch);
-        i += ch.len_utf8();
-    }
-
-    push_text_item(&mut items, &mut text_buf);
-
-    // Preserve any pasted images even if their inline markers were removed.
-    for slot in image_slots.into_iter().flatten() {
-        let (id, data) = slot;
-        image_blobs.insert(id.clone(), data);
-        items.push(InputItem::ImageRef { id });
-    }
-
-    (items, image_blobs)
-}
-
-fn push_text_item(items: &mut Vec<InputItem>, text: &mut String) {
-    if text.is_empty() {
-        return;
-    }
-    if let Some(InputItem::Text { text: prev }) = items.last_mut() {
-        prev.push_str(text);
-        text.clear();
-        return;
-    }
-    items.push(InputItem::Text {
-        text: std::mem::take(text),
-    });
-}
-
-fn parse_image_marker_at(input: &str, start: usize) -> Option<(usize, usize)> {
-    let rest = &input[start..];
-    let prefix = "[Image #";
-    if !rest.starts_with(prefix) {
-        return None;
-    }
-    let after = &rest[prefix.len()..];
-    let digits_len = after
-        .chars()
-        .take_while(|c| c.is_ascii_digit())
-        .map(char::len_utf8)
-        .sum::<usize>();
-    if digits_len == 0 {
-        return None;
-    }
-    let digits = &after[..digits_len];
-    let remaining = &after[digits_len..];
-    if !remaining.starts_with(']') {
-        return None;
-    }
-    let idx = digits.parse::<usize>().ok()?;
-    if idx == 0 {
-        return None;
-    }
-    Some((start + prefix.len() + digits_len + 1, idx))
-}
-
-/// Insert an inline attachment marker like `[Image #1]` at the current cursor,
-/// adding surrounding spaces when needed so it reads naturally in the input.
-fn insert_inline_marker(app: &mut App, marker: &str) {
-    let needs_leading_space = app.cursor_pos > 0
-        && app.input[..app.cursor_pos]
-            .chars()
-            .next_back()
-            .is_some_and(|c| !c.is_whitespace());
-
-    let needs_trailing_space = app.cursor_pos < app.input.len()
-        && app.input[app.cursor_pos..]
-            .chars()
-            .next()
-            .is_some_and(|c| !c.is_whitespace());
-
-    if needs_leading_space {
-        app.insert_char(' ');
-    }
-    for ch in marker.chars() {
-        app.insert_char(ch);
-    }
-    if needs_trailing_space {
-        app.insert_char(' ');
-    }
-}
-
 /// Send a desktop notification that the agent finished.
 fn notify_done() {
     // Ensure the icon exists in ~/.lash/
@@ -2364,7 +2259,7 @@ mod tests {
 
     #[test]
     fn parse_image_marker_rejects_zero_index() {
-        assert_eq!(parse_image_marker_at("[Image #0]", 0), None);
+        assert_eq!(input_items::parse_image_marker_at("[Image #0]", 0), None);
     }
 
     #[test]

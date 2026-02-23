@@ -19,7 +19,6 @@ uuid = { version = "1", features = ["v4"] }
 thiserror = "2"
 tempfile = "3"
 tracing = "0.1"
-baml = "0.218.0"
 regex = "1"
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 xxhash-rust = { version = "0.8", features = ["xxh32"] }

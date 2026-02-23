@@ -73,6 +73,11 @@ class LashAgent(BaseInstalledAgent):
     def create_run_agent_commands(self, instruction: str) -> list[ExecInput]:
         env: dict[str, str] = {
             "HOME": REMOTE_HOME,
+            # Bench tasks can involve long thinking phases with sparse stream chunks.
+            # Use a higher default than interactive runs; allow override from host env.
+            "LASH_LLM_STREAM_TIMEOUT_SECS": os.environ.get(
+                "LASH_LLM_STREAM_TIMEOUT_SECS", "300"
+            ),
         }
 
         if getattr(self, "_use_optional_libs", False):
@@ -84,8 +89,7 @@ class LashAgent(BaseInstalledAgent):
             "TAVILY_API_KEY",
             "LASH_LOG",
             "LASH_ALLOW_UNKNOWN_MODELS",
-            "LASH_PREAMBLE",
-            "LASH_SOUL",
+            "LASH_LLM_STREAM_TIMEOUT_SECS",
         ):
             value = os.environ.get(key, "")
             if value:
@@ -95,15 +99,93 @@ class LashAgent(BaseInstalledAgent):
         model_flag = (
             f"--model {shlex.quote(self.model_name)} " if self.model_name else ""
         )
+        prompt_flags = ""
+        for env_key, section in (
+            ("LASH_PROMPT_REPLACE_IDENTITY", "identity"),
+            ("LASH_PROMPT_REPLACE_GUIDELINES", "guidelines"),
+            ("LASH_PROMPT_REPLACE_TOOL_GUIDES", "tool_guides"),
+        ):
+            value = os.environ.get(env_key)
+            if value:
+                prompt_flags += (
+                    f"--prompt-replace {shlex.quote(f'{section}={value}')} "
+                )
+
+        disable_sections = os.environ.get("LASH_PROMPT_DISABLE", "").strip()
+        if disable_sections:
+            for section in disable_sections.split(","):
+                sec = section.strip()
+                if sec:
+                    prompt_flags += f"--prompt-disable {shlex.quote(sec)} "
         prompt = shlex.quote(instruction)
 
         return [
             ExecInput(
-                command=f"lash {provider_flag}{model_flag}--print {prompt}",
+                command=f"lash {provider_flag}{model_flag}{prompt_flags}--print {prompt}",
                 env=env,
-                timeout_sec=600,
+                timeout_sec=None,
             )
         ]
+
+    async def _persist_lash_log(self, environment: BaseEnvironment) -> None:
+        """Best-effort copy of lash runtime log into Harbor trial artifacts."""
+        source = f"{REMOTE_HOME}/.lash/lash.log"
+        target = self.logs_dir / "lash.log"
+        try:
+            await environment.download_file(source_path=source, target_path=target)
+        except Exception as exc:  # pragma: no cover - defensive, non-fatal
+            self.logger.warning("Failed to persist lash log from %s: %s", source, exc)
+
+    async def _persist_lash_sessions(self, environment: BaseEnvironment) -> None:
+        """Best-effort copy of lash session artifacts (db/jsonl/llm trace) into trial logs."""
+        sessions_dir = f"{REMOTE_HOME}/.lash/sessions"
+        target_dir = self.logs_dir / "sessions"
+        target_dir.mkdir(parents=True, exist_ok=True)
+
+        list_cmd = (
+            "bash -lc "
+            + shlex.quote(
+                f"ls -1 {sessions_dir}/*.db {sessions_dir}/*.jsonl {sessions_dir}/*.llm.jsonl "
+                "2>/dev/null | sort -u || true"
+            )
+        )
+
+        try:
+            result = await environment.exec(command=list_cmd)
+        except Exception as exc:  # pragma: no cover - defensive, non-fatal
+            self.logger.warning("Failed to enumerate lash session artifacts: %s", exc)
+            return
+
+        if result.return_code != 0:
+            self.logger.warning(
+                "Failed to enumerate lash session artifacts (rc=%s): %s",
+                result.return_code,
+                result.stderr or "",
+            )
+            return
+
+        for remote_path in [
+            line.strip() for line in (result.stdout or "").splitlines() if line.strip()
+        ]:
+            target = target_dir / Path(remote_path).name
+            try:
+                await environment.download_file(source_path=remote_path, target_path=target)
+            except Exception as exc:  # pragma: no cover - defensive, non-fatal
+                self.logger.warning(
+                    "Failed to persist lash session artifact %s: %s", remote_path, exc
+                )
+
+    async def run(
+        self,
+        instruction: str,
+        environment: BaseEnvironment,
+        context: AgentContext,
+    ) -> None:
+        try:
+            await super().run(instruction, environment, context)
+        finally:
+            await self._persist_lash_log(environment)
+            await self._persist_lash_sessions(environment)
 
     def populate_context_post_run(self, context: AgentContext) -> None:
         pass

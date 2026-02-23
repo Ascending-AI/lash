@@ -37,6 +37,7 @@ pub enum PythonRequest {
         tools_json: String,
         agent_id: String,
         headless: bool,
+        capabilities_json: String,
     },
     Exec {
         id: String,
@@ -345,10 +346,12 @@ fn python_thread_main(
                     tools_json,
                     agent_id,
                     headless,
+                    capabilities_json,
                 } => {
-                    if let Err(e) =
-                        repl.call_method1("_register_tools", (&tools_json, &agent_id, headless))
-                    {
+                    if let Err(e) = repl.call_method1(
+                        "_register_tools",
+                        (&tools_json, &agent_id, headless, &capabilities_json),
+                    ) {
                         tracing::error!("_register_tools failed: {e}");
                     }
                     let _ = response_tx.send(PythonResponse::Ready);

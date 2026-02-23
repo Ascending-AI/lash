@@ -1,24 +1,7 @@
 pub mod agent;
-#[allow(
-    non_snake_case,
-    unused_imports,
-    non_camel_case_types,
-    dead_code,
-    clippy::duplicated_attributes,
-    clippy::empty_line_after_doc_comments,
-    clippy::derive_partial_eq_without_eq,
-    clippy::enum_variant_names,
-    clippy::too_many_arguments,
-    clippy::manual_map,
-    clippy::redundant_closure,
-    clippy::derivable_impls,
-    clippy::unwrap_or_default,
-    clippy::redundant_clone,
-    clippy::map_clone
-)]
-pub(crate) mod baml_client;
 pub mod embedded;
 pub mod instructions;
+pub mod llm;
 pub mod model_info;
 pub mod oauth;
 pub mod provider;
@@ -31,7 +14,8 @@ pub mod tools;
 
 // Re-exports
 pub use agent::{
-    Agent, AgentConfig, AgentEvent, Message, MessageRole, Part, PartKind, PruneState, TokenUsage,
+    Agent, AgentCapabilities, AgentConfig, AgentEvent, Message, MessageRole, Part, PartKind,
+    PromptOverrideMode, PromptSectionName, PromptSectionOverride, PruneState, TokenUsage,
 };
 pub use instructions::{FsInstructionSource, InstructionLoader, InstructionSource};
 pub use provider::{LashConfig, Provider};

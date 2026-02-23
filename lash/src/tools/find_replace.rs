@@ -15,11 +15,11 @@ impl crate::ToolProvider for FindReplace {
         vec![ToolDefinition {
             name: "find_replace".into(),
             description: concat!(
-                "Find and replace text in a file. No anchors needed — works on raw file content.\n\n",
-                "Useful for renaming variables/functions, fixing typos, or simple substitutions. ",
-                "old_text must match exactly (including whitespace and newlines). ",
-                "By default replaces only the first occurrence; set all=true to replace every occurrence.\n\n",
-                "For structural edits (inserting/deleting lines, multi-line rewrites), use edit_file instead.",
+                "Fast path for exact-text edits. No anchors needed — works on raw file content.\n\n",
+                "Use this when you already know the exact `old_text` to change (single-line fixes, typos, straightforward renames). ",
+                "`old_text` must match exactly, including whitespace/newlines. ",
+                "By default it replaces only the first occurrence; set `all=true` to replace every match.\n\n",
+                "For structural edits (insertions, range rewrites, anchor-sensitive placement), use `edit_file`.",
             ).into(),
             params: vec![
                 ToolParam::typed("path", "str"),
@@ -42,7 +42,7 @@ impl crate::ToolProvider for FindReplace {
                     required: false,
                 },
             ],
-            returns: "str".into(),
+            returns: "EditResult".into(),
             examples: vec![],
                 hidden: false,
                 inject_into_prompt: true,
@@ -99,13 +99,13 @@ impl crate::ToolProvider for FindReplace {
             format!("{} replacements", count)
         };
 
-        let mut msg = format!("{} made in {}", label, path_str);
         let diff = compact_diff(&content, &new_content, path_str, 50);
-        if !diff.is_empty() {
-            msg.push_str("\n\n");
-            msg.push_str(&diff);
-        }
-        ToolResult::ok(json!(msg))
+        let summary = format!("{} made in {}", label, path_str);
+        ToolResult::ok(json!({
+            "__type__": "edit_result",
+            "summary": summary,
+            "diff": diff,
+        }))
     }
 }
 
@@ -158,8 +158,18 @@ mod tests {
             std::fs::read_to_string(&path).unwrap(),
             "qux bar qux baz qux"
         );
-        let text = result.result.as_str().unwrap();
-        assert!(text.contains("3 replacements"));
+        let obj = result.result.as_object().unwrap();
+        assert_eq!(
+            obj.get("__type__").and_then(|v| v.as_str()),
+            Some("edit_result")
+        );
+        assert!(
+            obj.get("summary")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .contains("3 replacements")
+        );
+        assert!(obj.get("diff").and_then(|v| v.as_str()).is_some());
     }
 
     #[tokio::test]

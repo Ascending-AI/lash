@@ -22,6 +22,8 @@ enum SetupStep {
         cursor: usize,
         error: Option<String>,
         verifier: Option<String>,
+        auth_url: Option<String>,
+        browser_error: Option<String>,
         mode: CredentialMode,
     },
     CodexDeviceAuth {
@@ -60,7 +62,7 @@ impl SetupApp {
 
 // ── Public entry point ──────────────────────────────────────────────
 
-pub async fn run_setup() -> anyhow::Result<LashConfig> {
+pub async fn run_setup_with_existing(existing: Option<&LashConfig>) -> anyhow::Result<LashConfig> {
     // Enter alternate screen + raw mode
     let mut terminal = ratatui::init();
     crossterm::execute!(
@@ -68,7 +70,7 @@ pub async fn run_setup() -> anyhow::Result<LashConfig> {
         crossterm::style::Print("\x1b]11;rgb:0e/0d/0b\x1b\\")
     )?;
 
-    let result = run_setup_inner(&mut terminal).await;
+    let result = run_setup_inner(&mut terminal, existing).await;
 
     // Restore terminal
     crossterm::execute!(std::io::stdout(), crossterm::style::Print("\x1b]111\x1b\\"))?;
@@ -77,13 +79,25 @@ pub async fn run_setup() -> anyhow::Result<LashConfig> {
     result
 }
 
-async fn run_setup_inner(terminal: &mut ratatui::DefaultTerminal) -> anyhow::Result<LashConfig> {
+async fn run_setup_inner(
+    terminal: &mut ratatui::DefaultTerminal,
+    existing: Option<&LashConfig>,
+) -> anyhow::Result<LashConfig> {
     let mut app = SetupApp::new();
     let mut provider: Option<Provider> = None;
-    let mut tavily_key: Option<String> = None;
+    let mut tavily_key: Option<String> =
+        existing.and_then(|c| c.tavily_api_key().map(str::to_string));
+    let existing_agent_models = existing.and_then(|c| c.agent_models.clone());
 
     loop {
         terminal.draw(|frame| draw_setup(frame, &app))?;
+
+        if matches!(app.step, SetupStep::Done) {
+            // Show "Authenticated!" briefly
+            terminal.draw(|frame| draw_setup(frame, &app))?;
+            std::thread::sleep(std::time::Duration::from_millis(500));
+            break;
+        }
 
         // For CodexDeviceAuth: poll with timeout then poll the device auth endpoint
         if let SetupStep::CodexDeviceAuth {
@@ -129,9 +143,13 @@ async fn run_setup_inner(terminal: &mut ratatui::DefaultTerminal) -> anyhow::Res
                                 expires_at: tokens.expires_at,
                                 account_id: tokens.account_id,
                             });
-                            app.step = SetupStep::InputTavily {
-                                input: String::new(),
-                                cursor: 0,
+                            app.step = if tavily_key.is_some() {
+                                SetupStep::Done
+                            } else {
+                                SetupStep::InputTavily {
+                                    input: String::new(),
+                                    cursor: 0,
+                                }
                             };
                         }
                         Err(e) => {
@@ -173,12 +191,15 @@ async fn run_setup_inner(terminal: &mut ratatui::DefaultTerminal) -> anyhow::Res
                             // Claude — start OAuth
                             let (verifier, challenge) = oauth::generate_pkce();
                             let url = oauth::authorize_url(&challenge, &verifier);
-                            let _ = open_browser(&url);
+                            persist_oauth_url(&url);
+                            let browser_error = open_browser(&url).err().map(|e| e.to_string());
                             app.step = SetupStep::InputCredential {
                                 input: String::new(),
                                 cursor: 0,
                                 error: None,
                                 verifier: Some(verifier),
+                                auth_url: Some(url),
+                                browser_error,
                                 mode: CredentialMode::ClaudeOAuth,
                             };
                         }
@@ -207,29 +228,33 @@ async fn run_setup_inner(terminal: &mut ratatui::DefaultTerminal) -> anyhow::Res
                         2 => {
                             // Google OAuth
                             let (verifier, challenge) = oauth::generate_pkce();
-                            let url = oauth::google_authorize_url(&challenge);
-                            if url.contains("client_id=&") {
-                                app.step = SetupStep::InputCredential {
-                                    input: String::new(),
-                                    cursor: 0,
-                                    error: Some(
-                                        "Set LASH_GOOGLE_CLIENT_ID and \
-LASH_GOOGLE_CLIENT_SECRET, then retry."
-                                            .into(),
-                                    ),
-                                    verifier: Some(verifier),
-                                    mode: CredentialMode::GoogleOAuth,
-                                };
-                                continue;
+                            match oauth::google_authorize_url(&challenge) {
+                                Ok(url) => {
+                                    persist_oauth_url(&url);
+                                    let browser_error =
+                                        open_browser(&url).err().map(|e| e.to_string());
+                                    app.step = SetupStep::InputCredential {
+                                        input: String::new(),
+                                        cursor: 0,
+                                        error: None,
+                                        verifier: Some(verifier),
+                                        auth_url: Some(url),
+                                        browser_error,
+                                        mode: CredentialMode::GoogleOAuth,
+                                    };
+                                }
+                                Err(e) => {
+                                    app.step = SetupStep::InputCredential {
+                                        input: String::new(),
+                                        cursor: 0,
+                                        error: Some(format!("{}", e)),
+                                        verifier: Some(verifier),
+                                        auth_url: None,
+                                        browser_error: None,
+                                        mode: CredentialMode::GoogleOAuth,
+                                    };
+                                }
                             }
-                            let _ = open_browser(&url);
-                            app.step = SetupStep::InputCredential {
-                                input: String::new(),
-                                cursor: 0,
-                                error: None,
-                                verifier: Some(verifier),
-                                mode: CredentialMode::GoogleOAuth,
-                            };
                         }
                         _ => {
                             // OpenRouter
@@ -238,6 +263,8 @@ LASH_GOOGLE_CLIENT_SECRET, then retry."
                                 cursor: 0,
                                 error: None,
                                 verifier: None,
+                                auth_url: None,
+                                browser_error: None,
                                 mode: CredentialMode::OpenRouterKey,
                             };
                         }
@@ -251,6 +278,8 @@ LASH_GOOGLE_CLIENT_SECRET, then retry."
                 cursor,
                 error,
                 verifier,
+                auth_url,
+                browser_error,
                 mode,
             } => match key.code {
                 KeyCode::Esc => {
@@ -301,9 +330,13 @@ LASH_GOOGLE_CLIENT_SECRET, then retry."
                                     api_key: val,
                                     base_url: "https://openrouter.ai/api/v1".into(),
                                 });
-                                app.step = SetupStep::InputTavily {
-                                    input: String::new(),
-                                    cursor: 0,
+                                app.step = if tavily_key.is_some() {
+                                    SetupStep::Done
+                                } else {
+                                    SetupStep::InputTavily {
+                                        input: String::new(),
+                                        cursor: 0,
+                                    }
                                 };
                             }
                             CredentialMode::ClaudeOAuth => {
@@ -319,16 +352,23 @@ LASH_GOOGLE_CLIENT_SECRET, then retry."
                                             refresh_token: tokens.refresh_token,
                                             expires_at: tokens.expires_at,
                                         });
-                                        app.step = SetupStep::InputTavily {
-                                            input: String::new(),
-                                            cursor: 0,
+                                        app.step = if tavily_key.is_some() {
+                                            SetupStep::Done
+                                        } else {
+                                            SetupStep::InputTavily {
+                                                input: String::new(),
+                                                cursor: 0,
+                                            }
                                         };
                                     }
                                     Err(e) => {
                                         *error = Some(format!("{}", e));
                                         let (new_v, challenge) = oauth::generate_pkce();
                                         let url = oauth::authorize_url(&challenge, &new_v);
-                                        let _ = open_browser(&url);
+                                        persist_oauth_url(&url);
+                                        *browser_error =
+                                            open_browser(&url).err().map(|err| err.to_string());
+                                        *auth_url = Some(url);
                                         *verifier = Some(new_v);
                                     }
                                 }
@@ -351,25 +391,34 @@ LASH_GOOGLE_CLIENT_SECRET, then retry."
                                                     std::env::var("GOOGLE_CLOUD_PROJECT_ID").ok()
                                                 }),
                                         });
-                                        app.step = SetupStep::InputTavily {
-                                            input: String::new(),
-                                            cursor: 0,
+                                        app.step = if tavily_key.is_some() {
+                                            SetupStep::Done
+                                        } else {
+                                            SetupStep::InputTavily {
+                                                input: String::new(),
+                                                cursor: 0,
+                                            }
                                         };
                                     }
                                     Err(e) => {
                                         *error = Some(format!("{}", e));
                                         let (new_v, challenge) = oauth::generate_pkce();
-                                        let url = oauth::google_authorize_url(&challenge);
-                                        if url.contains("client_id=&") {
-                                            *error = Some(
-                                                "Set LASH_GOOGLE_CLIENT_ID and \
-LASH_GOOGLE_CLIENT_SECRET, then retry."
-                                                    .into(),
-                                            );
-                                            continue;
+                                        match oauth::google_authorize_url(&challenge) {
+                                            Ok(url) => {
+                                                persist_oauth_url(&url);
+                                                *browser_error = open_browser(&url)
+                                                    .err()
+                                                    .map(|err| err.to_string());
+                                                *auth_url = Some(url);
+                                                *verifier = Some(new_v);
+                                            }
+                                            Err(auth_err) => {
+                                                *error = Some(format!("{}", auth_err));
+                                                *auth_url = None;
+                                                *browser_error = None;
+                                                *verifier = Some(new_v);
+                                            }
                                         }
-                                        let _ = open_browser(&url);
-                                        *verifier = Some(new_v);
                                     }
                                 }
                             }
@@ -431,7 +480,7 @@ LASH_GOOGLE_CLIENT_SECRET, then retry."
                 _ => {}
             },
 
-            SetupStep::Done => unreachable!(),
+            SetupStep::Done => {}
         }
 
         if matches!(app.step, SetupStep::Done) {
@@ -442,11 +491,9 @@ LASH_GOOGLE_CLIENT_SECRET, then retry."
         }
     }
 
-    let config = LashConfig {
-        provider: provider.expect("provider must be set before Done"),
-        tavily_api_key: tavily_key,
-        agent_models: None,
-    };
+    let mut config = LashConfig::new(provider.expect("provider must be set before Done"));
+    config.set_tavily_api_key(tavily_key);
+    config.agent_models = existing_agent_models;
     Ok(config)
 }
 
@@ -461,25 +508,33 @@ fn draw_setup(frame: &mut Frame, app: &SetupApp) {
 
     let logo_height = 8; // 5 logo + 1 trailing slash + 1 scribe + 1 tagline
 
-    let step_height: u16 = match &app.step {
-        SetupStep::SelectProvider { .. } => 10, // blank + label + blank + 4 options + blank + help + pad
-        SetupStep::InputCredential { error, .. } => {
-            if error.is_some() {
-                10
-            } else {
-                8
+    let step_height: u16 =
+        match &app.step {
+            SetupStep::SelectProvider { .. } => 10, // blank + label + blank + 4 options + blank + help + pad
+            SetupStep::InputCredential { error, mode, .. } => {
+                match mode {
+                    CredentialMode::OpenRouterKey => {
+                        if error.is_some() {
+                            10
+                        } else {
+                            8
+                        }
+                    }
+                    CredentialMode::ClaudeOAuth | CredentialMode::GoogleOAuth => {
+                        if error.is_some() { 12 } else { 11 }
+                    }
+                }
             }
-        }
-        SetupStep::CodexDeviceAuth { error, .. } => {
-            if error.is_some() {
-                10
-            } else {
-                9
+            SetupStep::CodexDeviceAuth { error, .. } => {
+                if error.is_some() {
+                    10
+                } else {
+                    9
+                }
             }
-        }
-        SetupStep::InputTavily { .. } => 7,
-        SetupStep::Done => 4,
-    };
+            SetupStep::InputTavily { .. } => 7,
+            SetupStep::Done => 4,
+        };
 
     let chunks = Layout::vertical([
         Constraint::Min(0),              // top spacer
@@ -497,9 +552,20 @@ fn draw_setup(frame: &mut Frame, app: &SetupApp) {
             input,
             cursor,
             error,
+            auth_url,
+            browser_error,
             mode,
             ..
-        } => draw_credential_input(frame, chunks[2], input, *cursor, error.as_deref(), *mode),
+        } => draw_credential_input(
+            frame,
+            chunks[2],
+            input,
+            *cursor,
+            error.as_deref(),
+            *mode,
+            auth_url.as_deref(),
+            browser_error.as_deref(),
+        ),
         SetupStep::CodexDeviceAuth {
             user_code, error, ..
         } => draw_codex_device_auth(frame, chunks[2], user_code, error.as_deref(), app.tick),
@@ -564,7 +630,7 @@ fn draw_provider_select(frame: &mut Frame, area: Rect, selected: usize) {
     let options = [
         ("Claude", "Max/Pro subscription"),
         ("Codex", "ChatGPT Plus/Pro/Team"),
-        ("Google OAuth", "Gemini via OAuth bearer"),
+        ("Google OAuth", "Gemini via Google account"),
         ("OpenRouter", "API key"),
     ];
 
@@ -624,6 +690,8 @@ fn draw_credential_input(
     cursor: usize,
     error: Option<&str>,
     mode: CredentialMode,
+    auth_url: Option<&str>,
+    browser_error: Option<&str>,
 ) {
     let box_width = 42usize;
     let cx = center_pad(area.width as usize, box_width);
@@ -632,30 +700,66 @@ fn draw_credential_input(
 
     let mut lines: Vec<Line> = Vec::new();
     lines.push(Line::from(""));
+    let oauth_url_hint = oauth_url_display();
 
     match mode {
         CredentialMode::ClaudeOAuth => {
             lines.push(Line::from(Span::styled(
-                format!("{}Authenticating with Claude...", pad),
+                format!("{}Claude sign-in", pad),
                 Style::default().fg(theme::ASH_TEXT),
             )));
-            lines.push(Line::from(Span::styled(
-                format!("{}Browser opened \u{2014} paste the code below.", pad),
-                Style::default().fg(theme::ASH_TEXT),
-            )));
+            if let Some(url) = auth_url {
+                if browser_error.is_some() {
+                    lines.push(Line::from(Span::styled(
+                        format!("{}Browser didn't open. Use manual URL.", pad),
+                        Style::default().fg(theme::ERROR),
+                    )));
+                } else {
+                    lines.push(Line::from(Span::styled(
+                        format!("{}Tried opening browser automatically.", pad),
+                        Style::default().fg(theme::ASH_TEXT),
+                    )));
+                }
+                lines.push(Line::from(Span::styled(
+                    format!("{}Paste code or callback URL.", pad),
+                    Style::default().fg(theme::ASH_TEXT),
+                )));
+                let _ = url;
+                lines.push(Line::from(Span::styled(
+                    format!("{}Manual URL: {}", pad, oauth_url_hint),
+                    Style::default().fg(theme::ASH_TEXT),
+                )));
+                lines.push(Line::from(""));
+            }
         }
         CredentialMode::GoogleOAuth => {
             lines.push(Line::from(Span::styled(
-                format!("{}Authenticating with Google...", pad),
+                format!("{}Google sign-in", pad),
                 Style::default().fg(theme::ASH_TEXT),
             )));
-            lines.push(Line::from(Span::styled(
-                format!(
-                    "{}Browser opened \u{2014} paste code (or callback URL) below.",
-                    pad
-                ),
-                Style::default().fg(theme::ASH_TEXT),
-            )));
+            if let Some(url) = auth_url {
+                if browser_error.is_some() {
+                    lines.push(Line::from(Span::styled(
+                        format!("{}Browser didn't open. Use manual URL.", pad),
+                        Style::default().fg(theme::ERROR),
+                    )));
+                } else {
+                    lines.push(Line::from(Span::styled(
+                        format!("{}Tried opening browser automatically.", pad),
+                        Style::default().fg(theme::ASH_TEXT),
+                    )));
+                }
+                lines.push(Line::from(Span::styled(
+                    format!("{}Paste code or callback URL.", pad),
+                    Style::default().fg(theme::ASH_TEXT),
+                )));
+                let _ = url;
+                lines.push(Line::from(Span::styled(
+                    format!("{}Manual URL: {}", pad, oauth_url_hint),
+                    Style::default().fg(theme::ASH_TEXT),
+                )));
+                lines.push(Line::from(""));
+            }
         }
         CredentialMode::OpenRouterKey => {
             lines.push(Line::from(Span::styled(
@@ -673,6 +777,8 @@ fn draw_credential_input(
     };
 
     // Input box
+    let input_row = area.y + lines.len() as u16 + 1;
+
     let top_border = format!(
         "{}\u{256d} {} {}\u{256e}",
         pad,
@@ -738,7 +844,7 @@ fn draw_credential_input(
     let vis_start = visible_start(input, inner_w, cursor);
     let cursor_offset = cursor_chars.saturating_sub(vis_start);
     let cursor_x = (cx + 4 + cursor_offset) as u16; // pad + "│ / " = 4
-    let cursor_y = area.y + 4;
+    let cursor_y = input_row;
     if cursor_x < area.x + area.width && cursor_y < area.y + area.height {
         frame.set_cursor_position((area.x + cursor_x, cursor_y));
     }
@@ -977,4 +1083,32 @@ fn open_browser(url: &str) -> std::io::Result<()> {
             .spawn()?;
     }
     Ok(())
+}
+
+fn oauth_url_path() -> std::path::PathBuf {
+    let mut p = std::env::var_os("HOME")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|| std::path::PathBuf::from("."));
+    p.push(".lash");
+    p.push("oauth-url.txt");
+    p
+}
+
+fn oauth_url_display() -> String {
+    if let Some(home) = std::env::var_os("HOME").map(std::path::PathBuf::from) {
+        let full = oauth_url_path();
+        if let Ok(rel) = full.strip_prefix(&home) {
+            let rel_str = rel.display().to_string();
+            return format!("~/{rel_str}");
+        }
+    }
+    oauth_url_path().display().to_string()
+}
+
+fn persist_oauth_url(url: &str) {
+    let path = oauth_url_path();
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    let _ = std::fs::write(path, url);
 }

@@ -16,10 +16,13 @@ impl ToolProvider for EditFile {
         vec![ToolDefinition {
             name: "edit_file".into(),
             description: concat!(
-                "Edit a file using hashline anchors. Each edit is one of: ",
-                "{\"set_line\": {\"anchor\": \"LINE:HASH\", \"new_text\": \"...\"}}, ",
-                "{\"replace_lines\": {\"start_anchor\": \"LINE:HASH\", \"end_anchor\": \"LINE:HASH\", \"new_text\": \"...\"}}, ",
-                "{\"insert_after\": {\"anchor\": \"LINE:HASH\", \"text\": \"...\"}}, ",
+                "Anchor-based file editor for structural or multi-line changes. ",
+                "Use this when you need precise placement (insert/delete/replace ranges) and have anchors from `read_file`.\n\n",
+                "If you already know the exact text to change and just want a quick substitution, prefer `find_replace`.\n\n",
+                "Each edit is one of: ",
+                "{\"set_line\": {\"anchor\": \"LINE:8HEX\", \"new_text\": \"...\"}}, ",
+                "{\"replace_lines\": {\"start_anchor\": \"LINE:8HEX\", \"end_anchor\": \"LINE:8HEX\", \"new_text\": \"...\"}}, ",
+                "{\"insert_after\": {\"anchor\": \"LINE:8HEX\", \"text\": \"...\"}}, ",
                 "{\"replace\": {\"old_text\": \"...\", \"new_text\": \"...\", \"all\": false}}",
             ).into(),
             params: vec![
@@ -31,7 +34,7 @@ impl ToolProvider for EditFile {
                     required: true,
                 },
             ],
-            returns: "str".into(),
+            returns: "EditResult".into(),
             examples: vec![],
                 hidden: false,
                 inject_into_prompt: true,
@@ -78,16 +81,16 @@ impl ToolProvider for EditFile {
                         return ToolResult::err_fmt(format_args!("Failed to write file: {e}"));
                     }
                     let new_lines = new_content.lines().count();
-                    let mut msg = format!(
+                    let summary = format!(
                         "Applied {} edit(s) to {} ({} lines)",
                         edits_count, path_str, new_lines,
                     );
                     let diff = compact_diff(&content, &new_content, &path_str, 50);
-                    if !diff.is_empty() {
-                        msg.push_str("\n\n");
-                        msg.push_str(&diff);
-                    }
-                    ToolResult::ok(json!(msg))
+                    ToolResult::ok(json!({
+                        "__type__": "edit_result",
+                        "summary": summary,
+                        "diff": diff,
+                    }))
                 }
                 Err(msg) => ToolResult::err(json!(msg)),
             }
@@ -265,7 +268,7 @@ mod tests {
                 "edit_file",
                 &json!({
                     "path": path.to_str().unwrap(),
-                    "edits": [{"set_line": {"anchor": "2:ff", "new_text": "replaced"}}]
+                    "edits": [{"set_line": {"anchor": "2:ffffffff", "new_text": "replaced"}}]
                 }),
             )
             .await;
