@@ -34,9 +34,9 @@ impl Tier {
 
     fn as_str(&self) -> &'static str {
         match self {
-            Tier::Low => "quick",
-            Tier::Medium => "balanced",
-            Tier::High => "thorough",
+            Tier::Low => "low",
+            Tier::Medium => "medium",
+            Tier::High => "high",
         }
     }
 }
@@ -49,7 +49,7 @@ fn pick_model_and_reasoning(
     if let Some(m) = models {
         match tier {
             Tier::Low => {
-                if let Some(ref q) = m.quick {
+                if let Some(ref q) = m.low {
                     let effort = config
                         .provider
                         .reasoning_effort_for_model(q)
@@ -58,7 +58,7 @@ fn pick_model_and_reasoning(
                 }
             }
             Tier::Medium => {
-                if let Some(ref b) = m.balanced {
+                if let Some(ref b) = m.medium {
                     let effort = config
                         .provider
                         .reasoning_effort_for_model(b)
@@ -67,7 +67,7 @@ fn pick_model_and_reasoning(
                 }
             }
             Tier::High => {
-                if let Some(ref t) = m.thorough {
+                if let Some(ref t) = m.high {
                     let effort = config
                         .provider
                         .reasoning_effort_for_model(t)
@@ -776,9 +776,9 @@ mod tests {
             ..Default::default()
         };
         let models = Some(AgentModels {
-            quick: None,
-            balanced: None,
-            thorough: Some("gpt-5.3-codex".to_string()),
+            low: None,
+            medium: None,
+            high: Some("gpt-5.3-codex".to_string()),
         });
 
         let (m, r) = pick_model_and_reasoning(&config, &models, &Tier::High);

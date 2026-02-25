@@ -203,15 +203,15 @@ impl LlmTransport for OpenRouterAdapter {
 
     fn default_agent_model(&self, tier: &str) -> Option<ModelSelection> {
         match tier {
-            "quick" => Some(ModelSelection {
+            "low" => Some(ModelSelection {
                 model: "minimax/minimax-m2.5",
                 reasoning_effort: None,
             }),
-            "balanced" => Some(ModelSelection {
+            "medium" => Some(ModelSelection {
                 model: "z-ai/glm-5",
                 reasoning_effort: None,
             }),
-            "thorough" => Some(ModelSelection {
+            "high" => Some(ModelSelection {
                 model: "anthropic/claude-sonnet-4.6",
                 reasoning_effort: None,
             }),

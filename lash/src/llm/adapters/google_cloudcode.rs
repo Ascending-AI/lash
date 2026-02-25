@@ -235,11 +235,11 @@ impl LlmTransport for GoogleCloudCodeAdapter {
 
     fn default_agent_model(&self, tier: &str) -> Option<ModelSelection> {
         match tier {
-            "quick" => Some(ModelSelection {
+            "low" => Some(ModelSelection {
                 model: "gemini-3-flash-preview",
                 reasoning_effort: None,
             }),
-            "balanced" | "thorough" => Some(ModelSelection {
+            "medium" | "high" => Some(ModelSelection {
                 model: "gemini-3.1-pro-preview",
                 reasoning_effort: None,
             }),

@@ -189,11 +189,11 @@ impl LlmTransport for ClaudeOAuthAdapter {
 
     fn default_agent_model(&self, tier: &str) -> Option<ModelSelection> {
         match tier {
-            "quick" => Some(ModelSelection {
+            "low" => Some(ModelSelection {
                 model: "claude-haiku-4-5",
                 reasoning_effort: None,
             }),
-            "balanced" | "thorough" => Some(ModelSelection {
+            "medium" | "high" => Some(ModelSelection {
                 model: "claude-sonnet-4-6",
                 reasoning_effort: None,
             }),

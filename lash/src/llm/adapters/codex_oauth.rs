@@ -253,15 +253,15 @@ impl LlmTransport for CodexOAuthAdapter {
 
     fn default_agent_model(&self, tier: &str) -> Option<ModelSelection> {
         match tier {
-            "quick" => Some(ModelSelection {
+            "low" => Some(ModelSelection {
                 model: "gpt-5.3-codex-spark",
                 reasoning_effort: None,
             }),
-            "balanced" => Some(ModelSelection {
+            "medium" => Some(ModelSelection {
                 model: "gpt-5.3-codex",
                 reasoning_effort: Some("medium"),
             }),
-            "thorough" => Some(ModelSelection {
+            "high" => Some(ModelSelection {
                 model: "gpt-5.3-codex",
                 reasoning_effort: Some("high"),
             }),

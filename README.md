@@ -179,9 +179,9 @@ Default root model by provider:
 | `Codex` | `gpt-5.3-codex` |
 | `Google OAuth` | `gemini-3.1-pro-preview` |
 
-Default sub-agent tier mapping (`quick` / `balanced` / `thorough`):
+Default sub-agent tier mapping (`low` / `medium` / `high`):
 
-| Provider | quick | balanced | thorough |
+| Provider | low | medium | high |
 |---|---|---|---|
 | `OpenRouter` | `minimax/minimax-m2.5` | `z-ai/glm-5` | `anthropic/claude-sonnet-4.6` |
 | `Claude` | `claude-haiku-4-5` | `claude-sonnet-4-6` | `claude-sonnet-4-6` |

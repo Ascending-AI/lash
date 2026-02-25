@@ -12,12 +12,12 @@ fn default_base_url() -> String {
 /// User-overridable model names for agent_call intelligence tiers.
 #[derive(Clone, Debug, Serialize, Deserialize, Default)]
 pub struct AgentModels {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub quick: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub balanced: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub thorough: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none", alias = "quick")]
+    pub low: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none", alias = "balanced")]
+    pub medium: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none", alias = "thorough")]
+    pub high: Option<String>,
 }
 
 /// Auxiliary service secrets that are independent of LLM provider auth.
@@ -333,15 +333,15 @@ mod tests {
     fn default_agent_model_claude() {
         let p = claude();
         assert_eq!(
-            p.default_agent_model("quick"),
+            p.default_agent_model("low"),
             Some(("claude-haiku-4-5", None))
         );
         assert_eq!(
-            p.default_agent_model("balanced"),
+            p.default_agent_model("medium"),
             Some(("claude-sonnet-4-6", None))
         );
         assert_eq!(
-            p.default_agent_model("thorough"),
+            p.default_agent_model("high"),
             Some(("claude-sonnet-4-6", None))
         );
     }
@@ -349,21 +349,21 @@ mod tests {
     #[test]
     fn default_agent_model_openrouter() {
         let p = openrouter();
-        assert!(p.default_agent_model("quick").is_some());
-        assert!(p.default_agent_model("balanced").is_some());
-        assert!(p.default_agent_model("thorough").is_some());
+        assert!(p.default_agent_model("low").is_some());
+        assert!(p.default_agent_model("medium").is_some());
+        assert!(p.default_agent_model("high").is_some());
     }
 
     #[test]
     fn default_agent_model_codex() {
         let p = codex();
-        let (m, re) = p.default_agent_model("quick").unwrap();
+        let (m, re) = p.default_agent_model("low").unwrap();
         assert_eq!(m, "gpt-5.3-codex-spark");
         assert_eq!(re, None);
-        let (m, re) = p.default_agent_model("balanced").unwrap();
+        let (m, re) = p.default_agent_model("medium").unwrap();
         assert_eq!(m, "gpt-5.3-codex");
         assert_eq!(re, Some("medium"));
-        let (m, re) = p.default_agent_model("thorough").unwrap();
+        let (m, re) = p.default_agent_model("high").unwrap();
         assert_eq!(m, "gpt-5.3-codex");
         assert_eq!(re, Some("high"));
     }
@@ -453,15 +453,15 @@ mod tests {
     fn default_agent_model_google_oauth_tiers() {
         let p = google_oauth();
         assert_eq!(
-            p.default_agent_model("quick"),
+            p.default_agent_model("low"),
             Some(("gemini-3-flash-preview", None))
         );
         assert_eq!(
-            p.default_agent_model("balanced"),
+            p.default_agent_model("medium"),
             Some(("gemini-3.1-pro-preview", None))
         );
         assert_eq!(
-            p.default_agent_model("thorough"),
+            p.default_agent_model("high"),
             Some(("gemini-3.1-pro-preview", None))
         );
     }
