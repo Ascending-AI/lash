@@ -17,6 +17,7 @@ mod state;
 mod switchable;
 #[cfg(feature = "sqlite-store")]
 mod tasks;
+mod toolset;
 mod web_search;
 mod write_file;
 
@@ -38,6 +39,7 @@ pub use state::StateStore;
 pub use switchable::SwitchableTools;
 #[cfg(feature = "sqlite-store")]
 pub use tasks::TaskStore;
+pub use toolset::{ToolSet, ToolSetDeps};
 pub use web_search::WebSearch;
 pub use write_file::WriteFile;
 

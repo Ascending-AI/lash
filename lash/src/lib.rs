@@ -38,6 +38,7 @@ pub use runtime::{
 pub use session::{ExecResponse, Session, SessionError, UserPrompt};
 #[cfg(feature = "sqlite-store")]
 pub use store::{AgentState, Store, TaskEntry};
+pub use tools::{ToolSet, ToolSetDeps};
 
 /// A message sent from the sandbox to the host during execution.
 #[derive(Clone, Debug)]
