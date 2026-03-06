@@ -140,6 +140,11 @@ impl AgentCall {
         } else {
             self.config.capabilities.clone()
         };
+        let execution_mode = if matches!(tier, Tier::Low) {
+            crate::ExecutionMode::NativeTools
+        } else {
+            self.config.execution_mode
+        };
         AgentConfig {
             capabilities,
             model,
@@ -153,7 +158,7 @@ impl AgentCall {
             headless: self.config.headless,
             prompt_overrides: self.config.prompt_overrides.clone(),
             instruction_source: self.config.instruction_source.clone(),
-            execution_mode: self.config.execution_mode,
+            execution_mode,
             ..Default::default()
         }
     }
@@ -648,11 +653,11 @@ impl ToolProvider for AgentCall {
                 name: "agent_call".into(),
                 description: vec![
                     crate::ToolText::new(
-                        r#"Spawn a sub-agent to perform a task. In REPL mode, `agent_call(...)` returns an AgentHandle immediately; then use `result = await handle.result()`. For compatibility, `await agent_call(...)` also works and yields the same handle. The handle also supports `await handle.output()` and `await handle.kill()`. Use intelligence="low" for fast read-only tasks (lookup/summarize), and medium/high for edits/refactors. Sub-agents inherit your _mem and _history (read-only)."#,
+                        r#"Spawn a sub-agent to perform a task. In REPL mode, `agent_call(...)` returns an AgentHandle immediately; then use `result = await handle.result()`. For compatibility, `await agent_call(...)` also works and yields the same handle. The handle also supports `await handle.output()` and `await handle.kill()`. Use intelligence="low" for fast read-only tasks (lookup/summarize); low-intelligence sub-agents always run in native-tools mode. Use medium/high for edits/refactors; those tiers inherit the parent session's execution mode. Sub-agents inherit your _mem and _history (read-only)."#,
                         [crate::ExecutionMode::Repl],
                     ),
                     crate::ToolText::new(
-                        r#"Spawn a sub-agent to perform a task. Returns an AgentHandle with `.result()`, `.output()`, and `.kill()`. Use intelligence="low" for fast read-only tasks (lookup/summarize), and medium/high for edits/refactors. Sub-agents inherit your _mem and _history (read-only)."#,
+                        r#"Spawn a sub-agent to perform a task. Returns an AgentHandle with `.result()`, `.output()`, and `.kill()`. Use intelligence="low" for fast read-only tasks (lookup/summarize); low-intelligence sub-agents always run in native-tools mode. Use medium/high for edits/refactors; those tiers inherit the parent session's execution mode. Sub-agents inherit your _mem and _history (read-only)."#,
                         [crate::ExecutionMode::NativeTools],
                     ),
                 ],
@@ -968,5 +973,7 @@ mod tests {
         let medium = agent_call.build_agent_config(&Tier::Medium);
         assert!(!low.capabilities.enabled(CapabilityId::CoreWrite));
         assert!(medium.capabilities.enabled(CapabilityId::CoreWrite));
+        assert_eq!(low.execution_mode, crate::ExecutionMode::NativeTools);
+        assert_eq!(medium.execution_mode, crate::ExecutionMode::Repl);
     }
 }

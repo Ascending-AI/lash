@@ -1113,12 +1113,12 @@ Added `timeout_ms: u64` field to the Config struct.</pre>
         <div class="arch-card-title">Sub-Agent Orchestration</div>
         <div class="arch-card-desc">
           <code>agent_call</code> forks parent dynamic state per sub-agent. Sub-agents share the same filesystem/worktree
-          but get isolated tool/capability state. Low tier sub-agents are filtered (no write/delegation tools).
+          but get isolated tool/capability state. Low tier sub-agents are filtered (no write/delegation tools) and always execute in <code>native-tools</code>; medium/high inherit the parent session's execution mode.
         </div>
         <div class="cell-grid cols-3">
           <div class="cell">
             <h4>Tiers</h4>
-            <p>Low (read-only lookup), medium (general), high (full capability). Each tier has a filtered tool set.</p>
+            <p>Low (read-only lookup, forced native-tools), medium (general), high (full capability). Each tier has a filtered tool set.</p>
           </div>
           <div class="cell">
             <h4>Recall Pattern</h4>

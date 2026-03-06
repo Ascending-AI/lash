@@ -147,6 +147,7 @@ scripts/run-terminalbench.sh --sample --build-mode host   # use host binary inst
 `/logout` only clears persisted config. The active session may continue with in-memory credentials until you switch provider or restart.
 
 `repl` is the default execution mode. `native-tools` uses provider-native tool calling with the same lash tool definitions, but it does not preserve arbitrary Python locals across turns.
+Low-intelligence sub-agents spawned with `agent_call(..., intelligence="low")` always run in `native-tools`; medium/high sub-agents inherit the parent session's execution mode.
 
 `batch` is native-tools-only. Use it for 2-25 independent tool calls when you already know the arguments up front; it runs those calls concurrently and returns a structured per-call result summary.
 
@@ -327,6 +328,7 @@ With the default capability profile, `native-tools` can call:
 - Native-tools only: `batch`
 
 This is the callable default surface, not the prompt-injected subset. Lash still injects only a smaller prompt-visible tool list and relies on `list_tools(...)` / `search_tools(...)` for discovery of omitted tools.
+For delegation, low-tier sub-agents use this native-tools surface by default even when the parent session is in `repl`.
 
 ## Filesystem Listing Output
 
