@@ -25,19 +25,19 @@ pub enum PromptSectionName {
 impl PromptSectionName {
     pub const ALL: [Self; 14] = [
         Self::Identity,
-        Self::Environment,
         Self::Personality,
         Self::ExecutionContract,
         Self::TerminationContract,
-        Self::ToolAccess,
-        Self::ToolGuides,
-        Self::AvailableTools,
         Self::ErrorRecovery,
-        Self::Builtins,
+        Self::Guidelines,
+        Self::ProjectInstructions,
+        Self::Environment,
         Self::Memory,
         Self::MemoryApi,
-        Self::ProjectInstructions,
-        Self::Guidelines,
+        Self::ToolAccess,
+        Self::Builtins,
+        Self::ToolGuides,
+        Self::AvailableTools,
     ];
 
     pub fn as_str(&self) -> &'static str {
@@ -375,10 +375,8 @@ fn default_section(section: PromptSectionName, input: &PromptComposeInput<'_>) -
             },
             if !(has_helper(input, "search_history") || has_capability(input, "history")) {
                 ""
-            } else if input.has_history {
-                "- Use `_history` and `_mem` only when prior-turn recall is actually needed"
             } else {
-                "- Skip history-mining detours unless the task explicitly depends on prior turns"
+                "- Use `_history` and `_mem` only when prior-turn recall is actually needed"
             }
         )),
     }
@@ -824,5 +822,52 @@ mod tests {
         });
         assert!(text.contains("prefer `batch`"));
         assert!(text.contains("Use `batch(tool_calls=[...])`"));
+    }
+
+    #[test]
+    fn prompt_orders_dynamic_sections_late() {
+        let text = compose_system_prompt(PromptComposeInput {
+            profile: PromptProfile::RootInteractive,
+            execution_mode: crate::ExecutionMode::Repl,
+            context: "ctx",
+            tool_list: "tools",
+            tool_names: &["read_file".to_string()],
+            has_history: true,
+            enabled_capability_ids: &ids_for(&AgentCapabilities::default()),
+            helper_bindings: &helpers_for(&AgentCapabilities::default()),
+            capability_prompt_sections: &prompt_sections_for(&AgentCapabilities::default()),
+            can_write: can_write(&AgentCapabilities::default()),
+            include_soul: true,
+            project_instructions: "project rules",
+            overrides: &[],
+        });
+        let guidelines_idx = text.find("## Guidelines").unwrap();
+        let project_idx = text.find("## Project Instructions").unwrap();
+        let env_idx = text.find("## Environment").unwrap();
+        let tools_idx = text.find("## Available Tools").unwrap();
+        assert!(guidelines_idx < project_idx);
+        assert!(project_idx < env_idx);
+        assert!(env_idx < tools_idx);
+    }
+
+    #[test]
+    fn prompt_does_not_emit_runtime_prune_status() {
+        let text = compose_system_prompt(PromptComposeInput {
+            profile: PromptProfile::RootInteractive,
+            execution_mode: crate::ExecutionMode::Repl,
+            context: "ctx",
+            tool_list: "tools",
+            tool_names: &[],
+            has_history: true,
+            enabled_capability_ids: &ids_for(&AgentCapabilities::default()),
+            helper_bindings: &helpers_for(&AgentCapabilities::default()),
+            capability_prompt_sections: &prompt_sections_for(&AgentCapabilities::default()),
+            can_write: can_write(&AgentCapabilities::default()),
+            include_soul: false,
+            project_instructions: "",
+            overrides: &[],
+        });
+        assert!(!text.contains("Context-pruned turns this run"));
+        assert!(!text.contains("Skip history-mining detours"));
     }
 }

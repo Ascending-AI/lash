@@ -14,7 +14,10 @@ use crate::capabilities::AgentCapabilities;
 use crate::instructions::{FsInstructionSource, InstructionSource};
 use crate::provider::Provider;
 use crate::strip_repl_fragments;
-use crate::{CapabilityId, ExecutionMode, Session, SessionError, ToolCallRecord, ToolProvider};
+use crate::{
+    CapabilityId, ContextFoldingConfig, ExecutionMode, Session, SessionError, ToolCallRecord,
+    ToolProvider,
+};
 
 /// Runtime execution mode for a turn.
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
@@ -59,6 +62,8 @@ pub struct AgentStateEnvelope {
     #[serde(default)]
     pub execution_mode: ExecutionMode,
     #[serde(default)]
+    pub context_folding: ContextFoldingConfig,
+    #[serde(default)]
     pub messages: Vec<Message>,
     #[serde(default)]
     pub iteration: usize,
@@ -79,6 +84,7 @@ impl Default for AgentStateEnvelope {
         Self {
             agent_id: "root".to_string(),
             execution_mode: ExecutionMode::Repl,
+            context_folding: ContextFoldingConfig::default(),
             messages: Vec::new(),
             iteration: 0,
             token_usage: TokenUsage::default(),
@@ -400,6 +406,7 @@ pub struct RuntimeConfig {
     pub model: String,
     pub provider: Provider,
     pub execution_mode: ExecutionMode,
+    pub context_folding: ContextFoldingConfig,
     pub session_id: Option<String>,
     pub max_context_tokens: Option<usize>,
     pub include_soul: bool,
@@ -422,6 +429,7 @@ impl Default for RuntimeConfig {
             model: cfg.model,
             provider: cfg.provider,
             execution_mode: cfg.execution_mode,
+            context_folding: cfg.context_folding,
             session_id: cfg.session_id,
             max_context_tokens: cfg.max_context_tokens,
             include_soul: cfg.include_soul,
@@ -450,6 +458,7 @@ impl From<RuntimeConfig> for AgentConfig {
             model: value.model,
             provider: value.provider,
             execution_mode: value.execution_mode,
+            context_folding: value.context_folding,
             session_id: value.session_id,
             max_context_tokens: value.max_context_tokens,
             sub_agent: false,
@@ -476,6 +485,7 @@ impl From<AgentConfig> for RuntimeConfig {
             model: value.model,
             provider: value.provider,
             execution_mode: value.execution_mode,
+            context_folding: value.context_folding,
             session_id: value.session_id,
             max_context_tokens: value.max_context_tokens,
             include_soul: value.include_soul,
@@ -528,6 +538,9 @@ impl RuntimeEngine {
         {
             state.execution_mode = config.execution_mode;
         }
+        if state.context_folding.is_default() && !config.context_folding.is_default() {
+            state.context_folding = config.context_folding;
+        }
         tools.set_execution_mode(state.execution_mode);
         let session = Session::new(
             tools,
@@ -538,6 +551,7 @@ impl RuntimeEngine {
         .await?;
         let mut agent = Agent::new(session, config.into(), Some(state.agent_id.clone()));
         agent.set_execution_mode(state.execution_mode);
+        agent.set_context_folding(state.context_folding);
         if let Some(snapshot) = state.repl_snapshot.clone() {
             agent.restore(&snapshot).await?;
         }
@@ -562,6 +576,7 @@ impl RuntimeEngine {
     pub fn set_state(&mut self, state: AgentStateEnvelope) {
         if let Some(agent) = self.agent.as_mut() {
             agent.set_execution_mode(state.execution_mode);
+            agent.set_context_folding(state.context_folding);
         }
         self.state = state;
     }
@@ -599,6 +614,14 @@ impl RuntimeEngine {
         self.state.execution_mode = execution_mode;
         if let Some(agent) = self.agent.as_mut() {
             agent.set_execution_mode(execution_mode);
+        }
+    }
+
+    /// Update context folding policy on the underlying agent and persisted envelope.
+    pub fn set_context_folding(&mut self, context_folding: ContextFoldingConfig) {
+        self.state.context_folding = context_folding;
+        if let Some(agent) = self.agent.as_mut() {
+            agent.set_context_folding(context_folding);
         }
     }
 

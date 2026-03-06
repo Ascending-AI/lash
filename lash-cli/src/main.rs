@@ -62,6 +62,14 @@ struct Args {
     #[arg(long = "execution-mode")]
     execution_mode: Option<String>,
 
+    /// Soft context-fold watermark percentage
+    #[arg(long = "context-fold-soft-pct")]
+    context_fold_soft_pct: Option<u8>,
+
+    /// Hard context-fold watermark percentage
+    #[arg(long = "context-fold-hard-pct")]
+    context_fold_hard_pct: Option<u8>,
+
     /// Base URL for the LLM API
     #[arg(long, default_value = OPENAI_GENERIC_DEFAULT_BASE_URL)]
     base_url: String,
@@ -351,6 +359,13 @@ async fn main() -> anyhow::Result<()> {
     if let Some(ref key) = args.tavily_api_key {
         lash_config.set_tavily_api_key(Some(key.clone()));
     }
+    let context_folding = resolve_context_folding(
+        lash_config.context_folding(),
+        args.context_fold_soft_pct,
+        args.context_fold_hard_pct,
+    )
+    .map_err(anyhow::Error::msg)?;
+    lash_config.set_context_folding(context_folding);
     if args.print_prompt.is_none() {
         lash_config.save()?;
     }
@@ -408,6 +423,7 @@ async fn main() -> anyhow::Result<()> {
         headless,
         prompt_overrides,
         execution_mode,
+        context_folding,
         ..Default::default()
     };
 
@@ -505,6 +521,7 @@ async fn main() -> anyhow::Result<()> {
         AgentStateEnvelope {
             agent_id: "root".to_string(),
             execution_mode,
+            context_folding,
             ..AgentStateEnvelope::default()
         },
     )
@@ -744,6 +761,18 @@ fn execution_mode_label(mode: ExecutionMode) -> &'static str {
     }
 }
 
+fn resolve_context_folding(
+    configured: ContextFoldingConfig,
+    soft_override: Option<u8>,
+    hard_override: Option<u8>,
+) -> Result<ContextFoldingConfig, String> {
+    ContextFoldingConfig {
+        soft_limit_pct: soft_override.unwrap_or(configured.soft_limit_pct),
+        hard_limit_pct: hard_override.unwrap_or(configured.hard_limit_pct),
+    }
+    .validate()
+}
+
 fn model_known_in_catalog(provider: &Provider, model: &str) -> bool {
     provider.context_window(model).is_some()
 }
@@ -818,6 +847,7 @@ fn persist_root_agent_state(
     provider: &Provider,
     configured_model: &str,
     execution_mode: ExecutionMode,
+    context_folding: ContextFoldingConfig,
     reasoning_effort: Option<&str>,
     toolset_hash: &str,
     prompt_hash: Option<String>,
@@ -841,6 +871,10 @@ fn persist_root_agent_state(
         "configured_model": manifest.configured_model,
         "resolved_model": manifest.resolved_model,
         "execution_mode": execution_mode_label(execution_mode),
+        "context_folding": {
+            "soft_limit_pct": context_folding.soft_limit_pct,
+            "hard_limit_pct": context_folding.hard_limit_pct,
+        },
         "reasoning_effort": manifest.reasoning_effort,
         "toolset_hash": manifest.toolset_hash,
         "prompt_hash": manifest.prompt_hash,
@@ -849,6 +883,10 @@ fn persist_root_agent_state(
     state.replay_manifest = Some(manifest_json.clone());
     let config_json = serde_json::json!({
         "manifest": manifest_json,
+        "context_folding": {
+            "soft_limit_pct": context_folding.soft_limit_pct,
+            "hard_limit_pct": context_folding.hard_limit_pct,
+        },
         "task_state": state.task_state,
         "subagent_state": state.subagent_state,
     })
@@ -977,6 +1015,10 @@ async fn run_app(
     let mut history: Vec<Message> = Vec::new();
     let mut turn_counter: usize = 0;
     let mut runtime = Some(runtime);
+    let mut current_context_folding = runtime
+        .as_ref()
+        .map(|rt| rt.export_state().context_folding)
+        .unwrap_or_default();
     let mut desired_dynamic = dynamic_tools.export_state();
     let mut pending_reconfigure = false;
 
@@ -1131,14 +1173,17 @@ async fn run_app(
                     history = state.messages.clone();
                     turn_counter = state.iteration;
                     app.token_usage = state.token_usage.clone();
+                    current_context_folding = state.context_folding;
 
                     let persisted_execution_mode = state.execution_mode;
+                    let persisted_context_folding = state.context_folding;
                     persist_root_agent_state(
                         &store,
                         &mut state,
                         &provider,
                         &app.model,
                         persisted_execution_mode,
+                        persisted_context_folding,
                         current_reasoning_effort.as_deref(),
                         &toolset_hash,
                         latest_user_prompt_hash(&history),
@@ -1584,6 +1629,7 @@ async fn run_app(
                                         let _ = rt.reset_session().await;
                                         rt.set_state(AgentStateEnvelope {
                                             agent_id: "root".to_string(),
+                                            context_folding: current_context_folding,
                                             messages: history.clone(),
                                             iteration: turn_counter,
                                             token_usage: app.token_usage.clone(),
@@ -2932,9 +2978,10 @@ async fn restore_agent_state(
     };
 
     if let Some(state) = resume_store.load_agent_state("root") {
+        let config_value = serde_json::from_str::<serde_json::Value>(&state.config_json).ok();
         *turn_counter = state.iteration.max(0) as usize;
-        let restored_execution_mode = serde_json::from_str::<serde_json::Value>(&state.config_json)
-            .ok()
+        let restored_execution_mode = config_value
+            .as_ref()
             .and_then(|v| {
                 v.get("manifest")
                     .and_then(|m| m.get("execution_mode"))
@@ -2943,6 +2990,12 @@ async fn restore_agent_state(
             })
             .and_then(|raw| parse_execution_mode(&raw).ok())
             .unwrap_or(ExecutionMode::Repl);
+        let restored_context_folding = config_value
+            .as_ref()
+            .and_then(|v| v.get("context_folding").cloned())
+            .and_then(|v| serde_json::from_value::<ContextFoldingConfig>(v).ok())
+            .and_then(|cfg| cfg.validate().ok())
+            .unwrap_or_default();
         *execution_mode = restored_execution_mode;
         // Restore token counts from DB
         if state.input_tokens > 0 || state.output_tokens > 0 {
@@ -2956,6 +3009,7 @@ async fn restore_agent_state(
         if let Some(ref dill_blob) = state.dill_blob {
             // Try to restore REPL state
             if let Some(rt) = runtime.as_mut() {
+                rt.set_context_folding(restored_context_folding);
                 match rt.restore_repl(dill_blob).await {
                     Ok(()) => {
                         app.blocks.push(DisplayBlock::SystemMessage(
@@ -3037,11 +3091,12 @@ async fn restore_agent_state(
 
         // Restore runtime envelope so replay metadata and token counters survive resume.
         if let Some(rt) = runtime.as_mut() {
-            let replay_manifest = serde_json::from_str::<serde_json::Value>(&state.config_json)
-                .ok()
+            let replay_manifest = config_value
+                .as_ref()
                 .and_then(|v| v.get("manifest").cloned());
             rt.set_state(AgentStateEnvelope {
                 agent_id: "root".to_string(),
+                context_folding: restored_context_folding,
                 messages: history.clone(),
                 iteration: *turn_counter,
                 token_usage: app.token_usage.clone(),

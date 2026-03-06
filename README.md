@@ -149,6 +149,12 @@ scripts/run-terminalbench.sh --sample --build-mode host   # use host binary inst
 `repl` is the default execution mode. `native-tools` uses provider-native tool calling with the same lash tool definitions, but it does not preserve arbitrary Python locals across turns.
 Low-intelligence sub-agents spawned with `agent_call(..., intelligence="low")` always run in `native-tools`; medium/high sub-agents inherit the parent session's execution mode.
 
+Context folding is batched and cache-friendly. Lash keeps the prompt stable until the hard watermark is hit, then folds old history back to the soft watermark with one stable archive marker instead of mutating prompt status every turn. Defaults are `50%` soft and `60%` hard. Override them with:
+
+```bash
+lash --context-fold-soft-pct 45 --context-fold-hard-pct 58
+```
+
 `batch` is native-tools-only. Use it for 2-25 independent tool calls when you already know the arguments up front; it runs those calls concurrently and returns a structured per-call result summary.
 
 In `native-tools`, lash persists structured tool call/result history and replays it back to providers as native tool-call turns. Multi-call assistant steps are replayed as grouped tool-calling turns where the provider supports it, and tool results are fed back as direct output/error content rather than wrapped in an extra lash-specific envelope.
@@ -285,8 +291,22 @@ High-level contract:
 Host/runtime policy knobs are configured via `RuntimeConfig`:
 
 - `host_profile` (`interactive` / `headless` / `embedded`)
+- `context_folding.soft_limit_pct` / `context_folding.hard_limit_pct`
 - `base_dir` + optional custom `path_resolver`
 - `sanitizer` and `termination` policies
+
+The same folding policy is persisted in CLI config under:
+
+```json
+{
+  "runtime": {
+    "context_folding": {
+      "soft_limit_pct": 50,
+      "hard_limit_pct": 60
+    }
+  }
+}
+```
 
 Integration invariants:
 

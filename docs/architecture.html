@@ -741,7 +741,7 @@
           </div>
           <div class="cell">
             <h4>Context Control</h4>
-            <p>Rolling window + <code>_history</code> / <code>_mem</code> for long-running sessions and sub-agents.</p>
+            <p>Batched context folding with soft/hard watermarks plus <code>_history</code> / <code>_mem</code> for long-running sessions and sub-agents.</p>
           </div>
           <div class="cell">
             <h4>Capability Guidance</h4>
@@ -1491,7 +1491,7 @@ skill = <span class="fn">load_skill</span>(<span class="str">"frontend-design"</
         <div class="step">
           <span class="step-num">03</span>
           <strong>Agent Step</strong>
-          <p>Prompt assembled from active tool/capability projection + injected tool docs, using the current execution mode.</p>
+          <p>Prompt assembled from a mostly static prefix plus later dynamic sections for environment, memory, and tools, using the current execution mode.</p>
         </div>
         <div class="step">
           <span class="step-num">04</span>
@@ -1500,8 +1500,8 @@ skill = <span class="fn">load_skill</span>(<span class="str">"frontend-design"</
         </div>
         <div class="step">
           <span class="step-num">05</span>
-          <strong>Output</strong>
-          <p>Events stream back; final answer + updated envelope return as one canonical <code>AssembledTurn</code>.</p>
+          <strong>Fold + Output</strong>
+          <p>When prompt usage reaches the hard watermark, old turns are folded back to the soft watermark with one stable archive marker; events stream back and the final answer + updated envelope return as one canonical <code>AssembledTurn</code>.</p>
         </div>
       </div>
     </div>

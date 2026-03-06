@@ -82,6 +82,51 @@ pub enum ExecutionMode {
     NativeTools,
 }
 
+/// Watermark policy for folding old context out of the active prompt window.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct ContextFoldingConfig {
+    #[serde(default = "ContextFoldingConfig::default_soft_limit_pct")]
+    pub soft_limit_pct: u8,
+    #[serde(default = "ContextFoldingConfig::default_hard_limit_pct")]
+    pub hard_limit_pct: u8,
+}
+
+impl ContextFoldingConfig {
+    pub const fn default_soft_limit_pct() -> u8 {
+        50
+    }
+
+    pub const fn default_hard_limit_pct() -> u8 {
+        60
+    }
+
+    pub fn validate(self) -> Result<Self, String> {
+        if self.soft_limit_pct == 0 || self.hard_limit_pct == 0 {
+            return Err("context folding percentages must be greater than 0".to_string());
+        }
+        if self.soft_limit_pct >= self.hard_limit_pct {
+            return Err("context folding soft limit must be less than hard limit".to_string());
+        }
+        if self.hard_limit_pct >= 100 {
+            return Err("context folding hard limit must be less than 100".to_string());
+        }
+        Ok(self)
+    }
+
+    pub fn is_default(&self) -> bool {
+        *self == Self::default()
+    }
+}
+
+impl Default for ContextFoldingConfig {
+    fn default() -> Self {
+        Self {
+            soft_limit_pct: Self::default_soft_limit_pct(),
+            hard_limit_pct: Self::default_hard_limit_pct(),
+        }
+    }
+}
+
 /// A message sent from the sandbox to the host during execution.
 #[derive(Clone, Debug)]
 pub struct SandboxMessage {
@@ -473,6 +518,30 @@ mod tests {
     fn format_tool_docs_empty() {
         let docs = ToolDefinition::format_tool_docs(&[], ExecutionMode::Repl);
         assert!(docs.is_empty());
+    }
+
+    #[test]
+    fn context_folding_defaults_and_validation() {
+        let cfg = ContextFoldingConfig::default();
+        assert_eq!(cfg.soft_limit_pct, 50);
+        assert_eq!(cfg.hard_limit_pct, 60);
+        assert!(cfg.validate().is_ok());
+        assert!(
+            ContextFoldingConfig {
+                soft_limit_pct: 60,
+                hard_limit_pct: 50,
+            }
+            .validate()
+            .is_err()
+        );
+        assert!(
+            ContextFoldingConfig {
+                soft_limit_pct: 50,
+                hard_limit_pct: 100,
+            }
+            .validate()
+            .is_err()
+        );
     }
 }
 

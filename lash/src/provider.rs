@@ -2,6 +2,7 @@ use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 
+use crate::ContextFoldingConfig;
 use crate::llm::factory::adapter_for;
 use crate::oauth::{self, OAuthError};
 
@@ -95,6 +96,18 @@ impl AuxiliarySecrets {
     }
 }
 
+#[derive(Clone, Debug, Serialize, Deserialize, Default)]
+pub struct RuntimeSettings {
+    #[serde(default, skip_serializing_if = "ContextFoldingConfig::is_default")]
+    pub context_folding: ContextFoldingConfig,
+}
+
+impl RuntimeSettings {
+    fn is_default(&self) -> bool {
+        self.context_folding.is_default()
+    }
+}
+
 /// Stored configuration: provider credentials + service API keys.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct LashConfig {
@@ -103,6 +116,8 @@ pub struct LashConfig {
     pub auxiliary_secrets: AuxiliarySecrets,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub agent_models: Option<AgentModels>,
+    #[serde(default, skip_serializing_if = "RuntimeSettings::is_default")]
+    pub runtime: RuntimeSettings,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -275,6 +290,7 @@ impl LashConfig {
             provider,
             auxiliary_secrets: AuxiliarySecrets::default(),
             agent_models: None,
+            runtime: RuntimeSettings::default(),
         }
     }
 
@@ -320,6 +336,14 @@ impl LashConfig {
         self.auxiliary_secrets.tavily_api_key = key;
     }
 
+    pub fn context_folding(&self) -> ContextFoldingConfig {
+        self.runtime.context_folding
+    }
+
+    pub fn set_context_folding(&mut self, config: ContextFoldingConfig) {
+        self.runtime.context_folding = config;
+    }
+
     /// Delete ~/.lash/config.json
     pub fn clear() -> Result<(), std::io::Error> {
         let path = Self::config_path();
@@ -337,6 +361,7 @@ pub fn save_provider(provider: &Provider) -> Result<(), std::io::Error> {
         provider: provider.clone(),
         auxiliary_secrets: AuxiliarySecrets::default(),
         agent_models: None,
+        runtime: RuntimeSettings::default(),
     });
     config.provider = provider.clone();
     config.save()
@@ -589,5 +614,26 @@ mod tests {
 
         let cfg: LashConfig = serde_json::from_value(raw).expect("valid config json");
         assert_eq!(cfg.tavily_api_key(), Some("new-key"));
+    }
+
+    #[test]
+    fn runtime_context_folding_preserved() {
+        let raw = serde_json::json!({
+            "provider": {
+                "type": "openai-generic",
+                "api_key": "k",
+                "base_url": "https://openrouter.ai/api/v1"
+            },
+            "runtime": {
+                "context_folding": {
+                    "soft_limit_pct": 45,
+                    "hard_limit_pct": 58
+                }
+            }
+        });
+
+        let cfg: LashConfig = serde_json::from_value(raw).expect("valid config json");
+        assert_eq!(cfg.context_folding().soft_limit_pct, 45);
+        assert_eq!(cfg.context_folding().hard_limit_pct, 58);
     }
 }

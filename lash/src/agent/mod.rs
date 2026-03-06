@@ -9,6 +9,7 @@ use std::sync::Arc;
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 
+use crate::ContextFoldingConfig;
 use crate::ExecutionMode;
 use crate::ToolDefinition;
 use crate::capabilities::AgentCapabilities;
@@ -28,11 +29,110 @@ use message::IMAGE_REF_PREFIX;
 use prompt::{PromptComposeInput, PromptProfile, compose_system_prompt};
 pub use prompt::{PromptOverrideMode, PromptSectionName, PromptSectionOverride};
 
+const CONTEXT_ARCHIVE_MARKER_ID: &str = "__context_archive__";
+const MIN_RECENT_USER_TURNS: usize = 3;
+
 /// Send an event to the channel if it's still open.
 pub(crate) async fn send_event(tx: &mpsc::Sender<AgentEvent>, event: AgentEvent) {
     if !tx.is_closed() {
         let _ = tx.send(event).await;
     }
+}
+
+#[derive(Clone, Copy, Debug, Default)]
+struct ContextFoldResult {
+    has_archived_history: bool,
+}
+
+fn is_context_archive_marker(msg: &Message) -> bool {
+    msg.id == CONTEXT_ARCHIVE_MARKER_ID
+}
+
+fn context_archive_marker(history_enabled: bool) -> Message {
+    let content = if history_enabled {
+        "Earlier turns were archived outside the active context. Use `_history.user_messages()`, `_history.search(...)`, or `_history[i]` for full-fidelity recall."
+    } else {
+        "Earlier turns were archived outside the active context."
+    };
+    Message {
+        id: CONTEXT_ARCHIVE_MARKER_ID.to_string(),
+        role: MessageRole::System,
+        parts: vec![Part {
+            id: format!("{CONTEXT_ARCHIVE_MARKER_ID}.p0"),
+            kind: PartKind::Text,
+            content: content.to_string(),
+            tool_call_id: None,
+            tool_name: None,
+            prune_state: PruneState::Intact,
+        }],
+    }
+}
+
+fn leading_system_prefix_len(msgs: &[Message]) -> usize {
+    msgs.iter()
+        .take_while(|msg| msg.role == MessageRole::System)
+        .count()
+}
+
+fn keep_from_for_recent_turns(msgs: &[Message], prefix_len: usize) -> usize {
+    let mut user_turns = 0usize;
+    for i in (prefix_len..msgs.len()).rev() {
+        if msgs[i].role == MessageRole::User {
+            user_turns += 1;
+            if user_turns >= MIN_RECENT_USER_TURNS {
+                return i;
+            }
+        }
+    }
+    prefix_len
+}
+
+fn apply_context_folding(
+    msgs: &mut Vec<Message>,
+    last_input_tokens: usize,
+    max_context: usize,
+    policy: ContextFoldingConfig,
+    history_enabled: bool,
+) -> ContextFoldResult {
+    let mut result = ContextFoldResult {
+        has_archived_history: msgs.iter().any(is_context_archive_marker),
+    };
+    if last_input_tokens == 0 || msgs.is_empty() {
+        return result;
+    }
+
+    let hard_budget = max_context * usize::from(policy.hard_limit_pct) / 100;
+    if last_input_tokens < hard_budget {
+        return result;
+    }
+
+    let soft_budget = max_context * usize::from(policy.soft_limit_pct) / 100;
+    let prefix_len = leading_system_prefix_len(msgs);
+    let total_chars: usize = msgs.iter().map(Message::char_count).sum();
+    let target_chars = total_chars.saturating_mul(soft_budget) / last_input_tokens.max(1);
+
+    let mut keep_from = msgs.len();
+    let mut tail_chars = 0usize;
+    for i in (prefix_len..msgs.len()).rev() {
+        let cost = msgs[i].char_count();
+        if tail_chars + cost > target_chars {
+            break;
+        }
+        tail_chars += cost;
+        keep_from = i;
+    }
+
+    keep_from = keep_from.min(keep_from_for_recent_turns(msgs, prefix_len));
+    if keep_from <= prefix_len {
+        return result;
+    }
+
+    msgs.drain(prefix_len..keep_from);
+    if !result.has_archived_history {
+        msgs.insert(prefix_len, context_archive_marker(history_enabled));
+    }
+    result.has_archived_history = true;
+    result
 }
 
 // ─── Token tracking ───
@@ -88,6 +188,8 @@ pub struct AgentConfig {
     pub instruction_source: Arc<dyn InstructionSource>,
     /// Execution backend for turns.
     pub execution_mode: ExecutionMode,
+    /// Watermark policy for folding old context out of the active prompt window.
+    pub context_folding: ContextFoldingConfig,
 }
 
 impl Default for AgentConfig {
@@ -110,6 +212,7 @@ impl Default for AgentConfig {
             prompt_overrides: Vec::new(),
             instruction_source: Arc::new(FsInstructionSource::new()),
             execution_mode: ExecutionMode::Repl,
+            context_folding: ContextFoldingConfig::default(),
         }
     }
 }
@@ -420,6 +523,10 @@ impl Agent {
         self.session.tools().set_execution_mode(execution_mode);
     }
 
+    pub fn set_context_folding(&mut self, context_folding: ContextFoldingConfig) {
+        self.config.context_folding = context_folding;
+    }
+
     fn cached_base_context(&mut self) -> String {
         if let Some(context) = self.cached_base_context.as_ref() {
             return context.clone();
@@ -707,9 +814,6 @@ impl Agent {
         let mut iteration: usize = run_offset;
         let mut tool_images: Vec<(String, Vec<u8>)> = Vec::new();
         let mut termination = TurnTerminationPolicyState::new();
-        let mut has_history = false;
-        let mut context_pruned_turns: usize = 0;
-        let session_start = std::time::Instant::now();
 
         loop {
             if cancel.is_cancelled() {
@@ -717,125 +821,15 @@ impl Agent {
                 return (msgs, iteration);
             }
 
-            // Rolling window: when context exceeds 60% of the model's token limit,
-            // collapse old turns to make room. Always preserve all User messages.
-            // Uses actual input_tokens from the last API call for accurate measurement,
-            // with char-based estimation (~4 chars/token) as proportional weights.
-            msgs.retain(|m| m.id != "history_note");
-            {
-                let token_budget = max_context * 60 / 100;
-                let needs_pruning = last_input_tokens > token_budget;
-
-                // `keep_from` is the start index of the retained tail.
-                // Default to 1 (= keep everything after the initial system message).
-                // If we are not pruning this turn, [1..keep_from) is empty and no collapse happens.
-                let mut keep_from = 1usize;
-                if needs_pruning {
-                    keep_from = msgs.len();
-                    // Estimate how many chars to keep: scale by (budget / actual) ratio
-                    let total_chars: usize = msgs.iter().map(|m| m.char_count()).sum();
-                    let target_chars = total_chars * token_budget / last_input_tokens.max(1);
-
-                    // Walk backwards, accumulating char counts as proportional weights
-                    let mut tail_chars = 0usize;
-                    for i in (1..msgs.len()).rev() {
-                        let cost = msgs[i].char_count();
-                        if tail_chars + cost > target_chars {
-                            break;
-                        }
-                        tail_chars += cost;
-                        keep_from = i;
-                    }
-                }
-                // Collect User messages from the pruned region [1..keep_from)
-                // so they're preserved in the context.
-                let mut preserved_user_msgs: Vec<Message> = Vec::new();
-                if keep_from > 1 {
-                    for msg in &msgs[1..keep_from] {
-                        if msg.role == MessageRole::User {
-                            preserved_user_msgs.push(msg.clone());
-                        }
-                    }
-                }
-                // Count collapsed turns (assistant+system pairs, minus preserved users)
-                let collapsed_count = if keep_from > 1 {
-                    (keep_from - 1 - preserved_user_msgs.len()) / 2
-                } else {
-                    0
-                };
-                if collapsed_count > 0 {
-                    context_pruned_turns += collapsed_count;
-                    has_history = true;
-                    // Drain the pruned region
-                    msgs.drain(1..keep_from);
-                    // Re-insert preserved user messages, then the history note
-                    let elapsed = session_start.elapsed();
-                    let elapsed_str = if elapsed.as_secs() >= 3600 {
-                        format!(
-                            "{}h {}m",
-                            elapsed.as_secs() / 3600,
-                            (elapsed.as_secs() % 3600) / 60
-                        )
-                    } else if elapsed.as_secs() >= 60 {
-                        format!("{}m {}s", elapsed.as_secs() / 60, elapsed.as_secs() % 60)
-                    } else {
-                        format!("{}s", elapsed.as_secs())
-                    };
-                    let note = if history_enabled {
-                        format!(
-                            "[Turn {}, {} elapsed. {} earlier turn(s) dropped from context (not summarized). \
-                             Use `_history` to access them at full fidelity:\n \
-                             `_history.user_messages()` -- what the user asked\n \
-                             `_history.search(\"query\", mode=\"hybrid\")` -- search past results\n \
-                             `_history[i]` -- specific turn]",
-                            iteration, elapsed_str, collapsed_count
-                        )
-                    } else {
-                        format!(
-                            "[Turn {}, {} elapsed. {} earlier turn(s) dropped from context (not summarized).]",
-                            iteration, elapsed_str, collapsed_count
-                        )
-                    };
-                    msgs.insert(
-                        1,
-                        Message {
-                            id: "history_note".to_string(),
-                            role: MessageRole::System,
-                            parts: vec![Part {
-                                id: "history_note.p0".to_string(),
-                                kind: PartKind::Text,
-                                content: note,
-                                tool_call_id: None,
-                                tool_name: None,
-                                prune_state: PruneState::Intact,
-                            }],
-                        },
-                    );
-                    // Insert preserved user messages right after the history note
-                    for (idx, user_msg) in preserved_user_msgs.into_iter().enumerate() {
-                        msgs.insert(2 + idx, user_msg);
-                    }
-                }
-            }
-
-            let history_scope = if history_enabled {
-                let guidance = if self.config.sub_agent {
-                    "This count tracks pruning in this agent only; inherited parent history may also exist in `_history`."
-                } else {
-                    "If this is 0, avoid `_history` mining detours unless prior-turn context is explicitly needed."
-                };
-                format!(
-                    "Context-pruned turns this run: {}. {}",
-                    context_pruned_turns, guidance
-                )
-            } else {
-                format!("Context-pruned turns this run: {}.", context_pruned_turns)
-            };
-            let context = if base_context.is_empty() {
-                history_scope
-            } else {
-                format!("{base_context}\n{history_scope}")
-            };
+            let fold = apply_context_folding(
+                &mut msgs,
+                last_input_tokens,
+                max_context,
+                self.config.context_folding,
+                history_enabled,
+            );
+            let has_history = fold.has_archived_history;
+            let context = base_context.clone();
 
             let chat_msgs = messages_to_chat(&msgs);
 
@@ -1821,7 +1815,23 @@ Prose-only output is not a valid step. Continue with concrete tool execution; ca
             .collect();
         let history_enabled = helper_bindings.contains("search_history")
             || enabled_capability_ids.contains("history");
-        let context_pruned_turns = 0usize;
+        let mut last_input_tokens: usize = 0;
+        let max_context = self
+            .config
+            .max_context_tokens
+            .or_else(|| {
+                self.config
+                    .provider
+                    .context_window(&self.config.model)
+                    .map(|v| v as usize)
+            })
+            .unwrap_or_else(|| {
+                eprintln!(
+                    "Warning: unknown context window for model '{}', defaulting to 200k",
+                    self.config.model
+                );
+                200_000
+            });
 
         struct NativeToolOutcome {
             call_id: String,
@@ -1836,21 +1846,15 @@ Prose-only output is not a valid step. Continue with concrete tool execution; ca
                 emit!(AgentEvent::Done);
                 return (msgs, iteration);
             }
+            let fold = apply_context_folding(
+                &mut msgs,
+                last_input_tokens,
+                max_context,
+                self.config.context_folding,
+                history_enabled,
+            );
             let llm_messages = messages_to_chat(&msgs);
-
-            let history_scope = if history_enabled {
-                format!(
-                    "Context-pruned turns this run: {}. If this is 0, avoid `_history` mining detours unless prior-turn context is explicitly needed.",
-                    context_pruned_turns
-                )
-            } else {
-                format!("Context-pruned turns this run: {}.", context_pruned_turns)
-            };
-            let context = if base_context.is_empty() {
-                history_scope
-            } else {
-                format!("{base_context}\n{history_scope}")
-            };
+            let context = base_context.clone();
             let include_soul = if self.config.sub_agent {
                 self.config.include_soul
             } else {
@@ -1863,7 +1867,7 @@ Prose-only output is not a valid step. Continue with concrete tool execution; ca
                 context: &context,
                 tool_list: &tool_list,
                 tool_names: &tool_names,
-                has_history: context_pruned_turns > 0,
+                has_history: fold.has_archived_history,
                 enabled_capability_ids: &enabled_capability_ids,
                 helper_bindings: &helper_bindings,
                 capability_prompt_sections: &capability_prompt_sections,
@@ -1958,6 +1962,7 @@ Prose-only output is not a valid step. Continue with concrete tool execution; ca
                 output_tokens: llm_response.usage.output_tokens,
                 cached_input_tokens: llm_response.usage.cached_input_tokens,
             };
+            last_input_tokens = usage.input_tokens as usize;
             cumulative_usage.add(&usage);
             emit!(AgentEvent::TokenUsage {
                 iteration,
@@ -2570,7 +2575,27 @@ fn parse_fence_line(
 
 #[cfg(test)]
 mod tests {
-    use super::{format_tool_result_content, is_malformed_assistant_output, parse_fence_line};
+    use super::{
+        apply_context_folding, format_tool_result_content, is_context_archive_marker,
+        is_malformed_assistant_output, parse_fence_line,
+    };
+    use crate::ContextFoldingConfig;
+    use crate::agent::{Message, MessageRole, Part, PartKind, PruneState};
+
+    fn text_message(id: &str, role: MessageRole, content: &str) -> Message {
+        Message {
+            id: id.to_string(),
+            role,
+            parts: vec![Part {
+                id: format!("{id}.p0"),
+                kind: PartKind::Text,
+                content: content.to_string(),
+                tool_call_id: None,
+                tool_name: None,
+                prune_state: PruneState::Intact,
+            }],
+        }
+    }
 
     #[test]
     fn parses_inline_open_and_close_tags() {
@@ -2727,6 +2752,55 @@ mod tests {
         assert_eq!(
             format_tool_result_content(false, &serde_json::json!({"code": "ENOENT"})),
             r#"{"error":{"code":"ENOENT"}}"#
+        );
+    }
+
+    #[test]
+    fn context_folding_inserts_single_archive_marker_and_keeps_recent_turns() {
+        let mut msgs = vec![
+            text_message("u1", MessageRole::User, &"u1".repeat(40)),
+            text_message("a1", MessageRole::Assistant, &"a1".repeat(40)),
+            text_message("u2", MessageRole::User, &"u2".repeat(40)),
+            text_message("a2", MessageRole::Assistant, &"a2".repeat(40)),
+            text_message("u3", MessageRole::User, &"u3".repeat(40)),
+            text_message("a3", MessageRole::Assistant, &"a3".repeat(40)),
+            text_message("u4", MessageRole::User, &"u4".repeat(40)),
+            text_message("a4", MessageRole::Assistant, &"a4".repeat(40)),
+        ];
+
+        let result =
+            apply_context_folding(&mut msgs, 70, 100, ContextFoldingConfig::default(), true);
+
+        assert!(result.has_archived_history);
+        assert!(is_context_archive_marker(&msgs[0]));
+        assert_eq!(
+            msgs.iter()
+                .filter(|msg| is_context_archive_marker(msg))
+                .count(),
+            1
+        );
+        assert!(!msgs.iter().any(|msg| msg.id == "u1"));
+        assert!(msgs.iter().any(|msg| msg.id == "u2"));
+        assert!(msgs.iter().any(|msg| msg.id == "u4"));
+    }
+
+    #[test]
+    fn context_folding_does_not_repeat_between_soft_and_hard() {
+        let mut msgs = vec![
+            text_message("__context_archive__", MessageRole::System, "archived"),
+            text_message("u1", MessageRole::User, "hello"),
+            text_message("a1", MessageRole::Assistant, "world"),
+        ];
+
+        let result =
+            apply_context_folding(&mut msgs, 55, 100, ContextFoldingConfig::default(), true);
+
+        assert!(result.has_archived_history);
+        assert_eq!(
+            msgs.iter()
+                .filter(|msg| is_context_archive_marker(msg))
+                .count(),
+            1
         );
     }
 }
