@@ -527,6 +527,24 @@ impl Agent {
         self.config.context_folding = context_folding;
     }
 
+    fn transport_stream_events(
+        &self,
+        requested: Option<tokio::sync::mpsc::UnboundedSender<LlmStreamEvent>>,
+    ) -> Option<tokio::sync::mpsc::UnboundedSender<LlmStreamEvent>> {
+        if requested.is_some() {
+            return requested;
+        }
+
+        let llm = adapter_for(&self.config.provider);
+        if llm.requires_streaming() {
+            let (tx, rx) = tokio::sync::mpsc::unbounded_channel::<LlmStreamEvent>();
+            drop(rx);
+            Some(tx)
+        } else {
+            None
+        }
+    }
+
     fn cached_base_context(&mut self) -> String {
         if let Some(context) = self.cached_base_context.as_ref() {
             return context.clone();
@@ -985,7 +1003,7 @@ impl Agent {
                     let (llm_stream_tx, mut llm_stream_rx) =
                         tokio::sync::mpsc::unbounded_channel::<LlmStreamEvent>();
                     let llm_request = LlmRequest {
-                        stream_events: Some(llm_stream_tx),
+                        stream_events: self.transport_stream_events(Some(llm_stream_tx)),
                         ..llm_request
                     };
 
@@ -1919,7 +1937,7 @@ Prose-only output is not a valid step. Continue with concrete tool execution; ca
                         },
                         reasoning_effort: self.config.reasoning_effort.clone(),
                         session_id: self.config.session_id.clone(),
-                        stream_events: None,
+                        stream_events: self.transport_stream_events(None),
                     };
 
                     let mut call_provider = self.config.provider.clone();

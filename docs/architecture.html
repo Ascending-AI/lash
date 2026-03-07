@@ -574,7 +574,7 @@
     </div>
     <div class="doc-meta">
       Lash Agent Framework<br>
-      Rust + Embedded Python<br>
+      Rust + Optional Embedded Python<br>
       2026
     </div>
   </header>
@@ -640,7 +640,7 @@
         <div class="arch-card-tag tag-bridge"><span class="dot"></span>Layer 4</div>
         <div class="arch-card-title">Execution Bridge</div>
         <div class="arch-card-desc">
-          Two execution backends: embedded Python REPL and provider-native tool calls.
+          Two execution backends: an optional embedded Python REPL and provider-native tool calls.
           Mode-specific contracts with bidirectional streaming signals.
         </div>
       </div>
@@ -917,7 +917,7 @@ models, routes = <span class="kw">await</span> asyncio.<span class="fn">gather</
         <div class="arch-card-desc">
           The Rust agent loop sends tool schemas to the provider. The model responds with native tool calls
           when execution is needed &mdash; no Python, no <code>&lt;repl&gt;</code>. Tool results are fed back as structured
-          content for the next turn.
+          content for the next turn. Native-tools-only builds compile just this backend and make it the default.
         </div>
         <div class="cell-grid cols-2">
           <div class="cell">
@@ -1113,7 +1113,7 @@ Added `timeout_ms: u64` field to the Config struct.</pre>
         <div class="arch-card-title">Sub-Agent Orchestration</div>
         <div class="arch-card-desc">
           <code>agent_call</code> forks parent dynamic state per sub-agent. Sub-agents share the same filesystem/worktree
-          but get isolated tool/capability state. Low tier sub-agents are filtered (no write/delegation tools) and always execute in <code>native-tools</code>; medium/high inherit the parent session's execution mode.
+          but get isolated tool/capability state. Low tier sub-agents are filtered (no write/delegation tools) and always execute in <code>native-tools</code>; medium/high inherit the parent session's execution mode. REPL-only setup (<code>done(...)</code> wrappers, <code>_history</code>/<code>_mem</code> injection) only applies when the child actually runs in <code>repl</code>.
         </div>
         <div class="cell-grid cols-3">
           <div class="cell">
@@ -1122,7 +1122,7 @@ Added `timeout_ms: u64` field to the Config struct.</pre>
           </div>
           <div class="cell">
             <h4>Recall Pattern</h4>
-            <p>Use a low-tier read-only sub-agent to summarize <code>_history</code>/<code>_mem</code> when prior context is needed.</p>
+            <p>Use a low-tier read-only sub-agent to summarize prior context when needed. In REPL mode that can include <code>_history</code>/<code>_mem</code>; in native-tools mode it relies on transcript and tool-result context.</p>
           </div>
           <div class="cell">
             <h4>Constraint</h4>
@@ -1496,7 +1496,7 @@ skill = <span class="fn">load_skill</span>(<span class="str">"frontend-design"</
         <div class="step">
           <span class="step-num">04</span>
           <strong>Mode Exec</strong>
-          <p>Execution diverges here: persistent Python REPL for <code>repl</code>, provider-native tool loop for <code>native-tools</code>.</p>
+          <p>Execution diverges here: persistent Python REPL for <code>repl</code> when that backend is built, provider-native tool loop for <code>native-tools</code>.</p>
         </div>
         <div class="step">
           <span class="step-num">05</span>
@@ -1525,7 +1525,7 @@ skill = <span class="fn">load_skill</span>(<span class="str">"frontend-design"</
       <div class="ref"><b>Prompt Contracts</b><code>lash/src/agent/prompt.rs</code></div>
       <div class="ref"><b>Session Bridge</b><code>lash/src/session.rs</code></div>
       <div class="ref"><b>LLM Message Types</b><code>lash/src/llm/types.rs</code></div>
-      <div class="ref"><b>Embedded Python</b><code>lash/src/embedded.rs + lash/python/repl.py</code></div>
+      <div class="ref"><b>Embedded Python</b><code>lash/src/embedded.rs + lash/src/embedded_stub.rs + lash/python/repl.py</code></div>
       <div class="ref"><b>Tool Model</b><code>lash/src/lib.rs + lash/src/tools/*</code></div>
       <div class="ref"><b>Capabilities</b><code>lash/src/capabilities.rs</code></div>
       <div class="ref"><b>Skills</b><code>lash/src/tools/skills.rs</code></div>

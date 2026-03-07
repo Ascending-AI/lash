@@ -121,7 +121,7 @@ Each skill is a directory containing a `SKILL.md` with YAML frontmatter (`name`,
     references/bar.md
 ```
 
-Use `/skills` to browse, `/<skill-name>` to invoke, or `load_skill("name")` from the REPL.
+Use `/skills` to browse, `/<skill-name>` to invoke, or call `load_skill("name")` from REPL/native-tools execution.
 
 ## Terminal Bench
 
@@ -143,7 +143,7 @@ scripts/run-terminalbench.sh --sample --build-mode host   # use host binary inst
 | `/clear`, `/new` | Reset conversation |
 | `/controls` | Show keyboard shortcuts |
 | `/model [name]` | Show current model or switch LLM model |
-| `/mode [name]` | Show current execution mode or switch between `repl` and `native-tools` |
+| `/mode [name]` | Show current execution mode or switch modes (Python-enabled builds: `repl` or `native-tools`; native-tools-only builds: `native-tools`) |
 | `/provider` | Open provider setup in-app |
 | `/login` | Alias for `/provider` |
 | `/logout` | Remove stored credentials from disk |
@@ -158,7 +158,7 @@ scripts/run-terminalbench.sh --sample --build-mode host   # use host binary inst
 
 `/logout` only clears persisted config. The active session may continue with in-memory credentials until you switch provider or restart.
 
-`repl` is the default execution mode. `native-tools` uses provider-native tool calling with the same lash tool definitions, but it does not preserve arbitrary Python locals across turns.
+In Python-enabled builds, `repl` is the default execution mode. In `native-tools-only` builds, `native-tools` is the default and `repl` cannot be selected. `native-tools` uses provider-native tool calling with the same lash tool definitions, but it does not preserve arbitrary Python locals across turns.
 Low-intelligence sub-agents spawned with `agent_call(..., intelligence="low")` always run in `native-tools`; medium/high sub-agents inherit the parent session's execution mode.
 
 Context folding is batched and cache-friendly. Lash keeps the prompt stable until the hard watermark is hit, then folds old history back to the soft watermark with one stable archive marker instead of mutating prompt status every turn. Defaults are `50%` soft and `60%` hard. Override them with:
@@ -179,7 +179,7 @@ Plan mode is a first-class runtime mode used for plan-then-execute workflows.
 - The TUI switches to plan mode and allocates a plan file in `.lash/plans/`.
 - Runtime injects plan-mode guardrails (read/explore/design, no project file edits) and points the model at that plan file.
 - `exit_plan_mode` returns plan content for user approval.
-- After approval, lash clears message history for a fresh execution phase while preserving REPL state.
+- After approval, lash clears message history for a fresh execution phase while preserving the active execution state where applicable (for example REPL state in `repl` mode).
 
 ## Keyboard Shortcuts
 

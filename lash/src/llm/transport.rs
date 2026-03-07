@@ -43,6 +43,9 @@ impl LlmTransportError {
 pub trait LlmTransport: Send + Sync {
     fn default_root_model(&self) -> &'static str;
     fn default_agent_model(&self, tier: &str) -> Option<ModelSelection>;
+    fn requires_streaming(&self) -> bool {
+        false
+    }
     fn reasoning_effort_for_model(&self, _model: &str) -> Option<&'static str> {
         None
     }

@@ -180,6 +180,7 @@ impl CodexOAuthAdapter {
         full: &mut String,
         deltas: &mut Vec<String>,
         usage: &mut LlmUsage,
+        final_response: &mut Option<Value>,
     ) -> Result<(), LlmTransportError> {
         let raw = raw.trim();
         if raw.is_empty() || raw == "[DONE]" {
@@ -198,6 +199,7 @@ impl CodexOAuthAdapter {
         }
 
         if let Some(resp_value) = event.get("response") {
+            *final_response = Some(resp_value.clone());
             let u = Self::extract_usage(resp_value);
             Self::merge_usage(usage, &u);
         } else {
@@ -241,6 +243,7 @@ impl CodexOAuthAdapter {
         full: &mut String,
         deltas: &mut Vec<String>,
         usage: &mut LlmUsage,
+        final_response: &mut Option<Value>,
     ) -> Result<(), LlmTransportError> {
         let mut event_lines: Vec<String> = Vec::new();
         for mut line in payload.lines().map(|l| l.to_string()) {
@@ -257,7 +260,7 @@ impl CodexOAuthAdapter {
             if line.trim().is_empty() {
                 if !event_lines.is_empty() {
                     let raw = event_lines.join("\n");
-                    Self::process_sse_event(&raw, full, deltas, usage)?;
+                    Self::process_sse_event(&raw, full, deltas, usage, final_response)?;
                     event_lines.clear();
                 }
                 continue;
@@ -265,7 +268,7 @@ impl CodexOAuthAdapter {
         }
         if !event_lines.is_empty() {
             let raw = event_lines.join("\n");
-            Self::process_sse_event(&raw, full, deltas, usage)?;
+            Self::process_sse_event(&raw, full, deltas, usage, final_response)?;
         }
         Ok(())
     }
@@ -376,6 +379,10 @@ impl LlmTransport for CodexOAuthAdapter {
         } else {
             format!("openai/{model}")
         }
+    }
+
+    fn requires_streaming(&self) -> bool {
+        true
     }
 
     async fn ensure_ready(&self, _provider: &mut Provider) -> Result<bool, LlmTransportError> {
@@ -513,12 +520,25 @@ impl LlmTransport for CodexOAuthAdapter {
                 let mut full = String::new();
                 let mut deltas = Vec::new();
                 let mut usage = LlmUsage::default();
-                Self::parse_sse_payload(&text, &mut full, &mut deltas, &mut usage)?;
-                let parts = if full.is_empty() {
-                    Vec::new()
-                } else {
-                    vec![LlmOutputPart::Text { text: full.clone() }]
-                };
+                let mut final_response = None;
+                Self::parse_sse_payload(
+                    &text,
+                    &mut full,
+                    &mut deltas,
+                    &mut usage,
+                    &mut final_response,
+                )?;
+                let parts = final_response
+                    .as_ref()
+                    .map(Self::response_parts_from_value)
+                    .filter(|parts| !parts.is_empty())
+                    .unwrap_or_else(|| {
+                        if full.is_empty() {
+                            Vec::new()
+                        } else {
+                            vec![LlmOutputPart::Text { text: full.clone() }]
+                        }
+                    });
                 if let Some(tx) = &stream_events {
                     for piece in &deltas {
                         let _ = tx.send(LlmStreamEvent::Delta(piece.clone()));
@@ -569,6 +589,7 @@ impl LlmTransport for CodexOAuthAdapter {
         let mut full = String::new();
         let mut deltas = Vec::new();
         let mut usage = LlmUsage::default();
+        let mut final_response = None;
         let mut pending = String::new();
         let mut event_lines: Vec<String> = Vec::new();
         let mut resp = resp;
@@ -594,7 +615,13 @@ impl LlmTransport for CodexOAuthAdapter {
                         let raw = event_lines.join("\n");
                         let prev_len = deltas.len();
                         let prev_usage = usage.clone();
-                        Self::process_sse_event(&raw, &mut full, &mut deltas, &mut usage)?;
+                        Self::process_sse_event(
+                            &raw,
+                            &mut full,
+                            &mut deltas,
+                            &mut usage,
+                            &mut final_response,
+                        )?;
                         if let Some(tx) = &stream_events {
                             for piece in deltas.iter().skip(prev_len) {
                                 let _ = tx.send(LlmStreamEvent::Delta(piece.clone()));
@@ -618,7 +645,13 @@ impl LlmTransport for CodexOAuthAdapter {
             let raw = event_lines.join("\n");
             let prev_len = deltas.len();
             let prev_usage = usage.clone();
-            Self::process_sse_event(&raw, &mut full, &mut deltas, &mut usage)?;
+            Self::process_sse_event(
+                &raw,
+                &mut full,
+                &mut deltas,
+                &mut usage,
+                &mut final_response,
+            )?;
             if let Some(tx) = &stream_events {
                 for piece in deltas.iter().skip(prev_len) {
                     let _ = tx.send(LlmStreamEvent::Delta(piece.clone()));
@@ -629,11 +662,17 @@ impl LlmTransport for CodexOAuthAdapter {
             }
         }
 
-        let parts = if full.is_empty() {
-            Vec::new()
-        } else {
-            vec![LlmOutputPart::Text { text: full.clone() }]
-        };
+        let parts = final_response
+            .as_ref()
+            .map(Self::response_parts_from_value)
+            .filter(|parts| !parts.is_empty())
+            .unwrap_or_else(|| {
+                if full.is_empty() {
+                    Vec::new()
+                } else {
+                    vec![LlmOutputPart::Text { text: full.clone() }]
+                }
+            });
 
         Ok(LlmResponse {
             deltas,
@@ -655,12 +694,14 @@ mod tests {
         let mut full = String::new();
         let mut deltas = Vec::new();
         let mut usage = LlmUsage::default();
+        let mut final_response = None;
 
         CodexOAuthAdapter::process_sse_event(
             r#"{"type":"response.output_text.delta","delta":"Hi "}"#,
             &mut full,
             &mut deltas,
             &mut usage,
+            &mut final_response,
         )
         .unwrap();
         CodexOAuthAdapter::process_sse_event(
@@ -668,6 +709,7 @@ mod tests {
             &mut full,
             &mut deltas,
             &mut usage,
+            &mut final_response,
         )
         .unwrap();
 
@@ -692,12 +734,59 @@ data: {"type":"response.completed","response":{"output_text":"Hey there","usage"
         let mut full = String::new();
         let mut deltas = Vec::new();
         let mut usage = LlmUsage::default();
-        CodexOAuthAdapter::parse_sse_payload(payload, &mut full, &mut deltas, &mut usage).unwrap();
+        let mut final_response = None;
+        CodexOAuthAdapter::parse_sse_payload(
+            payload,
+            &mut full,
+            &mut deltas,
+            &mut usage,
+            &mut final_response,
+        )
+        .unwrap();
 
         assert_eq!(full, "Hey there");
         assert_eq!(usage.input_tokens, 9);
         assert_eq!(usage.output_tokens, 2);
         assert_eq!(usage.cached_input_tokens, 3);
+    }
+
+    #[test]
+    fn extracts_tool_calls_from_completed_stream_response() {
+        let payload = r#"event: response.completed
+data: {"type":"response.completed","response":{"output":[{"type":"function_call","call_id":"call_1","name":"read_file","arguments":"{\"path\":\"README.md\"}"}],"usage":{"input_tokens":12,"output_tokens":3}}}
+"#;
+
+        let mut full = String::new();
+        let mut deltas = Vec::new();
+        let mut usage = LlmUsage::default();
+        let mut final_response = None;
+        CodexOAuthAdapter::parse_sse_payload(
+            payload,
+            &mut full,
+            &mut deltas,
+            &mut usage,
+            &mut final_response,
+        )
+        .unwrap();
+
+        let parts = final_response
+            .as_ref()
+            .map(CodexOAuthAdapter::response_parts_from_value)
+            .unwrap_or_default();
+        assert_eq!(
+            parts,
+            vec![LlmOutputPart::ToolCall {
+                call_id: "call_1".to_string(),
+                tool_name: "read_file".to_string(),
+                input_json: "{\"path\":\"README.md\"}".to_string(),
+            }]
+        );
+    }
+
+    #[test]
+    fn codex_transport_requires_streaming() {
+        let adapter = CodexOAuthAdapter::new();
+        assert!(LlmTransport::requires_streaming(&adapter));
     }
 
     #[test]
