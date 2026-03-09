@@ -751,6 +751,83 @@
           </div>
         </div>
       </div>
+
+      <div class="arch-card">
+        <div class="arch-card-tag tag-agent"><span class="dot"></span>Core Architecture</div>
+        <div class="arch-card-title">Sans-IO Turn Machine</div>
+        <div class="arch-card-desc">
+          <code>TurnMachine</code> (<code>lash/src/sansio.rs</code>) is a synchronous state machine that owns all protocol logic
+          for a single agent run. The async host driver (<code>Agent::run</code> / <code>run_native_tools</code>) is a thin loop
+          that calls <code>poll_effect()</code> to drain effects and <code>handle_response()</code> to feed results back.
+          This separation makes the core turn logic independently testable without a tokio runtime.
+        </div>
+        <div class="cell-grid cols-2">
+          <div class="cell">
+            <h4>Host Loop Contract</h4>
+            <p>
+              The host repeatedly calls <code>poll_effect()</code>, which returns <code>Some(Effect)</code> for each pending
+              effect or <code>None</code> when the host must fulfil an outstanding effect before more become available.
+              After fulfilling an effect, the host calls <code>handle_response(response)</code> to advance the machine.
+              <code>Effect::Emit</code> events are fire-and-forget (no response needed). <code>Effect::Done</code> signals termination.
+            </p>
+          </div>
+          <div class="cell">
+            <h4>Effect &rarr; Response Pairs</h4>
+            <p>
+              <code>LlmCall</code> &rarr; <code>LlmComplete</code> (full response or streaming final).<br>
+              <code>CancelLlm</code> &mdash; fire-and-forget, cancels an in-progress stream.<br>
+              <code>ToolCall</code> &rarr; <code>ToolResult</code> (native tool execution).<br>
+              <code>ExecCode</code> &rarr; <code>ExecResult</code> (REPL sandbox execution).<br>
+              <code>Sleep</code> &rarr; <code>Timeout</code> (retry backoff).<br>
+              <code>Emit(AgentEvent)</code> &mdash; fire-and-forget progress event.<br>
+              <code>Done</code> &mdash; terminal, carries final messages and iteration count.
+            </p>
+          </div>
+          <div class="cell">
+            <h4>Internal States</h4>
+            <p>
+              <code>PrepareIteration</code> &rarr; assembles prompt, applies context folding, emits <code>LlmCall</code>.<br>
+              <code>WaitingLlm</code> &rarr; awaiting provider response (REPL mode processes streaming deltas via <code>handle_llm_delta</code>).<br>
+              <code>WaitingTools</code> &rarr; native-tools mode, parallel tool calls in flight.<br>
+              <code>WaitingExec</code> &rarr; REPL mode, sandbox executing a code block.<br>
+              <code>WaitingRetry</code> &rarr; backoff sleep before LLM retry.<br>
+              <code>Finished</code> &rarr; terminal.
+            </p>
+          </div>
+          <div class="cell">
+            <h4>Owned Protocol Logic</h4>
+            <p>
+              Prompt composition, context folding (soft/hard watermarks), LLM retry with exponential backoff,
+              fence parsing (REPL <code>&lt;repl&gt;</code> block detection mid-stream), tool call dispatch and result assembly,
+              turn limits, malformed-output detection, and termination policy &mdash; all live in the synchronous machine.
+              The host only performs I/O.
+            </p>
+          </div>
+        </div>
+        <pre>  <span class="role">Host</span>                      <span class="role">TurnMachine</span>
+
+   │  new(config, messages)     │
+   │─────────────────────────&gt;│ state = PrepareIteration
+   │                            │
+   │  poll_effect()             │
+   │&lt;─── LlmCall { id, req } ──│ state = WaitingLlm
+   │                            │
+   │  (perform LLM call)        │
+   │                            │
+   │  handle_response(          │
+   │    LlmComplete { id, Ok }) │
+   │─────────────────────────&gt;│ (parses tool calls / fence)
+   │                            │
+   │  poll_effect()             │
+   │&lt;── ToolCall { id, ... } ──│ state = WaitingTools  (native-tools)
+   │&lt;── ExecCode { id, code } ─│ state = WaitingExec   (repl)
+   │&lt;── Emit(AgentEvent) ──────│ (fire-and-forget, keep polling)
+   │                            │
+   │  ...                       │ (loop continues until)
+   │                            │
+   │  poll_effect()             │
+   │&lt;──── Done { messages } ───│ state = Finished</pre>
+      </div>
     </div>
   </div>
 
