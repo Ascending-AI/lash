@@ -3,12 +3,6 @@ name = "lash-cli"
 version = "0.1.0"
 edition = "2024"
 
-[features]
-default = []
-python-system = ["lash_core/python-system"]
-python-bundled = ["lash_core/python-bundled"]
-native-tools-only = ["lash_core/native-tools-only"]
-
 [[bin]]
 name = "lash"
 path = "src/main.rs"

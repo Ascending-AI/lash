@@ -49,7 +49,7 @@ CREATE TABLE IF NOT EXISTS agents (
     messages            TEXT NOT NULL DEFAULT '[]',
     iteration           INTEGER NOT NULL DEFAULT 0,
     config_json         TEXT NOT NULL DEFAULT '{}',
-    dill_blob           BLOB,
+    repl_snapshot       BLOB,
     input_tokens        INTEGER NOT NULL DEFAULT 0,
     output_tokens       INTEGER NOT NULL DEFAULT 0,
     cached_input_tokens INTEGER NOT NULL DEFAULT 0
@@ -123,7 +123,7 @@ pub struct AgentState {
     pub messages_json: String,
     pub iteration: i64,
     pub config_json: String,
-    pub dill_blob: Option<Vec<u8>>,
+    pub repl_snapshot: Option<Vec<u8>>,
     pub input_tokens: i64,
     pub output_tokens: i64,
     pub cached_input_tokens: i64,
@@ -716,16 +716,16 @@ impl Store {
         messages_json: &str,
         iteration: i64,
         config_json: &str,
-        dill_blob: Option<&[u8]>,
+        repl_snapshot: Option<&[u8]>,
         input_tokens: i64,
         output_tokens: i64,
         cached_input_tokens: i64,
     ) {
         let conn = self.conn.lock().unwrap();
         conn.execute(
-            "INSERT OR REPLACE INTO agents (agent_id, parent_id, status, messages, iteration, config_json, dill_blob, input_tokens, output_tokens, cached_input_tokens)
+            "INSERT OR REPLACE INTO agents (agent_id, parent_id, status, messages, iteration, config_json, repl_snapshot, input_tokens, output_tokens, cached_input_tokens)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
-            params![agent_id, parent_id, status, messages_json, iteration, config_json, dill_blob, input_tokens, output_tokens, cached_input_tokens],
+            params![agent_id, parent_id, status, messages_json, iteration, config_json, repl_snapshot, input_tokens, output_tokens, cached_input_tokens],
         )
         .unwrap();
     }
@@ -734,7 +734,7 @@ impl Store {
     pub fn load_agent_state(&self, agent_id: &str) -> Option<AgentState> {
         let conn = self.conn.lock().unwrap();
         conn.query_row(
-            "SELECT agent_id, parent_id, status, messages, iteration, config_json, dill_blob, input_tokens, output_tokens, cached_input_tokens
+            "SELECT agent_id, parent_id, status, messages, iteration, config_json, repl_snapshot, input_tokens, output_tokens, cached_input_tokens
              FROM agents WHERE agent_id = ?1",
             params![agent_id],
             |row| {
@@ -745,7 +745,7 @@ impl Store {
                     messages_json: row.get(3)?,
                     iteration: row.get(4)?,
                     config_json: row.get(5)?,
-                    dill_blob: row.get(6)?,
+                    repl_snapshot: row.get(6)?,
                     input_tokens: row.get(7)?,
                     output_tokens: row.get(8)?,
                     cached_input_tokens: row.get(9)?,
@@ -761,11 +761,11 @@ impl Store {
         let mut results = Vec::new();
         let query = match parent_id {
             Some(_) => {
-                "SELECT agent_id, parent_id, status, messages, iteration, config_json, dill_blob, input_tokens, output_tokens, cached_input_tokens
+                "SELECT agent_id, parent_id, status, messages, iteration, config_json, repl_snapshot, input_tokens, output_tokens, cached_input_tokens
                  FROM agents WHERE status = 'active' AND parent_id = ?1 ORDER BY agent_id"
             }
             None => {
-                "SELECT agent_id, parent_id, status, messages, iteration, config_json, dill_blob, input_tokens, output_tokens, cached_input_tokens
+                "SELECT agent_id, parent_id, status, messages, iteration, config_json, repl_snapshot, input_tokens, output_tokens, cached_input_tokens
                  FROM agents WHERE status = 'active' AND parent_id IS NULL ORDER BY agent_id"
             }
         };
@@ -781,7 +781,7 @@ impl Store {
                 messages_json: row.get(3)?,
                 iteration: row.get(4)?,
                 config_json: row.get(5)?,
-                dill_blob: row.get(6)?,
+                repl_snapshot: row.get(6)?,
                 input_tokens: row.get(7)?,
                 output_tokens: row.get(8)?,
                 cached_input_tokens: row.get(9)?,

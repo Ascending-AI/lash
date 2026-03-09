@@ -232,6 +232,47 @@ impl GoogleCloudCodeAdapter {
         out
     }
 
+    fn tool_call_parts_from_event(event: &Value) -> Vec<LlmOutputPart> {
+        let mut out = Vec::new();
+        let Some(candidates) = event
+            .get("response")
+            .and_then(|r| r.get("candidates"))
+            .and_then(|c| c.as_array())
+        else {
+            return out;
+        };
+        for candidate in candidates {
+            let Some(parts) = candidate
+                .get("content")
+                .and_then(|c| c.get("parts"))
+                .and_then(|p| p.as_array())
+            else {
+                continue;
+            };
+            for part in parts {
+                if let Some(function_call) = part.get("functionCall") {
+                    let Some(name) = function_call.get("name").and_then(|v| v.as_str()) else {
+                        continue;
+                    };
+                    let input_json = function_call
+                        .get("args")
+                        .map(|v| v.to_string())
+                        .unwrap_or_else(|| "{}".to_string());
+                    out.push(LlmOutputPart::ToolCall {
+                        call_id: function_call
+                            .get("id")
+                            .and_then(|v| v.as_str())
+                            .map(str::to_string)
+                            .unwrap_or_else(|| uuid::Uuid::new_v4().to_string()),
+                        tool_name: name.to_string(),
+                        input_json,
+                    });
+                }
+            }
+        }
+        out
+    }
+
     fn apply_stream_piece(full: &mut String, deltas: &mut Vec<String>, piece: &str) {
         if piece.is_empty() {
             return;
@@ -253,6 +294,7 @@ impl GoogleCloudCodeAdapter {
         full: &mut String,
         deltas: &mut Vec<String>,
         usage: &mut LlmUsage,
+        tool_call_parts: Option<&mut Vec<LlmOutputPart>>,
     ) -> Result<(), LlmTransportError> {
         if raw.trim().is_empty() || raw.trim() == "[DONE]" {
             return Ok(());
@@ -268,6 +310,9 @@ impl GoogleCloudCodeAdapter {
         }
         for piece in Self::text_parts_from_event(&event) {
             Self::apply_stream_piece(full, deltas, &piece);
+        }
+        if let Some(parts) = tool_call_parts {
+            parts.extend(Self::tool_call_parts_from_event(&event));
         }
         Ok(())
     }
@@ -543,6 +588,7 @@ impl LlmTransport for GoogleCloudCodeAdapter {
         let mut full = String::new();
         let mut deltas = Vec::new();
         let mut usage = LlmUsage::default();
+        let mut tool_call_parts: Vec<LlmOutputPart> = Vec::new();
 
         let mut pending = String::new();
         let mut event_lines: Vec<String> = Vec::new();
@@ -570,7 +616,13 @@ impl LlmTransport for GoogleCloudCodeAdapter {
                         let raw = event_lines.join("\n");
                         let prev_len = deltas.len();
                         let prev_usage = usage.clone();
-                        Self::process_sse_event(&raw, &mut full, &mut deltas, &mut usage)?;
+                        Self::process_sse_event(
+                            &raw,
+                            &mut full,
+                            &mut deltas,
+                            &mut usage,
+                            Some(&mut tool_call_parts),
+                        )?;
                         if let Some(tx) = &stream_events {
                             for piece in deltas.iter().skip(prev_len) {
                                 let _ = tx.send(LlmStreamEvent::Delta(piece.clone()));
@@ -595,7 +647,13 @@ impl LlmTransport for GoogleCloudCodeAdapter {
             let raw = event_lines.join("\n");
             let prev_len = deltas.len();
             let prev_usage = usage.clone();
-            Self::process_sse_event(&raw, &mut full, &mut deltas, &mut usage)?;
+            Self::process_sse_event(
+                &raw,
+                &mut full,
+                &mut deltas,
+                &mut usage,
+                Some(&mut tool_call_parts),
+            )?;
             if let Some(tx) = &stream_events {
                 for piece in deltas.iter().skip(prev_len) {
                     let _ = tx.send(LlmStreamEvent::Delta(piece.clone()));
@@ -606,11 +664,11 @@ impl LlmTransport for GoogleCloudCodeAdapter {
             }
         }
 
-        let parts = if full.is_empty() {
-            Vec::new()
-        } else {
-            vec![LlmOutputPart::Text { text: full.clone() }]
-        };
+        let mut parts = Vec::new();
+        if !full.is_empty() {
+            parts.push(LlmOutputPart::Text { text: full.clone() });
+        }
+        parts.extend(tool_call_parts);
 
         Ok(LlmResponse {
             full_text: full,
@@ -626,6 +684,73 @@ impl LlmTransport for GoogleCloudCodeAdapter {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn streaming_extracts_function_calls() {
+        let mut full = String::new();
+        let mut deltas = Vec::new();
+        let mut usage = LlmUsage::default();
+        let mut tool_parts = Vec::new();
+
+        GoogleCloudCodeAdapter::process_sse_event(
+            r#"{"response":{"candidates":[{"content":{"parts":[{"functionCall":{"name":"read_file","args":{"path":"a.rs"}}}]}}]}}"#,
+            &mut full,
+            &mut deltas,
+            &mut usage,
+            Some(&mut tool_parts),
+        )
+        .unwrap();
+
+        assert!(full.is_empty());
+        assert_eq!(tool_parts.len(), 1);
+        match &tool_parts[0] {
+            LlmOutputPart::ToolCall {
+                tool_name,
+                input_json,
+                ..
+            } => {
+                assert_eq!(tool_name, "read_file");
+                let args: Value = serde_json::from_str(input_json).unwrap();
+                assert_eq!(args["path"], "a.rs");
+            }
+            _ => panic!("expected ToolCall"),
+        }
+    }
+
+    #[test]
+    fn streaming_text_and_function_calls() {
+        let mut full = String::new();
+        let mut deltas = Vec::new();
+        let mut usage = LlmUsage::default();
+        let mut tool_parts = Vec::new();
+
+        // Text event
+        GoogleCloudCodeAdapter::process_sse_event(
+            r#"{"response":{"candidates":[{"content":{"parts":[{"text":"Let me check."}]}}]}}"#,
+            &mut full,
+            &mut deltas,
+            &mut usage,
+            Some(&mut tool_parts),
+        )
+        .unwrap();
+
+        // Function call event
+        GoogleCloudCodeAdapter::process_sse_event(
+            r#"{"response":{"candidates":[{"content":{"parts":[{"functionCall":{"name":"read_file","args":{"path":"b.rs"}}}]}}]}}"#,
+            &mut full,
+            &mut deltas,
+            &mut usage,
+            Some(&mut tool_parts),
+        )
+        .unwrap();
+
+        assert_eq!(full, "Let me check.");
+        assert_eq!(tool_parts.len(), 1);
+        match &tool_parts[0] {
+            LlmOutputPart::ToolCall { tool_name, .. } => assert_eq!(tool_name, "read_file"),
+            _ => panic!("expected ToolCall"),
+        }
+    }
 
     #[test]
     fn build_contents_groups_multi_tool_turns_and_results() {

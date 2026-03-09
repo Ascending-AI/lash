@@ -22,16 +22,13 @@ impl ToolProvider for WebSearch {
     fn definitions(&self) -> Vec<ToolDefinition> {
         vec![ToolDefinition {
             name: "search_web".into(),
-            description: vec![
-                crate::ToolText::new(
-                    "Search the web via Tavily. In the REPL this returns a list-like `WebSearchResults` object with `.answer`, `.results`, and items shaped like `WebResult(title, url, content)`.",
-                    [crate::ExecutionMode::Repl],
-                ),
-                crate::ToolText::new(
-                    "Search the web via Tavily. Returns a dict with `results` (items shaped like `{title, url, content}`) and, when available, a top-level `answer` summary.",
-                    [crate::ExecutionMode::NativeTools],
-                ),
-            ],
+            description: vec![crate::ToolText::new(
+                "Search the web via Tavily. Returns a dict with `results` (list of `{title, url, content}` dicts) and, when available, a top-level `answer` summary string. Access results via `r[\"results\"]` and `r[\"answer\"]`.",
+                [
+                    crate::ExecutionMode::Repl,
+                    crate::ExecutionMode::NativeTools,
+                ],
+            )],
             params: vec![
                 ToolParam::typed("query", "str"),
                 ToolParam {
@@ -44,7 +41,7 @@ impl ToolProvider for WebSearch {
             returns: "dict".into(),
             examples: vec![
                 crate::ToolText::new(
-                    "results = await search_web(query=\"latest Rust release notes\", max_results=5)\nresults.answer\nresults[0].url",
+                    "r = search_web(query=\"latest Rust release notes\", max_results=5)\nr[\"answer\"]\nr[\"results\"][0][\"url\"]",
                     [crate::ExecutionMode::Repl],
                 ),
                 crate::ToolText::new(

@@ -218,7 +218,7 @@ fn default_section(section: PromptSectionName, input: &PromptComposeInput<'_>) -
     match section {
         PromptSectionName::Identity => Some(match profile {
             PromptProfile::RootInteractive => match input.execution_mode {
-                ExecutionMode::Repl => "You are an AI coding assistant operating in a persistent Python REPL with tool access.\nYou power lash, a terminal-based coding agent. Understand the codebase, make changes, run commands, and report outcomes clearly.".to_string(),
+                ExecutionMode::Repl => "You are an AI coding assistant operating in a persistent REPL with tool access.\nYou power lash, a terminal-based coding agent. Understand the codebase, make changes, run commands, and report outcomes clearly.".to_string(),
                 ExecutionMode::NativeTools => "You are an AI coding assistant with native tool-calling access.\nYou power lash, a terminal-based coding agent. Understand the codebase, make changes, run commands, and report outcomes clearly.".to_string(),
             },
             PromptProfile::RootHeadless => "You are an autonomous AI coding agent running in non-interactive mode.\nComplete the task end-to-end without asking for user input.".to_string(),
@@ -269,7 +269,7 @@ fn default_section(section: PromptSectionName, input: &PromptComposeInput<'_>) -
         PromptSectionName::ExecutionContract => Some(format!(
             "{}\n{}",
             if matches!(input.execution_mode, ExecutionMode::Repl) {
-                "## Execution Contract\n\nYour output can include prose and `<repl>` blocks.\n- `<repl>` blocks execute immediately when `</repl>` is reached\n- Maximum one `<repl>` block per turn\n- After a `<repl>` block executes, lash continues in a new internal turn with the execution output\n- Do not emit additional `<repl>` blocks in the same response after one has closed\n- Use `<repl>` only when execution is needed; prose-only responses are valid when no execution is required\n- For direct conversational requests (greetings, small talk, time/date, simple Q&A), respond in prose and do not open `<repl>`\n- Variables persist across turns\n- `print(...)` output is model-visible only"
+                "## Execution Contract\n\nYour output can include prose and `<repl>` blocks.\n- `<repl>` blocks execute immediately when `</repl>` is reached\n- Maximum one `<repl>` block per turn\n- After a `<repl>` block executes, lash continues in a new internal turn with the execution output\n- Do not emit additional `<repl>` blocks in the same response after one has closed\n- Use `<repl>` only when execution is needed; prose-only responses are valid when no execution is required\n- For direct conversational requests (greetings, small talk, time/date, simple Q&A), respond in prose and do not open `<repl>`\n- Variables persist across turns\n- `print(...)` output is model-visible only\n\n### REPL Language\n\nThe REPL runs a lightweight Python dialect (not CPython). It supports:\n- Functions (`def`, `lambda`, `async def`), closures, `*args`/`**kwargs`\n- Control flow: `if`/`elif`/`else`, `for`, `while`, `try`/`except`/`finally`, `raise`\n- Data types: `int`, `float`, `bool`, `str`, `bytes`, `list`, `tuple`, `dict`, `set`, `frozenset`, `None`\n- Comprehensions (list, dict, set), f-strings, unpacking, chained comparisons\n- `await` for async tool helpers; `asyncio.gather(...)` for parallel calls (only `asyncio.gather` and `asyncio.run` are available — `asyncio.sleep`, `asyncio.create_task`, and other asyncio APIs are not supported)\n- Builtins: `len`, `range`, `enumerate`, `zip`, `map`, `filter`, `sorted`, `reversed`, `min`, `max`, `sum`, `all`, `any`, `abs`, `round`, `isinstance`, `type`, `print`, `repr`, `hash`, `id`, `int()`, `str()`, `list()`, etc.\n- Limited modules: `re`, `os.getenv`, `pathlib.Path`\n\nNot supported: `class`, `yield`/generators, `with`/context managers, `del`, decorators, `match`/`case`, walrus `:=`, `import` of arbitrary modules, standard library (`json`, `collections`, `itertools`, etc.), `open()`/file I/O.\n\nFor tasks requiring unsupported features, write a script file and run it via `shell(\"python3 script.py\")`."
             } else {
                 "## Execution Contract\n\nUse native tool calls when execution is needed.\n- Do not emit `<repl>` blocks or Python code\n- Call tools directly with valid arguments\n- When several tool calls are independent, emit them together in the same response instead of serializing them across turns\n- Use serial tool calls only when later arguments depend on earlier tool results or when ordering is required for correctness\n- Avoid unnecessary prose between independent tool calls; optimize for completing the task with as few tool rounds as possible\n- After tool results are returned, continue with the next tool calls or final answer\n- For direct conversational requests that need no tools, respond in prose only"
             },
@@ -306,7 +306,7 @@ fn default_section(section: PromptSectionName, input: &PromptComposeInput<'_>) -
         )),
         PromptSectionName::ToolAccess => Some(
             if matches!(input.execution_mode, ExecutionMode::Repl) {
-                "## Tool Access\n\n- All visible tools are available in the `tools` module (e.g. `tools.read_file(...)`)\n- `from tools import *` is applied automatically, so visible tools are also callable as globals\n- If a tool name is overwritten, restore it with `import tools` or `from tools import <tool>` / `from tools import *`\n- Use `await` only for long-running calls (`delegate_*()` and shell handle methods like `proc.wait()`)\n- Use `asyncio.gather(...)` only for `delegate_*()` and shell handle methods"
+                "## Tool Access\n\n- All visible tools are available as global functions (for example `read_file(...)`)\n- There is no `tools` module, no implicit imports, and no wrapper classes; work with plain dict/list/primitive values\n- Call sync globals directly; use explicit `await` only for async helper/tool functions such as `shell_wait(...)`, `shell_read(...)`, `shell_write(...)`, `shell_kill(...)`, `agent_result(...)`, `agent_output(...)`, and `agent_kill(...)`\n- Use `asyncio.gather(...)` only for those async helper/tool functions"
                     .to_string()
             } else {
                 format!(
@@ -334,7 +334,7 @@ fn default_section(section: PromptSectionName, input: &PromptComposeInput<'_>) -
             }
         }
         PromptSectionName::AvailableTools => Some(format!(
-            "## Available Tools\n\n{}\n\nUse `help(tool_name)` or `help(tools.tool_name)` for signatures and docs.",
+            "## Available Tools\n\n{}\n\nUse `list_tools()` / `search_tools(...)` to rediscover signatures and descriptions.",
             input.tool_list
         )),
         PromptSectionName::ErrorRecovery => Some(
@@ -394,7 +394,7 @@ fn default_section(section: PromptSectionName, input: &PromptComposeInput<'_>) -
             if !(has_helper(input, "search_history") || has_capability(input, "history")) {
                 ""
             } else {
-                "- Use `_history` and `_mem` only when prior-turn recall is actually needed"
+                "- Use `search_history(...)` and memory helpers only when prior-turn recall is actually needed"
             }
         )),
     }
@@ -435,8 +435,11 @@ fn builtins_section(
         lines.push(
             "- `search_mem(query, mode=\"hybrid\", regex=None, limit=10, keys=None)`".to_string(),
         );
+        lines.push("- `mem_set(key, description, value=None)`".to_string());
+        lines.push("- `mem_get(key)`".to_string());
+        lines.push("- `mem_delete(key)`".to_string());
+        lines.push("- `mem_all()`".to_string());
     }
-    lines.push("- `help(tool_name)`".to_string());
     lines.push("- `reset_repl()`".to_string());
     lines.join("\n")
 }
@@ -457,30 +460,32 @@ fn memory_section(
     let mut lines = vec![title.to_string(), "".to_string()];
     if memory_enabled {
         lines.push(
-            "- `_mem` is persistent key-value memory across context pruning; use it to store durable decisions"
+            "- Memory is persistent across context pruning; use `mem_set(...)` for durable decisions"
                 .to_string(),
         );
-        lines.push("- Retrieve memory with `search_mem(...)` / `_mem.search(...)`".to_string());
+        lines.push(
+            "- Retrieve memory with `mem_get(...)`, `mem_all()`, and `search_mem(...)`".to_string(),
+        );
     }
     if history_enabled && has_history {
         lines.push(
-            "- `_history` stores pruned prior turns; use `_history.user_messages()` and `_history.search(...)`"
+            "- Pruned prior turns can be searched with `search_history(...)` when older context matters"
                 .to_string(),
         );
     }
     if is_subagent {
         if history_enabled && memory_enabled {
             lines.push(
-                "- `_history` and `_mem` can include parent-agent context inherited at spawn time"
+                "- History and memory can include parent-agent context inherited at spawn time"
                     .to_string(),
             );
         } else if history_enabled {
             lines.push(
-                "- `_history` can include parent-agent context inherited at spawn time".to_string(),
+                "- History can include parent-agent context inherited at spawn time".to_string(),
             );
         } else if memory_enabled {
             lines.push(
-                "- `_mem` can include parent-agent context inherited at spawn time".to_string(),
+                "- Memory can include parent-agent context inherited at spawn time".to_string(),
             );
         }
     }
@@ -491,13 +496,12 @@ fn memory_api_section() -> String {
     [
         "## Memory API",
         "",
-        "- `_mem.set(key, description, value=None)` stores/updates memory",
-        "- `_mem.get(key)` returns a stored value or `None`",
-        "- `_mem.delete(key)` removes a key",
-        "- `_mem.all()` lists keys with descriptions",
-        "- `_mem.search(query, mode=\"hybrid\", regex=None, limit=10, keys=None)` searches memory",
+        "- `mem_set(key, description, value=None)` stores/updates memory",
+        "- `mem_get(key)` returns `{key, description, value, turn}` dict or `None`; use `entry[\"value\"]` to extract the stored value",
+        "- `mem_delete(key)` removes a key",
+        "- `mem_all()` lists keys with descriptions",
         "- `search_mem(query, mode=\"hybrid\", regex=None, limit=10, keys=None)` is the built-in helper",
-        "- Example: `_mem.set(\"repo_convention\", \"Use snake_case for tool names\")`",
+        "- Example: `mem_set(\"repo_convention\", \"Use snake_case for tool names\")`",
     ]
     .join("\n")
 }
@@ -514,7 +518,7 @@ fn tool_guides(
 
     if tools.contains("ls") || tools.contains("read_file") || tools.contains("glob") {
         chunks.push(
-            "**Orient -> Read -> Act**\n1. `ls()` / `glob()` to inspect `PathEntry` objects (`path`, `kind`, `size_bytes`, `modified_at`, optional `lines`)\n2. `read_file`/`grep` for content-level context before editing\n3. `edit_file` for changes, `write_file` for new files"
+            "**Orient -> Read -> Act**\n1. `ls()` / `glob()` to inspect returned entries (`path`, `kind`, `size_bytes`, `modified_at`, optional `lines`)\n2. `read_file`/`grep` for content-level context before editing\n3. `edit_file` for changes, `write_file` for new files"
                 .to_string(),
         );
     }
@@ -541,7 +545,7 @@ fn tool_guides(
     }
     if tools.contains("shell") {
         chunks.push(
-            "**Shell handles**\n`proc = shell(cmd)` then use `await proc.wait()`, `await proc.read()`, `await proc.write(...)`, `await proc.kill()`."
+            "**Shell handles**\n`proc = shell(cmd)` returns a plain handle dict. Use `await shell_wait(proc)`, `await shell_read(proc)`, `await shell_write(proc, input)`, and `await shell_kill(proc)`.\n- `shell_wait` blocks until the process exits and returns all output — use this for commands that terminate.\n- `shell_read` is non-blocking and drains only the output accumulated so far (returns empty string if none). Use it to poll long-running processes."
                 .to_string(),
         );
         chunks.push(
@@ -565,11 +569,11 @@ fn tool_guides(
             "Context recall pattern"
         };
         let recall_line = if history_enabled && memory_enabled {
-            "When prior context likely matters, use a low-intelligence (read-only) `agent_call` to summarize relevant `_history`/`_mem` quickly, then continue execution."
+            "When prior context likely matters, use a low-intelligence (read-only) `agent_call` to summarize relevant `search_history(...)` / memory results quickly, then continue execution."
         } else if history_enabled {
-            "When prior context likely matters, use a low-intelligence (read-only) `agent_call` to summarize relevant `_history` quickly, then continue execution."
+            "When prior context likely matters, use a low-intelligence (read-only) `agent_call` to summarize relevant `search_history(...)` results quickly, then continue execution."
         } else if memory_enabled {
-            "When prior context likely matters, use a low-intelligence (read-only) `agent_call` to summarize relevant `_mem` quickly, then continue execution."
+            "When prior context likely matters, use a low-intelligence (read-only) `agent_call` to summarize relevant memory results quickly, then continue execution."
         } else {
             "When prior context likely matters, use a low-intelligence (read-only) `agent_call` to summarize relevant context quickly, then continue execution."
         };
@@ -579,6 +583,10 @@ fn tool_guides(
                 heading,
                 recall_line
             ),
+        );
+        chunks.push(
+            "**Agent lifecycle**\n`agent_result(id)` blocks until the agent finishes and returns its final result. The agent ID remains valid afterwards — you can call `agent_result` again or use `agent_kill` to clean up.\n`agent_output(id)` is non-blocking and drains intermediate streaming output; use it to monitor progress of a long-running agent before it completes."
+                .to_string(),
         );
     }
     if tools.contains("create_task") {
@@ -701,7 +709,7 @@ mod tests {
             overrides: &[],
         });
         assert!(text.contains("## Memory API"));
-        assert!(text.contains("_mem.set(key, description, value=None)"));
+        assert!(text.contains("mem_set(key, description, value=None)"));
     }
 
     #[test]
@@ -727,6 +735,32 @@ mod tests {
             overrides: &overrides,
         });
         assert!(!text.contains("## Memory API"));
+    }
+
+    #[test]
+    fn repl_tool_access_describes_global_helpers() {
+        let text = compose_system_prompt(PromptComposeInput {
+            profile: PromptProfile::RootInteractive,
+            execution_mode: crate::ExecutionMode::Repl,
+            context: "ctx",
+            tool_list: "tools",
+            tool_names: &["shell".to_string(), "agent_call".to_string()],
+            has_history: false,
+            enabled_capability_ids: &ids_for(&AgentCapabilities::default()),
+            helper_bindings: &helpers_for(&AgentCapabilities::default()),
+            capability_prompt_sections: &prompt_sections_for(&AgentCapabilities::default()),
+            can_write: can_write(&AgentCapabilities::default()),
+            include_soul: false,
+            project_instructions: "",
+            overrides: &[],
+        });
+        assert!(text.contains("All visible tools are available as global functions"));
+        assert!(
+            text.contains(
+                "There is no `tools` module, no implicit imports, and no wrapper classes"
+            )
+        );
+        assert!(text.contains("use explicit `await` only for async helper/tool functions"));
     }
 
     #[test]

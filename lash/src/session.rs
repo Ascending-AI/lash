@@ -8,9 +8,11 @@ use tokio::sync::mpsc::UnboundedSender;
 use crate::embedded::{PythonRequest, PythonResponse, PythonRuntime};
 use crate::{AgentCapabilities, SandboxMessage, ToolCallRecord, ToolImage, ToolProvider};
 
+const REPL_SNAPSHOT_VERSION: u32 = 2;
+
 /// A prompt from the agent asking the user a question.
 /// The `response_tx` travels all the way to the TUI, which sends the answer
-/// directly back to the Python bridge thread.
+/// directly back to the REPL bridge thread.
 pub struct UserPrompt {
     pub question: String,
     pub options: Vec<String>,
@@ -23,12 +25,14 @@ pub enum SessionError {
     Io(#[from] std::io::Error),
     #[error("JSON error: {0}")]
     Json(#[from] serde_json::Error),
-    #[error("python execution mode is not available in this build or session")]
+    #[error("repl execution mode is not available in this build or session")]
     ReplUnavailable,
-    #[error("python runtime exited unexpectedly")]
+    #[error("repl runtime exited unexpectedly")]
     RuntimeExited,
     #[error("protocol error: {0}")]
     Protocol(String),
+    #[error("legacy REPL snapshots are no longer supported")]
+    LegacySnapshot,
 }
 
 enum SessionBackend {
@@ -142,7 +146,7 @@ impl Session {
         self.prompt_tx = None;
     }
 
-    /// Execute code in the persistent Python REPL.
+    /// Execute code in the persistent Monty REPL.
     pub async fn run_code(&mut self, code: &str) -> Result<ExecResponse, SessionError> {
         self.tool_calls.clear();
         self.tool_images.clear();
@@ -171,7 +175,7 @@ impl Session {
         })?;
 
         // Read messages until we get exec_result.
-        // Tool calls are spawned as concurrent tokio tasks so that Python's
+        // Tool calls are spawned as concurrent tokio tasks so that Monty's
         // asyncio.gather() can dispatch multiple tools in parallel.
         let mut tool_handles: Vec<tokio::task::JoinHandle<(ToolCallRecord, Vec<ToolImage>)>> =
             Vec::new();
@@ -313,8 +317,7 @@ impl Session {
         }
     }
 
-    /// Check if a code string is syntactically complete Python.
-    /// Uses `ast.parse()` on the Python thread — returns true if the code parses.
+    /// Check if a code string is syntactically complete for the Monty REPL.
     pub fn check_complete(&self, code: &str) -> Result<bool, SessionError> {
         self.runtime()?.send(PythonRequest::CheckComplete {
             code: code.to_string(),
@@ -328,7 +331,7 @@ impl Session {
         }
     }
 
-    /// Reset the Python REPL namespace and re-register tools.
+    /// Reset the Monty REPL namespace and re-register tools.
     pub async fn reset(&mut self) -> Result<(), SessionError> {
         let id = uuid::Uuid::new_v4().to_string();
         self.runtime()?
@@ -387,7 +390,7 @@ impl Session {
         Ok(())
     }
 
-    /// Snapshot the session: Python namespace (via dill) + scratch filesystem.
+    /// Snapshot the session: REPL state + scratch filesystem.
     pub async fn snapshot(&mut self) -> Result<Vec<u8>, SessionError> {
         let id = uuid::Uuid::new_v4().to_string();
         self.runtime()?
@@ -403,8 +406,12 @@ impl Session {
         // Collect scratch files
         let files = collect_files(self.scratch_dir.path()).unwrap_or_default();
 
-        // `data` is opaque (hex-encoded dill bytes or JSON string) — store as-is
-        let combined = json!({ "vars": data, "files": files });
+        let combined = json!({
+            "version": REPL_SNAPSHOT_VERSION,
+            "engine": "monty",
+            "vars": data,
+            "files": files,
+        });
         Ok(serde_json::to_vec(&combined).unwrap())
     }
 
@@ -412,7 +419,21 @@ impl Session {
     pub async fn restore(&mut self, data: &[u8]) -> Result<(), SessionError> {
         let parsed: serde_json::Value = serde_json::from_slice(data).unwrap_or(json!({}));
 
-        // `vars` is a hex-encoded dill blob
+        if parsed.get("version").is_none() || parsed.get("engine").is_none() {
+            return Err(SessionError::LegacySnapshot);
+        }
+        if parsed.get("version").and_then(|v| v.as_u64()) != Some(REPL_SNAPSHOT_VERSION as u64) {
+            return Err(SessionError::Protocol(
+                "unsupported REPL snapshot version".to_string(),
+            ));
+        }
+        if parsed.get("engine").and_then(|v| v.as_str()) != Some("monty") {
+            return Err(SessionError::Protocol(
+                "unsupported REPL snapshot engine".to_string(),
+            ));
+        }
+
+        // `vars` is an opaque Monty snapshot string from the executor thread.
         let vars_str = parsed
             .get("vars")
             .and_then(|v| v.as_str())
@@ -423,10 +444,17 @@ impl Session {
         self.runtime()?
             .send(PythonRequest::Restore { id, data: vars_str })?;
 
-        // Wait for acknowledgment (exec_result with empty response)
+        // Wait for acknowledgment (exec_result with optional restore error)
         loop {
             match self.runtime()?.recv()? {
-                PythonResponse::ExecResult { .. } => break,
+                PythonResponse::ExecResult { error, .. } => {
+                    if let Some(err) = error {
+                        return Err(SessionError::Protocol(format!(
+                            "executor restore failed: {err}"
+                        )));
+                    }
+                    break;
+                }
                 _ => continue,
             }
         }

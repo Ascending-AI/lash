@@ -302,8 +302,8 @@ impl AgentCall {
         };
 
         // Dynamic tool providers may carry capability IDs beyond the static enum.
-        // Re-register capability payload from the forked dynamic registry so Python
-        // helpers/prompt bindings reflect the actual child projection.
+        // Re-register capability payload so the child REPL helper surface reflects
+        // the actual projected tool/capability set.
         if session.supports_repl()
             && let (Some(caps_json), Some(generation)) = (
                 session_tools.dynamic_capabilities_payload_json(),
@@ -316,82 +316,7 @@ impl AgentCall {
             ));
         }
 
-        // If a schema is provided, inject the model class and a validating done() wrapper
-        if matches!(agent_execution_mode, crate::ExecutionMode::Repl)
-            && let Some(ref schema_str) = schema
-        {
-            let inject_code = format!(
-                concat!(
-                    "import json as _json\n",
-                    "\n",
-                    "_schema = _json.loads({schema_json})\n",
-                    "\n",
-                    "def _build_class_from_schema(schema, name=None):\n",
-                    "    name = name or schema.get('title', 'Result')\n",
-                    "    fields = {{}}\n",
-                    "    required = set(schema.get('required', []))\n",
-                    "    props = schema.get('properties', {{}})\n",
-                    "    _type_map = {{\n",
-                    "        'string': str, 'integer': int, 'number': float,\n",
-                    "        'boolean': bool, 'array': list, 'object': dict,\n",
-                    "    }}\n",
-                    "    for fname, fdef in props.items():\n",
-                    "        ftype = _type_map.get(fdef.get('type', 'string'), str)\n",
-                    "        fields[fname] = (ftype, fname in required)\n",
-                    "    class _Model:\n",
-                    "        _fields = fields\n",
-                    "        _name = name\n",
-                    "        def __init__(self, **kwargs):\n",
-                    "            for fn, (ft, freq) in self._fields.items():\n",
-                    "                if fn in kwargs:\n",
-                    "                    val = kwargs[fn]\n",
-                    "                    if not isinstance(val, ft):\n",
-                    "                        try:\n",
-                    "                            val = ft(val)\n",
-                    "                        except (TypeError, ValueError):\n",
-                    "                            raise TypeError(\n",
-                    "                                f\"Field '{{fn}}' expected {{ft.__name__}}, got {{type(val).__name__}}\"\n",
-                    "                            )\n",
-                    "                    setattr(self, fn, val)\n",
-                    "                elif freq:\n",
-                    "                    raise TypeError(f\"Missing required field: '{{fn}}'\")\n",
-                    "                else:\n",
-                    "                    setattr(self, fn, None)\n",
-                    "            for k in kwargs:\n",
-                    "                if k not in self._fields:\n",
-                    "                    raise TypeError(f\"Unknown field: '{{k}}'\")\n",
-                    "        def __repr__(self):\n",
-                    "            parts = ', '.join(f'{{k}}={{getattr(self, k)!r}}' for k in self._fields)\n",
-                    "            return f'{{self._name}}({{parts}})'\n",
-                    "        def _to_dict(self):\n",
-                    "            return {{k: getattr(self, k) for k in self._fields}}\n",
-                    "    _Model.__name__ = name\n",
-                    "    _Model.__qualname__ = name\n",
-                    "    return _Model\n",
-                    "\n",
-                    "_ResultModel = _build_class_from_schema(_schema)\n",
-                    "globals()[_ResultModel._name] = _ResultModel\n",
-                    "\n",
-                    "_original_done = done\n",
-                    "\n",
-                    "def done(value):\n",
-                    "    if not isinstance(value, _ResultModel):\n",
-                    "        raise TypeError(\n",
-                    "            f\"done() requires a {{_ResultModel._name}} instance, got {{type(value).__name__}}. \"\n",
-                    "            f\"Create one with: {{_ResultModel._name}}({{', '.join(f'{{k}}=...' for k in _ResultModel._fields)}})\"\n",
-                    "        )\n",
-                    "    _original_done(_json.dumps(value._to_dict()))\n",
-                ),
-                schema_json = serde_json::to_string(schema_str).unwrap_or_default(),
-            );
-            if let Err(e) = session.run_code(&inject_code).await {
-                return ToolResult::err_fmt(format_args!(
-                    "Failed to inject schema into sub-agent: {e}"
-                ));
-            }
-        }
-
-        // Inject parent _mem and _history into the sub-agent's REPL
+        // Load parent memory/history into the child session via hidden state tools.
         let parent_history = args
             .get("_parent_history")
             .and_then(|v| v.as_str())
@@ -402,18 +327,27 @@ impl AgentCall {
             .map(|s| s.to_string());
 
         if session.supports_repl() && (parent_history.is_some() || parent_mem.is_some()) {
-            let mut init_parts = Vec::new();
-            if let Some(ref hist_json) = parent_history {
-                let json_str = serde_json::to_string(hist_json).unwrap_or_default();
-                init_parts.push(format!("_history._load(json.loads({json_str}))"));
+            if let Some(ref hist_json) = parent_history
+                && let Ok(turns) = serde_json::from_str::<serde_json::Value>(hist_json)
+            {
+                let _ = session
+                    .tools()
+                    .execute(
+                        "history_load",
+                        &json!({"__agent_id__": agent_id, "turns": turns}),
+                    )
+                    .await;
             }
-            if let Some(ref mem_json) = parent_mem {
-                let json_str = serde_json::to_string(mem_json).unwrap_or_default();
-                init_parts.push(format!("_mem._load(json.loads({json_str}))"));
-            }
-            let init_code = init_parts.join("\n");
-            if let Err(e) = session.run_code(&init_code).await {
-                tracing::warn!("Failed to inject parent state into sub-agent: {e}");
+            if let Some(ref mem_json) = parent_mem
+                && let Ok(entries) = serde_json::from_str::<serde_json::Value>(mem_json)
+            {
+                let _ = session
+                    .tools()
+                    .execute(
+                        "mem_load",
+                        &json!({"__agent_id__": agent_id, "entries": entries}),
+                    )
+                    .await;
             }
         }
 
@@ -427,7 +361,7 @@ impl AgentCall {
                 .unwrap_or_else(|| "Result".to_string());
             match agent_execution_mode {
                 crate::ExecutionMode::Repl => format!(
-                    "{prompt}\n\nA `{model_name}` class is available in your environment. You MUST call done() with an instance of `{model_name}`. Construct it and pass it to done()."
+                    "{prompt}\n\nCall done(...) with a single JSON-compatible dict matching this schema exactly:\n{schema_str}\n\nDo not return prose in done(). The dict should represent a `{model_name}` object."
                 ),
                 crate::ExecutionMode::NativeTools => format!(
                     "{prompt}\n\nReturn your final answer as a single JSON object matching this schema exactly:\n{schema_str}\n\nDo not wrap it in markdown fences or extra commentary."
@@ -610,7 +544,6 @@ impl AgentCall {
         }
 
         let result = result_arc.lock().unwrap().take().unwrap_or(json!(null));
-        self.agents.lock().unwrap().remove(id);
         ToolResult::ok(result)
     }
 
@@ -664,35 +597,40 @@ impl ToolProvider for AgentCall {
                 name: "agent_call".into(),
                 description: vec![
                     crate::ToolText::new(
-                        r#"Spawn a sub-agent to perform a task. In REPL mode, `agent_call(...)` returns an AgentHandle immediately; then use `result = await handle.result()`. For compatibility, `await agent_call(...)` also works and yields the same handle. The handle also supports `await handle.output()` and `await handle.kill()`. Use intelligence="low" for fast read-only tasks (lookup/summarize); low-intelligence sub-agents always run in native-tools mode. Use medium/high for edits/refactors; those tiers inherit the parent session's execution mode. Sub-agents inherit your _mem and _history (read-only)."#,
+                        r#"Spawn a sub-agent to perform a task. Returns a plain handle dict immediately; then use `await agent_result(handle["id"])`, `await agent_output(handle["id"])`, and `await agent_kill(handle["id"])`. Use intelligence="low" for fast read-only tasks (lookup/summarize); low-intelligence sub-agents always run in native-tools mode. Use medium/high for edits/refactors; those tiers inherit the parent session's execution mode. Sub-agents inherit your prior-turn history and memory context read-only."#,
                         [crate::ExecutionMode::Repl],
                     ),
                     crate::ToolText::new(
-                        r#"Spawn a sub-agent to perform a task. Returns an AgentHandle with `.result()`, `.output()`, and `.kill()`. Use intelligence="low" for fast read-only tasks (lookup/summarize); low-intelligence sub-agents always run in native-tools mode. Use medium/high for edits/refactors; those tiers inherit the parent session's execution mode. Sub-agents inherit your _mem and _history (read-only)."#,
+                        r#"Spawn a sub-agent to perform a task. Returns a plain handle dict. Use `agent_result(id)`, `agent_output(id)`, and `agent_kill(id)` with the returned handle ID. Use intelligence="low" for fast read-only tasks (lookup/summarize); low-intelligence sub-agents always run in native-tools mode. Use medium/high for edits/refactors; those tiers inherit the parent session's execution mode. Sub-agents inherit your prior-turn history and memory context read-only."#,
                         [crate::ExecutionMode::NativeTools],
                     ),
                 ],
                 params: vec![
                     ToolParam::typed("prompt", "str"),
                     ToolParam::typed("intelligence", "str"),
-                    ToolParam::optional("schema", "str"),
+                    ToolParam {
+                        name: "schema".into(),
+                        r#type: "str".into(),
+                        description: "JSON schema to include in the agent's prompt as output guidance (not enforced at runtime)".into(),
+                        required: false,
+                    },
                 ],
-                returns: "AgentHandle".into(),
+                returns: "dict".into(),
                 examples: vec![
                     crate::ToolText::new(
                         "handle = agent_call(\"Summarize the auth flow\", intelligence=\"low\")",
                         [crate::ExecutionMode::Repl],
                     ),
                     crate::ToolText::new(
-                        "result = await handle.result()",
+                        "result = await agent_result(handle[\"id\"])",
                         [crate::ExecutionMode::Repl],
                     ),
                     crate::ToolText::new(
-                        "handle = await agent_call(\"Summarize the auth flow\", intelligence=\"low\")  # also valid",
+                        "text = await agent_output(handle[\"id\"])",
                         [crate::ExecutionMode::Repl],
                     ),
                     crate::ToolText::new(
-                        "agent_call(prompt=\"Summarize the auth flow\", intelligence=\"low\")",
+                        "handle = agent_call(prompt=\"Summarize the auth flow\", intelligence=\"low\")",
                         [crate::ExecutionMode::NativeTools],
                     ),
                 ],
@@ -702,7 +640,7 @@ impl ToolProvider for AgentCall {
             ToolDefinition {
                 name: "agent_result".into(),
                 description: vec![crate::ToolText::new(
-                    "Wait for a sub-agent to finish and return its result.",
+                    "Wait for a sub-agent to finish and return its final result.",
                     [
                         crate::ExecutionMode::Repl,
                         crate::ExecutionMode::NativeTools,
@@ -720,7 +658,7 @@ impl ToolProvider for AgentCall {
             ToolDefinition {
                 name: "agent_output".into(),
                 description: vec![crate::ToolText::new(
-                    "Read accumulated output from a running sub-agent (non-blocking).",
+                    "Read and drain accumulated streaming output from a running sub-agent (non-blocking). Returns empty string if no new output. Agent must still be running — use before agent_result.",
                     [
                         crate::ExecutionMode::Repl,
                         crate::ExecutionMode::NativeTools,
@@ -862,10 +800,9 @@ mod tests {
         let repl_desc = agent_call.description_for(crate::ExecutionMode::Repl);
         let native_desc = agent_call.description_for(crate::ExecutionMode::NativeTools);
 
-        assert!(repl_desc.contains("returns an AgentHandle immediately"));
-        assert!(repl_desc.contains("await handle.result()"));
-        assert!(repl_desc.contains("await agent_call(...)"));
-        assert!(!native_desc.contains("returns an AgentHandle immediately"));
+        assert!(repl_desc.contains("plain handle dict"));
+        assert!(repl_desc.contains("await agent_result(handle[\"id\"])"));
+        assert!(!native_desc.contains("AgentHandle"));
     }
 
     struct MockBaseTool;

@@ -759,16 +759,16 @@ impl RuntimeEngine {
                     let mut available = Vec::new();
                     if self.capabilities.enabled(CapabilityId::History) {
                         available.push(
-                            "- `_history.search(\"query\", mode=\"hybrid\")` — search planning exploration"
+                            "- `search_history(\"query\", mode=\"hybrid\")` — search planning exploration"
                                 .to_string(),
                         );
                         available.push(
-                            "- `_history.user_messages()` — original user requests".to_string(),
+                            "- Prior user requests are included in turn history results".to_string(),
                         );
                     }
                     if self.capabilities.enabled(CapabilityId::Memory) {
                         available
-                            .push("- `_mem` — persistent memory (fully preserved)".to_string());
+                            .push("- `mem_get(...)`, `mem_all()`, and `search_mem(...)` — persistent memory".to_string());
                     }
                     let available_context = if available.is_empty() {
                         "No persisted planning context capabilities are enabled for this agent."

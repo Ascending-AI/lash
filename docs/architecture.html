@@ -574,7 +574,7 @@
     </div>
     <div class="doc-meta">
       Lash Agent Framework<br>
-      Rust + Optional Embedded Python<br>
+      Rust + Monty REPL Runtime<br>
       2026
     </div>
   </header>
@@ -640,7 +640,7 @@
         <div class="arch-card-tag tag-bridge"><span class="dot"></span>Layer 4</div>
         <div class="arch-card-title">Execution Bridge</div>
         <div class="arch-card-desc">
-          Two execution backends: an optional embedded Python REPL and provider-native tool calls.
+          Two execution backends: a persistent Monty-backed REPL and provider-native tool calls.
           Mode-specific contracts with bidirectional streaming signals.
         </div>
       </div>
@@ -723,12 +723,14 @@
     <div class="arch-grid">
       <div class="arch-card">
         <div class="arch-card-tag tag-agent"><span class="dot"></span>Agent Core</div>
-        <div class="arch-card-title">Prompt Assembly + Iterative Loop</div>
+        <div class="arch-card-title">Prompt Assembly + Sans-IO Turn Machine</div>
         <div class="arch-card-desc">
           Agent resolves provider/model, refreshes tokens, reads dynamic projection state from the active tool registry,
           injects only tools with <code>inject_into_prompt=true</code>, and appends discovery guidance for omitted tools
           (<code>list_tools</code>/<code>search_tools</code>, <code>tools.&lt;tool&gt;</code>). Prompt assembly is execution-mode aware:
           the same tool identity is projected into REPL help/docs or provider-native tool schemas depending on the active mode.
+          Both execution paths are driven by a single synchronous state machine (<code>TurnMachine</code> in <code>lash/src/sansio.rs</code>)
+          that emits I/O effects (<code>LlmCall</code>, <code>ToolCall</code>, <code>ExecCode</code>, <code>Sleep</code>) for the async host driver to fulfil.
         </div>
         <div class="cell-grid cols-3">
           <div class="cell">
@@ -741,7 +743,7 @@
           </div>
           <div class="cell">
             <h4>Context Control</h4>
-            <p>Batched context folding with soft/hard watermarks plus <code>_history</code> / <code>_mem</code> for long-running sessions and sub-agents.</p>
+            <p>Batched context folding with soft/hard watermarks plus <code>search_history</code> / <code>search_mem</code> tool calls for long-running sessions and sub-agents.</p>
           </div>
           <div class="cell">
             <h4>Capability Guidance</h4>
@@ -759,7 +761,7 @@
     <div class="section-header">
       <span class="section-number">04</span>
       <span class="section-title">REPL Mode</span>
-      <span class="section-desc">Embedded Python execution with persistent state across turns.</span>
+      <span class="section-desc">Monty-backed execution with persistent state across turns.</span>
     </div>
 
     <div class="arch-grid">
@@ -767,7 +769,7 @@
         <div class="arch-card-tag tag-repl"><span class="dot"></span>Execution Contract</div>
         <div class="arch-card-title">REPL Execution Model</div>
         <div class="arch-card-desc">
-          The session spins up embedded Python, registers tool definitions/capabilities,
+          The session spins up a Monty-backed REPL, registers tool definitions/capabilities,
           and executes <code>&lt;repl&gt;</code> blocks in a persistent namespace. The model may emit prose
           plus at most one <code>&lt;repl&gt;</code> block per turn.
         </div>
@@ -867,12 +869,12 @@ models, routes = <span class="kw">await</span> asyncio.<span class="fn">gather</
         <div class="arch-card-title">REPL Turn Cycle</div>
         <div class="arch-card-desc">
           After each <code>&lt;repl&gt;</code> block executes, the model sees code output, tool output, and errors
-          as typed feedback parts on the following turn. Python locals persist across turns and can be
+          as typed feedback parts on the following turn. REPL locals persist across turns and can be
           snapshotted for resume.
         </div>
 
         <div class="sequence-block">
-          <pre>  <span class="role">Host</span>          <span class="role">Runtime</span>         <span class="role">Agent</span>           <span class="role">Python REPL</span>
+          <pre>  <span class="role">Host</span>          <span class="role">Runtime</span>         <span class="role">Agent</span>           <span class="role">Monty REPL</span>
    │               │                │                │
    │──TurnInput──▶│                │                │
    │               │──assemble──▶  │                │
@@ -1113,7 +1115,7 @@ Added `timeout_ms: u64` field to the Config struct.</pre>
         <div class="arch-card-title">Sub-Agent Orchestration</div>
         <div class="arch-card-desc">
           <code>agent_call</code> forks parent dynamic state per sub-agent. Sub-agents share the same filesystem/worktree
-          but get isolated tool/capability state. Low tier sub-agents are filtered (no write/delegation tools) and always execute in <code>native-tools</code>; medium/high inherit the parent session's execution mode. REPL-only setup (<code>done(...)</code> wrappers, <code>_history</code>/<code>_mem</code> injection) only applies when the child actually runs in <code>repl</code>.
+          but get isolated tool/capability state. Low tier sub-agents are filtered (no write/delegation tools) and always execute in <code>native-tools</code>; medium/high inherit the parent session's execution mode. REPL-only setup (<code>done(...)</code> wrappers, history/memory tool registration) only applies when the child actually runs in <code>repl</code>.
         </div>
         <div class="cell-grid cols-3">
           <div class="cell">
@@ -1122,7 +1124,7 @@ Added `timeout_ms: u64` field to the Config struct.</pre>
           </div>
           <div class="cell">
             <h4>Recall Pattern</h4>
-            <p>Use a low-tier read-only sub-agent to summarize prior context when needed. In REPL mode that can include <code>_history</code>/<code>_mem</code>; in native-tools mode it relies on transcript and tool-result context.</p>
+            <p>Use a low-tier read-only sub-agent to summarize prior context when needed. Both modes can use <code>search_history</code>/<code>search_mem</code> tool calls for prior-turn recall.</p>
           </div>
           <div class="cell">
             <h4>Constraint</h4>
@@ -1263,24 +1265,23 @@ Added `timeout_ms: u64` field to the Config struct.</pre>
         <div class="arch-card-tag tag-memory"><span class="dot"></span>Memory</div>
         <div class="arch-card-title">Persistent Key-Value Memory</div>
         <div class="arch-card-desc">
-          <code>_mem</code> is persistent key-value memory across context pruning. Use it to store durable decisions,
-          conventions, and project-specific knowledge. Available as a REPL global and via tool calls.
+          Memory is persistent key-value storage across context pruning. Use it to store durable decisions,
+          conventions, and project-specific knowledge. Accessed via host tool calls (<code>mem_set</code>, <code>mem_get</code>, <code>mem_delete</code>, <code>search_mem</code>) in both execution modes.
         </div>
         <div class="cell-grid cols-2">
           <div class="cell">
-            <h4>API</h4>
+            <h4>Tool API</h4>
             <p>
-              <code>_mem.set(key, description, value=None)</code> &mdash; store/update<br>
-              <code>_mem.get(key)</code> &mdash; retrieve or <code>None</code><br>
-              <code>_mem.delete(key)</code> &mdash; remove<br>
-              <code>_mem.all()</code> &mdash; list keys with descriptions<br>
-              <code>_mem.search(query, mode, regex, limit, keys)</code> &mdash; search
+              <code>mem_set(key, description, value=None)</code> &mdash; store/update<br>
+              <code>mem_get(key)</code> &mdash; retrieve or <code>None</code><br>
+              <code>mem_delete(key)</code> &mdash; remove<br>
+              <code>search_mem(query, mode, regex, limit, keys)</code> &mdash; search
             </p>
           </div>
           <div class="cell">
-            <h4>Built-in Helper</h4>
+            <h4>Availability</h4>
             <p>
-              <code>search_mem(query, mode="hybrid", regex=None, limit=10, keys=None)</code> is available as a top-level built-in in REPL mode and as a native tool in native-tools mode.
+              <code>search_mem(query, mode="hybrid", regex=None, limit=10, keys=None)</code> is available as a callable tool in both REPL and native-tools modes.
             </p>
           </div>
         </div>
@@ -1288,8 +1289,7 @@ Added `timeout_ms: u64` field to the Config struct.</pre>
         <div class="example-block">
           <div class="example-label">Example &mdash; Storing a convention (REPL)</div>
           <pre><span class="tag">&lt;repl&gt;</span>
-_mem.<span class="fn">set</span>(<span class="str">"repo_convention"</span>, <span class="str">"Use snake_case for tool names"</span>)
-<span class="fn">print</span>(_mem.<span class="fn">all</span>())
+<span class="fn">mem_set</span>(<span class="str">"repo_convention"</span>, <span class="str">"Use snake_case for tool names"</span>)
 <span class="tag">&lt;/repl&gt;</span></pre>
         </div>
 
@@ -1315,23 +1315,23 @@ results = <span class="fn">search_mem</span>(<span class="str">"naming conventio
         <div class="arch-card-tag tag-memory"><span class="dot"></span>History</div>
         <div class="arch-card-title">Persistent Turn History</div>
         <div class="arch-card-desc">
-          <code>_history</code> tracks prior turns across context pruning. When the rolling context window drops old messages,
+          History tools track prior turns across context pruning. When the rolling context window drops old messages,
           they are preserved in history for retrieval. Sub-agents can inherit parent-agent context at spawn time.
         </div>
         <div class="cell-grid cols-2">
           <div class="cell">
             <h4>API</h4>
             <p>
-              <code>_history.user_messages()</code> &mdash; list prior user messages<br>
-              <code>_history.search(query, ...)</code> &mdash; search pruned turns<br>
-              <code>search_history(query, mode="hybrid", regex=None, limit=10, fields=None, since_turn=None)</code>
+              <code>search_history(query, mode="hybrid", regex=None, limit=10, fields=None, since_turn=None)</code> &mdash; search pruned turns<br>
+              <code>history_add_turn(...)</code> &mdash; add a turn to history<br>
+              <code>history_export(...)</code> / <code>history_load(...)</code> &mdash; export/import history
             </p>
           </div>
           <div class="cell">
             <h4>Sub-Agent Inheritance</h4>
             <p>
-              <code>_history</code> and <code>_mem</code> can include parent-agent context inherited at spawn time.
-              A low-tier sub-agent can summarize relevant history without full write access.
+              History and memory state can include parent-agent context inherited at spawn time.
+              A low-tier sub-agent can call <code>search_history</code> and <code>search_mem</code> to summarize relevant context without full write access.
             </p>
           </div>
         </div>
@@ -1351,7 +1351,7 @@ hits = <span class="fn">search_history</span>(<span class="str">"database migrat
           <pre><span class="tag">&lt;repl&gt;</span>
 <span class="cm"># Use a cheap sub-agent to mine history</span>
 summary = <span class="kw">await</span> <span class="fn">delegate_low</span>(
-    <span class="str">"Search _history for any database schema decisions and summarize them."</span>
+    <span class="str">"Search history for any database schema decisions and summarize them."</span>
 )
 <span class="fn">print</span>(summary)
 <span class="tag">&lt;/repl&gt;</span></pre>
@@ -1360,7 +1360,7 @@ summary = <span class="kw">await</span> <span class="fn">delegate_low</span>(
     </div>
 
     <div class="arch-note">
-      Use <code>_history</code> and <code>_mem</code> only when prior-turn recall is actually needed.
+      Use <code>search_history</code> and <code>search_mem</code> only when prior-turn recall is actually needed.
       Skip history-mining detours unless the task explicitly depends on prior turns.
     </div>
   </div>
@@ -1496,7 +1496,7 @@ skill = <span class="fn">load_skill</span>(<span class="str">"frontend-design"</
         <div class="step">
           <span class="step-num">04</span>
           <strong>Mode Exec</strong>
-          <p>Execution diverges here: persistent Python REPL for <code>repl</code> when that backend is built, provider-native tool loop for <code>native-tools</code>.</p>
+          <p>Execution diverges here: persistent Monty REPL for <code>repl</code>, provider-native tool loop for <code>native-tools</code>.</p>
         </div>
         <div class="step">
           <span class="step-num">05</span>
@@ -1522,10 +1522,11 @@ skill = <span class="fn">load_skill</span>(<span class="str">"frontend-design"</
       <div class="ref"><b>Runtime API</b><code>lash/src/runtime.rs</code></div>
       <div class="ref"><b>Dynamic Runtime</b><code>lash/src/dynamic.rs</code></div>
       <div class="ref"><b>Agent Loop</b><code>lash/src/agent/mod.rs</code></div>
+      <div class="ref"><b>Sans-IO Turn Machine</b><code>lash/src/sansio.rs</code></div>
       <div class="ref"><b>Prompt Contracts</b><code>lash/src/agent/prompt.rs</code></div>
       <div class="ref"><b>Session Bridge</b><code>lash/src/session.rs</code></div>
       <div class="ref"><b>LLM Message Types</b><code>lash/src/llm/types.rs</code></div>
-      <div class="ref"><b>Embedded Python</b><code>lash/src/embedded.rs + lash/src/embedded_stub.rs + lash/python/repl.py</code></div>
+      <div class="ref"><b>Embedded REPL</b><code>lash/src/embedded.rs</code></div>
       <div class="ref"><b>Tool Model</b><code>lash/src/lib.rs + lash/src/tools/*</code></div>
       <div class="ref"><b>Capabilities</b><code>lash/src/capabilities.rs</code></div>
       <div class="ref"><b>Skills</b><code>lash/src/tools/skills.rs</code></div>

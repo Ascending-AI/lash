@@ -48,7 +48,7 @@ impl ToolProvider for Glob {
                     required: false,
                 },
             ],
-            returns: "list[PathEntry]".into(),
+            returns: "dict".into(),
             examples: vec![],
             hidden: false,
             inject_into_prompt: true,

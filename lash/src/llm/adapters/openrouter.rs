@@ -14,6 +14,13 @@ pub struct OpenAiGenericAdapter {
     client: reqwest::Client,
 }
 
+#[derive(Clone, Debug, Default)]
+struct StreamingToolCall {
+    id: String,
+    name: String,
+    arguments: String,
+}
+
 impl Default for OpenAiGenericAdapter {
     fn default() -> Self {
         Self::new()
@@ -214,11 +221,22 @@ impl OpenAiGenericAdapter {
         deltas.push(piece.to_string());
     }
 
+    #[cfg(test)]
     fn process_sse_event(
         raw: &str,
         full: &mut String,
         deltas: &mut Vec<String>,
         usage: &mut LlmUsage,
+    ) -> Result<(), LlmTransportError> {
+        Self::process_sse_event_with_tools(raw, full, deltas, usage, None)
+    }
+
+    fn process_sse_event_with_tools(
+        raw: &str,
+        full: &mut String,
+        deltas: &mut Vec<String>,
+        usage: &mut LlmUsage,
+        tool_calls: Option<&mut Vec<StreamingToolCall>>,
     ) -> Result<(), LlmTransportError> {
         let raw = raw.trim();
         if raw.is_empty() || raw == "[DONE]" {
@@ -239,6 +257,37 @@ impl OpenAiGenericAdapter {
         }
         for piece in Self::extract_text_parts(&event) {
             Self::apply_stream_piece(full, deltas, &piece);
+        }
+        // Accumulate streaming tool call deltas.
+        if let Some(tool_calls) = tool_calls
+            && let Some(choices) = event.get("choices").and_then(|v| v.as_array())
+        {
+            for choice in choices {
+                let Some(tcs) = choice
+                    .get("delta")
+                    .and_then(|d| d.get("tool_calls"))
+                    .and_then(|t| t.as_array())
+                else {
+                    continue;
+                };
+                for tc in tcs {
+                    let index = tc.get("index").and_then(|i| i.as_u64()).unwrap_or(0) as usize;
+                    while tool_calls.len() <= index {
+                        tool_calls.push(StreamingToolCall::default());
+                    }
+                    if let Some(id) = tc.get("id").and_then(|i| i.as_str()) {
+                        tool_calls[index].id = id.to_string();
+                    }
+                    if let Some(f) = tc.get("function") {
+                        if let Some(name) = f.get("name").and_then(|n| n.as_str()) {
+                            tool_calls[index].name = name.to_string();
+                        }
+                        if let Some(args) = f.get("arguments").and_then(|a| a.as_str()) {
+                            tool_calls[index].arguments.push_str(args);
+                        }
+                    }
+                }
+            }
         }
         Ok(())
     }
@@ -350,7 +399,11 @@ impl LlmTransport for OpenAiGenericAdapter {
     }
 
     fn context_lookup_model(&self, model: &str) -> String {
-        model.to_string()
+        if model.starts_with("openrouter/") {
+            model.to_string()
+        } else {
+            format!("openrouter/{model}")
+        }
     }
 
     async fn ensure_ready(&self, _provider: &mut Provider) -> Result<bool, LlmTransportError> {
@@ -470,6 +523,7 @@ impl LlmTransport for OpenAiGenericAdapter {
         let mut full = String::new();
         let mut deltas = Vec::new();
         let mut usage = LlmUsage::default();
+        let mut streaming_tool_calls: Vec<StreamingToolCall> = Vec::new();
         let mut pending = String::new();
         let mut event_lines: Vec<String> = Vec::new();
         let mut resp = resp;
@@ -495,7 +549,13 @@ impl LlmTransport for OpenAiGenericAdapter {
                         let raw = event_lines.join("\n");
                         let prev_len = deltas.len();
                         let prev_usage = usage.clone();
-                        Self::process_sse_event(&raw, &mut full, &mut deltas, &mut usage)?;
+                        Self::process_sse_event_with_tools(
+                            &raw,
+                            &mut full,
+                            &mut deltas,
+                            &mut usage,
+                            Some(&mut streaming_tool_calls),
+                        )?;
                         if let Some(tx) = &stream_events {
                             for piece in deltas.iter().skip(prev_len) {
                                 let _ = tx.send(LlmStreamEvent::Delta(piece.clone()));
@@ -519,7 +579,13 @@ impl LlmTransport for OpenAiGenericAdapter {
             let raw = event_lines.join("\n");
             let prev_len = deltas.len();
             let prev_usage = usage.clone();
-            Self::process_sse_event(&raw, &mut full, &mut deltas, &mut usage)?;
+            Self::process_sse_event_with_tools(
+                &raw,
+                &mut full,
+                &mut deltas,
+                &mut usage,
+                Some(&mut streaming_tool_calls),
+            )?;
             if let Some(tx) = &stream_events {
                 for piece in deltas.iter().skip(prev_len) {
                     let _ = tx.send(LlmStreamEvent::Delta(piece.clone()));
@@ -530,11 +596,19 @@ impl LlmTransport for OpenAiGenericAdapter {
             }
         }
 
-        let parts = if full.is_empty() {
-            Vec::new()
-        } else {
-            vec![LlmOutputPart::Text { text: full.clone() }]
-        };
+        let mut parts = Vec::new();
+        if !full.is_empty() {
+            parts.push(LlmOutputPart::Text { text: full.clone() });
+        }
+        for tc in &streaming_tool_calls {
+            if !tc.id.is_empty() && !tc.name.is_empty() {
+                parts.push(LlmOutputPart::ToolCall {
+                    call_id: tc.id.clone(),
+                    tool_name: tc.name.clone(),
+                    input_json: tc.arguments.clone(),
+                });
+            }
+        }
 
         Ok(LlmResponse {
             deltas,
@@ -577,6 +651,51 @@ mod tests {
         assert_eq!(usage.input_tokens, 10);
         assert_eq!(usage.output_tokens, 3);
         assert_eq!(usage.cached_input_tokens, 4);
+    }
+
+    #[test]
+    fn streaming_accumulates_tool_calls() {
+        let mut full = String::new();
+        let mut deltas = Vec::new();
+        let mut usage = LlmUsage::default();
+        let mut tool_calls = Vec::new();
+
+        // First SSE event: tool call start with id and name
+        OpenAiGenericAdapter::process_sse_event_with_tools(
+            r#"{"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_abc","type":"function","function":{"name":"read_file","arguments":""}}]}}]}"#,
+            &mut full,
+            &mut deltas,
+            &mut usage,
+            Some(&mut tool_calls),
+        )
+        .unwrap();
+        assert_eq!(tool_calls.len(), 1);
+        assert_eq!(tool_calls[0].id, "call_abc");
+        assert_eq!(tool_calls[0].name, "read_file");
+
+        // Second SSE event: argument chunk
+        OpenAiGenericAdapter::process_sse_event_with_tools(
+            r#"{"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"arguments":"{\"path\":"}}]}}]}"#,
+            &mut full,
+            &mut deltas,
+            &mut usage,
+            Some(&mut tool_calls),
+        )
+        .unwrap();
+
+        // Third SSE event: argument continuation
+        OpenAiGenericAdapter::process_sse_event_with_tools(
+            r#"{"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"arguments":"\"a.rs\"}"}}]}}]}"#,
+            &mut full,
+            &mut deltas,
+            &mut usage,
+            Some(&mut tool_calls),
+        )
+        .unwrap();
+
+        assert_eq!(tool_calls.len(), 1);
+        assert_eq!(tool_calls[0].arguments, r#"{"path":"a.rs"}"#);
+        assert!(full.is_empty());
     }
 
     #[test]

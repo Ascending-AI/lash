@@ -32,6 +32,11 @@ enum SetupStep {
         interval: u64,
         error: Option<String>,
     },
+    InputBaseUrl {
+        api_key: String,
+        input: String,
+        cursor: usize,
+    },
     InputTavily {
         input: String,
         cursor: usize,
@@ -325,17 +330,12 @@ async fn run_setup_inner(
                     } else {
                         match mode {
                             CredentialMode::OpenAiGenericKey => {
-                                provider = Some(Provider::OpenAiGeneric {
+                                let default_url = OPENAI_GENERIC_DEFAULT_BASE_URL.to_string();
+                                let cursor_pos = default_url.len();
+                                app.step = SetupStep::InputBaseUrl {
                                     api_key: val,
-                                    base_url: OPENAI_GENERIC_DEFAULT_BASE_URL.into(),
-                                });
-                                app.step = if tavily_key.is_some() {
-                                    SetupStep::Done
-                                } else {
-                                    SetupStep::InputTavily {
-                                        input: String::new(),
-                                        cursor: 0,
-                                    }
+                                    input: default_url,
+                                    cursor: cursor_pos,
                                 };
                             }
                             CredentialMode::ClaudeOAuth => {
@@ -431,6 +431,70 @@ async fn run_setup_inner(
                 // Handled by polling loop above; this branch is unreachable
                 unreachable!();
             }
+
+            SetupStep::InputBaseUrl {
+                api_key,
+                input,
+                cursor,
+            } => match key.code {
+                KeyCode::Esc => {
+                    app.step = SetupStep::SelectProvider { selected: 0 };
+                }
+                KeyCode::Char(c) => {
+                    input.insert(*cursor, c);
+                    *cursor += c.len_utf8();
+                }
+                KeyCode::Backspace => {
+                    if *cursor > 0 {
+                        let prev = input[..*cursor]
+                            .char_indices()
+                            .last()
+                            .map(|(i, _)| i)
+                            .unwrap_or(0);
+                        input.drain(prev..*cursor);
+                        *cursor = prev;
+                    }
+                }
+                KeyCode::Left => {
+                    if *cursor > 0 {
+                        *cursor = input[..*cursor]
+                            .char_indices()
+                            .last()
+                            .map(|(i, _)| i)
+                            .unwrap_or(0);
+                    }
+                }
+                KeyCode::Right => {
+                    if *cursor < input.len() {
+                        *cursor += input[*cursor..]
+                            .chars()
+                            .next()
+                            .map(|c| c.len_utf8())
+                            .unwrap_or(0);
+                    }
+                }
+                KeyCode::Enter => {
+                    let base_url = input.trim().to_string();
+                    let base_url = if base_url.is_empty() {
+                        OPENAI_GENERIC_DEFAULT_BASE_URL.to_string()
+                    } else {
+                        base_url
+                    };
+                    provider = Some(Provider::OpenAiGeneric {
+                        api_key: api_key.clone(),
+                        base_url,
+                    });
+                    app.step = if tavily_key.is_some() {
+                        SetupStep::Done
+                    } else {
+                        SetupStep::InputTavily {
+                            input: String::new(),
+                            cursor: 0,
+                        }
+                    };
+                }
+                _ => {}
+            },
 
             SetupStep::InputTavily { input, cursor } => match key.code {
                 KeyCode::Esc => {
@@ -531,6 +595,7 @@ fn draw_setup(frame: &mut Frame, app: &SetupApp) {
                     9
                 }
             }
+            SetupStep::InputBaseUrl { .. } => 8,
             SetupStep::InputTavily { .. } => 7,
             SetupStep::Done => 4,
         };
@@ -568,6 +633,9 @@ fn draw_setup(frame: &mut Frame, app: &SetupApp) {
         SetupStep::CodexDeviceAuth {
             user_code, error, ..
         } => draw_codex_device_auth(frame, chunks[2], user_code, error.as_deref(), app.tick),
+        SetupStep::InputBaseUrl { input, cursor, .. } => {
+            draw_base_url_input(frame, chunks[2], input, *cursor)
+        }
         SetupStep::InputTavily { input, cursor } => {
             draw_tavily_input(frame, chunks[2], input, *cursor)
         }
@@ -644,7 +712,7 @@ fn draw_provider_select(frame: &mut Frame, area: Rect, selected: usize) {
                     Style::default().fg(theme::SODIUM),
                 ),
                 Span::styled(
-                    format!("{:<14}", name),
+                    format!("{:<16}", name),
                     Style::default()
                         .fg(theme::CHALK)
                         .add_modifier(Modifier::BOLD),
@@ -655,7 +723,7 @@ fn draw_provider_select(frame: &mut Frame, area: Rect, selected: usize) {
             lines.push(Line::from(vec![
                 Span::styled(format!("{}  ", pad), Style::default()),
                 Span::styled(
-                    format!("{:<14}", name),
+                    format!("{:<16}", name),
                     Style::default().fg(theme::ASH_TEXT),
                 ),
                 Span::styled(desc, Style::default().fg(theme::ASH_MID)),
@@ -921,6 +989,82 @@ fn draw_codex_device_auth(
 
     let paragraph = Paragraph::new(lines).style(Style::default().bg(theme::FORM));
     frame.render_widget(paragraph, area);
+}
+
+fn draw_base_url_input(frame: &mut Frame, area: Rect, input: &str, cursor: usize) {
+    let box_width = 52usize;
+    let cx = center_pad(area.width as usize, box_width);
+    let pad = " ".repeat(cx);
+    let inner_w = box_width.saturating_sub(4);
+
+    let mut lines: Vec<Line> = Vec::new();
+    lines.push(Line::from(""));
+    lines.push(Line::from(Span::styled(
+        format!("{}Base URL (enter to keep default):", pad),
+        Style::default().fg(theme::ASH_TEXT),
+    )));
+    lines.push(Line::from(""));
+
+    let label = "Base URL";
+    let top_border = format!(
+        "{}\u{256d} {} {}\u{256e}",
+        pad,
+        label,
+        "\u{2500}".repeat(box_width.saturating_sub(label.len() + 4)),
+    );
+    lines.push(Line::from(Span::styled(
+        top_border,
+        Style::default().fg(theme::ASH),
+    )));
+
+    let display_text = visible_slice(input, inner_w, cursor);
+    let text_pad = inner_w.saturating_sub(display_text.chars().count());
+    lines.push(Line::from(vec![
+        Span::styled(format!("{}\u{2502} ", pad), Style::default().fg(theme::ASH)),
+        Span::styled(
+            format!("{} ", theme::PROMPT_CHAR),
+            Style::default().fg(theme::SODIUM),
+        ),
+        Span::styled(
+            display_text.to_string(),
+            Style::default().fg(theme::CHALK_MID),
+        ),
+        Span::styled(
+            format!("{}\u{2502}", " ".repeat(text_pad)),
+            Style::default().fg(theme::ASH),
+        ),
+    ]));
+
+    let bottom_border = format!(
+        "{}\u{2570}{}\u{256f}",
+        pad,
+        "\u{2500}".repeat(box_width.saturating_sub(2)),
+    );
+    lines.push(Line::from(Span::styled(
+        bottom_border,
+        Style::default().fg(theme::ASH),
+    )));
+
+    lines.push(Line::from(""));
+    lines.push(Line::from(vec![
+        Span::styled(format!("{}enter", pad), theme::help_key()),
+        Span::styled(" submit  ", theme::help_desc()),
+        Span::styled("esc", theme::help_key()),
+        Span::styled(" back", theme::help_desc()),
+    ]));
+
+    let paragraph = Paragraph::new(lines).style(Style::default().bg(theme::FORM));
+    frame.render_widget(paragraph, area);
+
+    // Position cursor
+    let cursor_chars = input[..cursor].chars().count();
+    let vis_start = visible_start(input, inner_w, cursor);
+    let cursor_offset = cursor_chars.saturating_sub(vis_start);
+    let cursor_x = (cx + 4 + cursor_offset) as u16;
+    let cursor_y = area.y + 4; // input line is 5th line (index 4)
+    if cursor_x < area.x + area.width && cursor_y < area.y + area.height {
+        frame.set_cursor_position((area.x + cursor_x, cursor_y));
+    }
 }
 
 fn draw_tavily_input(frame: &mut Frame, area: Rect, input: &str, cursor: usize) {

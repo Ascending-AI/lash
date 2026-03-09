@@ -27,6 +27,7 @@ impl ExecAccumulator {
     }
 }
 
+#[allow(dead_code)]
 fn extract_exec_error_summary(raw: &str) -> String {
     let mut cleaned = raw.trim();
     if let Some(rest) = cleaned.strip_prefix("Runtime error:") {
@@ -58,6 +59,7 @@ fn extract_exec_error_summary(raw: &str) -> String {
     lines.last().unwrap_or(&"Execution failed").to_string()
 }
 
+#[allow(dead_code)]
 fn format_exec_error_for_output(raw: &str) -> String {
     if matches!(
         std::env::var("LASH_VERBOSE_RUNTIME_ERRORS")
@@ -73,6 +75,7 @@ fn format_exec_error_for_output(raw: &str) -> String {
 }
 
 /// Execute a code block, emit events, and collect results into the accumulator.
+#[allow(dead_code)]
 pub(crate) async fn execute_and_collect(
     session: &mut Session,
     code: &str,

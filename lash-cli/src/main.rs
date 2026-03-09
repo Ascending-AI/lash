@@ -768,10 +768,7 @@ fn ensure_supported_execution_mode(mode: ExecutionMode) -> Result<ExecutionMode,
         Ok(mode)
     } else {
         Err(match mode {
-            ExecutionMode::Repl => {
-                "REPL mode is not available in this build. Rebuild without `native-tools-only` to enable it."
-                    .to_string()
-            }
+            ExecutionMode::Repl => "REPL mode is not available in this build.".to_string(),
             ExecutionMode::NativeTools => "Execution mode is not available.".to_string(),
         })
     }
@@ -1334,6 +1331,14 @@ async fn run_app(
                 // With kitty keyboard protocol, ignore Release/Repeat events
                 if key.kind != KeyEventKind::Press {
                     continue;
+                }
+                // Re-enable mouse capture if it was released for native selection.
+                if !app.mouse_captured && !args.no_mouse {
+                    let _ = crossterm::execute!(
+                        std::io::stdout(),
+                        crossterm::event::EnableMouseCapture
+                    );
+                    app.mouse_captured = true;
                 }
                 app.dirty = true;
                 // CTRL+C: dismiss prompt if active, else quit
@@ -2571,17 +2576,27 @@ Use `/provider` or `/login` to sign in again without restarting.",
                 }
             }
             AppEvent::Terminal(TermEvent::Mouse(mouse)) => {
-                app.dirty = true;
-                use crossterm::event::MouseEventKind;
-                match mouse.kind {
-                    MouseEventKind::ScrollUp => app.scroll_up(3),
-                    MouseEventKind::ScrollDown => {
-                        let size = terminal.size()?;
-                        let vh = ui::history_viewport_height(&app, size.width, size.height);
-                        let vw = size.width as usize;
-                        app.scroll_down(3, vh, vw);
+                use crossterm::event::{KeyModifiers, MouseEventKind};
+                if mouse.modifiers.contains(KeyModifiers::SHIFT) && app.mouse_captured {
+                    // Release mouse capture so the terminal handles native
+                    // text selection and scrolling while shift is held.
+                    let _ = crossterm::execute!(
+                        std::io::stdout(),
+                        crossterm::event::DisableMouseCapture
+                    );
+                    app.mouse_captured = false;
+                } else {
+                    app.dirty = true;
+                    match mouse.kind {
+                        MouseEventKind::ScrollUp => app.scroll_up(3),
+                        MouseEventKind::ScrollDown => {
+                            let size = terminal.size()?;
+                            let vh = ui::history_viewport_height(&app, size.width, size.height);
+                            let vw = size.width as usize;
+                            app.scroll_down(3, vh, vw);
+                        }
+                        _ => {}
                     }
-                    _ => {}
                 }
             }
             AppEvent::Terminal(TermEvent::FocusGained) => {
@@ -2968,7 +2983,7 @@ fn send_user_message(
 }
 
 /// Try to restore agent state from the .db file corresponding to a .jsonl session file.
-/// On success, restores the REPL via dill. On failure (or no .db), injects a reset message.
+/// On success, restores the REPL from a persisted snapshot. On failure (or no .db), injects a reset message.
 async fn restore_agent_state(
     jsonl_filename: &str,
     history: &mut Vec<Message>,
@@ -3050,11 +3065,11 @@ async fn restore_agent_state(
         }
 
         if matches!(restored_execution_mode, ExecutionMode::Repl) {
-            if let Some(ref dill_blob) = state.dill_blob {
+            if let Some(ref repl_snapshot) = state.repl_snapshot {
                 // Try to restore REPL state
                 if let Some(rt) = runtime.as_mut() {
                     rt.set_context_folding(restored_context_folding);
-                    match rt.restore_repl(dill_blob).await {
+                    match rt.restore_repl(repl_snapshot).await {
                         Ok(()) => {
                             app.blocks.push(DisplayBlock::SystemMessage(
                                 "REPL state restored from snapshot.".to_string(),
@@ -3081,7 +3096,7 @@ async fn restore_agent_state(
                     }
                 }
             } else {
-                // No dill blob — inject reset message
+                // No persisted snapshot — inject reset message
                 let sys_id = format!("m{}", history.len());
                 history.push(Message {
                     id: sys_id.clone(),
@@ -3149,7 +3164,7 @@ async fn restore_agent_state(
                 task_state: None,
                 subagent_state: None,
                 replay_manifest,
-                repl_snapshot: state.dill_blob.clone(),
+                repl_snapshot: state.repl_snapshot.clone(),
             });
         }
     } else {

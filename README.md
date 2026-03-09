@@ -1,6 +1,6 @@
 # lash
 
-AI coding agent with a persistent Python REPL or native tool-calling execution mode, hashline-safe file editing, and a host-friendly runtime API for TUI and headless frontends.
+AI coding agent with a persistent Monty-backed `repl` runtime or native tool-calling execution mode, hashline-safe file editing, and a host-friendly runtime API for TUI and headless frontends.
 
 ## Setup
 
@@ -13,69 +13,33 @@ SCRIPT
 chmod +x ~/.local/bin/lash
 ```
 
-## Python Build Modes
+## Runtime Modes
 
-`lash`/`lash-core` support three build modes:
+`lash`/`lash-core` support two execution backends:
 
-- `python-system` (default): link against host Python discovered by PyO3 (and provide `dill` in that Python env).
-- `python-bundled`: link against `python-build-standalone` and bundle stdlib+dill.
-- `native-tools-only`: build without embedded Python/PyO3 at all. This defaults runtime execution to `native-tools`, and `repl` mode is unavailable in that build.
+- `repl` (default): a persistent Monty-backed sandbox that executes agent-written Python-like code with host-call boundaries for tools.
+- `native-tools`: provider-native tool calling without the REPL sandbox.
+
+Both backends are driven by a single sans-IO state machine (`TurnMachine` in `lash/src/sansio.rs`). All protocol logic (prompt assembly, fence parsing, retry/backoff, context folding, turn limits) lives in the synchronous machine; the async `Agent::run` / `run_native_tools` methods are thin host drivers that fulfil I/O effects. This makes the core turn logic independently testable without a tokio runtime.
 
 ### Local dev
 
 ```bash
-./dev.sh                           # default: system Python
-LASH_PYTHON_MODE=bundled ./dev.sh  # bundled python-build-standalone
-LASH_PYTHON_MODE=none ./dev.sh     # native-tools-only, no Python required
+./dev.sh
 ```
 
 ### Build commands
 
 ```bash
-# System Python
-cargo xtask build --python system
-
-# Bundled Python (auto-bootstrap + auto-configure)
-cargo xtask build --python bundled
-
-# No embedded Python at all
-cargo xtask build --python none
+cargo build -p lash-cli
+cargo build -p lash-cli --release
 ```
-
-`cargo xtask build --python bundled` bootstraps standalone Python as needed and sets
-`PYO3_CONFIG_FILE` automatically for the build invocation.
-
-Manual bundled build (advanced/CI override):
-
-```bash
-./scripts/fetch-python.sh
-PYO3_CONFIG_FILE=$PWD/target/python-standalone/pyo3-config.txt cargo build -p lash-cli --features python-bundled
-```
-
-`PYO3_CONFIG_FILE` only affects build/link time; it is not a runtime requirement.
-`python-system` mode expects `dill` to be importable at runtime (`python3 -m pip install dill`).
 
 ### Downstream (`lash-core`) integration
 
 ```toml
 [dependencies]
-lash-core = { path = "../lash", default-features = false, features = ["full", "python-system"] }
-```
-
-For bundled mode in downstream projects:
-
-```toml
-[dependencies]
-lash-core = { path = "../lash", default-features = false, features = ["full", "python-bundled"] }
-```
-
-Then bootstrap bundled Python and set `PYO3_CONFIG_FILE` before running Cargo (same as above).
-
-For native-tools-only mode in downstream projects:
-
-```toml
-[dependencies]
-lash-core = { path = "../lash", default-features = false, features = ["full", "native-tools-only"] }
+lash-core = { path = "../lash", default-features = false, features = ["full"] }
 ```
 
 ## CLI Usage
@@ -85,7 +49,7 @@ lash                               # start interactive TUI session
 lash -p "summarize this repo"      # headless mode: run one prompt and print result
 lash --print "summarize this repo"  # same, long form
 lash --model gpt-5.4               # override model
-lash --execution-mode native-tools # use provider-native tool calling instead of the Python REPL
+lash --execution-mode native-tools # use provider-native tool calling instead of the repl sandbox
 lash --no-mouse                    # disable mouse (re-enables terminal text selection)
 lash --provider                    # force provider setup flow
 lash --reset                       # delete ~/.lash and ~/.cache/lash, then exit
@@ -143,7 +107,7 @@ scripts/run-terminalbench.sh --sample --build-mode host   # use host binary inst
 | `/clear`, `/new` | Reset conversation |
 | `/controls` | Show keyboard shortcuts |
 | `/model [name]` | Show current model or switch LLM model |
-| `/mode [name]` | Show current execution mode or switch modes (Python-enabled builds: `repl` or `native-tools`; native-tools-only builds: `native-tools`) |
+| `/mode [name]` | Show current execution mode or switch modes (`repl` or `native-tools`) |
 | `/provider` | Open provider setup in-app |
 | `/login` | Alias for `/provider` |
 | `/logout` | Remove stored credentials from disk |
@@ -158,7 +122,7 @@ scripts/run-terminalbench.sh --sample --build-mode host   # use host binary inst
 
 `/logout` only clears persisted config. The active session may continue with in-memory credentials until you switch provider or restart.
 
-In Python-enabled builds, `repl` is the default execution mode. In `native-tools-only` builds, `native-tools` is the default and `repl` cannot be selected. `native-tools` uses provider-native tool calling with the same lash tool definitions, but it does not preserve arbitrary Python locals across turns.
+`repl` is the default execution mode and is always available. `native-tools` uses provider-native tool calling with the same lash tool definitions, but it does not preserve arbitrary REPL locals across turns.
 Low-intelligence sub-agents spawned with `agent_call(..., intelligence="low")` always run in `native-tools`; medium/high sub-agents inherit the parent session's execution mode.
 
 Context folding is batched and cache-friendly. Lash keeps the prompt stable until the hard watermark is hit, then folds old history back to the soft watermark with one stable archive marker instead of mutating prompt status every turn. Defaults are `50%` soft and `60%` hard. Override them with:
@@ -333,21 +297,21 @@ Tools define `inject_into_prompt: bool` (`lash/src/lib.rs`).
 - `inject_into_prompt=true`: tool appears directly in the LLM system prompt.
 - `inject_into_prompt=false`: tool is omitted from prompt for brevity, but still callable at runtime.
 - Tool identity is shared across execution modes, but tool `description` and `examples` are mode-scoped.
-- Lash projects REPL-tagged metadata into the Python REPL/help surface, and native-tools-tagged metadata into provider-native tool schemas/prompt docs.
+- Lash projects REPL-tagged metadata into the `repl` helper surface, and native-tools-tagged metadata into provider-native tool schemas and prompt docs.
 
 Runtime discovery is available via:
 
 - `list_tools(...)`
 - `search_tools(query, mode="hybrid", ...)`
 
-The REPL exposes the full tool namespace under `tools` (for example `tools.read_file(...)`, `tools.search_tools(...)`).
-It also implicitly runs `from tools import *`, so visible tools can be called directly.
+The `repl` executor exposes visible tools as global functions (for example `read_file(...)`, `search_tools(...)`).
+Use `list_tools(...)` and `search_tools(...)` to discover prompt-omitted tools at runtime.
 
 ### Default Native-Tools Surface
 
 With the default capability profile, `native-tools` can call:
 
-- Core read: `read_file`, `glob`, `grep`, `ls`, `search_tools`
+- Core read: `read_file`, `glob`, `grep`, `ls`, `list_tools`, `search_tools`
 - Core write: `write_file`, `edit_file`, `find_replace`
 - Shell: `shell`, `shell_wait`, `shell_read`, `shell_write`, `shell_kill`
 - Tasks: `tasks`, `tasks_summary`, `get_task`, `create_task`, `update_task`, `delete_task`, `claim_task`

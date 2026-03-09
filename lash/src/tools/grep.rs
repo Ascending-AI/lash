@@ -22,7 +22,7 @@ impl ToolProvider for Grep {
             name: "grep".into(),
             description: vec![crate::ToolText::new(
                 format!(
-                    "Search file contents for a regex pattern (ripgrep-compatible regex). Returns matching lines with file paths and line numbers, plus context lines (ripgrep `-C`) around each match. Defaults: context={}, limit={}.",
+                    "Search file contents for a regex pattern (ripgrep-compatible regex). Returns matching lines with file paths and line numbers, plus context lines (ripgrep `-C`) around each match. Each item is a string in ripgrep format: `file:line:text` for matches, `file-line-text` for context lines. Defaults: context={}, limit={}.",
                     DEFAULT_CONTEXT, MAX_RESULTS
                 ),
                 [
@@ -64,7 +64,7 @@ impl ToolProvider for Grep {
                     required: false,
                 },
             ],
-            returns: "list".into(),
+            returns: "list[str]".into(),
             examples: vec![],
             hidden: false,
             inject_into_prompt: true,

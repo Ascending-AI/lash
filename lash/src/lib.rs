@@ -1,15 +1,14 @@
 pub mod agent;
 pub mod capabilities;
 pub mod dynamic;
-#[cfg_attr(not(feature = "python-runtime"), path = "embedded_stub.rs")]
 pub mod embedded;
 pub mod instructions;
 pub mod llm;
 pub mod model_info;
 pub mod oauth;
 pub mod provider;
-pub mod python_home;
 pub mod runtime;
+pub mod sansio;
 pub mod session;
 #[cfg(feature = "sqlite-store")]
 pub mod store;
@@ -17,16 +16,6 @@ pub mod text;
 pub mod tools;
 
 use std::path::PathBuf;
-
-#[cfg(all(feature = "python-system", feature = "python-bundled"))]
-compile_error!("Features 'python-system' and 'python-bundled' are mutually exclusive.");
-#[cfg(all(
-    feature = "native-tools-only",
-    any(feature = "python-system", feature = "python-bundled")
-))]
-compile_error!(
-    "Feature 'native-tools-only' is mutually exclusive with 'python-system' and 'python-bundled'."
-);
 
 /// Return the root data directory for lash.
 ///
@@ -78,6 +67,7 @@ pub use runtime::{
     RuntimeConfig, RuntimeEngine, RuntimeError, SanitizerPolicy, TerminationPolicy, TurnInput,
     TurnIssue, TurnStatus,
 };
+pub use sansio::{Effect, EffectId, LlmCallError, Response, TurnMachine, TurnMachineConfig};
 pub use session::{ExecResponse, Session, SessionError, UserPrompt};
 #[cfg(feature = "sqlite-store")]
 pub use store::{AgentState, Store, TaskEntry};
@@ -85,29 +75,22 @@ pub use text::strip_repl_fragments;
 pub use tools::{BatchingTools, ToolSet, ToolSetDeps};
 
 /// Execution backend for agent turns.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ExecutionMode {
+    #[default]
     Repl,
     NativeTools,
 }
 
-impl Default for ExecutionMode {
-    fn default() -> Self {
-        if python_runtime_available() {
-            Self::Repl
-        } else {
-            Self::NativeTools
-        }
-    }
-}
-
 pub fn python_runtime_available() -> bool {
-    cfg!(feature = "python-runtime")
+    true
 }
 
 pub fn execution_mode_supported(mode: ExecutionMode) -> bool {
-    !matches!(mode, ExecutionMode::Repl) || python_runtime_available()
+    match mode {
+        ExecutionMode::Repl | ExecutionMode::NativeTools => true,
+    }
 }
 
 pub fn default_execution_mode() -> ExecutionMode {
@@ -212,7 +195,7 @@ pub struct ProjectedToolDefinition {
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
 pub struct ToolParam {
     pub name: String,
-    /// Python type: "str", "int", "float", "bool", "list", "dict", "any"
+    /// REPL type: "str", "int", "float", "bool", "list", "dict", "any"
     #[serde(default = "ToolParam::default_type")]
     pub r#type: String,
     #[serde(default, skip_serializing_if = "String::is_empty")]
@@ -247,7 +230,7 @@ impl ToolParam {
     }
 }
 
-/// A tool definition exposed to the Python REPL.
+/// A tool definition exposed to the `repl` executor.
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct ToolDefinition {
     pub name: String,
@@ -255,7 +238,7 @@ pub struct ToolDefinition {
     pub description: Vec<ToolText>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub params: Vec<ToolParam>,
-    /// Python return type: "str", "int", "float", "bool", "list", "dict", "any", "None"
+    /// REPL return type: "str", "int", "float", "bool", "list", "dict", "any", "None"
     #[serde(
         default = "ToolDefinition::default_returns",
         skip_serializing_if = "String::is_empty"

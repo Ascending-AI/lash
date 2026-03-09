@@ -26,7 +26,12 @@ impl TaskStore {
             .to_string()
     }
 
-    fn task_to_json(t: &crate::store::TaskEntry) -> serde_json::Value {
+    fn task_to_json(t: &crate::store::TaskEntry, caller: &str) -> serde_json::Value {
+        let owner_display = if !t.owner.is_empty() && t.owner == caller {
+            "you".to_string()
+        } else {
+            t.owner.clone()
+        };
         json!({
             "__type__": "task",
             "id": t.id,
@@ -35,7 +40,7 @@ impl TaskStore {
             "status": t.status,
             "priority": t.priority,
             "active_form": t.active_form,
-            "owner": t.owner,
+            "owner": owner_display,
             "blocks": t.blocks,
             "blocked_by": t.blocked_by,
             "metadata": t.metadata,
@@ -43,6 +48,7 @@ impl TaskStore {
     }
 
     fn execute_create(&self, args: &serde_json::Value) -> ToolResult {
+        let caller = Self::agent_id(args);
         let subject = match args.get("subject").and_then(|v| v.as_str()) {
             Some(s) if !s.is_empty() => s,
             _ => return Self::err("Missing required parameter: subject"),
@@ -74,10 +80,11 @@ impl TaskStore {
             self.store
                 .create_task(&id, subject, description, priority, active_form, &metadata);
 
-        ToolResult::ok(Self::task_to_json(&entry))
+        ToolResult::ok(Self::task_to_json(&entry, &caller))
     }
 
     fn execute_tasks(&self, args: &serde_json::Value) -> ToolResult {
+        let caller = Self::agent_id(args);
         let status_filter = args.get("status").and_then(|v| v.as_str());
         let blocked_filter = args.get("blocked").and_then(|v| v.as_bool());
 
@@ -85,25 +92,27 @@ impl TaskStore {
             .store
             .list_tasks(status_filter, blocked_filter)
             .iter()
-            .map(Self::task_to_json)
+            .map(|t| Self::task_to_json(t, &caller))
             .collect();
 
         ToolResult::ok(json!({ "__type__": "task_list", "items": items }))
     }
 
     fn execute_get(&self, args: &serde_json::Value) -> ToolResult {
+        let caller = Self::agent_id(args);
         let id = match args.get("id").and_then(|v| v.as_str()) {
             Some(s) => s,
             None => return Self::err("Missing required parameter: id"),
         };
 
         match self.store.get_task(id) {
-            Some(entry) => ToolResult::ok(Self::task_to_json(&entry)),
+            Some(entry) => ToolResult::ok(Self::task_to_json(&entry, &caller)),
             None => Self::err(format!("Task not found: {}", id)),
         }
     }
 
     fn execute_update(&self, args: &serde_json::Value) -> ToolResult {
+        let caller = Self::agent_id(args);
         let id = match args.get("id").and_then(|v| v.as_str()) {
             Some(s) => s,
             None => return Self::err("Missing required parameter: id"),
@@ -175,7 +184,7 @@ impl TaskStore {
         }
 
         match self.store.get_task(id) {
-            Some(updated) => ToolResult::ok(Self::task_to_json(&updated)),
+            Some(updated) => ToolResult::ok(Self::task_to_json(&updated, &caller)),
             None => Self::err(format!("Task not found after update: {}", id)),
         }
     }
@@ -188,7 +197,7 @@ impl TaskStore {
         let owner = Self::agent_id(args);
 
         match self.store.claim_task(id, &owner) {
-            Ok(entry) => ToolResult::ok(Self::task_to_json(&entry)),
+            Ok(entry) => ToolResult::ok(Self::task_to_json(&entry, &owner)),
             Err(msg) => Self::err(msg),
         }
     }
@@ -260,7 +269,7 @@ impl ToolProvider for TaskStore {
             ToolDefinition {
                 name: "tasks".into(),
                 description: vec![crate::ToolText::new(
-                    "List tasks. Returns a list of Task objects. Optional filters: status, blocked.",
+                    "List tasks. Returns a dict with `items` (list of Task dicts). Each task has: `id`, `subject`, `status`, `priority`, `active_form`, `description`. Optional filters: status, blocked.",
                     [
                         crate::ExecutionMode::Repl,
                         crate::ExecutionMode::NativeTools,
@@ -283,7 +292,7 @@ impl ToolProvider for TaskStore {
                         required: false,
                     },
                 ],
-                returns: "list[Task]".into(),
+                returns: "dict".into(),
                 examples: vec![],
                 hidden: false,
                 inject_into_prompt: false,
@@ -518,7 +527,7 @@ mod tests {
             .execute("claim_task", &json!({"id": id, "__agent_id__": "agent-1"}))
             .await;
         assert!(result.success);
-        assert_eq!(result.result["owner"], "agent-1");
+        assert_eq!(result.result["owner"], "you");
         assert_eq!(result.result["status"], "in_progress");
     }
 

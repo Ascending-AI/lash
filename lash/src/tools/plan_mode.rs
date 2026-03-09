@@ -16,7 +16,7 @@ pub struct PlanState {
 /// Plan mode tool provider: enter_plan_mode and exit_plan_mode.
 ///
 /// The Rust side handles file path generation and plan file reading.
-/// The Python wrapper (repl.py) orchestrates the user-facing approval flow.
+/// The runtime orchestrates the user-facing approval flow.
 pub struct PlanMode {
     state: Mutex<PlanState>,
 }

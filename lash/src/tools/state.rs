@@ -388,6 +388,69 @@ impl StateStore {
         skills
     }
 
+    fn list_tools(&self, args: &serde_json::Value) -> ToolResult {
+        let query = args
+            .get("query")
+            .and_then(|v| v.as_str())
+            .map(|v| v.to_ascii_lowercase());
+        let injected_only = args.get("injected_only").and_then(|v| v.as_bool());
+        let verbose = args
+            .get("verbose")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
+
+        let Some(catalog) = args.get("catalog").and_then(|v| v.as_array()) else {
+            return ToolResult::err(json!("Missing required parameter: catalog"));
+        };
+
+        let items: Vec<serde_json::Value> = catalog
+            .iter()
+            .filter(|t| {
+                if let Some(flag) = injected_only {
+                    let inject = t
+                        .get("inject_into_prompt")
+                        .and_then(|v| v.as_bool())
+                        .unwrap_or(false);
+                    if inject != flag {
+                        return false;
+                    }
+                }
+                if let Some(needle) = &query {
+                    let name = t
+                        .get("name")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or_default()
+                        .to_ascii_lowercase();
+                    let desc = t
+                        .get("description")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or_default()
+                        .to_ascii_lowercase();
+                    return name.contains(needle) || desc.contains(needle);
+                }
+                true
+            })
+            .map(|t| {
+                if verbose {
+                    t.clone()
+                } else {
+                    let name = t.get("name").and_then(|v| v.as_str()).unwrap_or_default();
+                    let desc = t
+                        .get("description")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or_default();
+                    let oneliner = desc.lines().next().unwrap_or("").trim();
+                    json!({
+                        "name": name,
+                        "oneliner": oneliner,
+                    })
+                }
+            })
+            .collect();
+
+        ToolResult::ok(json!(items))
+    }
+
     fn search_tools(&self, args: &serde_json::Value) -> ToolResult {
         let query = args
             .get("query")
@@ -814,28 +877,45 @@ impl StateStore {
 #[async_trait::async_trait]
 impl ToolProvider for StateStore {
     fn definitions(&self) -> Vec<ToolDefinition> {
-        let mut defs = vec![ToolDefinition {
-            name: "search_tools".into(),
-            description: vec![crate::ToolText::new(
-                "Search tools using hybrid/literal/regex matching. Results include relevance scores.",
-                [
-                    crate::ExecutionMode::Repl,
-                    crate::ExecutionMode::NativeTools,
+        let mut defs = vec![
+            ToolDefinition {
+                name: "list_tools".into(),
+                description: vec![crate::ToolText::new(
+                    "List available tools with compact summaries. Use verbose=true for full details. Use search_tools for ranked/filtered results.",
+                    [crate::ExecutionMode::NativeTools],
+                )],
+                params: vec![
+                    ToolParam::optional("query", "str"),
+                    ToolParam::optional("injected_only", "bool"),
+                    ToolParam::optional("verbose", "bool"),
                 ],
-            )],
-            params: vec![
-                ToolParam::typed("query", "str"),
-                ToolParam::optional("mode", "str"),
-                ToolParam::optional("regex", "str"),
-                ToolParam::optional("limit", "int"),
-                ToolParam::optional("injected_only", "bool"),
-                ToolParam::optional("catalog", "list"),
-            ],
-            returns: "list".into(),
-            examples: vec![],
-            hidden: true,
-            inject_into_prompt: false,
-        }];
+                returns: "list".into(),
+                examples: vec![],
+                hidden: true,
+                inject_into_prompt: false,
+            },
+            ToolDefinition {
+                name: "search_tools".into(),
+                description: vec![crate::ToolText::new(
+                    "Search tools using hybrid/literal/regex matching. Results include relevance scores.",
+                    [
+                        crate::ExecutionMode::Repl,
+                        crate::ExecutionMode::NativeTools,
+                    ],
+                )],
+                params: vec![
+                    ToolParam::typed("query", "str"),
+                    ToolParam::optional("mode", "str"),
+                    ToolParam::optional("regex", "str"),
+                    ToolParam::optional("limit", "int"),
+                    ToolParam::optional("injected_only", "bool"),
+                ],
+                returns: "list".into(),
+                examples: vec![],
+                hidden: true,
+                inject_into_prompt: false,
+            },
+        ];
         defs.push(ToolDefinition {
             name: "search_skills".into(),
             description: vec![crate::ToolText::new(
@@ -1048,6 +1128,7 @@ impl ToolProvider for StateStore {
         let name = name.to_string();
         let args = args.clone();
         run_blocking(move || match name.as_str() {
+            "list_tools" => this.list_tools(&args),
             "search_tools" => this.search_tools(&args),
             "search_skills" => this.search_skills(&args),
             "search_history" => this.search_history(&args),

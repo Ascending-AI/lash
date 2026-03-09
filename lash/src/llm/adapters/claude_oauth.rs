@@ -10,6 +10,13 @@ use crate::llm::types::{
 };
 use crate::provider::Provider;
 
+#[derive(Clone, Debug, Default)]
+struct StreamingToolCall {
+    id: String,
+    name: String,
+    arguments: String,
+}
+
 pub struct ClaudeOAuthAdapter {
     client: reqwest::Client,
 }
@@ -200,11 +207,22 @@ impl ClaudeOAuthAdapter {
         out
     }
 
+    #[cfg(test)]
     fn process_sse_event(
         raw: &str,
         full: &mut String,
         deltas: &mut Vec<String>,
         usage: &mut LlmUsage,
+    ) -> Result<(), LlmTransportError> {
+        Self::process_sse_event_with_tools(raw, full, deltas, usage, None)
+    }
+
+    fn process_sse_event_with_tools(
+        raw: &str,
+        full: &mut String,
+        deltas: &mut Vec<String>,
+        usage: &mut LlmUsage,
+        tool_calls: Option<&mut Vec<StreamingToolCall>>,
     ) -> Result<(), LlmTransportError> {
         let raw = raw.trim();
         if raw.is_empty() || raw == "[DONE]" {
@@ -242,6 +260,20 @@ impl ClaudeOAuthAdapter {
                 {
                     Self::apply_stream_piece(full, deltas, text);
                 }
+                if let Some(tool_calls) = tool_calls
+                    && let Some(partial) = event
+                        .get("delta")
+                        .filter(|d| {
+                            d.get("type").and_then(|t| t.as_str()) == Some("input_json_delta")
+                        })
+                        .and_then(|d| d.get("partial_json"))
+                        .and_then(|p| p.as_str())
+                {
+                    let index = event.get("index").and_then(|i| i.as_u64()).unwrap_or(0) as usize;
+                    if index < tool_calls.len() {
+                        tool_calls[index].arguments.push_str(partial);
+                    }
+                }
             }
             "content_block_start" => {
                 if let Some(text) = event
@@ -251,8 +283,24 @@ impl ClaudeOAuthAdapter {
                 {
                     Self::apply_stream_piece(full, deltas, text);
                 }
+                if let Some(tool_calls) = tool_calls
+                    && let Some(cb) = event
+                        .get("content_block")
+                        .filter(|cb| cb.get("type").and_then(|t| t.as_str()) == Some("tool_use"))
+                {
+                    let index = event.get("index").and_then(|i| i.as_u64()).unwrap_or(0) as usize;
+                    while tool_calls.len() <= index {
+                        tool_calls.push(StreamingToolCall::default());
+                    }
+                    if let Some(id) = cb.get("id").and_then(|v| v.as_str()) {
+                        tool_calls[index].id = id.to_string();
+                    }
+                    if let Some(name) = cb.get("name").and_then(|v| v.as_str()) {
+                        tool_calls[index].name = name.to_string();
+                    }
+                }
             }
-            "message_start" | "message_delta" | "message_stop" => {}
+            "message_start" | "message_delta" | "message_stop" | "content_block_stop" => {}
             _ => {
                 if let Some(text) = event
                     .get("delta")
@@ -468,6 +516,7 @@ impl LlmTransport for ClaudeOAuthAdapter {
         let mut full = String::new();
         let mut deltas = Vec::new();
         let mut usage = LlmUsage::default();
+        let mut streaming_tool_calls: Vec<StreamingToolCall> = Vec::new();
         let mut pending = String::new();
         let mut event_lines: Vec<String> = Vec::new();
         let mut resp = resp;
@@ -493,7 +542,13 @@ impl LlmTransport for ClaudeOAuthAdapter {
                         let raw = event_lines.join("\n");
                         let prev_len = deltas.len();
                         let prev_usage = usage.clone();
-                        Self::process_sse_event(&raw, &mut full, &mut deltas, &mut usage)?;
+                        Self::process_sse_event_with_tools(
+                            &raw,
+                            &mut full,
+                            &mut deltas,
+                            &mut usage,
+                            Some(&mut streaming_tool_calls),
+                        )?;
                         if let Some(tx) = &stream_events {
                             for piece in deltas.iter().skip(prev_len) {
                                 let _ = tx.send(LlmStreamEvent::Delta(piece.clone()));
@@ -517,7 +572,13 @@ impl LlmTransport for ClaudeOAuthAdapter {
             let raw = event_lines.join("\n");
             let prev_len = deltas.len();
             let prev_usage = usage.clone();
-            Self::process_sse_event(&raw, &mut full, &mut deltas, &mut usage)?;
+            Self::process_sse_event_with_tools(
+                &raw,
+                &mut full,
+                &mut deltas,
+                &mut usage,
+                Some(&mut streaming_tool_calls),
+            )?;
             if let Some(tx) = &stream_events {
                 for piece in deltas.iter().skip(prev_len) {
                     let _ = tx.send(LlmStreamEvent::Delta(piece.clone()));
@@ -528,11 +589,19 @@ impl LlmTransport for ClaudeOAuthAdapter {
             }
         }
 
-        let parts = if full.is_empty() {
-            Vec::new()
-        } else {
-            vec![LlmOutputPart::Text { text: full.clone() }]
-        };
+        let mut parts = Vec::new();
+        if !full.is_empty() {
+            parts.push(LlmOutputPart::Text { text: full.clone() });
+        }
+        for tc in &streaming_tool_calls {
+            if !tc.id.is_empty() && !tc.name.is_empty() {
+                parts.push(LlmOutputPart::ToolCall {
+                    call_id: tc.id.clone(),
+                    tool_name: tc.name.clone(),
+                    input_json: tc.arguments.clone(),
+                });
+            }
+        }
 
         Ok(LlmResponse {
             deltas,
@@ -581,6 +650,103 @@ mod tests {
         assert_eq!(usage.input_tokens, 120);
         assert_eq!(usage.output_tokens, 12);
         assert_eq!(usage.cached_input_tokens, 80);
+    }
+
+    #[test]
+    fn streaming_accumulates_tool_calls() {
+        let mut full = String::new();
+        let mut deltas = Vec::new();
+        let mut usage = LlmUsage::default();
+        let mut tool_calls = Vec::new();
+
+        // content_block_start with tool_use
+        ClaudeOAuthAdapter::process_sse_event_with_tools(
+            r#"{"type":"content_block_start","index":0,"content_block":{"type":"tool_use","id":"toolu_abc","name":"read_file"}}"#,
+            &mut full,
+            &mut deltas,
+            &mut usage,
+            Some(&mut tool_calls),
+        )
+        .unwrap();
+        assert_eq!(tool_calls.len(), 1);
+        assert_eq!(tool_calls[0].id, "toolu_abc");
+        assert_eq!(tool_calls[0].name, "read_file");
+
+        // First input_json_delta
+        ClaudeOAuthAdapter::process_sse_event_with_tools(
+            r#"{"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":"{\"path\":"}}"#,
+            &mut full,
+            &mut deltas,
+            &mut usage,
+            Some(&mut tool_calls),
+        )
+        .unwrap();
+
+        // Second input_json_delta
+        ClaudeOAuthAdapter::process_sse_event_with_tools(
+            r#"{"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":"\"a.rs\"}"}}"#,
+            &mut full,
+            &mut deltas,
+            &mut usage,
+            Some(&mut tool_calls),
+        )
+        .unwrap();
+
+        assert_eq!(tool_calls.len(), 1);
+        assert_eq!(tool_calls[0].arguments, r#"{"path":"a.rs"}"#);
+        assert!(full.is_empty());
+    }
+
+    #[test]
+    fn streaming_text_and_tool_calls() {
+        let mut full = String::new();
+        let mut deltas = Vec::new();
+        let mut usage = LlmUsage::default();
+        let mut tool_calls = Vec::new();
+
+        // Text block at index 0
+        ClaudeOAuthAdapter::process_sse_event_with_tools(
+            r#"{"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}"#,
+            &mut full,
+            &mut deltas,
+            &mut usage,
+            Some(&mut tool_calls),
+        )
+        .unwrap();
+        ClaudeOAuthAdapter::process_sse_event_with_tools(
+            r#"{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"Let me read that."}}"#,
+            &mut full,
+            &mut deltas,
+            &mut usage,
+            Some(&mut tool_calls),
+        )
+        .unwrap();
+
+        // Tool block at index 1
+        ClaudeOAuthAdapter::process_sse_event_with_tools(
+            r#"{"type":"content_block_start","index":1,"content_block":{"type":"tool_use","id":"toolu_xyz","name":"read_file"}}"#,
+            &mut full,
+            &mut deltas,
+            &mut usage,
+            Some(&mut tool_calls),
+        )
+        .unwrap();
+        ClaudeOAuthAdapter::process_sse_event_with_tools(
+            r#"{"type":"content_block_delta","index":1,"delta":{"type":"input_json_delta","partial_json":"{\"path\":\"b.rs\"}"}}"#,
+            &mut full,
+            &mut deltas,
+            &mut usage,
+            Some(&mut tool_calls),
+        )
+        .unwrap();
+
+        assert_eq!(full, "Let me read that.");
+        assert_eq!(tool_calls.len(), 2);
+        // Index 0 is empty (text block, not tool)
+        assert!(tool_calls[0].id.is_empty());
+        assert_eq!(tool_calls[1].id, "toolu_xyz");
+        assert_eq!(tool_calls[1].name, "read_file");
+        assert_eq!(tool_calls[1].arguments, r#"{"path":"b.rs"}"#);
     }
 
     #[test]

@@ -336,6 +336,8 @@ pub struct App {
     pub active_delegate: Option<(String, String, std::time::Instant)>,
     /// Set when exit_plan_mode is approved — triggers soft context reset on next turn.
     pub plan_approved: bool,
+    /// Whether mouse capture is currently active (temporarily released during shift+mouse for native selection).
+    pub mouse_captured: bool,
 }
 
 impl App {
@@ -406,6 +408,7 @@ impl App {
             task_all_done_at: None,
             active_delegate: None,
             plan_approved: false,
+            mouse_captured: true,
         }
     }
 

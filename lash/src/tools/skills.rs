@@ -232,14 +232,14 @@ impl ToolProvider for SkillStore {
             ToolDefinition {
                 name: "skills".into(),
                 description: vec![crate::ToolText::new(
-                    "List available skills. Returns a list of SkillSummary objects.",
+                    "List available skills. Returns a dict with `items` (list of `{name, description, file_count}` dicts).",
                     [
                         crate::ExecutionMode::Repl,
                         crate::ExecutionMode::NativeTools,
                     ],
                 )],
                 params: vec![],
-                returns: "list[SkillSummary]".into(),
+                returns: "dict".into(),
                 examples: vec![],
                 hidden: false,
                 inject_into_prompt: false,
@@ -247,14 +247,14 @@ impl ToolProvider for SkillStore {
             ToolDefinition {
                 name: "load_skill".into(),
                 description: vec![crate::ToolText::new(
-                    "Load a skill by name. Returns the full Skill with instructions and file list.",
+                    "Load a skill by name. Returns a dict with `name`, `description`, `instructions`, `files`, and `file_count`.",
                     [
                         crate::ExecutionMode::Repl,
                         crate::ExecutionMode::NativeTools,
                     ],
                 )],
                 params: vec![ToolParam::typed("name", "str")],
-                returns: "Skill".into(),
+                returns: "dict".into(),
                 examples: vec![],
                 hidden: false,
                 inject_into_prompt: false,

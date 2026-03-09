@@ -4,16 +4,9 @@ version = "0.1.0"
 edition = "2024"
 
 [features]
-# Keep core portable by default. Opt into storage/runtime extras explicitly.
+# Keep core portable by default. Monty-backed `repl` support is always on.
 default = []
 sqlite-store = ["dep:rusqlite"]
-# Build modes for embedded Python (PyO3):
-# - python-system: link against system Python discovered by PyO3.
-# - python-bundled: use python-build-standalone + generated PYO3_CONFIG_FILE.
-python-runtime = ["dep:pyo3"]
-python-system = ["python-runtime"]
-python-bundled = ["python-runtime"]
-native-tools-only = []
 # Convenience umbrella for first-party consumers (e.g. lash-cli).
 full = ["sqlite-store"]
 
@@ -36,7 +29,7 @@ base64 = "0.22"
 sha2 = "0.10"
 rusqlite = { version = "0.33", features = ["bundled"], optional = true }
 pty-process = { version = "0.4", features = ["async"] }
-pyo3 = { version = "0.28", optional = true }
+monty = { path = "../vendor/monty" }
 dirs = "6"
 chrono = "0.4"
 flate2 = "1"

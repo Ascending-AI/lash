@@ -17,7 +17,7 @@ impl ToolProvider for Ls {
             name: "ls".into(),
             description: vec![crate::ToolText::new(
                 format!(
-                    "List filesystem entries as `PathEntry` objects, respecting .gitignore. Each item has: `path`, `kind`, `size_bytes`, `lines` (or null), `modified_at` (RFC3339 UTC). Defaults: depth={}, limit={}, with_lines=false.",
+                    "List filesystem entries as `PathEntry` objects, respecting .gitignore. Sorted alphabetically by path. Each item has: `path`, `kind`, `size_bytes`, `lines` (or null), `modified_at` (RFC3339 UTC). Defaults: depth={}, limit={}, with_lines=false.",
                     DEFAULT_DEPTH, MAX_ENTRIES
                 ),
                 [crate::ExecutionMode::Repl, crate::ExecutionMode::NativeTools],
@@ -62,7 +62,7 @@ impl ToolProvider for Ls {
                     required: false,
                 },
             ],
-            returns: "list[PathEntry]".into(),
+            returns: "dict".into(),
             examples: vec![],
             hidden: false,
             inject_into_prompt: true,

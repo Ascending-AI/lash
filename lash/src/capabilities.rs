@@ -108,7 +108,14 @@ pub const CAPABILITY_DEFINITIONS: &[CapabilityDefinition] = &[
         description: "Core file navigation and discovery.",
         prompt_section: None,
         helper_bindings: &[],
-        tools: &["read_file", "glob", "grep", "ls", "search_tools"],
+        tools: &[
+            "read_file",
+            "glob",
+            "grep",
+            "ls",
+            "list_tools",
+            "search_tools",
+        ],
         enabled_by_default: true,
     },
     CapabilityDefinition {
@@ -177,9 +184,9 @@ pub const CAPABILITY_DEFINITIONS: &[CapabilityDefinition] = &[
         name: "History",
         description: "Persistent turn history and retrieval.",
         prompt_section: Some(
-            "## History\n\n`_history` tracks prior turns across pruning. Use `_history.search(...)` or `search_history(...)` only when previous context is needed.",
+            "## History\n\nPrior turns can be searched with `search_history(...)` when earlier context is actually needed.",
         ),
-        helper_bindings: &["search_history", "TurnHistory", "HistoryMatch", "_history"],
+        helper_bindings: &["search_history"],
         tools: &[
             "search_history",
             "history_add_turn",
@@ -193,9 +200,9 @@ pub const CAPABILITY_DEFINITIONS: &[CapabilityDefinition] = &[
         name: "Memory",
         description: "Persistent key-value memory and retrieval.",
         prompt_section: Some(
-            "## Memory\n\n`_mem` is persistent key-value memory. Store durable decisions and retrieve with `_mem.search(...)` / `search_mem(...)`.",
+            "## Memory\n\nUse `mem_set`, `mem_get`, `mem_delete`, `mem_all`, and `search_mem(...)` for durable decisions that should survive context pruning.",
         ),
-        helper_bindings: &["search_mem", "Mem", "MemEntry", "MemMatch", "_mem"],
+        helper_bindings: &["search_mem", "mem_set", "mem_get", "mem_delete", "mem_all"],
         tools: &[
             "search_mem",
             "mem_set_turn",
@@ -212,7 +219,7 @@ pub const CAPABILITY_DEFINITIONS: &[CapabilityDefinition] = &[
         name: "Skills",
         description: "Skill discovery and loading.",
         prompt_section: Some(
-            "## Skills\n\nWhen the user requests a skill-based workflow, use `tools.load_skill(name)` and follow the skill instructions.",
+            "## Skills\n\nWhen the user requests a skill-based workflow, use `load_skill(name)` and follow the skill instructions.",
         ),
         helper_bindings: &["search_skills"],
         tools: &["skills", "load_skill", "read_skill_file", "search_skills"],
@@ -339,5 +346,29 @@ mod tests {
         );
         assert!(resolved.effective_tools.contains("search_history"));
         assert!(resolved.helper_bindings.contains("search_history"));
+    }
+
+    #[test]
+    fn memory_capability_uses_global_memory_helpers() {
+        let caps = AgentCapabilities::default().enable(CapabilityId::Memory);
+        let resolved = resolve_features(
+            &caps,
+            &defs(&[
+                "search_mem",
+                "mem_set",
+                "mem_get",
+                "mem_delete",
+                "mem_export",
+                "mem_load",
+            ]),
+        );
+        assert!(resolved.effective_tools.contains("search_mem"));
+        assert!(resolved.effective_tools.contains("mem_set"));
+        assert!(resolved.helper_bindings.contains("search_mem"));
+        assert!(resolved.helper_bindings.contains("mem_set"));
+        assert!(resolved.helper_bindings.contains("mem_get"));
+        assert!(resolved.helper_bindings.contains("mem_delete"));
+        assert!(resolved.helper_bindings.contains("mem_all"));
+        assert!(!resolved.helper_bindings.contains("_mem"));
     }
 }
