@@ -57,9 +57,9 @@ const CHECKPOINT_REDRIVE_CANCEL: RuntimeScenarioCoverage = runtime_scenario_cove
     "Active-turn input deferral, cancellation after deferral, and no later idle claim."
 );
 const SESSION_LEASE_RELEASE_FAULT: RuntimeScenarioCoverage = runtime_scenario_coverage!(
-    runtime_scenario_rejects_commit_after_session_lease_release,
-    "session lease release fault",
-    "Released session lease/fence rejects a follow-up runtime commit."
+    runtime_scenario_commits_after_advisory_session_lease_release,
+    "advisory session lease release",
+    "A released advisory lease permits a current-head commit while the head CAS rejects stale state."
 );
 const DEAD_LEASE_RECLAIM: RuntimeScenarioCoverage = runtime_scenario_coverage!(
     runtime_scenario_reclaims_dead_session_lease_and_rejects_stale_observation,
@@ -138,7 +138,7 @@ impl RuntimeStateMachinePhaseSymbol {
             Self::DeadLeaseReclaim => RuntimeLeasePhase::reclaim_dead_holder().into(),
             Self::StaleQueueCompletionFault => RuntimeFaultPhase::StaleQueueCompletion.into(),
             Self::ReleasedLeaseCommitFault => {
-                RuntimeFaultPhase::CommitAfterSessionLeaseRelease.into()
+                RuntimeFaultPhase::CommitAfterAdvisoryLeaseRelease.into()
             }
             Self::Commit => RuntimeCommitPhase::new().into(),
         }
@@ -457,13 +457,13 @@ async fn runtime_scenario_defers_checkpoint_turn_input_and_respects_cancel() {
 }
 
 #[tokio::test]
-async fn runtime_scenario_rejects_commit_after_session_lease_release() {
+async fn runtime_scenario_commits_after_advisory_session_lease_release() {
     RuntimeScenario::new(SESSION_LEASE_RELEASE_FAULT.display_name)
         .session_id("runtime-scenario-lease-failure")
         .host_behavior(RuntimeHostBehavior {
             lease_owner_id: "runtime-scenario-lease-owner",
         })
-        .phase(RuntimeFaultPhase::CommitAfterSessionLeaseRelease)
+        .phase(RuntimeFaultPhase::CommitAfterAdvisoryLeaseRelease)
         .run()
         .await;
 }

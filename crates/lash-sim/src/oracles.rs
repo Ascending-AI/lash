@@ -2817,14 +2817,14 @@ fn runtime_contract_semantics(
     // specific runtime boundary it governs — no `|`-grouped shared arms and no
     // single global condition standing in for per-contract evidence.
     match semantic_oracle {
-        // The dead owner's lease release/completion is rejected (commit fenced out).
-        "runtime.lease_release_rejects_commit" => assert_semantic(
+        // Advisory lease state does not authorize a stale durable completion.
+        "runtime.advisory_lease_head_cas" => assert_semantic(
             worker_runtime_lease_dto_observed(events)
                 && summary
                     .workers
                     .iter()
                     .any(|worker| worker.stale_completion_rejections > 0),
-            "the stale lease holder's completion was rejected by the live fence",
+            "the stale worker completion was rejected by durable commit fencing",
         ),
         // A new incarnation reclaims the dead lease and the fence strictly advances.
         "runtime.dead_lease_reclaim_rejects_stale" => assert_semantic(

@@ -55,7 +55,7 @@ pub(super) fn scenario_transition_facts(
             facts.push(trigger_wakeup_fact(contract, selected_events)?);
             facts.push(queued_active_turn_fact(contract, selected_events)?);
         }
-        "runtime.lease_release_rejects_commit" => {
+        "runtime.advisory_lease_head_cas" => {
             facts.push(worker_stale_completion_rejection_fact(
                 contract,
                 selected_events,
@@ -133,9 +133,9 @@ pub(super) fn scenario_backend_regression_reference(
             "trigger-wakeup-routes-process",
             "trigger occurrence records a stable source key, reserves a matching delivery, and starts process wake routing without live external input",
         ),
-        "runtime.lease_release_rejects_commit" | "runtime.dead_lease_reclaim_rejects_stale" => (
+        "runtime.advisory_lease_head_cas" | "runtime.dead_lease_reclaim_rejects_stale" => (
             "worker-stale-completion-fenced",
-            "stale worker completion carries an older fence and is rejected while the live incarnation remains active",
+            "stale worker completion is rejected by durable commit fencing while the live incarnation remains active",
         ),
         "standard.empty_provider_response_error" | "standard.provider_error_without_checkpoint" => {
             (

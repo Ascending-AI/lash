@@ -2766,6 +2766,18 @@ async fn restate_handler_replay_retries_final_lash_commit_idempotently() {
     let first_runs = context.runs();
     assert!(!first_runs.is_empty());
 
+    let blocking_owner =
+        lash_core::LeaseOwnerIdentity::opaque("replay-blocker", "replay-blocker:001");
+    let blocking_lease = lash_core::SessionExecutionLeaseStore::try_claim_session_execution_lease(
+        &*store,
+        session_id,
+        &blocking_owner,
+        60_000,
+    )
+    .await
+    .expect("claim replay-blocking advisory lease")
+    .acquired()
+    .expect("replay-blocking advisory lease");
     context.start_replay();
     let retry_store: Arc<dyn lash_core::RuntimePersistence> =
         Arc::new(CommitRetryStore::new(Arc::clone(&runtime_store)));
@@ -2780,6 +2792,12 @@ async fn restate_handler_replay_retries_final_lash_commit_idempotently() {
     assert_eq!(first_turn.llm_calls.len(), 1);
     assert_eq!(replay_turn.llm_calls, first_turn.llm_calls);
     assert_eq!(provider_calls.load(Ordering::SeqCst), 1);
+    lash_core::SessionExecutionLeaseStore::release_session_execution_lease(
+        &*store,
+        &blocking_lease.completion(),
+    )
+    .await
+    .expect("release replay-blocking advisory lease");
 
     let conn = rusqlite::Connection::open(dir.path().join("session.db"))
         .expect("open raw session sqlite store");
@@ -2793,29 +2811,34 @@ async fn restate_handler_replay_retries_final_lash_commit_idempotently() {
     assert_eq!(rows, 1);
 }
 
-/// Pins FIG-460: `stream_turn` currently re-acquires the live session lease
-/// before it reaches the scoped durable controller, so replay can take
-/// `SessionExecutionBusy` instead of the branch recorded on the first pass.
-/// The production boundary fix is pending a design decision.
+/// FIG-460: a dropped suspended handler leaves its advisory lease live, but a
+/// fresh durable worker re-enters before TTL and still makes progress under the
+/// authoritative final-commit CAS fence.
 #[tokio::test]
-#[ignore = "FIG-460: pins replay lease-acquisition divergence; production fix needs design decision (grilling)"]
 async fn restate_replay_lease_acquisition_takes_recorded_branch() {
     let dir = tempfile::tempdir().expect("tempdir");
     let session_id = "restate-replay-lease-branch";
     let turn_id = "restate-replay-lease-turn-1";
     let provider_calls = Arc::new(AtomicUsize::new(0));
+    let first_provider_started = Arc::new(tokio::sync::Notify::new());
     let provider = lash_core::testing::TestProvider::builder()
         .kind("stub")
         .complete({
             let provider_calls = Arc::clone(&provider_calls);
+            let first_provider_started = Arc::clone(&first_provider_started);
             move |_| {
                 let provider_calls = Arc::clone(&provider_calls);
+                let first_provider_started = Arc::clone(&first_provider_started);
                 async move {
-                    provider_calls.fetch_add(1, Ordering::SeqCst);
+                    let call_index = provider_calls.fetch_add(1, Ordering::SeqCst);
+                    if call_index == 0 {
+                        first_provider_started.notify_one();
+                        std::future::pending::<()>().await;
+                    }
                     Ok(lash_core::LlmResponse {
-                        full_text: "recorded lease branch".to_string(),
+                        full_text: "fresh worker progressed".to_string(),
                         parts: vec![lash_core::LlmOutputPart::Text {
-                            text: "recorded lease branch".to_string(),
+                            text: "fresh worker progressed".to_string(),
                             response_meta: None,
                         }],
                         response_metadata: Default::default(),
@@ -2849,7 +2872,7 @@ async fn restate_replay_lease_acquisition_takes_recorded_branch() {
     let initial_state = replay_test_state(session_id, &policy);
     let context = Arc::new(ReplayableRecordingContext::default());
 
-    let mut first = replay_test_runtime(
+    let mut suspended = replay_test_runtime(
         session_id,
         policy.clone(),
         initial_state.clone(),
@@ -2857,52 +2880,36 @@ async fn restate_replay_lease_acquisition_takes_recorded_branch() {
         Arc::clone(&runtime_store),
     )
     .await;
-    let first_turn =
-        run_restate_replay_turn(&mut first, Arc::clone(&context), session_id, turn_id).await;
+    let suspended_context = Arc::clone(&context);
+    let suspended_turn = tokio::spawn(async move {
+        run_restate_replay_turn(&mut suspended, suspended_context, session_id, turn_id).await
+    });
+    tokio::time::timeout(
+        std::time::Duration::from_secs(1),
+        first_provider_started.notified(),
+    )
+    .await
+    .expect("first durable worker reaches provider suspension");
     assert_eq!(lease_claim_count.load(Ordering::SeqCst), 1);
-
-    let blocking_owner =
-        lash_core::LeaseOwnerIdentity::opaque("fig-460-blocker", "fig-460-blocker:001");
-    let blocking_lease =
-        match lash_core::SessionExecutionLeaseStore::try_claim_session_execution_lease(
-            &*store,
-            session_id,
-            &blocking_owner,
-            60_000,
-        )
-        .await
-        .expect("mutate live lease state")
-        {
-            lash_core::SessionExecutionLeaseClaimOutcome::Acquired(lease) => lease,
-            other => panic!("expected replay-blocking lease acquisition, got {other:?}"),
-        };
-
-    let replay_reset_key = "fig-460-replay-reset";
-    assert_eq!(
-        context
-            .events
-            .resolve_durable_event(RestateDurableWaitResolveRequest {
-                address: RestateDurableWaitAddress {
-                    workflow_key: replay_reset_key.to_string(),
-                    session_id: Some(session_id.to_string()),
-                    classification: RestateDurableWaitClassification::DurableWait,
-                },
-                resolution: Resolution::Ok(serde_json::json!({"replay": true})),
-            }),
-        ResolveOutcome::Accepted
+    assert!(
+        !context.runs().is_empty(),
+        "the suspended handler reached the real Restate run boundary"
     );
-    context
-        .events
-        .reset_invocation_state_for_replay_preserving_durable_event(replay_reset_key);
-    context.start_replay();
+    suspended_turn.abort();
+    assert!(
+        suspended_turn
+            .await
+            .expect_err("dropped suspended handler future")
+            .is_cancelled()
+    );
 
-    let mut replay =
+    let mut fresh_worker =
         replay_test_runtime(session_id, policy, initial_state, host, runtime_store).await;
     let controller = RestateRuntimeEffectController::new(Arc::clone(&context));
     let scoped_effect_controller = controller
         .scoped_effect_controller(ExecutionScope::turn(session_id, turn_id))
         .expect("scoped replay controller");
-    let replay_turn = replay
+    let replay_turn = fresh_worker
         .stream_turn(
             replay_test_input(turn_id),
             lash_core::TurnOptions::new(
@@ -2914,33 +2921,40 @@ async fn restate_replay_lease_acquisition_takes_recorded_branch() {
 
     let replay_turn = replay_turn.unwrap_or_else(|error| {
         panic!(
-            "replayed handler must take the recorded acquired branch, not live \
-             SessionExecutionBusy: {error:?}; total_lease_store_acquisitions={}",
+            "fresh durable worker must treat pre-TTL lease busy as advisory and \
+             progress under CAS: {error:?}; total_lease_store_acquisitions={}",
             lease_claim_count.load(Ordering::SeqCst)
         )
     });
+    assert!(matches!(
+        replay_turn.outcome,
+        lash_core::TurnOutcome::Finished(_)
+    ));
     assert_eq!(
-        serde_json::to_value(&replay_turn.state).expect("serialize replayed committed state"),
-        serde_json::to_value(&first_turn.state).expect("serialize first committed state")
+        replay_turn.assistant_output.safe_text,
+        "fresh worker progressed"
     );
-    assert_eq!(replay_turn.llm_calls, first_turn.llm_calls);
     assert_eq!(
         lease_claim_count.load(Ordering::SeqCst),
-        1,
-        "replay must perform zero fresh lease-store acquisitions"
+        2,
+        "the fresh worker re-enters before TTL and observes the advisory busy lease"
     );
     assert_eq!(
         provider_calls.load(Ordering::SeqCst),
-        1,
-        "replay must reuse the recorded provider result"
+        2,
+        "the dropped provider attempt is retried by the fresh worker"
     );
 
-    lash_core::SessionExecutionLeaseStore::release_session_execution_lease(
-        &*store,
-        &blocking_lease.completion(),
-    )
-    .await
-    .expect("release replay-blocking lease");
+    let conn = rusqlite::Connection::open(dir.path().join("session.db"))
+        .expect("open raw session sqlite store");
+    let rows: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM runtime_turn_commits WHERE session_id = ?1 AND turn_id = ?2",
+            rusqlite::params![session_id, turn_id],
+            |row| row.get(0),
+        )
+        .expect("count liveness turn commit stamps");
+    assert_eq!(rows, 1, "the fresh worker commits exactly once");
 }
 
 struct ReplayScalarPendingTools {

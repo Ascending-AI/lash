@@ -206,10 +206,9 @@ impl SessionCommitStore for PostgresSessionStore {
     ) -> Result<RuntimeCommitResult, StoreError> {
         let now = self.clock.timestamp_ms();
         let mut tx = self.pool.begin().await.map_err(store_sqlx_error)?;
-        // Read the head WITHOUT a lock. The session execution lease is the
-        // primary cross-runner serialization point; the conditional CAS write
-        // below is the stale-writer backstop, so no pessimistic `FOR UPDATE`
-        // lock is held across the rest of this transaction.
+        // Read the head WITHOUT a lock. The conditional CAS write below is the
+        // stale-writer authority; the session execution lease is only an
+        // advisory serialization optimization.
         let existing = load_session_head_meta_tx(&mut tx, &commit.session_id, false).await?;
         if let Some(bound_session_id) = existing.as_ref().map(|meta| meta.session_id.as_str())
             && bound_session_id != commit.session_id
@@ -271,17 +270,9 @@ impl SessionCommitStore for PostgresSessionStore {
                 });
             }
         }
-        let Some(session_execution_lease) = commit.session_execution_lease.as_ref() else {
-            return Err(StoreError::SessionExecutionLeaseExpired {
-                session_id: commit.session_id.clone(),
-            });
-        };
-        ensure_session_execution_lease_tx(&mut tx, &commit.session_id, session_execution_lease)
-            .await?;
         let actual_revision = existing.as_ref().map_or(0, |meta| meta.head_revision);
-        if commit.expected_head_revision.is_some()
-            && commit.expected_head_revision != Some(actual_revision)
-        {
+        let expected_revision = commit.expected_head_revision.unwrap_or(0);
+        if expected_revision != actual_revision {
             return Err(StoreError::HeadRevisionConflict {
                 expected: commit.expected_head_revision,
                 actual: actual_revision,

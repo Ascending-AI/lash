@@ -488,6 +488,16 @@ impl LashRuntime {
                         err.to_string(),
                     )
                 })?;
+            // An inline or external driver may have committed the command
+            // before returning. Reconcile that authoritative head before this
+            // resident runtime reaches another commit boundary; its lease is
+            // advisory, so retaining the pre-drive head would manufacture a
+            // stale CAS conflict on close.
+            self.refresh_session_graph_from_store()
+                .await
+                .map_err(|err| {
+                    RuntimeError::new("session_command_post_drive_refresh", err.to_string())
+                })?;
         }
         Ok(crate::SessionCommandReceipt {
             session_id,

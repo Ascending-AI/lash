@@ -127,7 +127,7 @@ pub async fn run_backend_contention_report(
             skipped,
             failed,
             production_api: "SessionExecutionLeaseStore claim/reclaim/renew/release and SessionCommitStore::commit_runtime_state through SessionStoreFactory handles",
-            semantics: "Competing store handles must admit one lease owner, reject stale completion tokens, survive reopen handles, reject unfenced transaction commits, preserve idempotent retry, reject stale write conflicts, and allow dead-owner reclaim without clearing the live successor.",
+            semantics: "Competing store handles must admit one lease owner, reject stale completion tokens, survive reopen handles, preserve idempotent retry, reject stale head revisions and stale write conflicts, and allow dead-owner reclaim without clearing the live successor.",
         },
         report_path: report_path.clone(),
     };
@@ -162,10 +162,10 @@ async fn run_factory_contention_scenario(
     operations.push(dead_owner_reclaim_preserves_live_successor(&session_id, store).await?);
 
     let store = open_store(Arc::clone(&factory), &session_id).await?;
-    operations.push(transaction_without_live_lease_is_rejected(&session_id, store).await?);
+    operations.push(final_commit_retry_and_conflict_are_fenced(&session_id, store).await?);
 
     let store = open_store(Arc::clone(&factory), &session_id).await?;
-    operations.push(final_commit_retry_and_conflict_are_fenced(&session_id, store).await?);
+    operations.push(stale_head_transaction_is_rejected(&session_id, store).await?);
 
     Ok(BackendContentionScenario {
         backend: backend.to_string(),
@@ -450,32 +450,47 @@ async fn dead_owner_reclaim_preserves_live_successor(
     })
 }
 
-async fn transaction_without_live_lease_is_rejected(
+async fn stale_head_transaction_is_rejected(
     session_id: &str,
     store: Arc<dyn RuntimePersistence>,
 ) -> Result<BackendContentionOperation, String> {
-    let state = RuntimeSessionState {
+    let expected_head_revision = store
+        .load_session(lash_core::SessionReadScope::FullGraph)
+        .await
+        .map_err(|err| format!("load current session head: {err}"))?
+        .map(|read| read.head_revision);
+    let current = RuntimeSessionState {
         session_id: session_id.to_string(),
+        head_revision: expected_head_revision,
+        ..RuntimeSessionState::default()
+    };
+    store
+        .commit_runtime_state(RuntimeCommit::persisted_state(&current, &[]))
+        .await
+        .map_err(|err| format!("establish current session head: {err}"))?;
+    let stale = RuntimeSessionState {
+        session_id: session_id.to_string(),
+        head_revision: expected_head_revision,
         ..RuntimeSessionState::default()
     };
     let err = store
-        .commit_runtime_state(RuntimeCommit::persisted_state(&state, &[]))
+        .commit_runtime_state(RuntimeCommit::persisted_state(&stale, &[]))
         .await
-        .expect_err("unfenced transaction must fail");
-    if !matches!(err, StoreError::SessionExecutionLeaseExpired { .. }) {
+        .expect_err("stale-head transaction must fail");
+    if !matches!(err, StoreError::HeadRevisionConflict { .. }) {
         return Err(format!(
-            "unfenced commit returned {err:?}, expected SessionExecutionLeaseExpired"
+            "stale-head commit returned {err:?}, expected HeadRevisionConflict"
         ));
     }
     Ok(BackendContentionOperation {
-        operation_id: "runtime-persistence.unfenced-transaction-rejected",
+        operation_id: "runtime-persistence.stale-head-transaction-rejected",
         status: "passed",
         production_api: "SessionCommitStore::commit_runtime_state",
-        assertion: "transaction loss or reconnect without a live session lease cannot publish session state",
+        assertion: "transaction loss or reconnect with a stale head revision cannot publish session state",
         evidence: json!({
             "session_id": session_id,
-            "error": "SessionExecutionLeaseExpired",
-            "retryable_class": "reclaim_or_retry_after_new_lease",
+            "error": "HeadRevisionConflict",
+            "retryable_class": "reload_current_head_and_retry",
         }),
     })
 }
@@ -637,7 +652,7 @@ mod tests {
         let body = std::fs::read_to_string(report.report_path).expect("report body");
         assert!(body.contains("runtime-persistence.competing-first-claim"));
         assert!(body.contains("runtime-persistence.dead-owner-reclaim"));
-        assert!(body.contains("runtime-persistence.unfenced-transaction-rejected"));
+        assert!(body.contains("runtime-persistence.stale-head-transaction-rejected"));
         assert!(body.contains("runtime-persistence.idempotent-retry-and-stale-write-conflict"));
     }
 }

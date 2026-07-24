@@ -31015,8 +31015,8 @@
     },
     {
       "status": "passed",
-      "oracle_id": "sim.oracle.scenario.runtime-contract.v1:runtime_scenario_rejects_commit_after_session_lease_release",
-      "message": "runtime contract `runtime_scenario_rejects_commit_after_session_lease_release` passed semantic `runtime.lease_release_rejects_commit`: Released session lease/fence rejects a follow-up runtime commit.. Evidence: queued_ingress, cancellation, process_wake, worker_stale_completion, lease_time; adapter: the stale lease holder's completion was rejected by the live fence"
+      "oracle_id": "sim.oracle.scenario.runtime-contract.v1:runtime_scenario_commits_after_advisory_session_lease_release",
+      "message": "runtime contract `runtime_scenario_commits_after_advisory_session_lease_release` passed semantic `runtime.advisory_lease_head_cas`: A released advisory lease permits a current-head commit while the head CAS rejects stale state.. Evidence: queued_ingress, cancellation, process_wake, worker_stale_completion, lease_time; adapter: the stale worker completion was rejected by durable commit fencing"
     },
     {
       "status": "passed",

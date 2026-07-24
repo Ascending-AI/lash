@@ -91,24 +91,35 @@ impl RuntimeTurnDriver<'_> {
         let mut committed_user_messages = Vec::new();
         let mut turn_causes = Vec::new();
         let (turn_input_claim, queue_claim) = if let Some(store) = self.session.history_store() {
-            let Some(session_execution_lease) = self.session_execution_lease.as_ref() else {
-                return Err(RuntimeError::new(
-                    RuntimeErrorCode::StoreCommitFailed,
-                    "active checkpoint work claim requires a session execution lease",
-                ));
-            };
-            store
-                .claim_checkpoint_work(
-                    &self.session_id,
-                    session_execution_lease,
-                    &self.runtime_lease_owner,
-                    &self.turn_id,
-                    checkpoint,
-                    64,
-                    64,
-                )
-                .await
-                .map_err(crate::runtime::runtime_error_from_store_commit)?
+            if let Some(session_execution_lease) = self.session_execution_lease.as_ref() {
+                match store
+                    .claim_checkpoint_work(
+                        &self.session_id,
+                        session_execution_lease,
+                        &self.runtime_lease_owner,
+                        &self.turn_id,
+                        checkpoint,
+                        64,
+                        64,
+                    )
+                    .await
+                {
+                    Ok(claims) => claims,
+                    Err(crate::StoreError::SessionExecutionLeaseExpired { .. }) => {
+                        tracing::debug!(
+                            session_id = %self.session_id,
+                            turn_id = %self.turn_id,
+                            event = "session_execution_lease.checkpoint_advisory",
+                            "session execution lease expired; skipping advisory checkpoint claims"
+                        );
+                        self.session_execution_lease = None;
+                        (None, None)
+                    }
+                    Err(err) => return Err(crate::runtime::runtime_error_from_store_commit(err)),
+                }
+            } else {
+                (None, None)
+            }
         } else {
             (None, None)
         };

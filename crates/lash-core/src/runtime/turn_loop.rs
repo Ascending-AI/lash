@@ -243,8 +243,6 @@ impl LashRuntime {
 
     async fn claim_session_execution_lease(
         &self,
-        cancel: CancellationToken,
-        busy_is_error: bool,
     ) -> Result<Option<SessionExecutionLeaseGuard>, RuntimeError> {
         let Some(store) = self
             .session
@@ -259,20 +257,19 @@ impl LashRuntime {
             &self.runtime_lease_owner,
             self.host.core.control.lease_timings,
             Arc::clone(&self.host.core.clock),
-            cancel,
         )
         .await
         .map_err(|err| RuntimeError::new(RuntimeErrorCode::StoreCommitFailed, err.to_string()))?
         {
             Some(lease) => Ok(Some(lease)),
-            None if busy_is_error => Err(RuntimeError::new(
-                RuntimeErrorCode::SessionExecutionBusy,
-                format!(
-                    "session `{}` is already executing on another runtime owner",
-                    self.state.session_id
-                ),
-            )),
-            None => Ok(None),
+            None => {
+                tracing::debug!(
+                    session_id = %self.state.session_id,
+                    event = "session_execution_lease.busy_advisory",
+                    "session execution lease is busy; proceeding under the commit CAS fence"
+                );
+                Ok(None)
+            }
         }
     }
 
@@ -871,9 +868,7 @@ impl LashRuntime {
         }
         let stopwatch = TurnStopwatch::start(self.host.core.clock.as_ref());
         let cancel = opts.cancel.clone();
-        let session_execution_lease = self
-            .claim_session_execution_lease(cancel.clone(), true)
-            .await?;
+        let session_execution_lease = self.claim_session_execution_lease().await?;
         let scoped_effect_controller = opts.scoped_effect_controller();
         let result = Box::pin(self.drive_logical_turn(
             LogicalTurnStart::Input(input),
@@ -916,10 +911,7 @@ impl LashRuntime {
     ) -> Result<Option<AssembledTurn>, RuntimeError> {
         let stopwatch = TurnStopwatch::start(self.host.core.clock.as_ref());
         let cancel = opts.cancel.clone();
-        let Some(session_execution_lease) = self
-            .claim_session_execution_lease(cancel.clone(), false)
-            .await?
-        else {
+        let Some(session_execution_lease) = self.claim_session_execution_lease().await? else {
             return Ok(None);
         };
         let session_execution_fence = session_execution_lease.fence();
@@ -1213,24 +1205,15 @@ impl LashRuntime {
         session_execution_lease: Option<&SessionExecutionLeaseGuard>,
         session_execution_lease_release_policy: SessionExecutionLeaseReleasePolicy,
     ) -> Result<PhysicalTurnExecution, RuntimeError> {
-        if queued_claims.is_empty() && turn_input_claims.is_empty() {
-            if let Some(lease) = session_execution_lease {
-                while self
-                    .drain_next_session_command(&lease.fence())
-                    .await?
-                    .is_some()
-                {}
-            } else if self
-                .session
-                .as_ref()
-                .and_then(|session| session.history_store())
+        if queued_claims.is_empty()
+            && turn_input_claims.is_empty()
+            && let Some(lease) = session_execution_lease
+        {
+            while self
+                .drain_next_session_command(&lease.fence())
+                .await?
                 .is_some()
-            {
-                return Err(RuntimeError::new(
-                    RuntimeErrorCode::StoreCommitFailed,
-                    "session command drain requires a session execution lease",
-                ));
-            }
+            {}
         }
         if let Some(input_turn_id) = input.trace_turn_id.as_deref()
             && scoped_effect_controller
@@ -1293,9 +1276,7 @@ impl LashRuntime {
         }
         let stopwatch = TurnStopwatch::start(self.host.core.clock.as_ref());
         let cancel = opts.cancel.clone();
-        let session_execution_lease = self
-            .claim_session_execution_lease(cancel.clone(), true)
-            .await?;
+        let session_execution_lease = self.claim_session_execution_lease().await?;
         let scoped_effect_controller = opts.scoped_effect_controller();
         let result = Box::pin(self.drive_logical_turn(
             LogicalTurnStart::Input(input),
@@ -1692,9 +1673,7 @@ impl LashRuntime {
         initial_turn_input_claim: Option<crate::TurnInputClaim>,
     ) -> Result<AssembledTurn, RuntimeError> {
         let stopwatch = TurnStopwatch::start(self.host.core.clock.as_ref());
-        let session_execution_lease = self
-            .claim_session_execution_lease(cancel.clone(), true)
-            .await?;
+        let session_execution_lease = self.claim_session_execution_lease().await?;
         let result = Box::pin(self.drive_logical_turn(
             LogicalTurnStart::Prepared(PreparedLogicalTurn {
                 messages,
@@ -1912,18 +1891,6 @@ impl LashRuntime {
             .await?
             .with_local_cancel_origin(turn_context.local_cancel_origin_hint()),
         );
-        if session_execution_lease.is_none()
-            && self
-                .session
-                .as_ref()
-                .and_then(|session| session.history_store())
-                .is_some()
-        {
-            return Err(RuntimeError::new(
-                RuntimeErrorCode::StoreCommitFailed,
-                "prepared turn requires a session execution lease",
-            ));
-        }
         let session_execution_fence =
             session_execution_lease.map(SessionExecutionLeaseGuard::fence);
         let (event_tx, mut event_rx) = mpsc::channel::<RuntimeStreamEvent>(100);

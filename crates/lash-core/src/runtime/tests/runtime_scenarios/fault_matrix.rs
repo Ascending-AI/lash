@@ -93,11 +93,11 @@ const DURABLE_FAULT_MATRIX: &[DurableFaultMatrixRow] = &[
         },
     },
     DurableFaultMatrixRow {
-        id: "lease-release-fence",
+        id: "lease-release-advisory",
         kind: DurableFaultKind::LeaseLoss,
-        contract: "Released session execution lease cannot commit follow-up state with a stale fence.",
+        contract: "A released advisory lease does not block a current-head commit, while the head-revision CAS still rejects stale follow-up state.",
         evidence: FaultEvidence::RuntimeScenario {
-            test_name: "runtime_scenario_rejects_commit_after_session_lease_release",
+            test_name: "runtime_scenario_commits_after_advisory_session_lease_release",
         },
     },
     DurableFaultMatrixRow {
