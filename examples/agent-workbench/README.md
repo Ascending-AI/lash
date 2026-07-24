@@ -1,7 +1,8 @@
 # Agent Workbench
 
-A standalone RLM chat demo for background processes, subagents, web tools,
-button triggers, and Restate-backed cron triggers.
+A production-grade recoverable-chat host reference for RLM background
+processes, subagents, web tools, button triggers, and Restate-backed cron
+triggers.
 
 Restate is required. Run the example from the repo root with the bundled
 entrypoint. The default command starts the workbench as a detached local
@@ -145,27 +146,74 @@ host-defined origin, and optional reason; the UI clears only after the request
 is accepted or the turn has already won the completion race.
 
 Cancellation is cooperative: detached effects and non-cooperative external
-work are not guaranteed to stop. Session and turn ids are routing identity,
-not authorization; a production host must authorize the caller before
-forwarding a stop request.
+work are not guaranteed to stop. Disconnecting either browser observation
+stream only drops that subscription; it never invokes cancellation. The Stop
+control is the separate, explicit `POST /api/turn/cancel` operation.
+
+Session and turn ids are routing identity, not authorization. `AppState` carries
+a `WorkbenchAuthorization` hook over the `WorkbenchAuthorizer` trait. The
+reference invokes it before snapshot/observation, turn enqueue, turn-input
+enqueue, and cancellation. Its local default is intentionally allow-all; a
+production host replaces `AllowAllWorkbenchAuthorizer` with its identity and
+policy adapter. Lash does not define product-specific auth.
 The Lashlang graph panel is backed by `TraceLashlangGraphStore`, a public
 trace-derived observation store for foreground blocks, durable process runs,
 and child execution links; command operations still go through the session's
 `SessionProcessAdmin` facade.
 
-The browser stream is deliberately split the same way a production host would
-split it: product rows such as user messages, assistant messages, trigger
-notes, errors, and `done` come from the workbench app stream, while Lash turn
-activity comes from `session.observe().current_observation().cursor` plus
-`ObservableSession::subscribe_and_recover_remote(...)`. `/api/events` accepts
-the last cursor as `?cursor=...`, emits `replay_cursor`, forwards
-`RemoteSessionObservationEvent` rows as `observation`, and reports missed
-bounded-replay windows as `replay_gap` with `RemoteLiveReplayGap` plus a fresh
-remote observation snapshot. Resetting the workbench rotates the session id and
-restarts the browser stream from a fresh cursor.
-On an ingress re-run, one single-shot answer may render as both a live app-stream assistant
-row and the canonical committed assistant row from `/api/state.messages`; this
-stream-plus-canonical pair is benign by design and is not retry duplication.
+## Recoverable-chat host structure
+
+The browser starts with exactly one `GET /api/state` materialization. That
+authoritative response contains the transcript, durable
+`remote_turn_input_applications()`, the Lash observation snapshot/cursor, and
+the workbench product-event snapshot/cursor. It then attaches two independent
+lanes after those cursors:
+
+- `/api/observations` is Lash's lane. The server enters
+  `ObservableSession::subscribe_and_recover_remote` directly. It forwards provisional turn
+  activity, `RemoteLiveReplayGap`, and terminal replacement. Event identity is
+  `(session_id, cursor)`; at-least-once redelivery of that identity is ignored.
+  A trimmed replay window replaces provisional state from a fresh authoritative
+  snapshot and continues from `gap.latest_cursor`.
+- `/api/events` is the product lane. `SessionEventRegistry` first appends every
+  event to `.agent-workbench/product-events.json` with a monotonic per-session
+  sequence and stable event id, then broadcasts it as a freshness hint. A
+  lagged subscriber receives an authoritative `resync` snapshot instead of an
+  error. The registry deduplicates stable ids across Restate replay and process
+  restart.
+
+The lanes never share a broadcast channel. Internal observation, provider, and
+serialization failures are traced server-side; no raw error string is a
+product-stream variant. The UI renders stable safe failure copy.
+
+Provisional prose and reasoning are keyed by Lash correlation id. A
+`model_attempt_reset` retracts only the superseded chunks. A replay gap,
+product lag, cancellation settlement, or terminal commit replaces all
+provisional state from `/api/state`. Canonical assistant rows use
+`workbench-assistant:<turn_id>` in both the live product event and durable
+session transcript, so a live/canonical pair is one row, never two.
+
+`turn_input_applied` is the only application signal. The live path consumes
+its typed application objects; snapshot recovery uses
+`remote_turn_input_applications()`. The host does not inspect
+`RuntimeDiagnostic`, and it never infers application from
+`pending_turn_inputs()`: pending input is admission state, not proof that a
+canonical message was committed.
+
+### Recovery is not retry-as-copy
+
+Restate recovery replays the same invocation and the same Lash turn id. The
+stable product ids and observation cursors converge that replay onto the same
+rows. A user-facing “retry turn” is different: it submits a new turn with a new
+turn id and is therefore a new transcript copy with new product identities.
+
+Do not use provider `retryable` classification or `had_tool_calls` as evidence
+that retrying is free of duplicate external effects. ADR 0042 makes one tool
+attempt atomic to Lash, but opaque work performed inside it is at-least-once if
+the worker dies after the external effect and before the attempt outcome is
+recorded. Recovery must never re-execute an uncertain tool merely to rebuild UI
+state; rebuild from durable snapshots, and make externally visible tool effects
+idempotent or split them into explicit durable process steps.
 
 The chat composer can upload one PNG (up to 1 MiB) through
 `POST /api/attachments`, then includes the returned content-addressed id as
@@ -436,3 +484,28 @@ run:
 ```bash
 just agent-workbench-restate-e2e
 ```
+
+## Conformance and projection gates
+
+The ownership split is intentional:
+
+- Lash's recoverable-chat conformance cases enter the real observation/recovery
+  API and cover snapshot-then-subscribe recovery, trimmed-gap forwarding,
+  redelivery identity deduplication, terminal replacement, and the rule that
+  dropping observation does not cancel server work.
+- The existing `live_restate_ingress_owner_restart_resumes_and_remains_cancellable`
+  gate supplies owner-loss evidence by killing the real workbench endpoint
+  process, starting a replacement, observing the superseding lease generation,
+  and settling the same turn. This runs for SQLite and PostgreSQL under
+  `just agent-workbench-restate-e2e`; no separate receipt sink or standalone
+  checker is introduced.
+- Workbench projection cases cover correlation-based provisional retraction,
+  durable resynchronization after forced broadcast lag, stable-id
+  live/canonical deduplication across reload, typed turn-input application, and
+  the absence of a raw-error product variant.
+
+Each gate asserts the violated invariant directly: duplicate identity changes a
+row count, a swallowed gap prevents recovery, a missing terminal replacement
+leaves the authoritative message absent, disconnect-as-cancel prevents the turn
+from completing, lag without resync loses ordered product events, and raw
+failure text fails the safe-copy assertion.
