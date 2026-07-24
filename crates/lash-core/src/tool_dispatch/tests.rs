@@ -9,12 +9,9 @@ use serde_json::json;
 use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::time::Instant;
-use tokio::sync::{Barrier, mpsc};
+use tokio::sync::{Barrier, mpsc, oneshot};
 use tokio::time::{Duration, timeout};
 
-type ExecutionWindow = (&'static str, Instant, Instant);
-type SharedExecutionWindows = Arc<std::sync::Mutex<Vec<ExecutionWindow>>>;
 type AttemptObservation = (u32, u32, Option<String>);
 type SharedAttemptObservations = Arc<std::sync::Mutex<Vec<AttemptObservation>>>;
 
@@ -79,75 +76,84 @@ fn contract_from(
         .map(|tool| Arc::new(tool.contract()))
 }
 
-#[derive(Clone)]
 struct ScheduledProbe {
     index: usize,
     name: &'static str,
-    delay: Duration,
+    release: oneshot::Receiver<()>,
 }
 
 #[tokio::test]
 async fn scheduler_runs_every_item_concurrently_and_preserves_order() {
-    let windows: SharedExecutionWindows = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let (slow_release, slow_gate) = oneshot::channel();
+    let (formerly_serial_release, formerly_serial_gate) = oneshot::channel();
+    let (fast_release, fast_gate) = oneshot::channel();
     let probes = vec![
         ScheduledProbe {
             index: 0,
             name: "slow",
-            delay: Duration::from_millis(40),
+            release: slow_gate,
         },
         ScheduledProbe {
             index: 1,
             name: "formerly_serial",
-            delay: Duration::from_millis(10),
+            release: formerly_serial_gate,
         },
         ScheduledProbe {
             index: 2,
             name: "fast",
-            delay: Duration::from_millis(5),
+            release: fast_gate,
         },
     ];
+    let (entered_tx, mut entered_rx) = mpsc::unbounded_channel();
+    let (completed_tx, mut completed_rx) = mpsc::unbounded_channel();
 
-    let outputs = schedule_tool_batch(probes, |probe| probe.index, {
-        let windows = Arc::clone(&windows);
+    let scheduled = schedule_tool_batch(probes, |probe| probe.index, {
+        let entered_tx = entered_tx.clone();
         move |probe| {
-            let windows = Arc::clone(&windows);
+            let entered_tx = entered_tx.clone();
+            let completed_tx = completed_tx.clone();
             async move {
-                let start = Instant::now();
-                tokio::time::sleep(probe.delay).await;
-                let end = Instant::now();
-                windows
-                    .lock()
-                    .expect("windows")
-                    .push((probe.name, start, end));
+                entered_tx
+                    .send(probe.name)
+                    .expect("scheduler observer remains alive");
+                probe.release.await.expect("observer releases every call");
+                completed_tx
+                    .send(probe.name)
+                    .expect("scheduler observer remains alive");
                 probe.name
             }
         }
-    })
-    .await;
+    });
+    drop(entered_tx);
 
-    assert_eq!(outputs, ["slow", "formerly_serial", "fast"]);
+    let observe_concurrency = async {
+        let mut entered = [
+            entered_rx.recv().await.expect("first call entered"),
+            entered_rx.recv().await.expect("second call entered"),
+            entered_rx.recv().await.expect("third call entered"),
+        ];
+        entered.sort_unstable();
+        assert_eq!(
+            entered,
+            ["fast", "formerly_serial", "slow"],
+            "every call, including the formerly-serial tool, must enter before any call completes"
+        );
 
-    let recorded = windows.lock().expect("windows").clone();
-    let slow = recorded
-        .iter()
-        .find(|(name, _, _)| *name == "slow")
-        .expect("slow");
-    let fast = recorded
-        .iter()
-        .find(|(name, _, _)| *name == "fast")
-        .expect("fast");
-    let formerly_serial = recorded
-        .iter()
-        .find(|(name, _, _)| *name == "formerly_serial")
-        .expect("formerly_serial");
+        fast_release.send(()).expect("fast call remains gated");
+        assert_eq!(completed_rx.recv().await, Some("fast"));
+        formerly_serial_release
+            .send(())
+            .expect("formerly-serial call remains gated");
+        assert_eq!(completed_rx.recv().await, Some("formerly_serial"));
+        slow_release.send(()).expect("slow call remains gated");
+        assert_eq!(completed_rx.recv().await, Some("slow"));
+    };
 
-    assert!(
-        fast.1 < slow.2,
-        "fast and slow calls should overlap even when completion order differs"
-    );
-    assert!(
-        formerly_serial.1 < slow.2,
-        "a call from a tool that was formerly marked serial should overlap its peers"
+    let (outputs, ()) = tokio::join!(scheduled, observe_concurrency);
+    assert_eq!(
+        outputs,
+        ["slow", "formerly_serial", "fast"],
+        "returned outcomes preserve the caller's fixed input order, not completion order"
     );
 }
 
