@@ -421,44 +421,8 @@ impl SessionCommitStore for PostgresSessionStore {
                 actual: actual_now,
             });
         }
-        for completed in &commit.completed_queue_claims {
-            for batch_id in &completed.batch_ids {
-                sqlx::query(
-                    "DELETE FROM lash_queued_work_batches
-                     WHERE session_id = $1 AND batch_id = $2 AND claim_id = $3 AND claim_token = $4",
-                )
-                .bind(&completed.session_id)
-                .bind(batch_id)
-                .bind(&completed.claim_id)
-                .bind(&completed.lease_token)
-                .execute(&mut *tx)
-                .await
-                .map_err(store_sqlx_error)?;
-            }
-        }
-        for completed in &commit.completed_turn_input_claims {
-            for input_id in &completed.input_ids {
-                sqlx::query(
-                    "UPDATE lash_pending_turn_inputs
-                     SET state = $5,
-                         claim_id = NULL,
-                         claim_owner_id = NULL,
-                         claim_owner_incarnation_id = NULL,
-                         claim_owner_liveness_json = NULL,
-                         claim_token = NULL,
-                         claim_session_lease_generation = 0
-                     WHERE session_id = $1 AND input_id = $2 AND claim_id = $3 AND claim_token = $4",
-                )
-                .bind(&completed.session_id)
-                .bind(input_id)
-                .bind(&completed.claim_id)
-                .bind(&completed.lease_token)
-                .bind(lash_core::TurnInputState::Completed.as_str())
-                .execute(&mut *tx)
-                .await
-                .map_err(store_sqlx_error)?;
-            }
-        }
+        complete_queued_work_claims_tx(&mut tx, &commit.completed_queue_claims).await?;
+        complete_turn_input_claims_tx(&mut tx, &commit.completed_turn_input_claims).await?;
         if let Some(turn_id) = commit.interrupted_turn_input_turn_id.as_deref() {
             let rows = sqlx::query(
                 "SELECT enqueue_seq, input_id, session_id, source_key, ingress_json,
@@ -601,6 +565,70 @@ impl SessionCommitStore for PostgresSessionStore {
         json.map(|json| store_decode_json(&json, "session meta"))
             .transpose()
     }
+}
+
+async fn complete_queued_work_claims_tx(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    completed_claims: &[QueuedWorkCompletion],
+) -> Result<(), StoreError> {
+    for completed in completed_claims {
+        for batch_id in &completed.batch_ids {
+            let completion = sqlx::query(
+                "DELETE FROM lash_queued_work_batches
+                 WHERE session_id = $1 AND batch_id = $2 AND claim_id = $3 AND claim_token = $4",
+            )
+            .bind(&completed.session_id)
+            .bind(batch_id)
+            .bind(&completed.claim_id)
+            .bind(&completed.lease_token)
+            .execute(&mut **tx)
+            .await
+            .map_err(store_sqlx_error)?;
+            if completion.rows_affected() != 1 {
+                return Err(StoreError::QueuedWorkClaimSuperseded {
+                    session_id: completed.session_id.clone(),
+                    claim_id: completed.claim_id.clone(),
+                });
+            }
+        }
+    }
+    Ok(())
+}
+
+async fn complete_turn_input_claims_tx(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    completed_claims: &[lash_core::TurnInputCompletion],
+) -> Result<(), StoreError> {
+    for completed in completed_claims {
+        for input_id in &completed.input_ids {
+            let completion = sqlx::query(
+                "UPDATE lash_pending_turn_inputs
+                 SET state = $5,
+                     claim_id = NULL,
+                     claim_owner_id = NULL,
+                     claim_owner_incarnation_id = NULL,
+                     claim_owner_liveness_json = NULL,
+                     claim_token = NULL,
+                     claim_session_lease_generation = 0
+                 WHERE session_id = $1 AND input_id = $2 AND claim_id = $3 AND claim_token = $4",
+            )
+            .bind(&completed.session_id)
+            .bind(input_id)
+            .bind(&completed.claim_id)
+            .bind(&completed.lease_token)
+            .bind(lash_core::TurnInputState::Completed.as_str())
+            .execute(&mut **tx)
+            .await
+            .map_err(store_sqlx_error)?;
+            if completion.rows_affected() != 1 {
+                return Err(StoreError::TurnInputClaimSuperseded {
+                    session_id: completed.session_id.clone(),
+                    claim_id: completed.claim_id.clone(),
+                });
+            }
+        }
+    }
+    Ok(())
 }
 
 #[async_trait::async_trait]
