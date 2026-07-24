@@ -251,7 +251,7 @@ impl BenchmarkRuntime {
         turn_id: &str,
         input: lash::TurnInput,
         source_id: &str,
-    ) -> anyhow::Result<lash_core::PendingTurnInput> {
+    ) -> anyhow::Result<lash_core::TurnInputAcceptanceReceipt> {
         self.session
             .as_ref()
             .expect("benchmark session")

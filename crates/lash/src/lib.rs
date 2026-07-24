@@ -50,7 +50,8 @@ pub use lash_core::{
     SessionCommandReceipt, SessionCreateRequest, SessionSpec, SessionStartPoint, TurnActivity,
     TurnActivityId, TurnActivitySink, TurnAddress, TurnAttach, TurnCancelOriginHint,
     TurnCancelOutcome, TurnCancelReceipt, TurnCancelRequest, TurnCancellationEvidence, TurnCause,
-    TurnEvent, TurnFinish, TurnInput, TurnOutcome, TurnStop, TurnTerminal, TurnWorkDriver,
+    TurnEvent, TurnFinish, TurnInput, TurnInputAcceptanceReceipt, TurnOutcome, TurnStop,
+    TurnTerminal, TurnWorkDriver,
 };
 /// Cooperative cancellation handle accepted by
 /// [`TurnBuilder::cancel`](crate::TurnBuilder::cancel); re-exported so
@@ -69,8 +70,9 @@ pub mod prelude {
         SessionCommand, SessionCommandAdmin, SessionCommandReceipt, SessionConfigPatch,
         SessionCreateRequest, SessionDeleteReport, SessionSpec, SessionStartPoint,
         SessionTriggerAdmin, ToolAdmin, TurnActivity, TurnActivityFanout, TurnActivityId,
-        TurnActivitySink, TurnBuilder, TurnCause, TurnEvent, TurnFinish, TurnInput, TurnOutcome,
-        TurnOutput, TurnResult, TurnStop, TurnStream, message_role, message_text,
+        TurnActivitySink, TurnBuilder, TurnCause, TurnEvent, TurnFinish, TurnInput,
+        TurnInputAcceptanceReceipt, TurnOutcome, TurnOutput, TurnResult, TurnStop, TurnStream,
+        message_role, message_text,
     };
 }
 
@@ -391,9 +393,9 @@ pub mod runtime {
         AssembledTurn, AwaitEventResolver, DirectCompletionClient, EmbeddedRuntimeHost, EventSink,
         ExecutionScope, InlineRuntimeEffectController, LashRuntime, LlmAttachmentSpec,
         LlmRequestSpec, NoopEventSink, NoopTurnActivitySink, ProcessCommand, ProcessEffectOutcome,
-        QueuedWorkDriver, QueuedWorkRunHandle, QueuedWorkRunRequest, RuntimeEffectCommand,
-        RuntimeEffectController, RuntimeEffectControllerError, RuntimeEffectEnvelope,
-        RuntimeEffectKind, RuntimeEffectLocalExecutor, RuntimeEffectOutcome,
+        QueuedWorkDriver, QueuedWorkRunHandle, QueuedWorkRunRequest, QueuedWorkWakeFailure,
+        RuntimeEffectCommand, RuntimeEffectController, RuntimeEffectControllerError,
+        RuntimeEffectEnvelope, RuntimeEffectKind, RuntimeEffectLocalExecutor, RuntimeEffectOutcome,
         RuntimeEnvironmentBuilder, RuntimeError, RuntimeErrorCode, RuntimeHandle,
         RuntimeInvocation, RuntimeObservation, RuntimeScope, RuntimeTurnPhase,
         RuntimeTurnPhaseProbe, ScopedEffectController, TurnContext,

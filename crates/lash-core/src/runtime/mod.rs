@@ -163,7 +163,9 @@ pub use process_worker::{
     DEFAULT_PROCESS_EXECUTION_CONCURRENCY, DurableProcessWorker, DurableProcessWorkerConfig,
     ProcessDrainReport, ProcessExecutionConcurrencyError,
 };
-pub use queued_work_driver::{QueuedWorkDriver, QueuedWorkRunHandle, QueuedWorkRunRequest};
+pub use queued_work_driver::{
+    QueuedWorkDriver, QueuedWorkRunHandle, QueuedWorkRunRequest, QueuedWorkWakeFailure,
+};
 pub use scenario_contracts::{RUNTIME_SCENARIO_CONTRACTS, ScenarioContractSpec};
 pub use session_manager::DirectCompletionClient;
 pub use state::RuntimeSessionState;
@@ -178,8 +180,9 @@ pub use turn_control::{
 pub use turn_input_ingress::{
     PendingTurnInput, PendingTurnInputCancelOutcome, PendingTurnInputCancelResult,
     PendingTurnInputCancelTarget, PendingTurnInputClaimDiagnostics, PendingTurnInputDraft,
-    PendingTurnInputSuffixCancelOutcome, QueuedCheckpointTurnInput, TurnInputCheckpointBoundary,
-    TurnInputClaim, TurnInputClaimMode, TurnInputCompletion, TurnInputIngress, TurnInputState,
+    PendingTurnInputSuffixCancelOutcome, QueuedCheckpointTurnInput, TurnInputAcceptanceReceipt,
+    TurnInputCheckpointBoundary, TurnInputClaim, TurnInputClaimMode, TurnInputCompletion,
+    TurnInputIngress, TurnInputState,
 };
 pub use turn_loop::ensure_durable_effect_input;
 pub use turn_queue::{

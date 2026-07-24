@@ -461,13 +461,15 @@ impl LashCore {
     /// durable turn may already own the session execution lease. Active-turn
     /// input is claimed by that exact turn at a checkpoint; next-turn input is
     /// handed to the configured queued-work driver after it is durably stored.
+    /// Success acknowledges durable acceptance only; queue dispatch is a
+    /// separate best-effort wake and is reconciled from the pending row.
     pub async fn enqueue_turn_input(
         &self,
         session_id: impl Into<String>,
         input: lash_core::TurnInput,
         ingress: lash_core::TurnInputIngress,
         id: Option<String>,
-    ) -> Result<lash_core::PendingTurnInput> {
+    ) -> Result<lash_core::TurnInputAcceptanceReceipt> {
         lash_core::ensure_durable_effect_input(&input).map_err(EmbedError::Runtime)?;
         let session_id = session_id.into();
         let Some(store_factory) = self.store_factory.as_ref() else {
@@ -499,17 +501,9 @@ impl LashCore {
                 ))
             })?;
         if is_next_turn && let Some(driver) = self.work_driver.drivers().await.queued.as_ref() {
-            driver
-                .claim_and_run_pending(Some(&enqueued.session_id), "queued_turn_input")
-                .await
-                .map_err(|err| {
-                    EmbedError::Runtime(lash_core::RuntimeError::new(
-                        lash_core::RuntimeErrorCode::Other("queued_work".to_string()),
-                        err.to_string(),
-                    ))
-                })?;
+            driver.wake_pending(Some(&enqueued.session_id), "queued_turn_input");
         }
-        Ok(enqueued)
+        Ok(lash_core::TurnInputAcceptanceReceipt::from(&enqueued))
     }
 
     pub async fn delete_session(

@@ -294,7 +294,7 @@ async fn enqueue_turn_input(
         TurnInputIngressRequest::NextTurn => lash::persistence::TurnInputIngress::next_turn(),
     };
     let source_id = format!("workbench-turn-input-{}", uuid::Uuid::new_v4());
-    let pending = state
+    let acceptance = state
         .core
         .enqueue_turn_input(
             session_id.clone(),
@@ -304,12 +304,20 @@ async fn enqueue_turn_input(
         )
         .await
         .map_err(AppError::internal)?;
-    reject_if_active_turn_settled(&state, &pending).await?;
+    reject_if_active_turn_settled(&state, &acceptance).await?;
+    let accepted_state = match acceptance.ingress {
+        lash::persistence::TurnInputIngress::ActiveTurn { .. } => {
+            lash::persistence::TurnInputState::PendingActive
+        }
+        lash::persistence::TurnInputIngress::NextTurn => {
+            lash::persistence::TurnInputState::DeferredNextTurn
+        }
+    };
     let receipt = TurnInputReceipt {
         accepted: true,
-        input_id: pending.input_id.clone(),
-        ingress: pending.ingress.clone(),
-        state: pending.state,
+        input_id: acceptance.input_id.clone(),
+        ingress: acceptance.ingress.clone(),
+        state: accepted_state,
         text,
     };
     state.trace_for_session(
@@ -325,23 +333,26 @@ async fn enqueue_turn_input(
 
 async fn reject_if_active_turn_settled(
     state: &AppState,
-    pending: &lash::PendingTurnInput,
+    acceptance: &lash::TurnInputAcceptanceReceipt,
 ) -> Result<(), AppError> {
-    let Some(turn_id) = pending.ingress.active_turn_id() else {
+    let Some(turn_id) = acceptance.ingress.active_turn_id() else {
         return Ok(());
     };
-    if state.active_turns.contains(&pending.session_id, turn_id) {
+    if state
+        .active_turns
+        .contains(&acceptance.session_id, turn_id)
+    {
         return Ok(());
     }
 
     let session = state
         .core
-        .session(pending.session_id.clone())
+        .session(acceptance.session_id.clone())
         .open()
         .await
         .map_err(AppError::runtime)?;
     let outcome = session
-        .cancel_pending_turn_input(&pending.input_id)
+        .cancel_pending_turn_input(&acceptance.input_id)
         .await
         .map_err(AppError::runtime)?;
     match outcome {
@@ -353,7 +364,7 @@ async fn reject_if_active_turn_settled(
         | lash::PendingTurnInputCancelOutcome::AlreadyCompleted(_) => Ok(()),
         lash::PendingTurnInputCancelOutcome::NotFound => Err(AppError::internal(format!(
             "active-turn input `{}` disappeared during settle reconciliation",
-            pending.input_id
+            acceptance.input_id
         ))),
     }
 }

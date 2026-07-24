@@ -435,15 +435,7 @@ pub(in crate::runtime) async fn enqueue_turn_input_to_store(
         .await
         .map_err(|err| RuntimeError::new(RuntimeErrorCode::StoreCommitFailed, err.to_string()))?;
     if is_next_turn && let Some(driver) = queued_work_driver.as_ref() {
-        driver
-            .claim_and_run_pending(Some(&enqueued.session_id), "queued_turn_input")
-            .await
-            .map_err(|err| {
-                RuntimeError::new(
-                    RuntimeErrorCode::Other("queued_work".to_string()),
-                    err.to_string(),
-                )
-            })?;
+        driver.wake_pending(Some(&enqueued.session_id), "queued_turn_input");
     }
     Ok(enqueued)
 }

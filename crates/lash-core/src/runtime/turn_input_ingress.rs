@@ -151,6 +151,31 @@ pub struct PendingTurnInput {
     pub input: TurnInput,
 }
 
+/// Durable acceptance evidence returned to an ingress caller.
+///
+/// The receipt deliberately carries only stable routing and idempotency
+/// identity. Queue dispatch and the pending row's mutable lifecycle state are
+/// observed separately through the pending-input reconciliation surface.
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct TurnInputAcceptanceReceipt {
+    pub input_id: String,
+    pub session_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source_key: Option<String>,
+    pub ingress: TurnInputIngress,
+}
+
+impl From<&PendingTurnInput> for TurnInputAcceptanceReceipt {
+    fn from(input: &PendingTurnInput) -> Self {
+        Self {
+            input_id: input.input_id.clone(),
+            session_id: input.session_id.clone(),
+            source_key: input.source_key.clone(),
+            ingress: input.ingress.clone(),
+        }
+    }
+}
+
 impl PendingTurnInput {
     pub fn source_or_id(&self) -> &str {
         self.source_key.as_deref().unwrap_or(&self.input_id)

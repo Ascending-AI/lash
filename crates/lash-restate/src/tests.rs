@@ -2476,7 +2476,10 @@ async fn restate_effect_host_checks_revocation_then_awaits_resolution() {
     );
 }
 
-struct PostCommitFailingQueuedWorkRunHandle;
+struct PostCommitFailingQueuedWorkRunHandle {
+    attempts: AtomicUsize,
+    recovered: tokio::sync::Notify,
+}
 
 #[async_trait::async_trait]
 impl lash_core::QueuedWorkRunHandle for PostCommitFailingQueuedWorkRunHandle {
@@ -2484,17 +2487,20 @@ impl lash_core::QueuedWorkRunHandle for PostCommitFailingQueuedWorkRunHandle {
         &self,
         _request: lash_core::QueuedWorkRunRequest,
     ) -> Result<(), PluginError> {
-        Err(PluginError::Session(
-            "FIG-430 deterministic post-commit dispatch failure".to_string(),
-        ))
+        if self.attempts.fetch_add(1, Ordering::SeqCst) == 0 {
+            return Err(PluginError::Session(
+                "FIG-430 deterministic post-commit dispatch failure".to_string(),
+            ));
+        }
+        self.recovered.notify_one();
+        Ok(())
     }
 }
 
-/// Pins FIG-430: `enqueue` currently commits the pending-input row and then
-/// returns a plain error when queued dispatch fails. The production fix is
-/// pending a decision about the public enqueue outcome and dispatch ownership.
+/// FIG-430: durable acceptance is final once the pending-input row commits.
+/// Dispatch failure is operational telemetry, and the wake retries itself
+/// without waiting for another enqueue or unrelated host event.
 #[tokio::test]
-#[ignore = "FIG-430: pins committed-then-error; production fix needs API-shape decision (grilling)"]
 async fn restate_enqueue_never_errors_after_commit() {
     let dir = tempfile::tempdir().expect("tempdir");
     let session_id = "restate-enqueue-post-commit-error";
@@ -2503,6 +2509,11 @@ async fn restate_enqueue_never_errors_after_commit() {
         .complete(|_| async { Ok(lash_core::LlmResponse::default()) })
         .build()
         .into_handle();
+    let queued_work = Arc::new(PostCommitFailingQueuedWorkRunHandle {
+        attempts: AtomicUsize::new(0),
+        recovered: tokio::sync::Notify::new(),
+    });
+    let recovered = queued_work.recovered.notified();
     let core = lash::LashCore::standard_builder()
         .provider(provider)
         .model(lash_core::ModelSpec::new(
@@ -2515,9 +2526,7 @@ async fn restate_enqueue_never_errors_after_commit() {
         .effect_host(Arc::new(lash::durability::InlineEffectHost::default()))
         .attachment_store(Arc::new(DurableMemoryAttachmentStore::default()))
         .process_env_store(Arc::new(DurableMemoryProcessEnvStore::default()))
-        .queued_work_driver(lash_core::QueuedWorkDriver::new(Arc::new(
-            PostCommitFailingQueuedWorkRunHandle,
-        )))
+        .queued_work_driver(lash_core::QueuedWorkDriver::new(queued_work.clone()))
         .build()
         .expect("build FIG-430 core");
     let session = core
@@ -2528,8 +2537,12 @@ async fn restate_enqueue_never_errors_after_commit() {
 
     let outcome = session
         .enqueue(lash_core::TurnInput::text("commit before dispatch"))
+        .id("fig-430-retry")
         .send()
         .await;
+    tokio::time::timeout(std::time::Duration::from_secs(1), recovered)
+        .await
+        .expect("the failed post-commit wake must retry on its own");
     let persisted = session
         .pending_turn_inputs()
         .await
@@ -2537,17 +2550,49 @@ async fn restate_enqueue_never_errors_after_commit() {
 
     match (&outcome, persisted.as_slice()) {
         (Err(_), []) => {}
-        (Ok(enqueued), [stored]) => assert_eq!(stored.input_id, enqueued.input_id),
+        (Ok(receipt), [stored]) => {
+            assert_eq!(stored.input_id, receipt.input_id);
+            assert_eq!(stored.session_id, receipt.session_id);
+            assert_eq!(stored.source_key, receipt.source_key);
+            assert_eq!(stored.ingress, receipt.ingress);
+            assert_eq!(receipt.source_key.as_deref(), Some("host:fig-430-retry"));
+        }
         (Err(error), stored) => panic!(
             "enqueue returned an undifferentiated error after durable commit: \
              caller_outcome={error:?}, persisted_row_count={}",
             stored.len()
         ),
-        (Ok(enqueued), stored) => panic!(
+        (Ok(receipt), stored) => panic!(
             "successful enqueue must identify exactly one durable row: \
-             caller_outcome={enqueued:?}, persisted_rows={stored:?}"
+             caller_outcome={receipt:?}, persisted_rows={stored:?}"
         ),
     }
+    assert_eq!(
+        queued_work.attempts.load(Ordering::SeqCst),
+        2,
+        "the wake path retries exactly once after the injected failure"
+    );
+
+    let retry_receipt = session
+        .enqueue(lash_core::TurnInput::text("commit before dispatch"))
+        .id("fig-430-retry")
+        .send()
+        .await
+        .expect("retry the same durable source identity");
+    assert_eq!(
+        Some(&retry_receipt.input_id),
+        outcome.as_ref().ok().map(|receipt| &receipt.input_id),
+        "the source key is the idempotent retry identity"
+    );
+    assert_eq!(
+        session
+            .pending_turn_inputs()
+            .await
+            .expect("inspect idempotent retry")
+            .len(),
+        1,
+        "an exact source retry must not create another durable input"
+    );
 }
 
 fn replay_test_policy(session_id: &str) -> lash_core::SessionPolicy {
