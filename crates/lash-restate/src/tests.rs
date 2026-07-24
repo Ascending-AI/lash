@@ -1511,6 +1511,30 @@ impl ReplayableRecordingContext {
         self.runs.lock().expect("runs lock").clone()
     }
 
+    fn recorded_runtime_effect_envelopes(&self) -> Vec<(String, RuntimeEffectEnvelope)> {
+        let mut envelopes = self
+            .records
+            .lock()
+            .expect("records lock")
+            .iter()
+            .map(|(effect_name, bytes)| {
+                let recorded: RecordedRuntimeEffect =
+                    serde_json::from_slice(bytes).expect("recorded runtime effect");
+                let canonical =
+                    serde_json::to_value(recorded.envelope).expect("canonical envelope value");
+                let json = canonical
+                    .get("json")
+                    .and_then(serde_json::Value::as_str)
+                    .expect("canonical envelope json");
+                let envelope =
+                    serde_json::from_str(json).expect("canonical runtime effect envelope");
+                (effect_name.clone(), envelope)
+            })
+            .collect::<Vec<_>>();
+        envelopes.sort_by(|left, right| left.0.cmp(&right.0));
+        envelopes
+    }
+
     fn install_process_worker(&self, worker: DurableProcessWorker) {
         *self.process_worker.lock().expect("process worker lock") = Some(worker);
     }
@@ -3171,6 +3195,45 @@ finish (await handle)?
         lash_core::TurnOutcome::Finished(_)
     ));
     assert_eq!(scalar_invocations.load(Ordering::SeqCst), 1);
+    let first_recorded_envelopes = context.recorded_runtime_effect_envelopes();
+    let scalar_tool_attempts = first_recorded_envelopes
+        .iter()
+        .filter(|(_, envelope)| {
+            matches!(
+                &envelope.command,
+                RuntimeEffectCommand::ToolAttempt { call, .. }
+                    if call.tool_name == "replay_scalar_counter"
+            )
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        scalar_tool_attempts.len(),
+        1,
+        "the production Lashlang tool caller must emit one journaled ToolAttempt envelope"
+    );
+    let (scalar_effect_name, scalar_envelope) = scalar_tool_attempts[0];
+    assert_eq!(
+        scalar_envelope.invocation.effect_kind(),
+        Some(RuntimeEffectKind::ToolAttempt)
+    );
+    let RuntimeEffectCommand::ToolAttempt {
+        call,
+        attempt,
+        max_attempts,
+        ..
+    } = &scalar_envelope.command
+    else {
+        unreachable!("filtered to the scalar ToolAttempt");
+    };
+    assert_eq!(call.tool_name, "replay_scalar_counter");
+    assert_eq!((*attempt, *max_attempts), (1, 1));
+    assert_eq!(
+        scalar_effect_name,
+        &restate_effect_name(&scalar_envelope.invocation),
+        "the real journaling host must derive its run identity from the caller-emitted envelope"
+    );
+    let scalar_envelope_hash = scalar_envelope.stable_hash().expect("scalar envelope hash");
+    let recorded_effect_count = first_recorded_envelopes.len();
 
     context
         .events
@@ -3201,6 +3264,39 @@ finish (await handle)?
         scalar_invocations.load(Ordering::SeqCst),
         1,
         "Restate replay must return the journaled scalar ToolAttempt instead of re-executing the provider"
+    );
+    let replayed_envelopes = context.recorded_runtime_effect_envelopes();
+    assert_eq!(
+        replayed_envelopes.len(),
+        recorded_effect_count,
+        "replay must consume the journal rather than append another ToolAttempt record"
+    );
+    let replayed_scalar = replayed_envelopes
+        .iter()
+        .find(|(_, envelope)| {
+            matches!(
+                &envelope.command,
+                RuntimeEffectCommand::ToolAttempt { call, .. }
+                    if call.tool_name == "replay_scalar_counter"
+            )
+        })
+        .expect("replayed scalar ToolAttempt envelope");
+    assert_eq!(
+        replayed_scalar
+            .1
+            .stable_hash()
+            .expect("replayed scalar envelope hash"),
+        scalar_envelope_hash,
+        "the caller must reconstruct the same ToolAttempt envelope on replay"
+    );
+    assert_eq!(
+        context
+            .runs()
+            .iter()
+            .filter(|effect_name| *effect_name == scalar_effect_name)
+            .count(),
+        2,
+        "the production caller must cross the journaling host once live and once on replay"
     );
 }
 
