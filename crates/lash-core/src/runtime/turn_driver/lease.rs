@@ -79,6 +79,7 @@ impl<'run> RuntimeTurnDriver<'run> {
             self.next_llm_ordinal = update.next_llm_ordinal;
             self.pending_queue_claims = update.pending_queue_claims;
             self.pending_turn_input_claims = update.pending_turn_input_claims;
+            self.pending_checkpoint_turn_input_claim = update.pending_checkpoint_turn_input_claim;
         }
     }
 }

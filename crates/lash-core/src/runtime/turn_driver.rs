@@ -42,6 +42,7 @@ pub(super) struct RuntimeTurnDriver<'a> {
     pub(super) turn_causes: Vec<crate::TurnCause>,
     pub(super) pending_queue_claims: Vec<crate::QueuedWorkClaim>,
     pub(super) pending_turn_input_claims: Vec<crate::TurnInputClaim>,
+    pub(super) pending_checkpoint_turn_input_claim: Option<crate::TurnInputClaim>,
     pub(super) checkpoint_messages: crate::tool_dispatch::CheckpointMessageBuffer,
     pub(super) session_execution_lease: Option<crate::SessionExecutionLeaseFence>,
     pub(super) runtime_lease_owner: crate::LeaseOwnerIdentity,

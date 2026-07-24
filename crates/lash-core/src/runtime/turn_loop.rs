@@ -2051,6 +2051,7 @@ impl LashRuntime {
             turn_causes: initial_turn_causes,
             pending_queue_claims: initial_claims.queued,
             pending_turn_input_claims: initial_claims.turn_inputs,
+            pending_checkpoint_turn_input_claim: None,
             checkpoint_messages: crate::tool_dispatch::CheckpointMessageBuffer::default(),
             session_execution_lease: session_execution_fence,
             runtime_lease_owner: self.runtime_lease_owner.clone(),
