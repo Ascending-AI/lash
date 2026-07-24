@@ -2267,6 +2267,7 @@ dependencies = [
  "lash-lashlang-runtime",
  "lash-protocol-rlm",
  "lash-protocol-standard",
+ "lash-runtime",
  "lash-sqlite-store",
  "lashlang",
  "restate-sdk",
