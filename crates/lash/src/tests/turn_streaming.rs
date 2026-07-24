@@ -1467,6 +1467,448 @@ async fn session_observation_recovery_stream_yields_gap_for_trimmed_cursor() -> 
     Ok(())
 }
 
+#[tokio::test]
+async fn recoverable_chat_conformance_snapshot_subscription_and_terminal_replacement() -> Result<()>
+{
+    let core = standard_core();
+    let session = core.session("recoverable-chat-terminal").open().await?;
+    let snapshot = session.observe().recoverable_chat_snapshot();
+    assert!(snapshot.read_view.messages().is_empty());
+    let mut stream = session
+        .observe()
+        .subscribe_recoverable_chat(snapshot.cursor);
+
+    session
+        .turn(TurnInput::text("terminal replacement"))
+        .turn_id("recoverable-terminal-turn")
+        .run()
+        .await?;
+
+    let terminal = loop {
+        let update = tokio::time::timeout(std::time::Duration::from_secs(2), stream.next())
+            .await
+            .expect("recoverable chat terminal timeout")
+            .expect("recoverable chat stream stays open")?;
+        if let crate::recoverable_chat::RecoverableChatUpdate::TerminalReplacement {
+            snapshot,
+            ..
+        } = update
+        {
+            break snapshot;
+        }
+    };
+    assert!(
+        terminal
+            .read_view
+            .messages()
+            .iter()
+            .any(|message| crate::message_text(message).contains("terminal replacement")),
+        "terminal replacement must carry the authoritative committed transcript"
+    );
+    Ok(())
+}
+
+#[derive(Debug)]
+struct PausedCommitReplayStore {
+    inner: lash_core::InMemoryLiveReplayStore,
+    commit_appended: std::sync::atomic::AtomicBool,
+    release_commit: std::sync::atomic::AtomicBool,
+    pause_lock: StdMutex<()>,
+    pause_changed: std::sync::Condvar,
+}
+
+impl PausedCommitReplayStore {
+    fn new() -> Self {
+        Self {
+            inner: lash_core::InMemoryLiveReplayStore::default(),
+            commit_appended: std::sync::atomic::AtomicBool::new(false),
+            release_commit: std::sync::atomic::AtomicBool::new(false),
+            pause_lock: StdMutex::new(()),
+            pause_changed: std::sync::Condvar::new(),
+        }
+    }
+
+    async fn wait_for_commit_append(&self) {
+        tokio::time::timeout(std::time::Duration::from_secs(2), async {
+            while !self
+                .commit_appended
+                .load(std::sync::atomic::Ordering::Acquire)
+            {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("turn never reached the post-append observation-install seam");
+    }
+
+    fn release_commit_install(&self) {
+        self.release_commit
+            .store(true, std::sync::atomic::Ordering::Release);
+        self.pause_changed.notify_all();
+    }
+}
+
+impl lash_core::LiveReplayStore for PausedCommitReplayStore {
+    fn append(
+        &self,
+        session_id: &str,
+        revision: lash_core::SessionRevision,
+        payload: lash_core::SessionObservationEventPayload,
+    ) -> std::result::Result<Arc<lash_core::SessionObservationEvent>, lash_core::LiveReplayStoreError>
+    {
+        let pause = matches!(
+            payload,
+            lash_core::SessionObservationEventPayload::Committed { .. }
+        );
+        let event = self.inner.append(session_id, revision, payload)?;
+        if pause
+            && !self
+                .commit_appended
+                .swap(true, std::sync::atomic::Ordering::AcqRel)
+        {
+            let mut guard = self.pause_lock.lock().expect("commit pause lock");
+            while !self
+                .release_commit
+                .load(std::sync::atomic::Ordering::Acquire)
+            {
+                guard = self
+                    .pause_changed
+                    .wait(guard)
+                    .expect("commit pause condition");
+            }
+        }
+        Ok(event)
+    }
+
+    fn replay_after_cursor(
+        &self,
+        cursor: &lash_core::SessionCursor,
+    ) -> std::result::Result<lash_core::LiveReplayResult, lash_core::LiveReplayStoreError> {
+        self.inner.replay_after_cursor(cursor)
+    }
+
+    fn subscribe_after_cursor(
+        &self,
+        cursor: &lash_core::SessionCursor,
+    ) -> std::result::Result<lash_core::LiveReplaySubscribeResult, lash_core::LiveReplayStoreError>
+    {
+        self.inner.subscribe_after_cursor(cursor)
+    }
+
+    fn current_cursor(
+        &self,
+        session_id: &str,
+        revision: lash_core::SessionRevision,
+    ) -> lash_core::SessionCursor {
+        self.inner.current_cursor(session_id, revision)
+    }
+
+    fn trim_session(
+        &self,
+        session_id: &str,
+    ) -> std::result::Result<(), lash_core::LiveReplayStoreError> {
+        self.inner.trim_session(session_id)
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn recoverable_chat_snapshot_handoff_never_loses_concurrent_terminal_commit() -> Result<()> {
+    let replay_store = Arc::new(PausedCommitReplayStore::new());
+    let core = explicit_ephemeral_facets(LashCore::standard_builder())
+        .provider(mock_provider())
+        .model(mock_model_spec())
+        .live_replay_store(replay_store.clone())
+        .build()?;
+    let session = core
+        .session("recoverable-chat-atomic-handoff")
+        .open()
+        .await?;
+    let turn_session = session.clone();
+    let turn = tokio::spawn(async move {
+        turn_session
+            .turn(TurnInput::text("atomic terminal handoff"))
+            .turn_id("recoverable-atomic-handoff-turn")
+            .run()
+            .await
+    });
+
+    replay_store.wait_for_commit_append().await;
+    let snapshot = session.observe().recoverable_chat_snapshot();
+    replay_store.release_commit_install();
+    turn.await.expect("join publishing turn")?;
+
+    let already_captured = snapshot
+        .read_view
+        .messages()
+        .iter()
+        .any(|message| crate::message_text(message).contains("atomic terminal handoff"));
+    let delivered_after_snapshot = if already_captured {
+        false
+    } else {
+        let mut stream = session
+            .observe()
+            .subscribe_recoverable_chat(snapshot.cursor);
+        tokio::time::timeout(std::time::Duration::from_millis(500), async {
+            loop {
+                let update = stream.next().await.expect("handoff stream remains open")?;
+                if let crate::recoverable_chat::RecoverableChatUpdate::TerminalReplacement {
+                    snapshot,
+                    ..
+                } = update
+                    && snapshot.read_view.messages().iter().any(|message| {
+                        crate::message_text(message).contains("atomic terminal handoff")
+                    })
+                {
+                    break Ok::<_, crate::EmbedError>(true);
+                }
+            }
+        })
+        .await
+        .unwrap_or(Ok(false))?
+    };
+
+    assert!(
+        already_captured || delivered_after_snapshot,
+        "a terminal commit concurrent with snapshot capture must be present in the snapshot or replayed after its cursor"
+    );
+    Ok(())
+}
+
+#[tokio::test]
+async fn recoverable_chat_conformance_deduplicates_redelivery_identity() -> Result<()> {
+    let core = standard_core();
+    let session = core.session("recoverable-chat-redelivery").open().await?;
+    let cursor = session.observe().recoverable_chat_snapshot().cursor;
+    session
+        .turn(TurnInput::text("redelivery identity"))
+        .turn_id("recoverable-redelivery-turn")
+        .run()
+        .await?;
+
+    let mut first_delivery = session.observe().subscribe_recoverable_chat(cursor.clone());
+    let first_id = match first_delivery.next().await.expect("first replay event")? {
+        crate::recoverable_chat::RecoverableChatUpdate::Event { id, .. }
+        | crate::recoverable_chat::RecoverableChatUpdate::TerminalReplacement { id, .. } => id,
+        crate::recoverable_chat::RecoverableChatUpdate::ReplayGap { .. } => {
+            panic!("fresh cursor unexpectedly gapped")
+        }
+    };
+
+    let mut redelivery = session
+        .observe()
+        .subscribe_recoverable_chat(cursor)
+        .with_applied_event_ids([first_id.clone()]);
+    let next_id = match redelivery.next().await.expect("next replay event")? {
+        crate::recoverable_chat::RecoverableChatUpdate::Event { id, .. }
+        | crate::recoverable_chat::RecoverableChatUpdate::TerminalReplacement { id, .. } => id,
+        crate::recoverable_chat::RecoverableChatUpdate::ReplayGap { .. } => {
+            panic!("fresh cursor unexpectedly gapped")
+        }
+    };
+    assert_ne!(
+        next_id, first_id,
+        "an already-applied event identity must not be delivered twice"
+    );
+    Ok(())
+}
+
+#[tokio::test]
+async fn recoverable_chat_gap_allows_new_event_that_reuses_pre_restart_cursor() -> Result<()> {
+    let session_id = "recoverable-chat-restart-cursor";
+    let store_factory = Arc::new(lash_core::InMemorySessionStoreFactory::new());
+    let bootstrap_core = explicit_ephemeral_facets(LashCore::standard_builder())
+        .provider(mock_provider())
+        .model(mock_model_spec())
+        .store_factory(store_factory.clone())
+        .build()?;
+    bootstrap_core
+        .session(session_id)
+        .open()
+        .await?
+        .close()
+        .await?;
+    drop(bootstrap_core);
+
+    let first_core = explicit_ephemeral_facets(LashCore::standard_builder())
+        .provider(mock_provider())
+        .model(mock_model_spec())
+        .store_factory(store_factory.clone())
+        .live_replay_store(Arc::new(lash_core::InMemoryLiveReplayStore::default()))
+        .build()?;
+    let first_session = first_core.session(session_id).open().await?;
+    let initial_cursor = first_session.observe().recoverable_chat_snapshot().cursor;
+    first_session
+        .observe()
+        .runtime
+        .record_turn_activity(TurnActivity::independent(TurnEvent::AssistantProseDelta {
+            text: "before replay-store restart".into(),
+        }));
+    let mut first_stream = first_session
+        .observe()
+        .subscribe_recoverable_chat(initial_cursor);
+    let old_id = match first_stream.next().await.expect("pre-restart event")? {
+        crate::recoverable_chat::RecoverableChatUpdate::Event { id, .. } => id,
+        other => panic!("expected pre-restart provisional event, got {other:?}"),
+    };
+    let old_cursor = first_stream.cursor().clone();
+    drop(first_stream);
+    drop(first_session);
+    drop(first_core);
+
+    let second_core = explicit_ephemeral_facets(LashCore::standard_builder())
+        .provider(mock_provider())
+        .model(mock_model_spec())
+        .store_factory(store_factory)
+        .live_replay_store(Arc::new(lash_core::InMemoryLiveReplayStore::default()))
+        .build()?;
+    let second_session = second_core.session(session_id).open().await?;
+    let mut recovered = second_session
+        .observe()
+        .subscribe_recoverable_chat(old_cursor)
+        .with_applied_event_ids([old_id.clone()]);
+    let gap = recovered.next().await.expect("restart gap")?;
+    assert!(matches!(
+        gap,
+        crate::recoverable_chat::RecoverableChatUpdate::ReplayGap {
+            gap: lash_core::LiveReplayGap {
+                reason: lash_core::LiveReplayGapReason::Unavailable,
+                ..
+            },
+            ..
+        }
+    ));
+
+    second_session
+        .observe()
+        .runtime
+        .record_turn_activity(TurnActivity::independent(TurnEvent::AssistantProseDelta {
+            text: "after replay-store restart".into(),
+        }));
+    let update = tokio::time::timeout(std::time::Duration::from_millis(500), recovered.next())
+        .await
+        .expect("new event at a reused cursor was incorrectly suppressed")
+        .expect("recovered stream remains open")?;
+    let crate::recoverable_chat::RecoverableChatUpdate::Event { id, event } = update else {
+        panic!("expected post-restart provisional event");
+    };
+    assert_eq!(
+        id, old_id,
+        "the in-memory replay store deliberately reuses the pre-restart cursor"
+    );
+    assert_eq!(
+        observation_assistant_delta(&event).as_deref(),
+        Some("after replay-store restart")
+    );
+    Ok(())
+}
+
+#[tokio::test]
+async fn recoverable_chat_conformance_forwards_trimmed_gap_and_continues() -> Result<()> {
+    let core = explicit_ephemeral_facets(LashCore::standard_builder())
+        .provider(mock_provider())
+        .model(mock_model_spec())
+        .live_replay_store(Arc::new(lash_core::InMemoryLiveReplayStore::new(
+            lash_core::InMemoryLiveReplayStoreConfig {
+                max_events_per_session: 1,
+                ..lash_core::InMemoryLiveReplayStoreConfig::default()
+            },
+        )))
+        .build()?;
+    let session = core.session("recoverable-chat-gap").open().await?;
+    let cursor = session.observe().recoverable_chat_snapshot().cursor;
+    session
+        .turn(TurnInput::text("trim the initial cursor"))
+        .run()
+        .await?;
+    let mut stream = session.observe().subscribe_recoverable_chat(cursor);
+    let update = stream.next().await.expect("gap update")?;
+    let crate::recoverable_chat::RecoverableChatUpdate::ReplayGap { snapshot, gap } = update else {
+        panic!("trimmed cursor must be forwarded as a recoverable gap");
+    };
+    assert_eq!(gap.reason, lash_core::LiveReplayGapReason::Trimmed);
+    assert_eq!(gap.latest_cursor, snapshot.cursor);
+
+    session
+        .turn(TurnInput::text("live after gap"))
+        .run()
+        .await?;
+    let read_view = tokio::time::timeout(std::time::Duration::from_secs(2), async {
+        loop {
+            match stream.next().await.expect("post-gap live update")? {
+                crate::recoverable_chat::RecoverableChatUpdate::ReplayGap { snapshot, .. }
+                | crate::recoverable_chat::RecoverableChatUpdate::TerminalReplacement {
+                    snapshot,
+                    ..
+                } => break Ok::<_, crate::EmbedError>(snapshot.read_view),
+                crate::recoverable_chat::RecoverableChatUpdate::Event { .. } => {}
+            }
+        }
+    })
+    .await
+    .expect("post-gap continuation timeout")?;
+    assert!(
+        read_view
+            .messages()
+            .iter()
+            .any(|message| crate::message_text(message).contains("live after gap")),
+        "continued recovery must replace from a snapshot containing the next turn"
+    );
+    Ok(())
+}
+
+#[tokio::test]
+async fn recoverable_chat_conformance_disconnect_does_not_cancel_server_work() -> Result<()> {
+    let (entered_tx, entered_rx) = oneshot::channel();
+    let entered_tx = Arc::new(StdMutex::new(Some(entered_tx)));
+    let release = Arc::new(tokio::sync::Notify::new());
+    let provider = crate::testing::TestProvider::builder()
+        .kind("recoverable-chat-disconnect")
+        .complete({
+            let entered_tx = Arc::clone(&entered_tx);
+            let release = Arc::clone(&release);
+            move |_request| {
+                let entered_tx = Arc::clone(&entered_tx);
+                let release = Arc::clone(&release);
+                async move {
+                    if let Some(tx) = entered_tx.lock().expect("entered sender").take() {
+                        let _ = tx.send(());
+                    }
+                    release.notified().await;
+                    Ok(text_response("completed after observer disconnect"))
+                }
+            }
+        })
+        .build()
+        .into_handle();
+    let core = explicit_ephemeral_facets(LashCore::standard_builder())
+        .provider(provider)
+        .model(mock_model_spec())
+        .build()?;
+    let session = core.session("recoverable-chat-disconnect").open().await?;
+    let cursor = session.observe().recoverable_chat_snapshot().cursor;
+    let stream = session.observe().subscribe_recoverable_chat(cursor);
+    let run_session = session.clone();
+    let mut turn = tokio::spawn(async move {
+        run_session
+            .turn(TurnInput::text("keep running"))
+            .turn_id("disconnect-is-not-cancel")
+            .run()
+            .await
+    });
+    entered_rx.await.expect("provider entered");
+    drop(stream);
+    assert!(
+        tokio::time::timeout(std::time::Duration::from_millis(50), &mut turn)
+            .await
+            .is_err(),
+        "disconnecting observation must not cancel server work"
+    );
+    release.notify_one();
+    let result = turn.await.expect("join turn")?;
+    assert!(matches!(result.result.outcome, TurnOutcome::Finished(_)));
+    Ok(())
+}
+
 fn observation_assistant_delta(event: &lash_core::SessionObservationEvent) -> Option<String> {
     match &event.payload {
         lash_core::SessionObservationEventPayload::TurnActivity(activity) => {

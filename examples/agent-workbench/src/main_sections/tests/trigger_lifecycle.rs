@@ -201,6 +201,7 @@
             restate_cron_job_keys: Arc::new(Mutex::new(BTreeSet::new())),
             mail_world: mail::MailWorld::new(),
             active_turns: active_turns.clone(),
+            authorization: WorkbenchAuthorization::allow_all(),
         };
         let target_scope_prefix = format!("session:{}/frame:", state.current_session_id());
         let session_store =

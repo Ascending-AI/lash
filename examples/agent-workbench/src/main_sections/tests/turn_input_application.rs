@@ -1,6 +1,6 @@
 async fn assert_typed_turn_input_application(
     session: &lash::LashSession,
-    rx: &mut mpsc::Receiver<StreamItem>,
+    rx: &mut mpsc::Receiver<ObservationStreamItem>,
 ) {
     let admission = session
         .enqueue(lash::TurnInput::text("queued workbench input"))
@@ -21,7 +21,7 @@ async fn assert_typed_turn_input_application(
             .await
             .expect("timed out waiting for typed application")
             .expect("stream item");
-        let StreamItem::Observation { event } = item else {
+        let ObservationStreamItem::Observation { event } = item else {
             continue;
         };
         let value = serde_json::to_value(&event).expect("remote event json");

@@ -383,8 +383,7 @@ impl RuntimeHandle {
     }
 
     pub fn current_session_observation(&self) -> SessionObservation {
-        let observation = self.observe();
-        self.session_observation_from(observation.as_ref())
+        self.observe().session_observation()
     }
 
     pub fn resume_session_observation(
@@ -397,7 +396,7 @@ impl RuntimeHandle {
             LiveReplayResult::Replayed(events) => Ok(SessionResume::Replayed { events }),
             LiveReplayResult::Gap(reason) => Ok(SessionResume::Gap {
                 gap: self.live_replay_gap(cursor, reason, observation.as_ref()),
-                observation: self.session_observation_from(observation.as_ref()),
+                observation: observation.session_observation(),
             }),
         }
     }
@@ -414,17 +413,8 @@ impl RuntimeHandle {
             }
             LiveReplaySubscribeResult::Gap(reason) => Ok(SessionObservationSubscription::Gap {
                 gap: self.live_replay_gap(cursor, reason, observation.as_ref()),
-                observation: self.session_observation_from(observation.as_ref()),
+                observation: observation.session_observation(),
             }),
-        }
-    }
-
-    fn session_observation_from(&self, observation: &RuntimeObservation) -> SessionObservation {
-        SessionObservation {
-            read_view: observation.read_view.clone(),
-            cursor: self
-                .live_replay_store
-                .current_cursor(observation.session_id(), observation.session_revision()),
         }
     }
 
@@ -434,13 +424,10 @@ impl RuntimeHandle {
         reason: LiveReplayGapReason,
         observation: &RuntimeObservation,
     ) -> LiveReplayGap {
-        let latest_cursor = self
-            .live_replay_store
-            .current_cursor(observation.session_id(), observation.session_revision());
         LiveReplayGap {
             session_id: observation.session_id().to_string(),
             requested_cursor: requested_cursor.clone(),
-            latest_cursor,
+            latest_cursor: observation.cursor().clone(),
             latest_revision: observation.session_revision(),
             reason,
         }

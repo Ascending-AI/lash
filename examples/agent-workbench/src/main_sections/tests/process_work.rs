@@ -91,6 +91,7 @@ mod process_work_tests {
             restate_cron_job_keys: Arc::new(Mutex::new(BTreeSet::new())),
             mail_world: mail::MailWorld::new(),
             active_turns: ActiveTurns::default(),
+            authorization: WorkbenchAuthorization::allow_all(),
         };
 
         // Register, append one non-terminal event, and complete — all through
@@ -284,6 +285,7 @@ mod process_work_tests {
             restate_cron_job_keys: Arc::new(Mutex::new(BTreeSet::new())),
             mail_world: mail::MailWorld::new(),
             active_turns: ActiveTurns::default(),
+            authorization: WorkbenchAuthorization::allow_all(),
         };
         let session_id = state.current_session_id();
         let process_id = "process-survives-session-delete";

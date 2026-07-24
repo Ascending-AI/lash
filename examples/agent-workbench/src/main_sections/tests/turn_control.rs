@@ -71,6 +71,7 @@ mod turn_control_timeout_tests {
             mail_world: mail::MailWorld::new(),
             active_turns: ActiveTurns::persistent(data_dir.join("active-turns.json"))
                 .expect("open active turns"),
+            authorization: WorkbenchAuthorization::allow_all(),
         };
         let session_id = state.current_session_id();
 
@@ -151,7 +152,7 @@ mod turn_control_timeout_tests {
             .await
             .expect("load state snapshot");
         assert!(snapshot.messages.iter().any(|message| {
-            message.id == "workbench-active-prompt:running-turn"
+                message.id == "workbench-user:running-turn"
                 && message.role == "user"
                 && message.text == "restored active prompt"
         }));
@@ -302,6 +303,7 @@ mod turn_control_timeout_tests {
             mail_world: mail::MailWorld::new(),
             active_turns: ActiveTurns::persistent(data_dir.join("active-turns.json"))
                 .expect("open active turns"),
+            authorization: WorkbenchAuthorization::allow_all(),
         }
     }
 

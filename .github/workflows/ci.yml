@@ -145,6 +145,10 @@ jobs:
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
 
+      - name: Install Node for browser projection gates
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24
 
       - name: Restore cargo cache
         uses: Swatinem/rust-cache@v2

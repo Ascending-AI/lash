@@ -220,7 +220,10 @@ async fn live_restate_suspended_sleep_cancel_wakes_and_streams_evidence_inner() 
         loop {
             if matches!(
                 events.recv().await,
-                Ok(StreamItem::Message { ref message }) if message.text == expected_message
+                Ok(ProductEvent {
+                    item: StreamItem::Message { ref message },
+                    ..
+                }) if message.text == expected_message
             ) {
                 break;
             }
@@ -315,29 +318,29 @@ async fn live_restate_provider_auth_failure_terminalizes_and_session_recovers_in
         "failed turn left a dangling active route"
     );
 
-    let mut rendered_error = None;
+    let mut rendered_failure = None;
     let mut saw_done = false;
-    while rendered_error.is_none() || !saw_done {
+    while rendered_failure.is_none() || !saw_done {
         let event = tokio::time::timeout(Duration::from_secs(5), product_events.recv())
             .await
             .expect("failure transcript event timeout")
             .expect("failure transcript event");
-        match event {
-            StreamItem::Error { message } => rendered_error = Some(message),
+        match event.item {
+            StreamItem::Message { message } if message.role == "event" => {
+                rendered_failure = Some(message.text)
+            }
             StreamItem::Done => saw_done = true,
             _ => {}
         }
     }
-    assert!(
-        rendered_error
-            .as_deref()
-            .is_some_and(|message| message.contains("rejected credentials mid-turn")),
-        "transcript error did not preserve the provider failure: {rendered_error:#?}"
+    assert_eq!(
+        rendered_failure.as_deref(),
+        Some("turn could not be completed"),
+        "product transcript must expose safe failure copy"
     );
     assert!(harness.state.messages_snapshot().iter().any(|message| {
         message.role == "event"
-            && message.text.contains("turn failed")
-            && message.text.contains("rejected credentials mid-turn")
+            && message.text == "turn could not be completed"
             && !message.text.to_ascii_lowercase().contains("cancelled")
     }));
 
@@ -1130,7 +1133,10 @@ async fn live_restate_turn_input_ingress_delivers_once_and_queues_after_settle_i
     let mut rendered_active_input = false;
     loop {
         match rendered_events.try_recv() {
-            Ok(StreamItem::Message { message })
+            Ok(ProductEvent {
+                item: StreamItem::Message { message },
+                ..
+            })
                 if message.role == "user" && message.text == "active injection marker" =>
             {
                 rendered_active_input = true;
@@ -1300,6 +1306,39 @@ async fn live_restate_ingress_owner_restart_for_store(backend: &'static str) {
     assert_eq!(
         evidence.reason.as_deref(),
         Some("deterministic ingress-owner restart gate")
+    );
+    let product_event_path = data_dir.join("product-events.json");
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+    loop {
+        let product_events =
+            SessionEventRegistry::persistent(product_event_path.clone(), 4)
+                .expect("reopen product events after ingress-owner replacement")
+                .snapshot(&session_id);
+        let done_count = product_events
+            .events
+            .iter()
+            .filter(|event| matches!(&event.item, StreamItem::Done))
+            .count();
+        if done_count > 0 {
+            break;
+        }
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "owner replacement did not settle the durable product projection"
+        );
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    let done_count = SessionEventRegistry::persistent(product_event_path, 4)
+        .expect("reopen settled product events after duplicate-observation window")
+        .snapshot(&session_id)
+        .events
+        .iter()
+        .filter(|event| matches!(&event.item, StreamItem::Done))
+        .count();
+    assert_eq!(
+        done_count, 1,
+        "owner replacement and Restate redelivery must settle the product projection once"
     );
     replacement.kill().await.expect("stop replacement child");
     replacement.wait().await.expect("reap replacement child");

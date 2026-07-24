@@ -20,6 +20,7 @@ struct AppState {
     restate_cron_job_keys: Arc<Mutex<BTreeSet<String>>>,
     mail_world: mail::MailWorld,
     active_turns: ActiveTurns,
+    authorization: WorkbenchAuthorization,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -50,6 +51,8 @@ impl ModelSelection {
 struct StateSnapshot {
     settings: Settings,
     messages: Vec<ChatMessage>,
+    observation: RemoteSessionObservation,
+    product_events: ProductEventSnapshot,
     active_turns: Vec<lash::TurnAddress>,
     pending_turn_inputs: Vec<lash::PendingTurnInput>,
     turn_input_applications:
@@ -57,7 +60,54 @@ struct StateSnapshot {
     usage: lash::usage::SessionUsageReport,
 }
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug)]
+enum WorkbenchAuthorizationAction {
+    Observe { session_id: String },
+    EnqueueTurn { session_id: String },
+    EnqueueTurnInput { session_id: String },
+    CancelTurn { session_id: String },
+}
+
+trait WorkbenchAuthorizer: Send + Sync {
+    fn authorize(&self, action: &WorkbenchAuthorizationAction) -> Result<(), AppError>;
+}
+
+#[derive(Clone)]
+struct WorkbenchAuthorization {
+    authorizer: Arc<dyn WorkbenchAuthorizer>,
+}
+
+impl WorkbenchAuthorization {
+    fn allow_all() -> Self {
+        Self::with_authorizer(Arc::new(AllowAllWorkbenchAuthorizer))
+    }
+
+    fn with_authorizer(authorizer: Arc<dyn WorkbenchAuthorizer>) -> Self {
+        Self { authorizer }
+    }
+
+    fn authorize(&self, action: WorkbenchAuthorizationAction) -> Result<(), AppError> {
+        self.authorizer.authorize(&action)
+    }
+}
+
+struct AllowAllWorkbenchAuthorizer;
+
+impl WorkbenchAuthorizer for AllowAllWorkbenchAuthorizer {
+    fn authorize(&self, action: &WorkbenchAuthorizationAction) -> Result<(), AppError> {
+        match action {
+            WorkbenchAuthorizationAction::Observe { session_id }
+            | WorkbenchAuthorizationAction::EnqueueTurn { session_id }
+            | WorkbenchAuthorizationAction::EnqueueTurnInput { session_id }
+            | WorkbenchAuthorizationAction::CancelTurn { session_id } => {
+                let _ = session_id;
+            }
+        }
+        Ok(())
+    }
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
 struct ChatMessage {
     id: String,
     role: String,
@@ -100,7 +150,7 @@ struct TurnInputRequest {
     ingress: TurnInputIngressRequest,
 }
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 struct TurnInputReceipt {
     accepted: bool,
     input_id: String,
@@ -112,6 +162,13 @@ struct TurnInputReceipt {
 #[derive(Debug, Deserialize)]
 struct EventsQuery {
     cursor: Option<String>,
+    #[serde(default)]
+    session_id: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct ProductEventsQuery {
+    cursor: Option<u64>,
     #[serde(default)]
     session_id: Option<String>,
 }
@@ -188,40 +245,102 @@ struct InjectMessageRequest {
     model_variant: Option<String>,
 }
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 enum StreamItem {
+    Message {
+        message: ChatMessage,
+    },
+    TurnInput {
+        receipt: TurnInputReceipt,
+    },
+    Done,
+}
+
+const PUBLIC_TURN_FAILURE_MESSAGE: &str = "turn could not be completed";
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+struct ProductEvent {
+    event_id: String,
+    sequence: u64,
+    #[serde(flatten)]
+    item: StreamItem,
+}
+
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+struct ProductEventSnapshot {
+    cursor: u64,
+    events: Vec<ProductEvent>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+enum ProductStreamItem {
+    Event {
+        event: ProductEvent,
+    },
+    Resync {
+        snapshot: ProductEventSnapshot,
+    },
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+enum ObservationStreamItem {
+    Cursor {
+        cursor: String,
+    },
     Observation {
         event: Box<RemoteSessionObservationEvent>,
-    },
-    ReplayCursor {
-        cursor: String,
     },
     ReplayGap {
         observation: Box<RemoteSessionObservation>,
         gap: Box<RemoteLiveReplayGap>,
     },
-    Message { message: ChatMessage },
-    TurnInput { receipt: TurnInputReceipt },
-    Error { message: String },
-    Done,
+    TerminalReplacement {
+        event: Box<RemoteSessionObservationEvent>,
+        cursor: String,
+    },
 }
 
 #[derive(Clone)]
 struct SessionEventRegistry {
-    senders: Arc<Mutex<HashMap<String, broadcast::Sender<StreamItem>>>>,
+    histories: Arc<Mutex<HashMap<String, Vec<ProductEvent>>>>,
+    senders: Arc<Mutex<HashMap<String, broadcast::Sender<ProductEvent>>>>,
     channel_capacity: usize,
+    path: Option<Arc<PathBuf>>,
 }
 
 impl SessionEventRegistry {
+    #[cfg(test)]
     fn new(channel_capacity: usize) -> Self {
         Self {
+            histories: Arc::new(Mutex::new(HashMap::new())),
             senders: Arc::new(Mutex::new(HashMap::new())),
             channel_capacity: channel_capacity.max(1),
+            path: None,
         }
     }
 
-    fn sender(&self, session_id: &str) -> broadcast::Sender<StreamItem> {
+    fn persistent(path: PathBuf, channel_capacity: usize) -> AnyhowResult<Self> {
+        let histories = match std::fs::read(&path) {
+            Ok(bytes) => serde_json::from_slice(&bytes)
+                .with_context(|| format!("decode product event log `{}`", path.display()))?,
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => HashMap::new(),
+            Err(err) => {
+                return Err(err)
+                    .with_context(|| format!("read product event log `{}`", path.display()));
+            }
+        };
+        Ok(Self {
+            histories: Arc::new(Mutex::new(histories)),
+            senders: Arc::new(Mutex::new(HashMap::new())),
+            channel_capacity: channel_capacity.max(1),
+            path: Some(Arc::new(path)),
+        })
+    }
+
+    fn sender(&self, session_id: &str) -> broadcast::Sender<ProductEvent> {
         let mut senders = self.senders.lock().expect("session event registry lock");
         senders
             .entry(session_id.to_string())
@@ -229,19 +348,117 @@ impl SessionEventRegistry {
             .clone()
     }
 
-    fn subscribe(&self, session_id: &str) -> broadcast::Receiver<StreamItem> {
+    #[cfg(test)]
+    fn subscribe(&self, session_id: &str) -> broadcast::Receiver<ProductEvent> {
         self.sender(session_id).subscribe()
     }
 
+    fn subscribe_after(
+        &self,
+        session_id: &str,
+        cursor: u64,
+    ) -> (Vec<ProductEvent>, broadcast::Receiver<ProductEvent>) {
+        let receiver = self.sender(session_id).subscribe();
+        let replay = self
+            .histories
+            .lock()
+            .expect("product event history lock")
+            .get(session_id)
+            .into_iter()
+            .flatten()
+            .filter(|event| event.sequence > cursor)
+            .cloned()
+            .collect();
+        (replay, receiver)
+    }
+
+    #[cfg(test)]
     fn publish(&self, session_id: &str, item: StreamItem) {
-        let _ = self.sender(session_id).send(item);
+        self.publish_identified(
+            session_id,
+            format!("workbench-product-event:{}", uuid::Uuid::new_v4()),
+            item,
+        );
+    }
+
+    fn publish_identified(
+        &self,
+        session_id: &str,
+        event_id: impl Into<String>,
+        item: StreamItem,
+    ) -> bool {
+        let event_id = event_id.into();
+        let event = {
+            let mut histories = self
+                .histories
+                .lock()
+                .expect("product event history lock");
+            let events = histories.entry(session_id.to_string()).or_default();
+            if events.iter().any(|event| event.event_id == event_id) {
+                return false;
+            }
+            let event = ProductEvent {
+                event_id,
+                sequence: events
+                    .last()
+                    .map_or(1, |event| event.sequence.saturating_add(1)),
+                item,
+            };
+            events.push(event.clone());
+            self.persist_snapshot(&histories);
+            event
+        };
+        let _ = self.sender(session_id).send(event);
+        true
+    }
+
+    fn snapshot(&self, session_id: &str) -> ProductEventSnapshot {
+        let events = self
+            .histories
+            .lock()
+            .expect("product event history lock")
+            .get(session_id)
+            .cloned()
+            .unwrap_or_default();
+        ProductEventSnapshot {
+            cursor: events.last().map_or(0, |event| event.sequence),
+            events,
+        }
     }
 
     fn remove(&self, session_id: &str) {
+        let mut histories = self
+            .histories
+            .lock()
+            .expect("product event history lock");
+        histories.remove(session_id);
+        self.persist_snapshot(&histories);
+        drop(histories);
         self.senders
             .lock()
             .expect("session event registry lock")
             .remove(session_id);
+    }
+
+    fn persist_snapshot(&self, histories: &HashMap<String, Vec<ProductEvent>>) {
+        let Some(path) = self.path.as_deref() else {
+            return;
+        };
+        let bytes = serde_json::to_vec(histories).expect("serialize product event log");
+        let temporary = path.with_extension("json.tmp");
+        std::fs::write(&temporary, bytes).unwrap_or_else(|err| {
+            panic!(
+                "write product event log `{}`: {err}",
+                temporary.display()
+            )
+        });
+        std::fs::rename(&temporary, path).unwrap_or_else(|err| {
+            panic!(
+                "replace product event log `{}` from `{}`: {err}",
+                path.display(),
+                temporary.display()
+            )
+        });
     }
 
     #[cfg(test)]

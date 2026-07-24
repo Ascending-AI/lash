@@ -770,15 +770,16 @@ async fn run_button_trigger(
             "started_process_ids": receipt.started_process_ids(),
         }),
     );
-    state.push_message_for_session(
+    state.push_message_with_id_for_session(
         &request.session_id,
+        format!("button-trigger:{}:event", request.operation_id),
         "event",
         "button trigger occurrence emitted",
     );
     // Trigger occurrence dispatch is the end of this client-initiated request.
     // Clear the UI's busy state when this request owns it, but do not clear a
     // foreground turn's busy state during a mid-turn occurrence.
-    state.publish_trigger_dispatch_done(&request.session_id);
+    state.publish_trigger_dispatch_done(&request.session_id, &request.operation_id);
     Ok(())
 }
 
@@ -813,15 +814,16 @@ async fn run_mail_received(
             "started_process_ids": receipt.started_process_ids(),
         }),
     );
-    state.push_message_for_session(
+    state.push_message_with_id_for_session(
         &request.session_id,
+        format!("mail-received:{}:event", request.operation_id),
         "event",
         "mail received trigger occurrence queued",
     );
     // Trigger occurrence dispatch is the end of this client-initiated request.
     // Clear the UI's busy state when this request owns it, but do not clear a
     // foreground turn's busy state during a mid-turn occurrence.
-    state.publish_trigger_dispatch_done(&request.session_id);
+    state.publish_trigger_dispatch_done(&request.session_id, &request.operation_id);
     Ok(())
 }
 
@@ -933,7 +935,7 @@ async fn run_queued_turn(
                 "turn_id": request.turn_id,
             }),
         );
-        state.publish_for_session(&request.session_id, crate::StreamItem::Done);
+        state.publish_turn_done(&request.session_id, &request.turn_id);
         return Ok(());
     };
     record_turn_output(
@@ -1103,7 +1105,7 @@ fn panic_payload_message(payload: Box<dyn std::any::Any + Send>) -> String {
     }
 }
 
-async fn record_turn_output(
+pub(crate) async fn record_turn_output(
     state: &AppState,
     session: &lash::LashSession,
     turn_id: &str,
@@ -1111,10 +1113,12 @@ async fn record_turn_output(
     turn_state: Arc<Mutex<TurnStreamState>>,
     trace_name: &str,
 ) -> Result<(), AppError> {
-    let streamed_prose = turn_state
-        .lock()
-        .expect("turn state lock")
-        .assistant_prose();
+    let streamed_prose = {
+        let mut turn_state = turn_state.lock().expect("turn state lock");
+        let streamed_prose = turn_state.assistant_prose();
+        turn_state.settle_terminal();
+        streamed_prose
+    };
     let assistant_text = assistant_text_for_display(&output, &streamed_prose);
     state.trace_for_session(
         &session.session_id(),
@@ -1144,8 +1148,9 @@ async fn record_turn_output(
         .iter()
         .filter(|message| message.id.starts_with("m_ingress_"))
     {
-        state.publish_for_session(
+        state.publish_for_session_identified(
             &session.session_id(),
+            format!("message:{}", message.id),
             crate::StreamItem::Message {
                 message: crate::chat_message_from_committed(message),
             },
@@ -1158,27 +1163,33 @@ async fn record_turn_output(
                 .as_ref()
                 .map(|evidence| format!("turn stopped · request {}", evidence.request_id))
                 .unwrap_or_else(|| "turn stopped".to_string());
-            state.push_message_for_session(&session.session_id(), "event", message);
+            state.push_message_with_id_for_session(
+                &session.session_id(),
+                format!("turn:{turn_id}:cancelled"),
+                "event",
+                message,
+            );
         }
         lash::TurnOutcome::Stopped(stop) => {
-            let message = output
-                .errors
-                .last()
-                .map(|issue| issue.message.clone())
-                .unwrap_or_else(|| format!("turn stopped with {stop:?}"));
-            state.push_message_for_session(
+            let _ = stop;
+            state.push_message_with_id_for_session(
                 &session.session_id(),
+                format!("turn:{turn_id}:failed"),
                 "event",
-                format!("turn failed: {message}"),
+                crate::PUBLIC_TURN_FAILURE_MESSAGE,
             );
-            state.publish_for_session(&session.session_id(), crate::StreamItem::Error { message });
         }
         _ => {
             commit_assistant_transcript(session, turn_id, assistant_text.clone()).await?;
-            state.push_message_for_session(&session.session_id(), "assistant", assistant_text);
+            state.push_message_with_id_for_session(
+                &session.session_id(),
+                format!("workbench-assistant:{turn_id}"),
+                "assistant",
+                assistant_text,
+            );
         }
     }
-    state.publish_for_session(&session.session_id(), crate::StreamItem::Done);
+    state.publish_turn_done(&session.session_id(), turn_id);
     Ok(())
 }
 
@@ -1226,14 +1237,13 @@ fn record_turn_failure(
             "error": message,
         }),
     );
-    state.push_message_for_session(session_id, "event", format!("turn failed: {message}"));
-    state.publish_for_session(
+    state.push_message_with_id_for_session(
         session_id,
-        crate::StreamItem::Error {
-            message: message.to_string(),
-        },
+        format!("turn:{turn_id}:failed"),
+        "event",
+        crate::PUBLIC_TURN_FAILURE_MESSAGE,
     );
-    state.publish_for_session(session_id, crate::StreamItem::Done);
+    state.publish_turn_done(session_id, turn_id);
 }
 
 async fn sync_cron_jobs_with_context(

@@ -60,7 +60,7 @@
         <article class="panel"><h3>Trigger buttons</h3><p>Red and blue buttons emit <code>ui.button.pressed</code> trigger occurrences; a registered trigger wakes a process with the validated event payload.</p></article>
         <article class="panel"><h3>Mock inbox accounts</h3><p>The accounts tab connects mock inboxes projected into the Lashlang host environment as typed <code>inbox.&lt;slug&gt;</code> modules; delivering a message emits <code>mail.received</code>, the demo's third trigger source beside the button and the cron clock.</p></article>
         <article class="panel"><h3>Restate cron triggers</h3><p>An enabled <code>cron.Schedule</code> registration syncs to a Restate virtual object that owns the timer and fires <code>cron.Tick</code>s.</p></article>
-        <article class="panel"><h3>Browser reconnect</h3><p><code>/api/events</code> merges workbench product rows with <code>RemoteSessionObservationEvent</code> rows from <code>subscribe_and_recover_remote</code>; the browser persists the latest cursor and reloads <code>/api/state</code> on <code>replay_gap</code>.</p></article>
+        <article class="panel"><h3>Browser reconnect</h3><p><code>/api/state</code> materializes one authoritative snapshot and both cursors. <code>/api/observations</code> then carries Lash recoverable-chat updates while <code>/api/events</code> carries the durable, ordered product log. Either lane resynchronizes from state instead of exposing a raw stream error.</p></article>
         <article class="panel"><h3>Restate turn control</h3><p>User turns, queued catalog refreshes, button triggers, inbox deliveries, session deletion, and cron jobs submit through Restate ingress. Stop retains the exact session/turn address and calls <code>TurnWorkDriver</code>; its keyed-promise request and authoritative cancellation evidence survive reconstructing the web process. The workbench does not persist a second submitted/running work-item lifecycle.</p></article>
         <article class="panel"><h3>Lashlang graph</h3><p>The graph panel is backed by <code>TraceLashlangGraphStore</code>; command operations still go through the session's <code>SessionProcessAdmin</code> facade.</p></article>
       </div>
@@ -71,23 +71,23 @@
         <h2>Browser Stream And Reconnect</h2>
         <p>The workbench keeps product state and Lash observation state separate on purpose. Product state is the durable app projection; live replay is the semantic session stream that lets a browser reconnect without making turn-local streaming a public resume protocol.</p>
       </div>
-      <p>Restate owns in-flight workflow replay by <code>turn_id</code>, Lash owns the session execution lease and final turn commit, and the workbench app stream stores only user-visible product events plus reconnect cursors.</p>
+      <p>Restate owns in-flight workflow replay by <code>turn_id</code>, Lash owns the session execution lease and final turn commit, and the workbench product log persists user-visible events with stable ids and monotonic per-session positions.</p>
       <div class="listing">
         <div class="listing__row">
           <div class="listing__label">snapshot</div>
-          <div class="listing__body"><p><code>/api/state</code> returns the workbench's product snapshot: settings and messages. It does not expose a raw session timeline.</p></div>
+          <div class="listing__body"><p><code>/api/state</code> returns settings, the complete canonical Lash transcript merged by stable id with product-only rows, typed durable turn-input applications, a Lash observation snapshot/cursor, and a product-event snapshot/cursor. It does not expose a raw session timeline.</p></div>
         </div>
         <div class="listing__row">
           <div class="listing__label">stream start</div>
-          <div class="listing__body"><p><code>/api/events</code> accepts an optional <code>?cursor=...</code>. Without one, the route captures <code>session.observe().current_observation().cursor</code>, sends it as <code>replay_cursor</code>, and then subscribes. With one, it deserializes <code>SessionCursor</code> and resumes from that point.</p></div>
+          <div class="listing__body"><p><code>/api/observations</code> resumes Lash from the opaque cursor through <code>subscribe_recoverable_chat</code>. <code>/api/events</code> independently resumes the product log from its numeric position. The initial state response prevents a snapshot/attach race in both lanes.</p></div>
         </div>
         <div class="listing__row">
           <div class="listing__label">stream rows</div>
-          <div class="listing__body"><p>The response merges host-defined rows such as <code>message</code>, <code>error</code>, and <code>done</code> with Lash rows: <code>observation</code> carries a <code>RemoteSessionObservationEvent</code>, while <code>replay_gap</code> carries <code>RemoteLiveReplayGap</code> plus a <code>RemoteSessionObservation</code> snapshot.</p></div>
+          <div class="listing__body"><p>The product response carries identified <code>message</code>, <code>turn_input</code>, and <code>done</code> events or an authoritative <code>resync</code>. It has no raw-error variant. The Lash response carries <code>observation</code>, <code>replay_gap</code>, and <code>terminal_replacement</code>.</p></div>
         </div>
         <div class="listing__row">
           <div class="listing__label">gap recovery</div>
-          <div class="listing__body"><p>On <code>replay_gap</code>, the browser stores <code>gap.latest_cursor</code>, reloads <code>/api/state</code> for the durable product projection, and reconnects from the latest cursor. Reset rotates the session id and starts a fresh stream.</p></div>
+          <div class="listing__body"><p>On <code>replay_gap</code>, product lag, cancellation settlement, or terminal replacement, the browser reloads <code>/api/state</code> behind a generation and product-cursor fence. A response overtaken by a newer recovery or live product event is discarded; an accepted authoritative replacement rebuilds both dedup sets and assigns its cursors. Reset rotates the session id and starts both streams from session-scoped cursor state.</p></div>
         </div>
       </div>
     </div>

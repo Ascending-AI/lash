@@ -48,13 +48,37 @@ impl AppState {
         self.publish_for_session(&self.current_session_id(), item);
     }
 
+    #[cfg(test)]
     fn publish_for_session(&self, session_id: &str, item: StreamItem) {
         self.event_tx.publish(session_id, item);
     }
 
-    fn publish_trigger_dispatch_done(&self, session_id: &str) {
+    fn publish_for_session_identified(
+        &self,
+        session_id: &str,
+        event_id: impl Into<String>,
+        item: StreamItem,
+    ) {
+        let _ = self
+            .event_tx
+            .publish_identified(session_id, event_id, item);
+    }
+
+    fn publish_turn_done(&self, session_id: &str, turn_id: &str) {
+        self.publish_for_session_identified(
+            session_id,
+            format!("turn:{turn_id}:done"),
+            StreamItem::Done,
+        );
+    }
+
+    fn publish_trigger_dispatch_done(&self, session_id: &str, operation_id: &str) {
         if self.active_turns.for_session(session_id).is_empty() {
-            self.publish_for_session(session_id, StreamItem::Done);
+            self.publish_for_session_identified(
+                session_id,
+                format!("operation:{operation_id}:done"),
+                StreamItem::Done,
+            );
         }
     }
 
@@ -76,8 +100,10 @@ impl AppState {
     ) -> Result<Vec<TurnCancelReceipt>, AppError> {
         let active = self.active_turns.for_session(session_id);
         let mut receipts = Vec::with_capacity(active.len());
+        let mut operation_ids = Vec::with_capacity(active.len());
         for address in active {
             let request_id = format!("workbench-stop-{}", uuid::Uuid::new_v4());
+            operation_ids.push(format!("{}:{request_id}", address.turn_id));
             let driver = self.core.turn_work_driver();
             let receipt = driver
                 .request_cancel(lash::TurnCancelRequest::new(
@@ -158,7 +184,11 @@ impl AppState {
             });
         }
         if !receipts.is_empty() {
-            self.publish_for_session(session_id, StreamItem::Done);
+            self.publish_for_session_identified(
+                session_id,
+                format!("turn-cancel:{}:done", operation_ids.join(",")),
+                StreamItem::Done,
+            );
         }
         Ok(receipts)
     }
@@ -191,19 +221,40 @@ impl AppState {
         role: impl Into<String>,
         text: impl Into<String>,
     ) -> ChatMessage {
+        self.push_message_with_id_for_session(
+            session_id,
+            uuid::Uuid::new_v4().to_string(),
+            role,
+            text,
+        )
+    }
+
+    fn push_message_with_id_for_session(
+        &self,
+        session_id: &str,
+        id: impl Into<String>,
+        role: impl Into<String>,
+        text: impl Into<String>,
+    ) -> ChatMessage {
         let message = ChatMessage {
-            id: uuid::Uuid::new_v4().to_string(),
+            id: id.into(),
             role: role.into(),
             text: text.into(),
             at: Utc::now().to_rfc3339(),
         };
-        self.messages
-            .lock()
-            .expect("messages lock")
-            .push(message.clone());
-        self.publish_for_session(session_id, StreamItem::Message {
-            message: message.clone(),
-        });
+        let inserted = self.event_tx.publish_identified(
+            session_id,
+            format!("message:{}", message.id),
+            StreamItem::Message {
+                message: message.clone(),
+            },
+        );
+        if inserted {
+            self.messages
+                .lock()
+                .expect("messages lock")
+                .push(message.clone());
+        }
         message
     }
 }
@@ -559,9 +610,19 @@ impl AppError {
     }
 
     fn internal(message: impl std::fmt::Display) -> Self {
+        eprintln!("agent-workbench internal request failure: {message}");
         Self {
             status: StatusCode::INTERNAL_SERVER_ERROR,
-            message: message.to_string(),
+            message: "internal server error".to_string(),
+            retryable: false,
+        }
+    }
+
+    #[allow(dead_code, reason = "production authorizers use this denial constructor")]
+    fn forbidden(message: impl Into<String>) -> Self {
+        Self {
+            status: StatusCode::FORBIDDEN,
+            message: message.into(),
             retryable: false,
         }
     }
@@ -575,10 +636,11 @@ impl AppError {
     }
 
     fn runtime(error: lash::EmbedError) -> Self {
+        eprintln!("agent-workbench runtime request failure: {error}");
         Self {
             status: StatusCode::INTERNAL_SERVER_ERROR,
             retryable: error.is_retryable(),
-            message: error.to_string(),
+            message: "internal server error".to_string(),
         }
     }
 }

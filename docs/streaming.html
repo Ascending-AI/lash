@@ -81,7 +81,7 @@ async fn pull_one_turn(session: &amp;LashSession) -&gt; anyhow::Result&lt;lash::
   <div class="section" id="session-reconnect">
     <div class="section-header">
       <h2>Session Reconnect</h2>
-      <p><code>ObservableSession</code> is the browser reconnect surface. It returns the current read view plus an opaque cursor, replays recent session observation events after a cursor, or reports a gap with a fresh observation. Persistent transports should use <code>subscribe_and_recover</code>; <code>resume_from_cursor</code> remains the one-shot poll alternative.</p>
+      <p><code>ObservableSession</code> is the browser reconnect surface. It returns the current read view plus an opaque cursor, replays recent session observation events after a cursor, or reports a gap with a fresh observation. Recoverable chat hosts should capture <code>recoverable_chat_snapshot</code> once and attach with <code>subscribe_recoverable_chat</code>; the lower-level <code>subscribe_and_recover</code> remains available to non-chat transports.</p>
     </div>
     <pre data-lang="rust" data-snippet="streaming#session-reconnect"><code>use futures_util::StreamExt as _;
 use lash::observe::SessionObservationStreamItem;
@@ -127,6 +127,10 @@ async fn reconnect_session(
     <aside class="contract">
       <strong>Advanced Primitives</strong>
       <p><code>resume_from_cursor</code>, <code>subscribe_from_cursor</code>, and <code>SessionObservationSubscription</code> are lower-level building blocks. Use them when a poll-based host wants one replay batch or when a custom transport needs to own the resubscribe policy. Browser, CLI, worker, and HTTP stream integrations should start with <code>subscribe_and_recover</code>.</p>
+    </aside>
+    <aside class="contract">
+      <strong>Recoverable chat</strong>
+      <p><code>subscribe_recoverable_chat</code> assigns every event the subscription-scoped <code>RecoverableChatEventId { session_id, cursor }</code>, forwards a trimmed or unavailable window as <code>ReplayGap</code>, and upgrades a commit into <code>TerminalReplacement</code> carrying the authoritative read view. Seed already-applied identities only for a reconnect within the same replay-store incarnation to suppress at-least-once redelivery. A replay gap clears those identities because an in-memory replay store can reuse cursor values after restart; the gap snapshot becomes authoritative. Dropping this stream disconnects observation only; cancellation is a separate <code>TurnWorkDriver</code> request.</p>
     </aside>
   </div>
 
@@ -210,7 +214,7 @@ async fn reconnect_session(
       <p>Lash provides semantic DTOs. The host owns HTTP routes, auth, tenancy, retention, and wire framing.</p>
     </div>
     <p>NDJSON is the recommended framing for activity streams because each <code>RemoteTurnActivity</code> or <code>RemoteSessionObservationEvent</code> remains ordinary JSON and newline boundaries are easy to proxy. SSE is also acceptable when the browser integration benefits from native <code>EventSource</code> reconnect; use the same DTOs as event data.</p>
-    <p>A common browser endpoint sends host-defined product rows such as <code>message</code>, <code>error</code>, and <code>done</code> beside Lash rows such as <code>replay_cursor</code>, <code>observation</code>, and <code>replay_gap</code>. Product rows are owned by the app. The Lash rows should use <code>RemoteSessionObservationEvent</code>, <code>RemoteSessionObservation</code>, and <code>RemoteLiveReplayGap</code> so cursors, revisions, event payloads, and gap snapshots keep the same remote contract across HTTP, queues, and workflow callbacks.</p>
+    <p>Production chat hosts should keep the Lash observation lane separate from their product-event lane. Product rows need their own durable source, ordering identity, replay cursor, lag-resynchronization policy, and authorization. The Lash lane uses <code>RemoteSessionObservationEvent</code>, <code>RemoteSessionObservation</code>, and <code>RemoteLiveReplayGap</code> so cursors, revisions, event payloads, and gap snapshots keep the same remote contract across HTTP, queues, and workflow callbacks. Internal stream errors belong in host telemetry, not in the product transcript.</p>
     <pre data-lang="rust" data-snippet="streaming#remote-ndjson-sink"><code>use lash_remote_protocol::RemoteTurnActivitySink;
 
 async fn stream_turn_as_ndjson(session: &amp;LashSession) -&gt; anyhow::Result&lt;Vec&lt;u8&gt;&gt; {
