@@ -285,55 +285,83 @@ async fn turn_input_application_identity_survives_pending_tombstone_vacuum(
     store: Arc<dyn RuntimePersistence>,
 ) {
     let session_id = "turn-input-application";
-    let turn_id = "turn-input-application-turn";
     let owner_id = "turn-input-application-owner";
-    let admitted = store
-        .enqueue_pending_turn_input(
-            pending_next_turn_input_draft(session_id, "canonical application")
-                .with_source_key("host:application-source"),
-        )
-        .await
-        .expect("enqueue application input");
     let lease = claim_session_execution_lease_for_test(&store, session_id, owner_id).await;
-    let mut claim = store
-        .claim_next_turn_inputs(session_id, &lease.fence(), &lease_owner(owner_id), 10)
-        .await
-        .expect("claim application input")
-        .expect("application input claim");
-    claim.record_initial_turn_application(turn_id, "application-message");
-
-    let state = RuntimeSessionState {
+    let mut state = RuntimeSessionState {
         session_id: session_id.to_string(),
         ..RuntimeSessionState::default()
     };
-    let mut commit = RuntimeCommit::persisted_state(&state, &[])
-        .with_session_execution_lease(lease.fence())
-        .releasing_session_execution_lease(lease.completion())
-        .completing_turn_input_claim(claim.completion());
-    let hash = commit
-        .turn_commit_hash()
-        .expect("hash application turn commit");
-    commit = commit.with_turn_commit(crate::RuntimeTurnCommitStamp::new(
-        session_id, turn_id, hash,
-    ));
-    let result = store
-        .commit_runtime_state(commit)
+    let mut expected = Vec::new();
+    let mut replay = None;
+
+    for (turn_index, turn_id) in ["z-first-application-turn", "a-second-application-turn"]
+        .into_iter()
+        .enumerate()
+    {
+        let admitted = futures_util::future::try_join_all((0..2).map(|input_index| {
+            store.enqueue_pending_turn_input(
+                pending_next_turn_input_draft(
+                    session_id,
+                    &format!("canonical application {turn_index}:{input_index}"),
+                )
+                .with_source_key(format!(
+                    "host:application-source-{turn_index}-{input_index}"
+                )),
+            )
+        }))
         .await
-        .expect("commit application identity");
-    let expected = crate::TurnInputApplication {
-        input_id: admitted.input_id,
-        source_key: Some("host:application-source".to_string()),
-        turn_id: turn_id.to_string(),
-        committed_message_id: "application-message".to_string(),
-        checkpoint: None,
-    };
-    assert_eq!(result.turn_input_applications, vec![expected.clone()]);
+        .expect("enqueue application inputs");
+        let mut claim = store
+            .claim_next_turn_inputs(session_id, &lease.fence(), &lease_owner(owner_id), 10)
+            .await
+            .expect("claim application inputs")
+            .expect("application input claim");
+        let committed_message_id = format!("application-message-{turn_index}");
+        claim.record_initial_turn_application(turn_id, &committed_message_id);
+        let turn_expected = claim.applications.clone();
+        assert_eq!(admitted.len(), turn_expected.len());
+
+        let mut commit = RuntimeCommit::persisted_state(&state, &[])
+            .with_session_execution_lease(lease.fence())
+            .completing_turn_input_claim(claim.completion());
+        if turn_index == 1 {
+            commit = commit.releasing_session_execution_lease(lease.completion());
+        }
+        let hash = commit
+            .turn_commit_hash()
+            .expect("hash application turn commit");
+        commit = commit.with_turn_commit(crate::RuntimeTurnCommitStamp::new(
+            session_id, turn_id, hash,
+        ));
+        if turn_index == 1 {
+            replay = Some(commit.clone());
+        }
+        let result = store
+            .commit_runtime_state(commit)
+            .await
+            .expect("commit application identity");
+        state.head_revision = Some(result.head_revision);
+
+        assert_eq!(result.turn_input_applications, turn_expected);
+        expected.extend(turn_expected);
+    }
+
+    let replayed = store
+        .commit_runtime_state(replay.expect("second turn commit replay"))
+        .await
+        .expect("replay application turn commit");
+    assert_eq!(
+        replayed.turn_input_applications,
+        expected[2..],
+        "an exact turn-commit replay must retain its applications"
+    );
     assert_eq!(
         store
             .list_turn_input_applications(session_id)
             .await
             .expect("read durable application identity"),
-        vec![expected.clone()]
+        expected,
+        "applications must follow monotonic turn-commit order and must not double-count a replay"
     );
 
     store.vacuum().await.expect("vacuum application tombstone");
@@ -342,7 +370,7 @@ async fn turn_input_application_identity_survives_pending_tombstone_vacuum(
             .list_turn_input_applications(session_id)
             .await
             .expect("read application identity after tombstone vacuum"),
-        vec![expected],
+        expected,
         "application reconciliation must come from the committed turn, not a pending snapshot"
     );
 }
@@ -4460,18 +4488,70 @@ async fn runtime_persistence_survives_reopen(factory: ReopenableRuntimePersisten
         .save_session_meta(meta.clone())
         .await
         .expect("save meta");
-    let state = RuntimeSessionState {
+    let mut state = RuntimeSessionState {
         session_id: "root".to_string(),
         tool_state_snapshot: Some(ToolState::default().with_generation(77)),
         ..RuntimeSessionState::default()
     };
-    commit_runtime_state_for_test(
+    let initial_commit = commit_runtime_state_for_test(
         &factory.open,
         RuntimeCommit::persisted_state(&state, &[]),
         "reopen",
     )
     .await
     .expect("commit state");
+    state.head_revision = Some(initial_commit.head_revision);
+
+    let application_lease =
+        claim_session_execution_lease_for_test(&factory.open, "root", "reopen-applications").await;
+    let mut expected_applications = Vec::new();
+    for (turn_index, turn_id) in ["z-reopen-application", "a-reopen-application"]
+        .into_iter()
+        .enumerate()
+    {
+        factory
+            .open
+            .enqueue_pending_turn_input(
+                pending_next_turn_input_draft("root", &format!("reopen application {turn_index}"))
+                    .with_source_key(format!("host:reopen-application-{turn_index}")),
+            )
+            .await
+            .expect("enqueue reopen application");
+        let mut claim = factory
+            .open
+            .claim_next_turn_inputs(
+                "root",
+                &application_lease.fence(),
+                &lease_owner("reopen-applications"),
+                1,
+            )
+            .await
+            .expect("claim reopen application")
+            .expect("reopen application claim");
+        claim.record_initial_turn_application(
+            turn_id,
+            &format!("reopen-application-message-{turn_index}"),
+        );
+        expected_applications.extend(claim.applications.clone());
+
+        let mut commit = RuntimeCommit::persisted_state(&state, &[])
+            .with_session_execution_lease(application_lease.fence())
+            .completing_turn_input_claim(claim.completion());
+        if turn_index == 1 {
+            commit = commit.releasing_session_execution_lease(application_lease.completion());
+        }
+        let hash = commit
+            .turn_commit_hash()
+            .expect("hash reopen application turn commit");
+        let result = factory
+            .open
+            .commit_runtime_state(
+                commit.with_turn_commit(RuntimeTurnCommitStamp::new("root", turn_id, hash)),
+            )
+            .await
+            .expect("commit reopen application");
+        state.head_revision = Some(result.head_revision);
+    }
     let queued = factory
         .open
         .enqueue_queued_work(
@@ -4519,6 +4599,15 @@ async fn runtime_persistence_survives_reopen(factory: ReopenableRuntimePersisten
             .and_then(|checkpoint| checkpoint.tool_state.as_ref())
             .map(|tool_state| tool_state.generation()),
         Some(77)
+    );
+    assert_eq!(
+        factory
+            .reopen
+            .list_turn_input_applications("root")
+            .await
+            .expect("list applications from reopened handle"),
+        expected_applications,
+        "a fresh durable handle must reconcile applications in turn-commit order"
     );
     let reopened_queue = factory
         .reopen

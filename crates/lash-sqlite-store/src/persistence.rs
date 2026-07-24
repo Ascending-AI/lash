@@ -1717,27 +1717,38 @@ impl TurnInputStore for Store {
                 let outcome = (|| {
                     let mut stmt = conn
                         .prepare(
-                            "SELECT result_json
+                            "SELECT turn_id, result_json
                              FROM runtime_turn_commits
-                             WHERE session_id = ?1
-                             ORDER BY committed_at_ms ASC, turn_id ASC",
+                             WHERE session_id = ?1",
                         )
                         .map_err(sqlite_error)?;
                     let rows = stmt
-                        .query_map(params![session_id], |row| row.get::<_, String>(0))
+                        .query_map(params![session_id], |row| {
+                            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+                        })
                         .map_err(sqlite_error)?;
-                    let mut applications = Vec::new();
+                    let mut commits = Vec::new();
                     for row in rows {
-                        let result_json = row.map_err(sqlite_error)?;
+                        let (turn_id, result_json) = row.map_err(sqlite_error)?;
                         let result: RuntimeCommitResult = serde_json::from_str(&result_json)
                             .map_err(|err| {
                                 StoreError::Backend(format!(
                                     "failed to decode runtime turn commit result: {err}"
                                 ))
                             })?;
-                        applications.extend(result.turn_input_applications);
+                        commits.push((
+                            result.head_revision,
+                            turn_id,
+                            result.turn_input_applications,
+                        ));
                     }
-                    Ok(applications)
+                    commits.sort_by(|left, right| {
+                        (left.0, left.1.as_str()).cmp(&(right.0, right.1.as_str()))
+                    });
+                    Ok(commits
+                        .into_iter()
+                        .flat_map(|(_, _, applications)| applications)
+                        .collect())
                 })();
                 Ok(outcome)
             })

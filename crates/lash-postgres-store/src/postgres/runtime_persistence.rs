@@ -1577,23 +1577,31 @@ impl TurnInputStore for PostgresSessionStore {
         session_id: &str,
     ) -> Result<Vec<lash_core::TurnInputApplication>, StoreError> {
         let rows = sqlx::query(
-            "SELECT result_json
+            "SELECT turn_id, result_json
              FROM lash_runtime_turn_commits
-             WHERE session_id = $1
-             ORDER BY committed_at_ms ASC, turn_id ASC",
+             WHERE session_id = $1",
         )
         .bind(session_id)
         .fetch_all(&self.pool)
         .await
         .map_err(store_sqlx_error)?;
-        let mut applications = Vec::new();
+        let mut commits = Vec::with_capacity(rows.len());
         for row in rows {
-            let result_json: String = row.get(0);
+            let turn_id: String = row.get(0);
+            let result_json: String = row.get(1);
             let result: RuntimeCommitResult =
                 store_decode_json(&result_json, "runtime turn commit result")?;
-            applications.extend(result.turn_input_applications);
+            commits.push((
+                result.head_revision,
+                turn_id,
+                result.turn_input_applications,
+            ));
         }
-        Ok(applications)
+        commits.sort_by(|left, right| (left.0, left.1.as_str()).cmp(&(right.0, right.1.as_str())));
+        Ok(commits
+            .into_iter()
+            .flat_map(|(_, _, applications)| applications)
+            .collect())
     }
 
     async fn cancel_pending_turn_inputs(
