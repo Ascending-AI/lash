@@ -1,68 +1,27 @@
 use super::*;
 
-use async_trait::async_trait;
-use lash_core::plugin::runtime_host::{
-    SessionGraphService, SessionLifecycleService, SessionStateService,
-};
-use lash_core::plugin::{PluginError, SessionHandle};
-use lash_core::{
-    DirectCompletionClient, DurabilityTier, RuntimeEffectController, RuntimeSessionState,
-    SessionCreateRequest, SessionSnapshot, ToolCall, ToolProvider,
-};
+use lash_core::{DurabilityTier, ToolCall, ToolProvider};
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-#[derive(Default)]
-struct ConformanceSessionHost {
-    snapshot: RuntimeSessionState,
+struct CountingFirstPartyProvider {
+    inner: Arc<dyn ToolProvider>,
+    executions: Arc<AtomicUsize>,
 }
 
-#[async_trait]
-impl SessionStateService for ConformanceSessionHost {
-    async fn snapshot_current(&self) -> Result<SessionSnapshot, PluginError> {
-        Ok(self.snapshot.to_snapshot())
+#[async_trait::async_trait]
+impl ToolProvider for CountingFirstPartyProvider {
+    fn tool_manifests(&self) -> Vec<lash_core::ToolManifest> {
+        self.inner.tool_manifests()
     }
 
-    async fn snapshot_session(&self, _session_id: &str) -> Result<SessionSnapshot, PluginError> {
-        Ok(self.snapshot.to_snapshot())
+    fn resolve_contract(&self, name: &str) -> Option<Arc<lash_core::ToolContract>> {
+        self.inner.resolve_contract(name)
     }
 
-    async fn tool_catalog(&self, _session_id: &str) -> Result<Vec<serde_json::Value>, PluginError> {
-        Ok(Vec::new())
+    async fn execute(&self, call: ToolCall<'_>) -> lash_core::ToolResult {
+        self.executions.fetch_add(1, Ordering::SeqCst);
+        self.inner.execute(call).await
     }
-}
-
-#[async_trait]
-impl SessionLifecycleService for ConformanceSessionHost {
-    async fn create_session(
-        &self,
-        _request: SessionCreateRequest,
-    ) -> Result<SessionHandle, PluginError> {
-        Err(PluginError::Session("not used".to_string()))
-    }
-
-    async fn close_session(&self, _session_id: &str) -> Result<(), PluginError> {
-        Ok(())
-    }
-}
-
-#[async_trait]
-impl SessionGraphService for ConformanceSessionHost {}
-
-fn tool_context() -> lash_core::ToolContext<'static> {
-    let host = Arc::new(ConformanceSessionHost::default());
-    let completions = DirectCompletionClient::from_fn(|_, usage_source| {
-        assert_eq!(usage_source, "llm_query");
-        Ok(lash_core::DirectCompletion {
-            text: r#"{"kind":"value","value":{"answer":"covered"},"error":null}"#.to_string(),
-            usage: lash_core::TokenUsage::default(),
-            llm_call: lash_core::LlmCallRecord {
-                call_id: lash_core::LlmCallId("tool-context-conformance".to_string()),
-                label: None,
-                attempts: Vec::new(),
-            },
-        })
-    });
-    lash_core::testing::mock_tool_context_with_host_and_direct_completions(host, completions)
 }
 
 fn args_for(tool_name: &str) -> serde_json::Value {
@@ -78,154 +37,208 @@ fn args_for(tool_name: &str) -> serde_json::Value {
     }
 }
 
-fn tool_attempt_envelope(
-    tier: DurabilityTier,
-    tool_name: &str,
-    args: serde_json::Value,
-) -> RuntimeEffectEnvelope {
-    let (scope, context_name) = match tier {
-        DurabilityTier::Inline => (
-            RuntimeScope::for_turn("tool-context-conformance", "inline", 1, 0),
-            "inline",
+fn lashlang_source_for(tool_name: &str) -> &'static str {
+    match tool_name {
+        "llm_query" => {
+            r#"<lashlang>
+result = await llm.query({
+  task: "Return the covered answer",
+  inputs: { answer: "covered" },
+  output: Type { answer: str }
+})?
+finish result
+</lashlang>"#
+        }
+        other => panic!(
+            "first-party tool `{other}` was registered without a production Lashlang fixture; add its caller path before merging"
         ),
-        DurabilityTier::Durable => (
-            RuntimeScope::new("tool-context-conformance-durable"),
-            "restate-durable",
-        ),
-    };
-    RuntimeEffectEnvelope::new(
-        RuntimeInvocation::effect(
-            scope,
-            format!("{context_name}:{tool_name}"),
-            RuntimeEffectKind::ToolAttempt,
-            format!("tool-context:{context_name}:{tool_name}"),
-        ),
-        RuntimeEffectCommand::ToolAttempt {
-            call: lash_core::PreparedToolCall::from_parts(
-                format!("{context_name}-{tool_name}"),
-                format!("tool:{tool_name}"),
-                tool_name,
-                args,
-                None,
-                serde_json::Value::Null,
-            ),
-            execution_grant: None,
-            attempt: 1,
-            max_attempts: 1,
-        },
-    )
+    }
 }
 
-fn executing_tool(
-    provider: Arc<dyn ToolProvider>,
-    tool_name: String,
-    args: serde_json::Value,
-    executions: Arc<AtomicUsize>,
-) -> RuntimeEffectLocalExecutor<'static> {
-    RuntimeEffectLocalExecutor::testing(move |_| {
-        let provider = Arc::clone(&provider);
-        let tool_name = tool_name.clone();
-        let args = args.clone();
-        let executions = Arc::clone(&executions);
-        async move {
-            executions.fetch_add(1, Ordering::SeqCst);
-            let context = tool_context();
-            let output = provider
-                .execute(ToolCall {
-                    name: &tool_name,
-                    args: &args,
-                    context: &context,
-                    progress: None,
-                })
-                .await
-                .into_done_output()
-                .map_err(|_| {
-                    RuntimeEffectControllerError::new(
-                        "tool_context_conformance_pending",
-                        format!("first-party tool `{tool_name}` unexpectedly returned pending"),
-                    )
-                })?;
-            assert!(
-                output.is_success(),
-                "{tool_name} failed in the conformance matrix: {output:?}"
-            );
-            Ok(RuntimeEffectOutcome::ToolAttempt {
-                launch: Box::new(lash_core::ToolAttemptLaunch::Done {
-                    record: Box::new(lash_core::ToolCallRecord {
-                        call_id: Some(format!("conformance-{tool_name}")),
-                        tool: tool_name,
-                        args,
-                        output,
-                        duration_ms: 0,
-                    }),
-                }),
-                triggers: Vec::new(),
+struct ProductionToolCell {
+    _dir: tempfile::TempDir,
+    session_id: String,
+    turn_id: String,
+    policy: lash_core::SessionPolicy,
+    initial_state: lash_core::RuntimeSessionState,
+    host: lash_core::RuntimeHostConfig,
+    runtime_store: Arc<dyn lash_core::RuntimePersistence>,
+    replay_store: Arc<dyn lash_core::RuntimePersistence>,
+    plugin_factories: Vec<Arc<dyn lash_core::PluginFactory>>,
+    tool_executions: Arc<AtomicUsize>,
+    llm_provider_calls: Arc<AtomicUsize>,
+}
+
+impl ProductionToolCell {
+    async fn new(tier: DurabilityTier, tool_name: &str) -> Self {
+        let context_name = match tier {
+            DurabilityTier::Inline => "inline",
+            DurabilityTier::Durable => "restate-durable",
+        };
+        let session_id = format!("tool-context-{context_name}-{tool_name}");
+        let turn_id = format!("{session_id}-turn");
+        let dir = tempfile::tempdir().expect("tool-context tempdir");
+        let first_party: Arc<dyn ToolProvider> =
+            Arc::new(lash_llm_tools::llm_query_provider(None, None, None));
+        let tool_executions = Arc::new(AtomicUsize::new(0));
+        let counting_provider: Arc<dyn ToolProvider> = Arc::new(CountingFirstPartyProvider {
+            inner: first_party,
+            executions: Arc::clone(&tool_executions),
+        });
+        let tool_plugin: Arc<dyn lash_core::PluginFactory> =
+            Arc::new(lash_core::plugin::StaticPluginFactory::new(
+                "tool-context-first-party",
+                lash_core::PluginSpec::new().with_tool_provider(counting_provider),
+            ));
+        let artifact_store: Arc<dyn lashlang::LashlangArtifactStore> =
+            Arc::new(lashlang::InMemoryLashlangArtifactStore::new());
+        let rlm_plugin: Arc<dyn lash_core::PluginFactory> = Arc::new(
+            lash_protocol_rlm::RlmProtocolPluginFactory::new(
+                lash_protocol_rlm::RlmProtocolPluginConfig::default(),
+                artifact_store,
+            )
+            .with_process_lifecycle(false),
+        );
+        let plugin_factories = vec![rlm_plugin, tool_plugin];
+
+        let llm_provider_calls = Arc::new(AtomicUsize::new(0));
+        let source = lashlang_source_for(tool_name).to_string();
+        let provider = lash_core::testing::TestProvider::builder()
+            .kind("stub")
+            .complete({
+                let llm_provider_calls = Arc::clone(&llm_provider_calls);
+                move |_request| {
+                    let llm_provider_calls = Arc::clone(&llm_provider_calls);
+                    let source = source.clone();
+                    async move {
+                        let call = llm_provider_calls.fetch_add(1, Ordering::SeqCst);
+                        let text = match call {
+                            0 => source,
+                            1 => r#"{"kind":"value","value":{"answer":"covered"},"error":null}"#
+                                .to_string(),
+                            other => panic!(
+                                "live+replay must not execute an unjournaled provider call #{other}"
+                            ),
+                        };
+                        Ok(lash_core::LlmResponse {
+                            full_text: text.clone(),
+                            parts: vec![lash_core::LlmOutputPart::Text {
+                                text,
+                                response_meta: None,
+                            }],
+                            response_metadata: Default::default(),
+                            ..lash_core::LlmResponse::default()
+                        })
+                    }
+                }
             })
-        }
-    })
-}
+            .build()
+            .into_handle();
+        let mut host = lash_core::RuntimeHostConfig::in_memory();
+        host.providers.provider_resolver =
+            Arc::new(lash_core::SingleProviderResolver::new(provider));
+        host.durability.attachment_store = Arc::new(lash_core::SessionAttachmentStore::ephemeral(
+            Arc::new(DurableMemoryAttachmentStore::default()),
+        ));
+        host.durability.process_env_store = Arc::new(DurableMemoryProcessEnvStore::default());
 
-fn replay_must_not_execute(executions: Arc<AtomicUsize>) -> RuntimeEffectLocalExecutor<'static> {
-    RuntimeEffectLocalExecutor::testing(move |_| {
-        let executions = Arc::clone(&executions);
-        async move {
-            executions.fetch_add(1, Ordering::SeqCst);
-            Err(RuntimeEffectControllerError::new(
-                "tool_context_conformance_reexecuted",
-                "recorded replay must not execute the first-party tool again",
-            ))
+        let store = Arc::new(
+            lash_sqlite_store::Store::open(&dir.path().join("session.db"))
+                .await
+                .expect("open production-path session store"),
+        );
+        let runtime_store: Arc<dyn lash_core::RuntimePersistence> = store;
+        let replay_store: Arc<dyn lash_core::RuntimePersistence> = Arc::new(
+            lash_sqlite_store::Store::open(&dir.path().join("replay-session.db"))
+                .await
+                .expect("open production-path replay session store"),
+        );
+        let policy = replay_test_policy(&session_id);
+        let initial_state = replay_test_state(&session_id, &policy);
+        Self {
+            _dir: dir,
+            session_id,
+            turn_id,
+            policy,
+            initial_state,
+            host,
+            runtime_store,
+            replay_store,
+            plugin_factories,
+            tool_executions,
+            llm_provider_calls,
         }
-    })
-}
+    }
 
-async fn assert_cell(
-    controller: &dyn RuntimeEffectController,
-    start_replay: impl FnOnce(),
-    tier: DurabilityTier,
-    provider: Arc<dyn ToolProvider>,
-    tool_name: String,
-) {
-    let args = args_for(&tool_name);
-    let envelope = tool_attempt_envelope(tier, &tool_name, args.clone());
-    let executions = Arc::new(AtomicUsize::new(0));
-    let first = controller
-        .execute_effect(
-            envelope.clone(),
-            executing_tool(
-                Arc::clone(&provider),
-                tool_name.clone(),
-                args,
-                Arc::clone(&executions),
-            ),
+    async fn run_once(
+        &self,
+        runtime: &mut lash_core::LashRuntime,
+        controller: &dyn RuntimeEffectController,
+    ) -> lash_core::AssembledTurn {
+        let scoped_effect_controller = lash_core::ScopedEffectController::borrowed(
+            controller,
+            ExecutionScope::turn(&self.session_id, &self.turn_id),
         )
-        .await
-        .unwrap_or_else(|error| panic!("{tier:?} {tool_name} live execution failed: {error}"));
-    let RuntimeEffectOutcome::ToolAttempt { launch, .. } = &first else {
-        panic!("{tier:?} {tool_name} returned the wrong effect outcome");
-    };
-    let lash_core::ToolAttemptLaunch::Done { record } = launch.as_ref() else {
-        panic!("{tier:?} {tool_name} did not finish inline");
-    };
-    assert!(
-        record.output.is_success(),
-        "{tier:?} {tool_name} did not succeed"
-    );
+        .expect("scope production tool cell");
+        runtime
+            .stream_turn(
+                replay_test_input(&self.turn_id),
+                lash_core::TurnOptions::new(
+                    tokio_util::sync::CancellationToken::new(),
+                    scoped_effect_controller,
+                ),
+            )
+            .await
+            .expect("run production tool cell")
+    }
 
-    start_replay();
-    let replayed = controller
-        .execute_effect(envelope, replay_must_not_execute(Arc::clone(&executions)))
-        .await
-        .unwrap_or_else(|error| panic!("{tier:?} {tool_name} replay failed: {error}"));
-    assert_eq!(
-        serde_json::to_value(replayed).expect("serialize replayed outcome"),
-        serde_json::to_value(first).expect("serialize live outcome"),
-        "{tier:?} {tool_name} replay must reproduce the recorded result"
-    );
-    assert_eq!(
-        executions.load(Ordering::SeqCst),
-        1,
-        "{tier:?} {tool_name} must execute exactly once across live and replay"
-    );
+    async fn run(&self, controller: &dyn RuntimeEffectController, start_replay: impl FnOnce()) {
+        let mut live = replay_test_runtime_with_plugins(
+            &self.session_id,
+            self.policy.clone(),
+            self.initial_state.clone(),
+            self.host.clone(),
+            Arc::clone(&self.runtime_store),
+            self.plugin_factories.clone(),
+        )
+        .await;
+        let live_turn = self.run_once(&mut live, controller).await;
+        assert!(matches!(
+            live_turn.outcome,
+            lash_core::TurnOutcome::Finished(_)
+        ));
+        assert_eq!(
+            self.tool_executions.load(Ordering::SeqCst),
+            1,
+            "the real caller must execute the first-party tool once on the live pass"
+        );
+
+        start_replay();
+        let mut replay = replay_test_runtime_with_plugins(
+            &self.session_id,
+            self.policy.clone(),
+            self.initial_state.clone(),
+            self.host.clone(),
+            Arc::clone(&self.replay_store),
+            self.plugin_factories.clone(),
+        )
+        .await;
+        let replay_turn = self.run_once(&mut replay, controller).await;
+        assert!(matches!(
+            replay_turn.outcome,
+            lash_core::TurnOutcome::Finished(_)
+        ));
+        assert_eq!(
+            self.tool_executions.load(Ordering::SeqCst),
+            1,
+            "the caller-emitted ToolAttempt must replay without re-executing the first-party tool"
+        );
+        assert_eq!(
+            self.llm_provider_calls.load(Ordering::SeqCst),
+            2,
+            "outer RLM generation and llm_query direct completion must each execute only on the live pass"
+        );
+    }
 }
 
 #[tokio::test]
@@ -239,29 +252,35 @@ async fn every_registered_first_party_tool_succeeds_and_replays_in_every_context
     );
 
     for manifest in manifests {
+        let _ = args_for(&manifest.name);
+
+        let inline_cell = ProductionToolCell::new(DurabilityTier::Inline, &manifest.name).await;
         let inline = lash_sqlite_store::SqliteRuntimeEffectController::memory(
-            ExecutionScope::turn("tool-context-conformance", "inline"),
+            ExecutionScope::turn(&inline_cell.session_id, &inline_cell.turn_id),
         )
         .await
-        .expect("in-process replay controller");
-        assert_cell(
-            &inline,
-            || inline.start_replay(),
-            DurabilityTier::Inline,
-            Arc::clone(&provider),
-            manifest.name.clone(),
-        )
-        .await;
+        .expect("in-process production replay controller");
+        inline_cell.run(&inline, || inline.start_replay()).await;
 
+        let durable_cell = ProductionToolCell::new(DurabilityTier::Durable, &manifest.name).await;
         let context = Arc::new(ReplayableRecordingContext::default());
         let durable = RestateRuntimeEffectController::new(Arc::clone(&context));
-        assert_cell(
-            &durable,
-            || context.start_replay(),
-            DurabilityTier::Durable,
-            Arc::clone(&provider),
-            manifest.name,
-        )
-        .await;
+        durable_cell.run(&durable, || context.start_replay()).await;
+        let tool_attempts = context
+            .recorded_runtime_effect_envelopes()
+            .into_iter()
+            .filter(|(_, envelope)| {
+                matches!(
+                    &envelope.command,
+                    RuntimeEffectCommand::ToolAttempt { call, .. }
+                        if call.tool_name == manifest.name
+                )
+            })
+            .count();
+        assert_eq!(
+            tool_attempts, 1,
+            "the production durable caller must emit one ToolAttempt for {}",
+            manifest.name
+        );
     }
 }
