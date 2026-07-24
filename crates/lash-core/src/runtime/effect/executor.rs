@@ -178,6 +178,7 @@ pub(crate) struct TurnEffectStateUpdate {
     pub(crate) next_llm_ordinal: usize,
     pub(crate) pending_queue_claims: Vec<crate::QueuedWorkClaim>,
     pub(crate) pending_turn_input_claims: Vec<crate::TurnInputClaim>,
+    pub(crate) pending_checkpoint_turn_input_claim: Option<crate::TurnInputClaim>,
 }
 
 pub(super) struct LocalTurnEffectRunner {
@@ -430,6 +431,7 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
             turn_causes: driver.turn_causes.clone(),
             pending_queue_claims: driver.pending_queue_claims.clone(),
             pending_turn_input_claims: driver.pending_turn_input_claims.clone(),
+            pending_checkpoint_turn_input_claim: driver.pending_checkpoint_turn_input_claim.clone(),
             checkpoint_messages: driver.checkpoint_messages.clone(),
             session_execution_lease: driver.session_execution_lease.clone(),
             runtime_lease_owner: driver.runtime_lease_owner.clone(),
@@ -1035,6 +1037,9 @@ impl RuntimeEffectLocalRunner for LocalTurnEffectRunner {
                 next_llm_ordinal: runner.driver.next_llm_ordinal,
                 pending_queue_claims: runner.driver.pending_queue_claims,
                 pending_turn_input_claims: runner.driver.pending_turn_input_claims,
+                pending_checkpoint_turn_input_claim: runner
+                    .driver
+                    .pending_checkpoint_turn_input_claim,
             });
         result
     }

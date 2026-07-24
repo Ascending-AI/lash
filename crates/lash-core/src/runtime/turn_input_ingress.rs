@@ -165,6 +165,25 @@ pub struct TurnInputAcceptanceReceipt {
     pub ingress: TurnInputIngress,
 }
 
+/// Durable evidence that an admitted input became canonical conversation input.
+///
+/// This is the application stage between [`TurnInputAcceptanceReceipt`]
+/// (admission) and the terminal turn commit (settlement). It deliberately
+/// carries identity only: hosts correlate an input to its canonical turn and
+/// committed message without parsing or retaining display text.
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct TurnInputApplication {
+    pub input_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source_key: Option<String>,
+    pub turn_id: String,
+    pub committed_message_id: String,
+    /// Present for active-turn checkpoint application and absent when the
+    /// input formed the initial canonical input of an idle queued turn.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub checkpoint: Option<CheckpointKind>,
+}
+
 impl From<&PendingTurnInput> for TurnInputAcceptanceReceipt {
     fn from(input: &PendingTurnInput) -> Self {
         Self {
@@ -290,6 +309,8 @@ pub struct TurnInputCompletion {
     pub claim_id: String,
     pub lease_token: String,
     pub input_ids: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub applications: Vec<TurnInputApplication>,
 }
 
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
@@ -305,6 +326,8 @@ pub struct TurnInputClaim {
     pub session_lease_generation: u64,
     pub mode: TurnInputClaimMode,
     pub inputs: Vec<PendingTurnInput>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub applications: Vec<TurnInputApplication>,
 }
 
 impl TurnInputClaim {
@@ -318,7 +341,56 @@ impl TurnInputClaim {
                 .iter()
                 .map(|input| input.input_id.clone())
                 .collect(),
+            applications: self.applications.clone(),
         }
+    }
+
+    pub fn record_initial_turn_application(&mut self, turn_id: &str, committed_message_id: &str) {
+        self.applications = self
+            .inputs
+            .iter()
+            .filter(|input| {
+                input.input.items.iter().any(|item| match item {
+                    crate::InputItem::Text { text } => !text.is_empty(),
+                    crate::InputItem::Attachment { .. } => true,
+                })
+            })
+            .map(|input| TurnInputApplication {
+                input_id: input.input_id.clone(),
+                source_key: input.source_key.clone(),
+                turn_id: turn_id.to_string(),
+                committed_message_id: committed_message_id.to_string(),
+                checkpoint: None,
+            })
+            .collect();
+    }
+
+    pub fn record_checkpoint_applications(
+        &mut self,
+        turn_id: &str,
+        checkpoint: CheckpointKind,
+        committed_messages: &[crate::Message],
+    ) {
+        let committed_message_ids = committed_messages
+            .iter()
+            .map(|message| message.id.as_str())
+            .collect::<std::collections::HashSet<_>>();
+        self.applications = self
+            .inputs
+            .iter()
+            .filter_map(|input| {
+                let committed_message_id = ingress_message_id(&input.input_id);
+                committed_message_ids
+                    .contains(committed_message_id.as_str())
+                    .then(|| TurnInputApplication {
+                        input_id: input.input_id.clone(),
+                        source_key: input.source_key.clone(),
+                        turn_id: turn_id.to_string(),
+                        committed_message_id,
+                        checkpoint: Some(checkpoint),
+                    })
+            })
+            .collect();
     }
 
     pub fn accepted_turn_inputs(&self) -> Vec<crate::AcceptedInjectedTurnInput> {
@@ -424,7 +496,7 @@ async fn committed_message_from_pending_input(
         attachment_source_policy,
     )
     .await?;
-    let message_id = format!("m_ingress_{}", pending.input_id);
+    let message_id = ingress_message_id(&pending.input_id);
     let mut parts = Vec::new();
     for item in normalized {
         match item {
@@ -470,4 +542,8 @@ async fn committed_message_from_pending_input(
         origin: None,
         parts: crate::shared_parts(parts),
     }))
+}
+
+pub(crate) fn ingress_message_id(input_id: &str) -> String {
+    format!("m_ingress_{input_id}")
 }

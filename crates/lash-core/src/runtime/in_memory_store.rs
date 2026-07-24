@@ -649,6 +649,7 @@ impl InMemorySessionStore {
             session_lease_generation: generation,
             mode,
             inputs,
+            applications: Vec::new(),
         }))
     }
 
@@ -791,6 +792,7 @@ impl crate::store::SessionCommitStore for InMemorySessionStore {
         &self,
         commit: crate::store::RuntimeCommit,
     ) -> Result<crate::store::RuntimeCommitResult, crate::store::StoreError> {
+        let turn_input_applications = commit.turn_input_applications();
         let _transaction = self
             .write_transaction
             .lock()
@@ -1001,6 +1003,7 @@ impl crate::store::SessionCommitStore for InMemorySessionStore {
                 .into_iter()
                 .map(|batch| self.enqueue_queued_work_in_memory(batch))
                 .collect(),
+            turn_input_applications,
         };
         if let Some(completed) = &commit.turn_commit {
             self.runtime_turn_commits

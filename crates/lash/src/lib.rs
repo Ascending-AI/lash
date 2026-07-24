@@ -50,8 +50,8 @@ pub use lash_core::{
     SessionCommandReceipt, SessionCreateRequest, SessionSpec, SessionStartPoint, TurnActivity,
     TurnActivityId, TurnActivitySink, TurnAddress, TurnAttach, TurnCancelOriginHint,
     TurnCancelOutcome, TurnCancelReceipt, TurnCancelRequest, TurnCancellationEvidence, TurnCause,
-    TurnEvent, TurnFinish, TurnInput, TurnInputAcceptanceReceipt, TurnOutcome, TurnStop,
-    TurnTerminal, TurnWorkDriver,
+    TurnEvent, TurnFinish, TurnInput, TurnInputAcceptanceReceipt, TurnInputApplication,
+    TurnOutcome, TurnStop, TurnTerminal, TurnWorkDriver,
 };
 /// Cooperative cancellation handle accepted by
 /// [`TurnBuilder::cancel`](crate::TurnBuilder::cancel); re-exported so
@@ -248,7 +248,7 @@ pub mod remote {
             RemoteLiveReplayGap, RemoteLiveReplayGapReason, RemoteSessionCursor,
             RemoteSessionObservation, RemoteSessionObservationEvent,
             RemoteSessionObservationEventPayload, RemoteSessionProcessEventKind,
-            RemoteSessionQueueEventKind,
+            RemoteSessionQueueEventKind, RemoteTurnInputApplication, RemoteTurnInputCheckpoint,
         };
     }
 

@@ -83,9 +83,39 @@ impl RuntimeTurnDriver<'_> {
             .await;
         match result {
             Ok(delivery) => {
+                let committed_user_messages = delivery.committed_user_messages.clone();
                 machine.handle_response(Response::Checkpoint { id, delivery });
+                if let Some(mut claim) = self.pending_checkpoint_turn_input_claim.take() {
+                    claim.record_checkpoint_applications(
+                        &self.turn_id,
+                        checkpoint,
+                        &committed_user_messages,
+                    );
+                    let applications = claim.applications.clone();
+                    let accepted_turn_inputs = claim.accepted_turn_inputs();
+                    self.pending_turn_input_claims.push(claim);
+                    send_turn_input_applications(event_tx, applications).await;
+                    if !accepted_turn_inputs.is_empty() {
+                        send_session_event(
+                            event_tx,
+                            SessionStreamEvent::InjectedTurnInputAccepted {
+                                inputs: accepted_turn_inputs,
+                                checkpoint,
+                            },
+                        )
+                        .await;
+                    }
+                }
             }
             Err(err) => {
+                if let Some(claim) = self.pending_checkpoint_turn_input_claim.take()
+                    && let Some(store) = self.session.history_store()
+                {
+                    store
+                        .abandon_turn_input_claim(&claim)
+                        .await
+                        .map_err(crate::runtime::runtime_error_from_store_commit)?;
+                }
                 self.fail_or_abort_runtime_effect_controller(machine, err.into())?;
             }
         }

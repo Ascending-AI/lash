@@ -1302,7 +1302,7 @@ impl LashRuntime {
         scoped_effect_controller: ScopedEffectController<'_>,
         cancel: CancellationToken,
         queued_claims: Vec<crate::QueuedWorkClaim>,
-        turn_input_claims: Vec<crate::TurnInputClaim>,
+        mut turn_input_claims: Vec<crate::TurnInputClaim>,
         materialize_initial_claims: bool,
         session_execution_lease: Option<&SessionExecutionLeaseGuard>,
         session_execution_lease_release_policy: SessionExecutionLeaseReleasePolicy,
@@ -1543,6 +1543,20 @@ impl LashRuntime {
                 parts: shared_parts(user_parts),
                 origin: None,
             });
+        }
+        let mut initial_turn_input_applications = Vec::new();
+        for claim in &mut turn_input_claims {
+            claim.record_initial_turn_application(&trace_turn_id, &user_id);
+            initial_turn_input_applications.extend(claim.applications.clone());
+        }
+        if !initial_turn_input_applications.is_empty() {
+            emit_turn_activity_to_sink(
+                turn_events,
+                TurnActivity::independent(TurnEvent::QueuedInputAccepted {
+                    applications: initial_turn_input_applications,
+                }),
+            )
+            .await;
         }
 
         let manager = self
@@ -2037,6 +2051,7 @@ impl LashRuntime {
             turn_causes: initial_turn_causes,
             pending_queue_claims: initial_claims.queued,
             pending_turn_input_claims: initial_claims.turn_inputs,
+            pending_checkpoint_turn_input_claim: None,
             checkpoint_messages: crate::tool_dispatch::CheckpointMessageBuffer::default(),
             session_execution_lease: session_execution_fence,
             runtime_lease_owner: self.runtime_lease_owner.clone(),

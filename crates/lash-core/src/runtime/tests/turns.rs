@@ -1289,6 +1289,240 @@ async fn checkpoint_hook_can_inject_messages() {
 }
 
 #[tokio::test]
+async fn checkpoint_plugin_abort_leaves_active_input_pending_without_application_evidence() {
+    let plugin = Arc::new(RuntimeTestPluginFactory {
+        build: Arc::new(|_| {
+            Ok(Arc::new(RuntimeTestPlugin {
+                before_turn: None,
+                checkpoint: Some(Arc::new(|_| {
+                    Box::pin(async {
+                        Ok(vec![crate::PluginDirective::AbortTurn {
+                            code: "checkpoint_rejected".to_string(),
+                            message: "reject checkpoint delivery".to_string(),
+                        }])
+                    })
+                })),
+                tool_result_projector: None,
+                runtime_event: None,
+                external_registrar: None,
+            }))
+        }),
+    });
+    let transport = mock_provider(vec![MockCall {
+        stream_events: Vec::new(),
+        response: Ok(LlmResponse {
+            full_text: "first".to_string(),
+            parts: vec![LlmOutputPart::Text {
+                text: "first".to_string(),
+                response_meta: None,
+            }],
+            response_metadata: Default::default(),
+            ..LlmResponse::default()
+        }),
+    }]);
+    let store = Arc::new(RecordingStore::default());
+    let runtime_store: Arc<dyn crate::store::RuntimePersistence> = store.clone();
+    let mut runtime = runtime_with_plugins_and_tools_and_host_and_store(
+        vec![plugin],
+        Arc::new(EmptyTools),
+        transport,
+        test_host_config(),
+        runtime_store,
+    )
+    .await;
+    runtime.host.process_registry = Some(Arc::new(crate::TestLocalProcessRegistry::default()));
+    let admitted = enqueue_turn_input_for_checkpoint(
+        store.as_ref(),
+        "root",
+        "checkpoint-plugin-abort-turn",
+        Some("host:checkpoint-plugin-abort".to_string()),
+        TurnInput::text("must remain pending"),
+    )
+    .await;
+    let turn_events = RecordingTurnEvents::default();
+
+    let turn = runtime
+        .stream_turn(
+            TurnInput::text("hello"),
+            TurnOptions::new(
+                CancellationToken::new(),
+                named_turn_scope("root", "checkpoint-plugin-abort-turn"),
+            )
+            .with_turn_events(&turn_events),
+        )
+        .await
+        .expect("plugin-aborted turn assembles");
+
+    assert!(
+        matches!(turn.outcome, TurnOutcome::Stopped(_)),
+        "checkpoint rejection must stop the turn: {:?}",
+        turn.outcome
+    );
+    assert!(
+        turn_events.snapshot().iter().all(|activity| !matches!(
+            activity.event,
+            crate::TurnEvent::QueuedInputAccepted { .. }
+        )),
+        "a rejected checkpoint must not emit live application evidence"
+    );
+    assert!(
+        crate::store::TurnInputStore::list_turn_input_applications(store.as_ref(), "root")
+            .await
+            .expect("list rejected checkpoint applications")
+            .is_empty(),
+        "a rejected checkpoint must not persist application evidence"
+    );
+    assert!(
+        crate::store::TurnInputStore::list_pending_turn_inputs(store.as_ref(), "root")
+            .await
+            .expect("list pending input after rejected checkpoint")
+            .iter()
+            .any(|input| input.input_id == admitted.input_id),
+        "a rejected checkpoint input must remain claimable"
+    );
+    assert!(
+        active_conversation_messages(&turn.state)
+            .iter()
+            .all(|message| message
+                .parts
+                .iter()
+                .all(|part| part.content != "must remain pending")),
+        "a rejected checkpoint input must not enter canonical history"
+    );
+}
+
+#[tokio::test]
+async fn checkpoint_attachment_failure_leaves_active_input_pending_without_application_evidence() {
+    #[derive(Debug)]
+    struct DenyHostCheckpointAttachments;
+
+    impl crate::AttachmentSourcePolicy for DenyHostCheckpointAttachments {
+        fn authorize(
+            &self,
+            producer: &crate::AttachmentProducer,
+            _source: &crate::AttachmentSource,
+        ) -> Result<(), crate::AttachmentSourcePolicyError> {
+            if matches!(producer, crate::AttachmentProducer::Host) {
+                return Err(crate::AttachmentSourcePolicyError {
+                    producer: producer.clone(),
+                    reason: "checkpoint attachment denied for test".to_string(),
+                });
+            }
+            Ok(())
+        }
+    }
+
+    let plugin = Arc::new(RuntimeTestPluginFactory {
+        build: Arc::new(|_| {
+            Ok(Arc::new(RuntimeTestPlugin {
+                before_turn: None,
+                checkpoint: Some(Arc::new(|_| {
+                    Box::pin(async {
+                        let mut message =
+                            crate::PluginMessage::text(crate::MessageRole::System, "plugin upload");
+                        message
+                            .attachments
+                            .push(crate::AttachmentSource::external_url(
+                                crate::MediaType::parse("application/pdf")
+                                    .expect("valid test media type"),
+                                "https://example.test/checkpoint.pdf",
+                            ));
+                        Ok(vec![crate::PluginDirective::EnqueueMessages {
+                            messages: vec![message],
+                        }])
+                    })
+                })),
+                tool_result_projector: None,
+                runtime_event: None,
+                external_registrar: None,
+            }))
+        }),
+    });
+    let transport = mock_provider(vec![MockCall {
+        stream_events: Vec::new(),
+        response: Ok(LlmResponse {
+            full_text: "first".to_string(),
+            parts: vec![LlmOutputPart::Text {
+                text: "first".to_string(),
+                response_meta: None,
+            }],
+            response_metadata: Default::default(),
+            ..LlmResponse::default()
+        }),
+    }]);
+    let store = Arc::new(RecordingStore::default());
+    let runtime_store: Arc<dyn crate::store::RuntimePersistence> = store.clone();
+    let mut runtime = runtime_with_plugins_and_tools_and_host_and_store(
+        vec![plugin],
+        Arc::new(EmptyTools),
+        transport,
+        test_host_config(),
+        runtime_store,
+    )
+    .await;
+    runtime.host.core.attachment_source_policy = Arc::new(DenyHostCheckpointAttachments);
+    runtime.host.process_registry = Some(Arc::new(crate::TestLocalProcessRegistry::default()));
+    let admitted = enqueue_turn_input_for_checkpoint(
+        store.as_ref(),
+        "root",
+        "checkpoint-attachment-failure-turn",
+        Some("host:checkpoint-attachment-failure".to_string()),
+        TurnInput::text("must remain pending after attachment failure"),
+    )
+    .await;
+    let turn_events = RecordingTurnEvents::default();
+
+    let turn = runtime
+        .stream_turn(
+            TurnInput::text("hello"),
+            TurnOptions::new(
+                CancellationToken::new(),
+                named_turn_scope("root", "checkpoint-attachment-failure-turn"),
+            )
+            .with_turn_events(&turn_events),
+        )
+        .await
+        .expect("attachment-failed turn assembles");
+
+    assert!(
+        matches!(turn.outcome, TurnOutcome::Stopped(_)),
+        "checkpoint attachment failure must stop the turn: {:?}",
+        turn.outcome
+    );
+    assert!(
+        turn_events.snapshot().iter().all(|activity| !matches!(
+            activity.event,
+            crate::TurnEvent::QueuedInputAccepted { .. }
+        )),
+        "a failed checkpoint attachment must not emit live application evidence"
+    );
+    assert!(
+        crate::store::TurnInputStore::list_turn_input_applications(store.as_ref(), "root")
+            .await
+            .expect("list attachment-failed checkpoint applications")
+            .is_empty(),
+        "a failed checkpoint attachment must not persist application evidence"
+    );
+    assert!(
+        crate::store::TurnInputStore::list_pending_turn_inputs(store.as_ref(), "root")
+            .await
+            .expect("list pending input after attachment failure")
+            .iter()
+            .any(|input| input.input_id == admitted.input_id),
+        "an attachment-failed checkpoint input must remain claimable"
+    );
+    assert!(
+        active_conversation_messages(&turn.state)
+            .iter()
+            .all(|message| message
+                .parts
+                .iter()
+                .all(|part| part.content != "must remain pending after attachment failure")),
+        "an attachment-failed checkpoint input must not enter canonical history"
+    );
+}
+
+#[tokio::test]
 async fn queued_checkpoint_input_accepts_and_persists_one_normal_user_message() {
     let transport = mock_provider(vec![
         MockCall {

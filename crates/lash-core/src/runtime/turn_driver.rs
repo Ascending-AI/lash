@@ -15,7 +15,10 @@ mod trace;
 pub(in crate::runtime) use crate::runtime::turn_loop::{
     queued_work_trace_payload, send_queued_work_started_event,
 };
-pub(super) use events::{emit_semantic_response_parts, send_session_event, send_turn_activity};
+pub(super) use events::{
+    emit_semantic_response_parts, send_session_event, send_turn_activity,
+    send_turn_input_applications,
+};
 use handlers::foreground_exec_graph_key;
 pub(super) use trace::protocol_step_trace_event;
 
@@ -39,6 +42,7 @@ pub(super) struct RuntimeTurnDriver<'a> {
     pub(super) turn_causes: Vec<crate::TurnCause>,
     pub(super) pending_queue_claims: Vec<crate::QueuedWorkClaim>,
     pub(super) pending_turn_input_claims: Vec<crate::TurnInputClaim>,
+    pub(super) pending_checkpoint_turn_input_claim: Option<crate::TurnInputClaim>,
     pub(super) checkpoint_messages: crate::tool_dispatch::CheckpointMessageBuffer,
     pub(super) session_execution_lease: Option<crate::SessionExecutionLeaseFence>,
     pub(super) runtime_lease_owner: crate::LeaseOwnerIdentity,

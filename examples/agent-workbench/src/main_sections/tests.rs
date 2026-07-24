@@ -596,6 +596,7 @@ finish "observed through live replay"
             .provider(provider)
             .model(model.clone())
             .store_factory(Arc::clone(&store_factory))
+            .disable_queued_work_driver()
             .build()
             .expect("build core");
         let session = core
@@ -646,13 +647,15 @@ finish "observed through live replay"
                 break;
             }
         }
-        forwarder.abort();
-
         assert!(saw_cursor, "stream should expose a replay cursor");
         assert!(
             saw_final_value_observation,
             "stream should expose turn activity through session observation"
         );
+        assert_typed_turn_input_application(&session, &mut rx).await;
+        forwarder.abort();
+        drop(session);
+        drop(core);
         let _ = std::fs::remove_dir_all(data_dir);
     }
 
@@ -2492,4 +2495,5 @@ finish initial
     }
 
     include!("tests/attachments_usage.rs");
+    include!("tests/turn_input_application.rs");
 }

@@ -52,6 +52,8 @@ struct StateSnapshot {
     messages: Vec<ChatMessage>,
     active_turns: Vec<lash::TurnAddress>,
     pending_turn_inputs: Vec<lash::PendingTurnInput>,
+    turn_input_applications:
+        Vec<lash::remote::observations::RemoteTurnInputApplication>,
     usage: lash::usage::SessionUsageReport,
 }
 

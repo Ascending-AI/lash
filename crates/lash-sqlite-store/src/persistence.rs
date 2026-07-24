@@ -491,6 +491,7 @@ impl SessionCommitStore for Store {
                         checkpoint_ref: stored_checkpoint.checkpoint_ref,
                         manifest: stored_checkpoint.manifest,
                         enqueued_queue_batches,
+                        turn_input_applications: commit.turn_input_applications(),
                     };
                     if let Some(completed) = &commit.turn_commit {
                         tx.execute(
@@ -1706,6 +1707,55 @@ impl TurnInputStore for Store {
             .map_err(sqlite_error)?
     }
 
+    async fn list_turn_input_applications(
+        &self,
+        session_id: &str,
+    ) -> Result<Vec<lash_core::TurnInputApplication>, StoreError> {
+        let session_id = session_id.to_string();
+        self.conn
+            .call(move |conn| {
+                let outcome = (|| {
+                    let mut stmt = conn
+                        .prepare(
+                            "SELECT turn_id, result_json
+                             FROM runtime_turn_commits
+                             WHERE session_id = ?1",
+                        )
+                        .map_err(sqlite_error)?;
+                    let rows = stmt
+                        .query_map(params![session_id], |row| {
+                            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+                        })
+                        .map_err(sqlite_error)?;
+                    let mut commits = Vec::new();
+                    for row in rows {
+                        let (turn_id, result_json) = row.map_err(sqlite_error)?;
+                        let result: RuntimeCommitResult = serde_json::from_str(&result_json)
+                            .map_err(|err| {
+                                StoreError::Backend(format!(
+                                    "failed to decode runtime turn commit result: {err}"
+                                ))
+                            })?;
+                        commits.push((
+                            result.head_revision,
+                            turn_id,
+                            result.turn_input_applications,
+                        ));
+                    }
+                    commits.sort_by(|left, right| {
+                        (left.0, left.1.as_str()).cmp(&(right.0, right.1.as_str()))
+                    });
+                    Ok(commits
+                        .into_iter()
+                        .flat_map(|(_, _, applications)| applications)
+                        .collect())
+                })();
+                Ok(outcome)
+            })
+            .await
+            .map_err(sqlite_error)?
+    }
+
     async fn cancel_pending_turn_inputs(
         &self,
         session_id: &str,
@@ -2364,6 +2414,7 @@ fn claim_pending_turn_inputs_sqlite_conn(
         session_lease_generation: lease.session_lease_generation,
         mode,
         inputs,
+        applications: Vec::new(),
     })))
 }
 
@@ -2511,6 +2562,7 @@ async fn claim_pending_turn_inputs_sqlite(
                 session_lease_generation: lease.session_lease_generation,
                 mode,
                 inputs,
+                applications: Vec::new(),
             })))
         })(
         );

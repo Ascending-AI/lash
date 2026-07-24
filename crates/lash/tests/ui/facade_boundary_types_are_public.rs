@@ -66,6 +66,7 @@ impl SessionCommitStore for FacadeStore {
             checkpoint_ref: "checkpoint".to_string().into(),
             manifest,
             enqueued_queue_batches: Vec::new(),
+            turn_input_applications: Vec::new(),
         })
     }
 

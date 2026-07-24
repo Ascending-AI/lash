@@ -1487,8 +1487,8 @@ mod tests {
             claim_id: "turn-input-claim".to_string(),
             lease_token: "turn-input-token".to_string(),
             input_ids: vec!["turn-input".to_string()],
+            applications: Vec::new(),
         };
-
         let store = RecordingStore::default();
         let (mut queue_pipeline, _lease) =
             leased_boundary(&store, state_with_graph(graph.clone())).await;

@@ -65,16 +65,7 @@ pub(in crate::runtime) async fn send_session_event(
                 )
                 .await;
             }
-            SessionStreamEvent::InjectedTurnInputAccepted { inputs, checkpoint } => {
-                send_independent_turn_event(
-                    event_tx,
-                    TurnEvent::QueuedInputAccepted {
-                        checkpoint: *checkpoint,
-                        inputs: inputs.clone(),
-                    },
-                )
-                .await;
-            }
+            SessionStreamEvent::InjectedTurnInputAccepted { .. } => {}
             SessionStreamEvent::InjectedMessagesCommitted {
                 messages,
                 checkpoint,
@@ -134,6 +125,16 @@ pub(in crate::runtime) async fn send_turn_activity(
     if !event_tx.is_closed() {
         let activity = TurnActivity::new(correlation_id, event);
         let _ = event_tx.send(RuntimeStreamEvent::Turn(activity)).await;
+    }
+}
+
+pub(in crate::runtime) async fn send_turn_input_applications(
+    event_tx: &mpsc::Sender<RuntimeStreamEvent>,
+    applications: Vec<crate::TurnInputApplication>,
+) {
+    if !applications.is_empty() {
+        send_independent_turn_event(event_tx, TurnEvent::QueuedInputAccepted { applications })
+            .await;
     }
 }
 

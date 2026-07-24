@@ -123,8 +123,12 @@ impl RuntimeTurnDriver<'_> {
         } else {
             (None, None)
         };
-        if let Some(claim) = turn_input_claim {
-            let accepted_turn_inputs = claim.accepted_turn_inputs();
+        debug_assert!(
+            self.pending_checkpoint_turn_input_claim.is_none(),
+            "checkpoint claims must be resolved before another checkpoint runs"
+        );
+        self.pending_checkpoint_turn_input_claim = turn_input_claim;
+        if let Some(claim) = self.pending_checkpoint_turn_input_claim.as_ref() {
             let materialized = claim
                 .materialize_for_checkpoint(
                     self.host.core.durability.attachment_store.as_ref(),
@@ -141,17 +145,6 @@ impl RuntimeTurnDriver<'_> {
                 })?;
             committed_user_messages.extend(materialized.messages);
             turn_causes.extend(materialized.turn_causes);
-            if !accepted_turn_inputs.is_empty() {
-                send_session_event(
-                    event_tx,
-                    SessionStreamEvent::InjectedTurnInputAccepted {
-                        inputs: accepted_turn_inputs,
-                        checkpoint,
-                    },
-                )
-                .await;
-            }
-            self.pending_turn_input_claims.push(claim);
         }
         if let Some(claim) = queue_claim {
             let materialized = claim

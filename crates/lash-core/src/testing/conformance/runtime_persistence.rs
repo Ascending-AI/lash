@@ -270,6 +270,7 @@ where
     pending_turn_inputs_source_keys_order_cancel_and_cross_session(make()).await;
     pending_turn_input_bulk_and_suffix_cancellation(make()).await;
     pending_turn_input_claims_reclaim_complete_and_fence(make()).await;
+    turn_input_application_identity_survives_pending_tombstone_vacuum(make()).await;
     turn_input_claims_supersede_across_session_lease_generations(make()).await;
     pending_turn_input_cancel_covers_active_and_deferred_states(make()).await;
     pending_active_turn_inputs_defer_unaccepted_once_on_interrupt(make()).await;
@@ -278,6 +279,100 @@ where
     if options.reclaims_unreachable_blobs {
         gc_reclaims_unreachable_checkpoint_blobs_and_preserves_live(make()).await;
     }
+}
+
+async fn turn_input_application_identity_survives_pending_tombstone_vacuum(
+    store: Arc<dyn RuntimePersistence>,
+) {
+    let session_id = "turn-input-application";
+    let owner_id = "turn-input-application-owner";
+    let lease = claim_session_execution_lease_for_test(&store, session_id, owner_id).await;
+    let mut state = RuntimeSessionState {
+        session_id: session_id.to_string(),
+        ..RuntimeSessionState::default()
+    };
+    let mut expected = Vec::new();
+    let mut replay = None;
+
+    for (turn_index, turn_id) in ["z-first-application-turn", "a-second-application-turn"]
+        .into_iter()
+        .enumerate()
+    {
+        let admitted = futures_util::future::try_join_all((0..2).map(|input_index| {
+            store.enqueue_pending_turn_input(
+                pending_next_turn_input_draft(
+                    session_id,
+                    &format!("canonical application {turn_index}:{input_index}"),
+                )
+                .with_source_key(format!(
+                    "host:application-source-{turn_index}-{input_index}"
+                )),
+            )
+        }))
+        .await
+        .expect("enqueue application inputs");
+        let mut claim = store
+            .claim_next_turn_inputs(session_id, &lease.fence(), &lease_owner(owner_id), 10)
+            .await
+            .expect("claim application inputs")
+            .expect("application input claim");
+        let committed_message_id = format!("application-message-{turn_index}");
+        claim.record_initial_turn_application(turn_id, &committed_message_id);
+        let turn_expected = claim.applications.clone();
+        assert_eq!(admitted.len(), turn_expected.len());
+
+        let mut commit = RuntimeCommit::persisted_state(&state, &[])
+            .with_session_execution_lease(lease.fence())
+            .completing_turn_input_claim(claim.completion());
+        if turn_index == 1 {
+            commit = commit.releasing_session_execution_lease(lease.completion());
+        }
+        let hash = commit
+            .turn_commit_hash()
+            .expect("hash application turn commit");
+        commit = commit.with_turn_commit(crate::RuntimeTurnCommitStamp::new(
+            session_id, turn_id, hash,
+        ));
+        if turn_index == 1 {
+            replay = Some(commit.clone());
+        }
+        let result = store
+            .commit_runtime_state(commit)
+            .await
+            .expect("commit application identity");
+        state.head_revision = Some(result.head_revision);
+
+        assert_eq!(result.turn_input_applications, turn_expected);
+        expected.extend(turn_expected);
+    }
+
+    let replayed = store
+        .commit_runtime_state(replay.expect("second turn commit replay"))
+        .await
+        .expect("replay application turn commit");
+    assert_eq!(
+        replayed.turn_input_applications,
+        expected[2..],
+        "an exact turn-commit replay must retain its applications"
+    );
+    assert_eq!(
+        store
+            .list_turn_input_applications(session_id)
+            .await
+            .expect("read durable application identity"),
+        expected,
+        "applications must follow monotonic turn-commit order and must not double-count a replay"
+    );
+
+    store.vacuum().await.expect("vacuum application tombstone");
+    assert_eq!(
+        store
+            .list_turn_input_applications(session_id)
+            .await
+            .expect("read application identity after tombstone vacuum"),
+        expected,
+        "application reconciliation must come from the committed turn, not a pending snapshot"
+    );
 }
 
 async fn checkpoint_work_claims_both_families_once(store: Arc<dyn RuntimePersistence>) {
@@ -4393,18 +4488,70 @@ async fn runtime_persistence_survives_reopen(factory: ReopenableRuntimePersisten
         .save_session_meta(meta.clone())
         .await
         .expect("save meta");
-    let state = RuntimeSessionState {
+    let mut state = RuntimeSessionState {
         session_id: "root".to_string(),
         tool_state_snapshot: Some(ToolState::default().with_generation(77)),
         ..RuntimeSessionState::default()
     };
-    commit_runtime_state_for_test(
+    let initial_commit = commit_runtime_state_for_test(
         &factory.open,
         RuntimeCommit::persisted_state(&state, &[]),
         "reopen",
     )
     .await
     .expect("commit state");
+    state.head_revision = Some(initial_commit.head_revision);
+
+    let application_lease =
+        claim_session_execution_lease_for_test(&factory.open, "root", "reopen-applications").await;
+    let mut expected_applications = Vec::new();
+    for (turn_index, turn_id) in ["z-reopen-application", "a-reopen-application"]
+        .into_iter()
+        .enumerate()
+    {
+        factory
+            .open
+            .enqueue_pending_turn_input(
+                pending_next_turn_input_draft("root", &format!("reopen application {turn_index}"))
+                    .with_source_key(format!("host:reopen-application-{turn_index}")),
+            )
+            .await
+            .expect("enqueue reopen application");
+        let mut claim = factory
+            .open
+            .claim_next_turn_inputs(
+                "root",
+                &application_lease.fence(),
+                &lease_owner("reopen-applications"),
+                1,
+            )
+            .await
+            .expect("claim reopen application")
+            .expect("reopen application claim");
+        claim.record_initial_turn_application(
+            turn_id,
+            &format!("reopen-application-message-{turn_index}"),
+        );
+        expected_applications.extend(claim.applications.clone());
+
+        let mut commit = RuntimeCommit::persisted_state(&state, &[])
+            .with_session_execution_lease(application_lease.fence())
+            .completing_turn_input_claim(claim.completion());
+        if turn_index == 1 {
+            commit = commit.releasing_session_execution_lease(application_lease.completion());
+        }
+        let hash = commit
+            .turn_commit_hash()
+            .expect("hash reopen application turn commit");
+        let result = factory
+            .open
+            .commit_runtime_state(
+                commit.with_turn_commit(RuntimeTurnCommitStamp::new("root", turn_id, hash)),
+            )
+            .await
+            .expect("commit reopen application");
+        state.head_revision = Some(result.head_revision);
+    }
     let queued = factory
         .open
         .enqueue_queued_work(
@@ -4452,6 +4599,15 @@ async fn runtime_persistence_survives_reopen(factory: ReopenableRuntimePersisten
             .and_then(|checkpoint| checkpoint.tool_state.as_ref())
             .map(|tool_state| tool_state.generation()),
         Some(77)
+    );
+    assert_eq!(
+        factory
+            .reopen
+            .list_turn_input_applications("root")
+            .await
+            .expect("list applications from reopened handle"),
+        expected_applications,
+        "a fresh durable handle must reconcile applications in turn-commit order"
     );
     let reopened_queue = factory
         .reopen

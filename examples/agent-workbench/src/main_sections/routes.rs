@@ -27,6 +27,10 @@ async fn app_state(
         .pending_turn_inputs()
         .await
         .map_err(AppError::internal)?;
+    let turn_input_applications = session
+        .remote_turn_input_applications()
+        .await
+        .map_err(AppError::internal)?;
     let usage = session.usage_report();
     session.close().await.map_err(AppError::internal)?;
     let active_turns = state.active_turns.for_session(&session_id);
@@ -46,6 +50,7 @@ async fn app_state(
         messages,
         active_turns,
         pending_turn_inputs,
+        turn_input_applications,
         usage,
     }))
 }
@@ -756,6 +761,7 @@ async fn reset_chat(
         messages: Vec::new(),
         active_turns: Vec::new(),
         pending_turn_inputs: Vec::new(),
+        turn_input_applications: Vec::new(),
         usage: session.usage_report(),
     }))
 }
