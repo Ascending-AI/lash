@@ -17,10 +17,15 @@ use lash_core::{
 use crate::Result;
 use crate::session::{ObservableSession, SessionObservationStream, SessionObservationStreamItem};
 
-/// Stable at-least-once delivery identity for one Lash observation event.
+/// Subscription-scoped at-least-once delivery identity for one Lash
+/// observation event.
 ///
-/// Hosts persist or retain this identity until they persist the corresponding
-/// projection. Re-delivery of the same identity must not create another row.
+/// Hosts retain this identity only while the current live-replay incarnation is
+/// known to be continuous. Re-delivery of the same identity must not create
+/// another row. A [`RecoverableChatUpdate::ReplayGap`] ends that continuity:
+/// the replacement snapshot is authoritative and cursor identities retained
+/// from before the gap must be discarded because an in-memory replay store can
+/// reuse them after restart.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct RecoverableChatEventId {
     pub session_id: String,
@@ -97,10 +102,14 @@ impl RecoverableChatSubscription {
         }
     }
 
-    /// Seed identities already committed by the host projection.
+    /// Seed identities already applied by the host projection in this replay
+    /// store incarnation.
     ///
-    /// This makes reconnect redelivery idempotent even when the persisted
-    /// projection cursor intentionally trails individual applied events.
+    /// This makes same-incarnation reconnect redelivery idempotent even when
+    /// the projection cursor intentionally trails individual applied events.
+    /// Do not persist these identities across a replay gap or process restart;
+    /// the subscription clears them when it emits
+    /// [`RecoverableChatUpdate::ReplayGap`].
     pub fn with_applied_event_ids(
         mut self,
         ids: impl IntoIterator<Item = RecoverableChatEventId>,
@@ -127,6 +136,7 @@ impl Stream for RecoverableChatSubscription {
             };
             match item {
                 SessionObservationStreamItem::Gap { observation, gap } => {
+                    self.applied.clear();
                     return Poll::Ready(Some(Ok(RecoverableChatUpdate::ReplayGap {
                         snapshot: RecoverableChatSnapshot {
                             read_view: observation.read_view,
@@ -142,6 +152,8 @@ impl Stream for RecoverableChatSubscription {
                     }
                     if let SessionObservationEventPayload::Committed { read_view } = &event.payload
                     {
+                        self.applied.clear();
+                        self.applied.insert(id.clone());
                         return Poll::Ready(Some(Ok(RecoverableChatUpdate::TerminalReplacement {
                             id,
                             snapshot: RecoverableChatSnapshot {
