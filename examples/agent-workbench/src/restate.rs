@@ -1105,7 +1105,7 @@ fn panic_payload_message(payload: Box<dyn std::any::Any + Send>) -> String {
     }
 }
 
-async fn record_turn_output(
+pub(crate) async fn record_turn_output(
     state: &AppState,
     session: &lash::LashSession,
     turn_id: &str,

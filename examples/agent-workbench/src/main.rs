@@ -39,8 +39,7 @@ use lash::{
 };
 use lash_provider_openai::{OPENROUTER_BASE_URL, OpenAiCompat, OpenAiCompatibleProvider};
 use lash_remote_protocol::{
-    RemoteLiveReplayGap, RemoteSessionCursor, RemoteSessionObservation,
-    RemoteSessionObservationEvent, RemoteSessionObservationEventPayload,
+    RemoteLiveReplayGap, RemoteSessionObservation, RemoteSessionObservationEvent,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};

@@ -2099,9 +2099,65 @@
       window.open(url, "_blank", "noopener");
     });
 
+    // BEGIN WORKBENCH_PROJECTION_STATE
+    function createWorkbenchProjectionState() {
+      return {
+        sessionId: null,
+        productCursor: 0,
+        observationCursor: null,
+        recoveryGeneration: 0,
+        renderedProductEvents: new Set(),
+        appliedObservationEvents: new Set()
+      };
+    }
+
+    function beginStateRecovery(projection) {
+      return {
+        generation: ++projection.recoveryGeneration,
+        sessionId: projection.sessionId,
+        productCursor: projection.productCursor
+      };
+    }
+
+    function recoveryResponseIsCurrent(projection, token, state) {
+      const snapshotSession = state?.settings?.session_id || null;
+      const snapshotCursor = Number(state?.product_events?.cursor) || 0;
+      return token.generation === projection.recoveryGeneration
+        && token.sessionId === projection.sessionId
+        && snapshotSession === token.sessionId
+        && projection.productCursor <= snapshotCursor;
+    }
+
+    function applyProjectionSnapshot(projection, state, authoritative = false) {
+      const snapshotSession = state?.settings?.session_id || null;
+      const snapshotProductCursor = Number(state?.product_events?.cursor) || 0;
+      const snapshotObservationCursor = state?.observation?.cursor || null;
+      const sessionChanged = projection.sessionId !== null
+        && projection.sessionId !== snapshotSession;
+      if (authoritative || sessionChanged) {
+        projection.renderedProductEvents.clear();
+        projection.appliedObservationEvents.clear();
+        projection.productCursor = snapshotProductCursor;
+        projection.observationCursor = snapshotObservationCursor;
+      } else {
+        projection.productCursor = Math.max(
+          projection.productCursor,
+          snapshotProductCursor
+        );
+        projection.observationCursor =
+          snapshotObservationCursor || projection.observationCursor;
+      }
+      projection.sessionId = snapshotSession;
+      for (const event of state?.product_events?.events || []) {
+        projection.renderedProductEvents.add(event.event_id);
+      }
+    }
+    // END WORKBENCH_PROJECTION_STATE
+
     const renderedMessages = new Set();
-    const renderedProductEvents = new Set();
-    const appliedObservationEvents = new Set();
+    const projectionState = createWorkbenchProjectionState();
+    const renderedProductEvents = projectionState.renderedProductEvents;
+    const appliedObservationEvents = projectionState.appliedObservationEvents;
     const renderedIngressInputs = new Set();
     const appliedTurnInputs = new Map();
     let assistantDraft = null;
@@ -2117,8 +2173,6 @@
     let productStreamController = null;
     let observationStreamController = null;
     let streamGeneration = 0;
-    let productCursor = 0;
-    let observationCursor = null;
     let lastRequest = null;
     let selectedAttachment = null;
     let attachmentUploadInFlight = false;
@@ -2743,6 +2797,7 @@
       setBusy(true, "agent running");
     }
 
+    // BEGIN WORKBENCH_TRANSIENT_SETTLEMENT
     function finishTransientRows() {
       for (const tool of pendingTools) appendTool(tool);
       assistantDraft?.closest(".message")?.remove();
@@ -2755,6 +2810,7 @@
       reasoning = null;
       reasoningChunks = [];
     }
+    // END WORKBENCH_TRANSIENT_SETTLEMENT
 
     function handleTurnEvent(event) {
       if (event.type === "queued_work_started") renderQueuedWorkStarted(event);
@@ -2816,9 +2872,11 @@
 
     function restartEventStreams(resetCursors = false) {
       if (resetCursors) {
-        productCursor = 0;
-        observationCursor = null;
+        projectionState.productCursor = 0;
+        projectionState.observationCursor = null;
+        renderedProductEvents.clear();
         appliedObservationEvents.clear();
+        projectionState.recoveryGeneration += 1;
       }
       streamGeneration += 1;
       if (productStreamController) productStreamController.abort();
@@ -2832,7 +2890,7 @@
     async function connectProductEvents(generation, signal) {
       while (generation === streamGeneration && !signal.aborted) {
         try {
-          const url = "/api/events?cursor=" + encodeURIComponent(productCursor);
+          const url = "/api/events?cursor=" + encodeURIComponent(projectionState.productCursor);
           const response = await fetch(url, { cache: "no-store", signal });
           if (!response.ok || !response.body) throw new Error("product stream unavailable");
           const reader = response.body.getReader();
@@ -2858,8 +2916,8 @@
     async function connectObservations(generation, signal) {
       while (generation === streamGeneration && !signal.aborted) {
         try {
-          const url = observationCursor
-            ? "/api/observations?cursor=" + encodeURIComponent(observationCursor)
+          const url = projectionState.observationCursor
+            ? "/api/observations?cursor=" + encodeURIComponent(projectionState.observationCursor)
             : "/api/observations";
           const response = await fetch(url, { cache: "no-store", signal });
           if (!response.ok || !response.body) throw new Error("observation stream unavailable");
@@ -2903,10 +2961,14 @@
       applyProductEvent(item.event);
     }
 
+    // BEGIN WORKBENCH_PRODUCT_EVENT_REDUCER
     function applyProductEvent(event) {
       if (!event || renderedProductEvents.has(event.event_id)) return;
       renderedProductEvents.add(event.event_id);
-      productCursor = Math.max(productCursor, Number(event.sequence) || 0);
+      projectionState.productCursor = Math.max(
+        projectionState.productCursor,
+        Number(event.sequence) || 0
+      );
       if (event.type === "message") renderMessage(event.message);
       if (event.type === "turn_input") renderIngressReceipt(event.receipt);
       if (event.type === "done") {
@@ -2915,15 +2977,17 @@
         refreshUsage();
       }
     }
+    // END WORKBENCH_PRODUCT_EVENT_REDUCER
 
     function handleObservationStreamLine(line) {
       const item = parseStreamLine(line);
       if (!item) return;
-      if (item.type === "cursor") observationCursor = item.cursor;
+      if (item.type === "cursor") projectionState.observationCursor = item.cursor;
       if (item.type === "replay_gap") recoverReplayGap(item.gap);
       if (item.type === "observation") handleObservation(item.event);
       if (item.type === "terminal_replacement") {
-        observationCursor = item.cursor || item.event?.cursor || observationCursor;
+        projectionState.observationCursor =
+          item.cursor || item.event?.cursor || projectionState.observationCursor;
         recoverTerminalReplacement();
       }
     }
@@ -2932,34 +2996,39 @@
       const identity = `${event.session_id || ""}:${event.cursor || ""}`;
       if (appliedObservationEvents.has(identity)) return;
       appliedObservationEvents.add(identity);
-      observationCursor = event.cursor || observationCursor;
+      projectionState.observationCursor =
+        event.cursor || projectionState.observationCursor;
       if (event.type === "turn_activity") handleTurnEvent(event.activity);
     }
 
-    async function recoverReplayGap(gap) {
-      observationCursor = gap?.latest_cursor || observationCursor;
+    async function recoverFromState(failureMessage) {
+      const token = beginStateRecovery(projectionState);
       try {
-        applyStateSnapshot(await fetchStateSnapshot(), true);
+        const state = await fetchStateSnapshot();
+        if (!recoveryResponseIsCurrent(projectionState, token, state)) return;
+        applyStateSnapshot(state, true, true);
       } catch (_) {
-        renderError("live updates paused; reload to restore the conversation", { retry: false });
+        renderError(failureMessage, { retry: false });
       }
+    }
+
+    async function recoverReplayGap(gap) {
+      projectionState.observationCursor =
+        gap?.latest_cursor || projectionState.observationCursor;
+      appliedObservationEvents.clear();
+      await recoverFromState("live updates paused; reload to restore the conversation");
     }
 
     async function recoverProductLag(snapshot) {
-      productCursor = Math.max(productCursor, Number(snapshot?.cursor) || 0);
-      try {
-        applyStateSnapshot(await fetchStateSnapshot(), true);
-      } catch (_) {
-        renderError("transcript updates paused; reload to restore the conversation", { retry: false });
-      }
+      await recoverFromState(
+        "transcript updates paused; reload to restore the conversation"
+      );
     }
 
     async function recoverTerminalReplacement() {
-      try {
-        applyStateSnapshot(await fetchStateSnapshot(), true);
-      } catch (_) {
-        renderError("the turn settled; reload to restore the final transcript", { retry: false });
-      }
+      await recoverFromState(
+        "the turn settled; reload to restore the final transcript"
+      );
     }
 
     function stopTurn() {
@@ -3041,7 +3110,7 @@
         sessionId.textContent = state.settings.session_id || "—";
         renderUsage(state.usage);
         applyStateSnapshot(state, true);
-        restartEventStreams();
+        restartEventStreams(true);
         setBusy(false, "ready");
       } catch (_) {
         renderError("the conversation could not be reset");
@@ -3582,13 +3651,13 @@
       syncCommandAvailability();
     }
 
-    function applyStateSnapshot(state, replaceTranscript = false) {
+    function applyStateSnapshot(
+      state,
+      replaceTranscript = false,
+      authoritative = replaceTranscript
+    ) {
       if (replaceTranscript) clearTranscript();
-      observationCursor = state.observation?.cursor || observationCursor;
-      productCursor = Math.max(productCursor, Number(state.product_events?.cursor) || 0);
-      for (const event of state.product_events?.events || []) {
-        renderedProductEvents.add(event.event_id);
-      }
+      applyProjectionSnapshot(projectionState, state, authoritative);
       modelInput.value = state.settings.model || "";
       const modelList = document.getElementById("modelList");
       modelList.innerHTML = "";

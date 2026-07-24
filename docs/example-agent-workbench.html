@@ -75,7 +75,7 @@
       <div class="listing">
         <div class="listing__row">
           <div class="listing__label">snapshot</div>
-          <div class="listing__body"><p><code>/api/state</code> returns settings, transcript rows, typed durable turn-input applications, a Lash observation snapshot/cursor, and a product-event snapshot/cursor. It does not expose a raw session timeline.</p></div>
+          <div class="listing__body"><p><code>/api/state</code> returns settings, the complete canonical Lash transcript merged by stable id with product-only rows, typed durable turn-input applications, a Lash observation snapshot/cursor, and a product-event snapshot/cursor. It does not expose a raw session timeline.</p></div>
         </div>
         <div class="listing__row">
           <div class="listing__label">stream start</div>
@@ -87,7 +87,7 @@
         </div>
         <div class="listing__row">
           <div class="listing__label">gap recovery</div>
-          <div class="listing__body"><p>On <code>replay_gap</code>, product lag, cancellation settlement, or terminal replacement, the browser drops provisional rows and reloads <code>/api/state</code>. Duplicate observation identities and stable product event ids are ignored. Reset rotates the session id and starts fresh streams.</p></div>
+          <div class="listing__body"><p>On <code>replay_gap</code>, product lag, cancellation settlement, or terminal replacement, the browser reloads <code>/api/state</code> behind a generation and product-cursor fence. A response overtaken by a newer recovery or live product event is discarded; an accepted authoritative replacement rebuilds both dedup sets and assigns its cursors. Reset rotates the session id and starts both streams from session-scoped cursor state.</p></div>
         </div>
       </div>
     </div>

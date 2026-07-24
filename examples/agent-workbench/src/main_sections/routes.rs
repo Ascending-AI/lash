@@ -38,8 +38,14 @@ async fn app_state(
             StreamItem::TurnInput { .. } | StreamItem::Done => None,
         })
         .collect::<Vec<_>>();
-    if !product_messages.is_empty() {
-        messages = product_messages;
+    let mut message_ids = messages
+        .iter()
+        .map(|message| message.id.clone())
+        .collect::<BTreeSet<_>>();
+    for message in product_messages {
+        if message_ids.insert(message.id.clone()) {
+            messages.push(message);
+        }
     }
     let pending_turn_inputs = session
         .pending_turn_inputs()
@@ -57,18 +63,18 @@ async fn app_state(
         });
     session.close().await.map_err(AppError::internal)?;
     let active_turns = state.active_turns.for_session(&session_id);
-    let rendered_user_texts = messages
+    let rendered_message_ids = messages
         .iter()
-        .filter(|message| message.role == "user")
-        .map(|message| message.text.clone())
+        .map(|message| message.id.clone())
         .collect::<BTreeSet<_>>();
     messages.extend(active_turns.iter().filter_map(|address| {
+        let message_id = format!("workbench-user:{}", address.turn_id);
         state
             .active_turns
             .prompt_for(&address.session_id, &address.turn_id)
-            .filter(|text| !rendered_user_texts.contains(text))
+            .filter(|_| !rendered_message_ids.contains(&message_id))
             .map(|text| ChatMessage {
-                id: format!("workbench-user:{}", address.turn_id),
+                id: message_id,
                 role: "user".to_string(),
                 text,
                 at: String::new(),
@@ -1054,44 +1060,48 @@ async fn forward_session_observations(
     {
         return;
     }
-    let mut stream = match session
-        .observe()
-        .subscribe_and_recover_remote(RemoteSessionCursor::from(cursor))
-    {
-        Ok(stream) => stream,
-        Err(err) => {
-            eprintln!("warning: workbench could not open Lash observation stream: {err}");
-            return;
-        }
-    };
+    let mut stream = session.observe().subscribe_recoverable_chat(cursor);
+    let mut sequence = 0;
     while let Some(item) = stream.next().await {
         match item {
-            Ok(lash::observe::RemoteSessionObservationStreamItem::Event(event)) => {
-                let update = if matches!(
-                    &event.event,
-                    RemoteSessionObservationEventPayload::Committed
-                ) {
-                    ObservationStreamItem::TerminalReplacement {
-                        cursor: event.cursor.clone(),
-                        event: Box::new(event),
-                    }
-                } else {
-                    ObservationStreamItem::Observation {
-                        event: Box::new(event),
-                    }
-                };
+            Ok(lash::recoverable_chat::RecoverableChatUpdate::Event { event, .. }) => {
+                let event = RemoteSessionObservationEvent::from_core(sequence, event);
+                sequence = sequence.saturating_add(1);
                 if tx
-                    .send(update)
+                    .send(ObservationStreamItem::Observation {
+                        event: Box::new(event),
+                    })
                     .await
                     .is_err()
                 {
                     break;
                 }
             }
-            Ok(lash::observe::RemoteSessionObservationStreamItem::Gap {
-                observation,
-                gap,
+            Ok(lash::recoverable_chat::RecoverableChatUpdate::TerminalReplacement {
+                event,
+                snapshot,
+                ..
             }) => {
+                let event = RemoteSessionObservationEvent::from_core(sequence, event);
+                sequence = sequence.saturating_add(1);
+                if tx
+                    .send(ObservationStreamItem::TerminalReplacement {
+                        cursor: snapshot.cursor.to_string(),
+                        event: Box::new(event),
+                    })
+                    .await
+                    .is_err()
+                {
+                    break;
+                }
+            }
+            Ok(lash::recoverable_chat::RecoverableChatUpdate::ReplayGap { snapshot, gap }) => {
+                let observation =
+                    RemoteSessionObservation::from_core(lash::observe::SessionObservation {
+                        read_view: snapshot.read_view,
+                        cursor: snapshot.cursor,
+                    });
+                let gap = RemoteLiveReplayGap::from(gap);
                 if tx
                     .send(ObservationStreamItem::ReplayGap {
                         observation: Box::new(observation),
@@ -1211,7 +1221,7 @@ mod turn_stream_state_tests {
     }
 
     #[tokio::test]
-    async fn workbench_cancellation_after_provisional_prose_retracts_the_draft() {
+    async fn workbench_terminal_settlement_clears_provisional_stream_state() {
         let turn_state = Arc::new(Mutex::new(TurnStreamState::default()));
         let sink = ChannelTurnEvents {
             turn_state: Arc::clone(&turn_state),
@@ -1229,10 +1239,6 @@ mod turn_stream_state_tests {
             projection.settle_terminal();
             assert!(projection.assistant_prose().is_empty());
         }
-        assert!(
-            ui::INDEX_HTML.contains("assistantDraft?.closest(\".message\")?.remove();"),
-            "the browser terminal projection must retract the provisional assistant row"
-        );
     }
 }
 

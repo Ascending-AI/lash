@@ -1309,7 +1309,7 @@ async fn live_restate_ingress_owner_restart_for_store(backend: &'static str) {
     );
     let product_event_path = data_dir.join("product-events.json");
     let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
-    let done_count = loop {
+    loop {
         let product_events =
             SessionEventRegistry::persistent(product_event_path.clone(), 4)
                 .expect("reopen product events after ingress-owner replacement")
@@ -1320,14 +1320,22 @@ async fn live_restate_ingress_owner_restart_for_store(backend: &'static str) {
             .filter(|event| matches!(&event.item, StreamItem::Done))
             .count();
         if done_count > 0 {
-            break done_count;
+            break;
         }
         assert!(
             tokio::time::Instant::now() < deadline,
             "owner replacement did not settle the durable product projection"
         );
         tokio::time::sleep(Duration::from_millis(100)).await;
-    };
+    }
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    let done_count = SessionEventRegistry::persistent(product_event_path, 4)
+        .expect("reopen settled product events after duplicate-observation window")
+        .snapshot(&session_id)
+        .events
+        .iter()
+        .filter(|event| matches!(&event.item, StreamItem::Done))
+        .count();
     assert_eq!(
         done_count, 1,
         "owner replacement and Restate redelivery must settle the product projection once"

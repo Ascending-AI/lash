@@ -100,8 +100,10 @@ impl AppState {
     ) -> Result<Vec<TurnCancelReceipt>, AppError> {
         let active = self.active_turns.for_session(session_id);
         let mut receipts = Vec::with_capacity(active.len());
+        let mut operation_ids = Vec::with_capacity(active.len());
         for address in active {
             let request_id = format!("workbench-stop-{}", uuid::Uuid::new_v4());
+            operation_ids.push(format!("{}:{request_id}", address.turn_id));
             let driver = self.core.turn_work_driver();
             let receipt = driver
                 .request_cancel(lash::TurnCancelRequest::new(
@@ -182,20 +184,9 @@ impl AppState {
             });
         }
         if !receipts.is_empty() {
-            let request_ids = receipts
-                .iter()
-                .map(|receipt| match &receipt.outcome {
-                    lash::TurnCancelOutcome::Requested(evidence)
-                    | lash::TurnCancelOutcome::AlreadyRequested(evidence) => {
-                        evidence.request_id.as_str()
-                    }
-                    _ => "settled",
-                })
-                .collect::<Vec<_>>()
-                .join(",");
             self.publish_for_session_identified(
                 session_id,
-                format!("turn-cancel:{request_ids}:done"),
+                format!("turn-cancel:{}:done", operation_ids.join(",")),
                 StreamItem::Done,
             );
         }
@@ -619,9 +610,10 @@ impl AppError {
     }
 
     fn internal(message: impl std::fmt::Display) -> Self {
+        eprintln!("agent-workbench internal request failure: {message}");
         Self {
             status: StatusCode::INTERNAL_SERVER_ERROR,
-            message: message.to_string(),
+            message: "internal server error".to_string(),
             retryable: false,
         }
     }
@@ -644,10 +636,11 @@ impl AppError {
     }
 
     fn runtime(error: lash::EmbedError) -> Self {
+        eprintln!("agent-workbench runtime request failure: {error}");
         Self {
             status: StatusCode::INTERNAL_SERVER_ERROR,
             retryable: error.is_retryable(),
-            message: error.to_string(),
+            message: "internal server error".to_string(),
         }
     }
 }
