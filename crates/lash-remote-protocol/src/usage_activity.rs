@@ -52,7 +52,13 @@ impl RemoteTurnActivity {
     pub fn validate(&self) -> Result<(), RemoteProtocolError> {
         ensure_protocol_version(self.protocol_version)?;
         require_non_empty("RemoteTurnActivity", "id", &self.id)?;
-        require_non_empty("RemoteTurnActivity", "correlation_id", &self.correlation_id)
+        require_non_empty("RemoteTurnActivity", "correlation_id", &self.correlation_id)?;
+        if let RemoteTurnEvent::TurnInputApplied { applications } = &self.event {
+            for application in applications {
+                application.validate()?;
+            }
+        }
+        Ok(())
     }
 }
 
@@ -136,6 +142,9 @@ pub enum RemoteTurnEvent {
         attempt: usize,
         max_attempts: usize,
         reason: String,
+    },
+    TurnInputApplied {
+        applications: Vec<crate::observations::RemoteTurnInputApplication>,
     },
     RuntimeDiagnostic {
         kind: String,

@@ -2101,6 +2101,7 @@
 
     const renderedMessages = new Set();
     const renderedIngressInputs = new Set();
+    const appliedTurnInputs = new Map();
     let assistantDraft = null;
     let assistantDraftText = "";
     let assistantDraftChunks = [];
@@ -2368,6 +2369,21 @@
       node.append(kind, body);
       timeline.appendChild(node);
       scrollToEnd();
+    }
+
+    function recordTurnInputApplications(applications) {
+      for (const application of applications || []) {
+        if (!application?.input_id || !application.committed_message_id) continue;
+        appliedTurnInputs.set(application.input_id, application);
+        const receipt = timeline.querySelector(
+          `.ingress-receipt[data-input-id="${CSS.escape(application.input_id)}"]`
+        );
+        if (receipt) {
+          receipt.dataset.committedMessageId = application.committed_message_id;
+          const kind = receipt.querySelector(".ingress-kind");
+          if (kind) kind.textContent = "applied to turn";
+        }
+      }
     }
 
     function ensureAssistantDraft() {
@@ -2733,6 +2749,7 @@
 
     function handleTurnEvent(event) {
       if (event.type === "queued_work_started") renderQueuedWorkStarted(event);
+      if (event.type === "turn_input_applied") recordTurnInputApplications(event.applications);
       if (event.type === "assistant_prose_delta") appendAssistantText(event.text, event.correlation_id);
       if (event.type === "reasoning_delta") appendReasoning(event.text, event.correlation_id);
       if (event.type === "model_attempt_reset") resetModelAttempt(event);
@@ -3521,6 +3538,7 @@
           text: textItem?.Text?.text || "pending input"
         });
       }
+      recordTurnInputApplications(state.turn_input_applications);
       if ((state.active_turns || []).length) setBusy(true, "turn running · restored");
     }
 

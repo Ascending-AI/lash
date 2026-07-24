@@ -16,9 +16,9 @@ use std::collections::BTreeSet;
 
 use lash_core::runtime::QueuedWorkClaimBoundary;
 use lash_core::{
-    AcceptedInjectedTurnInput, CheckpointKind, MessageOrigin, MessageRole, PluginMessage,
-    PluginRuntimeEvent, TokenUsage, ToolCallOutput, ToolFailure, ToolFailureClass, TurnActivity,
-    TurnActivityId, TurnCause, TurnEvent,
+    CheckpointKind, MessageOrigin, MessageRole, PluginMessage, PluginRuntimeEvent, TokenUsage,
+    ToolCallOutput, ToolFailure, ToolFailureClass, TurnActivity, TurnActivityId, TurnCause,
+    TurnEvent, TurnInputApplication,
 };
 use serde_json::json;
 
@@ -400,18 +400,22 @@ fn sample_events() -> Vec<(&'static str, TurnEvent, serde_json::Value)> {
         (
             "queued_input_accepted",
             TurnEvent::QueuedInputAccepted {
-                checkpoint: CheckpointKind::AfterWork,
-                inputs: vec![AcceptedInjectedTurnInput {
-                    id: Some("i".to_string()),
-                    message: PluginMessage::text(MessageRole::User, "hi"),
+                applications: vec![TurnInputApplication {
+                    input_id: "input-1".to_string(),
+                    source_key: Some("host:source-1".to_string()),
+                    turn_id: "turn-1".to_string(),
+                    committed_message_id: "message-1".to_string(),
+                    checkpoint: Some(CheckpointKind::AfterWork),
                 }],
             },
             json!({
                 "type": "queued_input_accepted",
-                "checkpoint": "after_work",
-                "inputs": [{
-                    "id": "i",
-                    "message": { "role": "User", "content": "hi" },
+                "applications": [{
+                    "input_id": "input-1",
+                    "source_key": "host:source-1",
+                    "turn_id": "turn-1",
+                    "committed_message_id": "message-1",
+                    "checkpoint": "after_work",
                 }],
             }),
         ),

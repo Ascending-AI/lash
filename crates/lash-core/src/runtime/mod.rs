@@ -182,8 +182,8 @@ pub use turn_input_ingress::{
     PendingTurnInput, PendingTurnInputCancelOutcome, PendingTurnInputCancelResult,
     PendingTurnInputCancelTarget, PendingTurnInputClaimDiagnostics, PendingTurnInputDraft,
     PendingTurnInputSuffixCancelOutcome, QueuedCheckpointTurnInput, TurnInputAcceptanceReceipt,
-    TurnInputCheckpointBoundary, TurnInputClaim, TurnInputClaimMode, TurnInputCompletion,
-    TurnInputIngress, TurnInputState,
+    TurnInputApplication, TurnInputCheckpointBoundary, TurnInputClaim, TurnInputClaimMode,
+    TurnInputCompletion, TurnInputIngress, TurnInputState,
 };
 pub use turn_loop::ensure_durable_effect_input;
 pub use turn_queue::{
@@ -887,8 +887,7 @@ pub enum TurnEvent {
         event: crate::PluginRuntimeEvent,
     },
     QueuedInputAccepted {
-        checkpoint: crate::CheckpointKind,
-        inputs: Vec<crate::AcceptedInjectedTurnInput>,
+        applications: Vec<crate::TurnInputApplication>,
     },
     QueuedMessagesCommitted {
         messages: Vec<crate::PluginMessage>,

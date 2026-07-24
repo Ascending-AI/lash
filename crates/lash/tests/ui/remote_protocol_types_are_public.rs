@@ -48,6 +48,15 @@ fn main() {
         kind: lash::remote::observations::RemoteSessionQueueEventKind::Enqueued,
         batch_ids: vec!["batch".to_string()],
     };
+    let _application = lash::remote::observations::RemoteTurnInputApplication {
+        input_id: "input".to_string(),
+        source_key: Some("source".to_string()),
+        turn_id: "turn".to_string(),
+        committed_message_id: "message".to_string(),
+        checkpoint: Some(
+            lash::remote::observations::RemoteTurnInputCheckpoint::BeforeCompletion,
+        ),
+    };
     let observation = lash::remote::observations::RemoteSessionObservation {
         protocol_version: lash::remote::REMOTE_PROTOCOL_VERSION,
         session_id: "session".to_string(),

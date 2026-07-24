@@ -679,6 +679,41 @@ impl LashSession {
             })
     }
 
+    /// Read settled canonical input applications from durable turn commits.
+    ///
+    /// This is the reconciliation surface for hosts whose live observation
+    /// cursor fell outside the bounded replay window.
+    pub async fn turn_input_applications(&self) -> Result<Vec<lash_core::TurnInputApplication>> {
+        let observation = self.runtime.observe();
+        let store = observation.queue_store.as_ref().ok_or_else(|| {
+            EmbedError::Runtime(lash_core::RuntimeError::new(
+                lash_core::RuntimeErrorCode::StoreCommitFailed,
+                "turn input application reconciliation requires a persistent runtime store",
+            ))
+        })?;
+        store
+            .list_turn_input_applications(observation.session_id())
+            .await
+            .map_err(|err| {
+                EmbedError::Runtime(lash_core::RuntimeError::new(
+                    lash_core::RuntimeErrorCode::StoreCommitFailed,
+                    err.to_string(),
+                ))
+            })
+    }
+
+    /// Versioned wire form of [`turn_input_applications`](Self::turn_input_applications).
+    pub async fn remote_turn_input_applications(
+        &self,
+    ) -> Result<Vec<lash_remote_protocol::RemoteTurnInputApplication>> {
+        Ok(self
+            .turn_input_applications()
+            .await?
+            .iter()
+            .map(Into::into)
+            .collect())
+    }
+
     pub async fn cancel_pending_turn_input(
         &self,
         input_id: &str,

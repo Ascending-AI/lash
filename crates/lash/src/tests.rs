@@ -242,6 +242,7 @@ impl lash_core::SessionCommitStore for SnapshotStore {
             checkpoint_ref: lash_core::BlobRef("checkpoint".to_string()),
             manifest: lash_core::store::SessionCheckpoint::default(),
             enqueued_queue_batches: Vec::new(),
+            turn_input_applications: Vec::new(),
         };
         if let Some(completed) = &commit.turn_commit {
             self.runtime_turn_commits

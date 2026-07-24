@@ -78,6 +78,27 @@ impl From<lash_core::SessionProcessEventKind> for RemoteSessionProcessEventKind 
     }
 }
 
+impl From<lash_core::CheckpointKind> for RemoteTurnInputCheckpoint {
+    fn from(value: lash_core::CheckpointKind) -> Self {
+        match value {
+            lash_core::CheckpointKind::AfterWork => Self::AfterWork,
+            lash_core::CheckpointKind::BeforeCompletion => Self::BeforeCompletion,
+        }
+    }
+}
+
+impl From<&lash_core::TurnInputApplication> for RemoteTurnInputApplication {
+    fn from(value: &lash_core::TurnInputApplication) -> Self {
+        Self {
+            input_id: value.input_id.clone(),
+            source_key: value.source_key.clone(),
+            turn_id: value.turn_id.clone(),
+            committed_message_id: value.committed_message_id.clone(),
+            checkpoint: value.checkpoint.map(Into::into),
+        }
+    }
+}
+
 impl RemoteSessionObservationEvent {
     pub fn from_core(sequence: u64, event: Arc<lash_core::SessionObservationEvent>) -> Self {
         let lash_core::SessionObservationEvent {
@@ -295,13 +316,9 @@ impl From<lash_core::TurnEvent> for RemoteTurnEvent {
                     "event": event,
                 }),
             },
-            lash_core::TurnEvent::QueuedInputAccepted { checkpoint, inputs } => {
-                Self::RuntimeDiagnostic {
-                    kind: "queued_input_accepted".to_string(),
-                    data: serde_json::json!({
-                        "checkpoint": checkpoint,
-                        "inputs": inputs,
-                    }),
+            lash_core::TurnEvent::QueuedInputAccepted { applications } => {
+                Self::TurnInputApplied {
+                    applications: applications.iter().map(Into::into).collect(),
                 }
             }
             lash_core::TurnEvent::QueuedMessagesCommitted {

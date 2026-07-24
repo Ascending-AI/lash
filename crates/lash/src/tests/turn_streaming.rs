@@ -627,6 +627,131 @@ async fn queued_turn_run_drains_ready_work_and_returns_none_when_idle() -> Resul
 }
 
 #[tokio::test]
+async fn idle_queued_input_emits_typed_remote_application_and_durable_identity() -> Result<()> {
+    let core = explicit_ephemeral_facets(LashCore::standard_builder())
+        .provider(mock_provider())
+        .model(mock_model_spec())
+        .store_factory(Arc::new(lash_core::InMemorySessionStoreFactory::new()))
+        .disable_queued_work_driver()
+        .build()?;
+    let session = core.session("idle-input-application").open().await?;
+    let cursor = session.observe().current_remote_observation().cursor;
+    let admission = session
+        .enqueue(TurnInput::text("queued canonical input"))
+        .id("idle-source")
+        .send()
+        .await?;
+
+    session
+        .queued_turn()
+        .drain_id("idle-application-turn")
+        .run()
+        .await?
+        .expect("queued input should run");
+
+    let crate::observe::RemoteSessionObservationSubscription::Subscribed(mut subscription) =
+        session.observe().subscribe_from_remote_cursor(
+            &crate::remote::observations::RemoteSessionCursor::new(cursor),
+        )?
+    else {
+        panic!("recent cursor should replay typed application");
+    };
+    let live = loop {
+        let event =
+            tokio::time::timeout(std::time::Duration::from_secs(2), subscription.next_event())
+                .await
+                .expect("timed out waiting for typed idle application")
+                .expect("remote observation event");
+        let crate::remote::observations::RemoteSessionObservationEventPayload::TurnActivity {
+            activity,
+        } = event.event
+        else {
+            continue;
+        };
+        if let crate::remote::usage::RemoteTurnEvent::TurnInputApplied { applications } =
+            activity.event
+        {
+            break applications;
+        }
+    };
+    assert_eq!(live.len(), 1);
+    let live = &live[0];
+    assert_eq!(live.input_id, admission.input_id);
+    assert_eq!(live.source_key.as_deref(), Some("host:idle-source"));
+    assert_eq!(live.turn_id, "idle-application-turn");
+    assert_eq!(live.checkpoint, None);
+    assert!(
+        session
+            .read_view()
+            .messages()
+            .iter()
+            .any(|message| message.id == live.committed_message_id),
+        "typed evidence must identify the canonical committed message"
+    );
+
+    let durable = session.remote_turn_input_applications().await?;
+    assert_eq!(durable, vec![live.clone()]);
+    Ok(())
+}
+
+#[tokio::test]
+async fn durable_application_read_survives_a_trimmed_live_replay_window() -> Result<()> {
+    let core = explicit_ephemeral_facets(LashCore::standard_builder())
+        .provider(mock_provider())
+        .model(mock_model_spec())
+        .store_factory(Arc::new(lash_core::InMemorySessionStoreFactory::new()))
+        .live_replay_store(Arc::new(lash_core::InMemoryLiveReplayStore::new(
+            lash_core::InMemoryLiveReplayStoreConfig {
+                max_events_per_session: 1,
+                ..lash_core::InMemoryLiveReplayStoreConfig::default()
+            },
+        )))
+        .disable_queued_work_driver()
+        .build()?;
+    let session = core.session("durable-input-application-gap").open().await?;
+    let stale_cursor = session.observe().current_remote_observation().cursor;
+    let admission = session
+        .enqueue(TurnInput::text("survives replay gap"))
+        .id("gap-source")
+        .send()
+        .await?;
+    session
+        .queued_turn()
+        .drain_id("gap-application-turn")
+        .run()
+        .await?
+        .expect("queued input should run");
+
+    let mut recovery = session.observe().subscribe_and_recover_remote(
+        crate::remote::observations::RemoteSessionCursor::new(stale_cursor),
+    )?;
+    let item = tokio::time::timeout(std::time::Duration::from_secs(2), recovery.next())
+        .await
+        .expect("timed out waiting for replay gap")
+        .expect("recovery stream item")?;
+    assert!(matches!(
+        item,
+        crate::observe::RemoteSessionObservationStreamItem::Gap { .. }
+    ));
+
+    let applications = session.remote_turn_input_applications().await?;
+    assert!(matches!(
+        applications.as_slice(),
+        [application]
+            if application.input_id == admission.input_id
+                && application.source_key.as_deref() == Some("host:gap-source")
+                && application.turn_id == "gap-application-turn"
+                && application.checkpoint.is_none()
+                && session
+                    .read_view()
+                    .messages()
+                    .iter()
+                    .any(|message| message.id == application.committed_message_id)
+    ));
+    Ok(())
+}
+
+#[tokio::test]
 async fn queued_turn_explicit_effects_create_queue_drain_scope_internally() -> Result<()> {
     let recorder = RecordingInlineEffectController::default();
     let core = explicit_ephemeral_facets(LashCore::standard_builder())
@@ -1499,10 +1624,15 @@ async fn queued_input_acceptance_streams_semantic_ack_with_id() -> Result<()> {
     assert!(events.iter().any(|event| matches!(
         &event.event,
         TurnEvent::QueuedInputAccepted {
-            checkpoint: lash_core::CheckpointKind::BeforeCompletion,
-            inputs,
-            ..
-        } if inputs.iter().any(|input| input.id.as_deref() == Some("queue-1"))
+            applications,
+        } if applications.iter().any(|application| {
+            application.source_key.as_deref() == Some("injection:queue-1")
+                && application.turn_id == "queued-input-turn"
+                && application.checkpoint
+                    == Some(lash_core::CheckpointKind::BeforeCompletion)
+                && application.committed_message_id
+                    == format!("m_ingress_{}", application.input_id)
+        })
     )));
     let prose = events
         .into_iter()

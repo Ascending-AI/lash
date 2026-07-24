@@ -472,6 +472,7 @@ impl RuntimePerfStore {
             session_lease_generation: generation,
             mode,
             inputs,
+            applications: Vec::new(),
         }))
     }
 }
@@ -798,6 +799,10 @@ impl SessionCommitStore for RuntimePerfStore {
             graph_node_count,
             token_ledger: Vec::new(),
         });
+        let turn_input_applications = completed_turn_input_claims
+            .iter()
+            .flat_map(|completion| completion.applications.iter().cloned())
+            .collect();
         let result = RuntimeCommitResult {
             head_revision,
             checkpoint_ref,
@@ -806,6 +811,7 @@ impl SessionCommitStore for RuntimePerfStore {
                 .into_iter()
                 .map(|batch| self.enqueue_queued_work_in_memory(batch))
                 .collect(),
+            turn_input_applications,
         };
         if let Some(completed) = &turn_commit {
             self.runtime_turn_commits
@@ -1083,6 +1089,27 @@ impl TurnInputStore for RuntimePerfStore {
             .collect::<Vec<_>>();
         inputs.sort_by_key(|input| input.enqueue_seq);
         Ok(inputs)
+    }
+
+    async fn list_turn_input_applications(
+        &self,
+        session_id: &str,
+    ) -> Result<Vec<lash_core::TurnInputApplication>, StoreError> {
+        let mut commits = self
+            .runtime_turn_commits
+            .lock()
+            .expect("lock perf runtime turn commits")
+            .iter()
+            .filter(|((stored_session_id, _), _)| stored_session_id == session_id)
+            .map(|((_, turn_id), (_, result))| {
+                (turn_id.clone(), result.turn_input_applications.clone())
+            })
+            .collect::<Vec<_>>();
+        commits.sort_by(|left, right| left.0.cmp(&right.0));
+        Ok(commits
+            .into_iter()
+            .flat_map(|(_, applications)| applications)
+            .collect())
     }
 
     async fn cancel_pending_turn_inputs(

@@ -408,6 +408,7 @@ mod tests {
             claim_id: "claim-a".to_string(),
             lease_token: "token-a".to_string(),
             input_ids: vec![input_id.clone()],
+            applications: Vec::new(),
         };
         sqlx::query(
             "INSERT INTO lash_sessions (session_id, head_revision, head_json)

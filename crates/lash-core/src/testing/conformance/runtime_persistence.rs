@@ -270,6 +270,7 @@ where
     pending_turn_inputs_source_keys_order_cancel_and_cross_session(make()).await;
     pending_turn_input_bulk_and_suffix_cancellation(make()).await;
     pending_turn_input_claims_reclaim_complete_and_fence(make()).await;
+    turn_input_application_identity_survives_pending_tombstone_vacuum(make()).await;
     turn_input_claims_supersede_across_session_lease_generations(make()).await;
     pending_turn_input_cancel_covers_active_and_deferred_states(make()).await;
     pending_active_turn_inputs_defer_unaccepted_once_on_interrupt(make()).await;
@@ -278,6 +279,72 @@ where
     if options.reclaims_unreachable_blobs {
         gc_reclaims_unreachable_checkpoint_blobs_and_preserves_live(make()).await;
     }
+}
+
+async fn turn_input_application_identity_survives_pending_tombstone_vacuum(
+    store: Arc<dyn RuntimePersistence>,
+) {
+    let session_id = "turn-input-application";
+    let turn_id = "turn-input-application-turn";
+    let owner_id = "turn-input-application-owner";
+    let admitted = store
+        .enqueue_pending_turn_input(
+            pending_next_turn_input_draft(session_id, "canonical application")
+                .with_source_key("host:application-source"),
+        )
+        .await
+        .expect("enqueue application input");
+    let lease = claim_session_execution_lease_for_test(&store, session_id, owner_id).await;
+    let mut claim = store
+        .claim_next_turn_inputs(session_id, &lease.fence(), &lease_owner(owner_id), 10)
+        .await
+        .expect("claim application input")
+        .expect("application input claim");
+    claim.record_initial_turn_application(turn_id, "application-message");
+
+    let state = RuntimeSessionState {
+        session_id: session_id.to_string(),
+        ..RuntimeSessionState::default()
+    };
+    let mut commit = RuntimeCommit::persisted_state(&state, &[])
+        .with_session_execution_lease(lease.fence())
+        .releasing_session_execution_lease(lease.completion())
+        .completing_turn_input_claim(claim.completion());
+    let hash = commit
+        .turn_commit_hash()
+        .expect("hash application turn commit");
+    commit = commit.with_turn_commit(crate::RuntimeTurnCommitStamp::new(
+        session_id, turn_id, hash,
+    ));
+    let result = store
+        .commit_runtime_state(commit)
+        .await
+        .expect("commit application identity");
+    let expected = crate::TurnInputApplication {
+        input_id: admitted.input_id,
+        source_key: Some("host:application-source".to_string()),
+        turn_id: turn_id.to_string(),
+        committed_message_id: "application-message".to_string(),
+        checkpoint: None,
+    };
+    assert_eq!(result.turn_input_applications, vec![expected.clone()]);
+    assert_eq!(
+        store
+            .list_turn_input_applications(session_id)
+            .await
+            .expect("read durable application identity"),
+        vec![expected.clone()]
+    );
+
+    store.vacuum().await.expect("vacuum application tombstone");
+    assert_eq!(
+        store
+            .list_turn_input_applications(session_id)
+            .await
+            .expect("read application identity after tombstone vacuum"),
+        vec![expected],
+        "application reconciliation must come from the committed turn, not a pending snapshot"
+    );
 }
 
 async fn checkpoint_work_claims_both_families_once(store: Arc<dyn RuntimePersistence>) {

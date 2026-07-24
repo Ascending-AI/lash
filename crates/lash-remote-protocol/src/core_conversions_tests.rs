@@ -940,6 +940,49 @@ fn remote_activity_preserves_model_attempt_reset_targets() {
 }
 
 #[test]
+fn remote_activity_exposes_typed_turn_input_application_without_display_text() {
+    let application = lash_core::TurnInputApplication {
+        input_id: "input-1".to_string(),
+        source_key: Some("host:source-1".to_string()),
+        turn_id: "turn-1".to_string(),
+        committed_message_id: "message-1".to_string(),
+        checkpoint: Some(lash_core::CheckpointKind::BeforeCompletion),
+    };
+    let activity =
+        lash_core::TurnActivity::independent(lash_core::TurnEvent::QueuedInputAccepted {
+            applications: vec![application],
+        });
+
+    let remote = RemoteTurnActivity::from_core(5, activity);
+    remote.validate().expect("typed application validates");
+    assert_eq!(
+        remote.event,
+        RemoteTurnEvent::TurnInputApplied {
+            applications: vec![RemoteTurnInputApplication {
+                input_id: "input-1".to_string(),
+                source_key: Some("host:source-1".to_string()),
+                turn_id: "turn-1".to_string(),
+                committed_message_id: "message-1".to_string(),
+                checkpoint: Some(RemoteTurnInputCheckpoint::BeforeCompletion),
+            }],
+        }
+    );
+    let json = serde_json::to_value(remote).expect("serialize typed application");
+    assert_eq!(
+        json.pointer("/type").and_then(serde_json::Value::as_str),
+        Some("turn_input_applied")
+    );
+    assert!(
+        json.get("kind").is_none() && !json.to_string().contains("queued_input_accepted"),
+        "application evidence must not use RuntimeDiagnostic: {json}"
+    );
+    assert!(
+        !json.to_string().contains("display") && !json.to_string().contains("text"),
+        "application evidence must carry identity only: {json}"
+    );
+}
+
+#[test]
 fn remote_session_observation_from_core_maps_snapshot_metadata() {
     let store = lash_core::InMemoryLiveReplayStore::default();
     let event = lash_core::LiveReplayStore::append(

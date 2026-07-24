@@ -509,6 +509,7 @@ impl SessionCommitStore for PostgresSessionStore {
             checkpoint_ref,
             manifest,
             enqueued_queue_batches,
+            turn_input_applications: commit.turn_input_applications(),
         };
         if let Some(completed) = &commit.turn_commit {
             sqlx::query(
@@ -1571,6 +1572,30 @@ impl TurnInputStore for PostgresSessionStore {
         Ok(inputs)
     }
 
+    async fn list_turn_input_applications(
+        &self,
+        session_id: &str,
+    ) -> Result<Vec<lash_core::TurnInputApplication>, StoreError> {
+        let rows = sqlx::query(
+            "SELECT result_json
+             FROM lash_runtime_turn_commits
+             WHERE session_id = $1
+             ORDER BY committed_at_ms ASC, turn_id ASC",
+        )
+        .bind(session_id)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(store_sqlx_error)?;
+        let mut applications = Vec::new();
+        for row in rows {
+            let result_json: String = row.get(0);
+            let result: RuntimeCommitResult =
+                store_decode_json(&result_json, "runtime turn commit result")?;
+            applications.extend(result.turn_input_applications);
+        }
+        Ok(applications)
+    }
+
     async fn cancel_pending_turn_inputs(
         &self,
         session_id: &str,
@@ -2241,6 +2266,7 @@ async fn claim_pending_turn_inputs_postgres_tx(
             session_lease_generation: lease.session_lease_generation,
             mode,
             inputs,
+            applications: Vec::new(),
         },
     )))
 }
@@ -2379,6 +2405,7 @@ async fn claim_pending_turn_inputs_postgres(
         session_lease_generation: lease.session_lease_generation,
         mode,
         inputs,
+        applications: Vec::new(),
     }))
 }
 

@@ -448,6 +448,12 @@ pub struct RuntimeCommitResult {
     pub manifest: SessionCheckpoint,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub enqueued_queue_batches: Vec<crate::QueuedWorkBatch>,
+    /// Canonical input applications settled by this idempotent turn commit.
+    ///
+    /// Keeping these identities in the durable turn-commit result lets hosts
+    /// reconcile after the bounded live observation window has been lost.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub turn_input_applications: Vec<crate::TurnInputApplication>,
 }
 
 /// Stable identity for the holder of a session-execution lease.
@@ -756,6 +762,13 @@ fn build_checkpoint_from_persisted_state(
 }
 
 impl RuntimeCommit {
+    pub fn turn_input_applications(&self) -> Vec<crate::TurnInputApplication> {
+        self.completed_turn_input_claims
+            .iter()
+            .flat_map(|completion| completion.applications.iter().cloned())
+            .collect()
+    }
+
     pub(crate) fn validate_claim_settlement(
         &self,
         originating_queue_claims: &[crate::QueuedWorkCompletion],
@@ -1098,6 +1111,20 @@ pub trait TurnInputStore: Send + Sync {
         &self,
         session_id: &str,
     ) -> Result<Vec<crate::PendingTurnInput>, StoreError>;
+
+    /// Read canonical input applications from durable turn-commit records.
+    ///
+    /// Unlike live observation replay, this surface is not retention-window
+    /// dependent. Implementations return settled applications in durable
+    /// commit order so a host can reconcile admission identity after a gap.
+    async fn list_turn_input_applications(
+        &self,
+        _session_id: &str,
+    ) -> Result<Vec<crate::TurnInputApplication>, StoreError> {
+        Err(StoreError::Backend(
+            "turn input application reconciliation is not implemented by this store".to_string(),
+        ))
+    }
 
     /// Cancel an unclaimed pending user input by id.
     ///

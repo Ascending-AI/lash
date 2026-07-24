@@ -107,6 +107,31 @@ impl crate::store::TurnInputStore for InMemorySessionStore {
         Ok(inputs)
     }
 
+    async fn list_turn_input_applications(
+        &self,
+        session_id: &str,
+    ) -> Result<Vec<crate::TurnInputApplication>, crate::store::StoreError> {
+        let mut commits = self
+            .runtime_turn_commits
+            .lock()
+            .expect("lock runtime turn commits")
+            .iter()
+            .filter(|((stored_session_id, _), _)| stored_session_id == session_id)
+            .map(|((_, turn_id), (_, result, committed_at_ms))| {
+                (
+                    *committed_at_ms,
+                    turn_id.clone(),
+                    result.turn_input_applications.clone(),
+                )
+            })
+            .collect::<Vec<_>>();
+        commits.sort_by(|left, right| (left.0, left.1.as_str()).cmp(&(right.0, right.1.as_str())));
+        Ok(commits
+            .into_iter()
+            .flat_map(|(_, _, applications)| applications)
+            .collect())
+    }
+
     async fn cancel_pending_turn_inputs(
         &self,
         session_id: &str,

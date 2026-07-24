@@ -8,6 +8,41 @@ use crate::registry_errors::{RemoteProtocolError, require_non_empty};
 use crate::usage_activity::{RemoteTurnActivity, RemoteUsage};
 use crate::{REMOTE_PROTOCOL_VERSION, ensure_protocol_version};
 
+/// Stable identity proving an admitted input became canonical turn input.
+///
+/// This wire DTO intentionally contains no display text. `input_id` and
+/// `source_key` correlate to the admission receipt, while `turn_id` and
+/// `committed_message_id` identify the canonical conversation application.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct RemoteTurnInputApplication {
+    pub input_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source_key: Option<String>,
+    pub turn_id: String,
+    pub committed_message_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub checkpoint: Option<RemoteTurnInputCheckpoint>,
+}
+
+impl RemoteTurnInputApplication {
+    pub fn validate(&self) -> Result<(), RemoteProtocolError> {
+        require_non_empty("RemoteTurnInputApplication", "input_id", &self.input_id)?;
+        require_non_empty("RemoteTurnInputApplication", "turn_id", &self.turn_id)?;
+        require_non_empty(
+            "RemoteTurnInputApplication",
+            "committed_message_id",
+            &self.committed_message_id,
+        )
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum RemoteTurnInputCheckpoint {
+    AfterWork,
+    BeforeCompletion,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct RemoteSessionCursor {
     pub protocol_version: u32,
@@ -73,6 +108,13 @@ impl RemoteSessionObservationEvent {
                     parent_version: self.protocol_version,
                     child_version: activity.protocol_version,
                 });
+            }
+            if let crate::usage_activity::RemoteTurnEvent::TurnInputApplied { applications } =
+                &activity.event
+            {
+                for application in applications {
+                    application.validate()?;
+                }
             }
         }
         Ok(())
