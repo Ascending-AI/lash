@@ -2,8 +2,6 @@ use std::sync::Arc;
 use std::sync::Mutex as StdMutex;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
-use tokio_util::sync::CancellationToken;
-
 use super::Clock;
 use crate::LeaseTimings;
 use crate::store::{
@@ -37,7 +35,6 @@ impl SessionExecutionLeaseGuard {
         owner: &crate::LeaseOwnerIdentity,
         timings: LeaseTimings,
         clock: Arc<dyn Clock>,
-        cancel: CancellationToken,
     ) -> Result<Option<Self>, StoreError> {
         let lease = match store
             .try_claim_session_execution_lease(session_id, owner, timings.ttl_ms())
@@ -86,7 +83,6 @@ impl SessionExecutionLeaseGuard {
             Arc::clone(&lost),
             timings,
             Arc::clone(&clock),
-            cancel,
         );
         Ok(Some(Self {
             store,
@@ -176,7 +172,6 @@ pub(super) async fn commit_runtime_state_with_fresh_session_execution_lease(
         owner,
         timings,
         clock,
-        CancellationToken::new(),
     )
     .await?
     else {
@@ -205,7 +200,6 @@ fn spawn_renewal_task(
     lost: Arc<AtomicBool>,
     timings: LeaseTimings,
     clock: Arc<dyn Clock>,
-    cancel: CancellationToken,
 ) -> tokio::task::JoinHandle<()> {
     let renew_every = timings.renew_interval();
     crate::task::spawn(async move {
@@ -241,7 +235,6 @@ fn spawn_renewal_task(
                         event = "session_execution_lease.lost",
                         "lost session execution lease"
                     );
-                    cancel.cancel();
                     break;
                 }
             }

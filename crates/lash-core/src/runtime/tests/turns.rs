@@ -3373,16 +3373,25 @@ async fn truncated_retry_resets_partial_tool_calls_and_retains_failed_attempt_us
     );
 }
 
-// Boundary: busy and lease-loss tests stay in `turns.rs` because they exercise
-// live `LashRuntime` lease acquisition, public busy/no-op scheduling, turn
-// phase probes, provider suspension, and runtime error-code mapping. Runtime
-// Scenarios own persistence-level released/stale lease rejection and
-// queue/input claim invariants; these tests own the facade scheduler response
-// to those store states.
+// Boundary: advisory-lease tests stay in `turns.rs` because they exercise live
+// `LashRuntime` lease acquisition, public scheduling, turn phase probes, and
+// provider suspension. Runtime Scenarios own persistence-level head-CAS and
+// queue/input claim invariants; these tests own the facade scheduler response.
 #[tokio::test]
-async fn foreground_turn_returns_session_execution_busy_when_lane_is_held() {
-    let (mut runtime, store) =
-        standard_runtime_with_transport_and_queue_store(mock_provider(Vec::new())).await;
+async fn foreground_turn_proceeds_when_advisory_session_lane_is_held() {
+    let transport = mock_provider(vec![MockCall {
+        stream_events: Vec::new(),
+        response: Ok(LlmResponse {
+            full_text: "foreground proceeded".to_string(),
+            parts: vec![LlmOutputPart::Text {
+                text: "foreground proceeded".to_string(),
+                response_meta: None,
+            }],
+            response_metadata: Default::default(),
+            ..LlmResponse::default()
+        }),
+    }]);
+    let (mut runtime, store) = standard_runtime_with_transport_and_queue_store(transport).await;
     let owner = lease_owner("other-runtime");
     let held_lease = crate::store::SessionExecutionLeaseStore::try_claim_session_execution_lease(
         store.as_ref(),
@@ -3395,16 +3404,16 @@ async fn foreground_turn_returns_session_execution_busy_when_lane_is_held() {
     .acquired()
     .expect("session execution lease");
 
-    let err = runtime
+    let assembled = runtime
         .run_turn_assembled(
-            TurnInput::text("foreground should be busy"),
+            TurnInput::text("foreground may proceed"),
             CancellationToken::new(),
-            named_turn_scope("root", "foreground-busy-turn"),
+            named_turn_scope("root", "foreground-advisory-lane-turn"),
         )
         .await
-        .expect_err("foreground turn should be rejected while lane is held");
+        .expect("an advisory lease holder must not select a durable error branch");
 
-    assert_eq!(err.code, crate::RuntimeErrorCode::SessionExecutionBusy);
+    assert_eq!(assembled.assistant_output.safe_text, "foreground proceeded");
     crate::store::SessionExecutionLeaseStore::release_session_execution_lease(
         store.as_ref(),
         &held_lease.completion(),
@@ -3549,7 +3558,7 @@ async fn idle_queued_work_claim_lease_expiry_surfaces_session_execution_lease_lo
 }
 
 #[tokio::test]
-async fn lease_loss_stops_foreground_turn_before_final_commit() {
+async fn advisory_lease_loss_does_not_stop_foreground_turn_before_final_commit() {
     let clock = Arc::new(ManualClock::new(1_000));
     let store_clock: Arc<dyn crate::Clock> = clock.clone();
     let store = Arc::new(RecordingStore::with_clock(store_clock));
@@ -3582,9 +3591,9 @@ async fn lease_loss_stops_foreground_turn_before_final_commit() {
                         .expect("provider continue receiver available");
                     let _ = rx.await;
                     Ok(LlmResponse {
-                        full_text: "should not commit".to_string(),
+                        full_text: "committed under head CAS".to_string(),
                         parts: vec![LlmOutputPart::Text {
-                            text: "should not commit".to_string(),
+                            text: "committed under head CAS".to_string(),
                             response_meta: None,
                         }],
                         response_metadata: Default::default(),
@@ -3638,15 +3647,17 @@ async fn lease_loss_stops_foreground_turn_before_final_commit() {
         .send(())
         .expect("provider should still be waiting");
 
-    let err = turn
+    let assembled = turn
         .await
         .expect("foreground turn task")
-        .expect_err("lost session lease must reject the turn before commit");
-    assert_eq!(err.code, crate::RuntimeErrorCode::SessionExecutionLeaseLost);
+        .expect("advisory lease loss must not reject the turn");
     assert_eq!(
-        *store.runtime_commit_count.lock().expect("commit count"),
-        commits_before_lease_loss,
-        "a turn that lost the session execution lease must not commit again after the lease is lost"
+        assembled.assistant_output.safe_text,
+        "committed under head CAS"
+    );
+    assert!(
+        *store.runtime_commit_count.lock().expect("commit count") > commits_before_lease_loss,
+        "the current-head turn must checkpoint and commit despite advisory lease loss"
     );
     crate::store::SessionExecutionLeaseStore::release_session_execution_lease(
         store.as_ref(),
@@ -3657,7 +3668,7 @@ async fn lease_loss_stops_foreground_turn_before_final_commit() {
 }
 
 #[tokio::test]
-async fn renewal_failure_mid_turn_surfaces_lease_lost_and_abandons_claims() {
+async fn renewal_failure_mid_turn_does_not_select_a_durable_branch() {
     let lease_ttl = std::time::Duration::from_millis(120);
     let clock = Arc::new(ManualClock::new(1_000));
     let store_clock: Arc<dyn crate::Clock> = clock.clone();
@@ -3668,12 +3679,16 @@ async fn renewal_failure_mid_turn_surfaces_lease_lost_and_abandons_claims() {
     let (provider_stalled_tx, provider_stalled_rx) = tokio::sync::oneshot::channel::<()>();
     let provider_stalled_tx = Arc::new(Mutex::new(Some(provider_stalled_tx)));
     let captured_provider_stalled_tx = Arc::clone(&provider_stalled_tx);
+    let (provider_continue_tx, provider_continue_rx) = tokio::sync::oneshot::channel::<()>();
+    let provider_continue_rx = Arc::new(Mutex::new(Some(provider_continue_rx)));
+    let captured_provider_continue_rx = Arc::clone(&provider_continue_rx);
     let transport = TestProvider::builder()
         .kind("mock")
         .requires_streaming(true)
         .complete(move |_request| {
             let captured_calls = Arc::clone(&captured_calls);
             let captured_provider_stalled_tx = Arc::clone(&captured_provider_stalled_tx);
+            let captured_provider_continue_rx = Arc::clone(&captured_provider_continue_rx);
             async move {
                 if captured_calls.fetch_add(1, Ordering::SeqCst) == 0 {
                     return Ok(LlmResponse {
@@ -3693,7 +3708,21 @@ async fn renewal_failure_mid_turn_surfaces_lease_lost_and_abandons_claims() {
                 {
                     let _ = tx.send(());
                 }
-                std::future::pending::<Result<LlmResponse, _>>().await
+                let rx = captured_provider_continue_rx
+                    .lock()
+                    .expect("provider continue receiver")
+                    .take()
+                    .expect("provider continue receiver available");
+                let _ = rx.await;
+                Ok(LlmResponse {
+                    full_text: "stale claim completion".to_string(),
+                    parts: vec![LlmOutputPart::Text {
+                        text: "stale claim completion".to_string(),
+                        response_meta: None,
+                    }],
+                    response_metadata: Default::default(),
+                    ..LlmResponse::default()
+                })
             }
         })
         .build();
@@ -3777,21 +3806,35 @@ async fn renewal_failure_mid_turn_surfaces_lease_lost_and_abandons_claims() {
         .expect("claim expired session execution lease")
         .acquired()
         .expect("expired lease should be acquired by successor");
+    tokio::time::timeout(std::time::Duration::from_secs(5), async {
+        while store.session_execution_lease_renewal_count() == renewals_before_loss {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("renewal task must observe the expired predecessor fence");
+    provider_continue_tx
+        .send(())
+        .expect("provider should still be waiting");
 
-    let err = tokio::time::timeout(std::time::Duration::from_secs(5), turn)
+    let assembled = tokio::time::timeout(std::time::Duration::from_secs(5), turn)
         .await
-        .expect("lease-lost turn should finish")
-        .expect("lease-lost turn task")
-        .expect_err("mid-turn renewal failure must reject the turn");
+        .expect("turn should finish")
+        .expect("turn task")
+        .expect("advisory renewal failure must not select a durable error branch")
+        .expect("claimed queued work must produce a turn");
     assert!(
         store.session_execution_lease_renewal_count() > renewals_before_loss,
         "the live renewal task must observe the expired predecessor fence"
     );
-    assert_eq!(err.code, crate::RuntimeErrorCode::SessionExecutionLeaseLost);
+    assert_eq!(
+        assembled.assistant_output.safe_text,
+        "stale claim completion"
+    );
     assert_eq!(
         store.abandoned_claim_counts(),
-        (1, 1),
-        "lease loss must abandon both queued-work and turn-input claims"
+        (0, 0),
+        "advisory lease loss must not mutate durable claim state out of band"
     );
 
     crate::store::SessionExecutionLeaseStore::release_session_execution_lease(
@@ -3916,7 +3959,7 @@ async fn cancellation_sealed_before_renewal_failure_remains_evidence_bearing_can
 }
 
 #[tokio::test]
-async fn finish_turn_fenced_commit_maps_lease_expiry_to_session_execution_lease_lost() {
+async fn finish_turn_commit_uses_head_cas_after_advisory_lease_expiry() {
     let clock = Arc::new(ManualClock::new(1_000));
     let store_clock: Arc<dyn crate::Clock> = clock.clone();
     let store = Arc::new(RecordingStore::with_clock(store_clock));
@@ -3924,9 +3967,9 @@ async fn finish_turn_fenced_commit_maps_lease_expiry_to_session_execution_lease_
     let transport = mock_provider(vec![MockCall {
         stream_events: Vec::new(),
         response: Ok(LlmResponse {
-            full_text: "should not commit".to_string(),
+            full_text: "committed after lease expiry".to_string(),
             parts: vec![LlmOutputPart::Text {
-                text: "should not commit".to_string(),
+                text: "committed after lease expiry".to_string(),
                 response_meta: None,
             }],
             response_metadata: Default::default(),
@@ -3948,21 +3991,23 @@ async fn finish_turn_fenced_commit_maps_lease_expiry_to_session_execution_lease_
     .await;
     runtime.set_turn_phase_probe(Arc::new(ExpireLeaseAtFinalCommit::new(Arc::clone(&clock))));
 
-    let err = runtime
+    let assembled = runtime
         .run_turn_assembled(
             TurnInput::text("lease expires at commit"),
             CancellationToken::new(),
             named_turn_scope("root", "final-commit-lease-expiry-turn"),
         )
         .await
-        .expect_err("final commit with an expired lease must fail as lease lost");
+        .expect("head CAS must authorize final commit after advisory lease expiry");
 
-    assert_eq!(err.code, crate::RuntimeErrorCode::SessionExecutionLeaseLost);
-    assert_ne!(err.code, crate::RuntimeErrorCode::StoreCommitFailed);
+    assert_eq!(
+        assembled.assistant_output.safe_text,
+        "committed after lease expiry"
+    );
 }
 
 #[tokio::test]
-async fn prepared_checkpoint_lease_expiry_surfaces_session_execution_lease_lost() {
+async fn prepared_checkpoint_continues_after_advisory_lease_expiry() {
     let clock = Arc::new(ManualClock::new(1_000));
     let store_clock: Arc<dyn crate::Clock> = clock.clone();
     let store = Arc::new(RecordingStore::with_clock(store_clock));
@@ -3970,9 +4015,9 @@ async fn prepared_checkpoint_lease_expiry_surfaces_session_execution_lease_lost(
     let transport = mock_provider(vec![MockCall {
         stream_events: Vec::new(),
         response: Ok(LlmResponse {
-            full_text: "provider should not be reached".to_string(),
+            full_text: "provider reached".to_string(),
             parts: vec![LlmOutputPart::Text {
-                text: "provider should not be reached".to_string(),
+                text: "provider reached".to_string(),
                 response_meta: None,
             }],
             response_metadata: Default::default(),
@@ -3996,16 +4041,16 @@ async fn prepared_checkpoint_lease_expiry_surfaces_session_execution_lease_lost(
         &clock,
     ))));
 
-    let err = runtime
+    let assembled = runtime
         .run_turn_assembled(
             TurnInput::text("lease expires at prepared checkpoint"),
             CancellationToken::new(),
             named_turn_scope("root", "prepared-checkpoint-lease-expiry-turn"),
         )
         .await
-        .expect_err("prepared checkpoint with an expired lease must fail as lease lost");
+        .expect("prepared checkpoint must continue after advisory lease expiry");
 
-    assert_eq!(err.code, crate::RuntimeErrorCode::SessionExecutionLeaseLost);
+    assert_eq!(assembled.assistant_output.safe_text, "provider reached");
 }
 
 // Boundary: this durable process-wake case stays in `turns.rs` because it

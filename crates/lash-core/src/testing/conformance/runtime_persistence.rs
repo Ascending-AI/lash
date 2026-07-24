@@ -197,12 +197,14 @@ pub async fn runtime_persistence_clock_expiry(
     let stale_commit = store
         .commit_runtime_state(
             RuntimeCommit::persisted_state(&stale_state, &[])
-                .with_session_execution_lease(stale_lease.fence()),
+                .with_session_execution_lease(stale_lease.fence())
+                .completing_queue_claim(stale_queue_claim.completion())
+                .completing_turn_input_claim(stale_input_claim.completion()),
         )
         .await;
     assert!(matches!(
         stale_commit,
-        Err(StoreError::SessionExecutionLeaseExpired { .. })
+        Err(StoreError::QueuedWorkClaimSuperseded { .. })
     ));
 
     store
@@ -988,34 +990,33 @@ async fn session_execution_lease_contract(store: Arc<dyn RuntimePersistence>) {
     assert!(reclaimed.fencing_token > expired.fencing_token);
     release_session_execution_lease_for_test(&store, &reclaimed).await;
 
-    let state = RuntimeSessionState {
+    let mut state = RuntimeSessionState {
         session_id: "root".to_string(),
         ..RuntimeSessionState::default()
     };
-    let err = store
+    let lease_free_commit = store
         .commit_runtime_state(RuntimeCommit::persisted_state(&state, &[]))
         .await
-        .expect_err("session-head commits require a live session lease");
-    assert!(matches!(
-        err,
-        StoreError::SessionExecutionLeaseExpired { .. }
-    ));
+        .expect("head CAS, not the advisory lease, authorizes commit");
+    state.head_revision = Some(lease_free_commit.head_revision);
 
     let commit_lease = claim_session_execution_lease_for_test(&store, "root", "commit-owner").await;
-    store
+    let lease_commit = store
         .commit_runtime_state(
             RuntimeCommit::persisted_state(&state, &[])
                 .with_session_execution_lease(commit_lease.fence())
                 .releasing_session_execution_lease(commit_lease.completion()),
         )
         .await
-        .expect("commit under live session lease");
+        .expect("advisory lease-bearing commit");
+    state.head_revision = Some(lease_commit.head_revision);
     let after_commit = claim_session_execution_lease_for_test(&store, "root", "after-commit").await;
     release_session_execution_lease_for_test(&store, &after_commit).await;
 
     let turn_state = RuntimeSessionState {
         session_id: "root".to_string(),
         turn_index: 1,
+        head_revision: state.head_revision,
         ..RuntimeSessionState::default()
     };
     let turn_commit = RuntimeCommit::persisted_state(&turn_state, &[]);
@@ -4025,7 +4026,7 @@ async fn pending_active_turn_inputs_defer_unaccepted_once_on_interrupt(
         session_id: "root".to_string(),
         ..RuntimeSessionState::default()
     };
-    store
+    let interrupt_result = store
         .commit_runtime_state(
             RuntimeCommit::persisted_state(&state, &[])
                 .with_session_execution_lease(lease.fence())
@@ -4034,6 +4035,8 @@ async fn pending_active_turn_inputs_defer_unaccepted_once_on_interrupt(
         )
         .await
         .expect("interrupt commit completes accepted inputs and defers unaccepted inputs");
+    let mut state = state;
+    state.head_revision = Some(interrupt_result.head_revision);
     let pending_after_interrupt = store
         .list_pending_turn_inputs("root")
         .await
@@ -4220,7 +4223,7 @@ async fn gc_reclaims_unreachable_checkpoint_blobs_and_preserves_live(
         tool_state_snapshot: Some(ToolState::default().with_generation(1)),
         ..RuntimeSessionState::default()
     };
-    commit_runtime_state_for_test(
+    let v1_result = commit_runtime_state_for_test(
         &store,
         RuntimeCommit::persisted_state(&v1, &[]),
         "gc-blobs-v1",
@@ -4232,6 +4235,7 @@ async fn gc_reclaims_unreachable_checkpoint_blobs_and_preserves_live(
     let v2 = RuntimeSessionState {
         session_id: "gc-blobs".to_string(),
         tool_state_snapshot: Some(ToolState::default().with_generation(2)),
+        head_revision: Some(v1_result.head_revision),
         ..RuntimeSessionState::default()
     };
     commit_runtime_state_for_test(

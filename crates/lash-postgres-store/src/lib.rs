@@ -390,6 +390,183 @@ mod postgres_test_support;
 mod tests {
     use super::*;
 
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn postgres_claim_completion_is_locked_and_zero_rows_roll_back_the_head() {
+        let Ok(database_url) = std::env::var("LASH_POSTGRES_DATABASE_URL") else {
+            eprintln!("skipping Postgres claim-completion fence: database URL is not set");
+            return;
+        };
+        let _database_lock =
+            postgres_test_support::SharedDatabaseLock::acquire(&database_url).await;
+        let storage = PostgresStorage::connect(&database_url)
+            .await
+            .expect("connect claim-completion fence storage");
+        let session_id = format!("postgres-claim-fence:{}", uuid::Uuid::new_v4());
+        let input_id = format!("input:{}", uuid::Uuid::new_v4());
+        let stale = lash_core::TurnInputCompletion {
+            session_id: session_id.clone(),
+            claim_id: "claim-a".to_string(),
+            lease_token: "token-a".to_string(),
+            input_ids: vec![input_id.clone()],
+        };
+        sqlx::query(
+            "INSERT INTO lash_sessions (session_id, head_revision, head_json)
+             VALUES ($1, 7, '{}')",
+        )
+        .bind(&session_id)
+        .execute(storage.pool())
+        .await
+        .expect("insert claim-fence session head");
+        sqlx::query(
+            "INSERT INTO lash_pending_turn_inputs (
+                input_id, session_id, ingress_json, state, input_json, enqueued_at_ms,
+                claim_id, claim_token, claim_fencing_token, claim_session_lease_generation
+             )
+             VALUES ($1, $2, '{}', $3, '{}', 1, $4, $5, 1, 1)",
+        )
+        .bind(&input_id)
+        .bind(&session_id)
+        .bind(lash_core::TurnInputState::DeferredNextTurn.as_str())
+        .bind(&stale.claim_id)
+        .bind(&stale.lease_token)
+        .execute(storage.pool())
+        .await
+        .expect("insert claimed turn input");
+
+        // Ownership validation locks the exact claim row. A superseder cannot
+        // rewrite it between validation and completion.
+        let mut validating = storage.pool().begin().await.expect("begin validating tx");
+        ensure_turn_input_completion_tx(&mut validating, &stale)
+            .await
+            .expect("validate and lock stale claim");
+        let mut blocked_superseder = storage.pool().begin().await.expect("begin superseder tx");
+        sqlx::query("SET LOCAL lock_timeout = '50ms'")
+            .execute(&mut *blocked_superseder)
+            .await
+            .expect("bound superseder lock wait");
+        let blocked = sqlx::query(
+            "UPDATE lash_pending_turn_inputs
+             SET claim_id = 'claim-b', claim_token = 'token-b',
+                 claim_fencing_token = 2, claim_session_lease_generation = 2
+             WHERE session_id = $1 AND input_id = $2",
+        )
+        .bind(&session_id)
+        .bind(&input_id)
+        .execute(&mut *blocked_superseder)
+        .await
+        .expect_err("ownership row lock must block supersession");
+        assert_eq!(
+            blocked.as_database_error().and_then(|error| error.code()),
+            Some(std::borrow::Cow::Borrowed("55P03")),
+            "supersession must fail specifically on the held row lock: {blocked}"
+        );
+        validating
+            .rollback()
+            .await
+            .expect("release validation lock");
+        blocked_superseder
+            .rollback()
+            .await
+            .expect("roll back timed-out superseder");
+
+        // Reproduce the old TOCTOU transaction shape: A observed ownership
+        // without locking, B committed a fresh generation+token, then A moved
+        // the head before attempting token-qualified completion. The checked
+        // zero-row completion must abort A's whole transaction.
+        let mut stale_committer = storage.pool().begin().await.expect("begin stale tx");
+        let observed: Option<i64> = sqlx::query_scalar(
+            "SELECT 1::BIGINT FROM lash_pending_turn_inputs
+             WHERE session_id = $1 AND input_id = $2 AND claim_id = $3 AND claim_token = $4",
+        )
+        .bind(&session_id)
+        .bind(&input_id)
+        .bind(&stale.claim_id)
+        .bind(&stale.lease_token)
+        .fetch_optional(&mut *stale_committer)
+        .await
+        .expect("old non-locking ownership validation");
+        assert_eq!(observed, Some(1));
+
+        let mut superseder = storage
+            .pool()
+            .begin()
+            .await
+            .expect("begin fresh superseder");
+        sqlx::query(
+            "UPDATE lash_pending_turn_inputs
+             SET claim_id = 'claim-b', claim_token = 'token-b',
+                 claim_fencing_token = 2, claim_session_lease_generation = 2
+             WHERE session_id = $1 AND input_id = $2",
+        )
+        .bind(&session_id)
+        .bind(&input_id)
+        .execute(&mut *superseder)
+        .await
+        .expect("supersede stale claim");
+        superseder
+            .commit()
+            .await
+            .expect("commit fresh supersession");
+
+        sqlx::query(
+            "UPDATE lash_sessions SET head_revision = head_revision + 1 WHERE session_id = $1",
+        )
+        .bind(&session_id)
+        .execute(&mut *stale_committer)
+        .await
+        .expect("tentatively move stale head");
+        let error =
+            complete_turn_input_claims_tx(&mut stale_committer, std::slice::from_ref(&stale))
+                .await
+                .expect_err("zero-row stale completion must trip the atomic fence");
+        assert!(matches!(
+            error,
+            StoreError::TurnInputClaimSuperseded {
+                ref session_id,
+                ref claim_id
+            } if session_id == &stale.session_id && claim_id == &stale.claim_id
+        ));
+        stale_committer
+            .rollback()
+            .await
+            .expect("roll back stale head movement");
+
+        let head_revision: i64 =
+            sqlx::query_scalar("SELECT head_revision FROM lash_sessions WHERE session_id = $1")
+                .bind(&session_id)
+                .fetch_one(storage.pool())
+                .await
+                .expect("read head after rejected stale commit");
+        assert_eq!(
+            head_revision, 7,
+            "rejected stale completion must not move the session head"
+        );
+        let current_claim: (String, String, i64) = sqlx::query_as(
+            "SELECT claim_id, claim_token, claim_session_lease_generation
+             FROM lash_pending_turn_inputs WHERE session_id = $1 AND input_id = $2",
+        )
+        .bind(&session_id)
+        .bind(&input_id)
+        .fetch_one(storage.pool())
+        .await
+        .expect("read winning claim");
+        assert_eq!(
+            current_claim,
+            ("claim-b".to_string(), "token-b".to_string(), 2)
+        );
+
+        sqlx::query("DELETE FROM lash_pending_turn_inputs WHERE session_id = $1")
+            .bind(&session_id)
+            .execute(storage.pool())
+            .await
+            .expect("clean claim-fence input");
+        sqlx::query("DELETE FROM lash_sessions WHERE session_id = $1")
+            .bind(&session_id)
+            .execute(storage.pool())
+            .await
+            .expect("clean claim-fence head");
+    }
+
     #[tokio::test]
     async fn checkpoint_probe_skips_writes_for_deferred_head_when_configured() {
         let Ok(database_url) = std::env::var("LASH_POSTGRES_DATABASE_URL") else {

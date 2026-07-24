@@ -13,10 +13,12 @@ impl RuntimeScenarioContext {
         if let Some(turn_id) = phase.defer_interrupted_turn_id {
             commit = commit.deferring_interrupted_turn_inputs(turn_id);
         }
-        self.store()
+        let result = self
+            .store()
             .commit_runtime_state(commit)
             .await
             .expect("commit runtime scenario checkpoint");
+        self.state.head_revision = Some(result.head_revision);
         self.command_claim = None;
 
         if !phase.pending_turn_inputs_after_deferral.is_empty() {

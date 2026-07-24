@@ -30,8 +30,10 @@ tracing = { workspace = true }
 bytes = { workspace = true }
 http = "1"
 http-body-util = { version = "0.1", features = ["channel"] }
+lash = { workspace = true, features = ["testing"] }
 lash-core = { workspace = true, features = ["testing"] }
 lash-lashlang-runtime = { workspace = true }
+lash-llm-tools = { workspace = true }
 lashlang = { workspace = true }
 lash-protocol-rlm = { workspace = true }
 lash-protocol-standard = { workspace = true, features = ["lashlang"] }

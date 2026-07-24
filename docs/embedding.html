@@ -296,18 +296,19 @@ persist(
 };
 
 session
-    .enqueue(TurnInput::text(&quot;first draft&quot;))
-    .id(&quot;message:1&quot;)
+    .enqueue(TurnInput::text("first draft"))
+    .id("message:1")
     .send()
     .await?;
 let second = session
-    .enqueue(TurnInput::text(&quot;second draft&quot;))
-    .id(&quot;message:2&quot;)
+    .enqueue(TurnInput::text("second draft"))
+    .id("message:2")
     .send()
     .await?;
 
-// Queue previews come from runtime admission receipts, not local draft
-// state. Persist `input_id` or `source_key` beside the product message.
+// Queue previews come from runtime reconciliation, not local draft state.
+// Persist the acceptance receipt's `input_id` or `source_key` beside the
+// product message.
 let pending = session.pending_turn_inputs().await?;
 render_pending_inputs(&amp;pending);
 
@@ -342,11 +343,12 @@ match session.cancel_pending_turn_input_suffix(anchor).await? {
 }
 
 let replacement = session
-    .enqueue(TurnInput::text(&quot;updated second draft&quot;))
-    .id(&quot;message:2:v2&quot;)
+    .enqueue(TurnInput::text("updated second draft"))
+    .id("message:2:v2")
     .send()
     .await?;
-render_pending_inputs(std::slice::from_ref(&amp;replacement));</code></pre>
+assert_eq!(replacement.source_key.as_deref(), Some("host:message:2:v2"));
+render_pending_inputs(&amp;session.pending_turn_inputs().await?);</code></pre>
           <p><code>PendingTurnInput</code> is runtime admission evidence. Keep product editing state in your app, store the returned <code>input_id</code> or <code>source_key</code> with your message revision, and treat claimed/completed outcomes as reconciliation signals instead of forcibly editing already-applied input.</p>
         </div>
   </main>

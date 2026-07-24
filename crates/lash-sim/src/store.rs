@@ -769,6 +769,12 @@ impl ModelStore {
             .or_insert_with(|| ModelSession::new(alias))
     }
 
+    /// COVERAGE-ONLY abstract model projection.
+    ///
+    /// This projection makes generated model states comparable; its synthetic
+    /// `execution_count` is not evidence for the `durable_effect_exactly_once`
+    /// runtime oracle. That oracle consumes the real replay controller's local
+    /// execution count from `runtime_boundaries`.
     fn project_durable_effect(
         &mut self,
         event: &BoundaryEvent,

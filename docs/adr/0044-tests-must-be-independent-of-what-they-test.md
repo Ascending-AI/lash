@@ -134,3 +134,8 @@ tests are kept unless they mechanically duplicate the implementation.
 
 A simulation or CI failure is a finding until an RCA proves otherwise. "Flaky"
 is a conclusion requiring evidence and a filed artifact, not a rerun.
+ADR 0008 makes that operational: the first failing attempt's artifact is
+immutable evidence, and any retry-to-green or quarantine must carry a
+machine-checked owner, issue, RCA status, and expiry. This ADR governs what
+constitutes credible evidence; ADR 0008 governs how CI retains and disposes of
+that evidence.

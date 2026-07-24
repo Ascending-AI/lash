@@ -322,7 +322,8 @@ async fn ensure_queued_work_completion_tx(
                AND batch_id = $2
                AND claim_id = $3
                AND claim_token = $4
-             LIMIT 1",
+             LIMIT 1
+             FOR UPDATE",
         )
         .bind(&completed.session_id)
         .bind(batch_id)
@@ -550,7 +551,8 @@ async fn ensure_turn_input_completion_tx(
                AND input_id = $2
                AND claim_id = $3
                AND claim_token = $4
-             LIMIT 1",
+             LIMIT 1
+             FOR UPDATE",
         )
         .bind(&completed.session_id)
         .bind(input_id)

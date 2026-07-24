@@ -17,6 +17,7 @@ use std::task::{Context, Poll, Waker};
 
 mod endpoint_protocol;
 mod process_tool_replay;
+mod tool_context_conformance;
 use endpoint_protocol::invoke_process_workflow_endpoint;
 
 struct PanicsWhenPolledAfterReady {
@@ -684,6 +685,16 @@ static RECOVERY_PROCESS_ENV_STORE: LazyLock<Arc<DurableMemoryProcessEnvStore>> =
 
 struct CommitRetryStore {
     inner: Arc<dyn lash_core::RuntimePersistence>,
+    lease_claim_count: Arc<AtomicUsize>,
+}
+
+impl CommitRetryStore {
+    fn new(inner: Arc<dyn lash_core::RuntimePersistence>) -> Self {
+        Self {
+            inner,
+            lease_claim_count: Arc::new(AtomicUsize::new(0)),
+        }
+    }
 }
 
 lash_core::impl_noop_attachment_manifest!(CommitRetryStore);
@@ -739,6 +750,7 @@ impl lash_core::SessionExecutionLeaseStore for CommitRetryStore {
         owner: &lash_core::LeaseOwnerIdentity,
         lease_ttl_ms: u64,
     ) -> Result<lash_core::SessionExecutionLeaseClaimOutcome, lash_core::StoreError> {
+        self.lease_claim_count.fetch_add(1, Ordering::SeqCst);
         self.inner
             .try_claim_session_execution_lease(session_id, owner, lease_ttl_ms)
             .await
@@ -1498,6 +1510,30 @@ impl ReplayableRecordingContext {
 
     fn runs(&self) -> Vec<String> {
         self.runs.lock().expect("runs lock").clone()
+    }
+
+    fn recorded_runtime_effect_envelopes(&self) -> Vec<(String, RuntimeEffectEnvelope)> {
+        let mut envelopes = self
+            .records
+            .lock()
+            .expect("records lock")
+            .iter()
+            .map(|(effect_name, bytes)| {
+                let recorded: RecordedRuntimeEffect =
+                    serde_json::from_slice(bytes).expect("recorded runtime effect");
+                let canonical =
+                    serde_json::to_value(recorded.envelope).expect("canonical envelope value");
+                let json = canonical
+                    .get("json")
+                    .and_then(serde_json::Value::as_str)
+                    .expect("canonical envelope json");
+                let envelope =
+                    serde_json::from_str(json).expect("canonical runtime effect envelope");
+                (effect_name.clone(), envelope)
+            })
+            .collect::<Vec<_>>();
+        envelopes.sort_by(|left, right| left.0.cmp(&right.0));
+        envelopes
     }
 
     fn install_process_worker(&self, worker: DurableProcessWorker) {
@@ -2465,6 +2501,127 @@ async fn restate_effect_host_checks_revocation_then_awaits_resolution() {
     );
 }
 
+struct PostCommitFailingQueuedWorkRunHandle {
+    attempts: AtomicUsize,
+    recovered: tokio::sync::Notify,
+}
+
+#[async_trait::async_trait]
+impl lash_core::QueuedWorkRunHandle for PostCommitFailingQueuedWorkRunHandle {
+    async fn run_queued_work(
+        &self,
+        _request: lash_core::QueuedWorkRunRequest,
+    ) -> Result<(), lash_core::QueuedWorkRunError> {
+        if self.attempts.fetch_add(1, Ordering::SeqCst) == 0 {
+            return Err(lash_core::QueuedWorkRunError::transient(
+                PluginError::Session(
+                    "FIG-430 deterministic post-commit dispatch failure".to_string(),
+                ),
+            ));
+        }
+        self.recovered.notify_one();
+        Ok(())
+    }
+}
+
+/// FIG-430: durable acceptance is final once the pending-input row commits.
+/// Dispatch failure is operational telemetry, and the wake retries itself
+/// without waiting for another enqueue or unrelated host event.
+#[tokio::test]
+async fn restate_enqueue_never_errors_after_commit() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let session_id = "restate-enqueue-post-commit-error";
+    let provider = lash_core::testing::TestProvider::builder()
+        .kind("fig-430-stub")
+        .complete(|_| async { Ok(lash_core::LlmResponse::default()) })
+        .build()
+        .into_handle();
+    let queued_work = Arc::new(PostCommitFailingQueuedWorkRunHandle {
+        attempts: AtomicUsize::new(0),
+        recovered: tokio::sync::Notify::new(),
+    });
+    let recovered = queued_work.recovered.notified();
+    let core = lash::LashCore::standard_builder()
+        .provider(provider)
+        .model(lash_core::ModelSpec::new(
+            "fig-430-model",
+            std::num::NonZeroUsize::new(1024).expect("non-zero context window"),
+        ))
+        .store_factory(Arc::new(lash_sqlite_store::SqliteSessionStoreFactory::new(
+            dir.path().join("sessions"),
+        )))
+        .effect_host(Arc::new(lash::durability::InlineEffectHost::default()))
+        .attachment_store(Arc::new(DurableMemoryAttachmentStore::default()))
+        .process_env_store(Arc::new(DurableMemoryProcessEnvStore::default()))
+        .queued_work_driver(lash_core::QueuedWorkDriver::new(queued_work.clone()))
+        .build()
+        .expect("build FIG-430 core");
+    let session = core
+        .session(session_id)
+        .open()
+        .await
+        .expect("open FIG-430 session");
+
+    let outcome = session
+        .enqueue(lash_core::TurnInput::text("commit before dispatch"))
+        .id("fig-430-retry")
+        .send()
+        .await;
+    tokio::time::timeout(std::time::Duration::from_secs(1), recovered)
+        .await
+        .expect("the failed post-commit wake must retry on its own");
+    let persisted = session
+        .pending_turn_inputs()
+        .await
+        .expect("inspect committed pending input");
+
+    match (&outcome, persisted.as_slice()) {
+        (Err(_), []) => {}
+        (Ok(receipt), [stored]) => {
+            assert_eq!(stored.input_id, receipt.input_id);
+            assert_eq!(stored.session_id, receipt.session_id);
+            assert_eq!(stored.source_key, receipt.source_key);
+            assert_eq!(stored.ingress, receipt.ingress);
+            assert_eq!(receipt.source_key.as_deref(), Some("host:fig-430-retry"));
+        }
+        (Err(error), stored) => panic!(
+            "enqueue returned an undifferentiated error after durable commit: \
+             caller_outcome={error:?}, persisted_row_count={}",
+            stored.len()
+        ),
+        (Ok(receipt), stored) => panic!(
+            "successful enqueue must identify exactly one durable row: \
+             caller_outcome={receipt:?}, persisted_rows={stored:?}"
+        ),
+    }
+    assert_eq!(
+        queued_work.attempts.load(Ordering::SeqCst),
+        2,
+        "the wake path retries exactly once after the injected failure"
+    );
+
+    let retry_receipt = session
+        .enqueue(lash_core::TurnInput::text("commit before dispatch"))
+        .id("fig-430-retry")
+        .send()
+        .await
+        .expect("retry the same durable source identity");
+    assert_eq!(
+        Some(&retry_receipt.input_id),
+        outcome.as_ref().ok().map(|receipt| &receipt.input_id),
+        "the source key is the idempotent retry identity"
+    );
+    assert_eq!(
+        session
+            .pending_turn_inputs()
+            .await
+            .expect("inspect idempotent retry")
+            .len(),
+        1,
+        "an exact source retry must not create another durable input"
+    );
+}
+
 fn replay_test_policy(session_id: &str) -> lash_core::SessionPolicy {
     let mut policy = lash_core::testing::mock_session_policy();
     policy.session_id = Some(session_id.to_string());
@@ -2636,10 +2793,21 @@ async fn restate_handler_replay_retries_final_lash_commit_idempotently() {
     let first_runs = context.runs();
     assert!(!first_runs.is_empty());
 
+    let blocking_owner =
+        lash_core::LeaseOwnerIdentity::opaque("replay-blocker", "replay-blocker:001");
+    let blocking_lease = lash_core::SessionExecutionLeaseStore::try_claim_session_execution_lease(
+        &*store,
+        session_id,
+        &blocking_owner,
+        60_000,
+    )
+    .await
+    .expect("claim replay-blocking advisory lease")
+    .acquired()
+    .expect("replay-blocking advisory lease");
     context.start_replay();
-    let retry_store: Arc<dyn lash_core::RuntimePersistence> = Arc::new(CommitRetryStore {
-        inner: Arc::clone(&runtime_store),
-    });
+    let retry_store: Arc<dyn lash_core::RuntimePersistence> =
+        Arc::new(CommitRetryStore::new(Arc::clone(&runtime_store)));
     let mut replay =
         replay_test_runtime(session_id, policy, initial_state, host, retry_store).await;
     let replay_turn =
@@ -2651,6 +2819,12 @@ async fn restate_handler_replay_retries_final_lash_commit_idempotently() {
     assert_eq!(first_turn.llm_calls.len(), 1);
     assert_eq!(replay_turn.llm_calls, first_turn.llm_calls);
     assert_eq!(provider_calls.load(Ordering::SeqCst), 1);
+    lash_core::SessionExecutionLeaseStore::release_session_execution_lease(
+        &*store,
+        &blocking_lease.completion(),
+    )
+    .await
+    .expect("release replay-blocking advisory lease");
 
     let conn = rusqlite::Connection::open(dir.path().join("session.db"))
         .expect("open raw session sqlite store");
@@ -2662,6 +2836,152 @@ async fn restate_handler_replay_retries_final_lash_commit_idempotently() {
         )
         .expect("count turn commit stamps");
     assert_eq!(rows, 1);
+}
+
+/// FIG-460: a dropped suspended handler leaves its advisory lease live, but a
+/// fresh durable worker re-enters before TTL and still makes progress under the
+/// authoritative final-commit CAS fence.
+#[tokio::test]
+async fn restate_replay_lease_acquisition_takes_recorded_branch() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let session_id = "restate-replay-lease-branch";
+    let turn_id = "restate-replay-lease-turn-1";
+    let provider_calls = Arc::new(AtomicUsize::new(0));
+    let first_provider_started = Arc::new(tokio::sync::Notify::new());
+    let provider = lash_core::testing::TestProvider::builder()
+        .kind("stub")
+        .complete({
+            let provider_calls = Arc::clone(&provider_calls);
+            let first_provider_started = Arc::clone(&first_provider_started);
+            move |_| {
+                let provider_calls = Arc::clone(&provider_calls);
+                let first_provider_started = Arc::clone(&first_provider_started);
+                async move {
+                    let call_index = provider_calls.fetch_add(1, Ordering::SeqCst);
+                    if call_index == 0 {
+                        first_provider_started.notify_one();
+                        std::future::pending::<()>().await;
+                    }
+                    Ok(lash_core::LlmResponse {
+                        full_text: "fresh worker progressed".to_string(),
+                        parts: vec![lash_core::LlmOutputPart::Text {
+                            text: "fresh worker progressed".to_string(),
+                            response_meta: None,
+                        }],
+                        response_metadata: Default::default(),
+                        ..lash_core::LlmResponse::default()
+                    })
+                }
+            }
+        })
+        .build()
+        .into_handle();
+    let mut host = lash_core::RuntimeHostConfig::in_memory();
+    host.providers.provider_resolver = Arc::new(lash_core::SingleProviderResolver::new(provider));
+    host.durability.attachment_store = Arc::new(lash_core::SessionAttachmentStore::ephemeral(
+        Arc::new(DurableMemoryAttachmentStore::default()),
+    ));
+    host.durability.process_env_store = Arc::new(DurableMemoryProcessEnvStore::default());
+
+    let store = Arc::new(
+        lash_sqlite_store::Store::open(&dir.path().join("session.db"))
+            .await
+            .expect("open session store"),
+    );
+    let underlying_store: Arc<dyn lash_core::RuntimePersistence> = store.clone();
+    let lease_claim_count = Arc::new(AtomicUsize::new(0));
+    let probed_store = Arc::new(CommitRetryStore {
+        inner: Arc::clone(&underlying_store),
+        lease_claim_count: Arc::clone(&lease_claim_count),
+    });
+    let runtime_store: Arc<dyn lash_core::RuntimePersistence> = probed_store;
+    let policy = replay_test_policy(session_id);
+    let initial_state = replay_test_state(session_id, &policy);
+    let context = Arc::new(ReplayableRecordingContext::default());
+
+    let mut suspended = replay_test_runtime(
+        session_id,
+        policy.clone(),
+        initial_state.clone(),
+        host.clone(),
+        Arc::clone(&runtime_store),
+    )
+    .await;
+    let suspended_context = Arc::clone(&context);
+    let suspended_turn = tokio::spawn(async move {
+        run_restate_replay_turn(&mut suspended, suspended_context, session_id, turn_id).await
+    });
+    tokio::time::timeout(
+        std::time::Duration::from_secs(1),
+        first_provider_started.notified(),
+    )
+    .await
+    .expect("first durable worker reaches provider suspension");
+    assert_eq!(lease_claim_count.load(Ordering::SeqCst), 1);
+    assert!(
+        !context.runs().is_empty(),
+        "the suspended handler reached the real Restate run boundary"
+    );
+    suspended_turn.abort();
+    assert!(
+        suspended_turn
+            .await
+            .expect_err("dropped suspended handler future")
+            .is_cancelled()
+    );
+
+    let mut fresh_worker =
+        replay_test_runtime(session_id, policy, initial_state, host, runtime_store).await;
+    let controller = RestateRuntimeEffectController::new(Arc::clone(&context));
+    let scoped_effect_controller = controller
+        .scoped_effect_controller(ExecutionScope::turn(session_id, turn_id))
+        .expect("scoped replay controller");
+    let replay_turn = fresh_worker
+        .stream_turn(
+            replay_test_input(turn_id),
+            lash_core::TurnOptions::new(
+                tokio_util::sync::CancellationToken::new(),
+                scoped_effect_controller,
+            ),
+        )
+        .await;
+
+    let replay_turn = replay_turn.unwrap_or_else(|error| {
+        panic!(
+            "fresh durable worker must treat pre-TTL lease busy as advisory and \
+             progress under CAS: {error:?}; total_lease_store_acquisitions={}",
+            lease_claim_count.load(Ordering::SeqCst)
+        )
+    });
+    assert!(matches!(
+        replay_turn.outcome,
+        lash_core::TurnOutcome::Finished(_)
+    ));
+    assert_eq!(
+        replay_turn.assistant_output.safe_text,
+        "fresh worker progressed"
+    );
+    assert_eq!(
+        lease_claim_count.load(Ordering::SeqCst),
+        2,
+        "the fresh worker re-enters before TTL and observes the advisory busy lease"
+    );
+    assert_eq!(
+        provider_calls.load(Ordering::SeqCst),
+        2,
+        "the dropped provider attempt is retried by the fresh worker"
+    );
+
+    let conn = rusqlite::Connection::open(dir.path().join("session.db"))
+        .expect("open raw session sqlite store");
+    let rows: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM runtime_turn_commits WHERE session_id = ?1 AND turn_id = ?2",
+            rusqlite::params![session_id, turn_id],
+            |row| row.get(0),
+        )
+        .expect("count liveness turn commit stamps");
+    assert_eq!(rows, 1, "the fresh worker commits exactly once");
 }
 
 struct ReplayScalarPendingTools {
@@ -2878,6 +3198,45 @@ finish (await handle)?
         lash_core::TurnOutcome::Finished(_)
     ));
     assert_eq!(scalar_invocations.load(Ordering::SeqCst), 1);
+    let first_recorded_envelopes = context.recorded_runtime_effect_envelopes();
+    let scalar_tool_attempts = first_recorded_envelopes
+        .iter()
+        .filter(|(_, envelope)| {
+            matches!(
+                &envelope.command,
+                RuntimeEffectCommand::ToolAttempt { call, .. }
+                    if call.tool_name == "replay_scalar_counter"
+            )
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        scalar_tool_attempts.len(),
+        1,
+        "the production Lashlang tool caller must emit one journaled ToolAttempt envelope"
+    );
+    let (scalar_effect_name, scalar_envelope) = scalar_tool_attempts[0];
+    assert_eq!(
+        scalar_envelope.invocation.effect_kind(),
+        Some(RuntimeEffectKind::ToolAttempt)
+    );
+    let RuntimeEffectCommand::ToolAttempt {
+        call,
+        attempt,
+        max_attempts,
+        ..
+    } = &scalar_envelope.command
+    else {
+        unreachable!("filtered to the scalar ToolAttempt");
+    };
+    assert_eq!(call.tool_name, "replay_scalar_counter");
+    assert_eq!((*attempt, *max_attempts), (1, 1));
+    assert_eq!(
+        scalar_effect_name,
+        &restate_effect_name(&scalar_envelope.invocation),
+        "the real journaling host must derive its run identity from the caller-emitted envelope"
+    );
+    let scalar_envelope_hash = scalar_envelope.stable_hash().expect("scalar envelope hash");
+    let recorded_effect_count = first_recorded_envelopes.len();
 
     context
         .events
@@ -2885,9 +3244,8 @@ finish (await handle)?
             &RestateDurableWaitAddress::for_key(&completion_key).workflow_key,
         );
     context.start_replay();
-    let retry_store: Arc<dyn lash_core::RuntimePersistence> = Arc::new(CommitRetryStore {
-        inner: Arc::clone(&runtime_store),
-    });
+    let retry_store: Arc<dyn lash_core::RuntimePersistence> =
+        Arc::new(CommitRetryStore::new(Arc::clone(&runtime_store)));
     let mut replay = Box::pin(replay_test_runtime_with_plugins_and_registry(
         session_id,
         policy,
@@ -2909,6 +3267,39 @@ finish (await handle)?
         scalar_invocations.load(Ordering::SeqCst),
         1,
         "Restate replay must return the journaled scalar ToolAttempt instead of re-executing the provider"
+    );
+    let replayed_envelopes = context.recorded_runtime_effect_envelopes();
+    assert_eq!(
+        replayed_envelopes.len(),
+        recorded_effect_count,
+        "replay must consume the journal rather than append another ToolAttempt record"
+    );
+    let replayed_scalar = replayed_envelopes
+        .iter()
+        .find(|(_, envelope)| {
+            matches!(
+                &envelope.command,
+                RuntimeEffectCommand::ToolAttempt { call, .. }
+                    if call.tool_name == "replay_scalar_counter"
+            )
+        })
+        .expect("replayed scalar ToolAttempt envelope");
+    assert_eq!(
+        replayed_scalar
+            .1
+            .stable_hash()
+            .expect("replayed scalar envelope hash"),
+        scalar_envelope_hash,
+        "the caller must reconstruct the same ToolAttempt envelope on replay"
+    );
+    assert_eq!(
+        context
+            .runs()
+            .iter()
+            .filter(|effect_name| *effect_name == scalar_effect_name)
+            .count(),
+        2,
+        "the production caller must cross the journaling host once live and once on replay"
     );
 }
 

@@ -842,14 +842,8 @@ impl crate::store::SessionCommitStore for InMemorySessionStore {
                 });
             }
         }
-        let Some(session_execution_lease) = commit.session_execution_lease.as_ref() else {
-            return Err(crate::store::StoreError::SessionExecutionLeaseExpired {
-                session_id: commit.session_id.clone(),
-            });
-        };
-        self.verify_session_execution_lease(&commit.session_id, session_execution_lease)?;
-        if commit.expected_head_revision.is_some() && commit.expected_head_revision != Some(actual)
-        {
+        let expected = commit.expected_head_revision.unwrap_or(0);
+        if expected != actual {
             return Err(crate::store::StoreError::HeadRevisionConflict {
                 expected: commit.expected_head_revision,
                 actual,

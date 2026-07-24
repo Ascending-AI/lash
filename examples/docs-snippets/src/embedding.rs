@@ -260,8 +260,9 @@ async fn pending_input_reconciliation(session: &LashSession) -> anyhow::Result<(
         .send()
         .await?;
 
-    // Queue previews come from runtime admission receipts, not local draft
-    // state. Persist `input_id` or `source_key` beside the product message.
+    // Queue previews come from runtime reconciliation, not local draft state.
+    // Persist the acceptance receipt's `input_id` or `source_key` beside the
+    // product message.
     let pending = session.pending_turn_inputs().await?;
     render_pending_inputs(&pending);
 
@@ -300,7 +301,8 @@ async fn pending_input_reconciliation(session: &LashSession) -> anyhow::Result<(
         .id("message:2:v2")
         .send()
         .await?;
-    render_pending_inputs(std::slice::from_ref(&replacement));
+    assert_eq!(replacement.source_key.as_deref(), Some("host:message:2:v2"));
+    render_pending_inputs(&session.pending_turn_inputs().await?);
     // docs:end:pending-input-reconciliation
     Ok(())
 }

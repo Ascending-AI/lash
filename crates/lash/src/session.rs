@@ -6,7 +6,7 @@ use futures_util::Stream;
 use lash_core::runtime::{
     PendingTurnInput, PendingTurnInputCancelOutcome, PendingTurnInputCancelResult,
     PendingTurnInputCancelTarget, PendingTurnInputSuffixCancelOutcome, QueuedWorkBatch,
-    QueuedWorkClaim, TurnInputClaim, TurnInputIngress,
+    QueuedWorkClaim, TurnInputAcceptanceReceipt, TurnInputClaim, TurnInputIngress,
 };
 use lash_core::{LiveReplayGap, LiveReplayStoreError, SessionObservationEvent};
 use lash_remote_protocol::{
@@ -1178,20 +1178,26 @@ impl<'a> EnqueueTurnBuilder<'a> {
         self
     }
 
-    pub async fn send(self) -> Result<PendingTurnInput> {
+    /// Persist the input and return stable durable-acceptance identity.
+    ///
+    /// For retryable host requests, supply [`id`](Self::id) again after an
+    /// ambiguous transport failure; its source key is the idempotency identity.
+    /// Mutable queue lifecycle state is available from
+    /// [`LashSession::pending_turn_inputs`].
+    pub async fn send(self) -> Result<TurnInputAcceptanceReceipt> {
         let source_key = self.id.map(|id| format!("host:{id}"));
         self.session
             .runtime
             .enqueue_turn_input(self.input, self.ingress, source_key)
             .await
+            .map(|pending| TurnInputAcceptanceReceipt::from(&pending))
             .map_err(EmbedError::Runtime)
     }
 }
 
 impl<'a> std::future::IntoFuture for EnqueueTurnBuilder<'a> {
-    type Output = Result<PendingTurnInput>;
-    type IntoFuture =
-        std::pin::Pin<Box<dyn std::future::Future<Output = Result<PendingTurnInput>> + 'a>>;
+    type Output = Result<TurnInputAcceptanceReceipt>;
+    type IntoFuture = std::pin::Pin<Box<dyn std::future::Future<Output = Self::Output> + 'a>>;
 
     fn into_future(self) -> Self::IntoFuture {
         Box::pin(self.send())

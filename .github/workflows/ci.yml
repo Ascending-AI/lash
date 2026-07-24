@@ -70,6 +70,9 @@ jobs:
       - name: Lint docs
         run: python3 scripts/lint_docs.py
 
+      - name: Check test quarantine metadata
+        run: python3 scripts/check_test_quarantines.py
+
       - name: Test release automation scripts
         run: |
           python3 scripts/test_release_version.py
@@ -269,7 +272,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: confidence-fast-${{ matrix.shard }}
+          name: confidence-fast-${{ matrix.shard }}-attempt-${{ github.run_attempt }}
           path: target/confidence/fast/${{ matrix.shard }}
           if-no-files-found: warn
 
@@ -291,7 +294,7 @@ jobs:
       - name: Download confidence fast shard artifacts
         uses: actions/download-artifact@v8
         with:
-          pattern: confidence-fast-*
+          pattern: confidence-fast-*-attempt-${{ github.run_attempt }}
           path: target/confidence/fast-download
           merge-multiple: false
 
@@ -300,7 +303,7 @@ jobs:
           rm -rf target/confidence/fast
           mkdir -p target/confidence/fast
           for shard in scenario-harnesses fault-matrix sim-unit-perf-guards sim-generated minimizer-fixtures; do
-            cp -a "target/confidence/fast-download/confidence-fast-${shard}" "target/confidence/fast/${shard}"
+            cp -a "target/confidence/fast-download/confidence-fast-${shard}-attempt-${{ github.run_attempt }}" "target/confidence/fast/${shard}"
           done
 
       - name: Validate confidence fast summary
@@ -310,7 +313,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: confidence-fast-summary
+          name: confidence-fast-summary-attempt-${{ github.run_attempt }}
           path: target/confidence/fast
           if-no-files-found: error
 

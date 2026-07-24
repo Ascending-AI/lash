@@ -4,8 +4,8 @@ impl RuntimeScenarioContext {
     pub(super) async fn fault(&mut self, phase: RuntimeFaultPhase) {
         match phase {
             RuntimeFaultPhase::StaleQueueCompletion => self.stale_queue_completion_fault().await,
-            RuntimeFaultPhase::CommitAfterSessionLeaseRelease => {
-                self.commit_after_session_lease_release_fault().await
+            RuntimeFaultPhase::CommitAfterAdvisoryLeaseRelease => {
+                self.commit_after_advisory_lease_release().await
             }
         }
     }
@@ -35,30 +35,47 @@ impl RuntimeScenarioContext {
         );
     }
 
-    async fn commit_after_session_lease_release_fault(&mut self) {
+    async fn commit_after_advisory_lease_release(&mut self) {
         if !self.lease_released {
             self.commit(RuntimeCommitPhase::new()).await;
         }
         let lease = self
             .lease
             .as_ref()
-            .expect("released-lease fault requires a previous session lease");
+            .expect("released-lease check requires a previous session lease");
+        let stale_head_revision = self.state.head_revision;
         self.state.turn_index = self.state.turn_index.saturating_add(1);
-        let err = self
+        let result = self
             .store()
             .commit_runtime_state(
                 RuntimeCommit::persisted_state(&self.state, &[])
                     .with_session_execution_lease(lease.fence()),
             )
             .await
-            .expect_err("released session execution lease should reject follow-up commit");
+            .expect("released advisory lease must not reject a current-head commit");
+        self.state.head_revision = Some(result.head_revision);
+
+        let mut stale_state = self.state.clone();
+        stale_state.head_revision = stale_head_revision;
+        stale_state.turn_index = stale_state.turn_index.saturating_add(1);
+        let err = self
+            .store()
+            .commit_runtime_state(
+                RuntimeCommit::persisted_state(&stale_state, &[])
+                    .with_session_execution_lease(lease.fence()),
+            )
+            .await
+            .expect_err("stale head must reject the follow-up commit");
         assert!(
             matches!(
                 err,
-                StoreError::SessionExecutionLeaseExpired { ref session_id }
-                    if session_id == self.session_id
+                StoreError::HeadRevisionConflict {
+                    expected,
+                    actual,
+                } if expected == stale_head_revision
+                    && actual == result.head_revision
             ),
-            "{} released session execution lease produced the wrong error: {err:?}",
+            "{} stale head produced the wrong error after advisory lease release: {err:?}",
             self.name
         );
     }

@@ -16,10 +16,12 @@ impl RuntimeScenarioContext {
             .completing_turn_input_claims(
                 self.turn_input_claim.iter().map(TurnInputClaim::completion),
             );
-        self.store()
+        let result = self
+            .store()
             .commit_runtime_state(final_commit)
             .await
             .expect("commit runtime scenario final state");
+        self.state.head_revision = Some(result.head_revision);
         self.command_claim = None;
         self.turn_claim = None;
         self.turn_input_claim = None;

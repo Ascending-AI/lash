@@ -14,8 +14,9 @@ use lash_core::{
     ProcessRegistry, RecoveryDisposition, RuntimeCommit, RuntimeEffectCommand,
     RuntimeEffectController, RuntimeEffectEnvelope, RuntimeEffectKind, RuntimeEffectLocalExecutor,
     RuntimeEffectOutcome, RuntimeInvocation, RuntimePersistence, RuntimeSessionState,
-    SessionExecutionLeaseClaimOutcome, SessionRelation, SessionScope, SessionStoreCreateRequest,
-    SessionStoreFactory, SlotPolicy, ToolAttemptLaunch, ToolCallOutput, ToolCallRecord, ToolId,
+    SessionExecutionLeaseClaimOutcome, SessionReadScope, SessionRelation, SessionScope,
+    SessionStoreCreateRequest, SessionStoreFactory, SlotPolicy, ToolAttemptLaunch, ToolCallOutput,
+    ToolCallRecord, ToolId,
 };
 use serde_json::{Value, json};
 
@@ -718,25 +719,6 @@ impl RuntimeBoundaryHarness {
             }
         };
 
-        let stale_state = RuntimeSessionState {
-            session_id: session.clone(),
-            ..RuntimeSessionState::default()
-        };
-        let expired_owner_commit_rejected = matches!(
-            store
-                .commit_runtime_state(
-                    RuntimeCommit::persisted_state(&stale_state, &[])
-                        .with_session_execution_lease(stale_lease.fence()),
-                )
-                .await,
-            Err(lash_core::StoreError::SessionExecutionLeaseExpired { .. })
-        );
-        if !expired_owner_commit_rejected {
-            return Err(RuntimeBoundaryError::new(
-                "expired worker owner committed after lease takeover",
-            ));
-        }
-
         let process_completion = self
             .run_process_completion_contention(
                 &session,
@@ -751,6 +733,7 @@ impl RuntimeBoundaryHarness {
         let failover = self
             .resume_crashed_worker_work(store.as_ref(), &session, &live_owner, &live_lease, &work)
             .await?;
+        let expired_owner_commit_rejected = failover.stale_work_completion_rejected;
 
         let stale_completion = stale_lease.completion();
         store
@@ -1050,8 +1033,18 @@ impl RuntimeBoundaryHarness {
         // rewrote the batch's claim id + lease token, so settling the crashed
         // worker's original claim through the runtime commit path is rejected as
         // superseded (ADR 0029).
+        let expected_head_revision = store
+            .load_session(SessionReadScope::FullGraph)
+            .await
+            .map_err(|err| {
+                RuntimeBoundaryError::new(format!(
+                    "load current head before stale claim completion: {err}"
+                ))
+            })?
+            .map(|read| read.head_revision);
         let stale_state = RuntimeSessionState {
             session_id: session.to_string(),
+            head_revision: expected_head_revision,
             ..RuntimeSessionState::default()
         };
         let stale_work_completion_rejected = matches!(

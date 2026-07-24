@@ -215,22 +215,9 @@ impl SessionCommitStore for Store {
                             });
                         }
                     }
-                    let Some(session_execution_lease) = commit.session_execution_lease.as_ref()
-                    else {
-                        return Err(StoreError::SessionExecutionLeaseExpired {
-                            session_id: commit.session_id.clone(),
-                        });
-                    };
-                    ensure_session_execution_lease_conn(
-                        tx,
-                        &commit.session_id,
-                        session_execution_lease,
-                        now,
-                    )?;
                     let actual_revision = existing.as_ref().map_or(0, |meta| meta.head_revision);
-                    if commit.expected_head_revision.is_some()
-                        && commit.expected_head_revision != Some(actual_revision)
-                    {
+                    let expected_revision = commit.expected_head_revision.unwrap_or(0);
+                    if expected_revision != actual_revision {
                         return Err(StoreError::HeadRevisionConflict {
                             expected: commit.expected_head_revision,
                             actual: actual_revision,

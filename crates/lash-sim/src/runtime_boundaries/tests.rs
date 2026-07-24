@@ -120,6 +120,8 @@ async fn durable_effect_replays_through_runtime_effect_controller() {
     assert_eq!(replay["replay_count"], 1);
     assert_eq!(replay["replayed"], true);
     assert_eq!(first["result_digest"], replay["result_digest"]);
+    assert_eq!(first["runtime_effect"]["local_executor_called"], true);
+    assert_eq!(replay["runtime_effect"]["local_executor_called"], false);
     assert_eq!(
         replay["runtime_effect"]["controller"],
         "sqlite_runtime_effect_controller"

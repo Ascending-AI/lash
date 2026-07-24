@@ -435,15 +435,7 @@ pub(in crate::runtime) async fn enqueue_turn_input_to_store(
         .await
         .map_err(|err| RuntimeError::new(RuntimeErrorCode::StoreCommitFailed, err.to_string()))?;
     if is_next_turn && let Some(driver) = queued_work_driver.as_ref() {
-        driver
-            .claim_and_run_pending(Some(&enqueued.session_id), "queued_turn_input")
-            .await
-            .map_err(|err| {
-                RuntimeError::new(
-                    RuntimeErrorCode::Other("queued_work".to_string()),
-                    err.to_string(),
-                )
-            })?;
+        drop(driver.wake_pending(Some(&enqueued.session_id), "queued_turn_input"));
     }
     Ok(enqueued)
 }
@@ -495,6 +487,16 @@ impl LashRuntime {
                         RuntimeErrorCode::Other("queued_work".to_string()),
                         err.to_string(),
                     )
+                })?;
+            // An inline or external driver may have committed the command
+            // before returning. Reconcile that authoritative head before this
+            // resident runtime reaches another commit boundary; its lease is
+            // advisory, so retaining the pre-drive head would manufacture a
+            // stale CAS conflict on close.
+            self.refresh_session_graph_from_store()
+                .await
+                .map_err(|err| {
+                    RuntimeError::new("session_command_post_drive_refresh", err.to_string())
                 })?;
         }
         Ok(crate::SessionCommandReceipt {

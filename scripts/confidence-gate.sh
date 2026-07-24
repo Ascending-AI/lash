@@ -1931,7 +1931,7 @@ write_confidence_summary() {
       "workflow": "Confidence",
       "lane": "broad",
       "trigger": "workflow_dispatch_or_schedule",
-      "artifact_name": "confidence-artifacts",
+      "artifact_name": "confidence-artifacts-attempt-${GITHUB_RUN_ATTEMPT:-local}",
       "coverage_scope": "${coverage_scope}",
       "coverage_evidence_status": "$(coverage_evidence_status)",
       "mutation_scope": "${mutation_scope}",

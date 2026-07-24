@@ -265,7 +265,7 @@ impl RuntimeScenarioPhase {
     fn releases_session_lease(&self) -> bool {
         matches!(
             self,
-            Self::Commit(_) | Self::Fault(RuntimeFaultPhase::CommitAfterSessionLeaseRelease)
+            Self::Commit(_) | Self::Fault(RuntimeFaultPhase::CommitAfterAdvisoryLeaseRelease)
         )
     }
 }
@@ -481,7 +481,7 @@ impl From<RuntimeLeasePhase> for RuntimeScenarioPhase {
 #[derive(Clone, Debug)]
 pub(crate) enum RuntimeFaultPhase {
     StaleQueueCompletion,
-    CommitAfterSessionLeaseRelease,
+    CommitAfterAdvisoryLeaseRelease,
 }
 
 impl From<RuntimeFaultPhase> for RuntimeScenarioPhase {
