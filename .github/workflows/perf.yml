@@ -57,7 +57,9 @@ jobs:
           python3 scripts/perfreport.py .benchmarks/perf-guard/lashlang.json >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload performance guard artifacts
+        if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: perf-guard-full
+          name: perf-guard-full-attempt-${{ github.run_attempt }}
           path: .benchmarks/perf-guard/*
+          if-no-files-found: warn

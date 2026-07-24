@@ -123,6 +123,9 @@ bash scripts/check-production-file-size.sh
 step "Docs lint"
 python3 scripts/lint_docs.py
 
+step "Test quarantine metadata"
+python3 scripts/check_test_quarantines.py
+
 run_release_script_tests
 
 step "Workspace check"

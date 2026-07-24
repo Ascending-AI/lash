@@ -66,7 +66,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: confidence-artifacts
+          name: confidence-artifacts-attempt-${{ github.run_attempt }}
           path: target/confidence/**
 
   sim-search:
@@ -105,5 +105,5 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: confidence-sim-search-${{ matrix.shard }}
+          name: confidence-sim-search-${{ matrix.shard }}-attempt-${{ github.run_attempt }}
           path: target/confidence/sim-search/**
