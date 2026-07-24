@@ -2265,6 +2265,7 @@ dependencies = [
  "lash-core",
  "lash-http-transport",
  "lash-lashlang-runtime",
+ "lash-llm-tools",
  "lash-protocol-rlm",
  "lash-protocol-standard",
  "lash-runtime",

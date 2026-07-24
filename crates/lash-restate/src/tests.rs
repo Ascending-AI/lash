@@ -17,6 +17,7 @@ use std::task::{Context, Poll, Waker};
 
 mod endpoint_protocol;
 mod process_tool_replay;
+mod tool_context_conformance;
 use endpoint_protocol::invoke_process_workflow_endpoint;
 
 struct PanicsWhenPolledAfterReady {
