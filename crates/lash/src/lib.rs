@@ -16,6 +16,7 @@ mod error;
 mod plugin_binding;
 pub(crate) mod process_admin;
 mod prompt_layer;
+pub mod recoverable_chat;
 #[cfg(feature = "rlm")]
 pub mod rlm;
 pub mod scenario_contracts;

@@ -1467,6 +1467,192 @@ async fn session_observation_recovery_stream_yields_gap_for_trimmed_cursor() -> 
     Ok(())
 }
 
+#[tokio::test]
+async fn recoverable_chat_conformance_snapshot_subscription_and_terminal_replacement() -> Result<()>
+{
+    let core = standard_core();
+    let session = core.session("recoverable-chat-terminal").open().await?;
+    let snapshot = session.observe().recoverable_chat_snapshot();
+    assert!(snapshot.read_view.messages().is_empty());
+    let mut stream = session
+        .observe()
+        .subscribe_recoverable_chat(snapshot.cursor);
+
+    session
+        .turn(TurnInput::text("terminal replacement"))
+        .turn_id("recoverable-terminal-turn")
+        .run()
+        .await?;
+
+    let terminal = loop {
+        let update = tokio::time::timeout(std::time::Duration::from_secs(2), stream.next())
+            .await
+            .expect("recoverable chat terminal timeout")
+            .expect("recoverable chat stream stays open")?;
+        if let crate::recoverable_chat::RecoverableChatUpdate::TerminalReplacement {
+            snapshot,
+            ..
+        } = update
+        {
+            break snapshot;
+        }
+    };
+    assert!(
+        terminal
+            .read_view
+            .messages()
+            .iter()
+            .any(|message| crate::message_text(message).contains("terminal replacement")),
+        "terminal replacement must carry the authoritative committed transcript"
+    );
+    Ok(())
+}
+
+#[tokio::test]
+async fn recoverable_chat_conformance_deduplicates_redelivery_identity() -> Result<()> {
+    let core = standard_core();
+    let session = core.session("recoverable-chat-redelivery").open().await?;
+    let cursor = session.observe().recoverable_chat_snapshot().cursor;
+    session
+        .turn(TurnInput::text("redelivery identity"))
+        .turn_id("recoverable-redelivery-turn")
+        .run()
+        .await?;
+
+    let mut first_delivery = session.observe().subscribe_recoverable_chat(cursor.clone());
+    let first_id = match first_delivery.next().await.expect("first replay event")? {
+        crate::recoverable_chat::RecoverableChatUpdate::Event { id, .. }
+        | crate::recoverable_chat::RecoverableChatUpdate::TerminalReplacement { id, .. } => id,
+        crate::recoverable_chat::RecoverableChatUpdate::ReplayGap { .. } => {
+            panic!("fresh cursor unexpectedly gapped")
+        }
+    };
+
+    let mut redelivery = session
+        .observe()
+        .subscribe_recoverable_chat(cursor)
+        .with_applied_event_ids([first_id.clone()]);
+    let next_id = match redelivery.next().await.expect("next replay event")? {
+        crate::recoverable_chat::RecoverableChatUpdate::Event { id, .. }
+        | crate::recoverable_chat::RecoverableChatUpdate::TerminalReplacement { id, .. } => id,
+        crate::recoverable_chat::RecoverableChatUpdate::ReplayGap { .. } => {
+            panic!("fresh cursor unexpectedly gapped")
+        }
+    };
+    assert_ne!(
+        next_id, first_id,
+        "an already-applied event identity must not be delivered twice"
+    );
+    Ok(())
+}
+
+#[tokio::test]
+async fn recoverable_chat_conformance_forwards_trimmed_gap_and_continues() -> Result<()> {
+    let core = explicit_ephemeral_facets(LashCore::standard_builder())
+        .provider(mock_provider())
+        .model(mock_model_spec())
+        .live_replay_store(Arc::new(lash_core::InMemoryLiveReplayStore::new(
+            lash_core::InMemoryLiveReplayStoreConfig {
+                max_events_per_session: 1,
+                ..lash_core::InMemoryLiveReplayStoreConfig::default()
+            },
+        )))
+        .build()?;
+    let session = core.session("recoverable-chat-gap").open().await?;
+    let cursor = session.observe().recoverable_chat_snapshot().cursor;
+    session
+        .turn(TurnInput::text("trim the initial cursor"))
+        .run()
+        .await?;
+    let mut stream = session.observe().subscribe_recoverable_chat(cursor);
+    let update = stream.next().await.expect("gap update")?;
+    let crate::recoverable_chat::RecoverableChatUpdate::ReplayGap { snapshot, gap } = update else {
+        panic!("trimmed cursor must be forwarded as a recoverable gap");
+    };
+    assert_eq!(gap.reason, lash_core::LiveReplayGapReason::Trimmed);
+    assert_eq!(gap.latest_cursor, snapshot.cursor);
+
+    session
+        .turn(TurnInput::text("live after gap"))
+        .run()
+        .await?;
+    let read_view = tokio::time::timeout(std::time::Duration::from_secs(2), async {
+        loop {
+            match stream.next().await.expect("post-gap live update")? {
+                crate::recoverable_chat::RecoverableChatUpdate::ReplayGap { snapshot, .. }
+                | crate::recoverable_chat::RecoverableChatUpdate::TerminalReplacement {
+                    snapshot,
+                    ..
+                } => break Ok::<_, crate::EmbedError>(snapshot.read_view),
+                crate::recoverable_chat::RecoverableChatUpdate::Event { .. } => {}
+            }
+        }
+    })
+    .await
+    .expect("post-gap continuation timeout")?;
+    assert!(
+        read_view
+            .messages()
+            .iter()
+            .any(|message| crate::message_text(message).contains("live after gap")),
+        "continued recovery must replace from a snapshot containing the next turn"
+    );
+    Ok(())
+}
+
+#[tokio::test]
+async fn recoverable_chat_conformance_disconnect_does_not_cancel_server_work() -> Result<()> {
+    let (entered_tx, entered_rx) = oneshot::channel();
+    let entered_tx = Arc::new(StdMutex::new(Some(entered_tx)));
+    let release = Arc::new(tokio::sync::Notify::new());
+    let provider = crate::testing::TestProvider::builder()
+        .kind("recoverable-chat-disconnect")
+        .complete({
+            let entered_tx = Arc::clone(&entered_tx);
+            let release = Arc::clone(&release);
+            move |_request| {
+                let entered_tx = Arc::clone(&entered_tx);
+                let release = Arc::clone(&release);
+                async move {
+                    if let Some(tx) = entered_tx.lock().expect("entered sender").take() {
+                        let _ = tx.send(());
+                    }
+                    release.notified().await;
+                    Ok(text_response("completed after observer disconnect"))
+                }
+            }
+        })
+        .build()
+        .into_handle();
+    let core = explicit_ephemeral_facets(LashCore::standard_builder())
+        .provider(provider)
+        .model(mock_model_spec())
+        .build()?;
+    let session = core.session("recoverable-chat-disconnect").open().await?;
+    let cursor = session.observe().recoverable_chat_snapshot().cursor;
+    let stream = session.observe().subscribe_recoverable_chat(cursor);
+    let run_session = session.clone();
+    let mut turn = tokio::spawn(async move {
+        run_session
+            .turn(TurnInput::text("keep running"))
+            .turn_id("disconnect-is-not-cancel")
+            .run()
+            .await
+    });
+    entered_rx.await.expect("provider entered");
+    drop(stream);
+    assert!(
+        tokio::time::timeout(std::time::Duration::from_millis(50), &mut turn)
+            .await
+            .is_err(),
+        "disconnecting observation must not cancel server work"
+    );
+    release.notify_one();
+    let result = turn.await.expect("join turn")?;
+    assert!(matches!(result.result.outcome, TurnOutcome::Finished(_)));
+    Ok(())
+}
+
 fn observation_assistant_delta(event: &lash_core::SessionObservationEvent) -> Option<String> {
     match &event.payload {
         lash_core::SessionObservationEventPayload::TurnActivity(activity) => {
