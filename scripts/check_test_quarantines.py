@@ -50,7 +50,8 @@ def validate_manifest(path: Path, today: dt.date | None = None) -> None:
     if not isinstance(entries, list):
         fail(f"{path}: quarantines must be an array")
 
-    seen: set[str] = set()
+    seen_ids: set[str] = set()
+    seen_targets: set[tuple[str, str]] = set()
     for index, entry in enumerate(entries):
         if not isinstance(entry, dict):
             fail(f"entry {index}: quarantine metadata must be an object")
@@ -62,15 +63,24 @@ def validate_manifest(path: Path, today: dt.date | None = None) -> None:
             fail(f"entry {index}: unknown fields: {', '.join(sorted(unknown))}")
 
         entry_id = nonempty_string(f"entry {index}", "id", entry["id"])
-        if entry_id in seen:
+        if entry_id in seen_ids:
             fail(f"{entry_id}: duplicate quarantine id")
-        seen.add(entry_id)
-        nonempty_string(entry_id, "test_selector", entry["test_selector"])
+        seen_ids.add(entry_id)
+        test_selector = nonempty_string(
+            entry_id, "test_selector", entry["test_selector"]
+        )
         nonempty_string(entry_id, "owner", entry["owner"])
 
         mode = nonempty_string(entry_id, "mode", entry["mode"])
         if mode not in MODES:
             fail(f"{entry_id}: mode must be one of {', '.join(sorted(MODES))}")
+        target = (mode, test_selector)
+        if target in seen_targets:
+            fail(
+                f"{entry_id}: duplicate quarantine target "
+                f"mode={mode} test_selector={test_selector}"
+            )
+        seen_targets.add(target)
 
         issue_url = nonempty_string(entry_id, "issue_url", entry["issue_url"])
         parsed_issue = urlparse(issue_url)

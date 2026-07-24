@@ -1,8 +1,12 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
+import datetime as dt
+import json
 import pathlib
 import re
+import runpy
+import tempfile
 import unittest
 
 
@@ -28,6 +32,9 @@ OLD_BROAD_CI_STEP_NAME = "Run bounded broad " + "replay/backend confidence"
 OLD_BROAD_CI_JOB_ID = "bounded-" + "broad-replay-backend"
 OLD_BROAD_CI_ARTIFACT = "bounded-" + "broad-replay-backend-confidence"
 OLD_BROAD_CI_OUT_ROOT = "target/confidence-ci/" + OLD_BROAD_CI_JOB_ID
+VALIDATE_QUARANTINE_MANIFEST = runpy.run_path(str(QUARANTINE_CHECK))[
+    "validate_manifest"
+]
 
 
 def shell_int_constant(script: str, name: str) -> int:
@@ -47,6 +54,15 @@ def workflow_job_block(workflow: str, job_id: str) -> str:
 
 
 class ConfidenceGateCiContractTest(unittest.TestCase):
+    def assert_quarantine_fixture_invalid(
+        self, payload: dict[str, object], message: str
+    ) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            fixture = pathlib.Path(directory) / "test-quarantines.json"
+            fixture.write_text(json.dumps(payload), encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, message):
+                VALIDATE_QUARANTINE_MANIFEST(fixture, dt.date(2026, 1, 1))
+
     def test_ci_shards_fast_confidence_not_broad_replay_backend(self) -> None:
         workflow = WORKFLOW.read_text(encoding="utf-8")
         gate = GATE.read_text(encoding="utf-8")
@@ -87,7 +103,6 @@ class ConfidenceGateCiContractTest(unittest.TestCase):
         confidence_workflow = CONFIDENCE_WORKFLOW.read_text(encoding="utf-8")
         perf_workflow = PERF_WORKFLOW.read_text(encoding="utf-8")
         gate = GATE.read_text(encoding="utf-8")
-        quarantine_check = QUARANTINE_CHECK.read_text(encoding="utf-8")
 
         self.assertIn("python3 scripts/check_test_quarantines.py", workflow)
         self.assertIn(
@@ -106,8 +121,50 @@ class ConfidenceGateCiContractTest(unittest.TestCase):
             '"artifact_name": "confidence-artifacts-attempt-${GITHUB_RUN_ATTEMPT:-local}"',
             gate,
         )
-        for field in ["owner", "issue_url", "rca_status", "expires_on"]:
-            self.assertIn(f'"{field}"', quarantine_check)
+
+    def test_quarantine_validator_rejects_malformed_expired_and_duplicate_fixtures(
+        self,
+    ) -> None:
+        valid_entry = {
+            "id": "FIG-100",
+            "test_selector": "crate::tests::flaky",
+            "mode": "retry",
+            "owner": "@runtime",
+            "issue_url": "https://linear.app/example/issue/FIG-100",
+            "rca_status": "investigating",
+            "expires_on": "2026-02-01",
+        }
+        self.assert_quarantine_fixture_invalid(
+            {
+                "schema": "lash.test-quarantines.v1",
+                "quarantines": [{key: value for key, value in valid_entry.items() if key != "owner"}],
+            },
+            "missing fields: owner",
+        )
+        self.assert_quarantine_fixture_invalid(
+            {
+                "schema": "lash.test-quarantines.v1",
+                "quarantines": [{**valid_entry, "expires_on": "2025-12-31"}],
+            },
+            "quarantine expired",
+        )
+        self.assert_quarantine_fixture_invalid(
+            {
+                "schema": "lash.test-quarantines.v1",
+                "quarantines": [valid_entry, valid_entry],
+            },
+            "duplicate quarantine id",
+        )
+        self.assert_quarantine_fixture_invalid(
+            {
+                "schema": "lash.test-quarantines.v1",
+                "quarantines": [
+                    valid_entry,
+                    {**valid_entry, "id": "FIG-101"},
+                ],
+            },
+            "duplicate quarantine target",
+        )
 
     def test_lint_job_runs_clippy_fmt_and_boundary_guards(self) -> None:
         workflow = WORKFLOW.read_text(encoding="utf-8")
