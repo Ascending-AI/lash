@@ -170,6 +170,7 @@
             restate_cron_job_keys: Arc::new(Mutex::new(BTreeSet::new())),
             mail_world: mail::MailWorld::new(),
             active_turns: ActiveTurns::default(),
+            authorization: WorkbenchAuthorization::allow_all(),
         };
 
         assert!(

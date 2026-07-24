@@ -106,7 +106,8 @@ async fn async_main() -> AnyhowResult<()> {
     let subagent_registry = Arc::new(lash_subagents::default_registry(&BTreeMap::new()));
     let mail_world = mail::MailWorld::new();
     let session_ids = WorkbenchSessionIds::persistent(data_dir.join("session-id"))?;
-    let event_tx = SessionEventRegistry::new(1024);
+    let event_tx =
+        SessionEventRegistry::persistent(data_dir.join("product-events.json"), 1024)?;
     let restate_http = reqwest::Client::new();
     let active_turns = ActiveTurns::persistent(data_dir.join("active-turns.json"))?;
     // Best-effort freshness feed for appended process events (ADR 0017). The
@@ -224,6 +225,7 @@ async fn async_main() -> AnyhowResult<()> {
         restate_cron_job_keys: Arc::new(Mutex::new(BTreeSet::new())),
         mail_world,
         active_turns,
+        authorization: WorkbenchAuthorization::allow_all(),
     };
     restate::spawn_restate_endpoint(
         restate_endpoint_addr,
@@ -254,6 +256,7 @@ async fn async_main() -> AnyhowResult<()> {
         .route("/healthz", get(healthz))
         .route("/api/state", get(app_state))
         .route("/api/events", get(session_events))
+        .route("/api/observations", get(session_observations))
         .route("/api/turn", post(send_turn))
         .route("/api/attachments", post(upload_attachment))
         .route("/api/attachments/{attachment_id}", get(retrieve_attachment))

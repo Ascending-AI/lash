@@ -11,18 +11,36 @@ async fn app_state(
     Query(query): Query<SessionQuery>,
 ) -> Result<Json<StateSnapshot>, AppError> {
     let session_id = query.resolve(&state)?;
+    state
+        .authorization
+        .authorize(WorkbenchAuthorizationAction::Observe {
+            session_id: session_id.clone(),
+        })?;
     let session = state
         .core
         .session(session_id.clone())
         .open()
         .await
         .map_err(AppError::internal)?;
-    let mut messages: Vec<_> = session
-        .read_view()
+    let observation_snapshot = session.observe().recoverable_chat_snapshot();
+    let product_events = state.event_tx.snapshot(&session_id);
+    let mut messages: Vec<_> = observation_snapshot
+        .read_view
         .messages()
         .iter()
         .map(chat_message_from_committed)
         .collect();
+    let product_messages = product_events
+        .events
+        .iter()
+        .filter_map(|event| match &event.item {
+            StreamItem::Message { message } => Some(message.clone()),
+            StreamItem::TurnInput { .. } | StreamItem::Done => None,
+        })
+        .collect::<Vec<_>>();
+    if !product_messages.is_empty() {
+        messages = product_messages;
+    }
     let pending_turn_inputs = session
         .pending_turn_inputs()
         .await
@@ -32,14 +50,25 @@ async fn app_state(
         .await
         .map_err(AppError::internal)?;
     let usage = session.usage_report();
+    let observation =
+        RemoteSessionObservation::from_core(lash::observe::SessionObservation {
+            read_view: observation_snapshot.read_view,
+            cursor: observation_snapshot.cursor,
+        });
     session.close().await.map_err(AppError::internal)?;
     let active_turns = state.active_turns.for_session(&session_id);
+    let rendered_user_texts = messages
+        .iter()
+        .filter(|message| message.role == "user")
+        .map(|message| message.text.clone())
+        .collect::<BTreeSet<_>>();
     messages.extend(active_turns.iter().filter_map(|address| {
         state
             .active_turns
             .prompt_for(&address.session_id, &address.turn_id)
+            .filter(|text| !rendered_user_texts.contains(text))
             .map(|text| ChatMessage {
-                id: format!("workbench-active-prompt:{}", address.turn_id),
+                id: format!("workbench-user:{}", address.turn_id),
                 role: "user".to_string(),
                 text,
                 at: String::new(),
@@ -48,6 +77,8 @@ async fn app_state(
     Ok(Json(StateSnapshot {
         settings: state.settings_for_session(session_id.clone()),
         messages,
+        observation,
+        product_events,
         active_turns,
         pending_turn_inputs,
         turn_input_applications,
@@ -160,48 +191,76 @@ fn chat_message_from_committed(message: &lash::messages::Message) -> ChatMessage
 
 async fn session_events(
     State(state): State<AppState>,
-    Query(query): Query<EventsQuery>,
+    Query(query): Query<ProductEventsQuery>,
 ) -> Result<Response, AppError> {
     let session_id = SessionQuery {
         session_id: query.session_id.clone(),
     }
     .resolve(&state)?;
-    let session = state
-        .core
-        .session(session_id.clone())
-        .open()
-        .await
-        .map_err(AppError::internal)?;
-    let observable = session.observe();
-    let cursor = match query.cursor.as_deref().filter(|cursor| !cursor.trim().is_empty()) {
-        Some(cursor) => serde_json::from_value::<SessionCursor>(json!(cursor))
-            .map_err(|err| AppError::bad_request(format!("invalid session cursor: {err}")))?,
-        None => observable.current_observation().cursor,
-    };
-    let mut product_events = state.event_tx.subscribe(&session_id);
-    let (tx, rx) = mpsc::channel::<StreamItem>(64);
-    let observation_tx = tx.clone();
+    state
+        .authorization
+        .authorize(WorkbenchAuthorizationAction::Observe {
+            session_id: session_id.clone(),
+        })?;
+    let (replay, mut product_events) = state
+        .event_tx
+        .subscribe_after(&session_id, query.cursor.unwrap_or(0));
+    let event_registry = state.event_tx.clone();
+    let (tx, rx) = mpsc::channel::<ProductStreamItem>(64);
     tokio::spawn(async move {
-        forward_session_observations(session, cursor, observation_tx).await;
-    });
-    tokio::spawn(async move {
+        for event in replay {
+            if tx.send(ProductStreamItem::Event { event }).await.is_err() {
+                return;
+            }
+        }
         loop {
             match product_events.recv().await {
-                Ok(item) => {
-                    if tx.send(item).await.is_err() {
+                Ok(event) => {
+                    if tx.send(ProductStreamItem::Event { event }).await.is_err() {
                         break;
                     }
                 }
-                Err(broadcast::error::RecvError::Lagged(count)) => {
+                Err(broadcast::error::RecvError::Lagged(_count)) => {
                     let _ = tx
-                        .send(StreamItem::Error {
-                            message: format!("event stream skipped {count} updates"),
+                        .send(ProductStreamItem::Resync {
+                            snapshot: event_registry.snapshot(&session_id),
                         })
                         .await;
                 }
                 Err(broadcast::error::RecvError::Closed) => break,
             }
         }
+    });
+    Ok(ndjson_response(rx))
+}
+
+async fn session_observations(
+    State(state): State<AppState>,
+    Query(query): Query<EventsQuery>,
+) -> Result<Response, AppError> {
+    let session_id = SessionQuery {
+        session_id: query.session_id.clone(),
+    }
+    .resolve(&state)?;
+    state
+        .authorization
+        .authorize(WorkbenchAuthorizationAction::Observe {
+            session_id: session_id.clone(),
+        })?;
+    let session = state
+        .core
+        .session(session_id)
+        .open()
+        .await
+        .map_err(AppError::internal)?;
+    let cursor = match query.cursor.as_deref().filter(|cursor| !cursor.trim().is_empty()) {
+        Some(cursor) => serde_json::from_value::<SessionCursor>(json!(cursor))
+            .map_err(|err| AppError::bad_request(format!("invalid session cursor: {err}")))?,
+        None => session.observe().recoverable_chat_snapshot().cursor,
+    };
+    let (tx, rx) = mpsc::channel::<ObservationStreamItem>(64);
+    tokio::spawn(async move {
+        forward_session_observations(session, cursor, tx).await;
     });
     Ok(ndjson_response(rx))
 }
@@ -242,6 +301,11 @@ async fn send_turn(
         request.model_variant.as_deref(),
     )?;
     let session_id = query.resolve(&state)?;
+    state
+        .authorization
+        .authorize(WorkbenchAuthorizationAction::EnqueueTurn {
+            session_id: session_id.clone(),
+        })?;
     state.trace_for_session(
         &session_id,
         "api.turn.request",
@@ -251,9 +315,14 @@ async fn send_turn(
             "model": serde_json::to_value(&turn_model).unwrap_or(Value::Null),
         }),
     );
-    state.push_message_for_session(&session_id, "user", text.clone());
     state.set_selected_model(ModelSelection::from_spec(&turn_model));
     let turn_id = format!("workbench-turn-{}", uuid::Uuid::new_v4());
+    state.push_message_with_id_for_session(
+        &session_id,
+        format!("workbench-user:{turn_id}"),
+        "user",
+        text.clone(),
+    );
     state.track_turn_prompt(&session_id, &turn_id, text.clone());
     if let Err(err) = restate::submit_user_turn(
         &state,
@@ -283,6 +352,11 @@ async fn enqueue_turn_input(
         return Err(AppError::bad_request("message text is required"));
     }
     let session_id = query.resolve(&state)?;
+    state
+        .authorization
+        .authorize(WorkbenchAuthorizationAction::EnqueueTurnInput {
+            session_id: session_id.clone(),
+        })?;
     let ingress = match request.ingress {
         TurnInputIngressRequest::ActiveTurn => {
             let active = state.active_turns.for_session(&session_id);
@@ -330,9 +404,13 @@ async fn enqueue_turn_input(
         "turn_input.enqueued",
         serde_json::to_value(&receipt).unwrap_or(Value::Null),
     );
-    state.publish_for_session(&session_id, StreamItem::TurnInput {
-        receipt: receipt.clone(),
-    });
+    state.publish_for_session_identified(
+        &session_id,
+        format!("turn-input:{}", receipt.input_id),
+        StreamItem::TurnInput {
+            receipt: receipt.clone(),
+        },
+    );
     Ok(Json(receipt))
 }
 
@@ -691,6 +769,11 @@ async fn cancel_turn(
     Query(query): Query<SessionQuery>,
 ) -> Result<Json<TurnCancelResponse>, AppError> {
     let session_id = query.resolve(&state)?;
+    state
+        .authorization
+        .authorize(WorkbenchAuthorizationAction::CancelTurn {
+            session_id: session_id.clone(),
+        })?;
     let cancellations = state.cancel_turns_for_session(&session_id).await?;
     state.trace_for_session(
         &session_id,
@@ -759,6 +842,8 @@ async fn reset_chat(
     Ok(Json(StateSnapshot {
         settings: state.settings_for_session(new_session_id),
         messages: Vec::new(),
+        observation: session.observe().current_remote_observation(),
+        product_events: ProductEventSnapshot::default(),
         active_turns: Vec::new(),
         pending_turn_inputs: Vec::new(),
         turn_input_applications: Vec::new(),
@@ -932,12 +1017,14 @@ async fn lashlang_graph(
     Ok(Json(graph))
 }
 
-fn ndjson_response(rx: mpsc::Receiver<StreamItem>) -> Response {
+fn ndjson_response<T>(rx: mpsc::Receiver<T>) -> Response
+where
+    T: Serialize + Send + 'static,
+{
     let stream = ReceiverStream::new(rx).map(|item| {
-        let mut line = serde_json::to_string(&item).unwrap_or_else(|err| {
+        let mut line = serde_json::to_string(&item).unwrap_or_else(|_err| {
             json!({
-                "type": "error",
-                "message": err.to_string(),
+                "type": "unavailable",
             })
             .to_string()
         });
@@ -956,10 +1043,10 @@ fn ndjson_response(rx: mpsc::Receiver<StreamItem>) -> Response {
 async fn forward_session_observations(
     session: lash::LashSession,
     cursor: SessionCursor,
-    tx: mpsc::Sender<StreamItem>,
+    tx: mpsc::Sender<ObservationStreamItem>,
 ) {
     if tx
-        .send(StreamItem::ReplayCursor {
+        .send(ObservationStreamItem::Cursor {
             cursor: cursor.to_string(),
         })
         .await
@@ -969,34 +1056,44 @@ async fn forward_session_observations(
     }
     let mut stream = match session
         .observe()
-        .subscribe_and_recover_remote(RemoteSessionCursor::new(cursor.to_string()))
+        .subscribe_and_recover_remote(RemoteSessionCursor::from(cursor))
     {
         Ok(stream) => stream,
         Err(err) => {
-            let _ = tx
-                .send(StreamItem::Error {
-                    message: err.to_string(),
-                })
-                .await;
+            eprintln!("warning: workbench could not open Lash observation stream: {err}");
             return;
         }
     };
     while let Some(item) = stream.next().await {
         match item {
-            Ok(RemoteSessionObservationStreamItem::Event(event)) => {
-                if tx
-                    .send(StreamItem::Observation {
+            Ok(lash::observe::RemoteSessionObservationStreamItem::Event(event)) => {
+                let update = if matches!(
+                    &event.event,
+                    RemoteSessionObservationEventPayload::Committed
+                ) {
+                    ObservationStreamItem::TerminalReplacement {
+                        cursor: event.cursor.clone(),
                         event: Box::new(event),
-                    })
+                    }
+                } else {
+                    ObservationStreamItem::Observation {
+                        event: Box::new(event),
+                    }
+                };
+                if tx
+                    .send(update)
                     .await
                     .is_err()
                 {
                     break;
                 }
             }
-            Ok(RemoteSessionObservationStreamItem::Gap { observation, gap }) => {
+            Ok(lash::observe::RemoteSessionObservationStreamItem::Gap {
+                observation,
+                gap,
+            }) => {
                 if tx
-                    .send(StreamItem::ReplayGap {
+                    .send(ObservationStreamItem::ReplayGap {
                         observation: Box::new(observation),
                         gap: Box::new(gap),
                     })
@@ -1007,11 +1104,7 @@ async fn forward_session_observations(
                 }
             }
             Err(err) => {
-                let _ = tx
-                    .send(StreamItem::Error {
-                        message: err.to_string(),
-                    })
-                    .await;
+                eprintln!("warning: workbench Lash observation stream stopped: {err}");
                 break;
             }
         }
@@ -1034,6 +1127,10 @@ impl TurnStreamState {
             .iter()
             .map(|chunk| chunk.text.as_str())
             .collect()
+    }
+
+    fn settle_terminal(&mut self) {
+        self.assistant_prose.clear();
     }
 }
 
@@ -1110,6 +1207,31 @@ mod turn_stream_state_tests {
                 .expect("turn state lock")
                 .assistant_prose(),
             "kept answer"
+        );
+    }
+
+    #[tokio::test]
+    async fn workbench_cancellation_after_provisional_prose_retracts_the_draft() {
+        let turn_state = Arc::new(Mutex::new(TurnStreamState::default()));
+        let sink = ChannelTurnEvents {
+            turn_state: Arc::clone(&turn_state),
+        };
+        sink.emit(TurnActivity::new(
+            lash::TurnActivityId::new("cancelled-attempt"),
+            TurnEvent::AssistantProseDelta {
+                text: "provisional text".into(),
+            },
+        ))
+        .await;
+        {
+            let mut projection = turn_state.lock().expect("turn state lock");
+            assert_eq!(projection.assistant_prose(), "provisional text");
+            projection.settle_terminal();
+            assert!(projection.assistant_prose().is_empty());
+        }
+        assert!(
+            ui::INDEX_HTML.contains("assistantDraft?.closest(\".message\")?.remove();"),
+            "the browser terminal projection must retract the provisional assistant row"
         );
     }
 }

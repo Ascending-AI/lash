@@ -31,29 +31,7 @@ mod tests {
         .expect("runtime thread")
     }
 
-    #[test]
-    fn session_event_registry_isolates_channels_and_recreates_after_removal() {
-        let registry = SessionEventRegistry::new(4);
-        let mut session_a = registry.subscribe("session-a");
-        let mut session_b = registry.subscribe("session-b");
-
-        registry.publish("session-a", StreamItem::Done);
-        assert!(matches!(session_a.try_recv(), Ok(StreamItem::Done)));
-        assert!(matches!(
-            session_b.try_recv(),
-            Err(broadcast::error::TryRecvError::Empty)
-        ));
-
-        registry.remove("session-a");
-        assert!(!registry.contains("session-a"));
-        let mut replacement_a = registry.subscribe("session-a");
-        registry.publish("session-a", StreamItem::Done);
-        assert!(matches!(replacement_a.try_recv(), Ok(StreamItem::Done)));
-        assert!(matches!(
-            session_a.try_recv(),
-            Err(broadcast::error::TryRecvError::Closed)
-        ));
-    }
+    include!("tests/recoverable_chat.rs");
 
     pub(super) fn explicit_durable_test_facets(
         data_dir: &std::path::Path,
@@ -276,9 +254,9 @@ mod tests {
         assert!(ui::INDEX_HTML.contains("injected now"));
         assert!(ui::INDEX_HTML.contains("queued next"));
         assert!(ui::INDEX_HTML.contains("/api/turn/input"));
-        assert!(ui::INDEX_HTML.contains("item.type === \"turn_input\""));
-        assert!(ui::INDEX_HTML.contains("item.type === \"message\""));
-        assert!(ui::INDEX_HTML.contains("renderMessage(item.message)"));
+        assert!(ui::INDEX_HTML.contains("event.type === \"turn_input\""));
+        assert!(ui::INDEX_HTML.contains("event.type === \"message\""));
+        assert!(ui::INDEX_HTML.contains("renderMessage(event.message)"));
     }
 
     #[test]
@@ -473,6 +451,7 @@ mod tests {
             restate_cron_job_keys: Arc::new(Mutex::new(BTreeSet::new())),
             mail_world: mail::MailWorld::new(),
             active_turns: ActiveTurns::default(),
+            authorization: WorkbenchAuthorization::allow_all(),
         };
         let mut events = state.event_tx.subscribe(&state.current_session_id());
 
@@ -480,7 +459,10 @@ mod tests {
 
         assert!(matches!(
             events.try_recv(),
-            Ok(StreamItem::Done)
+            Ok(ProductEvent {
+                item: StreamItem::Done,
+                ..
+            })
         ));
         let _ = std::fs::remove_dir_all(data_dir);
     }
@@ -546,20 +528,27 @@ mod tests {
             restate_cron_job_keys: Arc::new(Mutex::new(BTreeSet::new())),
             mail_world: mail::MailWorld::new(),
             active_turns: ActiveTurns::default(),
+            authorization: WorkbenchAuthorization::allow_all(),
         };
         let session_id = state.current_session_id();
         let mut events = state.event_tx.subscribe(&session_id);
 
         state.track_turn(&session_id, "foreground-turn");
-        state.publish_trigger_dispatch_done(&session_id);
+        state.publish_trigger_dispatch_done(&session_id, "trigger-running");
         assert!(
             matches!(events.try_recv(), Err(broadcast::error::TryRecvError::Empty)),
             "trigger dispatch must not publish Done while a foreground turn is active"
         );
 
         state.active_turns.remove(&session_id, "foreground-turn");
-        state.publish_trigger_dispatch_done(&session_id);
-        assert!(matches!(events.try_recv(), Ok(StreamItem::Done)));
+        state.publish_trigger_dispatch_done(&session_id, "trigger-settled");
+        assert!(matches!(
+            events.try_recv(),
+            Ok(ProductEvent {
+                item: StreamItem::Done,
+                ..
+            })
+        ));
         let _ = std::fs::remove_dir_all(data_dir);
     }
 
@@ -624,11 +613,11 @@ finish "observed through live replay"
                 .expect("timed out waiting for stream item")
                 .expect("stream item");
             match item {
-                StreamItem::ReplayCursor { cursor } => {
+                ObservationStreamItem::Cursor { cursor } => {
                     assert!(!cursor.is_empty(), "cursor should be opaque but non-empty");
                     saw_cursor = true;
                 }
-                StreamItem::Observation { event } => {
+                ObservationStreamItem::Observation { event } => {
                     let value = serde_json::to_value(&event).expect("remote event json");
                     if value.pointer("/type").and_then(Value::as_str) == Some("turn_activity")
                         && value.pointer("/activity/type").and_then(Value::as_str)
@@ -637,11 +626,8 @@ finish "observed through live replay"
                         saw_final_value_observation = true;
                     }
                 }
-                StreamItem::ReplayGap { .. }
-                | StreamItem::Message { .. }
-                | StreamItem::TurnInput { .. }
-                | StreamItem::Error { .. }
-                | StreamItem::Done => {}
+                ObservationStreamItem::ReplayGap { .. }
+                | ObservationStreamItem::TerminalReplacement { .. } => {}
             }
             if saw_cursor && saw_final_value_observation {
                 break;
@@ -724,7 +710,7 @@ finish "gap source"
                 .await
                 .expect("timed out waiting for stream item")
                 .expect("stream item");
-            if let StreamItem::ReplayGap { observation, gap } = item {
+            if let ObservationStreamItem::ReplayGap { observation, gap } = item {
                 assert_eq!(gap.requested_cursor, requested_cursor);
                 assert!(
                     !gap.latest_cursor.is_empty(),
@@ -811,6 +797,7 @@ finish "gap source"
             restate_cron_job_keys: Arc::new(Mutex::new(BTreeSet::new())),
             mail_world: mail::MailWorld::new(),
             active_turns: ActiveTurns::default(),
+            authorization: WorkbenchAuthorization::allow_all(),
         };
         let session_id = state.current_session_id();
         let mut events = state.event_tx.subscribe(&session_id);
@@ -859,7 +846,10 @@ finish "gap source"
         ));
         assert!(matches!(
             events.try_recv(),
-            Ok(StreamItem::Done)
+            Ok(ProductEvent {
+                item: StreamItem::Done,
+                ..
+            })
         ));
         let duplicate = state
             .core
@@ -1094,6 +1084,7 @@ finish initial
             restate_cron_job_keys: Arc::new(Mutex::new(BTreeSet::new())),
             mail_world: mail_world.clone(),
             active_turns: ActiveTurns::default(),
+            authorization: WorkbenchAuthorization::allow_all(),
         };
 
         let receipt = enqueue_tool_catalog_refresh(&state, "initial_empty")
@@ -1234,7 +1225,9 @@ finish initial
             lash::ModelSpec::from_token_limits("test-model", Default::default(), 4096, None).expect("model spec");
         let model = with_workbench_model_capability(model);
         let (restate_ingress_url, mut restate_requests) = spawn_restate_ingress_capture().await;
-        let event_tx = SessionEventRegistry::new(1024);
+        let event_tx =
+            SessionEventRegistry::persistent(data_dir.join("product-events.json"), 1024)
+                .expect("open durable product events");
         let factory = lash_protocol_rlm::RlmProtocolPluginFactory::new(
             lash::rlm::RlmProtocolPluginConfig::default()
                 .with_lashlang_abilities(workbench_lashlang_abilities()),
@@ -1284,6 +1277,7 @@ finish initial
             restate_cron_job_keys: Arc::new(Mutex::new(BTreeSet::new())),
             mail_world: mail::MailWorld::new(),
             active_turns: ActiveTurns::default(),
+            authorization: WorkbenchAuthorization::allow_all(),
         };
         let session = state
             .core
@@ -1452,6 +1446,7 @@ finish initial
             restate_cron_job_keys: Arc::new(Mutex::new(BTreeSet::new())),
             mail_world: mail::MailWorld::new(),
             active_turns: ActiveTurns::default(),
+            authorization: WorkbenchAuthorization::allow_all(),
         };
         let old_session_id = state.current_session_id();
         let _deleted_session_events = state.event_tx.subscribe(&old_session_id);
@@ -1870,7 +1865,9 @@ finish initial
             .processes()
             .observer()
             .expect("process observer configured");
-        let event_tx = SessionEventRegistry::new(1024);
+        let event_tx =
+            SessionEventRegistry::persistent(data_dir.join("product-events.json"), 1024)
+                .expect("open durable product events");
         let state = AppState {
             core,
             attachment_store: test_attachment_store(),
@@ -1895,6 +1892,7 @@ finish initial
             restate_cron_job_keys: Arc::new(Mutex::new(BTreeSet::new())),
             mail_world: mail::MailWorld::new(),
             active_turns,
+            authorization: WorkbenchAuthorization::allow_all(),
         };
         LiveWorkbenchRestateHarness {
             state,

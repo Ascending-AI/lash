@@ -23,7 +23,7 @@ use base64::Engine as _;
 use bytes::Bytes;
 use chrono::Utc;
 use futures_util::StreamExt;
-use lash::observe::{RemoteSessionObservationStreamItem, SessionCursor};
+use lash::observe::SessionCursor;
 use lash::plugins::{
     PluginError, PluginFactory, PluginRegistrar, PluginSessionContext, SessionPlugin,
 };
@@ -40,7 +40,7 @@ use lash::{
 use lash_provider_openai::{OPENROUTER_BASE_URL, OpenAiCompat, OpenAiCompatibleProvider};
 use lash_remote_protocol::{
     RemoteLiveReplayGap, RemoteSessionCursor, RemoteSessionObservation,
-    RemoteSessionObservationEvent,
+    RemoteSessionObservationEvent, RemoteSessionObservationEventPayload,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};

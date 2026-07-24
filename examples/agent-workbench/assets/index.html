@@ -2100,6 +2100,8 @@
     });
 
     const renderedMessages = new Set();
+    const renderedProductEvents = new Set();
+    const appliedObservationEvents = new Set();
     const renderedIngressInputs = new Set();
     const appliedTurnInputs = new Map();
     let assistantDraft = null;
@@ -2112,9 +2114,11 @@
     let busy = false;
     let resetInFlight = false;
     let controller = null;
-    let eventStreamController = null;
-    let eventStreamGeneration = 0;
-    let replayCursor = null;
+    let productStreamController = null;
+    let observationStreamController = null;
+    let streamGeneration = 0;
+    let productCursor = 0;
+    let observationCursor = null;
     let lastRequest = null;
     let selectedAttachment = null;
     let attachmentUploadInFlight = false;
@@ -2526,10 +2530,11 @@
     }
 
     function compactToolPayload(event) {
+      const succeeded = toolSucceeded(event);
       return {
         args: cleanArgs(event.args),
-        status: toolOutcome(event).status || (toolSucceeded(event) ? "success" : "unknown"),
-        result: toolResult(event)
+        status: toolOutcome(event).status || (succeeded ? "success" : "unknown"),
+        ...(succeeded ? { result: toolResult(event) } : {})
       };
     }
 
@@ -2574,8 +2579,7 @@
     }
 
     function summarizeToolFailure(result) {
-      if (typeof result === "string") return result;
-      return result?.message || result?.error || "Tool failed";
+      return "Tool failed";
     }
 
     function codeBlockStateLabel(event) {
@@ -2741,6 +2745,11 @@
 
     function finishTransientRows() {
       for (const tool of pendingTools) appendTool(tool);
+      assistantDraft?.closest(".message")?.remove();
+      assistantDraft = null;
+      assistantDraftText = "";
+      assistantDraftChunks = [];
+      for (const chunk of reasoningChunks) chunk.node?.remove();
       pendingCodeBlock = null;
       pendingTools = [];
       reasoning = null;
@@ -2758,7 +2767,7 @@
       if (event.type === "tool_call_completed") appendCompletedTool(event);
       if (event.type === "final_value") appendAssistantText(renderTerminalValue(event.value));
       if (event.type === "tool_value") appendAssistantText(renderTerminalValue(event.value));
-      if (event.type === "error") renderError(event.message, { retry: true });
+      if (event.type === "error") renderError("turn could not be completed", { retry: true });
     }
 
     async function postCommand(url, payload) {
@@ -2785,8 +2794,8 @@
           signal: commandController.signal
         });
         if (!response.ok) {
-          const text = await response.text();
-          renderError(text || "request failed", { retry: true });
+          await response.text();
+          renderError("request could not be completed", { retry: true });
           setBusy(false, "ready");
           return false;
         }
@@ -2795,7 +2804,7 @@
         if (error.name === "AbortError") {
           if (!resetInFlight) renderNote("turn stopped");
         } else {
-          renderError(error.message || String(error), { retry: true });
+          renderError("request could not be completed", { retry: true });
         }
         if (!resetInFlight) setBusy(false, "ready");
         return false;
@@ -2805,22 +2814,27 @@
       }
     }
 
-    function restartEventStream(resetCursor = false) {
-      if (resetCursor) replayCursor = null;
-      eventStreamGeneration += 1;
-      if (eventStreamController) eventStreamController.abort();
-      eventStreamController = new AbortController();
-      connectEvents(eventStreamGeneration, eventStreamController.signal);
+    function restartEventStreams(resetCursors = false) {
+      if (resetCursors) {
+        productCursor = 0;
+        observationCursor = null;
+        appliedObservationEvents.clear();
+      }
+      streamGeneration += 1;
+      if (productStreamController) productStreamController.abort();
+      if (observationStreamController) observationStreamController.abort();
+      productStreamController = new AbortController();
+      observationStreamController = new AbortController();
+      connectProductEvents(streamGeneration, productStreamController.signal);
+      connectObservations(streamGeneration, observationStreamController.signal);
     }
 
-    async function connectEvents(generation, signal) {
-      while (generation === eventStreamGeneration && !signal.aborted) {
+    async function connectProductEvents(generation, signal) {
+      while (generation === streamGeneration && !signal.aborted) {
         try {
-          const url = replayCursor
-            ? "/api/events?cursor=" + encodeURIComponent(replayCursor)
-            : "/api/events";
+          const url = "/api/events?cursor=" + encodeURIComponent(productCursor);
           const response = await fetch(url, { cache: "no-store", signal });
-          if (!response.ok || !response.body) throw new Error("event stream failed (" + response.status + ")");
+          if (!response.ok || !response.body) throw new Error("product stream unavailable");
           const reader = response.body.getReader();
           const decoder = new TextDecoder();
           let buffer = "";
@@ -2830,55 +2844,121 @@
             buffer += decoder.decode(value, { stream: true });
             const lines = buffer.split("\n");
             buffer = lines.pop() || "";
-            for (const line of lines) handleStreamLine(line);
+            for (const line of lines) handleProductStreamLine(line);
           }
-          handleStreamLine(buffer);
+          handleProductStreamLine(buffer);
         } catch (error) {
           if (signal.aborted) return;
-          renderNote("event stream reconnecting");
+          renderNote("transcript updates reconnecting");
         }
         await new Promise(resolve => setTimeout(resolve, 900));
       }
     }
 
-    function handleStreamLine(line) {
-      if (!line.trim()) return;
-      let item;
-      try {
-        item = JSON.parse(line);
-      } catch (_) {
-        renderNote("skipped a malformed update from the agent");
-        return;
+    async function connectObservations(generation, signal) {
+      while (generation === streamGeneration && !signal.aborted) {
+        try {
+          const url = observationCursor
+            ? "/api/observations?cursor=" + encodeURIComponent(observationCursor)
+            : "/api/observations";
+          const response = await fetch(url, { cache: "no-store", signal });
+          if (!response.ok || !response.body) throw new Error("observation stream unavailable");
+          const reader = response.body.getReader();
+          const decoder = new TextDecoder();
+          let buffer = "";
+          while (true) {
+            const { value, done } = await reader.read();
+            if (done) break;
+            buffer += decoder.decode(value, { stream: true });
+            const lines = buffer.split("\n");
+            buffer = lines.pop() || "";
+            for (const line of lines) handleObservationStreamLine(line);
+          }
+          handleObservationStreamLine(buffer);
+        } catch (error) {
+          if (signal.aborted) return;
+          renderNote("live turn updates reconnecting");
+        }
+        await new Promise(resolve => setTimeout(resolve, 900));
       }
-      handleStreamItem(item);
     }
 
-    function handleStreamItem(item) {
-      if (item.type === "message") renderMessage(item.message);
-      if (item.type === "turn_input") renderIngressReceipt(item.receipt);
-      if (item.type === "replay_cursor") replayCursor = item.cursor;
-      if (item.type === "replay_gap") recoverReplayGap(item.gap);
-      if (item.type === "observation") handleObservation(item.event);
-      if (item.type === "error") renderError(item.message, { retry: true });
-      if (item.type === "done") {
+    function parseStreamLine(line) {
+      if (!line.trim()) return;
+      try {
+        return JSON.parse(line);
+      } catch (_) {
+        renderNote("skipped a malformed update from the agent");
+      }
+    }
+
+    function handleProductStreamLine(line) {
+      const item = parseStreamLine(line);
+      if (!item) return;
+      if (item.type === "resync") {
+        recoverProductLag(item.snapshot);
+        return;
+      }
+      if (item.type !== "event") return;
+      applyProductEvent(item.event);
+    }
+
+    function applyProductEvent(event) {
+      if (!event || renderedProductEvents.has(event.event_id)) return;
+      renderedProductEvents.add(event.event_id);
+      productCursor = Math.max(productCursor, Number(event.sequence) || 0);
+      if (event.type === "message") renderMessage(event.message);
+      if (event.type === "turn_input") renderIngressReceipt(event.receipt);
+      if (event.type === "done") {
         finishTransientRows();
         setBusy(false, "ready");
         refreshUsage();
       }
     }
 
+    function handleObservationStreamLine(line) {
+      const item = parseStreamLine(line);
+      if (!item) return;
+      if (item.type === "cursor") observationCursor = item.cursor;
+      if (item.type === "replay_gap") recoverReplayGap(item.gap);
+      if (item.type === "observation") handleObservation(item.event);
+      if (item.type === "terminal_replacement") {
+        observationCursor = item.cursor || item.event?.cursor || observationCursor;
+        recoverTerminalReplacement();
+      }
+    }
+
     function handleObservation(event) {
-      replayCursor = event.cursor || replayCursor;
+      const identity = `${event.session_id || ""}:${event.cursor || ""}`;
+      if (appliedObservationEvents.has(identity)) return;
+      appliedObservationEvents.add(identity);
+      observationCursor = event.cursor || observationCursor;
       if (event.type === "turn_activity") handleTurnEvent(event.activity);
     }
 
     async function recoverReplayGap(gap) {
-      replayCursor = gap?.latest_cursor || replayCursor;
+      observationCursor = gap?.latest_cursor || observationCursor;
       try {
         applyStateSnapshot(await fetchStateSnapshot(), true);
-      } catch (error) {
-        renderError("couldn't recover the event stream after a replay gap: " +
-          (error.message || error), { retry: true });
+      } catch (_) {
+        renderError("live updates paused; reload to restore the conversation", { retry: false });
+      }
+    }
+
+    async function recoverProductLag(snapshot) {
+      productCursor = Math.max(productCursor, Number(snapshot?.cursor) || 0);
+      try {
+        applyStateSnapshot(await fetchStateSnapshot(), true);
+      } catch (_) {
+        renderError("transcript updates paused; reload to restore the conversation", { retry: false });
+      }
+    }
+
+    async function recoverTerminalReplacement() {
+      try {
+        applyStateSnapshot(await fetchStateSnapshot(), true);
+      } catch (_) {
+        renderError("the turn settled; reload to restore the final transcript", { retry: false });
       }
     }
 
@@ -2896,7 +2976,7 @@
           else if (unresolved) renderNote("turn route cleared · terminal outcome unknown");
           else if (!receipt.accepted) renderNote("turn already finished");
         })
-        .catch(error => renderError("couldn't stop the turn: " + (error.message || error)))
+        .catch(() => renderError("the turn could not be stopped"))
         .finally(() => {
           if (!resetInFlight) setBusy(false, "ready");
         });
@@ -2960,10 +3040,11 @@
         lastRequest = null;
         sessionId.textContent = state.settings.session_id || "—";
         renderUsage(state.usage);
-        restartEventStream(true);
+        applyStateSnapshot(state, true);
+        restartEventStreams();
         setBusy(false, "ready");
-      } catch (error) {
-        renderError(cleanErrorText(error.message || error));
+      } catch (_) {
+        renderError("the conversation could not be reset");
       } finally {
         resetInFlight = false;
         resetButton.disabled = false;
@@ -3079,17 +3160,15 @@
             data_base64: await fileBase64(file)
           })
         });
-        if (!response.ok) {
-          throw new Error(errorTextFrom(await response.text(), "attachment upload failed"));
-        }
+        if (!response.ok) throw new Error("attachment upload failed");
         const uploaded = await response.json();
         selectedAttachment = uploaded.attachment;
         attachButton.classList.remove("uploading");
         attachButton.classList.add("ready");
         attachButton.textContent = "attached · " + file.name;
         attachButton.title = file.name + " · " + uploaded.attachment.byte_len + " bytes · click to replace";
-      } catch (error) {
-        renderError("couldn't attach the PNG: " + (error.message || error));
+      } catch (_) {
+        renderError("the PNG could not be attached");
         clearAttachment();
       } finally {
         attachmentUploadInFlight = false;
@@ -3111,15 +3190,16 @@
           body: JSON.stringify({ text, ingress })
         });
         if (!response.ok) {
-          renderError(errorTextFrom(await response.text(), "input submission failed"));
+          await response.text();
+          renderError("the input could not be submitted");
           return;
         }
         const receipt = await response.json();
         renderIngressReceipt(receipt);
         lastUserText = text;
         promptInput.value = "";
-      } catch (error) {
-        renderError(error.message || String(error));
+      } catch (_) {
+        renderError("the input could not be submitted");
       }
     }
 
@@ -3152,9 +3232,12 @@
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(payload)
         });
-        if (!response.ok) renderError(errorTextFrom(await response.text(), "trigger failed"));
-      } catch (error) {
-        renderError(error.message || String(error));
+        if (!response.ok) {
+          await response.text();
+          renderError("the trigger could not be submitted");
+        }
+      } catch (_) {
+        renderError("the trigger could not be submitted");
       } finally {
         refreshWork();
       }
@@ -3213,14 +3296,20 @@
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ enabled })
       });
-      if (!response.ok) renderError(errorTextFrom(await response.text(), "trigger update failed"));
+      if (!response.ok) {
+        await response.text();
+        renderError("the trigger could not be updated");
+      }
       await loadTriggers();
     }
 
     async function deleteTrigger(handle) {
       if (!window.confirm("Delete trigger " + handle + "?")) return;
       const response = await fetch("/api/triggers/" + encodeURIComponent(handle), { method: "DELETE" });
-      if (!response.ok) renderError(errorTextFrom(await response.text(), "trigger delete failed"));
+      if (!response.ok) {
+        await response.text();
+        renderError("the trigger could not be deleted");
+      }
       await loadTriggers();
     }
 
@@ -3260,14 +3349,6 @@
     function showAccountsError(message) {
       accountsError.textContent = message || "";
       accountsError.hidden = !message;
-    }
-
-    function errorTextFrom(text, fallback) {
-      try {
-        const parsed = JSON.parse(text);
-        if (parsed && parsed.error) return parsed.error;
-      } catch (_) { /* not json */ }
-      return (text && text.trim()) || fallback;
     }
 
     async function loadAccounts(force) {
@@ -3419,12 +3500,13 @@
         const response = await fetch("/api/accounts/" + encodeURIComponent(slug) +
           "/messages/" + encodeURIComponent(id), { method: "DELETE" });
         if (!response.ok) {
-          showAccountsError(errorTextFrom(await response.text(), "could not delete message"));
+          await response.text();
+          showAccountsError("could not delete message");
           return;
         }
         await loadAccounts(true);
-      } catch (error) {
-        showAccountsError(error.message || String(error));
+      } catch (_) {
+        showAccountsError("could not delete message");
       }
     }
 
@@ -3437,12 +3519,13 @@
           body: JSON.stringify({ ...payload, ...selectedModelPayload() })
         });
         if (!response.ok) {
-          showAccountsError(errorTextFrom(await response.text(), "delivery failed"));
+          await response.text();
+          showAccountsError("delivery failed");
           return;
         }
         await loadAccounts(true);
-      } catch (error) {
-        showAccountsError(error.message || String(error));
+      } catch (_) {
+        showAccountsError("delivery failed");
       }
     }
 
@@ -3453,12 +3536,13 @@
       try {
         const response = await fetch("/api/accounts/" + encodeURIComponent(slug), { method: "DELETE" });
         if (!response.ok) {
-          showAccountsError(errorTextFrom(await response.text(), "could not delete account"));
+          await response.text();
+          showAccountsError("could not delete account");
           return;
         }
         await loadAccounts(true);
-      } catch (error) {
-        showAccountsError(error.message || String(error));
+      } catch (_) {
+        showAccountsError("could not delete account");
       }
     }
 
@@ -3474,13 +3558,14 @@
           body: JSON.stringify({ name })
         });
         if (!response.ok) {
-          showAccountsError(errorTextFrom(await response.text(), "could not add account"));
+          await response.text();
+          showAccountsError("could not add account");
           return;
         }
         accountNameInput.value = "";
         await loadAccounts(true);
-      } catch (error) {
-        showAccountsError(error.message || String(error));
+      } catch (_) {
+        showAccountsError("could not add account");
       }
     });
 
@@ -3499,6 +3584,11 @@
 
     function applyStateSnapshot(state, replaceTranscript = false) {
       if (replaceTranscript) clearTranscript();
+      observationCursor = state.observation?.cursor || observationCursor;
+      productCursor = Math.max(productCursor, Number(state.product_events?.cursor) || 0);
+      for (const event of state.product_events?.events || []) {
+        renderedProductEvents.add(event.event_id);
+      }
       modelInput.value = state.settings.model || "";
       const modelList = document.getElementById("modelList");
       modelList.innerHTML = "";
@@ -3579,13 +3669,12 @@
     async function loadState() {
       try {
         applyStateSnapshot(await fetchStateSnapshot());
-      } catch (error) {
+      } catch (_) {
         webState.textContent = "unavailable";
         sessionId.textContent = "—";
         streamState.textContent = "could not load session";
-        renderError("couldn't load the workbench session: " + (error.message || error) +
-          ". check the server is running, then reload.");
-        throw error;
+        renderError("the workbench session could not be loaded; check the server, then reload");
+        throw new Error("state unavailable");
       }
     }
 
@@ -3668,13 +3757,16 @@
               const response = await fetch("/api/work/" + encodeURIComponent(row.process_id) + "/cancel", {
                 method: "POST"
               });
-              if (!response.ok) throw new Error(await response.text());
+              if (!response.ok) {
+                await response.text();
+                throw new Error("process cancellation failed");
+              }
               await refreshWork();
-            } catch (error) {
+            } catch (_) {
               cancelButton.disabled = false;
               cancelButton.textContent = "retry cancel";
               workCount.textContent = "cancel failed — retry";
-              workCount.title = cleanErrorText(error.message || error);
+              workCount.title = "process cancellation could not be completed";
               workCount.classList.add("stale");
             }
           });
@@ -4693,7 +4785,7 @@
     loadState().catch(() => {}).finally(() => {
       refreshWork();
       loadTriggers();
-      restartEventStream(true);
+      restartEventStreams();
     });
     setInterval(refreshWork, 1400);
     setInterval(loadTriggers, 1400);
