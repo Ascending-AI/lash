@@ -164,7 +164,8 @@ pub use process_worker::{
     ProcessDrainReport, ProcessExecutionConcurrencyError,
 };
 pub use queued_work_driver::{
-    QueuedWorkDriver, QueuedWorkRunHandle, QueuedWorkRunRequest, QueuedWorkWakeFailure,
+    QueuedWorkDriver, QueuedWorkRunError, QueuedWorkRunErrorClass, QueuedWorkRunHandle,
+    QueuedWorkRunRequest, QueuedWorkWakeDisposition, QueuedWorkWakeFailure,
 };
 pub use scenario_contracts::{RUNTIME_SCENARIO_CONTRACTS, ScenarioContractSpec};
 pub use session_manager::DirectCompletionClient;

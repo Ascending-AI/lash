@@ -2511,10 +2511,12 @@ impl lash_core::QueuedWorkRunHandle for PostCommitFailingQueuedWorkRunHandle {
     async fn run_queued_work(
         &self,
         _request: lash_core::QueuedWorkRunRequest,
-    ) -> Result<(), PluginError> {
+    ) -> Result<(), lash_core::QueuedWorkRunError> {
         if self.attempts.fetch_add(1, Ordering::SeqCst) == 0 {
-            return Err(PluginError::Session(
-                "FIG-430 deterministic post-commit dispatch failure".to_string(),
+            return Err(lash_core::QueuedWorkRunError::transient(
+                PluginError::Session(
+                    "FIG-430 deterministic post-commit dispatch failure".to_string(),
+                ),
             ));
         }
         self.recovered.notify_one();

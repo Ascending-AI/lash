@@ -494,7 +494,7 @@ impl lash::runtime::QueuedWorkRunHandle for WorkbenchQueuedWorkSubmitter {
     async fn run_queued_work(
         &self,
         request: lash::runtime::QueuedWorkRunRequest,
-    ) -> std::result::Result<(), PluginError> {
+    ) -> std::result::Result<(), lash::runtime::QueuedWorkRunError> {
         let session_id = request
             .session_id
             .unwrap_or_else(|| self.session_ids.current());
@@ -506,7 +506,11 @@ impl lash::runtime::QueuedWorkRunHandle for WorkbenchQueuedWorkSubmitter {
         if !self.active_turns.for_session(&session_id).is_empty() {
             return Ok(());
         }
-        if !self.has_queued_work(&session_id).await? {
+        if !self
+            .has_queued_work(&session_id)
+            .await
+            .map_err(lash::runtime::QueuedWorkRunError::terminal)?
+        {
             return Ok(());
         }
         let workflow_request = restate::WorkbenchQueuedTurnWorkflowRequest {
@@ -525,7 +529,9 @@ impl lash::runtime::QueuedWorkRunHandle for WorkbenchQueuedWorkSubmitter {
         {
             self.active_turns
                 .remove(&session_id, &workflow_request.turn_id);
-            return Err(PluginError::Session(err.to_string()));
+            return Err(lash::runtime::QueuedWorkRunError::transient(
+                PluginError::Session(err.to_string()),
+            ));
         }
         Ok(())
     }
@@ -570,7 +576,7 @@ impl lash::runtime::QueuedWorkRunHandle for NoopQueuedWorkRunHandle {
     async fn run_queued_work(
         &self,
         _request: lash::runtime::QueuedWorkRunRequest,
-    ) -> std::result::Result<(), PluginError> {
+    ) -> std::result::Result<(), lash::runtime::QueuedWorkRunError> {
         Ok(())
     }
 }

@@ -253,7 +253,7 @@ impl QueuedWorkRunHandle for InlineQueuedWorkRunHandle {
     async fn run_queued_work(
         &self,
         request: QueuedWorkRunRequest,
-    ) -> std::result::Result<(), lash_core::PluginError> {
+    ) -> std::result::Result<(), lash_core::QueuedWorkRunError> {
         let Some(session_id) = request.session_id else {
             return Ok(());
         };
@@ -269,7 +269,9 @@ impl QueuedWorkRunHandle for InlineQueuedWorkRunHandle {
                 policy: policy.clone(),
             })
             .await
-            .map_err(lash_core::PluginError::Session)?;
+            .map_err(|error| {
+                lash_core::QueuedWorkRunError::terminal(lash_core::PluginError::Session(error))
+            })?;
         let state = crate::session::load_state_for_residency(
             self.config.env.residency,
             &session_id,
@@ -277,33 +279,51 @@ impl QueuedWorkRunHandle for InlineQueuedWorkRunHandle {
             store.as_ref(),
         )
         .await
-        .map_err(|err| lash_core::PluginError::Session(err.to_string()))?;
+        .map_err(|error| {
+            lash_core::QueuedWorkRunError::terminal(lash_core::PluginError::Session(
+                error.to_string(),
+            ))
+        })?;
         let plugin_host = build_plugin_host(
             self.config.protocol_factory.as_ref(),
             self.config.plugin_factories.as_ref(),
             Vec::new(),
         )
-        .map_err(|err| lash_core::PluginError::Session(err.to_string()))?;
+        .map_err(|error| {
+            lash_core::QueuedWorkRunError::terminal(lash_core::PluginError::Session(
+                error.to_string(),
+            ))
+        })?;
         let mut env = self.config.env.clone();
         env.core = plugin_host
             .install_process_engine_contributions(
                 env.core.clone(),
                 self.config.process_lifecycle_available,
             )
-            .map_err(|err| lash_core::PluginError::Session(err.to_string()))?;
+            .map_err(|error| {
+                lash_core::QueuedWorkRunError::terminal(lash_core::PluginError::Session(
+                    error.to_string(),
+                ))
+            })?;
         env.plugin_host = Some(Arc::new(plugin_host));
         let effect_host = Arc::clone(&env.core.control.effect_host);
         let runtime = LashRuntime::from_environment(&env, policy, state, Some(store))
             .await
-            .map_err(|err| lash_core::PluginError::Session(err.to_string()))?;
+            .map_err(|error| {
+                lash_core::QueuedWorkRunError::terminal(lash_core::PluginError::Session(
+                    error.to_string(),
+                ))
+            })?;
         let handle = RuntimeHandle::with_live_replay_store(
             runtime,
             Arc::clone(&self.config.live_replay_store),
         );
         let scope = lash_core::ExecutionScope::queue_drain(session_id, reason);
-        let scoped = effect_host
-            .scoped(scope)
-            .map_err(|err| lash_core::PluginError::Session(err.to_string()))?;
+        let scoped = effect_host.scoped(scope).map_err(|error| {
+            lash_core::QueuedWorkRunError::terminal(lash_core::PluginError::Session(
+                error.to_string(),
+            ))
+        })?;
         crate::turn::stream_next_queued_prepared_turn(
             &handle,
             crate::turn::TurnSinks::default(),
@@ -313,7 +333,14 @@ impl QueuedWorkRunHandle for InlineQueuedWorkRunHandle {
             &[],
         )
         .await
-        .map_err(|err| lash_core::PluginError::Session(err.to_string()))?;
+        .map_err(|error| {
+            let plugin_error = lash_core::PluginError::Session(error.to_string());
+            if error.is_retryable() {
+                lash_core::QueuedWorkRunError::transient(plugin_error)
+            } else {
+                lash_core::QueuedWorkRunError::terminal(plugin_error)
+            }
+        })?;
         Ok(())
     }
 }
@@ -501,7 +528,7 @@ impl LashCore {
                 ))
             })?;
         if is_next_turn && let Some(driver) = self.work_driver.drivers().await.queued.as_ref() {
-            driver.wake_pending(Some(&enqueued.session_id), "queued_turn_input");
+            drop(driver.wake_pending(Some(&enqueued.session_id), "queued_turn_input"));
         }
         Ok(lash_core::TurnInputAcceptanceReceipt::from(&enqueued))
     }
