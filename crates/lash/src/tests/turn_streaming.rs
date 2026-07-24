@@ -636,6 +636,11 @@ async fn idle_queued_input_emits_typed_remote_application_and_durable_identity()
         .build()?;
     let session = core.session("idle-input-application").open().await?;
     let cursor = session.observe().current_remote_observation().cursor;
+    let empty_admission = session
+        .enqueue(TurnInput::text(""))
+        .id("idle-empty-source")
+        .send()
+        .await?;
     let admission = session
         .enqueue(TurnInput::text("queued canonical input"))
         .id("idle-source")
@@ -674,8 +679,13 @@ async fn idle_queued_input_emits_typed_remote_application_and_durable_identity()
             break applications;
         }
     };
-    assert_eq!(live.len(), 1);
+    assert_eq!(
+        live.len(),
+        1,
+        "only inputs materialized into the canonical message receive application evidence"
+    );
     let live = &live[0];
+    assert_ne!(live.input_id, empty_admission.input_id);
     assert_eq!(live.input_id, admission.input_id);
     assert_eq!(live.source_key.as_deref(), Some("host:idle-source"));
     assert_eq!(live.turn_id, "idle-application-turn");

@@ -349,6 +349,12 @@ impl TurnInputClaim {
         self.applications = self
             .inputs
             .iter()
+            .filter(|input| {
+                input.input.items.iter().any(|item| match item {
+                    crate::InputItem::Text { text } => !text.is_empty(),
+                    crate::InputItem::Attachment { .. } => true,
+                })
+            })
             .map(|input| TurnInputApplication {
                 input_id: input.input_id.clone(),
                 source_key: input.source_key.clone(),
