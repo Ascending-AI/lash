@@ -2161,6 +2161,7 @@
     const renderedIngressInputs = new Set();
     const appliedTurnInputs = new Map();
     let assistantDraft = null;
+    let assistantDraftTurnId = null;
     let assistantDraftText = "";
     let assistantDraftChunks = [];
     let reasoning = null;
@@ -2351,6 +2352,7 @@
         const parent = assistantDraft.closest(".message");
         if (parent) parent.remove();
         assistantDraft = null;
+        assistantDraftTurnId = null;
         assistantDraftText = "";
         assistantDraftChunks = [];
       }
@@ -2444,8 +2446,8 @@
       }
     }
 
-    function ensureAssistantDraft() {
-      if (assistantDraft) return assistantDraft;
+    function ensureAssistantDraft(turnId) {
+      if (assistantDraft && assistantDraftTurnId === turnId) return assistantDraft;
       clearEmpty();
       const node = document.createElement("div");
       node.className = "message assistant";
@@ -2453,6 +2455,7 @@
       role.className = "msg-role";
       role.textContent = "agent";
       assistantDraft = document.createElement("div");
+      assistantDraftTurnId = turnId || null;
       assistantDraft.className = "msg-body";
       assistantDraftText = "";
       assistantDraftChunks = [];
@@ -2540,10 +2543,10 @@
       return "```json\n" + JSON.stringify(value, null, 2) + "\n```";
     }
 
-    function appendAssistantText(delta, correlationId = null) {
+    function appendAssistantText(delta, correlationId = null, turnId = null) {
       if (!delta) return;
-      const draft = ensureAssistantDraft();
-      assistantDraftChunks.push({ correlationId, text: delta });
+      const draft = ensureAssistantDraft(turnId);
+      assistantDraftChunks.push({ turnId, correlationId, text: delta });
       assistantDraftText = assistantDraftChunks.map(chunk => chunk.text).join("");
       draft.innerHTML = renderMarkdownBlocks(assistantDraftText);
       scrollToEnd();
@@ -2559,6 +2562,7 @@
       if (!assistantDraftText && assistantDraft) {
         assistantDraft.closest(".message")?.remove();
         assistantDraft = null;
+        assistantDraftTurnId = null;
       } else if (assistantDraft) {
         assistantDraft.innerHTML = renderMarkdownBlocks(assistantDraftText);
       }
@@ -2681,11 +2685,11 @@
       return el;
     }
 
-    function startCodeBlock(event) {
+    function startCodeBlock(event, turnId) {
       clearEmpty();
       const runningEvent = { ...event, phase: "running" };
       const el = appendCodeBlock(runningEvent);
-      pendingCodeBlock = { event: runningEvent, el };
+      pendingCodeBlock = { event: runningEvent, el, turnId };
       if (event.graph_key) refreshWork();
     }
 
@@ -2697,27 +2701,29 @@
       for (const tool of linkedTools) appendTool(tool, el);
     }
 
-    function appendCompletedTool(event) {
+    function appendCompletedTool(event, turnId) {
       if (pendingCodeBlock) {
-        pendingTools.push(event);
+        pendingTools.push({ ...event, observationTurnId: turnId });
       } else {
         appendTool(event);
       }
     }
 
-    function completeCodeBlock(event) {
+    function completeCodeBlock(event, turnId) {
       const linkedIds = new Set(event.tool_call_ids || []);
-      const linkedTools = pendingTools.filter(tool => tool.call_id && linkedIds.has(tool.call_id));
-      const unlinkedTools = pendingTools.filter(tool => !tool.call_id || !linkedIds.has(tool.call_id));
-      const completedEvent = { ...event, code: event.code || pendingCodeBlock?.event?.code || "" };
-      if (pendingCodeBlock?.el) {
-        updateCodeBlock(pendingCodeBlock.el, completedEvent, linkedTools);
+      const sameTurnTools = pendingTools.filter(tool => tool.observationTurnId === turnId);
+      const linkedTools = sameTurnTools.filter(tool => tool.call_id && linkedIds.has(tool.call_id));
+      const unlinkedTools = sameTurnTools.filter(tool => !tool.call_id || !linkedIds.has(tool.call_id));
+      const sameTurnBlock = pendingCodeBlock?.turnId === turnId ? pendingCodeBlock : null;
+      const completedEvent = { ...event, code: event.code || sameTurnBlock?.event?.code || "" };
+      if (sameTurnBlock?.el) {
+        updateCodeBlock(sameTurnBlock.el, completedEvent, linkedTools);
       } else {
         appendCodeBlock(completedEvent, linkedTools);
       }
-      pendingCodeBlock = null;
+      if (sameTurnBlock) pendingCodeBlock = null;
       for (const tool of unlinkedTools) appendTool(tool);
-      pendingTools = [];
+      pendingTools = pendingTools.filter(tool => tool.observationTurnId !== turnId);
     }
 
     function thinkingPanel(label) {
@@ -2733,13 +2739,13 @@
       return node && node.parentNode === timeline && timeline.lastElementChild === node;
     }
 
-    function appendReasoning(delta, correlationId = null) {
+    function appendReasoning(delta, correlationId = null, turnId = null) {
       if (!isCurrentTimelineHead(reasoning)) {
         clearEmpty();
         reasoning = thinkingPanel("thinking");
         timeline.appendChild(reasoning);
       }
-      reasoningChunks.push({ correlationId, text: delta, node: reasoning });
+      reasoningChunks.push({ turnId, correlationId, text: delta, node: reasoning });
       reasoning.querySelector("pre").textContent += delta;
       scrollToEnd();
     }
@@ -2798,31 +2804,48 @@
     }
 
     // BEGIN WORKBENCH_TRANSIENT_SETTLEMENT
-    function finishTransientRows() {
-      for (const tool of pendingTools) appendTool(tool);
-      assistantDraft?.closest(".message")?.remove();
-      assistantDraft = null;
-      assistantDraftText = "";
-      assistantDraftChunks = [];
-      for (const chunk of reasoningChunks) chunk.node?.remove();
-      pendingCodeBlock = null;
-      pendingTools = [];
-      reasoning = null;
-      reasoningChunks = [];
+    function finishTransientRows(turnId) {
+      if (!turnId) return;
+      const finishedTools = pendingTools.filter(tool => tool.observationTurnId === turnId);
+      for (const tool of finishedTools) appendTool(tool);
+      pendingTools = pendingTools.filter(tool => tool.observationTurnId !== turnId);
+      if (assistantDraftTurnId === turnId) {
+        assistantDraft?.closest(".message")?.remove();
+        assistantDraft = null;
+        assistantDraftTurnId = null;
+        assistantDraftText = "";
+        assistantDraftChunks = [];
+      }
+      const affectedReasoning = new Set(
+        reasoningChunks
+          .filter(chunk => chunk.turnId === turnId)
+          .map(chunk => chunk.node)
+      );
+      reasoningChunks = reasoningChunks.filter(chunk => chunk.turnId !== turnId);
+      for (const node of affectedReasoning) {
+        const text = reasoningChunks
+          .filter(chunk => chunk.node === node)
+          .map(chunk => chunk.text)
+          .join("");
+        if (text) node.querySelector("pre").textContent = text;
+        else node.remove();
+      }
+      if (pendingCodeBlock?.turnId === turnId) pendingCodeBlock = null;
+      if (!reasoning?.isConnected) reasoning = null;
     }
     // END WORKBENCH_TRANSIENT_SETTLEMENT
 
-    function handleTurnEvent(event) {
+    function handleTurnEvent(event, turnId) {
       if (event.type === "queued_work_started") renderQueuedWorkStarted(event);
       if (event.type === "turn_input_applied") recordTurnInputApplications(event.applications);
-      if (event.type === "assistant_prose_delta") appendAssistantText(event.text, event.correlation_id);
-      if (event.type === "reasoning_delta") appendReasoning(event.text, event.correlation_id);
+      if (event.type === "assistant_prose_delta") appendAssistantText(event.text, event.correlation_id, turnId);
+      if (event.type === "reasoning_delta") appendReasoning(event.text, event.correlation_id, turnId);
       if (event.type === "model_attempt_reset") resetModelAttempt(event);
-      if (event.type === "code_block_started") startCodeBlock(event);
-      if (event.type === "code_block_completed") completeCodeBlock(event);
-      if (event.type === "tool_call_completed") appendCompletedTool(event);
-      if (event.type === "final_value") appendAssistantText(renderTerminalValue(event.value));
-      if (event.type === "tool_value") appendAssistantText(renderTerminalValue(event.value));
+      if (event.type === "code_block_started") startCodeBlock(event, turnId);
+      if (event.type === "code_block_completed") completeCodeBlock(event, turnId);
+      if (event.type === "tool_call_completed") appendCompletedTool(event, turnId);
+      if (event.type === "final_value") appendAssistantText(renderTerminalValue(event.value), null, turnId);
+      if (event.type === "tool_value") appendAssistantText(renderTerminalValue(event.value), null, turnId);
       if (event.type === "error") renderError("turn could not be completed", { retry: true });
     }
 
@@ -2835,6 +2858,7 @@
       const commandController = new AbortController();
       controller = commandController;
       assistantDraft = null;
+      assistantDraftTurnId = null;
       assistantDraftText = "";
       assistantDraftChunks = [];
       reasoning = null;
@@ -2972,7 +2996,7 @@
       if (event.type === "message") renderMessage(event.message);
       if (event.type === "turn_input") renderIngressReceipt(event.receipt);
       if (event.type === "done") {
-        finishTransientRows();
+        finishTransientRows(event.turn_id);
         setBusy(false, "ready");
         refreshUsage();
       }
@@ -2988,17 +3012,18 @@
       if (item.type === "terminal_replacement") {
         projectionState.observationCursor =
           item.cursor || item.event?.cursor || projectionState.observationCursor;
+        finishTransientRows(item.event?.turn_id);
         recoverTerminalReplacement();
       }
     }
 
     function handleObservation(event) {
-      const identity = `${event.session_id || ""}:${event.cursor || ""}`;
+      const identity = `${event.session_id || ""}:${event.replay_incarnation_id || ""}:${event.cursor || ""}`;
       if (appliedObservationEvents.has(identity)) return;
       appliedObservationEvents.add(identity);
       projectionState.observationCursor =
         event.cursor || projectionState.observationCursor;
-      if (event.type === "turn_activity") handleTurnEvent(event.activity);
+      if (event.type === "turn_activity") handleTurnEvent(event.activity, event.turn_id);
     }
 
     async function recoverFromState(failureMessage) {
@@ -3069,6 +3094,7 @@
       timeline.innerHTML = "";
       renderedMessages.clear();
       assistantDraft = null;
+      assistantDraftTurnId = null;
       assistantDraftText = "";
       assistantDraftChunks = [];
       reasoning = null;

@@ -1173,6 +1173,55 @@ fn model_attempt_resets(events: &[Arc<lash_core::SessionObservationEvent>]) -> u
 }
 
 #[tokio::test]
+async fn session_observation_envelopes_scope_activity_and_commit_to_the_turn() -> Result<()> {
+    let core = standard_core();
+    let session = core
+        .session("session-observation-turn-identity")
+        .open()
+        .await?;
+    let cursor = session.observe().current_observation().cursor;
+
+    session
+        .turn(TurnInput::text("identify this turn"))
+        .turn_id("observation-turn")
+        .run()
+        .await?;
+
+    let lash_core::SessionResume::Replayed { events } =
+        session.observe().resume_from_cursor(&cursor)?
+    else {
+        panic!("fresh turn observation cursor should remain replayable");
+    };
+    let turn_activity = events
+        .iter()
+        .filter(|event| {
+            matches!(
+                event.payload,
+                lash_core::SessionObservationEventPayload::TurnActivity(_)
+            )
+        })
+        .collect::<Vec<_>>();
+    assert!(!turn_activity.is_empty(), "turn emitted no activity");
+    assert!(
+        turn_activity
+            .iter()
+            .all(|event| event.turn_id.as_deref() == Some("observation-turn")),
+        "every turn activity must carry its producing turn identity"
+    );
+    let committed = events
+        .iter()
+        .find(|event| {
+            matches!(
+                event.payload,
+                lash_core::SessionObservationEventPayload::Committed { .. }
+            )
+        })
+        .expect("turn commit observation");
+    assert_eq!(committed.turn_id.as_deref(), Some("observation-turn"));
+    Ok(())
+}
+
+#[tokio::test]
 async fn session_observation_retracts_two_retried_visible_attempts_live_and_on_replay() -> Result<()>
 {
     let core = explicit_ephemeral_facets(LashCore::standard_builder())
@@ -1553,6 +1602,7 @@ impl lash_core::LiveReplayStore for PausedCommitReplayStore {
         &self,
         session_id: &str,
         revision: lash_core::SessionRevision,
+        turn_id: Option<&str>,
         payload: lash_core::SessionObservationEventPayload,
     ) -> std::result::Result<Arc<lash_core::SessionObservationEvent>, lash_core::LiveReplayStoreError>
     {
@@ -1560,7 +1610,7 @@ impl lash_core::LiveReplayStore for PausedCommitReplayStore {
             payload,
             lash_core::SessionObservationEventPayload::Committed { .. }
         );
-        let event = self.inner.append(session_id, revision, payload)?;
+        let event = self.inner.append(session_id, revision, turn_id, payload)?;
         if pause
             && !self
                 .commit_appended
@@ -1713,7 +1763,7 @@ async fn recoverable_chat_conformance_deduplicates_redelivery_identity() -> Resu
 }
 
 #[tokio::test]
-async fn recoverable_chat_gap_allows_new_event_that_reuses_pre_restart_cursor() -> Result<()> {
+async fn recoverable_chat_restart_identity_does_not_depend_on_gap_clearing() -> Result<()> {
     let session_id = "recoverable-chat-restart-cursor";
     let store_factory = Arc::new(lash_core::InMemorySessionStoreFactory::new());
     let bootstrap_core = explicit_ephemeral_facets(LashCore::standard_builder())
@@ -1737,12 +1787,12 @@ async fn recoverable_chat_gap_allows_new_event_that_reuses_pre_restart_cursor() 
         .build()?;
     let first_session = first_core.session(session_id).open().await?;
     let initial_cursor = first_session.observe().recoverable_chat_snapshot().cursor;
-    first_session
-        .observe()
-        .runtime
-        .record_turn_activity(TurnActivity::independent(TurnEvent::AssistantProseDelta {
+    first_session.observe().runtime.record_turn_activity(
+        Some("before-restart-turn"),
+        TurnActivity::independent(TurnEvent::AssistantProseDelta {
             text: "before replay-store restart".into(),
-        }));
+        }),
+    );
     let mut first_stream = first_session
         .observe()
         .subscribe_recoverable_chat(initial_cursor);
@@ -1762,6 +1812,11 @@ async fn recoverable_chat_gap_allows_new_event_that_reuses_pre_restart_cursor() 
         .live_replay_store(Arc::new(lash_core::InMemoryLiveReplayStore::default()))
         .build()?;
     let second_session = second_core.session(session_id).open().await?;
+    let restarted_at = second_session.observe().recoverable_chat_snapshot().cursor;
+    let mut retained_applied_ids = second_session
+        .observe()
+        .subscribe_recoverable_chat(restarted_at)
+        .with_applied_event_ids([old_id.clone()]);
     let mut recovered = second_session
         .observe()
         .subscribe_recoverable_chat(old_cursor)
@@ -1778,22 +1833,46 @@ async fn recoverable_chat_gap_allows_new_event_that_reuses_pre_restart_cursor() 
         }
     ));
 
-    second_session
-        .observe()
-        .runtime
-        .record_turn_activity(TurnActivity::independent(TurnEvent::AssistantProseDelta {
+    second_session.observe().runtime.record_turn_activity(
+        Some("after-restart-turn"),
+        TurnActivity::independent(TurnEvent::AssistantProseDelta {
             text: "after replay-store restart".into(),
-        }));
-    let update = tokio::time::timeout(std::time::Duration::from_millis(500), recovered.next())
-        .await
-        .expect("new event at a reused cursor was incorrectly suppressed")
-        .expect("recovered stream remains open")?;
+        }),
+    );
+    let gap_continuation =
+        tokio::time::timeout(std::time::Duration::from_millis(500), recovered.next())
+            .await
+            .expect("gap stream did not continue with the new event")
+            .expect("recovered stream remains open")?;
+    let crate::recoverable_chat::RecoverableChatUpdate::Event {
+        id: gap_continuation_id,
+        event: gap_continuation_event,
+    } = gap_continuation
+    else {
+        panic!("expected post-gap provisional event");
+    };
+    let update = tokio::time::timeout(
+        std::time::Duration::from_millis(500),
+        retained_applied_ids.next(),
+    )
+    .await
+    .expect("retained pre-restart identity incorrectly suppressed the new event")
+    .expect("recovered stream remains open")?;
     let crate::recoverable_chat::RecoverableChatUpdate::Event { id, event } = update else {
         panic!("expected post-restart provisional event");
     };
     assert_eq!(
-        id, old_id,
+        id.cursor, old_id.cursor,
         "the in-memory replay store deliberately reuses the pre-restart cursor"
+    );
+    assert_ne!(
+        id, old_id,
+        "a fresh replay-store incarnation must distinguish a reused cursor without relying on gap clearing"
+    );
+    assert_eq!(gap_continuation_id, id);
+    assert_eq!(
+        observation_assistant_delta(&gap_continuation_event).as_deref(),
+        Some("after replay-store restart")
     );
     assert_eq!(
         observation_assistant_delta(&event).as_deref(),

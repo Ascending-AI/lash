@@ -136,8 +136,11 @@ test("a Done product event behaviorally retracts the provisional draft", () => {
         };
       },
     },
+    assistantDraftTurnId: "cancel-turn",
     assistantDraftText: "provisional text",
-    assistantDraftChunks: [{ text: "provisional text" }],
+    assistantDraftChunks: [
+      { turnId: "cancel-turn", text: "provisional text" },
+    ],
     pendingTools: [],
     appendTool() {},
     reasoningChunks: [],
@@ -153,14 +156,89 @@ test("a Done product event behaviorally retracts the provisional draft", () => {
   vm.runInNewContext(
     `${markedSource("WORKBENCH_TRANSIENT_SETTLEMENT", "WORKBENCH_TRANSIENT_SETTLEMENT")}
      ${markedSource("WORKBENCH_PRODUCT_EVENT_REDUCER", "WORKBENCH_PRODUCT_EVENT_REDUCER")}
-     applyProductEvent({ event_id: "cancel-done", sequence: 1, type: "done" });
-     this.result = { assistantDraft, assistantDraftText, assistantDraftChunks };`,
+     applyProductEvent({
+       event_id: "cancel-done",
+       sequence: 1,
+       type: "done",
+       turn_id: "cancel-turn"
+     });
+     this.result = {
+       assistantDraft,
+       assistantDraftTurnId,
+       assistantDraftText,
+       assistantDraftChunks
+     };`,
     reducerContext,
   );
 
   assert.equal(draftRemoved, true);
   assert.equal(busy, false);
   assert.equal(reducerContext.result.assistantDraft, null);
+  assert.equal(reducerContext.result.assistantDraftTurnId, null);
   assert.equal(reducerContext.result.assistantDraftText, "");
   assert.deepEqual([...reducerContext.result.assistantDraftChunks], []);
+});
+
+test("turn A Done does not retract turn B provisional prose", () => {
+  let draftRemoved = false;
+  const reducerContext = {
+    Set,
+    projectionState: createWorkbenchProjectionState(),
+    renderedProductEvents: new Set(),
+    assistantDraft: {
+      closest() {
+        return {
+          remove() {
+            draftRemoved = true;
+          },
+        };
+      },
+    },
+    assistantDraftTurnId: "turn-b",
+    assistantDraftText: "turn B provisional text",
+    assistantDraftChunks: [
+      {
+        turnId: "turn-b",
+        correlationId: "turn-b-prose",
+        text: "turn B provisional text",
+      },
+    ],
+    pendingTools: [],
+    appendTool() {},
+    reasoningChunks: [],
+    pendingCodeBlock: null,
+    reasoning: null,
+    renderMessage() {},
+    renderIngressReceipt() {},
+    setBusy() {},
+    refreshUsage() {},
+  };
+  vm.runInNewContext(
+    `${markedSource("WORKBENCH_TRANSIENT_SETTLEMENT", "WORKBENCH_TRANSIENT_SETTLEMENT")}
+     ${markedSource("WORKBENCH_PRODUCT_EVENT_REDUCER", "WORKBENCH_PRODUCT_EVENT_REDUCER")}
+     applyProductEvent({
+       event_id: "turn-a-done",
+       sequence: 1,
+       type: "done",
+       turn_id: "turn-a"
+     });
+     this.result = {
+       assistantDraft,
+       assistantDraftTurnId,
+       assistantDraftText,
+       assistantDraftChunks
+     };`,
+    reducerContext,
+  );
+
+  assert.equal(draftRemoved, false);
+  assert.equal(reducerContext.result.assistantDraftTurnId, "turn-b");
+  assert.equal(reducerContext.result.assistantDraftText, "turn B provisional text");
+  assert.deepEqual(
+    [...reducerContext.result.assistantDraftChunks].map((chunk) => ({
+      turnId: chunk.turnId,
+      text: chunk.text,
+    })),
+    [{ turnId: "turn-b", text: "turn B provisional text" }],
+  );
 });

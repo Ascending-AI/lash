@@ -474,6 +474,8 @@ fn remote_session_observation_dtos_json_round_trip_typed_kinds() {
     let event = RemoteSessionObservationEvent {
         protocol_version: REMOTE_PROTOCOL_VERSION,
         session_id: "session".to_string(),
+        replay_incarnation_id: "replay-incarnation".to_string(),
+        turn_id: None,
         revision: 3,
         cursor: "lashsc1:3:7:session".to_string(),
         event: RemoteSessionObservationEventPayload::QueueChanged {
@@ -843,8 +845,8 @@ fn wrong_protocol_versions_are_rejected() {
     assert!(matches!(
         request.validate(),
         Err(RemoteProtocolError::UnsupportedProtocolVersion {
-            actual: 15,
-            expected: 16,
+            actual: 16,
+            expected: 17,
         })
     ));
 
@@ -926,7 +928,7 @@ fn nested_protocol_versions_must_match_envelope() {
 
 #[test]
 fn remote_process_env_ref_is_validated_but_serializes_as_string() {
-    assert_eq!(REMOTE_PROTOCOL_VERSION, 16);
+    assert_eq!(REMOTE_PROTOCOL_VERSION, 17);
     let env_ref: RemoteProcessExecutionEnvRef =
         canonical_env_ref().parse().expect("canonical env ref");
     assert_eq!(env_ref.as_str(), canonical_env_ref());

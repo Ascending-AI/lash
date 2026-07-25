@@ -905,6 +905,17 @@ pub trait TurnActivitySink: Send + Sync {
     }
 
     async fn emit(&self, activity: TurnActivity);
+
+    /// Emit activity with the identity of the physical turn that produced it.
+    ///
+    /// Sinks that only consume turn-local activity can keep implementing
+    /// [`emit`](Self::emit). Observation sinks override this method to carry
+    /// turn identity on their enclosing event without adding it to
+    /// [`TurnActivity`].
+    async fn emit_for_turn(&self, turn_id: &str, activity: TurnActivity) {
+        let _ = turn_id;
+        self.emit(activity).await;
+    }
 }
 
 pub struct NoopTurnActivitySink;
@@ -1092,6 +1103,9 @@ pub struct LashRuntime {
     /// next physical turn on this handle.
     pub(in crate::runtime) last_committed_lease_continuity:
         Option<session_execution_lease::SessionExecutionLeaseContinuity>,
+    /// Most recent physical turn committed by this runtime, paired with the
+    /// resulting session revision for observation-envelope attribution.
+    pub(in crate::runtime) last_committed_observation_turn: Option<(u64, String)>,
     /// Set only after this handle itself has attempted a durable graph load.
     pub(in crate::runtime) graph_loaded_from_store: bool,
     /// Resident-graph policy chosen by the host. Controls whether

@@ -453,16 +453,19 @@ mod tests {
             active_turns: ActiveTurns::default(),
             authorization: WorkbenchAuthorization::allow_all(),
         };
-        let mut events = state.event_tx.subscribe(&state.current_session_id());
+        let session_id = state.current_session_id();
+        let mut events = state.event_tx.subscribe(&session_id);
 
-        state.publish(StreamItem::Done);
+        state.publish_turn_done(&session_id, "transient-turn");
 
         assert!(matches!(
             events.try_recv(),
             Ok(ProductEvent {
-                item: StreamItem::Done,
+                item: StreamItem::Done {
+                    turn_id: Some(turn_id),
+                },
                 ..
-            })
+            }) if turn_id == "transient-turn"
         ));
         let _ = std::fs::remove_dir_all(data_dir);
     }
@@ -545,7 +548,7 @@ mod tests {
         assert!(matches!(
             events.try_recv(),
             Ok(ProductEvent {
-                item: StreamItem::Done,
+                item: StreamItem::Done { turn_id: None },
                 ..
             })
         ));
@@ -847,7 +850,7 @@ finish "gap source"
         assert!(matches!(
             events.try_recv(),
             Ok(ProductEvent {
-                item: StreamItem::Done,
+                item: StreamItem::Done { .. },
                 ..
             })
         ));

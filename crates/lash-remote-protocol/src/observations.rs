@@ -84,6 +84,9 @@ impl RemoteSessionObservation {
 pub struct RemoteSessionObservationEvent {
     pub protocol_version: u32,
     pub session_id: String,
+    pub replay_incarnation_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub turn_id: Option<String>,
     pub revision: u64,
     pub cursor: String,
     #[serde(flatten)]
@@ -98,6 +101,14 @@ impl RemoteSessionObservationEvent {
             "session_id",
             &self.session_id,
         )?;
+        require_non_empty(
+            "RemoteSessionObservationEvent",
+            "replay_incarnation_id",
+            &self.replay_incarnation_id,
+        )?;
+        if let Some(turn_id) = self.turn_id.as_deref() {
+            require_non_empty("RemoteSessionObservationEvent", "turn_id", turn_id)?;
+        }
         require_non_empty("RemoteSessionObservationEvent", "cursor", &self.cursor)?;
         if let RemoteSessionObservationEventPayload::TurnActivity { activity } = &self.event {
             activity.validate()?;

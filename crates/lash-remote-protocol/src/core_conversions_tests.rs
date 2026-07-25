@@ -1016,6 +1016,7 @@ fn remote_session_observation_from_core_maps_snapshot_metadata() {
         &store,
         "session",
         lash_core::SessionRevision::new(4),
+        None,
         lash_core::SessionObservationEventPayload::QueueChanged {
             kind: lash_core::SessionQueueEventKind::Enqueued,
             batch_ids: vec!["batch-1".to_string()],
@@ -1055,6 +1056,7 @@ fn remote_session_observation_from_core_maps_snapshot_metadata() {
 #[test]
 fn remote_session_observation_from_core_maps_all_payload_variants() {
     fn event(
+        turn_id: Option<&str>,
         payload: lash_core::SessionObservationEventPayload,
     ) -> Arc<lash_core::SessionObservationEvent> {
         let store = lash_core::InMemoryLiveReplayStore::default();
@@ -1062,6 +1064,7 @@ fn remote_session_observation_from_core_maps_all_payload_variants() {
             &store,
             "session",
             lash_core::SessionRevision::new(4),
+            turn_id,
             payload,
         )
         .expect("append observation event")
@@ -1073,11 +1076,18 @@ fn remote_session_observation_from_core_maps_all_payload_variants() {
         });
     let remote = RemoteSessionObservationEvent::from_core(
         7,
-        event(lash_core::SessionObservationEventPayload::TurnActivity(
-            activity,
-        )),
+        event(
+            Some("activity-turn"),
+            lash_core::SessionObservationEventPayload::TurnActivity(activity),
+        ),
     );
-    match remote.event {
+    assert_eq!(remote.turn_id.as_deref(), Some("activity-turn"));
+    assert!(!remote.replay_incarnation_id.is_empty());
+    let encoded = serde_json::to_value(&remote).expect("serialize activity envelope");
+    let decoded: RemoteSessionObservationEvent =
+        serde_json::from_value(encoded).expect("deserialize activity envelope");
+    assert_eq!(decoded, remote);
+    match &remote.event {
         RemoteSessionObservationEventPayload::TurnActivity { activity } => {
             assert_eq!(activity.sequence, 7);
         }
@@ -1088,8 +1098,12 @@ fn remote_session_observation_from_core_maps_all_payload_variants() {
         lash_core::SessionReadView::from_snapshot(&lash_core::SessionSnapshot::default());
     let remote = RemoteSessionObservationEvent::from_core(
         8,
-        event(lash_core::SessionObservationEventPayload::Committed { read_view }),
+        event(
+            Some("committed-turn"),
+            lash_core::SessionObservationEventPayload::Committed { read_view },
+        ),
     );
+    assert_eq!(remote.turn_id.as_deref(), Some("committed-turn"));
     assert!(matches!(
         remote.event,
         RemoteSessionObservationEventPayload::Committed
@@ -1098,11 +1112,21 @@ fn remote_session_observation_from_core_maps_all_payload_variants() {
     let remote = RemoteSessionObservationEvent::from_core(
         9,
         event(
+            None,
             lash_core::SessionObservationEventPayload::AgentFrameSwitched {
                 frame_id: "frame-1".to_string(),
             },
         ),
     );
+    assert_eq!(remote.turn_id, None);
+    let encoded = serde_json::to_value(&remote).expect("serialize frame envelope");
+    assert!(
+        encoded.get("turn_id").is_none(),
+        "absent turn identity must be omitted: {encoded}"
+    );
+    let decoded: RemoteSessionObservationEvent =
+        serde_json::from_value(encoded).expect("deserialize frame envelope");
+    assert_eq!(decoded, remote);
     assert!(matches!(
         remote.event,
         RemoteSessionObservationEventPayload::AgentFrameSwitched { frame_id }
@@ -1111,11 +1135,15 @@ fn remote_session_observation_from_core_maps_all_payload_variants() {
 
     let remote = RemoteSessionObservationEvent::from_core(
         10,
-        event(lash_core::SessionObservationEventPayload::QueueChanged {
-            kind: lash_core::SessionQueueEventKind::Cancelled,
-            batch_ids: vec!["batch-1".to_string()],
-        }),
+        event(
+            None,
+            lash_core::SessionObservationEventPayload::QueueChanged {
+                kind: lash_core::SessionQueueEventKind::Cancelled,
+                batch_ids: vec!["batch-1".to_string()],
+            },
+        ),
     );
+    assert_eq!(remote.turn_id, None);
     assert!(matches!(
         remote.event,
         RemoteSessionObservationEventPayload::QueueChanged { kind, batch_ids }
@@ -1125,11 +1153,15 @@ fn remote_session_observation_from_core_maps_all_payload_variants() {
 
     let remote = RemoteSessionObservationEvent::from_core(
         11,
-        event(lash_core::SessionObservationEventPayload::ProcessChanged {
-            kind: lash_core::SessionProcessEventKind::Started,
-            process_ids: vec!["process-1".to_string()],
-        }),
+        event(
+            None,
+            lash_core::SessionObservationEventPayload::ProcessChanged {
+                kind: lash_core::SessionProcessEventKind::Started,
+                process_ids: vec!["process-1".to_string()],
+            },
+        ),
     );
+    assert_eq!(remote.turn_id, None);
     assert!(matches!(
         remote.event,
         RemoteSessionObservationEventPayload::ProcessChanged { kind, process_ids }

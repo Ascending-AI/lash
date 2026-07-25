@@ -329,7 +329,7 @@ async fn live_restate_provider_auth_failure_terminalizes_and_session_recovers_in
             StreamItem::Message { message } if message.role == "event" => {
                 rendered_failure = Some(message.text)
             }
-            StreamItem::Done => saw_done = true,
+            StreamItem::Done { .. } => saw_done = true,
             _ => {}
         }
     }
@@ -1317,7 +1317,7 @@ async fn live_restate_ingress_owner_restart_for_store(backend: &'static str) {
         let done_count = product_events
             .events
             .iter()
-            .filter(|event| matches!(&event.item, StreamItem::Done))
+            .filter(|event| matches!(&event.item, StreamItem::Done { .. }))
             .count();
         if done_count > 0 {
             break;
@@ -1334,7 +1334,7 @@ async fn live_restate_ingress_owner_restart_for_store(backend: &'static str) {
         .snapshot(&session_id)
         .events
         .iter()
-        .filter(|event| matches!(&event.item, StreamItem::Done))
+        .filter(|event| matches!(&event.item, StreamItem::Done { .. }))
         .count();
     assert_eq!(
         done_count, 1,

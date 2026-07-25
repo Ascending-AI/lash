@@ -39,6 +39,7 @@ async fn run_once_live_replay_pressure(chat_turns: usize) -> anyhow::Result<Runt
         let mut phase_profile = BTreeMap::new();
         let session_id = format!("runtime-perf-live-replay-{turn_index}");
         let revision = SessionRevision::new(turn_index as u64 + 1);
+        let turn_id = format!("turn-{turn_index}");
         let start_cursor = store.current_cursor(&session_id, revision);
 
         let (first_cursor, append_phase) =
@@ -48,6 +49,7 @@ async fn run_once_live_replay_pressure(chat_turns: usize) -> anyhow::Result<Runt
                     let event = store.append(
                         &session_id,
                         revision,
+                        Some(&turn_id),
                         live_replay_text_payload(format!("turn-{turn_index}-event-{event_index}")),
                     )?;
                     if first_cursor.is_none() {
@@ -111,6 +113,7 @@ async fn run_once_live_replay_pressure(chat_turns: usize) -> anyhow::Result<Runt
                 store.append(
                     &session_id,
                     revision,
+                    Some(&turn_id),
                     live_replay_text_payload(format!("turn-{turn_index}-live-event")),
                 )?;
                 tokio::time::timeout(Duration::from_secs(1), subscription.next_event())
@@ -130,11 +133,13 @@ async fn run_once_live_replay_pressure(chat_turns: usize) -> anyhow::Result<Runt
                     Duration::from_secs(120),
                 );
                 let trim_session_id = format!("runtime-perf-live-replay-trim-{turn_index}");
+                let trim_turn_id = format!("trim-turn-{turn_index}");
                 let trim_start = trim_store.current_cursor(&trim_session_id, revision);
                 for event_index in 0..(LIVE_REPLAY_TRIM_CAPACITY * 3) {
                     trim_store.append(
                         &trim_session_id,
                         revision,
+                        Some(&trim_turn_id),
                         live_replay_text_payload(format!("trim-{turn_index}-{event_index}")),
                     )?;
                 }

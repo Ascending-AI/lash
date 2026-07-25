@@ -173,9 +173,10 @@ lanes after those cursors:
   `ObservableSession::subscribe_recoverable_chat` directly, then encodes its
   updates for HTTP. It forwards provisional turn activity,
   `RemoteLiveReplayGap`, and terminal replacement. Event identity is
-  `(session_id, cursor)` within one replay-store incarnation; a replay gap
-  clears pre-gap identities before the stream continues from its authoritative
-  snapshot cursor.
+  `(session_id, replay_incarnation_id, cursor)`, so a consumer may safely retain
+  its bounded identity cache when the server restarts and reuses cursor values.
+  A replay gap still clears pre-gap identities before the stream continues from
+  its authoritative snapshot cursor.
 - `/api/events` is the product lane. `SessionEventRegistry` first appends every
   event to `.agent-workbench/product-events.json` with a monotonic per-session
   sequence and stable event id, then broadcasts it as a freshness hint. A
@@ -188,16 +189,18 @@ serialization failures are traced server-side; no raw error string is a
 product-stream variant. The UI renders stable safe failure copy.
 
 Provisional prose and reasoning are keyed by Lash correlation id. A
-`model_attempt_reset` retracts only the superseded chunks. A replay gap,
-product lag, cancellation settlement, or terminal commit replaces all
-provisional state from `/api/state`. Recovery fetches are generation-fenced:
-an out-of-order response or a response overtaken by a newer product event is
-discarded. Authoritative replacement rebuilds both dedup sets and assigns,
-rather than monotonically preserves, the snapshot cursor. Cursor and dedup
-state are scoped to the returned session id, so reset cannot carry positions
-into the new session. The state endpoint merges product-only rows onto the
-complete canonical Lash transcript by stable id; it never replaces canonical
-history with a partial product log. Canonical assistant rows use
+`model_attempt_reset` retracts only the superseded chunks. Provisional rows
+also retain their producing turn id; a `done` event retracts only rows from its
+own turn, so late settlement cannot erase a newer turn's output. A replay gap,
+product lag, cancellation settlement, or terminal replacement rebuilds state
+from `/api/state`. Recovery fetches are generation-fenced: an out-of-order
+response or a response overtaken by a newer product event is discarded.
+Authoritative replacement rebuilds both dedup sets and assigns, rather than
+monotonically preserves, the snapshot cursor. Cursor and dedup state are scoped
+to the returned session id, so reset cannot carry positions into the new
+session. The state endpoint merges product-only rows onto the complete
+canonical Lash transcript by stable id; it never replaces canonical history
+with a partial product log. Canonical assistant rows use
 `workbench-assistant:<turn_id>` in both the live product event and durable
 session transcript, so a live/canonical pair is one row, never two.
 
@@ -511,10 +514,11 @@ The ownership split is intentional:
   the real `/api/events` resync response after forced broadcast lag,
   generation-fenced browser recovery, session-scoped reset cursors, canonical
   history merged with a partial product log, the real turn-output
-  live/canonical identity across reload, distinct cancel settlement events,
-  typed turn-input application, and fixed public copy from a real provider
-  failure. The browser cases execute the production JavaScript reducer under
-  Node; the workspace test shards install Node explicitly.
+  live/canonical identity across reload, interleaved turn settlement that keeps
+  newer provisional output, distinct cancel settlement events, typed turn-input
+  application, and fixed public copy from a real provider failure. The browser
+  cases execute the production JavaScript reducer under Node; the workspace
+  test shards install Node explicitly.
 
 Each gate asserts the violated invariant directly: duplicate identity changes a
 row count, a swallowed gap prevents recovery, a missing terminal replacement

@@ -841,9 +841,17 @@ impl TurnActivitySink for SessionObservationTurnActivitySink<'_> {
     }
 
     async fn emit(&self, activity: TurnActivity) {
-        self.runtime.record_turn_activity(activity.clone());
+        self.runtime.record_turn_activity(None, activity.clone());
         if let Some(live) = self.live {
             live.emit(activity).await;
+        }
+    }
+
+    async fn emit_for_turn(&self, turn_id: &str, activity: TurnActivity) {
+        self.runtime
+            .record_turn_activity(Some(turn_id), activity.clone());
+        if let Some(live) = self.live {
+            live.emit_for_turn(turn_id, activity).await;
         }
     }
 }
