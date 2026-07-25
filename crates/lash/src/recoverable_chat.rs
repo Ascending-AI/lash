@@ -4,7 +4,7 @@
 //! terminal-replacement contract. Hosts own authorization, product events,
 //! transcript presentation, and cancellation controls.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeSet, VecDeque};
 use std::pin::Pin;
 use std::task::{Context, Poll};
 
@@ -17,18 +17,18 @@ use lash_core::{
 use crate::Result;
 use crate::session::{ObservableSession, SessionObservationStream, SessionObservationStreamItem};
 
-/// Subscription-scoped at-least-once delivery identity for one Lash
-/// observation event.
+/// At-least-once delivery identity for one Lash observation event.
 ///
-/// Hosts retain this identity only while the current live-replay incarnation is
-/// known to be continuous. Re-delivery of the same identity must not create
-/// another row. A [`RecoverableChatUpdate::ReplayGap`] ends that continuity:
-/// the replacement snapshot is authoritative and cursor identities retained
-/// from before the gap must be discarded because an in-memory replay store can
-/// reuse them after restart.
+/// The replay-store incarnation makes this identity safe to persist across
+/// process restarts: a newly constructed store may reuse a cursor, but it
+/// cannot reproduce the old identity. Re-delivery of the same identity must
+/// not create another row. A [`RecoverableChatUpdate::ReplayGap`] still makes
+/// the replacement snapshot authoritative and clears the subscription's
+/// bounded applied-identity window.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct RecoverableChatEventId {
     pub session_id: String,
+    pub replay_incarnation_id: String,
     pub cursor: String,
 }
 
@@ -36,7 +36,42 @@ impl RecoverableChatEventId {
     fn from_event(event: &SessionObservationEvent) -> Self {
         Self {
             session_id: event.session_id.clone(),
+            replay_incarnation_id: event.replay_incarnation_id.clone(),
             cursor: event.cursor.to_string(),
+        }
+    }
+}
+
+const MAX_APPLIED_EVENT_IDS: usize = 4096;
+
+#[derive(Default)]
+struct AppliedEventIds {
+    ids: BTreeSet<RecoverableChatEventId>,
+    order: VecDeque<RecoverableChatEventId>,
+}
+
+impl AppliedEventIds {
+    fn insert(&mut self, id: RecoverableChatEventId) -> bool {
+        if !self.ids.insert(id.clone()) {
+            return false;
+        }
+        self.order.push_back(id);
+        while self.order.len() > MAX_APPLIED_EVENT_IDS {
+            if let Some(expired) = self.order.pop_front() {
+                self.ids.remove(&expired);
+            }
+        }
+        true
+    }
+
+    fn clear(&mut self) {
+        self.ids.clear();
+        self.order.clear();
+    }
+
+    fn extend(&mut self, ids: impl IntoIterator<Item = RecoverableChatEventId>) {
+        for id in ids {
+            self.insert(id);
         }
     }
 }
@@ -91,25 +126,26 @@ pub enum RecoverableChatUpdate {
 /// [`TurnWorkDriver`](crate::TurnWorkDriver).
 pub struct RecoverableChatSubscription {
     inner: SessionObservationStream,
-    applied: BTreeSet<RecoverableChatEventId>,
+    applied: AppliedEventIds,
 }
 
 impl RecoverableChatSubscription {
     pub(crate) fn new(inner: SessionObservationStream) -> Self {
         Self {
             inner,
-            applied: BTreeSet::new(),
+            applied: AppliedEventIds::default(),
         }
     }
 
-    /// Seed identities already applied by the host projection in this replay
-    /// store incarnation.
+    /// Seed identities already applied by the host projection.
     ///
-    /// This makes same-incarnation reconnect redelivery idempotent even when
-    /// the projection cursor intentionally trails individual applied events.
-    /// Do not persist these identities across a replay gap or process restart;
-    /// the subscription clears them when it emits
-    /// [`RecoverableChatUpdate::ReplayGap`].
+    /// This makes reconnect redelivery idempotent even when the projection
+    /// cursor intentionally trails individual applied events. Persisting the
+    /// identities across a process restart is safe because the replay-store
+    /// incarnation distinguishes newly emitted events from old ones. The
+    /// subscription retains only a bounded recent window and still clears it
+    /// when it emits [`RecoverableChatUpdate::ReplayGap`], whose replacement
+    /// snapshot is authoritative.
     pub fn with_applied_event_ids(
         mut self,
         ids: impl IntoIterator<Item = RecoverableChatEventId>,

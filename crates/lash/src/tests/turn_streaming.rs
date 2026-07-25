@@ -1713,7 +1713,7 @@ async fn recoverable_chat_conformance_deduplicates_redelivery_identity() -> Resu
 }
 
 #[tokio::test]
-async fn recoverable_chat_gap_allows_new_event_that_reuses_pre_restart_cursor() -> Result<()> {
+async fn recoverable_chat_restart_identity_does_not_depend_on_gap_clearing() -> Result<()> {
     let session_id = "recoverable-chat-restart-cursor";
     let store_factory = Arc::new(lash_core::InMemorySessionStoreFactory::new());
     let bootstrap_core = explicit_ephemeral_facets(LashCore::standard_builder())
@@ -1762,6 +1762,11 @@ async fn recoverable_chat_gap_allows_new_event_that_reuses_pre_restart_cursor() 
         .live_replay_store(Arc::new(lash_core::InMemoryLiveReplayStore::default()))
         .build()?;
     let second_session = second_core.session(session_id).open().await?;
+    let restarted_at = second_session.observe().recoverable_chat_snapshot().cursor;
+    let mut retained_applied_ids = second_session
+        .observe()
+        .subscribe_recoverable_chat(restarted_at)
+        .with_applied_event_ids([old_id.clone()]);
     let mut recovered = second_session
         .observe()
         .subscribe_recoverable_chat(old_cursor)
@@ -1784,16 +1789,40 @@ async fn recoverable_chat_gap_allows_new_event_that_reuses_pre_restart_cursor() 
         .record_turn_activity(TurnActivity::independent(TurnEvent::AssistantProseDelta {
             text: "after replay-store restart".into(),
         }));
-    let update = tokio::time::timeout(std::time::Duration::from_millis(500), recovered.next())
-        .await
-        .expect("new event at a reused cursor was incorrectly suppressed")
-        .expect("recovered stream remains open")?;
+    let gap_continuation =
+        tokio::time::timeout(std::time::Duration::from_millis(500), recovered.next())
+            .await
+            .expect("gap stream did not continue with the new event")
+            .expect("recovered stream remains open")?;
+    let crate::recoverable_chat::RecoverableChatUpdate::Event {
+        id: gap_continuation_id,
+        event: gap_continuation_event,
+    } = gap_continuation
+    else {
+        panic!("expected post-gap provisional event");
+    };
+    let update = tokio::time::timeout(
+        std::time::Duration::from_millis(500),
+        retained_applied_ids.next(),
+    )
+    .await
+    .expect("retained pre-restart identity incorrectly suppressed the new event")
+    .expect("recovered stream remains open")?;
     let crate::recoverable_chat::RecoverableChatUpdate::Event { id, event } = update else {
         panic!("expected post-restart provisional event");
     };
     assert_eq!(
-        id, old_id,
+        id.cursor, old_id.cursor,
         "the in-memory replay store deliberately reuses the pre-restart cursor"
+    );
+    assert_ne!(
+        id, old_id,
+        "a fresh replay-store incarnation must distinguish a reused cursor without relying on gap clearing"
+    );
+    assert_eq!(gap_continuation_id, id);
+    assert_eq!(
+        observation_assistant_delta(&gap_continuation_event).as_deref(),
+        Some("after replay-store restart")
     );
     assert_eq!(
         observation_assistant_delta(&event).as_deref(),

@@ -166,6 +166,7 @@ pub struct SessionObservation {
 #[derive(Clone, Debug)]
 pub struct SessionObservationEvent {
     pub session_id: String,
+    pub replay_incarnation_id: String,
     pub revision: SessionRevision,
     pub cursor: SessionCursor,
     pub payload: SessionObservationEventPayload,
@@ -405,6 +406,7 @@ impl Default for InMemoryLiveReplayStoreConfig {
 
 #[derive(Debug)]
 pub struct InMemoryLiveReplayStore {
+    replay_incarnation_id: String,
     config: InMemoryLiveReplayStoreConfig,
     clock: Arc<dyn crate::Clock>,
     sessions: StdMutex<HashMap<String, LiveReplaySessionBuffer>>,
@@ -417,6 +419,7 @@ impl InMemoryLiveReplayStore {
 
     pub fn with_clock(config: InMemoryLiveReplayStoreConfig, clock: Arc<dyn crate::Clock>) -> Self {
         Self {
+            replay_incarnation_id: uuid::Uuid::new_v4().to_string(),
             config,
             clock,
             sessions: StdMutex::new(HashMap::new()),
@@ -543,6 +546,7 @@ impl LiveReplayStore for InMemoryLiveReplayStore {
         let cursor = SessionCursor::new(session_id, revision, buffer.tail_position);
         let event = Arc::new(SessionObservationEvent {
             session_id: session_id.to_string(),
+            replay_incarnation_id: self.replay_incarnation_id.clone(),
             revision,
             cursor,
             payload,
