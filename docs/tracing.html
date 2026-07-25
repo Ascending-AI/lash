@@ -315,8 +315,8 @@ $ cargo run -p lash-trace-viewer -- trace.jsonl \
           </div>
           <pre data-lang="console"><code># In your downstream Cargo.toml — pull in lash-core with the otel-trace
 # feature alongside the lash-runtime facade.
-lash-runtime = "=0.1.0-alpha.111"
-lash-core    = { version = "=0.1.0-alpha.111", features = ["otel-trace"] }</code></pre>
+lash-runtime = "=0.1.0-alpha.112"
+lash-core    = { version = "=0.1.0-alpha.112", features = ["otel-trace"] }</code></pre>
           <p><code>lash_core::OtelTraceSink</code> wraps an <code>opentelemetry</code> tracer and converts every event to a span with payload attributes. Use in place of (or alongside) <code>JsonlTraceSink</code>:</p>
           <pre data-lang="rust" data-snippet="tracing#otel-trace-core"><code>use std::sync::Arc;
 
