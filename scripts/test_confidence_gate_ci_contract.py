@@ -184,6 +184,16 @@ class ConfidenceGateCiContractTest(unittest.TestCase):
         self.assertIn("bash scripts/check-workflow-graph-model.sh", lint)
         self.assertIn("bash scripts/check-production-file-size.sh", lint)
 
+    def test_lint_job_checks_and_previews_pr_release_notes(self) -> None:
+        workflow = WORKFLOW.read_text(encoding="utf-8")
+        lint = workflow_job_block(workflow, "lint")
+
+        self.assertIn("fetch-depth: 0", lint)
+        self.assertIn("if: github.event_name == 'pull_request'", lint)
+        self.assertIn('git merge-base "origin/${{ github.base_ref }}" HEAD', lint)
+        self.assertIn("python3 scripts/release_notes.py check-pr", lint)
+        self.assertIn('--summary "$GITHUB_STEP_SUMMARY"', lint)
+
     def test_workflow_graph_example_is_in_functional_matrix(self) -> None:
         workflow = WORKFLOW.read_text(encoding="utf-8")
         justfile = JUSTFILE.read_text(encoding="utf-8")
