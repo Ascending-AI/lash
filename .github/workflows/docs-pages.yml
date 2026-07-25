@@ -57,7 +57,9 @@ jobs:
           set -euo pipefail
           site_dir="_site"
           rm -rf "${site_dir}"
-          rsync -a --delete docs/ "${site_dir}/"
+          # docs/agents/ is repo-internal contributor process guidance
+          # (tracker, ticket, and PR norms), not site content.
+          rsync -a --delete --exclude 'agents/' docs/ "${site_dir}/"
           touch "${site_dir}/.nojekyll"
           echo "lash.run" > "${site_dir}/CNAME"
 
