@@ -290,12 +290,16 @@ impl RuntimeHandle {
     pub fn publish_from(&self, runtime: &LashRuntime) {
         let revision = SessionRevision::from_runtime(runtime);
         let previous = self.observation.load_full();
+        let turn_id = (previous.revision != revision)
+            .then(|| runtime.last_committed_turn_id_for_revision(revision))
+            .flatten();
         let (state, read_view, usage_report) = export_observation_state(runtime);
         if previous.persisted_state.current_agent_frame_id != state.current_agent_frame_id
             && !state.current_agent_frame_id.is_empty()
             && let Err(err) = self.live_replay_store.append(
                 runtime.session_id(),
                 revision,
+                None,
                 SessionObservationEventPayload::AgentFrameSwitched {
                     frame_id: state.current_agent_frame_id.clone(),
                 },
@@ -310,6 +314,7 @@ impl RuntimeHandle {
         let cursor = match self.live_replay_store.append(
             runtime.session_id(),
             revision,
+            turn_id,
             SessionObservationEventPayload::Committed {
                 read_view: read_view.clone(),
             },
@@ -337,11 +342,12 @@ impl RuntimeHandle {
             )));
     }
 
-    pub fn record_turn_activity(&self, activity: crate::TurnActivity) {
+    pub fn record_turn_activity(&self, turn_id: Option<&str>, activity: crate::TurnActivity) {
         let observation = self.observe();
         if let Err(err) = self.live_replay_store.append(
             observation.session_id(),
             observation.session_revision(),
+            turn_id,
             SessionObservationEventPayload::TurnActivity(activity),
         ) {
             tracing::warn!(
@@ -357,6 +363,7 @@ impl RuntimeHandle {
         if let Err(err) = self.live_replay_store.append(
             observation.session_id(),
             observation.session_revision(),
+            None,
             SessionObservationEventPayload::QueueChanged { kind, batch_ids },
         ) {
             tracing::warn!(
@@ -372,6 +379,7 @@ impl RuntimeHandle {
         if let Err(err) = self.live_replay_store.append(
             observation.session_id(),
             observation.session_revision(),
+            None,
             SessionObservationEventPayload::ProcessChanged { kind, process_ids },
         ) {
             tracing::warn!(
@@ -671,6 +679,15 @@ impl RuntimeHandle {
     }
 }
 
+impl LashRuntime {
+    fn last_committed_turn_id_for_revision(&self, revision: SessionRevision) -> Option<&str> {
+        self.last_committed_observation_turn
+            .as_ref()
+            .filter(|(committed_revision, _)| *committed_revision == revision.as_u64())
+            .map(|(_, turn_id)| turn_id.as_str())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -683,6 +700,7 @@ mod tests {
             &self,
             _session_id: &str,
             _revision: SessionRevision,
+            _turn_id: Option<&str>,
             _payload: SessionObservationEventPayload,
         ) -> Result<Arc<SessionObservationEvent>, LiveReplayStoreError> {
             panic!("append should not be called by cursor rejection tests")
@@ -825,10 +843,12 @@ mod tests {
             events[0].payload,
             SessionObservationEventPayload::AgentFrameSwitched { .. }
         ));
+        assert_eq!(events[0].turn_id, None);
         assert!(matches!(
             events[1].payload,
             SessionObservationEventPayload::Committed { .. }
         ));
+        assert_eq!(events[1].turn_id, None);
     }
 
     #[tokio::test]

@@ -527,13 +527,13 @@ impl SessionAdmin {
         pending_turn_inputs: &[lash_core::PendingTurnInput],
     ) {
         for owned in events {
-            self.runtime
-                .record_turn_activity(lash_core::TurnActivity::independent(
-                    lash_core::TurnEvent::PluginRuntime {
-                        plugin_id: owned.plugin_id.clone(),
-                        event: owned.value.clone(),
-                    },
-                ));
+            self.runtime.record_turn_activity(
+                None,
+                lash_core::TurnActivity::independent(lash_core::TurnEvent::PluginRuntime {
+                    plugin_id: owned.plugin_id.clone(),
+                    event: owned.value.clone(),
+                }),
+            );
         }
         if !pending_turn_inputs.is_empty() {
             self.runtime.record_queue_changed(

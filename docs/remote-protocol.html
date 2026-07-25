@@ -32,7 +32,7 @@
     </div>
     <aside class="contract">
       <strong>Contract</strong>
-      <p>Every top-level remote envelope carries <code>protocol_version</code>. Current code uses <code>REMOTE_PROTOCOL_VERSION == 16</code>; call <code>validate()</code> or <code>ensure_protocol_version(...)</code> before executing a received envelope. Version 16 adds the typed <code>turn_input_applied</code> activity with stable admission, turn, committed-message, and optional checkpoint identity; hosts must not infer application from pending-input snapshots or parse a runtime diagnostic. Version 15 added trigger delivery provenance, and version 14 replaced image-only attachment DTOs and blob maps with the generic MIME-tagged <code>RemoteAttachmentSource</code> union. Remote consumers use exact-version negotiation, so each semantic wire expansion receives its own protocol version.</p>
+      <p>Every top-level remote envelope carries <code>protocol_version</code>. Current code uses <code>REMOTE_PROTOCOL_VERSION == 17</code>; call <code>validate()</code> or <code>ensure_protocol_version(...)</code> before executing a received envelope. Version 17 adds replay-store incarnation identity and optional turn identity to session observation event envelopes. Version 16 added the typed <code>turn_input_applied</code> activity with stable admission, turn, committed-message, and optional checkpoint identity. Remote consumers use exact-version negotiation, so a version 16 peer is rejected instead of silently decoding the expanded envelope.</p>
     </aside>
   </div>
 
@@ -156,7 +156,7 @@ request.validate()?;</code></pre>
       </div>
       <div class="listing__row">
         <div class="listing__label">session observation</div>
-        <div class="listing__body"><p><code>RemoteSessionCursor</code>, <code>RemoteSessionObservation</code>, <code>RemoteSessionObservationEvent</code>, and <code>RemoteLiveReplayGap</code> are the remote reconnect surface. They carry opaque cursor strings, session revisions, bounded replay events, explicit remote observation snapshots, and gap recovery without serializing a full <code>SessionReadView</code>. See <a href="./streaming.html#session-reconnect">Streaming and reconnect</a> for the host/frontend folding recipe.</p></div>
+        <div class="listing__body"><p><code>RemoteSessionCursor</code>, <code>RemoteSessionObservation</code>, <code>RemoteSessionObservationEvent</code>, and <code>RemoteLiveReplayGap</code> are the remote reconnect surface. They carry opaque cursor strings, session revisions, bounded replay events, explicit remote observation snapshots, and gap recovery without serializing a full <code>SessionReadView</code>. Every event carries the replay-store incarnation that makes redelivery identity restart-safe. Its optional <code>turn_id</code> is present for turn activity and commits, and absent for session-wide queue, process, and Agent Frame changes. See <a href="./streaming.html#session-reconnect">Streaming and reconnect</a> for the host/frontend folding recipe.</p></div>
       </div>
       <div class="listing__row">
         <div class="listing__label">prompt layer</div>

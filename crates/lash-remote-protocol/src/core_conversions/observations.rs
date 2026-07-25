@@ -103,7 +103,8 @@ impl RemoteSessionObservationEvent {
     pub fn from_core(sequence: u64, event: Arc<lash_core::SessionObservationEvent>) -> Self {
         let lash_core::SessionObservationEvent {
             session_id,
-            replay_incarnation_id: _,
+            replay_incarnation_id,
+            turn_id,
             revision,
             cursor,
             payload,
@@ -140,6 +141,8 @@ impl RemoteSessionObservationEvent {
         Self {
             protocol_version: REMOTE_PROTOCOL_VERSION,
             session_id: session_id.clone(),
+            replay_incarnation_id: replay_incarnation_id.clone(),
+            turn_id: turn_id.clone(),
             revision: revision.as_u64(),
             cursor: cursor.to_string(),
             event: payload,

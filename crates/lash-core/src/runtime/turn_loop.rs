@@ -194,12 +194,14 @@ pub(in crate::runtime) fn turn_input_completion_trace_payload(
 
 async fn emit_queued_work_started_to_sink(
     events: &dyn TurnActivitySink,
+    turn_id: &str,
     boundary: crate::QueuedWorkClaimBoundary,
     claim: &crate::QueuedWorkClaim,
     causes: Vec<crate::TurnCause>,
 ) {
-    emit_turn_activity_to_sink(
+    emit_turn_activity_to_sink_for_turn(
         events,
+        turn_id,
         TurnActivity::independent(TurnEvent::QueuedWorkStarted {
             boundary,
             batch_ids: queued_work_batch_ids(claim),
@@ -452,6 +454,12 @@ impl LashRuntime {
 
         let Some(session) = self.session.as_ref() else {
             self.state.apply_snapshot(&assembled.state);
+            self.last_committed_observation_turn = Some((
+                self.state
+                    .head_revision
+                    .unwrap_or(self.state.turn_index as u64),
+                trace_turn_id.clone(),
+            ));
             self.emit_completed_turn_trace(&assembled.state, &assembled.outcome, &trace_turn_id);
             publish_terminal_after_commit(
                 turn_control,
@@ -576,6 +584,12 @@ impl LashRuntime {
 
         emit_session_events_to_sink(events, finalized.events).await;
         self.state = turn_pipeline.into_final_state();
+        self.last_committed_observation_turn = Some((
+            self.state
+                .head_revision
+                .unwrap_or(self.state.turn_index as u64),
+            trace_turn_id.clone(),
+        ));
         publish_terminal_after_commit(
             turn_control,
             turn_control_resolver,
@@ -768,8 +782,9 @@ impl LashRuntime {
             }),
         };
         assembler.push(&error_event);
-        emit_turn_activity_to_sink(
+        emit_turn_activity_to_sink_for_turn(
             turn_events,
+            &trace_turn_id,
             TurnActivity::independent(TurnEvent::Error {
                 message: message.clone(),
             }),
@@ -1057,6 +1072,7 @@ impl LashRuntime {
         let causes = work.turn_causes.clone();
         emit_queued_work_started_to_sink(
             opts.turn_events_or_noop(),
+            &turn_id,
             crate::QueuedWorkClaimBoundary::Idle,
             &claim,
             causes.clone(),
@@ -1384,8 +1400,13 @@ impl LashRuntime {
                     }),
                 };
                 assembler.push(&error_event);
-                emit_turn_activity_to_sink(
+                let trace_turn_id = input
+                    .trace_turn_id
+                    .clone()
+                    .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+                emit_turn_activity_to_sink_for_turn(
                     turn_events,
+                    &trace_turn_id,
                     TurnActivity::independent(TurnEvent::Error { message: e }),
                 )
                 .await;
@@ -1398,10 +1419,6 @@ impl LashRuntime {
                 assembler.push(&SessionStreamEvent::Done);
                 emit_session_event_to_sink(events, SessionStreamEvent::Done).await;
                 let turn_index = self.state.turn_index + 1;
-                let trace_turn_id = input
-                    .trace_turn_id
-                    .clone()
-                    .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
                 let turn_control_host = Arc::clone(&self.host.core.control.effect_host);
                 let turn_control_resolver =
                     turn_control_resolver(turn_control_host.as_ref(), &scoped_effect_controller);
@@ -1550,8 +1567,9 @@ impl LashRuntime {
             initial_turn_input_applications.extend(claim.applications.clone());
         }
         if !initial_turn_input_applications.is_empty() {
-            emit_turn_activity_to_sink(
+            emit_turn_activity_to_sink_for_turn(
                 turn_events,
+                &trace_turn_id,
                 TurnActivity::independent(TurnEvent::QueuedInputAccepted {
                     applications: initial_turn_input_applications,
                 }),
@@ -1888,6 +1906,11 @@ impl LashRuntime {
         session_execution_lease: Option<&SessionExecutionLeaseGuard>,
         session_execution_lease_release_policy: SessionExecutionLeaseReleasePolicy,
     ) -> Result<PhysicalTurnExecution, RuntimeError> {
+        let scoped_turn_events = TurnScopedActivitySink {
+            turn_id: trace_turn_id.clone(),
+            inner: turn_events,
+        };
+        let turn_events: &dyn TurnActivitySink = &scoped_turn_events;
         let turn_control_host = Arc::clone(&self.host.core.control.effect_host);
         let turn_control_resolver =
             turn_control_resolver(turn_control_host.as_ref(), &scoped_effect_controller);
@@ -2209,6 +2232,32 @@ pub fn ensure_durable_effect_input(input: &TurnInput) -> Result<(), RuntimeError
 async fn emit_turn_activity_to_sink(events: &dyn TurnActivitySink, activity: TurnActivity) {
     if !events.is_noop() {
         events.emit(activity).await;
+    }
+}
+
+async fn emit_turn_activity_to_sink_for_turn(
+    events: &dyn TurnActivitySink,
+    turn_id: &str,
+    activity: TurnActivity,
+) {
+    if !events.is_noop() {
+        events.emit_for_turn(turn_id, activity).await;
+    }
+}
+
+struct TurnScopedActivitySink<'a> {
+    turn_id: String,
+    inner: &'a dyn TurnActivitySink,
+}
+
+#[async_trait::async_trait]
+impl TurnActivitySink for TurnScopedActivitySink<'_> {
+    fn is_noop(&self) -> bool {
+        self.inner.is_noop()
+    }
+
+    async fn emit(&self, activity: TurnActivity) {
+        self.inner.emit_for_turn(&self.turn_id, activity).await;
     }
 }
 

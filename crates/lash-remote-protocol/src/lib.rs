@@ -32,9 +32,9 @@ pub use turn_input::*;
 pub use turn_result::*;
 pub use usage_activity::*;
 
-// Bumped to 16: queued turn-input application is a typed observation with
-// stable admission, turn, and committed-message identity.
-pub const REMOTE_PROTOCOL_VERSION: u32 = 16;
+// Bumped to 17: session observation envelopes carry replay-store incarnation
+// and optional turn identity.
+pub const REMOTE_PROTOCOL_VERSION: u32 = 17;
 
 pub fn ensure_protocol_version(actual: u32) -> Result<(), RemoteProtocolError> {
     if actual == REMOTE_PROTOCOL_VERSION {

@@ -167,6 +167,7 @@ pub struct SessionObservation {
 pub struct SessionObservationEvent {
     pub session_id: String,
     pub replay_incarnation_id: String,
+    pub turn_id: Option<String>,
     pub revision: SessionRevision,
     pub cursor: SessionCursor,
     pub payload: SessionObservationEventPayload,
@@ -359,6 +360,7 @@ pub trait LiveReplayStore: Send + Sync {
         &self,
         session_id: &str,
         revision: SessionRevision,
+        turn_id: Option<&str>,
         payload: SessionObservationEventPayload,
     ) -> Result<Arc<SessionObservationEvent>, LiveReplayStoreError>;
 
@@ -532,6 +534,7 @@ impl LiveReplayStore for InMemoryLiveReplayStore {
         &self,
         session_id: &str,
         revision: SessionRevision,
+        turn_id: Option<&str>,
         payload: SessionObservationEventPayload,
     ) -> Result<Arc<SessionObservationEvent>, LiveReplayStoreError> {
         let now = self.clock.now();
@@ -547,6 +550,7 @@ impl LiveReplayStore for InMemoryLiveReplayStore {
         let event = Arc::new(SessionObservationEvent {
             session_id: session_id.to_string(),
             replay_incarnation_id: self.replay_incarnation_id.clone(),
+            turn_id: turn_id.map(str::to_string),
             revision,
             cursor,
             payload,
@@ -712,10 +716,10 @@ mod tests {
         let store = InMemoryLiveReplayStore::default();
         let start = store.current_cursor("s", SessionRevision(0));
         store
-            .append("s", SessionRevision(0), activity("a"))
+            .append("s", SessionRevision(0), None, activity("a"))
             .expect("append a");
         store
-            .append("s", SessionRevision(0), activity("b"))
+            .append("s", SessionRevision(0), None, activity("b"))
             .expect("append b");
         let LiveReplayResult::Replayed(events) = store.replay_after_cursor(&start).expect("replay")
         else {
@@ -736,10 +740,10 @@ mod tests {
         let store = InMemoryLiveReplayStore::with_bounds(1, Duration::from_secs(120));
         let start = store.current_cursor("s", SessionRevision(0));
         store
-            .append("s", SessionRevision(0), activity("a"))
+            .append("s", SessionRevision(0), None, activity("a"))
             .expect("append a");
         store
-            .append("s", SessionRevision(0), activity("b"))
+            .append("s", SessionRevision(0), None, activity("b"))
             .expect("append b");
         assert!(matches!(
             store.replay_after_cursor(&start).expect("gap"),
@@ -752,7 +756,7 @@ mod tests {
         let store = InMemoryLiveReplayStore::with_bounds(16, Duration::from_millis(1));
         let start = store.current_cursor("s", SessionRevision(0));
         store
-            .append("s", SessionRevision(0), activity("a"))
+            .append("s", SessionRevision(0), None, activity("a"))
             .expect("append a");
         std::thread::sleep(Duration::from_millis(5));
         assert!(matches!(
@@ -776,7 +780,7 @@ mod tests {
         let store = InMemoryLiveReplayStore::default();
         let start = store.current_cursor("s", SessionRevision(0));
         store
-            .append("s", SessionRevision(0), activity("a"))
+            .append("s", SessionRevision(0), None, activity("a"))
             .expect("append a");
         let LiveReplaySubscribeResult::Subscribed(mut subscription) =
             store.subscribe_after_cursor(&start).expect("subscribe")
@@ -786,7 +790,7 @@ mod tests {
         let first = subscription.next_event().await.expect("replay");
         assert_eq!(first.session_id, "s");
         store
-            .append("s", SessionRevision(0), activity("b"))
+            .append("s", SessionRevision(0), None, activity("b"))
             .expect("append b");
         let second = subscription.next_event().await.expect("live");
         match &second.payload {
@@ -819,6 +823,7 @@ mod tests {
                 .append(
                     "perf-session",
                     SessionRevision(7),
+                    None,
                     activity(&format!("token-{ordinal}")),
                 )
                 .expect("append token event");
@@ -849,7 +854,7 @@ mod tests {
         let store = InMemoryLiveReplayStore::default();
         let start = store.current_cursor("s", SessionRevision(0));
         store
-            .append("s", SessionRevision(0), activity("a"))
+            .append("s", SessionRevision(0), None, activity("a"))
             .expect("append a");
         {
             let sessions = store.sessions.lock().expect("sessions");
@@ -866,7 +871,7 @@ mod tests {
         }
         drop(subscription);
         store
-            .append("s", SessionRevision(0), activity("b"))
+            .append("s", SessionRevision(0), None, activity("b"))
             .expect("append b");
         let sessions = store.sessions.lock().expect("sessions");
         assert!(sessions.get("s").expect("buffer").sender.is_none());
@@ -877,10 +882,10 @@ mod tests {
         let store = InMemoryLiveReplayStore::with_bounds(1, Duration::from_secs(120));
         let start = store.current_cursor("s", SessionRevision(0));
         store
-            .append("s", SessionRevision(0), activity("a"))
+            .append("s", SessionRevision(0), None, activity("a"))
             .expect("append a");
         store
-            .append("s", SessionRevision(0), activity("b"))
+            .append("s", SessionRevision(0), None, activity("b"))
             .expect("append b");
         assert!(matches!(
             store.subscribe_after_cursor(&start).expect("subscribe"),
@@ -893,7 +898,7 @@ mod tests {
         let store = InMemoryLiveReplayStore::with_bounds(16, Duration::from_millis(1));
         let start = store.current_cursor("s", SessionRevision(0));
         store
-            .append("s", SessionRevision(0), activity("a"))
+            .append("s", SessionRevision(0), None, activity("a"))
             .expect("append a");
         std::thread::sleep(Duration::from_millis(5));
         assert!(matches!(

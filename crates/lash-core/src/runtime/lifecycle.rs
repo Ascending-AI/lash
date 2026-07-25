@@ -178,6 +178,7 @@ impl LashRuntime {
             process_sync_needed: Arc::new(AtomicBool::new(false)),
             turn_phase_probe: None,
             last_committed_lease_continuity: None,
+            last_committed_observation_turn: None,
             graph_loaded_from_store: false,
             residency: Residency::default(),
         })

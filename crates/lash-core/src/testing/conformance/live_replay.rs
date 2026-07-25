@@ -37,6 +37,7 @@ where
         .append(
             "capacity-session",
             revision,
+            Some("capacity-turn"),
             live_replay_text_payload("capacity one"),
         )
         .expect("append first capacity event");
@@ -44,6 +45,7 @@ where
         .append(
             "capacity-session",
             revision,
+            Some("capacity-turn"),
             live_replay_text_payload("capacity two"),
         )
         .expect("append second capacity event");
@@ -81,6 +83,7 @@ where
         .append(
             "ttl-session",
             revision,
+            Some("ttl-turn"),
             live_replay_text_payload("ttl expired"),
         )
         .expect("append ttl event");
@@ -120,12 +123,18 @@ async fn live_replay_store_appends_replays_and_isolates_sessions(store: Arc<dyn 
     assert!(empty.is_empty(), "initial cursor must replay no events");
 
     let first_a = store
-        .append("session-a", revision, live_replay_text_payload("alpha one"))
+        .append(
+            "session-a",
+            revision,
+            Some("alpha-turn"),
+            live_replay_text_payload("alpha one"),
+        )
         .expect("append first session-a event");
     let first_b = store
         .append(
             "session-b",
             revision,
+            None,
             SessionObservationEventPayload::ProcessChanged {
                 kind: SessionProcessEventKind::Started,
                 process_ids: vec!["proc-b".to_string()],
@@ -136,6 +145,7 @@ async fn live_replay_store_appends_replays_and_isolates_sessions(store: Arc<dyn 
         .append(
             "session-a",
             SessionRevision::new(8),
+            None,
             SessionObservationEventPayload::QueueChanged {
                 kind: SessionQueueEventKind::Enqueued,
                 batch_ids: vec!["batch-a".to_string()],
@@ -145,7 +155,18 @@ async fn live_replay_store_appends_replays_and_isolates_sessions(store: Arc<dyn 
 
     assert_eq!(first_a.session_id, "session-a");
     assert_eq!(first_a.revision, revision);
+    assert_eq!(first_a.turn_id.as_deref(), Some("alpha-turn"));
     assert_eq!(second_a.revision, SessionRevision::new(8));
+    assert_eq!(first_b.turn_id, None);
+    assert_eq!(second_a.turn_id, None);
+    assert_eq!(
+        first_a.replay_incarnation_id, second_a.replay_incarnation_id,
+        "one store construction must stamp one stable replay incarnation"
+    );
+    assert_eq!(
+        first_a.replay_incarnation_id, first_b.replay_incarnation_id,
+        "the replay incarnation is store-scoped rather than session-scoped"
+    );
     assert_ne!(
         first_a.cursor.as_str(),
         second_a.cursor.as_str(),
@@ -187,6 +208,7 @@ async fn live_replay_store_subscribe_replays_then_yields_live_events(
         .append(
             "subscribe-session",
             revision,
+            Some("subscribe-turn"),
             live_replay_text_payload("buffered one"),
         )
         .expect("append first buffered event");
@@ -194,6 +216,7 @@ async fn live_replay_store_subscribe_replays_then_yields_live_events(
         .append(
             "subscribe-session",
             revision,
+            Some("subscribe-turn"),
             live_replay_text_payload("buffered two"),
         )
         .expect("append second buffered event");
@@ -213,6 +236,7 @@ async fn live_replay_store_subscribe_replays_then_yields_live_events(
         .append(
             "subscribe-session",
             revision,
+            Some("subscribe-turn"),
             live_replay_text_payload("live three"),
         )
         .expect("append live event");
@@ -252,6 +276,7 @@ async fn live_replay_store_reports_unavailable_for_cursor_ahead_of_tail(
         .append(
             "ahead-session",
             revision,
+            Some("ahead-turn"),
             live_replay_text_payload("existing"),
         )
         .expect("append existing event");
