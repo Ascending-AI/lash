@@ -77,8 +77,8 @@ value with local `v*` tags and fails when a newer release tag exists. If the
 matching tag is unavailable in an offline or shallow checkout, the checked-in
 value is the fallback, so docs lint never needs network access.
 
-Every release is followed by a mechanical docs-pin bump PR that updates the
-display snippets and fallback together:
+After a release is published, the release workflow runs the same mechanical
+docs-pin update against current `main`:
 
 ```bash
 python3 scripts/release_version.py stamp-docs X.Y.Z
@@ -87,9 +87,11 @@ python3 scripts/lint_docs.py
 
 `stamp-docs` is deliberately separate from the ephemeral manifest stamp used
 by the release workflow: it changes checked-in documentation, not release
-artifacts. The `test-doc` CI job fetches release tags, so full-clone docs lint
-intentionally goes red after a release and stays red until that mechanical PR
-lands. Tagless local and offline checkouts continue to use
+artifacts. The workflow commits the result directly to `main` after publishing.
+An already-current pin creates no commit. A concurrent main update triggers a
+bounded rebase-and-push retry; exhaustion is reported loudly but cannot make an
+otherwise successful release fail. The direct commit triggers ordinary CI,
+including docs lint. Tagless local and offline checkouts continue to use
 `docs/released-version.txt` as their fallback authority.
 
 ## Release notes (required)

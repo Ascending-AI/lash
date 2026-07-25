@@ -462,13 +462,14 @@ class ConfidenceGateCiContractTest(unittest.TestCase):
         for snippet in required_snippets:
             self.assertIn(snippet, gate)
 
-    def test_publish_time_version_injection_has_no_bump_commit_or_second_pass(self) -> None:
+    def test_publish_time_version_injection_has_only_post_release_docs_commit(self) -> None:
         workflow = WORKFLOW.read_text(encoding="utf-8")
         release = RELEASE_WORKFLOW.read_text(encoding="utf-8")
         cargo = CARGO_TOML.read_text(encoding="utf-8")
 
-        # The bump commit and pass-1/pass-2 re-run chain are gone. A green main
-        # push only validates; a manual release stamps an ephemeral checkout.
+        # The manifest bump commit and pass-1/pass-2 re-run chain are gone. A
+        # green main push only validates; a manual release stamps an ephemeral
+        # checkout, then updates only the checked-in docs pin after publishing.
         self.assertNotIn("release_version.py set", workflow)
         self.assertNotIn("Commit release version", workflow)
         self.assertNotIn("Dispatch validation pass", workflow)
@@ -493,6 +494,13 @@ class ConfidenceGateCiContractTest(unittest.TestCase):
         # The publisher stamps the ephemeral checkout before packaging crates.
         # Host-application binary stamping belongs to lash-cli's release.
         self.assertIn("publish_workspace.py --version", release)
+        self.assertIn('release_version.py stamp-docs "${version}"', release)
+        self.assertIn("git push origin HEAD:main", release)
+        self.assertIn("git rebase origin/main", release)
+        self.assertIn("continue-on-error: true", release)
+        self.assertIn(
+            "Release-Notes: Internal: Stamp documentation version pins", release
+        )
 
     def test_release_notes_are_gated_only_when_a_manual_release_is_cut(self) -> None:
         workflow = WORKFLOW.read_text(encoding="utf-8")
