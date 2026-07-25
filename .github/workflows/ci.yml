@@ -35,7 +35,7 @@ jobs:
   # sharded out to the test-shard matrix below.
   test-doc:
     name: Test docs + build cache
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-16vcpu-ubuntu-2404
 
     steps:
       - name: Check out repository
@@ -51,7 +51,7 @@ jobs:
 
 
       - name: Restore cargo cache
-        uses: Swatinem/rust-cache@v2
+        uses: useblacksmith/rust-cache@v3.0.1
         with:
           cache-bin: false
           # This job builds a superset of what the other debug-profile jobs
@@ -181,7 +181,7 @@ jobs:
 
   lint:
     name: Lint
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-8vcpu-ubuntu-2404
 
     steps:
       - name: Check out repository
@@ -204,7 +204,7 @@ jobs:
 
 
       - name: Restore cargo cache
-        uses: Swatinem/rust-cache@v2
+        uses: useblacksmith/rust-cache@v3.0.1
         with:
           cache-bin: false
           # The test-doc job is the sole writer of the shared linux-debug cache;
@@ -241,7 +241,7 @@ jobs:
 
   confidence-fast:
     name: Confidence fast (${{ matrix.shard }})
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.runner }}
 
     strategy:
       fail-fast: false
@@ -252,6 +252,17 @@ jobs:
           - sim-unit-perf-guards
           - sim-generated
           - minimizer-fixtures
+        include:
+          - shard: scenario-harnesses
+            runner: blacksmith-16vcpu-ubuntu-2404
+          - shard: fault-matrix
+            runner: blacksmith-16vcpu-ubuntu-2404
+          - shard: sim-unit-perf-guards
+            runner: ubuntu-latest
+          - shard: sim-generated
+            runner: blacksmith-16vcpu-ubuntu-2404
+          - shard: minimizer-fixtures
+            runner: blacksmith-16vcpu-ubuntu-2404
 
     steps:
       - name: Check out repository
@@ -264,7 +275,16 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
 
 
-      - name: Restore cargo cache
+      - name: Restore cargo cache (Blacksmith)
+        if: matrix.runner != 'ubuntu-latest'
+        uses: useblacksmith/rust-cache@v3.0.1
+        with:
+          cache-bin: false
+          shared-key: linux-debug
+          save-if: false
+
+      - name: Restore cargo cache (GitHub)
+        if: matrix.runner == 'ubuntu-latest'
         uses: Swatinem/rust-cache@v2
         with:
           cache-bin: false
@@ -296,7 +316,7 @@ jobs:
 
   confidence-fast-summary:
     name: Confidence fast summary
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-2vcpu-ubuntu-2404
     if: always()
     needs:
       - confidence-fast
@@ -333,7 +353,7 @@ jobs:
 
   postgres-store:
     name: Test Postgres store
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2404
 
     services:
       postgres:
@@ -358,7 +378,7 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
 
       - name: Restore cargo cache
-        uses: Swatinem/rust-cache@v2
+        uses: useblacksmith/rust-cache@v3.0.1
         with:
           cache-bin: false
           shared-key: linux-debug
@@ -386,7 +406,7 @@ jobs:
 
   stack-budget:
     name: Stack budget
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-8vcpu-ubuntu-2404
 
     steps:
       - name: Check out repository
@@ -396,7 +416,7 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
 
       - name: Restore cargo cache
-        uses: Swatinem/rust-cache@v2
+        uses: useblacksmith/rust-cache@v3.0.1
         with:
           cache-bin: false
           shared-key: linux-debug
@@ -514,7 +534,7 @@ jobs:
 
   functional-e2e:
     name: Functional E2E (${{ matrix.name }})
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.runner }}
 
     strategy:
       fail-fast: false
@@ -523,12 +543,15 @@ jobs:
           - name: agent-service
             recipe: agent-service-restate-e2e
             node: false
+            runner: blacksmith-4vcpu-ubuntu-2404
           - name: agent-workbench
             recipe: agent-workbench-restate-e2e
             node: false
+            runner: blacksmith-8vcpu-ubuntu-2404
           - name: workflow-graph-roundtrip
             recipe: workflow-graph-integration-verify
             node: true
+            runner: blacksmith-2vcpu-ubuntu-2404
 
     steps:
       - name: Check out repository
@@ -539,7 +562,7 @@ jobs:
 
 
       - name: Restore cargo cache
-        uses: Swatinem/rust-cache@v2
+        uses: useblacksmith/rust-cache@v3.0.1
         with:
           cache-bin: false
           shared-key: linux-debug
