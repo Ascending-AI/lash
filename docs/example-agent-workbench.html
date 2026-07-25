@@ -83,7 +83,7 @@
         </div>
         <div class="listing__row">
           <div class="listing__label">stream rows</div>
-          <div class="listing__body"><p>The product response carries identified <code>message</code>, <code>turn_input</code>, and <code>done</code> events or an authoritative <code>resync</code>. It has no raw-error variant. The Lash response carries <code>observation</code>, <code>replay_gap</code>, and <code>terminal_replacement</code>.</p></div>
+          <div class="listing__body"><p>The product response carries identified <code>message</code>, <code>turn_input</code>, and turn-scoped <code>done</code> events or an authoritative <code>resync</code>. A completed turn retracts only its own provisional rows, preserving output from newer turns. It has no raw-error variant. The Lash response carries <code>observation</code>, <code>replay_gap</code>, and <code>terminal_replacement</code>.</p></div>
         </div>
         <div class="listing__row">
           <div class="listing__label">gap recovery</div>

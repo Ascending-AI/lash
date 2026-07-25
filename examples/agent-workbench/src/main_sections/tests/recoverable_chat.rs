@@ -95,11 +95,11 @@ fn session_event_registry_isolates_channels_and_recreates_after_removal() {
     let mut session_a = registry.subscribe("session-a");
     let mut session_b = registry.subscribe("session-b");
 
-    registry.publish("session-a", StreamItem::Done);
+    registry.publish("session-a", StreamItem::Done { turn_id: None });
     assert!(matches!(
         session_a.try_recv(),
         Ok(ProductEvent {
-            item: StreamItem::Done,
+            item: StreamItem::Done { .. },
             ..
         })
     ));
@@ -111,11 +111,11 @@ fn session_event_registry_isolates_channels_and_recreates_after_removal() {
     registry.remove("session-a");
     assert!(!registry.contains("session-a"));
     let mut replacement_a = registry.subscribe("session-a");
-    registry.publish("session-a", StreamItem::Done);
+    registry.publish("session-a", StreamItem::Done { turn_id: None });
     assert!(matches!(
         replacement_a.try_recv(),
         Ok(ProductEvent {
-            item: StreamItem::Done,
+            item: StreamItem::Done { .. },
             ..
         })
     ));
@@ -287,7 +287,9 @@ async fn workbench_sequential_settled_turn_cancels_each_emit_done() {
         .snapshot(&session_id)
         .events
         .into_iter()
-        .filter_map(|event| matches!(event.item, StreamItem::Done).then_some(event.event_id))
+        .filter_map(|event| {
+            matches!(event.item, StreamItem::Done { .. }).then_some(event.event_id)
+        })
         .collect::<Vec<_>>();
     assert_eq!(
         done_ids.len(),

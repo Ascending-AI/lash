@@ -43,16 +43,6 @@ impl AppState {
         );
     }
 
-    #[cfg(test)]
-    fn publish(&self, item: StreamItem) {
-        self.publish_for_session(&self.current_session_id(), item);
-    }
-
-    #[cfg(test)]
-    fn publish_for_session(&self, session_id: &str, item: StreamItem) {
-        self.event_tx.publish(session_id, item);
-    }
-
     fn publish_for_session_identified(
         &self,
         session_id: &str,
@@ -68,7 +58,9 @@ impl AppState {
         self.publish_for_session_identified(
             session_id,
             format!("turn:{turn_id}:done"),
-            StreamItem::Done,
+            StreamItem::Done {
+                turn_id: Some(turn_id.to_string()),
+            },
         );
     }
 
@@ -77,7 +69,7 @@ impl AppState {
             self.publish_for_session_identified(
                 session_id,
                 format!("operation:{operation_id}:done"),
-                StreamItem::Done,
+                StreamItem::Done { turn_id: None },
             );
         }
     }
@@ -187,7 +179,7 @@ impl AppState {
             self.publish_for_session_identified(
                 session_id,
                 format!("turn-cancel:{}:done", operation_ids.join(",")),
-                StreamItem::Done,
+                StreamItem::Done { turn_id: None },
             );
         }
         Ok(receipts)

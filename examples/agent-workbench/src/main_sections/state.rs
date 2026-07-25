@@ -254,7 +254,10 @@ enum StreamItem {
     TurnInput {
         receipt: TurnInputReceipt,
     },
-    Done,
+    Done {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        turn_id: Option<String>,
+    },
 }
 
 const PUBLIC_TURN_FAILURE_MESSAGE: &str = "turn could not be completed";

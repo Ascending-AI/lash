@@ -35,7 +35,7 @@ async fn app_state(
         .iter()
         .filter_map(|event| match &event.item {
             StreamItem::Message { message } => Some(message.clone()),
-            StreamItem::TurnInput { .. } | StreamItem::Done => None,
+            StreamItem::TurnInput { .. } | StreamItem::Done { .. } => None,
         })
         .collect::<Vec<_>>();
     let mut message_ids = messages
