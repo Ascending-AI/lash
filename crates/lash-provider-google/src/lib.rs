@@ -259,6 +259,28 @@ mod tests {
     }
 
     #[test]
+    fn google_provider_file_ignores_optional_media_type_hint() {
+        for media_type in [
+            None,
+            Some(lash_core::MediaType::parse("image/png").unwrap()),
+        ] {
+            let attachment = AttachmentSource::provider_file(
+                lash_core::ProviderFileScope::new("google_oauth", "credential"),
+                "files/123",
+                media_type,
+            );
+            let mut req = request(None);
+            req.attachments = vec![attachment.clone()];
+
+            GoogleOAuthProvider::validate_attachments(&req).expect("provider file is supported");
+            assert_eq!(
+                GoogleOAuthProvider::inline_attachment_part(&req, &attachment),
+                json!({"fileData": {"fileUri": "files/123"}})
+            );
+        }
+    }
+
+    #[test]
     fn google_rejects_gif_attachment_at_request_boundary() {
         let mut req = request(None);
         req.attachments = vec![AttachmentSource::inline(

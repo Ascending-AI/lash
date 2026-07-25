@@ -354,10 +354,12 @@ pub enum AttachmentSource {
     ProviderFile {
         provider_scope: ProviderFileScope,
         id: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        media_type: Option<MediaType>,
     },
 }
 
-// Current attachment content carrier; measured 96 B on rustc 1.97.0,
+// Current attachment content carrier; measured 104 B on rustc 1.97.0,
 // x86_64-unknown-linux-gnu (FIG-595).
 const _: () = assert!(std::mem::size_of::<AttachmentSource>() <= 128);
 
@@ -377,10 +379,15 @@ impl AttachmentSource {
         }
     }
 
-    pub fn provider_file(provider_scope: ProviderFileScope, id: impl Into<String>) -> Self {
+    pub fn provider_file(
+        provider_scope: ProviderFileScope,
+        id: impl Into<String>,
+        media_type: Option<MediaType>,
+    ) -> Self {
         Self::ProviderFile {
             provider_scope,
             id: id.into(),
+            media_type,
         }
     }
 
@@ -390,7 +397,7 @@ impl AttachmentSource {
                 Some(media_type)
             }
             Self::Stored { attachment_ref } => Some(&attachment_ref.media_type),
-            Self::ProviderFile { .. } => None,
+            Self::ProviderFile { media_type, .. } => media_type.as_ref(),
         }
     }
 
@@ -777,5 +784,41 @@ mod attempt_record_tests {
 
         let absent = ExecutionEvidence::default();
         assert_eq!(absent.reasoning_output_tokens, None);
+    }
+}
+
+#[cfg(test)]
+mod attachment_source_tests {
+    use super::*;
+
+    #[test]
+    fn provider_file_media_type_is_optional_and_omitted_when_absent() {
+        let scope = ProviderFileScope::new("anthropic", "credential");
+        let without_hint = AttachmentSource::provider_file(scope.clone(), "file-1", None);
+        let without_hint_json = serde_json::to_value(&without_hint).unwrap();
+        assert_eq!(
+            without_hint_json,
+            serde_json::json!({
+                "source": "provider_file",
+                "provider_scope": {
+                    "provider": "anthropic",
+                    "credential_scope": "credential"
+                },
+                "id": "file-1"
+            })
+        );
+        assert_eq!(
+            serde_json::from_value::<AttachmentSource>(without_hint_json).unwrap(),
+            without_hint
+        );
+
+        let with_hint = AttachmentSource::provider_file(
+            scope,
+            "file-2",
+            Some(MediaType::parse("image/png").unwrap()),
+        );
+        let with_hint_json = serde_json::to_value(&with_hint).unwrap();
+        assert_eq!(with_hint_json["media_type"], "image/png");
+        assert_eq!(with_hint.media_type().unwrap().as_str(), "image/png");
     }
 }

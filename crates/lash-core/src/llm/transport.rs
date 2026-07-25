@@ -85,10 +85,20 @@ pub fn unsupported_attachment_capability(
         accepted_by.join(", ")
     };
     let message = match source {
-        AttachmentSource::ProviderFile { provider_scope, .. } => format!(
-            "{provider} cannot materialize attachment source `provider_file` scoped to provider `{}`; the source carries no caller MIME; providers accepting this source: {accepted}",
-            provider_scope.provider
-        ),
+        AttachmentSource::ProviderFile {
+            provider_scope,
+            media_type,
+            ..
+        } => match media_type {
+            Some(media_type) => format!(
+                "{provider} cannot materialize attachment MIME `{media_type}` from source `provider_file` scoped to provider `{}`; providers accepting this source: {accepted}",
+                provider_scope.provider
+            ),
+            None => format!(
+                "{provider} cannot materialize attachment source `provider_file` scoped to provider `{}`; the source carries no caller MIME; providers accepting this source: {accepted}",
+                provider_scope.provider
+            ),
+        },
         source => {
             let media_type = source
                 .media_type()
@@ -176,6 +186,7 @@ mod tests {
         let google_file = AttachmentSource::provider_file(
             ProviderFileScope::new("gemini", "credential"),
             "file-id",
+            None,
         );
         assert_eq!(
             known_attachment_acceptors(&google_file),

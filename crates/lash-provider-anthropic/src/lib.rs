@@ -290,6 +290,59 @@ mod tests {
     }
 
     #[test]
+    fn provider_file_uses_media_type_to_select_image_or_document_block() {
+        let provider = AnthropicProvider::new("key");
+
+        for (mime, expected_block_type, file_id) in [
+            ("image/png", "image", "file-image"),
+            ("application/pdf", "document", "file-document"),
+        ] {
+            let mut req = request(vec![LlmMessage::new(
+                LlmRole::User,
+                vec![LlmContentBlock::Attachment { attachment_idx: 0 }],
+            )]);
+            req.attachments = vec![AttachmentSource::provider_file(
+                lash_core::ProviderFileScope::new("anthropic", "credential"),
+                file_id,
+                Some(lash_core::MediaType::parse(mime).unwrap()),
+            )];
+
+            let body = provider.build_request_body(&req).expect("body");
+            let block = &body["messages"][0]["content"][0];
+            assert_eq!(block["type"], expected_block_type);
+            assert_eq!(block["source"], json!({"type": "file", "file_id": file_id}));
+        }
+    }
+
+    #[test]
+    fn provider_file_without_media_type_is_rejected_before_transport() {
+        let provider = AnthropicProvider::new("key");
+        let mut req = request(vec![LlmMessage::new(
+            LlmRole::User,
+            vec![LlmContentBlock::Attachment { attachment_idx: 0 }],
+        )]);
+        req.attachments = vec![AttachmentSource::provider_file(
+            lash_core::ProviderFileScope::new("anthropic", "credential"),
+            "file-without-mime",
+            None,
+        )];
+
+        let err = provider
+            .build_request_body(&req)
+            .expect_err("missing MIME should be rejected before transport");
+
+        assert_eq!(err.kind, lash_core::ProviderFailureKind::Validation);
+        assert_eq!(
+            err.code.as_deref(),
+            Some("provider_file_media_type_required")
+        );
+        assert_eq!(
+            err.message,
+            "Anthropic Messages requires the media type for provider file ids in order to choose the image/document modality; supply `media_type` on `ProviderFile`"
+        );
+    }
+
+    #[test]
     fn unsupported_image_mime_is_rejected_at_request_boundary() {
         let provider = AnthropicProvider::new("key");
         let mut req = request(vec![LlmMessage::new(

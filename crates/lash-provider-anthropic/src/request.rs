@@ -16,12 +16,6 @@ impl AnthropicProvider {
 
     fn attachment_block_value(req: &LlmRequest, attachment_idx: usize) -> Option<Value> {
         let source = req.attachments.get(attachment_idx)?;
-        if let AttachmentSource::ProviderFile { id, .. } = source {
-            return Some(json!({
-                "type": "document",
-                "source": {"type": "file", "file_id": id},
-            }));
-        }
         let media_type = source.media_type()?;
         let block_type = if media_type.is_image() {
             "image"
@@ -39,7 +33,9 @@ impl AnthropicProvider {
                     "data": data,
                 })
             }
-            AttachmentSource::ProviderFile { .. } => unreachable!(),
+            AttachmentSource::ProviderFile { id, .. } => {
+                json!({"type": "file", "file_id": id})
+            }
         };
         Some(json!({"type": block_type, "source": wire_source}))
     }
@@ -350,6 +346,20 @@ impl AnthropicProvider {
 
     pub(crate) fn build_request_body(&self, req: &LlmRequest) -> Result<Value, LlmTransportError> {
         for source in &req.attachments {
+            if matches!(
+                source,
+                AttachmentSource::ProviderFile {
+                    provider_scope,
+                    media_type: None,
+                    ..
+                } if provider_scope.provider.eq_ignore_ascii_case("anthropic")
+            ) {
+                return Err(LlmTransportError::new(
+                    "Anthropic Messages requires the media type for provider file ids in order to choose the image/document modality; supply `media_type` on `ProviderFile`",
+                )
+                .with_kind(ProviderFailureKind::Validation)
+                .with_code("provider_file_media_type_required"));
+            }
             let supported = match source {
                 AttachmentSource::ProviderFile { provider_scope, .. } => {
                     provider_scope.provider.eq_ignore_ascii_case("anthropic")

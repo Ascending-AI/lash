@@ -651,12 +651,15 @@ impl From<core_llm::AttachmentSource> for RemoteAttachmentSource {
                 media_type: media_type.to_string(),
                 url,
             },
-            core_llm::AttachmentSource::ProviderFile { provider_scope, id } => {
-                Self::ProviderFile {
-                    provider_scope: provider_scope.into(),
-                    id,
-                }
-            }
+            core_llm::AttachmentSource::ProviderFile {
+                provider_scope,
+                id,
+                media_type,
+            } => Self::ProviderFile {
+                provider_scope: provider_scope.into(),
+                id,
+                media_type: media_type.map(|media_type| media_type.to_string()),
+            },
         }
     }
 }
@@ -684,9 +687,18 @@ impl TryFrom<RemoteAttachmentSource> for core_llm::AttachmentSource {
             RemoteAttachmentSource::ExternalUrl { media_type, url } => {
                 Ok(Self::external_url(parse_media_type(&media_type)?, url))
             }
-            RemoteAttachmentSource::ProviderFile { provider_scope, id } => {
-                Ok(Self::provider_file(provider_scope.into(), id))
-            }
+            RemoteAttachmentSource::ProviderFile {
+                provider_scope,
+                id,
+                media_type,
+            } => Ok(Self::provider_file(
+                provider_scope.into(),
+                id,
+                media_type
+                    .as_deref()
+                    .map(parse_media_type)
+                    .transpose()?,
+            )),
         }
     }
 }

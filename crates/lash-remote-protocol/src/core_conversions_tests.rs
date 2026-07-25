@@ -152,6 +152,33 @@ fn turn_input_rejects_non_remote_safe_fields() {
 }
 
 #[test]
+fn provider_file_media_type_round_trips_between_core_and_remote() {
+    for media_type in [
+        None,
+        Some(lash_core::MediaType::parse("image/png").unwrap()),
+    ] {
+        let core = lash_core::AttachmentSource::provider_file(
+            lash_core::ProviderFileScope::new("anthropic", "credential"),
+            "file-123",
+            media_type,
+        );
+
+        let remote = RemoteAttachmentSource::from(core.clone());
+        remote.validate(0).expect("valid remote attachment");
+        let remote_json = serde_json::to_value(&remote).expect("serialize remote attachment");
+        assert_eq!(
+            remote_json
+                .get("media_type")
+                .and_then(|value| value.as_str()),
+            core.media_type().map(lash_core::MediaType::as_str)
+        );
+        let round_trip =
+            lash_core::AttachmentSource::try_from(remote).expect("core attachment conversion");
+        assert_eq!(round_trip, core);
+    }
+}
+
+#[test]
 fn llm_request_and_response_round_trip_owned_dtos() {
     let request = core_llm::LlmRequest {
         model: "gpt-test".to_string(),
