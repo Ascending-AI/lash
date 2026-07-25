@@ -641,12 +641,17 @@ async fn run_once_turn_input_ingress_interrupt(
             );
         }
         let active_turn_input = active_claim.materialize_for_turn();
-        if !matches!(
-            active_turn_input.items.last(),
-            Some(lash_core::InputItem::Attachment {
-                source: lash_core::AttachmentSource::Inline { bytes, .. }
-            }) if bytes == &vec![1, 2, 3, turn_index as u8]
-        ) {
+        // Position-independent on purpose: a claim aggregates many inputs and
+        // only the first carries the attachment, so the attachment is not the
+        // last item. Assert survival, not placement.
+        if !active_turn_input.items.iter().any(|item| {
+            matches!(
+                item,
+                lash_core::InputItem::Attachment {
+                    source: lash_core::AttachmentSource::Inline { bytes, .. }
+                } if bytes == &vec![1, 2, 3, turn_index as u8]
+            )
+        }) {
             anyhow::bail!("turn-input ingress active claim lost attachment bytes");
         }
 
@@ -727,12 +732,15 @@ async fn run_once_turn_input_ingress_interrupt(
         phase_profile.insert(phase.0, phase.1);
         next_claims += 1;
         let next_turn_input = next_claim.materialize_for_turn();
-        if !matches!(
-            next_turn_input.items.last(),
-            Some(lash_core::InputItem::Attachment {
-                source: lash_core::AttachmentSource::Inline { bytes, .. }
-            }) if bytes == &vec![4, 5, 6, turn_index as u8]
-        ) {
+        // Position-independent: see the active-claim assertion above.
+        if !next_turn_input.items.iter().any(|item| {
+            matches!(
+                item,
+                lash_core::InputItem::Attachment {
+                    source: lash_core::AttachmentSource::Inline { bytes, .. }
+                } if bytes == &vec![4, 5, 6, turn_index as u8]
+            )
+        }) {
             anyhow::bail!("turn-input ingress next claim lost attachment bytes");
         }
 
