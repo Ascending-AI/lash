@@ -15,6 +15,7 @@ WORKFLOW = ROOT / ".github" / "workflows" / "ci.yml"
 CONFIDENCE_WORKFLOW = ROOT / ".github" / "workflows" / "confidence.yml"
 PERF_WORKFLOW = ROOT / ".github" / "workflows" / "perf.yml"
 RELEASE_WORKFLOW = ROOT / ".github" / "workflows" / "release.yml"
+RELEASE_NOTES = ROOT / "scripts" / "release_notes.py"
 GATE = ROOT / "scripts" / "confidence-gate.sh"
 QUARANTINE_CHECK = ROOT / "scripts" / "check_test_quarantines.py"
 CARGO_TOML = ROOT / "Cargo.toml"
@@ -34,6 +35,9 @@ OLD_BROAD_CI_ARTIFACT = "bounded-" + "broad-replay-backend-confidence"
 OLD_BROAD_CI_OUT_ROOT = "target/confidence-ci/" + OLD_BROAD_CI_JOB_ID
 VALIDATE_QUARANTINE_MANIFEST = runpy.run_path(str(QUARANTINE_CHECK))[
     "validate_manifest"
+]
+IS_AUTOMATED_DOCS_STAMP = runpy.run_path(str(RELEASE_NOTES))[
+    "is_automated_docs_stamp"
 ]
 
 
@@ -194,6 +198,25 @@ class ConfidenceGateCiContractTest(unittest.TestCase):
         self.assertIn("python3 scripts/release_notes.py check-pr", lint)
         self.assertIn('--summary "$GITHUB_STEP_SUMMARY"', lint)
 
+    def test_lint_job_runs_functional_perf_smoke_without_budgets(self) -> None:
+        workflow = WORKFLOW.read_text(encoding="utf-8")
+        lint = workflow_job_block(workflow, "lint")
+
+        self.assertIn("runs-on: blacksmith-8vcpu-ubuntu-2404", lint)
+        self.assertIn(
+            "profile_runtime.py --profile quick "
+            "--out .benchmarks/perf-smoke/runtime.json",
+            lint,
+        )
+        self.assertIn(
+            "profile_lashlang.py --debug --iterations 10 "
+            "--profile-iterations 10 --out .benchmarks/perf-smoke/lashlang.json",
+            lint,
+        )
+        smoke = lint[lint.index("- name: Run performance harness smoke") :]
+        smoke = smoke[: smoke.index("- name: Check core/UI boundary")]
+        self.assertNotIn("--enforce-budgets", smoke)
+
     def test_workflow_graph_example_is_in_functional_matrix(self) -> None:
         workflow = WORKFLOW.read_text(encoding="utf-8")
         justfile = JUSTFILE.read_text(encoding="utf-8")
@@ -293,27 +316,88 @@ class ConfidenceGateCiContractTest(unittest.TestCase):
             'requested="${REQUESTED_SHA:-origin/main}"',
             'git merge-base --is-ancestor "${sha}" origin/main',
             'gh run list --workflow ci.yml --commit "${sha}"',
-            'run.get("event") == "push"',
-            'run.get("conclusion") == "success"',
+            'run.get("event") in ("push", "workflow_dispatch")',
+            "run = matching[0]",
+            'run.get("conclusion") != "success"',
+            "release refused: target ",
+            "run.get('databaseId')",
+            "run.get('url', 'URL unavailable')",
             "release_notes.py collect --require",
             "release_version.py print-next",
-            'git tag "${tag}" "${sha}"',
+            'git tag "${RELEASE_TAG}" "${RELEASE_SHA}"',
         ]
         for snippet in required_snippets:
             self.assertIn(snippet, workflow)
         self.assertNotIn("\n  push:\n", workflow)
+        self.assertLess(
+            workflow.index(
+                "profile_runtime.py --profile full --release --enforce-budgets"
+            ),
+            workflow.index('git tag "${RELEASE_TAG}" "${RELEASE_SHA}"'),
+        )
 
     def test_runtime_release_publishes_sdk_without_host_assets(self) -> None:
         workflow = RELEASE_WORKFLOW.read_text(encoding="utf-8")
 
         publish = workflow_job_block(workflow, "publish")
         publish_crates = workflow_job_block(workflow, "publish-crates")
+        validate_release = workflow_job_block(workflow, "validate-release-ref")
 
         self.assertNotIn("build-release-assets", workflow)
-        self.assertNotIn("perf-guard-full", workflow)
         self.assertNotIn("install_lash.sh", workflow)
         self.assertIn("needs: [prepare-release, publish-crates]", publish)
         self.assertIn("needs: [prepare-release, validate-release-ref]", publish_crates)
+        self.assertIn("runs-on: blacksmith-16vcpu-ubuntu-2404", validate_release)
+        self.assertIn(
+            "ref: ${{ needs.prepare-release.outputs.release_sha }}", validate_release
+        )
+        self.assertIn(
+            "ref: ${{ needs.prepare-release.outputs.release_sha }}", publish_crates
+        )
+        self.assertIn("ref: ${{ needs.prepare-release.outputs.release_sha }}", publish)
+        self.assertIn('head_sha="$(git rev-parse HEAD)"', publish_crates)
+        self.assertIn('head_sha="$(git rev-parse HEAD)"', publish)
+        self.assertIn(
+            "profile_runtime.py --profile full --release --enforce-budgets",
+            validate_release,
+        )
+        self.assertIn(
+            "profile_lashlang.py --iterations 2500 --profile-iterations 2500 "
+            "--enforce-budgets",
+            validate_release,
+        )
+
+    def test_full_perf_is_release_gated_and_only_manually_dispatchable(self) -> None:
+        workflow = WORKFLOW.read_text(encoding="utf-8")
+        perf = PERF_WORKFLOW.read_text(encoding="utf-8")
+        release = RELEASE_WORKFLOW.read_text(encoding="utf-8")
+        release_cache = workflow_job_block(workflow, "linux-release-cache")
+
+        self.assertIn("workflow_dispatch:", perf)
+        self.assertNotIn("schedule:", perf)
+        self.assertIn("runs-on: blacksmith-16vcpu-ubuntu-2404", perf)
+        self.assertIn("useblacksmith/rust-cache@v3.0.1", release_cache)
+        self.assertIn("cargo build --locked --release --workspace", release_cache)
+        self.assertNotIn("--target x86_64-unknown-linux-gnu", release_cache)
+        for command in (
+            "profile_runtime.py --profile full --release --enforce-budgets",
+            "profile_lashlang.py --iterations 2500 --profile-iterations 2500 "
+            "--enforce-budgets",
+        ):
+            self.assertIn(command, perf)
+            self.assertIn(command, release)
+
+    def test_all_confidence_fast_shards_use_blacksmith(self) -> None:
+        workflow = WORKFLOW.read_text(encoding="utf-8")
+        confidence_fast = workflow_job_block(workflow, "confidence-fast")
+
+        self.assertIn(
+            "- shard: sim-unit-perf-guards\n"
+            "            runner: blacksmith-16vcpu-ubuntu-2404",
+            confidence_fast,
+        )
+        self.assertNotIn("ubuntu-latest", confidence_fast)
+        self.assertNotIn("Restore cargo cache (GitHub)", confidence_fast)
 
     def test_broad_lane_is_manual_or_scheduled_confidence_not_ci_cd(self) -> None:
         workflow = WORKFLOW.read_text(encoding="utf-8")
@@ -462,13 +546,14 @@ class ConfidenceGateCiContractTest(unittest.TestCase):
         for snippet in required_snippets:
             self.assertIn(snippet, gate)
 
-    def test_publish_time_version_injection_has_no_bump_commit_or_second_pass(self) -> None:
+    def test_publish_time_version_injection_has_only_post_release_docs_commit(self) -> None:
         workflow = WORKFLOW.read_text(encoding="utf-8")
         release = RELEASE_WORKFLOW.read_text(encoding="utf-8")
         cargo = CARGO_TOML.read_text(encoding="utf-8")
 
-        # The bump commit and pass-1/pass-2 re-run chain are gone. A green main
-        # push only validates; a manual release stamps an ephemeral checkout.
+        # The manifest bump commit and pass-1/pass-2 re-run chain are gone. A
+        # green main push only validates; a manual release stamps an ephemeral
+        # checkout, then updates only the checked-in docs pin after publishing.
         self.assertNotIn("release_version.py set", workflow)
         self.assertNotIn("Commit release version", workflow)
         self.assertNotIn("Dispatch validation pass", workflow)
@@ -493,6 +578,24 @@ class ConfidenceGateCiContractTest(unittest.TestCase):
         # The publisher stamps the ephemeral checkout before packaging crates.
         # Host-application binary stamping belongs to lash-cli's release.
         self.assertIn("publish_workspace.py --version", release)
+        self.assertIn('release_version.py stamp-docs "${version}"', release)
+        self.assertIn("git push origin HEAD:main", release)
+        self.assertIn("git rebase origin/main", release)
+        self.assertIn("continue-on-error: true", release)
+        self.assertIn(
+            "Release-Notes: Internal: Stamp documentation version pins", release
+        )
+        self.assertIn(
+            "Skipping docs pin for superseded ${RELEASE_TAG}", release
+        )
+        self.assertIn(
+            "git tag --list 'v*' --sort=-v:refname", release
+        )
+        self.assertIn("python3 scripts/lint_docs.py", release)
+        self.assertIn("gh workflow run ci.yml --ref main", release)
+        self.assertIn("permissions:\n  contents: read\n  actions: read", release)
+        publish = workflow_job_block(release, "publish")
+        self.assertIn("permissions:\n      contents: write\n      actions: write", publish)
 
     def test_release_notes_are_gated_only_when_a_manual_release_is_cut(self) -> None:
         workflow = WORKFLOW.read_text(encoding="utf-8")
@@ -502,6 +605,13 @@ class ConfidenceGateCiContractTest(unittest.TestCase):
         self.assertNotIn("release_notes.py collect --require", workflow)
         prepare_release = workflow_job_block(release, "prepare-release")
         self.assertIn("release_notes.py collect --require", prepare_release)
+
+    def test_automated_docs_stamp_cannot_satisfy_next_release_notes_gate(self) -> None:
+        release_notes = RELEASE_NOTES.read_text(encoding="utf-8")
+
+        self.assertTrue(IS_AUTOMATED_DOCS_STAMP("docs: stamp release 0.1.0-alpha.113"))
+        self.assertFalse(IS_AUTOMATED_DOCS_STAMP("docs: explain release 0.1.0-alpha.113"))
+        self.assertIn("if is_automated_docs_stamp(subject):", release_notes)
 
     def test_workspace_tests_are_sharded_off_the_critical_path(self) -> None:
         workflow = WORKFLOW.read_text(encoding="utf-8")
@@ -519,7 +629,13 @@ class ConfidenceGateCiContractTest(unittest.TestCase):
         workflow = WORKFLOW.read_text(encoding="utf-8")
         release = RELEASE_WORKFLOW.read_text(encoding="utf-8")
 
-        for job_id in ("test-doc", "test-shard", "confidence-fast", "linux-release-cache"):
+        for job_id in (
+            "test-doc",
+            "test-shard",
+            "lint",
+            "confidence-fast",
+            "linux-release-cache",
+        ):
             block = workflow_job_block(workflow, job_id)
             self.assertIn("./.github/actions/setup-sccache", block)
         self.assertNotIn("cargo build", release)

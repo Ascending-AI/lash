@@ -218,6 +218,9 @@ jobs:
         with:
           tool: protoc
 
+      - name: Setup sccache
+        uses: ./.github/actions/setup-sccache
+
       # `cargo fmt --all --check` and the same `--all-targets` clippy the local
       # push gate runs, plus the two boundary guards that otherwise gate nothing.
       # The clippy feature set mirrors the test-doc workspace check so the
@@ -229,6 +232,13 @@ jobs:
         run: |
           # shellcheck disable=SC2086
           cargo clippy --workspace --all-targets --locked ${LASH_CI_FEATURES} -- -D warnings
+
+      # Functional only: exercise every runtime and Lashlang measurement path
+      # cheaply on each push/PR. Full budget enforcement belongs to release.yml.
+      - name: Run performance harness smoke
+        run: |
+          python3 scripts/profile_runtime.py --profile quick --out .benchmarks/perf-smoke/runtime.json
+          python3 scripts/profile_lashlang.py --debug --iterations 10 --profile-iterations 10 --out .benchmarks/perf-smoke/lashlang.json
 
       - name: Check core/UI boundary
         run: bash scripts/check-core-ui-boundary.sh
@@ -258,7 +268,7 @@ jobs:
           - shard: fault-matrix
             runner: blacksmith-16vcpu-ubuntu-2404
           - shard: sim-unit-perf-guards
-            runner: ubuntu-latest
+            runner: blacksmith-16vcpu-ubuntu-2404
           - shard: sim-generated
             runner: blacksmith-16vcpu-ubuntu-2404
           - shard: minimizer-fixtures
@@ -275,17 +285,8 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
 
 
-      - name: Restore cargo cache (Blacksmith)
-        if: matrix.runner != 'ubuntu-latest'
+      - name: Restore cargo cache
         uses: useblacksmith/rust-cache@v3.0.1
-        with:
-          cache-bin: false
-          shared-key: linux-debug
-          save-if: false
-
-      - name: Restore cargo cache (GitHub)
-        if: matrix.runner == 'ubuntu-latest'
-        uses: Swatinem/rust-cache@v2
         with:
           cache-bin: false
           shared-key: linux-debug
@@ -504,12 +505,11 @@ jobs:
 
 
       - name: Restore cargo cache
-        uses: Swatinem/rust-cache@v2
+        uses: useblacksmith/rust-cache@v3.0.1
         with:
           cache-bin: false
           # Sole writer of the linux release-profile cache; release.yml's
-          # x86_64 build restores it (then stamps the release version, so only
-          # the workspace crates rebuild — the cached deps stay warm).
+          # perf jobs restore it, so release-profile dependencies stay warm.
           shared-key: linux-release
 
       - name: Install protoc
@@ -526,7 +526,7 @@ jobs:
           link-with-mold: "false"
 
       - name: Build release workspace
-        run: cargo build --locked --release --workspace --target x86_64-unknown-linux-gnu
+        run: cargo build --locked --release --workspace
 
       - name: Report sccache stats
         if: always()

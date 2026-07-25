@@ -14,7 +14,7 @@ Commands:
   stamp <version>   Rewrite the workspace manifests + lockfile to <version>
                     (used by the release workflow's ephemeral checkout).
   stamp-docs <ver>  Rewrite the checked-in doc install snippets to <version>
-                    (a maintainer convenience; CI no longer runs it).
+                    (used by release automation and maintainers).
 """
 
 from __future__ import annotations
@@ -249,8 +249,8 @@ def update_doc_example_versions(version: str) -> None:
 
     The docs are static HTML/Markdown rather than a templated site build. Only
     lines that mention Lash crates are rewritten; unrelated dependency versions
-    in examples stay untouched. CI no longer runs this (there is no release
-    commit); it stays as a maintainer convenience for refreshing the display
+    in examples stay untouched. Release automation runs this for its
+    post-publish commit, and maintainers can run it when refreshing the display
     snippets in a normal PR.
     """
     simple_dep_re = re.compile(

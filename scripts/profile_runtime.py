@@ -55,7 +55,7 @@ def parse_args() -> argparse.Namespace:
         "--profile",
         choices=sorted(PROFILE_DEFAULTS),
         default="full",
-        help="Benchmark size preset: quick for push CI, full for manual/nightly runs.",
+        help="Benchmark size preset: quick for push CI, full for release/manual runs.",
     )
     parser.add_argument("--runs", type=int, help="Measured runs. Defaults from --profile.")
     parser.add_argument("--warmups", type=int, help="Warm-up runs. Defaults from --profile.")

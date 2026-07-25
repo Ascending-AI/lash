@@ -31,7 +31,8 @@ dependency order and waits for crates.io visibility between crates.
 
 There is no version-bump commit and no second CI pass. `main` always carries the
 `0.0.0-dev` placeholder in every workspace manifest; the release version is
-computed at cut time and stamped into an ephemeral tag checkout at packaging
+computed at cut time and stamped into an immutable checkout of the validated
+release SHA at packaging
 time (`scripts/release_version.py stamp`, `scripts/publish_workspace.py
 --version`), so `main` never records a released version.
 
@@ -41,18 +42,21 @@ time (`scripts/release_version.py stamp`, `scripts/publish_workspace.py
    `Release` workflow. `release_sha` may name any commit on `main`; leaving it
    blank selects the current `main` head.
 3. The workflow proves that the selected commit is on `main` and has a
-   successful main-push CI run, then requires curated notes for the unreleased
-   range. `scripts/release_version.py print-next` computes the next version from
-   `[workspace.metadata.release].channel` and the existing `v*` tags. The
-   workflow tags that exact commit and is idempotent when retried.
-4. `release.yml` validates `cargo metadata --locked`, then:
+   successful main CI run, then requires curated notes for the unreleased range.
+   `scripts/release_version.py print-next` computes the next version from
+   `[workspace.metadata.release].channel` and the existing `v*` tags.
+4. `release.yml` validates `cargo metadata --locked` and runs both full,
+   budget-enforcing performance profiles on the validated SHA. If either gate
+   fails, nothing is published and no tag is created. Then:
    - `publish-crates` runs
      `python3 .release-tools/scripts/publish_workspace.py --version <version>`,
      which stamps the manifests + lockfile and publishes every crate in
      topological dependency layers (crates in a layer publish concurrently, one
      crates.io visibility wait per layer). Already-published versions are
      skipped, so a failed run can be re-run to resume.
-   - the `publish` job builds the SDK GitHub release with the curated notes.
+   - the `publish` job tags the validated SHA and builds the SDK GitHub release
+     with the curated notes. A retry verifies an existing tag still points to
+     that SHA.
 
 The independent `lash-cli` Release workflow owns binary artifacts, checksums,
 the installer, and `lash --version` stamping.
@@ -77,8 +81,8 @@ value with local `v*` tags and fails when a newer release tag exists. If the
 matching tag is unavailable in an offline or shallow checkout, the checked-in
 value is the fallback, so docs lint never needs network access.
 
-Every release is followed by a mechanical docs-pin bump PR that updates the
-display snippets and fallback together:
+After a release is published, the release workflow runs the same mechanical
+docs-pin update against current `main`:
 
 ```bash
 python3 scripts/release_version.py stamp-docs X.Y.Z
@@ -87,10 +91,16 @@ python3 scripts/lint_docs.py
 
 `stamp-docs` is deliberately separate from the ephemeral manifest stamp used
 by the release workflow: it changes checked-in documentation, not release
-artifacts. The `test-doc` CI job fetches release tags, so full-clone docs lint
-intentionally goes red after a release and stays red until that mechanical PR
-lands. Tagless local and offline checkouts continue to use
-`docs/released-version.txt` as their fallback authority.
+artifacts. The workflow lints the result, then commits it directly to `main`
+after publishing. An already-current pin creates no commit, and a rerun of an
+older release cannot replace a newer release pin. A concurrent main update
+triggers a bounded rebase-and-push retry; exhaustion is reported loudly but
+cannot make an otherwise successful release fail. Because GitHub suppresses
+push-triggered workflows for commits made with `GITHUB_TOKEN`, the release
+workflow explicitly dispatches CI for the new main head after pushing the pin.
+A newer racing main commit owns its normal push validation instead. Tagless
+local and offline checkouts continue to use `docs/released-version.txt` as
+their fallback authority.
 
 ## Release notes (required)
 
@@ -114,8 +124,10 @@ a section, the release stops without publishing. The publish job collects the
 same range's sections (oldest first) into the GitHub release body; the
 auto-generated commit list is appended below. The previous tag is resolved by
 graph ancestry (`git describe`), not version sorting, so tags from unrelated
-history lines are ignored. The flow authors no synthetic commits, so every
-commit in range is a real change eligible to contribute notes.
+history lines are ignored. The flow's post-release `docs: stamp release`
+commit appears in the next range and carries its required categorized trailer,
+but the collector excludes that mechanical note so it cannot satisfy the next
+release gate by itself. Every other commit remains eligible to contribute.
 
 ## Docs code snippets
 

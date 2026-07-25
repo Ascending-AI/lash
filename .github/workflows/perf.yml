@@ -1,14 +1,10 @@
 name: Performance
 
-# The heavyweight runtime performance checks deliberately do not run per push (see
-# ci.yml); this nightly run is the sole enforcement point for the budgets in
-# scripts/perf_guard_budgets.json — without it the budget system gates
-# nothing.
+# The release workflow enforces these full profiles before publishing. This
+# workflow keeps the same budget-enforcing check available on demand.
 
 on:
   workflow_dispatch:
-  schedule:
-    - cron: "17 3 * * *"
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -23,18 +19,21 @@ env:
 jobs:
   perf-guard-full:
     name: Perf Guard Full
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-16vcpu-ubuntu-2404
 
     steps:
       - name: Check out repository
         uses: actions/checkout@v7
+
+      - name: Reclaim runner disk
+        run: bash scripts/ci-reclaim-disk.sh
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
 
 
       - name: Restore cargo cache
-        uses: Swatinem/rust-cache@v2
+        uses: useblacksmith/rust-cache@v3.0.1
         with:
           cache-bin: false
           # Restore-only against the release cache ci.yml warms on main.
