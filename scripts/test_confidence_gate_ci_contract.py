@@ -198,6 +198,25 @@ class ConfidenceGateCiContractTest(unittest.TestCase):
         self.assertIn("python3 scripts/release_notes.py check-pr", lint)
         self.assertIn('--summary "$GITHUB_STEP_SUMMARY"', lint)
 
+    def test_lint_job_runs_functional_perf_smoke_without_budgets(self) -> None:
+        workflow = WORKFLOW.read_text(encoding="utf-8")
+        lint = workflow_job_block(workflow, "lint")
+
+        self.assertIn("runs-on: blacksmith-8vcpu-ubuntu-2404", lint)
+        self.assertIn(
+            "profile_runtime.py --profile quick "
+            "--out .benchmarks/perf-smoke/runtime.json",
+            lint,
+        )
+        self.assertIn(
+            "profile_lashlang.py --debug --iterations 10 "
+            "--profile-iterations 10 --out .benchmarks/perf-smoke/lashlang.json",
+            lint,
+        )
+        smoke = lint[lint.index("- name: Run performance harness smoke") :]
+        smoke = smoke[: smoke.index("- name: Check core/UI boundary")]
+        self.assertNotIn("--enforce-budgets", smoke)
+
     def test_workflow_graph_example_is_in_functional_matrix(self) -> None:
         workflow = WORKFLOW.read_text(encoding="utf-8")
         justfile = JUSTFILE.read_text(encoding="utf-8")

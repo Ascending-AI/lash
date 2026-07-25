@@ -233,6 +233,13 @@ jobs:
           # shellcheck disable=SC2086
           cargo clippy --workspace --all-targets --locked ${LASH_CI_FEATURES} -- -D warnings
 
+      # Functional only: exercise every runtime and Lashlang measurement path
+      # cheaply on each push/PR. Full budget enforcement belongs to release.yml.
+      - name: Run performance harness smoke
+        run: |
+          python3 scripts/profile_runtime.py --profile quick --out .benchmarks/perf-smoke/runtime.json
+          python3 scripts/profile_lashlang.py --debug --iterations 10 --profile-iterations 10 --out .benchmarks/perf-smoke/lashlang.json
+
       - name: Check core/UI boundary
         run: bash scripts/check-core-ui-boundary.sh
 
