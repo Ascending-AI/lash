@@ -489,6 +489,8 @@ pub enum RemoteAttachmentSource {
     ProviderFile {
         provider_scope: RemoteProviderFileScope,
         id: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        media_type: Option<String>,
     },
 }
 
@@ -513,9 +515,22 @@ impl RemoteAttachmentSource {
                 validate_media_type("RemoteAttachmentSource::ExternalUrl", media_type)?;
                 require_non_empty("RemoteAttachmentSource::ExternalUrl", "url", url)
             }
-            Self::ProviderFile { provider_scope, id } => {
+            Self::ProviderFile {
+                provider_scope,
+                id,
+                media_type,
+            } => {
                 provider_scope.validate()?;
-                require_non_empty("RemoteAttachmentSource::ProviderFile", "id", id)
+                require_non_empty("RemoteAttachmentSource::ProviderFile", "id", id)?;
+                if let Some(media_type) = media_type {
+                    require_non_empty(
+                        "RemoteAttachmentSource::ProviderFile",
+                        "media_type",
+                        media_type,
+                    )?;
+                    validate_media_type("RemoteAttachmentSource::ProviderFile", media_type)?;
+                }
+                Ok(())
             }
         }
     }
