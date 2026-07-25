@@ -9,7 +9,7 @@ on:
         type: string
 
 permissions:
-  contents: write
+  contents: read
   actions: read
 
 concurrency:
@@ -52,7 +52,7 @@ jobs:
 
           runs_file="$(mktemp)"
           gh run list --workflow ci.yml --commit "${sha}" --limit 20 \
-            --json conclusion,event,headSha,status > "${runs_file}"
+            --json conclusion,databaseId,displayTitle,event,headSha,status,url,workflowName > "${runs_file}"
           python3 - "${sha}" "${runs_file}" <<'PY'
           import json
           import pathlib
@@ -60,14 +60,33 @@ jobs:
 
           sha = sys.argv[1]
           runs = json.loads(pathlib.Path(sys.argv[2]).read_text(encoding="utf-8"))
-          if not any(
-              run.get("headSha") == sha
-              and run.get("event") == "push"
-              and run.get("status") == "completed"
-              and run.get("conclusion") == "success"
+          matching = [
+              run
               for run in runs
+              if run.get("headSha") == sha
+              and run.get("event") in ("push", "workflow_dispatch")
+          ]
+          if not matching:
+              raise SystemExit(
+                  f"release refused: no main CI run found for target {sha}"
+              )
+          run = matching[0]
+          if (
+              run.get("status") != "completed"
+              or run.get("conclusion") != "success"
           ):
-              raise SystemExit(f"no successful main CI push run found for {sha}")
+              state = (
+                  run.get("conclusion")
+                  if run.get("status") == "completed"
+                  else run.get("status")
+              )
+              raise SystemExit(
+                  "release refused: target "
+                  f"{sha} has no successful main CI run; latest matching "
+                  f"{run.get('workflowName', 'CI')} run {run.get('databaseId')} "
+                  f"({run.get('displayTitle', 'untitled')}) is {state}: "
+                  f"{run.get('url', 'URL unavailable')}"
+              )
           PY
 
           git checkout --detach "${sha}"
@@ -80,32 +99,62 @@ jobs:
               echo "Computed release tag ${tag} already exists on another commit." >&2
               exit 1
             fi
-            git config user.name "github-actions[bot]"
-            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-            git tag "${tag}" "${sha}"
-            git push origin "${tag}"
           fi
 
           echo "sha=${sha}" >> "${GITHUB_OUTPUT}"
           echo "tag=${tag}" >> "${GITHUB_OUTPUT}"
-          echo "Preparing ${tag} from ${sha}." >> "${GITHUB_STEP_SUMMARY}"
+          echo "Validating ${sha} for ${tag}." >> "${GITHUB_STEP_SUMMARY}"
 
   validate-release-ref:
     name: Validate release ref
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-16vcpu-ubuntu-2404
     needs: prepare-release
 
     steps:
       - name: Check out repository
         uses: actions/checkout@v7
         with:
-          ref: ${{ needs.prepare-release.outputs.release_tag }}
+          ref: ${{ needs.prepare-release.outputs.release_sha }}
+
+      - name: Reclaim runner disk
+        run: bash scripts/ci-reclaim-disk.sh
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
 
+      - name: Restore cargo cache
+        uses: useblacksmith/rust-cache@v3.0.1
+        with:
+          cache-bin: false
+          # Restore-only against the release cache ci.yml warms on main.
+          shared-key: linux-release
+          save-if: false
+
+      - name: Install protoc
+        uses: taiki-e/install-action@v2
+        with:
+          tool: protoc
+
       - name: Validate locked workspace metadata
         run: cargo metadata --format-version 1 --locked >/dev/null
+
+      - name: Run full runtime performance checks
+        run: |
+          python3 scripts/profile_runtime.py --profile full --release --enforce-budgets --out .benchmarks/perf-guard/runtime.json
+          python3 scripts/profile_lashlang.py --iterations 2500 --profile-iterations 2500 --enforce-budgets --out .benchmarks/perf-guard/lashlang.json
+
+      - name: Publish performance summaries
+        run: |
+          python3 scripts/perfreport.py .benchmarks/perf-guard/runtime.json >> "$GITHUB_STEP_SUMMARY"
+          python3 scripts/perfreport.py .benchmarks/perf-guard/lashlang.json >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload performance guard artifacts
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: release-perf-guard-${{ needs.prepare-release.outputs.release_tag }}-attempt-${{ github.run_attempt }}
+          path: .benchmarks/perf-guard/*
+          if-no-files-found: warn
 
   publish-crates:
     name: Publish crates to crates.io
@@ -121,7 +170,26 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v7
         with:
-          ref: ${{ needs.prepare-release.outputs.release_tag }}
+          ref: ${{ needs.prepare-release.outputs.release_sha }}
+
+      - name: Validate immutable release source
+        env:
+          RELEASE_SHA: ${{ needs.prepare-release.outputs.release_sha }}
+          RELEASE_TAG: ${{ needs.prepare-release.outputs.release_tag }}
+        run: |
+          set -euo pipefail
+          head_sha="$(git rev-parse HEAD)"
+          if [ "${head_sha}" != "${RELEASE_SHA}" ]; then
+            echo "Release checkout ${head_sha} does not match validated SHA ${RELEASE_SHA}." >&2
+            exit 1
+          fi
+
+          git fetch --force origin --tags
+          tag_sha="$(git rev-parse -q --verify "refs/tags/${RELEASE_TAG}^{commit}" || true)"
+          if [ -n "${tag_sha}" ] && [ "${tag_sha}" != "${RELEASE_SHA}" ]; then
+            echo "Release tag ${RELEASE_TAG} points to ${tag_sha}, not validated SHA ${RELEASE_SHA}." >&2
+            exit 1
+          fi
 
       - name: Check out release tooling
         uses: actions/checkout@v7
@@ -138,10 +206,10 @@ jobs:
       # publish=false crates are skipped; versions already visible on crates.io
       # are skipped, so reruns resume after partial publication.
       #
-      # --version stamps the real release version into the tag checkout's
+      # --version stamps the real release version into the validated checkout's
       # manifests + lockfile before reading the graph and publishing: `main`
       # carries the 0.0.0-dev placeholder, so this is what makes the published
-      # crates pin the real version. The stamp runs the tag checkout's own
+      # crates pin the real version. The stamp runs the validated checkout's own
       # scripts/release_version.py (the publisher script itself is the pinned
       # `.release-tools` copy).
       #
@@ -169,26 +237,54 @@ jobs:
     name: Publish SDK release
     runs-on: ubuntu-latest
     needs: [prepare-release, publish-crates]
+    permissions:
+      contents: write
+      actions: write
     env:
+      RELEASE_SHA: ${{ needs.prepare-release.outputs.release_sha }}
       RELEASE_TAG: ${{ needs.prepare-release.outputs.release_tag }}
 
     steps:
       - name: Check out repository
         uses: actions/checkout@v7
         with:
-          ref: ${{ needs.prepare-release.outputs.release_tag }}
+          ref: ${{ needs.prepare-release.outputs.release_sha }}
           # Full history + tags: release_notes.py walks previous-tag..tag to
           # assemble the curated release body.
           fetch-depth: 0
           fetch-tags: true
-
 
       # Curated notes from `Release-Notes:` commit sections become the release
       # body; the auto-generated commit list is appended below. Written
       # outside dist/ so it is not uploaded as an asset. prepare-release has
       # already required curated notes before creating a new tag.
       - name: Collect release notes
-        run: python3 scripts/release_notes.py collect --end "${RELEASE_TAG}" --out "${{ runner.temp }}/RELEASE_NOTES.md"
+        run: python3 scripts/release_notes.py collect --end "${RELEASE_SHA}" --out "${{ runner.temp }}/RELEASE_NOTES.md"
+
+      - name: Publish validated release tag
+        run: |
+          set -euo pipefail
+          head_sha="$(git rev-parse HEAD)"
+          if [ "${head_sha}" != "${RELEASE_SHA}" ]; then
+            echo "Release checkout ${head_sha} does not match validated SHA ${RELEASE_SHA}." >&2
+            exit 1
+          fi
+
+          git fetch --force origin main --tags
+          tag_sha="$(git rev-parse -q --verify "refs/tags/${RELEASE_TAG}^{commit}" || true)"
+          if [ -n "${tag_sha}" ]; then
+            if [ "${tag_sha}" != "${RELEASE_SHA}" ]; then
+              echo "Release tag ${RELEASE_TAG} points to ${tag_sha}, not validated SHA ${RELEASE_SHA}." >&2
+              exit 1
+            fi
+            echo "Release tag ${RELEASE_TAG} already points to ${RELEASE_SHA}."
+            exit 0
+          fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag "${RELEASE_TAG}" "${RELEASE_SHA}"
+          git push origin "refs/tags/${RELEASE_TAG}"
 
       - name: Publish release
         uses: softprops/action-gh-release@v3
@@ -202,14 +298,24 @@ jobs:
       # other docs-bump failure) to turn a successful publish red.
       - name: Stamp published version into docs
         continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           trap 'echo "::warning title=Docs pin bump failed::The release was published, but its automated docs pin bump failed. Update the docs pin manually."' ERR
 
           version="${RELEASE_TAG#v}"
-          git fetch origin main
+          git fetch --force origin main --tags
+          latest_tag="$(git tag --list 'v*' --sort=-v:refname | sed -n '1p')"
+          if [ "${latest_tag}" != "${RELEASE_TAG}" ]; then
+            echo "Skipping docs pin for superseded ${RELEASE_TAG}; newer release tag ${latest_tag} already exists."
+            echo "Skipped docs pin for superseded ${RELEASE_TAG}; newer release ${latest_tag} exists." >> "${GITHUB_STEP_SUMMARY}"
+            exit 0
+          fi
+
           git checkout -B release-docs-pin origin/main
           python3 scripts/release_version.py stamp-docs "${version}"
+          python3 scripts/lint_docs.py
 
           if [ -z "$(git status --short)" ]; then
             echo "Docs already reference ${version}; no commit needed."
@@ -230,6 +336,17 @@ jobs:
             echo "Pushing docs pin to main (attempt ${attempt}/${max_attempts})."
             if git push origin HEAD:main; then
               echo "Stamped docs for ${version} on main." >> "${GITHUB_STEP_SUMMARY}"
+              git fetch --force origin main
+              if [ "$(git rev-parse HEAD)" = "$(git rev-parse origin/main)" ]; then
+                if gh workflow run ci.yml --ref main; then
+                  echo "Dispatched CI for the docs pin commit." >> "${GITHUB_STEP_SUMMARY}"
+                else
+                  echo "::warning title=Docs pin CI dispatch failed::The docs pin reached main, but its CI run could not be dispatched."
+                  echo "WARNING: CI was not dispatched for the docs pin commit." >> "${GITHUB_STEP_SUMMARY}"
+                fi
+              else
+                echo "A newer main commit superseded the docs pin head and owns CI validation." >> "${GITHUB_STEP_SUMMARY}"
+              fi
               exit 0
             fi
 

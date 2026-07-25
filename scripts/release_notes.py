@@ -18,10 +18,14 @@ change that intentionally has no public-facing release note.
 
 The release pipeline uses two entry points:
   - the manually dispatched release workflow runs `collect --require` for the
-    selected green main commit before it creates a tag.
-  - the publish job runs `collect --end <tag> --out <file>` and feeds the file
-    to the GitHub release body (the auto-generated commit list is appended
-    below it).
+    selected green main commit before anything is published.
+  - the publish job runs `collect --end <sha> --out <file>` and feeds the file
+    to the GitHub release body before tagging that SHA (the auto-generated
+    commit list is appended below it).
+
+The automated post-release `docs: stamp release <version>` commit carries the
+required categorized trailer for repository history, but is excluded from
+collection so it cannot satisfy the next release's curated-notes gate by itself.
 
 Uses only the Python standard library, like the sibling release scripts.
 """
@@ -39,6 +43,8 @@ ROOT = Path(__file__).resolve().parents[1]
 MARKER_RE = re.compile(r"^Release-Notes:(.*)$")
 SQUASH_SUBJECT_RE = re.compile(r"^\*\s")
 RECORD_SEPARATOR = "\x1e"
+FIELD_SEPARATOR = "\x1f"
+AUTOMATED_DOCS_STAMP_SUBJECT_RE = re.compile(r"^docs: stamp release \S+$")
 CATEGORIES = ("Breaking", "Added", "Fixed", "Changed", "Internal")
 CATEGORY_COLON_RE = re.compile(
     r"^(Breaking|Added|Fixed|Changed|Internal):\s*(.*)$", re.IGNORECASE
@@ -148,14 +154,14 @@ def render_notes(notes: list[str]) -> str:
     return "\n\n".join(sections).strip()
 
 
-def commit_bodies(range_spec: str) -> list[str]:
-    """Return commit bodies in chronological order for an arbitrary range."""
+def commit_messages(range_spec: str) -> list[tuple[str, str]]:
+    """Return (subject, body) pairs in chronological order for a git range."""
     result = subprocess.run(
         [
             "git",
             "log",
             "--reverse",
-            f"--format=%B{RECORD_SEPARATOR}",
+            f"--format=%s{FIELD_SEPARATOR}%B{RECORD_SEPARATOR}",
             range_spec,
         ],
         cwd=ROOT,
@@ -163,17 +169,33 @@ def commit_bodies(range_spec: str) -> list[str]:
         capture_output=True,
         text=True,
     )
-    return [
-        record.strip("\n")
-        for record in result.stdout.split(RECORD_SEPARATOR)
-        if record.strip()
-    ]
+    messages: list[tuple[str, str]] = []
+    for record in result.stdout.split(RECORD_SEPARATOR):
+        if not record.strip():
+            continue
+        subject, separator, body = record.partition(FIELD_SEPARATOR)
+        if not separator:
+            raise ValueError("git log record is missing its subject/body separator")
+        messages.append((subject.strip(), body.strip("\n")))
+    return messages
+
+
+def commit_bodies(range_spec: str) -> list[str]:
+    """Return commit bodies in chronological order for an arbitrary range."""
+    return [body for _, body in commit_messages(range_spec)]
+
+
+def is_automated_docs_stamp(subject: str) -> bool:
+    """Whether a commit is the release workflow's mechanical docs-pin update."""
+    return AUTOMATED_DOCS_STAMP_SUBJECT_RE.fullmatch(subject) is not None
 
 
 def collect_notes_for_range(range_spec: str) -> list[str]:
     """Collect all notes from an arbitrary git range, oldest first."""
     notes: list[str] = []
-    for body in commit_bodies(range_spec):
+    for subject, body in commit_messages(range_spec):
+        if is_automated_docs_stamp(subject):
+            continue
         notes.extend(extract_notes(body))
     return notes
 
