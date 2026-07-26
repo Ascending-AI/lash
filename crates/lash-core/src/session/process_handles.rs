@@ -103,7 +103,6 @@ impl RuntimeExecutionContext<'_> {
         {
             return ToolInvocationReply::error(json!(err.to_string()));
         }
-        self.record_started_process(&handle_id);
 
         let handle_value = Self::process_handle_value(&handle_id, &tool_name);
         let record = ToolCallRecord {
@@ -509,14 +508,14 @@ mod tests {
         host.process_registry
             .revoke_handle(&run_scope, "async-call-1")
             .await
-            .expect("remove persisted grant to exercise run-local possession");
+            .expect("remove persisted grant");
         assert!(
             !host
                 .process_registry
                 .has_handle_grant(&run_scope, "async-call-1")
                 .await
-                .expect("check run-local handle grant"),
-            "run-local possession must work without a persisted handle grant"
+                .expect("check revoked handle grant"),
+            "tool-started process must rely on its persisted handle grant"
         );
         let ProcessInput::ToolCall { call } = record.input.as_ref() else {
             panic!("expected prepared tool call process input");
@@ -532,7 +531,13 @@ mod tests {
             .await_process_handle("await-async-call-1".to_string(), handle.to_json_value())
             .await;
 
-        assert!(awaited.output.is_success());
+        assert!(!awaited.output.is_success());
+        let await_error = awaited.output.value_for_projection().to_string();
+        assert!(
+            await_error
+                .contains("process handle `async-call-1` is not live or visible in this session"),
+            "revoked tool-started handle must return the typed visibility miss: {await_error}"
+        );
         let record = awaited.record.expect("await record");
         assert_eq!(record.call_id.as_deref(), Some("await-async-call-1"));
         assert_eq!(record.tool, "await_process");
