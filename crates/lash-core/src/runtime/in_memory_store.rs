@@ -187,6 +187,38 @@ impl InMemorySessionStore {
         Self::with_clock(Arc::new(crate::SystemClock))
     }
 
+    /// Return the active durable graph rows without constructing a session
+    /// read model.
+    ///
+    /// Differential persistence tests use this testing-only seam because a
+    /// [`crate::SessionGraph`] read model indexes duplicate node ids and would
+    /// hide malformed durable rows.
+    #[cfg(any(test, feature = "testing"))]
+    pub fn raw_graph_nodes_for_testing(&self) -> Vec<crate::SessionNodeRecord> {
+        let tombstoned = self
+            .tombstoned_node_ids
+            .lock()
+            .expect("lock tombstoned nodes");
+        self.session_graph
+            .lock()
+            .expect("lock graph")
+            .nodes
+            .iter()
+            .filter(|node| !tombstoned.contains(&node.node_id))
+            .cloned()
+            .collect()
+    }
+
+    /// Return the durable head revision without loading a session read model.
+    #[cfg(any(test, feature = "testing"))]
+    pub fn raw_head_revision_for_testing(&self) -> Option<u64> {
+        self.session_head_meta
+            .lock()
+            .expect("lock store")
+            .as_ref()
+            .map(|meta| meta.head_revision)
+    }
+
     pub fn with_clock(clock: Arc<dyn crate::Clock>) -> Self {
         Self {
             clock,
