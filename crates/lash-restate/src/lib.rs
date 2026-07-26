@@ -2121,7 +2121,7 @@ where
                         ProcessAwaitOutput::Abandoned {
                             evidence: Box::new(AbandonEvidence {
                                 writer: AbandonWriter::Sweep,
-                                owner: Some(by),
+                                owner: Some(*by),
                                 epoch_ms: restate_now_ms(),
                             }),
                             control: None,

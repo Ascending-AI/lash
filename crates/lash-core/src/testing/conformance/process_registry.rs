@@ -1216,7 +1216,7 @@ async fn disposition_first_started_and_abandon_request_persist(registry: Arc<dyn
     assert!(matches!(
         rerecorded,
         crate::PluginError::ProcessAlreadyStarted { by, .. }
-            if by == process_lease_owner("starter")
+            if *by == process_lease_owner("starter")
     ));
 
     // A live lease is exposed read-side by holder and expiry.

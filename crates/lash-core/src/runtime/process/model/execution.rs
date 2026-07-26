@@ -77,7 +77,7 @@ impl ProcessStartOutcome {
             Self::AlreadyStarted { current, by } => {
                 Err(crate::PluginError::ProcessAlreadyStarted {
                     process_id: current.id,
-                    by,
+                    by: Box::new(by),
                 })
             }
             Self::AttemptsExhausted {

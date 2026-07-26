@@ -12,7 +12,7 @@ pub enum PluginError {
     #[error("process `{process_id}` execution was already started by {by:?}")]
     ProcessAlreadyStarted {
         process_id: String,
-        by: crate::LeaseOwnerIdentity,
+        by: Box<crate::LeaseOwnerIdentity>,
     },
     #[error("process `{process_id}` exhausted its execution attempts ({attempts}/{max_attempts})")]
     ProcessAttemptsExhausted {

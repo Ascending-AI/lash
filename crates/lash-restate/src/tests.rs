@@ -4080,7 +4080,7 @@ impl RestateProcessRunner for AlreadyStartedRunner {
         *self.calls.lock().expect("runner calls lock") += 1;
         Err(PluginError::ProcessAlreadyStarted {
             process_id: registration.id,
-            by: self.winner.clone(),
+            by: Box::new(self.winner.clone()),
         })
     }
 
