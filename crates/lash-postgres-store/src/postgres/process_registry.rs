@@ -1381,7 +1381,7 @@ impl ProcessRegistry for PostgresProcessRegistry {
     }
 }
 
-pub(crate) fn process_external_ref_conflict(
+fn process_external_ref_conflict(
     process_id: &str,
     existing: &ProcessExternalRef,
     new: &ProcessExternalRef,

@@ -462,7 +462,7 @@ pub(crate) async fn load_pending_turn_input_row_by_target_tx(
     row.map(pending_turn_input_row).transpose()
 }
 
-pub(crate) fn pending_turn_input_claim_diagnostics_from_row(
+fn pending_turn_input_claim_diagnostics_from_row(
     row: &PendingTurnInputRow,
 ) -> Option<lash_core::PendingTurnInputClaimDiagnostics> {
     (row.claim_token.is_some() || matches!(row.state, lash_core::TurnInputState::Accepted)).then(

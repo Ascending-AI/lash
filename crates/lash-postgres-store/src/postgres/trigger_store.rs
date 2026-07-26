@@ -421,7 +421,7 @@ impl TriggerStore for PostgresTriggerStore {
     }
 }
 
-pub(crate) async fn reserve_postgres_deliveries(
+async fn reserve_postgres_deliveries(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     occurrence: &TriggerOccurrenceRecord,
 ) -> Result<Vec<TriggerDeliveryReservation>, PluginError> {
@@ -493,7 +493,7 @@ pub(crate) async fn reserve_postgres_deliveries(
     Ok(reservations)
 }
 
-pub(crate) async fn postgres_delivery_snapshots(
+async fn postgres_delivery_snapshots(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     occurrence: &TriggerOccurrenceRecord,
 ) -> Result<Vec<TriggerDeliveryReservation>, PluginError> {
@@ -520,7 +520,7 @@ pub(crate) async fn postgres_delivery_snapshots(
         .collect()
 }
 
-pub(crate) async fn list_deliveries_where(
+async fn list_deliveries_where(
     pool: &sqlx::PgPool,
     where_clause: &'static str,
     value: Option<String>,

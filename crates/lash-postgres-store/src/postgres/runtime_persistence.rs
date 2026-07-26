@@ -1,13 +1,13 @@
 use crate::*;
 
-pub(crate) const POSTGRES_QUEUED_WORK_HEAD_CANDIDATE_PREDICATE: &str = "session_id = $1
+const POSTGRES_QUEUED_WORK_HEAD_CANDIDATE_PREDICATE: &str = "session_id = $1
        AND available_at_ms <= FLOOR(EXTRACT(EPOCH FROM transaction_timestamp()) * 1000)
        AND (
             claim_token IS NULL
             OR claim_session_lease_generation <> $2
        )";
 
-pub(crate) fn postgres_queued_work_head_candidate_cte(boundary: QueuedWorkClaimBoundary) -> String {
+fn postgres_queued_work_head_candidate_cte(boundary: QueuedWorkClaimBoundary) -> String {
     let delivery_gate = match boundary {
         QueuedWorkClaimBoundary::Idle => "",
         QueuedWorkClaimBoundary::ActiveTurnCheckpoint => {
@@ -31,9 +31,7 @@ pub(crate) fn postgres_queued_work_head_candidate_cte(boundary: QueuedWorkClaimB
     )
 }
 
-pub(crate) fn postgres_queued_work_claim_candidates_sql(
-    boundary: QueuedWorkClaimBoundary,
-) -> String {
+fn postgres_queued_work_claim_candidates_sql(boundary: QueuedWorkClaimBoundary) -> String {
     let head_candidate = postgres_queued_work_head_candidate_cte(boundary);
     format!(
         "WITH {head_candidate}
@@ -50,7 +48,7 @@ pub(crate) fn postgres_queued_work_claim_candidates_sql(
     )
 }
 
-pub(crate) async fn enqueue_queued_work_tx(
+async fn enqueue_queued_work_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     batch: &QueuedWorkBatchDraft,
 ) -> Result<QueuedWorkBatch, StoreError> {
@@ -571,7 +569,7 @@ impl SessionCommitStore for PostgresSessionStore {
     }
 }
 
-pub(crate) async fn complete_queued_work_claims_tx(
+async fn complete_queued_work_claims_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     completed_claims: &[QueuedWorkCompletion],
 ) -> Result<(), StoreError> {
@@ -1941,7 +1939,7 @@ impl StoreMaintenance for PostgresSessionStore {
     }
 }
 
-pub(crate) fn derive_pending_turn_input_id(
+fn derive_pending_turn_input_id(
     session_id: &str,
     source_key: Option<&str>,
     now_epoch_ms: u64,
@@ -1956,13 +1954,13 @@ pub(crate) fn derive_pending_turn_input_id(
     )
 }
 
-pub(crate) enum ClaimTransactionOutcome<T> {
+enum ClaimTransactionOutcome<T> {
     Commit(T),
     Rollback(T),
 }
 
 #[allow(clippy::too_many_arguments)]
-pub(crate) async fn checkpoint_work_pending_postgres(
+async fn checkpoint_work_pending_postgres(
     pool: &PgPool,
     session_id: &str,
     generation: u64,
@@ -2023,7 +2021,7 @@ pub(crate) async fn checkpoint_work_pending_postgres(
 }
 
 #[allow(clippy::too_many_arguments)]
-pub(crate) async fn claim_ready_queued_work_postgres_tx(
+async fn claim_ready_queued_work_postgres_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     session_id: &str,
     session_execution_lease: &SessionExecutionLeaseFence,
@@ -2126,7 +2124,7 @@ pub(crate) async fn claim_ready_queued_work_postgres_tx(
 }
 
 #[allow(clippy::too_many_arguments)]
-pub(crate) async fn claim_pending_turn_inputs_postgres_tx(
+async fn claim_pending_turn_inputs_postgres_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     session_id: &str,
     session_execution_lease: &SessionExecutionLeaseFence,
@@ -2259,7 +2257,7 @@ pub(crate) async fn claim_pending_turn_inputs_postgres_tx(
     )))
 }
 
-pub(crate) async fn claim_pending_turn_inputs_postgres(
+async fn claim_pending_turn_inputs_postgres(
     pool: &PgPool,
     session_id: &str,
     session_execution_lease: &SessionExecutionLeaseFence,
@@ -2443,12 +2441,12 @@ pub(crate) fn lease_owner_from_columns(
     })
 }
 
-pub(crate) fn encode_liveness(liveness: &LeaseOwnerLiveness) -> Result<String, StoreError> {
+fn encode_liveness(liveness: &LeaseOwnerLiveness) -> Result<String, StoreError> {
     serde_json::to_string(liveness)
         .map_err(|err| StoreError::Backend(format!("failed to encode lease liveness: {err}")))
 }
 
-pub(crate) fn row_to_session_execution_lease(
+fn row_to_session_execution_lease(
     session_id: &str,
     row: SessionExecutionLeaseRow,
 ) -> Result<SessionExecutionLease, StoreError> {
@@ -2476,7 +2474,7 @@ pub(crate) fn row_to_session_execution_lease(
 /// mutually exclusive per session; Postgres releases it automatically when the
 /// transaction ends. (SQLite and the in-memory store serialize writers
 /// globally, so they do not need this.)
-pub(crate) async fn lock_session_execution_lease_tx(
+async fn lock_session_execution_lease_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     session_id: &str,
 ) -> Result<(), StoreError> {
@@ -2488,7 +2486,7 @@ pub(crate) async fn lock_session_execution_lease_tx(
     Ok(())
 }
 
-pub(crate) async fn acquire_session_execution_lease_tx(
+async fn acquire_session_execution_lease_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     session_id: &str,
     owner: &LeaseOwnerIdentity,
@@ -2539,7 +2537,7 @@ pub(crate) async fn acquire_session_execution_lease_tx(
     })
 }
 
-pub(crate) async fn ensure_session_execution_lease_tx(
+async fn ensure_session_execution_lease_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     session_id: &str,
     fence: &SessionExecutionLeaseFence,
@@ -2572,7 +2570,7 @@ pub(crate) async fn ensure_session_execution_lease_tx(
     }
 }
 
-pub(crate) async fn release_session_execution_lease_tx(
+async fn release_session_execution_lease_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     completion: &SessionExecutionLeaseCompletion,
 ) -> Result<(), StoreError> {

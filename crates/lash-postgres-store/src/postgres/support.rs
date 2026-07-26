@@ -68,7 +68,7 @@ pub(crate) fn encode_json<T: serde::Serialize>(value: &T) -> String {
     serde_json::to_string(value).expect("persisted state should serialize")
 }
 
-pub(crate) fn encode_msgpack<T: serde::Serialize>(value: &T) -> Vec<u8> {
+fn encode_msgpack<T: serde::Serialize>(value: &T) -> Vec<u8> {
     let mut buf = Vec::with_capacity(1024);
     rmp_serde::encode::write_named(&mut buf, value).expect("value should serialize");
     buf
@@ -136,7 +136,7 @@ pub(crate) struct SessionCheckpointEnvelope {
     execution_state: Option<Vec<u8>>,
 }
 
-pub(crate) async fn put_blob_tx(
+async fn put_blob_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     content: &[u8],
 ) -> Result<BlobRef, StoreError> {
@@ -154,7 +154,7 @@ pub(crate) async fn put_blob_tx(
     Ok(BlobRef(hash))
 }
 
-pub(crate) async fn get_blob(pool: &PgPool, blob_ref: &BlobRef) -> Option<Vec<u8>> {
+async fn get_blob(pool: &PgPool, blob_ref: &BlobRef) -> Option<Vec<u8>> {
     sqlx::query_scalar::<_, Vec<u8>>("SELECT content FROM lash_blobs WHERE hash = $1")
         .bind(blob_ref.as_str())
         .fetch_optional(pool)
@@ -287,10 +287,7 @@ pub(crate) async fn load_graph(
     Ok(lash_core::SessionGraph::from_nodes(nodes, leaf_node_id))
 }
 
-pub(crate) fn active_path_node_ids(
-    nodes: &[SessionNodeRecord],
-    leaf_node_id: &str,
-) -> HashSet<String> {
+fn active_path_node_ids(nodes: &[SessionNodeRecord], leaf_node_id: &str) -> HashSet<String> {
     let mut parent_by_id = std::collections::BTreeMap::new();
     for node in nodes {
         parent_by_id.insert(node.node_id.clone(), node.parent_node_id.clone());
