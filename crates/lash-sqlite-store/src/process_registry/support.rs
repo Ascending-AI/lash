@@ -133,6 +133,94 @@ impl SqliteProcessRegistry {
         .transpose()
     }
 
+    pub(crate) fn append_event_conn(
+        conn: &Connection,
+        record: &mut ProcessRecord,
+        request: ProcessEventAppendRequest,
+        occurred_at_ms: u64,
+    ) -> Result<(ProcessEventAppendResult, bool), lash_core::PluginError> {
+        let process_id = record.id.clone();
+        let replay_lookup =
+            if let Some(replay_key) = request.replay.as_ref().map(|replay| replay.key.as_str()) {
+                Self::load_event_by_key_conn(conn, &process_id, replay_key)?
+            } else {
+                None
+            };
+        let sequence = Self::next_event_sequence_conn(conn, &process_id)?;
+        let prepared =
+            prepare_process_event_append(record, request, sequence, replay_lookup, occurred_at_ms)?;
+        match prepared {
+            lash_core::ProcessEventAppendPlan::Replay {
+                event,
+                repair_record,
+                wake_delivery,
+                ..
+            } => {
+                let repaired = if let Some(repaired) = repair_record {
+                    *record = repaired;
+                    Self::save_process_conn(conn, record)?;
+                    true
+                } else {
+                    false
+                };
+                Ok((
+                    ProcessEventAppendResult {
+                        event,
+                        wake_delivery,
+                    },
+                    repaired,
+                ))
+            }
+            lash_core::ProcessEventAppendPlan::Insert {
+                event,
+                payload_hash,
+                projected_record,
+                wake_delivery,
+                occurred_at_ms,
+            } => {
+                conn.execute(
+                    "INSERT INTO process_events (
+                        process_id, sequence, event_type, payload_hash, idempotency_key,
+                        occurred_at_ms, event_json
+                     )
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                    params![
+                        process_id,
+                        sequence as i64,
+                        event.event_type.as_str(),
+                        payload_hash.as_str(),
+                        event.invocation.replay_key(),
+                        occurred_at_ms as i64,
+                        process_encode_json(&event)?,
+                    ],
+                )
+                .map_err(process_sqlite_error)?;
+                *record = projected_record;
+                Self::save_process_conn(conn, record)?;
+                Ok((
+                    ProcessEventAppendResult {
+                        event,
+                        wake_delivery,
+                    },
+                    true,
+                ))
+            }
+        }
+    }
+
+    pub(crate) fn next_event_sequence_conn(
+        conn: &Connection,
+        process_id: &str,
+    ) -> Result<u64, lash_core::PluginError> {
+        conn.query_row(
+            "SELECT COALESCE(MAX(sequence), 0) + 1 FROM process_events WHERE process_id = ?1",
+            params![process_id],
+            |row| row.get::<_, i64>(0),
+        )
+        .map(|sequence| sequence as u64)
+        .map_err(process_sqlite_error)
+    }
+
     pub(crate) fn load_process_lease_conn(
         conn: &Connection,
         process_id: &str,

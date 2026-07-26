@@ -1192,11 +1192,12 @@ async fn agent_contract_process_event_facts(
             .await
             .map_err(|err| FixedScriptRunnerError::Runtime(err.to_string()))?
         {
+            let event_type = event.event_type;
             events.push(json!({
                 "process_ref": process.process_ref.clone(),
                 "sequence": event.sequence,
-                "event_type": event.event_type,
-                "payload": normalize_contract_process_event_payload(event.payload),
+                "event_type": event_type,
+                "payload": normalize_contract_process_event_payload(&event_type, event.payload),
             }));
         }
     }
@@ -1213,10 +1214,19 @@ async fn agent_contract_process_event_facts(
     Ok(events)
 }
 
-fn normalize_contract_process_event_payload(payload: Value) -> Value {
+fn normalize_contract_process_event_payload(event_type: &str, payload: Value) -> Value {
     let mut payload = payload;
     if let Some(object) = payload.as_object_mut() {
         object.remove("await_key_id");
+        if event_type == "process.first_started"
+            && let Some(started) = object.get_mut("started").and_then(Value::as_object_mut)
+        {
+            started.remove("started_at_ms");
+            if let Some(owner) = started.get_mut("owner").and_then(Value::as_object_mut) {
+                owner.remove("owner_id");
+                owner.remove("incarnation_id");
+            }
+        }
     }
     payload
 }

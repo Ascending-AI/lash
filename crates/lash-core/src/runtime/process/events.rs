@@ -506,6 +506,55 @@ impl ProcessEventAppendRequest {
             "process:{process_id}:cancel_requested:{replay_key}"
         ))
     }
+
+    pub fn first_started(process_id: &str, started: &super::model::ProcessStarted) -> Self {
+        Self::new(
+            "process.first_started",
+            serde_json::json!({ "started": started }),
+        )
+        .with_replay_key(format!("process:{process_id}:first-started"))
+    }
+
+    pub fn wait_entered(
+        process_id: &str,
+        wait: &super::model::WaitState,
+        transition_sequence: u64,
+    ) -> Self {
+        Self::new("process.waiting", serde_json::json!({ "wait": wait })).with_replay_key(format!(
+            "process:{process_id}:wait:{}:entered:{transition_sequence}",
+            wait.key()
+        ))
+    }
+
+    pub fn wait_cleared(
+        process_id: &str,
+        wait: &super::model::WaitState,
+        transition_sequence: u64,
+    ) -> Self {
+        Self::new("process.resumed", serde_json::json!({ "wait": wait })).with_replay_key(format!(
+            "process:{process_id}:wait:{}:cleared:{transition_sequence}",
+            wait.key()
+        ))
+    }
+
+    pub fn external_ref_set(
+        process_id: &str,
+        external_ref: &super::model::ProcessExternalRef,
+    ) -> Self {
+        Self::new(
+            "process.external_ref_set",
+            serde_json::json!({ "external_ref": external_ref }),
+        )
+        .with_replay_key(format!("process:{process_id}:external-ref"))
+    }
+
+    pub fn abandon_requested(process_id: &str, request: &super::model::AbandonRequest) -> Self {
+        Self::new(
+            "process.abandon_requested",
+            serde_json::json!({ "request": request }),
+        )
+        .with_replay_key(format!("process:{process_id}:abandon-requested"))
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -551,12 +600,27 @@ pub(super) fn default_process_event_types() -> Vec<ProcessEventType> {
             semantics: ProcessEventSemanticsSpec::default(),
         },
         ProcessEventType {
+            name: "process.first_started".to_string(),
+            payload_schema: crate::LashSchema::any(),
+            semantics: ProcessEventSemanticsSpec::default(),
+        },
+        ProcessEventType {
             name: "process.waiting".to_string(),
             payload_schema: crate::LashSchema::any(),
             semantics: ProcessEventSemanticsSpec::default(),
         },
         ProcessEventType {
             name: "process.resumed".to_string(),
+            payload_schema: crate::LashSchema::any(),
+            semantics: ProcessEventSemanticsSpec::default(),
+        },
+        ProcessEventType {
+            name: "process.external_ref_set".to_string(),
+            payload_schema: crate::LashSchema::any(),
+            semantics: ProcessEventSemanticsSpec::default(),
+        },
+        ProcessEventType {
+            name: "process.abandon_requested".to_string(),
             payload_schema: crate::LashSchema::any(),
             semantics: ProcessEventSemanticsSpec::default(),
         },

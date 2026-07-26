@@ -63,8 +63,9 @@ pub use service::{
 pub use testing::*;
 pub use time::{current_epoch_ms, epoch_ms_from_system_time, system_time_from_epoch_ms};
 pub use validation::{
-    ProcessEventAppendPlan, apply_process_status_projection, prepare_process_event_append,
-    prepare_process_registration, process_event_payload_hash, require_event_replay,
+    ProcessEventAppendPlan, apply_process_event_projection, apply_process_status_projection,
+    fold_process_record, prepare_process_event_append, prepare_process_registration,
+    process_event_payload_hash, require_event_replay,
 };
 pub use wake::{
     ProcessWakeDeliveryRequest, process_wake_delivery, process_wake_input_from_event_payload,

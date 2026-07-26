@@ -120,6 +120,63 @@ impl TestLocalProcessRegistry {
         );
         Ok(record)
     }
+
+    async fn append_managed_event(
+        &self,
+        record: &mut ManagedProcessRecord,
+        request: ProcessEventAppendRequest,
+    ) -> Result<ProcessEventAppendResult, PluginError> {
+        let replay_lookup = request
+            .replay
+            .as_ref()
+            .and_then(|replay| record.keyed_events.get(replay.key.as_str()))
+            .map(|(hash, event)| (hash.clone(), event.clone()));
+        let sequence = record.events.len() as u64 + 1;
+        let prepared = prepare_process_event_append(
+            &record.record,
+            request,
+            sequence,
+            replay_lookup,
+            current_epoch_ms(),
+        )?;
+        match prepared {
+            super::ProcessEventAppendPlan::Replay {
+                event,
+                repair_record,
+                wake_delivery,
+                ..
+            } => {
+                if let Some(repaired) = repair_record {
+                    record.record = repaired;
+                    record.change_seq = self.next_change_seq().await;
+                }
+                Ok(ProcessEventAppendResult {
+                    event,
+                    wake_delivery,
+                })
+            }
+            super::ProcessEventAppendPlan::Insert {
+                event,
+                payload_hash,
+                projected_record,
+                wake_delivery,
+                ..
+            } => {
+                record.record = projected_record;
+                record.change_seq = self.next_change_seq().await;
+                record.events.push(event.clone());
+                if let Some(replay) = event.invocation.replay.clone() {
+                    record
+                        .keyed_events
+                        .insert(replay.key, (payload_hash, event.clone()));
+                }
+                Ok(ProcessEventAppendResult {
+                    event,
+                    wake_delivery,
+                })
+            }
+        }
+    }
 }
 
 #[async_trait::async_trait]
@@ -220,9 +277,8 @@ impl ProcessRegistry for TestLocalProcessRegistry {
                 &external_ref,
             ));
         }
-        record.record.external_ref = Some(external_ref);
-        record.record.updated_at_ms = current_epoch_ms();
-        record.change_seq = self.next_change_seq().await;
+        let request = ProcessEventAppendRequest::external_ref_set(process_id, &external_ref);
+        self.append_managed_event(record, request).await?;
         Ok(record.record.clone())
     }
 
@@ -448,68 +504,7 @@ impl ProcessRegistry for TestLocalProcessRegistry {
                 "unknown process `{process_id}`"
             )));
         };
-        let replay_lookup = request
-            .replay
-            .as_ref()
-            .and_then(|replay| record.keyed_events.get(replay.key.as_str()))
-            .map(|(hash, event)| (hash.clone(), event.clone()));
-        let sequence = record.events.len() as u64 + 1;
-        let prepared = prepare_process_event_append(
-            &record.record,
-            request,
-            sequence,
-            replay_lookup,
-            current_epoch_ms(),
-        )?;
-        match prepared {
-            super::ProcessEventAppendPlan::Replay {
-                event,
-                repair_status,
-                wake_delivery,
-                occurred_at_ms,
-            } => {
-                if let Some(status) = repair_status {
-                    super::apply_process_status_projection(
-                        &mut record.record,
-                        status,
-                        occurred_at_ms,
-                    );
-                    record.change_seq = self.next_change_seq().await;
-                }
-                Ok(ProcessEventAppendResult {
-                    event,
-                    wake_delivery,
-                })
-            }
-            super::ProcessEventAppendPlan::Insert {
-                event,
-                payload_hash,
-                status_update,
-                wake_delivery,
-                occurred_at_ms,
-            } => {
-                if let Some(status) = status_update {
-                    super::apply_process_status_projection(
-                        &mut record.record,
-                        status,
-                        occurred_at_ms,
-                    );
-                } else {
-                    record.record.updated_at_ms = occurred_at_ms;
-                }
-                record.change_seq = self.next_change_seq().await;
-                record.events.push(event.clone());
-                if let Some(replay) = event.invocation.replay.clone() {
-                    record
-                        .keyed_events
-                        .insert(replay.key, (payload_hash, event.clone()));
-                }
-                Ok(ProcessEventAppendResult {
-                    event,
-                    wake_delivery,
-                })
-            }
-        }
+        self.append_managed_event(record, request).await
     }
 
     async fn events_after(
@@ -584,36 +579,19 @@ impl ProcessRegistry for TestLocalProcessRegistry {
             current_epoch_ms(),
         )?;
         match prepared {
-            super::ProcessEventAppendPlan::Replay {
-                repair_status,
-                occurred_at_ms,
-                ..
-            } => {
-                if let Some(status) = repair_status {
-                    super::apply_process_status_projection(
-                        &mut record.record,
-                        status,
-                        occurred_at_ms,
-                    );
+            super::ProcessEventAppendPlan::Replay { repair_record, .. } => {
+                if let Some(repaired) = repair_record {
+                    record.record = repaired;
                     record.change_seq = self.next_change_seq().await;
                 }
             }
             super::ProcessEventAppendPlan::Insert {
                 event,
                 payload_hash,
-                status_update,
-                occurred_at_ms,
+                projected_record,
                 ..
             } => {
-                if let Some(status) = status_update {
-                    super::apply_process_status_projection(
-                        &mut record.record,
-                        status,
-                        occurred_at_ms,
-                    );
-                } else {
-                    record.record.updated_at_ms = occurred_at_ms;
-                }
+                record.record = projected_record;
                 record.change_seq = self.next_change_seq().await;
                 if let Some(replay) = event.invocation.replay.clone() {
                     record
@@ -668,17 +646,10 @@ impl ProcessRegistry for TestLocalProcessRegistry {
             super::ProcessEventAppendPlan::Insert {
                 event,
                 payload_hash,
-                status_update,
-                occurred_at_ms,
+                projected_record,
                 ..
             } => {
-                if let Some(status) = status_update {
-                    super::apply_process_status_projection(
-                        &mut record.record,
-                        status,
-                        occurred_at_ms,
-                    );
-                }
+                record.record = projected_record;
                 if let Some(replay) = event.invocation.replay.clone() {
                     record
                         .keyed_events
@@ -706,12 +677,11 @@ impl ProcessRegistry for TestLocalProcessRegistry {
                 "unknown process `{process_id}`"
             )));
         };
-        // First-writer-wins: the started fact is immutable once recorded.
-        if record.record.first_started.is_none() {
-            record.record.first_started = Some(Box::new(started));
-            record.record.updated_at_ms = current_epoch_ms();
-            record.change_seq = self.next_change_seq().await;
+        if record.record.first_started.is_some() {
+            return Ok(record.record.clone());
         }
+        let request = ProcessEventAppendRequest::first_started(process_id, &started);
+        self.append_managed_event(record, request).await?;
         Ok(record.record.clone())
     }
 
@@ -731,12 +701,11 @@ impl ProcessRegistry for TestLocalProcessRegistry {
                 "terminal process `{process_id}` cannot accept an abandon request"
             )));
         }
-        // First-writer-wins: preserve the original recorded authorization.
-        if record.record.abandon_request.is_none() {
-            record.record.abandon_request = Some(Box::new(request));
-            record.record.updated_at_ms = current_epoch_ms();
-            record.change_seq = self.next_change_seq().await;
+        if record.record.abandon_request.is_some() {
+            return Ok(record.record.clone());
         }
+        let append = ProcessEventAppendRequest::abandon_requested(process_id, &request);
+        self.append_managed_event(record, append).await?;
         Ok(record.record.clone())
     }
 
@@ -756,9 +725,13 @@ impl ProcessRegistry for TestLocalProcessRegistry {
                 "terminal process `{process_id}` cannot enter a wait state"
             )));
         }
-        record.record.wait = Some(wait);
-        record.record.updated_at_ms = current_epoch_ms();
-        record.change_seq = self.next_change_seq().await;
+        if record.record.wait.as_ref() == Some(&wait) {
+            return Ok(record.record.clone());
+        }
+        let transition_sequence = record.events.len() as u64 + 1;
+        let request =
+            ProcessEventAppendRequest::wait_entered(process_id, &wait, transition_sequence);
+        self.append_managed_event(record, request).await?;
         Ok(record.record.clone())
     }
 
@@ -769,9 +742,13 @@ impl ProcessRegistry for TestLocalProcessRegistry {
                 "unknown process `{process_id}`"
             )));
         };
-        record.record.wait = None;
-        record.record.updated_at_ms = current_epoch_ms();
-        record.change_seq = self.next_change_seq().await;
+        let Some(wait) = record.record.wait.clone() else {
+            return Ok(record.record.clone());
+        };
+        let transition_sequence = record.events.len() as u64 + 1;
+        let request =
+            ProcessEventAppendRequest::wait_cleared(process_id, &wait, transition_sequence);
+        self.append_managed_event(record, request).await?;
         Ok(record.record.clone())
     }
 

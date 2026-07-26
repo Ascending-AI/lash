@@ -16,13 +16,13 @@ pub enum ProcessEventAppendPlan {
     Insert {
         event: ProcessEvent,
         payload_hash: String,
-        status_update: Option<ProcessStatus>,
+        projected_record: ProcessRecord,
         wake_delivery: Option<ProcessWakeDelivery>,
         occurred_at_ms: u64,
     },
     Replay {
         event: ProcessEvent,
-        repair_status: Option<ProcessStatus>,
+        repair_record: Option<ProcessRecord>,
         wake_delivery: Option<ProcessWakeDelivery>,
         occurred_at_ms: u64,
     },
@@ -40,6 +40,165 @@ pub fn apply_process_status_projection(
     record.updated_at_ms = updated_at_ms;
 }
 
+/// Apply one persisted event to the process record fold.
+///
+/// Callers must supply events in sequence order when rebuilding a record. The
+/// append path uses this same function before inserting the event, then saves
+/// the returned projection in the event-insert transaction.
+pub fn apply_process_event_projection(
+    record: &mut ProcessRecord,
+    event: &ProcessEvent,
+) -> Result<(), PluginError> {
+    if event.process_id != record.id {
+        return Err(PluginError::Session(format!(
+            "process event for `{}` cannot project record `{}`",
+            event.process_id, record.id
+        )));
+    }
+
+    match event.event_type.as_str() {
+        "process.first_started" => {
+            let started = lifecycle_payload(event, "started")?;
+            match record.first_started.as_deref() {
+                None => record.first_started = Some(Box::new(started)),
+                Some(existing) if existing == &started => {}
+                Some(_) => {
+                    return Err(PluginError::Session(format!(
+                        "process `{}` already has a different first-started fact",
+                        record.id
+                    )));
+                }
+            }
+        }
+        "process.waiting" => {
+            if record.is_terminal() {
+                return Err(PluginError::Session(format!(
+                    "terminal process `{}` cannot enter a wait state",
+                    record.id
+                )));
+            }
+            record.wait = Some(lifecycle_payload(event, "wait")?);
+        }
+        "process.resumed" => {
+            record.wait = None;
+        }
+        "process.external_ref_set" => {
+            let external_ref = lifecycle_payload(event, "external_ref")?;
+            match record.external_ref.as_ref() {
+                None => record.external_ref = Some(external_ref),
+                Some(existing) if existing == &external_ref => {}
+                Some(existing) => {
+                    return Err(process_external_ref_conflict(
+                        &record.id,
+                        existing,
+                        &external_ref,
+                    ));
+                }
+            }
+        }
+        "process.abandon_requested" => {
+            if record.is_terminal() {
+                return Err(PluginError::Session(format!(
+                    "terminal process `{}` cannot accept an abandon request",
+                    record.id
+                )));
+            }
+            let request = lifecycle_payload(event, "request")?;
+            match record.abandon_request.as_deref() {
+                None => record.abandon_request = Some(Box::new(request)),
+                Some(existing) if existing == &request => {}
+                Some(_) => {
+                    return Err(PluginError::Session(format!(
+                        "process `{}` already has a different abandon request",
+                        record.id
+                    )));
+                }
+            }
+        }
+        _ => {}
+    }
+
+    if let Some(terminal) = event.semantics.terminal.clone() {
+        apply_process_status_projection(
+            record,
+            ProcessStatus::from_terminal(terminal),
+            epoch_ms_from_system_time(event.occurred_at),
+        );
+    } else {
+        record.updated_at_ms = epoch_ms_from_system_time(event.occurred_at);
+    }
+    Ok(())
+}
+
+/// Rebuild a process record by folding its persisted events in sequence order.
+pub fn fold_process_record(
+    mut record: ProcessRecord,
+    events: &[ProcessEvent],
+) -> Result<ProcessRecord, PluginError> {
+    for event in events {
+        apply_process_event_projection(&mut record, event)?;
+    }
+    Ok(record)
+}
+
+fn lifecycle_payload<T>(event: &ProcessEvent, field: &str) -> Result<T, PluginError>
+where
+    T: serde::de::DeserializeOwned,
+{
+    let value = event.payload.get(field).ok_or_else(|| {
+        PluginError::Session(format!(
+            "process event `{}` is missing lifecycle payload field `{field}`",
+            event.event_type
+        ))
+    })?;
+    serde_json::from_value(value.clone()).map_err(|err| {
+        PluginError::Session(format!(
+            "process event `{}` has invalid lifecycle payload field `{field}`: {err}",
+            event.event_type
+        ))
+    })
+}
+
+fn process_external_ref_conflict(
+    process_id: &str,
+    existing: &super::model::ProcessExternalRef,
+    requested: &super::model::ProcessExternalRef,
+) -> PluginError {
+    PluginError::Session(format!(
+        "process `{process_id}` external ref conflict: existing {} / {}, requested {} / {}",
+        existing.backend, existing.id, requested.backend, requested.id
+    ))
+}
+
+fn repair_monotonic_lifecycle_projection(
+    record: &ProcessRecord,
+    event: &ProcessEvent,
+) -> Result<Option<ProcessRecord>, PluginError> {
+    let mut repaired = record.clone();
+    let changed = match event.event_type.as_str() {
+        "process.first_started" => {
+            let value = Box::new(lifecycle_payload(event, "started")?);
+            let changed = repaired.first_started.as_ref() != Some(&value);
+            repaired.first_started = Some(value);
+            changed
+        }
+        "process.external_ref_set" => {
+            let value = lifecycle_payload(event, "external_ref")?;
+            let changed = repaired.external_ref.as_ref() != Some(&value);
+            repaired.external_ref = Some(value);
+            changed
+        }
+        "process.abandon_requested" => {
+            let value = Box::new(lifecycle_payload(event, "request")?);
+            let changed = repaired.abandon_request.as_ref() != Some(&value);
+            repaired.abandon_request = Some(value);
+            changed
+        }
+        _ => false,
+    };
+    Ok(changed.then_some(repaired))
+}
+
 pub fn prepare_process_event_append(
     record: &ProcessRecord,
     request: ProcessEventAppendRequest,
@@ -53,10 +212,29 @@ pub fn prepare_process_event_append(
         && let Some((existing_hash, existing)) = replay_lookup
     {
         if existing_hash == payload_hash {
-            let repair_status = existing.semantics.terminal.clone().and_then(|terminal| {
-                (!record.is_terminal()).then(|| ProcessStatus::from_terminal(terminal))
-            });
             let occurred_at_ms = epoch_ms_from_system_time(existing.occurred_at);
+            let repair_record = if existing.sequence.saturating_add(1) == sequence {
+                let mut projected = record.clone();
+                apply_process_event_projection(&mut projected, &existing)?;
+                (serde_json::to_value(&projected).ok() != serde_json::to_value(record).ok())
+                    .then_some(projected)
+            } else if !record.is_terminal() && existing.semantics.terminal.is_some() {
+                let mut projected = record.clone();
+                apply_process_status_projection(
+                    &mut projected,
+                    ProcessStatus::from_terminal(
+                        existing
+                            .semantics
+                            .terminal
+                            .clone()
+                            .expect("terminal checked above"),
+                    ),
+                    occurred_at_ms,
+                );
+                Some(projected)
+            } else {
+                repair_monotonic_lifecycle_projection(record, &existing)?
+            };
             let wake_delivery = prepare_wake_delivery(
                 process_id,
                 record,
@@ -72,7 +250,7 @@ pub fn prepare_process_event_append(
             )?;
             return Ok(ProcessEventAppendPlan::Replay {
                 event: existing,
-                repair_status,
+                repair_record,
                 wake_delivery,
                 occurred_at_ms,
             });
@@ -124,6 +302,8 @@ pub fn prepare_process_event_append(
         semantics: semantics.clone(),
         occurred_at,
     };
+    let mut projected_record = record.clone();
+    apply_process_event_projection(&mut projected_record, &event)?;
     let wake_delivery = prepare_wake_delivery(
         process_id,
         record,
@@ -139,7 +319,7 @@ pub fn prepare_process_event_append(
     Ok(ProcessEventAppendPlan::Insert {
         event,
         payload_hash,
-        status_update: semantics.terminal.map(ProcessStatus::from_terminal),
+        projected_record,
         wake_delivery,
         occurred_at_ms,
     })
@@ -214,8 +394,16 @@ pub fn require_event_replay(
     request: &ProcessEventAppendRequest,
     spec: &ProcessEventSemanticsSpec,
 ) -> Result<(), PluginError> {
-    let requires_key =
-        spec.terminal.is_some() || request.event_type.as_str() == "process.cancel_requested";
+    let requires_key = spec.terminal.is_some()
+        || matches!(
+            request.event_type.as_str(),
+            "process.cancel_requested"
+                | "process.first_started"
+                | "process.waiting"
+                | "process.resumed"
+                | "process.external_ref_set"
+                | "process.abandon_requested"
+        );
     if requires_key
         && request
             .replay
@@ -231,13 +419,14 @@ pub fn require_event_replay(
 }
 
 pub(super) fn ensure_core_event_types(registration: &mut ProcessRegistration) {
-    let mut existing = registration
-        .event_types
-        .iter()
-        .map(|event_type| event_type.name.clone())
-        .collect::<HashSet<_>>();
     for event_type in default_process_event_types() {
-        if existing.insert(event_type.name.clone()) {
+        if let Some(existing) = registration
+            .event_types
+            .iter_mut()
+            .find(|existing| existing.name == event_type.name)
+        {
+            *existing = event_type;
+        } else {
             registration.event_types.push(event_type);
         }
     }

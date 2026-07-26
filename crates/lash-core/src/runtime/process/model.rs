@@ -895,6 +895,13 @@ pub enum WaitKind {
     },
 }
 
+impl WaitState {
+    pub fn key(&self) -> &str {
+        let WaitKind::Signal { key, .. } = &self.kind;
+        key
+    }
+}
+
 impl ProcessRecord {
     pub fn from_registration(registration: ProcessRegistration) -> Self {
         Self::from_registration_with_clock(registration, &crate::SystemClock)

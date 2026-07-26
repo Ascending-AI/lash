@@ -568,6 +568,14 @@ finish "registered"
         ));
 
         await_success(&registry, &process_id).await;
+        let wake_sequence = registry
+            .events_after(&process_id, 0)
+            .await
+            .expect("trigger-triggered process events")
+            .into_iter()
+            .find(|event| event.event_type == "process.wake")
+            .expect("trigger-triggered process wake event")
+            .sequence;
         let session = core
             .session(SESSION_ID)
             .open()
@@ -597,11 +605,12 @@ finish "registered"
                         Some(lash_core::MessageOrigin::Process {
                             process_id: wake_process_id,
                             event_type,
-                            sequence: 1,
+                            sequence,
                             caused_by,
                             ..
                         }) if wake_process_id == &process_id
                             && event_type == "process.wake"
+                            && *sequence == wake_sequence
                             && caused_by.as_ref() == Some(&process_caused_by)
                     )
             }),
