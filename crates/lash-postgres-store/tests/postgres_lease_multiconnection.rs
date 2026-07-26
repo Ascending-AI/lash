@@ -186,18 +186,42 @@ async fn postgres_lease_clock_and_fencing_hold_across_independent_connections() 
     // downstream fencing/completion assertions test *ordering* facts, never race
     // a duration — the test asserts no exact timings.
     const A_TTL_MS: u64 = 750;
+    const A_REENTRY_TTL_MS: u64 = 2_000;
     const B_TTL_MS: u64 = 60_000;
 
     // (2) Host A claims the lease with a short-but-real TTL.
-    let lease_a = reg_a
+    let first_lease_a = reg_a
         .claim_process_lease(&process_id, &owner_a, A_TTL_MS)
         .await
         .expect("host A claim")
         .acquired()
         .expect("host A acquires the free lease");
     assert!(
-        lease_a.expires_at_epoch_ms > lease_a.claimed_at_epoch_ms,
+        first_lease_a.expires_at_epoch_ms > first_lease_a.claimed_at_epoch_ms,
         "the acquired lease must carry a DB-derived expiry after its claim instant"
+    );
+
+    // Re-enter through the same incarnation with a deliberately different TTL.
+    // The returned lease must expose the newly persisted expiry, not the stale
+    // expiry from the pre-update row.
+    let lease_a = reg_a
+        .claim_process_lease(&process_id, &owner_a, A_REENTRY_TTL_MS)
+        .await
+        .expect("host A re-enters its own lease")
+        .acquired()
+        .expect("the current incarnation re-acquires its own live lease");
+    let persisted_lease_a = reg_c
+        .get_process_lease(&process_id)
+        .await
+        .expect("observer reads host A's extended lease")
+        .expect("host A's extended lease remains persisted");
+    assert_eq!(
+        lease_a.expires_at_epoch_ms, persisted_lease_a.expires_at_epoch_ms,
+        "the re-entry result must carry the expiry persisted in Postgres"
+    );
+    assert!(
+        lease_a.expires_at_epoch_ms > first_lease_a.expires_at_epoch_ms,
+        "the longer re-entry TTL must extend the client-visible expiry"
     );
 
     // Host B's competing plain claim while A's lease is live is refused, and the

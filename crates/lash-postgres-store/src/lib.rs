@@ -409,7 +409,38 @@ mod postgres_test_support;
 
 #[cfg(test)]
 mod tests {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
     use super::*;
+    use tracing_subscriber::layer::{Context, SubscriberExt};
+    use tracing_subscriber::{Layer, Registry};
+
+    struct WarningCounter(Arc<AtomicUsize>);
+
+    impl<S> Layer<S> for WarningCounter
+    where
+        S: tracing::Subscriber,
+    {
+        fn on_event(&self, event: &tracing::Event<'_>, _context: Context<'_, S>) {
+            if *event.metadata().level() == tracing::Level::WARN {
+                self.0.fetch_add(1, Ordering::Relaxed);
+            }
+        }
+    }
+
+    #[test]
+    fn unwired_process_registry_factory_warns() {
+        let warning_count = Arc::new(AtomicUsize::new(0));
+        let subscriber = Registry::default().with(WarningCounter(Arc::clone(&warning_count)));
+
+        tracing::subscriber::with_default(subscriber, warn_postgres_process_registry_not_wired);
+
+        assert_eq!(
+            warning_count.load(Ordering::Relaxed),
+            1,
+            "the legacy factory must warn that process-owner liveness is not wired"
+        );
+    }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn postgres_claim_completion_is_locked_and_zero_rows_roll_back_the_head() {

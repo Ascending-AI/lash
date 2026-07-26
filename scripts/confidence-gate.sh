@@ -1833,6 +1833,15 @@ mutation_evidence_status() {
   fi
 }
 
+finalize_mutation_gate() {
+  write_mutation_evidence_summary
+  if [ "$mutation_failures" -ne 0 ]; then
+    write_confidence_summary "failed"
+    return 1
+  fi
+  return 0
+}
+
 coverage_evidence_status() {
   if [ "$coverage_scope" = "none" ]; then
     echo "not_run_by_scope"
@@ -2182,11 +2191,6 @@ if [ "$lane" = "default" ] || [ "$lane" = "broad" ] || [ "$lane" = "full" ]; the
   if [ "$mutation_scope" = "smoke" ] || [ "$mutation_scope" = "full" ]; then
     run_mutation_smoke
   fi
-  write_mutation_evidence_summary
-  if [ "$mutation_failures" -ne 0 ]; then
-    write_confidence_summary "failed"
-    exit 1
-  fi
 fi
 
 if [ "$lane" = "broad" ]; then
@@ -2197,9 +2201,10 @@ if [ "$lane" = "full" ]; then
   run_postgres_conformance
   run_restate_postgres_workers_e2e
   run_mutation_full
-  write_mutation_evidence_summary
-  if [ "$mutation_failures" -ne 0 ]; then
-    write_confidence_summary "failed"
+fi
+
+if [ "$lane" = "default" ] || [ "$lane" = "broad" ] || [ "$lane" = "full" ]; then
+  if ! finalize_mutation_gate; then
     exit 1
   fi
 fi

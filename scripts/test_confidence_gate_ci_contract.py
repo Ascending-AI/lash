@@ -6,6 +6,7 @@ import json
 import pathlib
 import re
 import runpy
+import subprocess
 import tempfile
 import unittest
 
@@ -546,6 +547,106 @@ class ConfidenceGateCiContractTest(unittest.TestCase):
             "Every generated trace and every backend-replayable regression trace is replayed through model, SQLite, and Postgres",
             gate,
         )
+
+    def test_model_replay_empty_corpus_writes_failed_verdict_and_exits_nonzero(
+        self,
+    ) -> None:
+        gate = GATE.read_text(encoding="utf-8")
+        replay_suite = shell_function_body(gate, "run_model_replay_suite")
+        harness = f"""\
+set -euo pipefail
+out_dir="$1"
+step() {{ :; }}
+run_model_replay_suite() {{
+{replay_suite}
+run_model_replay_suite
+"""
+        with tempfile.TemporaryDirectory() as directory:
+            completed = subprocess.run(
+                ["bash", "-c", harness, "model-replay-contract", directory],
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            summary_path = (
+                pathlib.Path(directory) / "sim" / "model-replay" / "summary.json"
+            )
+            self.assertEqual(
+                completed.returncode,
+                1,
+                f"empty replay corpus did not fail:\n{completed.stdout}\n{completed.stderr}",
+            )
+            summary = json.loads(summary_path.read_text(encoding="utf-8"))
+            self.assertEqual(summary["status"], "failed")
+            self.assertEqual(summary["row_count"], 0)
+
+    def test_seeded_mutation_failure_writes_failed_verdict_and_exits_nonzero(
+        self,
+    ) -> None:
+        gate = GATE.read_text(encoding="utf-8")
+        recorded = shell_function_body(gate, "run_mutants_recorded")
+        finalize = shell_function_body(gate, "finalize_mutation_gate")
+        harness = f"""\
+set -euo pipefail
+out_dir="$1"
+mutation_scope="smoke"
+mutation_failures=0
+write_mutation_evidence_summary() {{ :; }}
+write_confidence_summary() {{ printf '%s\\n' "$1" >"${{out_dir}}/summary-verdict"; }}
+run_mutants_recorded() {{
+{recorded}
+finalize_mutation_gate() {{
+{finalize}
+seeded_mutation_failure() {{ return 2; }}
+run_mutants_recorded \
+  "seeded survivor" \
+  "${{out_dir}}/seeded-mutant" \
+  seeded_mutation_failure
+finalize_mutation_gate
+"""
+        with tempfile.TemporaryDirectory() as directory:
+            completed = subprocess.run(
+                ["bash", "-c", harness, "mutation-contract", directory],
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            artifact = pathlib.Path(directory) / "seeded-mutant"
+            command_status = json.loads(
+                (artifact / "confidence-status.json").read_text(encoding="utf-8")
+            )
+            self.assertEqual(command_status["status"], "failed")
+            self.assertEqual(command_status["exit_code"], 2)
+            self.assertEqual(
+                completed.returncode,
+                1,
+                f"seeded mutation failure did not fail:\n{completed.stdout}\n{completed.stderr}",
+            )
+            self.assertEqual(
+                (pathlib.Path(directory) / "summary-verdict").read_text(
+                    encoding="utf-8"
+                ),
+                "failed\n",
+            )
+
+    def test_mutation_failure_is_aggregated_after_full_lane_evidence(self) -> None:
+        gate = GATE.read_text(encoding="utf-8")
+        main = gate[gate.rindex("\nrun_scenario_harnesses\n") :]
+
+        smoke = main.index("run_mutation_smoke")
+        broad_postgres = main.index("run_broad_postgres_evidence")
+        conformance = main.index("run_postgres_conformance")
+        workers_e2e = main.index("run_restate_postgres_workers_e2e")
+        full_mutation = main.index("run_mutation_full")
+        aggregate = main.index("finalize_mutation_gate")
+
+        self.assertLess(smoke, broad_postgres)
+        self.assertLess(broad_postgres, conformance)
+        self.assertLess(conformance, workers_e2e)
+        self.assertLess(workers_e2e, full_mutation)
+        self.assertLess(full_mutation, aggregate)
+        self.assertEqual(main.count("finalize_mutation_gate"), 1)
+        self.assertIn("if ! finalize_mutation_gate; then\n    exit 1\n  fi", main)
 
     def test_durable_stores_are_critical_coverage_and_mutation_packages(self) -> None:
         workflow = WORKFLOW.read_text(encoding="utf-8")
