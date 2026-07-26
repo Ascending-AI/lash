@@ -14,6 +14,12 @@ transition is an event. The store inserts that event and saves its projected
 record in the same transaction. Reads continue to use the stored projection;
 they do not refold the log.
 
+There is one temporary, named exception: deleting session process state clears
+a matching `wake_target` directly from the record. Subscription state moves to
+its own column in the later subscription-retargeting wave; that cutover removes
+this last eventless record mutation. Until then, the invariant and conformance
+claim exclude this session-delete cleanup.
+
 This decision closes the split that previously let first-started facts, wait
 entry and clearance, external references, and abandon requests mutate the
 record without an event. Lifecycle events are reserved runtime facts with
@@ -68,6 +74,13 @@ Every process-registry backend must pass the same conformance test: after each
 registration, lifecycle transition, signal, cancellation request, terminal
 outcome, replay, and failed append, folding the complete event log from the
 registration base must equal the stored record field-for-field.
+
+External consumers of `events_after` now observe five additive reserved event
+kinds: `process.first_started`, `process.waiting`, `process.resumed`,
+`process.external_ref_set`, and `process.abandon_requested`. Consumers must
+ignore unknown event kinds so future runtime facts remain additive. The
+best-effort `ProcessEventSink` emits these lifecycle events as well; the durable
+event log remains the reconcile source.
 
 Append concurrency controls, wake delivery, observers, grants, remote
 protocols, and durable-core graph commits are separate decisions. This ADR does

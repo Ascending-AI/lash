@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, Weak};
 use std::time::Duration;
 
 use tokio::sync::watch;
@@ -87,14 +87,6 @@ impl ProcessChangeHub {
 ///   durable write and the emit). Consumers that need completeness reconcile
 ///   from `events_after` — the durable log is authoritative — typically at
 ///   terminal time.
-/// - **Terminal events are deliberately NOT emitted through the sink.**
-///   [`ProcessRegistry::complete_process`] and
-///   [`ProcessRegistry::complete_process_with_lease`] append terminal events via
-///   the *inner* registry internally, so the decorator never observes them as
-///   `append_event` calls and never emits them. Do not wait on the sink for
-///   completion: terminal observation rides
-///   [`ProcessWorkDriver::await_terminal`](crate::ProcessWorkDriver::await_terminal)
-///   (see ADR 0016), which reads the durable terminal state.
 /// - **Emission cannot fail the write.** `emit` returns `()`, so a sink can
 ///   never fail or roll back an append; the durable write has already
 ///   committed by the time `emit` runs. But the decorator *awaits* `emit`
@@ -144,6 +136,7 @@ struct WatchedProcessRegistry {
     inner: Arc<dyn ProcessRegistry>,
     hub: ProcessChangeHub,
     sink: Option<Arc<dyn ProcessEventSink>>,
+    event_paths: Mutex<HashMap<String, Weak<tokio::sync::Mutex<()>>>>,
 }
 
 /// Wrap `inner` in a [`WatchedProcessRegistry`] with no event sink.
@@ -171,9 +164,50 @@ pub fn watch_process_registry_with_sink(
             inner,
             hub: hub.clone(),
             sink,
+            event_paths: Mutex::new(HashMap::new()),
         }),
         hub,
     )
+}
+
+impl WatchedProcessRegistry {
+    fn event_path(&self, process_id: &str) -> Arc<tokio::sync::Mutex<()>> {
+        let mut paths = self.event_paths.lock().expect("event path lock poisoned");
+        paths.retain(|_, path| path.strong_count() > 0);
+        if let Some(path) = paths.get(process_id).and_then(Weak::upgrade) {
+            return path;
+        }
+        let path = Arc::new(tokio::sync::Mutex::new(()));
+        paths.insert(process_id.to_string(), Arc::downgrade(&path));
+        path
+    }
+
+    async fn sink_cursor(&self, process_id: &str) -> Option<u64> {
+        self.sink.as_ref()?;
+        self.inner
+            .recent_events(process_id, 1)
+            .await
+            .ok()
+            .map(|events| {
+                events
+                    .into_iter()
+                    .map(|event| event.sequence)
+                    .max()
+                    .unwrap_or(0)
+            })
+    }
+
+    async fn emit_events_after(&self, process_id: &str, cursor: Option<u64>) {
+        let (Some(sink), Some(cursor)) = (self.sink.as_ref(), cursor) else {
+            return;
+        };
+        let Ok(events) = self.inner.events_after(process_id, cursor).await else {
+            return;
+        };
+        for event in events {
+            sink.emit(&event).await;
+        }
+    }
 }
 
 /// Core waiter for process terminal state and events (ADR 0016).
@@ -417,11 +451,15 @@ impl ProcessRegistry for WatchedProcessRegistry {
         process_id: &str,
         external_ref: ProcessExternalRef,
     ) -> Result<ProcessRecord, PluginError> {
+        let event_path = self.event_path(process_id);
+        let _guard = event_path.lock().await;
+        let sink_cursor = self.sink_cursor(process_id).await;
         let record = self
             .inner
             .set_external_ref(process_id, external_ref)
             .await?;
         self.hub.notify(process_id);
+        self.emit_events_after(process_id, sink_cursor).await;
         Ok(record)
     }
 
@@ -496,14 +534,12 @@ impl ProcessRegistry for WatchedProcessRegistry {
         process_id: &str,
         request: ProcessEventAppendRequest,
     ) -> Result<ProcessEventAppendResult, PluginError> {
+        let event_path = self.event_path(process_id);
+        let _guard = event_path.lock().await;
+        let sink_cursor = self.sink_cursor(process_id).await;
         let result = self.inner.append_event(process_id, request).await?;
         self.hub.notify(process_id);
-        // Best-effort freshness after the durable append: the write already
-        // committed, so the sink cannot fail it. Terminal appends never reach
-        // here — `complete_process` writes them through the inner registry.
-        if let Some(sink) = self.sink.as_ref() {
-            sink.emit(&result.event).await;
-        }
+        self.emit_events_after(process_id, sink_cursor).await;
         Ok(result)
     }
 
@@ -550,11 +586,15 @@ impl ProcessRegistry for WatchedProcessRegistry {
         await_output: ProcessAwaitOutput,
         authority: ProcessCompletionAuthority,
     ) -> Result<ProcessRecord, PluginError> {
+        let event_path = self.event_path(process_id);
+        let _guard = event_path.lock().await;
+        let sink_cursor = self.sink_cursor(process_id).await;
         let record = self
             .inner
             .complete_process(process_id, await_output, authority)
             .await?;
         self.hub.notify(process_id);
+        self.emit_events_after(process_id, sink_cursor).await;
         Ok(record)
     }
 
@@ -563,11 +603,15 @@ impl ProcessRegistry for WatchedProcessRegistry {
         lease: &ProcessLease,
         await_output: ProcessAwaitOutput,
     ) -> Result<ProcessRecord, PluginError> {
+        let event_path = self.event_path(&lease.process_id);
+        let _guard = event_path.lock().await;
+        let sink_cursor = self.sink_cursor(&lease.process_id).await;
         let record = self
             .inner
             .complete_process_with_lease(lease, await_output)
             .await?;
         self.hub.notify(&lease.process_id);
+        self.emit_events_after(&lease.process_id, sink_cursor).await;
         Ok(record)
     }
 
@@ -576,8 +620,12 @@ impl ProcessRegistry for WatchedProcessRegistry {
         process_id: &str,
         started: ProcessStarted,
     ) -> Result<ProcessRecord, PluginError> {
+        let event_path = self.event_path(process_id);
+        let _guard = event_path.lock().await;
+        let sink_cursor = self.sink_cursor(process_id).await;
         let record = self.inner.record_first_started(process_id, started).await?;
         self.hub.notify(process_id);
+        self.emit_events_after(process_id, sink_cursor).await;
         Ok(record)
     }
 
@@ -586,11 +634,15 @@ impl ProcessRegistry for WatchedProcessRegistry {
         process_id: &str,
         request: AbandonRequest,
     ) -> Result<ProcessRecord, PluginError> {
+        let event_path = self.event_path(process_id);
+        let _guard = event_path.lock().await;
+        let sink_cursor = self.sink_cursor(process_id).await;
         let record = self
             .inner
             .request_process_abandon(process_id, request)
             .await?;
         self.hub.notify(process_id);
+        self.emit_events_after(process_id, sink_cursor).await;
         Ok(record)
     }
 
@@ -599,14 +651,22 @@ impl ProcessRegistry for WatchedProcessRegistry {
         process_id: &str,
         wait: WaitState,
     ) -> Result<ProcessRecord, PluginError> {
+        let event_path = self.event_path(process_id);
+        let _guard = event_path.lock().await;
+        let sink_cursor = self.sink_cursor(process_id).await;
         let record = self.inner.set_process_wait(process_id, wait).await?;
         self.hub.notify(process_id);
+        self.emit_events_after(process_id, sink_cursor).await;
         Ok(record)
     }
 
     async fn clear_process_wait(&self, process_id: &str) -> Result<ProcessRecord, PluginError> {
+        let event_path = self.event_path(process_id);
+        let _guard = event_path.lock().await;
+        let sink_cursor = self.sink_cursor(process_id).await;
         let record = self.inner.clear_process_wait(process_id).await?;
         self.hub.notify(process_id);
+        self.emit_events_after(process_id, sink_cursor).await;
         Ok(record)
     }
 
@@ -1034,7 +1094,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn sink_not_invoked_for_complete_process_terminal_append() {
+    async fn sink_receives_complete_process_terminal_append() {
         let raw = Arc::new(TestLocalProcessRegistry::default()) as Arc<dyn ProcessRegistry>;
         let sink = CollectingSink::default();
         let (registry, _hub) = watch_process_registry_with_sink(raw, Some(Arc::new(sink.clone())));
@@ -1060,9 +1120,83 @@ mod tests {
 
         assert_eq!(
             sink.collected(),
-            vec![("producer.a".to_string(), 1)],
-            "complete_process appends its terminal event through the inner registry, so the \
-             decorator never emits it to the sink"
+            vec![
+                ("producer.a".to_string(), 1),
+                ("process.completed".to_string(), 2),
+            ],
+            "the sink must observe terminal events appended through completion verbs"
+        );
+    }
+
+    #[tokio::test]
+    async fn sink_receives_runtime_lifecycle_events_in_order() {
+        let raw = Arc::new(TestLocalProcessRegistry::default()) as Arc<dyn ProcessRegistry>;
+        let sink = CollectingSink::default();
+        let (registry, _hub) = watch_process_registry_with_sink(raw, Some(Arc::new(sink.clone())));
+        registry
+            .register_process(registration("proc"))
+            .await
+            .expect("register");
+        registry
+            .record_first_started(
+                "proc",
+                ProcessStarted {
+                    owner: crate::LeaseOwnerIdentity::opaque("owner", "incarnation"),
+                    started_at_ms: 1,
+                },
+            )
+            .await
+            .expect("record first start");
+        let wait = WaitState {
+            kind: crate::WaitKind::Signal {
+                name: "ready".to_string(),
+                event_type: "signal.ready".to_string(),
+                key: "process:proc:signal.ready:1".to_string(),
+                ordinal: 1,
+            },
+            since_ms: 2,
+        };
+        registry
+            .set_process_wait("proc", wait)
+            .await
+            .expect("enter wait");
+        registry
+            .clear_process_wait("proc")
+            .await
+            .expect("clear wait");
+        registry
+            .set_external_ref(
+                "proc",
+                ProcessExternalRef {
+                    backend: "test".to_string(),
+                    id: "external".to_string(),
+                    metadata: None,
+                },
+            )
+            .await
+            .expect("set external ref");
+        registry
+            .request_process_abandon(
+                "proc",
+                AbandonRequest {
+                    requested_by: "test".to_string(),
+                    requested_at_ms: 3,
+                    reason: None,
+                },
+            )
+            .await
+            .expect("request abandon");
+
+        assert_eq!(
+            sink.collected(),
+            vec![
+                ("process.first_started".to_string(), 1),
+                ("process.waiting".to_string(), 2),
+                ("process.resumed".to_string(), 3),
+                ("process.external_ref_set".to_string(), 4),
+                ("process.abandon_requested".to_string(), 5),
+            ],
+            "the sink must observe every runtime lifecycle append"
         );
     }
 
@@ -1323,8 +1457,8 @@ mod tests {
                 .await
                 .expect("append");
         }
-        // The terminal event never rides the sink at all (ADR 0017): completion
-        // observation is the await seam's job.
+        // Terminal events ride the same best-effort sink and remain durable for
+        // reconciliation if that push is dropped.
         registry
             .complete_process(
                 "proc",
