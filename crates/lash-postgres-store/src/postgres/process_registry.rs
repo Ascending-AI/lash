@@ -1,3 +1,5 @@
+use crate::*;
+
 #[async_trait::async_trait]
 impl ProcessRegistry for PostgresProcessRegistry {
     fn durability_tier(&self) -> DurabilityTier {
@@ -55,7 +57,9 @@ impl ProcessRegistry for PostgresProcessRegistry {
     ) -> Result<(), PluginError> {
         let mut tx = self.pool.begin().await.map_err(plugin_sqlx_error)?;
         if load_process_tx(&mut tx, process_id).await?.is_none() {
-            return Err(PluginError::Session(format!("unknown process `{process_id}`")));
+            return Err(PluginError::Session(format!(
+                "unknown process `{process_id}`"
+            )));
         }
         let encoded = serde_json::to_string(&handover).map_err(process_decode_error)?;
         let existing = sqlx::query(
@@ -1364,13 +1368,11 @@ impl ProcessRegistry for PostgresProcessRegistry {
                 .map_err(plugin_sqlx_error)?
                 .rows_affected() as usize;
         }
-        sqlx::query(
-            "DELETE FROM lash_trigger_mutation_receipts WHERE created_at_ms < $1",
-        )
-        .bind(cutoff)
-        .execute(&mut *tx)
-        .await
-        .map_err(plugin_sqlx_error)?;
+        sqlx::query("DELETE FROM lash_trigger_mutation_receipts WHERE created_at_ms < $1")
+            .bind(cutoff)
+            .execute(&mut *tx)
+            .await
+            .map_err(plugin_sqlx_error)?;
         tx.commit().await.map_err(plugin_sqlx_error)?;
         Ok(ProcessPruneReport {
             pruned_processes,
@@ -1379,7 +1381,7 @@ impl ProcessRegistry for PostgresProcessRegistry {
     }
 }
 
-fn process_external_ref_conflict(
+pub(crate) fn process_external_ref_conflict(
     process_id: &str,
     existing: &ProcessExternalRef,
     new: &ProcessExternalRef,

@@ -1,3 +1,5 @@
+use crate::*;
+
 #[async_trait::async_trait]
 impl SessionStoreFactory for PostgresSessionStoreFactory {
     fn durability_tier(&self) -> DurabilityTier {
@@ -116,10 +118,10 @@ impl SessionStoreFactory for PostgresSessionStoreFactory {
                )"
         );
         sqlx::query(&delete_sql)
-        .bind(intent_grace_cutoff_epoch_ms as i64)
-        .execute(&mut *tx)
-        .await
-        .map_err(store_sqlx_error)?;
+            .bind(intent_grace_cutoff_epoch_ms as i64)
+            .execute(&mut *tx)
+            .await
+            .map_err(store_sqlx_error)?;
         let rows = sqlx::query("SELECT DISTINCT attachment_id FROM lash_attachment_manifest")
             .fetch_all(&mut *tx)
             .await
@@ -173,16 +175,16 @@ impl SessionStoreFactory for PostgresSessionStoreFactory {
              LIMIT 1"
         );
         let row = sqlx::query(&select_sql)
-        .bind(id.as_str())
-        .bind(intent_grace_cutoff_epoch_ms as i64)
-        .fetch_optional(&self.pool)
-        .await
-        .map_err(store_sqlx_error)?;
+            .bind(id.as_str())
+            .bind(intent_grace_cutoff_epoch_ms as i64)
+            .fetch_optional(&self.pool)
+            .await
+            .map_err(store_sqlx_error)?;
         Ok(row.is_some())
     }
 }
 
-async fn delete_session_tx(
+pub(crate) async fn delete_session_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     session_id: &str,
 ) -> Result<(), StoreError> {
@@ -212,22 +214,22 @@ async fn delete_session_tx(
 }
 
 #[derive(Clone, Debug)]
-struct QueuedBatchRow {
-    enqueue_seq: u64,
-    batch_id: String,
+pub(crate) struct QueuedBatchRow {
+    pub(crate) enqueue_seq: u64,
+    pub(crate) batch_id: String,
     session_id: String,
     source_key: Option<String>,
-    delivery_policy: DeliveryPolicy,
-    slot_policy: SlotPolicy,
-    merge_key: MergeKey,
+    pub(crate) delivery_policy: DeliveryPolicy,
+    pub(crate) slot_policy: SlotPolicy,
+    pub(crate) merge_key: MergeKey,
     available_at_ms: u64,
     enqueued_at_ms: u64,
-    claim_fencing_token: u64,
-    claim_token: Option<String>,
-    claim_session_lease_generation: u64,
+    pub(crate) claim_fencing_token: u64,
+    pub(crate) claim_token: Option<String>,
+    pub(crate) claim_session_lease_generation: u64,
 }
 
-fn queued_batch_row(row: PgRow) -> Result<QueuedBatchRow, StoreError> {
+pub(crate) fn queued_batch_row(row: PgRow) -> Result<QueuedBatchRow, StoreError> {
     let delivery_policy =
         DeliveryPolicy::from_wire_str(row.get::<String, _>("delivery_policy").as_str())
             .ok_or_else(|| {
@@ -252,7 +254,7 @@ fn queued_batch_row(row: PgRow) -> Result<QueuedBatchRow, StoreError> {
     })
 }
 
-async fn load_queued_batch(
+pub(crate) async fn load_queued_batch(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     batch_id: &str,
 ) -> Result<Option<QueuedWorkBatch>, StoreError> {
@@ -275,7 +277,7 @@ async fn load_queued_batch(
     queued_work_batch_from_row(tx, row).await.map(Some)
 }
 
-async fn queued_work_batch_from_row(
+pub(crate) async fn queued_work_batch_from_row(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     row: QueuedBatchRow,
 ) -> Result<QueuedWorkBatch, StoreError> {
@@ -311,7 +313,7 @@ async fn queued_work_batch_from_row(
     })
 }
 
-async fn ensure_queued_work_completion_tx(
+pub(crate) async fn ensure_queued_work_completion_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     completed: &QueuedWorkCompletion,
 ) -> Result<(), StoreError> {
@@ -343,9 +345,9 @@ async fn ensure_queued_work_completion_tx(
 }
 
 #[derive(Clone, Debug)]
-struct PendingTurnInputRow {
-    enqueue_seq: u64,
-    input_id: String,
+pub(crate) struct PendingTurnInputRow {
+    pub(crate) enqueue_seq: u64,
+    pub(crate) input_id: String,
     session_id: String,
     source_key: Option<String>,
     ingress_json: String,
@@ -359,7 +361,7 @@ struct PendingTurnInputRow {
     claim_session_lease_generation: u64,
 }
 
-fn pending_turn_input_row(row: PgRow) -> Result<PendingTurnInputRow, StoreError> {
+pub(crate) fn pending_turn_input_row(row: PgRow) -> Result<PendingTurnInputRow, StoreError> {
     let state = lash_core::TurnInputState::from_wire_str(row.get::<String, _>("state").as_str())
         .ok_or_else(|| StoreError::Backend("invalid pending turn-input state".to_string()))?;
     Ok(PendingTurnInputRow {
@@ -383,7 +385,7 @@ fn pending_turn_input_row(row: PgRow) -> Result<PendingTurnInputRow, StoreError>
     })
 }
 
-fn pending_turn_input_from_row(
+pub(crate) fn pending_turn_input_from_row(
     row: PendingTurnInputRow,
 ) -> Result<lash_core::PendingTurnInput, StoreError> {
     Ok(lash_core::PendingTurnInput {
@@ -398,7 +400,7 @@ fn pending_turn_input_from_row(
     })
 }
 
-async fn load_pending_turn_input(
+pub(crate) async fn load_pending_turn_input(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     session_id: &str,
     input_id: &str,
@@ -422,7 +424,7 @@ async fn load_pending_turn_input(
         .transpose()
 }
 
-async fn load_pending_turn_input_row_by_target_tx(
+pub(crate) async fn load_pending_turn_input_row_by_target_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     session_id: &str,
     target: &lash_core::PendingTurnInputCancelTarget,
@@ -430,41 +432,37 @@ async fn load_pending_turn_input_row_by_target_tx(
 ) -> Result<Option<PendingTurnInputRow>, StoreError> {
     let for_update = if for_update { " FOR UPDATE" } else { "" };
     let row = match target {
-        lash_core::PendingTurnInputCancelTarget::InputId(input_id) => {
-            sqlx::query(&format!(
-                "SELECT enqueue_seq, input_id, session_id, source_key, ingress_json,
+        lash_core::PendingTurnInputCancelTarget::InputId(input_id) => sqlx::query(&format!(
+            "SELECT enqueue_seq, input_id, session_id, source_key, ingress_json,
                         state, input_json, enqueued_at_ms, claim_id, claim_fencing_token,
                         claim_owner_id, claim_owner_incarnation_id,
                         claim_owner_liveness_json, claim_token, claim_session_lease_generation
                  FROM lash_pending_turn_inputs
                  WHERE session_id = $1 AND input_id = $2{for_update}"
-            ))
-            .bind(session_id)
-            .bind(input_id)
-            .fetch_optional(&mut **tx)
-            .await
-            .map_err(store_sqlx_error)?
-        }
-        lash_core::PendingTurnInputCancelTarget::SourceKey(source_key) => {
-            sqlx::query(&format!(
-                "SELECT enqueue_seq, input_id, session_id, source_key, ingress_json,
+        ))
+        .bind(session_id)
+        .bind(input_id)
+        .fetch_optional(&mut **tx)
+        .await
+        .map_err(store_sqlx_error)?,
+        lash_core::PendingTurnInputCancelTarget::SourceKey(source_key) => sqlx::query(&format!(
+            "SELECT enqueue_seq, input_id, session_id, source_key, ingress_json,
                         state, input_json, enqueued_at_ms, claim_id, claim_fencing_token,
                         claim_owner_id, claim_owner_incarnation_id,
                         claim_owner_liveness_json, claim_token, claim_session_lease_generation
                  FROM lash_pending_turn_inputs
                  WHERE session_id = $1 AND source_key = $2{for_update}"
-            ))
-            .bind(session_id)
-            .bind(source_key)
-            .fetch_optional(&mut **tx)
-            .await
-            .map_err(store_sqlx_error)?
-        }
+        ))
+        .bind(session_id)
+        .bind(source_key)
+        .fetch_optional(&mut **tx)
+        .await
+        .map_err(store_sqlx_error)?,
     };
     row.map(pending_turn_input_row).transpose()
 }
 
-fn pending_turn_input_claim_diagnostics_from_row(
+pub(crate) fn pending_turn_input_claim_diagnostics_from_row(
     row: &PendingTurnInputRow,
 ) -> Option<lash_core::PendingTurnInputClaimDiagnostics> {
     (row.claim_token.is_some() || matches!(row.state, lash_core::TurnInputState::Accepted)).then(
@@ -481,19 +479,19 @@ fn pending_turn_input_claim_diagnostics_from_row(
     )
 }
 
-async fn cancel_pending_turn_input_row_tx(
+pub(crate) async fn cancel_pending_turn_input_row_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     row: PendingTurnInputRow,
     now_epoch_ms: u64,
 ) -> Result<lash_core::PendingTurnInputCancelOutcome, StoreError> {
     let mut input = pending_turn_input_from_row(row.clone())?;
     match input.state {
-        lash_core::TurnInputState::Cancelled => {
-            Ok(lash_core::PendingTurnInputCancelOutcome::AlreadyCancelled(input))
-        }
-        lash_core::TurnInputState::Completed => {
-            Ok(lash_core::PendingTurnInputCancelOutcome::AlreadyCompleted(input))
-        }
+        lash_core::TurnInputState::Cancelled => Ok(
+            lash_core::PendingTurnInputCancelOutcome::AlreadyCancelled(input),
+        ),
+        lash_core::TurnInputState::Completed => Ok(
+            lash_core::PendingTurnInputCancelOutcome::AlreadyCompleted(input),
+        ),
         lash_core::TurnInputState::Accepted => {
             Ok(lash_core::PendingTurnInputCancelOutcome::AlreadyClaimed {
                 input,
@@ -540,7 +538,7 @@ async fn cancel_pending_turn_input_row_tx(
     }
 }
 
-async fn ensure_turn_input_completion_tx(
+pub(crate) async fn ensure_turn_input_completion_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     completed: &lash_core::TurnInputCompletion,
 ) -> Result<(), StoreError> {
@@ -572,15 +570,15 @@ async fn ensure_turn_input_completion_tx(
 }
 
 #[derive(Clone, Debug)]
-struct TurnInputClaimLease {
-    claim_id: String,
-    lease_token: String,
-    fencing_token: u64,
-    session_lease_generation: u64,
+pub(crate) struct TurnInputClaimLease {
+    pub(crate) claim_id: String,
+    pub(crate) lease_token: String,
+    pub(crate) fencing_token: u64,
+    pub(crate) session_lease_generation: u64,
 }
 
 impl TurnInputClaimLease {
-    fn derive(
+    pub(crate) fn derive(
         head: &PendingTurnInputRow,
         session_id: &str,
         owner: &LeaseOwnerIdentity,

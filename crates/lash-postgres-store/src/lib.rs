@@ -377,16 +377,31 @@ impl PostgresSessionStore {
 
 mod await_event;
 
-include!("postgres/schema.rs");
-include!("postgres/support.rs");
-include!("postgres/attachments.rs");
-include!("postgres/effect_replay.rs");
-include!("postgres/session_factory.rs");
-include!("postgres/runtime_persistence.rs");
-include!("postgres/process_helpers.rs");
-include!("postgres/process_registry.rs");
-include!("postgres/trigger_store.rs");
-include!("postgres/artifact_store.rs");
+#[path = "postgres/artifact_store.rs"]
+mod artifact_store;
+#[path = "postgres/attachments.rs"]
+mod attachments;
+#[path = "postgres/effect_replay.rs"]
+mod effect_replay;
+#[path = "postgres/process_helpers.rs"]
+mod process_helpers;
+#[path = "postgres/process_registry.rs"]
+mod process_registry;
+#[path = "postgres/runtime_persistence.rs"]
+mod runtime_persistence;
+#[path = "postgres/schema.rs"]
+mod schema;
+#[path = "postgres/session_factory.rs"]
+mod session_factory;
+#[path = "postgres/support.rs"]
+mod support;
+#[path = "postgres/trigger_store.rs"]
+mod trigger_store;
+
+pub use effect_replay::{
+    PostgresEffectHost, PostgresEffectReplayOptions, PostgresRuntimeEffectController,
+};
+use {process_helpers::*, runtime_persistence::*, schema::*, session_factory::*, support::*};
 
 #[cfg(test)]
 #[path = "../tests/support/mod.rs"]

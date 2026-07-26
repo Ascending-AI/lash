@@ -1,12 +1,14 @@
+use crate::*;
+
 /// Logical keyspaces multiplexed onto `lash_lashlang_artifacts`. Each namespace
 /// owns its own half of the `(namespace, artifact_ref)` composite primary key,
 /// so a key value that happens to collide across namespaces (a module ref that
 /// equals a process-execution-env ref, say) resolves to independent rows instead
 /// of silently clobbering one another under last-writer-wins.
-const MODULE_ARTIFACT_NAMESPACE: &str = "lashlang_module";
-const RAW_ARTIFACT_NAMESPACE: &str = "lashlang_artifact";
-const PROCESS_ENV_NAMESPACE: &str = "process_execution_env";
-const CURRENT_TRIGGER_MANIFEST_NAMESPACE: &str = "lashlang_trigger_manifest";
+pub(crate) const MODULE_ARTIFACT_NAMESPACE: &str = "lashlang_module";
+pub(crate) const RAW_ARTIFACT_NAMESPACE: &str = "lashlang_artifact";
+pub(crate) const PROCESS_ENV_NAMESPACE: &str = "process_execution_env";
+pub(crate) const CURRENT_TRIGGER_MANIFEST_NAMESPACE: &str = "lashlang_trigger_manifest";
 
 impl PostgresLashlangArtifactStore {
     async fn put_namespaced_bytes(
@@ -58,9 +60,13 @@ impl lashlang::LashlangArtifactStore for PostgresLashlangArtifactStore {
         let bytes = artifact
             .to_store_bytes()
             .map_err(lashlang::ArtifactStoreError::from)?;
-        self.put_namespaced_bytes(MODULE_ARTIFACT_NAMESPACE, artifact.module_ref.as_str(), &bytes)
-            .await
-            .map_err(|err| lashlang::ArtifactStoreError::Backend(err.to_string()))
+        self.put_namespaced_bytes(
+            MODULE_ARTIFACT_NAMESPACE,
+            artifact.module_ref.as_str(),
+            &bytes,
+        )
+        .await
+        .map_err(|err| lashlang::ArtifactStoreError::Backend(err.to_string()))
     }
 
     async fn get_module_artifact(

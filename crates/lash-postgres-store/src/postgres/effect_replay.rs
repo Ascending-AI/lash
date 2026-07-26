@@ -1,13 +1,15 @@
+use crate::*;
+
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
 use crate::await_event::PostgresAwaitEvents;
 
-const POSTGRES_EFFECT_STATUS_IN_PROGRESS: &str = "in_progress";
-const POSTGRES_EFFECT_STATUS_COMPLETED: &str = "completed";
-const POSTGRES_EFFECT_STATUS_FAILED: &str = "failed";
-const POSTGRES_EFFECT_BUSY_POLL: Duration = Duration::from_millis(25);
+pub(crate) const POSTGRES_EFFECT_STATUS_IN_PROGRESS: &str = "in_progress";
+pub(crate) const POSTGRES_EFFECT_STATUS_COMPLETED: &str = "completed";
+pub(crate) const POSTGRES_EFFECT_STATUS_FAILED: &str = "failed";
+pub(crate) const POSTGRES_EFFECT_BUSY_POLL: Duration = Duration::from_millis(25);
 
-static POSTGRES_EFFECT_OWNER_COUNTER: AtomicU64 = AtomicU64::new(1);
+pub(crate) static POSTGRES_EFFECT_OWNER_COUNTER: AtomicU64 = AtomicU64::new(1);
 
 #[derive(Clone, Debug, Default)]
 pub struct PostgresEffectReplayOptions {
@@ -17,7 +19,7 @@ pub struct PostgresEffectReplayOptions {
     pub lease_timings: lash_core::LeaseTimings,
 }
 
-struct PostgresEffectReplayInner {
+pub(crate) struct PostgresEffectReplayInner {
     pool: PgPool,
     owner_id: String,
     lease_counter: AtomicU64,
@@ -37,7 +39,7 @@ pub struct PostgresRuntimeEffectController {
     scope: ExecutionScope,
 }
 
-struct PostgresClaimedEffect {
+pub(crate) struct PostgresClaimedEffect {
     scope_id: String,
     replay_key: String,
     envelope_hash: String,
@@ -45,7 +47,7 @@ struct PostgresClaimedEffect {
     due_at_ms: Option<u64>,
 }
 
-enum PostgresPreparedEffect {
+pub(crate) enum PostgresPreparedEffect {
     ReplayMismatch {
         recorded_envelope: Box<CanonicalRuntimeEffectEnvelope>,
         stored_envelope_hash: String,
@@ -61,7 +63,7 @@ enum PostgresPreparedEffect {
     },
 }
 
-struct PostgresEffectRow {
+pub(crate) struct PostgresEffectRow {
     envelope_hash: String,
     envelope_json: String,
     status: String,
@@ -673,7 +675,7 @@ impl RuntimeEffectController for PostgresRuntimeEffectController {
     }
 }
 
-struct PostgresPrepareInputs {
+pub(crate) struct PostgresPrepareInputs {
     row: PostgresEffectRow,
     scope_id: String,
     replay_key: String,
@@ -685,11 +687,7 @@ struct PostgresPrepareInputs {
 }
 
 impl PostgresEffectReplayInner {
-    fn new(
-        pool: PgPool,
-        signing_secret: Arc<[u8]>,
-        options: PostgresEffectReplayOptions,
-    ) -> Self {
+    fn new(pool: PgPool, signing_secret: Arc<[u8]>, options: PostgresEffectReplayOptions) -> Self {
         let sequence = POSTGRES_EFFECT_OWNER_COUNTER.fetch_add(1, Ordering::SeqCst);
         let await_events = PostgresAwaitEvents::new(pool.clone(), signing_secret);
         Self {
@@ -712,7 +710,7 @@ impl PostgresEffectReplayInner {
     }
 }
 
-async fn postgres_select_effect_row_for_update(
+pub(crate) async fn postgres_select_effect_row_for_update(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     scope_id: &str,
     replay_key: &str,
@@ -732,7 +730,7 @@ async fn postgres_select_effect_row_for_update(
     Ok(row.map(postgres_effect_row))
 }
 
-fn postgres_effect_row(row: PgRow) -> PostgresEffectRow {
+pub(crate) fn postgres_effect_row(row: PgRow) -> PostgresEffectRow {
     PostgresEffectRow {
         envelope_hash: row.get("envelope_hash"),
         envelope_json: row.get("envelope_json"),
@@ -744,14 +742,17 @@ fn postgres_effect_row(row: PgRow) -> PostgresEffectRow {
     }
 }
 
-fn postgres_effect_sleep_due_at_ms(envelope: &RuntimeEffectEnvelope, now: u64) -> Option<u64> {
+pub(crate) fn postgres_effect_sleep_due_at_ms(
+    envelope: &RuntimeEffectEnvelope,
+    now: u64,
+) -> Option<u64> {
     match envelope.command {
         RuntimeEffectCommand::Sleep { duration_ms } => Some(now.saturating_add(duration_ms)),
         _ => None,
     }
 }
 
-async fn postgres_effect_sleep_until_due(due_at_ms: Option<u64>) {
+pub(crate) async fn postgres_effect_sleep_until_due(due_at_ms: Option<u64>) {
     let Some(due_at_ms) = due_at_ms else {
         return;
     };
@@ -761,7 +762,7 @@ async fn postgres_effect_sleep_until_due(due_at_ms: Option<u64>) {
     }
 }
 
-async fn postgres_effect_sleep_until_retry(retry_at_ms: u64) {
+pub(crate) async fn postgres_effect_sleep_until_retry(retry_at_ms: u64) {
     let now = current_epoch_ms();
     let delay = if retry_at_ms > now {
         Duration::from_millis(retry_at_ms - now).min(POSTGRES_EFFECT_BUSY_POLL)
@@ -771,22 +772,22 @@ async fn postgres_effect_sleep_until_retry(retry_at_ms: u64) {
     tokio::time::sleep(delay).await;
 }
 
-fn postgres_effect_store_error(err: sqlx::Error) -> RuntimeEffectControllerError {
+pub(crate) fn postgres_effect_store_error(err: sqlx::Error) -> RuntimeEffectControllerError {
     RuntimeEffectControllerError::new("postgres_effect_replay_store", err.to_string())
 }
 
-fn postgres_effect_store_message(message: String) -> RuntimeEffectControllerError {
+pub(crate) fn postgres_effect_store_message(message: String) -> RuntimeEffectControllerError {
     RuntimeEffectControllerError::new("postgres_effect_replay_store", message)
 }
 
-fn postgres_effect_encode_error(err: serde_json::Error) -> RuntimeEffectControllerError {
+pub(crate) fn postgres_effect_encode_error(err: serde_json::Error) -> RuntimeEffectControllerError {
     RuntimeEffectControllerError::new(
         "postgres_effect_replay_encode",
         format!("failed to encode runtime effect replay row: {err}"),
     )
 }
 
-fn postgres_effect_decode_error(err: serde_json::Error) -> RuntimeEffectControllerError {
+pub(crate) fn postgres_effect_decode_error(err: serde_json::Error) -> RuntimeEffectControllerError {
     RuntimeEffectControllerError::new(
         "postgres_effect_replay_decode",
         format!("failed to decode runtime effect replay row: {err}"),

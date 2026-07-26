@@ -1,8 +1,10 @@
-fn process_status_label(record: &ProcessRecord) -> &'static str {
+use crate::*;
+
+pub(crate) fn process_status_label(record: &ProcessRecord) -> &'static str {
     record.status.label()
 }
 
-async fn load_process_tx(
+pub(crate) async fn load_process_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     process_id: &str,
 ) -> Result<Option<ProcessRecord>, PluginError> {
@@ -20,7 +22,7 @@ async fn load_process_tx(
         .transpose()
 }
 
-async fn load_process(
+pub(crate) async fn load_process(
     pool: &PgPool,
     process_id: &str,
 ) -> Result<Option<ProcessRecord>, PluginError> {
@@ -34,7 +36,7 @@ async fn load_process(
         .transpose()
 }
 
-async fn save_process_tx(
+pub(crate) async fn save_process_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     record: &ProcessRecord,
 ) -> Result<(), PluginError> {
@@ -55,7 +57,7 @@ async fn save_process_tx(
     Ok(())
 }
 
-async fn next_process_change_seq_tx(
+pub(crate) async fn next_process_change_seq_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
 ) -> Result<u64, PluginError> {
     let seq: i64 = sqlx::query_scalar(
@@ -70,7 +72,7 @@ async fn next_process_change_seq_tx(
     Ok(seq as u64)
 }
 
-async fn load_event_by_key_tx(
+pub(crate) async fn load_event_by_key_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     process_id: &str,
     replay_key: &str,
@@ -182,7 +184,7 @@ async fn append_process_event_tx(
     }
 }
 
-async fn load_process_lease_tx(
+pub(crate) async fn load_process_lease_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     process_id: &str,
 ) -> Result<Option<ProcessLease>, PluginError> {
@@ -229,7 +231,7 @@ async fn load_process_lease_tx(
 /// One authoritative wall-clock sample for every process-lease transaction.
 /// Using the database clock prevents worker clock skew from stealing or
 /// spuriously expiring a lease in multi-host Postgres deployments.
-async fn process_lease_now_epoch_ms_tx(
+pub(crate) async fn process_lease_now_epoch_ms_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
 ) -> Result<u64, PluginError> {
     let now: i64 =
@@ -242,7 +244,7 @@ async fn process_lease_now_epoch_ms_tx(
 
 /// Insert-or-replace the persisted lease row for `process_id` with a fresh
 /// lease owned by `owner` at `fencing_token`.
-async fn acquire_process_lease_tx(
+pub(crate) async fn acquire_process_lease_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     process_id: &str,
     owner: &LeaseOwnerIdentity,
@@ -298,7 +300,7 @@ async fn acquire_process_lease_tx(
     Ok(lease)
 }
 
-async fn retained_process_lease_fencing_token(
+pub(crate) async fn retained_process_lease_fencing_token(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     process_id: &str,
 ) -> Result<u64, PluginError> {
@@ -312,13 +314,15 @@ async fn retained_process_lease_fencing_token(
     Ok(existing_fence.unwrap_or(0) as u64)
 }
 
-fn encode_process_lease_liveness(liveness: &LeaseOwnerLiveness) -> Result<String, PluginError> {
+pub(crate) fn encode_process_lease_liveness(
+    liveness: &LeaseOwnerLiveness,
+) -> Result<String, PluginError> {
     serde_json::to_string(liveness).map_err(|err| {
         PluginError::Session(format!("failed to encode process lease liveness: {err}"))
     })
 }
 
-fn process_lease_expired(process_id: &str) -> PluginError {
+pub(crate) fn process_lease_expired(process_id: &str) -> PluginError {
     PluginError::ProcessLeaseSuperseded {
         process_id: process_id.to_string(),
     }
@@ -363,13 +367,13 @@ async fn validate_process_execution_authority_tx(
     }
 }
 
-fn guard_lease(current: Option<&ProcessLease>, lease_token: &str, now: u64) -> bool {
+pub(crate) fn guard_lease(current: Option<&ProcessLease>, lease_token: &str, now: u64) -> bool {
     current
         .map(|current| current.lease_token == lease_token && current.expires_at_epoch_ms > now)
         .unwrap_or(false)
 }
 
-async fn list_grants_for_scope(
+pub(crate) async fn list_grants_for_scope(
     pool: &PgPool,
     session_scope: &SessionScope,
     live_only: bool,

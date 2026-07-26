@@ -1,4 +1,6 @@
-fn current_epoch_ms() -> u64 {
+use crate::*;
+
+pub(crate) fn current_epoch_ms() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
@@ -11,7 +13,7 @@ fn current_epoch_ms() -> u64 {
 /// runtime happens to execute them. `transaction_timestamp()` is stable for the
 /// transaction, so every comparison and derived expiry in that transaction is
 /// based on one database-owned instant.
-async fn postgres_transaction_epoch_ms(
+pub(crate) async fn postgres_transaction_epoch_ms(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
 ) -> Result<u64, StoreError> {
     let now: i64 = sqlx::query_scalar(
@@ -24,14 +26,14 @@ async fn postgres_transaction_epoch_ms(
         .map_err(|_| StoreError::Backend(format!("postgres returned invalid epoch millis `{now}`")))
 }
 
-fn current_timestamp_string() -> String {
+pub(crate) fn current_timestamp_string() -> String {
     let now = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default();
     format!("unix:{}", now.as_secs())
 }
 
-fn store_sqlx_error(err: sqlx::Error) -> StoreError {
+pub(crate) fn store_sqlx_error(err: sqlx::Error) -> StoreError {
     StoreError::Backend(err.to_string())
 }
 
@@ -39,22 +41,22 @@ fn store_sqlx_error(err: sqlx::Error) -> StoreError {
 /// failure: serialization failure, deadlock, and lock-acquisition timeout. On the
 /// session head these all mean "a concurrent committer got there first" — i.e. a
 /// revision conflict the caller should reload-and-retry, not a backend error.
-fn is_contention_error(err: &sqlx::Error) -> bool {
+pub(crate) fn is_contention_error(err: &sqlx::Error) -> bool {
     matches!(
         err.as_database_error().and_then(|db| db.code()).as_deref(),
         Some("40001" | "40P01" | "55P03")
     )
 }
 
-fn plugin_sqlx_error(err: sqlx::Error) -> PluginError {
+pub(crate) fn plugin_sqlx_error(err: sqlx::Error) -> PluginError {
     PluginError::Session(err.to_string())
 }
 
-fn process_decode_error(err: serde_json::Error) -> PluginError {
+pub(crate) fn process_decode_error(err: serde_json::Error) -> PluginError {
     PluginError::Session(format!("failed to decode process registry row: {err}"))
 }
 
-fn store_decode_json<T: serde::de::DeserializeOwned>(
+pub(crate) fn store_decode_json<T: serde::de::DeserializeOwned>(
     json: &str,
     what: &str,
 ) -> Result<T, StoreError> {
@@ -62,17 +64,17 @@ fn store_decode_json<T: serde::de::DeserializeOwned>(
         .map_err(|err| StoreError::Backend(format!("failed to decode {what}: {err}")))
 }
 
-fn encode_json<T: serde::Serialize>(value: &T) -> String {
+pub(crate) fn encode_json<T: serde::Serialize>(value: &T) -> String {
     serde_json::to_string(value).expect("persisted state should serialize")
 }
 
-fn encode_msgpack<T: serde::Serialize>(value: &T) -> Vec<u8> {
+pub(crate) fn encode_msgpack<T: serde::Serialize>(value: &T) -> Vec<u8> {
     let mut buf = Vec::with_capacity(1024);
     rmp_serde::encode::write_named(&mut buf, value).expect("value should serialize");
     buf
 }
 
-fn decode_versioned_msgpack_record<T>(
+pub(crate) fn decode_versioned_msgpack_record<T>(
     bytes: &[u8],
     record_kind: &'static str,
     expected: u32,
@@ -87,7 +89,7 @@ where
         .map_err(|err| StoreError::Backend(format!("failed to decode {record_kind}: {err}")))
 }
 
-fn block_on_detached<T: Send + 'static>(
+pub(crate) fn block_on_detached<T: Send + 'static>(
     future: impl std::future::Future<Output = T> + Send + 'static,
 ) -> T {
     std::thread::spawn(move || {
@@ -101,7 +103,7 @@ fn block_on_detached<T: Send + 'static>(
     .expect("postgres manifest thread")
 }
 
-fn merge_token_ledger_entries(entries: Vec<TokenLedgerEntry>) -> Vec<TokenLedgerEntry> {
+pub(crate) fn merge_token_ledger_entries(entries: Vec<TokenLedgerEntry>) -> Vec<TokenLedgerEntry> {
     let mut merged = Vec::<TokenLedgerEntry>::new();
     for entry in entries {
         if entry.usage.total() == 0 {
@@ -123,18 +125,18 @@ fn merge_token_ledger_entries(entries: Vec<TokenLedgerEntry>) -> Vec<TokenLedger
     merged
 }
 
-const POSTGRES_SESSION_CHECKPOINT_ENVELOPE_SCHEMA_VERSION: u32 = 1;
+pub(crate) const POSTGRES_SESSION_CHECKPOINT_ENVELOPE_SCHEMA_VERSION: u32 = 1;
 
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
-struct SessionCheckpointEnvelope {
+pub(crate) struct SessionCheckpointEnvelope {
     schema_version: u32,
-    manifest: SessionCheckpoint,
+    pub(crate) manifest: SessionCheckpoint,
     tool_state: Option<lash_core::ToolState>,
     plugin_snapshot: Option<lash_core::PluginSessionSnapshot>,
     execution_state: Option<Vec<u8>>,
 }
 
-async fn put_blob_tx(
+pub(crate) async fn put_blob_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     content: &[u8],
 ) -> Result<BlobRef, StoreError> {
@@ -152,7 +154,7 @@ async fn put_blob_tx(
     Ok(BlobRef(hash))
 }
 
-async fn get_blob(pool: &PgPool, blob_ref: &BlobRef) -> Option<Vec<u8>> {
+pub(crate) async fn get_blob(pool: &PgPool, blob_ref: &BlobRef) -> Option<Vec<u8>> {
     sqlx::query_scalar::<_, Vec<u8>>("SELECT content FROM lash_blobs WHERE hash = $1")
         .bind(blob_ref.as_str())
         .fetch_optional(pool)
@@ -161,7 +163,7 @@ async fn get_blob(pool: &PgPool, blob_ref: &BlobRef) -> Option<Vec<u8>> {
         .flatten()
 }
 
-async fn put_checkpoint_tx(
+pub(crate) async fn put_checkpoint_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     checkpoint: &HydratedSessionCheckpoint,
 ) -> Result<(BlobRef, SessionCheckpoint), StoreError> {
@@ -184,7 +186,7 @@ async fn put_checkpoint_tx(
     Ok((checkpoint_ref, manifest))
 }
 
-async fn get_checkpoint(
+pub(crate) async fn get_checkpoint(
     pool: &PgPool,
     blob_ref: &BlobRef,
 ) -> Result<Option<HydratedSessionCheckpoint>, StoreError> {
@@ -213,7 +215,7 @@ async fn get_checkpoint(
     }))
 }
 
-async fn load_session_head_meta_tx(
+pub(crate) async fn load_session_head_meta_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     session_id: &str,
     for_update: bool,
@@ -242,7 +244,7 @@ async fn load_session_head_meta_tx(
     Ok(Some(meta))
 }
 
-async fn load_usage_deltas(pool: &PgPool, session_id: &str) -> Vec<TokenLedgerEntry> {
+pub(crate) async fn load_usage_deltas(pool: &PgPool, session_id: &str) -> Vec<TokenLedgerEntry> {
     let rows = sqlx::query(
         "SELECT entry_json FROM lash_usage_deltas WHERE session_id = $1 ORDER BY seq ASC",
     )
@@ -258,7 +260,7 @@ async fn load_usage_deltas(pool: &PgPool, session_id: &str) -> Vec<TokenLedgerEn
         .collect()
 }
 
-async fn load_graph(
+pub(crate) async fn load_graph(
     pool: &PgPool,
     session_id: &str,
     leaf_node_id: Option<String>,
@@ -285,7 +287,10 @@ async fn load_graph(
     Ok(lash_core::SessionGraph::from_nodes(nodes, leaf_node_id))
 }
 
-fn active_path_node_ids(nodes: &[SessionNodeRecord], leaf_node_id: &str) -> HashSet<String> {
+pub(crate) fn active_path_node_ids(
+    nodes: &[SessionNodeRecord],
+    leaf_node_id: &str,
+) -> HashSet<String> {
     let mut parent_by_id = std::collections::BTreeMap::new();
     for node in nodes {
         parent_by_id.insert(node.node_id.clone(), node.parent_node_id.clone());
@@ -301,7 +306,7 @@ fn active_path_node_ids(nodes: &[SessionNodeRecord], leaf_node_id: &str) -> Hash
     wanted
 }
 
-async fn commit_attachment_refs_tx(
+pub(crate) async fn commit_attachment_refs_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     session_id: &str,
     attachment_ids: &[AttachmentId],

@@ -1,4 +1,6 @@
-async fn ensure_schema(pool: &PgPool) -> Result<Vec<u8>, StoreError> {
+use crate::*;
+
+pub(crate) async fn ensure_schema(pool: &PgPool) -> Result<Vec<u8>, StoreError> {
     let mut tx = pool.begin().await.map_err(store_sqlx_error)?;
     tx.execute("SELECT pg_advisory_xact_lock(715421, 907001)")
         .await
@@ -352,11 +354,12 @@ async fn ensure_schema(pool: &PgPool) -> Result<Vec<u8>, StoreError> {
     .execute(&mut *tx)
     .await
     .map_err(store_sqlx_error)?;
-    let signing_secret: Vec<u8> =
-        sqlx::query_scalar("SELECT signing_secret FROM lash_await_event_meta WHERE singleton = TRUE")
-            .fetch_one(&mut *tx)
-            .await
-            .map_err(store_sqlx_error)?;
+    let signing_secret: Vec<u8> = sqlx::query_scalar(
+        "SELECT signing_secret FROM lash_await_event_meta WHERE singleton = TRUE",
+    )
+    .fetch_one(&mut *tx)
+    .await
+    .map_err(store_sqlx_error)?;
     if signing_secret.len() != 32 {
         return Err(StoreError::Backend(format!(
             "Postgres await-event signing secret has {} bytes, expected 32",
