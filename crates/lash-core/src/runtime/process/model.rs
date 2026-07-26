@@ -9,9 +9,7 @@ use super::events::{
     ProcessAwaitOutput, ProcessEventType, ProcessTerminalSemantics, ProcessTerminalState,
     default_process_event_types,
 };
-use super::validation::{
-    ensure_core_event_types, process_registration_hash, validate_process_registration,
-};
+use super::validation::prepare_process_registration;
 
 pub type ProcessId = String;
 
@@ -908,14 +906,11 @@ impl ProcessRecord {
     }
 
     pub fn from_registration_with_clock(
-        mut registration: ProcessRegistration,
+        registration: ProcessRegistration,
         clock: &dyn crate::Clock,
     ) -> Self {
-        ensure_core_event_types(&mut registration);
-        validate_process_registration(&registration)
-            .expect("process registration should be valid before record construction");
-        let registration_hash = process_registration_hash(&registration)
-            .expect("process registration should hash before record construction");
+        let (registration, registration_hash) = prepare_process_registration(registration)
+            .expect("process registration should be valid and hashable before record construction");
         Self::from_prepared_registration(registration, registration_hash, clock.timestamp_ms())
     }
 

@@ -10,6 +10,17 @@ pub(super) async fn process_record_is_the_fold_of_its_event_log(
         )
         .await
         .expect("register fold process");
+    assert!(
+        base.event_types.iter().all(|event_type| !matches!(
+            event_type.name.as_str(),
+            "process.first_started"
+                | "process.waiting"
+                | "process.resumed"
+                | "process.external_ref_set"
+                | "process.abandon_requested"
+        )),
+        "runtime lifecycle types must not be persisted as producer declarations"
+    );
     assert_process_record_fold(&registry, &base, "registration").await;
     registry
         .register_process(

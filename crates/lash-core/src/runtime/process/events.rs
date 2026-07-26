@@ -586,43 +586,49 @@ fn default_process_wake_event_invocation() -> crate::RuntimeInvocation {
     }
 }
 
+pub(super) fn runtime_lifecycle_event_type(name: &str) -> Option<ProcessEventType> {
+    match name {
+        "process.first_started"
+        | "process.waiting"
+        | "process.resumed"
+        | "process.external_ref_set"
+        | "process.abandon_requested" => Some(ProcessEventType {
+            name: name.to_string(),
+            payload_schema: crate::LashSchema::any(),
+            semantics: ProcessEventSemanticsSpec::default(),
+        }),
+        _ => None,
+    }
+}
+
+pub(super) fn is_runtime_lifecycle_event_type(name: &str) -> bool {
+    runtime_lifecycle_event_type(name).is_some()
+}
+
 pub(super) fn default_process_event_types() -> Vec<ProcessEventType> {
-    vec![
-        ProcessEventType {
-            name: "process.cancel_requested".to_string(),
-            payload_schema: crate::LashSchema::any(),
-            semantics: ProcessEventSemanticsSpec::default(),
-        },
-        ProcessEventType {
-            name: "process.first_started".to_string(),
-            payload_schema: crate::LashSchema::any(),
-            semantics: ProcessEventSemanticsSpec::default(),
-        },
-        ProcessEventType {
-            name: "process.waiting".to_string(),
-            payload_schema: crate::LashSchema::any(),
-            semantics: ProcessEventSemanticsSpec::default(),
-        },
-        ProcessEventType {
-            name: "process.resumed".to_string(),
-            payload_schema: crate::LashSchema::any(),
-            semantics: ProcessEventSemanticsSpec::default(),
-        },
-        ProcessEventType {
-            name: "process.external_ref_set".to_string(),
-            payload_schema: crate::LashSchema::any(),
-            semantics: ProcessEventSemanticsSpec::default(),
-        },
-        ProcessEventType {
-            name: "process.abandon_requested".to_string(),
-            payload_schema: crate::LashSchema::any(),
-            semantics: ProcessEventSemanticsSpec::default(),
-        },
+    let mut event_types = vec![ProcessEventType {
+        name: "process.cancel_requested".to_string(),
+        payload_schema: crate::LashSchema::any(),
+        semantics: ProcessEventSemanticsSpec::default(),
+    }];
+    event_types.extend(
+        [
+            "process.first_started",
+            "process.waiting",
+            "process.resumed",
+            "process.external_ref_set",
+            "process.abandon_requested",
+        ]
+        .into_iter()
+        .filter_map(runtime_lifecycle_event_type),
+    );
+    event_types.extend([
         terminal_event_type("process.completed", ProcessTerminalState::Completed),
         terminal_event_type("process.failed", ProcessTerminalState::Failed),
         terminal_event_type("process.cancelled", ProcessTerminalState::Cancelled),
         terminal_event_type("process.abandoned", ProcessTerminalState::Abandoned),
-    ]
+    ]);
+    event_types
 }
 
 fn terminal_event_type(name: &str, state: ProcessTerminalState) -> ProcessEventType {

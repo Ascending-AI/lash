@@ -21,10 +21,7 @@ use super::model::{
 use super::references::ProcessLiveReferenceSummary;
 use super::registry::{ProcessPruneReport, ProcessRegistry};
 use super::time::current_epoch_ms;
-use super::validation::{
-    ensure_core_event_types, prepare_process_event_append, process_registration_hash,
-    validate_process_registration,
-};
+use super::validation::{prepare_process_event_append, prepare_process_registration};
 
 /// In-memory process registry for core tests.
 pub struct TestLocalProcessRegistry {
@@ -86,11 +83,9 @@ impl TestLocalProcessRegistry {
 
     async fn insert_process(
         &self,
-        mut registration: ProcessRegistration,
+        registration: ProcessRegistration,
     ) -> Result<ProcessRecord, PluginError> {
-        ensure_core_event_types(&mut registration);
-        validate_process_registration(&registration)?;
-        let registration_hash = process_registration_hash(&registration)?;
+        let (registration, registration_hash) = prepare_process_registration(registration)?;
         let mut managed = self.managed.lock().await;
         if let Some(existing) = managed.get(&registration.id) {
             if existing.record.registration_hash == registration_hash {
