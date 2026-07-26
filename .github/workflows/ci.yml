@@ -392,10 +392,10 @@ jobs:
           shared-key: linux-debug
           save-if: false
 
-      - name: Install protoc
+      - name: Install protoc and nextest
         uses: taiki-e/install-action@v2
         with:
-          tool: protoc
+          tool: protoc,nextest
 
       # `lash-postgres-store`'s conformance tests run the backend-agnostic
       # RuntimePersistence / SessionStoreFactory / ProcessRegistry /
@@ -412,6 +412,45 @@ jobs:
         env:
           LASH_POSTGRES_DATABASE_URL: postgres://lash:lash@localhost:5432/lash
           LASH_REQUIRE_POSTGRES: "1"
+
+      # FIG-637 owns the contract change that will make this oracle green.
+      # Until then CI proves the ignored test reaches all three backends and
+      # fails for exactly the four named, known divergences.
+      - name: Exercise known-red store differential
+        shell: bash
+        run: |
+          oracle_output="$(mktemp)"
+          set +e
+          cargo nextest run -p lash-sim \
+            --test cross_backend_store_differential \
+            --run-ignored ignored-only \
+            --locked -j1 --no-capture 2>&1 | tee "$oracle_output"
+          oracle_status=${PIPESTATUS[0]}
+          set -e
+
+          if test "$oracle_status" -eq 0; then
+            echo "known-red store differential unexpectedly passed"
+            exit 1
+          fi
+
+          for divergence in \
+            duplicate_node_id_within_one_append \
+            duplicate_node_id_across_two_commits \
+            append_onto_tombstoned_node_id \
+            append_duplicate_node_id_after_replace_full_seed
+          do
+            if ! grep -F "case=$divergence " "$oracle_output" >/dev/null; then
+              echo "known-red store differential missed $divergence"
+              exit 1
+            fi
+          done
+
+          if test "$(grep -c '^case=' "$oracle_output")" -ne 4; then
+            echo "known-red store differential reported an unexpected divergence count"
+            exit 1
+          fi
+        env:
+          LASH_POSTGRES_DATABASE_URL: postgres://lash:lash@localhost:5432/lash
 
   stack-budget:
     name: Stack budget

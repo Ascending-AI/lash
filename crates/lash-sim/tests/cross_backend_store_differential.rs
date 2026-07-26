@@ -12,14 +12,14 @@
 use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use lash_core::store::GraphCommitDelta;
+use lash_core::store::{GraphCommitDelta, RuntimeCommitResult, SessionHeadMeta};
 use lash_core::{
-    InMemorySessionStore, LeaseOwnerIdentity, PendingTurnInputDraft, ProtocolEvent, Residency,
-    RuntimeCommit, RuntimePersistence, RuntimeSessionState, RuntimeTurnCommitStamp, SessionGraph,
+    InMemorySessionStore, LeaseOwnerIdentity, PendingTurnInputDraft, ProtocolEvent, RuntimeCommit,
+    RuntimePersistence, RuntimeSessionState, RuntimeTurnCommitStamp, SessionGraph,
     SessionHistoryRecord, SessionNodePayload, SessionNodeRecord, StoreError, TurnInput,
-    TurnInputClaim, TurnInputIngress,
+    TurnInputApplication, TurnInputClaim, TurnInputIngress, TurnInputState,
 };
 use lash_postgres_store::PostgresStorage;
 use rusqlite::OptionalExtension;
@@ -33,7 +33,7 @@ enum CaseName {
     DuplicateAcrossCommits,
     AppendTombstoned,
     AppendTombstonedThenVacuumed,
-    AppendOffActivePathUnderActivePathOnly,
+    AppendDuplicateAfterReplaceFullSeed,
     StaleExpectedHeadRevision,
     IdenticalAndMutatedTurnCommitReplay,
     SettleClaimAfterLeaseGenerationSuperseded,
@@ -46,8 +46,8 @@ impl CaseName {
             Self::DuplicateAcrossCommits => "duplicate_node_id_across_two_commits",
             Self::AppendTombstoned => "append_onto_tombstoned_node_id",
             Self::AppendTombstonedThenVacuumed => "append_onto_tombstoned_then_vacuumed_node_id",
-            Self::AppendOffActivePathUnderActivePathOnly => {
-                "append_onto_off_active_path_node_id_under_active_path_only"
+            Self::AppendDuplicateAfterReplaceFullSeed => {
+                "append_duplicate_node_id_after_replace_full_seed"
             }
             Self::StaleExpectedHeadRevision => "stale_expected_head_revision",
             Self::IdenticalAndMutatedTurnCommitReplay => "identical_and_mutated_turn_commit_replay",
@@ -61,7 +61,6 @@ impl CaseName {
 #[derive(Clone, Debug)]
 struct GeneratedCase {
     name: CaseName,
-    residency: Residency,
     operations: Vec<StoreOperation>,
 }
 
@@ -216,7 +215,6 @@ fn generated_cases() -> Vec<GeneratedCase> {
     vec![
         GeneratedCase {
             name: CaseName::DuplicateWithinAppend,
-            residency: Residency::KeepAll,
             operations: vec![commit(
                 "append_duplicate_batch",
                 None,
@@ -225,7 +223,6 @@ fn generated_cases() -> Vec<GeneratedCase> {
         },
         GeneratedCase {
             name: CaseName::DuplicateAcrossCommits,
-            residency: Residency::KeepAll,
             operations: vec![
                 commit(
                     "append_original",
@@ -241,7 +238,6 @@ fn generated_cases() -> Vec<GeneratedCase> {
         },
         GeneratedCase {
             name: CaseName::AppendTombstoned,
-            residency: Residency::KeepAll,
             operations: vec![
                 commit(
                     "append_original",
@@ -260,7 +256,6 @@ fn generated_cases() -> Vec<GeneratedCase> {
         },
         GeneratedCase {
             name: CaseName::AppendTombstonedThenVacuumed,
-            residency: Residency::KeepAll,
             operations: vec![
                 commit(
                     "append_original",
@@ -279,8 +274,11 @@ fn generated_cases() -> Vec<GeneratedCase> {
             ],
         },
         GeneratedCase {
-            name: CaseName::AppendOffActivePathUnderActivePathOnly,
-            residency: Residency::ActivePathOnly,
+            name: CaseName::AppendDuplicateAfterReplaceFullSeed,
+            // The store layer has no residency input. A host using
+            // `ActivePathOnly` can produce this malformed Append because
+            // `unique_message_node_id` de-duplicates only against its resident
+            // set; the restored host-layer differential covers that path.
             operations: vec![
                 commit(
                     "seed_forked_graph",
@@ -295,7 +293,7 @@ fn generated_cases() -> Vec<GeneratedCase> {
                     ),
                 ),
                 commit(
-                    "append_id_absent_from_active_path_resident_set",
+                    "append_duplicate_id_after_replace_full_seed",
                     Some(1),
                     append(
                         vec![NodeSpec::new("off-path", Some("root"), "off-path-mutated")],
@@ -306,7 +304,6 @@ fn generated_cases() -> Vec<GeneratedCase> {
         },
         GeneratedCase {
             name: CaseName::StaleExpectedHeadRevision,
-            residency: Residency::KeepAll,
             operations: vec![
                 commit(
                     "append_original",
@@ -325,7 +322,6 @@ fn generated_cases() -> Vec<GeneratedCase> {
         },
         GeneratedCase {
             name: CaseName::IdenticalAndMutatedTurnCommitReplay,
-            residency: Residency::KeepAll,
             operations: vec![
                 StoreOperation::Commit {
                     label: "first_turn_commit",
@@ -358,7 +354,6 @@ fn generated_cases() -> Vec<GeneratedCase> {
         },
         GeneratedCase {
             name: CaseName::SettleClaimAfterLeaseGenerationSuperseded,
-            residency: Residency::KeepAll,
             operations: vec![
                 StoreOperation::EnqueueNextTurnInput,
                 StoreOperation::AcquireSessionLease {
@@ -428,7 +423,14 @@ fn runtime_commit(
 
 #[derive(Clone, PartialEq, Eq)]
 struct DurableNode {
+    // SQL rows are read by `seq`; the in-memory vector uses its native index.
+    // Comparing this normalized replay ordinal keeps transcript order
+    // contract-visible without comparing backend-local sequence counters.
+    ordinal: usize,
     node_id: String,
+    // Both SQL backends currently store node_json as TEXT. A future jsonb
+    // migration would reserialize values and make every byte comparison red
+    // for a reason outside the persistence contract.
     bytes: Vec<u8>,
 }
 
@@ -436,6 +438,7 @@ impl std::fmt::Debug for DurableNode {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         formatter
             .debug_struct("DurableNode")
+            .field("ordinal", &self.ordinal)
             .field("node_id", &self.node_id)
             .field("bytes", &String::from_utf8_lossy(&self.bytes))
             .finish()
@@ -443,10 +446,40 @@ impl std::fmt::Debug for DurableNode {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-struct StepObservation {
-    store_error_variant: Option<&'static str>,
+struct PendingTurnInputObservation {
+    input_id: String,
+    state: TurnInputState,
+    claim_session_lease_generation: Option<u64>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct ComparableRuntimeCommitResult {
+    head_revision: u64,
+    turn_input_applications: Vec<TurnInputApplication>,
+}
+
+impl From<RuntimeCommitResult> for ComparableRuntimeCommitResult {
+    fn from(result: RuntimeCommitResult) -> Self {
+        Self {
+            head_revision: result.head_revision,
+            turn_input_applications: result.turn_input_applications,
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct RawDurableState {
     head_revision: Option<u64>,
+    leaf_node_id: Option<String>,
     durable_nodes: Vec<DurableNode>,
+    pending_turn_inputs: Vec<PendingTurnInputObservation>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct StepObservation {
+    store_error: Option<String>,
+    runtime_commit_result: Option<ComparableRuntimeCommitResult>,
+    durable_state: RawDurableState,
 }
 
 enum RawDurableReader {
@@ -456,84 +489,208 @@ enum RawDurableReader {
 }
 
 impl RawDurableReader {
-    async fn observe(&self) -> (Option<u64>, Vec<DurableNode>) {
-        let (head_revision, mut nodes) = match self {
+    async fn observe(&self) -> RawDurableState {
+        match self {
             Self::InMemory(store) => {
-                let nodes = store
+                let durable_nodes = store
                     .raw_graph_nodes_for_testing()
                     .into_iter()
-                    .map(|node| DurableNode {
+                    .enumerate()
+                    .map(|(ordinal, node)| DurableNode {
+                        ordinal,
                         node_id: node.node_id.clone(),
                         bytes: serde_json::to_vec(&node).expect("encode in-memory durable node"),
                     })
                     .collect();
-                (store.raw_head_revision_for_testing(), nodes)
+                let pending_turn_inputs = store
+                    .raw_pending_turn_inputs_for_testing()
+                    .into_iter()
+                    .map(|(input_id, state, claim_session_lease_generation)| {
+                        PendingTurnInputObservation {
+                            input_id,
+                            state,
+                            claim_session_lease_generation,
+                        }
+                    })
+                    .collect();
+                RawDurableState {
+                    head_revision: store.raw_head_revision_for_testing(),
+                    leaf_node_id: store.raw_leaf_node_id_for_testing(),
+                    durable_nodes,
+                    pending_turn_inputs,
+                }
             }
             Self::Sqlite(path) => read_sqlite_durable_state(path),
             Self::Postgres { pool, session_id } => {
-                let head_revision: Option<i64> = sqlx::query_scalar(
-                    "SELECT head_revision FROM lash_sessions WHERE session_id = $1",
+                let head: Option<(i64, String)> = sqlx::query_as(
+                    "SELECT head_revision, head_json
+                     FROM lash_sessions
+                     WHERE session_id = $1",
                 )
                 .bind(session_id)
                 .fetch_optional(pool)
                 .await
                 .expect("read Postgres durable head");
-                let rows: Vec<(String, String)> = sqlx::query_as(
-                    "SELECT node_id, node_json
+                let (head_revision, leaf_node_id) =
+                    head.map_or((None, None), |(revision, json)| {
+                        let meta: SessionHeadMeta =
+                            serde_json::from_str(&json).expect("decode Postgres durable head");
+                        (Some(revision as u64), meta.leaf_node_id)
+                    });
+                let rows: Vec<(i64, String, String)> = sqlx::query_as(
+                    "SELECT seq, node_id, node_json
                      FROM lash_graph_nodes
-                     WHERE session_id = $1 AND tombstoned = FALSE",
+                     WHERE session_id = $1 AND tombstoned = FALSE
+                     ORDER BY seq ASC",
                 )
                 .bind(session_id)
                 .fetch_all(pool)
                 .await
                 .expect("read Postgres durable nodes");
-                (
-                    head_revision.map(|revision| revision as u64),
-                    rows.into_iter()
-                        .map(|(node_id, node_json)| DurableNode {
-                            node_id,
-                            bytes: node_json.into_bytes(),
-                        })
-                        .collect(),
+                let durable_nodes = rows
+                    .into_iter()
+                    .enumerate()
+                    .map(|(ordinal, (_seq, node_id, node_json))| DurableNode {
+                        ordinal,
+                        node_id,
+                        bytes: node_json.into_bytes(),
+                    })
+                    .collect();
+                let pending_rows: Vec<(String, String, Option<i64>)> = sqlx::query_as(
+                    "SELECT input_id, state,
+                            CASE WHEN claim_token IS NULL
+                                 THEN NULL
+                                 ELSE claim_session_lease_generation
+                            END
+                     FROM lash_pending_turn_inputs
+                     WHERE session_id = $1
+                     ORDER BY enqueue_seq ASC",
                 )
+                .bind(session_id)
+                .fetch_all(pool)
+                .await
+                .expect("read Postgres pending turn inputs");
+                let pending_turn_inputs = pending_rows
+                    .into_iter()
+                    .map(|(input_id, state, claim_session_lease_generation)| {
+                        PendingTurnInputObservation {
+                            input_id,
+                            state: TurnInputState::from_wire_str(&state)
+                                .expect("decode Postgres pending-input state"),
+                            claim_session_lease_generation: claim_session_lease_generation
+                                .map(|generation| generation as u64),
+                        }
+                    })
+                    .collect();
+                RawDurableState {
+                    head_revision,
+                    leaf_node_id,
+                    durable_nodes,
+                    pending_turn_inputs,
+                }
             }
-        };
-        nodes.sort_by(|left, right| {
-            (&left.node_id, &left.bytes).cmp(&(&right.node_id, &right.bytes))
-        });
-        (head_revision, nodes)
+        }
     }
 }
 
-fn read_sqlite_durable_state(path: &Path) -> (Option<u64>, Vec<DurableNode>) {
+fn read_sqlite_durable_state(path: &Path) -> RawDurableState {
     let connection = rusqlite::Connection::open(path).expect("open SQLite durable reader");
-    let head_revision = connection
+    connection
+        .busy_timeout(Duration::from_secs(15))
+        .expect("configure SQLite durable reader busy timeout");
+    connection
+        .pragma_update(None, "journal_mode", "WAL")
+        .expect("configure SQLite durable reader WAL mode");
+    connection
+        .execute_batch("PRAGMA synchronous=NORMAL; PRAGMA foreign_keys=ON;")
+        .expect("configure SQLite durable reader pragmas");
+
+    let head: Option<(i64, String)> = connection
         .query_row(
-            "SELECT head_revision FROM session_head WHERE singleton = 1",
+            "SELECT head_revision, head_json
+             FROM session_head
+             WHERE singleton = 1",
             [],
-            |row| row.get::<_, i64>(0),
+            |row| Ok((row.get(0)?, row.get(1)?)),
         )
         .optional()
-        .expect("read SQLite durable head")
-        .map(|revision| revision as u64);
-    let mut statement = connection
-        .prepare(
-            "SELECT node_id, node_json
-             FROM graph_nodes
-             WHERE tombstoned = 0",
-        )
-        .expect("prepare SQLite durable node read");
-    let nodes = statement
-        .query_map([], |row| {
-            Ok(DurableNode {
-                node_id: row.get(0)?,
-                bytes: row.get::<_, String>(1)?.into_bytes(),
+        .expect("read SQLite durable head");
+    let (head_revision, leaf_node_id) = head.map_or((None, None), |(revision, json)| {
+        let meta: SessionHeadMeta =
+            serde_json::from_str(&json).expect("decode SQLite durable head");
+        (Some(revision as u64), meta.leaf_node_id)
+    });
+    let durable_nodes = {
+        let mut statement = connection
+            .prepare(
+                "SELECT seq, node_id, node_json
+                 FROM graph_nodes
+                 WHERE tombstoned = 0
+                 ORDER BY seq ASC",
+            )
+            .expect("prepare SQLite durable node read");
+        statement
+            .query_map([], |row| {
+                Ok((
+                    row.get::<_, i64>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                ))
             })
-        })
-        .expect("read SQLite durable nodes")
-        .collect::<Result<Vec<_>, _>>()
-        .expect("decode SQLite durable nodes");
-    (head_revision, nodes)
+            .expect("read SQLite durable nodes")
+            .collect::<Result<Vec<_>, _>>()
+            .expect("decode SQLite durable nodes")
+            .into_iter()
+            .enumerate()
+            .map(|(ordinal, (_seq, node_id, node_json))| DurableNode {
+                ordinal,
+                node_id,
+                bytes: node_json.into_bytes(),
+            })
+            .collect()
+    };
+    let pending_turn_inputs = {
+        let mut statement = connection
+            .prepare(
+                "SELECT input_id, state,
+                        CASE WHEN claim_token IS NULL
+                             THEN NULL
+                             ELSE claim_session_lease_generation
+                        END
+                 FROM pending_turn_inputs
+                 ORDER BY enqueue_seq ASC",
+            )
+            .expect("prepare SQLite pending-input read");
+        statement
+            .query_map([], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, Option<i64>>(2)?,
+                ))
+            })
+            .expect("read SQLite pending turn inputs")
+            .collect::<Result<Vec<_>, _>>()
+            .expect("decode SQLite pending turn inputs")
+            .into_iter()
+            .map(
+                |(input_id, state, claim_session_lease_generation)| PendingTurnInputObservation {
+                    input_id,
+                    state: TurnInputState::from_wire_str(&state)
+                        .expect("decode SQLite pending-input state"),
+                    claim_session_lease_generation: claim_session_lease_generation
+                        .map(|generation| generation as u64),
+                },
+            )
+            .collect()
+    };
+
+    RawDurableState {
+        head_revision,
+        leaf_node_id,
+        durable_nodes,
+        pending_turn_inputs,
+    }
 }
 
 struct BackendRunner {
@@ -562,7 +719,10 @@ impl BackendRunner {
         }
     }
 
-    async fn apply(&mut self, operation: &StoreOperation) -> Result<(), StoreError> {
+    async fn apply(
+        &mut self,
+        operation: &StoreOperation,
+    ) -> Result<Option<ComparableRuntimeCommitResult>, StoreError> {
         match operation {
             StoreOperation::Commit {
                 expected_head_revision,
@@ -578,12 +738,12 @@ impl BackendRunner {
                     *turn_commit,
                 ))
                 .await
-                .map(|_| ()),
+                .map(|result| Some(result.into())),
             StoreOperation::Tombstone { node_ids } => {
                 let node_ids = node_ids.iter().map(ToString::to_string).collect::<Vec<_>>();
-                self.store.tombstone_nodes(&node_ids).await
+                self.store.tombstone_nodes(&node_ids).await.map(|_| None)
             }
-            StoreOperation::Vacuum => self.store.vacuum().await.map(|_| ()),
+            StoreOperation::Vacuum => self.store.vacuum().await.map(|_| None),
             StoreOperation::EnqueueNextTurnInput => self
                 .store
                 .enqueue_pending_turn_input(
@@ -595,7 +755,7 @@ impl BackendRunner {
                     .with_input_id(format!("{}:input", self.session_id)),
                 )
                 .await
-                .map(|_| ()),
+                .map(|_| None),
             StoreOperation::AcquireSessionLease { slot, owner } => {
                 let owner = LeaseOwnerIdentity::opaque(*owner, format!("{owner}:incarnation"));
                 let lease = self
@@ -613,13 +773,22 @@ impl BackendRunner {
                             self.name
                         ))
                     })?;
+                if matches!(slot, LeaseSlot::Successor) {
+                    let first = self.lease(LeaseSlot::First);
+                    assert!(
+                        lease.fencing_token > first.fencing_token,
+                        "{} reused session-lease generation {} for the successor",
+                        self.name,
+                        lease.fencing_token
+                    );
+                }
                 self.put_lease(*slot, lease);
-                Ok(())
+                Ok(None)
             }
             StoreOperation::ClaimNextTurnInput { lease } => {
                 let lease = self.lease(*lease);
                 let owner = lease.owner.clone();
-                let claim = self
+                let mut claim = self
                     .store
                     .claim_next_turn_inputs(&self.session_id, &lease.fence(), &owner, 1)
                     .await?
@@ -629,14 +798,15 @@ impl BackendRunner {
                             self.name
                         ))
                     })?;
+                claim.record_initial_turn_application("claim-turn", "claim-message");
                 self.stale_turn_input_claim = Some(claim);
-                Ok(())
+                Ok(None)
             }
-            StoreOperation::ReleaseSessionLease { lease } => {
-                self.store
-                    .release_session_execution_lease(&self.lease(*lease).completion())
-                    .await
-            }
+            StoreOperation::ReleaseSessionLease { lease } => self
+                .store
+                .release_session_execution_lease(&self.lease(*lease).completion())
+                .await
+                .map(|_| None),
             StoreOperation::CommitStaleTurnInputClaim {
                 current_lease,
                 expected_head_revision,
@@ -657,37 +827,64 @@ impl BackendRunner {
                             .completing_turn_input_claim(claim.completion()),
                     )
                     .await
-                    .map(|_| ())
+                    .map(|result| Some(result.into()))
             }
         }
     }
 
-    async fn observe(&self, error: Option<&StoreError>) -> StepObservation {
-        let (head_revision, durable_nodes) = self.raw_reader.observe().await;
+    async fn observe(
+        &self,
+        result: Result<Option<ComparableRuntimeCommitResult>, StoreError>,
+    ) -> StepObservation {
+        let (store_error, runtime_commit_result) = match result {
+            Ok(result) => (None, result),
+            Err(error) => (Some(normalized_store_error(self.name, &error)), None),
+        };
         StepObservation {
-            store_error_variant: error.map(store_error_variant),
-            head_revision,
-            durable_nodes,
+            store_error,
+            runtime_commit_result,
+            durable_state: self.raw_reader.observe().await,
         }
     }
 }
 
-fn store_error_variant(error: &StoreError) -> &'static str {
+fn normalized_store_error(backend: &str, error: &StoreError) -> String {
     match error {
-        StoreError::SessionBindingMismatch { .. } => "SessionBindingMismatch",
-        StoreError::UnsupportedReadScope(_) => "UnsupportedReadScope",
-        StoreError::HeadRevisionConflict { .. } => "HeadRevisionConflict",
-        StoreError::RuntimeTurnCommitConflict { .. } => "RuntimeTurnCommitConflict",
-        StoreError::QueuedWorkClaimSuperseded { .. } => "QueuedWorkClaimSuperseded",
-        StoreError::TurnInputClaimSuperseded { .. } => "TurnInputClaimSuperseded",
-        StoreError::UnsettledQueuedWorkClaim { .. } => "UnsettledQueuedWorkClaim",
-        StoreError::UnsettledTurnInputClaim { .. } => "UnsettledTurnInputClaim",
-        StoreError::PendingTurnInputSourceKeyConflict { .. } => "PendingTurnInputSourceKeyConflict",
-        StoreError::SessionExecutionLeaseExpired { .. } => "SessionExecutionLeaseExpired",
-        StoreError::UnsupportedRecordSchemaVersion { .. } => "UnsupportedRecordSchemaVersion",
-        StoreError::MissingRecordSchemaVersion { .. } => "MissingRecordSchemaVersion",
-        StoreError::InvalidRecordSchemaVersion { .. } => "InvalidRecordSchemaVersion",
-        StoreError::Backend(_) => "Backend",
+        StoreError::SessionBindingMismatch { .. } => "SessionBindingMismatch".to_string(),
+        StoreError::UnsupportedReadScope(_) => "UnsupportedReadScope".to_string(),
+        StoreError::HeadRevisionConflict { .. } => "HeadRevisionConflict".to_string(),
+        StoreError::RuntimeTurnCommitConflict { .. } => "RuntimeTurnCommitConflict".to_string(),
+        StoreError::QueuedWorkClaimSuperseded { .. } => "QueuedWorkClaimSuperseded".to_string(),
+        StoreError::TurnInputClaimSuperseded { .. } => "TurnInputClaimSuperseded".to_string(),
+        StoreError::UnsettledQueuedWorkClaim { .. } => "UnsettledQueuedWorkClaim".to_string(),
+        StoreError::UnsettledTurnInputClaim { .. } => "UnsettledTurnInputClaim".to_string(),
+        StoreError::PendingTurnInputSourceKeyConflict { .. } => {
+            "PendingTurnInputSourceKeyConflict".to_string()
+        }
+        StoreError::SessionExecutionLeaseExpired { .. } => {
+            "SessionExecutionLeaseExpired".to_string()
+        }
+        StoreError::UnsupportedRecordSchemaVersion { .. } => {
+            "UnsupportedRecordSchemaVersion".to_string()
+        }
+        StoreError::MissingRecordSchemaVersion { .. } => "MissingRecordSchemaVersion".to_string(),
+        StoreError::InvalidRecordSchemaVersion { .. } => "InvalidRecordSchemaVersion".to_string(),
+        StoreError::Backend(message) => normalized_backend_error(backend, message),
+    }
+}
+
+fn normalized_backend_error(backend: &str, message: &str) -> String {
+    match backend {
+        "sqlite" if message.contains("UNIQUE constraint failed") => {
+            "Backend(sqlite:2067:SQLITE_CONSTRAINT_UNIQUE)".to_string()
+        }
+        "sqlite" if message.contains("database is locked") => {
+            "Backend(sqlite:5:SQLITE_BUSY)".to_string()
+        }
+        "postgres" if message.contains("duplicate key value violates unique constraint") => {
+            "Backend(postgres:23505:unique_violation)".to_string()
+        }
+        _ => format!("Backend({backend}:unclassified:{message})"),
     }
 }
 
@@ -764,9 +961,8 @@ fn render_divergence(
 ) {
     let _ = writeln!(
         output,
-        "\ncase={} residency={:?} step={} operation={}:",
+        "\ncase={} step={} operation={}:",
         case.name.as_str(),
-        case.residency,
         step_index + 1,
         operation.label()
     );
@@ -779,10 +975,23 @@ fn render_divergence(
 fn generated_catalog_covers_required_adversarial_shapes() {
     let cases = generated_cases();
     assert_eq!(cases.len(), 8);
-    assert!(cases.iter().any(|case| {
-        case.name == CaseName::AppendOffActivePathUnderActivePathOnly
-            && matches!(case.residency, Residency::ActivePathOnly)
-    }));
+    assert!(cases.iter().all(|case| !case.operations.is_empty()));
+    assert_eq!(
+        cases
+            .iter()
+            .map(|case| case.name.as_str())
+            .collect::<Vec<_>>(),
+        vec![
+            "duplicate_node_id_within_one_append",
+            "duplicate_node_id_across_two_commits",
+            "append_onto_tombstoned_node_id",
+            "append_onto_tombstoned_then_vacuumed_node_id",
+            "append_duplicate_node_id_after_replace_full_seed",
+            "stale_expected_head_revision",
+            "identical_and_mutated_turn_commit_replay",
+            "settle_claim_after_session_lease_generation_superseded_before_reclaim",
+        ]
+    );
 }
 
 // FIG-637 owns the append-only contract change. Remove `ignore`, or run this
@@ -807,7 +1016,7 @@ async fn cross_backend_store_differential_reports_fig_637_divergences() {
             let mut observations = Vec::with_capacity(runners.len());
             for runner in &mut runners {
                 let result = runner.apply(operation).await;
-                let observation = runner.observe(result.as_ref().err()).await;
+                let observation = runner.observe(result).await;
                 observations.push((runner.name, observation));
             }
             let agrees = observations.windows(2).all(|pair| pair[0].1 == pair[1].1);

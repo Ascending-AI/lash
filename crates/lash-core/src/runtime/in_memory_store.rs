@@ -193,6 +193,11 @@ impl InMemorySessionStore {
     /// Differential persistence tests use this testing-only seam because a
     /// [`crate::SessionGraph`] read model indexes duplicate node ids and would
     /// hide malformed durable rows.
+    ///
+    /// This diagnostic accessor deliberately does not take `write_transaction`.
+    /// It also holds `tombstoned_node_ids` while acquiring `session_graph`;
+    /// callers must not use it concurrently with writes or introduce the
+    /// inverse lock order.
     #[cfg(any(test, feature = "testing"))]
     pub fn raw_graph_nodes_for_testing(&self) -> Vec<crate::SessionNodeRecord> {
         let tombstoned = self
@@ -209,6 +214,16 @@ impl InMemorySessionStore {
             .collect()
     }
 
+    /// Return the durable leaf-node id without loading a session read model.
+    #[cfg(any(test, feature = "testing"))]
+    pub fn raw_leaf_node_id_for_testing(&self) -> Option<String> {
+        self.session_head_meta
+            .lock()
+            .expect("lock store")
+            .as_ref()
+            .and_then(|meta| meta.leaf_node_id.clone())
+    }
+
     /// Return the durable head revision without loading a session read model.
     #[cfg(any(test, feature = "testing"))]
     pub fn raw_head_revision_for_testing(&self) -> Option<u64> {
@@ -217,6 +232,28 @@ impl InMemorySessionStore {
             .expect("lock store")
             .as_ref()
             .map(|meta| meta.head_revision)
+    }
+
+    /// Return raw pending-input lifecycle state for differential tests.
+    #[cfg(any(test, feature = "testing"))]
+    pub fn raw_pending_turn_inputs_for_testing(
+        &self,
+    ) -> Vec<(String, crate::TurnInputState, Option<u64>)> {
+        self.pending_turn_inputs
+            .lock()
+            .expect("lock pending turn inputs")
+            .iter()
+            .map(|entry| {
+                (
+                    entry.input.input_id.clone(),
+                    entry.input.state,
+                    entry
+                        .claim_token
+                        .as_ref()
+                        .map(|_| entry.claim_session_lease_generation),
+                )
+            })
+            .collect()
     }
 
     pub fn with_clock(clock: Arc<dyn crate::Clock>) -> Self {
