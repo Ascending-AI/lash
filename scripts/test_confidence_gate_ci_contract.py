@@ -674,7 +674,32 @@ finalize_mutation_gate
             postgres_mutation,
         )
         self.assertIn("LASH_REQUIRE_POSTGRES=1", postgres_mutation)
-        self.assertIn('"$@" --jobs 1', postgres_mutation)
+        self.assertIn('"$@" --jobs "$mutation_jobs"', postgres_mutation)
+
+        derive_jobs = shell_function_body(gate, "derive_mutation_jobs")
+        harness = f"""\
+set -euo pipefail
+out_dir="$(mktemp -d)"
+derive_mutation_jobs() {{
+{derive_jobs}
+[ "$(derive_mutation_jobs 1)" = 1 ]
+[ "$(derive_mutation_jobs 4)" = 2 ]
+[ "$(derive_mutation_jobs 8)" = 4 ]
+[ "$(derive_mutation_jobs 32)" = 4 ]
+"""
+        completed = subprocess.run(
+            ["bash", "-c", harness],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        self.assertEqual(
+            completed.returncode,
+            0,
+            f"machine-derived mutation job contract failed:\n"
+            f"{completed.stdout}\n{completed.stderr}",
+        )
+        self.assertEqual(gate.count('local jobs="${LASH_MUTATION_JOBS:-2}"'), 0)
 
         coverage_body = shell_function_body(gate, "run_coverage_blind_spots")
         coverage_loops = re.findall(

@@ -60,6 +60,31 @@ case "$lane" in
 esac
 mutation_scope="${LASH_CONFIDENCE_MUTATION_SCOPE:-$default_mutation_scope}"
 coverage_scope="${LASH_CONFIDENCE_COVERAGE_SCOPE:-run}"
+
+derive_mutation_jobs() {
+  local cpu_count="${1:-}"
+  if [ -z "$cpu_count" ]; then
+    cpu_count="$(getconf _NPROCESSORS_ONLN 2>/dev/null || nproc 2>/dev/null || printf '1')"
+  fi
+  if ! [[ "$cpu_count" =~ ^[1-9][0-9]*$ ]]; then
+    cpu_count=1
+  fi
+
+  # Leave at least two logical CPUs per cargo-mutants job. More than four
+  # concurrent Rust builds increases disk/memory pressure without improving
+  # useful throughput on the CI and development machines this lane targets.
+  local jobs=$(((cpu_count + 1) / 2))
+  if ((jobs > 4)); then
+    jobs=4
+  fi
+  printf '%s\n' "$jobs"
+}
+
+mutation_jobs="${LASH_MUTATION_JOBS:-$(derive_mutation_jobs)}"
+if ! [[ "$mutation_jobs" =~ ^[1-9][0-9]*$ ]]; then
+  echo "LASH_MUTATION_JOBS must be a positive integer, got: ${mutation_jobs}" >&2
+  exit 2
+fi
 mutation_failures=0
 mutation_postgres_container=""
 mutation_postgres_database_url=""
@@ -369,7 +394,7 @@ run_postgres_mutants_recorded() {
   start_mutation_postgres "$artifact"
   LASH_POSTGRES_DATABASE_URL="$mutation_postgres_database_url" \
     LASH_REQUIRE_POSTGRES=1 \
-    run_mutants_recorded "$name" "$artifact" "$@" --jobs 1
+    run_mutants_recorded "$name" "$artifact" "$@" --jobs "$mutation_jobs"
   cleanup_mutation_postgres
 }
 
@@ -1611,10 +1636,9 @@ EOF
 }
 
 run_mutation_smoke() {
-  step "Mutation smoke shards"
+  step "Mutation smoke shards (${mutation_jobs} concurrent jobs)"
   require_tool cargo-mutants cargo-mutants 27.1.0
   local shard="${LASH_MUTATION_SMOKE_SHARD:-1/64}"
-  local jobs="${LASH_MUTATION_JOBS:-2}"
   local timeout="${LASH_MUTATION_TIMEOUT_SECONDS:-180}"
   for package in "${critical_packages[@]}"; do
     if [ "$package" = "lash-postgres-store" ]; then
@@ -1634,7 +1658,7 @@ run_mutation_smoke() {
         --cargo-arg=--locked \
         --test-tool cargo \
         --shard "$shard" \
-        --jobs "$jobs" \
+        --jobs "$mutation_jobs" \
         --timeout "$timeout" \
         --minimum-test-timeout 30 \
         --output "${out_dir}/mutants-${package}-smoke"
@@ -1643,9 +1667,8 @@ run_mutation_smoke() {
 }
 
 run_lash_core_direct_model_mutation_evidence() {
-  step "Lash-core direct/model mutation evidence"
+  step "Lash-core direct/model mutation evidence (${mutation_jobs} concurrent jobs)"
   require_tool cargo-mutants cargo-mutants 27.1.0
-  local jobs="${LASH_MUTATION_JOBS:-2}"
   local timeout="${LASH_MUTATION_TIMEOUT_SECONDS:-180}"
   run_mutants_recorded "lash-core direct provider/direct request survivors" "${out_dir}/mutants-lash-core-direct-targeted" \
     cargo mutants \
@@ -1653,7 +1676,7 @@ run_lash_core_direct_model_mutation_evidence() {
     --file crates/lash-core/src/direct.rs \
     --re 'DirectRequest::json_schema|DirectLlmClient::provider|DirectLlmClient::provider_mut|DirectLlmClient::complete|build_llm_request|transport_stream_events_for_direct' \
     --baseline skip \
-    --jobs "$jobs" \
+    --jobs "$mutation_jobs" \
     --timeout "$timeout" \
     --minimum-test-timeout 30 \
     --output "${out_dir}/mutants-lash-core-direct-targeted" \
@@ -1664,7 +1687,7 @@ run_lash_core_direct_model_mutation_evidence() {
     --file crates/lash-core/src/model.rs \
     --re 'ModelSpec::with_limits|ModelSpec::with_variant|ModelSpec::from_token_limits|ModelLimits::from_token_limits|ModelSpec::context_window_tokens|nonzero_token_limit|optional_nonzero_token_limit' \
     --baseline skip \
-    --jobs "$jobs" \
+    --jobs "$mutation_jobs" \
     --timeout "$timeout" \
     --minimum-test-timeout 30 \
     --output "${out_dir}/mutants-lash-core-model-targeted" \
@@ -1672,9 +1695,8 @@ run_lash_core_direct_model_mutation_evidence() {
 }
 
 run_lash_sim_runtime_completion_mutation_evidence() {
-  step "Lash-sim scheduler/runtime completion mutation evidence"
+  step "Lash-sim scheduler/runtime completion mutation evidence (${mutation_jobs} concurrent jobs)"
   require_tool cargo-mutants cargo-mutants 27.1.0
-  local jobs="${LASH_MUTATION_JOBS:-2}"
   local timeout="${LASH_MUTATION_TIMEOUT_SECONDS:-180}"
   run_mutants_recorded "lash-sim scheduler runtime completion queue" "${out_dir}/mutants-lash-sim-scheduler-runtime-completion-targeted" \
     cargo mutants \
@@ -1682,7 +1704,7 @@ run_lash_sim_runtime_completion_mutation_evidence() {
     --file crates/lash-sim/src/scheduler.rs \
     --re 'RuntimeCompletionQueue::register|RuntimeCompletionQueue::take_ready|RuntimeCompletionQueue::mark_completed|RuntimeCompletionQueue::registered_len' \
     --baseline skip \
-    --jobs "$jobs" \
+    --jobs "$mutation_jobs" \
     --timeout "$timeout" \
     --minimum-test-timeout 30 \
     --output "${out_dir}/mutants-lash-sim-scheduler-runtime-completion-targeted" \
@@ -1693,7 +1715,7 @@ run_lash_sim_runtime_completion_mutation_evidence() {
     --file crates/lash-sim/src/oracles.rs \
     --re 'scheduler_owned_runtime_completions|mini_rlm_lashlang_cell_exec_continues|mini_agent_parallel_spawn_join|mini_agent_durable_input_resolution|mini_standard_provider_error_without_checkpoint' \
     --baseline skip \
-    --jobs "$jobs" \
+    --jobs "$mutation_jobs" \
     --timeout "$timeout" \
     --minimum-test-timeout 30 \
     --output "${out_dir}/mutants-lash-sim-oracles-runtime-completion-targeted" \
@@ -1704,7 +1726,7 @@ run_lash_sim_runtime_completion_mutation_evidence() {
     --file crates/lash-sim/src/runner.rs \
     --re 'runtime_completion_ready|register_ready_runtime_completions|RuntimeCompletionState::next_provider_turn_ready|RuntimeCompletionState::provider_completed|RuntimeCompletionState::durable_completed' \
     --baseline skip \
-    --jobs "$jobs" \
+    --jobs "$mutation_jobs" \
     --timeout "$timeout" \
     --minimum-test-timeout 30 \
     --output "${out_dir}/mutants-lash-sim-runner-runtime-completion-targeted" \
@@ -1712,9 +1734,8 @@ run_lash_sim_runtime_completion_mutation_evidence() {
 }
 
 run_mutation_full() {
-  step "Full mutation suites"
+  step "Full mutation suites (${mutation_jobs} concurrent jobs)"
   require_tool cargo-mutants cargo-mutants 27.1.0
-  local jobs="${LASH_MUTATION_JOBS:-2}"
   local timeout="${LASH_MUTATION_TIMEOUT_SECONDS:-600}"
   for package in "${critical_packages[@]}"; do
     if [ "$package" = "lash-postgres-store" ]; then
@@ -1732,7 +1753,7 @@ run_mutation_full() {
         -p "$package" \
         --cargo-arg=--locked \
         --test-tool cargo \
-        --jobs "$jobs" \
+        --jobs "$mutation_jobs" \
         --timeout "$timeout" \
         --minimum-test-timeout 60 \
         --output "${out_dir}/mutants-${package}-full"
