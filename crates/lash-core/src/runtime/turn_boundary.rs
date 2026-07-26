@@ -1002,7 +1002,14 @@ mod tests {
                 .and_then(|meta| meta.leaf_node_id.clone()),
         );
         assert_eq!(stored_graph.nodes.len(), graph.nodes.len());
-        assert_eq!(stored_graph.nodes[1].node_id, graph.nodes[1].node_id);
+        assert_eq!(
+            serde_json::to_value(&stored_graph.nodes[1].payload).expect("stored payload"),
+            serde_json::to_value(&graph.nodes[1].payload).expect("expected payload")
+        );
+        assert_eq!(
+            stored_graph.nodes[1].parent_node_id,
+            stored_graph.nodes.first().map(|node| node.node_id.clone())
+        );
         assert!(pipeline.state_mut().head_revision.is_some());
     }
 

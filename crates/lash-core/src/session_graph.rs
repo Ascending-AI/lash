@@ -1411,7 +1411,7 @@ mod tests {
         graph.append_plugin("example", serde_json::json!({"ok": true}));
 
         for node in &graph.nodes {
-            assert!(node.node_id.starts_with("draft-node/v1/"), "{:?}", node);
+            assert!(node.node_id.starts_with("draft-node/v2/"), "{:?}", node);
         }
     }
 }
