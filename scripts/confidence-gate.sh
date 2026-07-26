@@ -61,6 +61,8 @@ esac
 mutation_scope="${LASH_CONFIDENCE_MUTATION_SCOPE:-$default_mutation_scope}"
 coverage_scope="${LASH_CONFIDENCE_COVERAGE_SCOPE:-run}"
 mutation_failures=0
+mutation_postgres_container=""
+mutation_postgres_database_url=""
 script_started_at="$SECONDS"
 current_step=""
 current_step_started_at=0
@@ -84,7 +86,20 @@ finish_current_step() {
   fi
 }
 
-trap finish_current_step EXIT
+cleanup_mutation_postgres() {
+  if [ -n "$mutation_postgres_container" ]; then
+    docker rm -f "$mutation_postgres_container" >/dev/null 2>&1 || true
+    mutation_postgres_container=""
+    mutation_postgres_database_url=""
+  fi
+}
+
+finish_confidence_gate() {
+  cleanup_mutation_postgres
+  finish_current_step
+}
+
+trap finish_confidence_gate EXIT
 
 usage() {
   cat <<'USAGE'
@@ -309,6 +324,53 @@ run_mutants_recorded() {
   "scope": "${mutation_scope}"
 }
 EOF
+}
+
+start_mutation_postgres() {
+  local artifact="$1"
+  local port deadline
+  if ! command -v docker >/dev/null 2>&1; then
+    echo "Postgres mutation requires Docker for an isolated ephemeral database." >&2
+    exit 127
+  fi
+
+  cleanup_mutation_postgres
+  mutation_postgres_container="lash-confidence-mutation-postgres-$(basename "$artifact")-$$"
+  docker rm -f "$mutation_postgres_container" >/dev/null 2>&1 || true
+  bash scripts/docker-pull-with-retry.sh postgres:16-alpine
+  docker run -d --name "$mutation_postgres_container" \
+    -e POSTGRES_USER=lash \
+    -e POSTGRES_PASSWORD=lash \
+    -e POSTGRES_DB=lash \
+    -p "127.0.0.1::5432" \
+    postgres:16-alpine >/dev/null
+
+  port="$(
+    docker inspect \
+      --format '{{(index (index .NetworkSettings.Ports "5432/tcp") 0).HostPort}}' \
+      "$mutation_postgres_container"
+  )"
+  deadline=$((SECONDS + 60))
+  until docker exec "$mutation_postgres_container" pg_isready -U lash -d lash >/dev/null 2>&1; do
+    if (( SECONDS >= deadline )); then
+      docker logs "$mutation_postgres_container" >&2 || true
+      echo "Mutation Postgres did not become ready on port ${port}" >&2
+      exit 1
+    fi
+    sleep 1
+  done
+  mutation_postgres_database_url="postgres://lash:lash@127.0.0.1:${port}/lash"
+}
+
+run_postgres_mutants_recorded() {
+  local name="$1"
+  local artifact="$2"
+  shift 2
+  start_mutation_postgres "$artifact"
+  LASH_POSTGRES_DATABASE_URL="$mutation_postgres_database_url" \
+    LASH_REQUIRE_POSTGRES=1 \
+    run_mutants_recorded "$name" "$artifact" "$@" --jobs 1
+  cleanup_mutation_postgres
 }
 
 bootstrap_nix_llvm_tools() {
@@ -880,7 +942,8 @@ EOF
 
 write_full_lane_prerequisites() {
   mkdir -p "${out_dir}/sim"
-  local cargo_llvm_cov cargo_mutants docker_available llvm_tools postgres_available full_feasible
+  local cargo_llvm_cov cargo_mutants docker_available llvm_tools postgres_available
+  local mutation_postgres_available full_feasible
   if command -v cargo-llvm-cov >/dev/null 2>&1; then
     cargo_llvm_cov="available"
   else
@@ -913,10 +976,16 @@ write_full_lane_prerequisites() {
   else
     postgres_available="missing"
   fi
+  if command -v docker >/dev/null 2>&1; then
+    mutation_postgres_available="isolated_ephemeral_docker"
+  else
+    mutation_postgres_available="missing"
+  fi
   if [ "$cargo_llvm_cov" = "available" ] \
     && [ "$cargo_mutants" = "available" ] \
     && [ "$llvm_tools" != "missing" ] \
-    && [ "$postgres_available" != "missing" ]; then
+    && [ "$postgres_available" != "missing" ] \
+    && [ "$mutation_postgres_available" != "missing" ]; then
     full_feasible="true"
   else
     full_feasible="false"
@@ -931,7 +1000,8 @@ write_full_lane_prerequisites() {
     "cargo_mutants": "${cargo_mutants}",
     "llvm_tools": "${llvm_tools}",
     "docker": "${docker_available}",
-    "postgres": "${postgres_available}"
+    "postgres": "${postgres_available}",
+    "mutation_postgres": "${mutation_postgres_available}"
   },
   "true_full_command": "LASH_CONFIDENCE_OUT_DIR=${out_root} LASH_CONFIDENCE_MUTATION_SCOPE=full scripts/confidence-gate.sh full",
   "bounded_broad_command": "LASH_CONFIDENCE_OUT_DIR=${out_root} LASH_BROAD_SIM_SEEDS=2 LASH_BROAD_SIM_MAX_BOUNDARIES=128 LASH_MUTATION_JOBS=2 LASH_MUTATION_TIMEOUT_SECONDS=300 scripts/confidence-gate.sh broad",
@@ -989,7 +1059,7 @@ run_generated_postgres_dynamic_replay() {
   step "Generated Postgres dynamic backend rerun"
   local replay_dir="${out_dir}/sim/postgres-generated-rerun"
   local profile="${LASH_POSTGRES_GENERATED_PROFILE:-full-random}"
-  local seed="${LASH_POSTGRES_GENERATED_SEED:-4101155038242989457}"
+  local seed="4101155038242989457"
   local max_boundaries="${LASH_POSTGRES_GENERATED_MAX_BOUNDARIES:-128}"
   LASH_POSTGRES_DATABASE_URL="$database_url" \
     cargo run -p lash-sim --locked -- run-postgres \
@@ -1447,7 +1517,7 @@ if generated["trace_count"] == 0 or generated_backend_regression["trace_count"] 
 summary = {
     "schema": "lash.confidence.model-replay-evidence.v1",
     "status": status,
-    "semantics": "Generated scheduler traces and generated backend regression fixtures are replayed against the simulation model. Minimized failing-regression traces are model-replayed to prove deterministic oracle preservation. Backend equivalence is not claimed by this artifact; generated SQLite/Postgres dynamic rerun artifacts carry that evidence.",
+    "semantics": "Generated scheduler traces and generated backend regression fixtures are replayed against the simulation model. Minimized failing-regression traces are model-replayed to prove deterministic oracle preservation. Backend equivalence is not claimed by this artifact; SQLite evidence is recorded by sim/backend-contention/backend-contention.json and sim/focused-sqlite-seed-tail/focused-sqlite-seed-tail.json, while Postgres generated-rerun evidence is recorded by sim/postgres-generated-rerun/summary.json using the single hardcoded seed 4101155038242989457.",
     "row_count": len(rows),
     "corpora": by_corpus,
     "failures": failures,
@@ -1500,7 +1570,9 @@ EOF
     --output-path "${coverage_dir}/missing-lines.txt"
   cargo llvm-cov report --json --summary-only \
     --output-path "${coverage_dir}/summary.json"
-  awk '
+  local critical_package_regex
+  critical_package_regex="$(IFS='|'; printf '%s' "${critical_packages[*]}")"
+  awk -v critical_package_regex="$critical_package_regex" '
     /^SF:/ {
       file = substr($0, 4)
       total = 0
@@ -1516,7 +1588,7 @@ EOF
       next
     }
     /^end_of_record/ {
-      if (file ~ /\/crates\/(lash-core|lashlang|lash-protocol-rlm|lash-protocol-standard|lash-sqlite-store|lash-postgres-store)\// && uncovered > 0) {
+      if (file ~ ("/crates/(" critical_package_regex ")/") && uncovered > 0) {
         print uncovered "\t" total "\t" file
       }
     }
@@ -1545,16 +1617,28 @@ run_mutation_smoke() {
   local jobs="${LASH_MUTATION_JOBS:-2}"
   local timeout="${LASH_MUTATION_TIMEOUT_SECONDS:-180}"
   for package in "${critical_packages[@]}"; do
-    run_mutants_recorded "$package smoke shard" "${out_dir}/mutants-${package}-smoke" \
-      cargo mutants \
-      -p "$package" \
-      --cargo-arg=--locked \
-      --test-tool cargo \
-      --shard "$shard" \
-      --jobs "$jobs" \
-      --timeout "$timeout" \
-      --minimum-test-timeout 30 \
-      --output "${out_dir}/mutants-${package}-smoke"
+    if [ "$package" = "lash-postgres-store" ]; then
+      run_postgres_mutants_recorded "$package smoke shard" "${out_dir}/mutants-${package}-smoke" \
+        cargo mutants \
+        -p "$package" \
+        --cargo-arg=--locked \
+        --test-tool cargo \
+        --shard "$shard" \
+        --timeout "$timeout" \
+        --minimum-test-timeout 30 \
+        --output "${out_dir}/mutants-${package}-smoke"
+    else
+      run_mutants_recorded "$package smoke shard" "${out_dir}/mutants-${package}-smoke" \
+        cargo mutants \
+        -p "$package" \
+        --cargo-arg=--locked \
+        --test-tool cargo \
+        --shard "$shard" \
+        --jobs "$jobs" \
+        --timeout "$timeout" \
+        --minimum-test-timeout 30 \
+        --output "${out_dir}/mutants-${package}-smoke"
+    fi
   done
 }
 
@@ -1633,15 +1717,26 @@ run_mutation_full() {
   local jobs="${LASH_MUTATION_JOBS:-2}"
   local timeout="${LASH_MUTATION_TIMEOUT_SECONDS:-600}"
   for package in "${critical_packages[@]}"; do
-    run_mutants_recorded "$package full mutation" "${out_dir}/mutants-${package}-full" \
-      cargo mutants \
-      -p "$package" \
-      --cargo-arg=--locked \
-      --test-tool cargo \
-      --jobs "$jobs" \
-      --timeout "$timeout" \
-      --minimum-test-timeout 60 \
-      --output "${out_dir}/mutants-${package}-full"
+    if [ "$package" = "lash-postgres-store" ]; then
+      run_postgres_mutants_recorded "$package full mutation" "${out_dir}/mutants-${package}-full" \
+        cargo mutants \
+        -p "$package" \
+        --cargo-arg=--locked \
+        --test-tool cargo \
+        --timeout "$timeout" \
+        --minimum-test-timeout 60 \
+        --output "${out_dir}/mutants-${package}-full"
+    else
+      run_mutants_recorded "$package full mutation" "${out_dir}/mutants-${package}-full" \
+        cargo mutants \
+        -p "$package" \
+        --cargo-arg=--locked \
+        --test-tool cargo \
+        --jobs "$jobs" \
+        --timeout "$timeout" \
+        --minimum-test-timeout 60 \
+        --output "${out_dir}/mutants-${package}-full"
+    fi
   done
 }
 

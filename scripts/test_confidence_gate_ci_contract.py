@@ -57,6 +57,39 @@ def workflow_job_block(workflow: str, job_id: str) -> str:
     return workflow[start : start + len(marker) + next_job.start()]
 
 
+def shell_function_body(script: str, function_name: str) -> str:
+    start_match = re.search(
+        rf"^{re.escape(function_name)}\(\) \{{\n", script, re.MULTILINE
+    )
+    if start_match is None:
+        raise AssertionError(f"missing shell function {function_name}")
+    next_function = re.search(
+        r"^[a-zA-Z_][a-zA-Z0-9_]*\(\) \{\n",
+        script[start_match.end() :],
+        re.MULTILINE,
+    )
+    if next_function is None:
+        return script[start_match.end() :]
+    return script[start_match.end() : start_match.end() + next_function.start()]
+
+
+def shell_logical_commands(script: str) -> list[str]:
+    commands: list[str] = []
+    current = ""
+    for line in script.splitlines():
+        stripped = line.strip()
+        current = f"{current} {stripped}".strip()
+        if current.endswith("\\"):
+            current = current[:-1].rstrip()
+            continue
+        if current:
+            commands.append(current)
+        current = ""
+    if current:
+        commands.append(current)
+    return commands
+
+
 class ConfidenceGateCiContractTest(unittest.TestCase):
     def assert_quarantine_fixture_invalid(
         self, payload: dict[str, object], message: str
@@ -498,8 +531,16 @@ class ConfidenceGateCiContractTest(unittest.TestCase):
 
         self.assertNotIn("run_cross_backend_replay_suite", gate)
         self.assertNotIn("sim/cross-backend-replay", gate)
-        self.assertNotIn('"backend":"%s"', gate)
-        self.assertNotIn('"skip_reason":"%s"', gate)
+        replay_command = shell_function_body(gate, "run_model_replay_command")
+        row_format = re.search(
+            r"""printf\s+'(?P<json>\{.*?\})\\n'""", replay_command, re.DOTALL
+        )
+        self.assertIsNotNone(row_format)
+        row_keys = set(
+            re.findall(r'"([^"]+)"\s*:', row_format.group("json"))
+        )
+        self.assertNotIn("backend", row_keys)
+        self.assertNotIn("skip_reason", row_keys)
         self.assertNotIn("backend_replayable_regression", gate)
         self.assertNotIn(
             "Every generated trace and every backend-replayable regression trace is replayed through model, SQLite, and Postgres",
@@ -514,10 +555,46 @@ class ConfidenceGateCiContractTest(unittest.TestCase):
         critical_packages = gate.split("critical_packages=(", 1)[1].split(")", 1)[0]
         self.assertIn("lash-sqlite-store", critical_packages)
         self.assertIn("lash-postgres-store", critical_packages)
-        self.assertIn('for package in "${critical_packages[@]}"; do', gate)
-        self.assertIn('coverage_package_args+=(-p "$package")', gate)
-        self.assertIn("run_mutation_smoke", gate)
-        self.assertIn("run_mutation_full", gate)
+        for function_name in ("run_mutation_smoke", "run_mutation_full"):
+            body = shell_function_body(gate, function_name)
+            loop_headers = re.findall(
+                r"^\s*for\s+package\s+in\s+(.+);\s*do\s*$", body, re.MULTILINE
+            )
+            self.assertEqual(['"${critical_packages[@]}"'], loop_headers)
+            self.assertIn('if [ "$package" = "lash-postgres-store" ]; then', body)
+            self.assertIn("run_postgres_mutants_recorded", body)
+
+        postgres_mutation = shell_function_body(
+            gate, "run_postgres_mutants_recorded"
+        )
+        self.assertIn('start_mutation_postgres "$artifact"', postgres_mutation)
+        self.assertIn(
+            'LASH_POSTGRES_DATABASE_URL="$mutation_postgres_database_url"',
+            postgres_mutation,
+        )
+        self.assertIn("LASH_REQUIRE_POSTGRES=1", postgres_mutation)
+        self.assertIn('"$@" --jobs 1', postgres_mutation)
+
+        coverage_body = shell_function_body(gate, "run_coverage_blind_spots")
+        coverage_loops = re.findall(
+            r"^\s*for\s+package\s+in\s+(.+);\s*do\s*$",
+            coverage_body,
+            re.MULTILINE,
+        )
+        self.assertEqual(['"${critical_packages[@]}"'], coverage_loops)
+        self.assertIn('coverage_package_args+=(-p "$package")', coverage_body)
+        self.assertIn(
+            '''critical_package_regex="$(IFS='|'; printf '%s' "${critical_packages[*]}")"''',
+            coverage_body,
+        )
+        self.assertIn(
+            'awk -v critical_package_regex="$critical_package_regex"',
+            coverage_body,
+        )
+        self.assertIn(
+            'file ~ ("/crates/(" critical_package_regex ")/")',
+            coverage_body,
+        )
         self.assertIn('if [ "$lane" = "full" ]; then', gate)
         self.assertIn('cron: "29 4 * * 0"', confidence_workflow)
         self.assertNotIn("scripts/confidence-gate.sh default", workflow)
@@ -527,9 +604,21 @@ class ConfidenceGateCiContractTest(unittest.TestCase):
         gate = GATE.read_text(encoding="utf-8")
 
         self.assertIn('LASH_REQUIRE_POSTGRES: "1"', workflow)
-        self.assertIn(
-            "LASH_REQUIRE_POSTGRES=1 cargo test -p lash-postgres-store --locked --test conformance",
-            gate,
+        conformance_calls = [
+            command
+            for command in shell_logical_commands(gate)
+            if re.search(
+                r"\bcargo test -p lash-postgres-store\b.*(?:^|\s)--test\s+conformance(?:\s|$)",
+                command,
+            )
+        ]
+        self.assertGreater(len(conformance_calls), 0)
+        self.assertEqual(
+            len(conformance_calls),
+            sum(
+                "LASH_REQUIRE_POSTGRES=1" in command
+                for command in conformance_calls
+            ),
         )
 
     def test_generated_postgres_dynamic_rerun_is_bounded_and_artifacted(self) -> None:

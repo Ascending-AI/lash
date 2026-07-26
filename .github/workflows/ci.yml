@@ -400,9 +400,9 @@ jobs:
       # `lash-postgres-store`'s conformance tests run the backend-agnostic
       # RuntimePersistence / SessionStoreFactory / ProcessRegistry /
       # TriggerStore / LashlangArtifactStore suites against a real Postgres.
-      # They self-skip when the URL is unset, so the env var is what makes
-      # them actually execute here. `connect()` runs `ensure_schema` (CREATE
-      # TABLE IF NOT EXISTS), so no separate migrate step.
+      # Required mode fails when the URL is unset, so missing CI configuration
+      # cannot silently skip this lane. `connect()` runs `ensure_schema`
+      # (CREATE TABLE IF NOT EXISTS), so no separate migrate step.
       # The suites self-serialize on a shared in-process guard (they share one
       # database and reset() truncates all lash_* tables), so no --test-threads=1.
       # That guard is per-process, so this must stay `cargo test` — nextest's
