@@ -20,13 +20,15 @@ must not confuse them:
 
 Two consequences are load-bearing:
 
-- **Terminal events are not emitted through the sink.** `complete_process`
-  appends its terminal event via the *inner* registry, so the decorator never
-  observes it as an `append_event` and never emits it. Terminal observation
-  rides `ProcessWorkDriver::await_terminal` (ADR 0016), which reads the durable
-  terminal state — engine-native (Restate ingress attach) where available, the
-  in-process change hub plus backoff point reads otherwise. Hosts must not wait
-  on the sink for completion.
+- **The sink emits every appended event, terminals included.** *(Superseded on
+  this point by ADR 0046: emission is uniform across explicit appends, lifecycle
+  verbs, and terminal completion, so projections never silently miss a
+  transition. This ADR originally excluded terminal events from the sink.)*
+  Terminal *observation* still rides `ProcessWorkDriver::await_terminal`
+  (ADR 0016), which reads the durable terminal state — engine-native (Restate
+  ingress attach) where available, the in-process change hub plus backoff point
+  reads otherwise. The sink stays best-effort freshness: hosts must not wait on
+  it for completion, and a terminal seen on the sink is a hint, not delivery.
 - **Emission cannot fail or slow-fail the write.** `emit` returns `()`, so a
   sink can never fail an append; the durable write has already committed when
   `emit` runs. But the decorator awaits `emit` inline, so a slow sink slows
