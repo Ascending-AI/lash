@@ -1717,8 +1717,8 @@ impl RestateProcessIngressRunner {
     /// (`owner: None`). The Restate tier holds no Lash lease — workflow-key
     /// coalescing is its single-writer discipline — so the terminal is written
     /// directly after re-checking the row is still non-terminal (it may have
-    /// been completed between the worklist scan and here). The terminal write
-    /// bypasses the event sink as usual.
+    /// been completed between the worklist scan and here). The decorated
+    /// registry emits the resulting terminal append through the event sink.
     async fn reconcile_externally_owned_abandon(
         &self,
         process_id: &str,

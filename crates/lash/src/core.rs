@@ -1351,9 +1351,9 @@ impl LashCoreBuilder {
     ///
     /// Each appended process event is pushed to the sink after its durable
     /// write, in per-process append order. This is freshness, not truth: it
-    /// never buffers or retries, terminal events are not emitted through it
-    /// (observe completion via the await seam), and consumers reconcile from
-    /// the durable event log. See [`ProcessEventSink`] for the full contract.
+    /// never buffers or retries, and consumers reconcile from the durable event
+    /// log. Observe completion via the await seam even though the terminal
+    /// append is also emitted. See [`ProcessEventSink`] for the full contract.
     ///
     /// Applies to the inline registry path ([`Self::process_registry`]); a host
     /// that supplies its own [`ProcessWorkDriver`](lash_core::ProcessWorkDriver)

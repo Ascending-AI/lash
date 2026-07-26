@@ -7191,7 +7191,7 @@ impl lash_core::ProcessEventSink for RecordingProcessEventSink {
 async fn restate_deployment_sink_funnel_feeds_appended_events() {
     // ADR 0017 names `RestateProcessDeployment::new_with_sink` as the durable
     // hosts' wrap funnel: a sink installed there observes every append made
-    // through the deployment's shared registry, and never terminal events.
+    // through the deployment's shared registry, including terminal events.
     let sink = RecordingProcessEventSink::default();
     let deployment = RestateProcessDeployment::new_with_sink(
         "http://127.0.0.1:8080",
@@ -7232,8 +7232,11 @@ async fn restate_deployment_sink_funnel_feeds_appended_events() {
 
     assert_eq!(
         sink.events.lock().expect("sink lock").clone(),
-        vec![("producer.tick".to_string(), 1)],
-        "the deployment-wrapped registry feeds appends to the sink and never terminal events"
+        vec![
+            ("producer.tick".to_string(), 1),
+            ("process.completed".to_string(), 2),
+        ],
+        "the deployment-wrapped registry feeds every append to the sink"
     );
 }
 
