@@ -976,8 +976,8 @@ async fn inline_process_await_sink_and_prune_end_to_end() -> Result<()> {
         "the held await resolves promptly once the process completes (waited {elapsed:?})"
     );
 
-    // The wired sink observed the intermediate signal event in append order and
-    // never a terminal event — terminal observation rides the await seam only.
+    // The wired sink observed lifecycle, signal, and terminal events in append
+    // order. The await seam remains authoritative for terminal observation.
     let collected = sink.collected();
     let sequences: Vec<u64> = collected.iter().map(|(_, sequence)| *sequence).collect();
     let mut sorted = sequences.clone();
@@ -993,12 +993,10 @@ async fn inline_process_await_sink_and_prune_end_to_end() -> Result<()> {
         "the sink observed the intermediate signal event; got {collected:?}"
     );
     assert!(
-        !collected.iter().any(|(event_type, _)| {
-            event_type == "process.completed"
-                || event_type == "process.failed"
-                || event_type == "process.cancelled"
-        }),
-        "terminal events never ride the sink; got {collected:?}"
+        collected
+            .iter()
+            .any(|(event_type, _)| event_type == "process.completed"),
+        "the sink observed the terminal append; got {collected:?}"
     );
 
     wait_for_terminal(
