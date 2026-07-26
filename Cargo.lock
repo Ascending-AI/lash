@@ -2397,6 +2397,7 @@ dependencies = [
  "lash-sqlite-store",
  "lash-subagents",
  "lash-tools",
+ "rusqlite",
  "serde",
  "serde_json",
  "sha2 0.10.9",

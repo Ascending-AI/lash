@@ -41,4 +41,5 @@ tokio = { workspace = true, features = ["macros", "rt", "rt-multi-thread", "sync
 
 [dev-dependencies]
 lash-provider-auth = { workspace = true }
+rusqlite = { version = "0.37", features = ["bundled"] }
 tempfile = { workspace = true }
