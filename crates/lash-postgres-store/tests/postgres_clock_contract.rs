@@ -67,7 +67,7 @@ fn process_lease_decisions_use_the_postgres_clock() {
     let lease_sensitive_regions = [
         (
             "async fn complete_process_with_lease(",
-            "async fn record_first_started(",
+            "async fn record_first_started_with_authority(",
         ),
         (
             "async fn claim_process_lease(",
