@@ -171,7 +171,8 @@ pub mod persistence {
     pub use lash_core::store::{
         GraphCommitDelta, HydratedSessionCheckpoint, OperationId, PersistedSessionRead,
         RealizedAgentFrame, RuntimeCommit, RuntimeCommitResult, RuntimeTurnCommitStamp,
-        SessionCheckpoint, SessionHead, SessionHeadMeta, load_persisted_session_state,
+        SessionCheckpoint, SessionHead, SessionHeadMeta, commit_runtime_state_verified,
+        graph_realization_digest, load_persisted_session_state,
         load_persisted_session_state_active_path,
     };
     pub use lash_core::{

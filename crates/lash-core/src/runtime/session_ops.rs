@@ -136,10 +136,17 @@ impl LashRuntime {
             {
                 Ok(result) => result,
                 Err(err) => {
-                    self.state = state_before_append;
-                    return Err(SessionError::Protocol(format!(
-                        "failed to persist runtime state: {err}"
-                    )));
+                    let persistence_error = format!("failed to persist runtime state: {err}");
+                    if let Err(rollback_err) = self
+                        .restore_protocol_session_after_failed_append(state_before_append)
+                        .await
+                    {
+                        return Err(SessionError::Protocol(format!(
+                            "{persistence_error}; failed to restore protocol session: \
+                             {rollback_err}"
+                        )));
+                    }
+                    return Err(SessionError::Protocol(persistence_error));
                 }
             };
             self.state.apply_persisted_commit_result(result);
@@ -162,6 +169,26 @@ impl LashRuntime {
                 .clone()
                 .unwrap_or_default(),
         })
+    }
+
+    async fn restore_protocol_session_after_failed_append(
+        &mut self,
+        state_before_append: RuntimeSessionState,
+    ) -> Result<(), SessionError> {
+        self.state = state_before_append;
+        let state_for_restore = self.state.clone();
+        if let Some(session) = self.session.as_mut() {
+            let protocol_session = Arc::clone(session.plugins().protocol_session());
+            let session_id = state_for_restore.session_id.clone();
+            protocol_session
+                .restore_session(
+                    crate::plugin::ProtocolSessionContext::new(session, &session_id),
+                    &state_for_restore,
+                )
+                .await?;
+        }
+        self.stamp_live_plugin_state();
+        Ok(())
     }
 
     pub async fn apply_protocol_session_extension(
@@ -353,6 +380,7 @@ impl LashRuntime {
         name: &str,
         args: serde_json::Value,
         session_id: Option<String>,
+        operation_scope: crate::ExecutionScope,
     ) -> Result<crate::PluginCommandReceipt<serde_json::Value>, PluginOperationInvokeError> {
         let manager = self.runtime_session_services()?;
         let Some(session) = self.session.as_ref() else {
@@ -373,11 +401,6 @@ impl LashRuntime {
                 manager.process_service(),
             )
             .await?;
-        let operation_scope = crate::ExecutionScope::runtime_operation(format!(
-            "session:{}:plugin-command:{}",
-            self.state.session_id,
-            uuid::Uuid::new_v4()
-        ));
         let (events, pending_turn_inputs) = self
             .apply_plugin_operation_effects(
                 &plugin_id,
