@@ -433,6 +433,11 @@ jobs:
             exit 1
           fi
 
+          if ! grep -F "cross-backend durable state diverged:" "$oracle_output" >/dev/null; then
+            echo "known-red store differential did not reach its final oracle assertion"
+            exit 1
+          fi
+
           for divergence in \
             duplicate_node_id_within_one_append \
             duplicate_node_id_across_two_commits \
