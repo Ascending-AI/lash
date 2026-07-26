@@ -11,7 +11,8 @@ use lash::persistence::{
     CheckpointKind, GcReport, GraphCommitDelta, LeaseOwnerIdentity, OperationId,
     PersistedSessionRead, PendingTurnInputDraft, QueuedWorkBatch, QueuedWorkBatchDraft, QueuedWorkClaim,
     QueuedWorkClaimBoundary, QueuedWorkStore, RuntimeCommit, RuntimeCommitResult,
-    RuntimePersistence, RuntimeSessionState, RuntimeTurnCommitStamp, SessionCheckpoint,
+    RuntimePersistence, RuntimeSessionState, RuntimeTurnCommitStamp, RealizedAgentFrame,
+    SessionCheckpoint,
     SessionCommitStore, SessionExecutionLease, SessionExecutionLeaseClaimOutcome,
     SessionExecutionLeaseCompletion, SessionExecutionLeaseFence, SessionExecutionLeaseStore,
     SessionMeta, SessionNodeRecord, SessionReadScope, StoreError, StoreMaintenance, TurnInputClaim,
@@ -66,8 +67,14 @@ impl SessionCommitStore for FacadeStore {
             checkpoint_ref: "checkpoint".to_string().into(),
             manifest,
             realization_digest: String::new(),
-            agent_frames: Vec::new(),
-            current_agent_frame_id: String::new(),
+            realized_agent_frames: commit
+                .agent_frames
+                .iter()
+                .map(|frame| RealizedAgentFrame {
+                    frame_id: frame.frame_id.clone(),
+                    created_at: frame.created_at.clone(),
+                })
+                .collect(),
             enqueued_queue_batches: Vec::new(),
             turn_input_applications: Vec::new(),
         })

@@ -245,7 +245,9 @@ where
         }
     }
     final_commit_stamp_is_idempotent_and_conflicts_on_changed_hash(make()).await;
+    verified_commit_rejects_receipt_topology_mismatch(make()).await;
     commit_rejects_non_derived_append_node_ids(make()).await;
+    append_rejects_existing_node_id_collision(make()).await;
     // [`SessionExecutionLeaseStore`]: single-writer lane fencing.
     session_execution_lease_contract(make()).await;
     session_execution_lease_reclaim_contract(make()).await;
@@ -4786,6 +4788,7 @@ async fn final_commit_stamp_is_idempotent_and_conflicts_on_changed_hash(
     };
     state.ensure_agent_frame_initialized();
     state.agent_frames[0].created_at = "2026-07-26T10:00:00Z".to_string();
+    state.agent_frames[0].execution_state_snapshot = Some(vec![7; 1_024]);
     let commit = RuntimeCommit::persisted_state(&state, &[]);
     let turn_commit_hash = commit.turn_commit_hash().expect("turn commit hash");
     let stamped_commit = commit.with_turn_commit(RuntimeTurnCommitStamp::new(
@@ -4824,8 +4827,13 @@ async fn final_commit_stamp_is_idempotent_and_conflicts_on_changed_hash(
         first.realization_digest,
         crate::store::graph_realization_digest(&stamped_commit.graph)
     );
+    let receipt_json = serde_json::to_string(&first).expect("serialize commit receipt");
+    assert!(
+        !receipt_json.contains("execution_state_snapshot"),
+        "commit receipts must retain frame references and timestamps, never snapshot bytes"
+    );
     assert_eq!(
-        retry.agent_frames[0].created_at, "2026-07-26T10:00:00Z",
+        retry.realized_agent_frames[0].created_at, "2026-07-26T10:00:00Z",
         "receipt must return store-realized frame time from the first attempt"
     );
     replay_state.apply_persisted_commit_result(retry.clone());
@@ -4860,6 +4868,56 @@ async fn final_commit_stamp_is_idempotent_and_conflicts_on_changed_hash(
         .await
         .expect_err("same provider turn id with a different commit hash must conflict");
     assert!(matches!(err, StoreError::RuntimeTurnCommitConflict { .. }));
+}
+
+async fn verified_commit_rejects_receipt_topology_mismatch(store: Arc<dyn RuntimePersistence>) {
+    let mut state = RuntimeSessionState {
+        session_id: "root".to_string(),
+        ..RuntimeSessionState::default()
+    };
+    state.ensure_agent_frame_initialized();
+    let operation = crate::OperationId::turn("root", "realization-guard", "final");
+    let node_id = crate::store::derive_history_node_id("root", &operation, 0)
+        .expect("derive guarded node id");
+    let graph = crate::GraphCommitDelta::Append {
+        nodes: vec![crate::SessionNodeRecord {
+            node_id: node_id.clone(),
+            parent_node_id: None,
+            caused_by: None,
+            agent_frame_id: Some(state.current_agent_frame_id.clone()),
+            timestamp: "2026-07-26T10:00:00Z".to_string(),
+            payload: crate::SessionNodePayload::Plugin {
+                plugin_type: "guard".to_string(),
+                body: crate::session_graph::SharedJsonValue::new(serde_json::json!({"ok": true})),
+            },
+        }],
+        leaf_node_id: Some(node_id.clone()),
+    };
+    let first = RuntimeCommit::persisted_state_with_graph_commit(&state, graph, &[])
+        .with_operation(operation)
+        .expect("stamp guarded commit");
+    commit_runtime_state_for_test(&store, first.clone(), "realization-guard")
+        .await
+        .expect("first guarded commit");
+
+    let mut divergent_replay = first;
+    let crate::GraphCommitDelta::Append { nodes, .. } = &mut divergent_replay.graph else {
+        panic!("guard fixture is append");
+    };
+    nodes[0].parent_node_id = Some("proposal-only-parent".to_string());
+    let err = crate::store::commit_runtime_state_verified(store.as_ref(), divergent_replay)
+        .await
+        .expect_err("verified receipt hit must reject a divergent topology");
+    assert!(matches!(err, StoreError::CommitRealizationMismatch { .. }));
+    let stored = store
+        .load_node(&node_id)
+        .await
+        .expect("load guarded node")
+        .expect("guarded node remains stored");
+    assert_eq!(
+        stored.parent_node_id, None,
+        "a rejected receipt replay must not adopt or persist proposal topology"
+    );
 }
 
 async fn commit_rejects_non_derived_append_node_ids(store: Arc<dyn RuntimePersistence>) {
@@ -4897,5 +4955,77 @@ async fn commit_rejects_non_derived_append_node_ids(store: Arc<dyn RuntimePersis
             .expect("load after guard rejection")
             .is_none(),
         "guard rejection must happen before any durable write"
+    );
+}
+
+async fn append_rejects_existing_node_id_collision(store: Arc<dyn RuntimePersistence>) {
+    let mut state = RuntimeSessionState {
+        session_id: "root".to_string(),
+        ..RuntimeSessionState::default()
+    };
+    state.ensure_agent_frame_initialized();
+    let append_operation =
+        crate::OperationId::turn("root", "collision-append", "append-session-nodes");
+    let colliding_id = crate::store::derive_history_node_id("root", &append_operation, 0)
+        .expect("derive collision id");
+    let original = crate::SessionNodeRecord {
+        node_id: colliding_id.clone(),
+        parent_node_id: None,
+        caused_by: None,
+        agent_frame_id: Some(state.current_agent_frame_id.clone()),
+        timestamp: "2026-07-26T10:00:00Z".to_string(),
+        payload: crate::SessionNodePayload::Plugin {
+            plugin_type: "original".to_string(),
+            body: crate::session_graph::SharedJsonValue::new(serde_json::json!({"version": 1})),
+        },
+    };
+    state.session_graph =
+        crate::SessionGraph::from_nodes(vec![original.clone()], Some(colliding_id.clone()));
+    let initial = RuntimeCommit::persisted_state(&state, &[])
+        .with_operation(crate::OperationId::turn(
+            "root",
+            "collision-seed",
+            "replace-full",
+        ))
+        .expect("stamp collision seed");
+    let first = commit_runtime_state_for_test(&store, initial, "collision-seed")
+        .await
+        .expect("seed colliding durable node");
+
+    let replacement = crate::SessionNodeRecord {
+        payload: crate::SessionNodePayload::Plugin {
+            plugin_type: "replacement".to_string(),
+            body: crate::session_graph::SharedJsonValue::new(serde_json::json!({"version": 2})),
+        },
+        ..original
+    };
+    let mut append = RuntimeCommit::persisted_state_with_graph_commit(
+        &state,
+        crate::GraphCommitDelta::Append {
+            nodes: vec![replacement],
+            leaf_node_id: Some(colliding_id.clone()),
+        },
+        &[],
+    );
+    append.expected_head_revision = Some(first.head_revision);
+    let append = append
+        .with_operation(append_operation)
+        .expect("stamp colliding append");
+    let err = commit_runtime_state_for_test(&store, append, "collision-append")
+        .await
+        .expect_err("append must reject an id already present in durable history");
+    assert!(matches!(
+        err,
+        StoreError::NodeIdCollision { ref node_id } if node_id == &colliding_id
+    ));
+    let stored = store
+        .load_node(&colliding_id)
+        .await
+        .expect("load original node")
+        .expect("original node remains");
+    assert_eq!(
+        stored.plugin().map(|(plugin_type, _)| plugin_type),
+        Some("original"),
+        "collision rejection must not overwrite the durable node"
     );
 }

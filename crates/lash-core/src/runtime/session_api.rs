@@ -328,6 +328,7 @@ impl LashRuntime {
         scoped_effect_controller: crate::ScopedEffectController<'_>,
     ) -> Result<bool, PluginOperationInvokeError> {
         let services = self.runtime_session_services()?;
+        let compaction_boundary = scoped_effect_controller.scope_id().to_string();
         let Some(plugin_session) = self.session.as_ref().map(|s| Arc::clone(s.plugins())) else {
             return Err(PluginOperationInvokeError::Unknown(
                 "runtime session not available".to_string(),
@@ -348,10 +349,10 @@ impl LashRuntime {
         else {
             return Ok(false);
         };
-        let frame_id = format!(
-            "{}:frame:compaction:{}",
-            self.state.session_id,
-            uuid::Uuid::new_v4()
+        let frame_id = compaction_frame_id(
+            &self.state.session_id,
+            &compaction_boundary,
+            &self.state.current_agent_frame_id,
         );
         let result = self.open_agent_frame(
             crate::OpenAgentFrameRequest::new(frame_id, crate::AgentFrameReason::compaction())
@@ -600,7 +601,12 @@ impl LashRuntime {
                     "session-command",
                 )
             })
-            .unwrap_or_else(|| super::state::revision_operation(&self.state, "session-command"));
+            .ok_or_else(|| {
+                RuntimeError::new(
+                    RuntimeErrorCode::StoreCommitFailed,
+                    "persisted session commands require a claimed queue boundary",
+                )
+            })?;
         let mut commit =
             crate::store::RuntimeCommit::persisted_state_with_graph_commit(&self.state, graph, &[])
                 .with_operation(operation)
@@ -615,22 +621,16 @@ impl LashRuntime {
         if let Some(completion) = completion {
             commit = commit.completing_queue_claim(completion);
         }
-        let proposed_realization = crate::store::graph_realization_digest(&commit.graph);
-        let result = store
-            .commit_runtime_state(commit)
+        let result = crate::store::commit_runtime_state_verified(store.as_ref(), commit)
             .await
             .map_err(super::runtime_error_from_store_commit)?;
-        if proposed_realization != result.realization_digest {
-            return Err(super::runtime_error_from_store_commit(
-                crate::StoreError::CommitRealizationMismatch {
-                    proposed: proposed_realization,
-                    stored: result.realization_digest.clone(),
-                },
-            ));
-        }
         self.state.apply_persisted_commit_result(result);
         Ok(())
     }
+}
+
+fn compaction_frame_id(session_id: &str, boundary_id: &str, previous_frame_id: &str) -> String {
+    format!("{session_id}:frame:compaction:{boundary_id}:after:{previous_frame_id}")
 }
 
 pub(in crate::runtime) fn queued_turn_input_store_required() -> RuntimeError {
@@ -638,4 +638,19 @@ pub(in crate::runtime) fn queued_turn_input_store_required() -> RuntimeError {
         RuntimeErrorCode::StoreCommitFailed,
         "queued turn input requires a persistent runtime store",
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::compaction_frame_id;
+
+    #[test]
+    fn compaction_frame_identity_is_replay_stable() {
+        let first = compaction_frame_id("session", "turn", "frame-before");
+        let replay = compaction_frame_id("session", "turn", "frame-before");
+        let next = compaction_frame_id("session", "turn", "frame-after");
+
+        assert_eq!(first, replay);
+        assert_ne!(first, next);
+    }
 }

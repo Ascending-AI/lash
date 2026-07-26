@@ -162,6 +162,7 @@ impl SessionAdmin {
         self.with_writer(async |runtime: &mut LashRuntime| {
             runtime
                 .append_session_nodes(lash_core::AppendSessionNodesRequest {
+                    operation_id: uuid::Uuid::new_v4().to_string(),
                     nodes: messages
                         .into_iter()
                         .map(lash_core::SessionAppendNode::message)
@@ -183,6 +184,7 @@ impl SessionAdmin {
         self.with_writer(async |runtime: &mut LashRuntime| {
             runtime
                 .append_session_nodes(lash_core::AppendSessionNodesRequest {
+                    operation_id: uuid::Uuid::new_v4().to_string(),
                     nodes: vec![lash_core::SessionAppendNode::plugin(plugin_type, body)],
                     requires_ancestor_node_id: None,
                 })

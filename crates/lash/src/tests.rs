@@ -162,8 +162,14 @@ impl lash_core::SessionCommitStore for SnapshotStore {
     {
         let mut read = self.read.lock().expect("snapshot store lock");
         let realization_digest = lash_core::store::graph_realization_digest(&commit.graph);
-        let realized_agent_frames = commit.agent_frames.clone();
-        let realized_current_agent_frame_id = commit.current_agent_frame_id.clone();
+        let realized_agent_frames = commit
+            .agent_frames
+            .iter()
+            .map(|frame| lash_core::store::RealizedAgentFrame {
+                frame_id: frame.frame_id.clone(),
+                created_at: frame.created_at.clone(),
+            })
+            .collect();
         if let Some(completed) = &commit.turn_commit {
             let operation_key = completed.operation.storage_key()?;
             if completed.session_id != commit.session_id {
@@ -249,8 +255,7 @@ impl lash_core::SessionCommitStore for SnapshotStore {
             checkpoint_ref: lash_core::BlobRef("checkpoint".to_string()),
             manifest: lash_core::store::SessionCheckpoint::default(),
             realization_digest,
-            agent_frames: realized_agent_frames,
-            current_agent_frame_id: realized_current_agent_frame_id,
+            realized_agent_frames,
             enqueued_queue_batches: Vec::new(),
             turn_input_applications: Vec::new(),
         };

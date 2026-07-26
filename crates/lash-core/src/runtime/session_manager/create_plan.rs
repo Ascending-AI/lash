@@ -118,7 +118,13 @@ fn build_runtime_state(
         base.protocol_turn_options.clone(),
         clock,
     );
-    append_session_nodes_to_state_with_clock(&mut base, &request.initial_nodes, clock);
+    let draft_namespace = format!("create-session:{}", base.session_id);
+    append_session_nodes_to_state_with_clock(
+        &mut base,
+        &request.initial_nodes,
+        &draft_namespace,
+        clock,
+    );
     normalize_session_graph(&mut base);
     base
 }

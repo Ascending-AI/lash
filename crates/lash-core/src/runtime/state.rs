@@ -228,8 +228,15 @@ impl RuntimeSessionState {
     pub fn apply_persisted_commit_result(&mut self, result: crate::store::RuntimeCommitResult) {
         self.head_revision = Some(result.head_revision);
         self.checkpoint_ref = Some(result.checkpoint_ref);
-        self.agent_frames = result.agent_frames;
-        self.current_agent_frame_id = result.current_agent_frame_id;
+        for realized in result.realized_agent_frames {
+            if let Some(frame) = self
+                .agent_frames
+                .iter_mut()
+                .find(|frame| frame.frame_id == realized.frame_id)
+            {
+                frame.created_at = realized.created_at;
+            }
+        }
         self.tool_state_ref = result.manifest.tool_state_ref;
         if let Some(snapshot) = self.tool_state_snapshot.as_ref() {
             self.tool_state_generation = Some(snapshot.generation());
@@ -477,6 +484,16 @@ impl Default for RuntimeSessionState {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn commit_operation_identity_depends_on_caller_boundary_not_head_revision() {
+        let first = boundary_operation("session", "request-42", "append-session-nodes");
+        let retry = boundary_operation("session", "request-42", "append-session-nodes");
+        let next = boundary_operation("session", "request-43", "append-session-nodes");
+
+        assert_eq!(first, retry);
+        assert_ne!(first, next);
+    }
     use std::sync::{Arc, Mutex};
 
     struct DynamicSnapshotTools {
@@ -695,15 +712,22 @@ pub(super) fn apply_session_head(
 pub(super) fn append_session_nodes_to_state_with_clock(
     state: &mut RuntimeSessionState,
     nodes: &[crate::SessionAppendNode],
+    draft_namespace: &str,
     clock: &dyn crate::Clock,
 ) -> Vec<String> {
     let drafts = nodes
         .iter()
-        .map(session_append_node_draft)
+        .enumerate()
+        .map(|(ordinal, node)| {
+            let fallback_digest =
+                crate::stable_hash::sha256_hex(format!("{draft_namespace}:{ordinal}").as_bytes());
+            session_append_node_draft(node, &format!("m_append_{fallback_digest}"))
+        })
         .collect::<Vec<_>>();
     state.ensure_agent_frame_initialized_with_clock(clock);
     let node_ids = state.session_graph.append_node_drafts_for_agent_frame_at(
         &state.current_agent_frame_id,
+        draft_namespace,
         drafts,
         clock.timestamp_rfc3339(),
     );
@@ -711,15 +735,14 @@ pub(super) fn append_session_nodes_to_state_with_clock(
     node_ids
 }
 
-pub(super) fn revision_operation(
-    state: &RuntimeSessionState,
+pub(super) fn boundary_operation(
+    session_id: &str,
+    boundary_id: &str,
     key: impl Into<String>,
 ) -> crate::OperationId {
     crate::OperationId::new(
         crate::ExecutionScope::runtime_operation(format!(
-            "session:{}:head:{}",
-            state.session_id,
-            state.head_revision.unwrap_or(0)
+            "session:{session_id}:boundary:{boundary_id}"
         )),
         key,
     )
@@ -731,7 +754,9 @@ pub(super) fn derive_graph_commit_node_ids(
     operation: &crate::OperationId,
 ) -> Result<Vec<String>, crate::StoreError> {
     let mapping = graph.derive_node_ids(&state.session_id, operation)?;
-    state.session_graph.remap_node_ids(&mapping);
+    state
+        .session_graph
+        .remap_node_ids(&state.session_id, &mapping);
     Ok(mapping.into_iter().map(|(_, derived)| derived).collect())
 }
 
@@ -770,8 +795,12 @@ pub(super) fn open_agent_frame_in_state_with_clock(
         clock.timestamp_rfc3339(),
     ));
 
-    let initial_node_ids =
-        append_session_nodes_to_state_with_clock(state, &request.initial_nodes, clock);
+    let initial_node_ids = append_session_nodes_to_state_with_clock(
+        state,
+        &request.initial_nodes,
+        &request.frame_id,
+        clock,
+    );
     if !initial_node_ids.is_empty() {
         state.graph_replace_required = true;
     }
@@ -784,11 +813,15 @@ pub(super) fn open_agent_frame_in_state_with_clock(
 
 fn session_append_node_draft(
     node: &crate::SessionAppendNode,
+    fallback_message_id: &str,
 ) -> crate::session_graph::SessionNodeDraft {
     match node {
         crate::SessionAppendNode::Message { message, caused_by } => {
-            crate::session_graph::SessionNodeDraft::message(plugin_message_to_message(message))
-                .with_caused_by(caused_by.clone())
+            crate::session_graph::SessionNodeDraft::message(plugin_message_to_message(
+                message,
+                fallback_message_id,
+            ))
+            .with_caused_by(caused_by.clone())
         }
         crate::SessionAppendNode::ProtocolEvent { event, caused_by } => {
             crate::session_graph::SessionNodeDraft::protocol_event(event.clone())

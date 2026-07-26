@@ -475,7 +475,7 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for StandardDriver {
                 return actions;
             }
 
-            let asst_id = format!("m_standard_{}_assistant", ctx.protocol_iteration());
+            let asst_id = standard_message_id(ctx.turn_id(), ctx.protocol_iteration(), "assistant");
             let mut parts_out = Vec::new();
             for (_, meta, text) in reasoning_items {
                 parts_out.push(reasoning_part(&asst_id, parts_out.len(), text, meta));
@@ -520,7 +520,7 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for StandardDriver {
             return actions;
         }
 
-        let asst_id = format!("m_standard_{}_assistant", ctx.protocol_iteration());
+        let asst_id = standard_message_id(ctx.turn_id(), ctx.protocol_iteration(), "assistant");
         let mut assistant_parts = Vec::new();
         for (content, response_meta) in assistant_text_parts {
             if content.trim().is_empty() {
@@ -615,7 +615,8 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for StandardDriver {
         }
 
         if !result_parts.is_empty() {
-            let user_id = format!("m_standard_{}_tool_results", ctx.protocol_iteration());
+            let user_id =
+                standard_message_id(ctx.turn_id(), ctx.protocol_iteration(), "tool_results");
             reassign_part_ids(&user_id, &mut result_parts);
             actions.push(DriverAction::AppendEvents(vec![conversation_event(
                 Message {
@@ -637,7 +638,8 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for StandardDriver {
         if let Some(max_turns) = ctx.max_turns()
             && next_protocol_iteration >= ctx.protocol_run_offset() + max_turns
         {
-            let message_id = format!("m_standard_{next_protocol_iteration}_turn_limit");
+            let message_id =
+                standard_message_id(ctx.turn_id(), next_protocol_iteration, "turn_limit");
             actions.push(DriverAction::AppendEvents(vec![conversation_event(
                 turn_limit_exhausted_message(message_id, max_turns),
             )]));
@@ -662,6 +664,10 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for StandardDriver {
     ) -> Vec<DriverAction> {
         Vec::new()
     }
+}
+
+fn standard_message_id(turn_id: &str, protocol_iteration: usize, purpose: &str) -> String {
+    format!("m_standard_{turn_id}_{protocol_iteration}_{purpose}")
 }
 
 fn append_model_return_parts(parts: &mut Vec<Part>, model_return: lash_core::ModelToolReturn) {
@@ -736,6 +742,16 @@ mod tests {
 
         assert_eq!(factory.id(), STANDARD_PROTOCOL_PLUGIN_ID);
         assert_eq!(factory.id(), "standard_protocol");
+    }
+
+    #[test]
+    fn protocol_message_ids_include_turn_identity() {
+        let first = standard_message_id("turn-1", 0, "assistant");
+        let replay = standard_message_id("turn-1", 0, "assistant");
+        let next_turn = standard_message_id("turn-2", 0, "assistant");
+
+        assert_eq!(first, replay);
+        assert_ne!(first, next_turn);
     }
 
     #[derive(Clone, Debug)]

@@ -101,6 +101,7 @@ impl UsageCapability {
     pub(in crate::runtime) async fn persist_current_usage_ledger(
         &self,
         current: &CurrentSessionCapability,
+        boundary_id: &str,
     ) -> Result<(), crate::PluginError> {
         if !self.persist_to_store {
             return Ok(());
@@ -117,8 +118,9 @@ impl UsageCapability {
             merge_ledger_entry(&mut state.token_ledger, entry);
         }
         let commit = crate::store::RuntimeCommit::persisted_state(&state, &drained)
-            .with_operation(super::super::state::revision_operation(
-                &state,
+            .with_operation(super::super::state::boundary_operation(
+                &state.session_id,
+                boundary_id,
                 "usage-ledger",
             ))
             .map_err(|err| crate::PluginError::Session(err.to_string()))?;

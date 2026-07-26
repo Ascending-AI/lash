@@ -4,12 +4,14 @@ mod attachment_manifest;
 mod commit_identity;
 mod lease_timings;
 pub mod queued_work;
+mod realization;
 
 pub use attachment_manifest::{
     AttachmentIntent, AttachmentManifest, AttachmentManifestEntry, AttachmentOwnerKind,
 };
 pub use commit_identity::{OperationId, derive_history_node_id, graph_realization_digest};
 pub use lease_timings::{LeaseTimings, LeaseTimingsError};
+pub use realization::{RealizedAgentFrame, commit_runtime_state_verified};
 
 const PROC_BOOT_ID_PATH: &str = "/proc/sys/kernel/random/boot_id";
 
@@ -132,10 +134,19 @@ pub enum StoreError {
         node_id: String,
         expected_node_id: String,
     },
+    #[error("runtime commit node id `{node_id}` already exists in durable session history")]
+    NodeIdCollision { node_id: String },
     #[error(
         "runtime commit realization differs from stored receipt: proposed {proposed}, stored {stored}"
     )]
     CommitRealizationMismatch { proposed: String, stored: String },
+    #[error(
+        "runtime commit frame realization differs from stored receipt: expected {expected:?}, stored {stored:?}"
+    )]
+    CommitFrameRealizationMismatch {
+        expected: Vec<String>,
+        stored: Vec<String>,
+    },
     #[error(
         "queued work claim `{claim_id}` for session `{session_id}` is superseded by a newer session-lease generation"
     )]
@@ -441,6 +452,11 @@ impl GraphCommitDelta {
             {
                 *parent = derived_parent.clone();
             }
+            crate::session_graph::remap_session_node_cause(
+                &mut node.caused_by,
+                session_id,
+                &remapped,
+            );
             let old = node.node_id.clone();
             let derived = derive_history_node_id(session_id, operation, ordinal as u64)?;
             node.node_id = derived.clone();
@@ -491,17 +507,16 @@ pub struct RuntimeCommitResult {
     pub head_revision: u64,
     pub checkpoint_ref: BlobRef,
     pub manifest: SessionCheckpoint,
-    /// Store-computed proof of the exact topology realized by this operation.
+    /// Store-recorded digest of the graph proposal accepted for this operation.
     ///
-    /// Node-derivation validation re-runs the derivation function and therefore
-    /// shares fate with its bugs. This digest instead compares two recorded
-    /// artifacts: the runtime proposal and the store result. It is the only
-    /// guard that cannot be broken by the same change that breaks derivation.
+    /// On a receipt hit this compares the retry proposal with the first
+    /// attempt's recorded proposal independently of node derivation. Physical
+    /// row realization still relies on the backend transaction being atomic.
     pub realization_digest: String,
-    /// Store-realized frame metadata. Reapplying it on receipt hits keeps
-    /// clock-derived `created_at` values equal to durable state.
-    pub agent_frames: Vec<crate::AgentFrameRecord>,
-    pub current_agent_frame_id: crate::AgentFrameId,
+    /// Store-realized frame timestamps. Receipts retain references and the
+    /// excluded clock value only; execution snapshot bytes remain in the
+    /// checkpoint/blob path and are never copied into receipt JSON.
+    pub realized_agent_frames: Vec<RealizedAgentFrame>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub enqueued_queue_batches: Vec<crate::QueuedWorkBatch>,
     /// Canonical input applications settled by this idempotent turn commit.
@@ -886,13 +901,17 @@ impl RuntimeCommit {
         Ok(())
     }
 
-    pub fn verify_realization(&self, result: &RuntimeCommitResult) -> Result<(), StoreError> {
-        let proposed = graph_realization_digest(&self.graph);
-        if proposed != result.realization_digest {
-            return Err(StoreError::CommitRealizationMismatch {
-                proposed,
-                stored: result.realization_digest.clone(),
-            });
+    pub fn validate_append_node_ids_unique(&self) -> Result<(), StoreError> {
+        let GraphCommitDelta::Append { nodes, .. } = &self.graph else {
+            return Ok(());
+        };
+        let mut seen = std::collections::HashSet::with_capacity(nodes.len());
+        for node in nodes {
+            if !seen.insert(node.node_id.as_str()) {
+                return Err(StoreError::NodeIdCollision {
+                    node_id: node.node_id.clone(),
+                });
+            }
         }
         Ok(())
     }

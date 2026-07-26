@@ -9,8 +9,8 @@ use crate::{PluginOperationInvokeError, SessionError};
 
 use super::LashRuntime;
 use super::state::{
-    RuntimeSessionState, append_session_nodes_to_state_with_clock, derive_graph_commit_node_ids,
-    normalize_session_graph, revision_operation,
+    RuntimeSessionState, append_session_nodes_to_state_with_clock, boundary_operation,
+    derive_graph_commit_node_ids, normalize_session_graph,
 };
 
 impl LashRuntime {
@@ -59,6 +59,11 @@ impl LashRuntime {
         &mut self,
         request: crate::AppendSessionNodesRequest,
     ) -> Result<crate::AppendSessionNodesResult, SessionError> {
+        if request.operation_id.trim().is_empty() {
+            return Err(SessionError::Protocol(
+                "session graph append requires a non-empty stable operation_id".to_string(),
+            ));
+        }
         self.refresh_session_graph_from_store().await?;
         if let Some(required) = request.requires_ancestor_node_id.as_deref()
             && !self.state.session_graph.active_path_contains(required)
@@ -67,10 +72,19 @@ impl LashRuntime {
                 current_leaf_node_id: self.state.session_graph.leaf_node_id.clone(),
             });
         }
-        let operation = revision_operation(&self.state, "append-session-nodes");
+        let operation = boundary_operation(
+            &self.state.session_id,
+            &request.operation_id,
+            "append-session-nodes",
+        );
+        let state_before_append = self.state.clone();
+        let draft_namespace = operation
+            .storage_key()
+            .map_err(|err| SessionError::Protocol(err.to_string()))?;
         let node_ids = append_session_nodes_to_state_with_clock(
             &mut self.state,
             &request.nodes,
+            &draft_namespace,
             self.host.core.clock.as_ref(),
         );
         if let Some(session) = self.session.as_mut() {
@@ -111,7 +125,7 @@ impl LashRuntime {
                 operation,
                 hash,
             ));
-            let result = super::commit_runtime_state_with_fresh_session_execution_lease(
+            let result = match super::commit_runtime_state_with_fresh_session_execution_lease(
                 store,
                 commit,
                 &self.runtime_lease_owner,
@@ -119,9 +133,15 @@ impl LashRuntime {
                 Arc::clone(&self.host.core.clock),
             )
             .await
-            .map_err(|err| {
-                SessionError::Protocol(format!("failed to persist runtime state: {err}"))
-            })?;
+            {
+                Ok(result) => result,
+                Err(err) => {
+                    self.state = state_before_append;
+                    return Err(SessionError::Protocol(format!(
+                        "failed to persist runtime state: {err}"
+                    )));
+                }
+            };
             self.state.apply_persisted_commit_result(result);
             return Ok(crate::AppendSessionNodesResult::Appended {
                 node_ids,
@@ -353,8 +373,18 @@ impl LashRuntime {
                 manager.process_service(),
             )
             .await?;
+        let operation_scope = crate::ExecutionScope::runtime_operation(format!(
+            "session:{}:plugin-command:{}",
+            self.state.session_id,
+            uuid::Uuid::new_v4()
+        ));
         let (events, pending_turn_inputs) = self
-            .apply_plugin_operation_effects(&plugin_id, outcome.events, outcome.directives)
+            .apply_plugin_operation_effects(
+                &plugin_id,
+                outcome.events,
+                outcome.directives,
+                operation_scope,
+            )
             .await?;
         Ok(crate::PluginCommandReceipt {
             output: outcome.output,
@@ -377,6 +407,7 @@ impl LashRuntime {
                 "runtime session not available".to_string(),
             ));
         };
+        let operation_scope = scoped_effect_controller.execution_scope().clone();
         let (plugin_id, outcome) = session
             .plugins()
             .run_plugin_task(
@@ -393,7 +424,12 @@ impl LashRuntime {
             )
             .await?;
         let (events, pending_turn_inputs) = self
-            .apply_plugin_operation_effects(&plugin_id, outcome.events, outcome.directives)
+            .apply_plugin_operation_effects(
+                &plugin_id,
+                outcome.events,
+                outcome.directives,
+                operation_scope,
+            )
             .await?;
         Ok(crate::PluginTaskReceipt {
             output: outcome.output,
@@ -407,6 +443,7 @@ impl LashRuntime {
         plugin_id: &str,
         events: Vec<crate::PluginRuntimeEvent>,
         directives: Vec<crate::PluginRuntimeDirective>,
+        operation_scope: crate::ExecutionScope,
     ) -> Result<
         (
             Vec<crate::PluginOwned<crate::PluginRuntimeEvent>>,
@@ -434,10 +471,12 @@ impl LashRuntime {
                         })
                 })
                 .collect::<Result<Vec<_>, _>>()?;
-            self.append_plugin_runtime_event_nodes(&nodes).await?;
+            self.append_plugin_runtime_event_nodes(&nodes, operation_scope.clone())
+                .await?;
         }
         self.stamp_live_plugin_state();
-        self.persist_plugin_operation_state_if_needed().await?;
+        self.persist_plugin_operation_state_if_needed(operation_scope)
+            .await?;
 
         let mut pending_turn_inputs = Vec::new();
         for directive in directives {
@@ -462,11 +501,19 @@ impl LashRuntime {
     async fn append_plugin_runtime_event_nodes(
         &mut self,
         nodes: &[crate::SessionAppendNode],
+        operation_scope: crate::ExecutionScope,
     ) -> Result<(), PluginOperationInvokeError> {
-        let operation = revision_operation(&self.state, "append-plugin-runtime-events");
+        let operation = crate::OperationId::new(operation_scope, "append-plugin-runtime-events");
+        let state_before_append = self.state.clone();
+        let draft_namespace = operation.storage_key().map_err(|err| {
+            PluginOperationInvokeError::Failed(format!(
+                "failed to encode plugin runtime event identity: {err}"
+            ))
+        })?;
         let node_ids = append_session_nodes_to_state_with_clock(
             &mut self.state,
             nodes,
+            &draft_namespace,
             self.host.core.clock.as_ref(),
         );
         if let Some(store) = self
@@ -503,7 +550,7 @@ impl LashRuntime {
                 operation,
                 hash,
             ));
-            let result = super::commit_runtime_state_with_fresh_session_execution_lease(
+            let result = match super::commit_runtime_state_with_fresh_session_execution_lease(
                 store,
                 commit,
                 &self.runtime_lease_owner,
@@ -511,11 +558,15 @@ impl LashRuntime {
                 Arc::clone(&self.host.core.clock),
             )
             .await
-            .map_err(|err| {
-                PluginOperationInvokeError::Failed(format!(
-                    "failed to persist plugin runtime events: {err}"
-                ))
-            })?;
+            {
+                Ok(result) => result,
+                Err(err) => {
+                    self.state = state_before_append;
+                    return Err(PluginOperationInvokeError::Failed(format!(
+                        "failed to persist plugin runtime events: {err}"
+                    )));
+                }
+            };
             self.state.apply_persisted_commit_result(result);
         }
         Ok(())
@@ -523,6 +574,7 @@ impl LashRuntime {
 
     async fn persist_plugin_operation_state_if_needed(
         &mut self,
+        operation_scope: crate::ExecutionScope,
     ) -> Result<(), PluginOperationInvokeError> {
         let Some(store) = self
             .session
@@ -532,7 +584,10 @@ impl LashRuntime {
             return Ok(());
         };
         let commit = crate::store::RuntimeCommit::persisted_state(&self.state, &[])
-            .with_operation(revision_operation(&self.state, "plugin-operation-state"))
+            .with_operation(crate::OperationId::new(
+                operation_scope,
+                "plugin-operation-state",
+            ))
             .map_err(|err| {
                 PluginOperationInvokeError::Failed(format!(
                     "failed to identify plugin operation state: {err}"

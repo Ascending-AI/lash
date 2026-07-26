@@ -56,8 +56,8 @@ fn default_allowed_tools() -> BTreeSet<String> {
     .collect()
 }
 
-fn fresh_context_frame_id() -> String {
-    format!("plan-frame-{}", uuid::Uuid::new_v4().simple())
+fn fresh_context_frame_id(session_id: &str, previous_frame_id: &str) -> String {
+    format!("{session_id}:frame:plan-exit:after:{previous_frame_id}")
 }
 
 fn plan_protocol_state_event(
@@ -621,7 +621,11 @@ impl SessionPlugin for PlanModePlugin {
                             .and_then(|value| value.as_str())
                             .unwrap_or_default()
                             .to_string();
-                        let frame_id = fresh_context_frame_id();
+                        let snapshot = ctx.session_snapshot().await?;
+                        let frame_id = fresh_context_frame_id(
+                            &ctx.session_id,
+                            &snapshot.current_agent_frame_id,
+                        );
                         let task = plan_exit_fresh_context_input(&plan_path);
                         directives.push(PluginDirective::short_circuit(
                             ToolResult::ok(json!({
@@ -807,8 +811,8 @@ where
 #[cfg(test)]
 mod tests {
     use super::{
-        PLAN_TEMPLATE, plan_exit_fresh_context_input, plan_exit_next_turn_input,
-        plan_exit_tool_definition, read_plan_report,
+        PLAN_TEMPLATE, fresh_context_frame_id, plan_exit_fresh_context_input,
+        plan_exit_next_turn_input, plan_exit_tool_definition, read_plan_report,
     };
 
     #[test]
@@ -854,6 +858,16 @@ mod tests {
             plan_exit_fresh_context_input(".lash/plans/run-session.md"),
             "Do a full, faithful implementation of the plan found at: .lash/plans/run-session.md"
         );
+    }
+
+    #[test]
+    fn fresh_context_frame_identity_is_replay_stable() {
+        let first = fresh_context_frame_id("session", "frame-before");
+        let replay = fresh_context_frame_id("session", "frame-before");
+        let next = fresh_context_frame_id("session", "frame-after");
+
+        assert_eq!(first, replay);
+        assert_ne!(first, next);
     }
 
     #[test]

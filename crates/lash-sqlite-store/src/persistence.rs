@@ -160,8 +160,14 @@ impl SessionCommitStore for Store {
     ) -> Result<RuntimeCommitResult, StoreError> {
         commit.validate_operation_session()?;
         let realization_digest = lash_core::store::graph_realization_digest(&commit.graph);
-        let realized_agent_frames = commit.agent_frames.clone();
-        let realized_current_agent_frame_id = commit.current_agent_frame_id.clone();
+        let realized_agent_frames = commit
+            .agent_frames
+            .iter()
+            .map(|frame| lash_core::store::RealizedAgentFrame {
+                frame_id: frame.frame_id.clone(),
+                created_at: frame.created_at.clone(),
+            })
+            .collect::<Vec<_>>();
         let blob_profile = self.options.blob_profile;
         let now = self.clock.timestamp_ms();
         let enqueue_nonce_start = self.commit_count.fetch_add(
@@ -223,6 +229,25 @@ impl SessionCommitStore for Store {
                         });
                     }
                     commit.validate_node_derivation()?;
+                    commit.validate_append_node_ids_unique()?;
+                    if let GraphCommitDelta::Append { nodes, .. } = &commit.graph {
+                        for node in nodes {
+                            let occupied = tx
+                                .query_row(
+                                    "SELECT 1 FROM graph_nodes WHERE node_id = ?1 LIMIT 1",
+                                    params![node.node_id],
+                                    |_| Ok(()),
+                                )
+                                .optional()
+                                .map_err(sqlite_error)?
+                                .is_some();
+                            if occupied {
+                                return Err(StoreError::NodeIdCollision {
+                                    node_id: node.node_id.clone(),
+                                });
+                            }
+                        }
+                    }
                     for completed in &commit.completed_queue_claims {
                         if completed.session_id != commit.session_id {
                             return Err(StoreError::QueuedWorkClaimSuperseded {
@@ -493,8 +518,7 @@ impl SessionCommitStore for Store {
                         checkpoint_ref: stored_checkpoint.checkpoint_ref,
                         manifest: stored_checkpoint.manifest,
                         realization_digest: realization_digest.clone(),
-                        agent_frames: realized_agent_frames.clone(),
-                        current_agent_frame_id: realized_current_agent_frame_id.clone(),
+                        realized_agent_frames: realized_agent_frames.clone(),
                         enqueued_queue_batches,
                         turn_input_applications: commit.turn_input_applications(),
                     };

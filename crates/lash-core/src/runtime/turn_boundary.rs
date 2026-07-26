@@ -119,6 +119,7 @@ impl TurnBoundary {
             stage: TurnCommitStage::Drafting(Box::new(TurnCommitDraft::from_state_with_clock(
                 state,
                 draft_clock,
+                operation_scope.id(),
             ))),
             clock,
             session_execution_lease: None,
@@ -581,13 +582,16 @@ impl TurnBoundary {
     ) -> Result<Vec<crate::QueuedWorkBatch>, StoreError> {
         let session_execution_lease = self.session_execution_lease.clone();
         if let Some(operation) = &operation {
-            let node_id_mapping = graph.derive_node_ids(&self.state().session_id, operation)?;
+            let session_id = self.state().session_id.clone();
+            let node_id_mapping = graph.derive_node_ids(&session_id, operation)?;
             match &mut self.stage {
-                TurnCommitStage::Drafting(draft) => draft.remap_node_ids(&node_id_mapping),
+                TurnCommitStage::Drafting(draft) => {
+                    draft.remap_node_ids(&session_id, &node_id_mapping)
+                }
                 TurnCommitStage::Finalized(finalized) => finalized
                     .state
                     .session_graph
-                    .remap_node_ids(&node_id_mapping),
+                    .remap_node_ids(&session_id, &node_id_mapping),
             }
         }
         let state = self.state_mut();
@@ -615,14 +619,7 @@ impl TurnBoundary {
                 turn_commit_hash,
             ));
         }
-        let proposed_realization = crate::store::graph_realization_digest(&commit.graph);
-        let result = store.commit_runtime_state(commit).await?;
-        if proposed_realization != result.realization_digest {
-            return Err(StoreError::CommitRealizationMismatch {
-                proposed: proposed_realization,
-                stored: result.realization_digest.clone(),
-            });
-        }
+        let result = crate::store::commit_runtime_state_verified(store, commit).await?;
         let enqueued_queue_batches = result.enqueued_queue_batches.clone();
         state.apply_persisted_commit_result(result);
         if let TurnCommitStage::Drafting(draft) = &mut self.stage {

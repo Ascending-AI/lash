@@ -14,8 +14,9 @@ impl ManagedSessionCapability {
             super::normalize_session_graph(&mut persisted_state);
             persisted_state.graph_replace_required = true;
             let commit = crate::store::RuntimeCommit::persisted_state(&persisted_state, &[])
-                .with_operation(super::super::state::revision_operation(
-                    &persisted_state,
+                .with_operation(super::super::state::boundary_operation(
+                    &persisted_state.session_id,
+                    &plan.session_id,
                     "create-session",
                 ))
                 .map_err(|err| crate::PluginError::Session(err.to_string()))?;

@@ -40,7 +40,15 @@ fn append_plugin_messages(
     let new_messages = plugin_messages
         .iter()
         .filter(|message| matches!(message.role, MessageRole::User | MessageRole::System))
-        .map(plugin_message_to_message)
+        .enumerate()
+        .map(|(ordinal, message)| {
+            let digest = crate::stable_hash::stable_json_sha256_hex(message)
+                .unwrap_or_else(|_| crate::stable_hash::sha256_hex(message.content.as_bytes()));
+            plugin_message_to_message(
+                message,
+                &format!("m_plugin_{digest}_{}", messages.len() + ordinal),
+            )
+        })
         .collect::<Vec<_>>();
     if !new_messages.is_empty() {
         messages.extend(new_messages);

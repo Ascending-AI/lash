@@ -116,7 +116,7 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for RlmDriver {
                     &mut actions,
                     Vec::new(),
                     vec![conversation_event(invalid_lashlang_cell_message(
-                        rlm_message_id(ctx.protocol_iteration(), "invalid_cell"),
+                        rlm_message_id(ctx.turn_id(), ctx.protocol_iteration(), "invalid_cell"),
                         err.message(),
                     ))],
                 ) {
@@ -159,12 +159,12 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for RlmDriver {
             let mut events = Vec::new();
             if !assistant_text.trim().is_empty() {
                 events.push(conversation_event(internal_assistant_prose_message(
-                    rlm_message_id(ctx.protocol_iteration(), "assistant_prose"),
+                    rlm_message_id(ctx.turn_id(), ctx.protocol_iteration(), "assistant_prose"),
                     assistant_text,
                 )));
             }
             events.push(conversation_event(finish_required_reminder_message(
-                rlm_message_id(ctx.protocol_iteration(), "finish_reminder"),
+                rlm_message_id(ctx.turn_id(), ctx.protocol_iteration(), "finish_reminder"),
                 schema.is_some(),
             )));
             if let Err(err) =
@@ -256,6 +256,7 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for RlmDriver {
                 }
                 if let Some(outcome) = terminal_outcome {
                     actions.push(DriverAction::AppendEvents(trajectory_events(
+                        ctx.turn_id(),
                         ctx.protocol_iteration(),
                         &state,
                         None,
@@ -290,13 +291,14 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for RlmDriver {
                     &ctx,
                     &mut actions,
                     trajectory_events(
+                        ctx.turn_id(),
                         ctx.protocol_iteration(),
                         &state,
                         Some(error_text.clone()),
                         None,
                     ),
                     vec![conversation_event(finish_schema_mismatch_message(
-                        rlm_message_id(ctx.protocol_iteration(), "schema_mismatch"),
+                        rlm_message_id(ctx.turn_id(), ctx.protocol_iteration(), "schema_mismatch"),
                         &error_text,
                     ))],
                 ) {
@@ -306,6 +308,7 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for RlmDriver {
             }
 
             actions.push(DriverAction::AppendEvents(trajectory_events(
+                ctx.turn_id(),
                 ctx.protocol_iteration(),
                 &state,
                 None,
@@ -325,7 +328,7 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for RlmDriver {
         if let Err(err) = continue_or_stop_after_nonterminal(
             &ctx,
             &mut actions,
-            trajectory_events(ctx.protocol_iteration(), &state, None, None),
+            trajectory_events(ctx.turn_id(), ctx.protocol_iteration(), &state, None, None),
             Vec::new(),
         ) {
             return invalid_turn_options_actions(err);
@@ -368,7 +371,7 @@ fn continue_or_stop_after_nonterminal(
                 if let Some(max_turns) = ctx.max_turns() {
                     actions.push(DriverAction::ScheduleTurnLimitFinal {
                         message: turn_limit_final_message(
-                            rlm_message_id(next_protocol_iteration, "turn_limit"),
+                            rlm_message_id(ctx.turn_id(), next_protocol_iteration, "turn_limit"),
                             max_turns,
                         ),
                     });
@@ -551,13 +554,14 @@ fn tool_output_attachments(output: &ToolCallOutput) -> Vec<lash_core::Attachment
 }
 
 fn trajectory_entry(
+    turn_id: &str,
     protocol_iteration: usize,
     state: &RlmDriverState,
     validation_error: Option<String>,
     final_output: Option<Value>,
 ) -> RlmTrajectoryEntry {
     RlmTrajectoryEntry {
-        id: format!("lashlang_step_{protocol_iteration}"),
+        id: format!("lashlang_step_{turn_id}_{protocol_iteration}"),
         protocol_iteration,
         code: state.executed_code.clone().unwrap_or_default(),
         output: state.output.clone(),
@@ -567,22 +571,25 @@ fn trajectory_entry(
     }
 }
 
-fn rlm_message_id(protocol_iteration: usize, purpose: &str) -> String {
-    format!("m_rlm_{protocol_iteration}_{purpose}")
+fn rlm_message_id(turn_id: &str, protocol_iteration: usize, purpose: &str) -> String {
+    format!("m_rlm_{turn_id}_{protocol_iteration}_{purpose}")
 }
 
 fn trajectory_events(
+    turn_id: &str,
     protocol_iteration: usize,
     state: &RlmDriverState,
     validation_error: Option<String>,
     final_output: Option<Value>,
 ) -> Vec<SessionHistoryRecord> {
     let mut events = Vec::new();
-    if let Some(event) = assistant_content_event(protocol_iteration, &state.reasoning, &state.prose)
+    if let Some(event) =
+        assistant_content_event(turn_id, protocol_iteration, &state.reasoning, &state.prose)
     {
         events.push(event);
     }
     events.push(trajectory_event(trajectory_entry(
+        turn_id,
         protocol_iteration,
         state,
         validation_error,
@@ -592,11 +599,12 @@ fn trajectory_events(
 }
 
 fn assistant_content_event(
+    turn_id: &str,
     protocol_iteration: usize,
     reasoning: &str,
     prose: &str,
 ) -> Option<SessionHistoryRecord> {
-    let id = rlm_message_id(protocol_iteration, "assistant_content");
+    let id = rlm_message_id(turn_id, protocol_iteration, "assistant_content");
     let reasoning = reasoning.trim();
     let prose = prose.trim();
     (!reasoning.is_empty() || !prose.is_empty()).then(|| {
@@ -703,6 +711,16 @@ mod tests {
             )
             .as_ref(),
         )
+    }
+
+    #[test]
+    fn protocol_message_ids_include_turn_identity() {
+        let first = rlm_message_id("turn-1", 0, "assistant_content");
+        let replay = rlm_message_id("turn-1", 0, "assistant_content");
+        let next_turn = rlm_message_id("turn-2", 0, "assistant_content");
+
+        assert_eq!(first, replay);
+        assert_ne!(first, next_turn);
     }
 
     fn record(index: usize, output: ToolCallOutput) -> ToolCallRecord {

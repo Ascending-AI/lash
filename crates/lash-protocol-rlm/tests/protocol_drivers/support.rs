@@ -44,6 +44,7 @@ pub(crate) fn test_config_with_protocol_turn_options(
         tool_specs: Vec::new().into(),
         system_prompt: std::sync::Arc::from(""),
         session_id: "test".to_string(),
+        turn_id: "test-turn".to_string(),
         emit_llm_trace: false,
         termination,
         turn_limit_final_message: Arc::new(test_turn_limit_final_message),

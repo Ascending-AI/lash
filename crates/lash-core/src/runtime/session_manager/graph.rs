@@ -10,6 +10,11 @@ impl CurrentSessionCapability {
         session_id: &str,
         request: crate::AppendSessionNodesRequest,
     ) -> Result<crate::AppendSessionNodesResult, crate::PluginError> {
+        if request.operation_id.trim().is_empty() {
+            return Err(crate::PluginError::Session(
+                "session graph append requires a non-empty stable operation_id".to_string(),
+            ));
+        }
         if let Some(runtime) = {
             let registry = managed.registry.lock().await;
             registry.get(session_id).cloned()
@@ -54,10 +59,18 @@ impl CurrentSessionCapability {
                 current_leaf_node_id: state.session_graph.leaf_node_id.clone(),
             });
         }
-        let operation = super::super::state::revision_operation(&state, "append-session-nodes");
+        let operation = super::super::state::boundary_operation(
+            &state.session_id,
+            &request.operation_id,
+            "append-session-nodes",
+        );
+        let draft_namespace = operation
+            .storage_key()
+            .map_err(|err| crate::PluginError::Session(err.to_string()))?;
         let node_ids = append_session_nodes_to_state_with_clock(
             &mut state,
             &request.nodes,
+            &draft_namespace,
             self.host.core.clock.as_ref(),
         );
         let mut graph = crate::store::GraphCommitDelta::Append {

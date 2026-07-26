@@ -19,10 +19,6 @@ pub use lash_sansio::session_model::{
     render_prompt, render_transcript_prompt, shared_parts,
 };
 
-pub fn fresh_message_id() -> String {
-    format!("m{}", uuid::Uuid::new_v4().simple())
-}
-
 pub type SessionHistoryRecord = lash_sansio::session_model::SessionHistoryRecord<ProtocolEvent>;
 
 pub const PLUGIN_RUNTIME_PROTOCOL_PLUGIN_ID: &str = "lash.plugin_runtime";
@@ -59,13 +55,16 @@ pub(crate) async fn send_event(tx: &mpsc::Sender<SessionStreamEvent>, event: Ses
     }
 }
 
-pub(crate) fn plugin_message_to_message(plugin_message: &PluginMessage) -> Message {
+pub(crate) fn plugin_message_to_message(
+    plugin_message: &PluginMessage,
+    fallback_id: &str,
+) -> Message {
     let message_id = plugin_message
         .id
         .as_deref()
         .filter(|id| !id.is_empty())
         .map(str::to_string)
-        .unwrap_or_else(fresh_message_id);
+        .unwrap_or_else(|| fallback_id.to_string());
     let mut parts = if plugin_message.parts.is_empty() && !plugin_message.content.is_empty() {
         vec![Part {
             id: format!("{message_id}.p0"),

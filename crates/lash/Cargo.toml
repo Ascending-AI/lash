@@ -34,6 +34,7 @@ lash-protocol-standard = { workspace = true }
 lash-plugin-tool-output-budget = { workspace = true }
 lash-rlm-types = { workspace = true, optional = true }
 lash-trace = { workspace = true }
+uuid = { workspace = true }
 lashlang = { workspace = true, optional = true }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }

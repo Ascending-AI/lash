@@ -264,7 +264,7 @@ fn derived_node_ids_are_session_operation_and_ordinal_scoped() {
 }
 
 #[test]
-fn node_derivation_and_recorded_realization_guards_are_independent() {
+fn node_derivation_and_realization_digest_are_independent() {
     let mut commit = intent_fixture();
     let operation = OperationId::turn("golden-session", "turn-42", "final");
     let hash = commit.turn_commit_hash().expect("intent hash");
@@ -285,19 +285,62 @@ fn node_derivation_and_recorded_realization_guards_are_independent() {
         Err(StoreError::NodeIdDerivationMismatch { .. })
     ));
 
-    let result = RuntimeCommitResult {
-        head_revision: 1,
-        checkpoint_ref: BlobRef::from("checkpoint".to_string()),
-        manifest: SessionCheckpoint::default(),
-        realization_digest: "store-recorded-different-topology".to_string(),
-        agent_frames: commit.agent_frames.clone(),
-        current_agent_frame_id: commit.current_agent_frame_id.clone(),
-        enqueued_queue_batches: Vec::new(),
-        turn_input_applications: Vec::new(),
+    assert_ne!(
+        graph_realization_digest(&commit.graph),
+        graph_realization_digest(&rogue.graph),
+        "realization digest must observe ids without invoking derivation"
+    );
+}
+
+#[test]
+fn node_derivation_remaps_in_batch_session_node_causes() {
+    let operation = OperationId::turn("session", "turn", "final");
+    let mut graph = GraphCommitDelta::Append {
+        nodes: vec![
+            crate::SessionNodeRecord {
+                node_id: "draft-a".to_string(),
+                parent_node_id: None,
+                caused_by: None,
+                agent_frame_id: None,
+                timestamp: "2026-07-26T10:00:00Z".to_string(),
+                payload: crate::SessionNodePayload::Plugin {
+                    plugin_type: "first".to_string(),
+                    body: crate::session_graph::SharedJsonValue::new(serde_json::json!({})),
+                },
+            },
+            crate::SessionNodeRecord {
+                node_id: "draft-b".to_string(),
+                parent_node_id: Some("draft-a".to_string()),
+                caused_by: Some(crate::CausalRef::SessionNode {
+                    session_id: "session".to_string(),
+                    node_id: "draft-a".to_string(),
+                }),
+                agent_frame_id: None,
+                timestamp: "2026-07-26T10:00:00Z".to_string(),
+                payload: crate::SessionNodePayload::Plugin {
+                    plugin_type: "second".to_string(),
+                    body: crate::session_graph::SharedJsonValue::new(serde_json::json!({})),
+                },
+            },
+        ],
+        leaf_node_id: Some("draft-b".to_string()),
     };
+    graph
+        .derive_node_ids("session", &operation)
+        .expect("derive node ids");
+    let GraphCommitDelta::Append { nodes, .. } = graph else {
+        panic!("fixture is append");
+    };
+    assert_eq!(
+        nodes[1].parent_node_id.as_deref(),
+        Some(nodes[0].node_id.as_str())
+    );
     assert!(matches!(
-        commit.verify_realization(&result),
-        Err(StoreError::CommitRealizationMismatch { .. })
+        &nodes[1].caused_by,
+        Some(crate::CausalRef::SessionNode {
+            session_id,
+            node_id,
+        }) if session_id == "session" && node_id == &nodes[0].node_id
     ));
 }
 

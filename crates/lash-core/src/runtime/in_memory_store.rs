@@ -864,8 +864,14 @@ impl crate::store::SessionCommitStore for InMemorySessionStore {
         commit.validate_operation_session()?;
         let turn_input_applications = commit.turn_input_applications();
         let realization_digest = crate::store::graph_realization_digest(&commit.graph);
-        let realized_agent_frames = commit.agent_frames.clone();
-        let realized_current_agent_frame_id = commit.current_agent_frame_id.clone();
+        let realized_agent_frames = commit
+            .agent_frames
+            .iter()
+            .map(|frame| crate::store::RealizedAgentFrame {
+                frame_id: frame.frame_id.clone(),
+                created_at: frame.created_at.clone(),
+            })
+            .collect();
         let _transaction = self
             .write_transaction
             .lock()
@@ -920,6 +926,18 @@ impl crate::store::SessionCommitStore for InMemorySessionStore {
             });
         }
         commit.validate_node_derivation()?;
+        commit.validate_append_node_ids_unique()?;
+        if let crate::store::GraphCommitDelta::Append { nodes, .. } = &commit.graph {
+            let graph = self.session_graph.lock().expect("lock graph");
+            if let Some(node) = nodes
+                .iter()
+                .find(|node| graph.find_node(&node.node_id).is_some())
+            {
+                return Err(crate::store::StoreError::NodeIdCollision {
+                    node_id: node.node_id.clone(),
+                });
+            }
+        }
         for completed in &commit.completed_queue_claims {
             let mut queued = self.queued_work.lock().expect("lock queued work");
             let matches = queued
@@ -1068,8 +1086,7 @@ impl crate::store::SessionCommitStore for InMemorySessionStore {
             checkpoint_ref,
             manifest,
             realization_digest,
-            agent_frames: realized_agent_frames,
-            current_agent_frame_id: realized_current_agent_frame_id,
+            realized_agent_frames,
             enqueued_queue_batches: commit
                 .enqueued_queue_batches
                 .into_iter()

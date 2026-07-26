@@ -605,8 +605,13 @@ impl SessionCommitStore for RuntimePerfStore {
             release_session_execution_lease,
             committed_attachment_ids: _,
         } = commit;
-        let realized_agent_frames = agent_frames.clone();
-        let realized_current_agent_frame_id = current_agent_frame_id.clone();
+        let realized_agent_frames = agent_frames
+            .iter()
+            .map(|frame| store::RealizedAgentFrame {
+                frame_id: frame.frame_id.clone(),
+                created_at: frame.created_at.clone(),
+            })
+            .collect();
         if let Some(batch) = enqueued_queue_batches
             .iter()
             .find(|batch| batch.session_id != session_id)
@@ -815,8 +820,7 @@ impl SessionCommitStore for RuntimePerfStore {
             checkpoint_ref,
             manifest,
             realization_digest,
-            agent_frames: realized_agent_frames,
-            current_agent_frame_id: realized_current_agent_frame_id,
+            realized_agent_frames,
             enqueued_queue_batches: enqueued_queue_batches
                 .into_iter()
                 .map(|batch| self.enqueue_queued_work_in_memory(batch))

@@ -549,6 +549,7 @@ pub(super) fn standard_contract_turn_machine_config() -> lash_core::TurnMachineC
         tool_specs: Vec::new().into(),
         system_prompt: std::sync::Arc::from(""),
         session_id: "standard-max-turn-contract".to_string(),
+        turn_id: "standard-max-turn".to_string(),
         emit_llm_trace: false,
         termination: lash_core::ProtocolTurnOptions::empty(),
         turn_limit_final_message: Arc::new(contract_turn_limit_final_message),

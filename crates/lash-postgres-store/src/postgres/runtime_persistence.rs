@@ -207,8 +207,14 @@ impl SessionCommitStore for PostgresSessionStore {
     ) -> Result<RuntimeCommitResult, StoreError> {
         commit.validate_operation_session()?;
         let realization_digest = lash_core::store::graph_realization_digest(&commit.graph);
-        let realized_agent_frames = commit.agent_frames.clone();
-        let realized_current_agent_frame_id = commit.current_agent_frame_id.clone();
+        let realized_agent_frames = commit
+            .agent_frames
+            .iter()
+            .map(|frame| lash_core::store::RealizedAgentFrame {
+                frame_id: frame.frame_id.clone(),
+                created_at: frame.created_at.clone(),
+            })
+            .collect();
         let now = self.clock.timestamp_ms();
         let mut tx = self.pool.begin().await.map_err(store_sqlx_error)?;
         // Read the head WITHOUT a lock. The conditional CAS write below is the
@@ -279,6 +285,27 @@ impl SessionCommitStore for PostgresSessionStore {
             });
         }
         commit.validate_node_derivation()?;
+        commit.validate_append_node_ids_unique()?;
+        if let GraphCommitDelta::Append { nodes, .. } = &commit.graph {
+            for node in nodes {
+                let occupied: bool = sqlx::query_scalar(
+                    "SELECT EXISTS(
+                        SELECT 1 FROM lash_graph_nodes
+                        WHERE session_id = $1 AND node_id = $2
+                    )",
+                )
+                .bind(&commit.session_id)
+                .bind(&node.node_id)
+                .fetch_one(&mut *tx)
+                .await
+                .map_err(store_sqlx_error)?;
+                if occupied {
+                    return Err(StoreError::NodeIdCollision {
+                        node_id: node.node_id.clone(),
+                    });
+                }
+            }
+        }
         for completed in &commit.completed_queue_claims {
             if completed.session_id != commit.session_id {
                 return Err(StoreError::QueuedWorkClaimSuperseded {
@@ -315,10 +342,7 @@ impl SessionCommitStore for PostgresSessionStore {
                 for node in nodes {
                     sqlx::query(
                         "INSERT INTO lash_graph_nodes (session_id, node_id, node_json)
-                         VALUES ($1, $2, $3)
-                         ON CONFLICT (session_id, node_id) DO UPDATE SET
-                            node_json = EXCLUDED.node_json,
-                            tombstoned = FALSE",
+                         VALUES ($1, $2, $3)",
                     )
                     .bind(&commit.session_id)
                     .bind(&node.node_id)
@@ -512,8 +536,7 @@ impl SessionCommitStore for PostgresSessionStore {
             checkpoint_ref,
             manifest,
             realization_digest,
-            agent_frames: realized_agent_frames,
-            current_agent_frame_id: realized_current_agent_frame_id,
+            realized_agent_frames,
             enqueued_queue_batches,
             turn_input_applications: commit.turn_input_applications(),
         };
