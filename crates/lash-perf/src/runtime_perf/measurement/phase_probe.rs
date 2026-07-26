@@ -267,7 +267,7 @@ pub(crate) async fn run_once(
             let hydrate_before_alloc = allocator_stats();
             let hydrate_before_memory = process_memory_sample();
             let hydrate_started = Instant::now();
-            runtime.reopen_with_state(scenario, state).await?;
+            Box::pin(runtime.reopen_with_state(scenario, state)).await?;
             extra_phase_profile.insert(
                 "store_reopen.runtime_hydration".to_string(),
                 RuntimePerfPhaseRunResult {
