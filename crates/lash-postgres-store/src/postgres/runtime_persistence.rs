@@ -287,23 +287,29 @@ impl SessionCommitStore for PostgresSessionStore {
         commit.validate_node_derivation()?;
         commit.validate_append_node_ids_unique()?;
         if let GraphCommitDelta::Append { nodes, .. } = &commit.graph {
-            for node in nodes {
-                let occupied: bool = sqlx::query_scalar(
-                    "SELECT EXISTS(
-                        SELECT 1 FROM lash_graph_nodes
-                        WHERE session_id = $1 AND node_id = $2
-                    )",
-                )
-                .bind(&commit.session_id)
-                .bind(&node.node_id)
-                .fetch_one(&mut *tx)
-                .await
-                .map_err(store_sqlx_error)?;
-                if occupied {
-                    return Err(StoreError::NodeIdCollision {
-                        node_id: node.node_id.clone(),
-                    });
-                }
+            let node_ids = nodes
+                .iter()
+                .map(|node| node.node_id.as_str())
+                .collect::<Vec<_>>();
+            let occupied = sqlx::query_scalar::<_, String>(
+                "SELECT node_id
+                 FROM lash_graph_nodes
+                 WHERE session_id = $1 AND node_id = ANY($2)",
+            )
+            .bind(&commit.session_id)
+            .bind(&node_ids)
+            .fetch_all(&mut *tx)
+            .await
+            .map_err(store_sqlx_error)?
+            .into_iter()
+            .collect::<std::collections::HashSet<_>>();
+            if let Some(node) = nodes
+                .iter()
+                .find(|node| occupied.contains(&node.node_id))
+            {
+                return Err(StoreError::NodeIdCollision {
+                    node_id: node.node_id.clone(),
+                });
             }
         }
         for completed in &commit.completed_queue_claims {

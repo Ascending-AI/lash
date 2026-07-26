@@ -126,7 +126,7 @@ pub enum StoreError {
     #[error("store head revision conflict: expected {expected:?}, actual {actual}")]
     HeadRevisionConflict { expected: Option<u64>, actual: u64 },
     #[error(
-        "runtime turn `{turn_id}` for session `{session_id}` was already committed with a different commit hash"
+        "runtime operation `{turn_id}` for session `{session_id}` was retried with different commit content; reuse an operation identity only for the same logical operation"
     )]
     RuntimeTurnCommitConflict { session_id: String, turn_id: String },
     #[error("runtime commit node `{node_id}` does not match derived node id `{expected_node_id}`")]

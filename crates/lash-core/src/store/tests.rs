@@ -140,6 +140,19 @@ fn intent_hash_golden_vector() {
 }
 
 #[test]
+fn operation_conflict_diagnostic_explains_identity_reuse() {
+    let message = StoreError::RuntimeTurnCommitConflict {
+        session_id: "root".to_string(),
+        turn_id: "operation-key".to_string(),
+    }
+    .to_string();
+
+    assert!(message.contains("runtime operation"));
+    assert!(message.contains("different commit content"));
+    assert!(message.contains("reuse an operation identity only"));
+}
+
+#[test]
 fn node_id_golden_vector() {
     let operation = OperationId::turn("golden-session", "turn-42", "final");
     assert_eq!(
