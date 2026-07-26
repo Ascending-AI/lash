@@ -177,9 +177,10 @@
             state.messages_snapshot().is_empty(),
             "the reconstructed web process must begin with no local transcript cache"
         );
-        let Json(before) = app_state(State(state.clone()), Query(SessionQuery::default()))
-            .await
-            .expect("project committed transcript after restart");
+        let Json(before) =
+            Box::pin(app_state(State(state.clone()), Query(SessionQuery::default())))
+                .await
+                .expect("project committed transcript after restart");
         let before_rows = before
             .messages
             .iter()
@@ -242,9 +243,10 @@
             }
         }
 
-        let Json(after) = app_state(State(state.clone()), Query(SessionQuery::default()))
-            .await
-            .expect("project transcript after resumed turn");
+        let Json(after) =
+            Box::pin(app_state(State(state.clone()), Query(SessionQuery::default())))
+                .await
+                .expect("project transcript after resumed turn");
         assert_eq!(after.messages.len(), 6);
         assert_eq!(after.messages[4].text, "resume question three");
         assert_eq!(after.messages[5].text, "resume answer three");

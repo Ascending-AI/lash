@@ -148,9 +148,10 @@ mod turn_control_timeout_tests {
         assert_eq!(pending[1].input_id, queued.input_id);
         session.close().await.expect("close session");
 
-        let Json(snapshot) = app_state(State(state.clone()), Query(SessionQuery::default()))
-            .await
-            .expect("load state snapshot");
+        let Json(snapshot) =
+            Box::pin(app_state(State(state.clone()), Query(SessionQuery::default())))
+                .await
+                .expect("load state snapshot");
         assert!(snapshot.messages.iter().any(|message| {
                 message.id == "workbench-user:running-turn"
                 && message.role == "user"

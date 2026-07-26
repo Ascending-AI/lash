@@ -160,7 +160,12 @@ impl WorkbenchTurnWorkflow for WorkbenchTurnWorkflowImpl {
     ) -> HandlerResult<Json<()>> {
         let session_id = request.session_id.clone();
         let controller = lash_restate::RestateRuntimeEffectController::new(ctx);
-        run_user_turn_terminalized(self.state.clone(), request, &controller).await?;
+        Box::pin(run_user_turn_terminalized(
+            self.state.clone(),
+            request,
+            &controller,
+        ))
+        .await?;
         sync_cron_jobs_with_context(&self.state, controller.context(), &session_id, "user_turn")
             .await?;
         self.state
@@ -196,7 +201,12 @@ impl WorkbenchQueuedTurnWorkflow for WorkbenchQueuedTurnWorkflowImpl {
     ) -> HandlerResult<Json<()>> {
         let session_id = request.session_id.clone();
         let controller = lash_restate::RestateRuntimeEffectController::new(ctx);
-        run_queued_turn_terminalized(self.state.clone(), request, &controller).await?;
+        Box::pin(run_queued_turn_terminalized(
+            self.state.clone(),
+            request,
+            &controller,
+        ))
+        .await?;
         self.state
             .queued_work_driver
             .claim_and_run_pending(Some(&session_id), "queued_turn_completed")

@@ -125,7 +125,7 @@ pub(crate) async fn run_once(
             return run_once_live_replay_pressure(chat_turns).await;
         }
         RuntimePerfScenario::TraceJsonlStandard | RuntimePerfScenario::TraceJsonlExtended => {
-            return run_once_trace_jsonl(scenario, chat_turns).await;
+            return Box::pin(run_once_trace_jsonl(scenario, chat_turns)).await;
         }
         RuntimePerfScenario::OpenAiResponsesSseParse => {
             return run_once_openai_responses_sse_parse(chat_turns).await;
