@@ -411,6 +411,7 @@ jobs:
         run: cargo test -p lash-postgres-store --locked
         env:
           LASH_POSTGRES_DATABASE_URL: postgres://lash:lash@localhost:5432/lash
+          LASH_REQUIRE_POSTGRES: "1"
 
   stack-budget:
     name: Stack budget

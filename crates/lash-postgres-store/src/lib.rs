@@ -413,7 +413,7 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn postgres_claim_completion_is_locked_and_zero_rows_roll_back_the_head() {
-        let Ok(database_url) = std::env::var("LASH_POSTGRES_DATABASE_URL") else {
+        let Some(database_url) = postgres_test_support::database_url() else {
             eprintln!("skipping Postgres claim-completion fence: database URL is not set");
             return;
         };
@@ -591,7 +591,7 @@ mod tests {
 
     #[tokio::test]
     async fn checkpoint_probe_skips_writes_for_deferred_head_when_configured() {
-        let Ok(database_url) = std::env::var("LASH_POSTGRES_DATABASE_URL") else {
+        let Some(database_url) = postgres_test_support::database_url() else {
             eprintln!("skipping Postgres checkpoint counter: database URL is not set");
             return;
         };

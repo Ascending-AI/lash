@@ -482,23 +482,53 @@ class ConfidenceGateCiContractTest(unittest.TestCase):
         for snippet in required_repro_snippets:
             self.assertIn(snippet, repro)
 
-    def test_static_replay_matrix_does_not_claim_generated_backend_static_replay(self) -> None:
+    def test_model_replay_artifact_does_not_claim_backend_equivalence(self) -> None:
         gate = GATE.read_text(encoding="utf-8")
 
         required_snippets = [
-            'step "Static replay evidence matrix"',
-            "generated_static_backend_skip_reason=",
-            "generated_backend_fixture_static_skip_reason=",
+            'step "Model replay evidence"',
+            "run_model_replay_suite()",
+            'replay_dir="${out_dir}/sim/model-replay"',
             "generated_backend_regression_fixture",
-            '"schema": "lash.confidence.static-replay-evidence-matrix.v1"',
-            "backend equivalence is proved by per-seed generated workload rerun artifacts",
+            '"schema": "lash.confidence.model-replay-evidence.v1"',
+            "Backend equivalence is not claimed by this artifact",
         ]
         for snippet in required_snippets:
             self.assertIn(snippet, gate)
 
+        self.assertNotIn("run_cross_backend_replay_suite", gate)
+        self.assertNotIn("sim/cross-backend-replay", gate)
+        self.assertNotIn('"backend":"%s"', gate)
+        self.assertNotIn('"skip_reason":"%s"', gate)
         self.assertNotIn("backend_replayable_regression", gate)
         self.assertNotIn(
             "Every generated trace and every backend-replayable regression trace is replayed through model, SQLite, and Postgres",
+            gate,
+        )
+
+    def test_durable_stores_are_critical_coverage_and_mutation_packages(self) -> None:
+        workflow = WORKFLOW.read_text(encoding="utf-8")
+        confidence_workflow = CONFIDENCE_WORKFLOW.read_text(encoding="utf-8")
+        gate = GATE.read_text(encoding="utf-8")
+
+        critical_packages = gate.split("critical_packages=(", 1)[1].split(")", 1)[0]
+        self.assertIn("lash-sqlite-store", critical_packages)
+        self.assertIn("lash-postgres-store", critical_packages)
+        self.assertIn('for package in "${critical_packages[@]}"; do', gate)
+        self.assertIn('coverage_package_args+=(-p "$package")', gate)
+        self.assertIn("run_mutation_smoke", gate)
+        self.assertIn("run_mutation_full", gate)
+        self.assertIn('if [ "$lane" = "full" ]; then', gate)
+        self.assertIn('cron: "29 4 * * 0"', confidence_workflow)
+        self.assertNotIn("scripts/confidence-gate.sh default", workflow)
+
+    def test_postgres_ci_lane_requires_database_configuration(self) -> None:
+        workflow = WORKFLOW.read_text(encoding="utf-8")
+        gate = GATE.read_text(encoding="utf-8")
+
+        self.assertIn('LASH_REQUIRE_POSTGRES: "1"', workflow)
+        self.assertIn(
+            "LASH_REQUIRE_POSTGRES=1 cargo test -p lash-postgres-store --locked --test conformance",
             gate,
         )
 

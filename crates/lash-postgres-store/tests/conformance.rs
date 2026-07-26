@@ -15,11 +15,7 @@ use lash_postgres_store::{
 
 mod support;
 
-use support::SharedDatabaseLock;
-
-fn database_url() -> Option<String> {
-    std::env::var("LASH_POSTGRES_DATABASE_URL").ok()
-}
+use support::{SharedDatabaseLock, database_url};
 
 fn sync_await<T: Send + 'static>(
     future: impl std::future::Future<Output = T> + Send + 'static,

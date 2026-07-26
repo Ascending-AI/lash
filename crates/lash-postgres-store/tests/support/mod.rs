@@ -5,6 +5,20 @@ use sqlx::{Connection, PgConnection};
 // database interaction.
 const SHARED_DATABASE_LOCK_KEY: i64 = 0x4c41_5348_5f50_4754;
 
+pub fn database_url() -> Option<String> {
+    match std::env::var("LASH_POSTGRES_DATABASE_URL") {
+        Ok(database_url) => Some(database_url),
+        Err(error) => {
+            if std::env::var("LASH_REQUIRE_POSTGRES").as_deref() == Ok("1") {
+                panic!(
+                    "LASH_POSTGRES_DATABASE_URL must be set when LASH_REQUIRE_POSTGRES=1: {error}"
+                );
+            }
+            None
+        }
+    }
+}
+
 pub struct SharedDatabaseLock {
     _connection: PgConnection,
 }
