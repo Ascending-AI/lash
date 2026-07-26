@@ -330,7 +330,11 @@ run_mutants_recorded() {
   shift 2
   mkdir -p "$artifact"
   set +e
-  CARGO_TARGET_DIR="${artifact}/cargo-target" "$@"
+  # cargo-mutants creates one scratch/build directory per concurrent job. Keep
+  # Cargo's target relative to each scratch tree: an inherited absolute target
+  # (from either the environment or global Cargo config) collapses the targets
+  # back together and lets mutated source trees race over the same artifacts.
+  CARGO_TARGET_DIR=target "$@"
   local exit_code=$?
   set -e
   local status

@@ -597,7 +597,13 @@ run_mutants_recorded() {{
 {recorded}
 finalize_mutation_gate() {{
 {finalize}
-seeded_mutation_failure() {{ return 2; }}
+seeded_mutation_failure() {{
+  if [ "${{CARGO_TARGET_DIR:-}}" != "target" ]; then
+    return 3
+  fi
+  return 2
+}}
+export CARGO_TARGET_DIR="deliberately-shared-target"
 run_mutants_recorded \
   "seeded survivor" \
   "${{out_dir}}/seeded-mutant" \
