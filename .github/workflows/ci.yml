@@ -439,12 +439,12 @@ jobs:
           fi
 
           for divergence in \
-            duplicate_node_id_within_one_append \
-            duplicate_node_id_across_two_commits \
-            append_onto_tombstoned_node_id \
-            append_duplicate_node_id_after_replace_full_seed
+            "case=duplicate_node_id_within_one_append step=1 operation=append_duplicate_batch:" \
+            "case=duplicate_node_id_across_two_commits step=2 operation=append_committed_id_again:" \
+            "case=append_onto_tombstoned_node_id step=3 operation=append_tombstoned_id:" \
+            "case=append_duplicate_node_id_after_replace_full_seed step=2 operation=append_duplicate_id_after_replace_full_seed:"
           do
-            if ! grep -F "case=$divergence " "$oracle_output" >/dev/null; then
+            if ! grep -F "$divergence" "$oracle_output" >/dev/null; then
               echo "known-red store differential missed $divergence"
               exit 1
             fi

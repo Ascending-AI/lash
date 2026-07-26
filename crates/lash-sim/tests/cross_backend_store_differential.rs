@@ -6,6 +6,9 @@
 //! the runner automatically applies every operation to in-memory, SQLite, and
 //! Postgres and compares the observation after each step.
 //!
+//! Agreement is not correctness: a differential cannot detect a defect shared
+//! by all backends. The FIG-641 case below is the live example of that limit.
+//!
 //! Nodes are never observed through `load_session`: that constructs a
 //! `SessionGraph` read model whose id indexes can hide duplicate durable rows.
 
@@ -354,6 +357,10 @@ fn generated_cases() -> Vec<GeneratedCase> {
         },
         GeneratedCase {
             name: CaseName::SettleClaimAfterLeaseGenerationSuperseded,
+            // FIG-641: all three backends currently consume this superseded
+            // claim, so this is an agreement test only. Its green result cannot
+            // establish correctness because a differential cannot detect
+            // uniform wrongness.
             operations: vec![
                 StoreOperation::EnqueueNextTurnInput,
                 StoreOperation::AcquireSessionLease {
