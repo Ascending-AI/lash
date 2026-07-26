@@ -89,6 +89,7 @@ fn main() {
             metadata: serde_json::json!({}),
         },
         disposition: lash::remote::processes::RemoteRecoveryDisposition::ExternallyOwned,
+        max_attempts: None,
         env_spec: Some(lash::remote::processes::RemoteProcessExecutionEnvSpec {
             plugin_options: lash::remote::processes::RemoteProcessPluginOptions::default(),
             policy: lash::remote::processes::RemoteProcessExecutionPolicy {
