@@ -506,6 +506,49 @@ impl ProcessEventAppendRequest {
             "process:{process_id}:cancel_requested:{replay_key}"
         ))
     }
+
+    pub fn first_started(process_id: &str, started: &super::model::ProcessStarted) -> Self {
+        Self::new(
+            "process.first_started",
+            serde_json::json!({ "started": started }),
+        )
+        .with_replay_key(format!("process:{process_id}:first-started"))
+    }
+
+    pub fn wait_entered(process_id: &str, wait: &super::model::WaitState) -> Self {
+        Self::new("process.waiting", serde_json::json!({ "wait": wait })).with_replay_key(format!(
+            "process:{process_id}:wait:{}:since:{}:entered",
+            wait.key(),
+            wait.since_ms
+        ))
+    }
+
+    pub fn wait_cleared(process_id: &str, wait: &super::model::WaitState) -> Self {
+        Self::new("process.resumed", serde_json::json!({ "wait": wait })).with_replay_key(format!(
+            "process:{process_id}:wait:{}:since:{}:cleared",
+            wait.key(),
+            wait.since_ms
+        ))
+    }
+
+    pub fn external_ref_set(
+        process_id: &str,
+        external_ref: &super::model::ProcessExternalRef,
+    ) -> Self {
+        Self::new(
+            "process.external_ref_set",
+            serde_json::json!({ "external_ref": external_ref }),
+        )
+        .with_replay_key(format!("process:{process_id}:external-ref"))
+    }
+
+    pub fn abandon_requested(process_id: &str, request: &super::model::AbandonRequest) -> Self {
+        Self::new(
+            "process.abandon_requested",
+            serde_json::json!({ "request": request }),
+        )
+        .with_replay_key(format!("process:{process_id}:abandon-requested"))
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -543,28 +586,49 @@ fn default_process_wake_event_invocation() -> crate::RuntimeInvocation {
     }
 }
 
+pub(super) fn runtime_lifecycle_event_type(name: &str) -> Option<ProcessEventType> {
+    match name {
+        "process.first_started"
+        | "process.waiting"
+        | "process.resumed"
+        | "process.external_ref_set"
+        | "process.abandon_requested" => Some(ProcessEventType {
+            name: name.to_string(),
+            payload_schema: crate::LashSchema::any(),
+            semantics: ProcessEventSemanticsSpec::default(),
+        }),
+        _ => None,
+    }
+}
+
+pub(super) fn is_runtime_lifecycle_event_type(name: &str) -> bool {
+    runtime_lifecycle_event_type(name).is_some()
+}
+
 pub(super) fn default_process_event_types() -> Vec<ProcessEventType> {
-    vec![
-        ProcessEventType {
-            name: "process.cancel_requested".to_string(),
-            payload_schema: crate::LashSchema::any(),
-            semantics: ProcessEventSemanticsSpec::default(),
-        },
-        ProcessEventType {
-            name: "process.waiting".to_string(),
-            payload_schema: crate::LashSchema::any(),
-            semantics: ProcessEventSemanticsSpec::default(),
-        },
-        ProcessEventType {
-            name: "process.resumed".to_string(),
-            payload_schema: crate::LashSchema::any(),
-            semantics: ProcessEventSemanticsSpec::default(),
-        },
+    let mut event_types = vec![ProcessEventType {
+        name: "process.cancel_requested".to_string(),
+        payload_schema: crate::LashSchema::any(),
+        semantics: ProcessEventSemanticsSpec::default(),
+    }];
+    event_types.extend(
+        [
+            "process.first_started",
+            "process.waiting",
+            "process.resumed",
+            "process.external_ref_set",
+            "process.abandon_requested",
+        ]
+        .into_iter()
+        .filter_map(runtime_lifecycle_event_type),
+    );
+    event_types.extend([
         terminal_event_type("process.completed", ProcessTerminalState::Completed),
         terminal_event_type("process.failed", ProcessTerminalState::Failed),
         terminal_event_type("process.cancelled", ProcessTerminalState::Cancelled),
         terminal_event_type("process.abandoned", ProcessTerminalState::Abandoned),
-    ]
+    ]);
+    event_types
 }
 
 fn terminal_event_type(name: &str, state: ProcessTerminalState) -> ProcessEventType {

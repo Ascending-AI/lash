@@ -169,9 +169,8 @@ impl ProcessRegistry for PostgresProcessRegistry {
                 &external_ref,
             ));
         }
-        record.external_ref = Some(external_ref);
-        record.updated_at_ms = current_epoch_ms();
-        save_process_tx(&mut tx, &record).await?;
+        let request = ProcessEventAppendRequest::external_ref_set(process_id, &external_ref);
+        append_process_event_tx(&mut tx, &mut record, request, current_epoch_ms()).await?;
         tx.commit().await.map_err(plugin_sqlx_error)?;
         Ok(record)
     }
@@ -432,81 +431,11 @@ impl ProcessRegistry for PostgresProcessRegistry {
         let mut record = load_process_tx(&mut tx, process_id)
             .await?
             .ok_or_else(|| PluginError::Session(format!("unknown process `{process_id}`")))?;
-        let replay_lookup =
-            if let Some(replay_key) = request.replay.as_ref().map(|r| r.key.as_str()) {
-                load_event_by_key_tx(&mut tx, process_id, replay_key).await?
-            } else {
-                None
-            };
-        let sequence: i64 = sqlx::query_scalar(
-            "SELECT COALESCE(MAX(sequence), 0) + 1 FROM lash_process_events WHERE process_id = $1",
-        )
-        .bind(process_id)
-        .fetch_one(&mut *tx)
-        .await
-        .map_err(plugin_sqlx_error)?;
         let occurred_at_ms = current_epoch_ms();
-        let prepared = lash_core::runtime::prepare_process_event_append(
-            &record,
-            request,
-            sequence as u64,
-            replay_lookup,
-            occurred_at_ms,
-        )?;
-        match prepared {
-            lash_core::ProcessEventAppendPlan::Replay {
-                event,
-                repair_status,
-                wake_delivery,
-                occurred_at_ms,
-            } => {
-                if let Some(status) = repair_status {
-                    lash_core::apply_process_status_projection(&mut record, status, occurred_at_ms);
-                    save_process_tx(&mut tx, &record).await?;
-                }
-                tx.commit().await.map_err(plugin_sqlx_error)?;
-                Ok(ProcessEventAppendResult {
-                    event,
-                    wake_delivery,
-                })
-            }
-            lash_core::ProcessEventAppendPlan::Insert {
-                event,
-                payload_hash,
-                status_update,
-                wake_delivery,
-                occurred_at_ms,
-            } => {
-                sqlx::query(
-                    "INSERT INTO lash_process_events (
-                        process_id, sequence, event_type, payload_hash, idempotency_key,
-                        occurred_at_ms, event_json
-                     )
-                     VALUES ($1, $2, $3, $4, $5, $6, $7)",
-                )
-                .bind(process_id)
-                .bind(sequence)
-                .bind(event.event_type.as_str())
-                .bind(&payload_hash)
-                .bind(event.invocation.replay_key())
-                .bind(occurred_at_ms as i64)
-                .bind(serde_json::to_string(&event).map_err(process_decode_error)?)
-                .execute(&mut *tx)
-                .await
-                .map_err(plugin_sqlx_error)?;
-                if let Some(status) = status_update {
-                    lash_core::apply_process_status_projection(&mut record, status, occurred_at_ms);
-                } else {
-                    record.updated_at_ms = occurred_at_ms;
-                }
-                save_process_tx(&mut tx, &record).await?;
-                tx.commit().await.map_err(plugin_sqlx_error)?;
-                Ok(ProcessEventAppendResult {
-                    event,
-                    wake_delivery,
-                })
-            }
-        }
+        let result =
+            append_process_event_tx(&mut tx, &mut record, request, occurred_at_ms).await?;
+        tx.commit().await.map_err(plugin_sqlx_error)?;
+        Ok(result)
     }
 
     async fn events_after(
@@ -658,12 +587,11 @@ impl ProcessRegistry for PostgresProcessRegistry {
         )?;
         match prepared {
             lash_core::ProcessEventAppendPlan::Replay {
-                repair_status,
-                occurred_at_ms,
+                repair_record,
                 ..
             } => {
-                if let Some(status) = repair_status {
-                    lash_core::apply_process_status_projection(&mut record, status, occurred_at_ms);
+                if let Some(repaired) = repair_record {
+                    record = repaired;
                     save_process_tx(&mut tx, &record).await?;
                 }
                 tx.commit().await.map_err(plugin_sqlx_error)?;
@@ -672,7 +600,7 @@ impl ProcessRegistry for PostgresProcessRegistry {
             lash_core::ProcessEventAppendPlan::Insert {
                 event,
                 payload_hash,
-                status_update,
+                projected_record,
                 occurred_at_ms,
                 ..
             } => {
@@ -693,11 +621,7 @@ impl ProcessRegistry for PostgresProcessRegistry {
                 .execute(&mut *tx)
                 .await
                 .map_err(plugin_sqlx_error)?;
-                if let Some(status) = status_update {
-                    lash_core::apply_process_status_projection(&mut record, status, occurred_at_ms);
-                } else {
-                    record.updated_at_ms = occurred_at_ms;
-                }
+                record = projected_record;
                 save_process_tx(&mut tx, &record).await?;
                 tx.commit().await.map_err(plugin_sqlx_error)?;
                 Ok(record)
@@ -755,7 +679,7 @@ impl ProcessRegistry for PostgresProcessRegistry {
         let lash_core::ProcessEventAppendPlan::Insert {
             event,
             payload_hash,
-            status_update,
+            projected_record,
             occurred_at_ms,
             ..
         } = prepared
@@ -778,9 +702,7 @@ impl ProcessRegistry for PostgresProcessRegistry {
         .execute(&mut *tx)
         .await
         .map_err(plugin_sqlx_error)?;
-        if let Some(status) = status_update {
-            lash_core::apply_process_status_projection(&mut record, status, occurred_at_ms);
-        }
+        record = projected_record;
         save_process_tx(&mut tx, &record).await?;
         let released = sqlx::query(
             "UPDATE lash_process_leases
@@ -817,12 +739,12 @@ impl ProcessRegistry for PostgresProcessRegistry {
         let mut record = load_process_tx(&mut tx, process_id)
             .await?
             .ok_or_else(|| PluginError::Session(format!("unknown process `{process_id}`")))?;
-        // First-writer-wins: the started fact is immutable once written.
-        if record.first_started.is_none() {
-            record.first_started = Some(Box::new(started));
-            record.updated_at_ms = current_epoch_ms();
-            save_process_tx(&mut tx, &record).await?;
+        if record.first_started.is_some() {
+            tx.commit().await.map_err(plugin_sqlx_error)?;
+            return Ok(record);
         }
+        let request = ProcessEventAppendRequest::first_started(process_id, &started);
+        append_process_event_tx(&mut tx, &mut record, request, current_epoch_ms()).await?;
         tx.commit().await.map_err(plugin_sqlx_error)?;
         Ok(record)
     }
@@ -841,12 +763,12 @@ impl ProcessRegistry for PostgresProcessRegistry {
                 "terminal process `{process_id}` cannot accept an abandon request"
             )));
         }
-        // First-writer-wins: preserve the original recorded authorization.
-        if record.abandon_request.is_none() {
-            record.abandon_request = Some(Box::new(request));
-            record.updated_at_ms = current_epoch_ms();
-            save_process_tx(&mut tx, &record).await?;
+        if record.abandon_request.is_some() {
+            tx.commit().await.map_err(plugin_sqlx_error)?;
+            return Ok(record);
         }
+        let append = ProcessEventAppendRequest::abandon_requested(process_id, &request);
+        append_process_event_tx(&mut tx, &mut record, append, current_epoch_ms()).await?;
         tx.commit().await.map_err(plugin_sqlx_error)?;
         Ok(record)
     }
@@ -865,9 +787,12 @@ impl ProcessRegistry for PostgresProcessRegistry {
                 "terminal process `{process_id}` cannot enter a wait state"
             )));
         }
-        record.wait = Some(wait);
-        record.updated_at_ms = current_epoch_ms();
-        save_process_tx(&mut tx, &record).await?;
+        if record.wait.as_ref() == Some(&wait) {
+            tx.commit().await.map_err(plugin_sqlx_error)?;
+            return Ok(record);
+        }
+        let request = ProcessEventAppendRequest::wait_entered(process_id, &wait);
+        append_process_event_tx(&mut tx, &mut record, request, current_epoch_ms()).await?;
         tx.commit().await.map_err(plugin_sqlx_error)?;
         Ok(record)
     }
@@ -877,9 +802,12 @@ impl ProcessRegistry for PostgresProcessRegistry {
         let mut record = load_process_tx(&mut tx, process_id)
             .await?
             .ok_or_else(|| PluginError::Session(format!("unknown process `{process_id}`")))?;
-        record.wait = None;
-        record.updated_at_ms = current_epoch_ms();
-        save_process_tx(&mut tx, &record).await?;
+        let Some(wait) = record.wait.clone() else {
+            tx.commit().await.map_err(plugin_sqlx_error)?;
+            return Ok(record);
+        };
+        let request = ProcessEventAppendRequest::wait_cleared(process_id, &wait);
+        append_process_event_tx(&mut tx, &mut record, request, current_epoch_ms()).await?;
         tx.commit().await.map_err(plugin_sqlx_error)?;
         Ok(record)
     }

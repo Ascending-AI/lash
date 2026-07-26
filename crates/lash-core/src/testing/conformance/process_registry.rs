@@ -14,8 +14,8 @@ use super::process_references::live_reference_summary_tracks_non_terminal_refere
 use super::*;
 
 mod completion_authority;
+mod fold;
 mod lease_reclaim;
-
 /// Run the full [`ProcessRegistry`] conformance suite against the backend
 /// produced by `make`. `make` must return a fresh, empty registry on each call.
 pub async fn process_registry<F>(make: F)
@@ -24,7 +24,6 @@ where
 {
     process_registry_with_expected_durability(make, crate::DurabilityTier::Inline).await;
 }
-
 /// Run the full [`ProcessRegistry`] suite plus durable reopen checks.
 pub async fn process_registry_reopenable<F>(make: F)
 where
@@ -33,7 +32,6 @@ where
     process_registry_with_expected_durability(|| make().open, crate::DurabilityTier::Durable).await;
     process_registry_survives_reopen(make()).await;
 }
-
 /// Run the full [`ProcessRegistry`] conformance suite against a backend with an
 /// explicit expected durability tier.
 pub async fn process_registry_with_expected_durability<F>(
@@ -43,6 +41,7 @@ pub async fn process_registry_with_expected_durability<F>(
     F: Fn() -> Arc<dyn ProcessRegistry>,
 {
     process_registry_reports_declared_durability(make(), expected_tier).await;
+    fold::process_record_is_the_fold_of_its_event_log(make()).await;
     registration_is_idempotent_and_hash_conflicts_fail(make()).await;
     external_refs_and_handle_grant_membership_round_trip(make()).await;
     validates_custom_events_and_materializes_wakes(make()).await;
@@ -938,8 +937,20 @@ async fn process_registry_survives_reopen(factory: ReopenableProcessRegistry) {
         .events_after("proc-reopen", 0)
         .await
         .expect("events after reopen");
-    assert_eq!(reopened_events.len(), 1);
-    assert_eq!(reopened_events[0].sequence, appended.event.sequence);
+    assert_eq!(reopened_events.len(), 2);
+    assert!(
+        reopened_events
+            .iter()
+            .any(|event| event.event_type == "process.external_ref_set")
+    );
+    assert_eq!(
+        reopened_events
+            .iter()
+            .find(|event| event.event_type == "producer.reopen_wake")
+            .expect("producer event survives reopen")
+            .sequence,
+        appended.event.sequence
+    );
     assert_eq!(
         factory
             .reopen

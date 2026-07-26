@@ -693,12 +693,8 @@ impl LashlangProcessHost<'_> {
             *ordinal
         };
         let key = lash_core::process_signal_wait_key(&self.process_id, &name, event_ordinal);
-        let waiting_replay_key = format!(
-            "process:{}:waiting:signal.{}:{event_ordinal}",
-            self.process_id, name
-        );
         let since_ms = self
-            .wait_since_ms(&key, &waiting_replay_key)
+            .wait_since_ms(&key)
             .await
             .map_err(|err| ExecutionHostError::new(err.to_string()))?;
         let wait = lash_core::WaitState {
@@ -714,17 +710,6 @@ impl LashlangProcessHost<'_> {
             .set_process_wait(&self.process_id, wait.clone())
             .await
             .map_err(|err| ExecutionHostError::new(err.to_string()))?;
-        self.registry
-            .append_event(
-                &self.process_id,
-                lash_core::ProcessEventAppendRequest::new(
-                    "process.waiting",
-                    serde_json::json!({ "wait": wait }),
-                )
-                .with_replay_key(waiting_replay_key),
-            )
-            .await
-            .map_err(|err| ExecutionHostError::new(err.to_string()))?;
         let payload = self
             .ctx
             .await_process_signal_event(&self.process_id, &name, event_ordinal)
@@ -734,32 +719,10 @@ impl LashlangProcessHost<'_> {
             .clear_process_wait(&self.process_id)
             .await
             .map_err(|err| ExecutionHostError::new(err.to_string()))?;
-        self.registry
-            .append_event(
-                &self.process_id,
-                lash_core::ProcessEventAppendRequest::new(
-                    "process.resumed",
-                    serde_json::json!({
-                        "signal": name,
-                        "key": key,
-                        "ordinal": event_ordinal,
-                    }),
-                )
-                .with_replay_key(format!(
-                    "process:{}:resumed:signal.{}:{event_ordinal}",
-                    self.process_id, name
-                )),
-            )
-            .await
-            .map_err(|err| ExecutionHostError::new(err.to_string()))?;
         Ok(lashlang::from_json(payload))
     }
 
-    async fn wait_since_ms(
-        &self,
-        key: &str,
-        waiting_replay_key: &str,
-    ) -> Result<u64, lash_core::PluginError> {
+    async fn wait_since_ms(&self, key: &str) -> Result<u64, lash_core::PluginError> {
         if let Some(since_ms) =
             self.registry
                 .get_process(&self.process_id)
@@ -784,15 +747,15 @@ impl LashlangProcessHost<'_> {
             .into_iter()
             .rev()
         {
-            if event.event_type != "process.waiting"
-                || event.invocation.replay_key() != Some(waiting_replay_key)
-            {
+            if event.event_type != "process.waiting" {
                 continue;
             }
             let Some(wait_value) = event.payload.get("wait") else {
                 continue;
             };
-            if let Ok(wait) = serde_json::from_value::<lash_core::WaitState>(wait_value.clone()) {
+            if let Ok(wait) = serde_json::from_value::<lash_core::WaitState>(wait_value.clone())
+                && wait.key() == key
+            {
                 return Ok(wait.since_ms);
             }
         }

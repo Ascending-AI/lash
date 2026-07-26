@@ -112,10 +112,10 @@ async fn async_main() -> AnyhowResult<()> {
     let active_turns = ActiveTurns::persistent(data_dir.join("active-turns.json"))?;
     // Best-effort freshness feed for appended process events (ADR 0017). The
     // sink is a freshness overlay on the durable event log, never truth: no
-    // delivery guarantee, terminal events never arrive here (they ride
-    // `await_terminal`), and a consumer needing completeness reconciles from
-    // `events_after`. `emit` must be fast, so it only hands each event to this
-    // channel; the consumer task does the projection off the append path.
+    // delivery guarantee, and a consumer needing completeness reconciles from
+    // `events_after`. Terminal observation still rides `await_terminal`.
+    // `emit` must be fast, so it only hands each event to this channel; the
+    // consumer task does the projection off the append path.
     let (process_event_tx, mut process_event_rx) =
         mpsc::channel::<lash::process::ProcessEvent>(256);
     tokio::spawn(async move {

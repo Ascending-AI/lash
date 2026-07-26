@@ -156,7 +156,7 @@ mod process_work_tests {
             result.events
         );
 
-        // The sink saw the non-terminal append (best-effort freshness)...
+        // The sink saw both appends (best-effort freshness)...
         let mut sunk = Vec::new();
         while let Ok(event) = sink_rx.try_recv() {
             sunk.push(event);
@@ -165,11 +165,10 @@ mod process_work_tests {
             sunk.iter().any(|event| event.event_type == "progress"),
             "sink missed the non-terminal append: {sunk:?}"
         );
-        // ...but never the terminal event — completion rides `await_terminal`,
-        // not the sink (ADR 0017).
         assert!(
-            sunk.iter().all(|event| event.semantics.terminal.is_none()),
-            "terminal event must not ride the sink: {sunk:?}"
+            sunk.iter()
+                .any(|event| event.event_type == "process.completed"),
+            "sink missed the terminal append: {sunk:?}"
         );
 
         watched

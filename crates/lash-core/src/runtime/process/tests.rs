@@ -235,7 +235,7 @@ fn replayed_terminal_event_repairs_non_terminal_status_projection() {
 
     let ProcessEventAppendPlan::Replay {
         event,
-        repair_status,
+        repair_record,
         occurred_at_ms,
         ..
     } = replayed
@@ -245,7 +245,7 @@ fn replayed_terminal_event_repairs_non_terminal_status_projection() {
     assert_eq!(event.sequence, 1);
     assert_eq!(occurred_at_ms, 42);
     assert!(matches!(
-        repair_status,
+        repair_record.map(|record| record.status),
         Some(ProcessStatus::Completed {
             await_output: ProcessAwaitOutput::Success { .. }
         })

@@ -135,9 +135,9 @@ impl ProcessRegistry for SqliteProcessRegistry {
                             &external_ref,
                         ));
                     }
-                    record.external_ref = Some(external_ref);
-                    record.updated_at_ms = now;
-                    Self::save_process_conn(tx, &record)?;
+                    let request =
+                        ProcessEventAppendRequest::external_ref_set(&process_id, &external_ref);
+                    Self::append_event_conn(tx, &mut record, request, now)?;
                     Ok((record, true))
                 })()))
             })
@@ -498,96 +498,7 @@ impl ProcessRegistry for SqliteProcessRegistry {
                                 "unknown process `{process_id}`"
                             ))
                         })?;
-                    let replay_lookup = if let Some(replay_key) =
-                        request.replay.as_ref().map(|replay| replay.key.as_str())
-                    {
-                        Self::load_event_by_key_conn(tx, &process_id, replay_key)?
-                    } else {
-                        None
-                    };
-                    let sequence = tx
-                        .query_row(
-                            "SELECT COALESCE(MAX(sequence), 0) + 1 FROM process_events WHERE process_id = ?1",
-                            params![process_id],
-                            |row| row.get::<_, i64>(0),
-                        )
-                        .map_err(process_sqlite_error)? as u64;
-                    let prepared = prepare_process_event_append(
-                        &record,
-                        request,
-                        sequence,
-                        replay_lookup,
-                        occurred_at_ms,
-                    )?;
-                    match prepared {
-                        lash_core::ProcessEventAppendPlan::Replay {
-                            event,
-                            repair_status,
-                            wake_delivery,
-                            occurred_at_ms,
-                        } => {
-                            let repaired = if let Some(status) = repair_status {
-                                lash_core::apply_process_status_projection(
-                                    &mut record,
-                                    status,
-                                    occurred_at_ms,
-                                );
-                                Self::save_process_conn(tx, &record)?;
-                                true
-                            } else {
-                                false
-                            };
-                            Ok((
-                                ProcessEventAppendResult {
-                                    event,
-                                    wake_delivery,
-                                },
-                                repaired,
-                            ))
-                        }
-                        lash_core::ProcessEventAppendPlan::Insert {
-                            event,
-                            payload_hash,
-                            status_update,
-                            wake_delivery,
-                            occurred_at_ms,
-                        } => {
-                            tx.execute(
-                                "INSERT INTO process_events (
-                                    process_id, sequence, event_type, payload_hash, idempotency_key,
-                                    occurred_at_ms, event_json
-                                 )
-                                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
-                                params![
-                                    process_id,
-                                    sequence as i64,
-                                    event.event_type.as_str(),
-                                    payload_hash.as_str(),
-                                    event.invocation.replay_key(),
-                                    occurred_at_ms as i64,
-                                    process_encode_json(&event)?,
-                                ],
-                            )
-                            .map_err(process_sqlite_error)?;
-                            if let Some(status) = status_update {
-                                lash_core::apply_process_status_projection(
-                                    &mut record,
-                                    status,
-                                    occurred_at_ms,
-                                );
-                            } else {
-                                record.updated_at_ms = occurred_at_ms;
-                            }
-                            Self::save_process_conn(tx, &record)?;
-                            Ok((
-                                ProcessEventAppendResult {
-                                    event,
-                                    wake_delivery,
-                                },
-                                true,
-                            ))
-                        }
-                    }
+                    Self::append_event_conn(tx, &mut record, request, occurred_at_ms)
                 })()))
             })
             .await
@@ -789,12 +700,11 @@ impl ProcessRegistry for SqliteProcessRegistry {
                                 "unknown process `{process_id}`"
                             ))
                         })?;
-                    // First-writer-wins: the started fact is immutable once written.
-                    if record.first_started.is_none() {
-                        record.first_started = Some(Box::new(started));
-                        record.updated_at_ms = now;
-                        Self::save_process_conn(tx, &record)?;
+                    if record.first_started.is_some() {
+                        return Ok(record);
                     }
+                    let request = ProcessEventAppendRequest::first_started(&process_id, &started);
+                    Self::append_event_conn(tx, &mut record, request, now)?;
                     Ok(record)
                 })()))
             })
@@ -823,12 +733,12 @@ impl ProcessRegistry for SqliteProcessRegistry {
                             "terminal process `{process_id}` cannot accept an abandon request"
                         )));
                     }
-                    // First-writer-wins: preserve the original recorded authorization.
-                    if record.abandon_request.is_none() {
-                        record.abandon_request = Some(Box::new(request));
-                        record.updated_at_ms = now;
-                        Self::save_process_conn(tx, &record)?;
+                    if record.abandon_request.is_some() {
+                        return Ok(record);
                     }
+                    let append =
+                        ProcessEventAppendRequest::abandon_requested(&process_id, &request);
+                    Self::append_event_conn(tx, &mut record, append, now)?;
                     Ok(record)
                 })()))
             })
@@ -857,9 +767,11 @@ impl ProcessRegistry for SqliteProcessRegistry {
                             "terminal process `{process_id}` cannot enter a wait state"
                         )));
                     }
-                    record.wait = Some(wait);
-                    record.updated_at_ms = now;
-                    Self::save_process_conn(tx, &record)?;
+                    if record.wait.as_ref() == Some(&wait) {
+                        return Ok(record);
+                    }
+                    let request = ProcessEventAppendRequest::wait_entered(&process_id, &wait);
+                    Self::append_event_conn(tx, &mut record, request, now)?;
                     Ok(record)
                 })()))
             })
@@ -882,9 +794,11 @@ impl ProcessRegistry for SqliteProcessRegistry {
                                 "unknown process `{process_id}`"
                             ))
                         })?;
-                    record.wait = None;
-                    record.updated_at_ms = now;
-                    Self::save_process_conn(tx, &record)?;
+                    let Some(wait) = record.wait.clone() else {
+                        return Ok(record);
+                    };
+                    let request = ProcessEventAppendRequest::wait_cleared(&process_id, &wait);
+                    Self::append_event_conn(tx, &mut record, request, now)?;
                     Ok(record)
                 })()))
             })

@@ -58,16 +58,11 @@ pub(super) async fn complete_process(
                     prepare_process_event_append(&record, request, sequence, replay_lookup, now)?;
                 match prepared {
                     lash_core::ProcessEventAppendPlan::Replay {
-                        repair_status,
-                        occurred_at_ms,
+                        repair_record,
                         ..
                     } => {
-                        if let Some(status) = repair_status {
-                            lash_core::apply_process_status_projection(
-                                &mut record,
-                                status,
-                                occurred_at_ms,
-                            );
+                        if let Some(repaired) = repair_record {
+                            record = repaired;
                             SqliteProcessRegistry::save_process_conn(tx, &record)?;
                         }
                         Ok(record)
@@ -75,7 +70,7 @@ pub(super) async fn complete_process(
                     lash_core::ProcessEventAppendPlan::Insert {
                         event,
                         payload_hash,
-                        status_update,
+                        projected_record,
                         occurred_at_ms,
                         ..
                     } => {
@@ -95,15 +90,7 @@ pub(super) async fn complete_process(
                             ],
                         )
                         .map_err(process_sqlite_error)?;
-                        if let Some(status) = status_update {
-                            lash_core::apply_process_status_projection(
-                                &mut record,
-                                status,
-                                occurred_at_ms,
-                            );
-                        } else {
-                            record.updated_at_ms = occurred_at_ms;
-                        }
+                        record = projected_record;
                         SqliteProcessRegistry::save_process_conn(tx, &record)?;
                         Ok(record)
                     }
@@ -172,7 +159,7 @@ pub(super) async fn complete_process_with_lease(
                 let lash_core::ProcessEventAppendPlan::Insert {
                     event,
                     payload_hash,
-                    status_update,
+                    projected_record,
                     occurred_at_ms,
                     ..
                 } = prepared
@@ -195,13 +182,7 @@ pub(super) async fn complete_process_with_lease(
                     ],
                 )
                 .map_err(process_sqlite_error)?;
-                if let Some(status) = status_update {
-                    lash_core::apply_process_status_projection(
-                        &mut record,
-                        status,
-                        occurred_at_ms,
-                    );
-                }
+                record = projected_record;
                 SqliteProcessRegistry::save_process_conn(tx, &record)?;
                 tx.execute(
                     "UPDATE process_leases

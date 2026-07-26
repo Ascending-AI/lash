@@ -706,7 +706,7 @@ mod tests {
                 code: code.to_string(),
                 accept_finish: true,
             },
-            lashlang::global_in_memory_lashlang_artifact_store(),
+            Arc::new(lashlang::InMemoryLashlangArtifactStore::new()),
             surface,
             None,
             RlmProjectedBindings::default(),
