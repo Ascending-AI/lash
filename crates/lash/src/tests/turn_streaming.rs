@@ -4074,6 +4074,14 @@ async fn durable_agent_frame_follow_through_uses_distinct_turn_scopes_and_commit
         .query_map([], |row| row.get::<_, String>(0))
         .expect("query turn commits")
         .map(|row| row.expect("read turn commit row"))
+        .map(|encoded| {
+            serde_json::from_str::<lash_core::OperationId>(&encoded)
+                .expect("decode commit operation")
+                .scope
+                .turn_id()
+                .expect("turn-scoped commit")
+                .to_string()
+        })
         .collect::<Vec<_>>();
     assert_eq!(
         turn_commit_ids,

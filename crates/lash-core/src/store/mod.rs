@@ -1,12 +1,14 @@
 //! The runtime's settled-session persistence contract and shared store types.
 
 mod attachment_manifest;
+mod commit_identity;
 mod lease_timings;
 pub mod queued_work;
 
 pub use attachment_manifest::{
     AttachmentIntent, AttachmentManifest, AttachmentManifestEntry, AttachmentOwnerKind,
 };
+pub use commit_identity::{OperationId, derive_history_node_id, graph_realization_digest};
 pub use lease_timings::{LeaseTimings, LeaseTimingsError};
 
 const PROC_BOOT_ID_PATH: &str = "/proc/sys/kernel/random/boot_id";
@@ -125,6 +127,15 @@ pub enum StoreError {
         "runtime turn `{turn_id}` for session `{session_id}` was already committed with a different commit hash"
     )]
     RuntimeTurnCommitConflict { session_id: String, turn_id: String },
+    #[error("runtime commit node `{node_id}` does not match derived node id `{expected_node_id}`")]
+    NodeIdDerivationMismatch {
+        node_id: String,
+        expected_node_id: String,
+    },
+    #[error(
+        "runtime commit realization differs from stored receipt: proposed {proposed}, stored {stored}"
+    )]
+    CommitRealizationMismatch { proposed: String, stored: String },
     #[error(
         "queued work claim `{claim_id}` for session `{session_id}` is superseded by a newer session-lease generation"
     )]
@@ -409,6 +420,40 @@ impl GraphCommitDelta {
             Self::ReplaceFull(graph) => graph.leaf_node_id.as_ref(),
         }
     }
+
+    pub(crate) fn derive_node_ids(
+        &mut self,
+        session_id: &str,
+        operation: &OperationId,
+    ) -> Result<Vec<(String, String)>, StoreError> {
+        let (nodes, leaf_node_id) = match self {
+            Self::Append {
+                nodes,
+                leaf_node_id,
+            } => (nodes, leaf_node_id),
+            Self::Unchanged { .. } | Self::ReplaceFull(_) => return Ok(Vec::new()),
+        };
+        let mut remapped = std::collections::HashMap::<String, String>::new();
+        let mut mapping = Vec::with_capacity(nodes.len());
+        for (ordinal, node) in nodes.iter_mut().enumerate() {
+            if let Some(parent) = node.parent_node_id.as_mut()
+                && let Some(derived_parent) = remapped.get(parent)
+            {
+                *parent = derived_parent.clone();
+            }
+            let old = node.node_id.clone();
+            let derived = derive_history_node_id(session_id, operation, ordinal as u64)?;
+            node.node_id = derived.clone();
+            remapped.insert(old.clone(), derived.clone());
+            mapping.push((old, derived));
+        }
+        if let Some(leaf) = leaf_node_id.as_mut()
+            && let Some(derived_leaf) = remapped.get(leaf)
+        {
+            *leaf = derived_leaf.clone();
+        }
+        Ok(mapping)
+    }
 }
 
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
@@ -434,7 +479,7 @@ pub struct RuntimeCommit {
     pub interrupted_turn_input_turn_id: Option<String>,
     /// Attachment ids explicitly adopted by this commit. In the same
     /// transaction the backend also stamps every uncommitted manifest row owned
-    /// by `turn_commit.turn_id`, including ids that appear only in plain tool
+    /// by the turn id in `turn_commit.operation`, including ids that appear only in plain tool
     /// JSON. This list preserves typed-output and cross-turn re-references;
     /// adoption updates existing rows only and deliberately no-ops when this
     /// session has no matching intent.
@@ -446,6 +491,17 @@ pub struct RuntimeCommitResult {
     pub head_revision: u64,
     pub checkpoint_ref: BlobRef,
     pub manifest: SessionCheckpoint,
+    /// Store-computed proof of the exact topology realized by this operation.
+    ///
+    /// Node-derivation validation re-runs the derivation function and therefore
+    /// shares fate with its bugs. This digest instead compares two recorded
+    /// artifacts: the runtime proposal and the store result. It is the only
+    /// guard that cannot be broken by the same change that breaks derivation.
+    pub realization_digest: String,
+    /// Store-realized frame metadata. Reapplying it on receipt hits keeps
+    /// clock-derived `created_at` values equal to durable state.
+    pub agent_frames: Vec<crate::AgentFrameRecord>,
+    pub current_agent_frame_id: crate::AgentFrameId,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub enqueued_queue_batches: Vec<crate::QueuedWorkBatch>,
     /// Canonical input applications settled by this idempotent turn commit.
@@ -738,19 +794,19 @@ where
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct RuntimeTurnCommitStamp {
     pub session_id: String,
-    pub turn_id: String,
+    pub operation: OperationId,
     pub turn_commit_hash: String,
 }
 
 impl RuntimeTurnCommitStamp {
     pub fn new(
         session_id: impl Into<String>,
-        turn_id: impl Into<String>,
+        operation: OperationId,
         turn_commit_hash: impl Into<String>,
     ) -> Self {
         Self {
             session_id: session_id.into(),
-            turn_id: turn_id.into(),
+            operation,
             turn_commit_hash: turn_commit_hash.into(),
         }
     }
@@ -781,6 +837,66 @@ fn build_checkpoint_from_persisted_state(
 }
 
 impl RuntimeCommit {
+    pub fn validate_operation_session(&self) -> Result<(), StoreError> {
+        let Some(completed) = &self.turn_commit else {
+            return Ok(());
+        };
+        completed
+            .operation
+            .scope
+            .validate()
+            .map_err(|err| StoreError::Backend(err.to_string()))?;
+        if completed.operation.key.trim().is_empty() {
+            return Err(StoreError::Backend(
+                "commit operation identity requires a non-empty key".to_string(),
+            ));
+        }
+        if completed.session_id != self.session_id
+            || completed
+                .operation
+                .scope
+                .session_id()
+                .is_some_and(|session_id| session_id != self.session_id)
+        {
+            return Err(StoreError::RuntimeTurnCommitConflict {
+                session_id: completed.session_id.clone(),
+                turn_id: completed.operation.storage_key()?,
+            });
+        }
+        Ok(())
+    }
+
+    pub fn validate_node_derivation(&self) -> Result<(), StoreError> {
+        let Some(completed) = &self.turn_commit else {
+            return Ok(());
+        };
+        let GraphCommitDelta::Append { nodes, .. } = &self.graph else {
+            return Ok(());
+        };
+        for (ordinal, node) in nodes.iter().enumerate() {
+            let expected =
+                derive_history_node_id(&self.session_id, &completed.operation, ordinal as u64)?;
+            if node.node_id != expected {
+                return Err(StoreError::NodeIdDerivationMismatch {
+                    node_id: node.node_id.clone(),
+                    expected_node_id: expected,
+                });
+            }
+        }
+        Ok(())
+    }
+
+    pub fn verify_realization(&self, result: &RuntimeCommitResult) -> Result<(), StoreError> {
+        let proposed = graph_realization_digest(&self.graph);
+        if proposed != result.realization_digest {
+            return Err(StoreError::CommitRealizationMismatch {
+                proposed,
+                stored: result.realization_digest.clone(),
+            });
+        }
+        Ok(())
+    }
+
     pub fn turn_input_applications(&self) -> Vec<crate::TurnInputApplication> {
         self.completed_turn_input_claims
             .iter()
@@ -819,20 +935,7 @@ impl RuntimeCommit {
     }
 
     pub fn turn_commit_hash(&self) -> Result<String, StoreError> {
-        let mut semantic_commit = self.clone();
-        semantic_commit.expected_head_revision = None;
-        semantic_commit.session_execution_lease = None;
-        semantic_commit.release_session_execution_lease = None;
-        semantic_commit.turn_commit = None;
-        let mut semantic_commit = serde_json::to_value(&semantic_commit).map_err(|err| {
-            StoreError::Backend(format!("failed to serialize runtime turn commit: {err}"))
-        })?;
-        scrub_turn_commit_hash_value(&mut semantic_commit);
-        crate::stable_hash::stable_json_sha256_hex(&semantic_commit).map_err(|err| {
-            StoreError::Backend(format!(
-                "failed to serialize runtime turn commit hash: {err}"
-            ))
-        })
+        commit_identity::turn_commit_hash(self)
     }
 
     pub fn persisted_state(
@@ -895,6 +998,16 @@ impl RuntimeCommit {
         self
     }
 
+    pub fn with_operation(mut self, operation: OperationId) -> Result<Self, StoreError> {
+        let hash = self.turn_commit_hash()?;
+        self.turn_commit = Some(RuntimeTurnCommitStamp::new(
+            self.session_id.clone(),
+            operation,
+            hash,
+        ));
+        Ok(self)
+    }
+
     pub fn with_session_execution_lease(mut self, lease: SessionExecutionLeaseFence) -> Self {
         self.session_execution_lease = Some(lease);
         self
@@ -953,32 +1066,6 @@ impl RuntimeCommit {
     ) -> Self {
         self.committed_attachment_ids = attachment_ids.into_iter().collect();
         self
-    }
-}
-
-fn scrub_turn_commit_hash_value(value: &mut serde_json::Value) {
-    match value {
-        serde_json::Value::Object(map) => {
-            let is_message = map.contains_key("role") && map.contains_key("parts");
-            let is_message_part = map.contains_key("kind")
-                && map.contains_key("content")
-                && map.contains_key("prune_state");
-            if is_message || is_message_part {
-                map.remove("id");
-            }
-            for volatile_key in ["node_id", "parent_node_id", "leaf_node_id", "timestamp"] {
-                map.remove(volatile_key);
-            }
-            for child in map.values_mut() {
-                scrub_turn_commit_hash_value(child);
-            }
-        }
-        serde_json::Value::Array(items) => {
-            for item in items {
-                scrub_turn_commit_hash_value(item);
-            }
-        }
-        _ => {}
     }
 }
 
@@ -1508,44 +1595,4 @@ pub async fn refresh_persisted_session_state(
 }
 
 #[cfg(test)]
-mod tests {
-    use super::{LeaseOwnerIdentity, LeaseOwnerLiveness};
-
-    fn local_liveness(
-        host_id: &str,
-        boot_id: &str,
-        pid: u32,
-        process_start: &str,
-    ) -> LeaseOwnerLiveness {
-        LeaseOwnerLiveness::local_process_for_test(host_id, boot_id, pid, process_start)
-    }
-
-    #[test]
-    fn lease_owner_identity_requires_same_incarnation() {
-        let first = LeaseOwnerIdentity::opaque("owner", "incarnation-a");
-        let same = LeaseOwnerIdentity::opaque("owner", "incarnation-a");
-        let next = LeaseOwnerIdentity::opaque("owner", "incarnation-b");
-
-        assert!(first.same_incarnation(&same));
-        assert!(!first.same_incarnation(&next));
-    }
-
-    #[test]
-    fn local_liveness_only_proves_same_host_boot_dead_processes() {
-        let holder = local_liveness(
-            "host-a",
-            "boot-a",
-            std::process::id(),
-            "not-the-current-process-start",
-        );
-        let same_host_boot = local_liveness("host-a", "boot-a", std::process::id(), "claimant");
-        let other_host = local_liveness("host-b", "boot-a", std::process::id(), "claimant");
-        let other_boot = local_liveness("host-a", "boot-b", std::process::id(), "claimant");
-
-        assert!(holder.is_definitely_dead_for_claimant(&same_host_boot));
-        assert!(!holder.is_definitely_dead_for_claimant(&other_host));
-        assert!(!holder.is_definitely_dead_for_claimant(&other_boot));
-        assert!(!holder.is_definitely_dead_for_claimant(&LeaseOwnerLiveness::Opaque));
-        assert!(!LeaseOwnerLiveness::Opaque.is_definitely_dead_for_claimant(&same_host_boot));
-    }
-}
+mod tests;

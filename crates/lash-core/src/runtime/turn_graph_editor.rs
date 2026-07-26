@@ -66,17 +66,12 @@ impl TurnGraphEditor {
     where
         I: IntoIterator<Item = SessionHistoryRecord>,
     {
-        let mut active_message_ids = self
-            .active_messages
-            .iter()
-            .map(|message| message.id.clone())
-            .collect::<HashSet<_>>();
         let events = events
             .into_iter()
             .filter(|event| match event {
                 SessionHistoryRecord::Conversation(record) => {
                     let message = record.to_message();
-                    !message.is_transient() && active_message_ids.insert(record.id.clone())
+                    !message.is_transient()
                 }
                 SessionHistoryRecord::Protocol(_) => true,
             })
@@ -102,7 +97,8 @@ impl TurnGraphEditor {
         let mut appended = Vec::new();
         for message in next.into_iter().filter(|message| !message.is_transient()) {
             if let Some(current_message) = current.next() {
-                if current_message.id != message.id {
+                if serde_json::to_value(current_message).ok() != serde_json::to_value(message).ok()
+                {
                     return None;
                 }
             } else {
@@ -188,6 +184,29 @@ impl TurnGraphEditor {
         I: IntoIterator<Item = String>,
     {
         self.committed_node_ids = node_ids.into_iter().collect();
+    }
+
+    pub(super) fn remap_node_ids(&mut self, mapping: &[(String, String)]) {
+        if mapping.is_empty() {
+            return;
+        }
+        let by_old = mapping.iter().cloned().collect::<HashMap<_, _>>();
+        for node in &mut self.appended_nodes {
+            if let Some(derived) = by_old.get(&node.node_id) {
+                node.node_id = derived.clone();
+            }
+            if let Some(parent) = node.parent_node_id.as_mut()
+                && let Some(derived) = by_old.get(parent)
+            {
+                *parent = derived.clone();
+            }
+        }
+        self.appended_node_indices = self
+            .appended_node_indices
+            .drain()
+            .map(|(id, index)| (by_old.get(&id).cloned().unwrap_or(id), index))
+            .collect();
+        self.append_builder.remap_node_ids(mapping);
     }
 
     pub(super) fn into_session_graph(self) -> SessionGraph {

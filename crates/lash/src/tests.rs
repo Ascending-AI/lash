@@ -161,14 +161,21 @@ impl lash_core::SessionCommitStore for SnapshotStore {
     ) -> std::result::Result<lash_core::store::RuntimeCommitResult, lash_core::store::StoreError>
     {
         let mut read = self.read.lock().expect("snapshot store lock");
+        let realization_digest = lash_core::store::graph_realization_digest(&commit.graph);
+        let realized_agent_frames = commit.agent_frames.clone();
+        let realized_current_agent_frame_id = commit.current_agent_frame_id.clone();
         if let Some(completed) = &commit.turn_commit {
+            let operation_key = completed.operation.storage_key()?;
             if completed.session_id != commit.session_id {
                 return Err(lash_core::store::StoreError::RuntimeTurnCommitConflict {
                     session_id: completed.session_id.clone(),
-                    turn_id: completed.turn_id.clone(),
+                    turn_id: operation_key,
                 });
             }
-            let key = (completed.session_id.clone(), completed.turn_id.clone());
+            let key = (
+                completed.session_id.clone(),
+                completed.operation.storage_key()?,
+            );
             if let Some((stored_hash, result)) = self
                 .runtime_turn_commits
                 .lock()
@@ -181,7 +188,7 @@ impl lash_core::SessionCommitStore for SnapshotStore {
                 }
                 return Err(lash_core::store::StoreError::RuntimeTurnCommitConflict {
                     session_id: completed.session_id.clone(),
-                    turn_id: completed.turn_id.clone(),
+                    turn_id: completed.operation.storage_key()?,
                 });
             }
         }
@@ -241,6 +248,9 @@ impl lash_core::SessionCommitStore for SnapshotStore {
             head_revision: 8,
             checkpoint_ref: lash_core::BlobRef("checkpoint".to_string()),
             manifest: lash_core::store::SessionCheckpoint::default(),
+            realization_digest,
+            agent_frames: realized_agent_frames,
+            current_agent_frame_id: realized_current_agent_frame_id,
             enqueued_queue_batches: Vec::new(),
             turn_input_applications: Vec::new(),
         };
@@ -249,7 +259,10 @@ impl lash_core::SessionCommitStore for SnapshotStore {
                 .lock()
                 .expect("runtime turn commits lock")
                 .insert(
-                    (completed.session_id.clone(), completed.turn_id.clone()),
+                    (
+                        completed.session_id.clone(),
+                        completed.operation.storage_key()?,
+                    ),
                     (completed.turn_commit_hash.clone(), result.clone()),
                 );
         }

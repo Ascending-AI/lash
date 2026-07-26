@@ -506,7 +506,9 @@ fn final_turn_commit(
         .with_committed_attachments(adopted_attachment_ids);
     let hash = commit.turn_commit_hash().expect("turn commit hash");
     commit = commit.with_turn_commit(crate::RuntimeTurnCommitStamp::new(
-        session_id, turn_id, hash,
+        session_id,
+        crate::OperationId::turn(session_id, turn_id, "final"),
+        hash,
     ));
     commit
 }

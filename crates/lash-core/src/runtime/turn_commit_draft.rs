@@ -130,6 +130,10 @@ impl TurnCommitDraft {
         self.graph.replace_persisted_node_ids(node_ids);
     }
 
+    pub(super) fn remap_node_ids(&mut self, mapping: &[(String, String)]) {
+        self.graph.remap_node_ids(mapping);
+    }
+
     fn apply_message_projection(&mut self, messages: &MessageSequence) {
         if let Some(appended_messages) = self
             .graph

@@ -364,7 +364,9 @@ impl LashRuntime {
         // here would bump the head revision on every park/close, disturbing
         // host-side head-CAS expectations for what is durably a no-op.
         if self.state.head_revision.is_none() || self.state.graph_replace_required {
-            let commit = crate::store::RuntimeCommit::persisted_state(&self.state, &[]);
+            let commit = crate::store::RuntimeCommit::persisted_state(&self.state, &[])
+                .with_operation(super::state::revision_operation(&self.state, "park"))
+                .map_err(|err| SessionError::Protocol(err.to_string()))?;
             let result = commit_runtime_state_with_fresh_session_execution_lease(
                 Arc::clone(&store),
                 commit,

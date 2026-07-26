@@ -9,7 +9,8 @@ use crate::{PluginOperationInvokeError, SessionError};
 
 use super::LashRuntime;
 use super::state::{
-    RuntimeSessionState, append_session_nodes_to_state_with_clock, normalize_session_graph,
+    RuntimeSessionState, append_session_nodes_to_state_with_clock, derive_graph_commit_node_ids,
+    normalize_session_graph, revision_operation,
 };
 
 impl LashRuntime {
@@ -66,6 +67,7 @@ impl LashRuntime {
                 current_leaf_node_id: self.state.session_graph.leaf_node_id.clone(),
             });
         }
+        let operation = revision_operation(&self.state, "append-session-nodes");
         let node_ids = append_session_nodes_to_state_with_clock(
             &mut self.state,
             &request.nodes,
@@ -87,19 +89,29 @@ impl LashRuntime {
             .as_ref()
             .and_then(|session| session.history_store())
         {
-            let graph = crate::store::GraphCommitDelta::Append {
+            let mut graph = crate::store::GraphCommitDelta::Append {
                 nodes: node_ids
                     .iter()
                     .filter_map(|id| self.state.session_graph.find_node(id).cloned())
                     .collect(),
                 leaf_node_id: self.state.session_graph.leaf_node_id.clone(),
             };
-            let commit = crate::store::RuntimeCommit::persisted_state_with_graph_commit(
+            let node_ids = derive_graph_commit_node_ids(&mut self.state, &mut graph, &operation)
+                .map_err(|err| SessionError::Protocol(err.to_string()))?;
+            let mut commit = crate::store::RuntimeCommit::persisted_state_with_graph_commit(
                 &self.state,
                 graph,
                 &[],
             );
-            match super::commit_runtime_state_with_fresh_session_execution_lease(
+            let hash = commit
+                .turn_commit_hash()
+                .map_err(|err| SessionError::Protocol(err.to_string()))?;
+            commit.turn_commit = Some(crate::RuntimeTurnCommitStamp::new(
+                self.state.session_id.clone(),
+                operation,
+                hash,
+            ));
+            let result = super::commit_runtime_state_with_fresh_session_execution_lease(
                 store,
                 commit,
                 &self.runtime_lease_owner,
@@ -107,10 +119,19 @@ impl LashRuntime {
                 Arc::clone(&self.host.core.clock),
             )
             .await
-            {
-                Ok(result) => self.state.apply_persisted_commit_result(result),
-                Err(err) => tracing::warn!("failed to persist runtime state: {err}"),
-            }
+            .map_err(|err| {
+                SessionError::Protocol(format!("failed to persist runtime state: {err}"))
+            })?;
+            self.state.apply_persisted_commit_result(result);
+            return Ok(crate::AppendSessionNodesResult::Appended {
+                node_ids,
+                leaf_node_id: self
+                    .state
+                    .session_graph
+                    .leaf_node_id
+                    .clone()
+                    .unwrap_or_default(),
+            });
         }
         Ok(crate::AppendSessionNodesResult::Appended {
             node_ids,
@@ -442,6 +463,7 @@ impl LashRuntime {
         &mut self,
         nodes: &[crate::SessionAppendNode],
     ) -> Result<(), PluginOperationInvokeError> {
+        let operation = revision_operation(&self.state, "append-plugin-runtime-events");
         let node_ids = append_session_nodes_to_state_with_clock(
             &mut self.state,
             nodes,
@@ -452,18 +474,35 @@ impl LashRuntime {
             .as_ref()
             .and_then(|session| session.history_store())
         {
-            let graph = crate::store::GraphCommitDelta::Append {
+            let mut graph = crate::store::GraphCommitDelta::Append {
                 nodes: node_ids
                     .iter()
                     .filter_map(|id| self.state.session_graph.find_node(id).cloned())
                     .collect(),
                 leaf_node_id: self.state.session_graph.leaf_node_id.clone(),
             };
-            let commit = crate::store::RuntimeCommit::persisted_state_with_graph_commit(
+            derive_graph_commit_node_ids(&mut self.state, &mut graph, &operation).map_err(
+                |err| {
+                    PluginOperationInvokeError::Failed(format!(
+                        "failed to derive plugin runtime event identity: {err}"
+                    ))
+                },
+            )?;
+            let mut commit = crate::store::RuntimeCommit::persisted_state_with_graph_commit(
                 &self.state,
                 graph,
                 &[],
             );
+            let hash = commit.turn_commit_hash().map_err(|err| {
+                PluginOperationInvokeError::Failed(format!(
+                    "failed to hash plugin runtime events: {err}"
+                ))
+            })?;
+            commit.turn_commit = Some(crate::RuntimeTurnCommitStamp::new(
+                self.state.session_id.clone(),
+                operation,
+                hash,
+            ));
             let result = super::commit_runtime_state_with_fresh_session_execution_lease(
                 store,
                 commit,
@@ -492,7 +531,13 @@ impl LashRuntime {
         else {
             return Ok(());
         };
-        let commit = crate::store::RuntimeCommit::persisted_state(&self.state, &[]);
+        let commit = crate::store::RuntimeCommit::persisted_state(&self.state, &[])
+            .with_operation(revision_operation(&self.state, "plugin-operation-state"))
+            .map_err(|err| {
+                PluginOperationInvokeError::Failed(format!(
+                    "failed to identify plugin operation state: {err}"
+                ))
+            })?;
         let result = super::commit_runtime_state_with_fresh_session_execution_lease(
             store,
             commit,

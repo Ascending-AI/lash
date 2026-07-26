@@ -54,6 +54,8 @@ fn store_error_variant(error: &StoreError) -> &'static str {
         StoreError::SessionBindingMismatch { .. } => "SessionBindingMismatch",
         StoreError::UnsupportedReadScope(_) => "UnsupportedReadScope",
         StoreError::RuntimeTurnCommitConflict { .. } => "RuntimeTurnCommitConflict",
+        StoreError::NodeIdDerivationMismatch { .. } => "NodeIdDerivationMismatch",
+        StoreError::CommitRealizationMismatch { .. } => "CommitRealizationMismatch",
         StoreError::QueuedWorkClaimSuperseded { .. } => "QueuedWorkClaimSuperseded",
         StoreError::TurnInputClaimSuperseded { .. } => "TurnInputClaimSuperseded",
         StoreError::UnsettledQueuedWorkClaim { .. } => "UnsettledQueuedWorkClaim",

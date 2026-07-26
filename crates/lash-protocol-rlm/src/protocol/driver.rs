@@ -5,8 +5,7 @@ use lash_core::sansio::{
     WaitingLlmState,
 };
 use lash_core::session_model::{
-    ConversationRecord, Message, SessionHistoryRecord, SessionStreamEvent, fresh_message_id,
-    make_error_event,
+    ConversationRecord, Message, SessionHistoryRecord, SessionStreamEvent, make_error_event,
 };
 use lash_core::{
     CheckpointKind, DriverAction, DriverContextView, ExecResponse, LlmOutputPart, LlmResponse,
@@ -117,6 +116,7 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for RlmDriver {
                     &mut actions,
                     Vec::new(),
                     vec![conversation_event(invalid_lashlang_cell_message(
+                        rlm_message_id(ctx.protocol_iteration(), "invalid_cell"),
                         err.message(),
                     ))],
                 ) {
@@ -159,10 +159,12 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for RlmDriver {
             let mut events = Vec::new();
             if !assistant_text.trim().is_empty() {
                 events.push(conversation_event(internal_assistant_prose_message(
+                    rlm_message_id(ctx.protocol_iteration(), "assistant_prose"),
                     assistant_text,
                 )));
             }
             events.push(conversation_event(finish_required_reminder_message(
+                rlm_message_id(ctx.protocol_iteration(), "finish_reminder"),
                 schema.is_some(),
             )));
             if let Err(err) =
@@ -294,6 +296,7 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for RlmDriver {
                         None,
                     ),
                     vec![conversation_event(finish_schema_mismatch_message(
+                        rlm_message_id(ctx.protocol_iteration(), "schema_mismatch"),
                         &error_text,
                     ))],
                 ) {
@@ -364,7 +367,10 @@ fn continue_or_stop_after_nonterminal(
             RlmTermination::Natural => {
                 if let Some(max_turns) = ctx.max_turns() {
                     actions.push(DriverAction::ScheduleTurnLimitFinal {
-                        message: turn_limit_final_message(fresh_message_id(), max_turns),
+                        message: turn_limit_final_message(
+                            rlm_message_id(next_protocol_iteration, "turn_limit"),
+                            max_turns,
+                        ),
                     });
                 }
             }
@@ -561,6 +567,10 @@ fn trajectory_entry(
     }
 }
 
+fn rlm_message_id(protocol_iteration: usize, purpose: &str) -> String {
+    format!("m_rlm_{protocol_iteration}_{purpose}")
+}
+
 fn trajectory_events(
     protocol_iteration: usize,
     state: &RlmDriverState,
@@ -568,7 +578,8 @@ fn trajectory_events(
     final_output: Option<Value>,
 ) -> Vec<SessionHistoryRecord> {
     let mut events = Vec::new();
-    if let Some(event) = assistant_content_event(&state.reasoning, &state.prose) {
+    if let Some(event) = assistant_content_event(protocol_iteration, &state.reasoning, &state.prose)
+    {
         events.push(event);
     }
     events.push(trajectory_event(trajectory_entry(
@@ -580,8 +591,12 @@ fn trajectory_events(
     events
 }
 
-fn assistant_content_event(reasoning: &str, prose: &str) -> Option<SessionHistoryRecord> {
-    let id = fresh_message_id();
+fn assistant_content_event(
+    protocol_iteration: usize,
+    reasoning: &str,
+    prose: &str,
+) -> Option<SessionHistoryRecord> {
+    let id = rlm_message_id(protocol_iteration, "assistant_content");
     let reasoning = reasoning.trim();
     let prose = prose.trim();
     (!reasoning.is_empty() || !prose.is_empty()).then(|| {

@@ -591,8 +591,20 @@ impl LashRuntime {
         else {
             return Ok(());
         };
+        let operation = completion
+            .as_ref()
+            .and_then(|completion| completion.batch_ids.first())
+            .map(|batch_id| {
+                crate::OperationId::new(
+                    crate::ExecutionScope::queue_drain(&self.state.session_id, batch_id),
+                    "session-command",
+                )
+            })
+            .unwrap_or_else(|| super::state::revision_operation(&self.state, "session-command"));
         let mut commit =
-            crate::store::RuntimeCommit::persisted_state_with_graph_commit(&self.state, graph, &[]);
+            crate::store::RuntimeCommit::persisted_state_with_graph_commit(&self.state, graph, &[])
+                .with_operation(operation)
+                .map_err(super::runtime_error_from_store_commit)?;
         let Some(session_execution_lease) = session_execution_lease else {
             return Err(RuntimeError::new(
                 RuntimeErrorCode::StoreCommitFailed,
@@ -603,10 +615,19 @@ impl LashRuntime {
         if let Some(completion) = completion {
             commit = commit.completing_queue_claim(completion);
         }
+        let proposed_realization = crate::store::graph_realization_digest(&commit.graph);
         let result = store
             .commit_runtime_state(commit)
             .await
             .map_err(super::runtime_error_from_store_commit)?;
+        if proposed_realization != result.realization_digest {
+            return Err(super::runtime_error_from_store_commit(
+                crate::StoreError::CommitRealizationMismatch {
+                    proposed: proposed_realization,
+                    stored: result.realization_digest.clone(),
+                },
+            ));
+        }
         self.state.apply_persisted_commit_result(result);
         Ok(())
     }

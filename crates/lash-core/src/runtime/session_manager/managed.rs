@@ -13,7 +13,12 @@ impl ManagedSessionCapability {
             let mut persisted_state = materialized.runtime.export_persisted_state();
             super::normalize_session_graph(&mut persisted_state);
             persisted_state.graph_replace_required = true;
-            let commit = crate::store::RuntimeCommit::persisted_state(&persisted_state, &[]);
+            let commit = crate::store::RuntimeCommit::persisted_state(&persisted_state, &[])
+                .with_operation(super::super::state::revision_operation(
+                    &persisted_state,
+                    "create-session",
+                ))
+                .map_err(|err| crate::PluginError::Session(err.to_string()))?;
             let result = commit_runtime_state_with_fresh_session_execution_lease(
                 Arc::clone(store),
                 commit,

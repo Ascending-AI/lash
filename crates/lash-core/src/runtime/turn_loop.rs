@@ -547,7 +547,6 @@ impl LashRuntime {
                 &mut returned_turn,
                 self.session.as_mut(),
                 &turn_usage_delta,
-                Some(&trace_turn_id),
                 commit_effects.originating_queue_claims,
                 commit_effects.originating_turn_input_claims,
                 commit_effects.completed_queue_claims,
@@ -803,6 +802,7 @@ impl LashRuntime {
         let mut turn_pipeline = TurnBoundary::from_state_with_clock(
             self.state.clone(),
             Arc::clone(&self.host.core.clock),
+            crate::ExecutionScope::turn(&self.state.session_id, &trace_turn_id),
         )
         .with_session_execution_lease(
             session_execution_lease.map(SessionExecutionLeaseGuard::fence),
@@ -982,8 +982,7 @@ impl LashRuntime {
                 let turn_id = input
                     .trace_turn_id
                     .clone()
-                    .or_else(|| Some(opts.execution_scope_id().to_owned()))
-                    .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+                    .unwrap_or_else(|| opts.execution_scope_id().to_owned());
                 input.trace_turn_id = Some(turn_id.clone());
                 crate::trace::emit_trace(
                     &self.host.core.tracing.trace_sink,
@@ -1066,8 +1065,7 @@ impl LashRuntime {
             .input
             .trace_turn_id
             .clone()
-            .or_else(|| Some(opts.execution_scope_id().to_owned()))
-            .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+            .unwrap_or_else(|| opts.execution_scope_id().to_owned());
         work.input.trace_turn_id = Some(turn_id.clone());
         let causes = work.turn_causes.clone();
         emit_queued_work_started_to_sink(
@@ -1403,7 +1401,7 @@ impl LashRuntime {
                 let trace_turn_id = input
                     .trace_turn_id
                     .clone()
-                    .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+                    .expect("turn id is bound from the execution scope before validation");
                 emit_turn_activity_to_sink_for_turn(
                     turn_events,
                     &trace_turn_id,
@@ -1432,6 +1430,7 @@ impl LashRuntime {
                 let mut turn_pipeline = TurnBoundary::from_state_with_clock(
                     self.state.clone(),
                     Arc::clone(&self.host.core.clock),
+                    crate::ExecutionScope::turn(&self.state.session_id, &trace_turn_id),
                 )
                 .with_session_execution_lease(
                     session_execution_lease.map(SessionExecutionLeaseGuard::fence),
@@ -1466,7 +1465,7 @@ impl LashRuntime {
         let trace_turn_id = input
             .trace_turn_id
             .clone()
-            .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+            .expect("turn id is bound from the execution scope before normalization");
         if self.host.core.tracing.trace_sink.is_some() {
             let mut trace_metadata = std::collections::BTreeMap::new();
             trace_metadata.insert(
@@ -1501,7 +1500,12 @@ impl LashRuntime {
                 .map(crate::TurnCause::to_event_message),
         );
 
-        let user_id = fresh_message_id();
+        let user_id = turn_input_claims
+            .iter()
+            .flat_map(|claim| claim.inputs.iter().map(|input| input.input_id.as_str()))
+            .next()
+            .map(crate::runtime::ingress_message_id)
+            .unwrap_or_else(|| format!("m_turn_{trace_turn_id}_input"));
         let mut user_parts: Vec<Part> = Vec::new();
         for item in normalized {
             match item {
@@ -1823,6 +1827,7 @@ impl LashRuntime {
         let mut turn_pipeline = TurnBoundary::from_state_with_clock(
             self.state.clone(),
             Arc::clone(&self.host.core.clock),
+            crate::ExecutionScope::turn(&self.state.session_id, &trace_turn_id),
         )
         .with_session_execution_lease(session_execution_fence);
         turn_pipeline.apply_prepared_messages(&prepared.messages);
@@ -2003,6 +2008,7 @@ impl LashRuntime {
         let mut turn_pipeline = TurnBoundary::from_state_with_clock(
             self.state.clone(),
             Arc::clone(&self.host.core.clock),
+            crate::ExecutionScope::turn(&self.state.session_id, &trace_turn_id),
         )
         .with_session_execution_lease(session_execution_fence.clone());
         let store = self

@@ -19,9 +19,10 @@ impl InMemorySessionStore {
             .expect("lock attachment manifest")
             .values_mut()
         {
+            let turn_id = completed.operation.turn_id();
             if entry.session_id == completed.session_id
                 && entry.owner_kind == Some(crate::AttachmentOwnerKind::Turn)
-                && entry.owner_id.as_deref() == Some(completed.turn_id.as_str())
+                && entry.owner_id.as_deref() == turn_id
                 && entry.committed_at_epoch_ms.is_none()
             {
                 entry.committed_at_epoch_ms = Some(now);

@@ -56,8 +56,8 @@ use crate::plugin::{
 use crate::sansio::{LlmCallError, Response};
 use crate::session_model::{
     Message, MessageRole, Part, PartKind, PruneState, RuntimeSessionPolicy, SessionPolicy,
-    SessionStreamEvent, TokenUsage, fresh_message_id, make_error_event, reassign_part_ids,
-    shared_parts, transport_stream_events,
+    SessionStreamEvent, TokenUsage, make_error_event, reassign_part_ids, shared_parts,
+    transport_stream_events,
 };
 use crate::{
     CheckpointKind, PersistentRuntimeServices, PluginOperationInvokeError, PromptHookContext,
@@ -182,6 +182,7 @@ pub use turn_control::{
     TurnAddress, TurnAttach, TurnCancelOriginHint, TurnCancelOutcome, TurnCancelReceipt,
     TurnCancelRequest, TurnCancellationEvidence, TurnTerminal, TurnWorkDriver,
 };
+pub(crate) use turn_input_ingress::ingress_message_id;
 pub use turn_input_ingress::{
     PendingTurnInput, PendingTurnInputCancelOutcome, PendingTurnInputCancelResult,
     PendingTurnInputCancelTarget, PendingTurnInputClaimDiagnostics, PendingTurnInputDraft,

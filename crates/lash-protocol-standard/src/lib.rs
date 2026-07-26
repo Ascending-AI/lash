@@ -27,7 +27,7 @@ use lash_core::sansio::{
 use lash_core::session_model::message::PartAttachment;
 use lash_core::session_model::{
     ConversationRecord, Message, MessageRole, Part, PartKind, PruneState, SessionHistoryRecord,
-    SessionStreamEvent, fresh_message_id, make_error_event, reassign_part_ids, shared_parts,
+    SessionStreamEvent, make_error_event, reassign_part_ids, shared_parts,
 };
 
 mod batch;
@@ -475,7 +475,7 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for StandardDriver {
                 return actions;
             }
 
-            let asst_id = fresh_message_id();
+            let asst_id = format!("m_standard_{}_assistant", ctx.protocol_iteration());
             let mut parts_out = Vec::new();
             for (_, meta, text) in reasoning_items {
                 parts_out.push(reasoning_part(&asst_id, parts_out.len(), text, meta));
@@ -520,7 +520,7 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for StandardDriver {
             return actions;
         }
 
-        let asst_id = fresh_message_id();
+        let asst_id = format!("m_standard_{}_assistant", ctx.protocol_iteration());
         let mut assistant_parts = Vec::new();
         for (content, response_meta) in assistant_text_parts {
             if content.trim().is_empty() {
@@ -615,7 +615,7 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for StandardDriver {
         }
 
         if !result_parts.is_empty() {
-            let user_id = fresh_message_id();
+            let user_id = format!("m_standard_{}_tool_results", ctx.protocol_iteration());
             reassign_part_ids(&user_id, &mut result_parts);
             actions.push(DriverAction::AppendEvents(vec![conversation_event(
                 Message {
@@ -637,7 +637,7 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for StandardDriver {
         if let Some(max_turns) = ctx.max_turns()
             && next_protocol_iteration >= ctx.protocol_run_offset() + max_turns
         {
-            let message_id = fresh_message_id();
+            let message_id = format!("m_standard_{next_protocol_iteration}_turn_limit");
             actions.push(DriverAction::AppendEvents(vec![conversation_event(
                 turn_limit_exhausted_message(message_id, max_turns),
             )]));

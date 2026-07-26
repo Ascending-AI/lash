@@ -8,8 +8,8 @@ use lash::direct::{
 use lash::durability::RuntimeHostConfig;
 use lash::messages::MessageRole;
 use lash::persistence::{
-    CheckpointKind, GcReport, GraphCommitDelta, LeaseOwnerIdentity, PersistedSessionRead,
-    PendingTurnInputDraft, QueuedWorkBatch, QueuedWorkBatchDraft, QueuedWorkClaim,
+    CheckpointKind, GcReport, GraphCommitDelta, LeaseOwnerIdentity, OperationId,
+    PersistedSessionRead, PendingTurnInputDraft, QueuedWorkBatch, QueuedWorkBatchDraft, QueuedWorkClaim,
     QueuedWorkClaimBoundary, QueuedWorkStore, RuntimeCommit, RuntimeCommitResult,
     RuntimePersistence, RuntimeSessionState, RuntimeTurnCommitStamp, SessionCheckpoint,
     SessionCommitStore, SessionExecutionLease, SessionExecutionLeaseClaimOutcome,
@@ -65,6 +65,9 @@ impl SessionCommitStore for FacadeStore {
             head_revision: commit.expected_head_revision.unwrap_or_default() + 1,
             checkpoint_ref: "checkpoint".to_string().into(),
             manifest,
+            realization_digest: String::new(),
+            agent_frames: Vec::new(),
+            current_agent_frame_id: String::new(),
             enqueued_queue_batches: Vec::new(),
             turn_input_applications: Vec::new(),
         })
@@ -311,7 +314,7 @@ fn persistence_types_are_nameable(
         usage_deltas: ledger,
         turn_commit: Some(RuntimeTurnCommitStamp::new(
             "facade",
-            "turn",
+            OperationId::turn("facade", "turn", "final"),
             "sha256:facade",
         )),
         completed_queue_claims: Vec::new(),

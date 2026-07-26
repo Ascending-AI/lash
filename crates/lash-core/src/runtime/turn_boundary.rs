@@ -1,14 +1,16 @@
-use std::{collections::BTreeSet, sync::Arc};
+use std::sync::Arc;
 
-use crate::session_model::{SessionHistoryRecord, fresh_message_id};
+use crate::session_model::SessionHistoryRecord;
 use crate::store::{GraphCommitDelta, RuntimeCommit, RuntimePersistence, StoreError};
 use crate::{
-    AssembledTurn, Message, MessageRole, MessageSequence, Part, PartKind, PluginSession,
-    PruneState, Session, SessionPolicy, SessionReadView, ToolCallRecord, TurnFinish, TurnOutcome,
-    shared_parts,
+    AssembledTurn, MessageSequence, PluginSession, Session, SessionPolicy, SessionReadView,
+    ToolCallRecord, TurnOutcome,
 };
 
 use super::{RuntimeError, RuntimeSessionState, TurnCommitDraft, merge_ledger_entry};
+
+mod materialize;
+use materialize::*;
 
 pub(super) struct ProgressBoundaryCommit {
     pub(super) protocol_events: Vec<crate::ProtocolEvent>,
@@ -29,6 +31,7 @@ pub(super) struct TurnBoundary {
     stage: TurnCommitStage,
     clock: Arc<dyn crate::Clock>,
     session_execution_lease: Option<crate::SessionExecutionLeaseFence>,
+    operation_scope: crate::ExecutionScope,
 }
 
 /// Explicit two-phase lifecycle for a turn commit.
@@ -66,7 +69,6 @@ struct FinalCommitInput<'a> {
     store: Option<&'a (dyn RuntimePersistence + 'a)>,
     usage_deltas: &'a [crate::TokenLedgerEntry],
     outcome: &'a TurnOutcome,
-    turn_id: Option<&'a str>,
     originating_queue_claims: Vec<crate::QueuedWorkCompletion>,
     originating_turn_input_claims: Vec<crate::TurnInputCompletion>,
     completed_queue_claims: Vec<crate::QueuedWorkCompletion>,
@@ -103,12 +105,14 @@ impl PersistedGraphMark {
 impl TurnBoundary {
     #[cfg(test)]
     pub(super) fn from_state(state: RuntimeSessionState) -> Self {
-        Self::from_state_with_clock(state, Arc::new(crate::SystemClock))
+        let scope = crate::ExecutionScope::turn(&state.session_id, "test-turn");
+        Self::from_state_with_clock(state, Arc::new(crate::SystemClock), scope)
     }
 
     pub(super) fn from_state_with_clock(
         state: RuntimeSessionState,
         clock: Arc<dyn crate::Clock>,
+        operation_scope: crate::ExecutionScope,
     ) -> Self {
         let draft_clock = Arc::clone(&clock);
         Self {
@@ -118,6 +122,7 @@ impl TurnBoundary {
             ))),
             clock,
             session_execution_lease: None,
+            operation_scope,
         }
     }
 
@@ -286,7 +291,6 @@ impl TurnBoundary {
             });
         }
 
-        let protocol_events = self.apply_event_delta(event_delta);
         {
             let draft = self.draft_mut();
             draft.apply_prepared_messages(&messages);
@@ -300,6 +304,7 @@ impl TurnBoundary {
                 state.refresh_plugin_snapshots(plugins);
             }
         }
+        let protocol_events = self.apply_event_delta(event_delta);
 
         let Some(store) = store else {
             return Ok(ProgressBoundaryCommit {
@@ -334,13 +339,18 @@ impl TurnBoundary {
         event_delta: Vec<SessionHistoryRecord>,
     ) -> Vec<crate::ProtocolEvent> {
         let protocol_events = event_delta
-            .iter()
+            .into_iter()
             .filter_map(|event| match event {
-                SessionHistoryRecord::Protocol(event) => Some(event.clone()),
+                SessionHistoryRecord::Protocol(event) => Some(event),
                 SessionHistoryRecord::Conversation(_) => None,
             })
             .collect::<Vec<_>>();
-        self.draft_mut().append_events(event_delta);
+        self.draft_mut().append_events(
+            protocol_events
+                .iter()
+                .cloned()
+                .map(SessionHistoryRecord::Protocol),
+        );
         protocol_events
     }
 
@@ -350,7 +360,6 @@ impl TurnBoundary {
         returned_turn: &mut AssembledTurn,
         session: Option<&mut Session>,
         usage_deltas: &[crate::TokenLedgerEntry],
-        turn_id: Option<&str>,
         originating_queue_claims: Vec<crate::QueuedWorkCompletion>,
         originating_turn_input_claims: Vec<crate::TurnInputCompletion>,
         completed_queue_claims: Vec<crate::QueuedWorkCompletion>,
@@ -377,7 +386,6 @@ impl TurnBoundary {
                 store: store.as_ref().map(|store| store.as_ref()),
                 usage_deltas,
                 outcome: &returned_turn.outcome,
-                turn_id,
                 originating_queue_claims,
                 originating_turn_input_claims,
                 completed_queue_claims,
@@ -473,7 +481,6 @@ impl TurnBoundary {
             store,
             usage_deltas,
             outcome,
-            turn_id,
             originating_queue_claims,
             originating_turn_input_claims,
             completed_queue_claims,
@@ -483,6 +490,7 @@ impl TurnBoundary {
             session_execution_lease_completion,
         } = input;
         let clock = Arc::clone(&self.clock);
+        let terminal_message_id = format!("m_turn_{}_assistant", self.operation_scope.id());
         let state = self.final_state_mut();
         state.apply_snapshot(returned_state);
         for entry in usage_deltas.iter().cloned() {
@@ -494,7 +502,7 @@ impl TurnBoundary {
         if let Some(execution_state_snapshot) = execution_state_snapshot {
             state.set_execution_state_snapshot(execution_state_snapshot);
         }
-        materialize_terminal_output(state, outcome, clock.as_ref());
+        materialize_terminal_output(state, outcome, clock.as_ref(), &terminal_message_id);
         materialize_agent_frame_switch(state, outcome, clock.as_ref());
         let progress_graph = match &self.stage {
             TurnCommitStage::Drafting(draft) => {
@@ -535,7 +543,10 @@ impl TurnBoundary {
                 store,
                 graph,
                 usage_deltas,
-                turn_id,
+                Some(crate::OperationId::new(
+                    self.operation_scope.clone(),
+                    "final",
+                )),
                 originating_queue_claims,
                 originating_turn_input_claims,
                 completed_queue_claims,
@@ -556,9 +567,9 @@ impl TurnBoundary {
     async fn apply_commit(
         &mut self,
         store: &(dyn RuntimePersistence + '_),
-        graph: GraphCommitDelta,
+        mut graph: GraphCommitDelta,
         usage_deltas: &[crate::TokenLedgerEntry],
-        turn_id: Option<&str>,
+        operation: Option<crate::OperationId>,
         originating_queue_claims: Vec<crate::QueuedWorkCompletion>,
         originating_turn_input_claims: Vec<crate::TurnInputCompletion>,
         completed_queue_claims: Vec<crate::QueuedWorkCompletion>,
@@ -569,6 +580,16 @@ impl TurnBoundary {
         session_execution_lease_completion: Option<crate::SessionExecutionLeaseCompletion>,
     ) -> Result<Vec<crate::QueuedWorkBatch>, StoreError> {
         let session_execution_lease = self.session_execution_lease.clone();
+        if let Some(operation) = &operation {
+            let node_id_mapping = graph.derive_node_ids(&self.state().session_id, operation)?;
+            match &mut self.stage {
+                TurnCommitStage::Drafting(draft) => draft.remap_node_ids(&node_id_mapping),
+                TurnCommitStage::Finalized(finalized) => finalized
+                    .state
+                    .session_graph
+                    .remap_node_ids(&node_id_mapping),
+            }
+        }
         let state = self.state_mut();
         let mark = PersistedGraphMark::from_graph_commit(&graph);
         let mut commit =
@@ -586,15 +607,22 @@ impl TurnBoundary {
             .validate_claim_settlement(&originating_queue_claims, &originating_turn_input_claims)?;
         commit.enqueued_queue_batches = enqueued_queue_batches;
         commit.interrupted_turn_input_turn_id = interrupted_turn_input_turn_id;
-        if let Some(turn_id) = turn_id {
+        if let Some(operation) = operation {
             let turn_commit_hash = commit.turn_commit_hash()?;
             commit.turn_commit = Some(crate::RuntimeTurnCommitStamp::new(
                 commit.session_id.clone(),
-                turn_id,
+                operation,
                 turn_commit_hash,
             ));
         }
+        let proposed_realization = crate::store::graph_realization_digest(&commit.graph);
         let result = store.commit_runtime_state(commit).await?;
+        if proposed_realization != result.realization_digest {
+            return Err(StoreError::CommitRealizationMismatch {
+                proposed: proposed_realization,
+                stored: result.realization_digest.clone(),
+            });
+        }
         let enqueued_queue_batches = result.enqueued_queue_batches.clone();
         state.apply_persisted_commit_result(result);
         if let TurnCommitStage::Drafting(draft) = &mut self.stage {
@@ -631,115 +659,6 @@ impl TurnBoundary {
             }
         }
     }
-}
-
-fn committed_attachment_ids(
-    state: &RuntimeSessionState,
-    tool_calls: &[ToolCallRecord],
-) -> Vec<crate::AttachmentId> {
-    let mut attachment_ids = BTreeSet::new();
-    for call in tool_calls {
-        for attachment in call.output.attachments() {
-            if let Some(attachment_ref) = attachment.stored_ref() {
-                attachment_ids.insert(attachment_ref.id.clone());
-            }
-        }
-    }
-    for message in state.read_model().messages.iter() {
-        for part in message.parts.iter() {
-            if let Some(attachment_ref) = part
-                .attachment
-                .as_ref()
-                .and_then(|attachment| attachment.source.stored_ref())
-            {
-                attachment_ids.insert(attachment_ref.id.clone());
-            }
-        }
-    }
-    attachment_ids.into_iter().collect()
-}
-
-fn materialize_terminal_output(
-    state: &mut RuntimeSessionState,
-    outcome: &TurnOutcome,
-    clock: &dyn crate::Clock,
-) {
-    let TurnOutcome::Finished(TurnFinish::AssistantMessage { text }) = outcome else {
-        return;
-    };
-    if state
-        .read_model()
-        .messages
-        .iter()
-        .rfind(|message| !message.is_transient())
-        .is_some_and(|message| {
-            message.role == MessageRole::Assistant && message_rendered_text(message) == *text
-        })
-    {
-        return;
-    }
-
-    let id = fresh_message_id();
-    state.append_active_conversation_messages_with_clock(
-        &[Message {
-            id: id.clone(),
-            role: MessageRole::Assistant,
-            parts: shared_parts(vec![Part {
-                id: format!("{id}.p0"),
-                kind: PartKind::Prose,
-                content: text.clone(),
-                attachment: None,
-                tool_call_id: None,
-                tool_name: None,
-                tool_replay: None,
-                prune_state: PruneState::Intact,
-                reasoning_meta: None,
-                response_meta: None,
-            }]),
-            origin: None,
-        }],
-        clock,
-    );
-    state.graph_replace_required = true;
-}
-
-fn materialize_agent_frame_switch(
-    state: &mut RuntimeSessionState,
-    outcome: &TurnOutcome,
-    clock: &dyn crate::Clock,
-) {
-    let TurnOutcome::AgentFrameSwitch {
-        frame_id,
-        initial_nodes,
-        ..
-    } = outcome
-    else {
-        return;
-    };
-    if frame_id.trim().is_empty() || state.current_agent_frame_id == *frame_id {
-        return;
-    }
-    super::open_agent_frame_in_state_with_clock(
-        state,
-        crate::OpenAgentFrameRequest::new(frame_id.clone(), crate::AgentFrameReason::continue_as())
-            .with_initial_nodes(initial_nodes.clone()),
-        clock,
-    );
-}
-
-fn message_rendered_text(message: &Message) -> String {
-    message
-        .parts
-        .iter()
-        .filter(|part| {
-            matches!(
-                part.kind,
-                PartKind::Prose | PartKind::Text | PartKind::Attachment | PartKind::ToolResult
-            )
-        })
-        .map(|part| part.content.as_str())
-        .collect::<Vec<_>>()
-        .join("")
 }
 
 #[cfg(test)]
@@ -1176,8 +1095,17 @@ mod tests {
             })
             .collect::<Vec<_>>();
         assert_eq!(conversation_nodes.len(), 2);
-        assert_eq!(conversation_nodes[0].node_id, "u0");
-        assert_eq!(conversation_nodes[1].node_id, "a0");
+        assert_eq!(
+            conversation_nodes[0].message().expect("user message").id,
+            "u0"
+        );
+        assert_eq!(
+            conversation_nodes[1]
+                .message()
+                .expect("assistant message")
+                .id,
+            "a0"
+        );
         assert!(
             stored_graph
                 .nodes
@@ -1448,7 +1376,6 @@ mod tests {
                 usage_deltas: &usage,
                 outcome: &TurnOutcome::Stopped(crate::TurnStop::Cancelled),
                 tool_calls: &[],
-                turn_id: None,
                 originating_queue_claims: Vec::new(),
                 originating_turn_input_claims: Vec::new(),
                 completed_queue_claims: Vec::new(),
@@ -1502,7 +1429,6 @@ mod tests {
                 usage_deltas: &[],
                 outcome: &TurnOutcome::Stopped(crate::TurnStop::Cancelled),
                 tool_calls: &[],
-                turn_id: None,
                 originating_queue_claims: vec![queue_origin],
                 originating_turn_input_claims: Vec::new(),
                 completed_queue_claims: Vec::new(),
@@ -1530,7 +1456,6 @@ mod tests {
                 usage_deltas: &[],
                 outcome: &TurnOutcome::Stopped(crate::TurnStop::Cancelled),
                 tool_calls: &[],
-                turn_id: None,
                 originating_queue_claims: Vec::new(),
                 originating_turn_input_claims: vec![turn_input_origin],
                 completed_queue_claims: Vec::new(),
@@ -1578,7 +1503,6 @@ mod tests {
                 usage_deltas: &[],
                 outcome: &TurnOutcome::Stopped(crate::TurnStop::Cancelled),
                 tool_calls: &[],
-                turn_id: None,
                 originating_queue_claims: Vec::new(),
                 originating_turn_input_claims: Vec::new(),
                 completed_queue_claims: Vec::new(),

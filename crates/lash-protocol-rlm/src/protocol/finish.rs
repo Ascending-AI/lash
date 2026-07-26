@@ -1,6 +1,4 @@
-use lash_core::session_model::{
-    Message, MessageRole, Part, PartKind, PruneState, fresh_message_id, shared_parts,
-};
+use lash_core::session_model::{Message, MessageRole, Part, PartKind, PruneState, shared_parts};
 use serde_json::Value;
 
 pub(crate) fn turn_limit_final_message(message_id: String, max_turns: usize) -> Message {
@@ -29,8 +27,9 @@ pub(crate) fn turn_limit_final_message(message_id: String, max_turns: usize) -> 
     }
 }
 
-pub(super) fn internal_assistant_prose_message(content: String) -> Message {
+pub(super) fn internal_assistant_prose_message(message_id: String, content: String) -> Message {
     prose_message(
+        message_id,
         content,
         Some(lash_core::MessageOrigin::Plugin {
             plugin_id: "rlm_protocol".to_string(),
@@ -39,8 +38,7 @@ pub(super) fn internal_assistant_prose_message(content: String) -> Message {
     )
 }
 
-fn prose_message(content: String, origin: Option<lash_core::MessageOrigin>) -> Message {
-    let id = fresh_message_id();
+fn prose_message(id: String, content: String, origin: Option<lash_core::MessageOrigin>) -> Message {
     Message {
         id: id.clone(),
         role: MessageRole::Assistant,
@@ -60,8 +58,7 @@ fn prose_message(content: String, origin: Option<lash_core::MessageOrigin>) -> M
     }
 }
 
-pub(super) fn finish_required_reminder_message(requires_schema: bool) -> Message {
-    let id = fresh_message_id();
+pub(super) fn finish_required_reminder_message(id: String, requires_schema: bool) -> Message {
     let content = if requires_schema {
         "Deliver the final answer from a paired `<lashlang>...</lashlang>` block by calling `finish <value>` with a value matching the required output schema. Plain text before the block is recorded only as progress."
     } else {
@@ -89,8 +86,7 @@ pub(super) fn finish_required_reminder_message(requires_schema: bool) -> Message
     }
 }
 
-pub(super) fn finish_schema_mismatch_message(error_text: &str) -> Message {
-    let id = fresh_message_id();
+pub(super) fn finish_schema_mismatch_message(id: String, error_text: &str) -> Message {
     Message {
         id: id.clone(),
         role: MessageRole::System,
@@ -115,8 +111,7 @@ pub(super) fn finish_schema_mismatch_message(error_text: &str) -> Message {
     }
 }
 
-pub(super) fn invalid_lashlang_cell_message(error_text: &str) -> Message {
-    let id = fresh_message_id();
+pub(super) fn invalid_lashlang_cell_message(id: String, error_text: &str) -> Message {
     Message {
         id: id.clone(),
         role: MessageRole::System,

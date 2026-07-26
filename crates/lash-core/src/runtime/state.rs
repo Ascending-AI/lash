@@ -228,6 +228,8 @@ impl RuntimeSessionState {
     pub fn apply_persisted_commit_result(&mut self, result: crate::store::RuntimeCommitResult) {
         self.head_revision = Some(result.head_revision);
         self.checkpoint_ref = Some(result.checkpoint_ref);
+        self.agent_frames = result.agent_frames;
+        self.current_agent_frame_id = result.current_agent_frame_id;
         self.tool_state_ref = result.manifest.tool_state_ref;
         if let Some(snapshot) = self.tool_state_snapshot.as_ref() {
             self.tool_state_generation = Some(snapshot.generation());
@@ -707,6 +709,30 @@ pub(super) fn append_session_nodes_to_state_with_clock(
     );
     normalize_session_graph(state);
     node_ids
+}
+
+pub(super) fn revision_operation(
+    state: &RuntimeSessionState,
+    key: impl Into<String>,
+) -> crate::OperationId {
+    crate::OperationId::new(
+        crate::ExecutionScope::runtime_operation(format!(
+            "session:{}:head:{}",
+            state.session_id,
+            state.head_revision.unwrap_or(0)
+        )),
+        key,
+    )
+}
+
+pub(super) fn derive_graph_commit_node_ids(
+    state: &mut RuntimeSessionState,
+    graph: &mut crate::GraphCommitDelta,
+    operation: &crate::OperationId,
+) -> Result<Vec<String>, crate::StoreError> {
+    let mapping = graph.derive_node_ids(&state.session_id, operation)?;
+    state.session_graph.remap_node_ids(&mapping);
+    Ok(mapping.into_iter().map(|(_, derived)| derived).collect())
 }
 
 pub(super) fn open_agent_frame_in_state_with_clock(

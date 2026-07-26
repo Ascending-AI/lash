@@ -586,6 +586,7 @@ impl SessionCommitStore for RuntimePerfStore {
         &self,
         commit: RuntimeCommit,
     ) -> Result<RuntimeCommitResult, store::StoreError> {
+        let realization_digest = store::graph_realization_digest(&commit.graph);
         let RuntimeCommit {
             session_id,
             expected_head_revision,
@@ -604,6 +605,8 @@ impl SessionCommitStore for RuntimePerfStore {
             release_session_execution_lease,
             committed_attachment_ids: _,
         } = commit;
+        let realized_agent_frames = agent_frames.clone();
+        let realized_current_agent_frame_id = current_agent_frame_id.clone();
         if let Some(batch) = enqueued_queue_batches
             .iter()
             .find(|batch| batch.session_id != session_id)
@@ -619,13 +622,17 @@ impl SessionCommitStore for RuntimePerfStore {
             .expect("lock perf session head meta");
         let actual = meta_guard.as_ref().map_or(0, |meta| meta.head_revision);
         if let Some(completed) = &turn_commit {
+            let operation_key = completed.operation.storage_key()?;
             if completed.session_id != session_id {
                 return Err(StoreError::RuntimeTurnCommitConflict {
                     session_id: completed.session_id.clone(),
-                    turn_id: completed.turn_id.clone(),
+                    turn_id: operation_key,
                 });
             }
-            let key = (completed.session_id.clone(), completed.turn_id.clone());
+            let key = (
+                completed.session_id.clone(),
+                completed.operation.storage_key()?,
+            );
             if let Some((stored_hash, result)) = self
                 .runtime_turn_commits
                 .lock()
@@ -641,7 +648,7 @@ impl SessionCommitStore for RuntimePerfStore {
                 }
                 return Err(StoreError::RuntimeTurnCommitConflict {
                     session_id: completed.session_id.clone(),
-                    turn_id: completed.turn_id.clone(),
+                    turn_id: completed.operation.storage_key()?,
                 });
             }
         }
@@ -807,6 +814,9 @@ impl SessionCommitStore for RuntimePerfStore {
             head_revision,
             checkpoint_ref,
             manifest,
+            realization_digest,
+            agent_frames: realized_agent_frames,
+            current_agent_frame_id: realized_current_agent_frame_id,
             enqueued_queue_batches: enqueued_queue_batches
                 .into_iter()
                 .map(|batch| self.enqueue_queued_work_in_memory(batch))
@@ -818,7 +828,10 @@ impl SessionCommitStore for RuntimePerfStore {
                 .lock()
                 .expect("lock perf runtime turn commits")
                 .insert(
-                    (completed.session_id.clone(), completed.turn_id.clone()),
+                    (
+                        completed.session_id.clone(),
+                        completed.operation.storage_key()?,
+                    ),
                     (completed.turn_commit_hash.clone(), result.clone()),
                 );
         }

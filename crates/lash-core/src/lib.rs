@@ -504,7 +504,7 @@ pub(crate) use store::{
     load_persisted_session_state_active_path,
 };
 pub use store::{
-    HydratedSessionCheckpoint, RuntimeCommit, RuntimeTurnCommitStamp, SessionHead,
+    HydratedSessionCheckpoint, OperationId, RuntimeCommit, RuntimeTurnCommitStamp, SessionHead,
     refresh_persisted_session_state,
 };
 pub use tool_provider::{
