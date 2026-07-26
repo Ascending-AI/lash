@@ -791,9 +791,7 @@ impl ProcessRegistry for PostgresProcessRegistry {
             tx.commit().await.map_err(plugin_sqlx_error)?;
             return Ok(record);
         }
-        let transition_sequence = next_process_event_sequence_tx(&mut tx, process_id).await?;
-        let request =
-            ProcessEventAppendRequest::wait_entered(process_id, &wait, transition_sequence);
+        let request = ProcessEventAppendRequest::wait_entered(process_id, &wait);
         append_process_event_tx(&mut tx, &mut record, request, current_epoch_ms()).await?;
         tx.commit().await.map_err(plugin_sqlx_error)?;
         Ok(record)
@@ -808,9 +806,7 @@ impl ProcessRegistry for PostgresProcessRegistry {
             tx.commit().await.map_err(plugin_sqlx_error)?;
             return Ok(record);
         };
-        let transition_sequence = next_process_event_sequence_tx(&mut tx, process_id).await?;
-        let request =
-            ProcessEventAppendRequest::wait_cleared(process_id, &wait, transition_sequence);
+        let request = ProcessEventAppendRequest::wait_cleared(process_id, &wait);
         append_process_event_tx(&mut tx, &mut record, request, current_epoch_ms()).await?;
         tx.commit().await.map_err(plugin_sqlx_error)?;
         Ok(record)

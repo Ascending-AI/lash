@@ -728,9 +728,7 @@ impl ProcessRegistry for TestLocalProcessRegistry {
         if record.record.wait.as_ref() == Some(&wait) {
             return Ok(record.record.clone());
         }
-        let transition_sequence = record.events.len() as u64 + 1;
-        let request =
-            ProcessEventAppendRequest::wait_entered(process_id, &wait, transition_sequence);
+        let request = ProcessEventAppendRequest::wait_entered(process_id, &wait);
         self.append_managed_event(record, request).await?;
         Ok(record.record.clone())
     }
@@ -745,9 +743,7 @@ impl ProcessRegistry for TestLocalProcessRegistry {
         let Some(wait) = record.record.wait.clone() else {
             return Ok(record.record.clone());
         };
-        let transition_sequence = record.events.len() as u64 + 1;
-        let request =
-            ProcessEventAppendRequest::wait_cleared(process_id, &wait, transition_sequence);
+        let request = ProcessEventAppendRequest::wait_cleared(process_id, &wait);
         self.append_managed_event(record, request).await?;
         Ok(record.record.clone())
     }

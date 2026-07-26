@@ -770,12 +770,7 @@ impl ProcessRegistry for SqliteProcessRegistry {
                     if record.wait.as_ref() == Some(&wait) {
                         return Ok(record);
                     }
-                    let transition_sequence = Self::next_event_sequence_conn(tx, &process_id)?;
-                    let request = ProcessEventAppendRequest::wait_entered(
-                        &process_id,
-                        &wait,
-                        transition_sequence,
-                    );
+                    let request = ProcessEventAppendRequest::wait_entered(&process_id, &wait);
                     Self::append_event_conn(tx, &mut record, request, now)?;
                     Ok(record)
                 })()))
@@ -802,12 +797,7 @@ impl ProcessRegistry for SqliteProcessRegistry {
                     let Some(wait) = record.wait.clone() else {
                         return Ok(record);
                     };
-                    let transition_sequence = Self::next_event_sequence_conn(tx, &process_id)?;
-                    let request = ProcessEventAppendRequest::wait_cleared(
-                        &process_id,
-                        &wait,
-                        transition_sequence,
-                    );
+                    let request = ProcessEventAppendRequest::wait_cleared(&process_id, &wait);
                     Self::append_event_conn(tx, &mut record, request, now)?;
                     Ok(record)
                 })()))

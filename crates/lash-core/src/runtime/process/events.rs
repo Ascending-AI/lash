@@ -515,25 +515,19 @@ impl ProcessEventAppendRequest {
         .with_replay_key(format!("process:{process_id}:first-started"))
     }
 
-    pub fn wait_entered(
-        process_id: &str,
-        wait: &super::model::WaitState,
-        transition_sequence: u64,
-    ) -> Self {
+    pub fn wait_entered(process_id: &str, wait: &super::model::WaitState) -> Self {
         Self::new("process.waiting", serde_json::json!({ "wait": wait })).with_replay_key(format!(
-            "process:{process_id}:wait:{}:entered:{transition_sequence}",
-            wait.key()
+            "process:{process_id}:wait:{}:since:{}:entered",
+            wait.key(),
+            wait.since_ms
         ))
     }
 
-    pub fn wait_cleared(
-        process_id: &str,
-        wait: &super::model::WaitState,
-        transition_sequence: u64,
-    ) -> Self {
+    pub fn wait_cleared(process_id: &str, wait: &super::model::WaitState) -> Self {
         Self::new("process.resumed", serde_json::json!({ "wait": wait })).with_replay_key(format!(
-            "process:{process_id}:wait:{}:cleared:{transition_sequence}",
-            wait.key()
+            "process:{process_id}:wait:{}:since:{}:cleared",
+            wait.key(),
+            wait.since_ms
         ))
     }
 

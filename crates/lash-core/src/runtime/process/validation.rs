@@ -170,7 +170,7 @@ fn process_external_ref_conflict(
     ))
 }
 
-fn repair_monotonic_lifecycle_projection(
+fn repair_lifecycle_projection(
     record: &ProcessRecord,
     event: &ProcessEvent,
 ) -> Result<Option<ProcessRecord>, PluginError> {
@@ -192,6 +192,17 @@ fn repair_monotonic_lifecycle_projection(
             let value = Box::new(lifecycle_payload(event, "request")?);
             let changed = repaired.abandon_request.as_ref() != Some(&value);
             repaired.abandon_request = Some(value);
+            changed
+        }
+        "process.waiting" => {
+            let value = lifecycle_payload(event, "wait")?;
+            let changed = repaired.wait.as_ref() != Some(&value);
+            repaired.wait = Some(value);
+            changed
+        }
+        "process.resumed" => {
+            let changed = repaired.wait.is_some();
+            repaired.wait = None;
             changed
         }
         _ => false,
@@ -216,8 +227,17 @@ pub fn prepare_process_event_append(
             let repair_record = if existing.sequence.saturating_add(1) == sequence {
                 let mut projected = record.clone();
                 apply_process_event_projection(&mut projected, &existing)?;
-                (serde_json::to_value(&projected).ok() != serde_json::to_value(record).ok())
-                    .then_some(projected)
+                let projected_value = serde_json::to_value(&projected).map_err(|err| {
+                    PluginError::Session(format!(
+                        "failed to compare replay projection for process `{process_id}`: {err}"
+                    ))
+                })?;
+                let record_value = serde_json::to_value(record).map_err(|err| {
+                    PluginError::Session(format!(
+                        "failed to compare stored projection for process `{process_id}`: {err}"
+                    ))
+                })?;
+                (projected_value != record_value).then_some(projected)
             } else if !record.is_terminal() && existing.semantics.terminal.is_some() {
                 let mut projected = record.clone();
                 apply_process_status_projection(
@@ -233,7 +253,7 @@ pub fn prepare_process_event_append(
                 );
                 Some(projected)
             } else {
-                repair_monotonic_lifecycle_projection(record, &existing)?
+                repair_lifecycle_projection(record, &existing)?
             };
             let wake_delivery = prepare_wake_delivery(
                 process_id,

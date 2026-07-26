@@ -41,7 +41,7 @@ pub(super) async fn process_record_is_the_fold_of_its_event_log(
         since_ms: 22,
     };
     registry
-        .set_process_wait(process_id, wait)
+        .set_process_wait(process_id, wait.clone())
         .await
         .expect("append wait-entered lifecycle event");
     assert_process_record_fold(&registry, &base, "wait entered").await;
@@ -53,8 +53,88 @@ pub(super) async fn process_record_is_the_fold_of_its_event_log(
         .await
         .expect("append wait-cleared lifecycle event");
     assert_process_record_fold(&registry, &base, "wait cleared").await;
-    replay_latest_event(&registry, process_id, "process.resumed").await;
-    assert_process_record_fold(&registry, &base, "wait-cleared replay").await;
+    let after_first_wait_cycle = registry
+        .get_process(process_id)
+        .await
+        .expect("load process after first wait cycle");
+    let first_cycle_events = registry
+        .events_after(process_id, 0)
+        .await
+        .expect("load first wait-cycle events");
+
+    registry
+        .set_process_wait(process_id, wait.clone())
+        .await
+        .expect("replay wait-entered lifecycle event");
+    registry
+        .clear_process_wait(process_id)
+        .await
+        .expect("replay wait-cleared lifecycle event");
+    assert_process_record_fold(&registry, &base, "wait-cycle replay").await;
+    let after_replay = registry
+        .get_process(process_id)
+        .await
+        .expect("load process after wait-cycle replay");
+    assert_eq!(
+        serde_json::to_value(&after_replay).expect("serialize replayed wait-cycle record"),
+        serde_json::to_value(&after_first_wait_cycle).expect("serialize first wait-cycle record"),
+        "re-executing the same wait cycle must leave the record unchanged"
+    );
+    assert_eq!(
+        registry
+            .events_after(process_id, 0)
+            .await
+            .expect("load events after wait-cycle replay")
+            .len(),
+        first_cycle_events.len(),
+        "re-executing the same wait cycle must not append events"
+    );
+
+    let second_wait = WaitState {
+        kind: WaitKind::Signal {
+            name: "ready".to_string(),
+            event_type: "signal.ready".to_string(),
+            key: format!("process:{process_id}:signal.ready:2"),
+            ordinal: 2,
+        },
+        since_ms: 22,
+    };
+    registry
+        .set_process_wait(process_id, second_wait)
+        .await
+        .expect("append distinct second wait-entered lifecycle event");
+    registry
+        .clear_process_wait(process_id)
+        .await
+        .expect("append distinct second wait-cleared lifecycle event");
+    assert_process_record_fold(&registry, &base, "second wait cycle").await;
+    let wait_events = registry
+        .events_after(process_id, 0)
+        .await
+        .expect("load both wait cycles")
+        .into_iter()
+        .filter(|event| {
+            matches!(
+                event.event_type.as_str(),
+                "process.waiting" | "process.resumed"
+            )
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        wait_events.len(),
+        4,
+        "two legitimate wait cycles must produce four lifecycle events"
+    );
+    assert_eq!(
+        wait_events
+            .iter()
+            .filter_map(|event| event.invocation.replay.as_ref())
+            .map(|replay| replay.key.as_str())
+            .collect::<std::collections::HashSet<_>>()
+            .len(),
+        4,
+        "legitimate wait cycles must have distinct replay identities"
+    );
 
     let external_ref = ProcessExternalRef {
         backend: "fold".to_string(),
