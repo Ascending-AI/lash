@@ -138,6 +138,12 @@ async fn commit_conflict_retry(
             let session = core.session(chat_id).open().await?;
             retry_or_report(err, session)?;
         }
+        Err(lash::EmbedError::Runtime(err))
+            if err.code == RuntimeErrorCode::StoreCommitContended =>
+        {
+            // The failed commit published nothing: retry the same operation unchanged.
+            retry_later(err)?;
+        }
         Err(lash::EmbedError::Runtime(err)) if err.code == RuntimeErrorCode::StoreCommitFailed => {
             // The CAS backstop fired: reload and retry.
             let session = core.session(chat_id).open().await?;

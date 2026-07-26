@@ -8,12 +8,24 @@ impl RuntimeCommit {
     /// `lash-postgres-store/tests/commit_size_benchmark.rs`.
     pub const MAX_COMMIT_NODE_COUNT: usize = 512;
 
-    /// Maximum aggregate serialized graph-delta, checkpoint, and attachment
-    /// manifest bytes a single commit may carry.
+    /// Maximum aggregate persisted-payload bytes for the graph delta,
+    /// checkpoint, and attachment-manifest ids a single commit may carry.
+    ///
+    /// Graph nodes use their exact JSON row representation. Checkpoints use a
+    /// backend-neutral named-MessagePack representation of the hydrated value:
+    /// PostgreSQL writes the same fields in one envelope, while SQLite splits
+    /// them into named-MessagePack blobs and may compress those blobs.
+    /// Attachment ids use the exact UTF-8 bytes bound into manifest updates.
+    /// Backend envelope, compression, row, and page overhead is deliberately
+    /// outside this caller-controlled logical-payload budget.
     pub const MAX_COMMIT_BUDGET_BYTES: usize = 1024 * 1024;
 
-    /// Enforce the invariant that runtime commit transactions contain no
-    /// unbounded caller-controlled work.
+    /// Bound the graph, hydrated checkpoint, and attachment-adoption payloads
+    /// before a backend transaction starts.
+    ///
+    /// This is not a bound on the complete [`RuntimeCommit`]: queue batches,
+    /// agent frames, usage deltas, and the durable turn result are currently
+    /// outside it.
     pub fn validate_budget(&self) -> Result<(), StoreError> {
         let node_count = match &self.graph {
             GraphCommitDelta::Unchanged { .. } => 0,
@@ -26,17 +38,35 @@ impl RuntimeCommit {
             });
         }
 
-        let measure = |result: Result<Vec<u8>, serde_json::Error>| {
+        let measure_json = |result: Result<Vec<u8>, serde_json::Error>| {
             result.map(|bytes| bytes.len()).map_err(|err| {
                 StoreError::Backend(format!(
                     "failed to measure runtime commit transaction budget: {err}"
                 ))
             })
         };
-        let graph_delta_bytes = measure(serde_json::to_vec(&self.graph))?;
-        let checkpoint_bytes = measure(serde_json::to_vec(&self.checkpoint))?;
-        let attachment_manifest_bytes =
-            measure(serde_json::to_vec(&self.committed_attachment_ids))?;
+        let graph_delta_bytes =
+            match &self.graph {
+                GraphCommitDelta::Unchanged { .. } => 0,
+                GraphCommitDelta::Append { nodes, .. } => {
+                    nodes
+                        .iter()
+                        .try_fold(0usize, |total, node| -> Result<usize, StoreError> {
+                            Ok(total.saturating_add(measure_json(serde_json::to_vec(node))?))
+                        })?
+                }
+            };
+        let checkpoint_bytes = rmp_serde::to_vec_named(&self.checkpoint)
+            .map(|bytes| bytes.len())
+            .map_err(|err| {
+                StoreError::Backend(format!(
+                    "failed to measure runtime commit transaction budget: {err}"
+                ))
+            })?;
+        let attachment_manifest_bytes = self
+            .committed_attachment_ids
+            .iter()
+            .fold(0usize, |total, id| total.saturating_add(id.as_str().len()));
         let total_bytes = graph_delta_bytes
             .saturating_add(checkpoint_bytes)
             .saturating_add(attachment_manifest_bytes);
@@ -58,7 +88,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn rejects_node_count_before_backend_work() {
+    fn rejects_node_count_over_limit() {
         let state = crate::RuntimeSessionState {
             session_id: "budget-nodes".to_string(),
             ..Default::default()
@@ -104,18 +134,48 @@ mod tests {
             ..Default::default()
         };
         let mut commit = RuntimeCommit::persisted_state(&state, &[]);
+        let node = crate::SessionNodeRecord {
+            node_id: "budget-node".to_string(),
+            parent_node_id: None,
+            caused_by: None,
+            agent_frame_id: None,
+            timestamp: "2026-07-26T00:00:00Z".to_string(),
+            payload: crate::SessionNodePayload::Event {
+                event: crate::SessionHistoryRecord::Protocol(
+                    crate::ProtocolEvent::typed("budget", serde_json::Value::Null)
+                        .expect("protocol event"),
+                ),
+            },
+        };
+        commit.graph = GraphCommitDelta::Append {
+            nodes: vec![node.clone()],
+            leaf_node_id: Some(node.node_id.clone()),
+        };
         commit.checkpoint.execution_state =
             Some(vec![0; RuntimeCommit::MAX_COMMIT_BUDGET_BYTES + 1]);
+        commit.committed_attachment_ids = vec![crate::AttachmentId::new("budget-attachment")];
+
+        let expected_graph_bytes = serde_json::to_vec(&node).expect("encode graph node").len();
+        let expected_checkpoint_bytes = rmp_serde::to_vec_named(&commit.checkpoint)
+            .expect("encode hydrated checkpoint")
+            .len();
+        let expected_attachment_bytes = "budget-attachment".len();
 
         assert!(matches!(
             commit.validate_budget(),
             Err(StoreError::CommitByteBudgetExceeded {
+                graph_delta_bytes,
                 checkpoint_bytes,
+                attachment_manifest_bytes,
                 total_bytes,
                 max_bytes,
-                ..
-            }) if checkpoint_bytes > RuntimeCommit::MAX_COMMIT_BUDGET_BYTES
-                && total_bytes >= checkpoint_bytes
+            }) if graph_delta_bytes == expected_graph_bytes
+                && checkpoint_bytes == expected_checkpoint_bytes
+                && attachment_manifest_bytes == expected_attachment_bytes
+                && total_bytes
+                    == expected_graph_bytes
+                        + expected_checkpoint_bytes
+                        + expected_attachment_bytes
                 && max_bytes == RuntimeCommit::MAX_COMMIT_BUDGET_BYTES
         ));
     }

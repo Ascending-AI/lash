@@ -171,6 +171,8 @@ pub struct InMemorySessionStore {
     #[cfg(test)]
     checkpoint_write_transaction_count: std::sync::atomic::AtomicUsize,
     #[cfg(test)]
+    commit_write_transaction_count: std::sync::atomic::AtomicUsize,
+    #[cfg(test)]
     fail_next_session_execution_lease_renewal: std::sync::atomic::AtomicBool,
     #[cfg(test)]
     session_execution_lease_renewal_count: std::sync::atomic::AtomicUsize,
@@ -293,6 +295,8 @@ impl InMemorySessionStore {
             checkpoint_probe_count: std::sync::atomic::AtomicUsize::new(0),
             #[cfg(test)]
             checkpoint_write_transaction_count: std::sync::atomic::AtomicUsize::new(0),
+            #[cfg(test)]
+            commit_write_transaction_count: std::sync::atomic::AtomicUsize::new(0),
             #[cfg(test)]
             fail_next_session_execution_lease_renewal: std::sync::atomic::AtomicBool::new(false),
             #[cfg(test)]
@@ -890,6 +894,9 @@ impl crate::store::SessionCommitStore for InMemorySessionStore {
             .write_transaction
             .lock()
             .expect("lock in-memory write transaction");
+        #[cfg(test)]
+        self.commit_write_transaction_count
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         let mut meta = self.session_head_meta.lock().expect("lock store");
         let actual = meta.as_ref().map_or(0, |meta| meta.head_revision);
         if let Some(bound) = meta.as_ref().map(|meta| meta.session_id.clone())

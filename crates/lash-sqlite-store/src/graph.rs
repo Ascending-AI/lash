@@ -20,34 +20,28 @@ impl Store {
         conn: &Connection,
         session_id: &str,
         leaf_node_id: Option<String>,
-    ) -> lash_core::SessionGraph {
+    ) -> Result<lash_core::SessionGraph, StoreError> {
         // Tombstoned rows are physically still present until `vacuum()` is
         // called; the runtime view should never see them.
-        let mut stmt = match conn.prepare(
-            "SELECT node_json FROM graph_nodes
+        let mut stmt = conn
+            .prepare(
+                "SELECT node_json FROM graph_nodes
                  WHERE session_id = ?1 AND tombstoned = 0
                  ORDER BY seq ASC",
-        ) {
-            Ok(stmt) => stmt,
-            Err(err) => {
-                tracing::warn!(error = %err, "failed to prepare graph load statement");
-                return lash_core::SessionGraph::from_nodes(Vec::new(), leaf_node_id);
-            }
-        };
-        let rows = match stmt.query_map(params![session_id], |row| row.get::<_, String>(0)) {
-            Ok(rows) => rows,
-            Err(err) => {
-                tracing::warn!(error = %err, "failed to query graph rows");
-                return lash_core::SessionGraph::from_nodes(Vec::new(), leaf_node_id);
-            }
-        };
+            )
+            .map_err(sqlite_error)?;
+        let rows = stmt
+            .query_map(params![session_id], |row| row.get::<_, String>(0))
+            .map_err(sqlite_error)?;
         let nodes = rows
-            .filter_map(Result::ok)
-            .filter_map(|node_json| {
-                serde_json::from_str::<lash_core::SessionNodeRecord>(&node_json).ok()
+            .map(|row| {
+                let node_json = row.map_err(sqlite_error)?;
+                serde_json::from_str(&node_json).map_err(|err| {
+                    StoreError::Backend(format!("failed to decode session graph node: {err}"))
+                })
             })
-            .collect();
-        lash_core::SessionGraph::from_nodes(nodes, leaf_node_id)
+            .collect::<Result<Vec<_>, StoreError>>()?;
+        Ok(lash_core::SessionGraph::from_nodes(nodes, leaf_node_id))
     }
 
     pub(crate) fn load_active_path_session_graph_from_conn(
@@ -140,7 +134,9 @@ impl Store {
         self.conn
             .call(move |conn| Ok(Self::load_session_graph_from_conn(conn, &session_id, None)))
             .await
-            .unwrap_or_else(|_| lash_core::SessionGraph::from_nodes(Vec::new(), None))
+            .ok()
+            .and_then(Result::ok)
+            .unwrap_or_default()
     }
 
     pub async fn gc_unreachable(&self) -> GcReport {
@@ -206,7 +202,7 @@ impl Store {
     /// Synchronous body of [`try_gc_unreachable`], run on the connection thread
     /// inside the `BEGIN IMMEDIATE` transaction so the mark/sweep is atomic and
     /// holds the write lock for its duration.
-    fn gc_unreachable_in_tx(tx: &Transaction<'_>) -> Result<GcReport, StoreError> {
+    pub(crate) fn gc_unreachable_in_tx(tx: &Transaction<'_>) -> Result<GcReport, StoreError> {
         let mut roots = Self::live_checkpoint_roots(tx)?;
         {
             let mut stmt = tx

@@ -35,8 +35,8 @@
 //! writer, so commits for different sessions serialize. This is an accepted
 //! embedded/single-host trade-off: catalog granularity can be tuned later
 //! without weakening crash atomicity. Runtime commits are preflighted against a
-//! measured node-and-byte budget so no caller can put unbounded work inside the
-//! catalog write transaction.
+//! measured node-and-byte budget for graph, checkpoint, and attachment-adoption
+//! payloads before entering the catalog write transaction.
 //!
 //! [`RuntimePersistence`]: lash_core::RuntimePersistence
 //! [`AttachmentManifest`]: lash_core::AttachmentManifest
@@ -600,6 +600,26 @@ async fn delete_session_from_catalog(root: &Path, session_id: &str) -> Result<()
                 params![session_id],
             )?;
         }
+        // Trigger manifests are the one artifact-ref namespace with an exact
+        // session owner. Module, raw-artifact, and process-environment refs are
+        // content-addressed factory services with no safe session attribution;
+        // their lifecycle remains owned by the host-facing artifact APIs.
+        tx.execute(
+            "DELETE FROM artifact_refs
+             WHERE namespace = ?1 AND artifact_ref = ?2",
+            params![
+                attachments::CURRENT_TRIGGER_MANIFEST_NAMESPACE,
+                format!("session:{session_id}")
+            ],
+        )?;
+        // Session deletion used to unlink the whole per-session file. Preserve
+        // that reclaiming behavior for rows whose ownership is now explicit;
+        // global artifact refs above remain roots.
+        Store::gc_unreachable_in_tx(tx).map_err(|err| {
+            rusqlite::Error::ToSqlConversionFailure(Box::new(std::io::Error::other(
+                err.to_string(),
+            )))
+        })?;
         Ok(())
     })
     .await
@@ -851,6 +871,41 @@ mod tests {
             );
             assert!(matches!(sqlite_error(error), StoreError::Contended));
         }
+    }
+
+    #[tokio::test]
+    async fn real_locked_catalog_surfaces_typed_contention() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("contended.db");
+        let store = Store::open(&path).await.expect("open store");
+        store.bind_session("contended").expect("bind store");
+        store
+            .conn
+            .call(|conn| {
+                conn.busy_timeout(std::time::Duration::ZERO)?;
+                Ok(())
+            })
+            .await
+            .expect("disable busy wait");
+
+        let locker = rusqlite::Connection::open(&path).expect("open lock holder");
+        locker
+            .execute_batch("BEGIN IMMEDIATE")
+            .expect("hold catalog writer lock");
+        let result = store
+            .commit_runtime_state(RuntimeCommit::persisted_state(
+                &lash_core::RuntimeSessionState {
+                    session_id: "contended".to_string(),
+                    ..Default::default()
+                },
+                &[],
+            ))
+            .await;
+        locker
+            .execute_batch("ROLLBACK")
+            .expect("release writer lock");
+
+        assert!(matches!(result, Err(StoreError::Contended)));
     }
 
     #[tokio::test]

@@ -145,31 +145,29 @@ impl Store {
     pub(crate) fn load_usage_deltas_conn(
         conn: &Connection,
         session_id: &str,
-    ) -> Vec<lash_core::TokenLedgerEntry> {
-        let mut stmt = match conn.prepare(
-            "SELECT source, model, input_tokens, output_tokens, cache_read_input_tokens, cache_write_input_tokens, reasoning_output_tokens
+    ) -> Result<Vec<lash_core::TokenLedgerEntry>, StoreError> {
+        let mut stmt = conn
+            .prepare(
+                "SELECT source, model, input_tokens, output_tokens, cache_read_input_tokens, cache_write_input_tokens, reasoning_output_tokens
              FROM usage_deltas WHERE session_id = ?1 ORDER BY seq ASC",
-        ) {
-            Ok(stmt) => stmt,
-            Err(_) => return Vec::new(),
-        };
-        let rows = match stmt.query_map(params![session_id], |row| {
-            Ok(lash_core::TokenLedgerEntry {
-                source: row.get(0)?,
-                model: row.get(1)?,
-                usage: lash_core::TokenUsage {
-                    input_tokens: row.get(2)?,
-                    output_tokens: row.get(3)?,
-                    cache_read_input_tokens: row.get(4)?,
-                    cache_write_input_tokens: row.get(5)?,
-                    reasoning_output_tokens: row.get(6)?,
-                },
+            )
+            .map_err(sqlite_error)?;
+        let rows = stmt
+            .query_map(params![session_id], |row| {
+                Ok(lash_core::TokenLedgerEntry {
+                    source: row.get(0)?,
+                    model: row.get(1)?,
+                    usage: lash_core::TokenUsage {
+                        input_tokens: row.get(2)?,
+                        output_tokens: row.get(3)?,
+                        cache_read_input_tokens: row.get(4)?,
+                        cache_write_input_tokens: row.get(5)?,
+                        reasoning_output_tokens: row.get(6)?,
+                    },
+                })
             })
-        }) {
-            Ok(rows) => rows,
-            Err(_) => return Vec::new(),
-        };
-        rows.filter_map(Result::ok).collect()
+            .map_err(sqlite_error)?;
+        rows.collect::<Result<Vec<_>, _>>().map_err(sqlite_error)
     }
 
     /// Persist `stored` bytes under `hash` in the `blobs` table, warning with
@@ -305,6 +303,8 @@ impl Store {
         self.conn
             .call(move |conn| Ok(Self::load_usage_deltas_conn(conn, &session_id)))
             .await
+            .ok()
+            .and_then(Result::ok)
             .unwrap_or_default()
     }
 }

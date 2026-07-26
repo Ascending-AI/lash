@@ -12,7 +12,7 @@ pub enum StoreError {
     )]
     CommitNodeBudgetExceeded { node_count: usize, max_nodes: usize },
     #[error(
-        "runtime commit serializes to {total_bytes} budgeted bytes, exceeding the {max_bytes}-byte transaction budget (graph delta: {graph_delta_bytes}, checkpoint: {checkpoint_bytes}, attachment manifest: {attachment_manifest_bytes})"
+        "runtime commit carries {total_bytes} budgeted payload bytes, exceeding the {max_bytes}-byte transaction budget (graph delta: {graph_delta_bytes}, checkpoint: {checkpoint_bytes}, attachment manifest: {attachment_manifest_bytes})"
     )]
     CommitByteBudgetExceeded {
         graph_delta_bytes: usize,

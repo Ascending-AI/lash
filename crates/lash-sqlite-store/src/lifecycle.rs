@@ -196,7 +196,8 @@ impl Store {
                 let head_meta =
                     serde_json::from_str::<SessionHeadMeta>(&head_json).unwrap_or_default();
                 let graph =
-                    Self::load_session_graph_from_conn(conn, &session_id, head_meta.leaf_node_id);
+                    Self::load_session_graph_from_conn(conn, &session_id, head_meta.leaf_node_id)
+                        .unwrap_or_default();
 
                 Ok(Some(SessionPickerInfo {
                     session_id,

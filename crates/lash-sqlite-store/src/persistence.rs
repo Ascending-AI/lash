@@ -103,7 +103,7 @@ impl SessionCommitStore for Store {
                             &tx,
                             &session_id,
                             meta.leaf_node_id.clone(),
-                        ),
+                        )?,
                         SessionReadScope::ActivePath { .. } => {
                             Self::load_active_path_session_graph_from_conn(
                                 &tx,
@@ -132,7 +132,7 @@ impl SessionCommitStore for Store {
                         token_ledger: merge_token_ledger_entries(Self::load_usage_deltas_conn(
                             &tx,
                             &session_id,
-                        )),
+                        )?),
                     }))
                 })(
                 );
@@ -2060,13 +2060,24 @@ impl StoreMaintenance for Store {
         if ids.is_empty() {
             return Ok(());
         }
+        let session_id = self.session_id.get().cloned();
         let ids = ids.to_vec();
         self.conn
             .write(move |tx| {
-                let mut stmt =
-                    tx.prepare("UPDATE graph_nodes SET tombstoned = 1 WHERE node_id = ?1")?;
-                for id in &ids {
-                    stmt.execute(params![id])?;
+                if let Some(session_id) = session_id {
+                    let mut stmt = tx.prepare(
+                        "UPDATE graph_nodes SET tombstoned = 1
+                         WHERE session_id = ?1 AND node_id = ?2",
+                    )?;
+                    for id in &ids {
+                        stmt.execute(params![session_id, id])?;
+                    }
+                } else {
+                    let mut stmt =
+                        tx.prepare("UPDATE graph_nodes SET tombstoned = 1 WHERE node_id = ?1")?;
+                    for id in &ids {
+                        stmt.execute(params![id])?;
+                    }
                 }
                 Ok(())
             })
@@ -2075,19 +2086,40 @@ impl StoreMaintenance for Store {
     }
 
     async fn vacuum(&self) -> Result<VacuumReport, StoreError> {
+        let session_id = self.session_id.get().cloned();
         let (removed_node_count, removed_pending_turn_input_tombstone_count) = self
             .conn
             .write(move |tx| {
-                let removed_node_count =
-                    tx.execute("DELETE FROM graph_nodes WHERE tombstoned = 1", [])?;
-                let removed_pending_turn_input_tombstone_count = tx.execute(
-                    "DELETE FROM pending_turn_inputs
-                     WHERE state IN (?1, ?2)",
-                    params![
-                        lash_core::TurnInputState::Cancelled.as_str(),
-                        lash_core::TurnInputState::Completed.as_str()
-                    ],
-                )?;
+                let removed_node_count = if let Some(session_id) = session_id.as_deref() {
+                    tx.execute(
+                        "DELETE FROM graph_nodes
+                         WHERE session_id = ?1 AND tombstoned = 1",
+                        params![session_id],
+                    )?
+                } else {
+                    tx.execute("DELETE FROM graph_nodes WHERE tombstoned = 1", [])?
+                };
+                let removed_pending_turn_input_tombstone_count =
+                    if let Some(session_id) = session_id.as_deref() {
+                        tx.execute(
+                            "DELETE FROM pending_turn_inputs
+                             WHERE session_id = ?1 AND state IN (?2, ?3)",
+                            params![
+                                session_id,
+                                lash_core::TurnInputState::Cancelled.as_str(),
+                                lash_core::TurnInputState::Completed.as_str()
+                            ],
+                        )?
+                    } else {
+                        tx.execute(
+                            "DELETE FROM pending_turn_inputs
+                             WHERE state IN (?1, ?2)",
+                            params![
+                                lash_core::TurnInputState::Cancelled.as_str(),
+                                lash_core::TurnInputState::Completed.as_str()
+                            ],
+                        )?
+                    };
                 Ok((
                     removed_node_count,
                     removed_pending_turn_input_tombstone_count,

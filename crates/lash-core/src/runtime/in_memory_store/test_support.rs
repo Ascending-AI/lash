@@ -19,6 +19,11 @@ impl InMemorySessionStore {
                 .load(std::sync::atomic::Ordering::SeqCst),
         )
     }
+
+    pub(crate) fn commit_write_transaction_count(&self) -> usize {
+        self.commit_write_transaction_count
+            .load(std::sync::atomic::Ordering::SeqCst)
+    }
 }
 
 #[cfg(test)]
@@ -27,7 +32,7 @@ mod tests {
     use crate::{
         DeliveryPolicy, MergeKey, QueuedWorkBatch, QueuedWorkCompletion, RuntimeCommit,
         RuntimeSessionState, SessionStoreCreateRequest, SessionStoreFactory, SlotPolicy,
-        StoreError, TurnInputCompletion,
+        StoreError, TokenLedgerEntry, TokenUsage, TurnInputCompletion,
     };
 
     #[tokio::test]
@@ -46,6 +51,13 @@ mod tests {
             .create_store(&request("second"))
             .await
             .expect("second store");
+        let second_concrete = factory
+            .stores
+            .lock()
+            .expect("lock stores")
+            .get("second")
+            .cloned()
+            .expect("second concrete store");
         let node = crate::SessionNodeRecord {
             node_id: "factory-global-node".to_string(),
             parent_node_id: None,
@@ -64,7 +76,15 @@ mod tests {
                 session_id: session_id.to_string(),
                 ..Default::default()
             };
-            let mut commit = RuntimeCommit::persisted_state(&state, &[]);
+            let usage = TokenLedgerEntry {
+                source: "rollback-probe".to_string(),
+                model: "test".to_string(),
+                usage: TokenUsage {
+                    input_tokens: 1,
+                    ..Default::default()
+                },
+            };
+            let mut commit = RuntimeCommit::persisted_state(&state, &[usage]);
             commit.graph = GraphCommitDelta::Append {
                 nodes: vec![node.clone()],
                 leaf_node_id: Some(node.node_id.clone()),
@@ -82,13 +102,58 @@ mod tests {
             .expect_err("second session must not reuse a global node id");
 
         assert!(matches!(error, crate::StoreError::Backend(_)));
-        assert!(
-            second
-                .load_session(crate::SessionReadScope::FullGraph)
-                .await
-                .expect("load second session")
-                .is_none(),
-            "the failed cross-session collision must leave the second store unchanged"
+        assert_eq!(
+            second_concrete
+                .usage_deltas
+                .lock()
+                .expect("lock usage")
+                .len(),
+            0,
+            "the usage mutation preceding node ownership must not leak from a rejected commit"
+        );
+    }
+
+    #[tokio::test]
+    async fn budget_rejection_happens_before_backend_transaction_work() {
+        let store = super::InMemorySessionStore::new();
+        let state = RuntimeSessionState {
+            session_id: "budget-before-backend".to_string(),
+            ..Default::default()
+        };
+        let node = crate::SessionNodeRecord {
+            node_id: "node".to_string(),
+            parent_node_id: None,
+            caused_by: None,
+            agent_frame_id: None,
+            timestamp: "2026-07-26T00:00:00Z".to_string(),
+            payload: crate::SessionNodePayload::Event {
+                event: crate::SessionHistoryRecord::Protocol(
+                    crate::ProtocolEvent::typed("budget", serde_json::Value::Null)
+                        .expect("protocol event"),
+                ),
+            },
+        };
+        let mut commit = RuntimeCommit::persisted_state(&state, &[]);
+        commit.graph = GraphCommitDelta::Append {
+            nodes: (0..=RuntimeCommit::MAX_COMMIT_NODE_COUNT)
+                .map(|index| crate::SessionNodeRecord {
+                    node_id: format!("node-{index}"),
+                    ..node.clone()
+                })
+                .collect(),
+            leaf_node_id: None,
+        };
+
+        let error = store
+            .commit_runtime_state(commit)
+            .await
+            .expect_err("over-budget commit");
+
+        assert!(matches!(error, StoreError::CommitNodeBudgetExceeded { .. }));
+        assert_eq!(
+            store.commit_write_transaction_count(),
+            0,
+            "budget validation must reject before the backend transaction boundary"
         );
     }
 

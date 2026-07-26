@@ -448,6 +448,10 @@ impl SessionCommitStore for PostgresSessionStore {
         let head_write = match head_write {
             Ok(result) => result,
             Err(err) if is_contention_error(&err) => {
+                // PostgreSQL aborted this transaction before the head write
+                // published. This is not evidence that the head advanced (the
+                // rows_affected == 0 branch below is); the unchanged commit is
+                // therefore the only semantically valid retry.
                 return Err(StoreError::Contended);
             }
             Err(err) => return Err(store_sqlx_error(err)),

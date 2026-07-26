@@ -36,6 +36,10 @@ pub enum RuntimeErrorCode {
     ExecutionScopeTurnIdMismatch,
     SessionExecutionBusy,
     SessionExecutionLeaseLost,
+    /// The store aborted a commit before publication because transactional
+    /// write authority was contended. Retrying the same operation unchanged is
+    /// safe; reloading or rebasing is not required.
+    StoreCommitContended,
     /// A process (re-)execution was handed an empty/non-persisted process id.
     /// Process execution identity is the persisted `process_id`; a retry that
     /// cannot present that stable id has lost its idempotency anchor.
@@ -67,6 +71,7 @@ impl RuntimeErrorCode {
             Self::ExecutionScopeTurnIdMismatch => "execution_scope_turn_id_mismatch",
             Self::SessionExecutionBusy => "session_execution_busy",
             Self::SessionExecutionLeaseLost => "session_execution_lease_lost",
+            Self::StoreCommitContended => "store_commit_contended",
             Self::MissingProcessExecutionId => "missing_process_execution_id",
             Self::DurableStoreRequired { facet } => facet.as_code(),
             Self::StoreCommitFailed => "store_commit_failed",
@@ -99,6 +104,7 @@ impl From<&str> for RuntimeErrorCode {
             "execution_scope_turn_id_mismatch" => Self::ExecutionScopeTurnIdMismatch,
             "session_execution_busy" => Self::SessionExecutionBusy,
             "session_execution_lease_lost" => Self::SessionExecutionLeaseLost,
+            "store_commit_contended" => Self::StoreCommitContended,
             "missing_process_execution_id" => Self::MissingProcessExecutionId,
             "durable_store_required:attachment_store" => Self::DurableStoreRequired {
                 facet: DurableStoreFacet::AttachmentStore,

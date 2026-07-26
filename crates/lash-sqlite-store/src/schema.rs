@@ -58,6 +58,8 @@ CREATE TABLE IF NOT EXISTS usage_deltas (
     cache_write_input_tokens INTEGER NOT NULL,
     reasoning_output_tokens     INTEGER NOT NULL
 );
+CREATE INDEX IF NOT EXISTS idx_usage_deltas_session_seq
+    ON usage_deltas(session_id, seq);
 
 CREATE TABLE IF NOT EXISTS session_meta (
     session_id    TEXT PRIMARY KEY,

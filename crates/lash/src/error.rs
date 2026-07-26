@@ -93,6 +93,9 @@ impl EmbedError {
     ///   the same lease, so the failed attempt committed nothing and its
     ///   queued-work/turn-input claims were released; a fresh attempt can
     ///   re-claim safely.
+    /// - [`StoreCommitContended`](lash_core::RuntimeErrorCode::StoreCommitContended):
+    ///   the backend aborted before publication because transactional write
+    ///   authority was unavailable; retry the identical operation unchanged.
     ///
     /// Everything else is `false`. Notably
     /// [`StoreCommitFailed`](lash_core::RuntimeErrorCode::StoreCommitFailed)
@@ -110,6 +113,7 @@ impl EmbedError {
                 err.code,
                 RuntimeErrorCode::SessionExecutionBusy
                     | RuntimeErrorCode::SessionExecutionLeaseLost
+                    | RuntimeErrorCode::StoreCommitContended
             ),
             _ => false,
         }
@@ -190,6 +194,7 @@ mod tests {
         for code in [
             RuntimeErrorCode::SessionExecutionBusy,
             RuntimeErrorCode::SessionExecutionLeaseLost,
+            RuntimeErrorCode::StoreCommitContended,
         ] {
             let err = runtime_error(code);
             assert!(err.is_retryable(), "{err}");
