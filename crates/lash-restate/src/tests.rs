@@ -4062,6 +4062,36 @@ impl RestateProcessRunner for RecordingRunner {
     }
 }
 
+struct AlreadyStartedRunner {
+    calls: Mutex<usize>,
+    winner: lash_core::LeaseOwnerIdentity,
+}
+
+#[async_trait::async_trait]
+impl RestateProcessRunner for AlreadyStartedRunner {
+    async fn run_process_segment(
+        &self,
+        registration: ProcessRegistration,
+        _execution_context: ProcessExecutionContext,
+        _scoped_effect_controller: lash_core::ScopedEffectController<'_>,
+        _handover: Option<lash_core::SegmentHandover>,
+        _cancellation: tokio_util::sync::CancellationToken,
+    ) -> Result<lash_core::ProcessRunOutcome, PluginError> {
+        *self.calls.lock().expect("runner calls lock") += 1;
+        Err(PluginError::ProcessAlreadyStarted {
+            process_id: registration.id,
+            by: self.winner.clone(),
+        })
+    }
+
+    async fn request_process_cancel(
+        &self,
+        _request: RestateProcessCancelRequest,
+    ) -> Result<(), PluginError> {
+        Ok(())
+    }
+}
+
 struct SegmentedRecordingRunner {
     outcomes: Mutex<VecDeque<lash_core::ProcessRunOutcome>>,
     handovers: Mutex<Vec<Option<lash_core::SegmentHandover>>>,
@@ -5859,6 +5889,8 @@ async fn sqlite_sweep_abandons_started_owner_bound_without_rerunning_but_reruns_
             "ob-crashed",
             lash_core::ProcessStarted {
                 owner: dead_holder.clone(),
+                fencing_token: 0,
+                attempt: 1,
                 started_at_ms: 1,
             },
         )
@@ -5884,6 +5916,8 @@ async fn sqlite_sweep_abandons_started_owner_bound_without_rerunning_but_reruns_
             "rerun-crashed",
             lash_core::ProcessStarted {
                 owner: dead_holder.clone(),
+                fencing_token: 0,
+                attempt: 1,
                 started_at_ms: 1,
             },
         )
@@ -6255,13 +6289,66 @@ async fn process_workflow_impl_runs_and_cancels_through_runner() {
 }
 
 #[tokio::test]
+async fn terminal_retry_returns_the_stored_outcome() {
+    let runner = Arc::new(RecordingRunner::default());
+    let registry = process_registry();
+    let workflow = LashProcessWorkflowImpl::new_for_test(runner, registry.clone());
+    registry
+        .register_process(rerunnable_registration("terminal-retry"))
+        .await
+        .expect("register process");
+    let stored = ProcessAwaitOutput::Success {
+        value: serde_json::json!({"winner": "stored"}),
+        control: None,
+    };
+    registry
+        .complete_process(
+            "terminal-retry",
+            stored.clone(),
+            lash_core::ProcessCompletionAuthority::workflow_key("terminal-retry"),
+        )
+        .await
+        .expect("commit terminal");
+
+    let replayed = workflow
+        .complete_with_stored_outcome(
+            "terminal-retry",
+            ProcessAwaitOutput::Failure {
+                class: lash_core::ToolFailureClass::Execution,
+                code: "divergent".to_string(),
+                message: "must not replace the stored outcome".to_string(),
+                raw: None,
+                control: None,
+            },
+        )
+        .await
+        .expect("terminal retry");
+
+    assert_eq!(replayed, stored);
+    assert_eq!(
+        registry
+            .events_after("terminal-retry", 0)
+            .await
+            .expect("terminal events")
+            .into_iter()
+            .filter(|event| event.semantics.terminal.is_some())
+            .count(),
+        1
+    );
+}
+
+#[tokio::test]
 async fn run_registration_abandons_restarted_owner_bound_without_running() {
     // ADR 0019: when the engine re-invokes the workflow for an OwnerBound row
     // whose prior incarnation already recorded `first_started` but left no
     // outcome, the run handler must NOT re-execute it. It completes the row as
     // Abandoned{Sweep} — the durable tier's crash-recovery verdict — and returns
     // that output so the durable promise still resolves for awaiters.
-    let runner = Arc::new(RecordingRunner::default());
+    let started_owner = lash_core::LeaseOwnerIdentity::opaque("owner-a", "incarnation-1");
+    let runner = Arc::new(AlreadyStartedRunner {
+        calls: Mutex::new(0),
+        winner: started_owner.clone(),
+    });
     let registry = process_registry();
     let workflow = LashProcessWorkflowImpl::new_for_test(runner.clone(), registry.clone());
     let registration = owner_bound_registration("ob-restart");
@@ -6270,12 +6357,13 @@ async fn run_registration_abandons_restarted_owner_bound_without_running() {
         .await
         .expect("register owner-bound process");
     // Simulate the prior incarnation that began executing but never completed.
-    let started_owner = lash_core::LeaseOwnerIdentity::opaque("owner-a", "incarnation-1");
     registry
         .record_first_started(
             "ob-restart",
             lash_core::ProcessStarted {
                 owner: started_owner.clone(),
+                fencing_token: 0,
+                attempt: 1,
                 started_at_ms: 42,
             },
         )
@@ -6298,12 +6386,10 @@ async fn run_registration_abandons_restarted_owner_bound_without_running() {
         .await
         .expect("run_registration");
 
-    // The runner is never invoked: re-execution of a started OwnerBound row is
-    // refused.
-    assert!(
-        runner.ran.lock().expect("runner ran lock").is_empty(),
-        "a restarted OwnerBound row must not be re-executed"
-    );
+    // The real runner rejects this before user-code execution when its atomic
+    // start write observes the prior OwnerBound attempt. This fake returns the
+    // same typed verdict so the durable tier's terminal decision is exercised.
+    assert_eq!(*runner.calls.lock().expect("runner calls lock"), 1);
     // Both the returned output and the persisted terminal are Abandoned{Sweep},
     // naming the incarnation that began the work as the evidence owner.
     let lash_core::ProcessRunOutcome::Terminal(output) = &output else {

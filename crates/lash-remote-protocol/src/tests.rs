@@ -516,6 +516,7 @@ fn remote_process_dtos_json_round_trip() {
             metadata: serde_json::json!({ "label": "Import" }),
         },
         disposition: RemoteRecoveryDisposition::ExternallyOwned,
+        max_attempts: None,
         env_spec: Some(RemoteProcessExecutionEnvSpec {
             plugin_options: RemoteProcessPluginOptions {
                 plugins: BTreeMap::from([(
@@ -550,6 +551,12 @@ fn remote_process_dtos_json_round_trip() {
         event_types: vec![remote_process_event_type()],
     };
     start.validate().expect("valid process start request");
+    let mut invalid_max_attempts = start.clone();
+    invalid_max_attempts.max_attempts = Some(0);
+    assert!(matches!(
+        invalid_max_attempts.validate(),
+        Err(RemoteProtocolError::InvalidEnvelope { .. })
+    ));
     let decoded: RemoteProcessStartRequest =
         serde_json::from_value(serde_json::to_value(&start).expect("serialize start"))
             .expect("deserialize start");
@@ -1156,6 +1163,7 @@ fn remote_process_record() -> RemoteProcessRecord {
             metadata: serde_json::json!({ "label": "Import" }),
         },
         disposition: RemoteRecoveryDisposition::ExternallyOwned,
+        max_attempts: None,
         identity: RemoteProcessIdentity {
             kind: "external".to_string(),
             label: Some("Import".to_string()),

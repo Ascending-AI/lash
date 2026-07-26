@@ -1242,11 +1242,14 @@ impl RestateProcessRunner for RestateCoreProcessRunner {
         handover: Option<lash_core::SegmentHandover>,
         cancellation: tokio_util::sync::CancellationToken,
     ) -> Result<lash_core::ProcessRunOutcome, PluginError> {
+        let execution_write_authority =
+            lash_core::ProcessExecutionWriteAuthority::workflow_key(registration.id.clone());
         Box::pin(
             self.worker
                 .run_process_segment_with_scoped_effect_controller(
                     registration,
                     execution_context,
+                    execution_write_authority,
                     scoped_effect_controller,
                     cancellation,
                     handover,
@@ -1668,6 +1671,7 @@ impl RestateProcessIngressRunner {
             id: record.id,
             input: record.input,
             disposition: record.disposition,
+            max_attempts: record.max_attempts,
             identity: record.identity,
             event_types: record.event_types,
             provenance: record.provenance.clone(),
@@ -2027,12 +2031,28 @@ impl<R> LashProcessWorkflowImpl<R>
 where
     R: RestateProcessRunner,
 {
+    async fn complete_with_stored_outcome(
+        &self,
+        process_id: &str,
+        proposed: ProcessAwaitOutput,
+    ) -> Result<ProcessAwaitOutput, PluginError> {
+        let record = self
+            .registry
+            .complete_process(process_id, proposed, workflow_key_authority(process_id))
+            .await?;
+        record.status.await_output().cloned().ok_or_else(|| {
+            PluginError::Session(format!(
+                "process `{process_id}` completion returned a non-terminal record"
+            ))
+        })
+    }
+
     async fn run_registration<F>(
         &self,
         registration: ProcessRegistration,
         execution_context: ProcessExecutionContext,
         scoped_effect_controller: ScopedEffectController<'_>,
-        segment_ordinal: u64,
+        _segment_ordinal: u64,
         handover: Option<lash_core::SegmentHandover>,
         cancellation_signal: F,
     ) -> Result<lash_core::ProcessRunOutcome, HandlerError>
@@ -2040,48 +2060,6 @@ where
         F: Future<Output = Result<(), HandlerError>>,
     {
         let process_id = registration.id.clone();
-        // ADR 0019: refuse to re-execute an already-started OwnerBound row. A
-        // fresh OwnerBound row has `first_started == None` (the runner records
-        // it inside `run_process`, during execution), so this guard never fires
-        // on the first invocation — only when the engine re-invoked the workflow
-        // for a row whose prior incarnation began executing but recorded no
-        // outcome. Re-running would violate the OwnerBound contract (once started,
-        // no other owner may re-execute), so complete it as Abandoned instead and
-        // return that output; the normal `run` tail then resolves the durable
-        // promise so awaiters still unblock. Rerunnable rows are never affected.
-        if let Some(record) = self
-            .registry
-            .try_get_process(&process_id)
-            .await
-            .map_err(retryable_registry_error)?
-            && record.disposition == RecoveryDisposition::OwnerBound
-            && record.first_started.is_some()
-            && segment_ordinal == 0
-        {
-            // Writer attribution = Sweep: the Restate run handler is standing in
-            // as the crash-recovery sweep for the durable tier. The engine
-            // re-invoked a started OwnerBound row whose prior incarnation left no
-            // outcome — exactly the sweep's "OwnerBound + started + holder gone"
-            // verdict. The evidence owner is the incarnation that began the work
-            // (the recorded `first_started` owner).
-            let output = ProcessAwaitOutput::Abandoned {
-                evidence: Box::new(AbandonEvidence {
-                    writer: AbandonWriter::Sweep,
-                    owner: record.first_started.map(|started| started.owner.clone()),
-                    epoch_ms: restate_now_ms(),
-                }),
-                control: None,
-            };
-            self.registry
-                .complete_process(
-                    &process_id,
-                    output.clone(),
-                    workflow_key_authority(&process_id),
-                )
-                .await
-                .map_err(retryable_registry_error)?;
-            return Ok(output.into());
-        }
         if self
             .process_cancel_requested(&process_id)
             .await
@@ -2092,12 +2070,8 @@ where
                 raw: None,
                 control: None,
             };
-            self.registry
-                .complete_process(
-                    &process_id,
-                    output.clone(),
-                    workflow_key_authority(&process_id),
-                )
+            let output = self
+                .complete_with_stored_outcome(&process_id, output)
                 .await
                 .map_err(retryable_registry_error)?;
             return Ok(output.into());
@@ -2133,40 +2107,54 @@ where
         };
         match outcome {
             Ok(lash_core::ProcessRunOutcome::Terminal(output)) => {
-                self.registry
-                    .complete_process(
+                let stored = self
+                    .complete_with_stored_outcome(&process_id, (*output).clone())
+                    .await
+                    .map_err(retryable_registry_error)?;
+                Ok(lash_core::ProcessRunOutcome::Terminal(Box::new(stored)))
+            }
+            Ok(boundary @ lash_core::ProcessRunOutcome::SegmentBoundary(_)) => Ok(boundary),
+            Err(PluginError::ProcessAlreadyStarted { by, .. }) => {
+                let output = self
+                    .complete_with_stored_outcome(
                         &process_id,
-                        (*output).clone(),
-                        workflow_key_authority(&process_id),
+                        ProcessAwaitOutput::Abandoned {
+                            evidence: Box::new(AbandonEvidence {
+                                writer: AbandonWriter::Sweep,
+                                owner: Some(by),
+                                epoch_ms: restate_now_ms(),
+                            }),
+                            control: None,
+                        },
                     )
                     .await
                     .map_err(retryable_registry_error)?;
-                Ok(lash_core::ProcessRunOutcome::Terminal(output))
-            }
-            Ok(boundary @ lash_core::ProcessRunOutcome::SegmentBoundary(_)) => Ok(boundary),
-            Err(err) => {
-                let output = ProcessAwaitOutput::Failure {
-                    class: lash_core::ToolFailureClass::Execution,
-                    code: "restate_process_runner_failed".to_string(),
-                    message: err.to_string(),
-                    raw: None,
-                    control: None,
-                };
-                let _ = self
-                    .registry
-                    .complete_process(
-                        &process_id,
-                        output.clone(),
-                        workflow_key_authority(&process_id),
-                    )
-                    .await;
-                tracing::warn!(
-                    process_id = %process_id,
-                    error = %err,
-                    "Restate process runner failed; completed process with failure output",
-                );
                 Ok(output.into())
             }
+            Err(PluginError::ProcessAttemptsExhausted { .. }) => {
+                let owner = self
+                    .registry
+                    .try_get_process(&process_id)
+                    .await
+                    .map_err(retryable_registry_error)?
+                    .and_then(|record| record.first_started.map(|started| started.owner.clone()));
+                let output = self
+                    .complete_with_stored_outcome(
+                        &process_id,
+                        ProcessAwaitOutput::Abandoned {
+                            evidence: Box::new(AbandonEvidence {
+                                writer: AbandonWriter::EngineGaveUp,
+                                owner,
+                                epoch_ms: restate_now_ms(),
+                            }),
+                            control: None,
+                        },
+                    )
+                    .await
+                    .map_err(retryable_registry_error)?;
+                Ok(output.into())
+            }
+            Err(err) => Err(retryable_registry_error(err)),
         }
     }
 
@@ -2250,7 +2238,7 @@ where
         Json(input): Json<RestateProcessWorkflowInput>,
     ) -> HandlerResult<Json<RestateProcessWorkflowOutput>> {
         let process_id = input.registration.id.clone();
-        let _record = self
+        let record = self
             .registry
             .try_get_process(&process_id)
             .await
@@ -2260,6 +2248,36 @@ where
                     "unknown process `{process_id}`"
                 )))
             })?;
+        if let Some(output) = record.status.await_output().cloned() {
+            self.registry
+                .delete_segment_handovers(&process_id)
+                .await
+                .map_err(HandlerError::from)?;
+            if terminal_completion_workflow_key(&process_id, input.segment_ordinal).is_none() {
+                resolve_process_terminal_promise(&ctx, &process_id, &output)?;
+            } else {
+                let request: restate_sdk::context::Request<
+                    '_,
+                    Json<RestateProcessCompleteRequest>,
+                    Json<()>,
+                > = ContextClient::request(
+                    &ctx,
+                    RequestTarget::workflow(
+                        "LashProcessWorkflow",
+                        process_id.clone(),
+                        "complete_terminal",
+                    ),
+                    Json(RestateProcessCompleteRequest {
+                        process_id: process_id.clone(),
+                        output: output.clone(),
+                    }),
+                );
+                request.call().await?;
+            }
+            return Ok(Json(RestateProcessWorkflowOutput::Terminal {
+                output: Box::new(output),
+            }));
+        }
         let mut handover = if input.segment_ordinal == 0 {
             None
         } else {
@@ -2302,12 +2320,8 @@ where
                         raw: None,
                         control: None,
                     };
-                    self.registry
-                        .complete_process(
-                            &process_id,
-                            output.clone(),
-                            workflow_key_authority(&process_id),
-                        )
+                    let output = self
+                        .complete_with_stored_outcome(&process_id, output)
                         .await
                         .map_err(|err| HandlerError::from(TerminalError::from_error(err)))?;
                     self.registry
@@ -2434,12 +2448,8 @@ where
                         raw: None,
                         control: None,
                     };
-                    self.registry
-                        .complete_process(
-                            &process_id,
-                            output.clone(),
-                            workflow_key_authority(&process_id),
-                        )
+                    let output = self
+                        .complete_with_stored_outcome(&process_id, output)
                         .await
                         .map_err(HandlerError::from)?;
                     self.registry
