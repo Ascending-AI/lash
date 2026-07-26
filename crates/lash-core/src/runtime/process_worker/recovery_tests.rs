@@ -1506,6 +1506,8 @@ async fn sweep_abandons_started_owner_bound_with_provably_dead_holder() {
             "proc-ob-dead",
             ProcessStarted {
                 owner: dead_holder.clone(),
+                fencing_token: 0,
+                attempt: 1,
                 started_at_ms: 1,
             },
         )
@@ -1537,22 +1539,19 @@ async fn sweep_abandons_started_owner_bound_with_provably_dead_holder() {
     );
 
     // Revenant: the dead owner reappears and tries to complete the row. The
-    // row is already terminal, so the write is rejected — the sweep stayed the
-    // single writer.
-    assert!(
-        registry
-            .complete_process(
-                "proc-ob-dead",
-                ProcessAwaitOutput::Success {
-                    value: serde_json::json!("revenant"),
-                    control: None,
-                },
-                crate::ProcessCompletionAuthority::workflow_key("proc-ob-dead"),
-            )
-            .await
-            .is_err(),
-        "a revenant cannot overwrite an Abandoned terminal"
-    );
+    // terminal append adopts the stored outcome rather than overwriting it.
+    let replayed = registry
+        .complete_process(
+            "proc-ob-dead",
+            ProcessAwaitOutput::Success {
+                value: serde_json::json!("revenant"),
+                control: None,
+            },
+            crate::ProcessCompletionAuthority::workflow_key("proc-ob-dead"),
+        )
+        .await
+        .expect("terminal retry adopts stored outcome");
+    assert!(matches!(replayed.status, ProcessStatus::Abandoned { .. }));
 }
 
 /// A started OwnerBound row whose holder is merely silent (no death evidence)
@@ -1573,6 +1572,8 @@ async fn sweep_skips_started_owner_bound_with_silent_holder() {
             "proc-ob-silent",
             ProcessStarted {
                 owner: LeaseOwnerIdentity::opaque("started-worker", "started-incarnation"),
+                fencing_token: 0,
+                attempt: 1,
                 started_at_ms: 1,
             },
         )
@@ -1628,6 +1629,8 @@ async fn sweep_reconciles_started_owner_bound_after_lease_lapse() {
             "proc-ob-lapse",
             ProcessStarted {
                 owner: LeaseOwnerIdentity::opaque("lapsed-owner", "lapsed-incarnation"),
+                fencing_token: 0,
+                attempt: 1,
                 started_at_ms: 1,
             },
         )
@@ -1667,9 +1670,10 @@ async fn sweep_reconciles_started_owner_bound_after_lease_lapse() {
 
 /// An OwnerBound row that has never started is claimable and runnable by any
 /// worker (first execution is not re-execution): the runner records
-/// `first_started` and drives it to a run terminal, not an Abandoned one.
+/// `first_started`. If execution infrastructure is unavailable, the row stays
+/// non-terminal and becomes claimable again rather than recording a failure.
 #[tokio::test]
-async fn owner_bound_unstarted_runs_once() {
+async fn owner_bound_unstarted_infra_failure_stays_claimable() {
     let registry: Arc<dyn ProcessRegistry> = Arc::new(TestLocalProcessRegistry::default());
     registry
         .register_process(registration_with_disposition(
@@ -1687,8 +1691,37 @@ async fn owner_bound_unstarted_runs_once() {
         .drive_pending_processes()
         .await
         .expect("sweep dispatches");
-    await_terminal(&registry, "proc-ob-unstarted").await;
-
+    tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            if registry
+                .get_process("proc-ob-unstarted")
+                .await
+                .expect("process")
+                .first_started
+                .is_some()
+            {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("runner records first_started before infrastructure fails");
+    let next_owner = local_owner("next-worker", "host-b", "claimant-next");
+    let reclaimed = tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            match registry
+                .claim_process_lease("proc-ob-unstarted", &next_owner, 60_000)
+                .await
+                .expect("claim after infrastructure failure")
+            {
+                crate::ProcessLeaseClaimOutcome::Acquired(lease) => break lease,
+                crate::ProcessLeaseClaimOutcome::Busy { .. } => tokio::task::yield_now().await,
+            }
+        }
+    })
+    .await
+    .expect("infrastructure failure releases its lease");
     let record = registry
         .get_process("proc-ob-unstarted")
         .await
@@ -1697,13 +1730,15 @@ async fn owner_bound_unstarted_runs_once() {
         record.first_started.is_some(),
         "the runner must record first_started before executing an unstarted OwnerBound row"
     );
-    // A run terminal (Failed here, because the External placeholder input has
-    // no execution runtime) — crucially NOT Abandoned. First execution ran.
     assert!(
-        matches!(record.status, ProcessStatus::Failed { .. }),
-        "an unstarted OwnerBound row reaches a run terminal, not an abandoned one, got {:?}",
+        !record.is_terminal(),
+        "infrastructure failure must not write a terminal, got {:?}",
         record.status
     );
+    registry
+        .complete_process_lease(&crate::ProcessLeaseCompletion::from_lease(&reclaimed))
+        .await
+        .expect("release verification claim");
 }
 
 /// Owner drain (ADR 0019): a host closing gracefully terminalizes its own
@@ -1728,6 +1763,8 @@ async fn drain_terminalizes_this_hosts_started_owner_bound_work() {
             "mine-started",
             ProcessStarted {
                 owner: owner.clone(),
+                fencing_token: 0,
+                attempt: 1,
                 started_at_ms: 1,
             },
         )
@@ -1747,6 +1784,8 @@ async fn drain_terminalizes_this_hosts_started_owner_bound_work() {
             "theirs-started",
             ProcessStarted {
                 owner: local_owner("other-host", "host-b", "start-b"),
+                fencing_token: 0,
+                attempt: 1,
                 started_at_ms: 1,
             },
         )
@@ -1776,6 +1815,8 @@ async fn drain_terminalizes_this_hosts_started_owner_bound_work() {
             "rerunnable",
             ProcessStarted {
                 owner: owner.clone(),
+                fencing_token: 0,
+                attempt: 1,
                 started_at_ms: 1,
             },
         )

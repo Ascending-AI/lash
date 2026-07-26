@@ -6,10 +6,11 @@ use super::events::{
     ProcessEventAppendResult,
 };
 use super::model::{
-    AbandonRequest, ProcessChangeCursor, ProcessExternalRef, ProcessHandleDescriptor,
-    ProcessHandleGrant, ProcessHandleGrantEntry, ProcessLease, ProcessLeaseClaimOutcome,
-    ProcessLeaseCompletion, ProcessListFilter, ProcessRecord, ProcessRegistration,
-    ProcessSessionDeleteReport, ProcessStarted, SessionScope, WaitState,
+    AbandonRequest, ProcessChangeCursor, ProcessExecutionWriteAuthority, ProcessExternalRef,
+    ProcessHandleDescriptor, ProcessHandleGrant, ProcessHandleGrantEntry, ProcessLease,
+    ProcessLeaseClaimOutcome, ProcessLeaseCompletion, ProcessListFilter, ProcessRecord,
+    ProcessRegistration, ProcessSessionDeleteReport, ProcessStartOutcome, ProcessStarted,
+    SessionScope, WaitState,
 };
 use super::references::ProcessLiveReferenceSummary;
 
@@ -244,7 +245,22 @@ pub trait ProcessRegistry: Send + Sync {
         &self,
         process_id: &str,
         started: ProcessStarted,
-    ) -> Result<ProcessRecord, PluginError>;
+    ) -> Result<ProcessRecord, PluginError> {
+        self.record_first_started_with_authority(
+            process_id,
+            started,
+            &ProcessExecutionWriteAuthority::workflow_key(process_id),
+        )
+        .await?
+        .into_record()
+    }
+
+    async fn record_first_started_with_authority(
+        &self,
+        process_id: &str,
+        started: ProcessStarted,
+        authority: &ProcessExecutionWriteAuthority,
+    ) -> Result<ProcessStartOutcome, PluginError>;
 
     /// Set the durable, non-terminal Abandon Request marker (ADR 0019).
     ///
@@ -263,9 +279,35 @@ pub trait ProcessRegistry: Send + Sync {
         &self,
         process_id: &str,
         wait: WaitState,
+    ) -> Result<ProcessRecord, PluginError> {
+        self.set_process_wait_with_authority(
+            process_id,
+            wait,
+            &ProcessExecutionWriteAuthority::workflow_key(process_id),
+        )
+        .await
+    }
+
+    async fn set_process_wait_with_authority(
+        &self,
+        process_id: &str,
+        wait: WaitState,
+        authority: &ProcessExecutionWriteAuthority,
     ) -> Result<ProcessRecord, PluginError>;
 
-    async fn clear_process_wait(&self, process_id: &str) -> Result<ProcessRecord, PluginError>;
+    async fn clear_process_wait(&self, process_id: &str) -> Result<ProcessRecord, PluginError> {
+        self.clear_process_wait_with_authority(
+            process_id,
+            &ProcessExecutionWriteAuthority::workflow_key(process_id),
+        )
+        .await
+    }
+
+    async fn clear_process_wait_with_authority(
+        &self,
+        process_id: &str,
+        authority: &ProcessExecutionWriteAuthority,
+    ) -> Result<ProcessRecord, PluginError>;
 
     async fn get_process(&self, process_id: &str) -> Option<ProcessRecord>;
 

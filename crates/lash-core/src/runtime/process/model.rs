@@ -11,6 +11,9 @@ use super::events::{
 };
 use super::validation::prepare_process_registration;
 
+mod execution;
+pub use execution::*;
+
 pub type ProcessId = String;
 
 /// Opaque position in a store's Process Change Feed.
@@ -167,16 +170,6 @@ pub enum RecoveryDisposition {
     /// Lash never executes the row at all. Closure comes from an external actor
     /// calling `complete_process`, or from a reconciled Abandon Request.
     ExternallyOwned,
-}
-
-/// Durable "execution started" fact: which owner began executing the row and
-/// when. The runner writes it under its live lease immediately before executing
-/// so the sweep can distinguish an OwnerBound row that has started (never
-/// re-run) from one that has not (runnable by anyone). First-writer-wins.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ProcessStarted {
-    pub owner: crate::LeaseOwnerIdentity,
-    pub started_at_ms: u64,
 }
 
 /// Durable, non-terminal marker recording that a non-owner authorized
@@ -336,25 +329,6 @@ pub async fn load_process_execution_env(
     })
 }
 
-/// Execution-local context for process runners. Durable edges live on the
-/// process record.
-#[derive(Clone, Debug, Default, Serialize, Deserialize)]
-pub struct ProcessExecutionContext {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub causal_invocation: Option<crate::RuntimeInvocation>,
-}
-
-impl ProcessExecutionContext {
-    pub fn with_causal_invocation(mut self, invocation: Option<crate::RuntimeInvocation>) -> Self {
-        self.causal_invocation = invocation;
-        self
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.causal_invocation.is_none()
-    }
-}
-
 #[derive(Clone)]
 pub struct ProcessOpScope<'scope> {
     pub(crate) parent_invocation: Option<crate::RuntimeInvocation>,
@@ -441,6 +415,7 @@ impl ProcessStartOptions {
     pub fn execution_context(&self, scope: &ProcessOpScope<'_>) -> ProcessExecutionContext {
         ProcessExecutionContext {
             causal_invocation: scope.parent_invocation.clone(),
+            execution_write_authority: None,
         }
     }
 }
@@ -451,6 +426,8 @@ pub struct ProcessStartRequest {
     pub id: ProcessId,
     pub input: ProcessInput,
     pub disposition: RecoveryDisposition,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_attempts: Option<u32>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub env_spec: Option<ProcessExecutionEnvSpec>,
     pub originator: ProcessOriginator,
@@ -473,6 +450,7 @@ impl ProcessStartRequest {
             id: id.into(),
             input,
             disposition,
+            max_attempts: None,
             env_spec: None,
             originator,
             wake_target: None,
@@ -498,6 +476,11 @@ impl ProcessStartRequest {
 
     pub fn with_env_spec(mut self, env_spec: ProcessExecutionEnvSpec) -> Self {
         self.env_spec = Some(env_spec);
+        self
+    }
+
+    pub fn with_max_attempts(mut self, max_attempts: Option<u32>) -> Self {
+        self.max_attempts = max_attempts;
         self
     }
 
@@ -534,6 +517,7 @@ impl ProcessStartRequest {
             self.disposition,
             ProcessProvenance::new(self.originator),
         )
+        .with_max_attempts(self.max_attempts)
         .with_event_types(self.event_types)
         .with_execution_env_ref(env_ref)
         .with_wake_target(self.wake_target)
@@ -652,6 +636,8 @@ pub struct ProcessRegistration {
     pub id: ProcessId,
     pub input: Arc<ProcessInput>,
     pub disposition: RecoveryDisposition,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_attempts: Option<u32>,
     pub identity: ProcessIdentity,
     #[serde(default)]
     pub event_types: Vec<ProcessEventType>,
@@ -668,6 +654,7 @@ impl Clone for ProcessRegistration {
             id: self.id.clone(),
             input: Arc::clone(&self.input),
             disposition: self.disposition,
+            max_attempts: self.max_attempts,
             identity: self.identity.clone(),
             event_types: self.event_types.clone(),
             provenance: self.provenance.clone(),
@@ -689,6 +676,7 @@ impl ProcessRegistration {
             id: id.into(),
             input: Arc::new(input),
             disposition,
+            max_attempts: None,
             identity,
             event_types: default_process_event_types(),
             provenance,
@@ -707,6 +695,11 @@ impl ProcessRegistration {
 
     pub fn with_process_provenance(mut self, provenance: ProcessProvenance) -> Self {
         self.provenance = provenance;
+        self
+    }
+
+    pub fn with_max_attempts(mut self, max_attempts: Option<u32>) -> Self {
+        self.max_attempts = max_attempts;
         self
     }
 
@@ -832,6 +825,8 @@ pub struct ProcessRecord {
     /// durable rows cannot deserialize and are handled by each store's schema
     /// version bump (reject-and-recreate), never by an API/serde default.
     pub disposition: RecoveryDisposition,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_attempts: Option<u32>,
     pub identity: ProcessIdentity,
     #[serde(default)]
     pub event_types: Vec<ProcessEventType>,
@@ -910,6 +905,7 @@ impl ProcessRecord {
             registration_hash,
             input: registration.input,
             disposition: registration.disposition,
+            max_attempts: registration.max_attempts,
             identity: registration.identity,
             event_types: registration.event_types,
             provenance: registration.provenance,

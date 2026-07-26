@@ -61,14 +61,15 @@ use lash_core::{
     AttachmentOwnerKind, BlobRef, DeliveryPolicy, DurabilityTier, GcReport, LeaseOwnerIdentity,
     LeaseOwnerLiveness, MergeKey, PROCESS_LEASE_SCHEMA_VERSION, PersistedSegmentHandover,
     ProcessAwaitOutput, ProcessChangeCursor, ProcessEvent, ProcessEventAppendRequest,
-    ProcessEventAppendResult, ProcessExternalRef, ProcessHandleDescriptor, ProcessHandleGrant,
-    ProcessLease, ProcessLeaseClaimOutcome, ProcessLeaseCompletion, ProcessListFilter,
-    ProcessLiveReferenceSummary, ProcessPruneReport, ProcessRecord, ProcessRegistration,
-    ProcessRegistry, ProcessStarted, QueuedWorkStore, RuntimePersistence, SessionCommitStore,
-    SessionExecutionLease, SessionExecutionLeaseClaimOutcome, SessionExecutionLeaseCompletion,
-    SessionExecutionLeaseFence, SessionExecutionLeaseStore, SessionMeta, SessionPickerInfo,
-    SessionReadScope, SessionScope, SessionStoreCreateRequest, SessionStoreFactory, SlotPolicy,
-    StoreError, StoreMaintenance, TurnInputStore, VacuumReport,
+    ProcessEventAppendResult, ProcessExecutionWriteAuthority, ProcessExternalRef,
+    ProcessHandleDescriptor, ProcessHandleGrant, ProcessLease, ProcessLeaseClaimOutcome,
+    ProcessLeaseCompletion, ProcessListFilter, ProcessLiveReferenceSummary, ProcessPruneReport,
+    ProcessRecord, ProcessRegistration, ProcessRegistry, ProcessStartOutcome, ProcessStartPlan,
+    ProcessStarted, QueuedWorkStore, RuntimePersistence, SessionCommitStore, SessionExecutionLease,
+    SessionExecutionLeaseClaimOutcome, SessionExecutionLeaseCompletion, SessionExecutionLeaseFence,
+    SessionExecutionLeaseStore, SessionMeta, SessionPickerInfo, SessionReadScope, SessionScope,
+    SessionStoreCreateRequest, SessionStoreFactory, SlotPolicy, StoreError, StoreMaintenance,
+    TurnInputStore, VacuumReport,
 };
 use rusqlite::{Connection, OptionalExtension, Transaction, params};
 use sha2::{Digest, Sha256};

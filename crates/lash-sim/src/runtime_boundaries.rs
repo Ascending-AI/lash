@@ -1454,6 +1454,8 @@ async fn record_lifecycle_started(
             id,
             lash_core::ProcessStarted {
                 owner: owner.clone(),
+                fencing_token: 0,
+                attempt: 1,
                 started_at_ms: 1,
             },
         )
@@ -1536,6 +1538,7 @@ fn abandon_writer_str(writer: lash_core::AbandonWriter) -> &'static str {
         lash_core::AbandonWriter::OwnerDrain => "owner_drain",
         lash_core::AbandonWriter::Sweep => "sweep",
         lash_core::AbandonWriter::ReconciledRequest => "reconciled_request",
+        lash_core::AbandonWriter::EngineGaveUp => "engine_gave_up",
     }
 }
 

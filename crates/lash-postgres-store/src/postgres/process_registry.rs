@@ -561,6 +561,10 @@ impl ProcessRegistry for PostgresProcessRegistry {
         let mut record = load_process_tx(&mut tx, process_id)
             .await?
             .ok_or_else(|| PluginError::Session(format!("unknown process `{process_id}`")))?;
+        if record.is_terminal() {
+            tx.commit().await.map_err(plugin_sqlx_error)?;
+            return Ok(record);
+        }
         authority.validate(process_id, record.disposition, &await_output)?;
         let request =
             lash_core::terminal_append_request(process_id, &await_output, Some(&authority));
@@ -639,6 +643,10 @@ impl ProcessRegistry for PostgresProcessRegistry {
         let mut record = load_process_tx(&mut tx, process_id)
             .await?
             .ok_or_else(|| PluginError::Session(format!("unknown process `{process_id}`")))?;
+        if record.is_terminal() {
+            tx.commit().await.map_err(plugin_sqlx_error)?;
+            return Ok(record);
+        }
         let request = lash_core::terminal_append_request(process_id, &await_output, None);
         let replay_lookup =
             if let Some(replay_key) = request.replay.as_ref().map(|r| r.key.as_str()) {
@@ -730,23 +738,47 @@ impl ProcessRegistry for PostgresProcessRegistry {
         Ok(record)
     }
 
-    async fn record_first_started(
+    async fn record_first_started_with_authority(
         &self,
         process_id: &str,
         started: ProcessStarted,
-    ) -> Result<ProcessRecord, PluginError> {
+        authority: &ProcessExecutionWriteAuthority,
+    ) -> Result<ProcessStartOutcome, PluginError> {
         let mut tx = self.pool.begin().await.map_err(plugin_sqlx_error)?;
         let mut record = load_process_tx(&mut tx, process_id)
             .await?
             .ok_or_else(|| PluginError::Session(format!("unknown process `{process_id}`")))?;
-        if record.first_started.is_some() {
-            tx.commit().await.map_err(plugin_sqlx_error)?;
-            return Ok(record);
+        let now = process_lease_now_epoch_ms_tx(&mut tx).await?;
+        validate_process_execution_authority_tx(&mut tx, process_id, authority, now).await?;
+        match lash_core::runtime::prepare_process_start(&record, &started)? {
+            ProcessStartPlan::AlreadyApplied => {
+                tx.commit().await.map_err(plugin_sqlx_error)?;
+                return Ok(ProcessStartOutcome::AlreadyApplied(record));
+            }
+            ProcessStartPlan::AlreadyStarted { by } => {
+                tx.commit().await.map_err(plugin_sqlx_error)?;
+                return Ok(ProcessStartOutcome::AlreadyStarted {
+                    current: record,
+                    by,
+                });
+            }
+            ProcessStartPlan::AttemptsExhausted {
+                attempts,
+                max_attempts,
+            } => {
+                tx.commit().await.map_err(plugin_sqlx_error)?;
+                return Ok(ProcessStartOutcome::AttemptsExhausted {
+                    current: record,
+                    attempts,
+                    max_attempts,
+                });
+            }
+            ProcessStartPlan::Append => {}
         }
         let request = ProcessEventAppendRequest::first_started(process_id, &started);
-        append_process_event_tx(&mut tx, &mut record, request, current_epoch_ms()).await?;
+        append_process_event_tx(&mut tx, &mut record, request, now).await?;
         tx.commit().await.map_err(plugin_sqlx_error)?;
-        Ok(record)
+        Ok(ProcessStartOutcome::Started(record))
     }
 
     async fn request_process_abandon(
@@ -773,15 +805,18 @@ impl ProcessRegistry for PostgresProcessRegistry {
         Ok(record)
     }
 
-    async fn set_process_wait(
+    async fn set_process_wait_with_authority(
         &self,
         process_id: &str,
         wait: lash_core::WaitState,
+        authority: &ProcessExecutionWriteAuthority,
     ) -> Result<ProcessRecord, PluginError> {
         let mut tx = self.pool.begin().await.map_err(plugin_sqlx_error)?;
         let mut record = load_process_tx(&mut tx, process_id)
             .await?
             .ok_or_else(|| PluginError::Session(format!("unknown process `{process_id}`")))?;
+        let now = process_lease_now_epoch_ms_tx(&mut tx).await?;
+        validate_process_execution_authority_tx(&mut tx, process_id, authority, now).await?;
         if record.is_terminal() {
             return Err(PluginError::Session(format!(
                 "terminal process `{process_id}` cannot enter a wait state"
@@ -792,22 +827,28 @@ impl ProcessRegistry for PostgresProcessRegistry {
             return Ok(record);
         }
         let request = ProcessEventAppendRequest::wait_entered(process_id, &wait);
-        append_process_event_tx(&mut tx, &mut record, request, current_epoch_ms()).await?;
+        append_process_event_tx(&mut tx, &mut record, request, now).await?;
         tx.commit().await.map_err(plugin_sqlx_error)?;
         Ok(record)
     }
 
-    async fn clear_process_wait(&self, process_id: &str) -> Result<ProcessRecord, PluginError> {
+    async fn clear_process_wait_with_authority(
+        &self,
+        process_id: &str,
+        authority: &ProcessExecutionWriteAuthority,
+    ) -> Result<ProcessRecord, PluginError> {
         let mut tx = self.pool.begin().await.map_err(plugin_sqlx_error)?;
         let mut record = load_process_tx(&mut tx, process_id)
             .await?
             .ok_or_else(|| PluginError::Session(format!("unknown process `{process_id}`")))?;
+        let now = process_lease_now_epoch_ms_tx(&mut tx).await?;
+        validate_process_execution_authority_tx(&mut tx, process_id, authority, now).await?;
         let Some(wait) = record.wait.clone() else {
             tx.commit().await.map_err(plugin_sqlx_error)?;
             return Ok(record);
         };
         let request = ProcessEventAppendRequest::wait_cleared(process_id, &wait);
-        append_process_event_tx(&mut tx, &mut record, request, current_epoch_ms()).await?;
+        append_process_event_tx(&mut tx, &mut record, request, now).await?;
         tx.commit().await.map_err(plugin_sqlx_error)?;
         Ok(record)
     }

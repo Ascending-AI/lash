@@ -6,7 +6,8 @@ pub(super) async fn process_record_is_the_fold_of_its_event_log(
     let process_id = "proc-event-fold";
     let base = registry
         .register_process(
-            registration(process_id).with_extra_event_types([plain_event_type("signal.ready")]),
+            rerunnable_registration(process_id)
+                .with_extra_event_types([plain_event_type("signal.ready")]),
         )
         .await
         .expect("register fold process");
@@ -24,7 +25,8 @@ pub(super) async fn process_record_is_the_fold_of_its_event_log(
     assert_process_record_fold(&registry, &base, "registration").await;
     registry
         .register_process(
-            registration(process_id).with_extra_event_types([plain_event_type("signal.ready")]),
+            rerunnable_registration(process_id)
+                .with_extra_event_types([plain_event_type("signal.ready")]),
         )
         .await
         .expect("replay fold process registration");
@@ -32,6 +34,8 @@ pub(super) async fn process_record_is_the_fold_of_its_event_log(
 
     let started = ProcessStarted {
         owner: process_lease_owner("fold-starter"),
+        fencing_token: 0,
+        attempt: 1,
         started_at_ms: 11,
     };
     registry
@@ -41,6 +45,21 @@ pub(super) async fn process_record_is_the_fold_of_its_event_log(
     assert_process_record_fold(&registry, &base, "first started").await;
     replay_latest_event(&registry, process_id, "process.first_started").await;
     assert_process_record_fold(&registry, &base, "first-started replay").await;
+    registry
+        .record_first_started(
+            process_id,
+            ProcessStarted {
+                owner: process_lease_owner("fold-starter-2"),
+                fencing_token: 0,
+                attempt: 2,
+                started_at_ms: 12,
+            },
+        )
+        .await
+        .expect("append second execution attempt");
+    assert_process_record_fold(&registry, &base, "second execution attempt").await;
+    replay_latest_event(&registry, process_id, "process.first_started").await;
+    assert_process_record_fold(&registry, &base, "second attempt replay").await;
 
     let wait = WaitState {
         kind: WaitKind::Signal {
@@ -316,21 +335,18 @@ async fn complete_and_assert_fold(
     output: ProcessAwaitOutput,
     label: &str,
 ) {
+    let authority = if base.disposition == RecoveryDisposition::ExternallyOwned {
+        ProcessCompletionAuthority::external_owner()
+    } else {
+        ProcessCompletionAuthority::workflow_key("fold-conformance")
+    };
     registry
-        .complete_process(
-            process_id,
-            output.clone(),
-            ProcessCompletionAuthority::external_owner(),
-        )
+        .complete_process(process_id, output.clone(), authority.clone())
         .await
         .expect("append terminal event");
     assert_process_record_fold(registry, base, label).await;
     registry
-        .complete_process(
-            process_id,
-            output,
-            ProcessCompletionAuthority::external_owner(),
-        )
+        .complete_process(process_id, output, authority)
         .await
         .expect("replay terminal event");
     assert_process_record_fold(registry, base, &format!("{label} replay")).await;

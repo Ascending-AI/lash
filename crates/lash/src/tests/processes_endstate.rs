@@ -1131,6 +1131,8 @@ async fn owner_bound_graceful_drain_resolves_awaiter_and_prunes_end_to_end() -> 
             process_id,
             lash_core::ProcessStarted {
                 owner: drain_owner.clone(),
+                fencing_token: 0,
+                attempt: 1,
                 started_at_ms: 1,
             },
         )
@@ -1247,6 +1249,8 @@ async fn silent_owner_stays_running_then_abandon_request_reconciles_end_to_end()
             process_id,
             lash_core::ProcessStarted {
                 owner: silent_owner.clone(),
+                fencing_token: 0,
+                attempt: 1,
                 started_at_ms: 1,
             },
         )

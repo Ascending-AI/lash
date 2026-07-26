@@ -615,18 +615,22 @@ impl ProcessRegistry for WatchedProcessRegistry {
         Ok(record)
     }
 
-    async fn record_first_started(
+    async fn record_first_started_with_authority(
         &self,
         process_id: &str,
         started: ProcessStarted,
-    ) -> Result<ProcessRecord, PluginError> {
+        authority: &crate::ProcessExecutionWriteAuthority,
+    ) -> Result<crate::ProcessStartOutcome, PluginError> {
         let event_path = self.event_path(process_id);
         let _guard = event_path.lock().await;
         let sink_cursor = self.sink_cursor(process_id).await;
-        let record = self.inner.record_first_started(process_id, started).await?;
+        let outcome = self
+            .inner
+            .record_first_started_with_authority(process_id, started, authority)
+            .await?;
         self.hub.notify(process_id);
         self.emit_events_after(process_id, sink_cursor).await;
-        Ok(record)
+        Ok(outcome)
     }
 
     async fn request_process_abandon(
@@ -646,25 +650,36 @@ impl ProcessRegistry for WatchedProcessRegistry {
         Ok(record)
     }
 
-    async fn set_process_wait(
+    async fn set_process_wait_with_authority(
         &self,
         process_id: &str,
         wait: WaitState,
+        authority: &crate::ProcessExecutionWriteAuthority,
     ) -> Result<ProcessRecord, PluginError> {
         let event_path = self.event_path(process_id);
         let _guard = event_path.lock().await;
         let sink_cursor = self.sink_cursor(process_id).await;
-        let record = self.inner.set_process_wait(process_id, wait).await?;
+        let record = self
+            .inner
+            .set_process_wait_with_authority(process_id, wait, authority)
+            .await?;
         self.hub.notify(process_id);
         self.emit_events_after(process_id, sink_cursor).await;
         Ok(record)
     }
 
-    async fn clear_process_wait(&self, process_id: &str) -> Result<ProcessRecord, PluginError> {
+    async fn clear_process_wait_with_authority(
+        &self,
+        process_id: &str,
+        authority: &crate::ProcessExecutionWriteAuthority,
+    ) -> Result<ProcessRecord, PluginError> {
         let event_path = self.event_path(process_id);
         let _guard = event_path.lock().await;
         let sink_cursor = self.sink_cursor(process_id).await;
-        let record = self.inner.clear_process_wait(process_id).await?;
+        let record = self
+            .inner
+            .clear_process_wait_with_authority(process_id, authority)
+            .await?;
         self.hub.notify(process_id);
         self.emit_events_after(process_id, sink_cursor).await;
         Ok(record)
@@ -1152,8 +1167,19 @@ mod tests {
         let raw = Arc::new(TestLocalProcessRegistry::default()) as Arc<dyn ProcessRegistry>;
         let sink = CollectingSink::default();
         let (registry, _hub) = watch_process_registry_with_sink(raw, Some(Arc::new(sink.clone())));
+        let mut lifecycle_registration = ProcessRegistration::new(
+            "proc",
+            ProcessInput::Engine {
+                kind: "test".to_string(),
+                payload: serde_json::json!({}),
+            },
+            crate::RecoveryDisposition::Rerunnable,
+            ProcessProvenance::host(),
+        );
+        lifecycle_registration.env_ref =
+            Some(crate::ProcessExecutionEnvRef::new("process-env:test"));
         registry
-            .register_process(registration("proc"))
+            .register_process(lifecycle_registration)
             .await
             .expect("register");
         registry
@@ -1161,6 +1187,8 @@ mod tests {
                 "proc",
                 ProcessStarted {
                     owner: crate::LeaseOwnerIdentity::opaque("owner", "incarnation"),
+                    fencing_token: 0,
+                    attempt: 1,
                     started_at_ms: 1,
                 },
             )

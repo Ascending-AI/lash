@@ -28,6 +28,9 @@ pub(super) async fn complete_process(
                     .ok_or_else(|| {
                         lash_core::PluginError::Session(format!("unknown process `{process_id}`"))
                     })?;
+                if record.is_terminal() {
+                    return Ok(record);
+                }
                 // Validate the authority against the row's declared disposition
                 // *inside* the transaction that appends, so a concurrent
                 // complete→prune→re-register with a different disposition cannot
@@ -117,6 +120,9 @@ pub(super) async fn complete_process_with_lease(
                         "unknown process `{process_id}`"
                     ))
                 })?;
+                if record.is_terminal() {
+                    return Ok(record);
+                }
                 let request = lash_core::terminal_append_request(process_id, &await_output, None);
                 let replay_lookup = request
                     .replay

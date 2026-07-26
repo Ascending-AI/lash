@@ -8,7 +8,9 @@ use super::events::{
     runtime_lifecycle_event_type,
 };
 use super::materialization::materialize_process_event_semantics;
-use super::model::{ProcessRecord, ProcessRegistration, ProcessStatus};
+use super::model::{
+    ProcessRecord, ProcessRegistration, ProcessStarted, ProcessStatus, RecoveryDisposition,
+};
 use super::time::{epoch_ms_from_system_time, system_time_from_epoch_ms};
 use super::wake::{ProcessWakeDeliveryRequest, process_wake_delivery};
 
@@ -27,6 +29,60 @@ pub enum ProcessEventAppendPlan {
         wake_delivery: Option<ProcessWakeDelivery>,
         occurred_at_ms: u64,
     },
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ProcessStartPlan {
+    Append,
+    AlreadyApplied,
+    AlreadyStarted { by: crate::LeaseOwnerIdentity },
+    AttemptsExhausted { attempts: u32, max_attempts: u32 },
+}
+
+pub fn prepare_process_start(
+    record: &ProcessRecord,
+    started: &ProcessStarted,
+) -> Result<ProcessStartPlan, PluginError> {
+    if record.is_terminal() {
+        return Err(PluginError::Session(format!(
+            "terminal process `{}` cannot start an execution attempt",
+            record.id
+        )));
+    }
+    if record.disposition == RecoveryDisposition::ExternallyOwned {
+        return Err(PluginError::Session(format!(
+            "externally-owned process `{}` cannot start an execution attempt",
+            record.id
+        )));
+    }
+
+    let expected_attempt = match record.first_started.as_deref() {
+        None => 1,
+        Some(existing) if existing.same_execution(started) => {
+            return Ok(ProcessStartPlan::AlreadyApplied);
+        }
+        Some(existing) if record.disposition == RecoveryDisposition::OwnerBound => {
+            return Ok(ProcessStartPlan::AlreadyStarted {
+                by: existing.owner.clone(),
+            });
+        }
+        Some(existing) => existing.attempt.saturating_add(1),
+    };
+    if started.attempt != expected_attempt {
+        return Err(PluginError::Session(format!(
+            "process `{}` execution attempt must be {}, got {}",
+            record.id, expected_attempt, started.attempt
+        )));
+    }
+    if let Some(max_attempts) = record.max_attempts
+        && started.attempt > max_attempts
+    {
+        return Ok(ProcessStartPlan::AttemptsExhausted {
+            attempts: started.attempt.saturating_sub(1),
+            max_attempts,
+        });
+    }
+    Ok(ProcessStartPlan::Append)
 }
 
 pub fn apply_process_status_projection(
@@ -62,10 +118,16 @@ pub fn apply_process_event_projection(
             let started = lifecycle_payload(event, "started")?;
             match record.first_started.as_deref() {
                 None => record.first_started = Some(Box::new(started)),
-                Some(existing) if existing == &started => {}
+                Some(existing) if existing.same_execution(&started) => {}
+                Some(existing)
+                    if record.disposition == RecoveryDisposition::Rerunnable
+                        && started.attempt == existing.attempt.saturating_add(1) =>
+                {
+                    record.first_started = Some(Box::new(started));
+                }
                 Some(_) => {
                     return Err(PluginError::Session(format!(
-                        "process `{}` already has a different first-started fact",
+                        "process `{}` has an invalid execution-started attempt",
                         record.id
                     )));
                 }
@@ -484,6 +546,12 @@ pub(super) fn validate_process_registration(
             registration.id
         )));
     }
+    if registration.max_attempts == Some(0) {
+        return Err(PluginError::Session(format!(
+            "process `{}` max_attempts must be greater than zero",
+            registration.id
+        )));
+    }
     match registration.input.as_ref() {
         super::model::ProcessInput::ToolCall { .. } | super::model::ProcessInput::Engine { .. } => {
             if registration.env_ref.is_none() {
@@ -631,6 +699,8 @@ mod tests {
                 &record.id,
                 &ProcessStarted {
                     owner: crate::LeaseOwnerIdentity::opaque("owner", "incarnation"),
+                    fencing_token: 0,
+                    attempt: 1,
                     started_at_ms: 2,
                 },
             ),

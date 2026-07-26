@@ -39,15 +39,15 @@ pub use materialization::materialize_process_event_semantics;
 pub use model::{
     AbandonRequest, InMemoryProcessExecutionEnvStore, PROCESS_LEASE_SCHEMA_VERSION,
     ProcessCancelSummary, ProcessChangeCursor, ProcessExecutionContext, ProcessExecutionEnvRef,
-    ProcessExecutionEnvSpec, ProcessExecutionEnvStore, ProcessExternalRef, ProcessHandleDescriptor,
-    ProcessHandleGrant, ProcessHandleGrantEntry, ProcessHandleSummary, ProcessId, ProcessIdentity,
-    ProcessInput, ProcessLease, ProcessLeaseClaimOutcome, ProcessLeaseCompletion,
-    ProcessLifecycleStatus, ProcessListFilter, ProcessListMode, ProcessOpScope, ProcessOriginator,
-    ProcessProvenance, ProcessRecord, ProcessRegistration, ProcessSessionDeleteReport,
-    ProcessSpawnProvenance, ProcessStartGrant, ProcessStartOptions, ProcessStartRequest,
-    ProcessStarted, ProcessStatus, ProcessStatusFilter, RecoveryDisposition, SessionScope,
-    SessionScopeId, WaitKind, WaitState, load_process_execution_env, persist_process_execution_env,
-    process_runtime_session_ids,
+    ProcessExecutionEnvSpec, ProcessExecutionEnvStore, ProcessExecutionWriteAuthority,
+    ProcessExternalRef, ProcessHandleDescriptor, ProcessHandleGrant, ProcessHandleGrantEntry,
+    ProcessHandleSummary, ProcessId, ProcessIdentity, ProcessInput, ProcessLease,
+    ProcessLeaseClaimOutcome, ProcessLeaseCompletion, ProcessLifecycleStatus, ProcessListFilter,
+    ProcessListMode, ProcessOpScope, ProcessOriginator, ProcessProvenance, ProcessRecord,
+    ProcessRegistration, ProcessSessionDeleteReport, ProcessSpawnProvenance, ProcessStartGrant,
+    ProcessStartOptions, ProcessStartOutcome, ProcessStartRequest, ProcessStarted, ProcessStatus,
+    ProcessStatusFilter, RecoveryDisposition, SessionScope, SessionScopeId, WaitKind, WaitState,
+    load_process_execution_env, persist_process_execution_env, process_runtime_session_ids,
 };
 pub use observation::{
     ObservedProcess, ObservedProcessEvent, ObservedWorkItem, ProcessWorkObserver,
@@ -63,9 +63,10 @@ pub use service::{
 pub use testing::*;
 pub use time::{current_epoch_ms, epoch_ms_from_system_time, system_time_from_epoch_ms};
 pub use validation::{
-    ProcessEventAppendPlan, apply_process_event_projection, apply_process_status_projection,
-    fold_process_record, prepare_process_event_append, prepare_process_registration,
-    process_event_payload_hash, require_event_replay,
+    ProcessEventAppendPlan, ProcessStartPlan, apply_process_event_projection,
+    apply_process_status_projection, fold_process_record, prepare_process_event_append,
+    prepare_process_registration, prepare_process_start, process_event_payload_hash,
+    require_event_replay,
 };
 pub use wake::{
     ProcessWakeDeliveryRequest, process_wake_delivery, process_wake_input_from_event_payload,

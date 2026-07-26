@@ -255,6 +255,18 @@ pub async fn run_lashlang_process(
         lashlang_execution_trace.emit_started(&artifact);
     }
     let registry = context.registry();
+    let Some(execution_write_authority) = context
+        .execution_context()
+        .execution_write_authority
+        .clone()
+    else {
+        return process_lashlang_failure(
+            "process_execution_fence_missing",
+            "process execution did not provide a write fence".to_string(),
+            None,
+        )
+        .into();
+    };
     let cancellation = context.cancellation_token();
     let (ctx, guard, mut state) = {
         let _phase = context.named_phase("rlm_process.build_context");
@@ -294,6 +306,7 @@ pub async fn run_lashlang_process(
         host_environment,
         artifact_store: engine.artifact_store(),
         registry,
+        execution_write_authority,
         process_id: process_id.clone(),
         lashlang_execution_trace: lashlang_execution_trace.clone(),
         sleep_sequence: AtomicU64::new(sleep_sequence),
@@ -439,6 +452,7 @@ struct LashlangProcessHost<'run> {
     host_environment: lashlang::LashlangHostEnvironment,
     artifact_store: Arc<dyn lashlang::LashlangArtifactStore>,
     registry: Arc<dyn lash_core::ProcessRegistry>,
+    execution_write_authority: lash_core::ProcessExecutionWriteAuthority,
     process_id: String,
     lashlang_execution_trace: LashlangProcessExecutionTrace,
     sleep_sequence: AtomicU64,
@@ -707,7 +721,11 @@ impl LashlangProcessHost<'_> {
             },
         };
         self.registry
-            .set_process_wait(&self.process_id, wait.clone())
+            .set_process_wait_with_authority(
+                &self.process_id,
+                wait.clone(),
+                &self.execution_write_authority,
+            )
             .await
             .map_err(|err| ExecutionHostError::new(err.to_string()))?;
         let payload = self
@@ -716,7 +734,7 @@ impl LashlangProcessHost<'_> {
             .await
             .map_err(|err| ExecutionHostError::new(err.to_string()))?;
         self.registry
-            .clear_process_wait(&self.process_id)
+            .clear_process_wait_with_authority(&self.process_id, &self.execution_write_authority)
             .await
             .map_err(|err| ExecutionHostError::new(err.to_string()))?;
         Ok(lashlang::from_json(payload))

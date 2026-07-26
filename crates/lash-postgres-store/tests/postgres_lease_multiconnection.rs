@@ -175,6 +175,8 @@ async fn postgres_lease_clock_and_fencing_hold_across_independent_connections() 
     // immutability across connections is checked at the very end.
     let started = ProcessStarted {
         owner: owner_a.clone(),
+        fencing_token: 0,
+        attempt: 1,
         started_at_ms: 111,
     };
     reg_a

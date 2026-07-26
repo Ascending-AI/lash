@@ -12,16 +12,20 @@ use super::events::{
     ProcessEventAppendResult, terminal_append_request,
 };
 use super::model::{
-    AbandonRequest, PROCESS_LEASE_SCHEMA_VERSION, ProcessChangeCursor, ProcessExternalRef,
-    ProcessHandleDescriptor, ProcessHandleGrant, ProcessHandleGrantEntry, ProcessLease,
-    ProcessLeaseClaimOutcome, ProcessLeaseCompletion, ProcessListFilter, ProcessRecord,
-    ProcessRegistration, ProcessSessionDeleteReport, ProcessStarted, SessionScope, SessionScopeId,
+    AbandonRequest, PROCESS_LEASE_SCHEMA_VERSION, ProcessChangeCursor,
+    ProcessExecutionWriteAuthority, ProcessExternalRef, ProcessHandleDescriptor,
+    ProcessHandleGrant, ProcessHandleGrantEntry, ProcessLease, ProcessLeaseClaimOutcome,
+    ProcessLeaseCompletion, ProcessListFilter, ProcessRecord, ProcessRegistration,
+    ProcessSessionDeleteReport, ProcessStartOutcome, ProcessStarted, SessionScope, SessionScopeId,
     WaitState,
 };
 use super::references::ProcessLiveReferenceSummary;
 use super::registry::{ProcessPruneReport, ProcessRegistry};
 use super::time::current_epoch_ms;
-use super::validation::{prepare_process_event_append, prepare_process_registration};
+use super::validation::{
+    ProcessStartPlan, prepare_process_event_append, prepare_process_registration,
+    prepare_process_start,
+};
 
 /// In-memory process registry for core tests.
 pub struct TestLocalProcessRegistry {
@@ -564,6 +568,9 @@ impl ProcessRegistry for TestLocalProcessRegistry {
                 "unknown process `{process_id}`"
             )));
         };
+        if record.record.is_terminal() {
+            return Ok(record.record.clone());
+        }
         authority.validate(process_id, record.record.disposition, &await_output)?;
         let request = terminal_append_request(process_id, &await_output, Some(&authority));
         let replay_lookup = request
@@ -617,6 +624,9 @@ impl ProcessRegistry for TestLocalProcessRegistry {
                 lease.process_id
             )));
         };
+        if record.record.is_terminal() {
+            return Ok(record.record.clone());
+        }
         let now = current_epoch_ms();
         let request = terminal_append_request(&lease.process_id, &await_output, None);
         let replay_lookup = request
@@ -667,23 +677,50 @@ impl ProcessRegistry for TestLocalProcessRegistry {
         Ok(record.record.clone())
     }
 
-    async fn record_first_started(
+    async fn record_first_started_with_authority(
         &self,
         process_id: &str,
         started: ProcessStarted,
-    ) -> Result<ProcessRecord, PluginError> {
+        authority: &ProcessExecutionWriteAuthority,
+    ) -> Result<ProcessStartOutcome, PluginError> {
         let mut managed = self.managed.lock().await;
         let Some(record) = managed.get_mut(process_id) else {
             return Err(PluginError::Session(format!(
                 "unknown process `{process_id}`"
             )));
         };
-        if record.record.first_started.is_some() {
-            return Ok(record.record.clone());
+        validate_in_memory_execution_authority(
+            &self.leases,
+            process_id,
+            authority,
+            current_epoch_ms(),
+        )
+        .await?;
+        match prepare_process_start(&record.record, &started)? {
+            ProcessStartPlan::AlreadyApplied => {
+                return Ok(ProcessStartOutcome::AlreadyApplied(record.record.clone()));
+            }
+            ProcessStartPlan::AlreadyStarted { by } => {
+                return Ok(ProcessStartOutcome::AlreadyStarted {
+                    current: record.record.clone(),
+                    by,
+                });
+            }
+            ProcessStartPlan::AttemptsExhausted {
+                attempts,
+                max_attempts,
+            } => {
+                return Ok(ProcessStartOutcome::AttemptsExhausted {
+                    current: record.record.clone(),
+                    attempts,
+                    max_attempts,
+                });
+            }
+            ProcessStartPlan::Append => {}
         }
         let request = ProcessEventAppendRequest::first_started(process_id, &started);
         self.append_managed_event(record, request).await?;
-        Ok(record.record.clone())
+        Ok(ProcessStartOutcome::Started(record.record.clone()))
     }
 
     async fn request_process_abandon(
@@ -710,10 +747,11 @@ impl ProcessRegistry for TestLocalProcessRegistry {
         Ok(record.record.clone())
     }
 
-    async fn set_process_wait(
+    async fn set_process_wait_with_authority(
         &self,
         process_id: &str,
         wait: WaitState,
+        authority: &ProcessExecutionWriteAuthority,
     ) -> Result<ProcessRecord, PluginError> {
         let mut managed = self.managed.lock().await;
         let Some(record) = managed.get_mut(process_id) else {
@@ -721,6 +759,13 @@ impl ProcessRegistry for TestLocalProcessRegistry {
                 "unknown process `{process_id}`"
             )));
         };
+        validate_in_memory_execution_authority(
+            &self.leases,
+            process_id,
+            authority,
+            current_epoch_ms(),
+        )
+        .await?;
         if record.record.is_terminal() {
             return Err(PluginError::Session(format!(
                 "terminal process `{process_id}` cannot enter a wait state"
@@ -734,13 +779,24 @@ impl ProcessRegistry for TestLocalProcessRegistry {
         Ok(record.record.clone())
     }
 
-    async fn clear_process_wait(&self, process_id: &str) -> Result<ProcessRecord, PluginError> {
+    async fn clear_process_wait_with_authority(
+        &self,
+        process_id: &str,
+        authority: &ProcessExecutionWriteAuthority,
+    ) -> Result<ProcessRecord, PluginError> {
         let mut managed = self.managed.lock().await;
         let Some(record) = managed.get_mut(process_id) else {
             return Err(PluginError::Session(format!(
                 "unknown process `{process_id}`"
             )));
         };
+        validate_in_memory_execution_authority(
+            &self.leases,
+            process_id,
+            authority,
+            current_epoch_ms(),
+        )
+        .await?;
         let Some(wait) = record.record.wait.clone() else {
             return Ok(record.record.clone());
         };
@@ -1053,9 +1109,44 @@ fn acquire_test_lease(
 
 /// Loud, stable error for a superseded or expired process lease.
 fn process_lease_expired(process_id: &str) -> PluginError {
-    PluginError::Session(format!(
-        "process lease for `{process_id}` is missing or expired"
-    ))
+    PluginError::ProcessLeaseSuperseded {
+        process_id: process_id.to_string(),
+    }
+}
+
+async fn validate_in_memory_execution_authority(
+    leases: &Mutex<ManagedLeaseMap>,
+    process_id: &str,
+    authority: &ProcessExecutionWriteAuthority,
+    now: u64,
+) -> Result<(), PluginError> {
+    match authority {
+        ProcessExecutionWriteAuthority::WorkflowKey { workflow_key } => {
+            if workflow_key != process_id {
+                return Err(PluginError::Session(format!(
+                    "process `{process_id}` workflow execution authority does not match its workflow key"
+                )));
+            }
+            Ok(())
+        }
+        ProcessExecutionWriteAuthority::Lease(lease) => {
+            if lease.process_id != process_id {
+                return Err(process_lease_expired(process_id));
+            }
+            let current = leases.lock().await;
+            if current.get(process_id).is_some_and(|current| {
+                !current.lease_token.is_empty()
+                    && current.owner.same_incarnation(&lease.owner)
+                    && current.lease_token == lease.lease_token
+                    && current.fencing_token == lease.fencing_token
+                    && current.expires_at_epoch_ms > now
+            }) {
+                Ok(())
+            } else {
+                Err(process_lease_expired(process_id))
+            }
+        }
+    }
 }
 
 fn process_external_ref_conflict(
