@@ -29,15 +29,20 @@ async fn restate_replay_does_not_reexecute_process_owned_tool_call() {
         .scoped_effect_controller(ExecutionScope::process(process_id))
         .expect("scope first process execution");
     let first = worker
-        .run_process_with_scoped_effect_controller(
+        .run_process_segment_with_scoped_effect_controller(
             registration.clone(),
             ProcessExecutionContext::default(),
             first_scope,
             tokio_util::sync::CancellationToken::new(),
+            None,
         )
         .await
         .expect("run first process execution");
-    assert!(matches!(first, ProcessAwaitOutput::Success { .. }));
+    assert!(matches!(
+        first,
+        lash_core::ProcessRunOutcome::Terminal(output)
+            if matches!(*output, ProcessAwaitOutput::Success { .. })
+    ));
     assert_eq!(executions.load(Ordering::SeqCst), 1);
 
     context.start_replay();
@@ -46,16 +51,21 @@ async fn restate_replay_does_not_reexecute_process_owned_tool_call() {
         .scoped_effect_controller(ExecutionScope::process(process_id))
         .expect("scope replayed process execution");
     let replayed = worker
-        .run_process_with_scoped_effect_controller(
+        .run_process_segment_with_scoped_effect_controller(
             registration,
             ProcessExecutionContext::default(),
             replay_scope,
             tokio_util::sync::CancellationToken::new(),
+            None,
         )
         .await
         .expect("replay process execution");
 
-    assert!(matches!(replayed, ProcessAwaitOutput::Success { .. }));
+    assert!(matches!(
+        replayed,
+        lash_core::ProcessRunOutcome::Terminal(output)
+            if matches!(*output, ProcessAwaitOutput::Success { .. })
+    ));
     assert_eq!(
         executions.load(Ordering::SeqCst),
         1,

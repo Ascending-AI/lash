@@ -129,10 +129,9 @@ pub struct AbandonEvidence {
 pub enum ProcessCompletionAuthority {
     /// An external actor closes an [`RecoveryDisposition::ExternallyOwned`] row
     /// it holds a handle grant for (the `shell.start` detach path, ADR 0019).
-    /// `granted_to` is the session-scope identity the caller verified holds the
-    /// grant — the audit trail for who closed the row out of band. Rejected on
-    /// any lash-executed disposition: those have a lease-fenced single writer.
-    ExternalOwner { granted_to: String },
+    /// Rejected on any lash-executed disposition: those have a lease-fenced
+    /// single writer.
+    ExternalOwner,
     /// A workflow-key-coalesced substrate (e.g. Restate keyed by `process_id`)
     /// completes a row it ran itself. Its single-writer discipline is the
     /// engine's per-key coalescing, not a Lash lease; `workflow_key` records the
@@ -152,12 +151,9 @@ pub enum ProcessCompletionAuthority {
 }
 
 impl ProcessCompletionAuthority {
-    /// Construct [`ExternalOwner`](Self::ExternalOwner) authority naming the
-    /// session-scope identity that holds the handle grant.
-    pub fn external_owner(granted_to: impl Into<String>) -> Self {
-        Self::ExternalOwner {
-            granted_to: granted_to.into(),
-        }
+    /// Construct [`ExternalOwner`](Self::ExternalOwner) authority.
+    pub fn external_owner() -> Self {
+        Self::ExternalOwner
     }
 
     /// Construct [`WorkflowKey`](Self::WorkflowKey) authority naming the
@@ -171,7 +167,7 @@ impl ProcessCompletionAuthority {
     /// Short, stable label for diagnostics.
     pub fn label(&self) -> &'static str {
         match self {
-            Self::ExternalOwner { .. } => "external-owner",
+            Self::ExternalOwner => "external-owner",
             Self::WorkflowKey { .. } => "workflow-key",
             Self::ReconciledAbandon => "reconciled-abandon",
         }
@@ -196,7 +192,7 @@ impl ProcessCompletionAuthority {
             )))
         };
         match self {
-            Self::ExternalOwner { .. } => {
+            Self::ExternalOwner => {
                 if disposition != RecoveryDisposition::ExternallyOwned {
                     return reject(
                         "only externally-owned rows may be completed by an external owner; a \

@@ -1108,7 +1108,7 @@ async fn terminal_and_cancel_events_require_keys(registry: Arc<dyn ProcessRegist
                 raw: None,
                 control: None,
             },
-            ProcessCompletionAuthority::external_owner("conformance"),
+            ProcessCompletionAuthority::external_owner(),
         )
         .await
         .expect("complete cancelled");
@@ -1135,7 +1135,7 @@ async fn await_reads_terminal_materialized_output(registry: Arc<dyn ProcessRegis
                 value: serde_json::json!({ "ok": true }),
                 control: None,
             },
-            ProcessCompletionAuthority::external_owner("conformance"),
+            ProcessCompletionAuthority::external_owner(),
         )
         .await
         .expect("complete");
@@ -1491,7 +1491,7 @@ async fn list_processes_filters_by_status_and_waiting(registry: Arc<dyn ProcessR
                 value: serde_json::Value::Null,
                 control: None,
             },
-            ProcessCompletionAuthority::external_owner("conformance"),
+            ProcessCompletionAuthority::external_owner(),
         )
         .await
         .expect("complete process");
@@ -1663,7 +1663,7 @@ async fn process_change_feed_orders_resumes_and_includes_terminal_transitions(
                 value: serde_json::json!("done"),
                 control: None,
             },
-            ProcessCompletionAuthority::external_owner("conformance"),
+            ProcessCompletionAuthority::external_owner(),
         )
         .await
         .expect("complete b");
@@ -1785,7 +1785,7 @@ async fn wait_state_round_trips_filters_and_clears_on_terminal(registry: Arc<dyn
                 value: serde_json::json!({ "done": true }),
                 control: None,
             },
-            ProcessCompletionAuthority::external_owner("conformance"),
+            ProcessCompletionAuthority::external_owner(),
         )
         .await
         .expect("complete waiting process");
@@ -1965,7 +1965,7 @@ async fn delete_session_revokes_handles_by_session(registry: Arc<dyn ProcessRegi
                 value: serde_json::Value::Null,
                 control: None,
             },
-            ProcessCompletionAuthority::external_owner("conformance"),
+            ProcessCompletionAuthority::external_owner(),
         )
         .await
         .expect("complete terminal");
@@ -2065,7 +2065,7 @@ async fn list_non_terminal_excludes_terminal_processes(registry: Arc<dyn Process
                 value: serde_json::Value::Null,
                 control: None,
             },
-            ProcessCompletionAuthority::external_owner("conformance"),
+            ProcessCompletionAuthority::external_owner(),
         )
         .await
         .expect("complete done");
@@ -2107,7 +2107,7 @@ async fn list_live_handle_grants_excludes_terminal_history(registry: Arc<dyn Pro
                 value: serde_json::Value::Null,
                 control: None,
             },
-            ProcessCompletionAuthority::external_owner("conformance"),
+            ProcessCompletionAuthority::external_owner(),
         )
         .await
         .expect("complete done");

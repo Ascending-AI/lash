@@ -78,7 +78,12 @@ const SCHEMA_COMPONENT: &str = "lash-postgres-store";
 // Bumped to 17 for FIG-579 canonical runtime-effect envelope persistence.
 // Pre-17 databases cannot produce structural replay mismatch diagnostics and
 // are rejected and recreated.
-const SCHEMA_VERSION: i32 = 17;
+//
+// Bumped to 18 for the second completion-authority payload cutover (ADR 0027):
+// `ExternalOwner` no longer carries the unverified `granted_to` field, changing
+// the terminal event's replay-key payload hash. Pre-18 databases are rejected
+// and recreated so retries cannot compare terminal events across payload formats.
+const SCHEMA_VERSION: i32 = 18;
 const PROCESS_LEASE_SCHEMA_VERSION: u32 = lash_core::PROCESS_LEASE_SCHEMA_VERSION;
 
 #[derive(Clone)]

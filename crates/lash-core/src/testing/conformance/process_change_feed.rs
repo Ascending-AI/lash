@@ -106,7 +106,7 @@ pub(super) async fn process_change_feed_never_misses_concurrent_terminal_writers
                         value: serde_json::json!({ "writer": writer_index }),
                         control: None,
                     },
-                    crate::ProcessCompletionAuthority::external_owner("test"),
+                    crate::ProcessCompletionAuthority::external_owner(),
                 )
                 .await
                 .expect("concurrent writer complete");

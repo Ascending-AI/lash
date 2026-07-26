@@ -293,7 +293,12 @@ CREATE TABLE IF NOT EXISTS process_segment_handovers (
 // replay-key payload hash of a pre-cutover terminal event no longer matches the
 // hash a cross-version retry would compute — a replay would spuriously diverge.
 // Rejecting pre-11 process databases and recreating them removes that hazard.
-pub(crate) const PROCESS_SCHEMA_VERSION: i32 = 12;
+//
+// Bumped to 13 for the second completion-authority payload cutover (ADR 0027):
+// `ExternalOwner` no longer carries the unverified `granted_to` field, changing
+// the replay-key payload hash again. Pre-13 process databases are rejected and
+// recreated so retries cannot compare terminal events across payload formats.
+pub(crate) const PROCESS_SCHEMA_VERSION: i32 = 13;
 
 pub(crate) const TRIGGER_SCHEMA: &str = "
 CREATE TABLE IF NOT EXISTS trigger_subscriptions (

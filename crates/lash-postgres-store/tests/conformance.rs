@@ -299,7 +299,7 @@ async fn postgres_turn_commit_stamps_use_injected_store_clock_when_configured() 
 }
 
 // Blocker 1: `from_pool` must enforce the same component schema-version gate as
-// `connect`/`connect_with`. Writing the pre-canonical-envelope version (16) into
+// `connect`/`connect_with`. Writing the pre-unit-external-owner version (17) into
 // `lash_schema_versions` and then constructing over the pool must fail loudly with
 // the mismatch error, so a pre-cutover database can never be adopted post-bump.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
@@ -311,7 +311,7 @@ async fn postgres_from_pool_enforces_schema_version_gate_when_configured() {
     let pool = storage.pool().clone();
     // Force the recorded component version to a stale value.
     sqlx::query(
-        "INSERT INTO lash_schema_versions (component, version) VALUES ('lash-postgres-store', 16)
+        "INSERT INTO lash_schema_versions (component, version) VALUES ('lash-postgres-store', 17)
          ON CONFLICT (component) DO UPDATE SET version = EXCLUDED.version",
     )
     .execute(&pool)
@@ -323,18 +323,18 @@ async fn postgres_from_pool_enforces_schema_version_gate_when_configured() {
     // Restore the correct version BEFORE asserting so a failed assert never leaves
     // the shared database wedged for other cases.
     sqlx::query(
-        "UPDATE lash_schema_versions SET version = 17 WHERE component = 'lash-postgres-store'",
+        "UPDATE lash_schema_versions SET version = 18 WHERE component = 'lash-postgres-store'",
     )
     .execute(&pool)
     .await
     .expect("restore schema version");
 
     let message = match result {
-        Ok(_) => panic!("from_pool must reject a version-16 database"),
+        Ok(_) => panic!("from_pool must reject a version-17 database"),
         Err(err) => err.to_string(),
     };
     assert!(
-        message.contains("version 16") && message.contains("expected 17"),
+        message.contains("version 17") && message.contains("expected 18"),
         "expected a schema-version mismatch error, got: {message}"
     );
 }

@@ -672,7 +672,7 @@ mod tests {
                     raw: None,
                     control: None,
                 },
-                crate::ProcessCompletionAuthority::external_owner("test"),
+                crate::ProcessCompletionAuthority::external_owner(),
             )
             .await
             .expect("fail process");
@@ -684,7 +684,7 @@ mod tests {
                     raw: None,
                     control: None,
                 },
-                crate::ProcessCompletionAuthority::external_owner("test"),
+                crate::ProcessCompletionAuthority::external_owner(),
             )
             .await
             .expect("cancel process");

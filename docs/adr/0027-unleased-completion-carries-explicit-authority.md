@@ -17,10 +17,11 @@ alias.
 `ProcessCompletionAuthority` has exactly three variants, one per legitimate
 unleased writer:
 
-- **`ExternalOwner { granted_to }`** — an external actor closes an
-  `ExternallyOwned` row it holds a session handle grant for (the `shell.start`
-  detach path). `granted_to` is the session-scope identity the caller verified
-  holds the grant: the audit trail for who closed the row out of band.
+- **`ExternalOwner`** — an external actor closes an `ExternallyOwned` row it
+  holds a session handle grant for (the `shell.start` detach path). The
+  session-manager completion path verifies the caller holds a handle grant for
+  the row before the authority reaches the registry; per-closer attribution is
+  no longer recorded on the terminal event.
 - **`WorkflowKey { workflow_key }`** — a workflow-key-coalesced substrate (e.g.
   Restate keyed by `process_id`) completes a row it ran itself. Its
   single-writer discipline is the engine's per-key coalescing, not a Lash lease;
@@ -72,16 +73,16 @@ allowed to close a row of this disposition* — was expressed nowhere in the typ
 system and enforced nowhere in the store.
 
 In-process Rust cannot make such a token unforgeable, and that is explicitly not
-the goal. The value is **explicitness, a single validation choke point per
-backend, and audit evidence**. Making the authority a required argument means a
-new unleased caller must name which discipline it is standing on, and cannot
-compile without doing so (there is no `Default`, matching the runtime's
-explicit-over-defaults stance and ADR 0019's no-default disposition). Moving the
-disposition check into the backend means every store enforces the same matrix
-uniformly, and a caller can no longer forget it. Recording the authority on the
-terminal event means an operator auditing a closed row can see it was closed by,
-say, an external owner holding grant `session:abc` rather than inferring it from
-surrounding logs.
+the goal. The value is **explicitness and a single validation choke point per
+backend**. Making the authority a required argument means a new unleased caller
+must name which discipline it is standing on, and cannot compile without doing
+so (there is no `Default`, matching the runtime's explicit-over-defaults stance
+and ADR 0019's no-default disposition). Moving the disposition check into the
+backend means every store enforces the same matrix uniformly, and a caller can
+no longer forget it. For `ExternalOwner`, the session-manager completion path
+also verifies the caller's handle grant before entering the registry; the
+terminal event records the validated authority kind without copying an
+unverified per-closer scope string into durable audit data.
 
 Alternatives rejected: threading the authority only to the facade layer (leaves
 the store trusting) re-hides the invariant the way the doc comment did; encoding
@@ -138,14 +139,19 @@ watch/wait and no lash-owned effect journal is introduced.
 
 ## Cross-version consequences
 
-Terminal process events now carry a `completion_authority` field in their payload,
-which the replay-key payload hash covers. A pre-cutover terminal event has no such
-field, so its stored hash no longer matches the hash a post-cutover retry of the
-same replay key would compute — a cross-version retry would spuriously diverge
-instead of replaying idempotently. Per lash's reject-and-recreate doctrine (no
-migration chain), the process-event store is gated by a schema-version bump —
-SQLite process databases move to `user_version = 11`, and the single Postgres
-schema component (which gates `lash_process_events` alongside every other table)
-to version 11 — so a pre-cutover process store is rejected loudly at open with a
-"delete and start fresh" error and recreated, rather than replaying stale-hash
-terminal events across the format change.
+Terminal process events carry a `completion_authority` field in their payload,
+which the replay-key payload hash covers. Adding that field was the first payload
+format hazard: a pre-cutover terminal event had no field, so its stored hash
+could not match a post-cutover retry. SQLite process databases therefore moved
+to `user_version = 11`, and the single Postgres schema component (which gates
+`lash_process_events` alongside every other table) moved to version 11.
+
+Removing `ExternalOwner.granted_to` is the second half of the same hazard. A
+terminal event containing
+`{"authority":"external_owner","granted_to":"session:abc"}` hashes differently
+from one containing `{"authority":"external_owner"}`, so a retry across this
+cutover would also spuriously diverge instead of replaying idempotently. Per
+lash's reject-and-recreate doctrine (no migration chain), SQLite process
+databases now move to `user_version = 13` and the Postgres schema component to
+version 18. Pre-cutover stores are rejected loudly at open and must be recreated
+rather than comparing replay hashes across terminal payload formats.

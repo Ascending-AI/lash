@@ -504,6 +504,19 @@ mod tests {
             .get_process("async-call-1")
             .await
             .expect("registered process");
+        let run_scope = crate::SessionScope::for_agent_frame("session", "");
+        host.process_registry
+            .revoke_handle(&run_scope, "async-call-1")
+            .await
+            .expect("remove persisted grant");
+        assert!(
+            !host
+                .process_registry
+                .has_handle_grant(&run_scope, "async-call-1")
+                .await
+                .expect("check revoked handle grant"),
+            "tool-started process must rely on its persisted handle grant"
+        );
         let ProcessInput::ToolCall { call } = record.input.as_ref() else {
             panic!("expected prepared tool call process input");
         };
@@ -518,7 +531,13 @@ mod tests {
             .await_process_handle("await-async-call-1".to_string(), handle.to_json_value())
             .await;
 
-        assert!(awaited.output.is_success());
+        assert!(!awaited.output.is_success());
+        let await_error = awaited.output.value_for_projection().to_string();
+        assert!(
+            await_error
+                .contains("process handle `async-call-1` is not live or visible in this session"),
+            "revoked tool-started handle must return the typed visibility miss: {await_error}"
+        );
         let record = awaited.record.expect("await record");
         assert_eq!(record.call_id.as_deref(), Some("await-async-call-1"));
         assert_eq!(record.tool, "await_process");
@@ -701,11 +720,21 @@ mod tests {
             .await_process_handle("await-hidden-process".to_string(), handle.clone())
             .await;
         let cancelled = context
-            .cancel_process_handle("cancel-hidden-process".to_string(), handle)
+            .cancel_process_handle("cancel-hidden-process".to_string(), handle.clone())
             .await;
 
         assert!(!awaited.output.is_success());
         assert!(!cancelled.output.is_success());
+        let await_error = awaited.output.value_for_projection().to_string();
+        let cancel_error = cancelled.output.value_for_projection().to_string();
+        for error in [&await_error, &cancel_error] {
+            assert!(
+                error.contains(
+                    "process handle `hidden-process` is not live or visible in this session"
+                ),
+                "await and cancel must return the same typed visibility miss: {error}"
+            );
+        }
         assert_eq!(
             awaited
                 .record
@@ -720,6 +749,30 @@ mod tests {
                 .and_then(|record| record.call_id.as_deref()),
             Some("cancel-hidden-process")
         );
+
+        host.process_registry
+            .complete_process(
+                "hidden-process",
+                crate::ProcessAwaitOutput::Success {
+                    value: json!("done"),
+                    control: None,
+                },
+                crate::ProcessCompletionAuthority::external_owner(),
+            )
+            .await
+            .expect("complete observed process");
+        host.process_registry
+            .grant_handle(
+                &crate::SessionScope::for_agent_frame("session", ""),
+                "hidden-process",
+                crate::ProcessHandleDescriptor::new(Some("test"), Some("hidden")),
+            )
+            .await
+            .expect("grant observed process");
+        let observed = context
+            .await_process_handle("await-observed-process".to_string(), handle)
+            .await;
+        assert!(observed.output.is_success());
     }
 
     #[tokio::test]

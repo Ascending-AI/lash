@@ -371,8 +371,8 @@ impl ProcessAwaiter {
     ) -> Result<Option<ProcessAwaitOutput>, PluginError> {
         let record = self
             .registry
-            .get_process(process_id)
-            .await
+            .try_get_process(process_id)
+            .await?
             .ok_or_else(|| PluginError::Session(format!("unknown process `{process_id}`")))?;
         Ok(record.status.await_output().cloned())
     }
@@ -877,7 +877,7 @@ mod tests {
             .complete_process(
                 "proc-terminal",
                 success(serde_json::json!("done")),
-                crate::ProcessCompletionAuthority::external_owner("test"),
+                crate::ProcessCompletionAuthority::external_owner(),
             )
             .await
             .expect("complete");
@@ -958,6 +958,25 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn await_terminal_propagates_process_store_read_errors() {
+        let registry = Arc::new(TestLocalProcessRegistry::default());
+        registry
+            .set_process_read_error(Some(PluginError::Session(
+                "process store read failed".to_string(),
+            )))
+            .await;
+        let err = ProcessAwaiter::polling(registry)
+            .await_terminal("unreadable")
+            .await
+            .expect_err("store read failure should surface");
+        assert_eq!(
+            err.to_string(),
+            "plugin session error: process store read failed"
+        );
+        assert!(!err.to_string().contains("unknown process"));
+    }
+
+    #[tokio::test]
     async fn polling_awaiter_resolves_via_backoff() {
         let registry = Arc::new(TestLocalProcessRegistry::default()) as Arc<dyn ProcessRegistry>;
         registry
@@ -971,7 +990,7 @@ mod tests {
                 .complete_process(
                     "proc",
                     success(serde_json::json!({ "ok": true })),
-                    crate::ProcessCompletionAuthority::external_owner("test"),
+                    crate::ProcessCompletionAuthority::external_owner(),
                 )
                 .await
                 .expect("complete");
@@ -1001,7 +1020,7 @@ mod tests {
             .complete_process(
                 "proc",
                 success(serde_json::json!("done")),
-                crate::ProcessCompletionAuthority::external_owner("test"),
+                crate::ProcessCompletionAuthority::external_owner(),
             )
             .await
             .expect("complete");
@@ -1113,7 +1132,7 @@ mod tests {
             .complete_process(
                 "proc",
                 success(serde_json::json!("done")),
-                crate::ProcessCompletionAuthority::external_owner("test"),
+                crate::ProcessCompletionAuthority::external_owner(),
             )
             .await
             .expect("complete");
@@ -1274,13 +1293,33 @@ mod tests {
             .complete_process(
                 "proc",
                 success(serde_json::json!("ready")),
-                crate::ProcessCompletionAuthority::external_owner("test"),
+                crate::ProcessCompletionAuthority::external_owner(),
             )
             .await
             .expect("complete");
 
         let output = driver.await_terminal("proc").await.expect("await terminal");
         assert_eq!(output, success(serde_json::json!("ready")));
+    }
+
+    #[tokio::test]
+    async fn driver_propagates_process_store_read_errors() {
+        let raw = Arc::new(TestLocalProcessRegistry::default());
+        raw.set_process_read_error(Some(PluginError::Session(
+            "process store read failed".to_string(),
+        )))
+        .await;
+        let driver = crate::ProcessWorkDriver::new(raw, Arc::new(NoopRunHandle));
+
+        let err = driver
+            .await_terminal("unreadable")
+            .await
+            .expect_err("store read failure should surface");
+        assert_eq!(
+            err.to_string(),
+            "plugin session error: process store read failed"
+        );
+        assert!(!err.to_string().contains("unknown process"));
     }
 
     #[tokio::test]
@@ -1350,7 +1389,7 @@ mod tests {
             .complete_process(
                 "proc",
                 output.clone(),
-                crate::ProcessCompletionAuthority::external_owner("test"),
+                crate::ProcessCompletionAuthority::external_owner(),
             )
             .await
             .expect("complete");
@@ -1394,7 +1433,7 @@ mod tests {
             .complete_process(
                 "proc",
                 output.clone(),
-                crate::ProcessCompletionAuthority::external_owner("test"),
+                crate::ProcessCompletionAuthority::external_owner(),
             )
             .await
             .expect("complete");
@@ -1463,7 +1502,7 @@ mod tests {
             .complete_process(
                 "proc",
                 success(serde_json::json!("done")),
-                crate::ProcessCompletionAuthority::external_owner("test"),
+                crate::ProcessCompletionAuthority::external_owner(),
             )
             .await
             .expect("complete");

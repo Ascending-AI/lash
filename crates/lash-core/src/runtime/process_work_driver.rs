@@ -114,8 +114,8 @@ impl ProcessWorkDriver {
     ) -> Result<ProcessAwaitOutput, PluginError> {
         let record = self
             .registry
-            .get_process(process_id)
-            .await
+            .try_get_process(process_id)
+            .await?
             .ok_or_else(|| PluginError::Session(format!("unknown process `{process_id}`")))?;
         if let Some(output) = record.status.await_output() {
             return Ok(output.clone());

@@ -1,5 +1,4 @@
 use super::*;
-use std::collections::HashSet;
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
 
@@ -402,8 +401,7 @@ impl ProcessCapability {
         let runner = self.command_runner(current, &scope)?;
         let session_scope = self.process_scope_for_op(session_id, scope.agent_frame_id());
         // Session-visibility authorization: the caller must hold a live handle
-        // grant for the row. This scopes *which* rows this session may complete;
-        // it is the identity the completion authority carries as evidence.
+        // grant for the row. This scopes *which* rows this session may complete.
         if !runner
             .registry()
             .has_handle_grant(&session_scope, process_id)
@@ -423,9 +421,7 @@ impl ProcessCapability {
             .complete_process(
                 process_id,
                 await_output,
-                crate::ProcessCompletionAuthority::ExternalOwner {
-                    granted_to: session_scope.id().to_string(),
-                },
+                crate::ProcessCompletionAuthority::ExternalOwner,
             )
             .await
     }
@@ -538,56 +534,10 @@ impl ProcessCapability {
         self.command_runner(current, &scope)?
             .transfer(
                 self.process_scope_for_op(from_session_id, scope.agent_frame_id()),
-                self.process_scope_for_op(to_session_id, scope.target_agent_frame_id()),
+                self.process_scope_for_op(to_session_id, None),
                 process_ids,
             )
             .await
-    }
-
-    pub(in crate::runtime::session_manager) async fn cancel_unreferenced_process_handles(
-        &self,
-        current: &CurrentSessionCapability,
-        _managed: &ManagedSessionCapability,
-        session_id: &str,
-        keep_process_ids: Vec<String>,
-        scope: crate::ProcessOpScope<'_>,
-    ) -> Result<Vec<crate::ProcessRecord>, crate::PluginError> {
-        let keep = keep_process_ids.iter().cloned().collect::<HashSet<_>>();
-        let runner = self.command_runner(current, &scope)?;
-        let session_scope = self.process_scope_for_op(session_id, scope.agent_frame_id());
-        let tasks = runner.registry().list_handle_grants(&session_scope).await?;
-        let mut cancelled = Vec::new();
-        for (grant, record) in tasks {
-            if keep.contains(&grant.process_id) {
-                continue;
-            }
-            runner
-                .registry()
-                .revoke_handle(&session_scope, &grant.process_id)
-                .await?;
-            if record.is_terminal() {
-                continue;
-            }
-            if !runner
-                .registry()
-                .handle_grants_for_process(&grant.process_id)
-                .await?
-                .is_empty()
-            {
-                continue;
-            }
-            cancelled.push(
-                self.cancel_process(
-                    current,
-                    _managed,
-                    session_id,
-                    &grant.process_id,
-                    scope.clone(),
-                )
-                .await?,
-            );
-        }
-        Ok(cancelled)
     }
 
     async fn ensure_known_process_session(
