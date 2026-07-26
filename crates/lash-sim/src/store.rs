@@ -49,6 +49,9 @@ fn backend_fault_store_error(operation: &str, attempt: usize, retryable: bool) -
 
 fn store_error_variant(error: &StoreError) -> &'static str {
     match error {
+        StoreError::Contended => "Contended",
+        StoreError::CommitNodeBudgetExceeded { .. } => "CommitNodeBudgetExceeded",
+        StoreError::CommitByteBudgetExceeded { .. } => "CommitByteBudgetExceeded",
         StoreError::HeadRevisionConflict { .. } => "HeadRevisionConflict",
         StoreError::Backend(_) => "Backend",
         StoreError::SessionBindingMismatch { .. } => "SessionBindingMismatch",

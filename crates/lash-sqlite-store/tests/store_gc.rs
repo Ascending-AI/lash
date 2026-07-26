@@ -1,3 +1,4 @@
+use lash_core::store::GraphCommitDelta;
 use lash_core::{
     HydratedSessionCheckpoint, LeaseOwnerIdentity, ModelSpec, PersistedSessionConfig,
     PersistedTurnState, PluginSessionSnapshot, RuntimeCommit, RuntimeSessionState,
@@ -124,12 +125,12 @@ async fn auto_gc_runs_after_commit_without_reentrant_locking() {
 }
 
 #[test]
-fn sqlite_factory_uses_deterministic_safe_session_paths() {
+fn sqlite_factory_uses_one_deterministic_catalog_path() {
     let root = unique_temp_dir("paths");
     let factory = SqliteSessionStoreFactory::new(&root);
 
-    let first = factory.path_for_session("../weird/session");
-    let second = factory.path_for_session("../weird/session");
+    let first = factory.catalog_path();
+    let second = factory.catalog_path();
 
     assert_eq!(first, second);
     assert_eq!(first.parent(), Some(root.as_path()));
@@ -229,16 +230,25 @@ async fn sqlite_factory_is_explicitly_usable_as_session_store_factory() {
 }
 
 #[tokio::test]
-async fn sqlite_factory_delete_session_removes_database_and_sidecars_idempotently() {
+async fn sqlite_factory_delete_session_removes_only_the_selected_session() {
     let root = unique_temp_dir("delete-session");
     let factory = SqliteSessionStoreFactory::new(&root);
-    let db_path = factory.path_for_session("delete/me");
-    let wal_path = sidecar_path(&db_path, "-wal");
-    let shm_path = sidecar_path(&db_path, "-shm");
-    std::fs::create_dir_all(&root).expect("create session root");
-    std::fs::write(&db_path, b"db").expect("write db file");
-    std::fs::write(&wal_path, b"wal").expect("write wal sidecar");
-    std::fs::write(&shm_path, b"shm").expect("write shm sidecar");
+    let request = |session_id: &str| SessionStoreCreateRequest {
+        session_id: session_id.to_string(),
+        relation: lash_core::SessionRelation::Root,
+        policy: SessionPolicy {
+            model: model_spec("model"),
+            ..SessionPolicy::default()
+        },
+    };
+    factory
+        .create_store(&request("delete/me"))
+        .await
+        .expect("create deleted session");
+    factory
+        .create_store(&request("keep/me"))
+        .await
+        .expect("create retained session");
 
     factory
         .delete_session("delete/me")
@@ -249,9 +259,84 @@ async fn sqlite_factory_delete_session_removes_database_and_sidecars_idempotentl
         .await
         .expect("delete session again");
 
-    assert!(!db_path.exists());
-    assert!(!wal_path.exists());
-    assert!(!shm_path.exists());
+    assert!(factory.catalog_path().exists());
+    assert!(
+        factory
+            .open_existing_store(&request("delete/me"))
+            .await
+            .expect("probe deleted session")
+            .is_none()
+    );
+    assert!(
+        factory
+            .open_existing_store(&request("keep/me"))
+            .await
+            .expect("probe retained session")
+            .is_some()
+    );
+}
+
+#[tokio::test]
+async fn sqlite_catalog_enforces_global_node_ids_across_sessions() {
+    let root = unique_temp_dir("global-node-id");
+    let factory = SqliteSessionStoreFactory::new(&root);
+    let store_for = |session_id: &str| SessionStoreCreateRequest {
+        session_id: session_id.to_string(),
+        relation: lash_core::SessionRelation::Root,
+        policy: SessionPolicy::default(),
+    };
+    let first = factory
+        .create_store(&store_for("first"))
+        .await
+        .expect("first store");
+    let second = factory
+        .create_store(&store_for("second"))
+        .await
+        .expect("second store");
+    let node = lash_core::SessionNodeRecord {
+        node_id: "factory-global-node".to_string(),
+        parent_node_id: None,
+        caused_by: None,
+        agent_frame_id: None,
+        timestamp: "2026-07-26T00:00:00Z".to_string(),
+        payload: lash_core::SessionNodePayload::Event {
+            event: lash_core::SessionHistoryRecord::Protocol(
+                lash_core::ProtocolEvent::typed("global-node-id", serde_json::Value::Null)
+                    .expect("protocol event"),
+            ),
+        },
+    };
+    let commit = |session_id: &str| {
+        let state = RuntimeSessionState {
+            session_id: session_id.to_string(),
+            ..Default::default()
+        };
+        let mut commit = RuntimeCommit::persisted_state(&state, &[]);
+        commit.graph = GraphCommitDelta::Append {
+            nodes: vec![node.clone()],
+            leaf_node_id: Some(node.node_id.clone()),
+        };
+        commit
+    };
+
+    first
+        .commit_runtime_state(commit("first"))
+        .await
+        .expect("first node insert");
+    let error = second
+        .commit_runtime_state(commit("second"))
+        .await
+        .expect_err("second session must not reuse a global node id");
+
+    assert!(matches!(error, lash_core::StoreError::Backend(_)));
+    assert!(
+        second
+            .load_session(lash_core::SessionReadScope::FullGraph)
+            .await
+            .expect("load second session")
+            .is_none(),
+        "the failed cross-session collision must roll back the whole commit"
+    );
 }
 
 fn unique_temp_dir(name: &str) -> std::path::PathBuf {
@@ -265,10 +350,4 @@ fn unique_temp_dir(name: &str) -> std::path::PathBuf {
     ));
     std::fs::create_dir_all(&dir).expect("temp dir");
     dir
-}
-
-fn sidecar_path(path: &std::path::Path, suffix: &str) -> std::path::PathBuf {
-    let mut sidecar = path.as_os_str().to_os_string();
-    sidecar.push(suffix);
-    std::path::PathBuf::from(sidecar)
 }

@@ -15,6 +15,27 @@
 use super::*;
 
 impl Store {
+    pub(crate) async fn open_bound_with_options_clock_and_process_registry(
+        path: &Path,
+        session_id: &str,
+        options: StoreOptions,
+        clock: Arc<dyn lash_core::Clock>,
+        process_registry_path: Option<&Path>,
+    ) -> tokio_rusqlite::Result<Self> {
+        let store = Self::open_with_options_clock_and_process_registry(
+            path,
+            options,
+            clock,
+            process_registry_path,
+        )
+        .await?;
+        store
+            .session_id
+            .set(session_id.to_string())
+            .expect("new SQLite store binding is unset");
+        Ok(store)
+    }
+
     pub async fn open(path: &Path) -> tokio_rusqlite::Result<Self> {
         Self::open_with_options(path, StoreOptions::default()).await
     }
@@ -106,6 +127,7 @@ impl Store {
         };
         Ok(Self {
             conn,
+            session_id: OnceLock::new(),
             clock,
             artifact_cache: Mutex::new(BTreeMap::new()),
             options,
@@ -124,6 +146,7 @@ impl Store {
         let conn = SqliteConnection::open_readonly(path).await?;
         Ok(Self {
             conn,
+            session_id: OnceLock::new(),
             clock: Arc::new(lash_core::SystemClock),
             artifact_cache: Mutex::new(BTreeMap::new()),
             options: StoreOptions::default(),
@@ -137,13 +160,14 @@ impl Store {
     }
 
     pub async fn load_picker_info(&self) -> Option<SessionPickerInfo> {
+        let selected_session_id = self.session_id.get()?.clone();
         self.conn
-            .call(|conn| {
+            .call(move |conn| {
                 let meta = conn
                     .query_row(
                         "SELECT session_id, cwd, relation_json
-                         FROM session_meta WHERE singleton = 1",
-                        [],
+                         FROM session_meta WHERE session_id = ?1",
+                        params![selected_session_id],
                         |row| {
                             let relation_json: Option<String> = row.get(2)?;
                             let relation = relation_json
@@ -163,15 +187,16 @@ impl Store {
 
                 let head_json: String = conn
                     .query_row(
-                        "SELECT head_json FROM session_head WHERE singleton = 1",
-                        [],
+                        "SELECT head_json FROM session_head WHERE session_id = ?1",
+                        params![session_id],
                         |row| row.get(0),
                     )
                     .optional()?
                     .unwrap_or_else(|| "{}".to_string());
                 let head_meta =
                     serde_json::from_str::<SessionHeadMeta>(&head_json).unwrap_or_default();
-                let graph = Self::load_session_graph_from_conn(conn, head_meta.leaf_node_id);
+                let graph =
+                    Self::load_session_graph_from_conn(conn, &session_id, head_meta.leaf_node_id);
 
                 Ok(Some(SessionPickerInfo {
                     session_id,
@@ -220,6 +245,7 @@ impl Store {
         apply_pragmas(&conn, StoreBacking::Memory).await?;
         Ok(Self {
             conn,
+            session_id: OnceLock::new(),
             clock,
             artifact_cache: Mutex::new(BTreeMap::new()),
             options,
@@ -243,6 +269,10 @@ impl Store {
     }
 
     pub async fn save_session_head_meta(&self, meta: SessionHeadMeta) {
+        if let Err(err) = self.bind_session(&meta.session_id) {
+            tracing::warn!(error = %err, "failed to bind SQLite session store");
+            return;
+        }
         let head_json = encode_json(&meta);
         let session_id = meta.session_id.clone();
         let head_revision = meta.head_revision as i64;
@@ -250,8 +280,8 @@ impl Store {
             .conn
             .call(move |conn| {
                 conn.execute(
-                    "INSERT OR REPLACE INTO session_head (singleton, session_id, head_json, head_revision)
-                     VALUES (1, ?1, ?2, ?3)",
+                    "INSERT OR REPLACE INTO session_head (session_id, head_json, head_revision)
+                     VALUES (?1, ?2, ?3)",
                     params![session_id, head_json, head_revision],
                 )
             })
@@ -262,14 +292,19 @@ impl Store {
     }
 
     pub async fn load_session_head_meta(&self) -> Option<SessionHeadMeta> {
+        let session_id = self.session_id.get()?.clone();
         self.conn
-            .call(|conn| Ok(load_session_head_meta_from_conn(conn)))
+            .call(move |conn| Ok(load_session_head_meta_from_conn(conn, &session_id)))
             .await
             .ok()
             .flatten()
     }
 
     pub async fn save_session_head(&self, head: SessionHead) {
+        if let Err(err) = self.bind_session(&head.session_id) {
+            tracing::warn!(error = %err, "failed to bind SQLite session store");
+            return;
+        }
         self.append_session_graph_nodes(&head.graph.nodes).await;
         self.save_session_head_meta(session_head_meta(&head)).await;
     }
@@ -291,6 +326,10 @@ impl Store {
     }
 
     pub async fn save_session_meta(&self, meta: SessionMeta) {
+        if let Err(err) = self.bind_session(&meta.session_id) {
+            tracing::warn!(error = %err, "failed to bind SQLite session store");
+            return;
+        }
         let relation_json = serde_json::to_string(&meta.relation).ok();
         let session_id_for_log = meta.session_id.clone();
         let result = self
@@ -298,8 +337,8 @@ impl Store {
             .call(move |conn| {
                 conn.execute(
                     "INSERT OR REPLACE INTO session_meta
-                     (singleton, session_id, session_name, created_at, model, cwd, relation_json)
-                     VALUES (1, ?1, ?2, ?3, ?4, ?5, ?6)",
+                     (session_id, session_name, created_at, model, cwd, relation_json)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
                     params![
                         meta.session_id,
                         meta.session_name,
@@ -321,10 +360,31 @@ impl Store {
     }
 
     pub async fn load_session_meta(&self) -> Option<SessionMeta> {
-        self.conn
-            .call(|conn| Ok(load_session_meta_from_conn(conn)))
+        let selected = self.session_id.get().cloned();
+        let meta = self
+            .conn
+            .call(move |conn| {
+                if let Some(session_id) = selected {
+                    return Ok(load_session_meta_from_conn(conn, &session_id));
+                }
+                let mut stmt = conn.prepare(
+                    "SELECT session_id FROM session_meta ORDER BY session_id ASC LIMIT 2",
+                )?;
+                let session_ids = stmt
+                    .query_map([], |row| row.get::<_, String>(0))?
+                    .collect::<Result<Vec<_>, _>>()?;
+                if session_ids.len() == 1 {
+                    Ok(load_session_meta_from_conn(conn, &session_ids[0]))
+                } else {
+                    Ok(None)
+                }
+            })
             .await
             .ok()
-            .flatten()
+            .flatten();
+        if let Some(meta) = &meta {
+            let _ = self.bind_session(&meta.session_id);
+        }
+        meta
     }
 }

@@ -16,9 +16,9 @@ pub(crate) enum StoreBacking {
     Memory,
 }
 
-/// Canonical SQLite schema for a lash session database.
+/// Canonical SQLite schema for a factory-wide lash durable-core catalog.
 ///
-/// This is the *only* schema the store supports. Older session databases —
+/// This is the *only* schema the store supports. Older durable-core databases —
 /// including any rolled forward through prior migration chains — must be
 /// deleted before opening with this binary; [`ensure_schema`] rejects any
 /// `PRAGMA user_version` that does not match [`SCHEMA_VERSION`] exactly. We
@@ -32,21 +32,24 @@ CREATE TABLE IF NOT EXISTS blobs (
 );
 
 CREATE TABLE IF NOT EXISTS session_head (
-    singleton      INTEGER PRIMARY KEY CHECK (singleton = 1),
-    session_id     TEXT NOT NULL DEFAULT 'root',
+    session_id     TEXT PRIMARY KEY,
     head_json      TEXT NOT NULL DEFAULT '{}',
     head_revision  INTEGER NOT NULL DEFAULT 0
 );
 
 CREATE TABLE IF NOT EXISTS graph_nodes (
     seq        INTEGER PRIMARY KEY,
+    session_id TEXT NOT NULL,
     node_id    TEXT NOT NULL UNIQUE,
     node_json  TEXT NOT NULL,
     tombstoned INTEGER NOT NULL DEFAULT 0
 );
+CREATE INDEX IF NOT EXISTS idx_graph_nodes_session_seq
+    ON graph_nodes(session_id, seq);
 
 CREATE TABLE IF NOT EXISTS usage_deltas (
     seq                  INTEGER PRIMARY KEY,
+    session_id            TEXT NOT NULL,
     source               TEXT NOT NULL,
     model                TEXT NOT NULL,
     input_tokens         INTEGER NOT NULL,
@@ -57,8 +60,7 @@ CREATE TABLE IF NOT EXISTS usage_deltas (
 );
 
 CREATE TABLE IF NOT EXISTS session_meta (
-    singleton     INTEGER PRIMARY KEY CHECK (singleton = 1),
-    session_id    TEXT NOT NULL,
+    session_id    TEXT PRIMARY KEY,
     session_name  TEXT NOT NULL,
     created_at    TEXT NOT NULL,
     model         TEXT NOT NULL,
@@ -196,7 +198,12 @@ CREATE INDEX IF NOT EXISTS idx_attachment_manifest_owner
 /// Bumped to 12 for FIG-546 owner-bound attachment intents. This is a
 /// reject-and-recreate cutover: pre-12 manifests have no durable execution
 /// owner and cannot participate in reachability-based reclamation.
-pub(crate) const SCHEMA_VERSION: i32 = 12;
+///
+/// Bumped to 13 for FIG-636's factory-wide durable-core catalog. Session heads,
+/// metadata, graph rows, and usage deltas are now keyed by `session_id`; node
+/// ids remain globally unique across the one database. Pre-13 per-session
+/// databases are rejected and must be recreated.
+pub(crate) const SCHEMA_VERSION: i32 = 13;
 
 pub(crate) const PROCESS_SCHEMA: &str = "
 CREATE TABLE IF NOT EXISTS processes (

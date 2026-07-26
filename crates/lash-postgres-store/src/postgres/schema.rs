@@ -27,10 +27,9 @@ pub(crate) async fn ensure_schema(pool: &PgPool) -> Result<Vec<u8>, StoreError> 
         CREATE TABLE IF NOT EXISTS lash_graph_nodes (
             session_id TEXT NOT NULL,
             seq BIGSERIAL,
-            node_id TEXT NOT NULL,
+            node_id TEXT PRIMARY KEY,
             node_json TEXT NOT NULL,
-            tombstoned BOOLEAN NOT NULL DEFAULT FALSE,
-            PRIMARY KEY (session_id, node_id)
+            tombstoned BOOLEAN NOT NULL DEFAULT FALSE
         );
         CREATE INDEX IF NOT EXISTS idx_lash_graph_nodes_seq
             ON lash_graph_nodes(session_id, seq);

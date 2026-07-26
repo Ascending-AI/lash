@@ -138,28 +138,34 @@ impl SessionCommitStore for PostgresSessionStore {
             return Ok(None);
         };
         let mut tx = self.pool.begin().await.map_err(store_sqlx_error)?;
+        sqlx::query("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY")
+            .execute(&mut *tx)
+            .await
+            .map_err(store_sqlx_error)?;
         let Some(meta) = load_session_head_meta_tx(&mut tx, &session_id, false).await? else {
+            tx.commit().await.map_err(store_sqlx_error)?;
             return Ok(None);
         };
-        tx.commit().await.map_err(store_sqlx_error)?;
         let leaf_node_id = match &scope {
             SessionReadScope::FullGraph => meta.leaf_node_id.clone(),
             SessionReadScope::ActivePath { leaf_node_id } => {
                 leaf_node_id.clone().or_else(|| meta.leaf_node_id.clone())
             }
         };
-        let graph = load_graph(
-            &self.pool,
+        let graph = load_graph_tx(
+            &mut tx,
             &session_id,
             leaf_node_id.clone(),
             matches!(scope, SessionReadScope::ActivePath { .. }),
         )
         .await?;
         let checkpoint = match meta.checkpoint_ref.as_ref() {
-            Some(blob_ref) => get_checkpoint(&self.pool, blob_ref).await?,
+            Some(blob_ref) => get_checkpoint_tx(&mut tx, blob_ref).await?,
             None => None,
         };
-        Ok(Some(PersistedSessionRead {
+        let token_ledger =
+            merge_token_ledger_entries(load_usage_deltas_tx(&mut tx, &session_id).await?);
+        let read = PersistedSessionRead {
             session_id: meta.session_id,
             head_revision: meta.head_revision,
             config: meta.config,
@@ -168,10 +174,10 @@ impl SessionCommitStore for PostgresSessionStore {
             graph,
             checkpoint_ref: meta.checkpoint_ref,
             checkpoint,
-            token_ledger: merge_token_ledger_entries(
-                load_usage_deltas(&self.pool, &session_id).await,
-            ),
-        }))
+            token_ledger,
+        };
+        tx.commit().await.map_err(store_sqlx_error)?;
+        Ok(Some(read))
     }
 
     async fn load_node(&self, node_id: &str) -> Result<Option<SessionNodeRecord>, StoreError> {
@@ -205,6 +211,7 @@ impl SessionCommitStore for PostgresSessionStore {
         &self,
         commit: RuntimeCommit,
     ) -> Result<RuntimeCommitResult, StoreError> {
+        commit.validate_budget()?;
         commit.validate_operation_session()?;
         let realization_digest = lash_core::store::graph_realization_digest(&commit.graph);
         let realized_agent_frames = commit
@@ -441,14 +448,7 @@ impl SessionCommitStore for PostgresSessionStore {
         let head_write = match head_write {
             Ok(result) => result,
             Err(err) if is_contention_error(&err) => {
-                // The head row is contended by a concurrent committer (lock
-                // timeout / serialization failure / deadlock). That is a conflict,
-                // not an opaque backend error: surface it so the caller reloads
-                // and retries. The tx is now aborted; returning drops it.
-                return Err(StoreError::HeadRevisionConflict {
-                    expected: commit.expected_head_revision.or(Some(actual_revision)),
-                    actual: actual_revision,
-                });
+                return Err(StoreError::Contended);
             }
             Err(err) => return Err(store_sqlx_error(err)),
         };

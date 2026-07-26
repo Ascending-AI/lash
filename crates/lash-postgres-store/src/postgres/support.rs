@@ -34,18 +34,39 @@ pub(crate) fn current_timestamp_string() -> String {
 }
 
 pub(crate) fn store_sqlx_error(err: sqlx::Error) -> StoreError {
-    StoreError::Backend(err.to_string())
+    if is_contention_error(&err) {
+        StoreError::Contended
+    } else {
+        StoreError::Backend(err.to_string())
+    }
 }
 
 /// Postgres SQLSTATEs that signal transient write contention rather than a hard
-/// failure: serialization failure, deadlock, and lock-acquisition timeout. On the
-/// session head these all mean "a concurrent committer got there first" — i.e. a
-/// revision conflict the caller should reload-and-retry, not a backend error.
+/// failure: serialization failure, deadlock, and lock-acquisition timeout.
+/// These mean the transaction can retry its identical commit unchanged.
 pub(crate) fn is_contention_error(err: &sqlx::Error) -> bool {
-    matches!(
-        err.as_database_error().and_then(|db| db.code()).as_deref(),
-        Some("40001" | "40P01" | "55P03")
-    )
+    err.as_database_error()
+        .and_then(|db| db.code())
+        .is_some_and(|code| is_contention_sqlstate(&code))
+}
+
+fn is_contention_sqlstate(code: &str) -> bool {
+    matches!(code, "40001" | "40P01" | "55P03")
+}
+
+#[cfg(test)]
+mod contention_tests {
+    use super::is_contention_sqlstate;
+
+    #[test]
+    fn only_retry_unchanged_sqlstates_are_contention() {
+        for code in ["40001", "40P01", "55P03"] {
+            assert!(is_contention_sqlstate(code), "{code}");
+        }
+        for code in ["23505", "57014", "08006"] {
+            assert!(!is_contention_sqlstate(code), "{code}");
+        }
+    }
 }
 
 pub(crate) fn plugin_sqlx_error(err: sqlx::Error) -> PluginError {
@@ -154,15 +175,6 @@ async fn put_blob_tx(
     Ok(BlobRef(hash))
 }
 
-async fn get_blob(pool: &PgPool, blob_ref: &BlobRef) -> Option<Vec<u8>> {
-    sqlx::query_scalar::<_, Vec<u8>>("SELECT content FROM lash_blobs WHERE hash = $1")
-        .bind(blob_ref.as_str())
-        .fetch_optional(pool)
-        .await
-        .ok()
-        .flatten()
-}
-
 pub(crate) async fn put_checkpoint_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     checkpoint: &HydratedSessionCheckpoint,
@@ -186,11 +198,17 @@ pub(crate) async fn put_checkpoint_tx(
     Ok((checkpoint_ref, manifest))
 }
 
-pub(crate) async fn get_checkpoint(
-    pool: &PgPool,
+pub(crate) async fn get_checkpoint_tx(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     blob_ref: &BlobRef,
 ) -> Result<Option<HydratedSessionCheckpoint>, StoreError> {
-    let Some(bytes) = get_blob(pool, blob_ref).await else {
+    let bytes: Option<Vec<u8>> =
+        sqlx::query_scalar("SELECT content FROM lash_blobs WHERE hash = $1")
+            .bind(blob_ref.as_str())
+            .fetch_optional(&mut **tx)
+            .await
+            .map_err(store_sqlx_error)?;
+    let Some(bytes) = bytes else {
         return Ok(None);
     };
     let envelope: SessionCheckpointEnvelope = decode_versioned_msgpack_record(
@@ -244,24 +262,27 @@ pub(crate) async fn load_session_head_meta_tx(
     Ok(Some(meta))
 }
 
-pub(crate) async fn load_usage_deltas(pool: &PgPool, session_id: &str) -> Vec<TokenLedgerEntry> {
+pub(crate) async fn load_usage_deltas_tx(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    session_id: &str,
+) -> Result<Vec<TokenLedgerEntry>, StoreError> {
     let rows = sqlx::query(
         "SELECT entry_json FROM lash_usage_deltas WHERE session_id = $1 ORDER BY seq ASC",
     )
     .bind(session_id)
-    .fetch_all(pool)
+    .fetch_all(&mut **tx)
     .await
-    .unwrap_or_default();
+    .map_err(store_sqlx_error)?;
     rows.into_iter()
-        .filter_map(|row| {
+        .map(|row| {
             let json: String = row.get(0);
-            serde_json::from_str(&json).ok()
+            store_decode_json(&json, "usage delta")
         })
         .collect()
 }
 
-pub(crate) async fn load_graph(
-    pool: &PgPool,
+pub(crate) async fn load_graph_tx(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     session_id: &str,
     leaf_node_id: Option<String>,
     active_path: bool,
@@ -272,7 +293,7 @@ pub(crate) async fn load_graph(
          ORDER BY seq ASC",
     )
     .bind(session_id)
-    .fetch_all(pool)
+    .fetch_all(&mut **tx)
     .await
     .map_err(store_sqlx_error)?;
     let mut nodes = Vec::<SessionNodeRecord>::new();

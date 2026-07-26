@@ -1378,7 +1378,8 @@ impl ProcessRegistry for SqliteProcessRegistry {
             // removes any process row.
             for process_id in prunable {
                 for session_id in lash_core::process_runtime_session_ids(&process_id) {
-                    delete_session_files(root, &session_id)
+                    delete_session_from_catalog(root, &session_id)
+                        .await
                         .map_err(lash_core::PluginError::Session)?;
                 }
             }

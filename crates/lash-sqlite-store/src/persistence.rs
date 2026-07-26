@@ -82,10 +82,14 @@ impl SessionCommitStore for Store {
         &self,
         scope: SessionReadScope,
     ) -> Result<Option<PersistedSessionRead>, StoreError> {
+        let Some(session_id) = self.resolve_session_id_for_read().await? else {
+            return Ok(None);
+        };
         self.conn
             .call(move |conn| {
+                let tx = conn.transaction()?;
                 let outcome: Result<Option<PersistedSessionRead>, StoreError> = (|| {
-                    let Some(meta) = try_load_session_head_meta_from_conn(conn)? else {
+                    let Some(meta) = try_load_session_head_meta_from_conn(&tx, &session_id)? else {
                         return Ok(None);
                     };
                     let leaf_node_id = match &scope {
@@ -95,12 +99,15 @@ impl SessionCommitStore for Store {
                         }
                     };
                     let mut graph = match scope {
-                        SessionReadScope::FullGraph => {
-                            Self::load_session_graph_from_conn(conn, meta.leaf_node_id.clone())
-                        }
+                        SessionReadScope::FullGraph => Self::load_session_graph_from_conn(
+                            &tx,
+                            &session_id,
+                            meta.leaf_node_id.clone(),
+                        ),
                         SessionReadScope::ActivePath { .. } => {
                             Self::load_active_path_session_graph_from_conn(
-                                conn,
+                                &tx,
+                                &session_id,
                                 leaf_node_id.clone(),
                             )
                             .map_err(sqlite_error)?
@@ -110,7 +117,7 @@ impl SessionCommitStore for Store {
                     let checkpoint = meta
                         .checkpoint_ref
                         .as_ref()
-                        .map(|blob_ref| Self::get_checkpoint_conn(conn, blob_ref))
+                        .map(|blob_ref| Self::get_checkpoint_conn(&tx, blob_ref))
                         .transpose()?
                         .flatten();
                     Ok(Some(PersistedSessionRead {
@@ -123,11 +130,13 @@ impl SessionCommitStore for Store {
                         checkpoint_ref: meta.checkpoint_ref,
                         checkpoint,
                         token_ledger: merge_token_ledger_entries(Self::load_usage_deltas_conn(
-                            conn,
+                            &tx,
+                            &session_id,
                         )),
                     }))
                 })(
                 );
+                tx.commit()?;
                 Ok(outcome)
             })
             .await
@@ -138,13 +147,17 @@ impl SessionCommitStore for Store {
         &self,
         node_id: &str,
     ) -> Result<Option<lash_core::SessionNodeRecord>, StoreError> {
+        let Some(session_id) = self.resolve_session_id_for_read().await? else {
+            return Ok(None);
+        };
         let node_id = node_id.to_string();
         let row: Option<String> = self
             .conn
             .call(move |conn| {
                 conn.query_row(
-                    "SELECT node_json FROM graph_nodes WHERE node_id = ?1 AND tombstoned = 0",
-                    params![node_id],
+                    "SELECT node_json FROM graph_nodes
+                     WHERE session_id = ?1 AND node_id = ?2 AND tombstoned = 0",
+                    params![session_id, node_id],
                     |row| row.get(0),
                 )
                 .optional()
@@ -158,7 +171,9 @@ impl SessionCommitStore for Store {
         &self,
         commit: RuntimeCommit,
     ) -> Result<RuntimeCommitResult, StoreError> {
+        commit.validate_budget()?;
         commit.validate_operation_session()?;
+        self.bind_session(&commit.session_id)?;
         let realization_digest = lash_core::store::graph_realization_digest(&commit.graph);
         let realized_agent_frames = commit
             .agent_frames
@@ -178,7 +193,8 @@ impl SessionCommitStore for Store {
             .conn
             .write_flow(move |tx| {
                 let outcome: Result<RuntimeCommitResult, StoreError> = (|| {
-                    let existing = try_load_session_head_meta_from_conn(tx)?;
+                    let existing =
+                        try_load_session_head_meta_from_conn(tx, &commit.session_id)?;
                     if let Some(bound_session_id) =
                         existing.as_ref().map(|meta| meta.session_id.as_str())
                         && bound_session_id != commit.session_id
@@ -332,12 +348,13 @@ impl SessionCommitStore for Store {
                         let mut stmt = tx
                             .prepare(
                                 "INSERT INTO usage_deltas (
-                                    source, model, input_tokens, output_tokens, cache_read_input_tokens, cache_write_input_tokens, reasoning_output_tokens
-                                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                                    session_id, source, model, input_tokens, output_tokens, cache_read_input_tokens, cache_write_input_tokens, reasoning_output_tokens
+                                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
                             )
                             .map_err(sqlite_error)?;
                         for entry in &commit.usage_deltas {
                             stmt.execute(params![
+                                commit.session_id,
                                 entry.source,
                                 entry.model,
                                 entry.usage.input_tokens,
@@ -359,8 +376,9 @@ impl SessionCommitStore for Store {
                             for node in nodes {
                                 let node_json = encode_json(node);
                                 tx.execute(
-                                    "INSERT INTO graph_nodes (node_id, node_json) VALUES (?1, ?2)",
-                                    params![node.node_id, node_json],
+                                    "INSERT INTO graph_nodes (session_id, node_id, node_json)
+                                     VALUES (?1, ?2, ?3)",
+                                    params![commit.session_id, node.node_id, node_json],
                                 )
                                 .map_err(sqlite_error)?;
                             }
@@ -369,8 +387,9 @@ impl SessionCommitStore for Store {
                     };
                     let graph_node_count: usize = tx
                         .query_row(
-                            "SELECT COUNT(*) FROM graph_nodes WHERE tombstoned = 0",
-                            [],
+                            "SELECT COUNT(*) FROM graph_nodes
+                             WHERE session_id = ?1 AND tombstoned = 0",
+                            params![commit.session_id],
                             |row| row.get::<_, i64>(0),
                         )
                         .map_err(sqlite_error)? as usize;
@@ -388,8 +407,9 @@ impl SessionCommitStore for Store {
                         token_ledger: Vec::new(),
                     };
                     tx.execute(
-                        "INSERT OR REPLACE INTO session_head (singleton, session_id, head_json, head_revision)
-                         VALUES (1, ?1, ?2, ?3)",
+                        "INSERT OR REPLACE INTO session_head
+                         (session_id, head_json, head_revision)
+                         VALUES (?1, ?2, ?3)",
                         params![
                             meta.session_id,
                             encode_json(&meta),

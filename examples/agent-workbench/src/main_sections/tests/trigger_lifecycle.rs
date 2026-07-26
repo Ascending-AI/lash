@@ -1,4 +1,4 @@
-    use lash_core::TriggerStore;
+    use lash_core::{SessionStoreFactory, TriggerStore};
 
     #[test]
     fn button_trigger_lifecycle_stays_visible_and_queues_wakes_during_active_turn() {
@@ -205,7 +205,12 @@
         };
         let target_scope_prefix = format!("session:{}/frame:", state.current_session_id());
         let session_store =
-            lash_sqlite_store::Store::open(&session_store_factory.path_for_session(&session_id))
+            session_store_factory
+                .create_store(&lash::persistence::SessionStoreCreateRequest {
+                    session_id: session_id.clone(),
+                    relation: lash::persistence::SessionRelation::Root,
+                    policy: lash::runtime::SessionPolicy::default(),
+                })
                 .await
                 .expect("open session store");
         let queued = session_store

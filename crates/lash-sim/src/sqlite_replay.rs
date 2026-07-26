@@ -916,7 +916,7 @@ impl SqliteRuntimeReplayWorld {
                 database_path: lash_sqlite_store::SqliteSessionStoreFactory::new(
                     self.database_root.clone(),
                 )
-                .path_for_session(session_id),
+                .catalog_path(),
                 turn_index: read_view.turn_index(),
                 graph_node_count: read_view.session_graph().nodes.len(),
                 transcript_message_count: read_view.messages().len(),

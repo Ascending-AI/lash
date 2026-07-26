@@ -1,6 +1,7 @@
 //! The runtime's settled-session persistence contract and shared store types.
 
 mod attachment_manifest;
+mod commit_budget;
 mod commit_identity;
 mod error;
 mod lease_timings;

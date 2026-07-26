@@ -2,6 +2,25 @@ use super::SessionReadScope;
 
 #[derive(Debug, thiserror::Error)]
 pub enum StoreError {
+    /// The backend could not acquire its transactional write authority because
+    /// another writer currently holds it. Retry the identical commit unchanged;
+    /// do not reload, rebase, or alter its semantic content.
+    #[error("store commit is contended; retry the identical commit unchanged")]
+    Contended,
+    #[error(
+        "runtime commit has {node_count} graph nodes, exceeding the {max_nodes}-node transaction budget"
+    )]
+    CommitNodeBudgetExceeded { node_count: usize, max_nodes: usize },
+    #[error(
+        "runtime commit serializes to {total_bytes} budgeted bytes, exceeding the {max_bytes}-byte transaction budget (graph delta: {graph_delta_bytes}, checkpoint: {checkpoint_bytes}, attachment manifest: {attachment_manifest_bytes})"
+    )]
+    CommitByteBudgetExceeded {
+        graph_delta_bytes: usize,
+        checkpoint_bytes: usize,
+        attachment_manifest_bytes: usize,
+        total_bytes: usize,
+        max_bytes: usize,
+    },
     #[error(
         "store is already bound to session `{bound_session_id}` and cannot be reused for `{attempted_session_id}`"
     )]
