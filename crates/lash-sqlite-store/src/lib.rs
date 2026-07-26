@@ -1095,7 +1095,7 @@ mod tests {
                         value: serde_json::json!({"ok": true}),
                         control: None,
                     },
-                    lash_core::ProcessCompletionAuthority::external_owner("session"),
+                    lash_core::ProcessCompletionAuthority::external_owner(),
                 )
                 .await
                 .expect("complete");

@@ -320,7 +320,7 @@ async fn complete_and_assert_fold(
         .complete_process(
             process_id,
             output.clone(),
-            ProcessCompletionAuthority::external_owner("fold-conformance"),
+            ProcessCompletionAuthority::external_owner(),
         )
         .await
         .expect("append terminal event");
@@ -329,7 +329,7 @@ async fn complete_and_assert_fold(
         .complete_process(
             process_id,
             output,
-            ProcessCompletionAuthority::external_owner("fold-conformance"),
+            ProcessCompletionAuthority::external_owner(),
         )
         .await
         .expect("replay terminal event");

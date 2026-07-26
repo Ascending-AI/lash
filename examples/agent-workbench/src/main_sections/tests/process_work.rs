@@ -129,7 +129,7 @@ mod process_work_tests {
                     value: json!("done"),
                     control: None,
                 },
-                lash::process::ProcessCompletionAuthority::external_owner("test"),
+                lash::process::ProcessCompletionAuthority::external_owner(),
             )
             .await
             .expect("complete process");
@@ -192,7 +192,7 @@ mod process_work_tests {
                     raw: None,
                     control: None,
                 },
-                lash::process::ProcessCompletionAuthority::external_owner("test"),
+                lash::process::ProcessCompletionAuthority::external_owner(),
             )
             .await
             .expect("fail process");

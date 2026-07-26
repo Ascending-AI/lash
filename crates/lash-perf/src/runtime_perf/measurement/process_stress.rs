@@ -45,7 +45,7 @@ async fn run_once_process_list_stress(chat_turns: usize) -> anyhow::Result<Runti
                         value: serde_json::json!({ "index": index }),
                         control: None,
                     },
-                    lash_core::ProcessCompletionAuthority::external_owner(session_scope.id().to_string()),
+                    lash_core::ProcessCompletionAuthority::external_owner(),
                 )
                 .await?;
         }

@@ -42,7 +42,7 @@ pub(super) async fn completion_authority_validated_against_disposition(
         .complete_process(
             "auth-ext-accept",
             success(serde_json::json!("ok")),
-            ProcessCompletionAuthority::external_owner("session:owner"),
+            ProcessCompletionAuthority::external_owner(),
         )
         .await
         .expect("external owner closes an externally-owned row");
@@ -50,7 +50,7 @@ pub(super) async fn completion_authority_validated_against_disposition(
         completed.status.terminal_state(),
         Some(ProcessTerminalState::Completed)
     );
-    // The authority is recorded on the terminal event as audit evidence.
+    // The authority kind is recorded on the terminal event as audit evidence.
     let terminal_event = registry
         .events_after("auth-ext-accept", 0)
         .await
@@ -62,9 +62,8 @@ pub(super) async fn completion_authority_validated_against_disposition(
         terminal_event.payload.get("completion_authority"),
         Some(&serde_json::json!({
             "authority": "external_owner",
-            "granted_to": "session:owner",
         })),
-        "the terminal event records the completion authority as evidence"
+        "the terminal event records the completion authority kind as evidence"
     );
 
     registry
@@ -148,7 +147,7 @@ pub(super) async fn completion_authority_validated_against_disposition(
             .complete_process(
                 "auth-ownerbound-reject",
                 success(serde_json::json!("no")),
-                ProcessCompletionAuthority::external_owner("session:owner"),
+                ProcessCompletionAuthority::external_owner(),
             )
             .await
             .is_err(),
@@ -179,7 +178,7 @@ pub(super) async fn completion_authority_validated_against_disposition(
             .complete_process(
                 "auth-rerun-reject",
                 success(serde_json::json!("no")),
-                ProcessCompletionAuthority::external_owner("session:owner"),
+                ProcessCompletionAuthority::external_owner(),
             )
             .await
             .is_err(),
@@ -206,7 +205,7 @@ pub(super) async fn completion_authority_reads_live_disposition_not_stale(
         .complete_process(
             "auth-reregister",
             success(serde_json::json!("first")),
-            ProcessCompletionAuthority::external_owner("session:owner"),
+            ProcessCompletionAuthority::external_owner(),
         )
         .await
         .expect("external owner closes the externally-owned row");
@@ -237,7 +236,7 @@ pub(super) async fn completion_authority_reads_live_disposition_not_stale(
             .complete_process(
                 "auth-reregister",
                 success(serde_json::json!("stale")),
-                ProcessCompletionAuthority::external_owner("session:owner"),
+                ProcessCompletionAuthority::external_owner(),
             )
             .await
             .is_err(),

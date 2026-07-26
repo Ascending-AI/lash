@@ -27,6 +27,7 @@ use super::validation::{prepare_process_event_append, prepare_process_registrati
 pub struct TestLocalProcessRegistry {
     durability_tier: crate::DurabilityTier,
     managed: Arc<Mutex<ManagedProcessMap>>,
+    process_read_error: Arc<Mutex<Option<PluginError>>>,
     next_change_seq: Arc<Mutex<u64>>,
     grants: Arc<Mutex<ManagedGrantMap>>,
     leases: Arc<Mutex<ManagedLeaseMap>>,
@@ -39,6 +40,7 @@ impl Default for TestLocalProcessRegistry {
         Self {
             durability_tier: crate::DurabilityTier::Inline,
             managed: Arc::new(Mutex::new(HashMap::new())),
+            process_read_error: Arc::new(Mutex::new(None)),
             next_change_seq: Arc::new(Mutex::new(0)),
             grants: Arc::new(Mutex::new(HashMap::new())),
             leases: Arc::new(Mutex::new(HashMap::new())),
@@ -61,6 +63,10 @@ struct ManagedProcessRecord {
 }
 
 impl TestLocalProcessRegistry {
+    pub async fn set_process_read_error(&self, error: Option<PluginError>) {
+        *self.process_read_error.lock().await = error;
+    }
+
     pub fn with_durability_tier(mut self, durability_tier: crate::DurabilityTier) -> Self {
         self.durability_tier = durability_tier;
         self
@@ -744,8 +750,18 @@ impl ProcessRegistry for TestLocalProcessRegistry {
     }
 
     async fn get_process(&self, process_id: &str) -> Option<ProcessRecord> {
+        self.try_get_process(process_id).await.ok().flatten()
+    }
+
+    async fn try_get_process(
+        &self,
+        process_id: &str,
+    ) -> Result<Option<ProcessRecord>, PluginError> {
+        if let Some(error) = self.process_read_error.lock().await.clone() {
+            return Err(error);
+        }
         let managed = self.managed.lock().await;
-        managed.get(process_id).map(|record| record.record.clone())
+        Ok(managed.get(process_id).map(|record| record.record.clone()))
     }
 
     async fn list_processes(

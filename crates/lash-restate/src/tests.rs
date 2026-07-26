@@ -1789,15 +1789,24 @@ impl<'ctx> RestateControllerContext<'ctx> for Arc<ReplayableRecordingContext> {
             let scoped_effect_controller = controller
                 .scoped_effect_controller(ExecutionScope::process(&process_id))
                 .map_err(TerminalError::from_error)?;
-            let output = worker
-                .run_process_with_scoped_effect_controller(
-                    registration,
-                    execution_context,
-                    scoped_effect_controller,
-                    tokio_util::sync::CancellationToken::new(),
-                )
-                .await
-                .map_err(TerminalError::from_error)?;
+            let cancellation = tokio_util::sync::CancellationToken::new();
+            let mut handover = None;
+            let output = loop {
+                match worker
+                    .run_process_segment_with_scoped_effect_controller(
+                        registration.clone(),
+                        execution_context.clone(),
+                        scoped_effect_controller.clone(),
+                        cancellation.clone(),
+                        handover,
+                    )
+                    .await
+                    .map_err(TerminalError::from_error)?
+                {
+                    lash_core::ProcessRunOutcome::Terminal(output) => break *output,
+                    lash_core::ProcessRunOutcome::SegmentBoundary(next) => handover = Some(next),
+                }
+            };
             context
                 .events
                 .resolve_process_terminal(&process_id, &output);
@@ -3429,7 +3438,7 @@ async fn restate_controller_replays_process_start_await_command_sequence() {
         .complete_process(
             process_id,
             terminal.clone(),
-            lash_core::ProcessCompletionAuthority::external_owner("test"),
+            lash_core::ProcessCompletionAuthority::external_owner(),
         )
         .await
         .expect("complete child process");
@@ -3830,7 +3839,7 @@ async fn restate_controller_awaits_and_signals_through_process_effects() {
         .complete_process(
             "task-await-signal",
             awaited_output.clone(),
-            lash_core::ProcessCompletionAuthority::external_owner("test"),
+            lash_core::ProcessCompletionAuthority::external_owner(),
         )
         .await
         .expect("complete");
@@ -6973,7 +6982,7 @@ async fn cancel_during_successor_boundary_routes_root_and_await_terminal_resolve
         .complete_process(
             "retained-terminal",
             expected.clone(),
-            lash_core::ProcessCompletionAuthority::external_owner("session"),
+            lash_core::ProcessCompletionAuthority::external_owner(),
         )
         .await
         .expect("complete");
@@ -7129,7 +7138,7 @@ async fn restate_driver_short_circuits_terminal_without_ingress_call() {
         .complete_process(
             "process-1",
             output.clone(),
-            lash_core::ProcessCompletionAuthority::external_owner("test"),
+            lash_core::ProcessCompletionAuthority::external_owner(),
         )
         .await
         .expect("complete");
@@ -7225,7 +7234,7 @@ async fn restate_deployment_sink_funnel_feeds_appended_events() {
                 value: serde_json::Value::Null,
                 control: None,
             },
-            lash_core::ProcessCompletionAuthority::external_owner("test"),
+            lash_core::ProcessCompletionAuthority::external_owner(),
         )
         .await
         .expect("complete");

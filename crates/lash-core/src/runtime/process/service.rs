@@ -232,13 +232,6 @@ pub trait ProcessService: Send + Sync {
         process_ids: Vec<String>,
         scope: ProcessOpScope<'_>,
     ) -> Result<(), PluginError>;
-
-    async fn cancel_unreferenced(
-        &self,
-        session_id: &str,
-        keep_process_ids: Vec<String>,
-        scope: ProcessOpScope<'_>,
-    ) -> Result<Vec<ProcessRecord>, PluginError>;
 }
 
 pub struct UnavailableProcessService;
@@ -326,17 +319,6 @@ impl ProcessService for UnavailableProcessService {
         }
         Err(PluginError::Session(
             "process handle transfer is unavailable in this runtime".to_string(),
-        ))
-    }
-
-    async fn cancel_unreferenced(
-        &self,
-        _session_id: &str,
-        _keep_process_ids: Vec<String>,
-        _scope: ProcessOpScope<'_>,
-    ) -> Result<Vec<ProcessRecord>, PluginError> {
-        Err(PluginError::Session(
-            "process handle cleanup is unavailable in this runtime".to_string(),
         ))
     }
 }
@@ -521,17 +503,6 @@ mod tests {
             _scope: ProcessOpScope<'_>,
         ) -> Result<(), PluginError> {
             Err(PluginError::Session("transfer not implemented".to_string()))
-        }
-
-        async fn cancel_unreferenced(
-            &self,
-            _session_id: &str,
-            _keep_process_ids: Vec<String>,
-            _scope: ProcessOpScope<'_>,
-        ) -> Result<Vec<ProcessRecord>, PluginError> {
-            Err(PluginError::Session(
-                "cancel unreferenced not implemented".to_string(),
-            ))
         }
     }
 

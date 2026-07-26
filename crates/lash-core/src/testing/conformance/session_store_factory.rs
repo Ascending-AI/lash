@@ -76,7 +76,7 @@ pub async fn process_prune_deletes_owned_session_stores(
                 value: serde_json::Value::Null,
                 control: None,
             },
-            crate::ProcessCompletionAuthority::external_owner("prune-session-store-test"),
+            crate::ProcessCompletionAuthority::external_owner(),
         )
         .await
         .expect("complete process with owned stores");

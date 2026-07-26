@@ -17,10 +17,9 @@ alias.
 `ProcessCompletionAuthority` has exactly three variants, one per legitimate
 unleased writer:
 
-- **`ExternalOwner { granted_to }`** — an external actor closes an
-  `ExternallyOwned` row it holds a session handle grant for (the `shell.start`
-  detach path). `granted_to` is the session-scope identity the caller verified
-  holds the grant: the audit trail for who closed the row out of band.
+- **`ExternalOwner`** — an external actor closes an `ExternallyOwned` row it
+  holds a session handle grant for (the `shell.start` detach path). The tool
+  layer verifies that live grant before the authority reaches the registry.
 - **`WorkflowKey { workflow_key }`** — a workflow-key-coalesced substrate (e.g.
   Restate keyed by `process_id`) completes a row it ran itself. Its
   single-writer discipline is the engine's per-key coalescing, not a Lash lease;

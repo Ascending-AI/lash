@@ -318,17 +318,6 @@ mod tests {
                 "continue_as must not transfer process handles".to_string(),
             ))
         }
-
-        async fn cancel_unreferenced(
-            &self,
-            _session_id: &str,
-            _keep_process_ids: Vec<String>,
-            _scope: lash_core::ProcessOpScope<'_>,
-        ) -> Result<Vec<lash_core::ProcessRecord>, PluginError> {
-            Err(PluginError::Session(
-                "continue_as must not cancel process handles".to_string(),
-            ))
-        }
     }
 
     async fn run_continue_as(

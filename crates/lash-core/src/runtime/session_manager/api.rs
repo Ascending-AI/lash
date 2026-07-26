@@ -359,22 +359,4 @@ impl crate::ProcessService for RuntimeSessionProcessService {
             )
             .await
     }
-
-    async fn cancel_unreferenced(
-        &self,
-        session_id: &str,
-        keep_process_ids: Vec<String>,
-        scope: crate::ProcessOpScope<'_>,
-    ) -> Result<Vec<crate::ProcessRecord>, crate::PluginError> {
-        self.services
-            .processes
-            .cancel_unreferenced_process_handles(
-                &self.services.current,
-                &self.services.managed,
-                session_id,
-                keep_process_ids,
-                scope,
-            )
-            .await
-    }
 }

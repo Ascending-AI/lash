@@ -470,7 +470,7 @@ async fn process_owner_leg(backend: &AttachmentOwnerColdReplayBackend) {
                 value: serde_json::Value::Null,
                 control: None,
             },
-            crate::ProcessCompletionAuthority::external_owner("attachment-owner-conformance"),
+            crate::ProcessCompletionAuthority::external_owner(),
         )
         .await
         .expect("complete process owner");

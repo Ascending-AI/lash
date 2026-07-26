@@ -69,6 +69,13 @@ impl ToolSessionProcessAdmin<'_> {
         process_id: &str,
     ) -> Result<crate::ProcessAwaitOutput, PluginError> {
         self.processes
+            .validate_visible(
+                &self.session_id,
+                &[process_id.to_string()],
+                self.process_scope(),
+            )
+            .await?;
+        self.processes
             .await_process(process_id, self.process_scope())
             .await
     }
@@ -187,33 +194,77 @@ impl ToolSessionProcessAdmin<'_> {
             )
             .await
     }
+}
 
-    pub async fn transfer_handles_to_frame(
-        &self,
-        to_agent_frame_id: &str,
-        process_ids: Vec<String>,
-    ) -> Result<(), PluginError> {
-        self.processes
-            .transfer(
-                &self.session_id,
-                &self.session_id,
-                process_ids,
-                self.process_scope()
-                    .with_target_agent_frame_id(Some(to_agent_frame_id.to_string())),
-            )
-            .await
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ProcessRegistry;
+    use crate::runtime::RuntimeEffectControllerHandle;
+
+    fn admin(processes: Arc<dyn crate::ProcessService>) -> ToolSessionProcessAdmin<'static> {
+        ToolSessionProcessAdmin {
+            session_id: "session".to_string(),
+            agent_frame_id: "frame".to_string(),
+            processes,
+            process_cancel_ability: Arc::new(crate::DefaultProcessCancelAbility),
+            effect_controller: RuntimeEffectControllerHandle::shared(Arc::new(
+                crate::InlineRuntimeEffectController::default(),
+            )),
+            parent_invocation: None,
+            tool_call_id: None,
+            execution_env_spec: crate::ProcessExecutionEnvSpec::new(
+                crate::PluginOptions::default(),
+                crate::SessionPolicy::default(),
+            ),
+        }
     }
 
-    pub async fn cancel_unreferenced_handles(
-        &self,
-        keep_process_ids: Vec<String>,
-    ) -> Result<Vec<crate::ProcessCancelSummary>, PluginError> {
-        Ok(self
-            .processes
-            .cancel_unreferenced(&self.session_id, keep_process_ids, self.process_scope())
-            .await?
-            .into_iter()
-            .map(crate::ProcessCancelSummary::from_record)
-            .collect())
+    #[tokio::test]
+    async fn await_process_requires_visibility_then_allows_observed_process() {
+        let host = Arc::new(crate::testing::MockSessionManager::default());
+        host.process_registry
+            .register_process(crate::ProcessRegistration::new(
+                "process",
+                crate::ProcessInput::External {
+                    metadata: serde_json::Value::Null,
+                },
+                crate::RecoveryDisposition::ExternallyOwned,
+                crate::ProcessProvenance::host(),
+            ))
+            .await
+            .expect("register process");
+        host.process_registry
+            .complete_process(
+                "process",
+                crate::ProcessAwaitOutput::Success {
+                    value: serde_json::json!("done"),
+                    control: None,
+                },
+                crate::ProcessCompletionAuthority::external_owner(),
+            )
+            .await
+            .expect("complete process");
+        let processes: Arc<dyn crate::ProcessService> = host.clone();
+        let admin = admin(processes);
+
+        let hidden = admin
+            .await_process("process")
+            .await
+            .expect_err("unobserved process must be hidden");
+        assert_eq!(
+            hidden.to_string(),
+            "plugin session error: process handle `process` is not live or visible in this session"
+        );
+
+        host.process_registry
+            .grant_handle(
+                &crate::SessionScope::for_agent_frame("session", "frame"),
+                "process",
+                crate::ProcessHandleDescriptor::new(Some("test"), Some("process")),
+            )
+            .await
+            .expect("grant process handle");
+        assert!(admin.await_process("process").await.is_ok());
     }
 }

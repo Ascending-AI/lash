@@ -448,60 +448,10 @@ impl DurableProcessWorker {
         &self.config
     }
 
-    pub async fn run_process(
-        &self,
-        registration: ProcessRegistration,
-        execution_context: ProcessExecutionContext,
-        cancellation: CancellationToken,
-    ) -> Result<ProcessAwaitOutput, PluginError> {
-        let scoped_effect_controller = self
-            .config
-            .runtime_host
-            .control
-            .effect_host
-            .scoped_static(crate::ExecutionScope::process(registration.id.clone()))
-            .map_err(|err| PluginError::Session(err.to_string()))?
-            .ok_or_else(|| {
-                PluginError::Session(
-                    "process worker effect host must provide a static process scope".to_string(),
-                )
-            })?;
-        Box::pin(self.run_process_with_scoped_effect_controller(
-            registration,
-            execution_context,
-            scoped_effect_controller,
-            cancellation,
-        ))
-        .await
-    }
-
-    pub async fn run_process_with_scoped_effect_controller(
-        &self,
-        registration: ProcessRegistration,
-        execution_context: ProcessExecutionContext,
-        scoped_effect_controller: crate::ScopedEffectController<'_>,
-        cancellation: CancellationToken,
-    ) -> Result<ProcessAwaitOutput, PluginError> {
-        let mut handover = None;
-        loop {
-            match Box::pin(self.run_process_segment_with_scoped_effect_controller(
-                registration.clone(),
-                execution_context.clone(),
-                scoped_effect_controller.clone(),
-                cancellation.clone(),
-                handover,
-            ))
-            .await?
-            {
-                crate::ProcessRunOutcome::Terminal(output) => return Ok(*output),
-                crate::ProcessRunOutcome::SegmentBoundary(next) => handover = Some(next),
-            }
-        }
-    }
-
     /// Run exactly one engine segment. Durable substrates use this method so a
-    /// non-terminal boundary can end the current substrate invocation; inline
-    /// callers continue to use the looping `run_process_with_*` methods.
+    /// non-terminal boundary can end the current substrate invocation; the
+    /// inline worker's lease-fenced drive loops over segment boundaries
+    /// internally.
     pub async fn run_process_segment_with_scoped_effect_controller(
         &self,
         registration: ProcessRegistration,

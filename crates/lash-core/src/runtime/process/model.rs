@@ -360,7 +360,6 @@ pub struct ProcessOpScope<'scope> {
     pub(crate) parent_invocation: Option<crate::RuntimeInvocation>,
     pub(crate) effect_controller: crate::runtime::RuntimeEffectControllerHandle<'scope>,
     pub(crate) agent_frame_id: Option<crate::AgentFrameId>,
-    pub(crate) target_agent_frame_id: Option<crate::AgentFrameId>,
 }
 
 impl<'scope> ProcessOpScope<'scope> {
@@ -371,7 +370,6 @@ impl<'scope> ProcessOpScope<'scope> {
                 scoped_effect_controller,
             ),
             agent_frame_id: None,
-            target_agent_frame_id: None,
         }
     }
 
@@ -388,20 +386,8 @@ impl<'scope> ProcessOpScope<'scope> {
         self
     }
 
-    pub fn with_target_agent_frame_id(
-        mut self,
-        agent_frame_id: Option<crate::AgentFrameId>,
-    ) -> Self {
-        self.target_agent_frame_id = agent_frame_id;
-        self
-    }
-
     pub fn agent_frame_id(&self) -> Option<&str> {
         self.agent_frame_id.as_deref()
-    }
-
-    pub fn target_agent_frame_id(&self) -> Option<&str> {
-        self.target_agent_frame_id.as_deref()
     }
 
     pub(crate) fn controller(&self) -> &dyn crate::RuntimeEffectController {

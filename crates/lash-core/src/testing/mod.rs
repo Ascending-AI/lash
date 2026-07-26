@@ -624,7 +624,7 @@ impl crate::ProcessService for MockSessionManager {
         // authority its declared disposition permits: externally-owned rows close
         // via their external owner, lash-executed rows via the workflow-key path.
         let authority = if registration.disposition == crate::RecoveryDisposition::ExternallyOwned {
-            crate::ProcessCompletionAuthority::external_owner(session_id)
+            crate::ProcessCompletionAuthority::external_owner()
         } else {
             crate::ProcessCompletionAuthority::workflow_key(&id)
         };
@@ -756,64 +756,10 @@ impl crate::ProcessService for MockSessionManager {
             .as_deref()
             .map(|frame_id| crate::SessionScope::for_agent_frame(from_session_id, frame_id))
             .unwrap_or_else(|| crate::SessionScope::new(from_session_id));
-        let to_scope = scope
-            .target_agent_frame_id
-            .as_deref()
-            .map(|frame_id| crate::SessionScope::for_agent_frame(to_session_id, frame_id))
-            .unwrap_or_else(|| crate::SessionScope::new(to_session_id));
+        let to_scope = crate::SessionScope::new(to_session_id);
         self.process_registry
             .transfer_handle_grants(&from_scope, &to_scope, &process_ids)
             .await
-    }
-
-    async fn cancel_unreferenced(
-        &self,
-        session_id: &str,
-        keep_process_ids: Vec<String>,
-        scope: crate::ProcessOpScope<'_>,
-    ) -> Result<Vec<crate::ProcessRecord>, PluginError> {
-        let keep = keep_process_ids
-            .iter()
-            .cloned()
-            .collect::<std::collections::HashSet<_>>();
-        let session_scope = scope
-            .agent_frame_id
-            .as_deref()
-            .map(|frame_id| crate::SessionScope::for_agent_frame(session_id, frame_id))
-            .unwrap_or_else(|| crate::SessionScope::new(session_id));
-        let grants = self
-            .process_registry
-            .list_handle_grants(&session_scope)
-            .await?;
-        let mut cancelled = Vec::new();
-
-        for (grant, record) in grants {
-            if keep.contains(&grant.process_id) {
-                continue;
-            }
-            self.process_registry
-                .revoke_handle(&session_scope, &grant.process_id)
-                .await?;
-            if record.is_terminal()
-                || !self
-                    .process_registry
-                    .handle_grants_for_process(&grant.process_id)
-                    .await?
-                    .is_empty()
-            {
-                continue;
-            }
-            cancelled.push(
-                crate::InlineRuntimeEffectController::request_process_cancel(
-                    self.process_registry.clone(),
-                    &grant.process_id,
-                    Some("unreferenced by test".to_string()),
-                )
-                .await?,
-            );
-        }
-
-        Ok(cancelled)
     }
 }
 // ─────────────────────────────────────────────────────────────────────

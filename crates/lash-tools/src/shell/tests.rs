@@ -171,9 +171,7 @@ mod tests {
                 .complete_process(
                     process_id,
                     await_output,
-                    lash_core::ProcessCompletionAuthority::external_owner(
-                        session_scope.id().to_string(),
-                    ),
+                    lash_core::ProcessCompletionAuthority::external_owner(),
                 )
                 .await
         }
@@ -293,14 +291,6 @@ mod tests {
             Ok(())
         }
 
-        async fn cancel_unreferenced(
-            &self,
-            _session_id: &str,
-            _keep_process_ids: Vec<String>,
-            _scope: lash_core::ProcessOpScope<'_>,
-        ) -> Result<Vec<lash_core::ProcessRecord>, PluginError> {
-            Ok(Vec::new())
-        }
     }
 
     fn context_with_processes(
@@ -733,7 +723,7 @@ mod tests {
                     value: serde_json::json!({ "pid": 1234 }),
                     control: None,
                 },
-                lash_core::ProcessCompletionAuthority::external_owner("test"),
+                lash_core::ProcessCompletionAuthority::external_owner(),
             )
             .await
             .expect("complete external row");

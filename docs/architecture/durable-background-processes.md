@@ -425,8 +425,9 @@ durability, not the emitter.
 Intentional cancellation now follows the host-owned ability seam instead of the
 durable-start path. `ProcessCancelAbility` receives typed cancel requests with a
 source (`HostApi`, `Tool`, or `Lashlang`) and reason; cancel-all first lists live
-visible handles, then calls the same cancel-summary path for each. Internal
-cleanup (`cancel_unreferenced`) stays on the low-level registry operation.
+visible handles, then calls the same cancel-summary path for each. Handle
+revocation and process cancellation remain explicit operations rather than a
+combined unreferenced-handle cleanup request.
 
 ### Subagent collapse
 

@@ -2,8 +2,8 @@ use super::*;
 use crate::{
     AttachmentStore, AttachmentStoreError, AttachmentStorePersistence, DurabilityTier,
     DurableStoreFacet, InMemoryAttachmentStore, ProcessExecutionEnvRef, ProcessExecutionEnvStore,
-    ProcessInput, ProcessRegistration, RuntimeEffectController, RuntimeError, StoredAttachment,
-    TriggerStore,
+    ProcessInput, ProcessRegistration, ProcessRunOutcome, RuntimeEffectController, RuntimeError,
+    StoredAttachment, TriggerStore,
 };
 use lash_sansio::{AttachmentCreateMeta, AttachmentId, AttachmentRef};
 
@@ -256,12 +256,20 @@ fn external_registration() -> ProcessRegistration {
     )
 }
 
-async fn run(worker: &DurableProcessWorker) -> Result<ProcessAwaitOutput, PluginError> {
+async fn run(worker: &DurableProcessWorker) -> Result<ProcessRunOutcome, PluginError> {
+    let controller = DurableController;
+    let scope = crate::ScopedEffectController::borrowed(
+        &controller,
+        crate::ExecutionScope::process("worker-boundary-process"),
+    )
+    .expect("scope process execution");
     worker
-        .run_process(
+        .run_process_segment_with_scoped_effect_controller(
             external_registration(),
             ProcessExecutionContext::default(),
+            scope,
             CancellationToken::new(),
+            None,
         )
         .await
 }
