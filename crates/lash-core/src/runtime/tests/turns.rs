@@ -4637,14 +4637,6 @@ async fn plugin_command_reuses_caller_scope_on_lost_response_retry() {
         Arc::clone(&store_trait),
     )
     .await;
-    let mut retry = runtime_with_plugins_and_tools_and_host_and_store(
-        vec![plugin],
-        Arc::new(EmptyTools),
-        mock_provider(Vec::new()),
-        test_host_config(),
-        store_trait,
-    )
-    .await;
     let operation_scope =
         crate::ExecutionScope::runtime_operation("root:plugin-command:stable-request");
 
@@ -4656,6 +4648,14 @@ async fn plugin_command_reuses_caller_scope_on_lost_response_retry() {
         .runtime_commit_count
         .lock()
         .expect("runtime commit count");
+    let mut retry = runtime_with_plugins_and_tools_and_host_and_store(
+        vec![plugin],
+        Arc::new(EmptyTools),
+        mock_provider(Vec::new()),
+        test_host_config(),
+        store_trait,
+    )
+    .await;
 
     retry
         .run_plugin_command("test.emit", json!({}), None, operation_scope)

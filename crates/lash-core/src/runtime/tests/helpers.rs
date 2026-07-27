@@ -516,16 +516,20 @@ pub(crate) async fn runtime_with_plugins_and_tools_and_host_and_store(
     )));
     let plugin_host = crate::PluginHost::new(factories);
     let plugin_session = plugin_host.build_session("root", None).expect("plugins");
+    let mut state = RuntimeSessionState::default();
+    if let Some(meta) = store
+        .load_session_meta()
+        .await
+        .expect("load persistent test-store metadata")
+    {
+        state.incarnation_id = meta.incarnation_id;
+    }
     let services =
         crate::PersistentRuntimeServices::new(plugin_session, store).into_runtime_services();
-    let mut runtime = LashRuntime::from_embedded_state(
-        standard_test_policy(),
-        host,
-        services,
-        RuntimeSessionState::default(),
-    )
-    .await
-    .expect("runtime");
+    let mut runtime =
+        LashRuntime::from_embedded_state(standard_test_policy(), host, services, state)
+            .await
+            .expect("runtime");
     set_runtime_provider(&mut runtime, transport.clone().into_handle());
     runtime
 }
