@@ -18,7 +18,7 @@ use lash_core::store::queued_work::{
     select_leading_session_command, select_turn_work_claim_prefix,
 };
 use lash_core::store::{
-    GraphCommitDelta, HydratedSessionCheckpoint, PersistedSessionRead, RuntimeCommit,
+    GraphAppend, HydratedSessionCheckpoint, PersistedSessionRead, RuntimeCommit,
     RuntimeCommitResult, SessionCheckpoint, SessionHeadMeta,
 };
 use lash_core::{
@@ -35,7 +35,7 @@ use lash_core::{
     RuntimeEffectLocalExecutor, RuntimeEffectOutcome, RuntimeError, RuntimePersistence,
     ScopedEffectController, SessionCommitStore, SessionExecutionLease,
     SessionExecutionLeaseClaimOutcome, SessionExecutionLeaseCompletion, SessionExecutionLeaseFence,
-    SessionExecutionLeaseStore, SessionMeta, SessionNodeRecord, SessionReadScope, SessionScope,
+    SessionExecutionLeaseStore, SessionMeta, SessionNodeRecord, SessionScope,
     SessionStoreCreateRequest, SessionStoreFactory, SlotPolicy, StoreError, StoreMaintenance,
     TokenLedgerEntry, TurnInputStore, VacuumReport, validate_replayed_effect_envelope,
 };
@@ -716,7 +716,7 @@ mod tests {
         state.bind_durable_incarnation(incarnation_id);
         state.ensure_agent_frame_initialized();
         store
-            .commit_runtime_state(RuntimeCommit::persisted_state(&state, &[]))
+            .commit_runtime_state(RuntimeCommit::persisted_state_for_test(&state, &[]))
             .await
             .expect("commit root frame");
         let frame_node_id = state.current_frame_node_id.clone().expect("frame node");
@@ -737,9 +737,9 @@ mod tests {
                 ),
             },
         };
-        let mut commit = RuntimeCommit::persisted_state(&state, &[]);
+        let mut commit = RuntimeCommit::persisted_state_for_test(&state, &[]);
         commit.expected_head_revision = 1;
-        commit.graph = GraphCommitDelta::Append {
+        commit.graph = GraphAppend {
             nodes: vec![child],
             leaf_node_id: Some(child_node_id.clone()),
         };
@@ -797,7 +797,7 @@ mod tests {
         state.bind_durable_incarnation(incarnation_id);
         state.ensure_agent_frame_initialized();
         store
-            .commit_runtime_state(RuntimeCommit::persisted_state(&state, &[]))
+            .commit_runtime_state(RuntimeCommit::persisted_state_for_test(&state, &[]))
             .await
             .expect("commit root frame");
         let frame_node_id = state.current_frame_node_id.expect("frame node");
@@ -873,7 +873,7 @@ mod tests {
             .await
             .expect("delete before first commit");
         let error = stale_store
-            .commit_runtime_state(RuntimeCommit::persisted_state(&state, &[]))
+            .commit_runtime_state(RuntimeCommit::persisted_state_for_test(&state, &[]))
             .await
             .expect_err("stale first commit must not resurrect the session");
         assert!(matches!(
@@ -901,7 +901,7 @@ mod tests {
         };
         state.ensure_agent_frame_initialized();
         recreated
-            .commit_runtime_state(RuntimeCommit::persisted_state(&state, &[]))
+            .commit_runtime_state(RuntimeCommit::persisted_state_for_test(&state, &[]))
             .await
             .expect("recreated store accepts first commit");
     }

@@ -4805,13 +4805,10 @@ async fn session_manager_persists_child_sessions_in_separate_store() {
         .expect("session meta");
     assert_eq!(meta.session_id, "child-store");
     assert_eq!(meta.parent_session_id(), Some("root"));
-    let read = crate::store::SessionCommitStore::load_session(
-        stores[0].as_ref(),
-        crate::store::SessionReadScope::FullGraph,
-    )
-    .await
-    .expect("load session")
-    .expect("session read");
+    let read = crate::store::SessionCommitStore::load_session(stores[0].as_ref())
+        .await
+        .expect("load session")
+        .expect("session read");
     let graph = read.graph;
     let child_frame_node_id = crate::session_graph::frame_node_id(
         &meta.session_id,

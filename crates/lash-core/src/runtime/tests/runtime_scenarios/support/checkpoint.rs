@@ -6,15 +6,13 @@ impl RuntimeScenarioContext {
         if let Some(turn_index) = phase.turn_index {
             self.state.turn_index = turn_index;
         }
-        let (_, lease) = self.owner_and_lease();
         let persisted_node_ids = self
             .state
             .pending_graph_commit()
             .appended_nodes()
             .map(|node| node.node_id.clone())
             .collect::<Vec<_>>();
-        let mut commit = RuntimeCommit::persisted_state(&self.state, &[])
-            .with_session_execution_lease(lease.fence())
+        let mut commit = RuntimeCommit::persisted_state_for_test(&self.state, &[])
             .completing_queue_claims(self.command_claim.iter().map(QueuedWorkClaim::completion));
         if let Some(turn_id) = phase.defer_interrupted_turn_id {
             commit = commit.deferring_interrupted_turn_inputs(turn_id);

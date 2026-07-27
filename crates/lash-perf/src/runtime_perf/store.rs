@@ -8,15 +8,14 @@ use lash_core::runtime::{
 };
 use lash_core::store;
 use lash_core::store::{
-    GraphCommitDelta, PersistedSessionRead, RuntimeCommitResult, SessionCheckpoint, SessionHeadMeta,
+    PersistedSessionRead, RuntimeCommitResult, SessionCheckpoint, SessionHeadMeta,
 };
 use lash_core::{
     BlobRef, GcReport, LeaseOwnerIdentity, QueuedWorkStore, RuntimeCommit, RuntimePersistence,
     SessionCommitStore, SessionExecutionLease, SessionExecutionLeaseClaimOutcome,
     SessionExecutionLeaseCompletion, SessionExecutionLeaseFence, SessionExecutionLeaseStore,
-    SessionGraph, SessionNodeRecord, SessionReadScope, SessionStoreCreateRequest,
-    SessionStoreFactory, StoreError, StoreMaintenance, TurnInputStore, VacuumReport,
-    current_epoch_ms,
+    SessionGraph, SessionNodeRecord, SessionStoreCreateRequest, SessionStoreFactory, StoreError,
+    StoreMaintenance, TurnInputStore, VacuumReport, current_epoch_ms,
 };
 
 #[derive(Clone)]
@@ -547,10 +546,7 @@ impl SessionCommitStore for RuntimePerfStore {
         Ok(incarnation_id)
     }
 
-    async fn load_session(
-        &self,
-        scope: SessionReadScope,
-    ) -> Result<Option<PersistedSessionRead>, store::StoreError> {
+    async fn load_session(&self) -> Result<Option<PersistedSessionRead>, store::StoreError> {
         let Some(meta) = self
             .session_head_meta
             .lock()
@@ -559,27 +555,11 @@ impl SessionCommitStore for RuntimePerfStore {
         else {
             return Ok(None);
         };
-        let graph = {
-            let stored_graph = self.session_graph.lock().expect("lock perf graph");
-            match scope {
-                SessionReadScope::FullGraph => stored_graph.clone(),
-                SessionReadScope::ActivePath { leaf_node_id } => {
-                    if leaf_node_id.is_none() || leaf_node_id == stored_graph.leaf_node_id {
-                        let nodes = stored_graph
-                            .active_path_nodes()
-                            .into_iter()
-                            .cloned()
-                            .collect();
-                        SessionGraph::from_nodes(nodes, stored_graph.leaf_node_id.clone())
-                    } else {
-                        let mut scoped = stored_graph.clone();
-                        scoped.set_leaf_node_id(leaf_node_id);
-                        let nodes = scoped.active_path_nodes().into_iter().cloned().collect();
-                        SessionGraph::from_nodes(nodes, scoped.leaf_node_id.clone())
-                    }
-                }
-            }
-        };
+        let graph = self
+            .session_graph
+            .lock()
+            .expect("lock perf graph")
+            .trim_to_active_path();
         Ok(Some(PersistedSessionRead {
             session_id: meta.session_id,
             head_revision: meta.head_revision,
@@ -635,7 +615,6 @@ impl SessionCommitStore for RuntimePerfStore {
             completed_turn_input_claims,
             enqueued_queue_batches,
             interrupted_turn_input_turn_id,
-            session_execution_lease,
             release_session_execution_lease,
             committed_attachment_ids: _,
         } = commit;
@@ -653,43 +632,36 @@ impl SessionCommitStore for RuntimePerfStore {
             .lock()
             .expect("lock perf session head meta");
         let actual = meta_guard.as_ref().map_or(0, |meta| meta.head_revision);
-        if let Some(completed) = &turn_commit {
-            let operation_key = completed.operation.storage_key()?;
-            if completed.session_id != session_id {
-                return Err(StoreError::RuntimeTurnCommitConflict {
-                    session_id: completed.session_id.clone(),
-                    turn_id: operation_key,
-                });
-            }
-            let key = (
-                completed.session_id.clone(),
-                completed.operation.storage_key()?,
-            );
-            if let Some((stored_hash, result)) = self
-                .runtime_turn_commits
-                .lock()
-                .expect("lock perf runtime turn commits")
-                .get(&key)
-                .cloned()
-            {
-                if stored_hash == completed.turn_commit_hash {
-                    if let Some(completion) = release_session_execution_lease.as_ref() {
-                        self.release_session_execution_lease_in_memory(completion);
-                    }
-                    return Ok(result);
-                }
-                return Err(StoreError::RuntimeTurnCommitConflict {
-                    session_id: completed.session_id.clone(),
-                    turn_id: completed.operation.storage_key()?,
-                });
-            }
-        }
-        let Some(session_execution_lease) = session_execution_lease.as_ref() else {
-            return Err(StoreError::SessionExecutionLeaseExpired {
-                session_id: session_id.clone(),
+        let completed = &turn_commit;
+        let operation_key = completed.operation.storage_key()?;
+        if completed.session_id != session_id {
+            return Err(StoreError::RuntimeTurnCommitConflict {
+                session_id: completed.session_id.clone(),
+                turn_id: operation_key,
             });
-        };
-        self.verify_session_execution_lease(&session_id, session_execution_lease)?;
+        }
+        let key = (
+            completed.session_id.clone(),
+            completed.operation.storage_key()?,
+        );
+        if let Some((stored_hash, result)) = self
+            .runtime_turn_commits
+            .lock()
+            .expect("lock perf runtime turn commits")
+            .get(&key)
+            .cloned()
+        {
+            if stored_hash == completed.turn_commit_hash {
+                if let Some(completion) = release_session_execution_lease.as_ref() {
+                    self.release_session_execution_lease_in_memory(completion);
+                }
+                return Ok(result);
+            }
+            return Err(StoreError::RuntimeTurnCommitConflict {
+                session_id: completed.session_id.clone(),
+                turn_id: completed.operation.storage_key()?,
+            });
+        }
         if expected_head_revision != actual {
             return Err(store::StoreError::HeadRevisionConflict {
                 expected: expected_head_revision,
@@ -720,16 +692,8 @@ impl SessionCommitStore for RuntimePerfStore {
             }
         }
         let mut graph = self.session_graph.lock().expect("lock perf graph");
-        let leaf_node_id = match graph_delta {
-            GraphCommitDelta::Unchanged { leaf_node_id } => leaf_node_id.clone(),
-            GraphCommitDelta::Append {
-                nodes,
-                leaf_node_id,
-            } => {
-                graph.extend_node_records(nodes);
-                leaf_node_id
-            }
-        };
+        graph.extend_node_records(graph_delta.nodes);
+        let leaf_node_id = graph_delta.leaf_node_id;
         graph.set_leaf_node_id(leaf_node_id.clone());
         if !usage_deltas.is_empty() {
             self.usage_deltas
@@ -817,7 +781,6 @@ impl SessionCommitStore for RuntimePerfStore {
                 checkpoint.execution_state_ref
             },
         );
-        let graph_node_count = graph.nodes.len();
         drop(graph);
         let id = self.next_blob_id.fetch_add(1, Ordering::Relaxed);
         let checkpoint_ref = BlobRef(format!("perf-checkpoint-{id}"));
@@ -830,8 +793,6 @@ impl SessionCommitStore for RuntimePerfStore {
             current_frame_node_id,
             checkpoint_ref: Some(checkpoint_ref.clone()),
             leaf_node_id,
-            graph_node_count,
-            token_ledger: Vec::new(),
         });
         let turn_input_applications = completed_turn_input_claims
             .iter()
@@ -849,18 +810,16 @@ impl SessionCommitStore for RuntimePerfStore {
                 .collect(),
             turn_input_applications,
         };
-        if let Some(completed) = &turn_commit {
-            self.runtime_turn_commits
-                .lock()
-                .expect("lock perf runtime turn commits")
-                .insert(
-                    (
-                        completed.session_id.clone(),
-                        completed.operation.storage_key()?,
-                    ),
-                    (completed.turn_commit_hash.clone(), result.clone()),
-                );
-        }
+        self.runtime_turn_commits
+            .lock()
+            .expect("lock perf runtime turn commits")
+            .insert(
+                (
+                    completed.session_id.clone(),
+                    completed.operation.storage_key()?,
+                ),
+                (completed.turn_commit_hash.clone(), result.clone()),
+            );
         if let Some(completion) = release_session_execution_lease.as_ref() {
             self.release_session_execution_lease_in_memory(completion);
         }
@@ -1523,10 +1482,6 @@ impl QueuedWorkStore for RuntimePerfStore {
 
 #[async_trait::async_trait]
 impl StoreMaintenance for RuntimePerfStore {
-    async fn tombstone_nodes(&self, _ids: &[String]) -> Result<(), store::StoreError> {
-        Err(unsupported_maintenance("tombstone_nodes"))
-    }
-
     async fn vacuum(&self) -> Result<VacuumReport, store::StoreError> {
         Err(unsupported_maintenance("vacuum"))
     }

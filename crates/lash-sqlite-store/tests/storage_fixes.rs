@@ -69,7 +69,7 @@ fn commit_at(
     };
     RuntimeCommit {
         expected_head_revision,
-        ..RuntimeCommit::persisted_state(&state, &[])
+        ..RuntimeCommit::persisted_state_for_test(&state, &[])
     }
 }
 
@@ -87,47 +87,23 @@ fn commit_at(
 fn head_revision_cas_holds_across_two_connections() {
     let path = unique_db_path("cas");
     let incarnation_id = lash_core::IncarnationId::mint_for_store();
-    let session_fence = {
-        let store = block_on(Store::open(&path)).expect("lease store");
-        let owner = lease_owner("session-owner");
-        block_on(store.try_claim_session_execution_lease("root", &owner, 60_000))
-            .expect("claim session execution lease")
-            .acquired()
-            .expect("session execution lease")
-            .fence()
-    };
-
     let barrier = Arc::new(std::sync::Barrier::new(2));
     let run = |path: std::path::PathBuf,
                incarnation_id: lash_core::IncarnationId,
-               session_fence: lash_core::SessionExecutionLeaseFence,
                barrier: Arc<std::sync::Barrier>| {
         std::thread::spawn(move || {
             block_on(async move {
                 let store = Store::open(&path).await.expect("open store");
                 barrier.wait();
                 store
-                    .commit_runtime_state(
-                        commit_at("root", &incarnation_id, 0)
-                            .with_session_execution_lease(session_fence),
-                    )
+                    .commit_runtime_state(commit_at("root", &incarnation_id, 0))
                     .await
             })
         })
     };
 
-    let handle_a = run(
-        path.clone(),
-        incarnation_id.clone(),
-        session_fence.clone(),
-        Arc::clone(&barrier),
-    );
-    let handle_b = run(
-        path.clone(),
-        incarnation_id,
-        session_fence,
-        Arc::clone(&barrier),
-    );
+    let handle_a = run(path.clone(), incarnation_id.clone(), Arc::clone(&barrier));
+    let handle_b = run(path.clone(), incarnation_id, Arc::clone(&barrier));
     let result_a = handle_a.join().expect("thread a");
     let result_b = handle_b.join().expect("thread b");
 
@@ -151,7 +127,7 @@ fn head_revision_cas_holds_across_two_connections() {
 
     // The persisted head must reflect exactly one applied commit.
     let store = block_on(Store::open(&path)).expect("reopen store");
-    let read = block_on(store.load_session(lash_core::SessionReadScope::FullGraph))
+    let read = block_on(store.load_session())
         .expect("load")
         .expect("session present");
     assert_eq!(read.head_revision, 1);
@@ -196,9 +172,8 @@ async fn gc_keeps_live_committed_checkpoint_blobs() {
         .expect("session execution lease");
     let commit = RuntimeCommit {
         expected_head_revision: 0,
-        ..RuntimeCommit::persisted_state(&state, &[])
+        ..RuntimeCommit::persisted_state_for_test(&state, &[])
     }
-    .with_session_execution_lease(session_lease.fence())
     .releasing_session_execution_lease(session_lease.completion());
     let result = store.commit_runtime_state(commit).await.expect("commit");
 

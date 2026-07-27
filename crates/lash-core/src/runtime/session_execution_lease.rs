@@ -179,9 +179,7 @@ pub(super) async fn commit_runtime_state_with_fresh_session_execution_lease(
             "session execution lease for session `{session_id}` is busy"
         )));
     };
-    let commit = commit
-        .with_session_execution_lease(lease.fence())
-        .releasing_session_execution_lease(lease.completion());
+    let commit = commit.releasing_session_execution_lease(lease.completion());
     let result = crate::store::commit_runtime_state_verified(store.as_ref(), commit).await?;
     lease.mark_released();
     Ok(result)

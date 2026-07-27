@@ -511,14 +511,14 @@ async fn final_turn_commit(
         session_lifetime: crate::SessionLifetime::durable(incarnation_id),
         ..crate::RuntimeSessionState::default()
     };
-    let mut commit = crate::RuntimeCommit::persisted_state(&state, &[])
+    let mut commit = crate::RuntimeCommit::persisted_state_for_test(&state, &[])
         .with_committed_attachments(adopted_attachment_ids);
     let hash = commit.turn_commit_hash().expect("turn commit hash");
-    commit = commit.with_turn_commit(crate::RuntimeTurnCommitStamp::new(
+    commit.turn_commit = crate::RuntimeTurnCommitStamp::new(
         session_id,
         crate::OperationId::turn(session_id, turn_id, "final"),
         hash,
-    ));
+    );
     commit
 }
 
@@ -535,11 +535,7 @@ async fn commit_with_lease(
         .acquired()
         .expect("commit lease acquired");
     store
-        .commit_runtime_state(
-            commit
-                .with_session_execution_lease(lease.fence())
-                .releasing_session_execution_lease(lease.completion()),
-        )
+        .commit_runtime_state(commit.releasing_session_execution_lease(lease.completion()))
         .await
         .expect("commit runtime state")
 }

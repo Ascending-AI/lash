@@ -165,7 +165,7 @@ pub use effect::{
     ToolAttemptEffectOutcome, ToolAttemptLaunch, ToolBatchEffectOutcome, ToolCallLaunch,
     validate_replayed_effect_envelope,
 };
-pub use environment::{ParkedSession, Residency, RuntimeEnvironment, RuntimeEnvironmentBuilder};
+pub use environment::{ParkedSession, RuntimeEnvironment, RuntimeEnvironmentBuilder};
 pub use error::{RuntimeError, RuntimeErrorCode};
 pub use host::{EmbeddedRuntimeHost, ProcessRuntimeHost, RuntimeHostConfig};
 pub use in_memory_store::{InMemorySessionStore, InMemorySessionStoreFactory};
@@ -229,8 +229,8 @@ pub use scenario_contracts::{RUNTIME_SCENARIO_CONTRACTS, ScenarioContractSpec};
 pub use session_manager::DirectCompletionClient;
 pub use state::RuntimeSessionState;
 use state::{
-    append_session_nodes_to_state_with_clock, apply_residency_on_load, apply_session_checkpoint,
-    apply_session_head, open_agent_frame_in_state_with_clock,
+    append_session_nodes_to_state_with_clock, apply_session_checkpoint, apply_session_head,
+    open_agent_frame_in_state_with_clock,
 };
 pub use turn_control::{
     TurnAddress, TurnAttach, TurnCancelOriginHint, TurnCancelOutcome, TurnCancelReceipt,
@@ -1230,9 +1230,4 @@ pub struct LashRuntime {
     pub(in crate::runtime) last_committed_observation_turn: Option<(u64, String)>,
     /// Set only after this handle itself has attempted a durable graph load.
     pub(in crate::runtime) graph_loaded_from_store: bool,
-    /// Resident-graph policy chosen by the host. Controls whether
-    /// [`LashRuntime::refresh_session_graph_from_store`] reloads the full
-    /// graph or just the active path, matching the trimming behavior set at
-    /// load time via [`apply_residency_on_load`](crate::runtime::apply_residency_on_load).
-    pub(in crate::runtime) residency: Residency,
 }

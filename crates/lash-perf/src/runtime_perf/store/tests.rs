@@ -21,20 +21,15 @@ async fn refcount_scrub_refuses_to_report_false_success() {
 #[tokio::test]
 async fn runtime_commit_rejects_cross_session_queue_batches_atomically() {
     let store = RuntimePerfStore::default();
-    let owner = LeaseOwnerIdentity::opaque("perf-store-test", "cross-session-outbox");
-    let lease = store
-        .try_claim_session_execution_lease("root", &owner, 60_000)
-        .await
-        .expect("claim execution lease")
-        .acquired()
-        .expect("execution lease acquired");
     let state = RuntimeSessionState {
         session_id: "root".to_string(),
+        session_lifetime: lash_core::SessionLifetime::durable(
+            lash_core::IncarnationId::mint_for_store(),
+        ),
         turn_index: 1,
         ..RuntimeSessionState::default()
     };
-    let mut commit =
-        RuntimeCommit::persisted_state(&state, &[]).with_session_execution_lease(lease.fence());
+    let mut commit = RuntimeCommit::persisted_state_for_test(&state, &[]);
     commit.enqueued_queue_batches = vec![QueuedWorkBatchDraft::new(
         "other-session",
         DeliveryPolicy::AfterCurrentTurnCommit,
@@ -60,7 +55,7 @@ async fn runtime_commit_rejects_cross_session_queue_batches_atomically() {
     ));
     assert!(
         store
-            .load_session(SessionReadScope::FullGraph)
+            .load_session()
             .await
             .expect("load session after rejected commit")
             .is_none(),

@@ -188,12 +188,6 @@ pub struct AgentFrameAssignment {
     pub policy: SessionPolicy,
     #[serde(default)]
     pub plugin_options: PluginOptions,
-    #[serde(default)]
-    pub plugin_source: SessionPluginSource,
-    #[serde(default)]
-    pub tool_access: SessionToolAccess,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub subagent: Option<SubagentSessionContext>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub usage_source: Option<String>,
 }
@@ -203,9 +197,6 @@ impl AgentFrameAssignment {
         Self {
             policy,
             plugin_options: request.plugin_options.clone(),
-            plugin_source: request.plugin_source,
-            tool_access: request.tool_access.clone(),
-            subagent: request.subagent.clone(),
             usage_source: request.usage_source.clone(),
         }
     }
@@ -214,9 +205,6 @@ impl AgentFrameAssignment {
         Self {
             policy,
             plugin_options: PluginOptions::default(),
-            plugin_source: SessionPluginSource::CurrentHostFresh,
-            tool_access: SessionToolAccess::default(),
-            subagent: None,
             usage_source: None,
         }
     }

@@ -292,22 +292,6 @@ impl SessionStoreFactory for PostgresSessionStoreFactory {
                 .ok_or_else(|| StoreError::MissingFrameOpenAncestor {
                     leaf_node_id: request.node_id.clone(),
                 })?;
-        let graph_node_count = sqlx::query_scalar::<_, i64>(
-            "WITH RECURSIVE ancestry(node_id, parent_node_id) AS (
-                 SELECT node_id, parent_node_id FROM lash_graph_nodes
-                 WHERE node_id = $1 AND tombstoned = FALSE
-                 UNION ALL
-                 SELECT parent.node_id, parent.parent_node_id
-                 FROM lash_graph_nodes parent
-                 JOIN ancestry ON parent.node_id = ancestry.parent_node_id
-                 WHERE parent.tombstoned = FALSE
-             )
-             SELECT COUNT(*) FROM ancestry",
-        )
-        .bind(&request.node_id)
-        .fetch_one(&mut *tx)
-        .await
-        .map_err(store_sqlx_error)? as usize;
         let changed = sqlx::query(
             "UPDATE lash_graph_nodes SET incoming_refs = incoming_refs + 1
              WHERE node_id = $1 AND tombstoned = FALSE",
@@ -334,8 +318,6 @@ impl SessionStoreFactory for PostgresSessionStoreFactory {
             current_frame_node_id: Some(current_frame_node_id),
             checkpoint_ref: Some(checkpoint_ref.clone().into()),
             leaf_node_id: Some(request.node_id.clone()),
-            graph_node_count,
-            token_ledger: Vec::new(),
         };
         sqlx::query(
             "INSERT INTO lash_sessions

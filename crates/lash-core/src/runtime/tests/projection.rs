@@ -272,15 +272,12 @@ async fn completed_turns_are_persisted_for_custom_runtime_store() {
         .await
         .expect("turn");
 
-    let read_model = crate::store::SessionCommitStore::load_session(
-        store.as_ref(),
-        crate::store::SessionReadScope::FullGraph,
-    )
-    .await
-    .expect("load session")
-    .expect("session head")
-    .graph
-    .read_model();
+    let read_model = crate::store::SessionCommitStore::load_session(store.as_ref())
+        .await
+        .expect("load session")
+        .expect("session head")
+        .graph
+        .read_model();
     let messages = read_model.messages.as_slice();
     assert_eq!(messages.len(), 2);
     assert_eq!(messages[0].role, MessageRole::User);
@@ -503,13 +500,10 @@ async fn completed_turns_are_persisted_in_session_graph() {
         .await
         .expect("turn");
 
-    let read = crate::store::SessionCommitStore::load_session(
-        store.as_ref(),
-        crate::store::SessionReadScope::FullGraph,
-    )
-    .await
-    .expect("load session")
-    .expect("session read");
+    let read = crate::store::SessionCommitStore::load_session(store.as_ref())
+        .await
+        .expect("load session")
+        .expect("session read");
     let graph = read.graph;
     let read_model = graph.read_model();
     let messages = read_model.messages.as_slice();

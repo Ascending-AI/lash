@@ -8,60 +8,6 @@
 
 use super::*;
 
-/// Attachment-manifest behavior expected from a [`RuntimePersistence`] backend.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum AttachmentManifestConformance {
-    /// The backend stores and reconciles attachment intent rows.
-    Persistent,
-    /// The backend explicitly has no attachment-write story and uses the no-op
-    /// manifest contract.
-    Noop,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct RuntimePersistenceConformance {
-    pub attachment_manifest: AttachmentManifestConformance,
-    /// Whether the backend physically reclaims unreachable checkpoint blobs on
-    /// [`gc_unreachable`](crate::StoreMaintenance::gc_unreachable). Blob-backed
-    /// durable stores (SQLite, Postgres) set this; the in-memory store keeps
-    /// everything in RAM and reports an empty [`GcReport`](crate::GcReport), so
-    /// the stronger reclamation assertion is gated off for it.
-    pub reclaims_unreachable_blobs: bool,
-}
-
-impl RuntimePersistenceConformance {
-    pub const fn persistent_attachment_manifest() -> Self {
-        Self {
-            attachment_manifest: AttachmentManifestConformance::Persistent,
-            reclaims_unreachable_blobs: false,
-        }
-    }
-
-    pub const fn noop_attachment_manifest() -> Self {
-        Self {
-            attachment_manifest: AttachmentManifestConformance::Noop,
-            reclaims_unreachable_blobs: false,
-        }
-    }
-
-    /// Assert the backend reclaims unreachable checkpoint blobs on GC, running
-    /// the stronger mark/sweep conformance in addition to the minimal
-    /// safe-to-call check.
-    pub const fn reclaiming_unreachable_blobs(mut self) -> Self {
-        self.reclaims_unreachable_blobs = true;
-        self
-    }
-}
-
-impl Default for RuntimePersistenceConformance {
-    fn default() -> Self {
-        Self {
-            attachment_manifest: AttachmentManifestConformance::Persistent,
-            reclaims_unreachable_blobs: false,
-        }
-    }
-}
-
 /// Run the [`RuntimePersistence`] durability conformance suite against the
 /// backend produced by `make`. `make` must return a fresh, empty,
 /// single-session store on each call.
@@ -81,11 +27,7 @@ pub async fn runtime_persistence<F>(make: F)
 where
     F: Fn() -> Arc<dyn RuntimePersistence>,
 {
-    runtime_persistence_with_options(
-        make,
-        RuntimePersistenceConformance::persistent_attachment_manifest(),
-    )
-    .await;
+    runtime_persistence_suite(make).await;
 }
 
 /// Run the full [`RuntimePersistence`] suite plus durable reopen checks.
@@ -93,12 +35,8 @@ pub async fn runtime_persistence_reopenable<F>(make: F)
 where
     F: Fn() -> ReopenableRuntimePersistence,
 {
-    runtime_persistence_with_options(
-        || make().open,
-        RuntimePersistenceConformance::persistent_attachment_manifest()
-            .reclaiming_unreachable_blobs(),
-    )
-    .await;
+    runtime_persistence_suite(|| make().open).await;
+    gc_reclaims_unreachable_checkpoint_blobs_and_preserves_live(make().open).await;
     runtime_persistence_survives_reopen(make()).await;
 }
 
@@ -189,8 +127,7 @@ pub async fn runtime_persistence_clock_expiry(
     };
     let stale_commit = store
         .commit_runtime_state(
-            RuntimeCommit::persisted_state(&stale_state, &[])
-                .with_session_execution_lease(stale_lease.fence())
+            RuntimeCommit::persisted_state_for_test(&stale_state, &[])
                 .completing_queue_claim(stale_queue_claim.completion())
                 .completing_turn_input_claim(stale_input_claim.completion()),
         )
@@ -202,8 +139,7 @@ pub async fn runtime_persistence_clock_expiry(
 
     store
         .commit_runtime_state(
-            RuntimeCommit::persisted_state(&stale_state, &[])
-                .with_session_execution_lease(successor_lease.fence())
+            RuntimeCommit::persisted_state_for_test(&stale_state, &[])
                 .releasing_session_execution_lease(successor_lease.completion())
                 .completing_queue_claim(successor_queue_claim.completion())
                 .completing_turn_input_claim(successor_input_claim.completion()),
@@ -214,7 +150,7 @@ pub async fn runtime_persistence_clock_expiry(
     assert_eq!(stale_input_claim.inputs[0].input_id, input.input_id);
 }
 
-pub async fn runtime_persistence_with_options<F>(make: F, options: RuntimePersistenceConformance)
+async fn runtime_persistence_suite<F>(make: F)
 where
     F: Fn() -> Arc<dyn RuntimePersistence>,
 {
@@ -224,18 +160,11 @@ where
     concurrent_head_revision_cas_applies_exactly_once(make()).await;
     commit_rejects_a_different_session_id(make()).await;
     load_hydrates_checkpoint_and_usage(make()).await;
-    active_path_read_scope_selects_only_requested_ancestry(make()).await;
+    session_read_loads_persisted_history(make()).await;
     session_metadata_round_trips(make()).await;
-    match options.attachment_manifest {
-        AttachmentManifestConformance::Persistent => {
-            attachment_manifest_records_intent_and_commit_stamps(make()).await;
-            attachment_manifest_keeps_same_content_ownership_per_session(make()).await;
-            attachment_manifest_reference_tracking_and_gc_root_set(make()).await;
-        }
-        AttachmentManifestConformance::Noop => {
-            noop_attachment_manifest_is_explicit_and_empty(make()).await;
-        }
-    }
+    attachment_manifest_records_intent_and_commit_stamps(make()).await;
+    attachment_manifest_keeps_same_content_ownership_per_session(make()).await;
+    attachment_manifest_reference_tracking_and_gc_root_set(make()).await;
     final_commit_stamp_is_idempotent_and_conflicts_on_changed_hash(make()).await;
     verified_commit_rejects_receipt_topology_mismatch(make()).await;
     commit_rejects_non_derived_append_node_ids(make()).await;
@@ -244,7 +173,6 @@ where
     commit_rejects_unresolvable_leaf(make()).await;
     commit_rejects_missing_leaf(make()).await;
     empty_append_cannot_move_the_head(make()).await;
-    host_tombstone_cannot_remove_a_reachable_leaf(make()).await;
     commit_rejects_leaf_without_frame_open_ancestor(make()).await;
     // [`SessionExecutionLeaseStore`]: single-writer lane fencing.
     session_execution_lease_contract(make()).await;
@@ -277,10 +205,6 @@ where
     pending_active_turn_inputs_defer_unaccepted_once_on_interrupt(make()).await;
     // [`StoreMaintenance`]: tombstone/vacuum/GC retention.
     verify_node_refcounts_matches_append_edges_and_head_moves(make()).await;
-    tombstone_vacuum_and_gc_are_minimally_consistent(make()).await;
-    if options.reclaims_unreachable_blobs {
-        gc_reclaims_unreachable_checkpoint_blobs_and_preserves_live(make()).await;
-    }
 }
 
 async fn commit_rejects_leaf_without_frame_open_ancestor(store: Arc<dyn RuntimePersistence>) {
@@ -301,7 +225,7 @@ async fn commit_rejects_leaf_without_frame_open_ancestor(store: Arc<dyn RuntimeP
     };
     let commit = RuntimeCommit::persisted_state_with_graph_commit(
         &state,
-        crate::GraphCommitDelta::Append {
+        crate::GraphAppend {
             nodes: vec![node],
             leaf_node_id: Some("unframed-root".to_string()),
         },
@@ -336,7 +260,7 @@ async fn verify_node_refcounts_matches_append_edges_and_head_moves(
         .map(|node| node.node_id.clone())
         .collect::<Vec<_>>();
     let first = store
-        .commit_runtime_state(RuntimeCommit::persisted_state(&state, &[]))
+        .commit_runtime_state(RuntimeCommit::persisted_state_for_test(&state, &[]))
         .await
         .expect("commit frame root");
     state.apply_persisted_commit_result(first);
@@ -366,7 +290,7 @@ async fn verify_node_refcounts_matches_append_edges_and_head_moves(
         .map(|node| node.node_id.clone())
         .collect::<Vec<_>>();
     let second = store
-        .commit_runtime_state(RuntimeCommit::persisted_state(&state, &[]))
+        .commit_runtime_state(RuntimeCommit::persisted_state_for_test(&state, &[]))
         .await
         .expect("move head to child");
     state.apply_persisted_commit_result(second);
@@ -421,8 +345,7 @@ async fn turn_input_application_identity_survives_pending_tombstone_vacuum(
         let turn_expected = claim.applications.clone();
         assert_eq!(admitted.len(), turn_expected.len());
 
-        let mut commit = RuntimeCommit::persisted_state(&state, &[])
-            .with_session_execution_lease(lease.fence())
+        let mut commit = RuntimeCommit::persisted_state_for_test(&state, &[])
             .completing_turn_input_claim(claim.completion());
         if turn_index == 1 {
             commit = commit.releasing_session_execution_lease(lease.completion());
@@ -430,11 +353,11 @@ async fn turn_input_application_identity_survives_pending_tombstone_vacuum(
         let hash = commit
             .turn_commit_hash()
             .expect("hash application turn commit");
-        commit = commit.with_turn_commit(crate::RuntimeTurnCommitStamp::new(
+        commit.turn_commit = crate::RuntimeTurnCommitStamp::new(
             session_id,
             crate::OperationId::turn(session_id, turn_id, "final"),
             hash,
-        ));
+        );
         if turn_index == 1 {
             replay = Some(commit.clone());
         }
@@ -833,11 +756,7 @@ async fn commit_runtime_state_for_test(
     let session_id = commit.session_id.clone();
     let lease = claim_session_execution_lease_for_test(store, &session_id, owner_id).await;
     store
-        .commit_runtime_state(
-            commit
-                .with_session_execution_lease(lease.fence())
-                .releasing_session_execution_lease(lease.completion()),
-        )
+        .commit_runtime_state(commit.releasing_session_execution_lease(lease.completion()))
         .await
 }
 
@@ -923,13 +842,13 @@ async fn commit_increments_head_and_round_trips_agent_frames(store: Arc<dyn Runt
 
     commit_runtime_state_for_test(
         &store,
-        RuntimeCommit::persisted_state(&state, &[]),
+        RuntimeCommit::persisted_state_for_test(&state, &[]),
         "commit-round-trip",
     )
     .await
     .expect("commit runtime state");
     let read = store
-        .load_session(SessionReadScope::FullGraph)
+        .load_session()
         .await
         .expect("load session")
         .expect("session read");
@@ -968,13 +887,12 @@ async fn concurrent_head_revision_cas_applies_exactly_once(store: Arc<dyn Runtim
         RuntimeCommit {
             expected_head_revision: 0,
             current_frame_node_id: Some(derived_node_id.clone()),
-            graph: crate::GraphCommitDelta::Append {
+            graph: crate::GraphAppend {
                 nodes: vec![node],
                 leaf_node_id: Some(derived_node_id),
             },
-            ..RuntimeCommit::persisted_state(&state, &[])
+            ..RuntimeCommit::persisted_state_for_test(&state, &[])
         }
-        .with_session_execution_lease(lease.fence())
     };
 
     let barrier = Arc::new(tokio::sync::Barrier::new(3));
@@ -1014,7 +932,7 @@ async fn concurrent_head_revision_cas_applies_exactly_once(store: Arc<dyn Runtim
     );
 
     let persisted = store
-        .load_session(SessionReadScope::FullGraph)
+        .load_session()
         .await
         .expect("load state after concurrent head CAS")
         .expect("concurrent head-CAS winner persisted a session");
@@ -1038,7 +956,7 @@ async fn commit_rejects_a_different_session_id(store: Arc<dyn RuntimePersistence
     };
     commit_runtime_state_for_test(
         &store,
-        RuntimeCommit::persisted_state(&alpha, &[]),
+        RuntimeCommit::persisted_state_for_test(&alpha, &[]),
         "bind-alpha",
     )
     .await
@@ -1050,7 +968,7 @@ async fn commit_rejects_a_different_session_id(store: Arc<dyn RuntimePersistence
     };
     let result = commit_runtime_state_for_test(
         &store,
-        RuntimeCommit::persisted_state(&beta, &[]),
+        RuntimeCommit::persisted_state_for_test(&beta, &[]),
         "bind-beta",
     )
     .await;
@@ -1085,17 +1003,13 @@ async fn load_hydrates_checkpoint_and_usage(store: Arc<dyn RuntimePersistence>) 
 
     commit_runtime_state_for_test(
         &store,
-        RuntimeCommit::persisted_state(&state, &[usage]),
+        RuntimeCommit::persisted_state_for_test(&state, &[usage]),
         "hydrate",
     )
     .await
     .expect("commit");
 
-    let read = store
-        .load_session(SessionReadScope::FullGraph)
-        .await
-        .expect("load")
-        .expect("session");
+    let read = store.load_session().await.expect("load").expect("session");
     let checkpoint = read.checkpoint.expect("checkpoint");
     assert_eq!(read.session_id, "hydrated");
     assert_eq!(
@@ -1220,7 +1134,7 @@ async fn session_execution_lease_contract(store: Arc<dyn RuntimePersistence>) {
         ..RuntimeSessionState::default()
     };
     let lease_free_commit = store
-        .commit_runtime_state(RuntimeCommit::persisted_state(&state, &[]))
+        .commit_runtime_state(RuntimeCommit::persisted_state_for_test(&state, &[]))
         .await
         .expect("head CAS, not the advisory lease, authorizes commit");
     state.head_revision = lease_free_commit.head_revision;
@@ -1228,8 +1142,7 @@ async fn session_execution_lease_contract(store: Arc<dyn RuntimePersistence>) {
     let commit_lease = claim_session_execution_lease_for_test(&store, "root", "commit-owner").await;
     let lease_commit = store
         .commit_runtime_state(
-            RuntimeCommit::persisted_state(&state, &[])
-                .with_session_execution_lease(commit_lease.fence())
+            RuntimeCommit::persisted_state_for_test(&state, &[])
                 .releasing_session_execution_lease(commit_lease.completion()),
         )
         .await
@@ -1245,19 +1158,19 @@ async fn session_execution_lease_contract(store: Arc<dyn RuntimePersistence>) {
         head_revision: state.head_revision,
         ..RuntimeSessionState::default()
     };
-    let turn_commit = RuntimeCommit::persisted_state(&turn_state, &[]);
+    let turn_commit = RuntimeCommit::persisted_state_for_test(&turn_state, &[]);
     let turn_hash = turn_commit.turn_commit_hash().expect("turn hash");
-    let turn_commit = turn_commit.with_turn_commit(RuntimeTurnCommitStamp::new(
+    let mut turn_commit = turn_commit;
+    turn_commit.turn_commit = RuntimeTurnCommitStamp::new(
         "root",
         crate::OperationId::turn("root", "lease-replay-turn", "final"),
         turn_hash,
-    ));
+    );
     let turn_lease = claim_session_execution_lease_for_test(&store, "root", "turn-owner").await;
     let first_result = store
         .commit_runtime_state(
             turn_commit
                 .clone()
-                .with_session_execution_lease(turn_lease.fence())
                 .releasing_session_execution_lease(turn_lease.completion()),
         )
         .await
@@ -1574,9 +1487,7 @@ async fn session_execution_lease_reclaim_contract(store: Arc<dyn RuntimePersiste
     }
 }
 
-async fn active_path_read_scope_selects_only_requested_ancestry(
-    store: Arc<dyn RuntimePersistence>,
-) {
+async fn session_read_loads_persisted_history(store: Arc<dyn RuntimePersistence>) {
     let incarnation_id = crate::IncarnationId::mint_for_store();
     let root = sample_session_node("branchy", &incarnation_id, "root-node", None);
     let root_node_id = root.node_id.clone();
@@ -1597,68 +1508,27 @@ async fn active_path_read_scope_selects_only_requested_ancestry(
     };
     commit_runtime_state_for_test(
         &store,
-        RuntimeCommit::persisted_state(&state, &[]),
+        RuntimeCommit::persisted_state_for_test(&state, &[]),
         "active-path",
     )
     .await
     .expect("commit linear graph");
 
-    let full = store
-        .load_session(SessionReadScope::FullGraph)
+    let read = store
+        .load_session()
         .await
-        .expect("load full graph")
-        .expect("full graph exists");
+        .expect("load session history")
+        .expect("session history exists");
     assert_eq!(
-        full.graph
+        read.graph
             .nodes
             .iter()
             .map(|node| node.node_id.as_str())
             .collect::<Vec<_>>(),
         vec![root_node_id.as_str(), "left-node", "left-leaf"],
-        "FullGraph must retain the full non-tombstoned chain"
+        "session reads must return the persisted leaf-to-root history"
     );
-
-    let persisted_leaf_path = store
-        .load_session(SessionReadScope::ActivePath { leaf_node_id: None })
-        .await
-        .expect("load persisted active path")
-        .expect("active path exists");
-    assert_eq!(
-        persisted_leaf_path
-            .graph
-            .nodes
-            .iter()
-            .map(|node| node.node_id.as_str())
-            .collect::<Vec<_>>(),
-        vec![root_node_id.as_str(), "left-node", "left-leaf"],
-        "ActivePath with no explicit leaf must use the persisted leaf"
-    );
-    assert_eq!(
-        persisted_leaf_path.graph.leaf_node_id.as_deref(),
-        Some("left-leaf")
-    );
-
-    let explicit_ancestor_path = store
-        .load_session(SessionReadScope::ActivePath {
-            leaf_node_id: Some("left-node".to_string()),
-        })
-        .await
-        .expect("load explicit active path")
-        .expect("explicit active path exists");
-    assert_eq!(
-        explicit_ancestor_path
-            .graph
-            .nodes
-            .iter()
-            .map(|node| node.node_id.as_str())
-            .collect::<Vec<_>>(),
-        vec![root_node_id.as_str(), "left-node"],
-        "ActivePath with an explicit leaf must select only that ancestry"
-    );
-    assert_eq!(
-        explicit_ancestor_path.graph.leaf_node_id.as_deref(),
-        Some("left-node")
-    );
+    assert_eq!(read.graph.leaf_node_id.as_deref(), Some("left-leaf"));
 }
 
 async fn attachment_manifest_records_intent_and_commit_stamps(store: Arc<dyn RuntimePersistence>) {
@@ -1687,7 +1557,7 @@ async fn attachment_manifest_records_intent_and_commit_stamps(store: Arc<dyn Run
     };
     commit_runtime_state_for_test(
         &store,
-        RuntimeCommit::persisted_state(&state, &[])
+        RuntimeCommit::persisted_state_for_test(&state, &[])
             .with_committed_attachments([committed_by_runtime.clone()]),
         "attachment-manifest",
     )
@@ -1764,26 +1634,6 @@ async fn attachment_manifest_keeps_same_content_ownership_per_session(
                 && entry.attachment_id == attachment),
         "a colliding owner or repeated put must not erase another session's commit stamp"
     );
-}
-
-async fn noop_attachment_manifest_is_explicit_and_empty(store: Arc<dyn RuntimePersistence>) {
-    let attachment = AttachmentId::new("noop".to_string());
-    store
-        .record_intent(attachment_intent(attachment.as_str()))
-        .expect("noop record intent succeeds");
-    store
-        .commit_refs("root", std::slice::from_ref(&attachment))
-        .expect("noop commit refs succeeds");
-    assert!(
-        store
-            .list_uncommitted(200)
-            .expect("noop list uncommitted")
-            .is_empty(),
-        "declared no-op attachment manifests must not retain intent rows"
-    );
-    store
-        .forget("noop-session", &attachment)
-        .expect("noop forget succeeds");
 }
 
 async fn queued_work_source_keys_are_idempotent_and_list_ordered(
@@ -2161,8 +2011,7 @@ async fn queued_work_exact_claim_uses_selected_batch_ids(store: Arc<dyn RuntimeP
     };
     store
         .commit_runtime_state(
-            RuntimeCommit::persisted_state(&state, &[])
-                .with_session_execution_lease(selected_session_lease.fence())
+            RuntimeCommit::persisted_state_for_test(&state, &[])
                 .releasing_session_execution_lease(selected_session_lease.completion())
                 .completing_queue_claim(selected.completion()),
         )
@@ -2261,8 +2110,7 @@ async fn queued_work_classes_gate_command_and_turn_claims(store: Arc<dyn Runtime
     };
     store
         .commit_runtime_state(
-            RuntimeCommit::persisted_state(&state, &[])
-                .with_session_execution_lease(command_lease.fence())
+            RuntimeCommit::persisted_state_for_test(&state, &[])
                 .releasing_session_execution_lease(command_lease.completion())
                 .completing_queue_claim(command_claim.completion()),
         )
@@ -2449,7 +2297,7 @@ async fn queued_work_claims_respect_boundaries_abandon_and_stale_completion(
     };
     let stale_err = commit_runtime_state_for_test(
         &store,
-        RuntimeCommit::persisted_state(&stale_state, &[])
+        RuntimeCommit::persisted_state_for_test(&stale_state, &[])
             .completing_queue_claim(idle_claim.completion()),
         "owner-d",
     )
@@ -2544,8 +2392,7 @@ pub async fn queued_work_claims_supersede_across_session_lease_generations(
     };
     let stale_err = store
         .commit_runtime_state(
-            RuntimeCommit::persisted_state(&stale_state, &[])
-                .with_session_execution_lease(lease_b.fence())
+            RuntimeCommit::persisted_state_for_test(&stale_state, &[])
                 .completing_queue_claim(claim_a.completion()),
         )
         .await
@@ -2613,8 +2460,7 @@ pub async fn queued_work_claims_supersede_across_session_lease_generations(
     assert_eq!(claim_taker.batches[0].batch_id, batch.batch_id);
     let takeover_err = store
         .commit_runtime_state(
-            RuntimeCommit::persisted_state(&stale_state, &[])
-                .with_session_execution_lease(taker_lease.fence())
+            RuntimeCommit::persisted_state_for_test(&stale_state, &[])
                 .completing_queue_claim(claim_dead.completion()),
         )
         .await
@@ -3283,8 +3129,7 @@ async fn queued_work_completion_is_lease_guarded(store: Arc<dyn RuntimePersisten
     };
     let err = store
         .commit_runtime_state(
-            RuntimeCommit::persisted_state(&state, &[])
-                .with_session_execution_lease(claim_session_lease.fence())
+            RuntimeCommit::persisted_state_for_test(&state, &[])
                 .completing_queue_claim(stale_completion),
         )
         .await
@@ -3301,8 +3146,7 @@ async fn queued_work_completion_is_lease_guarded(store: Arc<dyn RuntimePersisten
 
     store
         .commit_runtime_state(
-            RuntimeCommit::persisted_state(&state, &[])
-                .with_session_execution_lease(claim_session_lease.fence())
+            RuntimeCommit::persisted_state_for_test(&state, &[])
                 .releasing_session_execution_lease(claim_session_lease.completion())
                 .completing_queue_claim(claim.completion()),
         )
@@ -3364,7 +3208,7 @@ async fn queue_completion_and_turn_commit_stamp_are_atomic(store: Arc<dyn Runtim
         turn_index: 41,
         ..RuntimeSessionState::default()
     };
-    let mut base_commit = RuntimeCommit::persisted_state(&state, &[]);
+    let mut base_commit = RuntimeCommit::persisted_state_for_test(&state, &[]);
     base_commit.enqueued_queue_batches = vec![
         QueuedWorkBatchDraft::new(
             "root",
@@ -3384,14 +3228,13 @@ async fn queue_completion_and_turn_commit_stamp_are_atomic(store: Arc<dyn Runtim
         crate::OperationId::turn("root", "turn-atomic", "final"),
         commit_hash.clone(),
     );
+    base_commit.turn_commit = turn_commit.clone();
     let mut stale_queue_completion = claim.completion();
     stale_queue_completion.lease_token.push_str(":stale");
     let err = store
         .commit_runtime_state(
             base_commit
                 .clone()
-                .with_session_execution_lease(session_lease.fence())
-                .with_turn_commit(turn_commit.clone())
                 .completing_turn_input_claim(input_claim.completion())
                 .completing_queue_claim(stale_queue_completion),
         )
@@ -3400,7 +3243,7 @@ async fn queue_completion_and_turn_commit_stamp_are_atomic(store: Arc<dyn Runtim
     assert!(matches!(err, StoreError::QueuedWorkClaimSuperseded { .. }));
     assert!(
         store
-            .load_session(SessionReadScope::FullGraph)
+            .load_session()
             .await
             .expect("load after rejected atomic commit")
             .is_none(),
@@ -3421,7 +3264,6 @@ async fn queue_completion_and_turn_commit_stamp_are_atomic(store: Arc<dyn Runtim
     let err = store
         .commit_runtime_state(
             cross_session_outbox
-                .with_session_execution_lease(session_lease.fence())
                 .completing_queue_claim(claim.completion())
                 .completing_turn_input_claim(input_claim.completion()),
         )
@@ -3430,7 +3272,7 @@ async fn queue_completion_and_turn_commit_stamp_are_atomic(store: Arc<dyn Runtim
     assert!(matches!(err, StoreError::SessionBindingMismatch { .. }));
     assert!(
         store
-            .load_session(SessionReadScope::FullGraph)
+            .load_session()
             .await
             .expect("load after rejected outbox enqueue")
             .is_none(),
@@ -3450,27 +3292,25 @@ async fn queue_completion_and_turn_commit_stamp_are_atomic(store: Arc<dyn Runtim
         .commit_runtime_state(
             base_commit
                 .clone()
-                .with_session_execution_lease(session_lease.fence())
                 .releasing_session_execution_lease(session_lease.completion())
-                .with_turn_commit(turn_commit.clone())
                 .completing_turn_input_claim(input_claim.completion())
                 .completing_queue_claim(claim.completion()),
         )
         .await
         .expect("valid final commit clears queue and records the turn stamp atomically");
     let retry = store
-        .commit_runtime_state(
-            base_commit
-                .with_session_execution_lease(session_lease.fence())
+        .commit_runtime_state({
+            let mut retry = base_commit;
+            retry.turn_commit = RuntimeTurnCommitStamp::new(
+                "root",
+                crate::OperationId::turn("root", "turn-atomic", "final"),
+                commit_hash,
+            );
+            retry
                 .releasing_session_execution_lease(session_lease.completion())
-                .with_turn_commit(RuntimeTurnCommitStamp::new(
-                    "root",
-                    crate::OperationId::turn("root", "turn-atomic", "final"),
-                    commit_hash,
-                ))
                 .completing_turn_input_claim(input_claim.completion())
-                .completing_queue_claim(claim.completion()),
-        )
+                .completing_queue_claim(claim.completion())
+        })
         .await
         .expect("same final turn commit stamp retries idempotently");
     assert_eq!(retry.head_revision, first.head_revision);
@@ -3487,7 +3327,7 @@ async fn queue_completion_and_turn_commit_stamp_are_atomic(store: Arc<dyn Runtim
     );
     assert!(
         store
-            .load_session(SessionReadScope::FullGraph)
+            .load_session()
             .await
             .expect("load after accepted atomic commit")
             .is_some()
@@ -3901,8 +3741,7 @@ async fn pending_turn_input_claims_reclaim_complete_and_fence(store: Arc<dyn Run
     };
     let err = store
         .commit_runtime_state(
-            RuntimeCommit::persisted_state(&state, &[])
-                .with_session_execution_lease(lease.fence())
+            RuntimeCommit::persisted_state_for_test(&state, &[])
                 .completing_turn_input_claim(claim.completion()),
         )
         .await
@@ -3919,8 +3758,7 @@ async fn pending_turn_input_claims_reclaim_complete_and_fence(store: Arc<dyn Run
 
     store
         .commit_runtime_state(
-            RuntimeCommit::persisted_state(&state, &[])
-                .with_session_execution_lease(lease.fence())
+            RuntimeCommit::persisted_state_for_test(&state, &[])
                 .releasing_session_execution_lease(lease.completion())
                 .completing_turn_input_claim(reclaimed.completion()),
         )
@@ -4024,8 +3862,7 @@ pub async fn turn_input_claims_supersede_across_session_lease_generations(
     };
     let stale_err = store
         .commit_runtime_state(
-            RuntimeCommit::persisted_state(&stale_state, &[])
-                .with_session_execution_lease(lease_b.fence())
+            RuntimeCommit::persisted_state_for_test(&stale_state, &[])
                 .completing_turn_input_claim(claim_a.completion()),
         )
         .await
@@ -4079,8 +3916,7 @@ pub async fn turn_input_claims_supersede_across_session_lease_generations(
     assert_eq!(claim_taker.inputs[0].input_id, input.input_id);
     let takeover_err = store
         .commit_runtime_state(
-            RuntimeCommit::persisted_state(&stale_state, &[])
-                .with_session_execution_lease(taker_lease.fence())
+            RuntimeCommit::persisted_state_for_test(&stale_state, &[])
                 .completing_turn_input_claim(claim_dead.completion()),
         )
         .await
@@ -4145,8 +3981,7 @@ async fn pending_turn_input_cancel_covers_active_and_deferred_states(
     };
     store
         .commit_runtime_state(
-            RuntimeCommit::persisted_state(&state, &[])
-                .with_session_execution_lease(lease.fence())
+            RuntimeCommit::persisted_state_for_test(&state, &[])
                 .deferring_interrupted_turn_inputs(turn_id),
         )
         .await
@@ -4276,8 +4111,7 @@ async fn pending_active_turn_inputs_defer_unaccepted_once_on_interrupt(
     };
     let interrupt_result = store
         .commit_runtime_state(
-            RuntimeCommit::persisted_state(&state, &[])
-                .with_session_execution_lease(lease.fence())
+            RuntimeCommit::persisted_state_for_test(&state, &[])
                 .completing_turn_input_claim(claim.completion())
                 .deferring_interrupted_turn_inputs(turn_id),
         )
@@ -4350,8 +4184,7 @@ async fn pending_active_turn_inputs_defer_unaccepted_once_on_interrupt(
     );
     store
         .commit_runtime_state(
-            RuntimeCommit::persisted_state(&state, &[])
-                .with_session_execution_lease(lease.fence())
+            RuntimeCommit::persisted_state_for_test(&state, &[])
                 .releasing_session_execution_lease(lease.completion())
                 .completing_turn_input_claim(next_claim.completion()),
         )
@@ -4395,69 +4228,6 @@ async fn session_metadata_round_trips(store: Arc<dyn RuntimePersistence>) {
     assert_eq!(loaded.relation, meta.relation);
 }
 
-async fn tombstone_vacuum_and_gc_are_minimally_consistent(store: Arc<dyn RuntimePersistence>) {
-    let incarnation_id = crate::IncarnationId::mint_for_store();
-    let root = sample_session_node("root", &incarnation_id, "node-live", None);
-    let root_node_id = root.node_id.clone();
-    let mut state = RuntimeSessionState {
-        session_id: "root".to_string(),
-        session_lifetime: crate::SessionLifetime::durable(incarnation_id.clone()),
-        session_graph: crate::SessionGraph::from_nodes(
-            vec![
-                root,
-                sample_session_node("root", &incarnation_id, "node-delete", Some(&root_node_id)),
-            ],
-            Some("node-delete".to_string()),
-        ),
-        ..RuntimeSessionState::default()
-    };
-    state.head_revision = 0;
-    commit_runtime_state_for_test(
-        &store,
-        RuntimeCommit::persisted_state(&state, &[]),
-        "tombstone",
-    )
-    .await
-    .expect("commit graph");
-    assert!(
-        store
-            .load_node("node-delete")
-            .await
-            .expect("load node before tombstone")
-            .is_some()
-    );
-    store
-        .tombstone_nodes(&["node-delete".to_string()])
-        .await
-        .expect("probe live node for reclamation");
-    assert!(
-        store
-            .load_node("node-delete")
-            .await
-            .expect("load node after reclamation probe")
-            .is_some(),
-        "a host-selected live node must not be tombstoned"
-    );
-    let read = store
-        .load_session(SessionReadScope::FullGraph)
-        .await
-        .expect("load graph after tombstone")
-        .expect("session after tombstone");
-    assert!(
-        read.graph
-            .nodes
-            .iter()
-            .any(|node| node.node_id == "node-delete"),
-        "a reachable node must remain in session graph loads"
-    );
-    let vacuum = store.vacuum().await.expect("vacuum");
-    assert_eq!(vacuum.removed_node_count, 0);
-    store
-        .gc_unreachable()
-        .await
-        .expect("gc_unreachable should be safe to call");
-}
-
 /// Blob-backed backends must physically reclaim the checkpoint blob a superseding
 /// commit orphaned, while preserving the live one. Generalizes the SQLite-only
 /// `gc_unreachable_keeps_rooted_checkpoint_blobs` test to every reclaiming
@@ -4474,7 +4244,7 @@ async fn gc_reclaims_unreachable_checkpoint_blobs_and_preserves_live(
     };
     let v1_result = commit_runtime_state_for_test(
         &store,
-        RuntimeCommit::persisted_state(&v1, &[]),
+        RuntimeCommit::persisted_state_for_test(&v1, &[]),
         "gc-blobs-v1",
     )
     .await
@@ -4490,7 +4260,7 @@ async fn gc_reclaims_unreachable_checkpoint_blobs_and_preserves_live(
     };
     commit_runtime_state_for_test(
         &store,
-        RuntimeCommit::persisted_state(&v2, &[]),
+        RuntimeCommit::persisted_state_for_test(&v2, &[]),
         "gc-blobs-v2",
     )
     .await
@@ -4515,7 +4285,7 @@ async fn gc_reclaims_unreachable_checkpoint_blobs_and_preserves_live(
 
     // The reachable checkpoint survived: the session still loads at generation 2.
     let read = store
-        .load_session(SessionReadScope::FullGraph)
+        .load_session()
         .await
         .expect("load after gc")
         .expect("session after gc");
@@ -4652,7 +4422,7 @@ async fn runtime_persistence_survives_reopen(factory: ReopenableRuntimePersisten
     };
     let initial_commit = commit_runtime_state_for_test(
         &factory.open,
-        RuntimeCommit::persisted_state(&state, &[]),
+        RuntimeCommit::persisted_state_for_test(&state, &[]),
         "reopen",
     )
     .await
@@ -4691,8 +4461,7 @@ async fn runtime_persistence_survives_reopen(factory: ReopenableRuntimePersisten
         );
         expected_applications.extend(claim.applications.clone());
 
-        let mut commit = RuntimeCommit::persisted_state(&state, &[])
-            .with_session_execution_lease(application_lease.fence())
+        let mut commit = RuntimeCommit::persisted_state_for_test(&state, &[])
             .completing_turn_input_claim(claim.completion());
         if turn_index == 1 {
             commit = commit.releasing_session_execution_lease(application_lease.completion());
@@ -4700,13 +4469,14 @@ async fn runtime_persistence_survives_reopen(factory: ReopenableRuntimePersisten
         let hash = commit
             .turn_commit_hash()
             .expect("hash reopen application turn commit");
+        commit.turn_commit = RuntimeTurnCommitStamp::new(
+            "root",
+            crate::OperationId::turn("root", turn_id, "final"),
+            hash,
+        );
         let result = factory
             .open
-            .commit_runtime_state(commit.with_turn_commit(RuntimeTurnCommitStamp::new(
-                "root",
-                crate::OperationId::turn("root", turn_id, "final"),
-                hash,
-            )))
+            .commit_runtime_state(commit)
             .await
             .expect("commit reopen application");
         state.head_revision = result.head_revision;
@@ -4746,7 +4516,7 @@ async fn runtime_persistence_survives_reopen(factory: ReopenableRuntimePersisten
     assert_eq!(reopened_meta.session_name, meta.session_name);
     let reopened = factory
         .reopen
-        .load_session(SessionReadScope::FullGraph)
+        .load_session()
         .await
         .expect("load reopened state")
         .expect("reopened state");
@@ -4911,8 +4681,7 @@ async fn queued_wake_delivery_is_source_key_idempotent_and_claimed_once(
     };
     store
         .commit_runtime_state(
-            RuntimeCommit::persisted_state(&state, &[])
-                .with_session_execution_lease(session_lease.fence())
+            RuntimeCommit::persisted_state_for_test(&state, &[])
                 .releasing_session_execution_lease(session_lease.completion())
                 .completing_queue_claim(claim.completion()),
         )
@@ -4940,15 +4709,10 @@ async fn final_commit_stamp_is_idempotent_and_conflicts_on_changed_hash(
     state.session_graph.data_mut().nodes[0].timestamp = "2026-07-26T10:00:00Z".to_string();
     state.execution_state_snapshot = Some(vec![7; 1_024]);
     let operation = crate::OperationId::turn("root", "provider-turn", "final");
-    let (stamped_commit, _) = RuntimeCommit::persisted_state(&state, &[])
+    let (stamped_commit, _) = RuntimeCommit::persisted_state_for_test(&state, &[])
         .with_operation(operation.clone())
         .expect("derive and stamp first commit");
-    let turn_commit_hash = stamped_commit
-        .turn_commit
-        .as_ref()
-        .expect("turn commit stamp")
-        .turn_commit_hash
-        .clone();
+    let turn_commit_hash = stamped_commit.turn_commit.turn_commit_hash.clone();
 
     let session_lease =
         claim_session_execution_lease_for_test(&store, "root", "provider-turn").await;
@@ -4956,22 +4720,16 @@ async fn final_commit_stamp_is_idempotent_and_conflicts_on_changed_hash(
         .commit_runtime_state(
             stamped_commit
                 .clone()
-                .with_session_execution_lease(session_lease.fence())
                 .releasing_session_execution_lease(session_lease.completion()),
         )
         .await
         .expect("first final commit requires a live session execution lease");
     let mut replay_state = state.clone();
     replay_state.session_graph.data_mut().nodes[0].timestamp = "2026-07-26T10:00:09Z".to_string();
-    let (replay_commit, _) = RuntimeCommit::persisted_state(&replay_state, &[])
+    let (replay_commit, _) = RuntimeCommit::persisted_state_for_test(&replay_state, &[])
         .with_operation(operation.clone())
         .expect("derive and stamp replay");
-    let replay_hash = replay_commit
-        .turn_commit
-        .as_ref()
-        .expect("replay stamp")
-        .turn_commit_hash
-        .clone();
+    let replay_hash = replay_commit.turn_commit.turn_commit_hash.clone();
     assert_eq!(replay_hash, turn_commit_hash);
     let retry = store
         .commit_runtime_state(replay_commit)
@@ -4990,7 +4748,7 @@ async fn final_commit_stamp_is_idempotent_and_conflicts_on_changed_hash(
     );
     replay_state.apply_persisted_commit_result(retry.clone());
 
-    let mut retry_from_new_head = RuntimeCommit::persisted_state(&state, &[])
+    let mut retry_from_new_head = RuntimeCommit::persisted_state_for_test(&state, &[])
         .with_operation(operation.clone())
         .expect("stamp retry from advanced head")
         .0;
@@ -5009,14 +4767,15 @@ async fn final_commit_stamp_is_idempotent_and_conflicts_on_changed_hash(
         turn_index: 1,
         ..RuntimeSessionState::default()
     };
-    let changed = RuntimeCommit::persisted_state(&changed_state, &[]);
+    let mut changed = RuntimeCommit::persisted_state_for_test(&changed_state, &[]);
     let changed_hash = changed.turn_commit_hash().expect("changed commit hash");
+    changed.turn_commit = RuntimeTurnCommitStamp::new(
+        "root",
+        crate::OperationId::turn("root", "provider-turn", "final"),
+        changed_hash,
+    );
     let err = store
-        .commit_runtime_state(changed.with_turn_commit(RuntimeTurnCommitStamp::new(
-            "root",
-            crate::OperationId::turn("root", "provider-turn", "final"),
-            changed_hash,
-        )))
+        .commit_runtime_state(changed)
         .await
         .expect_err("same provider turn id with a different commit hash must conflict");
     assert!(matches!(err, StoreError::RuntimeTurnCommitConflict { .. }));
@@ -5036,7 +4795,7 @@ async fn verified_commit_rejects_receipt_topology_mismatch(store: Arc<dyn Runtim
         &state.session_lifetime,
         frame_key,
     );
-    let graph = crate::GraphCommitDelta::Append {
+    let graph = crate::GraphAppend {
         nodes: vec![crate::SessionNodeRecord {
             node_id: node_id.clone(),
             parent_node_id: None,
@@ -5066,9 +4825,7 @@ async fn verified_commit_rejects_receipt_topology_mismatch(store: Arc<dyn Runtim
         .expect("first guarded commit");
 
     let mut divergent_replay = first;
-    let crate::GraphCommitDelta::Append { nodes, .. } = &mut divergent_replay.graph else {
-        panic!("guard fixture is append");
-    };
+    let crate::GraphAppend { nodes, .. } = &mut divergent_replay.graph;
     nodes[0].parent_node_id = Some("proposal-only-parent".to_string());
     let err = crate::store::commit_runtime_state_verified(store.as_ref(), divergent_replay)
         .await
@@ -5093,7 +4850,7 @@ async fn commit_rejects_non_derived_append_node_ids(store: Arc<dyn RuntimePersis
     };
     state.ensure_agent_frame_initialized();
     let operation = crate::OperationId::turn("root", "guard-turn", "final");
-    let graph = crate::GraphCommitDelta::Append {
+    let graph = crate::GraphAppend {
         nodes: vec![crate::SessionNodeRecord {
             node_id: "rogue-node-id".to_string(),
             parent_node_id: None,
@@ -5105,16 +4862,16 @@ async fn commit_rejects_non_derived_append_node_ids(store: Arc<dyn RuntimePersis
         }],
         leaf_node_id: Some("rogue-node-id".to_string()),
     };
-    let commit = RuntimeCommit::persisted_state_with_graph_commit(&state, graph, &[]);
+    let mut commit = RuntimeCommit::persisted_state_with_graph_commit(&state, graph, &[]);
     let hash = commit.turn_commit_hash().expect("hash rogue proposal");
-    let commit = commit.with_turn_commit(RuntimeTurnCommitStamp::new("root", operation, hash));
+    commit.turn_commit = RuntimeTurnCommitStamp::new("root", operation, hash);
     let err = commit_runtime_state_for_test(&store, commit, "node-guard")
         .await
         .expect_err("store must rederive append node ids before writing");
     assert!(matches!(err, StoreError::NodeIdDerivationMismatch { .. }));
     assert!(
         store
-            .load_session(SessionReadScope::FullGraph)
+            .load_session()
             .await
             .expect("load after guard rejection")
             .is_none(),
@@ -5148,7 +4905,7 @@ async fn append_rejects_existing_node_id_collision(store: Arc<dyn RuntimePersist
     };
     state.session_graph =
         crate::SessionGraph::from_nodes(vec![original.clone()], Some(colliding_id.clone()));
-    let initial = RuntimeCommit::persisted_state(&state, &[]);
+    let initial = RuntimeCommit::persisted_state_for_test(&state, &[]);
     let first = commit_runtime_state_for_test(&store, initial, "collision-seed")
         .await
         .expect("seed colliding durable node");
@@ -5164,7 +4921,7 @@ async fn append_rejects_existing_node_id_collision(store: Arc<dyn RuntimePersist
     };
     let mut append = RuntimeCommit::persisted_state_with_graph_commit(
         &state,
-        crate::GraphCommitDelta::Append {
+        crate::GraphAppend {
             nodes: vec![replacement],
             leaf_node_id: Some(colliding_id.clone()),
         },
@@ -5197,7 +4954,7 @@ async fn append_rejects_duplicate_batch_node_ids(store: Arc<dyn RuntimePersisten
     let duplicate_node_id = crate::frame_node_id("root", &incarnation_id, "duplicate");
     let commit = RuntimeCommit::persisted_state_with_graph_commit(
         &state,
-        crate::GraphCommitDelta::Append {
+        crate::GraphAppend {
             nodes: vec![
                 sample_session_node("root", &incarnation_id, "duplicate", None),
                 sample_session_node("root", &incarnation_id, "duplicate", None),
@@ -5215,7 +4972,7 @@ async fn append_rejects_duplicate_batch_node_ids(store: Arc<dyn RuntimePersisten
     ));
     assert!(
         store
-            .load_session(SessionReadScope::FullGraph)
+            .load_session()
             .await
             .expect("load after duplicate rejection")
             .is_none(),
@@ -5231,7 +4988,7 @@ async fn commit_rejects_unresolvable_leaf(store: Arc<dyn RuntimePersistence>) {
     };
     let commit = RuntimeCommit::persisted_state_with_graph_commit(
         &state,
-        crate::GraphCommitDelta::Append {
+        crate::GraphAppend {
             nodes: vec![sample_session_node(
                 "root",
                 &conformance_incarnation("root"),
@@ -5271,7 +5028,7 @@ async fn commit_rejects_missing_leaf(store: Arc<dyn RuntimePersistence>) {
     };
     let missing = RuntimeCommit::persisted_state_with_graph_commit(
         &state,
-        crate::GraphCommitDelta::Append {
+        crate::GraphAppend {
             nodes: vec![sample_session_node(
                 "root",
                 &conformance_incarnation("root"),
@@ -5312,14 +5069,14 @@ async fn empty_append_cannot_move_the_head(store: Arc<dyn RuntimePersistence>) {
     };
     state.ensure_agent_frame_initialized();
     let first = store
-        .commit_runtime_state(RuntimeCommit::persisted_state(&state, &[]))
+        .commit_runtime_state(RuntimeCommit::persisted_state_for_test(&state, &[]))
         .await
         .expect("seed the live head");
     let old_leaf = state.session_graph.leaf_node_id.clone();
     state.apply_persisted_commit_result(first);
     let mut move_attempt = RuntimeCommit::persisted_state_with_graph_commit(
         &state,
-        crate::GraphCommitDelta::Append {
+        crate::GraphAppend {
             nodes: Vec::new(),
             leaf_node_id: None,
         },
@@ -5335,59 +5092,9 @@ async fn empty_append_cannot_move_the_head(store: Arc<dyn RuntimePersistence>) {
         StoreError::InvalidGraphLeaf { leaf_node_id: None }
     ));
     let loaded = store
-        .load_session(SessionReadScope::FullGraph)
+        .load_session()
         .await
         .expect("load after rejected empty append")
         .expect("seeded session remains");
     assert_eq!(loaded.graph.leaf_node_id, old_leaf);
-}
-
-async fn host_tombstone_cannot_remove_a_reachable_leaf(store: Arc<dyn RuntimePersistence>) {
-    let mut state = RuntimeSessionState {
-        session_id: "root".to_string(),
-        session_lifetime: conformance_lifetime("root"),
-        ..RuntimeSessionState::default()
-    };
-    let incarnation_id = conformance_incarnation("root");
-    let tombstoned_leaf_id = crate::frame_node_id("root", &incarnation_id, "tombstoned-leaf");
-    let seed = RuntimeCommit::persisted_state_with_graph_commit(
-        &state,
-        crate::GraphCommitDelta::Append {
-            nodes: vec![sample_session_node(
-                "root",
-                &incarnation_id,
-                "tombstoned-leaf",
-                None,
-            )],
-            leaf_node_id: Some(tombstoned_leaf_id.clone()),
-        },
-        &[],
-    );
-    let result = commit_runtime_state_for_test(&store, seed, "tombstoned-leaf-seed")
-        .await
-        .expect("seed leaf");
-    state.head_revision = result.head_revision;
-    store
-        .tombstone_nodes(std::slice::from_ref(&tombstoned_leaf_id))
-        .await
-        .expect("tombstone leaf");
-
-    let mut unchanged = RuntimeCommit::persisted_state_with_graph_commit(
-        &state,
-        crate::GraphCommitDelta::Unchanged {
-            leaf_node_id: Some(tombstoned_leaf_id.clone()),
-        },
-        &[],
-    );
-    unchanged.current_frame_node_id = Some(tombstoned_leaf_id.clone());
-    commit_runtime_state_for_test(&store, unchanged, "tombstoned-leaf-unchanged")
-        .await
-        .expect("host tombstone selection cannot override a live head root");
-    assert!(
-        store
-            .load_node(&tombstoned_leaf_id)
-            .await
-            .expect("load protected leaf")
-            .is_some()
-    );
 }

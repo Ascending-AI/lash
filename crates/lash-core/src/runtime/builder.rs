@@ -2,9 +2,9 @@ use std::sync::Arc;
 
 use crate::plugin::{PluginFactory, PluginHost, PluginSession};
 use crate::{
-    EffectHost, EmbeddedRuntimeHost, LashRuntime, PluginStack, ProcessRegistry, Residency,
-    RuntimeHostConfig, RuntimePersistence, RuntimeSessionState, SessionError, SessionPolicy,
-    SessionStoreFactory, TerminationPolicy,
+    EffectHost, EmbeddedRuntimeHost, LashRuntime, PluginStack, ProcessRegistry, RuntimeHostConfig,
+    RuntimePersistence, RuntimeSessionState, SessionError, SessionPolicy, SessionStoreFactory,
+    TerminationPolicy,
 };
 
 enum PluginSource {
@@ -26,7 +26,6 @@ pub struct EmbeddedRuntimeBuilder {
     process_registry: Option<Arc<dyn ProcessRegistry>>,
     process_work_driver: Option<crate::ProcessWorkDriver>,
     queued_work_driver: Option<crate::QueuedWorkDriver>,
-    residency: Residency,
 }
 
 impl Default for EmbeddedRuntimeBuilder {
@@ -48,7 +47,6 @@ impl Default for EmbeddedRuntimeBuilder {
             process_registry: None,
             process_work_driver: None,
             queued_work_driver: None,
-            residency: Residency::default(),
         }
     }
 }
@@ -225,17 +223,6 @@ impl EmbeddedRuntimeBuilder {
         self
     }
 
-    /// Trim a rebuilt session's resident graph to match the host's residency.
-    ///
-    /// Defaults to [`Residency::KeepAll`]. Setting [`Residency::ActivePathOnly`]
-    /// makes a rebuilt runtime (e.g. a durable worker reconstructing a session to
-    /// run a background process) keep only the active path resident, matching the
-    /// live runtime's behavior instead of silently retaining the full graph.
-    pub fn with_residency(mut self, residency: Residency) -> Self {
-        self.residency = residency;
-        self
-    }
-
     fn resolve_state_from_defaults(&self) -> RuntimeSessionState {
         let mut state = self.initial_state.clone().unwrap_or_default();
         if let Some(session_id) = &self.session_id {
@@ -338,7 +325,6 @@ impl EmbeddedRuntimeBuilder {
             persistence,
             self.process_registry,
             state,
-            self.residency,
         )
         .await?;
         runtime.host.process_work_driver = self.process_work_driver;

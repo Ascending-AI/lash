@@ -1,5 +1,3 @@
-use super::SessionReadScope;
-
 #[derive(Debug, thiserror::Error)]
 pub enum StoreError {
     /// The backend could not acquire its transactional write authority because
@@ -45,8 +43,6 @@ pub enum StoreError {
         session_id: String,
         boundary: &'static str,
     },
-    #[error("store does not support read scope {0:?}")]
-    UnsupportedReadScope(SessionReadScope),
     #[error("store does not support `{operation}`")]
     UnsupportedStoreOperation { operation: &'static str },
     #[error("store head revision conflict: expected {expected}, actual {actual}")]

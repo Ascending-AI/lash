@@ -24,7 +24,6 @@ async fn durable_core_without_advanced(
         data_dir.join("attachments"),
     )))
     .effect_host(Arc::new(lash::durability::InlineEffectHost::default()))
-    .residency(lash::durability::Residency::ActivePathOnly)
     .termination(lash::durability::TerminationPolicy::default())
     .build()
 }

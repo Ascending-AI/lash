@@ -14,9 +14,8 @@ use lash_core::{
     ProcessRegistry, RecoveryDisposition, RuntimeCommit, RuntimeEffectCommand,
     RuntimeEffectController, RuntimeEffectEnvelope, RuntimeEffectKind, RuntimeEffectLocalExecutor,
     RuntimeEffectOutcome, RuntimeInvocation, RuntimePersistence, RuntimeSessionState,
-    SessionExecutionLeaseClaimOutcome, SessionReadScope, SessionRelation, SessionScope,
-    SessionStoreCreateRequest, SessionStoreFactory, SlotPolicy, ToolAttemptLaunch, ToolCallOutput,
-    ToolCallRecord, ToolId,
+    SessionExecutionLeaseClaimOutcome, SessionRelation, SessionScope, SessionStoreCreateRequest,
+    SessionStoreFactory, SlotPolicy, ToolAttemptLaunch, ToolCallOutput, ToolCallRecord, ToolId,
 };
 use serde_json::{Value, json};
 
@@ -1063,14 +1062,11 @@ impl RuntimeBoundaryHarness {
         // rewrote the batch's claim id + lease token, so settling the crashed
         // worker's original claim through the runtime commit path is rejected as
         // superseded (ADR 0029).
-        let current = store
-            .load_session(SessionReadScope::FullGraph)
-            .await
-            .map_err(|err| {
-                RuntimeBoundaryError::new(format!(
-                    "load current head before stale claim completion: {err}"
-                ))
-            })?;
+        let current = store.load_session().await.map_err(|err| {
+            RuntimeBoundaryError::new(format!(
+                "load current head before stale claim completion: {err}"
+            ))
+        })?;
         let (head_revision, session_graph, persisted_node_ids) = current.map_or_else(
             || (0, lash_core::SessionGraph::default(), HashSet::new()),
             |read| {
@@ -1109,8 +1105,7 @@ impl RuntimeBoundaryHarness {
         let stale_work_completion_rejected = matches!(
             store
                 .commit_runtime_state(
-                    RuntimeCommit::persisted_state(&stale_state, &[])
-                        .with_session_execution_lease(lease.fence())
+                    RuntimeCommit::persisted_state_for_test(&stale_state, &[])
                         .completing_queue_claim(work.claim.completion()),
                 )
                 .await,

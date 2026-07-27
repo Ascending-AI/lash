@@ -258,10 +258,6 @@ impl RuntimeEffectController for RecordingEffectController {
             RuntimeEffectCommand::PeekAwaitEvent { .. } => {
                 Ok(RuntimeEffectOutcome::PeekAwaitEvent { resolution: None })
             }
-            RuntimeEffectCommand::DurableStep { step_id, input } => {
-                let _ = (step_id, local_executor);
-                Ok(RuntimeEffectOutcome::DurableStep { value: input })
-            }
             RuntimeEffectCommand::Direct { request, .. } => {
                 // Both the text-only (`direct_completion`) and full-response
                 // (`direct_llm_completion`) client methods now flow through the

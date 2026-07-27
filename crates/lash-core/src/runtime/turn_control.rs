@@ -222,8 +222,9 @@ pub trait TurnAttach: Send + Sync {
 /// gate. On an inline effect host that promise is process-local, so the driver
 /// only reaches owners in the same OS process. A durable effect-host deployment
 /// is required for another process or replayed owner to observe the request.
-/// The returned [`TurnCancelReceipt`] exposes that tier so hosts can gate their
-/// UX rather than treating an inline receipt as cross-process proof.
+/// The returned [`TurnCancelReceipt`] reports only the cancellation outcome.
+/// Hosts must use their configured effect-host topology when deciding whether
+/// an inline receipt is cross-process proof.
 ///
 /// Lash asks the running or replayed owner to unwind and commit a cancelled
 /// result; it cannot guarantee that detached tasks, subprocesses, or

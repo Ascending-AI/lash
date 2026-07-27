@@ -292,16 +292,12 @@ async fn postgres_turn_commit_stamps_use_injected_store_clock_when_configured() 
         ),
         ..Default::default()
     };
-    let mut commit = lash_core::RuntimeCommit::persisted_state(&state, &[]);
-    let hash = commit.turn_commit_hash().expect("turn commit hash");
     let operation = lash_core::OperationId::turn(SESSION_ID, TURN_ID, "final");
     let operation_key = operation.storage_key().expect("canonical operation key");
-    commit = commit
-        .with_turn_commit(lash_core::RuntimeTurnCommitStamp::new(
-            SESSION_ID, operation, hash,
-        ))
-        .with_session_execution_lease(lease.fence())
-        .releasing_session_execution_lease(lease.completion());
+    let (commit, _) = lash_core::RuntimeCommit::persisted_state_for_test(&state, &[])
+        .with_operation(operation)
+        .expect("stamp clock test commit");
+    let commit = commit.releasing_session_execution_lease(lease.completion());
     store
         .commit_runtime_state(commit)
         .await

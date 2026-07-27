@@ -162,13 +162,7 @@ impl LashRuntime {
         else {
             return Ok(());
         };
-        let scope = match self.residency {
-            crate::Residency::KeepAll => crate::store::SessionReadScope::FullGraph,
-            crate::Residency::ActivePathOnly => crate::store::SessionReadScope::ActivePath {
-                leaf_node_id: self.state.session_graph.leaf_node_id.clone(),
-            },
-        };
-        let read = store.load_session(scope).await.map_err(|err| {
+        let read = store.load_session().await.map_err(|err| {
             SessionError::Protocol(format!("failed to refresh session graph from store: {err}"))
         })?;
         self.graph_loaded_from_store = true;
@@ -583,13 +577,12 @@ impl LashRuntime {
                 operation,
             )
             .map_err(super::runtime_error_from_store_commit)?;
-        let Some(session_execution_lease) = session_execution_lease else {
+        let Some(_session_execution_lease) = session_execution_lease else {
             return Err(RuntimeError::new(
                 RuntimeErrorCode::StoreCommitFailed,
                 "session command commit requires a session execution lease",
             ));
         };
-        commit = commit.with_session_execution_lease(session_execution_lease.clone());
         if let Some(completion) = completion {
             commit = commit.completing_queue_claim(completion);
         }

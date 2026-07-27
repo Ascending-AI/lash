@@ -420,7 +420,10 @@ async fn session_store_factory_rejects_cross_session_graph_parents(
     };
     first_state.ensure_agent_frame_initialized();
     first
-        .commit_runtime_state(crate::RuntimeCommit::persisted_state(&first_state, &[]))
+        .commit_runtime_state(crate::RuntimeCommit::persisted_state_for_test(
+            &first_state,
+            &[],
+        ))
         .await
         .expect("commit graph parent owner frame");
     let foreign_parent = first_state
@@ -441,21 +444,13 @@ async fn session_store_factory_rejects_cross_session_graph_parents(
     };
     second_state.ensure_agent_frame_initialized();
     let second_result = second
-        .commit_runtime_state(crate::RuntimeCommit::persisted_state(&second_state, &[]))
+        .commit_runtime_state(crate::RuntimeCommit::persisted_state_for_test(
+            &second_state,
+            &[],
+        ))
         .await
         .expect("commit intruder's own frame");
     second_state.apply_persisted_commit_result(second_result);
-    let foreign_path = second
-        .load_session(crate::SessionReadScope::ActivePath {
-            leaf_node_id: Some(foreign_parent.clone()),
-        })
-        .await
-        .expect("probe unrelated active path")
-        .expect("intruder has its own durable head");
-    assert!(
-        foreign_path.graph.nodes.is_empty() && foreign_path.graph.leaf_node_id.is_none(),
-        "ActivePath must not expose a foreign session's ancestry"
-    );
     assert!(
         second
             .load_node(&foreign_parent)
@@ -486,7 +481,7 @@ async fn session_store_factory_rejects_cross_session_graph_parents(
     let error = second
         .commit_runtime_state(crate::RuntimeCommit::persisted_state_with_graph_commit(
             &state,
-            crate::GraphCommitDelta::Append {
+            crate::GraphAppend {
                 nodes: vec![child.clone()],
                 leaf_node_id: Some(child.node_id.clone()),
             },
@@ -502,7 +497,7 @@ async fn session_store_factory_rejects_cross_session_graph_parents(
         _ => false,
     });
     let intruder_after_rejection = second
-        .load_session(crate::SessionReadScope::FullGraph)
+        .load_session()
         .await
         .expect("load intruder after rejection")
         .expect("intruder head survives rejection");
@@ -558,7 +553,7 @@ async fn session_store_factory_fork_semantics(factory: Arc<dyn crate::SessionSto
         .clone()
         .expect("source root leaf");
     let first = source
-        .commit_runtime_state(crate::RuntimeCommit::persisted_state(
+        .commit_runtime_state(crate::RuntimeCommit::persisted_state_for_test(
             &state,
             &[crate::TokenLedgerEntry {
                 source: "source-only".to_string(),
@@ -722,7 +717,7 @@ async fn session_store_factory_fork_semantics(factory: Arc<dyn crate::SessionSto
         .expect("open fork")
         .expect("fork exists");
     let branch_read = branch
-        .load_session(crate::SessionReadScope::ActivePath { leaf_node_id: None })
+        .load_session()
         .await
         .expect("load fork")
         .expect("fork head");
@@ -849,7 +844,10 @@ async fn session_store_factory_fork_semantics(factory: Arc<dyn crate::SessionSto
         .map(|node| node.node_id.clone())
         .collect::<Vec<_>>();
     let recreated_frame_result = recreated
-        .commit_runtime_state(crate::RuntimeCommit::persisted_state(&recreated_state, &[]))
+        .commit_runtime_state(crate::RuntimeCommit::persisted_state_for_test(
+            &recreated_state,
+            &[],
+        ))
         .await
         .expect("commit recreated frame");
     recreated_state.apply_persisted_commit_result(recreated_frame_result);
@@ -912,7 +910,7 @@ async fn commit_fork_conformance_state(
         .map(|node| node.node_id.clone())
         .collect::<Vec<_>>();
     let result = store
-        .commit_runtime_state(crate::RuntimeCommit::persisted_state(state, &[]))
+        .commit_runtime_state(crate::RuntimeCommit::persisted_state_for_test(state, &[]))
         .await?;
     state.apply_persisted_commit_result(result);
     state.mark_node_ids_persisted(new_node_ids);
@@ -968,7 +966,7 @@ async fn session_store_factory_delete_removes_store_and_is_idempotent(
         Some(live_leaf.node_id.clone()),
     );
     created
-        .commit_runtime_state(crate::RuntimeCommit::persisted_state(&state, &[]))
+        .commit_runtime_state(crate::RuntimeCommit::persisted_state_for_test(&state, &[]))
         .await
         .expect("commit graph chain before delete");
     created
@@ -1084,11 +1082,14 @@ async fn session_store_factory_delete_removes_store_and_is_idempotent(
     };
     recreated_state.ensure_agent_frame_initialized();
     recreated
-        .commit_runtime_state(crate::RuntimeCommit::persisted_state(&recreated_state, &[]))
+        .commit_runtime_state(crate::RuntimeCommit::persisted_state_for_test(
+            &recreated_state,
+            &[],
+        ))
         .await
         .expect("recreated session must be able to reuse its deterministic initial frame id");
     let read = recreated
-        .load_session(crate::SessionReadScope::FullGraph)
+        .load_session()
         .await
         .expect("load recreated session")
         .expect("recreated session has a committed head");

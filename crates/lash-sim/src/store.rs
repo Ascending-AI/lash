@@ -58,7 +58,6 @@ fn store_error_variant(error: &StoreError) -> &'static str {
         StoreError::EphemeralSessionAtDurableBoundary { .. } => "EphemeralSessionAtDurableBoundary",
         StoreError::SessionDeleted { .. } => "SessionDeleted",
         StoreError::SessionIncarnationMismatch { .. } => "SessionIncarnationMismatch",
-        StoreError::UnsupportedReadScope(_) => "UnsupportedReadScope",
         StoreError::UnsupportedStoreOperation { .. } => "UnsupportedStoreOperation",
         StoreError::RuntimeTurnCommitConflict { .. } => "RuntimeTurnCommitConflict",
         StoreError::NodeIdDerivationMismatch { .. } => "NodeIdDerivationMismatch",

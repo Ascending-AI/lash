@@ -140,7 +140,7 @@ impl SessionBuilder {
     ///
     /// This is for advanced hosts that already own a complete state snapshot.
     /// Normal embedders should use [`Self::open`] to resume according to Lash's
-    /// residency policy.
+    /// durable history.
     pub async fn open_with_state(self, mut state: RuntimeSessionState) -> Result<LashSession> {
         let policy = self.session_policy();
         let store = self.create_store(&policy).await?;
@@ -167,7 +167,7 @@ impl SessionBuilder {
     ) -> Result<RuntimeSessionState> {
         let state = match store {
             Some(store) => {
-                let loaded = self.load_persisted_state_for_residency(store).await?;
+                let loaded = self.load_persisted_state(store).await?;
                 let mut state = loaded.unwrap_or_else(|| RuntimeSessionState {
                     session_id: self.session_id.clone(),
                     policy: policy.clone(),
@@ -191,11 +191,11 @@ impl SessionBuilder {
         Ok(state)
     }
 
-    async fn load_persisted_state_for_residency(
+    async fn load_persisted_state(
         &self,
         store: &dyn RuntimePersistence,
     ) -> Result<Option<RuntimeSessionState>> {
-        load_persisted_state_for_residency(self.core.env.residency, store).await
+        load_persisted_state(store).await
     }
 
     async fn open_resolved(
@@ -286,13 +286,12 @@ impl SessionBuilder {
     }
 }
 
-pub(crate) async fn load_state_for_residency(
-    residency: Residency,
+pub(crate) async fn load_state_from_store(
     session_id: &str,
     policy: &SessionPolicy,
     store: &dyn RuntimePersistence,
 ) -> Result<RuntimeSessionState> {
-    let mut state = load_persisted_state_for_residency(residency, store)
+    let mut state = load_persisted_state(store)
         .await?
         .unwrap_or_else(|| RuntimeSessionState {
             session_id: session_id.to_string(),
@@ -315,25 +314,12 @@ fn reconcile_loaded_state_policy(state: &mut RuntimeSessionState, policy: &Sessi
     state.policy.provider_id = recorded_provider_id;
 }
 
-async fn load_persisted_state_for_residency(
-    residency: Residency,
+async fn load_persisted_state(
     store: &dyn RuntimePersistence,
 ) -> Result<Option<RuntimeSessionState>> {
-    match residency {
-        Residency::KeepAll => {
-            let loaded = lash_core::store::load_persisted_session_state(store)
-                .await
-                .map_err(|err| SessionError::Protocol(format!("failed to load store: {err}")))?;
-            Ok(loaded)
-        }
-        Residency::ActivePathOnly => Ok(
-            lash_core::store::load_persisted_session_state_active_path(store, None)
-                .await
-                .map_err(|err| {
-                    SessionError::Protocol(format!("failed to load active-path store: {err}"))
-                })?,
-        ),
-    }
+    Ok(lash_core::store::load_persisted_session_state(store)
+        .await
+        .map_err(|err| SessionError::Protocol(format!("failed to load store: {err}")))?)
 }
 
 impl PromptLayerSink for SessionBuilder {

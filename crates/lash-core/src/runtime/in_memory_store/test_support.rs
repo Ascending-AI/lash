@@ -46,7 +46,7 @@ impl InMemorySessionStore {
 
 #[cfg(test)]
 mod tests {
-    use crate::store::{GraphCommitDelta, SessionCommitStore, StoreMaintenance};
+    use crate::store::{GraphAppend, SessionCommitStore, StoreMaintenance};
     use crate::{
         DeliveryPolicy, MergeKey, QueuedWorkBatch, QueuedWorkCompletion, RuntimeCommit,
         RuntimeSessionState, SessionStoreCreateRequest, SessionStoreFactory, SlotPolicy,
@@ -116,7 +116,7 @@ mod tests {
                     ..Default::default()
                 },
             };
-            RuntimeCommit::persisted_state(&state, &[usage])
+            RuntimeCommit::persisted_state_for_test(&state, &[usage])
         };
 
         first
@@ -174,7 +174,7 @@ mod tests {
         };
         state.ensure_agent_frame_initialized();
         let first = store
-            .commit_runtime_state(RuntimeCommit::persisted_state(&state, &[]))
+            .commit_runtime_state(RuntimeCommit::persisted_state_for_test(&state, &[]))
             .await
             .expect("commit root frame");
         let leaf = concrete
@@ -195,7 +195,7 @@ mod tests {
         };
         let mut commit = RuntimeCommit::persisted_state_with_graph_commit(
             &state,
-            GraphCommitDelta::Append {
+            GraphAppend {
                 nodes: vec![child.clone()],
                 leaf_node_id: Some(child.node_id.clone()),
             },
@@ -247,7 +247,7 @@ mod tests {
         state.bind_durable_incarnation(incarnation_id);
         state.ensure_agent_frame_initialized();
         store
-            .commit_runtime_state(RuntimeCommit::persisted_state(&state, &[]))
+            .commit_runtime_state(RuntimeCommit::persisted_state_for_test(&state, &[]))
             .await
             .expect("commit root frame");
         let leaf = store
@@ -296,6 +296,9 @@ mod tests {
         let store = super::InMemorySessionStore::new();
         let state = RuntimeSessionState {
             session_id: "budget-before-backend".to_string(),
+            session_lifetime: crate::SessionLifetime::durable(
+                crate::IncarnationId::mint_for_store(),
+            ),
             ..Default::default()
         };
         let node = crate::SessionNodeRecord {
@@ -309,8 +312,8 @@ mod tests {
                 ),
             },
         };
-        let mut commit = RuntimeCommit::persisted_state(&state, &[]);
-        commit.graph = GraphCommitDelta::Append {
+        let mut commit = RuntimeCommit::persisted_state_for_test(&state, &[]);
+        commit.graph = GraphAppend {
             nodes: (0..=RuntimeCommit::MAX_COMMIT_NODE_COUNT)
                 .map(|index| crate::SessionNodeRecord {
                     node_id: format!("node-{index}"),
@@ -366,7 +369,7 @@ mod tests {
             .await
             .expect("realize stale-claim session lifetime");
         state.bind_durable_incarnation(incarnation_id);
-        let mut commit = RuntimeCommit::persisted_state(&state, &[]);
+        let mut commit = RuntimeCommit::persisted_state_for_test(&state, &[]);
         commit.completed_queue_claims = vec![QueuedWorkCompletion {
             session_id: "session".to_string(),
             claim_id: "queue-claim".to_string(),
@@ -393,11 +396,7 @@ mod tests {
             "a later validation failure must not consume an earlier queue claim"
         );
         assert!(
-            store
-                .load_session(crate::SessionReadScope::FullGraph)
-                .await
-                .expect("load session")
-                .is_none(),
+            store.load_session().await.expect("load session").is_none(),
             "the failed commit must not create a session head"
         );
     }

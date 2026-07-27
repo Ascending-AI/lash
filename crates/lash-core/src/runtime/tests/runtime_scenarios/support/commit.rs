@@ -10,8 +10,7 @@ impl RuntimeScenarioContext {
             .appended_nodes()
             .map(|node| node.node_id.clone())
             .collect::<Vec<_>>();
-        let final_commit = RuntimeCommit::persisted_state(&self.state, &[])
-            .with_session_execution_lease(lease.fence())
+        let final_commit = RuntimeCommit::persisted_state_for_test(&self.state, &[])
             .releasing_session_execution_lease(lease.completion())
             .completing_queue_claims(
                 self.command_claim
@@ -50,7 +49,7 @@ impl RuntimeScenarioContext {
         }
         let read = self
             .store()
-            .load_session(SessionReadScope::FullGraph)
+            .load_session()
             .await
             .expect("load runtime scenario session")
             .expect("runtime scenario session read");

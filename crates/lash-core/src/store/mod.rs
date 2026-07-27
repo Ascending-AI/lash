@@ -18,10 +18,7 @@ pub use commit_identity::{OperationId, derive_history_node_id, graph_realization
 pub use error::StoreError;
 pub use incarnation::{EphemeralRunId, IncarnationId, SessionLifetime};
 pub use lease_timings::{LeaseTimings, LeaseTimingsError};
-pub use load::{
-    load_persisted_session_state, load_persisted_session_state_active_path,
-    refresh_persisted_session_state,
-};
+pub use load::{load_persisted_session_state, refresh_persisted_session_state};
 pub use realization::{RealizedNodeTimestamp, commit_runtime_state_verified};
 
 const PROC_BOOT_ID_PATH: &str = "/proc/sys/kernel/random/boot_id";
@@ -262,7 +259,7 @@ pub struct HydratedSessionCheckpoint {
 pub struct SessionHead {
     #[serde(default = "default_root_session_id")]
     pub session_id: String,
-    #[serde(default)]
+    #[serde(skip)]
     pub head_revision: u64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub current_frame_node_id: Option<String>,
@@ -279,19 +276,15 @@ pub struct SessionHeadMeta {
     pub schema_version: u32,
     #[serde(default = "default_root_session_id")]
     pub session_id: String,
-    #[serde(default)]
+    #[serde(skip)]
     pub head_revision: u64,
     pub config: crate::PersistedSessionConfig,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub current_frame_node_id: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(skip)]
     pub checkpoint_ref: Option<BlobRef>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(skip)]
     pub leaf_node_id: Option<String>,
-    #[serde(default)]
-    pub graph_node_count: usize,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub token_ledger: Vec<crate::TokenLedgerEntry>,
 }
 
 fn persisted_session_config_from_state(
@@ -301,12 +294,6 @@ fn persisted_session_config_from_state(
         provider_id: state.policy.recorded_provider_id().to_string(),
         model: state.policy.model.clone(),
     }
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum SessionReadScope {
-    FullGraph,
-    ActivePath { leaf_node_id: Option<String> },
 }
 
 #[derive(Clone, Debug)]
@@ -322,23 +309,14 @@ pub struct PersistedSessionRead {
 }
 
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
-pub enum GraphCommitDelta {
-    Unchanged {
-        leaf_node_id: Option<String>,
-    },
-    Append {
-        nodes: Vec<crate::SessionNodeRecord>,
-        leaf_node_id: Option<String>,
-    },
+pub struct GraphAppend {
+    pub nodes: Vec<crate::SessionNodeRecord>,
+    pub leaf_node_id: Option<String>,
 }
 
-impl GraphCommitDelta {
+impl GraphAppend {
     pub fn leaf_node_id(&self) -> Option<&String> {
-        match self {
-            Self::Unchanged { leaf_node_id } | Self::Append { leaf_node_id, .. } => {
-                leaf_node_id.as_ref()
-            }
-        }
+        self.leaf_node_id.as_ref()
     }
 }
 
@@ -348,15 +326,13 @@ pub struct RuntimeCommit {
     pub session_lifetime: SessionLifetime,
     pub expected_head_revision: u64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub session_execution_lease: Option<SessionExecutionLeaseFence>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub release_session_execution_lease: Option<SessionExecutionLeaseCompletion>,
     pub config: crate::PersistedSessionConfig,
     pub current_frame_node_id: Option<String>,
-    pub graph: GraphCommitDelta,
+    pub graph: GraphAppend,
     pub checkpoint: HydratedSessionCheckpoint,
     pub usage_deltas: Vec<crate::TokenLedgerEntry>,
-    pub turn_commit: Option<RuntimeTurnCommitStamp>,
+    pub turn_commit: RuntimeTurnCommitStamp,
     pub completed_queue_claims: Vec<crate::QueuedWorkCompletion>,
     pub completed_turn_input_claims: Vec<crate::TurnInputCompletion>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -737,9 +713,7 @@ impl RuntimeCommit {
     }
 
     pub fn validate_operation_session(&self) -> Result<(), StoreError> {
-        let Some(completed) = &self.turn_commit else {
-            return Ok(());
-        };
+        let completed = &self.turn_commit;
         completed
             .operation
             .scope
@@ -777,13 +751,8 @@ impl RuntimeCommit {
                 actual_incarnation_id: commit_incarnation_id.to_string(),
             });
         }
-        let Some(completed) = &self.turn_commit else {
-            return self.validate_frame_node_derivation(durable_incarnation_id);
-        };
-        let GraphCommitDelta::Append { nodes, .. } = &self.graph else {
-            return Ok(());
-        };
-        for (ordinal, node) in nodes.iter().enumerate() {
+        let completed = &self.turn_commit;
+        for (ordinal, node) in self.graph.nodes.iter().enumerate() {
             let expected = match &node.payload {
                 crate::SessionNodePayload::FrameOpen { frame_key, .. } => {
                     crate::session_graph::frame_node_id(
@@ -808,38 +777,9 @@ impl RuntimeCommit {
         Ok(())
     }
 
-    fn validate_frame_node_derivation(
-        &self,
-        durable_incarnation_id: &IncarnationId,
-    ) -> Result<(), StoreError> {
-        let GraphCommitDelta::Append { nodes, .. } = &self.graph else {
-            return Ok(());
-        };
-        for node in nodes {
-            let crate::SessionNodePayload::FrameOpen { frame_key, .. } = &node.payload else {
-                continue;
-            };
-            let expected = crate::session_graph::frame_node_id(
-                &self.session_id,
-                durable_incarnation_id,
-                frame_key,
-            );
-            if node.node_id != expected {
-                return Err(StoreError::NodeIdDerivationMismatch {
-                    node_id: node.node_id.clone(),
-                    expected_node_id: expected,
-                });
-            }
-        }
-        Ok(())
-    }
-
     pub fn validate_append_node_ids_unique(&self) -> Result<(), StoreError> {
-        let GraphCommitDelta::Append { nodes, .. } = &self.graph else {
-            return Ok(());
-        };
-        let mut seen = std::collections::HashSet::with_capacity(nodes.len());
-        for node in nodes {
+        let mut seen = std::collections::HashSet::with_capacity(self.graph.nodes.len());
+        for node in &self.graph.nodes {
             if !seen.insert(node.node_id.as_str()) {
                 return Err(StoreError::NodeIdCollision {
                     node_id: node.node_id.clone(),
@@ -890,11 +830,34 @@ impl RuntimeCommit {
         commit_identity::turn_commit_hash(self)
     }
 
-    pub fn persisted_state(
+    #[doc(hidden)]
+    #[track_caller]
+    pub fn persisted_state_for_test(
         state: &crate::RuntimeSessionState,
         usage_deltas: &[crate::TokenLedgerEntry],
     ) -> Self {
-        Self::persisted_state_with_graph_commit(state, state.pending_graph_commit(), usage_deltas)
+        let caller = std::panic::Location::caller();
+        let operation = OperationId::new(
+            crate::ExecutionScope::runtime_operation(format!(
+                "test-commit:{}:{}:{}",
+                caller.file(),
+                caller.line(),
+                state.head_revision
+            )),
+            "commit",
+        );
+        let mut graph = state.pending_graph_commit();
+        graph
+            .derive_node_ids(
+                &state.session_id,
+                state
+                    .durable_incarnation_id("test runtime commit")
+                    .expect("test runtime commit requires a durable session incarnation"),
+                &operation,
+            )
+            .expect("test commit node ids must be derivable");
+        Self::persisted_state_with_graph_commit_and_operation(state, graph, usage_deltas, operation)
+            .expect("test commit must be hashable")
     }
 
     pub(crate) fn persisted_state_with_operation(
@@ -902,8 +865,8 @@ impl RuntimeCommit {
         usage_deltas: &[crate::TokenLedgerEntry],
         operation: OperationId,
     ) -> Result<(Self, Vec<String>), StoreError> {
-        let mut commit = Self::persisted_state(state, usage_deltas);
-        let mapping = commit.graph.derive_node_ids(
+        let mut graph = state.pending_graph_commit();
+        let mapping = graph.derive_node_ids(
             &state.session_id,
             state.durable_incarnation_id("history node derivation")?,
             &operation,
@@ -911,59 +874,88 @@ impl RuntimeCommit {
         state
             .session_graph
             .remap_node_ids(&state.session_id, &mapping);
-        remap_optional_node_id(&mut commit.current_frame_node_id, &mapping);
         remap_optional_node_id(&mut state.current_frame_node_id, &mapping);
         state.agent_frames = state.session_graph.agent_frame_records(&state.session_id);
         let persisted_node_ids = mapping.iter().map(|(_, derived)| derived.clone()).collect();
-        let hash = commit.turn_commit_hash()?;
-        commit.turn_commit = Some(RuntimeTurnCommitStamp::new(
-            commit.session_id.clone(),
+        let commit = Self::persisted_state_with_graph_commit_and_operation(
+            state,
+            graph,
+            usage_deltas,
             operation,
-            hash,
-        ));
+        )?;
         Ok((commit, persisted_node_ids))
     }
 
+    #[doc(hidden)]
+    #[track_caller]
+    #[cfg(any(test, feature = "testing"))]
     pub(crate) fn persisted_state_with_graph_commit(
         state: &crate::RuntimeSessionState,
-        graph: GraphCommitDelta,
+        mut graph: GraphAppend,
         usage_deltas: &[crate::TokenLedgerEntry],
     ) -> Self {
+        let caller = std::panic::Location::caller();
+        let operation = OperationId::new(
+            crate::ExecutionScope::runtime_operation(format!(
+                "test-graph-commit:{}:{}:{}",
+                caller.file(),
+                caller.line(),
+                state.head_revision
+            )),
+            "commit",
+        );
+        graph
+            .derive_node_ids(
+                &state.session_id,
+                state
+                    .durable_incarnation_id("test graph commit")
+                    .expect("test graph commit requires a durable session incarnation"),
+                &operation,
+            )
+            .expect("test graph commit node ids must be derivable");
+        Self::persisted_state_with_graph_commit_and_operation(state, graph, usage_deltas, operation)
+            .expect("test graph commit must be hashable")
+    }
+
+    pub(crate) fn persisted_state_with_graph_commit_and_operation(
+        state: &crate::RuntimeSessionState,
+        graph: GraphAppend,
+        usage_deltas: &[crate::TokenLedgerEntry],
+        operation: OperationId,
+    ) -> Result<Self, StoreError> {
         let mut projected_graph = state.session_graph.clone();
-        if let GraphCommitDelta::Append { nodes, .. } = &graph {
-            for node in nodes {
-                if projected_graph.find_node(&node.node_id).is_none() {
-                    projected_graph.extend_node_records(std::iter::once(node.clone()));
-                }
+        for node in &graph.nodes {
+            if projected_graph.find_node(&node.node_id).is_none() {
+                projected_graph.extend_node_records(std::iter::once(node.clone()));
             }
         }
         projected_graph.set_leaf_node_id(graph.leaf_node_id().cloned());
         let current_frame_node_id = projected_graph
             .nearest_frame_node_id(projected_graph.leaf_node_id.as_deref())
             .map(ToOwned::to_owned);
-        Self {
+        let mut commit = Self {
             session_id: state.session_id.clone(),
             session_lifetime: state.session_lifetime.clone(),
             expected_head_revision: state.head_revision,
-            session_execution_lease: None,
             release_session_execution_lease: None,
             config: persisted_session_config_from_state(state),
             current_frame_node_id,
             graph,
             checkpoint: build_checkpoint_from_persisted_state(state),
             usage_deltas: usage_deltas.to_vec(),
-            turn_commit: None,
+            turn_commit: RuntimeTurnCommitStamp::new(
+                state.session_id.clone(),
+                operation,
+                String::new(),
+            ),
             completed_queue_claims: Vec::new(),
             completed_turn_input_claims: Vec::new(),
             enqueued_queue_batches: Vec::new(),
             interrupted_turn_input_turn_id: None,
             committed_attachment_ids: Vec::new(),
-        }
-    }
-
-    pub fn with_turn_commit(mut self, turn_commit: RuntimeTurnCommitStamp) -> Self {
-        self.turn_commit = Some(turn_commit);
-        self
+        };
+        commit.turn_commit.turn_commit_hash = commit.turn_commit_hash()?;
+        Ok(commit)
     }
 
     /// Derive append-node identities, stamp the operation, and return the
@@ -981,18 +973,11 @@ impl RuntimeCommit {
             self.graph
                 .derive_node_ids(&session_id, &incarnation_id, &operation)?;
         remap_optional_node_id(&mut self.current_frame_node_id, &node_id_mapping);
+        self.turn_commit =
+            RuntimeTurnCommitStamp::new(self.session_id.clone(), operation, String::new());
         let hash = self.turn_commit_hash()?;
-        self.turn_commit = Some(RuntimeTurnCommitStamp::new(
-            self.session_id.clone(),
-            operation,
-            hash,
-        ));
+        self.turn_commit.turn_commit_hash = hash;
         Ok((self, node_id_mapping))
-    }
-
-    pub fn with_session_execution_lease(mut self, lease: SessionExecutionLeaseFence) -> Self {
-        self.session_execution_lease = Some(lease);
-        self
     }
 
     pub fn releasing_session_execution_lease(
@@ -1143,8 +1128,6 @@ impl Default for SessionHeadMeta {
             current_frame_node_id: None,
             checkpoint_ref: None,
             leaf_node_id: None,
-            graph_node_count: 0,
-            token_ledger: Vec::new(),
         }
     }
 }
@@ -1167,10 +1150,7 @@ impl Default for SessionHeadMeta {
 /// paste no-op manifest impls via [`impl_noop_attachment_manifest!`].
 #[async_trait::async_trait]
 pub trait SessionCommitStore: AttachmentManifest + Send + Sync {
-    async fn load_session(
-        &self,
-        scope: SessionReadScope,
-    ) -> Result<Option<PersistedSessionRead>, StoreError>;
+    async fn load_session(&self) -> Result<Option<PersistedSessionRead>, StoreError>;
 
     async fn load_node(
         &self,
@@ -1504,10 +1484,6 @@ pub trait QueuedWorkStore: Send + Sync {
 /// state.
 #[async_trait::async_trait]
 pub trait StoreMaintenance: Send + Sync {
-    /// Mark graph nodes as tombstoned so reads exclude them until
-    /// [`vacuum`](Self::vacuum) physically removes them.
-    async fn tombstone_nodes(&self, ids: &[String]) -> Result<(), StoreError>;
-
     /// Physically delete tombstoned graph-node rows and prune terminal
     /// pending-turn-input evidence rows. See [`VacuumReport`].
     async fn vacuum(&self) -> Result<VacuumReport, StoreError>;

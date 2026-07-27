@@ -1,4 +1,4 @@
-use super::{GraphCommitDelta, RuntimeCommit, StoreError};
+use super::{RuntimeCommit, StoreError};
 
 impl RuntimeCommit {
     /// Maximum number of graph nodes a single commit may write.
@@ -27,10 +27,7 @@ impl RuntimeCommit {
     /// agent frames, usage deltas, and the durable turn result are currently
     /// outside it.
     pub fn validate_budget(&self) -> Result<(), StoreError> {
-        let node_count = match &self.graph {
-            GraphCommitDelta::Unchanged { .. } => 0,
-            GraphCommitDelta::Append { nodes, .. } => nodes.len(),
-        };
+        let node_count = self.graph.nodes.len();
         if node_count > Self::MAX_COMMIT_NODE_COUNT {
             return Err(StoreError::CommitNodeBudgetExceeded {
                 node_count,
@@ -45,16 +42,12 @@ impl RuntimeCommit {
                 ))
             })
         };
-        let graph_delta_bytes = match &self.graph {
-            GraphCommitDelta::Unchanged { .. } => 0,
-            GraphCommitDelta::Append { nodes, .. } => {
-                nodes
-                    .iter()
-                    .try_fold(0usize, |total, node| -> Result<usize, StoreError> {
-                        Ok(total.saturating_add(measure_json(serde_json::to_vec(node))?))
-                    })?
-            }
-        };
+        let graph_delta_bytes = self.graph.nodes.iter().try_fold(
+            0usize,
+            |total, node| -> Result<usize, StoreError> {
+                Ok(total.saturating_add(measure_json(serde_json::to_vec(node))?))
+            },
+        )?;
         let checkpoint_bytes = rmp_serde::to_vec_named(&self.checkpoint)
             .map(|bytes| bytes.len())
             .map_err(|err| {
@@ -90,6 +83,9 @@ mod tests {
     fn rejects_node_count_over_limit() {
         let state = crate::RuntimeSessionState {
             session_id: "budget-nodes".to_string(),
+            session_lifetime: crate::SessionLifetime::durable(
+                crate::IncarnationId::mint_for_store(),
+            ),
             ..Default::default()
         };
         let node = crate::SessionNodeRecord {
@@ -103,8 +99,8 @@ mod tests {
                 ),
             },
         };
-        let mut commit = RuntimeCommit::persisted_state(&state, &[]);
-        commit.graph = GraphCommitDelta::Append {
+        let mut commit = RuntimeCommit::persisted_state_for_test(&state, &[]);
+        commit.graph = crate::GraphAppend {
             nodes: (0..=RuntimeCommit::MAX_COMMIT_NODE_COUNT)
                 .map(|index| crate::SessionNodeRecord {
                     node_id: format!("node-{index}"),
@@ -128,9 +124,12 @@ mod tests {
     fn reports_each_byte_component() {
         let state = crate::RuntimeSessionState {
             session_id: "budget-bytes".to_string(),
+            session_lifetime: crate::SessionLifetime::durable(
+                crate::IncarnationId::mint_for_store(),
+            ),
             ..Default::default()
         };
-        let mut commit = RuntimeCommit::persisted_state(&state, &[]);
+        let mut commit = RuntimeCommit::persisted_state_for_test(&state, &[]);
         let node = crate::SessionNodeRecord {
             node_id: "budget-node".to_string(),
             parent_node_id: None,
@@ -142,7 +141,7 @@ mod tests {
                 ),
             },
         };
-        commit.graph = GraphCommitDelta::Append {
+        commit.graph = crate::GraphAppend {
             nodes: vec![node.clone()],
             leaf_node_id: Some(node.node_id.clone()),
         };

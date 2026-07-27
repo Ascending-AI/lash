@@ -403,18 +403,6 @@ impl TriggerStore for PostgresTriggerStore {
     async fn list_deliveries(&self) -> Result<Vec<TriggerDeliveryReservation>, PluginError> {
         list_deliveries_where(&self.pool, "TRUE", None).await
     }
-
-    async fn prune_mutation_receipts(&self, cutoff_epoch_ms: u64) -> Result<usize, PluginError> {
-        let cutoff_epoch_ms = i64::try_from(cutoff_epoch_ms).unwrap_or(i64::MAX);
-        Ok(
-            sqlx::query("DELETE FROM lash_trigger_mutation_receipts WHERE created_at_ms < $1")
-                .bind(cutoff_epoch_ms)
-                .execute(&self.pool)
-                .await
-                .map_err(plugin_sqlx_error)?
-                .rows_affected() as usize,
-        )
-    }
 }
 
 async fn reserve_postgres_deliveries(

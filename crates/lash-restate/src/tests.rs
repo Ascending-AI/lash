@@ -535,15 +535,6 @@ fn prepared_tool_call() -> lash_core::PreparedToolCall {
     )
 }
 
-fn legacy_durable_step_command() -> RuntimeEffectCommand {
-    serde_json::from_value(serde_json::json!({
-        "type": "durable_step",
-        "step_id": "step",
-        "input": { "x": 1 }
-    }))
-    .expect("legacy DurableStep command remains readable for one release")
-}
-
 fn prepared_tool_call_with(call_id: &str, tool_name: &str) -> lash_core::PreparedToolCall {
     lash_core::PreparedToolCall::from_parts(
         call_id,
@@ -724,7 +715,6 @@ impl lash_core::SessionCommitStore for CommitRetryStore {
 
     async fn load_session(
         &self,
-        _scope: lash_core::SessionReadScope,
     ) -> Result<Option<lash_core::store::PersistedSessionRead>, lash_core::StoreError> {
         Ok(None)
     }
@@ -999,10 +989,6 @@ impl lash_core::TurnInputStore for CommitRetryStore {
 
 #[async_trait::async_trait]
 impl lash_core::StoreMaintenance for CommitRetryStore {
-    async fn tombstone_nodes(&self, ids: &[String]) -> Result<(), lash_core::StoreError> {
-        self.inner.tombstone_nodes(ids).await
-    }
-
     async fn vacuum(&self) -> Result<lash_core::VacuumReport, lash_core::StoreError> {
         self.inner.vacuum().await
     }
@@ -1092,10 +1078,6 @@ fn restate_command_execution_plan_is_explicit_for_every_command() {
             RuntimeEffectCommand::SyncExecutionEnvironment {
                 update_machine_config: true,
             },
-            RestateEffectExecution::JournaledRun,
-        ),
-        (
-            legacy_durable_step_command(),
             RestateEffectExecution::JournaledRun,
         ),
     ];

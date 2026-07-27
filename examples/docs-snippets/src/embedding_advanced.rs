@@ -59,40 +59,6 @@ async fn sqlite_core(
     Ok(())
 }
 
-async fn active_path_residency(
-    provider: ProviderHandle,
-    model: String,
-    data_dir: PathBuf,
-    store_factory: Arc<dyn SessionStoreFactory>,
-) -> anyhow::Result<()> {
-    // docs:start:active-path-residency
-    use std::sync::Arc;
-
-    use lash::durability::{InlineEffectHost, Residency};
-    use lash::persistence::FileAttachmentStore;
-    use lash_sqlite_store::Store;
-
-    let factory = lash::rlm::RlmProtocolPluginFactory::new(
-        lash::rlm::RlmProtocolPluginConfig::default(),
-        Arc::new(Store::open(&data_dir.join("artifacts.db")).await?),
-    );
-    let core = lash::LashCore::rlm_builder(factory)
-        .provider(provider)
-        .model(
-            lash::ModelSpec::from_token_limits(model.clone(), Default::default(), 200_000, None)
-                .expect("valid model metadata"),
-        )
-        .store_factory(store_factory)
-        .effect_host(Arc::new(InlineEffectHost::default()))
-        .attachment_store(Arc::new(FileAttachmentStore::new(
-            data_dir.join("attachments"),
-        )))
-        .residency(Residency::ActivePathOnly)
-        .build()?;
-    // docs:end:active-path-residency
-    Ok(())
-}
-
 async fn refresh_background_graph(session: &LashSession) -> anyhow::Result<()> {
     // docs:start:refresh-background-graph
     session.refresh_background_graph().await?;
@@ -309,7 +275,6 @@ async fn durable_stores_core(
         .attachment_store(std::sync::Arc::new(
             lash::persistence::FileAttachmentStore::new(data_dir.join("attachments")),
         ))
-        .residency(lash::durability::Residency::ActivePathOnly)
         .build()?;
     // docs:end:durable-stores-core
     Ok(())

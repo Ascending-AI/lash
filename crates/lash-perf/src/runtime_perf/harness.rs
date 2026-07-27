@@ -730,9 +730,6 @@ pub(crate) async fn build_runtime_with_store(
                 builder = builder
                     .store_factory(Arc::new(RuntimePerfStoreFactory::new(Arc::clone(&store))));
             }
-            if matches!(scenario, RuntimePerfScenario::StoreReopen) {
-                builder = builder.residency(lash::durability::Residency::ActivePathOnly);
-            }
             BenchmarkCore::Standard(builder.build()?)
         }
         ExecutionMode::Rlm => {
@@ -1027,7 +1024,6 @@ pub(crate) async fn build_runtime_with_sqlite_store(
                 .trigger_store(trigger_store.clone())
                 .store_factory(store_factory.clone())
                 .plugins(plugin_stack)
-                .residency(lash::durability::Residency::ActivePathOnly)
                 .build()?,
         ),
         ExecutionMode::Rlm => {
@@ -1052,7 +1048,6 @@ pub(crate) async fn build_runtime_with_sqlite_store(
                     .store_factory(store_factory.clone())
                     .plugins(plugin_stack)
                     .max_turns(RUNTIME_PERF_MAX_TURNS)
-                    .residency(lash::durability::Residency::ActivePathOnly)
                     .build()?,
             )
         }

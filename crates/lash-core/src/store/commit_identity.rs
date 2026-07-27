@@ -96,30 +96,16 @@ impl<'a> From<&'a RuntimeCommit> for RuntimeCommitIntent<'a> {
 }
 
 #[derive(serde::Serialize)]
-#[serde(tag = "kind", rename_all = "snake_case")]
-enum GraphCommitIntent<'a> {
-    Unchanged {
-        leaf_node_id: Option<&'a str>,
-    },
-    Append {
-        nodes: Vec<SessionNodeIntent<'a>>,
-        leaf_node_id: Option<&'a str>,
-    },
+struct GraphCommitIntent<'a> {
+    nodes: Vec<SessionNodeIntent<'a>>,
+    leaf_node_id: Option<&'a str>,
 }
 
-impl<'a> From<&'a GraphCommitDelta> for GraphCommitIntent<'a> {
-    fn from(graph: &'a GraphCommitDelta) -> Self {
-        match graph {
-            GraphCommitDelta::Unchanged { leaf_node_id } => Self::Unchanged {
-                leaf_node_id: leaf_node_id.as_deref(),
-            },
-            GraphCommitDelta::Append {
-                nodes,
-                leaf_node_id,
-            } => Self::Append {
-                nodes: nodes.iter().map(SessionNodeIntent::from).collect(),
-                leaf_node_id: leaf_node_id.as_deref(),
-            },
+impl<'a> From<&'a GraphAppend> for GraphCommitIntent<'a> {
+    fn from(graph: &'a GraphAppend) -> Self {
+        Self {
+            nodes: graph.nodes.iter().map(SessionNodeIntent::from).collect(),
+            leaf_node_id: graph.leaf_node_id.as_deref(),
         }
     }
 }
@@ -327,13 +313,9 @@ pub fn derive_history_node_id(
     ))
 }
 
-pub fn graph_realization_digest(graph: &GraphCommitDelta) -> String {
+pub fn graph_realization_digest(graph: &GraphAppend) -> String {
     let mut components = Vec::<Vec<u8>>::new();
-    let nodes: &[crate::SessionNodeRecord] = match graph {
-        GraphCommitDelta::Append { nodes, .. } => nodes,
-        GraphCommitDelta::Unchanged { .. } => &[],
-    };
-    for node in nodes {
+    for node in &graph.nodes {
         components.push(node.node_id.as_bytes().to_vec());
         components.push(optional_digest_component(node.parent_node_id.as_deref()));
     }

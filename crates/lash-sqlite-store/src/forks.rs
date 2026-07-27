@@ -212,22 +212,6 @@ pub(super) async fn fork_at_in_catalog(
                         leaf_node_id: request.node_id.clone(),
                     },
                 )?;
-            let graph_node_count = tx
-                .query_row(
-                    "WITH RECURSIVE ancestry(node_id, parent_node_id) AS (
-                         SELECT node_id, parent_node_id FROM graph_nodes
-                         WHERE node_id = ?1 AND tombstoned = 0
-                         UNION ALL
-                         SELECT parent.node_id, parent.parent_node_id
-                         FROM graph_nodes parent
-                         JOIN ancestry ON parent.node_id = ancestry.parent_node_id
-                         WHERE parent.tombstoned = 0
-                     )
-                     SELECT COUNT(*) FROM ancestry",
-                    params![request.node_id],
-                    |row| row.get::<_, i64>(0),
-                )
-                .map_err(sqlite_error)? as usize;
             let changed = tx
                 .execute(
                     "UPDATE graph_nodes SET incoming_refs = incoming_refs + 1
@@ -252,8 +236,6 @@ pub(super) async fn fork_at_in_catalog(
                 current_frame_node_id: Some(current_frame_node_id),
                 checkpoint_ref: Some(checkpoint_ref.clone().into()),
                 leaf_node_id: Some(request.node_id.clone()),
-                graph_node_count,
-                token_ledger: Vec::new(),
             };
             tx.execute(
                 "INSERT INTO session_head
