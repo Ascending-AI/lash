@@ -145,6 +145,7 @@ fn reasoning_capability() -> ModelCapability {
         }),
         cache_control: None,
         stream_termination: None,
+        sampling: lash_core::SamplingCapability::Configurable,
     }
 }
 
@@ -161,6 +162,7 @@ fn budget_reasoning_capability() -> ModelCapability {
         }),
         cache_control: None,
         stream_termination: None,
+        sampling: lash_core::SamplingCapability::Configurable,
     }
 }
 
@@ -174,6 +176,7 @@ fn toggle_false_reasoning_capability() -> ModelCapability {
         }),
         cache_control: None,
         stream_termination: None,
+        sampling: lash_core::SamplingCapability::Configurable,
     }
 }
 

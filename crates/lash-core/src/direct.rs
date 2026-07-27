@@ -617,6 +617,7 @@ mod tests {
             }),
             cache_control: None,
             stream_termination: None,
+            sampling: crate::SamplingCapability::Configurable,
         }
     }
 

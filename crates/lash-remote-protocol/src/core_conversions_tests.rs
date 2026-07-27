@@ -223,6 +223,7 @@ fn llm_request_and_response_round_trip_owned_dtos() {
             }),
             cache_control: Some(core_llm::CacheControlDialect::Anthropic),
             stream_termination: Some(core_llm::StreamTermination::RequireTerminalEvidence),
+            sampling: core_llm::SamplingCapability::Pinned,
         },
         generation: core_llm::GenerationOptions {
             output_token_cap: NonZeroUsize::new(42),

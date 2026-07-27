@@ -64,6 +64,7 @@ mod tests {
             }),
             cache_control: None,
             stream_termination: None,
+            sampling: lash_core::SamplingCapability::Configurable,
         }
     }
 
@@ -87,6 +88,7 @@ mod tests {
             }),
             cache_control: None,
             stream_termination: None,
+            sampling: lash_core::SamplingCapability::Configurable,
         }
     }
 
@@ -593,6 +595,58 @@ mod tests {
             .build_request_body(&thinking_req)
             .expect("thinking body");
         assert!(thinking.get("temperature").is_none());
+    }
+
+    #[test]
+    fn requested_temperature_is_emitted_unless_thinking_pins_sampling() {
+        let provider = AnthropicProvider::new("key");
+        let mut req = request(vec![LlmMessage::text(LlmRole::User, "hello")]);
+        req.generation.temperature =
+            Some(NonNegativeFiniteF64::new(0.25).expect("finite temperature"));
+        req.generation.seed = Some(7);
+
+        let plain = provider.build_request_body(&req).expect("plain body");
+        assert_eq!(plain["temperature"], json!(0.25));
+        // Anthropic Messages has no seed field, so a requested seed is simply
+        // not expressible on this wire.
+        assert!(plain.get("seed").is_none());
+
+        let mut thinking_req = req.clone();
+        thinking_req.model_variant =
+            lash_core::provider::ReasoningSelection::Effort("medium".to_string());
+        thinking_req.model_capability = effort_capability(&["low", "medium", "high"]);
+        let thinking = provider
+            .build_request_body(&thinking_req)
+            .expect("thinking body");
+        assert_eq!(thinking["thinking"]["type"], "adaptive");
+        // Extended thinking pins sampling; Anthropic rejects a temperature
+        // alongside it.
+        assert!(thinking.get("temperature").is_none());
+    }
+
+    #[test]
+    fn requested_temperature_is_omitted_for_a_model_that_pins_sampling() {
+        // Models released after Claude Opus 4.6 answer any caller-set
+        // temperature with HTTP 400, thinking or no thinking. The host says so
+        // through the capability; the adapter never reads the model name.
+        let provider = AnthropicProvider::new("key");
+        let mut req = request(vec![LlmMessage::text(LlmRole::User, "hello")]);
+        req.model = "claude-opus-4-7".to_string();
+        req.generation.temperature =
+            Some(NonNegativeFiniteF64::new(0.25).expect("finite temperature"));
+        req.model_capability.sampling = lash_core::SamplingCapability::Pinned;
+
+        let body = provider.build_request_body(&req).expect("body");
+        assert!(
+            body.get("thinking").is_none(),
+            "no thinking on this request"
+        );
+        assert!(body.get("temperature").is_none());
+
+        // The same request against a model that allows it still emits.
+        req.model_capability.sampling = lash_core::SamplingCapability::Configurable;
+        let configurable = provider.build_request_body(&req).expect("body");
+        assert_eq!(configurable["temperature"], json!(0.25));
     }
 
     #[test]

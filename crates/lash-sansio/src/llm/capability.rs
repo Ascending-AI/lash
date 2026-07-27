@@ -21,6 +21,32 @@ pub struct ModelCapability {
     /// How a streaming provider proves that this model's response completed.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub stream_termination: Option<StreamTermination>,
+    /// Whether this model lets a caller set the sampling temperature.
+    #[serde(default, skip_serializing_if = "SamplingCapability::is_default")]
+    pub sampling: SamplingCapability,
+}
+
+/// Whether a model accepts a caller-set sampling temperature at all.
+///
+/// Some models pin their own sampling and reject any temperature the caller
+/// supplies — Anthropic models released after Claude Opus 4.6 answer a
+/// non-default temperature with HTTP 400. That is a per-model fact the host
+/// knows from its model catalogue, so it travels with the capability rather
+/// than being guessed from a model name in an adapter.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum SamplingCapability {
+    /// The model accepts a caller-set temperature.
+    #[default]
+    Configurable,
+    /// The model pins sampling itself; adapters omit temperature entirely.
+    Pinned,
+}
+
+impl SamplingCapability {
+    pub fn is_default(&self) -> bool {
+        *self == Self::default()
+    }
 }
 
 /// Host-supplied policy for interpreting a clean EOF on a provider stream.
@@ -148,6 +174,13 @@ impl ModelCapability {
         self.reasoning.is_none()
             && self.cache_control.is_none()
             && self.stream_termination.is_none()
+            && self.sampling.is_default()
+    }
+
+    /// Whether an adapter may put a caller-requested temperature on the wire
+    /// for this model.
+    pub fn allows_caller_temperature(&self) -> bool {
+        self.sampling == SamplingCapability::Configurable
     }
 
     /// Resolve a requested effort to its canonical form: alias-map first
@@ -281,6 +314,7 @@ mod tests {
             reasoning,
             cache_control: None,
             stream_termination: None,
+            sampling: SamplingCapability::Configurable,
         }
     }
 
@@ -302,6 +336,15 @@ mod tests {
             }
             .is_empty()
         );
+        // A capability whose only statement is "this model pins its own
+        // sampling" must still reach the wire.
+        let pinned = ModelCapability {
+            sampling: SamplingCapability::Pinned,
+            ..ModelCapability::default()
+        };
+        assert!(!pinned.is_empty());
+        assert!(!pinned.allows_caller_temperature());
+        assert!(ModelCapability::default().allows_caller_temperature());
     }
 
     #[test]

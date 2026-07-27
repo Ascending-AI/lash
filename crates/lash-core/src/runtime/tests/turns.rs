@@ -4953,6 +4953,7 @@ async fn turn_driver_normalizes_alias_effort_into_outgoing_request() {
         }),
         cache_control: None,
         stream_termination: None,
+        sampling: crate::SamplingCapability::Configurable,
     };
     let model = crate::ModelSpec::from_token_limits(
         "mock-model",
@@ -5027,6 +5028,7 @@ async fn turn_driver_rejects_unsupported_effort_before_provider_call() {
         }),
         cache_control: None,
         stream_termination: None,
+        sampling: crate::SamplingCapability::Configurable,
     };
     let model = crate::ModelSpec::from_token_limits(
         "mock-model",

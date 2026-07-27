@@ -29,7 +29,7 @@ pub use handle::{
 pub use lash_sansio::llm::capability::{
     CacheControlDialect, ModelCapability, ModelEffortValidationCategory,
     ModelEffortValidationError, ReasoningCapability, ReasoningDisableEncoding, ReasoningEncoding,
-    ReasoningSelection, StreamTermination,
+    ReasoningSelection, SamplingCapability, StreamTermination,
 };
 pub use options::{
     CacheRetention, DEFAULT_CHUNK_TIMEOUT_MS, DEFAULT_REQUEST_TIMEOUT_MS,

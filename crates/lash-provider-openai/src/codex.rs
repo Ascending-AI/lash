@@ -2025,6 +2025,7 @@ mod tests {
             }),
             cache_control: None,
             stream_termination: None,
+            sampling: lash_core::SamplingCapability::Configurable,
         }
     }
 

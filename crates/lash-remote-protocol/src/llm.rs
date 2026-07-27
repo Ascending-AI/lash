@@ -200,6 +200,9 @@ pub struct RemoteModelCapability {
     pub cache_control: Option<RemoteCacheControlDialect>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub stream_termination: Option<RemoteStreamTermination>,
+    /// Whether this model lets a caller set the sampling temperature.
+    #[serde(default, skip_serializing_if = "RemoteSamplingCapability::is_default")]
+    pub sampling: RemoteSamplingCapability,
 }
 
 impl RemoteModelCapability {
@@ -207,6 +210,23 @@ impl RemoteModelCapability {
         self.reasoning.is_none()
             && self.cache_control.is_none()
             && self.stream_termination.is_none()
+            && self.sampling.is_default()
+    }
+}
+
+/// Mirror of the core `SamplingCapability`: whether the model accepts a
+/// caller-set temperature at all, or pins its own sampling and rejects one.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum RemoteSamplingCapability {
+    #[default]
+    Configurable,
+    Pinned,
+}
+
+impl RemoteSamplingCapability {
+    pub fn is_default(&self) -> bool {
+        *self == Self::default()
     }
 }
 

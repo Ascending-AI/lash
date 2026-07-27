@@ -89,11 +89,13 @@ impl From<core_llm::ModelCapability> for RemoteModelCapability {
             reasoning,
             cache_control,
             stream_termination,
+            sampling,
         } = value;
         Self {
             reasoning: reasoning.map(Into::into),
             cache_control: cache_control.map(Into::into),
             stream_termination: stream_termination.map(Into::into),
+            sampling: sampling.into(),
         }
     }
 }
@@ -104,11 +106,31 @@ impl From<RemoteModelCapability> for core_llm::ModelCapability {
             reasoning,
             cache_control,
             stream_termination,
+            sampling,
         } = value;
         Self {
             reasoning: reasoning.map(Into::into),
             cache_control: cache_control.map(Into::into),
             stream_termination: stream_termination.map(Into::into),
+            sampling: sampling.into(),
+        }
+    }
+}
+
+impl From<core_llm::SamplingCapability> for RemoteSamplingCapability {
+    fn from(value: core_llm::SamplingCapability) -> Self {
+        match value {
+            core_llm::SamplingCapability::Configurable => Self::Configurable,
+            core_llm::SamplingCapability::Pinned => Self::Pinned,
+        }
+    }
+}
+
+impl From<RemoteSamplingCapability> for core_llm::SamplingCapability {
+    fn from(value: RemoteSamplingCapability) -> Self {
+        match value {
+            RemoteSamplingCapability::Configurable => Self::Configurable,
+            RemoteSamplingCapability::Pinned => Self::Pinned,
         }
     }
 }

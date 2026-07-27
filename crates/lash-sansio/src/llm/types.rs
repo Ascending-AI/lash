@@ -7,7 +7,7 @@ use crate::{AttachmentRef, MediaType, SchemaContract};
 pub use crate::llm::capability::{
     CacheControlDialect, ModelCapability, ModelEffortValidationCategory,
     ModelEffortValidationError, ReasoningCapability, ReasoningDisableEncoding, ReasoningEncoding,
-    ReasoningSelection, StreamTermination,
+    ReasoningSelection, SamplingCapability, StreamTermination,
 };
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
