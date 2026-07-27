@@ -17,11 +17,13 @@ key uses semantic session/turn identity rather than lease generation: cancellati
 loss, while ADR 0029's normal
 generation fence prevents the stale owner from committing.
 
-The keyed-promise tier is part of the receipt. `Inline` uses a bounded process-global in-memory
-registry and is same-process control only: a driver in another OS process can resolve its own local
-gate but cannot signal the owner's gate. Cross-process cancellation and replay observation require
-a `Durable` engine deployment such as Restate. Hosts must use the receipt's durability tier when
-deciding whether a Stop control can honestly promise cross-process delivery.
+The cancellation receipt reports only the outcome of addressing the keyed promise. Delivery
+geometry is a property of the `TurnWorkDriver` and effect controller the Host Application
+configured. The inline path uses a bounded process-global in-memory registry and is same-process
+control only: a driver in another OS process can resolve its own local gate but cannot signal the
+owner's gate. Cross-process cancellation and replay observation require a controller-backed
+deployment such as Restate. A host decides whether a Stop control can honestly promise
+cross-process delivery from the deployment it constructed, not from a receipt field.
 
 Who cancelled is host-domain data: Lash records an opaque host-supplied origin and never interprets
 it, mirroring ADR 0026's treatment of host-supplied capability data. Process-local token entry
@@ -45,14 +47,14 @@ For turns blocked in local composite execution, graceful cancellation cannot int
 the demonstrated break-glass is an admin `KILL`, run last because a killed handler cannot release
 the shared-session lease.
 
-The keyed-promise implementation uses the existing `AwaitEventResolver` operations and engine
-journal. Reserved `TurnCancelGate` and `TurnTerminal` identities are indexed as control promises:
+The keyed-promise implementation uses the existing `AwaitEventResolver` operations and the
+configured effect controller's journal. Reserved `TurnCancelGate` and `TurnTerminal` identities are indexed as control promises:
 ordinary durable-wait cancellation does not sweep them, while session deletion revokes them. This
-adds no store method (ADR 0016), no Lash-owned effect journal (ADR 0012), no store polling/watch
-path, and no claim TTL. A live owner does hold an engine-native keyed-promise observation; Restate
-implements that observation through `LashDurableWaitWorkflow` ingress with bounded retry, not its
-Admin API. The inline registry drains live gate/terminal entries after terminal publication and
-keeps only bounded recent completion and session-revocation caches.
+adds no session-store method (ADR 0016), no second replay journal (ADR 0012), no store
+polling/watch path, and no claim TTL. A live owner does hold an engine-native keyed-promise
+observation; Restate implements that observation through `LashDurableWaitWorkflow` ingress with
+bounded retry, not its Admin API. The inline registry drains live gate/terminal entries after
+terminal publication and keeps only bounded recent completion and session-revocation caches.
 
 We rejected store-side cancellation rows or a lease marker because they add store coordination,
 polling, and recovery races; invocation-id cancellation because it leaks engine identity and can

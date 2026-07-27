@@ -1,23 +1,29 @@
-# Durable waits lean on effect-host engines; lash never owns an effect journal
+# Durable waits lean on effect-host engines; substrates own their journals
 
 Long-lived processes need to suspend durably (waiting on a signal, a long timer, or a
 child process) without holding a worker. We close this by growing the effect-host
 contract by exactly one primitive — a durable, one-shot, keyed promise
 (`AwaitEvent { key }` plus a resolve seam) — and leaning on whatever engine implements
-the contract correctly (Restate today, Temporal or others tomorrow) for journaling,
-replay, and suspension economics. All richer wait semantics (named typed signals,
-child-process joins, timer wakes) are lash-defined compilations onto that one primitive
-with deterministic, occurrence-sequenced keys. Lash never journals effect outcomes
-itself.
+the contract correctly (Restate today, Temporal or others tomorrow) for suspension
+economics. All richer wait semantics (named typed signals, child-process joins, timer
+wakes) are lash-defined compilations onto that one primitive with deterministic,
+occurrence-sequenced keys.
+
+Lash owns the effect-journal contract; the configured substrate owns the journal.
+Restate supplies its native journal. The SQLite and PostgreSQL substrates implement
+the same contract in `runtime_effect_replay` and `lash_runtime_effect_replay`.
+The inline substrate owns no replay journal. The session commit store does not absorb
+this responsibility: effect replay and settled session history remain separate seams
+joined by stable operation identity.
 
 ## Considered Options
 
-- **Lash-owned journal**: record effect outcomes into the process event log and replay
-  from it, giving uniform suspension on every backend (sqlite/postgres/inline) and
-  demoting engines to transports. Rejected: it reimplements what dedicated
-  durable-execution engines already do well, and the entire point of the effect-host
-  seam is pluggable durability — the registry tier's weaker guarantees are priced in by
-  `DurabilityTier`.
+- **Process-event-log journal**: record effect outcomes into the process event log and
+  replay from it, giving uniform suspension on every backend and demoting engines to
+  transports. Rejected: it duplicates the effect-journal contract inside an
+  observation log and fuses process history to one replay implementation. SQL-backed
+  implementations of the effect-host contract are substrates, not this rejected
+  second journal.
 - **Per-semantic contract growth** (`AwaitSignal`, `AwaitProcessTerminal`, …): rejected —
   the probability of a correct third-party engine implementation falls with contract
   surface area; one promise primitive is the smallest thing an engine must get right,
@@ -25,11 +31,13 @@ itself.
 
 ## Consequences
 
-- The inline implementation satisfies the same contract as an in-memory wait over the
-  process registry: correct semantics, no suspension economics (a waiting process holds
-  a parked future and keeps its lease alive). Long-lived automation belongs on an
-  engine-backed tier; this difference is the existing `DurabilityTier` distinction, not
-  a bug.
+- The inline implementation provides an in-memory wait over the process registry: a
+  waiting process holds a parked future and keeps its lease alive, and replay does not
+  survive loss of that runtime. Long-lived automation that requires cross-process
+  replay belongs on a substrate configured to own it.
+- `EffectReplayOwnership` records only the mechanical fact of whether the runtime or
+  its controller owns replay. It is not an end-to-end durability claim. The Host
+  Application owns that deployment-level assertion.
 - Signals are named and typed only: declared per-process as event types with payload
   schemas, validated at send time; the unnamed untyped `wait_signal()` is removed.
 - Waiting is an observability facet on a running process (wait state on the record,
