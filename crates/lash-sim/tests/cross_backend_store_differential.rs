@@ -421,7 +421,7 @@ fn runtime_commit(
     if let Some(turn_commit) = turn_commit {
         commit = commit.with_turn_commit(RuntimeTurnCommitStamp::new(
             session_id,
-            turn_commit.turn_id,
+            lash_core::store::OperationId::turn(session_id, turn_commit.turn_id, "differential"),
             turn_commit.hash,
         ));
     }
@@ -876,6 +876,12 @@ fn normalized_store_error(backend: &str, error: &StoreError) -> String {
         }
         StoreError::MissingRecordSchemaVersion { .. } => "MissingRecordSchemaVersion".to_string(),
         StoreError::InvalidRecordSchemaVersion { .. } => "InvalidRecordSchemaVersion".to_string(),
+        StoreError::NodeIdDerivationMismatch { .. } => "NodeIdDerivationMismatch".to_string(),
+        StoreError::NodeIdCollision { .. } => "NodeIdCollision".to_string(),
+        StoreError::CommitRealizationMismatch { .. } => "CommitRealizationMismatch".to_string(),
+        StoreError::CommitFrameRealizationMismatch { .. } => {
+            "CommitFrameRealizationMismatch".to_string()
+        }
         StoreError::Backend(message) => normalized_backend_error(backend, message),
     }
 }

@@ -303,10 +303,7 @@ impl SessionCommitStore for PostgresSessionStore {
             .map_err(store_sqlx_error)?
             .into_iter()
             .collect::<std::collections::HashSet<_>>();
-            if let Some(node) = nodes
-                .iter()
-                .find(|node| occupied.contains(&node.node_id))
-            {
+            if let Some(node) = nodes.iter().find(|node| occupied.contains(&node.node_id)) {
                 return Err(StoreError::NodeIdCollision {
                     node_id: node.node_id.clone(),
                 });
