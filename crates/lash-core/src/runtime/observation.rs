@@ -794,7 +794,7 @@ mod tests {
         let writer = handle.writer();
         let mut runtime = writer.lock().await;
         runtime.state.turn_index = 9;
-        runtime.state.head_revision = Some(17);
+        runtime.state.head_revision = 17;
 
         let exported = runtime.export_persisted_state();
         let exported_revision = SessionRevision::from_state(&exported);

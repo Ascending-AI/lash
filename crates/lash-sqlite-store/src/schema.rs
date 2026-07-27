@@ -77,6 +77,7 @@ CREATE INDEX IF NOT EXISTS idx_usage_deltas_session_seq
 
 CREATE TABLE IF NOT EXISTS session_meta (
     session_id    TEXT PRIMARY KEY,
+    incarnation_id TEXT NOT NULL,
     session_name  TEXT NOT NULL,
     created_at    TEXT NOT NULL,
     model         TEXT NOT NULL,
@@ -230,7 +231,10 @@ CREATE INDEX IF NOT EXISTS idx_attachment_manifest_owner
 ///
 /// Bumped to 16 so an anchor binds the continuation checkpoint and source
 /// session as one immutable snapshot rather than selecting either later.
-pub(crate) const SCHEMA_VERSION: i32 = 16;
+///
+/// Bumped to 17 so a reusable session name has a durable per-lifetime
+/// incarnation for node and effect-replay identity.
+pub(crate) const SCHEMA_VERSION: i32 = 17;
 
 pub(crate) const PROCESS_SCHEMA: &str = "
 CREATE TABLE IF NOT EXISTS processes (
@@ -455,7 +459,7 @@ CREATE TABLE IF NOT EXISTS await_event_revoked_sessions (
 // FIG-579 persists canonical runtime-effect envelopes for structural replay
 // diagnostics. Effect databases follow the crate's alpha reject-and-recreate
 // convention rather than carrying a migration chain.
-pub(crate) const EFFECT_SCHEMA_VERSION: i32 = 3;
+pub(crate) const EFFECT_SCHEMA_VERSION: i32 = 4;
 
 pub(crate) async fn apply_pragmas(
     conn: &SqliteConnection,

@@ -26,6 +26,7 @@ impl SessionStoreFactory for InMemorySessionStoreFactory {
                 ));
                 *store.session_meta.lock().expect("lock session meta") = Some(crate::SessionMeta {
                     session_id: request.session_id.clone(),
+                    incarnation_id: crate::IncarnationId::fresh(),
                     session_name: request.session_id.clone(),
                     created_at: self.clock.timestamp_rfc3339(),
                     model: request.policy.model.id.clone(),
@@ -222,14 +223,24 @@ impl SessionStoreFactory for InMemorySessionStoreFactory {
             else {
                 continue;
             };
-            points
-                .entry(node_id.clone())
-                .or_insert_with(|| crate::ForkPoint {
-                    node_id: node_id.clone(),
-                    checkpoint_ref: checkpoint_ref.clone(),
-                    source_session_id: head.session_id.clone(),
-                    pinned: false,
-                });
+            let candidate = crate::ForkPoint {
+                node_id: node_id.clone(),
+                checkpoint_ref: checkpoint_ref.clone(),
+                source_session_id: head.session_id.clone(),
+                pinned: false,
+            };
+            match points.entry(node_id.clone()) {
+                std::collections::btree_map::Entry::Vacant(entry) => {
+                    entry.insert(candidate);
+                }
+                std::collections::btree_map::Entry::Occupied(mut entry)
+                    if !entry.get().pinned
+                        && candidate.source_session_id < entry.get().source_session_id =>
+                {
+                    entry.insert(candidate);
+                }
+                std::collections::btree_map::Entry::Occupied(_) => {}
+            }
         }
         Ok(points.into_values().collect())
     }
@@ -353,6 +364,7 @@ impl SessionStoreFactory for InMemorySessionStoreFactory {
             });
         *store.session_meta.lock().expect("lock session meta") = Some(crate::SessionMeta {
             session_id: request.session_id.clone(),
+            incarnation_id: crate::IncarnationId::fresh(),
             session_name: request.session_id.clone(),
             created_at: self.clock.timestamp_rfc3339(),
             model: request.policy.model.id.clone(),

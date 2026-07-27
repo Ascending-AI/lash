@@ -560,6 +560,22 @@ async fn postgres_runtime_effect_controller_satisfies_conformance_when_configure
     };
     reset(&storage).await;
 
+    let first_incarnation = storage.runtime_effect_controller(ExecutionScope::turn_incarnation(
+        "postgres-reused-session",
+        lash_core::IncarnationId::from("postgres-first-incarnation".to_string()),
+        "postgres-reused-turn",
+    ));
+    let second_incarnation = storage.runtime_effect_controller(ExecutionScope::turn_incarnation(
+        "postgres-reused-session",
+        lash_core::IncarnationId::from("postgres-second-incarnation".to_string()),
+        "postgres-reused-turn",
+    ));
+    lash_core::testing::conformance::effect_controller_session_incarnations_are_isolated(
+        &first_incarnation,
+        &second_incarnation,
+    )
+    .await;
+
     let controller = storage.runtime_effect_controller(ExecutionScope::runtime_operation(
         "postgres-effect-controller-conformance",
     ));

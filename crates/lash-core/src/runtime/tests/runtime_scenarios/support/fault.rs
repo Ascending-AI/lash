@@ -53,7 +53,7 @@ impl RuntimeScenarioContext {
             )
             .await
             .expect("released advisory lease must not reject a current-head commit");
-        self.state.head_revision = Some(result.head_revision);
+        self.state.head_revision = result.head_revision;
 
         let mut stale_state = self.state.clone();
         stale_state.head_revision = stale_head_revision;
@@ -72,7 +72,7 @@ impl RuntimeScenarioContext {
                 StoreError::HeadRevisionConflict {
                     expected,
                     actual,
-                } if Some(expected) == stale_head_revision
+                } if expected == stale_head_revision
                     && actual == result.head_revision
             ),
             "{} stale head produced the wrong error after advisory lease release: {err:?}",

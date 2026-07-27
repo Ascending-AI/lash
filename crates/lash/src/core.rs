@@ -656,6 +656,37 @@ impl LashCore {
                 return Err(err.into());
             }
         }
+        let create_request = lash_core::SessionStoreCreateRequest {
+            session_id: request.session_id,
+            relation: request.relation,
+            policy: request.policy,
+        };
+        let branch_store = store_factory
+            .open_existing_store(&create_request)
+            .await
+            .map_err(|error| {
+                lash_core::StoreError::Backend(format!(
+                    "failed to reopen fork store `{}`: {error}",
+                    create_request.session_id
+                ))
+            })?
+            .ok_or_else(|| {
+                lash_core::StoreError::Backend(format!(
+                    "fork store `{}` disappeared before grant publication completed",
+                    create_request.session_id
+                ))
+            })?;
+        let mut meta = branch_store.load_session_meta().await?.ok_or_else(|| {
+            lash_core::StoreError::Backend(format!(
+                "fork store `{}` has no session metadata",
+                create_request.session_id
+            ))
+        })?;
+        let lash_core::SessionRelation::Fork { process_grants, .. } = &mut meta.relation else {
+            unreachable!("fork factory must persist fork metadata");
+        };
+        process_grants.clear();
+        branch_store.save_session_meta(meta).await?;
         Ok(fork)
     }
 

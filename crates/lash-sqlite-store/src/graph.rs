@@ -65,21 +65,38 @@ impl Store {
 
     pub(crate) fn load_active_path_session_graph_from_conn(
         conn: &Connection,
-        _session_id: &str,
+        session_id: &str,
         leaf_node_id: Option<String>,
     ) -> rusqlite::Result<lash_core::SessionGraph> {
         let Some(leaf_node_id) = leaf_node_id else {
             return Ok(lash_core::SessionGraph::default());
         };
         let mut stmt = conn.prepare(
-            "WITH RECURSIVE active(node_id, node_json, parent_node_id, depth) AS (
+            "WITH RECURSIVE bound_path(node_id, parent_node_id) AS (
+                SELECT node_id, parent_node_id
+                FROM graph_nodes
+                WHERE node_id = (
+                    SELECT leaf_node_id FROM session_head WHERE session_id = ?2
+                ) AND tombstoned = 0
+              UNION ALL
+                SELECT parent.node_id, parent.parent_node_id
+                FROM graph_nodes parent
+                JOIN bound_path ON parent.node_id = bound_path.parent_node_id
+                WHERE parent.tombstoned = 0
+            ),
+            active(node_id, node_json, parent_node_id, depth) AS (
                 SELECT
                     node_id,
                     node_json,
                     parent_node_id,
                     0
                 FROM graph_nodes
-                WHERE node_id = ?1 AND tombstoned = 0
+                WHERE node_id = ?1
+                  AND tombstoned = 0
+                  AND (
+                      session_id = ?2
+                      OR node_id IN (SELECT node_id FROM bound_path)
+                  )
               UNION ALL
                 SELECT
                     g.node_id,
@@ -92,7 +109,7 @@ impl Store {
             )
             SELECT node_id, parent_node_id, node_json FROM active ORDER BY depth DESC",
         )?;
-        let rows = stmt.query_map(params![leaf_node_id.as_str()], |row| {
+        let rows = stmt.query_map(params![leaf_node_id.as_str(), session_id], |row| {
             Ok((
                 row.get::<_, String>(0)?,
                 row.get::<_, Option<String>>(1)?,
@@ -110,10 +127,8 @@ impl Store {
                 nodes.push(node);
             }
         }
-        Ok(lash_core::SessionGraph::from_nodes(
-            nodes,
-            Some(leaf_node_id),
-        ))
+        let retained_leaf = (!nodes.is_empty()).then_some(leaf_node_id);
+        Ok(lash_core::SessionGraph::from_nodes(nodes, retained_leaf))
     }
 
     pub(crate) async fn maybe_auto_gc(&self) {

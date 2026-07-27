@@ -18,10 +18,10 @@ fn draft_node_id(namespace: &str, ordinal: u64) -> String {
 /// Process provenance can capture the current frame scope immediately, so a
 /// FrameOpen ID cannot use the provisional-to-realized remapping used by
 /// ordinary history nodes.
-pub(crate) fn frame_node_id(session_id: &str, frame_key: &str) -> String {
+pub fn frame_node_id(incarnation_id: &crate::IncarnationId, frame_key: &str) -> String {
     let preimage = format!(
-        "{}:{session_id}:{}:{frame_key}",
-        session_id.len(),
+        "{}:{incarnation_id}:{}:{frame_key}",
+        incarnation_id.as_str().len(),
         frame_key.len()
     );
     format!(
@@ -205,6 +205,7 @@ pub enum SessionNodePayload {
         body: SharedJsonValue,
     },
     FrameOpen {
+        frame_key: String,
         reason: crate::AgentFrameReason,
         assignment: crate::AgentFrameAssignment,
         protocol_turn_options: crate::ProtocolTurnOptions,
@@ -586,6 +587,7 @@ impl SessionNodeRecord {
                 reason,
                 assignment,
                 protocol_turn_options,
+                ..
             } => Some((reason, assignment, protocol_turn_options)),
             SessionNodePayload::Event { .. } | SessionNodePayload::Plugin { .. } => None,
         }
@@ -864,6 +866,7 @@ impl SessionGraph {
     pub(crate) fn append_frame_open_with_id_at(
         &mut self,
         frame_node_id: String,
+        frame_key: String,
         reason: crate::AgentFrameReason,
         assignment: crate::AgentFrameAssignment,
         protocol_turn_options: crate::ProtocolTurnOptions,
@@ -877,6 +880,7 @@ impl SessionGraph {
             parent_node_id: self.leaf_node_id.clone(),
             timestamp,
             payload: SessionNodePayload::FrameOpen {
+                frame_key,
                 reason,
                 assignment,
                 protocol_turn_options,
@@ -1376,18 +1380,21 @@ mod tests {
     fn nearest_frame_is_derived_from_ancestry() {
         let assignment = crate::AgentFrameAssignment::from_policy(crate::SessionPolicy::default());
         let mut graph = SessionGraph::default();
-        let first = frame_node_id("frame-ancestry", "first-frame");
+        let incarnation_id = crate::IncarnationId::fresh();
+        let first = frame_node_id(&incarnation_id, "first-frame");
         assert!(graph.append_frame_open_with_id_at(
             first.clone(),
+            "first-frame".to_string(),
             crate::AgentFrameReason::initial(),
             assignment.clone(),
             crate::ProtocolTurnOptions::default(),
             "2026-07-27T00:00:00Z".to_string(),
         ));
         let first_message = graph.append_message(text_message("m1", MessageRole::User, "first"));
-        let second = frame_node_id("frame-ancestry", "second-frame");
+        let second = frame_node_id(&incarnation_id, "second-frame");
         assert!(graph.append_frame_open_with_id_at(
             second.clone(),
+            "second-frame".to_string(),
             crate::AgentFrameReason::continue_as(),
             assignment,
             crate::ProtocolTurnOptions::default(),

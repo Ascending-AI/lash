@@ -94,7 +94,9 @@ const SCHEMA_COMPONENT: &str = "lash-postgres-store";
 // joins live heads as both a graph-node root and checkpoint-blob root.
 // Bumped to 22 so each anchor binds one continuation checkpoint and source
 // session snapshot.
-const SCHEMA_VERSION: i32 = 22;
+// Bumped to 23 so reusable session names carry durable per-lifetime
+// incarnation identity in session metadata.
+const SCHEMA_VERSION: i32 = 23;
 const PROCESS_LEASE_SCHEMA_VERSION: u32 = lash_core::PROCESS_LEASE_SCHEMA_VERSION;
 
 #[derive(Clone)]

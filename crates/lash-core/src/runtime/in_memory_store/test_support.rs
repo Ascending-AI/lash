@@ -63,6 +63,7 @@ mod tests {
             parent_node_id: None,
             timestamp: "2026-07-26T00:00:00Z".to_string(),
             payload: crate::SessionNodePayload::FrameOpen {
+                frame_key: "factory-global-node".to_string(),
                 reason: crate::AgentFrameReason::initial(),
                 assignment: crate::AgentFrameAssignment::from_policy(
                     crate::SessionPolicy::default(),

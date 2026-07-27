@@ -107,6 +107,7 @@ fn conflicting_reopen_state(session_id: &str) -> RuntimeSessionState {
         parent_node_id: state.session_graph.leaf_node_id.clone(),
         timestamp: "2026-07-27T00:00:00Z".to_string(),
         payload: lash_core::SessionNodePayload::FrameOpen {
+            frame_key: format!("conflicting-frame-{session_id}"),
             reason: lash_core::AgentFrameReason::continue_as(),
             assignment: lash_core::AgentFrameAssignment::from_policy(current_policy),
             protocol_turn_options: Default::default(),
@@ -2221,8 +2222,15 @@ async fn fork_inherits_process_grants_without_inheriting_wake_subscription() -> 
         })
         .await
         .expect("create fork grant source");
+    let source_incarnation_id = source_store
+        .load_session_meta()
+        .await
+        .expect("load source metadata")
+        .expect("source metadata exists")
+        .incarnation_id;
     let mut source_state = lash_core::RuntimeSessionState {
         session_id: "fork-grant-source".to_string(),
+        incarnation_id: source_incarnation_id,
         policy,
         ..Default::default()
     };
@@ -2299,10 +2307,37 @@ async fn fork_inherits_process_grants_without_inheriting_wake_subscription() -> 
         Some("fork-grant-source"),
         "fork observes the process but does not become its wake target"
     );
+    let published_meta = branch_store
+        .load_session_meta()
+        .await
+        .expect("load published fork metadata")
+        .expect("published fork metadata exists");
+    let lash_core::SessionRelation::Fork { process_grants, .. } = &published_meta.relation else {
+        panic!("branch metadata must retain its fork relation");
+    };
+    assert!(
+        process_grants.is_empty(),
+        "successfully published grants must be consumed from the recovery snapshot"
+    );
+
+    let mut recovery_meta = published_meta;
+    let lash_core::SessionRelation::Fork { process_grants, .. } = &mut recovery_meta.relation
+    else {
+        unreachable!("relation was checked above");
+    };
+    process_grants.push(lash_core::ProcessHandleGrant {
+        session_id: "fork-grant-source".to_string(),
+        process_id: "fork-visible-process".to_string(),
+        descriptor: lash_core::ProcessHandleDescriptor::new(Some("test"), Some("fork inherited")),
+    });
+    branch_store
+        .save_session_meta(recovery_meta)
+        .await
+        .expect("simulate a crash before grant snapshot consumption");
     registry
         .revoke_handle(&branch_scope, "fork-visible-process")
         .await
-        .expect("simulate a crash before grant publication");
+        .expect("remove the partially published grant");
     core.session("fork-grant-branch").open().await?;
     assert_eq!(
         registry
@@ -2311,7 +2346,32 @@ async fn fork_inherits_process_grants_without_inheriting_wake_subscription() -> 
             .expect("list recovered fork grants")
             .len(),
         1,
-        "opening a durable fork must reconcile its snapshotted grant set"
+        "opening a durable fork must reconcile an unconsumed grant snapshot"
+    );
+    let recovered_meta = branch_store
+        .load_session_meta()
+        .await
+        .expect("load recovered fork metadata")
+        .expect("recovered fork metadata exists");
+    let lash_core::SessionRelation::Fork { process_grants, .. } = &recovered_meta.relation else {
+        unreachable!("relation was checked above");
+    };
+    assert!(
+        process_grants.is_empty(),
+        "recovery must consume the snapshot after idempotent publication"
+    );
+    registry
+        .revoke_handle(&branch_scope, "fork-visible-process")
+        .await
+        .expect("deliberately revoke the recovered grant");
+    core.session("fork-grant-branch").open().await?;
+    assert!(
+        registry
+            .list_handle_grants(&branch_scope)
+            .await
+            .expect("list grants after deliberate revocation")
+            .is_empty(),
+        "a later deliberate revocation must remain revoked"
     );
     Ok(())
 }

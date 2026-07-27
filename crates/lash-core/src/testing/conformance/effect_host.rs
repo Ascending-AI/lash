@@ -500,6 +500,37 @@ pub async fn effect_controller_journaled_effect_replay(
     );
 }
 
+/// Prove that two recreated session incarnations may reuse the same logical
+/// turn and replay identities without sharing a durable effect journal row.
+#[cfg(any(test, feature = "testing"))]
+pub async fn effect_controller_session_incarnations_are_isolated(
+    first: &dyn RuntimeEffectController,
+    second: &dyn RuntimeEffectController,
+) {
+    let envelope = exec_code_conformance_envelope("incarnation-reuse", "same-envelope");
+    let first_outcome = first
+        .execute_effect(
+            envelope.clone(),
+            RuntimeEffectLocalExecutor::testing(|_| async {
+                Ok(replay_conformance_exec_outcome("first-incarnation"))
+            }),
+        )
+        .await
+        .expect("execute first-incarnation effect");
+    assert_replay_conformance_exec_marker(first_outcome, "first-incarnation");
+
+    let second_outcome = second
+        .execute_effect(
+            envelope,
+            RuntimeEffectLocalExecutor::testing(|_| async {
+                Ok(replay_conformance_exec_outcome("second-incarnation"))
+            }),
+        )
+        .await
+        .expect("execute second-incarnation effect");
+    assert_replay_conformance_exec_marker(second_outcome, "second-incarnation");
+}
+
 /// Assert that a durable effect controller surfaces the same structural replay
 /// mismatch detail as the shared canonical-envelope validator.
 #[cfg(any(test, feature = "testing"))]

@@ -216,7 +216,7 @@ impl PostgresRuntimeEffectController {
         let envelope_hash = reconstructed_envelope.hash().to_string();
         let envelope_json =
             serde_json::to_string(reconstructed_envelope).map_err(postgres_effect_encode_error)?;
-        let scope_id = self.scope.id().to_string();
+        let scope_id = self.scope.journal_id();
         let lease_token = self.inner.next_lease_token();
         let replay_mode = self.inner.replay_mode.load(Ordering::SeqCst);
         let owner_id = self.inner.owner_id.clone();

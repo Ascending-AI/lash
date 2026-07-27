@@ -458,7 +458,7 @@ async fn stale_head_transaction_is_rejected(
         .load_session(lash_core::SessionReadScope::FullGraph)
         .await
         .map_err(|err| format!("load current session head: {err}"))?
-        .map(|read| read.head_revision);
+        .map_or(0, |read| read.head_revision);
     let current = RuntimeSessionState {
         session_id: session_id.to_string(),
         head_revision: expected_head_revision,

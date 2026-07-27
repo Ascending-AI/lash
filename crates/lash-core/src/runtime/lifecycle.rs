@@ -364,7 +364,7 @@ impl LashRuntime {
         // persisted or has pending graph nodes; an unconditional commit
         // here would bump the head revision on every park/close, disturbing
         // host-side head-CAS expectations for what is durably a no-op.
-        if self.state.head_revision.is_none()
+        if self.state.checkpoint_ref.is_none()
             || matches!(
                 self.state.pending_graph_commit(),
                 crate::GraphCommitDelta::Append { .. }
@@ -512,7 +512,7 @@ mod tests {
         let first = crate::store::RuntimeCommit::persisted_state(&state, &[]);
 
         let mut retry_state = state.clone();
-        retry_state.head_revision = Some(41);
+        retry_state.head_revision = 41;
         let retry = crate::store::RuntimeCommit::persisted_state(&retry_state, &[]);
 
         let mut changed_state = retry_state;

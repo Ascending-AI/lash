@@ -18,6 +18,13 @@ use super::usage::TokenLedgerEntry;
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct RuntimeSessionState {
     pub session_id: String,
+    /// Store-minted identity for this lifetime of `session_id`.
+    ///
+    /// Runtime snapshots preserve already-materialized graph ids, while a
+    /// durable store binding replaces this value with the metadata value
+    /// before any new node identity is derived.
+    #[serde(skip)]
+    pub incarnation_id: crate::IncarnationId,
     #[serde(default)]
     pub policy: SessionPolicy,
     /// Derived cache of FrameOpen nodes; never serialized or persisted.
@@ -59,11 +66,11 @@ pub struct RuntimeSessionState {
     pub token_ledger: Vec<TokenLedgerEntry>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub checkpoint_ref: Option<crate::store::BlobRef>,
-    /// Store head revision observed by the runtime. Lease-fenced commits use it
-    /// as the stale-writer CAS backstop; `None` means the runtime is creating
-    /// the first persisted head.
+    /// Store head revision observed by the runtime. Revision zero is the
+    /// create/fork baseline; `checkpoint_ref` distinguishes an unpersisted
+    /// empty runtime from a durable revision-zero fork.
     #[serde(skip)]
-    pub head_revision: Option<u64>,
+    pub head_revision: u64,
     /// Node ids known to exist durably. This is deliberately independent of
     /// the resident graph: partial residency omits durable off-path nodes,
     /// while host-side edits can add resident nodes before they commit.
@@ -79,6 +86,7 @@ impl RuntimeSessionState {
             .agent_frame_records(&snapshot.session_id);
         let mut state = Self {
             session_id: snapshot.session_id,
+            incarnation_id: crate::IncarnationId::fresh(),
             policy: snapshot.policy,
             agent_frames,
             current_frame_node_id: snapshot.current_frame_node_id,
@@ -97,7 +105,7 @@ impl RuntimeSessionState {
             execution_state_snapshot: None,
             token_ledger: snapshot.token_ledger,
             checkpoint_ref: snapshot.checkpoint_ref,
-            head_revision: None,
+            head_revision: 0,
             persisted_node_ids: std::collections::HashSet::new(),
         };
         state.ensure_agent_frame_initialized();
@@ -226,7 +234,7 @@ impl RuntimeSessionState {
     }
 
     pub fn apply_persisted_commit_result(&mut self, result: crate::store::RuntimeCommitResult) {
-        self.head_revision = Some(result.head_revision);
+        self.head_revision = result.head_revision;
         self.checkpoint_ref = Some(result.checkpoint_ref);
         self.session_graph
             .apply_realized_node_timestamps(&result.realized_node_timestamps);
@@ -387,9 +395,11 @@ impl RuntimeSessionState {
             return;
         }
         let assignment = crate::AgentFrameAssignment::from_policy(self.policy.clone());
-        let frame_node_id = crate::session_graph::frame_node_id(&self.session_id, "initial-frame");
+        let frame_key = "initial-frame";
+        let frame_node_id = crate::session_graph::frame_node_id(&self.incarnation_id, frame_key);
         self.session_graph.append_frame_open_with_id_at(
             frame_node_id.clone(),
+            frame_key.to_string(),
             crate::AgentFrameReason::initial(),
             assignment,
             self.protocol_turn_options.clone(),
@@ -419,9 +429,11 @@ impl RuntimeSessionState {
     ) {
         self.policy = assignment.policy.clone();
         self.protocol_turn_options = protocol_turn_options.clone();
-        let frame_node_id = crate::session_graph::frame_node_id(&self.session_id, "initial-frame");
+        let frame_key = "initial-frame";
+        let frame_node_id = crate::session_graph::frame_node_id(&self.incarnation_id, frame_key);
         self.session_graph.append_frame_open_with_id_at(
             frame_node_id.clone(),
+            frame_key.to_string(),
             crate::AgentFrameReason::initial(),
             assignment,
             protocol_turn_options,
@@ -436,6 +448,7 @@ impl Default for RuntimeSessionState {
     fn default() -> Self {
         Self {
             session_id: "root".to_string(),
+            incarnation_id: crate::IncarnationId::fresh(),
             policy: SessionPolicy::default(),
             agent_frames: Vec::new(),
             current_frame_node_id: None,
@@ -454,7 +467,7 @@ impl Default for RuntimeSessionState {
             execution_state_snapshot: None,
             token_ledger: Vec::new(),
             checkpoint_ref: None,
-            head_revision: None,
+            head_revision: 0,
             persisted_node_ids: std::collections::HashSet::new(),
         }
     }
@@ -535,7 +548,7 @@ mod tests {
             tool_state_snapshot: Some(crate::ToolState::default()),
             plugin_snapshot: Some(crate::PluginSessionSnapshot::default()),
             execution_state_snapshot: Some(vec![1, 2, 3]),
-            head_revision: Some(42),
+            head_revision: 42,
             ..RuntimeSessionState::default()
         };
         state.ensure_agent_frame_initialized();
@@ -561,7 +574,7 @@ mod tests {
 
         assert_eq!(hydrated.session_id, "snapshot-test");
         assert_eq!(hydrated.policy.recorded_provider_id(), "mock");
-        assert!(hydrated.head_revision.is_none());
+        assert_eq!(hydrated.head_revision, 0);
         assert!(hydrated.tool_state_snapshot.is_none());
         assert!(hydrated.plugin_snapshot.is_none());
         assert!(hydrated.execution_state_snapshot.is_none());
@@ -663,7 +676,7 @@ pub(super) fn apply_session_head(
     state.execution_state_ref = None;
     state.execution_state_snapshot = None;
     state.ensure_agent_frame_initialized();
-    state.head_revision = Some(head.head_revision);
+    state.head_revision = head.head_revision;
     state.persisted_node_ids = head
         .graph
         .nodes
@@ -712,7 +725,7 @@ pub(super) fn derive_graph_commit_node_ids(
     graph: &mut crate::GraphCommitDelta,
     operation: &crate::OperationId,
 ) -> Result<Vec<String>, crate::StoreError> {
-    let mapping = graph.derive_node_ids(&state.session_id, operation)?;
+    let mapping = graph.derive_node_ids(&state.incarnation_id, operation)?;
     state
         .session_graph
         .remap_node_ids(&state.session_id, &mapping);
@@ -746,9 +759,11 @@ pub(super) fn open_agent_frame_in_state_with_clock(
         .unwrap_or_else(|| crate::AgentFrameAssignment::from_policy(state.policy.clone()));
     assignment.policy = state.policy.clone();
     let protocol_turn_options = state.protocol_turn_options.clone();
-    let frame_node_id = crate::session_graph::frame_node_id(&state.session_id, &request.frame_id);
+    let frame_node_id =
+        crate::session_graph::frame_node_id(&state.incarnation_id, &request.frame_id);
     let opened = state.session_graph.append_frame_open_with_id_at(
         frame_node_id.clone(),
+        request.frame_id.clone(),
         request.reason,
         assignment,
         protocol_turn_options,

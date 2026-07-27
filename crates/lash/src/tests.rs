@@ -700,6 +700,7 @@ impl lash_core::SessionCommitStore for BoundSessionStore {
     ) -> std::result::Result<Option<lash_core::SessionMeta>, lash_core::store::StoreError> {
         Ok(Some(lash_core::SessionMeta {
             session_id: self.session_id.clone(),
+            incarnation_id: lash_core::IncarnationId::fresh(),
             session_name: self.session_id.clone(),
             created_at: "test".to_string(),
             model: "mock-model".to_string(),

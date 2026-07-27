@@ -26,6 +26,8 @@ pub enum ExecutionScope {
     Turn {
         session_id: String,
         turn_id: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        incarnation_id: Option<crate::IncarnationId>,
     },
     Process {
         process_id: String,
@@ -47,6 +49,19 @@ impl ExecutionScope {
         Self::Turn {
             session_id: session_id.into(),
             turn_id: turn_id.into(),
+            incarnation_id: None,
+        }
+    }
+
+    pub fn turn_incarnation(
+        session_id: impl Into<String>,
+        incarnation_id: crate::IncarnationId,
+        turn_id: impl Into<String>,
+    ) -> Self {
+        Self::Turn {
+            session_id: session_id.into(),
+            turn_id: turn_id.into(),
+            incarnation_id: Some(incarnation_id),
         }
     }
 
@@ -85,6 +100,28 @@ impl ExecutionScope {
         }
     }
 
+    /// Durable effect-journal namespace for this execution scope.
+    ///
+    /// Trace and host-facing turn ids remain unchanged; only the persistence
+    /// key gains the store-minted session incarnation.
+    pub fn journal_id(&self) -> String {
+        match self {
+            Self::Turn {
+                turn_id,
+                incarnation_id: Some(incarnation_id),
+                ..
+            } => format!("{}:{turn_id}", incarnation_id.as_str()),
+            _ => self.id().to_string(),
+        }
+    }
+
+    pub fn incarnation_id(&self) -> Option<&crate::IncarnationId> {
+        match self {
+            Self::Turn { incarnation_id, .. } => incarnation_id.as_ref(),
+            _ => None,
+        }
+    }
+
     pub fn session_id(&self) -> Option<&str> {
         match self {
             Self::Turn { session_id, .. }
@@ -110,6 +147,7 @@ impl ExecutionScope {
             Self::Turn {
                 session_id,
                 turn_id,
+                ..
             } => session_id.trim().is_empty() || turn_id.trim().is_empty(),
             Self::Process { process_id } => process_id.trim().is_empty(),
             Self::QueueDrain {

@@ -302,7 +302,7 @@ fn domain_hash(domain: &str, components: &[&[u8]]) -> String {
 }
 
 pub fn derive_history_node_id(
-    session_id: &str,
+    incarnation_id: &crate::IncarnationId,
     operation: &OperationId,
     ordinal: u64,
 ) -> Result<String, StoreError> {
@@ -319,7 +319,7 @@ pub fn derive_history_node_id(
         domain_hash(
             "lash-history-node/v1",
             &[
-                session_id.as_bytes(),
+                incarnation_id.as_str().as_bytes(),
                 operation.as_bytes(),
                 &ordinal.to_be_bytes(),
             ],

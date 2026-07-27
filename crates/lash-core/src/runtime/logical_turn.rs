@@ -149,7 +149,11 @@ impl LashRuntime {
             } else {
                 ScopedEffectController::borrowed(
                     scoped_effect_controller.controller(),
-                    ExecutionScope::turn(&self.state.session_id, &turn_trace_turn_id),
+                    ExecutionScope::turn_incarnation(
+                        &self.state.session_id,
+                        self.state.incarnation_id.clone(),
+                        &turn_trace_turn_id,
+                    ),
                 )?
             };
             let frame_stopwatch = if turns.is_empty() {
@@ -317,7 +321,11 @@ impl LashRuntime {
                     agent_frame_follow_turn_id(&root_trace_turn_id, turns.len());
                 let terminal_effect_controller = ScopedEffectController::borrowed(
                     scoped_effect_controller.controller(),
-                    ExecutionScope::turn(&self.state.session_id, &terminal_trace_turn_id),
+                    ExecutionScope::turn_incarnation(
+                        &self.state.session_id,
+                        self.state.incarnation_id.clone(),
+                        &terminal_trace_turn_id,
+                    ),
                 )?;
                 let terminal_stopwatch = TurnStopwatch::start(self.host.core.clock.as_ref());
                 let mut terminal = self

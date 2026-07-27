@@ -1,6 +1,53 @@
-use super::{GraphCommitDelta, StoreError};
+use super::{GraphCommitDelta, IncarnationId, OperationId, StoreError, derive_history_node_id};
 
 impl GraphCommitDelta {
+    pub(crate) fn derive_node_ids(
+        &mut self,
+        incarnation_id: &IncarnationId,
+        operation: &OperationId,
+    ) -> Result<Vec<(String, String)>, StoreError> {
+        let (nodes, leaf_node_id) = match self {
+            Self::Append {
+                nodes,
+                leaf_node_id,
+            } => (nodes, leaf_node_id),
+            Self::Unchanged { .. } => return Ok(Vec::new()),
+        };
+        let mut remapped = std::collections::HashMap::<String, String>::new();
+        let mut mapping = Vec::with_capacity(nodes.len());
+        for (ordinal, node) in nodes.iter_mut().enumerate() {
+            if let Some(parent) = node.parent_node_id.as_mut()
+                && let Some(derived_parent) = remapped.get(parent)
+            {
+                *parent = derived_parent.clone();
+            }
+            let old = node.node_id.clone();
+            let derived = match &node.payload {
+                crate::SessionNodePayload::FrameOpen { frame_key, .. } => {
+                    crate::session_graph::frame_node_id(incarnation_id, frame_key)
+                }
+                _ => derive_history_node_id(incarnation_id, operation, ordinal as u64)?,
+            };
+            node.node_id = derived.clone();
+            remapped.insert(old.clone(), derived.clone());
+            mapping.push((old, derived));
+        }
+        if let Some(leaf) = leaf_node_id.as_mut()
+            && let Some(derived_leaf) = remapped.get(leaf)
+        {
+            *leaf = derived_leaf.clone();
+        }
+        Ok(mapping)
+    }
+
+    pub fn appended_nodes(&self) -> impl Iterator<Item = &crate::SessionNodeRecord> {
+        match self {
+            Self::Append { nodes, .. } => nodes.as_slice(),
+            Self::Unchanged { .. } => &[],
+        }
+        .iter()
+    }
+
     pub fn validate_append_topology(&self) -> Result<(), StoreError> {
         let Self::Append {
             nodes,

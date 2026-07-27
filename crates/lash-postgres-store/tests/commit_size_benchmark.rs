@@ -25,6 +25,7 @@ fn realistic_commit(session_id: &str, node_count: usize, sample: usize) -> Runti
                 timestamp: "2026-07-26T12:00:00Z".to_string(),
                 payload: if index == 0 {
                     SessionNodePayload::FrameOpen {
+                        frame_key: "benchmark-frame".to_string(),
                         reason: lash_core::AgentFrameReason::initial(),
                         assignment: lash_core::AgentFrameAssignment::from_policy(
                             SessionPolicy::default(),

@@ -464,20 +464,39 @@ impl SessionStoreFactory for SqliteSessionStoreFactory {
             .await
             .map_err(|err| err.to_string())?,
         );
-        if store.load_session_meta().await.is_none() {
-            store
-                .save_session_meta(SessionMeta {
-                    session_id: request.session_id.clone(),
-                    session_name: request.session_id.clone(),
-                    created_at: self.clock.timestamp_rfc3339(),
-                    model: request.policy.model.id.clone(),
-                    cwd: std::env::current_dir()
-                        .ok()
-                        .and_then(|path| path.to_str().map(str::to_string)),
-                    relation: request.relation.clone(),
-                })
-                .await;
-        }
+        let meta = SessionMeta {
+            session_id: request.session_id.clone(),
+            incarnation_id: lash_core::IncarnationId::fresh(),
+            session_name: request.session_id.clone(),
+            created_at: self.clock.timestamp_rfc3339(),
+            model: request.policy.model.id.clone(),
+            cwd: std::env::current_dir()
+                .ok()
+                .and_then(|path| path.to_str().map(str::to_string)),
+            relation: request.relation.clone(),
+        };
+        let relation_json = encode_json(&meta.relation);
+        store
+            .conn
+            .write(move |tx| {
+                tx.execute(
+                    "INSERT OR IGNORE INTO session_meta
+                     (session_id, incarnation_id, session_name, created_at, model, cwd, relation_json)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                    params![
+                        meta.session_id,
+                        meta.incarnation_id.as_str(),
+                        meta.session_name,
+                        meta.created_at,
+                        meta.model,
+                        meta.cwd,
+                        relation_json
+                    ],
+                )?;
+                Ok(())
+            })
+            .await
+            .map_err(|err| err.to_string())?;
         Ok(store as Arc<dyn RuntimePersistence>)
     }
 
@@ -844,20 +863,21 @@ fn load_session_head_meta_from_conn(
 
 fn load_session_meta_from_conn(conn: &Connection, session_id: &str) -> Option<SessionMeta> {
     conn.query_row(
-        "SELECT session_id, session_name, created_at, model, cwd, relation_json
+        "SELECT session_id, incarnation_id, session_name, created_at, model, cwd, relation_json
          FROM session_meta WHERE session_id = ?1",
         params![session_id],
         |row| {
-            let relation_json: Option<String> = row.get(5)?;
+            let relation_json: Option<String> = row.get(6)?;
             let relation = relation_json
                 .and_then(|json| serde_json::from_str(&json).ok())
                 .unwrap_or_default();
             Ok(SessionMeta {
                 session_id: row.get(0)?,
-                session_name: row.get(1)?,
-                created_at: row.get(2)?,
-                model: row.get(3)?,
-                cwd: row.get(4)?,
+                incarnation_id: lash_core::IncarnationId::from(row.get::<_, String>(1)?),
+                session_name: row.get(2)?,
+                created_at: row.get(3)?,
+                model: row.get(4)?,
+                cwd: row.get(5)?,
                 relation,
             })
         },

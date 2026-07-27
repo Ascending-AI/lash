@@ -116,18 +116,23 @@ impl SessionBuilder {
         else {
             return Ok(());
         };
-        let Some(meta) = store.load_session_meta().await? else {
+        let Some(mut meta) = store.load_session_meta().await? else {
             return Ok(());
         };
-        let lash_core::SessionRelation::Fork { process_grants, .. } = meta.relation else {
+        let lash_core::SessionRelation::Fork { process_grants, .. } = &meta.relation else {
             return Ok(());
         };
         let target_scope = lash_core::SessionScope::new(self.session_id.clone());
         for grant in process_grants {
             process_registry
-                .grant_handle(&target_scope, &grant.process_id, grant.descriptor)
+                .grant_handle(&target_scope, &grant.process_id, grant.descriptor.clone())
                 .await?;
         }
+        let lash_core::SessionRelation::Fork { process_grants, .. } = &mut meta.relation else {
+            unreachable!("relation was checked above");
+        };
+        process_grants.clear();
+        store.save_session_meta(meta).await?;
         Ok(())
     }
 
@@ -144,6 +149,11 @@ impl SessionBuilder {
                 loaded: state.session_id,
                 requested: self.session_id,
             });
+        }
+        if let Some(store) = store.as_deref()
+            && let Some(meta) = store.load_session_meta().await?
+        {
+            state.incarnation_id = meta.incarnation_id;
         }
         reconcile_loaded_state_policy(&mut state, &policy);
         Box::pin(self.open_resolved(policy, state, store)).await
@@ -168,6 +178,9 @@ impl SessionBuilder {
                     policy: policy.clone(),
                     ..RuntimeSessionState::default()
                 });
+                if let Some(meta) = store.load_session_meta().await? {
+                    state.incarnation_id = meta.incarnation_id;
+                }
                 if state.session_id != self.session_id {
                     return Err(EmbedError::StoreSessionMismatch {
                         loaded: state.session_id,
@@ -294,6 +307,9 @@ pub(crate) async fn load_state_for_residency(
             policy: policy.clone(),
             ..RuntimeSessionState::default()
         });
+    if let Some(meta) = store.load_session_meta().await? {
+        state.incarnation_id = meta.incarnation_id;
+    }
     if state.session_id != session_id {
         return Err(EmbedError::StoreSessionMismatch {
             loaded: state.session_id,

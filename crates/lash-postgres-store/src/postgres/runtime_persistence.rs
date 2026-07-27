@@ -425,6 +425,40 @@ impl SessionCommitStore for PostgresSessionStore {
         if self.session_id.is_none() {
             let _ = self.bound_session.set(commit.session_id.clone());
         }
+        let direct_meta = SessionMeta {
+            session_id: commit.session_id.clone(),
+            incarnation_id: commit.incarnation_id.clone(),
+            session_name: commit.session_id.clone(),
+            created_at: self.clock.timestamp_rfc3339(),
+            model: commit.config.model.id.clone(),
+            cwd: None,
+            relation: lash_core::SessionRelation::Root,
+        };
+        sqlx::query(
+            "INSERT INTO lash_session_meta (session_id, meta_json)
+             VALUES ($1, $2)
+             ON CONFLICT (session_id) DO NOTHING",
+        )
+        .bind(&commit.session_id)
+        .bind(encode_json(&direct_meta))
+        .execute(&mut *tx)
+        .await
+        .map_err(store_sqlx_error)?;
+        let durable_meta_json = sqlx::query_scalar::<_, String>(
+            "SELECT meta_json FROM lash_session_meta WHERE session_id = $1",
+        )
+        .bind(&commit.session_id)
+        .fetch_optional(&mut *tx)
+        .await
+        .map_err(store_sqlx_error)?
+        .ok_or_else(|| {
+            StoreError::Backend(format!(
+                "session `{}` has no durable session metadata",
+                commit.session_id
+            ))
+        })?;
+        let durable_meta: SessionMeta = store_decode_json(&durable_meta_json, "session meta")?;
+        commit.validate_node_derivation(&durable_meta.incarnation_id)?;
         if let Some(completed) = &commit.turn_commit {
             let operation_key = completed.operation.storage_key()?;
             let prior = sqlx::query(
@@ -480,7 +514,6 @@ impl SessionCommitStore for PostgresSessionStore {
                 });
             }
         }
-        commit.validate_node_derivation()?;
         commit.validate_append_node_ids_unique()?;
         commit.graph.validate_append_topology()?;
         if let GraphCommitDelta::Append { nodes, .. } = &commit.graph {
@@ -890,16 +923,29 @@ impl SessionCommitStore for PostgresSessionStore {
     }
 
     async fn save_session_meta(&self, meta: SessionMeta) -> Result<(), StoreError> {
-        sqlx::query(
+        let updated = sqlx::query(
             "INSERT INTO lash_session_meta (session_id, meta_json)
              VALUES ($1, $2)
-             ON CONFLICT (session_id) DO UPDATE SET meta_json = EXCLUDED.meta_json",
+             ON CONFLICT (session_id) DO UPDATE SET meta_json = EXCLUDED.meta_json
+             WHERE lash_session_meta.meta_json::jsonb ->> 'incarnation_id' = $3",
         )
         .bind(&meta.session_id)
         .bind(encode_json(&meta))
+        .bind(meta.incarnation_id.as_str())
         .execute(&self.pool)
         .await
         .map_err(store_sqlx_error)?;
+        if updated.rows_affected() == 0 {
+            let existing = self.load_session_meta().await?;
+            return Err(StoreError::SessionIncarnationMismatch {
+                session_id: meta.session_id,
+                expected_incarnation_id: existing.map_or_else(
+                    || "<missing>".to_string(),
+                    |existing| existing.incarnation_id.to_string(),
+                ),
+                actual_incarnation_id: meta.incarnation_id.to_string(),
+            });
+        }
         Ok(())
     }
 

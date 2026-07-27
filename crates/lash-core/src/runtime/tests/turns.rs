@@ -4806,7 +4806,8 @@ async fn session_manager_persists_child_sessions_in_separate_store() {
     .expect("load session")
     .expect("session read");
     let graph = read.graph;
-    let child_frame_node_id = crate::session_graph::frame_node_id("child-store", "initial-frame");
+    let child_frame_node_id =
+        crate::session_graph::frame_node_id(&meta.incarnation_id, "initial-frame");
     assert_eq!(
         graph.nodes.first().map(|node| node.node_id.as_str()),
         Some(child_frame_node_id.as_str())
@@ -4818,10 +4819,14 @@ async fn session_manager_persists_child_sessions_in_separate_store() {
             .and_then(|node| node.parent_node_id.as_deref()),
         None
     );
-    assert!(
-        graph.nodes.iter().all(
-            |node| node.node_id != crate::session_graph::frame_node_id("root", "initial-frame")
-        )
+    assert_eq!(
+        graph
+            .nodes
+            .iter()
+            .filter(|node| matches!(node.payload, crate::SessionNodePayload::FrameOpen { .. }))
+            .count(),
+        1,
+        "child history must not retain the parent frame root"
     );
     let read_model = graph.read_model();
     let messages = read_model.messages.as_slice();

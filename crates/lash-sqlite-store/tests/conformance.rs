@@ -388,11 +388,11 @@ async fn sqlite_trigger_store_rejects_pre_keyed_schema_before_serving() {
 }
 
 #[tokio::test]
-async fn sqlite_effect_controller_rejects_pre_canonical_envelope_schema_before_serving() {
+async fn sqlite_effect_controller_rejects_pre_incarnation_journal_schema_before_serving() {
     let dir = tempfile::tempdir().expect("tempdir");
     let path = dir.path().join("pre-canonical-envelope-effects.db");
     let conn = rusqlite::Connection::open(&path).expect("open legacy effect db");
-    conn.pragma_update(None, "user_version", 2)
+    conn.pragma_update(None, "user_version", 3)
         .expect("stamp legacy effect schema");
     drop(conn);
 
@@ -405,7 +405,7 @@ async fn sqlite_effect_controller_rejects_pre_canonical_envelope_schema_before_s
         };
     let message = error.to_string();
     assert!(message.contains("Unsupported lash effect replay schema"));
-    assert!(message.contains("supports schema version 3"));
+    assert!(message.contains("supports schema version 4"));
     assert!(message.contains("delete the effect replay database and start fresh"));
 }
 
@@ -789,6 +789,37 @@ async fn sqlite_effect_controller_replays_without_local_executor() {
         .await
         .expect("replayed effect");
     assert_exec_marker(replayed, "recorded");
+}
+
+#[tokio::test]
+async fn sqlite_effect_controller_isolates_recreated_session_incarnations() {
+    let dir = tempfile::tempdir().expect("effect replay tempdir");
+    let path = dir.path().join("effect-replay.db");
+    let first = SqliteRuntimeEffectController::open(
+        &path,
+        ExecutionScope::turn_incarnation(
+            "reused-session",
+            lash_core::IncarnationId::from("first-incarnation".to_string()),
+            "reused-turn",
+        ),
+    )
+    .await
+    .expect("open first-incarnation controller");
+    let second = SqliteRuntimeEffectController::open(
+        &path,
+        ExecutionScope::turn_incarnation(
+            "reused-session",
+            lash_core::IncarnationId::from("second-incarnation".to_string()),
+            "reused-turn",
+        ),
+    )
+    .await
+    .expect("open second-incarnation controller");
+
+    lash_core::testing::conformance::effect_controller_session_incarnations_are_isolated(
+        &first, &second,
+    )
+    .await;
 }
 
 #[tokio::test]

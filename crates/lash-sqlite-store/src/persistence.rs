@@ -239,7 +239,9 @@ impl SessionCommitStore for Store {
                             .map_err(sqlite_error)?
                         }
                     };
-                    graph.set_leaf_node_id(leaf_node_id);
+                    if !graph.nodes.is_empty() {
+                        graph.set_leaf_node_id(leaf_node_id);
+                    }
                     let checkpoint = meta
                         .checkpoint_ref
                         .as_ref()
@@ -329,6 +331,7 @@ impl SessionCommitStore for Store {
             .collect::<Vec<_>>();
         let blob_profile = self.options.blob_profile;
         let now = self.clock.timestamp_ms();
+        let created_at = self.clock.timestamp_rfc3339();
         let enqueue_nonce_start = self.commit_count.fetch_add(
             commit.enqueued_queue_batches.len() as u64,
             AtomicOrdering::Relaxed,
@@ -348,6 +351,36 @@ impl SessionCommitStore for Store {
                             attempted_session_id: commit.session_id.clone(),
                         });
                     }
+                    tx.execute(
+                        "INSERT OR IGNORE INTO session_meta
+                         (session_id, incarnation_id, session_name, created_at, model, cwd, relation_json)
+                         VALUES (?1, ?2, ?1, ?3, ?4, NULL, ?5)",
+                        params![
+                            commit.session_id,
+                            commit.incarnation_id.as_str(),
+                            created_at,
+                            commit.config.model.id,
+                            serde_json::to_string(&lash_core::SessionRelation::Root)
+                                .map_err(|error| StoreError::Backend(error.to_string()))?,
+                        ],
+                    )
+                    .map_err(sqlite_error)?;
+                    let durable_incarnation_id = tx
+                        .query_row(
+                            "SELECT incarnation_id FROM session_meta WHERE session_id = ?1",
+                            params![commit.session_id],
+                            |row| row.get::<_, String>(0),
+                        )
+                        .optional()
+                        .map_err(sqlite_error)?
+                        .map(lash_core::IncarnationId::from)
+                        .ok_or_else(|| {
+                            StoreError::Backend(format!(
+                                "session `{}` has no durable session metadata",
+                                commit.session_id
+                            ))
+                        })?;
+                    commit.validate_node_derivation(&durable_incarnation_id)?;
                     if let Some(completed) = &commit.turn_commit {
                         let operation_key = completed.operation.storage_key()?;
                         let prior: Option<(String, String)> = tx
@@ -388,7 +421,6 @@ impl SessionCommitStore for Store {
                             actual: actual_revision,
                         });
                     }
-                    commit.validate_node_derivation()?;
                     commit.validate_append_node_ids_unique()?;
                     commit.graph.validate_append_topology()?;
                     if let GraphCommitDelta::Append { nodes, .. } = &commit.graph {
@@ -867,8 +899,7 @@ impl SessionCommitStore for Store {
     }
 
     async fn save_session_meta(&self, meta: SessionMeta) -> Result<(), StoreError> {
-        Store::save_session_meta(self, meta).await;
-        Ok(())
+        Store::save_session_meta(self, meta).await
     }
 
     async fn load_session_meta(&self) -> Result<Option<SessionMeta>, StoreError> {

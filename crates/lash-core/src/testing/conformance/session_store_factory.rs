@@ -337,9 +337,16 @@ async fn session_store_factory_create_is_idempotent(factory: Arc<dyn crate::Sess
         .create_store(&initial)
         .await
         .expect("create stable session");
+    let incarnation_id = created
+        .load_session_meta()
+        .await
+        .expect("load created metadata")
+        .expect("created metadata exists")
+        .incarnation_id;
     created
         .save_session_meta(SessionMeta {
             session_id: "stable-session".to_string(),
+            incarnation_id,
             session_name: "custom-name".to_string(),
             created_at: "custom-created-at".to_string(),
             model: "custom-model".to_string(),
@@ -401,6 +408,12 @@ async fn session_store_factory_rejects_cross_session_graph_parents(
         .expect("create graph parent intruder");
     let mut first_state = crate::RuntimeSessionState {
         session_id: first_request.session_id.clone(),
+        incarnation_id: first
+            .load_session_meta()
+            .await
+            .expect("load graph parent owner metadata")
+            .expect("graph parent owner metadata")
+            .incarnation_id,
         ..Default::default()
     };
     first_state.ensure_agent_frame_initialized();
@@ -412,6 +425,33 @@ async fn session_store_factory_rejects_cross_session_graph_parents(
         .current_frame_node_id
         .clone()
         .expect("owner frame node id");
+    let mut second_state = crate::RuntimeSessionState {
+        session_id: second_request.session_id.clone(),
+        incarnation_id: second
+            .load_session_meta()
+            .await
+            .expect("load graph parent intruder metadata")
+            .expect("graph parent intruder metadata")
+            .incarnation_id,
+        ..Default::default()
+    };
+    second_state.ensure_agent_frame_initialized();
+    let second_result = second
+        .commit_runtime_state(crate::RuntimeCommit::persisted_state(&second_state, &[]))
+        .await
+        .expect("commit intruder's own frame");
+    second_state.apply_persisted_commit_result(second_result);
+    let foreign_path = second
+        .load_session(crate::SessionReadScope::ActivePath {
+            leaf_node_id: Some(foreign_parent.clone()),
+        })
+        .await
+        .expect("probe unrelated active path")
+        .expect("intruder has its own durable head");
+    assert!(
+        foreign_path.graph.nodes.is_empty() && foreign_path.graph.leaf_node_id.is_none(),
+        "ActivePath must not expose a foreign session's ancestry"
+    );
     assert!(
         second
             .load_node(&foreign_parent)
@@ -432,7 +472,10 @@ async fn session_store_factory_rejects_cross_session_graph_parents(
         },
     };
     let state = crate::RuntimeSessionState {
-        session_id: second_request.session_id.clone(),
+        head_revision: second_state.head_revision,
+        persisted_node_ids: second_state.persisted_node_ids,
+        session_id: second_state.session_id,
+        incarnation_id: second_state.incarnation_id,
         current_frame_node_id: Some(foreign_parent),
         ..Default::default()
     };
@@ -454,12 +497,14 @@ async fn session_store_factory_rejects_cross_session_graph_parents(
         }
         _ => false,
     });
-    assert!(
-        second
-            .load_session(crate::SessionReadScope::FullGraph)
-            .await
-            .expect("load intruder after rejection")
-            .is_none(),
+    let intruder_after_rejection = second
+        .load_session(crate::SessionReadScope::FullGraph)
+        .await
+        .expect("load intruder after rejection")
+        .expect("intruder head survives rejection");
+    assert_eq!(
+        intruder_after_rejection.graph.nodes.len(),
+        1,
         "cross-session parent rejection must be atomic"
     );
     assert_eq!(
@@ -468,7 +513,7 @@ async fn session_store_factory_rejects_cross_session_graph_parents(
             .await
             .expect("foreign parent refcount remains exact")
             .checked_node_count,
-        1
+        2
     );
 }
 
@@ -485,6 +530,12 @@ async fn session_store_factory_fork_semantics(factory: Arc<dyn crate::SessionSto
         .expect("create fork source");
     let mut state = crate::RuntimeSessionState {
         session_id: source_request.session_id.clone(),
+        incarnation_id: source
+            .load_session_meta()
+            .await
+            .expect("load fork source metadata")
+            .expect("fork source metadata")
+            .incarnation_id,
         execution_state_snapshot: Some(vec![0xFA, 0xCE]),
         ..Default::default()
     };
@@ -526,6 +577,26 @@ async fn session_store_factory_fork_semantics(factory: Arc<dyn crate::SessionSto
         .await
         .expect("pin participates in refcount scrub");
 
+    append_fork_conformance_message(&mut state, "reuse-proof-old", "old incarnation");
+    let reuse_operation =
+        crate::OperationId::turn(&source_request.session_id, "reuse-proof", "conformance");
+    let (old_commit, old_node_ids) = crate::RuntimeCommit::persisted_state_with_operation(
+        &mut state,
+        &[],
+        reuse_operation.clone(),
+    )
+    .expect("derive old-incarnation node ids");
+    let old_ordinary_node_id = old_node_ids
+        .last()
+        .cloned()
+        .expect("old incarnation ordinary node id");
+    let old_result = source
+        .commit_runtime_state(old_commit)
+        .await
+        .expect("commit old-incarnation ordinary node");
+    state.apply_persisted_commit_result(old_result);
+    state.mark_node_ids_persisted(old_node_ids);
+
     append_fork_conformance_message(&mut state, "source-child", "source child");
     commit_fork_conformance_state(&source, &mut state)
         .await
@@ -565,6 +636,44 @@ async fn session_store_factory_fork_semantics(factory: Arc<dyn crate::SessionSto
         .unpin(&source_tip_node_id)
         .await
         .expect("remove concurrent pin");
+
+    let delete_first_request = crate::ForkSessionRequest {
+        session_id: "aaa-fork-delete-first".to_string(),
+        node_id: source_tip_node_id.clone(),
+        relation: crate::SessionRelation::Root,
+        policy: source_request.policy.clone(),
+    };
+    factory
+        .fork_at(&delete_first_request)
+        .await
+        .expect("fork live source tip");
+    let deduplicated_tip = factory
+        .fork_points()
+        .await
+        .expect("enumerate shared live tip")
+        .into_iter()
+        .find(|point| point.node_id == source_tip_node_id)
+        .expect("shared live tip remains forkable");
+    assert_eq!(
+        deduplicated_tip.source_session_id, delete_first_request.session_id,
+        "unpinned shared heads use a lexicographic source-session tie-break"
+    );
+    factory
+        .delete_session(&delete_first_request.session_id)
+        .await
+        .expect("delete branch before source");
+    assert!(
+        source
+            .load_node(&source_tip_node_id)
+            .await
+            .expect("load source tip after branch-first delete")
+            .is_some(),
+        "deleting a branch first must not reclaim its live source sibling"
+    );
+    source
+        .verify_node_refcounts()
+        .await
+        .expect("branch-first delete preserves exact refcounts");
 
     let unretained_error = factory
         .fork_at(&crate::ForkSessionRequest {
@@ -698,6 +807,66 @@ async fn session_store_factory_fork_semantics(factory: Arc<dyn crate::SessionSto
             .is_some(),
         "the live branch child edge retains the prefix after unpin"
     );
+
+    let recreated = factory
+        .create_store(&source_request)
+        .await
+        .expect("recreate deleted source session id");
+    let recreated_meta = recreated
+        .load_session_meta()
+        .await
+        .expect("load recreated source metadata")
+        .expect("recreated source metadata exists");
+    assert_ne!(
+        recreated_meta.incarnation_id, state.incarnation_id,
+        "delete-then-recreate must mint a new session incarnation"
+    );
+    let mut recreated_state = crate::RuntimeSessionState {
+        session_id: source_request.session_id.clone(),
+        incarnation_id: recreated_meta.incarnation_id,
+        ..Default::default()
+    };
+    recreated_state.ensure_agent_frame_initialized();
+    let recreated_frame_node_id = recreated_state
+        .current_frame_node_id
+        .clone()
+        .expect("recreated frame node id");
+    assert_ne!(
+        recreated_frame_node_id, root_node_id,
+        "recreated frame identity must not alias retained old history"
+    );
+    let recreated_frame_ids = recreated_state
+        .session_graph
+        .nodes
+        .iter()
+        .map(|node| node.node_id.clone())
+        .collect::<Vec<_>>();
+    let recreated_frame_result = recreated
+        .commit_runtime_state(crate::RuntimeCommit::persisted_state(&recreated_state, &[]))
+        .await
+        .expect("commit recreated frame");
+    recreated_state.apply_persisted_commit_result(recreated_frame_result);
+    recreated_state.mark_node_ids_persisted(recreated_frame_ids);
+    append_fork_conformance_message(&mut recreated_state, "reuse-proof-new", "new incarnation");
+    let (recreated_commit, recreated_node_ids) =
+        crate::RuntimeCommit::persisted_state_with_operation(
+            &mut recreated_state,
+            &[],
+            reuse_operation,
+        )
+        .expect("derive new-incarnation node ids");
+    let recreated_ordinary_node_id = recreated_node_ids
+        .last()
+        .cloned()
+        .expect("new incarnation ordinary node id");
+    assert_ne!(
+        recreated_ordinary_node_id, old_ordinary_node_id,
+        "ordinary history identity must include the session incarnation"
+    );
+    recreated
+        .commit_runtime_state(recreated_commit)
+        .await
+        .expect("commit same operation identity in recreated incarnation");
 }
 
 fn append_fork_conformance_message(
@@ -757,6 +926,12 @@ async fn session_store_factory_delete_removes_store_and_is_idempotent(
         .expect("create deleted session");
     let mut state = crate::RuntimeSessionState {
         session_id: request.session_id.clone(),
+        incarnation_id: created
+            .load_session_meta()
+            .await
+            .expect("load deleted session metadata")
+            .expect("deleted session metadata")
+            .incarnation_id,
         ..Default::default()
     };
     state.ensure_agent_frame_initialized();
@@ -895,6 +1070,7 @@ async fn session_store_factory_delete_removes_store_and_is_idempotent(
     assert_meta_matches_request(&meta, &recreated_request, "recreated-model");
     let mut recreated_state = crate::RuntimeSessionState {
         session_id: recreated_request.session_id.clone(),
+        incarnation_id: meta.incarnation_id,
         ..Default::default()
     };
     recreated_state.ensure_agent_frame_initialized();

@@ -480,14 +480,14 @@ pub use session::{
 };
 pub use session_graph::{
     PersistedSessionConfig, PersistedTurnState, SessionGraph, SessionMessageTreeNode,
-    SessionNodePayload, SessionNodeRecord,
+    SessionNodePayload, SessionNodeRecord, frame_node_id,
 };
 pub use session_model::context::PreparedContext;
 pub use session_model::{ConversationRecord, ProtocolEvent, SessionHistoryRecord};
 pub use session_model::{RuntimeSessionPolicy, SessionPolicy, SessionSpec};
 pub use store::{
     AttachmentIntent, AttachmentManifest, AttachmentManifestEntry, BlobRef, GcReport,
-    LeaseOwnerIdentity, LeaseOwnerLiveness, LeaseTimings, LeaseTimingsError,
+    IncarnationId, LeaseOwnerIdentity, LeaseOwnerLiveness, LeaseTimings, LeaseTimingsError,
     NodeRefcountVerification, QueuedWorkStore, RuntimePersistence, SessionCommitStore,
     SessionExecutionLease, SessionExecutionLeaseClaimOutcome, SessionExecutionLeaseCompletion,
     SessionExecutionLeaseFence, SessionExecutionLeaseStore, SessionMeta, SessionPickerInfo,

@@ -14,9 +14,9 @@ use std::sync::{Arc, Mutex};
 use super::usage::merge_usage_delta_entries;
 use super::{SessionStoreCreateRequest, SessionStoreFactory};
 use crate::store::RuntimePersistence;
-
 mod attachments;
 mod factory;
+mod incarnation;
 mod maintenance;
 mod queued_work;
 mod reads;
@@ -819,9 +819,30 @@ impl crate::store::SessionCommitStore for InMemorySessionStore {
                 )
             }
             crate::store::SessionReadScope::ActivePath { leaf_node_id } => {
-                let mut graph = global_graph;
-                graph.set_leaf_node_id(leaf_node_id.or_else(|| meta.leaf_node_id.clone()));
-                graph.trim_to_active_path()
+                let requested_leaf = leaf_node_id.or_else(|| meta.leaf_node_id.clone());
+                let authorized = requested_leaf.as_deref().is_none_or(|leaf| {
+                    let owners = self
+                        .global_node_owners
+                        .lock()
+                        .expect("lock global node owners");
+                    if owners.get(leaf) == Some(&meta.session_id) {
+                        return true;
+                    }
+                    let mut own_ancestry = global_graph.clone();
+                    own_ancestry.set_leaf_node_id(meta.leaf_node_id.clone());
+                    own_ancestry
+                        .trim_to_active_path()
+                        .nodes
+                        .iter()
+                        .any(|node| node.node_id == leaf)
+                });
+                if authorized {
+                    let mut graph = global_graph;
+                    graph.set_leaf_node_id(requested_leaf);
+                    graph.trim_to_active_path()
+                } else {
+                    crate::SessionGraph::default()
+                }
             }
         };
         if !tombstoned.is_empty() {
@@ -915,6 +936,8 @@ impl crate::store::SessionCommitStore for InMemorySessionStore {
                 attempted_session_id: batch.session_id.clone(),
             });
         }
+        let durable_incarnation_id = self.durable_incarnation_for_commit(&commit);
+        commit.validate_node_derivation(&durable_incarnation_id)?;
         if let Some(completed) = &commit.turn_commit {
             let operation_key = completed.operation.storage_key()?;
             let key = (completed.session_id.clone(), operation_key.clone());
@@ -944,7 +967,6 @@ impl crate::store::SessionCommitStore for InMemorySessionStore {
                 actual,
             });
         }
-        commit.validate_node_derivation()?;
         commit.validate_append_node_ids_unique()?;
         commit.graph.validate_append_topology()?;
         let incoming_nodes = match &commit.graph {
@@ -1340,8 +1362,7 @@ impl crate::store::SessionCommitStore for InMemorySessionStore {
         &self,
         meta: crate::store::SessionMeta,
     ) -> Result<(), crate::store::StoreError> {
-        *self.session_meta.lock().expect("lock session meta") = Some(meta);
-        Ok(())
+        self.replace_session_meta(meta)
     }
 
     async fn load_session_meta(

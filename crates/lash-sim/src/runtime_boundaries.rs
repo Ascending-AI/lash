@@ -1072,7 +1072,7 @@ impl RuntimeBoundaryHarness {
                 ))
             })?;
         let (head_revision, session_graph, persisted_node_ids) = current.map_or_else(
-            || (None, lash_core::SessionGraph::default(), HashSet::new()),
+            || (0, lash_core::SessionGraph::default(), HashSet::new()),
             |read| {
                 let persisted_node_ids = read
                     .graph
@@ -1080,7 +1080,7 @@ impl RuntimeBoundaryHarness {
                     .iter()
                     .map(|node| node.node_id.clone())
                     .collect();
-                (Some(read.head_revision), read.graph, persisted_node_ids)
+                (read.head_revision, read.graph, persisted_node_ids)
             },
         );
         let stale_state = RuntimeSessionState {

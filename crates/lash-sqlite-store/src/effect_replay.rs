@@ -311,7 +311,7 @@ impl SqliteRuntimeEffectController {
         let envelope_hash = reconstructed_envelope.hash().to_string();
         let envelope_json =
             serde_json::to_string(reconstructed_envelope).map_err(effect_encode_error)?;
-        let scope_id = self.scope.id().to_string();
+        let scope_id = self.scope.journal_id();
         let now = self.inner.clock.timestamp_ms();
         let lease_token = self.inner.next_lease_token();
         let due_at_ms = sleep_due_at_ms(envelope, now);

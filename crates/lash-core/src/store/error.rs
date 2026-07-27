@@ -30,6 +30,14 @@ pub enum StoreError {
     },
     #[error("session `{session_id}` was deleted; recreate it through the session-store factory")]
     SessionDeleted { session_id: String },
+    #[error(
+        "session `{session_id}` commit used incarnation `{actual_incarnation_id}`, expected durable incarnation `{expected_incarnation_id}`"
+    )]
+    SessionIncarnationMismatch {
+        session_id: String,
+        expected_incarnation_id: String,
+        actual_incarnation_id: String,
+    },
     #[error("store does not support read scope {0:?}")]
     UnsupportedReadScope(SessionReadScope),
     #[error("store does not support `{operation}`")]

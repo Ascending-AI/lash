@@ -269,6 +269,7 @@ pub(super) async fn fork_at_in_catalog(
             .map_err(sqlite_error)?;
             let session_meta = lash_core::SessionMeta {
                 session_id: request.session_id.clone(),
+                incarnation_id: lash_core::IncarnationId::fresh(),
                 session_name: request.session_id.clone(),
                 created_at: lash_core::Clock::timestamp_rfc3339(&lash_core::SystemClock),
                 model: request.policy.model.id.clone(),
@@ -279,10 +280,11 @@ pub(super) async fn fork_at_in_catalog(
             };
             tx.execute(
                 "INSERT INTO session_meta
-                 (session_id, session_name, created_at, model, cwd, relation_json)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                 (session_id, incarnation_id, session_name, created_at, model, cwd, relation_json)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
                 params![
                     session_meta.session_id,
+                    session_meta.incarnation_id.as_str(),
                     session_meta.session_name,
                     session_meta.created_at,
                     session_meta.model,

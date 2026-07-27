@@ -197,6 +197,7 @@ async fn sqlite_factory_creates_metadata_once_and_preserves_on_reopen() {
     store
         .save_session_meta(lash_core::SessionMeta {
             session_id: "chat/alpha".to_string(),
+            incarnation_id: meta.incarnation_id,
             session_name: "Renamed".to_string(),
             created_at: "original".to_string(),
             model: "preserved-model".to_string(),
@@ -403,6 +404,7 @@ async fn sqlite_catalog_enforces_global_node_ids_across_sessions() {
         parent_node_id: None,
         timestamp: "2026-07-26T00:00:00Z".to_string(),
         payload: lash_core::SessionNodePayload::FrameOpen {
+            frame_key: "factory-global-node".to_string(),
             reason: lash_core::AgentFrameReason::initial(),
             assignment: lash_core::AgentFrameAssignment::from_policy(SessionPolicy::default()),
             protocol_turn_options: Default::default(),
@@ -480,6 +482,7 @@ async fn sqlite_catalog_leaf_validation_is_session_scoped() {
         parent_node_id: None,
         timestamp: "2026-07-26T00:00:00Z".to_string(),
         payload: lash_core::SessionNodePayload::FrameOpen {
+            frame_key: "leaf-a-node".to_string(),
             reason: lash_core::AgentFrameReason::initial(),
             assignment: lash_core::AgentFrameAssignment::from_policy(SessionPolicy::default()),
             protocol_turn_options: Default::default(),
@@ -516,7 +519,7 @@ async fn sqlite_catalog_leaf_validation_is_session_scoped() {
     let mut cross_session_leaf = RuntimeCommit::persisted_state(
         &RuntimeSessionState {
             session_id: "leaf-b".to_string(),
-            head_revision: Some(1),
+            head_revision: 1,
             ..Default::default()
         },
         &[],
@@ -552,6 +555,7 @@ async fn sqlite_maintenance_is_scoped_to_the_bound_session() {
         parent_node_id: None,
         timestamp: "2026-07-26T00:00:00Z".to_string(),
         payload: lash_core::SessionNodePayload::FrameOpen {
+            frame_key: "maintenance-b-node".to_string(),
             reason: lash_core::AgentFrameReason::initial(),
             assignment: lash_core::AgentFrameAssignment::from_policy(SessionPolicy::default()),
             protocol_turn_options: Default::default(),

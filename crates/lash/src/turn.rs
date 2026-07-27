@@ -246,7 +246,12 @@ impl TurnBuilder {
     }
 
     fn turn_scope(&self, turn_id: &str) -> lash_core::ExecutionScope {
-        lash_core::ExecutionScope::turn(self.runtime.observe().session_id(), turn_id)
+        let observation = self.runtime.observe();
+        lash_core::ExecutionScope::turn_incarnation(
+            observation.session_id(),
+            observation.persisted_state.incarnation_id.clone(),
+            turn_id,
+        )
     }
 
     pub(crate) fn prepare(
