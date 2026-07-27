@@ -1408,7 +1408,7 @@ async fn sweep_does_not_reconcile_trigger_delivery_pruned_with_terminal_process(
     assert!(matches!(
         replayed_registration,
         crate::TriggerCommandOutcome::Mutation { receipt }
-            if receipt.disposition == crate::TriggerMutationDisposition::Unchanged
+            if receipt.disposition == crate::TriggerMutationDisposition::Created
     ));
 
     worker

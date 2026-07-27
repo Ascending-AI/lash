@@ -725,9 +725,8 @@ mod tests {
             .execute(storage.pool())
             .await
             .expect("corrupt cached count");
-        let child_node_id = format!("postgres-refcount-child:{}", uuid::Uuid::new_v4());
         let child = lash_core::SessionNodeRecord {
-            node_id: child_node_id.clone(),
+            node_id: "postgres-refcount-child".to_string(),
             parent_node_id: Some(frame_node_id.clone()),
             timestamp: "2026-07-27T00:00:00Z".to_string(),
             payload: lash_core::SessionNodePayload::Event {
@@ -741,8 +740,17 @@ mod tests {
         commit.expected_head_revision = 1;
         commit.graph = GraphAppend {
             nodes: vec![child],
-            leaf_node_id: Some(child_node_id.clone()),
+            leaf_node_id: Some("postgres-refcount-child".to_string()),
         };
+        let (commit, _) = commit
+            .with_operation(lash_core::OperationId::new(
+                lash_core::ExecutionScope::runtime_operation(format!(
+                    "postgres-refcount-drift:{session_id}"
+                )),
+                "commit",
+            ))
+            .expect("derive refcount-drift child identity");
+        let child_node_id = commit.graph.nodes[0].node_id.clone();
 
         let error = store
             .commit_runtime_state(commit)

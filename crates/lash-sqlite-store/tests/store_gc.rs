@@ -621,7 +621,8 @@ async fn sqlite_snapshot_read_propagates_graph_statement_errors() {
         })
         .await
         .expect("create store");
-    let state = factory_state(&store, "graph-read-error", 0).await;
+    let mut state = factory_state(&store, "graph-read-error", 0).await;
+    state.ensure_agent_frame_initialized();
     store
         .commit_runtime_state(RuntimeCommit::persisted_state_for_test(&state, &[]))
         .await

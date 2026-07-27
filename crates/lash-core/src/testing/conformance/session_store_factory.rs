@@ -478,21 +478,23 @@ async fn session_store_factory_rejects_cross_session_graph_parents(
         current_frame_node_id: Some(foreign_parent),
         ..Default::default()
     };
+    let commit = crate::RuntimeCommit::persisted_state_with_graph_commit(
+        &state,
+        crate::GraphAppend {
+            nodes: vec![child],
+            leaf_node_id: Some("cross-session-child".to_string()),
+        },
+        &[],
+    );
+    let child_node_id = commit.graph.nodes[0].node_id.clone();
     let error = second
-        .commit_runtime_state(crate::RuntimeCommit::persisted_state_with_graph_commit(
-            &state,
-            crate::GraphAppend {
-                nodes: vec![child.clone()],
-                leaf_node_id: Some(child.node_id.clone()),
-            },
-            &[],
-        ))
+        .commit_runtime_state(commit)
         .await
         .expect_err("a graph parent must belong to the committing session");
     assert!(match &error {
-        crate::StoreError::InvalidGraphParent { node_id, .. } => node_id == &child.node_id,
+        crate::StoreError::InvalidGraphParent { node_id, .. } => node_id == &child_node_id,
         crate::StoreError::MissingFrameOpenAncestor { leaf_node_id } => {
-            leaf_node_id == &child.node_id
+            leaf_node_id == &child_node_id
         }
         _ => false,
     });
@@ -902,16 +904,14 @@ async fn commit_fork_conformance_state(
     store: &Arc<dyn crate::RuntimePersistence>,
     state: &mut crate::RuntimeSessionState,
 ) -> Result<(), crate::StoreError> {
-    let new_node_ids = state
-        .session_graph
-        .nodes
-        .iter()
-        .filter(|node| !state.persisted_node_ids.contains(&node.node_id))
-        .map(|node| node.node_id.clone())
-        .collect::<Vec<_>>();
-    let result = store
-        .commit_runtime_state(crate::RuntimeCommit::persisted_state_for_test(state, &[]))
-        .await?;
+    let operation = crate::OperationId::turn(
+        &state.session_id,
+        format!("fork-conformance-{}", state.head_revision),
+        "commit",
+    );
+    let (commit, new_node_ids) =
+        crate::RuntimeCommit::persisted_state_with_operation(state, &[], operation)?;
+    let result = store.commit_runtime_state(commit).await?;
     state.apply_persisted_commit_result(result);
     state.mark_node_ids_persisted(new_node_ids);
     Ok(())

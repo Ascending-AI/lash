@@ -61,16 +61,26 @@ fn commit_at(
     session_id: &str,
     incarnation_id: &lash_core::IncarnationId,
     expected_head_revision: u64,
+    writer_id: &str,
 ) -> RuntimeCommit {
     let state = RuntimeSessionState {
         session_id: session_id.to_string(),
         session_lifetime: lash_core::SessionLifetime::durable(incarnation_id.clone()),
         ..RuntimeSessionState::default()
     };
-    RuntimeCommit {
+    let commit = RuntimeCommit {
         expected_head_revision,
         ..RuntimeCommit::persisted_state_for_test(&state, &[])
-    }
+    };
+    commit
+        .with_operation(lash_core::OperationId::new(
+            lash_core::ExecutionScope::runtime_operation(format!(
+                "head-cas:{session_id}:{writer_id}"
+            )),
+            "commit",
+        ))
+        .expect("build distinct head-CAS operation")
+        .0
 }
 
 // Finding 1: the head-revision compare-and-set must serialize across two
@@ -90,20 +100,26 @@ fn head_revision_cas_holds_across_two_connections() {
     let barrier = Arc::new(std::sync::Barrier::new(2));
     let run = |path: std::path::PathBuf,
                incarnation_id: lash_core::IncarnationId,
-               barrier: Arc<std::sync::Barrier>| {
+               barrier: Arc<std::sync::Barrier>,
+               writer_id: &'static str| {
         std::thread::spawn(move || {
             block_on(async move {
                 let store = Store::open(&path).await.expect("open store");
                 barrier.wait();
                 store
-                    .commit_runtime_state(commit_at("root", &incarnation_id, 0))
+                    .commit_runtime_state(commit_at("root", &incarnation_id, 0, writer_id))
                     .await
             })
         })
     };
 
-    let handle_a = run(path.clone(), incarnation_id.clone(), Arc::clone(&barrier));
-    let handle_b = run(path.clone(), incarnation_id, Arc::clone(&barrier));
+    let handle_a = run(
+        path.clone(),
+        incarnation_id.clone(),
+        Arc::clone(&barrier),
+        "a",
+    );
+    let handle_b = run(path.clone(), incarnation_id, Arc::clone(&barrier), "b");
     let result_a = handle_a.join().expect("thread a");
     let result_b = handle_b.join().expect("thread b");
 

@@ -231,6 +231,11 @@ async fn commit_rejects_leaf_without_frame_open_ancestor(store: Arc<dyn RuntimeP
         },
         &[],
     );
+    let expected_leaf_node_id = commit
+        .graph
+        .leaf_node_id
+        .clone()
+        .expect("derived unframed leaf");
 
     let error = store
         .commit_runtime_state(commit)
@@ -240,7 +245,7 @@ async fn commit_rejects_leaf_without_frame_open_ancestor(store: Arc<dyn RuntimeP
     assert!(matches!(
         error,
         StoreError::MissingFrameOpenAncestor { leaf_node_id }
-            if leaf_node_id == "unframed-root"
+            if leaf_node_id == expected_leaf_node_id
     ));
 }
 
@@ -884,7 +889,7 @@ async fn concurrent_head_revision_cas_applies_exactly_once(store: Arc<dyn Runtim
         };
         let node = sample_session_node(session_id, &incarnation_id, node_id, None);
         let derived_node_id = node.node_id.clone();
-        RuntimeCommit {
+        let commit = RuntimeCommit {
             expected_head_revision: 0,
             current_frame_node_id: Some(derived_node_id.clone()),
             graph: crate::GraphAppend {
@@ -892,7 +897,14 @@ async fn concurrent_head_revision_cas_applies_exactly_once(store: Arc<dyn Runtim
                 leaf_node_id: Some(derived_node_id),
             },
             ..RuntimeCommit::persisted_state_for_test(&state, &[])
-        }
+        };
+        commit
+            .with_operation(crate::OperationId::new(
+                crate::ExecutionScope::runtime_operation(format!("head-cas:{node_id}")),
+                "commit",
+            ))
+            .expect("build distinct head-CAS operation")
+            .0
     };
 
     let barrier = Arc::new(tokio::sync::Barrier::new(3));
@@ -1506,13 +1518,17 @@ async fn session_read_loads_persisted_history(store: Arc<dyn RuntimePersistence>
         session_graph: graph,
         ..RuntimeSessionState::default()
     };
-    commit_runtime_state_for_test(
-        &store,
-        RuntimeCommit::persisted_state_for_test(&state, &[]),
-        "active-path",
-    )
-    .await
-    .expect("commit linear graph");
+    let commit = RuntimeCommit::persisted_state_for_test(&state, &[]);
+    let expected_node_ids = commit
+        .graph
+        .nodes
+        .iter()
+        .map(|node| node.node_id.clone())
+        .collect::<Vec<_>>();
+    let expected_leaf_node_id = commit.graph.leaf_node_id.clone();
+    commit_runtime_state_for_test(&store, commit, "active-path")
+        .await
+        .expect("commit linear graph");
 
     let read = store
         .load_session()
@@ -1525,10 +1541,13 @@ async fn session_read_loads_persisted_history(store: Arc<dyn RuntimePersistence>
             .iter()
             .map(|node| node.node_id.as_str())
             .collect::<Vec<_>>(),
-        vec![root_node_id.as_str(), "left-node", "left-leaf"],
+        expected_node_ids
+            .iter()
+            .map(String::as_str)
+            .collect::<Vec<_>>(),
         "session reads must return the persisted leaf-to-root history"
     );
-    assert_eq!(read.graph.leaf_node_id.as_deref(), Some("left-leaf"));
+    assert_eq!(read.graph.leaf_node_id, expected_leaf_node_id);
 }
 
 async fn attachment_manifest_records_intent_and_commit_stamps(store: Arc<dyn RuntimePersistence>) {
