@@ -269,38 +269,6 @@ impl Store {
         )
     }
 
-    pub async fn save_session_head_meta(&self, meta: SessionHeadMeta) {
-        if let Err(err) = self.bind_session(&meta.session_id) {
-            tracing::warn!(error = %err, "failed to bind SQLite session store");
-            return;
-        }
-        let head_json = encode_json(&meta);
-        let session_id = meta.session_id.clone();
-        let head_revision = meta.head_revision as i64;
-        let leaf_node_id = meta.leaf_node_id.clone();
-        let checkpoint_ref = meta.checkpoint_ref.as_ref().map(|value| value.0.clone());
-        let result = self
-            .conn
-            .call(move |conn| {
-                conn.execute(
-                    "INSERT OR REPLACE INTO session_head
-                     (session_id, head_json, head_revision, leaf_node_id, checkpoint_ref)
-                     VALUES (?1, ?2, ?3, ?4, ?5)",
-                    params![
-                        session_id,
-                        head_json,
-                        head_revision,
-                        leaf_node_id,
-                        checkpoint_ref
-                    ],
-                )
-            })
-            .await;
-        if let Err(err) = result {
-            tracing::warn!(error = %err, "failed to persist session head");
-        }
-    }
-
     pub async fn load_session_head_meta(&self) -> Option<SessionHeadMeta> {
         let session_id = self.session_id.get()?.clone();
         self.conn

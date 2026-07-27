@@ -110,13 +110,27 @@ fn build_runtime_state(
     policy: &SessionPolicy,
     clock: &dyn crate::Clock,
 ) -> RuntimeSessionState {
+    let inherited_nodes = match &request.start {
+        SessionStartPoint::Empty => Vec::new(),
+        _ => current_frame_node_drafts(&base),
+    };
     base.session_id = session_id;
     base.head_revision = None;
     base.policy = policy.clone();
+    base.session_graph = crate::SessionGraph::default();
+    base.agent_frames.clear();
+    base.current_frame_node_id = None;
+    base.persisted_node_ids.clear();
     base.reset_initial_agent_frame_with_clock(
         crate::AgentFrameAssignment::from_session_request(request, policy.clone()),
         base.protocol_turn_options.clone(),
         clock,
+    );
+    let inherited_namespace = format!("create-session:{}:inherited", base.session_id);
+    base.session_graph.append_node_drafts_at(
+        &inherited_namespace,
+        inherited_nodes,
+        clock.timestamp_rfc3339(),
     );
     let draft_namespace = format!("create-session:{}", base.session_id);
     append_session_nodes_to_state_with_clock(
@@ -126,4 +140,34 @@ fn build_runtime_state(
         clock,
     );
     base
+}
+
+fn current_frame_node_drafts(
+    state: &RuntimeSessionState,
+) -> Vec<crate::session_graph::SessionNodeDraft> {
+    let active_path = state.session_graph.active_path_nodes();
+    let start = state
+        .current_frame_node_id
+        .as_deref()
+        .and_then(|frame_node_id| {
+            active_path
+                .iter()
+                .position(|node| node.node_id == frame_node_id)
+        })
+        .map_or(0, |index| index + 1);
+    active_path[start..]
+        .iter()
+        .filter_map(|node| match &node.payload {
+            crate::SessionNodePayload::Event { event } => {
+                Some(crate::session_graph::SessionNodeDraft::event(event.clone()))
+            }
+            crate::SessionNodePayload::Plugin { plugin_type, body } => {
+                Some(crate::session_graph::SessionNodeDraft::plugin(
+                    plugin_type.clone(),
+                    body.to_owned(),
+                ))
+            }
+            crate::SessionNodePayload::FrameOpen { .. } => None,
+        })
+        .collect()
 }
