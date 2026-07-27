@@ -123,6 +123,36 @@ fn first_persisted_state_commit_derives_and_installs_node_ids() {
 }
 
 #[test]
+fn with_operation_returns_the_append_id_mapping() {
+    let commit = intent_fixture();
+    let GraphCommitDelta::Append { nodes, .. } = &commit.graph else {
+        panic!("fixture graph must append");
+    };
+    let old_node_id = nodes[0].node_id.clone();
+    let operation = OperationId::turn("golden-session", "turn-43", "final");
+    let expected_node_id = derive_history_node_id("golden-session", &operation, 0)
+        .expect("derive replacement node id");
+
+    let (commit, mapping) = commit
+        .with_operation(operation)
+        .expect("derive and stamp commit");
+
+    assert_eq!(
+        mapping,
+        vec![(old_node_id.clone(), expected_node_id.clone())]
+    );
+    let GraphCommitDelta::Append {
+        nodes,
+        leaf_node_id,
+    } = commit.graph
+    else {
+        panic!("stamped graph must append");
+    };
+    assert_eq!(nodes[0].node_id, expected_node_id);
+    assert_eq!(leaf_node_id, Some(expected_node_id));
+}
+
+#[test]
 fn legacy_hash_reproduces_created_at_replay_conflict() {
     let first = intent_fixture();
     let mut replay = first.clone();
