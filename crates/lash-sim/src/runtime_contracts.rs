@@ -137,8 +137,8 @@ pub fn runtime_turn_contract(
             ),
         );
     }
-    let expected_min_count = expected_turn_index * 2;
-    if observation.graph_node_count < expected_min_count {
+    let expected_graph_min_count = expected_turn_index * 2 + 1;
+    if observation.graph_node_count < expected_graph_min_count {
         return OracleVerdict::failed(
             "runtime.turn_contract",
             format!(
@@ -147,7 +147,8 @@ pub fn runtime_turn_contract(
             ),
         );
     }
-    if observation.transcript_message_count < expected_min_count {
+    let expected_transcript_min_count = expected_turn_index * 2;
+    if observation.transcript_message_count < expected_transcript_min_count {
         return OracleVerdict::failed(
             "runtime.turn_contract",
             format!(
@@ -519,7 +520,7 @@ mod tests {
             session_id: "session-001".to_string(),
             turn_index: 2,
             assistant_message: "answer".to_string(),
-            graph_node_count: 4,
+            graph_node_count: 5,
             transcript_message_count: 4,
             activity_count: 3,
             provider_exchange_count: 2,

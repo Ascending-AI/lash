@@ -653,7 +653,7 @@ impl ModelStore {
                     "graph_node_count": event.payload
                         .get("expected_graph_node_count")
                         .and_then(Value::as_u64)
-                        .unwrap_or((turn_index * 2) as u64),
+                        .unwrap_or((turn_index * 2 + 1) as u64),
                     "transcript_message_count": event.payload
                         .get("expected_transcript_message_count")
                         .and_then(Value::as_u64)
