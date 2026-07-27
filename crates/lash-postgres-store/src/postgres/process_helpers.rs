@@ -113,7 +113,7 @@ async fn next_process_event_sequence_tx(
     Ok(sequence as u64)
 }
 
-async fn append_process_event_tx(
+pub(crate) async fn append_process_event_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     record: &mut ProcessRecord,
     request: ProcessEventAppendRequest,
@@ -328,7 +328,7 @@ pub(crate) fn process_lease_expired(process_id: &str) -> PluginError {
     }
 }
 
-async fn validate_process_execution_authority_tx(
+pub(crate) async fn validate_process_execution_authority_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     process_id: &str,
     record: &ProcessRecord,

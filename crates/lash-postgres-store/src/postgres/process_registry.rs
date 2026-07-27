@@ -436,8 +436,7 @@ impl ProcessRegistry for PostgresProcessRegistry {
             .await?
             .ok_or_else(|| PluginError::Session(format!("unknown process `{process_id}`")))?;
         let occurred_at_ms = current_epoch_ms();
-        let result =
-            append_process_event_tx(&mut tx, &mut record, request, occurred_at_ms).await?;
+        let result = append_process_event_tx(&mut tx, &mut record, request, occurred_at_ms).await?;
         tx.commit().await.map_err(plugin_sqlx_error)?;
         Ok(result)
     }
@@ -454,17 +453,11 @@ impl ProcessRegistry for PostgresProcessRegistry {
             .ok_or_else(|| PluginError::Session(format!("unknown process `{process_id}`")))?;
         let now_ms = process_lease_now_epoch_ms_tx(&mut tx).await?;
         validate_process_execution_authority_tx(
-            &mut tx,
-            process_id,
-            &record,
-            authority,
-            None,
-            now_ms,
+            &mut tx, process_id, &record, authority, None, now_ms,
         )
         .await?;
         let occurred_at_ms = current_epoch_ms();
-        let result =
-            append_process_event_tx(&mut tx, &mut record, request, occurred_at_ms).await?;
+        let result = append_process_event_tx(&mut tx, &mut record, request, occurred_at_ms).await?;
         tx.commit().await.map_err(plugin_sqlx_error)?;
         Ok(result)
     }
@@ -624,18 +617,13 @@ impl ProcessRegistry for PostgresProcessRegistry {
             occurred_at_ms,
         )?;
         match prepared {
-            lash_core::ProcessEventAppendPlan::Replay {
-                repair_record,
-                ..
-            } => {
+            lash_core::ProcessEventAppendPlan::Replay { repair_record, .. } => {
                 if let Some(repaired) = repair_record {
                     record = repaired;
                     save_process_tx(&mut tx, &record).await?;
                 }
                 tx.commit().await.map_err(plugin_sqlx_error)?;
-                Ok(lash_core::ProcessCompletionOutcome::AlreadyApplied {
-                    stored: record,
-                })
+                Ok(lash_core::ProcessCompletionOutcome::AlreadyApplied { stored: record })
             }
             lash_core::ProcessEventAppendPlan::Insert {
                 event,
@@ -710,9 +698,7 @@ impl ProcessRegistry for PostgresProcessRegistry {
         )?;
         if matches!(prepared, lash_core::ProcessEventAppendPlan::Replay { .. }) {
             tx.commit().await.map_err(plugin_sqlx_error)?;
-            return Ok(lash_core::ProcessCompletionOutcome::AlreadyApplied {
-                stored: record,
-            });
+            return Ok(lash_core::ProcessCompletionOutcome::AlreadyApplied { stored: record });
         }
 
         let current = load_process_lease_tx(&mut tx, process_id).await?;
@@ -870,15 +856,8 @@ impl ProcessRegistry for PostgresProcessRegistry {
             .await?
             .ok_or_else(|| PluginError::Session(format!("unknown process `{process_id}`")))?;
         let now = process_lease_now_epoch_ms_tx(&mut tx).await?;
-        validate_process_execution_authority_tx(
-            &mut tx,
-            process_id,
-            &record,
-            authority,
-            None,
-            now,
-        )
-        .await?;
+        validate_process_execution_authority_tx(&mut tx, process_id, &record, authority, None, now)
+            .await?;
         if record.is_terminal() {
             return Err(PluginError::Session(format!(
                 "terminal process `{process_id}` cannot enter a wait state"
@@ -904,15 +883,8 @@ impl ProcessRegistry for PostgresProcessRegistry {
             .await?
             .ok_or_else(|| PluginError::Session(format!("unknown process `{process_id}`")))?;
         let now = process_lease_now_epoch_ms_tx(&mut tx).await?;
-        validate_process_execution_authority_tx(
-            &mut tx,
-            process_id,
-            &record,
-            authority,
-            None,
-            now,
-        )
-        .await?;
+        validate_process_execution_authority_tx(&mut tx, process_id, &record, authority, None, now)
+            .await?;
         let Some(wait) = record.wait.clone() else {
             tx.commit().await.map_err(plugin_sqlx_error)?;
             return Ok(record);
