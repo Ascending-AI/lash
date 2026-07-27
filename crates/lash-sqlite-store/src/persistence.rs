@@ -273,9 +273,9 @@ impl SessionCommitStore for Store {
                         let live = tx
                             .query_row(
                                 "SELECT 1 FROM graph_nodes
-                                 WHERE node_id = ?1 AND tombstoned = 0
+                                 WHERE session_id = ?1 AND node_id = ?2 AND tombstoned = 0
                                  LIMIT 1",
-                                params![leaf_node_id],
+                                params![commit.session_id, leaf_node_id],
                                 |_| Ok(()),
                             )
                             .optional()
@@ -294,9 +294,9 @@ impl SessionCommitStore for Store {
                         let has_live_nodes = tx
                             .query_row(
                                 "SELECT 1 FROM graph_nodes
-                                 WHERE tombstoned = 0
+                                 WHERE session_id = ?1 AND tombstoned = 0
                                  LIMIT 1",
-                                [],
+                                params![commit.session_id],
                                 |_| Ok(()),
                             )
                             .optional()

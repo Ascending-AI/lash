@@ -445,7 +445,11 @@ async fn sqlite_catalog_enforces_global_node_ids_across_sessions() {
         .await
         .expect_err("second session must not reuse a global node id");
 
-    assert!(matches!(error, lash_core::StoreError::Backend(_)));
+    assert!(matches!(
+        error,
+        lash_core::StoreError::NodeIdCollision { node_id }
+            if node_id == "factory-global-node"
+    ));
     let conn = rusqlite::Connection::open(factory.catalog_path()).expect("open catalog");
     let usage_count: i64 = conn
         .query_row(
@@ -458,6 +462,80 @@ async fn sqlite_catalog_enforces_global_node_ids_across_sessions() {
         usage_count, 0,
         "the usage write before the conflicting node insert must roll back"
     );
+}
+
+#[tokio::test]
+async fn sqlite_catalog_leaf_validation_is_session_scoped() {
+    let root = unique_temp_dir("leaf-scope");
+    let factory = SqliteSessionStoreFactory::new(&root);
+    let request = |session_id: &str| SessionStoreCreateRequest {
+        session_id: session_id.to_string(),
+        relation: lash_core::SessionRelation::Root,
+        policy: SessionPolicy::default(),
+    };
+    let first = factory
+        .create_store(&request("leaf-a"))
+        .await
+        .expect("first store");
+    let second = factory
+        .create_store(&request("leaf-b"))
+        .await
+        .expect("second store");
+    let node = lash_core::SessionNodeRecord {
+        node_id: "leaf-a-node".to_string(),
+        parent_node_id: None,
+        caused_by: None,
+        agent_frame_id: None,
+        timestamp: "2026-07-26T00:00:00Z".to_string(),
+        payload: lash_core::SessionNodePayload::Event {
+            event: lash_core::SessionHistoryRecord::Protocol(
+                lash_core::ProtocolEvent::typed("leaf-scope", serde_json::Value::Null)
+                    .expect("protocol event"),
+            ),
+        },
+    };
+    let mut first_commit = RuntimeCommit::persisted_state(
+        &RuntimeSessionState {
+            session_id: "leaf-a".to_string(),
+            ..Default::default()
+        },
+        &[],
+    );
+    first_commit.graph = GraphCommitDelta::Append {
+        nodes: vec![node.clone()],
+        leaf_node_id: Some(node.node_id.clone()),
+    };
+    first
+        .commit_runtime_state(first_commit)
+        .await
+        .expect("commit first session node");
+
+    second
+        .commit_runtime_state(RuntimeCommit::persisted_state(
+            &RuntimeSessionState {
+                session_id: "leaf-b".to_string(),
+                ..Default::default()
+            },
+            &[],
+        ))
+        .await
+        .expect("another session's live node must not invalidate an empty session");
+
+    let mut cross_session_leaf = RuntimeCommit::persisted_state(
+        &RuntimeSessionState {
+            session_id: "leaf-b".to_string(),
+            head_revision: Some(1),
+            ..Default::default()
+        },
+        &[],
+    );
+    cross_session_leaf.graph = GraphCommitDelta::Unchanged {
+        leaf_node_id: Some(node.node_id),
+    };
+    assert!(matches!(
+        second.commit_runtime_state(cross_session_leaf).await,
+        Err(lash_core::StoreError::InvalidGraphLeaf { .. })
+    ));
 }
 
 #[tokio::test]
