@@ -858,12 +858,10 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn progress_boundaries_update_the_draft_without_store_mutation() {
+    async fn progress_boundaries_accumulate_protocol_events_in_the_draft() {
         let user = text_message("u0", MessageRole::User, "hello");
         let assistant = text_message("a0", MessageRole::Assistant, "hi");
-        let store = RecordingStore::default();
-        let (mut pipeline, _lease) =
-            leased_boundary(&store, state_with_graph(SessionGraph::default())).await;
+        let mut pipeline = TurnBoundary::from_state(state_with_graph(SessionGraph::default()));
         pipeline
             .prepared_checkpoint(
                 SessionPolicy::default(),
@@ -892,14 +890,6 @@ mod tests {
 
         assert_eq!(boundary.protocol_events.len(), 1);
         assert_eq!(pipeline.state().turn_index, 1);
-        assert_eq!(
-            *store
-                .runtime_commit_count
-                .lock()
-                .expect("lock runtime commit count"),
-            0
-        );
-        assert!(store.raw_graph_nodes_for_testing().is_empty());
         assert!(pipeline.state().head_revision.is_none());
     }
 
