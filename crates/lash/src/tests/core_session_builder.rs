@@ -2205,9 +2205,11 @@ async fn fork_inherits_process_grants_without_inheriting_wake_subscription() -> 
         .store_factory(Arc::clone(&factory) as Arc<dyn lash_core::SessionStoreFactory>)
         .process_registry(Arc::clone(&registry) as Arc<dyn lash_core::ProcessRegistry>)
         .build()?;
+    let mut source_model = mock_model_spec();
+    source_model.id = "fork-source-model".to_string();
     let policy = lash_core::SessionPolicy {
-        provider_id: mock_provider().kind().to_string(),
-        model: mock_model_spec(),
+        provider_id: "fork-source-provider".to_string(),
+        model: source_model,
         session_id: Some("fork-grant-source".to_string()),
         ..Default::default()
     };
@@ -2215,12 +2217,13 @@ async fn fork_inherits_process_grants_without_inheriting_wake_subscription() -> 
         .create_store(&lash_core::SessionStoreCreateRequest {
             session_id: "fork-grant-source".to_string(),
             relation: lash_core::SessionRelation::Root,
-            policy,
+            policy: policy.clone(),
         })
         .await
         .expect("create fork grant source");
     let mut source_state = lash_core::RuntimeSessionState {
         session_id: "fork-grant-source".to_string(),
+        policy,
         ..Default::default()
     };
     source_state.ensure_agent_frame_initialized();
@@ -2263,6 +2266,22 @@ async fn fork_inherits_process_grants_without_inheriting_wake_subscription() -> 
         .expect("grant source process handle");
 
     core.fork_at(&fork_node_id, "fork-grant-branch").await?;
+    let branch_store = factory
+        .open_existing_store(&lash_core::SessionStoreCreateRequest {
+            session_id: "fork-grant-branch".to_string(),
+            relation: lash_core::SessionRelation::Root,
+            policy: lash_core::SessionPolicy::default(),
+        })
+        .await
+        .expect("open branch store")
+        .expect("branch store exists");
+    let branch_read = branch_store
+        .load_session(lash_core::SessionReadScope::FullGraph)
+        .await
+        .expect("load branch config")
+        .expect("branch head exists");
+    assert_eq!(branch_read.config.provider_id, "fork-source-provider");
+    assert_eq!(branch_read.config.model.id, "fork-source-model");
 
     let branch_scope = lash_core::SessionScope::new("fork-grant-branch");
     let inherited = registry

@@ -19,6 +19,7 @@ mod attachments;
 mod factory;
 mod maintenance;
 mod queued_work;
+mod reads;
 mod refcounts;
 #[cfg(test)]
 mod test_support;
@@ -864,12 +865,11 @@ impl crate::store::SessionCommitStore for InMemorySessionStore {
         {
             return Ok(None);
         }
-        Ok(self
-            .global_session_graph
-            .lock()
-            .expect("lock global graph")
-            .find_node(node_id)
-            .cloned())
+        if !self.node_visible_to_bound_session(node_id) {
+            return Ok(None);
+        }
+        let graph = self.global_session_graph.lock().expect("lock global graph");
+        Ok(graph.find_node(node_id).cloned())
     }
 
     async fn commit_runtime_state(

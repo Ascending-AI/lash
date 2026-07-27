@@ -199,7 +199,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn refcount_scrub_detects_corrupt_cached_count() {
+    async fn refcount_scrub_counts_anchor_roots_when_detecting_drift() {
         let store = super::InMemorySessionStore::new();
         let mut state = RuntimeSessionState {
             session_id: "scrub-refcount-drift".to_string(),
@@ -213,7 +213,28 @@ mod tests {
         let leaf = store
             .raw_leaf_node_id_for_testing()
             .expect("persisted leaf");
-        store.corrupt_node_refcount_for_testing(&leaf, 2);
+        let checkpoint_ref = store
+            .session_head_meta
+            .lock()
+            .expect("lock head")
+            .as_ref()
+            .and_then(|head| head.checkpoint_ref.clone())
+            .expect("checkpoint ref");
+        let checkpoint = store
+            .checkpoint
+            .lock()
+            .expect("lock checkpoint")
+            .clone()
+            .expect("checkpoint");
+        store.node_anchors.lock().expect("lock anchors").insert(
+            leaf.clone(),
+            (
+                checkpoint_ref,
+                checkpoint,
+                "scrub-refcount-drift".to_string(),
+            ),
+        );
+        store.corrupt_node_refcount_for_testing(&leaf, 3);
 
         let error = store
             .verify_node_refcounts()
@@ -224,8 +245,8 @@ mod tests {
             error,
             StoreError::NodeRefcountDrift {
                 node_id,
-                cached: 2,
-                derived: 1,
+                cached: 3,
+                derived: 2,
             } if node_id == leaf
         ));
     }

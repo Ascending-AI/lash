@@ -705,7 +705,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn postgres_refcount_scrub_detects_corrupt_cached_count() {
+    async fn postgres_refcount_scrub_counts_anchor_roots_when_detecting_drift() {
         let Some(database_url) = postgres_test_support::database_url() else {
             eprintln!("skipping Postgres refcount scrub proof: database URL is not set");
             return;
@@ -727,7 +727,17 @@ mod tests {
             .await
             .expect("commit root frame");
         let frame_node_id = state.current_frame_node_id.expect("frame node");
-        sqlx::query("UPDATE lash_graph_nodes SET incoming_refs = 2 WHERE node_id = $1")
+        sqlx::query(
+            "INSERT INTO lash_node_anchors
+             (node_id, checkpoint_ref, source_session_id)
+             VALUES ($1, 'anchor-checkpoint', $2)",
+        )
+        .bind(&frame_node_id)
+        .bind(&state.session_id)
+        .execute(storage.pool())
+        .await
+        .expect("insert anchor root");
+        sqlx::query("UPDATE lash_graph_nodes SET incoming_refs = 3 WHERE node_id = $1")
             .bind(&frame_node_id)
             .execute(storage.pool())
             .await
@@ -742,8 +752,8 @@ mod tests {
             error,
             StoreError::NodeRefcountDrift {
                 node_id,
-                cached: 2,
-                derived: 1,
+                cached: 3,
+                derived: 2,
             } if node_id == frame_node_id
         ));
     }

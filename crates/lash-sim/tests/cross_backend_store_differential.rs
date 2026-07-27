@@ -305,19 +305,16 @@ fn generated_cases() -> Vec<GeneratedCase> {
         },
         GeneratedCase {
             name: CaseName::AppendDuplicateAfterAppendSeed,
-            // The store layer has no residency input. A host using
-            // `ActivePathOnly` can produce this malformed Append because
-            // `unique_message_node_id` de-duplicates only against its resident
-            // set; the restored host-layer differential covers that path.
+            // A duplicate append id must be rejected even when its parent and
+            // terminal leaf otherwise form a valid linear continuation.
             operations: vec![
                 commit(
-                    "seed_forked_graph",
+                    "seed_graph",
                     0,
                     append(
                         vec![
                             NodeSpec::new("root", None, "root"),
                             NodeSpec::new("active-leaf", Some("root"), "active"),
-                            NodeSpec::new("off-path", Some("root"), "off-path-original"),
                         ],
                         Some("active-leaf"),
                     ),
@@ -326,7 +323,11 @@ fn generated_cases() -> Vec<GeneratedCase> {
                     "append_duplicate_id_after_append_seed",
                     1,
                     append(
-                        vec![NodeSpec::new("off-path", Some("root"), "off-path-mutated")],
+                        vec![NodeSpec::new(
+                            "active-leaf",
+                            Some("active-leaf"),
+                            "duplicate",
+                        )],
                         Some("active-leaf"),
                     ),
                 ),

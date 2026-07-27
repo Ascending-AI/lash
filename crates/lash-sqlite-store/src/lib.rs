@@ -1077,7 +1077,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn refcount_scrub_detects_corrupt_cached_count() {
+    async fn refcount_scrub_counts_anchor_roots_when_detecting_drift() {
         let store = Store::memory().await.expect("open store");
         store
             .bind_session("scrub-refcount-drift")
@@ -1098,7 +1098,13 @@ mod tests {
                 let frame_node_id = frame_node_id.clone();
                 move |tx| {
                     tx.execute(
-                        "UPDATE graph_nodes SET incoming_refs = 2 WHERE node_id = ?1",
+                        "INSERT INTO node_anchors
+                         (node_id, checkpoint_ref, source_session_id)
+                         VALUES (?1, 'anchor-checkpoint', 'scrub-refcount-drift')",
+                        params![frame_node_id],
+                    )?;
+                    tx.execute(
+                        "UPDATE graph_nodes SET incoming_refs = 3 WHERE node_id = ?1",
                         params![frame_node_id],
                     )?;
                     Ok(())
@@ -1116,8 +1122,8 @@ mod tests {
             error,
             StoreError::NodeRefcountDrift {
                 node_id,
-                cached: 2,
-                derived: 1,
+                cached: 3,
+                derived: 2,
             } if node_id == frame_node_id
         ));
     }

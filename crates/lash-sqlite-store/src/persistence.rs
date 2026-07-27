@@ -272,14 +272,32 @@ impl SessionCommitStore for Store {
         &self,
         node_id: &str,
     ) -> Result<Option<lash_core::SessionNodeRecord>, StoreError> {
+        let session_id = self.selected_session_id()?;
         let node_id = node_id.to_string();
         let row: Option<(String, Option<String>, String)> = self
             .conn
             .call(move |conn| {
                 conn.query_row(
-                    "SELECT node_id, parent_node_id, node_json FROM graph_nodes
-                     WHERE node_id = ?1 AND tombstoned = 0",
-                    params![node_id],
+                    "WITH RECURSIVE ancestry(node_id, parent_node_id) AS (
+                         SELECT node.node_id, node.parent_node_id
+                         FROM graph_nodes node
+                         JOIN session_head head ON head.leaf_node_id = node.node_id
+                         WHERE head.session_id = ?2 AND node.tombstoned = 0
+                         UNION ALL
+                         SELECT parent.node_id, parent.parent_node_id
+                         FROM graph_nodes parent
+                         JOIN ancestry child ON parent.node_id = child.parent_node_id
+                         WHERE parent.tombstoned = 0
+                     )
+                     SELECT node_id, parent_node_id, node_json FROM graph_nodes
+                     WHERE node_id = ?1 AND tombstoned = 0
+                       AND (
+                           session_id = ?2
+                           OR EXISTS (
+                               SELECT 1 FROM ancestry WHERE ancestry.node_id = graph_nodes.node_id
+                           )
+                       )",
+                    params![node_id, session_id],
                     |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
                 )
                 .optional()

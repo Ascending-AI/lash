@@ -320,11 +320,33 @@ impl SessionCommitStore for PostgresSessionStore {
     }
 
     async fn load_node(&self, node_id: &str) -> Result<Option<SessionNodeRecord>, StoreError> {
+        let Some(session_id) = self.selected_session_id().await? else {
+            return Ok(None);
+        };
         let row = sqlx::query(
-            "SELECT node_id, parent_node_id, node_json FROM lash_graph_nodes
-             WHERE node_id = $1 AND tombstoned = FALSE",
+            "WITH RECURSIVE ancestry(node_id, parent_node_id) AS (
+                 SELECT node.node_id, node.parent_node_id
+                 FROM lash_graph_nodes node
+                 JOIN lash_sessions head ON head.leaf_node_id = node.node_id
+                 WHERE head.session_id = $2 AND node.tombstoned = FALSE
+                 UNION ALL
+                 SELECT parent.node_id, parent.parent_node_id
+                 FROM lash_graph_nodes parent
+                 JOIN ancestry child ON parent.node_id = child.parent_node_id
+                 WHERE parent.tombstoned = FALSE
+             )
+             SELECT node_id, parent_node_id, node_json FROM lash_graph_nodes
+             WHERE node_id = $1 AND tombstoned = FALSE
+               AND (
+                   session_id = $2
+                   OR EXISTS (
+                       SELECT 1 FROM ancestry
+                       WHERE ancestry.node_id = lash_graph_nodes.node_id
+                   )
+               )",
         )
         .bind(node_id)
+        .bind(session_id)
         .fetch_optional(&self.pool)
         .await
         .map_err(store_sqlx_error)?;

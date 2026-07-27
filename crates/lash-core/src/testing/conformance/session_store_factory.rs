@@ -412,6 +412,14 @@ async fn session_store_factory_rejects_cross_session_graph_parents(
         .current_frame_node_id
         .clone()
         .expect("owner frame node id");
+    assert!(
+        second
+            .load_node(&foreign_parent)
+            .await
+            .expect("probe unrelated history")
+            .is_none(),
+        "a bound store must not expose an unrelated session's node"
+    );
     let child = crate::SessionNodeRecord {
         node_id: "cross-session-child".to_string(),
         parent_node_id: Some(foreign_parent.clone()),
