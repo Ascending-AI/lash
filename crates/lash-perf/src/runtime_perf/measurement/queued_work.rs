@@ -909,6 +909,7 @@ fn queued_work_stress_commit(
 ) -> RuntimeCommit {
     RuntimeCommit {
         session_id: session_id.to_string(),
+        incarnation_id: lash_core::IncarnationId::fresh(),
         expected_head_revision: 0,
         session_execution_lease: Some(lease.fence()),
         release_session_execution_lease: release_lease.then(|| lease.completion()),

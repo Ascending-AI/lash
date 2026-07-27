@@ -241,8 +241,7 @@ impl RuntimePerfStore {
 
     /// The fencing token of the session's currently-live execution lease, or
     /// `None` when no live lease holds the session. A queued-work or turn-input
-    /// claim is live for lease-less host callers exactly when the generation it
-    /// pins equals this value (ADR 0029).
+    /// claim is live for lease-less hosts when its generation equals this value (ADR 0029).
     fn live_session_lease_generation(&self, session_id: &str, now: u64) -> Option<u64> {
         let leases = self
             .session_execution_leases
@@ -596,6 +595,7 @@ impl SessionCommitStore for RuntimePerfStore {
             .collect();
         let RuntimeCommit {
             session_id,
+            incarnation_id: _,
             expected_head_revision,
             config,
             current_frame_node_id,
