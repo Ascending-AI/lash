@@ -125,8 +125,11 @@ pub enum DirectLlmError {
         category: ModelEffortValidationCategory,
         message: String,
     },
-    #[error("invalid response: {0}")]
-    InvalidResponse(String),
+    #[error("invalid response: {message}")]
+    InvalidResponse {
+        message: String,
+        result: Box<DirectLlmResult>,
+    },
     #[error("transport error: {0}")]
     Transport(#[from] Box<LlmTransportError>),
 }
@@ -228,7 +231,17 @@ impl DirectLlmClient {
         };
         match self.provider.complete(llm_request).await {
             Ok(response) => {
-                if let Err(error) = validate_direct_output(&output_for_validation, &response) {
+                let result = DirectLlmResult {
+                    response: response.response,
+                    llm_call: response.call_record,
+                };
+                if let Err(message) =
+                    validate_direct_output(&output_for_validation, &result.response)
+                {
+                    let error = DirectLlmError::InvalidResponse {
+                        message,
+                        result: Box::new(result),
+                    };
                     if let Some(llm_call_id) = llm_call_id {
                         crate::trace::emit_trace(
                             &self.trace_sink,
@@ -258,22 +271,19 @@ impl DirectLlmClient {
                         TraceContext::default().for_llm_call(llm_call_id),
                         TraceEvent::LlmCallCompleted {
                             response: crate::trace::trace_llm_response(
-                                response.full_text.clone(),
+                                result.full_text.clone(),
                                 0,
-                                Some(response.terminal_reason),
-                                crate::trace::trace_output_parts(&response.parts),
+                                Some(result.terminal_reason),
+                                crate::trace::trace_output_parts(&result.parts),
                             ),
-                            usage: Some(crate::trace::trace_usage_from_llm(&response.usage)),
-                            provider_usage: response.provider_usage.clone(),
+                            usage: Some(crate::trace::trace_usage_from_llm(&result.usage)),
+                            provider_usage: result.provider_usage.clone(),
                             stream_summary: None,
                         },
                         self.clock.as_ref(),
                     );
                 }
-                Ok(DirectLlmResult {
-                    response: response.response,
-                    llm_call: response.call_record,
-                })
+                Ok(result)
             }
             Err(error) => {
                 if let Some(llm_call_id) = llm_call_id {
@@ -394,18 +404,13 @@ pub(crate) fn build_llm_request(
     }
 }
 
-fn validate_direct_output(
-    output: &DirectOutputSpec,
-    response: &LlmResponse,
-) -> Result<(), DirectLlmError> {
+fn validate_direct_output(output: &DirectOutputSpec, response: &LlmResponse) -> Result<(), String> {
     let DirectOutputSpec::JsonSchema(schema) = output else {
         return Ok(());
     };
     let parsed: serde_json::Value = serde_json::from_str(response.full_text.trim())
-        .map_err(|err| DirectLlmError::InvalidResponse(format!("expected JSON: {err}")))?;
-    LashSchema::new(schema.schema.canonical().clone())
-        .validate(&parsed)
-        .map_err(DirectLlmError::InvalidResponse)
+        .map_err(|err| format!("expected JSON: {err}"))?;
+    LashSchema::new(schema.schema.canonical().clone()).validate(&parsed)
 }
 
 fn transport_stream_events_for_direct(
@@ -543,6 +548,11 @@ mod tests {
             .complete(|_request| async {
                 Ok(LlmResponse {
                     full_text: r#"{"items":[]}"#.to_string(),
+                    usage: LlmUsage {
+                        input_tokens: 17,
+                        output_tokens: 3,
+                        ..Default::default()
+                    },
                     terminal_reason: LlmTerminalReason::Stop,
                     response_metadata: Default::default(),
                     ..Default::default()
@@ -577,7 +587,14 @@ mod tests {
             .await
             .expect_err("empty items must fail canonical validation");
 
-        assert!(matches!(err, DirectLlmError::InvalidResponse(_)));
+        let DirectLlmError::InvalidResponse { result, .. } = &err else {
+            panic!("expected invalid response, got {err:?}");
+        };
+        assert_eq!(result.full_text, r#"{"items":[]}"#);
+        assert_eq!(result.usage.input_tokens, 17);
+        assert_eq!(result.usage.output_tokens, 3);
+        assert_eq!(result.terminal_reason, LlmTerminalReason::Stop);
+        assert_eq!(result.llm_call.attempts.len(), 1);
         let error = err.to_string();
         assert!(
             error.contains("items") && error.contains("[] has less than 1 item"),
