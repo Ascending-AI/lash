@@ -101,7 +101,11 @@ mod tests {
             .await
             .expect_err("second session must not reuse a global node id");
 
-        assert!(matches!(error, crate::StoreError::Backend(_)));
+        assert!(matches!(
+            error,
+            crate::StoreError::NodeIdCollision { node_id }
+                if node_id == "factory-global-node"
+        ));
         assert_eq!(
             second_concrete
                 .usage_deltas
