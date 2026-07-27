@@ -64,7 +64,7 @@ flowchart TD
 
         <div class="section">
           <div class="section-header">
-            <h2>Residency And Sessions</h2>
+            <h2>Durable Sessions</h2>
             <p>Lash can run behind the CLI or inside any long-lived host application. The same session machinery supports active sessions, managed child sessions, parked runtimes, and resumable hosts.</p>
           </div>
           <div class="mode-grid">
@@ -141,7 +141,7 @@ flowchart LR
             <div class="mermaid">
 flowchart LR
   Driver["RuntimeTurnDriver"] --> Pipeline["TurnBoundary"]
-  Pipeline --> Delta["RuntimeCommit<br/>GraphCommitDelta"]
+  Pipeline --> Delta["RuntimeCommit<br/>GraphAppend"]
   Delta --> Store["lash-sqlite-store"]
   Store --> Head["session_head revision"]
   Store --> Blobs["checkpoint + attachment blobs"]
