@@ -784,19 +784,44 @@ impl crate::store::SessionCommitStore for InMemorySessionStore {
             .lock()
             .expect("lock tombstoned nodes")
             .clone();
-        let requested_leaf = match scope {
-            crate::store::SessionReadScope::FullGraph => meta.leaf_node_id.clone(),
-            crate::store::SessionReadScope::ActivePath { leaf_node_id } => {
-                leaf_node_id.or_else(|| meta.leaf_node_id.clone())
-            }
-        };
-        let mut graph = self
+        let global_graph = self
             .global_session_graph
             .lock()
             .expect("lock global graph")
             .clone();
-        graph.set_leaf_node_id(requested_leaf);
-        graph = graph.trim_to_active_path();
+        let mut graph = match scope {
+            crate::store::SessionReadScope::FullGraph => {
+                let mut ancestry = global_graph.clone();
+                ancestry.set_leaf_node_id(meta.leaf_node_id.clone());
+                let active_node_ids = ancestry
+                    .trim_to_active_path()
+                    .nodes
+                    .iter()
+                    .map(|node| node.node_id.clone())
+                    .collect::<HashSet<_>>();
+                let owners = self
+                    .global_node_owners
+                    .lock()
+                    .expect("lock global node owners");
+                crate::SessionGraph::from_nodes(
+                    global_graph
+                        .nodes
+                        .iter()
+                        .filter(|node| {
+                            owners.get(&node.node_id) == Some(&meta.session_id)
+                                || active_node_ids.contains(&node.node_id)
+                        })
+                        .cloned()
+                        .collect(),
+                    meta.leaf_node_id.clone(),
+                )
+            }
+            crate::store::SessionReadScope::ActivePath { leaf_node_id } => {
+                let mut graph = global_graph;
+                graph.set_leaf_node_id(leaf_node_id.or_else(|| meta.leaf_node_id.clone()));
+                graph.trim_to_active_path()
+            }
+        };
         if !tombstoned.is_empty() {
             let leaf_node_id = graph
                 .leaf_node_id
