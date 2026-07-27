@@ -56,8 +56,8 @@ fn default_allowed_tools() -> BTreeSet<String> {
     .collect()
 }
 
-fn fresh_context_frame_id(session_id: &str, previous_frame_id: &str) -> String {
-    format!("{session_id}:frame:plan-exit:after:{previous_frame_id}")
+fn fresh_context_frame_id(session_id: &str, previous_frame_node_id: &str) -> String {
+    format!("{session_id}:frame:plan-exit:after:{previous_frame_node_id}")
 }
 
 fn plan_protocol_state_event(
@@ -624,7 +624,10 @@ impl SessionPlugin for PlanModePlugin {
                         let snapshot = ctx.session_snapshot().await?;
                         let frame_id = fresh_context_frame_id(
                             &ctx.session_id,
-                            &snapshot.current_agent_frame_id,
+                            snapshot
+                                .current_frame_node_id
+                                .as_deref()
+                                .unwrap_or_default(),
                         );
                         let task = plan_exit_fresh_context_input(&plan_path);
                         directives.push(PluginDirective::short_circuit(

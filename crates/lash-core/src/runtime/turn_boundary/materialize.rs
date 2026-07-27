@@ -90,7 +90,9 @@ pub(super) fn materialize_agent_frame_switch(
     else {
         return;
     };
-    if frame_id.trim().is_empty() || state.current_agent_frame_id == *frame_id {
+    if frame_id.trim().is_empty()
+        || state.current_frame_node_id.as_deref() == Some(frame_id.as_str())
+    {
         return;
     }
     super::super::open_agent_frame_in_state_with_clock(

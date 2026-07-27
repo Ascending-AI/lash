@@ -152,11 +152,11 @@ impl RlmRuntimeState {
         let execution = execution_guard
             .as_mut()
             .ok_or_else(|| SessionError::Protocol("RLM execution state is busy".to_string()))?;
-        if active_agent_frame_id.as_deref() != Some(state.current_agent_frame_id.as_str()) {
+        if *active_agent_frame_id != state.current_frame_node_id {
             *execution = RlmExecutionState::new()?;
             *self.session_projected_bindings.lock().await = RlmProjectedBindings::new();
             *self.bound_variable_render_cache.lock().await = BoundVariableRenderCache::default();
-            *active_agent_frame_id = Some(state.current_agent_frame_id.clone());
+            *active_agent_frame_id = state.current_frame_node_id.clone();
         }
         let protected_names = self.protected_projected_binding_names().await;
         if let Some(snapshot) = state.execution_state_snapshot().map(|bytes| bytes.to_vec()) {

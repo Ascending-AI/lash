@@ -63,8 +63,6 @@ fn intent_fixture() -> RuntimeCommit {
         nodes: vec![crate::SessionNodeRecord {
             node_id: node_id.clone(),
             parent_node_id: None,
-            caused_by: None,
-            agent_frame_id: Some(state.current_agent_frame_id.clone()),
             timestamp: "2026-07-26T10:00:01Z".to_string(),
             payload: crate::SessionNodePayload::Event {
                 event: crate::SessionHistoryRecord::Conversation(
@@ -86,8 +84,6 @@ fn first_persisted_state_commit_derives_and_installs_node_ids() {
             vec![crate::SessionNodeRecord {
                 node_id: placeholder.clone(),
                 parent_node_id: None,
-                caused_by: None,
-                agent_frame_id: None,
                 timestamp: "2026-07-27T00:00:00Z".to_string(),
                 payload: crate::SessionNodePayload::Plugin {
                     plugin_type: "first-commit".to_string(),
@@ -150,24 +146,6 @@ fn with_operation_returns_the_append_id_mapping() {
     };
     assert_eq!(nodes[0].node_id, expected_node_id);
     assert_eq!(leaf_node_id, Some(expected_node_id));
-}
-
-#[test]
-fn legacy_hash_reproduces_created_at_replay_conflict() {
-    let first = intent_fixture();
-    let mut replay = first.clone();
-    replay.agent_frames[0].created_at = "2026-07-26T10:00:09Z".to_string();
-
-    assert_ne!(
-        legacy_turn_commit_hash(&first),
-        legacy_turn_commit_hash(&replay),
-        "the pre-L2 scrubber hashes live frame creation time"
-    );
-    assert_eq!(
-        first.turn_commit_hash().expect("first intent"),
-        replay.turn_commit_hash().expect("replay intent"),
-        "L2 excludes clock-derived frame time"
-    );
 }
 
 #[test]
@@ -381,15 +359,13 @@ fn node_derivation_and_realization_digest_are_independent() {
 }
 
 #[test]
-fn node_derivation_remaps_in_batch_session_node_causes() {
+fn node_derivation_remaps_in_batch_parent_edges() {
     let operation = OperationId::turn("session", "turn", "final");
     let mut graph = GraphCommitDelta::Append {
         nodes: vec![
             crate::SessionNodeRecord {
                 node_id: "draft-a".to_string(),
                 parent_node_id: None,
-                caused_by: None,
-                agent_frame_id: None,
                 timestamp: "2026-07-26T10:00:00Z".to_string(),
                 payload: crate::SessionNodePayload::Plugin {
                     plugin_type: "first".to_string(),
@@ -399,11 +375,6 @@ fn node_derivation_remaps_in_batch_session_node_causes() {
             crate::SessionNodeRecord {
                 node_id: "draft-b".to_string(),
                 parent_node_id: Some("draft-a".to_string()),
-                caused_by: Some(crate::CausalRef::SessionNode {
-                    session_id: "session".to_string(),
-                    node_id: "draft-a".to_string(),
-                }),
-                agent_frame_id: None,
                 timestamp: "2026-07-26T10:00:00Z".to_string(),
                 payload: crate::SessionNodePayload::Plugin {
                     plugin_type: "second".to_string(),
@@ -423,13 +394,6 @@ fn node_derivation_remaps_in_batch_session_node_causes() {
         nodes[1].parent_node_id.as_deref(),
         Some(nodes[0].node_id.as_str())
     );
-    assert!(matches!(
-        &nodes[1].caused_by,
-        Some(crate::CausalRef::SessionNode {
-            session_id,
-            node_id,
-        }) if session_id == "session" && node_id == &nodes[0].node_id
-    ));
 }
 
 fn local_liveness(

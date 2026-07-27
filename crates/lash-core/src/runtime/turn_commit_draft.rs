@@ -19,18 +19,14 @@ impl TurnCommitDraft {
         draft_namespace: &str,
     ) -> Self {
         let base_graph = Arc::new(std::mem::take(&mut state.session_graph));
-        let base_read_model = base_graph.read_model_for_agent_frame(
-            &state.current_agent_frame_id,
-            state
-                .current_agent_frame()
-                .map(|frame| frame.previous_frame_id.is_none())
-                .unwrap_or(true),
+        let base_read_model = state.current_frame_node_id.as_deref().map_or_else(
+            || base_graph.read_model(),
+            |frame_node_id| base_graph.read_model_for_frame(frame_node_id),
         );
         let persisted_node_ids = std::mem::take(&mut state.persisted_node_ids);
         let graph = TurnGraphEditor::new(
             base_graph,
             base_read_model,
-            state.current_agent_frame_id.clone(),
             draft_namespace,
             clock,
             persisted_node_ids,

@@ -160,17 +160,25 @@ impl NodeSpec {
             parent_node_id: self
                 .parent_node_id
                 .map(|node_id| scoped_node_id(session_id, node_id)),
-            caused_by: None,
-            agent_frame_id: None,
             timestamp: "2026-07-26T00:00:00Z".to_string(),
-            payload: SessionNodePayload::Event {
-                event: SessionHistoryRecord::Protocol(
-                    ProtocolEvent::typed(
-                        "store-differential",
-                        serde_json::json!({ "contents": self.contents }),
-                    )
-                    .expect("valid differential protocol event"),
-                ),
+            payload: if self.parent_node_id.is_none() {
+                SessionNodePayload::FrameOpen {
+                    reason: lash_core::AgentFrameReason::initial(),
+                    assignment: lash_core::AgentFrameAssignment::from_policy(
+                        lash_core::SessionPolicy::default(),
+                    ),
+                    protocol_turn_options: Default::default(),
+                }
+            } else {
+                SessionNodePayload::Event {
+                    event: SessionHistoryRecord::Protocol(
+                        ProtocolEvent::typed(
+                            "store-differential",
+                            serde_json::json!({ "contents": self.contents }),
+                        )
+                        .expect("valid differential protocol event"),
+                    ),
+                }
             },
         }
     }
@@ -441,6 +449,15 @@ fn runtime_commit(
     let mut commit = RuntimeCommit::persisted_state(&state, &[]);
     commit.expected_head_revision = expected_head_revision;
     commit.graph = materialize_graph(session_id, graph);
+    commit.current_frame_node_id = match graph {
+        GraphSpec::Unchanged { leaf_node_id } => {
+            leaf_node_id.map(|node_id| scoped_node_id(session_id, node_id))
+        }
+        GraphSpec::Append { nodes, .. } => nodes
+            .first()
+            .map(|node| node.parent_node_id.unwrap_or(node.node_id))
+            .map(|node_id| scoped_node_id(session_id, node_id)),
+    };
     if let Some(turn_commit) = turn_commit {
         commit = commit.with_turn_commit(RuntimeTurnCommitStamp::new(
             session_id,
@@ -909,10 +926,10 @@ fn normalized_store_error(backend: &str, error: &StoreError) -> String {
         StoreError::NodeIdDerivationMismatch { .. } => "NodeIdDerivationMismatch".to_string(),
         StoreError::NodeIdCollision { .. } => "NodeIdCollision".to_string(),
         StoreError::InvalidGraphLeaf { .. } => "InvalidGraphLeaf".to_string(),
+        StoreError::InvalidGraphParent { .. } => "InvalidGraphParent".to_string(),
+        StoreError::MissingFrameOpenAncestor { .. } => "MissingFrameOpenAncestor".to_string(),
+        StoreError::NodeRefcountDrift { .. } => "NodeRefcountDrift".to_string(),
         StoreError::CommitRealizationMismatch { .. } => "CommitRealizationMismatch".to_string(),
-        StoreError::CommitFrameRealizationMismatch { .. } => {
-            "CommitFrameRealizationMismatch".to_string()
-        }
         StoreError::Backend(message) => normalized_backend_error(backend, message),
     }
 }

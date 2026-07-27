@@ -204,7 +204,12 @@ fn canonical_seed_nodes(state: &lash_core::SessionSnapshot, frame_id: &str) -> V
         .session_graph
         .nodes
         .iter()
-        .filter(|node| node.agent_frame_id.as_deref() == Some(frame_id))
+        .filter(|node| {
+            state
+                .session_graph
+                .nearest_frame_node_id(Some(&node.node_id))
+                == Some(frame_id)
+        })
         .filter_map(|node| match &node.payload {
             SessionNodePayload::Plugin { plugin_type, body } => Some(json!({
                 "kind": "plugin",

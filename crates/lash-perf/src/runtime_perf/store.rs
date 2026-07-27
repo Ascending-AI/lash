@@ -557,8 +557,7 @@ impl SessionCommitStore for RuntimePerfStore {
             session_id: meta.session_id,
             head_revision: meta.head_revision,
             config: meta.config,
-            agent_frames: meta.agent_frames,
-            current_agent_frame_id: meta.current_agent_frame_id,
+            current_frame_node_id: meta.current_frame_node_id,
             graph,
             checkpoint_ref: meta.checkpoint_ref,
             checkpoint: None,
@@ -591,8 +590,7 @@ impl SessionCommitStore for RuntimePerfStore {
             session_id,
             expected_head_revision,
             config,
-            agent_frames,
-            current_agent_frame_id,
+            current_frame_node_id,
             graph: graph_delta,
             checkpoint,
             usage_deltas,
@@ -605,13 +603,6 @@ impl SessionCommitStore for RuntimePerfStore {
             release_session_execution_lease,
             committed_attachment_ids: _,
         } = commit;
-        let realized_agent_frames = agent_frames
-            .iter()
-            .map(|frame| store::RealizedAgentFrame {
-                frame_id: frame.frame_id.clone(),
-                created_at: frame.created_at.clone(),
-            })
-            .collect();
         if let Some(batch) = enqueued_queue_batches
             .iter()
             .find(|batch| batch.session_id != session_id)
@@ -800,8 +791,7 @@ impl SessionCommitStore for RuntimePerfStore {
             session_id: session_id.clone(),
             head_revision,
             config,
-            agent_frames,
-            current_agent_frame_id,
+            current_frame_node_id,
             checkpoint_ref: Some(checkpoint_ref.clone()),
             leaf_node_id,
             graph_node_count,
@@ -816,7 +806,6 @@ impl SessionCommitStore for RuntimePerfStore {
             checkpoint_ref,
             manifest,
             realization_digest,
-            realized_agent_frames,
             enqueued_queue_batches: enqueued_queue_batches
                 .into_iter()
                 .map(|batch| self.enqueue_queued_work_in_memory(batch))
@@ -1507,6 +1496,12 @@ impl StoreMaintenance for RuntimePerfStore {
 
     async fn gc_unreachable(&self) -> Result<GcReport, store::StoreError> {
         Ok(GcReport::default())
+    }
+
+    async fn verify_node_refcounts(
+        &self,
+    ) -> Result<lash_core::NodeRefcountVerification, store::StoreError> {
+        Ok(lash_core::NodeRefcountVerification::default())
     }
 }
 

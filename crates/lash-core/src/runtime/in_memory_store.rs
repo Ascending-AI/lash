@@ -148,6 +148,7 @@ pub struct InMemorySessionStore {
     pub(crate) session_graph: Mutex<crate::SessionGraph>,
     global_node_owners: Arc<Mutex<HashMap<String, String>>>,
     tombstoned_node_ids: Mutex<HashSet<String>>,
+    incoming_node_refs: Mutex<HashMap<String, i64>>,
     pub(crate) checkpoint: Mutex<Option<crate::HydratedSessionCheckpoint>>,
     pub(crate) usage_deltas: Mutex<Vec<crate::TokenLedgerEntry>>,
     pub(crate) runtime_commit_count: Mutex<usize>,
@@ -236,6 +237,14 @@ impl InMemorySessionStore {
             .map(|meta| meta.head_revision)
     }
 
+    #[cfg(any(test, feature = "testing"))]
+    pub fn corrupt_node_refcount_for_testing(&self, node_id: &str, incoming_refs: i64) {
+        self.incoming_node_refs
+            .lock()
+            .expect("lock incoming node refs")
+            .insert(node_id.to_string(), incoming_refs);
+    }
+
     /// Return raw pending-input lifecycle state for differential tests.
     #[cfg(any(test, feature = "testing"))]
     pub fn raw_pending_turn_inputs_for_testing(
@@ -274,6 +283,7 @@ impl InMemorySessionStore {
             session_graph: Mutex::new(crate::SessionGraph::default()),
             global_node_owners,
             tombstoned_node_ids: Mutex::new(HashSet::new()),
+            incoming_node_refs: Mutex::new(HashMap::new()),
             checkpoint: Mutex::new(None),
             usage_deltas: Mutex::new(Vec::new()),
             runtime_commit_count: Mutex::new(0),
@@ -842,8 +852,7 @@ impl crate::store::SessionCommitStore for InMemorySessionStore {
             session_id: meta.session_id,
             head_revision: meta.head_revision,
             config: meta.config,
-            agent_frames: meta.agent_frames,
-            current_agent_frame_id: meta.current_agent_frame_id,
+            current_frame_node_id: meta.current_frame_node_id,
             graph,
             checkpoint_ref: meta.checkpoint_ref,
             checkpoint: self.checkpoint.lock().expect("lock checkpoint").clone(),
@@ -881,14 +890,6 @@ impl crate::store::SessionCommitStore for InMemorySessionStore {
         commit.validate_operation_session()?;
         let turn_input_applications = commit.turn_input_applications();
         let realization_digest = crate::store::graph_realization_digest(&commit.graph);
-        let realized_agent_frames = commit
-            .agent_frames
-            .iter()
-            .map(|frame| crate::store::RealizedAgentFrame {
-                frame_id: frame.frame_id.clone(),
-                created_at: frame.created_at.clone(),
-            })
-            .collect();
         let _transaction = self
             .write_transaction
             .lock()
@@ -947,6 +948,8 @@ impl crate::store::SessionCommitStore for InMemorySessionStore {
         }
         commit.validate_node_derivation()?;
         commit.validate_append_node_ids_unique()?;
+        commit
+            .validate_append_chain(meta.as_ref().and_then(|head| head.leaf_node_id.as_deref()))?;
         let incoming_nodes = match &commit.graph {
             crate::store::GraphCommitDelta::Unchanged { .. } => &[][..],
             crate::store::GraphCommitDelta::Append { nodes, .. } => nodes.as_slice(),
@@ -1008,6 +1011,29 @@ impl crate::store::SessionCommitStore for InMemorySessionStore {
                 return Err(crate::store::StoreError::InvalidGraphLeaf { leaf_node_id: None });
             }
             _ => {}
+        }
+        {
+            let mut proposed = self.session_graph.lock().expect("lock graph").clone();
+            if let crate::store::GraphCommitDelta::Append { nodes, .. } = &commit.graph {
+                proposed.extend_node_records(nodes.iter().cloned());
+            }
+            proposed.set_leaf_node_id(commit.graph.leaf_node_id().cloned());
+            if let Some(leaf_node_id) = proposed.leaf_node_id.as_deref() {
+                let derived = proposed
+                    .nearest_frame_node_id(Some(leaf_node_id))
+                    .map(ToOwned::to_owned)
+                    .ok_or_else(|| crate::store::StoreError::MissingFrameOpenAncestor {
+                        leaf_node_id: leaf_node_id.to_string(),
+                    })?;
+                if commit.current_frame_node_id.as_deref() != Some(derived.as_str()) {
+                    return Err(crate::store::StoreError::Backend(format!(
+                        "current_frame_node_id {:?} does not match derived frame `{derived}`",
+                        commit.current_frame_node_id
+                    )));
+                }
+            } else if commit.current_frame_node_id.is_some() {
+                return Err(crate::store::StoreError::InvalidGraphLeaf { leaf_node_id: None });
+            }
         }
         {
             let queued = self.queued_work.lock().expect("lock queued work");
@@ -1118,6 +1144,15 @@ impl crate::store::SessionCommitStore for InMemorySessionStore {
         graph.set_leaf_node_id(leaf_node_id.clone());
         let graph_node_count = graph.nodes.len();
         drop(graph);
+        if !incoming_nodes.is_empty() {
+            let mut refs = self
+                .incoming_node_refs
+                .lock()
+                .expect("lock incoming node refs");
+            for node in incoming_nodes {
+                refs.insert(node.node_id.clone(), 1);
+            }
+        }
         for node in incoming_nodes {
             global_node_owners.insert(node.node_id.clone(), commit.session_id.clone());
         }
@@ -1149,8 +1184,7 @@ impl crate::store::SessionCommitStore for InMemorySessionStore {
             session_id: commit.session_id,
             head_revision,
             config: commit.config,
-            agent_frames: commit.agent_frames,
-            current_agent_frame_id: commit.current_agent_frame_id,
+            current_frame_node_id: commit.current_frame_node_id,
             checkpoint_ref: Some(checkpoint_ref.clone()),
             leaf_node_id,
             graph_node_count,
@@ -1165,7 +1199,6 @@ impl crate::store::SessionCommitStore for InMemorySessionStore {
             checkpoint_ref,
             manifest,
             realization_digest,
-            realized_agent_frames,
             enqueued_queue_batches: commit
                 .enqueued_queue_batches
                 .into_iter()

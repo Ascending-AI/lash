@@ -77,7 +77,7 @@ impl SessionReadMeta {
             session_id: self.session_id.clone(),
             policy: self.policy.clone(),
             agent_frames: Vec::new(),
-            current_agent_frame_id: String::new(),
+            current_frame_node_id: None,
             session_graph,
             turn_index: self.turn_index,
             token_usage: self.token_usage.clone(),
@@ -171,13 +171,12 @@ impl SessionReadView {
         base_graph: Arc<crate::SessionGraph>,
         messages: crate::MessageSequence,
     ) -> Self {
-        let active_events = base_graph
-            .read_model_for_agent_frame(
-                &state.current_agent_frame_id,
-                state
-                    .current_agent_frame()
-                    .map(|frame| frame.previous_frame_id.is_none())
-                    .unwrap_or(true),
+        let active_events = state
+            .current_frame_node_id
+            .as_deref()
+            .map_or_else(
+                || base_graph.read_model(),
+                |frame_node_id| base_graph.read_model_for_frame(frame_node_id),
             )
             .active_events;
         Self::from_graph_message_sequence_meta(

@@ -991,6 +991,12 @@ impl lash_core::StoreMaintenance for CommitRetryStore {
     async fn gc_unreachable(&self) -> Result<lash_core::GcReport, lash_core::StoreError> {
         self.inner.gc_unreachable().await
     }
+
+    async fn verify_node_refcounts(
+        &self,
+    ) -> Result<lash_core::NodeRefcountVerification, lash_core::StoreError> {
+        self.inner.verify_node_refcounts().await
+    }
 }
 
 #[test]

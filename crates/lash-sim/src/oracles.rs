@@ -1116,7 +1116,7 @@ pub fn runtime_single_active_agent_frame(events: &[DeliveredBoundary]) -> Oracle
                 format!(
                     "provider boundary `{}` observed current_frame=`{}` active={:?} current_exists={} current_active={} unknown_node_frames={:?}",
                     event.boundary_id,
-                    facts.current_agent_frame_id,
+                    facts.current_frame_node_id,
                     facts.active_frame_ids,
                     facts.current_frame_exists,
                     facts.current_frame_active,

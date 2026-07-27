@@ -57,8 +57,7 @@ async fn gc_unreachable_keeps_rooted_checkpoint_blobs() {
         .save_session_head(SessionHead {
             session_id: "root".to_string(),
             head_revision: 0,
-            agent_frames: Vec::new(),
-            current_agent_frame_id: String::new(),
+            current_frame_node_id: None,
             graph: SessionGraph::default(),
             config: PersistedSessionConfig {
                 provider_id: "openai-compatible".into(),
@@ -405,14 +404,11 @@ async fn sqlite_catalog_enforces_global_node_ids_across_sessions() {
     let node = lash_core::SessionNodeRecord {
         node_id: "factory-global-node".to_string(),
         parent_node_id: None,
-        caused_by: None,
-        agent_frame_id: None,
         timestamp: "2026-07-26T00:00:00Z".to_string(),
-        payload: lash_core::SessionNodePayload::Event {
-            event: lash_core::SessionHistoryRecord::Protocol(
-                lash_core::ProtocolEvent::typed("global-node-id", serde_json::Value::Null)
-                    .expect("protocol event"),
-            ),
+        payload: lash_core::SessionNodePayload::FrameOpen {
+            reason: lash_core::AgentFrameReason::initial(),
+            assignment: lash_core::AgentFrameAssignment::from_policy(SessionPolicy::default()),
+            protocol_turn_options: Default::default(),
         },
     };
     let commit = |session_id: &str| {
@@ -484,14 +480,11 @@ async fn sqlite_catalog_leaf_validation_is_session_scoped() {
     let node = lash_core::SessionNodeRecord {
         node_id: "leaf-a-node".to_string(),
         parent_node_id: None,
-        caused_by: None,
-        agent_frame_id: None,
         timestamp: "2026-07-26T00:00:00Z".to_string(),
-        payload: lash_core::SessionNodePayload::Event {
-            event: lash_core::SessionHistoryRecord::Protocol(
-                lash_core::ProtocolEvent::typed("leaf-scope", serde_json::Value::Null)
-                    .expect("protocol event"),
-            ),
+        payload: lash_core::SessionNodePayload::FrameOpen {
+            reason: lash_core::AgentFrameReason::initial(),
+            assignment: lash_core::AgentFrameAssignment::from_policy(SessionPolicy::default()),
+            protocol_turn_options: Default::default(),
         },
     };
     let mut first_commit = RuntimeCommit::persisted_state(
@@ -558,14 +551,11 @@ async fn sqlite_maintenance_is_scoped_to_the_bound_session() {
     let node = lash_core::SessionNodeRecord {
         node_id: "maintenance-b-node".to_string(),
         parent_node_id: None,
-        caused_by: None,
-        agent_frame_id: None,
         timestamp: "2026-07-26T00:00:00Z".to_string(),
-        payload: lash_core::SessionNodePayload::Event {
-            event: lash_core::SessionHistoryRecord::Protocol(
-                lash_core::ProtocolEvent::typed("maintenance", serde_json::Value::Null)
-                    .expect("protocol event"),
-            ),
+        payload: lash_core::SessionNodePayload::FrameOpen {
+            reason: lash_core::AgentFrameReason::initial(),
+            assignment: lash_core::AgentFrameAssignment::from_policy(SessionPolicy::default()),
+            protocol_turn_options: Default::default(),
         },
     };
     let mut commit = RuntimeCommit::persisted_state(

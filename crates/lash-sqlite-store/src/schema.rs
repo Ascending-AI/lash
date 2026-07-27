@@ -34,18 +34,34 @@ CREATE TABLE IF NOT EXISTS blobs (
 CREATE TABLE IF NOT EXISTS session_head (
     session_id     TEXT PRIMARY KEY,
     head_json      TEXT NOT NULL DEFAULT '{}',
-    head_revision  INTEGER NOT NULL DEFAULT 0
+    head_revision  INTEGER NOT NULL DEFAULT 0,
+    leaf_node_id   TEXT,
+    checkpoint_ref TEXT
 );
+CREATE INDEX IF NOT EXISTS idx_session_head_leaf
+    ON session_head(leaf_node_id);
 
 CREATE TABLE IF NOT EXISTS graph_nodes (
-    seq        INTEGER PRIMARY KEY,
-    session_id TEXT NOT NULL,
-    node_id    TEXT NOT NULL UNIQUE,
-    node_json  TEXT NOT NULL,
-    tombstoned INTEGER NOT NULL DEFAULT 0
+    seq            INTEGER PRIMARY KEY,
+    session_id     TEXT NOT NULL,
+    node_id        TEXT NOT NULL UNIQUE,
+    parent_node_id TEXT,
+    node_json      TEXT NOT NULL,
+    incoming_refs  INTEGER NOT NULL DEFAULT 0 CHECK (incoming_refs >= 0),
+    tombstoned     INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS idx_graph_nodes_session_seq
     ON graph_nodes(session_id, seq);
+CREATE INDEX IF NOT EXISTS idx_graph_nodes_parent
+    ON graph_nodes(parent_node_id);
+
+CREATE TABLE IF NOT EXISTS node_anchors (
+    node_id        TEXT PRIMARY KEY,
+    checkpoint_ref TEXT NOT NULL,
+    pinned         INTEGER NOT NULL CHECK (pinned IN (0, 1))
+);
+CREATE INDEX IF NOT EXISTS idx_node_anchors_pinned
+    ON node_anchors(node_id) WHERE pinned = 1;
 
 CREATE TABLE IF NOT EXISTS usage_deltas (
     seq                  INTEGER PRIMARY KEY,
@@ -205,7 +221,11 @@ CREATE INDEX IF NOT EXISTS idx_attachment_manifest_owner
 /// metadata, graph rows, and usage deltas are now keyed by `session_id`; node
 /// ids remain globally unique across the one database. Pre-13 per-session
 /// databases are rejected and must be recreated.
-pub(crate) const SCHEMA_VERSION: i32 = 13;
+///
+/// Bumped to 14 for FIG-654's reachability model. Parent edges, head roots,
+/// cached incoming counts, and continuation-anchor pins are queryable rows;
+/// graph structure no longer lives inside `node_json`.
+pub(crate) const SCHEMA_VERSION: i32 = 14;
 
 pub(crate) const PROCESS_SCHEMA: &str = "
 CREATE TABLE IF NOT EXISTS processes (

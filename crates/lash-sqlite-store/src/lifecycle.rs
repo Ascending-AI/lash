@@ -277,13 +277,22 @@ impl Store {
         let head_json = encode_json(&meta);
         let session_id = meta.session_id.clone();
         let head_revision = meta.head_revision as i64;
+        let leaf_node_id = meta.leaf_node_id.clone();
+        let checkpoint_ref = meta.checkpoint_ref.as_ref().map(|value| value.0.clone());
         let result = self
             .conn
             .call(move |conn| {
                 conn.execute(
-                    "INSERT OR REPLACE INTO session_head (session_id, head_json, head_revision)
-                     VALUES (?1, ?2, ?3)",
-                    params![session_id, head_json, head_revision],
+                    "INSERT OR REPLACE INTO session_head
+                     (session_id, head_json, head_revision, leaf_node_id, checkpoint_ref)
+                     VALUES (?1, ?2, ?3, ?4, ?5)",
+                    params![
+                        session_id,
+                        head_json,
+                        head_revision,
+                        leaf_node_id,
+                        checkpoint_ref
+                    ],
                 )
             })
             .await;
@@ -317,8 +326,7 @@ impl Store {
         Some(SessionHead {
             session_id: meta.session_id,
             head_revision: meta.head_revision,
-            agent_frames: meta.agent_frames,
-            current_agent_frame_id: meta.current_agent_frame_id,
+            current_frame_node_id: meta.current_frame_node_id,
             graph,
             config: meta.config,
             checkpoint_ref: meta.checkpoint_ref,

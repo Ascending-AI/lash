@@ -72,6 +72,100 @@ fn sqlite_queued_work_claim_candidates_sql(boundary: QueuedWorkClaimBoundary) ->
     )
 }
 
+fn derived_node_refcount_conn(conn: &Connection, node_id: &str) -> Result<i64, StoreError> {
+    conn.query_row(
+        "SELECT
+            (SELECT COUNT(*) FROM graph_nodes
+             WHERE parent_node_id = ?1 AND tombstoned = 0)
+          + (SELECT COUNT(*) FROM session_head WHERE leaf_node_id = ?1)
+          + (SELECT COUNT(*) FROM node_anchors WHERE node_id = ?1 AND pinned = 1)",
+        params![node_id],
+        |row| row.get(0),
+    )
+    .map_err(sqlite_error)
+}
+
+/// Remove one counted reference and reclaim a zero-count ancestry prefix.
+///
+/// A cached count that is too high only leaks storage and a later scrub can
+/// repair it. A count that is too low can delete a prefix still shared by
+/// another head; `vacuum` then makes that loss unrecoverable. Therefore every
+/// destructive zero transition is re-derived from indexed edge/root rows in
+/// this same transaction before the node is tombstoned.
+pub(crate) fn decrement_node_ref_conn(
+    conn: &Connection,
+    first_node_id: &str,
+) -> Result<(), StoreError> {
+    let mut node_id = first_node_id.to_string();
+    loop {
+        let row = conn
+            .query_row(
+                "UPDATE graph_nodes
+                 SET incoming_refs = incoming_refs - 1
+                 WHERE node_id = ?1 AND tombstoned = 0 AND incoming_refs > 0
+                 RETURNING incoming_refs, parent_node_id",
+                params![node_id],
+                |row| Ok((row.get::<_, i64>(0)?, row.get::<_, Option<String>>(1)?)),
+            )
+            .optional()
+            .map_err(sqlite_error)?;
+        let Some((cached, parent_node_id)) = row else {
+            let derived = derived_node_refcount_conn(conn, &node_id)?;
+            return Err(StoreError::NodeRefcountDrift {
+                node_id,
+                cached: 0,
+                derived,
+            });
+        };
+        if cached > 0 {
+            return Ok(());
+        }
+        let derived = derived_node_refcount_conn(conn, &node_id)?;
+        if derived != 0 {
+            return Err(StoreError::NodeRefcountDrift {
+                node_id,
+                cached,
+                derived,
+            });
+        }
+        conn.execute(
+            "UPDATE graph_nodes SET tombstoned = 1 WHERE node_id = ?1",
+            params![node_id],
+        )
+        .map_err(sqlite_error)?;
+        let Some(parent_node_id) = parent_node_id else {
+            return Ok(());
+        };
+        node_id = parent_node_id;
+    }
+}
+
+fn nearest_frame_node_id_conn(
+    conn: &Connection,
+    leaf_node_id: &str,
+) -> Result<Option<String>, StoreError> {
+    conn.query_row(
+        "WITH RECURSIVE ancestry(node_id, parent_node_id, node_json, depth) AS (
+            SELECT node_id, parent_node_id, node_json, 0
+            FROM graph_nodes
+            WHERE node_id = ?1 AND tombstoned = 0
+          UNION ALL
+            SELECT parent.node_id, parent.parent_node_id, parent.node_json, ancestry.depth + 1
+            FROM graph_nodes AS parent
+            JOIN ancestry ON parent.node_id = ancestry.parent_node_id
+            WHERE parent.tombstoned = 0
+        )
+        SELECT node_id FROM ancestry
+        WHERE json_extract(node_json, '$.kind') = 'frame_open'
+        ORDER BY depth ASC
+        LIMIT 1",
+        params![leaf_node_id],
+        |row| row.get(0),
+    )
+    .optional()
+    .map_err(sqlite_error)
+}
+
 #[async_trait::async_trait]
 impl SessionCommitStore for Store {
     async fn load_session(
@@ -120,8 +214,7 @@ impl SessionCommitStore for Store {
                         session_id: meta.session_id,
                         head_revision: meta.head_revision,
                         config: meta.config,
-                        agent_frames: meta.agent_frames,
-                        current_agent_frame_id: meta.current_agent_frame_id,
+                        current_frame_node_id: meta.current_frame_node_id,
                         graph,
                         checkpoint_ref: meta.checkpoint_ref,
                         checkpoint,
@@ -147,20 +240,24 @@ impl SessionCommitStore for Store {
             return Ok(None);
         };
         let node_id = node_id.to_string();
-        let row: Option<String> = self
+        let row: Option<(String, Option<String>, String)> = self
             .conn
             .call(move |conn| {
                 conn.query_row(
-                    "SELECT node_json FROM graph_nodes
+                    "SELECT node_id, parent_node_id, node_json FROM graph_nodes
                      WHERE session_id = ?1 AND node_id = ?2 AND tombstoned = 0",
                     params![session_id, node_id],
-                    |row| row.get(0),
+                    |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
                 )
                 .optional()
             })
             .await
             .map_err(sqlite_error)?;
-        Ok(row.and_then(|json| serde_json::from_str(&json).ok()))
+        row.map(|(node_id, parent_node_id, node_json)| {
+            lash_core::SessionNodeRecord::decode_storage_body(node_id, parent_node_id, &node_json)
+                .map_err(|err| StoreError::Backend(format!("failed to decode graph node: {err}")))
+        })
+        .transpose()
     }
 
     async fn commit_runtime_state(
@@ -171,14 +268,6 @@ impl SessionCommitStore for Store {
         commit.validate_operation_session()?;
         self.bind_session(&commit.session_id)?;
         let realization_digest = lash_core::store::graph_realization_digest(&commit.graph);
-        let realized_agent_frames = commit
-            .agent_frames
-            .iter()
-            .map(|frame| lash_core::store::RealizedAgentFrame {
-                frame_id: frame.frame_id.clone(),
-                created_at: frame.created_at.clone(),
-            })
-            .collect::<Vec<_>>();
         let blob_profile = self.options.blob_profile;
         let now = self.clock.timestamp_ms();
         let enqueue_nonce_start = self.commit_count.fetch_add(
@@ -242,6 +331,11 @@ impl SessionCommitStore for Store {
                     }
                     commit.validate_node_derivation()?;
                     commit.validate_append_node_ids_unique()?;
+                    commit.validate_append_chain(
+                        existing
+                            .as_ref()
+                            .and_then(|head| head.leaf_node_id.as_deref()),
+                    )?;
                     if let GraphCommitDelta::Append { nodes, .. } = &commit.graph {
                         for node in nodes {
                             let occupied = tx
@@ -363,6 +457,9 @@ impl SessionCommitStore for Store {
                         }
                     }
 
+                    let old_leaf_node_id = existing
+                        .as_ref()
+                        .and_then(|head| head.leaf_node_id.clone());
                     let leaf_node_id = match &commit.graph {
                         GraphCommitDelta::Unchanged { leaf_node_id } => leaf_node_id.clone(),
                         GraphCommitDelta::Append {
@@ -370,17 +467,80 @@ impl SessionCommitStore for Store {
                             leaf_node_id,
                         } => {
                             for node in nodes {
-                                let node_json = encode_json(node);
+                                let node_json = node.encode_storage_body().map_err(|err| {
+                                    StoreError::Backend(format!(
+                                        "failed to encode graph node body: {err}"
+                                    ))
+                                })?;
                                 tx.execute(
-                                    "INSERT INTO graph_nodes (session_id, node_id, node_json)
-                                     VALUES (?1, ?2, ?3)",
-                                    params![commit.session_id, node.node_id, node_json],
+                                    "INSERT INTO graph_nodes
+                                     (session_id, node_id, parent_node_id, node_json, incoming_refs)
+                                     VALUES (?1, ?2, ?3, ?4, 0)",
+                                    params![
+                                        commit.session_id,
+                                        node.node_id,
+                                        node.parent_node_id,
+                                        node_json
+                                    ],
                                 )
                                 .map_err(sqlite_error)?;
+                                if let Some(parent_node_id) = &node.parent_node_id {
+                                    let changed = tx
+                                        .execute(
+                                            "UPDATE graph_nodes
+                                             SET incoming_refs = incoming_refs + 1
+                                             WHERE node_id = ?1 AND tombstoned = 0",
+                                            params![parent_node_id],
+                                        )
+                                        .map_err(sqlite_error)?;
+                                    if changed != 1 {
+                                        return Err(StoreError::InvalidGraphParent {
+                                            node_id: node.node_id.clone(),
+                                            expected: node.parent_node_id.clone(),
+                                            actual: None,
+                                        });
+                                    }
+                                }
                             }
                             leaf_node_id.clone()
                         }
                     };
+                    if old_leaf_node_id != leaf_node_id {
+                        if let Some(new_leaf_node_id) = &leaf_node_id {
+                            let changed = tx
+                                .execute(
+                                    "UPDATE graph_nodes
+                                     SET incoming_refs = incoming_refs + 1
+                                     WHERE node_id = ?1 AND tombstoned = 0",
+                                    params![new_leaf_node_id],
+                                )
+                                .map_err(sqlite_error)?;
+                            if changed != 1 {
+                                return Err(StoreError::InvalidGraphLeaf {
+                                    leaf_node_id: leaf_node_id.clone(),
+                                });
+                            }
+                        }
+                        if let Some(old_leaf_node_id) = &old_leaf_node_id {
+                            decrement_node_ref_conn(tx, old_leaf_node_id)?;
+                        }
+                    }
+                    let derived_frame_node_id = match leaf_node_id.as_deref() {
+                        Some(leaf_node_id) => Some(
+                            nearest_frame_node_id_conn(tx, leaf_node_id)?.ok_or_else(|| {
+                                StoreError::MissingFrameOpenAncestor {
+                                    leaf_node_id: leaf_node_id.to_string(),
+                                }
+                            })?,
+                        ),
+                        None => None,
+                    };
+                    if commit.current_frame_node_id != derived_frame_node_id {
+                        return Err(StoreError::Backend(format!(
+                            "current_frame_node_id {:?} does not match nearest FrameOpen ancestor {:?}",
+                            commit.current_frame_node_id, derived_frame_node_id
+                        )));
+                    }
                     let graph_node_count: usize = tx
                         .query_row(
                             "SELECT COUNT(*) FROM graph_nodes
@@ -395,8 +555,7 @@ impl SessionCommitStore for Store {
                         session_id: commit.session_id.clone(),
                         head_revision: next_revision,
                         config: commit.config.clone(),
-                        agent_frames: commit.agent_frames.clone(),
-                        current_agent_frame_id: commit.current_agent_frame_id.clone(),
+                        current_frame_node_id: derived_frame_node_id,
                         checkpoint_ref: Some(stored_checkpoint.checkpoint_ref.clone()),
                         leaf_node_id,
                         graph_node_count,
@@ -404,12 +563,14 @@ impl SessionCommitStore for Store {
                     };
                     tx.execute(
                         "INSERT OR REPLACE INTO session_head
-                         (session_id, head_json, head_revision)
-                         VALUES (?1, ?2, ?3)",
+                         (session_id, head_json, head_revision, leaf_node_id, checkpoint_ref)
+                         VALUES (?1, ?2, ?3, ?4, ?5)",
                         params![
                             meta.session_id,
                             encode_json(&meta),
-                            meta.head_revision as i64
+                            meta.head_revision as i64,
+                            meta.leaf_node_id,
+                            meta.checkpoint_ref.as_ref().map(BlobRef::as_str),
                         ],
                     )
                     .map_err(sqlite_error)?;
@@ -563,7 +724,6 @@ impl SessionCommitStore for Store {
                         checkpoint_ref: stored_checkpoint.checkpoint_ref,
                         manifest: stored_checkpoint.manifest,
                         realization_digest: realization_digest.clone(),
-                        realized_agent_frames: realized_agent_frames.clone(),
                         enqueued_queue_batches,
                         turn_input_applications: commit.turn_input_applications(),
                     };
@@ -2060,19 +2220,42 @@ impl StoreMaintenance for Store {
         let ids = ids.to_vec();
         self.conn
             .write(move |tx| {
-                if let Some(session_id) = session_id {
-                    let mut stmt = tx.prepare(
-                        "UPDATE graph_nodes SET tombstoned = 1
-                         WHERE session_id = ?1 AND node_id = ?2",
-                    )?;
-                    for id in &ids {
-                        stmt.execute(params![session_id, id])?;
+                for id in &ids {
+                    let row = tx
+                        .query_row(
+                            "SELECT incoming_refs, parent_node_id
+                             FROM graph_nodes
+                             WHERE node_id = ?1 AND tombstoned = 0
+                               AND (?2 IS NULL OR session_id = ?2)",
+                            params![id, session_id],
+                            |row| Ok((row.get::<_, i64>(0)?, row.get::<_, Option<String>>(1)?)),
+                        )
+                        .optional()?;
+                    let Some((cached, parent_node_id)) = row else {
+                        continue;
+                    };
+                    let derived = derived_node_refcount_conn(tx, id)
+                        .map_err(|err| rusqlite::Error::ToSqlConversionFailure(Box::new(err)))?;
+                    if cached != derived {
+                        return Err(rusqlite::Error::ToSqlConversionFailure(Box::new(
+                            StoreError::NodeRefcountDrift {
+                                node_id: id.clone(),
+                                cached,
+                                derived,
+                            },
+                        )));
                     }
-                } else {
-                    let mut stmt =
-                        tx.prepare("UPDATE graph_nodes SET tombstoned = 1 WHERE node_id = ?1")?;
-                    for id in &ids {
-                        stmt.execute(params![id])?;
+                    if derived != 0 {
+                        continue;
+                    }
+                    tx.execute(
+                        "UPDATE graph_nodes SET tombstoned = 1 WHERE node_id = ?1",
+                        params![id],
+                    )?;
+                    if let Some(parent_node_id) = parent_node_id {
+                        decrement_node_ref_conn(tx, &parent_node_id).map_err(|err| {
+                            rusqlite::Error::ToSqlConversionFailure(Box::new(err))
+                        })?;
                     }
                 }
                 Ok(())
@@ -2131,6 +2314,41 @@ impl StoreMaintenance for Store {
 
     async fn gc_unreachable(&self) -> Result<GcReport, StoreError> {
         Ok(Store::gc_unreachable(self).await)
+    }
+
+    async fn verify_node_refcounts(&self) -> Result<NodeRefcountVerification, StoreError> {
+        let session_id = self.session_id.get().cloned();
+        self.conn
+            .call(move |conn| {
+                let mut stmt = conn.prepare(
+                    "SELECT node_id, incoming_refs
+                     FROM graph_nodes
+                     WHERE tombstoned = 0 AND (?1 IS NULL OR session_id = ?1)
+                     ORDER BY node_id",
+                )?;
+                let rows = stmt.query_map(params![session_id], |row| {
+                    Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
+                })?;
+                let mut checked_node_count = 0;
+                for row in rows {
+                    let (node_id, cached) = row?;
+                    let derived = derived_node_refcount_conn(conn, &node_id)
+                        .map_err(|err| rusqlite::Error::ToSqlConversionFailure(Box::new(err)))?;
+                    if cached != derived {
+                        return Err(rusqlite::Error::ToSqlConversionFailure(Box::new(
+                            StoreError::NodeRefcountDrift {
+                                node_id,
+                                cached,
+                                derived,
+                            },
+                        )));
+                    }
+                    checked_node_count += 1;
+                }
+                Ok(NodeRefcountVerification { checked_node_count })
+            })
+            .await
+            .map_err(sqlite_error)
     }
 }
 

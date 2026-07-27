@@ -25,18 +25,29 @@ impl Store {
         // called; the runtime view should never see them.
         let mut stmt = conn
             .prepare(
-                "SELECT node_json FROM graph_nodes
+                "SELECT node_id, parent_node_id, node_json FROM graph_nodes
                  WHERE session_id = ?1 AND tombstoned = 0
                  ORDER BY seq ASC",
             )
             .map_err(sqlite_error)?;
         let rows = stmt
-            .query_map(params![session_id], |row| row.get::<_, String>(0))
+            .query_map(params![session_id], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, Option<String>>(1)?,
+                    row.get::<_, String>(2)?,
+                ))
+            })
             .map_err(sqlite_error)?;
         let nodes = rows
             .map(|row| {
-                let node_json = row.map_err(sqlite_error)?;
-                serde_json::from_str(&node_json).map_err(|err| {
+                let (node_id, parent_node_id, node_json) = row.map_err(sqlite_error)?;
+                lash_core::SessionNodeRecord::decode_storage_body(
+                    node_id,
+                    parent_node_id,
+                    &node_json,
+                )
+                .map_err(|err| {
                     StoreError::Backend(format!("failed to decode session graph node: {err}"))
                 })
             })
@@ -57,7 +68,7 @@ impl Store {
                 SELECT
                     node_id,
                     node_json,
-                    json_extract(node_json, '$.parent_node_id'),
+                    parent_node_id,
                     0
                 FROM graph_nodes
                 WHERE session_id = ?1 AND node_id = ?2 AND tombstoned = 0
@@ -65,21 +76,29 @@ impl Store {
                 SELECT
                     g.node_id,
                     g.node_json,
-                    json_extract(g.node_json, '$.parent_node_id'),
+                    g.parent_node_id,
                     active.depth + 1
                 FROM graph_nodes g
                 JOIN active ON g.node_id = active.parent_node_id
-                WHERE g.session_id = ?1 AND g.tombstoned = 0
+                WHERE g.tombstoned = 0
             )
-            SELECT node_json FROM active ORDER BY depth DESC",
+            SELECT node_id, parent_node_id, node_json FROM active ORDER BY depth DESC",
         )?;
         let rows = stmt.query_map(params![session_id, leaf_node_id.as_str()], |row| {
-            row.get::<_, String>(0)
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, Option<String>>(1)?,
+                row.get::<_, String>(2)?,
+            ))
         })?;
         let mut nodes = Vec::new();
         for row in rows {
-            let node_json = row?;
-            if let Ok(node) = serde_json::from_str::<lash_core::SessionNodeRecord>(&node_json) {
+            let (node_id, parent_node_id, node_json) = row?;
+            if let Ok(node) = lash_core::SessionNodeRecord::decode_storage_body(
+                node_id,
+                parent_node_id,
+                &node_json,
+            ) {
                 nodes.push(node);
             }
         }
@@ -112,12 +131,20 @@ impl Store {
             .conn
             .write(move |tx| {
                 let mut stmt = tx.prepare(
-                    "INSERT INTO graph_nodes (session_id, node_id, node_json)
-                     VALUES (?1, ?2, ?3)",
+                    "INSERT INTO graph_nodes
+                     (session_id, node_id, parent_node_id, node_json, incoming_refs)
+                     VALUES (?1, ?2, ?3, ?4, 1)",
                 )?;
                 for node in &nodes {
-                    let node_json = encode_json(node);
-                    stmt.execute(params![session_id, node.node_id, node_json])?;
+                    let node_json = node
+                        .encode_storage_body()
+                        .map_err(|err| rusqlite::Error::ToSqlConversionFailure(Box::new(err)))?;
+                    stmt.execute(params![
+                        session_id,
+                        node.node_id,
+                        node.parent_node_id,
+                        node_json
+                    ])?;
                 }
                 Ok(())
             })

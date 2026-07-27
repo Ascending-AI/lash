@@ -25,14 +25,15 @@ use lash_core::{
     AbandonRequest, AttachmentId, AttachmentIntent, AttachmentManifest, AttachmentManifestEntry,
     AttachmentOwnerKind, AwaitEventResolver, BlobRef, CanonicalRuntimeEffectEnvelope,
     DeliveryPolicy, EffectHost, ExecutionScope, GcReport, LeaseOwnerIdentity, LeaseOwnerLiveness,
-    MergeKey, PersistedSegmentHandover, ProcessAwaitOutput, ProcessChangeCursor, ProcessEvent,
-    ProcessEventAppendRequest, ProcessEventAppendResult, ProcessExecutionWriteAuthority,
-    ProcessExternalRef, ProcessHandleDescriptor, ProcessHandleGrant, ProcessLease,
-    ProcessLeaseCompletion, ProcessLiveReferenceSummary, ProcessPruneReport, ProcessRecord,
-    ProcessRegistration, ProcessRegistry, ProcessStartOutcome, ProcessStartPlan, ProcessStarted,
-    QueuedWorkStore, RuntimeEffectCommand, RuntimeEffectController, RuntimeEffectControllerError,
-    RuntimeEffectEnvelope, RuntimeEffectLocalExecutor, RuntimeEffectOutcome, RuntimeError,
-    RuntimePersistence, ScopedEffectController, SessionCommitStore, SessionExecutionLease,
+    MergeKey, NodeRefcountVerification, PersistedSegmentHandover, ProcessAwaitOutput,
+    ProcessChangeCursor, ProcessEvent, ProcessEventAppendRequest, ProcessEventAppendResult,
+    ProcessExecutionWriteAuthority, ProcessExternalRef, ProcessHandleDescriptor,
+    ProcessHandleGrant, ProcessLease, ProcessLeaseCompletion, ProcessLiveReferenceSummary,
+    ProcessPruneReport, ProcessRecord, ProcessRegistration, ProcessRegistry, ProcessStartOutcome,
+    ProcessStartPlan, ProcessStarted, QueuedWorkStore, RuntimeEffectCommand,
+    RuntimeEffectController, RuntimeEffectControllerError, RuntimeEffectEnvelope,
+    RuntimeEffectLocalExecutor, RuntimeEffectOutcome, RuntimeError, RuntimePersistence,
+    ScopedEffectController, SessionCommitStore, SessionExecutionLease,
     SessionExecutionLeaseClaimOutcome, SessionExecutionLeaseCompletion, SessionExecutionLeaseFence,
     SessionExecutionLeaseStore, SessionMeta, SessionNodeRecord, SessionReadScope, SessionScope,
     SessionStoreCreateRequest, SessionStoreFactory, SlotPolicy, StoreError, StoreMaintenance,
@@ -83,7 +84,7 @@ const SCHEMA_COMPONENT: &str = "lash-postgres-store";
 // `ExternalOwner` no longer carries the unverified `granted_to` field, changing
 // the terminal event's replay-key payload hash. Pre-18 databases are rejected
 // and recreated so retries cannot compare terminal events across payload formats.
-const SCHEMA_VERSION: i32 = 18;
+const SCHEMA_VERSION: i32 = 19;
 const PROCESS_LEASE_SCHEMA_VERSION: u32 = lash_core::PROCESS_LEASE_SCHEMA_VERSION;
 
 #[derive(Clone)]

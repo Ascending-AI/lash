@@ -21,18 +21,33 @@ pub(crate) async fn ensure_schema(pool: &PgPool) -> Result<Vec<u8>, StoreError> 
             session_id TEXT PRIMARY KEY,
             head_revision BIGINT NOT NULL DEFAULT 0,
             head_json TEXT NOT NULL,
-            checkpoint_ref TEXT
+            checkpoint_ref TEXT,
+            leaf_node_id TEXT
         );
+        CREATE INDEX IF NOT EXISTS idx_lash_sessions_leaf
+            ON lash_sessions(leaf_node_id);
 
         CREATE TABLE IF NOT EXISTS lash_graph_nodes (
             session_id TEXT NOT NULL,
             seq BIGSERIAL,
             node_id TEXT PRIMARY KEY,
+            parent_node_id TEXT,
             node_json TEXT NOT NULL,
+            incoming_refs BIGINT NOT NULL DEFAULT 0 CHECK (incoming_refs >= 0),
             tombstoned BOOLEAN NOT NULL DEFAULT FALSE
         );
         CREATE INDEX IF NOT EXISTS idx_lash_graph_nodes_seq
             ON lash_graph_nodes(session_id, seq);
+        CREATE INDEX IF NOT EXISTS idx_lash_graph_nodes_parent
+            ON lash_graph_nodes(parent_node_id);
+
+        CREATE TABLE IF NOT EXISTS lash_node_anchors (
+            node_id TEXT PRIMARY KEY,
+            checkpoint_ref TEXT NOT NULL,
+            pinned BOOLEAN NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_lash_node_anchors_pinned
+            ON lash_node_anchors(node_id) WHERE pinned;
 
         CREATE TABLE IF NOT EXISTS lash_usage_deltas (
             seq BIGSERIAL PRIMARY KEY,

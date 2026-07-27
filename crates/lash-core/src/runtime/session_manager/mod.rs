@@ -126,7 +126,7 @@ impl CurrentSessionCapability {
             session_id: runtime.state.session_id.clone(),
             policy: runtime.state.policy.clone(),
             agent_frames: runtime.state.agent_frames.clone(),
-            current_agent_frame_id: runtime.state.current_agent_frame_id.clone(),
+            current_frame_node_id: runtime.state.current_frame_node_id.clone(),
             session_graph: crate::SessionGraph::default(),
             turn_index: runtime.state.turn_index,
             token_usage: runtime.state.token_usage.clone(),

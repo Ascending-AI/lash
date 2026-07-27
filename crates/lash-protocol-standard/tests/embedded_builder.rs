@@ -63,8 +63,7 @@ async fn embedded_runtime_builder_loads_state_from_store() {
         .save_session_head(SessionHead {
             session_id: "stored-session".to_string(),
             head_revision: 0,
-            agent_frames: Vec::new(),
-            current_agent_frame_id: String::new(),
+            current_frame_node_id: None,
             graph: SessionGraph::from_active_read_state(&[text_message(
                 "u0",
                 MessageRole::User,
@@ -105,8 +104,7 @@ async fn embedded_runtime_builder_rejects_store_bound_to_different_session_id() 
         .save_session_head(SessionHead {
             session_id: "alpha".to_string(),
             head_revision: 0,
-            agent_frames: Vec::new(),
-            current_agent_frame_id: String::new(),
+            current_frame_node_id: None,
             graph: SessionGraph::default(),
             config: PersistedSessionConfig {
                 provider_id: "openai-compatible".into(),

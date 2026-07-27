@@ -61,8 +61,6 @@ mod tests {
         let node = crate::SessionNodeRecord {
             node_id: "factory-global-node".to_string(),
             parent_node_id: None,
-            caused_by: None,
-            agent_frame_id: None,
             timestamp: "2026-07-26T00:00:00Z".to_string(),
             payload: crate::SessionNodePayload::Event {
                 event: crate::SessionHistoryRecord::Protocol(
@@ -127,8 +125,6 @@ mod tests {
         let node = crate::SessionNodeRecord {
             node_id: "node".to_string(),
             parent_node_id: None,
-            caused_by: None,
-            agent_frame_id: None,
             timestamp: "2026-07-26T00:00:00Z".to_string(),
             payload: crate::SessionNodePayload::Event {
                 event: crate::SessionHistoryRecord::Protocol(

@@ -736,8 +736,6 @@ fn sample_session_node(id: &str, parent: Option<&str>) -> SessionNodeRecord {
     SessionNodeRecord {
         node_id: id.to_string(),
         parent_node_id: parent.map(ToOwned::to_owned),
-        caused_by: None,
-        agent_frame_id: None,
         timestamp: "1970-01-01T00:00:00Z".to_string(),
         payload: SessionNodePayload::Event {
             event: crate::SessionHistoryRecord::Protocol(
@@ -770,22 +768,21 @@ async fn commit_increments_head_and_round_trips_agent_frames(store: Arc<dyn Runt
         ..RuntimeSessionState::default()
     };
     state.ensure_agent_frame_initialized();
-    let previous_frame_id = state.current_agent_frame_id.clone();
     let assignment = state
         .current_agent_frame()
         .expect("initial frame")
         .assignment
         .clone();
     let custom_reason = AgentFrameReason::new("plan_mode");
-    state.append_agent_frame(AgentFrameRecord::new(
+    assert!(state.session_graph.append_frame_open_with_id_at(
         "frame-2".to_string(),
-        "root".to_string(),
-        Some(previous_frame_id),
         custom_reason.clone(),
-        None,
         assignment,
         ProtocolTurnOptions::default(),
+        "2026-07-27T00:00:00Z".to_string(),
     ));
+    state.current_frame_node_id = Some("frame-2".to_string());
+    state.agent_frames = state.session_graph.agent_frame_records("root");
     state.set_execution_state_snapshot(Some(b"frame-vm".to_vec()));
 
     commit_runtime_state_for_test(
@@ -801,18 +798,14 @@ async fn commit_increments_head_and_round_trips_agent_frames(store: Arc<dyn Runt
         .expect("load session")
         .expect("session read");
 
-    assert_eq!(read.current_agent_frame_id, "frame-2");
-    assert_eq!(read.agent_frames.len(), 2);
-    let current = read
-        .agent_frames
+    assert_eq!(read.current_frame_node_id.as_deref(), Some("frame-2"));
+    let frames = read.graph.agent_frame_records("root");
+    assert_eq!(frames.len(), 2);
+    let current = frames
         .iter()
-        .find(|frame| frame.frame_id == "frame-2")
+        .find(|frame| frame.frame_node_id == "frame-2")
         .expect("current frame");
     assert_eq!(current.reason, custom_reason);
-    assert_eq!(
-        current.execution_state_snapshot.as_deref(),
-        Some(&b"frame-vm"[..])
-    );
     assert_eq!(
         read.checkpoint
             .as_ref()
@@ -4771,7 +4764,7 @@ async fn final_commit_stamp_is_idempotent_and_conflicts_on_changed_hash(
     };
     state.ensure_agent_frame_initialized();
     state.agent_frames[0].created_at = "2026-07-26T10:00:00Z".to_string();
-    state.agent_frames[0].execution_state_snapshot = Some(vec![7; 1_024]);
+    state.execution_state_snapshot = Some(vec![7; 1_024]);
     let commit = RuntimeCommit::persisted_state(&state, &[]);
     let turn_commit_hash = commit.turn_commit_hash().expect("turn commit hash");
     let stamped_commit = commit.with_turn_commit(RuntimeTurnCommitStamp::new(
@@ -4815,15 +4808,7 @@ async fn final_commit_stamp_is_idempotent_and_conflicts_on_changed_hash(
         !receipt_json.contains("execution_state_snapshot"),
         "commit receipts must retain frame references and timestamps, never snapshot bytes"
     );
-    assert_eq!(
-        retry.realized_agent_frames[0].created_at, "2026-07-26T10:00:00Z",
-        "receipt must return store-realized frame time from the first attempt"
-    );
     replay_state.apply_persisted_commit_result(retry.clone());
-    assert_eq!(
-        replay_state.agent_frames[0].created_at, "2026-07-26T10:00:00Z",
-        "runtime must rehydrate store-realized frame time from the receipt"
-    );
 
     let mut retry_from_new_head = RuntimeCommit::persisted_state(&state, &[]);
     retry_from_new_head.expected_head_revision = Some(first.head_revision);
@@ -4866,8 +4851,6 @@ async fn verified_commit_rejects_receipt_topology_mismatch(store: Arc<dyn Runtim
         nodes: vec![crate::SessionNodeRecord {
             node_id: node_id.clone(),
             parent_node_id: None,
-            caused_by: None,
-            agent_frame_id: Some(state.current_agent_frame_id.clone()),
             timestamp: "2026-07-26T10:00:00Z".to_string(),
             payload: crate::SessionNodePayload::Plugin {
                 plugin_type: "guard".to_string(),
@@ -4920,8 +4903,6 @@ async fn commit_rejects_non_derived_append_node_ids(store: Arc<dyn RuntimePersis
         nodes: vec![crate::SessionNodeRecord {
             node_id: "rogue-node-id".to_string(),
             parent_node_id: None,
-            caused_by: None,
-            agent_frame_id: Some(state.current_agent_frame_id.clone()),
             timestamp: "2026-07-26T10:00:00Z".to_string(),
             payload: crate::SessionNodePayload::Plugin {
                 plugin_type: "guard".to_string(),
@@ -4960,8 +4941,6 @@ async fn append_rejects_existing_node_id_collision(store: Arc<dyn RuntimePersist
     let original = crate::SessionNodeRecord {
         node_id: colliding_id.clone(),
         parent_node_id: None,
-        caused_by: None,
-        agent_frame_id: Some(state.current_agent_frame_id.clone()),
         timestamp: "2026-07-26T10:00:00Z".to_string(),
         payload: crate::SessionNodePayload::Plugin {
             plugin_type: "original".to_string(),

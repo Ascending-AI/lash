@@ -47,8 +47,7 @@ impl OperationId {
 struct RuntimeCommitIntent<'a> {
     session_id: &'a str,
     config: &'a crate::PersistedSessionConfig,
-    agent_frames: Vec<AgentFrameIntent<'a>>,
-    current_agent_frame_id: &'a str,
+    current_frame_node_id: Option<&'a str>,
     graph: GraphCommitIntent<'a>,
     checkpoint: CheckpointIntent<'a>,
     usage_deltas: &'a [crate::TokenLedgerEntry],
@@ -71,12 +70,7 @@ impl<'a> From<&'a RuntimeCommit> for RuntimeCommitIntent<'a> {
         Self {
             session_id: &commit.session_id,
             config: &commit.config,
-            agent_frames: commit
-                .agent_frames
-                .iter()
-                .map(AgentFrameIntent::from)
-                .collect(),
-            current_agent_frame_id: &commit.current_agent_frame_id,
+            current_frame_node_id: commit.current_frame_node_id.as_deref(),
             graph: GraphCommitIntent::from(&commit.graph),
             checkpoint: CheckpointIntent::from(&commit.checkpoint),
             usage_deltas: &commit.usage_deltas,
@@ -97,35 +91,6 @@ impl<'a> From<&'a RuntimeCommit> for RuntimeCommitIntent<'a> {
                 .collect(),
             interrupted_turn_input_turn_id: commit.interrupted_turn_input_turn_id.as_deref(),
             committed_attachment_ids: &commit.committed_attachment_ids,
-        }
-    }
-}
-
-#[derive(serde::Serialize)]
-struct AgentFrameIntent<'a> {
-    frame_id: &'a str,
-    session_id: &'a str,
-    previous_frame_id: Option<&'a str>,
-    status: &'a crate::AgentFrameStatus,
-    reason: &'a crate::AgentFrameReason,
-    caused_by: &'a Option<crate::CausalRef>,
-    assignment: &'a crate::AgentFrameAssignment,
-    protocol_turn_options: &'a crate::ProtocolTurnOptions,
-    execution_state_ref: &'a Option<BlobRef>,
-}
-
-impl<'a> From<&'a crate::AgentFrameRecord> for AgentFrameIntent<'a> {
-    fn from(frame: &'a crate::AgentFrameRecord) -> Self {
-        Self {
-            frame_id: &frame.frame_id,
-            session_id: &frame.session_id,
-            previous_frame_id: frame.previous_frame_id.as_deref(),
-            status: &frame.status,
-            reason: &frame.reason,
-            caused_by: &frame.caused_by,
-            assignment: &frame.assignment,
-            protocol_turn_options: &frame.protocol_turn_options,
-            execution_state_ref: &frame.execution_state_ref,
         }
     }
 }
@@ -163,8 +128,6 @@ impl<'a> From<&'a GraphCommitDelta> for GraphCommitIntent<'a> {
 struct SessionNodeIntent<'a> {
     node_id: &'a str,
     parent_node_id: Option<&'a str>,
-    caused_by: &'a Option<crate::CausalRef>,
-    agent_frame_id: Option<&'a str>,
     payload: &'a crate::SessionNodePayload,
 }
 
@@ -173,8 +136,6 @@ impl<'a> From<&'a crate::SessionNodeRecord> for SessionNodeIntent<'a> {
         Self {
             node_id: &node.node_id,
             parent_node_id: node.parent_node_id.as_deref(),
-            caused_by: &node.caused_by,
-            agent_frame_id: node.agent_frame_id.as_deref(),
             payload: &node.payload,
         }
     }

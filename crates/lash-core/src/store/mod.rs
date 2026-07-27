@@ -14,7 +14,7 @@ pub use attachment_manifest::{
 pub use commit_identity::{OperationId, derive_history_node_id, graph_realization_digest};
 pub use error::StoreError;
 pub use lease_timings::{LeaseTimings, LeaseTimingsError};
-pub use realization::{RealizedAgentFrame, commit_runtime_state_verified};
+pub use realization::commit_runtime_state_verified;
 
 const PROC_BOOT_ID_PATH: &str = "/proc/sys/kernel/random/boot_id";
 
@@ -22,7 +22,7 @@ fn default_root_session_id() -> String {
     "root".to_string()
 }
 
-pub const SESSION_HEAD_META_SCHEMA_VERSION: u32 = 1;
+pub const SESSION_HEAD_META_SCHEMA_VERSION: u32 = 2;
 pub const SESSION_CHECKPOINT_SCHEMA_VERSION: u32 = 1;
 
 #[cfg(test)]
@@ -35,8 +35,7 @@ mod persisted_state_tests {
             SessionHead {
                 session_id: "stored".to_string(),
                 head_revision: 7,
-                agent_frames: Vec::new(),
-                current_agent_frame_id: String::new(),
+                current_frame_node_id: None,
                 graph: crate::SessionGraph::default(),
                 config: crate::PersistedSessionConfig {
                     provider_id: "stored-provider".to_string(),
@@ -49,12 +48,7 @@ mod persisted_state_tests {
         );
 
         assert_eq!(state.policy.recorded_provider_id(), "stored-provider");
-        assert!(
-            state
-                .agent_frames
-                .iter()
-                .all(|frame| frame.assignment.policy.recorded_provider_id() == "stored-provider")
-        );
+        assert_eq!(state.policy.recorded_provider_id(), "stored-provider");
         assert_eq!(state.head_revision, Some(7));
     }
 
@@ -189,6 +183,13 @@ pub struct VacuumReport {
     pub removed_pending_turn_input_tombstone_count: usize,
 }
 
+/// Result of comparing cached node counts with references re-derived from the
+/// indexed edge and root rows.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct NodeRefcountVerification {
+    pub checked_node_count: usize,
+}
+
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct SessionCheckpoint {
     pub schema_version: u32,
@@ -253,10 +254,8 @@ pub struct SessionHead {
     pub session_id: String,
     #[serde(default)]
     pub head_revision: u64,
-    #[serde(default)]
-    pub agent_frames: Vec<crate::AgentFrameRecord>,
-    #[serde(default, skip_serializing_if = "String::is_empty")]
-    pub current_agent_frame_id: crate::AgentFrameId,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub current_frame_node_id: Option<String>,
     pub graph: crate::SessionGraph,
     pub config: crate::PersistedSessionConfig,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -273,10 +272,8 @@ pub struct SessionHeadMeta {
     #[serde(default)]
     pub head_revision: u64,
     pub config: crate::PersistedSessionConfig,
-    #[serde(default)]
-    pub agent_frames: Vec<crate::AgentFrameRecord>,
-    #[serde(default, skip_serializing_if = "String::is_empty")]
-    pub current_agent_frame_id: crate::AgentFrameId,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub current_frame_node_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub checkpoint_ref: Option<BlobRef>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -307,8 +304,7 @@ pub struct PersistedSessionRead {
     pub session_id: String,
     pub head_revision: u64,
     pub config: crate::PersistedSessionConfig,
-    pub agent_frames: Vec<crate::AgentFrameRecord>,
-    pub current_agent_frame_id: crate::AgentFrameId,
+    pub current_frame_node_id: Option<String>,
     pub graph: crate::SessionGraph,
     pub checkpoint_ref: Option<BlobRef>,
     pub checkpoint: Option<HydratedSessionCheckpoint>,
@@ -355,11 +351,6 @@ impl GraphCommitDelta {
             {
                 *parent = derived_parent.clone();
             }
-            crate::session_graph::remap_session_node_cause(
-                &mut node.caused_by,
-                session_id,
-                &remapped,
-            );
             let old = node.node_id.clone();
             let derived = derive_history_node_id(session_id, operation, ordinal as u64)?;
             node.node_id = derived.clone();
@@ -392,8 +383,7 @@ pub struct RuntimeCommit {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub release_session_execution_lease: Option<SessionExecutionLeaseCompletion>,
     pub config: crate::PersistedSessionConfig,
-    pub agent_frames: Vec<crate::AgentFrameRecord>,
-    pub current_agent_frame_id: crate::AgentFrameId,
+    pub current_frame_node_id: Option<String>,
     pub graph: GraphCommitDelta,
     pub checkpoint: HydratedSessionCheckpoint,
     pub usage_deltas: Vec<crate::TokenLedgerEntry>,
@@ -424,10 +414,6 @@ pub struct RuntimeCommitResult {
     /// attempt's recorded proposal independently of node derivation. Physical
     /// row realization still relies on the backend transaction being atomic.
     pub realization_digest: String,
-    /// Store-realized frame timestamps. Receipts retain references and the
-    /// excluded clock value only; execution snapshot bytes remain in the
-    /// checkpoint/blob path and are never copied into receipt JSON.
-    pub realized_agent_frames: Vec<RealizedAgentFrame>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub enqueued_queue_batches: Vec<crate::QueuedWorkBatch>,
     /// Canonical input applications settled by this idempotent turn commit.
@@ -827,6 +813,36 @@ impl RuntimeCommit {
         Ok(())
     }
 
+    pub fn validate_append_chain(
+        &self,
+        existing_leaf_node_id: Option<&str>,
+    ) -> Result<(), StoreError> {
+        let GraphCommitDelta::Append {
+            nodes,
+            leaf_node_id,
+        } = &self.graph
+        else {
+            return Ok(());
+        };
+        let mut expected_parent = existing_leaf_node_id.map(ToOwned::to_owned);
+        for node in nodes {
+            if node.parent_node_id != expected_parent {
+                return Err(StoreError::InvalidGraphParent {
+                    node_id: node.node_id.clone(),
+                    expected: expected_parent,
+                    actual: node.parent_node_id.clone(),
+                });
+            }
+            expected_parent = Some(node.node_id.clone());
+        }
+        if !nodes.is_empty() && leaf_node_id != &expected_parent {
+            return Err(StoreError::InvalidGraphLeaf {
+                leaf_node_id: leaf_node_id.clone(),
+            });
+        }
+        Ok(())
+    }
+
     pub fn turn_input_applications(&self) -> Vec<crate::TurnInputApplication> {
         self.completed_turn_input_claims
             .iter()
@@ -878,8 +894,7 @@ impl RuntimeCommit {
             session_execution_lease: None,
             release_session_execution_lease: None,
             config: persisted_session_config_from_state(state),
-            agent_frames: state.agent_frames.clone(),
-            current_agent_frame_id: state.current_agent_frame_id.clone(),
+            current_frame_node_id: state.current_frame_node_id.clone(),
             graph: state.pending_graph_commit(),
             checkpoint: build_checkpoint_from_persisted_state(state),
             usage_deltas: usage_deltas.to_vec(),
@@ -904,6 +919,9 @@ impl RuntimeCommit {
         state
             .session_graph
             .remap_node_ids(&state.session_id, &mapping);
+        remap_optional_node_id(&mut commit.current_frame_node_id, &mapping);
+        remap_optional_node_id(&mut state.current_frame_node_id, &mapping);
+        state.agent_frames = state.session_graph.agent_frame_records(&state.session_id);
         let persisted_node_ids = mapping.iter().map(|(_, derived)| derived.clone()).collect();
         let hash = commit.turn_commit_hash()?;
         commit.turn_commit = Some(RuntimeTurnCommitStamp::new(
@@ -925,8 +943,7 @@ impl RuntimeCommit {
             session_execution_lease: None,
             release_session_execution_lease: None,
             config: persisted_session_config_from_state(state),
-            agent_frames: state.agent_frames.clone(),
-            current_agent_frame_id: state.current_agent_frame_id.clone(),
+            current_frame_node_id: state.current_frame_node_id.clone(),
             graph,
             checkpoint: build_checkpoint_from_persisted_state(state),
             usage_deltas: usage_deltas.to_vec(),
@@ -952,6 +969,7 @@ impl RuntimeCommit {
         operation: OperationId,
     ) -> Result<(Self, Vec<(String, String)>), StoreError> {
         let node_id_mapping = self.graph.derive_node_ids(&self.session_id, &operation)?;
+        remap_optional_node_id(&mut self.current_frame_node_id, &node_id_mapping);
         let hash = self.turn_commit_hash()?;
         self.turn_commit = Some(RuntimeTurnCommitStamp::new(
             self.session_id.clone(),
@@ -1022,6 +1040,15 @@ impl RuntimeCommit {
     }
 }
 
+fn remap_optional_node_id(node_id: &mut Option<String>, mapping: &[(String, String)]) {
+    let Some(current) = node_id.as_mut() else {
+        return;
+    };
+    if let Some((_, derived)) = mapping.iter().find(|(draft, _)| draft == current) {
+        *current = derived.clone();
+    }
+}
+
 fn persisted_session_state_from_head(
     head: SessionHead,
     checkpoint: Option<HydratedSessionCheckpoint>,
@@ -1032,12 +1059,14 @@ fn persisted_session_state_from_head(
         .iter()
         .map(|node| node.node_id.clone())
         .collect();
+    let graph = head.graph;
+    let agent_frames = graph.agent_frame_records(&head.session_id);
     let mut state = crate::RuntimeSessionState {
         session_id: head.session_id,
         policy: crate::SessionPolicy::default(),
-        agent_frames: head.agent_frames,
-        current_agent_frame_id: head.current_agent_frame_id,
-        session_graph: head.graph,
+        agent_frames,
+        current_frame_node_id: head.current_frame_node_id,
+        session_graph: graph,
         turn_index: 0,
         token_usage: crate::TokenUsage::default(),
         last_prompt_usage: None,
@@ -1083,8 +1112,7 @@ impl Default for SessionHead {
         Self {
             session_id: default_root_session_id(),
             head_revision: 0,
-            agent_frames: Vec::new(),
-            current_agent_frame_id: String::new(),
+            current_frame_node_id: None,
             graph: crate::SessionGraph::default(),
             config: crate::PersistedSessionConfig::default(),
             checkpoint_ref: None,
@@ -1100,8 +1128,7 @@ impl Default for SessionHeadMeta {
             session_id: default_root_session_id(),
             head_revision: 0,
             config: crate::PersistedSessionConfig::default(),
-            agent_frames: Vec::new(),
-            current_agent_frame_id: String::new(),
+            current_frame_node_id: None,
             checkpoint_ref: None,
             leaf_node_id: None,
             graph_node_count: 0,
@@ -1463,6 +1490,13 @@ pub trait StoreMaintenance: Send + Sync {
 
     /// Delete blobs no longer reachable from any retained root.
     async fn gc_unreachable(&self) -> Result<GcReport, StoreError>;
+
+    /// Re-derive every live node's incoming references from edge rows.
+    ///
+    /// Process roots deliberately remain outside this stored count because
+    /// they live in another store family; `live_reference_summary` continues
+    /// to aggregate those roots on demand (ADR 0024).
+    async fn verify_node_refcounts(&self) -> Result<NodeRefcountVerification, StoreError>;
 }
 
 /// Exact settled-session persistence protocol required by the runtime.
@@ -1505,8 +1539,7 @@ fn persisted_session_state_from_read(read: PersistedSessionRead) -> crate::Runti
         SessionHead {
             session_id: read.session_id,
             head_revision: read.head_revision,
-            agent_frames: read.agent_frames,
-            current_agent_frame_id: read.current_agent_frame_id,
+            current_frame_node_id: read.current_frame_node_id,
             graph: read.graph,
             config: read.config,
             checkpoint_ref: read.checkpoint_ref,

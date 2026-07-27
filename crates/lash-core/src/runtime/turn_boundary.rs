@@ -727,7 +727,7 @@ mod tests {
         )]);
         let mut state = state_with_graph(graph);
         state.ensure_agent_frame_initialized();
-        let previous_frame_id = state.current_agent_frame_id.clone();
+        let previous_frame_node_id = state.current_frame_node_id.clone();
         let frame_id = "frame-2".to_string();
         let seed_node = crate::SessionAppendNode::message(crate::PluginMessage::text(
             MessageRole::User,
@@ -744,24 +744,27 @@ mod tests {
         );
 
         assert_eq!(state.session_id, "session-1");
-        assert_eq!(state.current_agent_frame_id, frame_id);
+        assert_eq!(
+            state.current_frame_node_id.as_deref(),
+            Some(frame_id.as_str())
+        );
         let current = state.current_agent_frame().expect("current frame");
         assert_eq!(
-            current.previous_frame_id.as_deref(),
-            Some(previous_frame_id.as_str())
+            current.previous_frame_node_id.as_deref(),
+            previous_frame_node_id.as_deref()
         );
         assert_eq!(
             current.reason.as_str(),
             crate::AgentFrameReason::CONTINUE_AS
         );
-        let current_read = state
-            .session_graph
-            .read_model_for_agent_frame(&frame_id, false);
+        let current_read = state.session_graph.read_model_for_frame(&frame_id);
         assert_eq!(current_read.messages.len(), 1);
         assert_eq!(current_read.messages[0].parts[0].content, "seed message");
-        let previous_read = state
-            .session_graph
-            .read_model_for_agent_frame(&previous_frame_id, true);
+        let previous_read = state.session_graph.read_model_for_frame(
+            previous_frame_node_id
+                .as_deref()
+                .expect("previous frame node id"),
+        );
         assert_eq!(previous_read.messages.len(), 1);
         assert_eq!(previous_read.messages[0].parts[0].content, "old frame");
     }
@@ -775,7 +778,7 @@ mod tests {
         )]);
         let mut state = state_with_graph(graph);
         state.ensure_agent_frame_initialized();
-        let previous_frame_id = state.current_agent_frame_id.clone();
+        let previous_frame_node_id = state.current_frame_node_id.clone();
         let previous = state
             .current_agent_frame_mut()
             .expect("current frame before compaction");
@@ -803,12 +806,15 @@ mod tests {
         );
 
         assert!(opened.opened);
-        assert_eq!(state.current_agent_frame_id, frame_id);
+        assert_eq!(
+            state.current_frame_node_id.as_deref(),
+            Some(frame_id.as_str())
+        );
         let current = state.current_agent_frame().expect("current frame");
         assert_eq!(current.reason.as_str(), crate::AgentFrameReason::COMPACTION);
         assert_eq!(
-            current.previous_frame_id.as_deref(),
-            Some(previous_frame_id.as_str())
+            current.previous_frame_node_id.as_deref(),
+            previous_frame_node_id.as_deref()
         );
         assert_eq!(
             current.assignment.usage_source.as_deref(),
@@ -819,9 +825,7 @@ mod tests {
             serde_json::json!({ "mode": "test" })
         );
 
-        let current_read = state
-            .session_graph
-            .read_model_for_agent_frame(&frame_id, false);
+        let current_read = state.session_graph.read_model_for_frame(&frame_id);
         assert_eq!(current_read.messages.len(), 1);
         assert_eq!(
             current_read.messages[0].parts[0].content,
@@ -832,9 +836,11 @@ mod tests {
             Some(crate::MessageOrigin::Plugin { plugin_id, .. }) if plugin_id == "rolling_history"
         ));
 
-        let previous_read = state
-            .session_graph
-            .read_model_for_agent_frame(&previous_frame_id, true);
+        let previous_read = state.session_graph.read_model_for_frame(
+            previous_frame_node_id
+                .as_deref()
+                .expect("previous frame node id"),
+        );
         assert_eq!(previous_read.messages.len(), 1);
         assert_eq!(
             previous_read.messages[0].parts[0].content,
@@ -851,9 +857,7 @@ mod tests {
             &crate::SystemClock,
         );
         assert!(!replay.opened);
-        let replay_read = state
-            .session_graph
-            .read_model_for_agent_frame(&frame_id, false);
+        let replay_read = state.session_graph.read_model_for_frame(&frame_id);
         assert_eq!(replay_read.messages.len(), 1);
     }
 

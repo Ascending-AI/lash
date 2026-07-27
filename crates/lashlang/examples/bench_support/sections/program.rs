@@ -476,7 +476,7 @@ frame = await control.continue_as({
     }
   })?
 finish {
-  frame_id: frame.frame_id,
+  frame_id: frame.frame_node_id,
   task: frame.task,
   seed_keys: frame.seed_keys,
   projected_count: frame.projected_count,

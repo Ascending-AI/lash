@@ -43,7 +43,7 @@ pub struct RuntimeGraphMissingParent {
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct RuntimeAgentFrameInvariantFacts {
-    pub current_agent_frame_id: String,
+    pub current_frame_node_id: String,
     pub frame_count: usize,
     pub active_frame_ids: Vec<String>,
     pub current_frame_exists: bool,
@@ -272,48 +272,65 @@ pub fn runtime_agent_frame_invariant_facts(
     snapshot: &lash_core::SessionSnapshot,
 ) -> RuntimeAgentFrameInvariantFacts {
     let frame_ids = snapshot
-        .agent_frames
+        .session_graph
+        .nodes
         .iter()
-        .map(|frame| frame.frame_id.clone())
+        .filter(|node| {
+            matches!(
+                node.payload,
+                lash_core::SessionNodePayload::FrameOpen { .. }
+            )
+        })
+        .map(|node| node.node_id.clone())
         .collect::<BTreeSet<_>>();
     let active_frame_ids = snapshot
-        .agent_frames
+        .current_frame_node_id
         .iter()
-        .filter(|frame| frame.status == lash_core::AgentFrameStatus::Active)
-        .map(|frame| frame.frame_id.clone())
+        .cloned()
         .collect::<Vec<_>>();
-    let current_frame_exists = !snapshot.current_agent_frame_id.is_empty()
-        && frame_ids.contains(&snapshot.current_agent_frame_id);
-    let current_frame_active = snapshot
-        .agent_frames
-        .iter()
-        .find(|frame| frame.frame_id == snapshot.current_agent_frame_id)
-        .is_some_and(|frame| frame.status == lash_core::AgentFrameStatus::Active);
+    let current_frame_exists = snapshot
+        .current_frame_node_id
+        .as_ref()
+        .is_some_and(|frame| frame_ids.contains(frame));
+    let canonical_frame_node_id = snapshot
+        .session_graph
+        .nearest_frame_node_id(snapshot.session_graph.leaf_node_id.as_deref());
+    let current_frame_active = snapshot.current_frame_node_id.as_deref() == canonical_frame_node_id;
     let nodes_without_agent_frame = snapshot
         .session_graph
         .nodes
         .iter()
-        .filter(|node| node.agent_frame_id.is_none())
+        .filter(|node| {
+            snapshot
+                .session_graph
+                .nearest_frame_node_id(Some(&node.node_id))
+                .is_none()
+        })
         .map(|node| node.node_id.clone())
         .collect::<Vec<_>>();
     let node_agent_frame_ids_without_record = snapshot
         .session_graph
         .nodes
         .iter()
-        .filter_map(|node| node.agent_frame_id.as_ref())
+        .filter_map(|node| {
+            snapshot
+                .session_graph
+                .nearest_frame_node_id(Some(&node.node_id))
+        })
         .filter(|frame_id| !frame_ids.contains(*frame_id))
-        .cloned()
+        .map(ToOwned::to_owned)
         .collect::<BTreeSet<_>>()
         .into_iter()
         .collect::<Vec<_>>();
     let passed = active_frame_ids.len() == 1
-        && active_frame_ids.first() == Some(&snapshot.current_agent_frame_id)
+        && active_frame_ids.first() == snapshot.current_frame_node_id.as_ref()
         && current_frame_exists
         && current_frame_active
+        && nodes_without_agent_frame.is_empty()
         && node_agent_frame_ids_without_record.is_empty();
     RuntimeAgentFrameInvariantFacts {
-        current_agent_frame_id: snapshot.current_agent_frame_id.clone(),
-        frame_count: snapshot.agent_frames.len(),
+        current_frame_node_id: snapshot.current_frame_node_id.clone().unwrap_or_default(),
+        frame_count: frame_ids.len(),
         active_frame_ids,
         current_frame_exists,
         current_frame_active,

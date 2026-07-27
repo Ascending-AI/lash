@@ -308,7 +308,7 @@ fn persistence_types_are_nameable(
         release_session_execution_lease: None,
         config: Default::default(),
         agent_frames: Vec::new(),
-        current_agent_frame_id: String::new(),
+        current_frame_node_id: String::new(),
         graph,
         checkpoint: Default::default(),
         usage_deltas: ledger,

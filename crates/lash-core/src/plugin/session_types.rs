@@ -21,8 +21,8 @@ pub struct SessionSnapshot {
     pub policy: SessionPolicy,
     #[serde(default)]
     pub agent_frames: Vec<AgentFrameRecord>,
-    #[serde(default, skip_serializing_if = "String::is_empty")]
-    pub current_agent_frame_id: AgentFrameId,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub current_frame_node_id: Option<String>,
     #[serde(default)]
     pub session_graph: crate::SessionGraph,
     #[serde(default)]
@@ -51,15 +51,9 @@ pub struct SessionSnapshot {
 
 impl SessionSnapshot {
     pub(crate) fn read_model(&self) -> crate::session_graph::SessionReadModel {
-        let current_agent_frame_is_initial = self
-            .agent_frames
-            .iter()
-            .find(|frame| frame.frame_id == self.current_agent_frame_id)
-            .map(|frame| frame.previous_frame_id.is_none())
-            .unwrap_or(true);
-        self.session_graph.read_model_for_agent_frame(
-            &self.current_agent_frame_id,
-            current_agent_frame_is_initial,
+        self.current_frame_node_id.as_deref().map_or_else(
+            || self.session_graph.read_model(),
+            |frame_node_id| self.session_graph.read_model_for_frame(frame_node_id),
         )
     }
 
@@ -68,13 +62,11 @@ impl SessionSnapshot {
     }
 
     pub fn replace_active_read_state(&mut self, messages: &[crate::Message]) {
-        self.session_graph
-            .replace_active_read_state_for_agent_frame(&self.current_agent_frame_id, messages);
+        self.session_graph.replace_active_read_state(messages);
     }
 
     pub fn append_active_read_delta(&mut self, messages: &[crate::Message]) {
-        self.session_graph
-            .append_active_read_delta_for_agent_frame(&self.current_agent_frame_id, messages);
+        self.session_graph.append_active_read_delta(messages);
     }
 }
 
@@ -102,14 +94,6 @@ pub enum SessionPluginSource {
 }
 
 pub type AgentFrameId = String;
-
-#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum AgentFrameStatus {
-    #[default]
-    Active,
-    Superseded,
-}
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(transparent)]
@@ -224,42 +208,32 @@ impl AgentFrameAssignment {
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct AgentFrameRecord {
-    pub frame_id: AgentFrameId,
+    pub frame_node_id: String,
     pub session_id: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub previous_frame_id: Option<AgentFrameId>,
-    #[serde(default)]
-    pub status: AgentFrameStatus,
+    pub previous_frame_node_id: Option<String>,
     #[serde(default)]
     pub reason: AgentFrameReason,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub caused_by: Option<crate::CausalRef>,
     pub created_at: String,
     pub assignment: AgentFrameAssignment,
     #[serde(default)]
     pub protocol_turn_options: ProtocolTurnOptions,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub execution_state_ref: Option<crate::store::BlobRef>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub execution_state_snapshot: Option<Vec<u8>>,
 }
 
 impl AgentFrameRecord {
     pub fn new(
-        frame_id: impl Into<AgentFrameId>,
+        frame_node_id: impl Into<String>,
         session_id: impl Into<String>,
-        previous_frame_id: Option<AgentFrameId>,
+        previous_frame_node_id: Option<String>,
         reason: AgentFrameReason,
-        caused_by: Option<crate::CausalRef>,
         assignment: AgentFrameAssignment,
         protocol_turn_options: ProtocolTurnOptions,
     ) -> Self {
         Self::new_at(
-            frame_id,
+            frame_node_id,
             session_id,
-            previous_frame_id,
+            previous_frame_node_id,
             reason,
-            caused_by,
             assignment,
             protocol_turn_options,
             <crate::SystemClock as crate::Clock>::timestamp_rfc3339(&crate::SystemClock),
@@ -268,27 +242,22 @@ impl AgentFrameRecord {
 
     #[allow(clippy::too_many_arguments)]
     pub fn new_at(
-        frame_id: impl Into<AgentFrameId>,
+        frame_node_id: impl Into<String>,
         session_id: impl Into<String>,
-        previous_frame_id: Option<AgentFrameId>,
+        previous_frame_node_id: Option<String>,
         reason: AgentFrameReason,
-        caused_by: Option<crate::CausalRef>,
         assignment: AgentFrameAssignment,
         protocol_turn_options: ProtocolTurnOptions,
         created_at: impl Into<String>,
     ) -> Self {
         Self {
-            frame_id: frame_id.into(),
+            frame_node_id: frame_node_id.into(),
             session_id: session_id.into(),
-            previous_frame_id,
-            status: AgentFrameStatus::Active,
+            previous_frame_node_id,
             reason,
-            caused_by,
             created_at: created_at.into(),
             assignment,
             protocol_turn_options,
-            execution_state_ref: None,
-            execution_state_snapshot: None,
         }
     }
 }
@@ -326,7 +295,7 @@ impl OpenAgentFrameRequest {
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct OpenAgentFrameResult {
-    pub frame_id: AgentFrameId,
+    pub frame_node_id: String,
     pub opened: bool,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub initial_node_ids: Vec<String>,

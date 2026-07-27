@@ -46,16 +46,29 @@ pub enum StoreError {
     #[error("runtime commit leaf {leaf_node_id:?} does not resolve to a live graph node")]
     InvalidGraphLeaf { leaf_node_id: Option<String> },
     #[error(
+        "runtime commit node `{node_id}` has parent {actual:?}, expected {expected:?} for an append-only chain"
+    )]
+    InvalidGraphParent {
+        node_id: String,
+        expected: Option<String>,
+        actual: Option<String>,
+    },
+    #[error(
+        "session leaf `{leaf_node_id}` has no FrameOpen ancestor; every root graph must begin with a frame"
+    )]
+    MissingFrameOpenAncestor { leaf_node_id: String },
+    #[error(
+        "node `{node_id}` cached incoming reference count drifted: cached {cached}, derived {derived}"
+    )]
+    NodeRefcountDrift {
+        node_id: String,
+        cached: i64,
+        derived: i64,
+    },
+    #[error(
         "runtime commit realization differs from stored receipt: proposed {proposed}, stored {stored}"
     )]
     CommitRealizationMismatch { proposed: String, stored: String },
-    #[error(
-        "runtime commit frame realization differs from stored receipt: expected {expected:?}, stored {stored:?}"
-    )]
-    CommitFrameRealizationMismatch {
-        expected: Vec<String>,
-        stored: Vec<String>,
-    },
     #[error(
         "queued work claim `{claim_id}` for session `{session_id}` is superseded by a newer session-lease generation"
     )]

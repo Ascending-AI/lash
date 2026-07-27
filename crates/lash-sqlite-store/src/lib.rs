@@ -69,13 +69,13 @@ use lash_core::store::{
 use lash_core::{
     AbandonRequest, AttachmentId, AttachmentIntent, AttachmentManifest, AttachmentManifestEntry,
     AttachmentOwnerKind, BlobRef, DeliveryPolicy, GcReport, LeaseOwnerIdentity, LeaseOwnerLiveness,
-    MergeKey, PROCESS_LEASE_SCHEMA_VERSION, PersistedSegmentHandover, ProcessAwaitOutput,
-    ProcessChangeCursor, ProcessEvent, ProcessEventAppendRequest, ProcessEventAppendResult,
-    ProcessExecutionWriteAuthority, ProcessExternalRef, ProcessHandleDescriptor,
-    ProcessHandleGrant, ProcessLease, ProcessLeaseClaimOutcome, ProcessLeaseCompletion,
-    ProcessListFilter, ProcessLiveReferenceSummary, ProcessPruneReport, ProcessRecord,
-    ProcessRegistration, ProcessRegistry, ProcessStartOutcome, ProcessStartPlan, ProcessStarted,
-    QueuedWorkStore, RuntimePersistence, SessionCommitStore, SessionExecutionLease,
+    MergeKey, NodeRefcountVerification, PROCESS_LEASE_SCHEMA_VERSION, PersistedSegmentHandover,
+    ProcessAwaitOutput, ProcessChangeCursor, ProcessEvent, ProcessEventAppendRequest,
+    ProcessEventAppendResult, ProcessExecutionWriteAuthority, ProcessExternalRef,
+    ProcessHandleDescriptor, ProcessHandleGrant, ProcessLease, ProcessLeaseClaimOutcome,
+    ProcessLeaseCompletion, ProcessListFilter, ProcessLiveReferenceSummary, ProcessPruneReport,
+    ProcessRecord, ProcessRegistration, ProcessRegistry, ProcessStartOutcome, ProcessStartPlan,
+    ProcessStarted, QueuedWorkStore, RuntimePersistence, SessionCommitStore, SessionExecutionLease,
     SessionExecutionLeaseClaimOutcome, SessionExecutionLeaseCompletion, SessionExecutionLeaseFence,
     SessionExecutionLeaseStore, SessionMeta, SessionPickerInfo, SessionReadScope, SessionScope,
     SessionStoreCreateRequest, SessionStoreFactory, SlotPolicy, StoreError, StoreMaintenance,
@@ -577,6 +577,22 @@ async fn delete_session_from_catalog(root: &Path, session_id: &str) -> Result<()
         .map_err(|err| err.to_string())?;
     ensure_schema(&conn).await.map_err(|err| err.to_string())?;
     conn.write(move |tx| {
+        let leaf_node_id = tx
+            .query_row(
+                "SELECT leaf_node_id FROM session_head WHERE session_id = ?1",
+                params![session_id],
+                |row| row.get::<_, Option<String>>(0),
+            )
+            .optional()?
+            .flatten();
+        tx.execute(
+            "DELETE FROM session_head WHERE session_id = ?1",
+            params![session_id],
+        )?;
+        if let Some(leaf_node_id) = leaf_node_id {
+            persistence::decrement_node_ref_conn(tx, &leaf_node_id)
+                .map_err(|err| rusqlite::Error::ToSqlConversionFailure(Box::new(err)))?;
+        }
         tx.execute(
             "DELETE FROM queued_work_batches WHERE session_id = ?1",
             params![session_id],
@@ -587,8 +603,6 @@ async fn delete_session_from_catalog(root: &Path, session_id: &str) -> Result<()
             "runtime_turn_commits",
             "session_execution_leases",
             "usage_deltas",
-            "graph_nodes",
-            "session_head",
             "session_meta",
         ] {
             tx.execute(
@@ -651,8 +665,7 @@ fn session_head_meta(head: &SessionHead) -> SessionHeadMeta {
         session_id: head.session_id.clone(),
         head_revision: 0,
         config: head.config.clone(),
-        agent_frames: head.agent_frames.clone(),
-        current_agent_frame_id: head.current_agent_frame_id.clone(),
+        current_frame_node_id: head.current_frame_node_id.clone(),
         checkpoint_ref: head.checkpoint_ref.clone(),
         leaf_node_id: head.graph.leaf_node_id.clone(),
         graph_node_count: head.graph.nodes.len(),
@@ -726,13 +739,21 @@ fn try_load_session_head_meta_from_conn(
 ) -> Result<Option<SessionHeadMeta>, StoreError> {
     let row = conn
         .query_row(
-            "SELECT head_json, head_revision FROM session_head WHERE session_id = ?1",
+            "SELECT head_json, head_revision, leaf_node_id, checkpoint_ref
+             FROM session_head WHERE session_id = ?1",
             params![session_id],
-            |row| Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?)),
+            |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, i64>(1)?,
+                    row.get::<_, Option<String>>(2)?,
+                    row.get::<_, Option<String>>(3)?,
+                ))
+            },
         )
         .optional()
         .map_err(sqlite_error)?;
-    let Some((head_json, head_revision)) = row else {
+    let Some((head_json, head_revision, leaf_node_id, checkpoint_ref)) = row else {
         return Ok(None);
     };
     let mut meta: SessionHeadMeta = lash_core::store::decode_versioned_json_record(
@@ -741,6 +762,8 @@ fn try_load_session_head_meta_from_conn(
         lash_core::store::SESSION_HEAD_META_SCHEMA_VERSION,
     )?;
     meta.head_revision = head_revision as u64;
+    meta.leaf_node_id = leaf_node_id;
+    meta.checkpoint_ref = checkpoint_ref.map(Into::into);
     Ok(Some(meta))
 }
 

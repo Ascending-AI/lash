@@ -189,10 +189,10 @@ pub fn reverify_runtime_invariant_facts(
                     ))
                 })?;
             let recomputed = agent_frame.active_frame_ids.len() == 1
-                && agent_frame.active_frame_ids.first()
-                    == Some(&agent_frame.current_agent_frame_id)
+                && agent_frame.active_frame_ids.first() == Some(&agent_frame.current_frame_node_id)
                 && agent_frame.current_frame_exists
                 && agent_frame.current_frame_active
+                && agent_frame.nodes_without_agent_frame.is_empty()
                 && agent_frame.node_agent_frame_ids_without_record.is_empty();
             require_reverified(
                 event,
@@ -202,7 +202,7 @@ pub fn reverify_runtime_invariant_facts(
                 format!(
                     "active_frames={:?} current={} exists={} active={} orphan_frames={:?}",
                     agent_frame.active_frame_ids,
-                    agent_frame.current_agent_frame_id,
+                    agent_frame.current_frame_node_id,
                     agent_frame.current_frame_exists,
                     agent_frame.current_frame_active,
                     agent_frame.node_agent_frame_ids_without_record

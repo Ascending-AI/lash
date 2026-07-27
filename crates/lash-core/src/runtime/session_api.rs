@@ -192,8 +192,7 @@ impl LashRuntime {
         let head = crate::store::SessionHead {
             session_id: read.session_id.clone(),
             head_revision: read.head_revision,
-            agent_frames: read.agent_frames.clone(),
-            current_agent_frame_id: read.current_agent_frame_id.clone(),
+            current_frame_node_id: read.current_frame_node_id.clone(),
             graph: read.graph,
             config: read.config.clone(),
             checkpoint_ref: read.checkpoint_ref.clone(),
@@ -345,7 +344,10 @@ impl LashRuntime {
         let frame_id = compaction_frame_id(
             &self.state.session_id,
             &compaction_boundary,
-            &self.state.current_agent_frame_id,
+            self.state
+                .current_frame_node_id
+                .as_deref()
+                .unwrap_or_default(),
         );
         let result = self.open_agent_frame(
             crate::OpenAgentFrameRequest::new(frame_id, crate::AgentFrameReason::compaction())
@@ -611,8 +613,12 @@ impl LashRuntime {
     }
 }
 
-fn compaction_frame_id(session_id: &str, boundary_id: &str, previous_frame_id: &str) -> String {
-    format!("{session_id}:frame:compaction:{boundary_id}:after:{previous_frame_id}")
+fn compaction_frame_id(
+    session_id: &str,
+    boundary_id: &str,
+    previous_frame_node_id: &str,
+) -> String {
+    format!("{session_id}:frame:compaction:{boundary_id}:after:{previous_frame_node_id}")
 }
 
 pub(in crate::runtime) fn queued_turn_input_store_required() -> RuntimeError {
