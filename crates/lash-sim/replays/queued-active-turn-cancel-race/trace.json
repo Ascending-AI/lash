@@ -427,7 +427,7 @@
         "backend_failure": true,
         "operation": "commit_runtime_state:001",
         "production_store_error": {
-          "message": "store head revision conflict: expected Some(1), actual 2",
+          "message": "store head revision conflict: expected 1, actual 2",
           "retryable_class": true,
           "type": "lash_core::StoreError",
           "variant": "HeadRevisionConflict"
@@ -7641,7 +7641,7 @@
         "backend_failure": true,
         "operation": "commit_runtime_state:001",
         "production_store_error": {
-          "message": "store head revision conflict: expected Some(3), actual 4",
+          "message": "store head revision conflict: expected 3, actual 4",
           "retryable_class": true,
           "type": "lash_core::StoreError",
           "variant": "HeadRevisionConflict"
@@ -8119,7 +8119,7 @@
         "backend_failure": true,
         "operation": "commit_runtime_state:001",
         "production_store_error": {
-          "message": "store head revision conflict: expected Some(4), actual 5",
+          "message": "store head revision conflict: expected 4, actual 5",
           "retryable_class": true,
           "type": "lash_core::StoreError",
           "variant": "HeadRevisionConflict"
