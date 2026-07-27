@@ -17,7 +17,7 @@ pub(super) async fn complete_process(
     process_id: &str,
     await_output: ProcessAwaitOutput,
     authority: lash_core::ProcessCompletionAuthority,
-) -> Result<ProcessRecord, lash_core::PluginError> {
+) -> Result<lash_core::ProcessCompletionOutcome, lash_core::PluginError> {
     let process_id = process_id.to_string();
     let now = registry.clock.timestamp_ms();
     registry
@@ -29,7 +29,10 @@ pub(super) async fn complete_process(
                         lash_core::PluginError::Session(format!("unknown process `{process_id}`"))
                     })?;
                 if record.is_terminal() {
-                    return Ok(record);
+                    return Ok(lash_core::ProcessCompletionOutcome::from_stored(
+                        record,
+                        &await_output,
+                    ));
                 }
                 // Validate the authority against the row's declared disposition
                 // *inside* the transaction that appends, so a concurrent
@@ -68,7 +71,9 @@ pub(super) async fn complete_process(
                             record = repaired;
                             SqliteProcessRegistry::save_process_conn(tx, &record)?;
                         }
-                        Ok(record)
+                        Ok(lash_core::ProcessCompletionOutcome::AlreadyApplied {
+                            stored: record,
+                        })
                     }
                     lash_core::ProcessEventAppendPlan::Insert {
                         event,
@@ -95,7 +100,7 @@ pub(super) async fn complete_process(
                         .map_err(process_sqlite_error)?;
                         record = projected_record;
                         SqliteProcessRegistry::save_process_conn(tx, &record)?;
-                        Ok(record)
+                        Ok(lash_core::ProcessCompletionOutcome::Committed(record))
                     }
                 }
             })()))
@@ -108,7 +113,7 @@ pub(super) async fn complete_process_with_lease(
     registry: &SqliteProcessRegistry,
     lease: &ProcessLease,
     await_output: ProcessAwaitOutput,
-) -> Result<ProcessRecord, lash_core::PluginError> {
+) -> Result<lash_core::ProcessCompletionOutcome, lash_core::PluginError> {
     let lease = lease.clone();
     let now = registry.clock.timestamp_ms();
     registry.conn
@@ -121,7 +126,10 @@ pub(super) async fn complete_process_with_lease(
                     ))
                 })?;
                 if record.is_terminal() {
-                    return Ok(record);
+                    return Ok(lash_core::ProcessCompletionOutcome::from_stored(
+                        record,
+                        &await_output,
+                    ));
                 }
                 let request = lash_core::terminal_append_request(process_id, &await_output, None);
                 let replay_lookup = request
@@ -149,7 +157,9 @@ pub(super) async fn complete_process_with_lease(
                     now,
                 )?;
                 if matches!(prepared, lash_core::ProcessEventAppendPlan::Replay { .. }) {
-                    return Ok(record);
+                    return Ok(lash_core::ProcessCompletionOutcome::AlreadyApplied {
+                        stored: record,
+                    });
                 }
 
                 let current = SqliteProcessRegistry::load_process_lease_conn(tx, process_id)?;
@@ -204,7 +214,7 @@ pub(super) async fn complete_process_with_lease(
                     params![process_id, lease.lease_token, lease.fencing_token as i64],
                 )
                 .map_err(process_sqlite_error)?;
-                Ok(record)
+                Ok(lash_core::ProcessCompletionOutcome::Committed(record))
             })()))
         })
         .await

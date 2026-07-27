@@ -1,4 +1,5 @@
 use super::*;
+use lash_core::TestProcessRegistryWriteExt;
 use std::collections::BTreeMap;
 use std::sync::Arc;
 

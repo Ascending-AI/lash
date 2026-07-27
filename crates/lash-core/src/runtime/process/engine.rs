@@ -39,6 +39,40 @@ pub enum ProcessRunOutcome {
     SegmentBoundary(SegmentHandover),
 }
 
+/// Failure of the host/runtime infrastructure needed to execute a process.
+///
+/// Infrastructure failures are not producer outcomes and must not be persisted
+/// as terminal process failures. The worker leaves the row claimable so its
+/// configured retry pacing and attempt budget can decide what happens next.
+#[derive(Debug)]
+pub struct ProcessInfraError {
+    source: crate::PluginError,
+}
+
+impl ProcessInfraError {
+    pub fn new(source: crate::PluginError) -> Self {
+        Self { source }
+    }
+
+    pub fn into_plugin_error(self) -> crate::PluginError {
+        self.source
+    }
+}
+
+impl std::fmt::Display for ProcessInfraError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.source.fmt(formatter)
+    }
+}
+
+impl std::error::Error for ProcessInfraError {}
+
+impl From<crate::PluginError> for ProcessInfraError {
+    fn from(source: crate::PluginError) -> Self {
+        Self::new(source)
+    }
+}
+
 impl From<ProcessAwaitOutput> for ProcessRunOutcome {
     fn from(output: ProcessAwaitOutput) -> Self {
         Self::Terminal(Box::new(output))
@@ -295,7 +329,7 @@ pub trait ProcessEngine: Send + Sync {
         &self,
         context: ProcessEngineRunContext<'_>,
         payload: serde_json::Value,
-    ) -> ProcessRunOutcome;
+    ) -> Result<ProcessRunOutcome, ProcessInfraError>;
 
     fn identity(&self, payload: &serde_json::Value) -> ProcessIdentity {
         let _ = payload;

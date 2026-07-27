@@ -24,7 +24,7 @@ pub use awaiter::{
 pub use engine::{
     PersistedSegmentHandover, ProcessEngine, ProcessEngineRegistry, ProcessEngineRunContext,
     ProcessEngineRunGuard, ProcessEngineRuntimeContext, ProcessEngineValidationContext,
-    ProcessRunOutcome, SegmentHandover,
+    ProcessInfraError, ProcessRunOutcome, SegmentHandover,
 };
 pub use events::{
     AbandonEvidence, AbandonWriter, ProcessAwaitOutput, ProcessCompletionAuthority, ProcessEvent,
@@ -38,16 +38,17 @@ pub use events::{
 pub use materialization::materialize_process_event_semantics;
 pub use model::{
     AbandonRequest, InMemoryProcessExecutionEnvStore, PROCESS_LEASE_SCHEMA_VERSION,
-    ProcessCancelSummary, ProcessChangeCursor, ProcessExecutionContext, ProcessExecutionEnvRef,
-    ProcessExecutionEnvSpec, ProcessExecutionEnvStore, ProcessExecutionWriteAuthority,
-    ProcessExternalRef, ProcessHandleDescriptor, ProcessHandleGrant, ProcessHandleGrantEntry,
-    ProcessHandleSummary, ProcessId, ProcessIdentity, ProcessInput, ProcessLease,
-    ProcessLeaseClaimOutcome, ProcessLeaseCompletion, ProcessLifecycleStatus, ProcessListFilter,
-    ProcessListMode, ProcessOpScope, ProcessOriginator, ProcessProvenance, ProcessRecord,
-    ProcessRegistration, ProcessSessionDeleteReport, ProcessSpawnProvenance, ProcessStartGrant,
-    ProcessStartOptions, ProcessStartOutcome, ProcessStartRequest, ProcessStarted, ProcessStatus,
-    ProcessStatusFilter, RecoveryDisposition, SessionScope, SessionScopeId, WaitKind, WaitState,
-    load_process_execution_env, persist_process_execution_env, process_runtime_session_ids,
+    ProcessCancelSummary, ProcessChangeCursor, ProcessCompletionOutcome, ProcessExecutionContext,
+    ProcessExecutionEnvRef, ProcessExecutionEnvSpec, ProcessExecutionEnvStore,
+    ProcessExecutionWriteAuthority, ProcessExternalRef, ProcessHandleDescriptor,
+    ProcessHandleGrant, ProcessHandleGrantEntry, ProcessHandleSummary, ProcessId, ProcessIdentity,
+    ProcessInput, ProcessLease, ProcessLeaseClaimOutcome, ProcessLeaseCompletion,
+    ProcessLifecycleStatus, ProcessListFilter, ProcessListMode, ProcessOpScope, ProcessOriginator,
+    ProcessProvenance, ProcessRecord, ProcessRegistration, ProcessSessionDeleteReport,
+    ProcessSpawnProvenance, ProcessStartGrant, ProcessStartOptions, ProcessStartOutcome,
+    ProcessStartRequest, ProcessStarted, ProcessStatus, ProcessStatusFilter, RecoveryDisposition,
+    SessionScope, SessionScopeId, WaitKind, WaitState, load_process_execution_env,
+    persist_process_execution_env, process_runtime_session_ids,
 };
 pub use observation::{
     ObservedProcess, ObservedProcessEvent, ObservedWorkItem, ProcessWorkObserver,

@@ -692,6 +692,7 @@ impl RuntimeExecutionContext<'_> {
         if let Some(process_events) = self.process_event_context.as_ref() {
             tool_context = tool_context.process_events(
                 process_events.process_id.clone(),
+                process_events.execution_write_authority.clone(),
                 std::sync::Arc::clone(&process_events.registry),
                 process_events.awaiter.clone(),
                 process_events.store.clone(),

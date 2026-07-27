@@ -27,13 +27,21 @@ impl ProcessStarted {
 }
 
 /// Correctness fence presented by the process execution that writes runtime
-/// lifecycle facts. Lash workers present their persisted lease; substrate
-/// workflows present the workflow key whose single-writer discipline replaces
-/// a Lash lease.
+/// lifecycle facts. Lash workers present their persisted lease; durable
+/// substrates present a replay-stable execution id bound to one attempt.
 #[derive(Clone, Debug)]
 pub enum ProcessExecutionWriteAuthority {
     Lease(ProcessLease),
-    WorkflowKey { workflow_key: String },
+    Invocation {
+        process_id: String,
+        execution_id: String,
+        attempt: Option<u32>,
+    },
+    #[cfg(any(test, feature = "testing"))]
+    #[doc(hidden)]
+    Testing {
+        process_id: String,
+    },
 }
 
 impl ProcessExecutionWriteAuthority {
@@ -41,17 +49,145 @@ impl ProcessExecutionWriteAuthority {
         Self::Lease(lease)
     }
 
-    pub fn workflow_key(workflow_key: impl Into<String>) -> Self {
-        Self::WorkflowKey {
-            workflow_key: workflow_key.into(),
+    pub fn invocation(process_id: impl Into<String>, execution_id: impl Into<String>) -> Self {
+        Self::Invocation {
+            process_id: process_id.into(),
+            execution_id: execution_id.into(),
+            attempt: None,
+        }
+    }
+
+    #[cfg(any(test, feature = "testing"))]
+    #[doc(hidden)]
+    pub fn testing(process_id: impl Into<String>) -> Self {
+        Self::Testing {
+            process_id: process_id.into(),
+        }
+    }
+
+    pub fn bind_attempt(&self, attempt: u32) -> Self {
+        match self {
+            Self::Lease(lease) => Self::Lease(lease.clone()),
+            Self::Invocation {
+                process_id,
+                execution_id,
+                ..
+            } => Self::Invocation {
+                process_id: process_id.clone(),
+                execution_id: execution_id.clone(),
+                attempt: Some(attempt),
+            },
+            #[cfg(any(test, feature = "testing"))]
+            Self::Testing { process_id } => Self::Testing {
+                process_id: process_id.clone(),
+            },
         }
     }
 
     pub fn lease_ref(&self) -> Option<&ProcessLease> {
         match self {
             Self::Lease(lease) => Some(lease),
-            Self::WorkflowKey { .. } => None,
+            Self::Invocation { .. } => None,
+            #[cfg(any(test, feature = "testing"))]
+            Self::Testing { .. } => None,
         }
+    }
+
+    pub fn invocation_started(&self) -> Option<ProcessStarted> {
+        match self {
+            Self::Lease(_) => None,
+            Self::Invocation {
+                process_id,
+                execution_id,
+                attempt: Some(attempt),
+            } => Some(ProcessStarted {
+                owner: crate::LeaseOwnerIdentity::opaque(
+                    format!("restate:{process_id}"),
+                    execution_id.clone(),
+                ),
+                fencing_token: 0,
+                attempt: *attempt,
+                started_at_ms: 0,
+            }),
+            Self::Invocation { attempt: None, .. } => None,
+            #[cfg(any(test, feature = "testing"))]
+            Self::Testing { .. } => None,
+        }
+    }
+
+    pub fn validate_invocation_for_start(
+        &self,
+        process_id: &str,
+        started: &ProcessStarted,
+    ) -> Result<(), crate::PluginError> {
+        #[cfg(any(test, feature = "testing"))]
+        if let Self::Testing {
+            process_id: authority_process_id,
+        } = self
+        {
+            return if authority_process_id == process_id {
+                Ok(())
+            } else {
+                Err(crate::PluginError::ProcessLeaseSuperseded {
+                    process_id: process_id.to_string(),
+                })
+            };
+        }
+        let Self::Invocation {
+            process_id: authority_process_id,
+            ..
+        } = self
+        else {
+            return Ok(());
+        };
+        if authority_process_id != process_id
+            || self
+                .invocation_started()
+                .is_none_or(|authority| !authority.same_execution(started))
+        {
+            return Err(crate::PluginError::ProcessLeaseSuperseded {
+                process_id: process_id.to_string(),
+            });
+        }
+        Ok(())
+    }
+
+    pub fn validate_invocation_for_write(
+        &self,
+        process_id: &str,
+        record: &ProcessRecord,
+    ) -> Result<(), crate::PluginError> {
+        #[cfg(any(test, feature = "testing"))]
+        if let Self::Testing {
+            process_id: authority_process_id,
+        } = self
+        {
+            return if authority_process_id == process_id {
+                Ok(())
+            } else {
+                Err(crate::PluginError::ProcessLeaseSuperseded {
+                    process_id: process_id.to_string(),
+                })
+            };
+        }
+        let Self::Invocation {
+            process_id: authority_process_id,
+            ..
+        } = self
+        else {
+            return Ok(());
+        };
+        let current = record.first_started.as_deref();
+        if authority_process_id != process_id
+            || self.invocation_started().is_none_or(|authority| {
+                current.is_none_or(|current| !current.same_execution(&authority))
+            })
+        {
+            return Err(crate::PluginError::ProcessLeaseSuperseded {
+                process_id: process_id.to_string(),
+            });
+        }
+        Ok(())
     }
 }
 
@@ -68,6 +204,48 @@ pub enum ProcessStartOutcome {
         attempts: u32,
         max_attempts: u32,
     },
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(tag = "outcome", rename_all = "snake_case")]
+pub enum ProcessCompletionOutcome {
+    Committed(ProcessRecord),
+    AlreadyApplied { stored: ProcessRecord },
+    Superseded { stored: ProcessRecord },
+}
+
+impl ProcessCompletionOutcome {
+    pub fn from_stored(record: ProcessRecord, proposed: &super::ProcessAwaitOutput) -> Self {
+        if record.status.await_output() == Some(proposed) {
+            Self::AlreadyApplied { stored: record }
+        } else {
+            Self::Superseded { stored: record }
+        }
+    }
+
+    pub fn stored(&self) -> &ProcessRecord {
+        match self {
+            Self::Committed(record)
+            | Self::AlreadyApplied { stored: record }
+            | Self::Superseded { stored: record } => record,
+        }
+    }
+
+    pub fn into_record(self) -> ProcessRecord {
+        match self {
+            Self::Committed(record)
+            | Self::AlreadyApplied { stored: record }
+            | Self::Superseded { stored: record } => record,
+        }
+    }
+}
+
+impl std::ops::Deref for ProcessCompletionOutcome {
+    type Target = ProcessRecord;
+
+    fn deref(&self) -> &Self::Target {
+        self.stored()
+    }
 }
 
 impl ProcessStartOutcome {

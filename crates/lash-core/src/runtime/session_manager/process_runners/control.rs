@@ -424,6 +424,7 @@ impl ProcessCapability {
                 crate::ProcessCompletionAuthority::ExternalOwner,
             )
             .await
+            .map(crate::ProcessCompletionOutcome::into_record)
     }
 
     pub(in crate::runtime::session_manager) async fn list_process_handles(

@@ -2,6 +2,7 @@
 
 use super::*;
 use http_body_util::{BodyExt, Empty};
+use lash_core::TestProcessRegistryWriteExt;
 use lash_core::{ProcessInput, ProcessRegistration, RuntimeScope};
 use lash_http_transport::{HttpResponse, HttpResponseBody, HttpTransport, HttpTransportError};
 use lash_lashlang_runtime::{LashlangToolBinding, ToolDefinitionLashlangExt};
@@ -1276,6 +1277,7 @@ impl<'ctx> RestateControllerContext<'ctx> for Arc<RecordingContext> {
                         registration,
                         execution_context,
                         segment_ordinal: 0,
+                        execution_id: None,
                     },
                     complete_runs,
                 )
@@ -1792,7 +1794,7 @@ impl<'ctx> RestateControllerContext<'ctx> for Arc<ReplayableRecordingContext> {
             let cancellation = tokio_util::sync::CancellationToken::new();
             let mut handover = None;
             let execution_write_authority =
-                lash_core::ProcessExecutionWriteAuthority::workflow_key(&process_id);
+                lash_core::ProcessExecutionWriteAuthority::testing(&process_id);
             let output = loop {
                 match worker
                     .run_process_segment_with_scoped_effect_controller(
@@ -6335,6 +6337,132 @@ async fn terminal_retry_returns_the_stored_outcome() {
             .count(),
         1
     );
+}
+
+fn invocation_started(
+    process_id: &str,
+    execution_id: &str,
+    attempt: u32,
+) -> (
+    lash_core::ProcessExecutionWriteAuthority,
+    lash_core::ProcessStarted,
+) {
+    let authority = lash_core::ProcessExecutionWriteAuthority::invocation(process_id, execution_id)
+        .bind_attempt(attempt);
+    let mut started = authority
+        .invocation_started()
+        .expect("bound invocation authority");
+    started.started_at_ms = u64::from(attempt);
+    (authority, started)
+}
+
+#[tokio::test]
+async fn restate_invocation_identity_distinguishes_replay_from_fresh_execution() {
+    let registry = process_registry();
+    registry
+        .register_process(rerunnable_registration("invocation-rerun").with_max_attempts(Some(2)))
+        .await
+        .expect("register rerunnable");
+
+    let (first_authority, first_started) =
+        invocation_started("invocation-rerun", "invocation-1", 1);
+    assert!(matches!(
+        registry
+            .record_first_started_with_authority(
+                "invocation-rerun",
+                first_started.clone(),
+                &first_authority,
+            )
+            .await
+            .expect("first invocation"),
+        lash_core::ProcessStartOutcome::Started(_)
+    ));
+    assert!(matches!(
+        registry
+            .record_first_started_with_authority(
+                "invocation-rerun",
+                first_started,
+                &first_authority,
+            )
+            .await
+            .expect("cross-replica journal replay"),
+        lash_core::ProcessStartOutcome::AlreadyApplied(_)
+    ));
+
+    let (second_authority, second_started) =
+        invocation_started("invocation-rerun", "invocation-2", 2);
+    assert!(matches!(
+        registry
+            .record_first_started_with_authority(
+                "invocation-rerun",
+                second_started,
+                &second_authority,
+            )
+            .await
+            .expect("fresh invocation"),
+        lash_core::ProcessStartOutcome::Started(_)
+    ));
+    let (third_authority, third_started) =
+        invocation_started("invocation-rerun", "invocation-3", 3);
+    assert!(matches!(
+        registry
+            .record_first_started_with_authority(
+                "invocation-rerun",
+                third_started,
+                &third_authority,
+            )
+            .await
+            .expect("attempt budget verdict"),
+        lash_core::ProcessStartOutcome::AttemptsExhausted {
+            attempts: 2,
+            max_attempts: 2,
+            ..
+        }
+    ));
+}
+
+#[tokio::test]
+async fn owner_bound_segment_continuation_reuses_root_invocation_identity() {
+    let registry = process_registry();
+    registry
+        .register_process(owner_bound_registration("owner-bound-segment"))
+        .await
+        .expect("register owner-bound");
+    let (root_authority, root_started) =
+        invocation_started("owner-bound-segment", "root-invocation", 1);
+    registry
+        .record_first_started_with_authority(
+            "owner-bound-segment",
+            root_started.clone(),
+            &root_authority,
+        )
+        .await
+        .expect("start root segment");
+
+    assert!(matches!(
+        registry
+            .record_first_started_with_authority(
+                "owner-bound-segment",
+                root_started,
+                &root_authority,
+            )
+            .await
+            .expect("mid-chain continuation"),
+        lash_core::ProcessStartOutcome::AlreadyApplied(_)
+    ));
+    let (fresh_authority, fresh_started) =
+        invocation_started("owner-bound-segment", "fresh-invocation", 2);
+    assert!(matches!(
+        registry
+            .record_first_started_with_authority(
+                "owner-bound-segment",
+                fresh_started,
+                &fresh_authority,
+            )
+            .await
+            .expect("fresh owner-bound invocation verdict"),
+        lash_core::ProcessStartOutcome::AlreadyStarted { .. }
+    ));
 }
 
 #[tokio::test]

@@ -1,5 +1,6 @@
 use crate::plugin::PluginError;
 
+use super::ProcessCompletionOutcome;
 use super::engine::PersistedSegmentHandover;
 use super::events::{
     ProcessAwaitOutput, ProcessCompletionAuthority, ProcessEvent, ProcessEventAppendRequest,
@@ -146,6 +147,16 @@ pub trait ProcessRegistry: Send + Sync {
         request: ProcessEventAppendRequest,
     ) -> Result<ProcessEventAppendResult, PluginError>;
 
+    /// Append an event emitted by the currently executing process attempt.
+    ///
+    /// Implementations validate `authority` and append in one atomic write.
+    async fn append_event_with_authority(
+        &self,
+        process_id: &str,
+        request: ProcessEventAppendRequest,
+        authority: &ProcessExecutionWriteAuthority,
+    ) -> Result<ProcessEventAppendResult, PluginError>;
+
     async fn events_after(
         &self,
         process_id: &str,
@@ -219,7 +230,7 @@ pub trait ProcessRegistry: Send + Sync {
         process_id: &str,
         await_output: ProcessAwaitOutput,
         authority: ProcessCompletionAuthority,
-    ) -> Result<ProcessRecord, PluginError>;
+    ) -> Result<ProcessCompletionOutcome, PluginError>;
 
     /// Atomically append the terminal output while the supplied process lease
     /// is still current, then release that lease in the same transaction.
@@ -233,28 +244,13 @@ pub trait ProcessRegistry: Send + Sync {
         &self,
         lease: &ProcessLease,
         await_output: ProcessAwaitOutput,
-    ) -> Result<ProcessRecord, PluginError>;
+    ) -> Result<ProcessCompletionOutcome, PluginError>;
 
     /// Record the durable, lease-fenced "execution started" fact (ADR 0019).
     ///
-    /// First-writer-wins: the first call stores `started`; a later call is an
-    /// idempotent no-op returning the existing record unchanged (the fact is
-    /// immutable once written, so the sweep can prove an OwnerBound row has
-    /// begun executing). Implementations reject unknown process ids.
-    async fn record_first_started(
-        &self,
-        process_id: &str,
-        started: ProcessStarted,
-    ) -> Result<ProcessRecord, PluginError> {
-        self.record_first_started_with_authority(
-            process_id,
-            started,
-            &ProcessExecutionWriteAuthority::workflow_key(process_id),
-        )
-        .await?
-        .into_record()
-    }
-
+    /// The first attempt stores `started`. An identical replay is idempotent.
+    /// Rerunnable recovery replaces the retained fact with the next consecutive
+    /// attempt; OwnerBound recovery rejects a distinct execution.
     async fn record_first_started_with_authority(
         &self,
         process_id: &str,
@@ -275,33 +271,12 @@ pub trait ProcessRegistry: Send + Sync {
         request: AbandonRequest,
     ) -> Result<ProcessRecord, PluginError>;
 
-    async fn set_process_wait(
-        &self,
-        process_id: &str,
-        wait: WaitState,
-    ) -> Result<ProcessRecord, PluginError> {
-        self.set_process_wait_with_authority(
-            process_id,
-            wait,
-            &ProcessExecutionWriteAuthority::workflow_key(process_id),
-        )
-        .await
-    }
-
     async fn set_process_wait_with_authority(
         &self,
         process_id: &str,
         wait: WaitState,
         authority: &ProcessExecutionWriteAuthority,
     ) -> Result<ProcessRecord, PluginError>;
-
-    async fn clear_process_wait(&self, process_id: &str) -> Result<ProcessRecord, PluginError> {
-        self.clear_process_wait_with_authority(
-            process_id,
-            &ProcessExecutionWriteAuthority::workflow_key(process_id),
-        )
-        .await
-    }
 
     async fn clear_process_wait_with_authority(
         &self,

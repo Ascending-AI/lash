@@ -116,7 +116,11 @@ impl ToolProcessEventClient {
         };
         let result = process
             .registry
-            .append_event(&process.process_id, request)
+            .append_event_with_authority(
+                &process.process_id,
+                request,
+                &process.execution_write_authority,
+            )
             .await?;
         enqueue_wake_delivery(
             process.store.clone(),

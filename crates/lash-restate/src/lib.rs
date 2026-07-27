@@ -1242,8 +1242,15 @@ impl RestateProcessRunner for RestateCoreProcessRunner {
         handover: Option<lash_core::SegmentHandover>,
         cancellation: tokio_util::sync::CancellationToken,
     ) -> Result<lash_core::ProcessRunOutcome, PluginError> {
-        let execution_write_authority =
-            lash_core::ProcessExecutionWriteAuthority::workflow_key(registration.id.clone());
+        let execution_write_authority = execution_context
+            .execution_write_authority
+            .clone()
+            .ok_or_else(|| {
+                PluginError::Session(format!(
+                    "Restate process `{}` omitted its invocation execution identity",
+                    registration.id
+                ))
+            })?;
         Box::pin(
             self.worker
                 .run_process_segment_with_scoped_effect_controller(
@@ -1666,6 +1673,14 @@ impl RestateProcessIngressRunner {
         let segment_ordinal = latest_handover
             .as_ref()
             .map_or(0, |handover| handover.segment_ordinal);
+        let execution_id = (segment_ordinal > 0)
+            .then(|| {
+                record.first_started.as_deref().and_then(|started| {
+                    (started.owner.owner_id == format!("restate:{process_id}"))
+                        .then(|| started.owner.incarnation_id.clone())
+                })
+            })
+            .flatten();
         let workflow_key = process_segment_workflow_key(&process_id, segment_ordinal);
         let registration = ProcessRegistration {
             id: record.id,
@@ -1689,6 +1704,7 @@ impl RestateProcessIngressRunner {
                     registration,
                     execution_context,
                     segment_ordinal,
+                    execution_id,
                 },
             )
             .await
@@ -1899,6 +1915,10 @@ pub struct RestateProcessWorkflowInput {
     pub execution_context: ProcessExecutionContext,
     #[serde(default)]
     pub segment_ordinal: u64,
+    /// Root Restate invocation id for this execution attempt. Segment
+    /// successors carry it forward so a process chain remains one attempt.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub execution_id: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, serde::Deserialize)]
@@ -2036,10 +2056,15 @@ where
         process_id: &str,
         proposed: ProcessAwaitOutput,
     ) -> Result<ProcessAwaitOutput, PluginError> {
-        let record = self
+        let completion = self
             .registry
             .complete_process(process_id, proposed, workflow_key_authority(process_id))
             .await?;
+        let record = match completion {
+            lash_core::ProcessCompletionOutcome::Committed(record) => record,
+            lash_core::ProcessCompletionOutcome::AlreadyApplied { stored }
+            | lash_core::ProcessCompletionOutcome::Superseded { stored } => stored,
+        };
         record.status.await_output().cloned().ok_or_else(|| {
             PluginError::Session(format!(
                 "process `{process_id}` completion returned a non-terminal record"
@@ -2052,7 +2077,7 @@ where
         registration: ProcessRegistration,
         execution_context: ProcessExecutionContext,
         scoped_effect_controller: ScopedEffectController<'_>,
-        _segment_ordinal: u64,
+        segment_ordinal: u64,
         handover: Option<lash_core::SegmentHandover>,
         cancellation_signal: F,
     ) -> Result<lash_core::ProcessRunOutcome, HandlerError>
@@ -2060,6 +2085,11 @@ where
         F: Future<Output = Result<(), HandlerError>>,
     {
         let process_id = registration.id.clone();
+        if segment_ordinal > 0 && handover.is_none() {
+            return Err(HandlerError::from(TerminalError::new(format!(
+                "process `{process_id}` segment {segment_ordinal} omitted its validated handover"
+            ))));
+        }
         if self
             .process_cancel_requested(&process_id)
             .await
@@ -2238,6 +2268,10 @@ where
         Json(input): Json<RestateProcessWorkflowInput>,
     ) -> HandlerResult<Json<RestateProcessWorkflowOutput>> {
         let process_id = input.registration.id.clone();
+        let execution_id = input
+            .execution_id
+            .clone()
+            .unwrap_or_else(|| ctx.invocation_id().to_string());
         let record = self
             .registry
             .try_get_process(&process_id)
@@ -2365,7 +2399,15 @@ where
             let outcome = self
                 .run_registration(
                     input.registration.clone(),
-                    input.execution_context.clone(),
+                    input
+                        .execution_context
+                        .clone()
+                        .with_execution_write_authority(
+                            lash_core::ProcessExecutionWriteAuthority::invocation(
+                                process_id.clone(),
+                                execution_id.clone(),
+                            ),
+                        ),
                     scoped_effect_controller,
                     input.segment_ordinal,
                     handover,
@@ -2499,6 +2541,7 @@ where
                         registration: input.registration,
                         execution_context: input.execution_context,
                         segment_ordinal: next_segment_ordinal,
+                        execution_id: Some(execution_id),
                     }),
                 );
                 let _ = request.send().invocation_id().await?;
@@ -3635,6 +3678,7 @@ macro_rules! impl_restate_controller_context {
                             registration,
                             execution_context,
                             segment_ordinal: 0,
+                            execution_id: None,
                         }),
                     );
                     let handle = request.send();

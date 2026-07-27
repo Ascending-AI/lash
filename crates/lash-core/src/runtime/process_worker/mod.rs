@@ -486,9 +486,21 @@ impl DurableProcessWorker {
             })?;
         let (owner, fencing_token) = match &execution_write_authority {
             crate::ProcessExecutionWriteAuthority::Lease(lease) => {
-                (lease.owner.clone(), lease.fencing_token)
+                (self.config.lease_owner.clone(), lease.fencing_token)
             }
-            crate::ProcessExecutionWriteAuthority::WorkflowKey { .. } => {
+            crate::ProcessExecutionWriteAuthority::Invocation {
+                process_id,
+                execution_id,
+                ..
+            } => (
+                crate::LeaseOwnerIdentity::opaque(
+                    format!("restate:{process_id}"),
+                    execution_id.clone(),
+                ),
+                0,
+            ),
+            #[cfg(any(test, feature = "testing"))]
+            crate::ProcessExecutionWriteAuthority::Testing { .. } => {
                 (self.config.lease_owner.clone(), 0)
             }
         };
@@ -499,6 +511,7 @@ impl DurableProcessWorker {
                 started.attempt.saturating_add(1)
             }
         });
+        let execution_write_authority = execution_write_authority.bind_attempt(attempt);
         self.config
             .process_registry
             .record_first_started_with_authority(
@@ -547,7 +560,7 @@ impl DurableProcessWorker {
                 registration.id
             ))
         })?;
-        Ok(manager
+        manager
             .run_process(
                 registration,
                 execution_context,
@@ -556,7 +569,8 @@ impl DurableProcessWorker {
                 cancellation,
                 handover,
             )
-            .await)
+            .await
+            .map_err(crate::ProcessInfraError::into_plugin_error)
     }
 
     /// Queue every non-terminal process this worker can claim and execute the

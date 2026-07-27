@@ -12,6 +12,8 @@ use super::process_coordination::{
 use super::process_filters::list_processes_filters_by_enriched_fields;
 use super::process_references::live_reference_summary_tracks_non_terminal_reference_counts;
 use super::*;
+use crate::ProcessCompletionOutcome;
+use crate::TestProcessRegistryWriteExt;
 
 mod completion_authority;
 mod execution_fencing;
@@ -1329,7 +1331,7 @@ async fn abandoned_terminal_round_trips_and_pins_writer_rules(registry: Arc<dyn 
         terminal.status.terminal_state(),
         Some(ProcessTerminalState::Abandoned)
     );
-    match terminal.status {
+    match terminal.into_record().status {
         ProcessStatus::Abandoned {
             await_output: ProcessAwaitOutput::Abandoned { evidence: got, .. },
         } => assert_eq!(
@@ -1364,6 +1366,10 @@ async fn abandoned_terminal_round_trips_and_pins_writer_rules(registry: Arc<dyn 
         )
         .await
         .expect("terminal retry returns stored outcome");
+    assert!(matches!(
+        &replayed,
+        ProcessCompletionOutcome::Superseded { .. }
+    ));
     assert_eq!(
         replayed.status.terminal_state(),
         Some(ProcessTerminalState::Abandoned)

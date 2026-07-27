@@ -12,7 +12,7 @@ use super::events::{
     ProcessEventAppendResult, terminal_append_request,
 };
 use super::model::{
-    AbandonRequest, PROCESS_LEASE_SCHEMA_VERSION, ProcessChangeCursor,
+    AbandonRequest, PROCESS_LEASE_SCHEMA_VERSION, ProcessChangeCursor, ProcessCompletionOutcome,
     ProcessExecutionWriteAuthority, ProcessExternalRef, ProcessHandleDescriptor,
     ProcessHandleGrant, ProcessHandleGrantEntry, ProcessLease, ProcessLeaseClaimOutcome,
     ProcessLeaseCompletion, ProcessListFilter, ProcessRecord, ProcessRegistration,
@@ -37,6 +37,7 @@ pub struct TestLocalProcessRegistry {
     leases: Arc<Mutex<ManagedLeaseMap>>,
     handovers: Arc<Mutex<HashMap<(String, u64), crate::PersistedSegmentHandover>>>,
     trigger_store: Option<Arc<crate::InMemoryTriggerStore>>,
+    execution_write_pause: Arc<std::sync::Mutex<Option<ExecutionWritePause>>>,
 }
 
 impl Default for TestLocalProcessRegistry {
@@ -50,6 +51,7 @@ impl Default for TestLocalProcessRegistry {
             leases: Arc::new(Mutex::new(HashMap::new())),
             handovers: Arc::new(Mutex::new(HashMap::new())),
             trigger_store: None,
+            execution_write_pause: Arc::new(std::sync::Mutex::new(None)),
         }
     }
 }
@@ -57,6 +59,70 @@ impl Default for TestLocalProcessRegistry {
 type ManagedProcessMap = HashMap<String, ManagedProcessRecord>;
 type ManagedGrantMap = HashMap<SessionScopeId, HashMap<String, ProcessHandleGrant>>;
 type ManagedLeaseMap = HashMap<String, ProcessLease>;
+
+#[derive(Clone)]
+struct ExecutionWritePause {
+    validated: Arc<tokio::sync::Notify>,
+    resume: Arc<tokio::sync::Notify>,
+}
+
+#[derive(Clone)]
+pub struct ExecutionWritePauseHandle {
+    validated: Arc<tokio::sync::Notify>,
+    resume: Arc<tokio::sync::Notify>,
+}
+
+impl ExecutionWritePauseHandle {
+    pub async fn wait_until_validated(&self) {
+        self.validated.notified().await;
+    }
+
+    pub fn resume(&self) {
+        self.resume.notify_one();
+    }
+}
+
+/// Explicit fixture-only conveniences for lifecycle writes whose production
+/// API requires an execution authority.
+#[async_trait::async_trait]
+pub trait TestProcessRegistryWriteExt: ProcessRegistry {
+    async fn record_first_started(
+        &self,
+        process_id: &str,
+        started: ProcessStarted,
+    ) -> Result<ProcessRecord, PluginError> {
+        self.record_first_started_with_authority(
+            process_id,
+            started,
+            &ProcessExecutionWriteAuthority::testing(process_id),
+        )
+        .await?
+        .into_record()
+    }
+
+    async fn set_process_wait(
+        &self,
+        process_id: &str,
+        wait: WaitState,
+    ) -> Result<ProcessRecord, PluginError> {
+        self.set_process_wait_with_authority(
+            process_id,
+            wait,
+            &ProcessExecutionWriteAuthority::testing(process_id),
+        )
+        .await
+    }
+
+    async fn clear_process_wait(&self, process_id: &str) -> Result<ProcessRecord, PluginError> {
+        self.clear_process_wait_with_authority(
+            process_id,
+            &ProcessExecutionWriteAuthority::testing(process_id),
+        )
+        .await
+    }
+}
+
+impl<T> TestProcessRegistryWriteExt for T where T: ProcessRegistry + ?Sized {}
 
 struct ManagedProcessRecord {
     record: ProcessRecord,
@@ -67,6 +133,34 @@ struct ManagedProcessRecord {
 }
 
 impl TestLocalProcessRegistry {
+    #[doc(hidden)]
+    pub fn pause_next_execution_write_after_validation(&self) -> ExecutionWritePauseHandle {
+        let pause = ExecutionWritePause {
+            validated: Arc::new(tokio::sync::Notify::new()),
+            resume: Arc::new(tokio::sync::Notify::new()),
+        };
+        *self
+            .execution_write_pause
+            .lock()
+            .expect("execution write pause lock") = Some(pause.clone());
+        ExecutionWritePauseHandle {
+            validated: pause.validated,
+            resume: pause.resume,
+        }
+    }
+
+    async fn pause_execution_write_after_validation(&self) {
+        let pause = self
+            .execution_write_pause
+            .lock()
+            .expect("execution write pause lock")
+            .take();
+        if let Some(pause) = pause {
+            pause.validated.notify_one();
+            pause.resume.notified().await;
+        }
+    }
+
     pub async fn set_process_read_error(&self, error: Option<PluginError>) {
         *self.process_read_error.lock().await = error;
     }
@@ -512,6 +606,33 @@ impl ProcessRegistry for TestLocalProcessRegistry {
         self.append_managed_event(record, request).await
     }
 
+    async fn append_event_with_authority(
+        &self,
+        process_id: &str,
+        request: ProcessEventAppendRequest,
+        authority: &ProcessExecutionWriteAuthority,
+    ) -> Result<ProcessEventAppendResult, PluginError> {
+        let mut managed = self.managed.lock().await;
+        let Some(record) = managed.get_mut(process_id) else {
+            return Err(PluginError::Session(format!(
+                "unknown process `{process_id}`"
+            )));
+        };
+        let leases = self.leases.lock().await;
+        validate_in_memory_execution_authority(
+            &leases,
+            process_id,
+            &record.record,
+            authority,
+            None,
+            current_epoch_ms(),
+        )?;
+        self.pause_execution_write_after_validation().await;
+        let result = self.append_managed_event(record, request).await;
+        drop(leases);
+        result
+    }
+
     async fn events_after(
         &self,
         process_id: &str,
@@ -557,7 +678,7 @@ impl ProcessRegistry for TestLocalProcessRegistry {
         process_id: &str,
         await_output: ProcessAwaitOutput,
         authority: ProcessCompletionAuthority,
-    ) -> Result<ProcessRecord, PluginError> {
+    ) -> Result<ProcessCompletionOutcome, PluginError> {
         // Hold the `managed` lock across load→validate→append so no other
         // completion can complete, prune, and re-register the row with a
         // different disposition between the validation and the terminal append.
@@ -569,7 +690,10 @@ impl ProcessRegistry for TestLocalProcessRegistry {
             )));
         };
         if record.record.is_terminal() {
-            return Ok(record.record.clone());
+            return Ok(ProcessCompletionOutcome::from_stored(
+                record.record.clone(),
+                &await_output,
+            ));
         }
         authority.validate(process_id, record.record.disposition, &await_output)?;
         let request = terminal_append_request(process_id, &await_output, Some(&authority));
@@ -586,11 +710,14 @@ impl ProcessRegistry for TestLocalProcessRegistry {
             replay_lookup,
             current_epoch_ms(),
         )?;
-        match prepared {
+        let outcome = match prepared {
             super::ProcessEventAppendPlan::Replay { repair_record, .. } => {
                 if let Some(repaired) = repair_record {
                     record.record = repaired;
                     record.change_seq = self.next_change_seq().await;
+                }
+                ProcessCompletionOutcome::AlreadyApplied {
+                    stored: record.record.clone(),
                 }
             }
             super::ProcessEventAppendPlan::Insert {
@@ -607,16 +734,17 @@ impl ProcessRegistry for TestLocalProcessRegistry {
                         .insert(replay.key, (payload_hash, event.clone()));
                 }
                 record.events.push(event);
+                ProcessCompletionOutcome::Committed(record.record.clone())
             }
-        }
-        Ok(record.record.clone())
+        };
+        Ok(outcome)
     }
 
     async fn complete_process_with_lease(
         &self,
         lease: &ProcessLease,
         await_output: ProcessAwaitOutput,
-    ) -> Result<ProcessRecord, PluginError> {
+    ) -> Result<ProcessCompletionOutcome, PluginError> {
         let mut managed = self.managed.lock().await;
         let Some(record) = managed.get_mut(&lease.process_id) else {
             return Err(PluginError::Session(format!(
@@ -625,7 +753,10 @@ impl ProcessRegistry for TestLocalProcessRegistry {
             )));
         };
         if record.record.is_terminal() {
-            return Ok(record.record.clone());
+            return Ok(ProcessCompletionOutcome::from_stored(
+                record.record.clone(),
+                &await_output,
+            ));
         }
         let now = current_epoch_ms();
         let request = terminal_append_request(&lease.process_id, &await_output, None);
@@ -638,7 +769,9 @@ impl ProcessRegistry for TestLocalProcessRegistry {
         let prepared =
             prepare_process_event_append(&record.record, request, sequence, replay_lookup, now)?;
         if matches!(prepared, super::ProcessEventAppendPlan::Replay { .. }) {
-            return Ok(record.record.clone());
+            return Ok(ProcessCompletionOutcome::AlreadyApplied {
+                stored: record.record.clone(),
+            });
         }
 
         let mut leases = self.leases.lock().await;
@@ -674,7 +807,7 @@ impl ProcessRegistry for TestLocalProcessRegistry {
         current.lease_token.clear();
         current.claimed_at_epoch_ms = 0;
         current.expires_at_epoch_ms = 0;
-        Ok(record.record.clone())
+        Ok(ProcessCompletionOutcome::Committed(record.record.clone()))
     }
 
     async fn record_first_started_with_authority(
@@ -689,13 +822,15 @@ impl ProcessRegistry for TestLocalProcessRegistry {
                 "unknown process `{process_id}`"
             )));
         };
+        let leases = self.leases.lock().await;
         validate_in_memory_execution_authority(
-            &self.leases,
+            &leases,
             process_id,
+            &record.record,
             authority,
+            Some(&started),
             current_epoch_ms(),
-        )
-        .await?;
+        )?;
         match prepare_process_start(&record.record, &started)? {
             ProcessStartPlan::AlreadyApplied => {
                 return Ok(ProcessStartOutcome::AlreadyApplied(record.record.clone()));
@@ -720,6 +855,7 @@ impl ProcessRegistry for TestLocalProcessRegistry {
         }
         let request = ProcessEventAppendRequest::first_started(process_id, &started);
         self.append_managed_event(record, request).await?;
+        drop(leases);
         Ok(ProcessStartOutcome::Started(record.record.clone()))
     }
 
@@ -759,13 +895,15 @@ impl ProcessRegistry for TestLocalProcessRegistry {
                 "unknown process `{process_id}`"
             )));
         };
+        let leases = self.leases.lock().await;
         validate_in_memory_execution_authority(
-            &self.leases,
+            &leases,
             process_id,
+            &record.record,
             authority,
+            None,
             current_epoch_ms(),
-        )
-        .await?;
+        )?;
         if record.record.is_terminal() {
             return Err(PluginError::Session(format!(
                 "terminal process `{process_id}` cannot enter a wait state"
@@ -776,6 +914,7 @@ impl ProcessRegistry for TestLocalProcessRegistry {
         }
         let request = ProcessEventAppendRequest::wait_entered(process_id, &wait);
         self.append_managed_event(record, request).await?;
+        drop(leases);
         Ok(record.record.clone())
     }
 
@@ -790,18 +929,21 @@ impl ProcessRegistry for TestLocalProcessRegistry {
                 "unknown process `{process_id}`"
             )));
         };
+        let leases = self.leases.lock().await;
         validate_in_memory_execution_authority(
-            &self.leases,
+            &leases,
             process_id,
+            &record.record,
             authority,
+            None,
             current_epoch_ms(),
-        )
-        .await?;
+        )?;
         let Some(wait) = record.record.wait.clone() else {
             return Ok(record.record.clone());
         };
         let request = ProcessEventAppendRequest::wait_cleared(process_id, &wait);
         self.append_managed_event(record, request).await?;
+        drop(leases);
         Ok(record.record.clone())
     }
 
@@ -1114,27 +1256,34 @@ fn process_lease_expired(process_id: &str) -> PluginError {
     }
 }
 
-async fn validate_in_memory_execution_authority(
-    leases: &Mutex<ManagedLeaseMap>,
+fn validate_in_memory_execution_authority(
+    leases: &ManagedLeaseMap,
     process_id: &str,
+    record: &ProcessRecord,
     authority: &ProcessExecutionWriteAuthority,
+    start: Option<&ProcessStarted>,
     now: u64,
 ) -> Result<(), PluginError> {
     match authority {
-        ProcessExecutionWriteAuthority::WorkflowKey { workflow_key } => {
-            if workflow_key != process_id {
-                return Err(PluginError::Session(format!(
-                    "process `{process_id}` workflow execution authority does not match its workflow key"
-                )));
+        ProcessExecutionWriteAuthority::Invocation { .. } => {
+            if let Some(started) = start {
+                authority.validate_invocation_for_start(process_id, started)
+            } else {
+                authority.validate_invocation_for_write(process_id, record)
             }
-            Ok(())
+        }
+        ProcessExecutionWriteAuthority::Testing { .. } => {
+            if let Some(started) = start {
+                authority.validate_invocation_for_start(process_id, started)
+            } else {
+                authority.validate_invocation_for_write(process_id, record)
+            }
         }
         ProcessExecutionWriteAuthority::Lease(lease) => {
             if lease.process_id != process_id {
                 return Err(process_lease_expired(process_id));
             }
-            let current = leases.lock().await;
-            if current.get(process_id).is_some_and(|current| {
+            if leases.get(process_id).is_some_and(|current| {
                 !current.lease_token.is_empty()
                     && current.owner.same_incarnation(&lease.owner)
                     && current.lease_token == lease.lease_token
@@ -1157,4 +1306,102 @@ fn process_external_ref_conflict(
     PluginError::Session(format!(
         "process `{process_id}` external ref conflict: existing {existing:?}, new {new:?}"
     ))
+}
+
+#[cfg(test)]
+mod atomic_execution_write_tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn claim_cannot_interleave_between_authority_validation_and_append() {
+        const PROCESS_ID: &str = "atomic-authority-append";
+        let registry = Arc::new(TestLocalProcessRegistry::default());
+        registry
+            .register_process(
+                ProcessRegistration::new(
+                    PROCESS_ID,
+                    crate::ProcessInput::Engine {
+                        kind: "test".to_string(),
+                        payload: serde_json::Value::Null,
+                    },
+                    crate::RecoveryDisposition::Rerunnable,
+                    crate::ProcessProvenance::host(),
+                )
+                .with_execution_env_ref(Some(crate::ProcessExecutionEnvRef::new("test-env"))),
+            )
+            .await
+            .expect("register");
+        let owner = crate::LeaseOwnerIdentity::opaque("worker-a", "incarnation-a");
+        let lease = registry
+            .claim_process_lease(PROCESS_ID, &owner, 60_000)
+            .await
+            .expect("claim")
+            .acquired()
+            .expect("lease");
+        registry
+            .record_first_started_with_authority(
+                PROCESS_ID,
+                ProcessStarted {
+                    owner: owner.clone(),
+                    fencing_token: lease.fencing_token,
+                    attempt: 1,
+                    started_at_ms: 1,
+                },
+                &ProcessExecutionWriteAuthority::lease(lease.clone()),
+            )
+            .await
+            .expect("start");
+
+        let pause = registry.pause_next_execution_write_after_validation();
+        let writer_registry = Arc::clone(&registry);
+        let writer_lease = lease.clone();
+        let writer = crate::task::spawn(async move {
+            writer_registry
+                .append_event_with_authority(
+                    PROCESS_ID,
+                    ProcessEventAppendRequest::cancel_requested(PROCESS_ID, Some("race".into())),
+                    &ProcessExecutionWriteAuthority::lease(writer_lease),
+                )
+                .await
+        });
+        pause.wait_until_validated().await;
+
+        let claimant_registry = Arc::clone(&registry);
+        let claimant_lease = lease.clone();
+        let claimant = crate::task::spawn(async move {
+            claimant_registry
+                .complete_process_lease(&ProcessLeaseCompletion::from_lease(&claimant_lease))
+                .await?;
+            claimant_registry
+                .claim_process_lease(
+                    PROCESS_ID,
+                    &crate::LeaseOwnerIdentity::opaque("worker-b", "incarnation-b"),
+                    60_000,
+                )
+                .await
+        });
+        assert!(
+            tokio::time::timeout(std::time::Duration::from_millis(25), async {
+                while !claimant.is_finished() {
+                    tokio::task::yield_now().await;
+                }
+            })
+            .await
+            .is_err(),
+            "claim must remain blocked while the validated append holds the lease lock"
+        );
+
+        pause.resume();
+        writer
+            .await
+            .expect("writer joins")
+            .expect("validated writer appends");
+        let claimed = claimant
+            .await
+            .expect("claimant joins")
+            .expect("claim after append")
+            .acquired()
+            .expect("new lease");
+        assert!(claimed.fencing_token > lease.fencing_token);
+    }
 }

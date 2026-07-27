@@ -32,9 +32,8 @@ pub use turn_input::*;
 pub use turn_result::*;
 pub use usage_activity::*;
 
-// Bumped to 17: session observation envelopes carry replay-store incarnation
-// and optional turn identity.
-pub const REMOTE_PROTOCOL_VERSION: u32 = 17;
+// Bumped to 18: process abandon evidence can name EngineGaveUp.
+pub const REMOTE_PROTOCOL_VERSION: u32 = 18;
 
 pub fn ensure_protocol_version(actual: u32) -> Result<(), RemoteProtocolError> {
     if actual == REMOTE_PROTOCOL_VERSION {

@@ -174,6 +174,7 @@ mod tests {
                     lash_core::ProcessCompletionAuthority::external_owner(),
                 )
                 .await
+                .map(lash_core::ProcessCompletionOutcome::into_record)
         }
 
         async fn await_process(

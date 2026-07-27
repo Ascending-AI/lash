@@ -864,7 +864,7 @@ impl lash_core::ProcessEngine for LashlangProcessEngine {
         &self,
         context: lash_core::ProcessEngineRunContext<'_>,
         payload: serde_json::Value,
-    ) -> lash_core::ProcessRunOutcome {
+    ) -> Result<lash_core::ProcessRunOutcome, lash_core::ProcessInfraError> {
         process::run_lashlang_process(self.clone(), context, payload).await
     }
 

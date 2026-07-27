@@ -327,17 +327,25 @@ fn process_lease_expired(process_id: &str) -> PluginError {
 async fn validate_process_execution_authority_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     process_id: &str,
+    record: &ProcessRecord,
     authority: &ProcessExecutionWriteAuthority,
+    start: Option<&ProcessStarted>,
     now: u64,
 ) -> Result<(), PluginError> {
     match authority {
-        ProcessExecutionWriteAuthority::WorkflowKey { workflow_key } => {
-            if workflow_key != process_id {
-                return Err(PluginError::Session(format!(
-                    "process `{process_id}` workflow execution authority does not match its workflow key"
-                )));
+        ProcessExecutionWriteAuthority::Invocation { .. } => {
+            if let Some(started) = start {
+                authority.validate_invocation_for_start(process_id, started)
+            } else {
+                authority.validate_invocation_for_write(process_id, record)
             }
-            Ok(())
+        }
+        ProcessExecutionWriteAuthority::Testing { .. } => {
+            if let Some(started) = start {
+                authority.validate_invocation_for_start(process_id, started)
+            } else {
+                authority.validate_invocation_for_write(process_id, record)
+            }
         }
         ProcessExecutionWriteAuthority::Lease(lease) => {
             if lease.process_id != process_id {

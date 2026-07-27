@@ -426,6 +426,9 @@ pub struct ProcessStartRequest {
     pub id: ProcessId,
     pub input: ProcessInput,
     pub disposition: RecoveryDisposition,
+    /// Maximum execution attempts. `None` delegates pacing indefinitely to the
+    /// engine; deterministic failures then require host cancellation or
+    /// abandonment to resolve awaiters.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub max_attempts: Option<u32>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -636,6 +639,10 @@ pub struct ProcessRegistration {
     pub id: ProcessId,
     pub input: Arc<ProcessInput>,
     pub disposition: RecoveryDisposition,
+    /// Maximum execution attempts, or `None` for engine-paced indefinite
+    /// retry. A deterministic failure with `None` can remain non-terminal
+    /// indefinitely; producers with deterministic failure modes should set an
+    /// explicit budget.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub max_attempts: Option<u32>,
     pub identity: ProcessIdentity,
@@ -825,6 +832,7 @@ pub struct ProcessRecord {
     /// durable rows cannot deserialize and are handled by each store's schema
     /// version bump (reject-and-recreate), never by an API/serde default.
     pub disposition: RecoveryDisposition,
+    /// Persisted attempt budget; `None` retains engine-paced indefinite retry.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub max_attempts: Option<u32>,
     pub identity: ProcessIdentity,

@@ -646,6 +646,7 @@ impl crate::ProcessService for MockSessionManager {
                 authority,
             )
             .await
+            .map(crate::ProcessCompletionOutcome::into_record)
     }
 
     async fn await_process(

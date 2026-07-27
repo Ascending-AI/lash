@@ -134,8 +134,9 @@ registry events plus process leases:
 | Turn    | effect-host history | host-recorded effects       | workflow handler replay |
 | Process | `ProcessLease`     | registry events + journal   | `drive_pending_processes` (on start / on open) |
 
-The `DurableProcessWorker` — the Restate execution authority via
-`RestateCoreProcessRunner` / `LashProcessWorkflow` — is the single executor for
+The `DurableProcessWorker` — with a persisted lease inline and a replay-stable
+root Restate invocation id via `RestateCoreProcessRunner` /
+`LashProcessWorkflow` — is the single executor for
 **all** non-terminal registered processes, regardless of how they were started.
 It:
 
@@ -215,6 +216,12 @@ A generalization of code that already existed for turns — not a new subsystem:
   non-terminal. An `ExternallyOwned` row is never claimed. Idempotent by
   `process_id`: terminal processes are never on the worklist, and a process that
   became terminal between the list and the claim is detected and skipped.
+  Engine infrastructure failures do not become producer `Failed` terminals:
+  the worker releases the claim and lets the engine/substrate pace a retry.
+  `max_attempts = None` deliberately means unbounded retry, so a deterministic
+  failure may keep the row non-terminal and its awaiters pending until the host
+  cancels or abandons it. Producers with deterministic failure modes should set
+  an explicit `max_attempts`.
   Inline execution is bounded per worker by
   `process_execution_concurrency` (default 64, minimum 1). A run holds a slot
   for its own work, including provider streaming and tool I/O, releases it while

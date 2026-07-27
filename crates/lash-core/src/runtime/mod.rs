@@ -124,22 +124,21 @@ pub use observation::{
     SessionObservationSubscription, SessionProcessEventKind, SessionQueueEventKind, SessionResume,
     SessionRevision,
 };
-#[cfg(any(test, feature = "testing"))]
-pub use process::TestLocalProcessRegistry;
 pub use process::{
     AbandonEvidence, AbandonRequest, AbandonWriter, DefaultProcessCancelAbility,
     InMemoryProcessExecutionEnvStore, ObservedProcess, ObservedProcessEvent, ObservedWorkItem,
     PROCESS_LEASE_SCHEMA_VERSION, PersistedSegmentHandover, ProcessAttach, ProcessAwaitOutput,
     ProcessAwaiter, ProcessCancelAbility, ProcessCancelAllRequest, ProcessCancelRequest,
     ProcessCancelSource, ProcessCancelSummary, ProcessChangeCursor, ProcessChangeHub,
-    ProcessCompletionAuthority, ProcessEngine, ProcessEngineRegistry, ProcessEngineRunContext,
-    ProcessEngineRunGuard, ProcessEngineRuntimeContext, ProcessEngineValidationContext,
-    ProcessEvent, ProcessEventAppendPlan, ProcessEventAppendRequest, ProcessEventAppendResult,
-    ProcessEventSemantics, ProcessEventSemanticsSpec, ProcessEventSink, ProcessEventType,
-    ProcessExecutionContext, ProcessExecutionEnvRef, ProcessExecutionEnvSpec,
-    ProcessExecutionEnvStore, ProcessExecutionWriteAuthority, ProcessExternalRef,
-    ProcessHandleDescriptor, ProcessHandleGrant, ProcessHandleGrantEntry, ProcessHandleSummary,
-    ProcessId, ProcessIdentity, ProcessInput, ProcessLease, ProcessLeaseClaimOutcome,
+    ProcessCompletionAuthority, ProcessCompletionOutcome, ProcessEngine, ProcessEngineRegistry,
+    ProcessEngineRunContext, ProcessEngineRunGuard, ProcessEngineRuntimeContext,
+    ProcessEngineValidationContext, ProcessEvent, ProcessEventAppendPlan,
+    ProcessEventAppendRequest, ProcessEventAppendResult, ProcessEventSemantics,
+    ProcessEventSemanticsSpec, ProcessEventSink, ProcessEventType, ProcessExecutionContext,
+    ProcessExecutionEnvRef, ProcessExecutionEnvSpec, ProcessExecutionEnvStore,
+    ProcessExecutionWriteAuthority, ProcessExternalRef, ProcessHandleDescriptor,
+    ProcessHandleGrant, ProcessHandleGrantEntry, ProcessHandleSummary, ProcessId, ProcessIdentity,
+    ProcessInfraError, ProcessInput, ProcessLease, ProcessLeaseClaimOutcome,
     ProcessLeaseCompletion, ProcessLifecycleStatus, ProcessListFilter, ProcessListMode,
     ProcessLiveReferenceSummary, ProcessOpScope, ProcessOriginator, ProcessProvenance,
     ProcessPruneReport, ProcessRecord, ProcessRegistration, ProcessRegistry, ProcessRunOutcome,
@@ -160,6 +159,8 @@ pub use process::{
     terminal_append_request, terminal_event_type_name, validate_process_signal_name,
     watch_process_registry, watch_process_registry_with_sink,
 };
+#[cfg(any(test, feature = "testing"))]
+pub use process::{TestLocalProcessRegistry, TestProcessRegistryWriteExt};
 pub use process_work_driver::{InlineProcessRunHandle, ProcessRunHandle, ProcessWorkDriver};
 pub use process_worker::{
     DEFAULT_PROCESS_EXECUTION_CONCURRENCY, DurableProcessWorker, DurableProcessWorkerConfig,

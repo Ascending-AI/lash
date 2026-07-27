@@ -54,6 +54,7 @@ pub struct RuntimeExecutionContext<'run> {
 #[derive(Clone)]
 pub(super) struct RuntimeExecutionProcessEventContext {
     pub process_id: String,
+    pub execution_write_authority: crate::ProcessExecutionWriteAuthority,
     pub registry: Arc<dyn crate::ProcessRegistry>,
     pub awaiter: crate::ProcessAwaiter,
     pub store: Option<Arc<dyn crate::RuntimePersistence>>,
@@ -415,9 +416,11 @@ impl<'run> RuntimeExecutionContext<'run> {
         self
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn with_process_event_context(
         mut self,
         process_id: impl Into<String>,
+        execution_write_authority: crate::ProcessExecutionWriteAuthority,
         registry: Arc<dyn crate::ProcessRegistry>,
         awaiter: crate::ProcessAwaiter,
         store: Option<Arc<dyn crate::RuntimePersistence>>,
@@ -426,6 +429,7 @@ impl<'run> RuntimeExecutionContext<'run> {
     ) -> Self {
         self.process_event_context = Some(RuntimeExecutionProcessEventContext {
             process_id: process_id.into(),
+            execution_write_authority,
             registry,
             awaiter,
             store,
@@ -786,7 +790,19 @@ impl<'run> RuntimeExecutionContext<'run> {
         process_id: &str,
         request: crate::ProcessEventAppendRequest,
     ) -> Result<crate::ProcessEvent, crate::PluginError> {
-        let result = registry.append_event(process_id, request).await?;
+        let authority = self
+            .process_event_context
+            .as_ref()
+            .ok_or_else(|| {
+                crate::PluginError::Session(format!(
+                    "process `{process_id}` event emission omitted its execution authority"
+                ))
+            })?
+            .execution_write_authority
+            .clone();
+        let result = registry
+            .append_event_with_authority(process_id, request, &authority)
+            .await?;
         if let Some(context) = self.process_event_context.as_ref() {
             crate::tool_provider::process_events::enqueue_wake_delivery(
                 context.store.clone(),

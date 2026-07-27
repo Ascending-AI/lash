@@ -59,6 +59,16 @@ pub(super) async fn respects_recovery_disposition(registry: Arc<dyn ProcessRegis
         registry
             .record_first_started_with_authority(
                 "fence-rerunnable",
+                started_for(&first, 2),
+                &ProcessExecutionWriteAuthority::lease(first.clone()),
+            )
+            .await,
+        Err(crate::PluginError::ProcessLeaseSuperseded { .. })
+    ));
+    assert!(matches!(
+        registry
+            .record_first_started_with_authority(
+                "fence-rerunnable",
                 started_for(&second, 2),
                 &ProcessExecutionWriteAuthority::lease(second.clone()),
             )
@@ -109,6 +119,19 @@ pub(super) async fn respects_recovery_disposition(registry: Arc<dyn ProcessRegis
         )
         .await
         .expect("current runner clears wait");
+    assert!(matches!(
+        registry
+            .append_event_with_authority(
+                "fence-rerunnable",
+                ProcessEventAppendRequest::new(
+                    "process.progress",
+                    serde_json::json!({"writer": "stale"}),
+                ),
+                &ProcessExecutionWriteAuthority::lease(first.clone()),
+            )
+            .await,
+        Err(crate::PluginError::ProcessLeaseSuperseded { .. })
+    ));
     let rerun_events = registry
         .events_after("fence-rerunnable", 0)
         .await
@@ -167,7 +190,7 @@ pub(super) async fn respects_recovery_disposition(registry: Arc<dyn ProcessRegis
         .record_first_started_with_authority(
             "fence-owner-bound",
             other,
-            &ProcessExecutionWriteAuthority::workflow_key("fence-owner-bound"),
+            &ProcessExecutionWriteAuthority::testing("fence-owner-bound"),
         )
         .await
         .expect("typed owner-bound rejection")
@@ -204,14 +227,27 @@ pub(super) async fn respects_recovery_disposition(registry: Arc<dyn ProcessRegis
         .expect("reclaim transient row")
         .acquired()
         .expect("transient row remains claimable");
-    assert!(
-        !registry
-            .get_process("fence-transient")
-            .await
-            .expect("transient row")
-            .is_terminal()
-    );
-    release_lease(registry.as_ref(), &reclaimed).await;
+    registry
+        .record_first_started_with_authority(
+            "fence-transient",
+            started_for(&reclaimed, 1),
+            &ProcessExecutionWriteAuthority::lease(reclaimed.clone()),
+        )
+        .await
+        .expect("subsequent execution starts after transient failure")
+        .into_record()
+        .expect("subsequent execution is accepted");
+    let completed = registry
+        .complete_process_with_lease(
+            &reclaimed,
+            ProcessAwaitOutput::Success {
+                value: serde_json::json!({"ran": true}),
+                control: None,
+            },
+        )
+        .await
+        .expect("subsequent execution completes");
+    assert!(matches!(&completed, ProcessCompletionOutcome::Committed(_)));
 
     registry
         .register_process(rerunnable_registration("fence-terminal-replay"))
@@ -341,6 +377,7 @@ pub(super) async fn leased_terminal_replay_returns_stored_record(
         .complete_process_with_lease(&current, output.clone())
         .await
         .expect("current lease completes");
+    assert!(matches!(completed, ProcessCompletionOutcome::Committed(_)));
     assert!(completed.is_terminal());
     assert!(
         registry
@@ -354,9 +391,13 @@ pub(super) async fn leased_terminal_replay_returns_stored_record(
         .complete_process_with_lease(&current, output)
         .await
         .expect("same leased terminal replay is idempotent");
+    assert!(matches!(
+        &replayed,
+        ProcessCompletionOutcome::AlreadyApplied { .. }
+    ));
     assert_eq!(
-        serde_json::to_value(&replayed).expect("serialize replayed terminal record"),
-        serde_json::to_value(&completed).expect("serialize completed terminal record"),
+        serde_json::to_value(replayed.stored()).expect("serialize replayed terminal record"),
+        serde_json::to_value(completed.stored()).expect("serialize completed terminal record"),
         "replaying the same terminal event must return the existing terminal record"
     );
     let terminal_events = registry

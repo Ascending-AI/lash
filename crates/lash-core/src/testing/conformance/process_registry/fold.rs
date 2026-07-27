@@ -4,6 +4,7 @@ pub(super) async fn process_record_is_the_fold_of_its_event_log(
     registry: Arc<dyn ProcessRegistry>,
 ) {
     let process_id = "proc-event-fold";
+    let execution_authority = ProcessExecutionWriteAuthority::testing(process_id);
     let base = registry
         .register_process(
             rerunnable_registration(process_id)
@@ -39,14 +40,14 @@ pub(super) async fn process_record_is_the_fold_of_its_event_log(
         started_at_ms: 11,
     };
     registry
-        .record_first_started(process_id, started)
+        .record_first_started_with_authority(process_id, started, &execution_authority)
         .await
         .expect("append first-started lifecycle event");
     assert_process_record_fold(&registry, &base, "first started").await;
     replay_latest_event(&registry, process_id, "process.first_started").await;
     assert_process_record_fold(&registry, &base, "first-started replay").await;
     registry
-        .record_first_started(
+        .record_first_started_with_authority(
             process_id,
             ProcessStarted {
                 owner: process_lease_owner("fold-starter-2"),
@@ -54,6 +55,7 @@ pub(super) async fn process_record_is_the_fold_of_its_event_log(
                 attempt: 2,
                 started_at_ms: 12,
             },
+            &execution_authority,
         )
         .await
         .expect("append second execution attempt");
@@ -71,7 +73,7 @@ pub(super) async fn process_record_is_the_fold_of_its_event_log(
         since_ms: 22,
     };
     registry
-        .set_process_wait(process_id, wait.clone())
+        .set_process_wait_with_authority(process_id, wait.clone(), &execution_authority)
         .await
         .expect("append wait-entered lifecycle event");
     assert_process_record_fold(&registry, &base, "wait entered").await;
@@ -79,7 +81,7 @@ pub(super) async fn process_record_is_the_fold_of_its_event_log(
     assert_process_record_fold(&registry, &base, "wait-entered replay").await;
 
     registry
-        .clear_process_wait(process_id)
+        .clear_process_wait_with_authority(process_id, &execution_authority)
         .await
         .expect("append wait-cleared lifecycle event");
     assert_process_record_fold(&registry, &base, "wait cleared").await;
@@ -93,11 +95,11 @@ pub(super) async fn process_record_is_the_fold_of_its_event_log(
         .expect("load first wait-cycle events");
 
     registry
-        .set_process_wait(process_id, wait.clone())
+        .set_process_wait_with_authority(process_id, wait.clone(), &execution_authority)
         .await
         .expect("replay wait-entered lifecycle event");
     registry
-        .clear_process_wait(process_id)
+        .clear_process_wait_with_authority(process_id, &execution_authority)
         .await
         .expect("replay wait-cleared lifecycle event");
     assert_process_record_fold(&registry, &base, "wait-cycle replay").await;
@@ -130,11 +132,11 @@ pub(super) async fn process_record_is_the_fold_of_its_event_log(
         since_ms: 22,
     };
     registry
-        .set_process_wait(process_id, second_wait)
+        .set_process_wait_with_authority(process_id, second_wait, &execution_authority)
         .await
         .expect("append distinct second wait-entered lifecycle event");
     registry
-        .clear_process_wait(process_id)
+        .clear_process_wait_with_authority(process_id, &execution_authority)
         .await
         .expect("append distinct second wait-cleared lifecycle event");
     assert_process_record_fold(&registry, &base, "second wait cycle").await;

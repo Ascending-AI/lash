@@ -852,8 +852,8 @@ fn wrong_protocol_versions_are_rejected() {
     assert!(matches!(
         request.validate(),
         Err(RemoteProtocolError::UnsupportedProtocolVersion {
-            actual: 16,
-            expected: 17,
+            actual: 17,
+            expected: 18,
         })
     ));
 
@@ -935,7 +935,7 @@ fn nested_protocol_versions_must_match_envelope() {
 
 #[test]
 fn remote_process_env_ref_is_validated_but_serializes_as_string() {
-    assert_eq!(REMOTE_PROTOCOL_VERSION, 17);
+    assert_eq!(REMOTE_PROTOCOL_VERSION, 18);
     let env_ref: RemoteProcessExecutionEnvRef =
         canonical_env_ref().parse().expect("canonical env ref");
     assert_eq!(env_ref.as_str(), canonical_env_ref());

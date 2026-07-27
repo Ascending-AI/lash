@@ -88,7 +88,7 @@ pub async fn run_lashlang_process(
     engine: LashlangProcessEngine,
     mut context: lash_core::ProcessEngineRunContext<'_>,
     payload: serde_json::Value,
-) -> lash_core::ProcessRunOutcome {
+) -> Result<lash_core::ProcessRunOutcome, lash_core::ProcessInfraError> {
     let handover = context.take_handover();
     let is_initial_segment = handover.is_none();
     let persisted_program_hash = handover
@@ -99,12 +99,12 @@ pub async fn run_lashlang_process(
     let input = match LashlangProcessInput::from_payload(payload) {
         Ok(input) => input,
         Err(err) => {
-            return process_lashlang_failure(
+            return Ok(process_lashlang_failure(
                 "process_payload_invalid",
                 format!("invalid lashlang process payload: {err}"),
                 None,
             )
-            .into();
+            .into());
         }
     };
     let artifact = {
@@ -116,28 +116,25 @@ pub async fn run_lashlang_process(
         {
             Ok(Some(artifact)) => artifact,
             Ok(None) => {
-                return process_lashlang_failure(
+                return Ok(process_lashlang_failure(
                     "process_module_artifact_missing",
                     format!("missing lashlang module artifact `{}`", input.module_ref),
                     None,
                 )
-                .into();
+                .into());
             }
             Err(err) => {
-                return process_lashlang_failure(
-                    "process_module_artifact_load_failed",
-                    format!(
+                return Err(lash_core::ProcessInfraError::new(
+                    lash_core::PluginError::Session(format!(
                         "failed to load lashlang module artifact `{}`: {err}",
                         input.module_ref
-                    ),
-                    None,
-                )
-                .into();
+                    )),
+                ));
             }
         }
     };
     if artifact.host_requirements_ref != input.host_requirements_ref {
-        return process_lashlang_failure(
+        return Ok(process_lashlang_failure(
             "process_host_requirements_mismatch",
             format!(
                 "lashlang process `{}` requested surface {}, artifact has {}",
@@ -145,10 +142,10 @@ pub async fn run_lashlang_process(
             ),
             None,
         )
-        .into();
+        .into());
     }
     if artifact.process_ref(&input.process_name) != Some(&input.process_ref) {
-        return process_lashlang_failure(
+        return Ok(process_lashlang_failure(
             "process_ref_mismatch",
             format!(
                 "lashlang module `{}` does not export process `{}` as requested ref {:?}",
@@ -156,19 +153,14 @@ pub async fn run_lashlang_process(
             ),
             None,
         )
-        .into();
+        .into());
     }
     let (tool_catalog, host_environment) = {
         let _phase = context.named_phase("rlm_process.resolve_environment");
         let tool_catalog = match context.resolved_tool_catalog() {
             Ok(tool_catalog) => tool_catalog,
             Err(err) => {
-                return process_lashlang_failure(
-                    "process_tool_catalog_failed",
-                    err.to_string(),
-                    None,
-                )
-                .into();
+                return Err(lash_core::ProcessInfraError::new(err));
             }
         };
         let surface = engine
@@ -178,15 +170,16 @@ pub async fn run_lashlang_process(
         let host_environment = match surface.host_environment(&tool_catalog) {
             Ok(host_environment) => host_environment,
             Err(err) => {
-                return process_lashlang_failure("process_host_environment_invalid", err, None)
-                    .into();
+                return Ok(
+                    process_lashlang_failure("process_host_environment_invalid", err, None).into(),
+                );
             }
         };
         if let Err(err) = lashlang_host_environment_satisfies_requirements(
             &artifact.host_requirements,
             &host_environment,
         ) {
-            return process_lashlang_failure(
+            return Ok(process_lashlang_failure(
                 "process_host_environment_incompatible",
                 format!(
                     "lashlang process `{}` is incompatible with this host surface: {err}",
@@ -194,7 +187,7 @@ pub async fn run_lashlang_process(
                 ),
                 None,
             )
-            .into();
+            .into());
         }
         (tool_catalog, host_environment)
     };
@@ -211,12 +204,12 @@ pub async fn run_lashlang_process(
         match compiled {
             Ok(compiled) => compiled,
             Err(err) => {
-                return process_lashlang_failure(
+                return Ok(process_lashlang_failure(
                     "process_compile_failed",
                     format!("failed to compile process `{}`: {err}", input.process_name),
                     None,
                 )
-                .into();
+                .into());
             }
         }
     };
@@ -224,12 +217,12 @@ pub async fn run_lashlang_process(
         Some(handover) => match serde_json::from_slice(&handover.engine_state) {
             Ok(state) => Some(state),
             Err(err) => {
-                return process_lashlang_failure(
+                return Ok(process_lashlang_failure(
                     "process_segment_handover_invalid",
                     format!("invalid lashlang segment handover: {err}"),
                     None,
                 )
-                .into();
+                .into());
             }
         },
         None => None,
@@ -238,7 +231,7 @@ pub async fn run_lashlang_process(
     if let Err(output) =
         validate_lashlang_program_hash(persisted_program_hash.as_deref(), &current_program_hash)
     {
-        return (*output).into();
+        return Ok((*output).into());
     }
     let process_id = context.registration().id.clone();
     let session_id = context.session_id().to_string();
@@ -260,12 +253,11 @@ pub async fn run_lashlang_process(
         .execution_write_authority
         .clone()
     else {
-        return process_lashlang_failure(
-            "process_execution_fence_missing",
-            "process execution did not provide a write fence".to_string(),
-            None,
-        )
-        .into();
+        return Err(lash_core::ProcessInfraError::new(
+            lash_core::PluginError::Session(
+                "process execution did not provide a write fence".to_string(),
+            ),
+        ));
     };
     let cancellation = context.cancellation_token();
     let (ctx, guard, mut state) = {
@@ -273,12 +265,7 @@ pub async fn run_lashlang_process(
         let runtime_context = match context.into_runtime_context(tool_catalog) {
             Ok(runtime_context) => runtime_context,
             Err(err) => {
-                return process_lashlang_failure(
-                    "process_run_context_failed",
-                    err.to_string(),
-                    None,
-                )
-                .into();
+                return Err(lash_core::ProcessInfraError::new(err));
             }
         };
         let (ctx, guard) = runtime_context.into_parts();
@@ -340,7 +327,7 @@ pub async fn run_lashlang_process(
     {
         lashlang_execution_trace.emit_finished(output);
     }
-    output
+    Ok(output)
 }
 
 async fn execute_lashlang(

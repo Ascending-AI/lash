@@ -35,6 +35,7 @@
 
 use std::time::{Duration, Instant};
 
+use lash_core::TestProcessRegistryWriteExt;
 use lash_core::{
     LeaseOwnerIdentity, ProcessAwaitOutput, ProcessInput, ProcessLeaseClaimOutcome,
     ProcessProvenance, ProcessRegistration, ProcessRegistry, ProcessStarted, RecoveryDisposition,

@@ -384,6 +384,8 @@ pub use provider::{
 };
 #[cfg(any(test, feature = "testing"))]
 pub use runtime::TestLocalProcessRegistry;
+#[cfg(any(test, feature = "testing"))]
+pub use runtime::TestProcessRegistryWriteExt;
 pub use runtime::promise_semantics;
 pub use runtime::{
     AbandonEvidence, AbandonRequest, AbandonWriter, AgentFrameRun, AssembledTurn, AssistantOutput,
@@ -403,13 +405,14 @@ pub use runtime::{
     PersistedSegmentHandover, ProcessAttach, ProcessAwaitOutput, ProcessAwaiter,
     ProcessCancelAbility, ProcessCancelAllRequest, ProcessCancelRequest, ProcessCancelSource,
     ProcessCancelSummary, ProcessChangeCursor, ProcessChangeHub, ProcessCompletionAuthority,
-    ProcessDrainReport, ProcessEngine, ProcessEngineRegistry, ProcessEngineRunContext,
-    ProcessEngineRunGuard, ProcessEngineRuntimeContext, ProcessEngineValidationContext,
-    ProcessEvent, ProcessEventAppendPlan, ProcessEventAppendRequest, ProcessEventAppendResult,
-    ProcessEventSink, ProcessEventType, ProcessExecutionContext, ProcessExecutionEnvRef,
-    ProcessExecutionEnvSpec, ProcessExecutionEnvStore, ProcessExecutionWriteAuthority,
-    ProcessExternalRef, ProcessHandleDescriptor, ProcessHandleGrant, ProcessHandleSummary,
-    ProcessId, ProcessIdentity, ProcessInput, ProcessLease, ProcessLeaseClaimOutcome,
+    ProcessCompletionOutcome, ProcessDrainReport, ProcessEngine, ProcessEngineRegistry,
+    ProcessEngineRunContext, ProcessEngineRunGuard, ProcessEngineRuntimeContext,
+    ProcessEngineValidationContext, ProcessEvent, ProcessEventAppendPlan,
+    ProcessEventAppendRequest, ProcessEventAppendResult, ProcessEventSink, ProcessEventType,
+    ProcessExecutionContext, ProcessExecutionEnvRef, ProcessExecutionEnvSpec,
+    ProcessExecutionEnvStore, ProcessExecutionWriteAuthority, ProcessExternalRef,
+    ProcessHandleDescriptor, ProcessHandleGrant, ProcessHandleSummary, ProcessId, ProcessIdentity,
+    ProcessInfraError, ProcessInput, ProcessLease, ProcessLeaseClaimOutcome,
     ProcessLeaseCompletion, ProcessLifecycleStatus, ProcessListFilter, ProcessListMode,
     ProcessLiveReferenceSummary, ProcessOpScope, ProcessOriginator, ProcessProvenance,
     ProcessPruneReport, ProcessRecord, ProcessRegistration, ProcessRegistry, ProcessRunHandle,
