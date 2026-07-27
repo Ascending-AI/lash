@@ -99,8 +99,9 @@ impl SessionStoreFactory for PostgresSessionStoreFactory {
                 node_id: node_id.to_string(),
             });
         }
-        if let Some(checkpoint_ref) = sqlx::query_scalar::<_, String>(
-            "SELECT checkpoint_ref FROM lash_node_anchors WHERE node_id = $1",
+        if let Some((checkpoint_ref, source_session_id)) = sqlx::query_as::<_, (String, String)>(
+            "SELECT checkpoint_ref, source_session_id
+             FROM lash_node_anchors WHERE node_id = $1",
         )
         .bind(node_id)
         .fetch_optional(&mut *tx)
@@ -111,6 +112,7 @@ impl SessionStoreFactory for PostgresSessionStoreFactory {
             return Ok(lash_core::ForkPoint {
                 node_id: node_id.to_string(),
                 checkpoint_ref: checkpoint_ref.into(),
+                source_session_id,
                 pinned: true,
             });
         }
@@ -148,7 +150,7 @@ impl SessionStoreFactory for PostgresSessionStoreFactory {
         )
         .bind(node_id)
         .bind(&checkpoint_ref)
-        .bind(source_session_id)
+        .bind(&source_session_id)
         .execute(&mut *tx)
         .await
         .map_err(store_sqlx_error)?;
@@ -156,6 +158,7 @@ impl SessionStoreFactory for PostgresSessionStoreFactory {
         Ok(lash_core::ForkPoint {
             node_id: node_id.to_string(),
             checkpoint_ref: checkpoint_ref.into(),
+            source_session_id,
             pinned: true,
         })
     }
@@ -185,10 +188,10 @@ impl SessionStoreFactory for PostgresSessionStoreFactory {
 
     async fn fork_points(&self) -> Result<Vec<lash_core::ForkPoint>, StoreError> {
         let rows = sqlx::query(
-            "SELECT node_id, checkpoint_ref, pinned
+            "SELECT node_id, checkpoint_ref, source_session_id, pinned
              FROM (
                  SELECT DISTINCT ON (node_id)
-                        node_id, checkpoint_ref, pinned
+                        node_id, checkpoint_ref, source_session_id, pinned
                  FROM (
                      SELECT node_id, checkpoint_ref, source_session_id,
                             TRUE AS pinned, 0 AS priority
@@ -211,7 +214,8 @@ impl SessionStoreFactory for PostgresSessionStoreFactory {
             .map(|row| lash_core::ForkPoint {
                 node_id: row.get(0),
                 checkpoint_ref: BlobRef(row.get(1)),
-                pinned: row.get(2),
+                source_session_id: row.get(2),
+                pinned: row.get(3),
             })
             .collect())
     }
@@ -271,6 +275,16 @@ impl SessionStoreFactory for PostgresSessionStoreFactory {
             retained.ok_or_else(|| StoreError::ForkPointNotRetained {
                 node_id: request.node_id.clone(),
             })?;
+        if let lash_core::SessionRelation::Fork {
+            source_session_id: expected,
+            ..
+        } = &request.relation
+            && expected != &source_session_id
+        {
+            return Err(StoreError::ForkPointNotRetained {
+                node_id: request.node_id.clone(),
+            });
+        }
         let current_frame_node_id =
             crate::runtime_persistence::nearest_frame_node_id_tx(&mut tx, &request.node_id)
                 .await?

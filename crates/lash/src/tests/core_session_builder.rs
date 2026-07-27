@@ -2280,6 +2280,20 @@ async fn fork_inherits_process_grants_without_inheriting_wake_subscription() -> 
         Some("fork-grant-source"),
         "fork observes the process but does not become its wake target"
     );
+    registry
+        .revoke_handle(&branch_scope, "fork-visible-process")
+        .await
+        .expect("simulate a crash before grant publication");
+    core.session("fork-grant-branch").open().await?;
+    assert_eq!(
+        registry
+            .list_handle_grants(&branch_scope)
+            .await
+            .expect("list recovered fork grants")
+            .len(),
+        1,
+        "opening a durable fork must reconcile its snapshotted grant set"
+    );
     Ok(())
 }
 

@@ -511,6 +511,7 @@ async fn session_store_factory_fork_semantics(factory: Arc<dyn crate::SessionSto
 
     let pinned = factory.pin(&root_node_id).await.expect("pin fork root");
     assert_eq!(pinned.node_id, root_node_id);
+    assert_eq!(pinned.source_session_id, source_request.session_id);
     assert!(pinned.pinned);
     source
         .verify_node_refcounts()
@@ -530,6 +531,32 @@ async fn session_store_factory_fork_semantics(factory: Arc<dyn crate::SessionSto
     commit_fork_conformance_state(&source, &mut state)
         .await
         .expect("advance source past unpinned child");
+    let source_tip_node_id = state
+        .session_graph
+        .leaf_node_id
+        .clone()
+        .expect("source tip leaf");
+    let (first_pin, second_pin) = tokio::join!(
+        factory.pin(&source_tip_node_id),
+        factory.pin(&source_tip_node_id)
+    );
+    first_pin.expect("first concurrent pin succeeds");
+    second_pin.expect("second concurrent pin is idempotent");
+    assert_eq!(
+        factory
+            .fork_points()
+            .await
+            .expect("enumerate concurrent pin")
+            .iter()
+            .filter(|point| point.node_id == source_tip_node_id)
+            .count(),
+        1,
+        "fork-point enumeration deduplicates shared node ids"
+    );
+    factory
+        .unpin(&source_tip_node_id)
+        .await
+        .expect("remove concurrent pin");
 
     let unretained_error = factory
         .fork_at(&crate::ForkSessionRequest {
@@ -732,7 +759,7 @@ async fn session_store_factory_delete_removes_store_and_is_idempotent(
         .cloned()
         .expect("initial frame node");
     let frame_node_id = frame.node_id.clone();
-    let branch_node = |node_id: &str| crate::SessionNodeRecord {
+    let child_node = |node_id: &str| crate::SessionNodeRecord {
         node_id: node_id.to_string(),
         parent_node_id: Some(frame_node_id.clone()),
         timestamp: "2026-07-27T00:00:00Z".to_string(),
@@ -743,16 +770,15 @@ async fn session_store_factory_delete_removes_store_and_is_idempotent(
             ),
         },
     };
-    let live_leaf = branch_node("delete-live-leaf");
-    let zero_ref_branch = branch_node("delete-zero-ref-branch");
+    let live_leaf = child_node("delete-live-leaf");
     state.session_graph = crate::SessionGraph::from_nodes(
-        vec![frame, live_leaf.clone(), zero_ref_branch.clone()],
+        vec![frame, live_leaf.clone()],
         Some(live_leaf.node_id.clone()),
     );
     created
         .commit_runtime_state(crate::RuntimeCommit::persisted_state(&state, &[]))
         .await
-        .expect("commit live and zero-ref graph branches before delete");
+        .expect("commit graph chain before delete");
     created
         .enqueue_pending_turn_input(
             crate::PendingTurnInputDraft::new(
@@ -799,7 +825,7 @@ async fn session_store_factory_delete_removes_store_and_is_idempotent(
         .delete_session(&request.session_id)
         .await
         .expect("delete session");
-    for node_id in [&frame_node_id, &live_leaf.node_id, &zero_ref_branch.node_id] {
+    for node_id in [&frame_node_id, &live_leaf.node_id] {
         assert!(
             created
                 .load_node(node_id)

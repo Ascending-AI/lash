@@ -583,26 +583,44 @@ impl LashCore {
         let Some(store_factory) = self.store_factory.as_ref() else {
             return Err(EmbedError::MissingSessionStoreFactory);
         };
+        let node_id = node_id.into();
+        let session_id = session_id.into();
+        let point = store_factory
+            .fork_points()
+            .await?
+            .into_iter()
+            .find(|point| point.node_id == node_id)
+            .ok_or_else(|| lash_core::StoreError::ForkPointNotRetained {
+                node_id: node_id.clone(),
+            })?;
+        let inherited = if let Some(process_registry) = self.process_registry() {
+            process_registry
+                .list_handle_grants(&lash_core::SessionScope::new(
+                    point.source_session_id.clone(),
+                ))
+                .await?
+                .into_iter()
+                .map(|(grant, _)| grant)
+                .collect()
+        } else {
+            Vec::new()
+        };
         let request = lash_core::ForkSessionRequest {
-            session_id: session_id.into(),
-            node_id: node_id.into(),
-            relation: lash_core::SessionRelation::Root,
+            session_id,
+            node_id,
+            relation: lash_core::SessionRelation::Fork {
+                source_session_id: point.source_session_id,
+                source_node_id: point.node_id,
+                process_grants: inherited.clone(),
+            },
             policy: self.policy.clone(),
         };
         let fork = store_factory.fork_at(&request).await?;
         let Some(process_registry) = self.process_registry() else {
             return Ok(fork);
         };
-        let source_scope = lash_core::SessionScope::new(fork.source_session_id.clone());
         let target_scope = lash_core::SessionScope::new(fork.session_id.clone());
-        let inherited = match process_registry.list_handle_grants(&source_scope).await {
-            Ok(inherited) => inherited,
-            Err(err) => {
-                let _ = store_factory.delete_session(&fork.session_id).await;
-                return Err(err.into());
-            }
-        };
-        for (grant, _) in inherited {
+        for grant in inherited {
             if let Err(err) = process_registry
                 .grant_handle(&target_scope, &grant.process_id, grant.descriptor)
                 .await

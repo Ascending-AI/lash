@@ -17,11 +17,12 @@ pub(super) async fn pin_in_catalog(
     let node_id = node_id.to_string();
     conn.write_flow(move |tx| {
         let outcome: Result<lash_core::ForkPoint, lash_core::StoreError> = (|| {
-            if let Some(checkpoint_ref) = tx
+            if let Some((checkpoint_ref, source_session_id)) = tx
                 .query_row(
-                    "SELECT checkpoint_ref FROM node_anchors WHERE node_id = ?1",
+                    "SELECT checkpoint_ref, source_session_id
+                     FROM node_anchors WHERE node_id = ?1",
                     params![node_id],
-                    |row| row.get::<_, String>(0),
+                    |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
                 )
                 .optional()
                 .map_err(sqlite_error)?
@@ -29,6 +30,7 @@ pub(super) async fn pin_in_catalog(
                 return Ok(lash_core::ForkPoint {
                     node_id,
                     checkpoint_ref: checkpoint_ref.into(),
+                    source_session_id,
                     pinned: true,
                 });
             }
@@ -68,6 +70,7 @@ pub(super) async fn pin_in_catalog(
             Ok(lash_core::ForkPoint {
                 node_id,
                 checkpoint_ref: checkpoint_ref.into(),
+                source_session_id,
                 pinned: true,
             })
         })();
@@ -114,9 +117,9 @@ pub(super) async fn fork_points_in_catalog(
     let conn = open_factory_catalog(root).await?;
     conn.call(|conn| {
         let mut stmt = conn.prepare(
-            "SELECT node_id, checkpoint_ref, pinned
+            "SELECT node_id, checkpoint_ref, source_session_id, pinned
              FROM (
-                 SELECT node_id, checkpoint_ref, pinned,
+                 SELECT node_id, checkpoint_ref, source_session_id, pinned,
                         ROW_NUMBER() OVER (
                             PARTITION BY node_id ORDER BY priority, source_session_id
                         ) AS ordinal
@@ -138,7 +141,8 @@ pub(super) async fn fork_points_in_catalog(
             Ok(lash_core::ForkPoint {
                 node_id: row.get(0)?,
                 checkpoint_ref: lash_core::BlobRef(row.get(1)?),
-                pinned: row.get::<_, i64>(2)? != 0,
+                source_session_id: row.get(2)?,
+                pinned: row.get::<_, i64>(3)? != 0,
             })
         })?;
         rows.collect::<Result<Vec<_>, _>>()
@@ -192,6 +196,16 @@ pub(super) async fn fork_at_in_catalog(
                 retained.ok_or_else(|| lash_core::StoreError::ForkPointNotRetained {
                     node_id: request.node_id.clone(),
                 })?;
+            if let lash_core::SessionRelation::Fork {
+                source_session_id: expected,
+                ..
+            } = &request.relation
+                && expected != &source_session_id
+            {
+                return Err(lash_core::StoreError::ForkPointNotRetained {
+                    node_id: request.node_id.clone(),
+                });
+            }
             let current_frame_node_id =
                 persistence::nearest_frame_node_id_conn(tx, &request.node_id)?.ok_or_else(
                     || lash_core::StoreError::MissingFrameOpenAncestor {

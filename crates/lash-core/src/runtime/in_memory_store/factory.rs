@@ -75,7 +75,7 @@ impl SessionStoreFactory for InMemorySessionStoreFactory {
             .write_transaction
             .lock()
             .expect("lock in-memory write transaction");
-        if let Some((checkpoint_ref, _, _)) = self
+        if let Some((checkpoint_ref, _, source_session_id)) = self
             .node_anchors
             .lock()
             .expect("lock node anchors")
@@ -85,6 +85,7 @@ impl SessionStoreFactory for InMemorySessionStoreFactory {
             return Ok(crate::ForkPoint {
                 node_id: node_id.to_string(),
                 checkpoint_ref,
+                source_session_id,
                 pinned: true,
             });
         }
@@ -129,11 +130,16 @@ impl SessionStoreFactory for InMemorySessionStoreFactory {
             .or_default() += 1;
         self.node_anchors.lock().expect("lock node anchors").insert(
             node_id.to_string(),
-            (checkpoint_ref.clone(), checkpoint, source_session_id),
+            (
+                checkpoint_ref.clone(),
+                checkpoint,
+                source_session_id.clone(),
+            ),
         );
         Ok(crate::ForkPoint {
             node_id: node_id.to_string(),
             checkpoint_ref,
+            source_session_id,
             pinned: true,
         })
     }
@@ -193,12 +199,13 @@ impl SessionStoreFactory for InMemorySessionStoreFactory {
         let anchors = self.node_anchors.lock().expect("lock node anchors");
         let mut points = anchors
             .iter()
-            .map(|(node_id, (checkpoint_ref, _, _))| {
+            .map(|(node_id, (checkpoint_ref, _, source_session_id))| {
                 (
                     node_id.clone(),
                     crate::ForkPoint {
                         node_id: node_id.clone(),
                         checkpoint_ref: checkpoint_ref.clone(),
+                        source_session_id: source_session_id.clone(),
                         pinned: true,
                     },
                 )
@@ -220,6 +227,7 @@ impl SessionStoreFactory for InMemorySessionStoreFactory {
                 .or_insert_with(|| crate::ForkPoint {
                     node_id: node_id.clone(),
                     checkpoint_ref: checkpoint_ref.clone(),
+                    source_session_id: head.session_id.clone(),
                     pinned: false,
                 });
         }
@@ -275,6 +283,16 @@ impl SessionStoreFactory for InMemorySessionStoreFactory {
                 node_id: request.node_id.clone(),
             });
         };
+        if let crate::SessionRelation::Fork {
+            source_session_id: expected,
+            ..
+        } = &request.relation
+            && expected != &source_session_id
+        {
+            return Err(crate::StoreError::ForkPointNotRetained {
+                node_id: request.node_id.clone(),
+            });
+        }
         let graph = self.global_session_graph.lock().expect("lock global graph");
         let tombstoned = self
             .tombstoned_node_ids

@@ -349,6 +349,12 @@ pub enum SessionRelation {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         caused_by: Option<crate::CausalRef>,
     },
+    Fork {
+        source_session_id: String,
+        source_node_id: String,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        process_grants: Vec<crate::ProcessHandleGrant>,
+    },
 }
 
 impl SessionRelation {
@@ -358,6 +364,7 @@ impl SessionRelation {
             Self::Child {
                 parent_session_id, ..
             } => Some(parent_session_id),
+            Self::Fork { .. } => None,
         }
     }
 }

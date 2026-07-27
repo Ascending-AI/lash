@@ -1084,6 +1084,7 @@ impl SessionStoreCreateRequest {
 pub struct ForkPoint {
     pub node_id: String,
     pub checkpoint_ref: crate::BlobRef,
+    pub source_session_id: String,
     pub pinned: bool,
 }
 

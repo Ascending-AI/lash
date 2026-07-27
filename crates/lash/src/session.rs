@@ -100,10 +100,35 @@ impl SessionBuilder {
     pub async fn open(self) -> Result<LashSession> {
         let policy = self.session_policy();
         let store = self.create_store(&policy).await?;
+        self.reconcile_fork_process_grants(store.as_deref()).await?;
         let state = self
             .load_or_default_state(&policy, store.as_deref())
             .await?;
         Box::pin(self.open_resolved(policy, state, store)).await
+    }
+
+    async fn reconcile_fork_process_grants(
+        &self,
+        store: Option<&dyn RuntimePersistence>,
+    ) -> Result<()> {
+        let (Some(store), Some(process_registry)) =
+            (store, self.core.env.process_registry.as_ref())
+        else {
+            return Ok(());
+        };
+        let Some(meta) = store.load_session_meta().await? else {
+            return Ok(());
+        };
+        let lash_core::SessionRelation::Fork { process_grants, .. } = meta.relation else {
+            return Ok(());
+        };
+        let target_scope = lash_core::SessionScope::new(self.session_id.clone());
+        for grant in process_grants {
+            process_registry
+                .grant_handle(&target_scope, &grant.process_id, grant.descriptor)
+                .await?;
+        }
+        Ok(())
     }
 
     /// Open with an explicitly supplied runtime state.
