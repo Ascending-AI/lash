@@ -96,7 +96,6 @@ fn first_persisted_state_commit_derives_and_installs_node_ids() {
             }],
             Some(placeholder),
         ),
-        graph_flush_required: true,
         ..crate::RuntimeSessionState::default()
     };
     let operation = OperationId::new(

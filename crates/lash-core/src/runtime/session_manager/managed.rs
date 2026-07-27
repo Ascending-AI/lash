@@ -11,7 +11,6 @@ impl ManagedSessionCapability {
     ) -> Result<SessionHandle, crate::PluginError> {
         if let Some(store) = &materialized.store_binding {
             let mut persisted_state = materialized.runtime.export_persisted_state();
-            persisted_state.graph_flush_required = true;
             let operation = super::super::state::boundary_operation(
                 &persisted_state.session_id,
                 &plan.session_id,
@@ -35,10 +34,7 @@ impl ManagedSessionCapability {
             .map_err(|err| crate::PluginError::Session(err.to_string()))?;
             persisted_state.apply_persisted_commit_result(result);
             persisted_state.mark_node_ids_persisted(persisted_node_ids);
-            materialized
-                .runtime
-                .set_persisted_state(persisted_state)
-                .map_err(|err| crate::PluginError::Session(err.to_string()))?;
+            materialized.runtime.state = persisted_state;
         }
         self.registry.lock().await.insert(
             plan.session_id.clone(),

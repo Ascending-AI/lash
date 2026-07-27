@@ -36,6 +36,7 @@ enum CaseName {
     DuplicateAcrossCommits,
     AppendTombstoned,
     AppendTombstonedThenVacuumed,
+    TombstonedLeaf,
     AppendDuplicateAfterAppendSeed,
     StaleExpectedHeadRevision,
     IdenticalAndMutatedTurnCommitReplay,
@@ -49,6 +50,7 @@ impl CaseName {
             Self::DuplicateAcrossCommits => "duplicate_node_id_across_two_commits",
             Self::AppendTombstoned => "append_onto_tombstoned_node_id",
             Self::AppendTombstonedThenVacuumed => "append_onto_tombstoned_then_vacuumed_node_id",
+            Self::TombstonedLeaf => "unchanged_commit_rejects_tombstoned_leaf",
             Self::AppendDuplicateAfterAppendSeed => "append_duplicate_node_id_after_append_seed",
             Self::StaleExpectedHeadRevision => "stale_expected_head_revision",
             Self::IdenticalAndMutatedTurnCommitReplay => "identical_and_mutated_turn_commit_replay",
@@ -120,6 +122,9 @@ impl StoreOperation {
 
 #[derive(Clone, Debug)]
 enum GraphSpec {
+    Unchanged {
+        leaf_node_id: Option<&'static str>,
+    },
     Append {
         nodes: Vec<NodeSpec>,
         leaf_node_id: Option<&'static str>,
@@ -183,6 +188,10 @@ fn append(nodes: Vec<NodeSpec>, leaf_node_id: Option<&'static str>) -> GraphSpec
         nodes,
         leaf_node_id,
     }
+}
+
+fn unchanged(leaf_node_id: Option<&'static str>) -> GraphSpec {
+    GraphSpec::Unchanged { leaf_node_id }
 }
 
 fn commit(
@@ -260,6 +269,24 @@ fn generated_cases() -> Vec<GeneratedCase> {
                     "append_vacuumed_id",
                     Some(1),
                     append(vec![mutated()], Some("collision")),
+                ),
+            ],
+        },
+        GeneratedCase {
+            name: CaseName::TombstonedLeaf,
+            operations: vec![
+                commit(
+                    "append_original",
+                    None,
+                    append(vec![original()], Some("collision")),
+                ),
+                StoreOperation::Tombstone {
+                    node_ids: vec!["collision"],
+                },
+                commit(
+                    "unchanged_with_tombstoned_leaf",
+                    Some(1),
+                    unchanged(Some("collision")),
                 ),
             ],
         },
@@ -375,6 +402,9 @@ fn generated_cases() -> Vec<GeneratedCase> {
 
 fn materialize_graph(spec: &GraphSpec) -> GraphCommitDelta {
     match spec {
+        GraphSpec::Unchanged { leaf_node_id } => GraphCommitDelta::Unchanged {
+            leaf_node_id: leaf_node_id.map(str::to_string),
+        },
         GraphSpec::Append {
             nodes,
             leaf_node_id,
@@ -968,7 +998,7 @@ fn render_divergence(
 #[test]
 fn generated_catalog_covers_required_adversarial_shapes() {
     let cases = generated_cases();
-    assert_eq!(cases.len(), 8);
+    assert_eq!(cases.len(), 9);
     assert!(cases.iter().all(|case| !case.operations.is_empty()));
     assert_eq!(
         cases
@@ -980,6 +1010,7 @@ fn generated_catalog_covers_required_adversarial_shapes() {
             "duplicate_node_id_across_two_commits",
             "append_onto_tombstoned_node_id",
             "append_onto_tombstoned_then_vacuumed_node_id",
+            "unchanged_commit_rejects_tombstoned_leaf",
             "append_duplicate_node_id_after_append_seed",
             "stale_expected_head_revision",
             "identical_and_mutated_turn_commit_replay",

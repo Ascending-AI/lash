@@ -943,15 +943,21 @@ impl RuntimeCommit {
         self
     }
 
-    pub fn with_operation(mut self, operation: OperationId) -> Result<Self, StoreError> {
-        self.graph.derive_node_ids(&self.session_id, &operation)?;
+    /// Derive append-node identities, stamp the operation, and return the
+    /// old-to-derived id mapping so callers can remap any resident graph that
+    /// supplied the commit.
+    pub fn with_operation(
+        mut self,
+        operation: OperationId,
+    ) -> Result<(Self, Vec<(String, String)>), StoreError> {
+        let node_id_mapping = self.graph.derive_node_ids(&self.session_id, &operation)?;
         let hash = self.turn_commit_hash()?;
         self.turn_commit = Some(RuntimeTurnCommitStamp::new(
             self.session_id.clone(),
             operation,
             hash,
         ));
-        Ok(self)
+        Ok((self, node_id_mapping))
     }
 
     pub fn with_session_execution_lease(mut self, lease: SessionExecutionLeaseFence) -> Self {
@@ -1047,7 +1053,6 @@ fn persisted_session_state_from_head(
         checkpoint_ref: head.checkpoint_ref.clone(),
         head_revision: Some(head.head_revision),
         persisted_node_ids,
-        graph_flush_required: false,
     };
     state.policy.model = head.config.model.clone();
     state.policy.provider_id = head.config.provider_id.clone();

@@ -144,7 +144,6 @@ impl CurrentSessionCapability {
             checkpoint_ref: runtime.state.checkpoint_ref.clone(),
             head_revision: runtime.state.head_revision,
             persisted_node_ids: runtime.state.persisted_node_ids.clone(),
-            graph_flush_required: runtime.state.graph_flush_required,
         }
     }
 

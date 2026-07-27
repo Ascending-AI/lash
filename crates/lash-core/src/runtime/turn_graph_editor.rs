@@ -185,6 +185,7 @@ impl TurnGraphEditor {
             return;
         }
         let by_old = mapping.iter().cloned().collect::<HashMap<_, _>>();
+        Arc::make_mut(&mut self.base_graph).remap_node_ids(session_id, mapping);
         for node in &mut self.appended_nodes {
             if let Some(derived) = by_old.get(&node.node_id) {
                 node.node_id = derived.clone();

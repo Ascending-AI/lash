@@ -75,7 +75,6 @@ pub(super) fn materialize_terminal_output(
         }],
         clock,
     );
-    state.graph_flush_required = true;
 }
 
 pub(super) fn materialize_agent_frame_switch(

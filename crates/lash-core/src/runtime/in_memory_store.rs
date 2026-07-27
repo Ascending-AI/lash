@@ -941,17 +941,20 @@ impl crate::store::SessionCommitStore for InMemorySessionStore {
                 });
             }
         }
-        let has_existing_live_nodes = {
+        let (has_existing_live_nodes, existing_leaf_is_live) = {
+            let graph = self.session_graph.lock().expect("lock graph");
             let tombstoned = self
                 .tombstoned_node_ids
                 .lock()
                 .expect("lock tombstoned nodes");
-            self.session_graph
-                .lock()
-                .expect("lock graph")
+            let has_existing_live_nodes = graph
                 .nodes
                 .iter()
-                .any(|node| !tombstoned.contains(&node.node_id))
+                .any(|node| !tombstoned.contains(&node.node_id));
+            let existing_leaf_is_live = commit.graph.leaf_node_id().is_some_and(|leaf_node_id| {
+                !tombstoned.contains(leaf_node_id) && graph.find_node(leaf_node_id).is_some()
+            });
+            (has_existing_live_nodes, existing_leaf_is_live)
         };
         match commit.graph.leaf_node_id() {
             Some(leaf_node_id)
@@ -959,12 +962,7 @@ impl crate::store::SessionCommitStore for InMemorySessionStore {
                     .graph
                     .appended_nodes()
                     .any(|node| &node.node_id == leaf_node_id)
-                    && self
-                        .session_graph
-                        .lock()
-                        .expect("lock graph")
-                        .find_node(leaf_node_id)
-                        .is_none() =>
+                    && !existing_leaf_is_live =>
             {
                 return Err(crate::store::StoreError::InvalidGraphLeaf {
                     leaf_node_id: Some(leaf_node_id.clone()),

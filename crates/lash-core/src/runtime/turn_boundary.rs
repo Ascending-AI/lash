@@ -684,7 +684,6 @@ mod tests {
         let pending_node_id = graph.nodes[1].node_id.clone();
         let mut state = state_with_graph(graph);
         state.persisted_node_ids.insert(durable_node_id);
-        state.graph_flush_required = true;
 
         let draft = TurnCommitDraft::from_state_with_clock(
             state,
@@ -700,6 +699,32 @@ mod tests {
                 .map(|node| node.node_id.as_str())
                 .collect::<Vec<_>>(),
             vec![pending_node_id.as_str()]
+        );
+    }
+
+    #[tokio::test]
+    async fn resident_base_nodes_are_persisted_once_across_progress_commits() {
+        let graph = SessionGraph::from_active_read_state(&[text_message(
+            "pending",
+            MessageRole::Assistant,
+            "not durable yet",
+        )]);
+        let store = RecordingStore::default();
+        let (mut boundary, _lease) = leased_boundary(&store, state_with_graph(graph)).await;
+
+        boundary
+            .commit_progress_graph(&store, &[])
+            .await
+            .expect("first progress commit");
+        boundary
+            .commit_progress_graph(&store, &[])
+            .await
+            .expect("second progress commit");
+
+        assert_eq!(
+            store.raw_graph_nodes_for_testing().len(),
+            1,
+            "a resident base node must not be re-derived and re-appended after it commits"
         );
     }
 

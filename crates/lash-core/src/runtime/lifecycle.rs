@@ -372,7 +372,12 @@ impl LashRuntime {
         // persisted or has pending graph nodes; an unconditional commit
         // here would bump the head revision on every park/close, disturbing
         // host-side head-CAS expectations for what is durably a no-op.
-        if self.state.head_revision.is_none() || self.state.graph_flush_required {
+        if self.state.head_revision.is_none()
+            || matches!(
+                self.state.pending_graph_commit(),
+                crate::GraphCommitDelta::Append { .. }
+            )
+        {
             let proposed = crate::store::RuntimeCommit::persisted_state(&self.state, &[]);
             let operation = initial_park_operation(&proposed)
                 .map_err(|err| SessionError::Protocol(err.to_string()))?;
@@ -509,7 +514,6 @@ mod tests {
     fn initial_park_identity_is_stable_for_replay_and_distinguishes_content() {
         let mut state = crate::RuntimeSessionState {
             session_id: "park-identity".to_string(),
-            graph_flush_required: true,
             ..crate::RuntimeSessionState::default()
         };
         state.ensure_agent_frame_initialized();

@@ -69,14 +69,10 @@ pub struct RuntimeSessionState {
     #[serde(skip)]
     #[doc(hidden)]
     pub persisted_node_ids: std::collections::HashSet<String>,
-    /// Signals that resident graph nodes still need an append flush.
-    #[serde(skip)]
-    pub graph_flush_required: bool,
 }
 
 impl RuntimeSessionState {
     pub fn from_snapshot(snapshot: SessionSnapshot) -> Self {
-        let graph_flush_required = !snapshot.session_graph.nodes.is_empty();
         let mut state = Self {
             session_id: snapshot.session_id,
             policy: snapshot.policy,
@@ -99,7 +95,6 @@ impl RuntimeSessionState {
             checkpoint_ref: snapshot.checkpoint_ref,
             head_revision: None,
             persisted_node_ids: std::collections::HashSet::new(),
-            graph_flush_required,
         };
         for frame in &mut state.agent_frames {
             frame.execution_state_snapshot = None;
@@ -177,7 +172,6 @@ impl RuntimeSessionState {
     pub fn replace_active_read_state(&mut self, messages: &[Message]) {
         self.session_graph
             .replace_active_read_state_for_agent_frame(&self.current_agent_frame_id, messages);
-        self.graph_flush_required = true;
     }
 
     pub fn append_active_read_delta(&mut self, messages: &[Message]) {
@@ -257,7 +251,6 @@ impl RuntimeSessionState {
             frame.execution_state_ref = execution_state_ref;
             frame.execution_state_snapshot = None;
         }
-        self.graph_flush_required = false;
         self.tool_state_snapshot = None;
         self.plugin_snapshot = None;
         self.execution_state_snapshot = None;
@@ -291,11 +284,6 @@ impl RuntimeSessionState {
         I: IntoIterator<Item = String>,
     {
         self.persisted_node_ids.extend(node_ids);
-        self.graph_flush_required = self
-            .session_graph
-            .nodes
-            .iter()
-            .any(|node| !self.persisted_node_ids.contains(&node.node_id));
     }
 
     pub fn discard_runtime_snapshots(&mut self) {
@@ -515,7 +503,6 @@ impl Default for RuntimeSessionState {
             checkpoint_ref: None,
             head_revision: None,
             persisted_node_ids: std::collections::HashSet::new(),
-            graph_flush_required: false,
         }
     }
 }
@@ -596,7 +583,6 @@ mod tests {
             plugin_snapshot: Some(crate::PluginSessionSnapshot::default()),
             execution_state_snapshot: Some(vec![1, 2, 3]),
             head_revision: Some(42),
-            graph_flush_required: true,
             ..RuntimeSessionState::default()
         };
         state.ensure_agent_frame_initialized();
@@ -609,7 +595,6 @@ mod tests {
         for runtime_key in [
             "head_revision",
             "persisted_node_ids",
-            "graph_flush_required",
             "tool_state_snapshot",
             "plugin_snapshot",
             "execution_state_snapshot",
@@ -633,7 +618,6 @@ mod tests {
         assert_eq!(hydrated.session_id, "snapshot-test");
         assert_eq!(hydrated.policy.recorded_provider_id(), "mock");
         assert!(hydrated.head_revision.is_none());
-        assert!(!hydrated.graph_flush_required);
         assert!(hydrated.tool_state_snapshot.is_none());
         assert!(hydrated.plugin_snapshot.is_none());
         assert!(hydrated.execution_state_snapshot.is_none());
@@ -751,7 +735,6 @@ pub(super) fn apply_session_head(
         .iter()
         .map(|node| node.node_id.clone())
         .collect();
-    state.graph_flush_required = false;
     apply_persisted_session_config(&mut state.policy, &head.config);
 }
 
@@ -777,9 +760,6 @@ pub(super) fn append_session_nodes_to_state_with_clock(
         drafts,
         clock.timestamp_rfc3339(),
     );
-    if !node_ids.is_empty() {
-        state.graph_flush_required = true;
-    }
     node_ids
 }
 

@@ -252,6 +252,7 @@ where
     append_rejects_tombstoned_node_id_collision(make()).await;
     commit_rejects_unresolvable_leaf(make()).await;
     commit_rejects_missing_leaf(make()).await;
+    commit_rejects_tombstoned_leaf(make()).await;
     // [`SessionExecutionLeaseStore`]: single-writer lane fencing.
     session_execution_lease_contract(make()).await;
     session_execution_lease_reclaim_contract(make()).await;
@@ -1467,7 +1468,6 @@ async fn active_path_read_scope_selects_only_requested_ancestry(
     let state = RuntimeSessionState {
         session_id: "branchy".to_string(),
         session_graph: graph,
-        graph_flush_required: true,
         ..RuntimeSessionState::default()
     };
     commit_runtime_state_for_test(
@@ -4264,7 +4264,6 @@ async fn tombstone_vacuum_and_gc_are_minimally_consistent(store: Arc<dyn Runtime
             ],
             Some("node-delete".to_string()),
         ),
-        graph_flush_required: true,
         ..RuntimeSessionState::default()
     };
     state.head_revision = None;
@@ -4897,9 +4896,15 @@ async fn verified_commit_rejects_receipt_topology_mismatch(store: Arc<dyn Runtim
         }],
         leaf_node_id: Some(node_id.clone()),
     };
-    let first = RuntimeCommit::persisted_state_with_graph_commit(&state, graph, &[])
-        .with_operation(operation)
-        .expect("stamp guarded commit");
+    let (first, node_id_mapping) =
+        RuntimeCommit::persisted_state_with_graph_commit(&state, graph, &[])
+            .with_operation(operation)
+            .expect("stamp guarded commit");
+    assert_eq!(
+        node_id_mapping,
+        vec![(node_id.clone(), node_id.clone())],
+        "operation stamping must return the append-id mapping"
+    );
     commit_runtime_state_for_test(&store, first.clone(), "realization-guard")
         .await
         .expect("first guarded commit");
@@ -5157,4 +5162,44 @@ async fn commit_rejects_missing_leaf(store: Arc<dyn RuntimePersistence>) {
             .is_none(),
         "missing leaf rejection must abort the whole commit"
     );
+}
+
+async fn commit_rejects_tombstoned_leaf(store: Arc<dyn RuntimePersistence>) {
+    let mut state = RuntimeSessionState {
+        session_id: "root".to_string(),
+        ..RuntimeSessionState::default()
+    };
+    let seed = RuntimeCommit::persisted_state_with_graph_commit(
+        &state,
+        crate::GraphCommitDelta::Append {
+            nodes: vec![sample_session_node("tombstoned-leaf", None)],
+            leaf_node_id: Some("tombstoned-leaf".to_string()),
+        },
+        &[],
+    );
+    let result = commit_runtime_state_for_test(&store, seed, "tombstoned-leaf-seed")
+        .await
+        .expect("seed leaf");
+    state.head_revision = Some(result.head_revision);
+    store
+        .tombstone_nodes(&["tombstoned-leaf".to_string()])
+        .await
+        .expect("tombstone leaf");
+
+    let unchanged = RuntimeCommit::persisted_state_with_graph_commit(
+        &state,
+        crate::GraphCommitDelta::Unchanged {
+            leaf_node_id: Some("tombstoned-leaf".to_string()),
+        },
+        &[],
+    );
+    let err = commit_runtime_state_for_test(&store, unchanged, "tombstoned-leaf-unchanged")
+        .await
+        .expect_err("a tombstoned leaf must not resolve in the post-commit live graph");
+    assert!(matches!(
+        err,
+        StoreError::InvalidGraphLeaf {
+            leaf_node_id: Some(ref leaf)
+        } if leaf == "tombstoned-leaf"
+    ));
 }

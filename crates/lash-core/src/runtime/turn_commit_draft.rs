@@ -111,12 +111,6 @@ impl TurnCommitDraft {
     pub(super) fn into_final_state(mut self) -> RuntimeSessionState {
         self.state.persisted_node_ids = self.graph.persisted_node_ids();
         self.state.session_graph = self.graph.into_session_graph();
-        self.state.graph_flush_required = self
-            .state
-            .session_graph
-            .nodes
-            .iter()
-            .any(|node| !self.state.persisted_node_ids.contains(&node.node_id));
         self.state
     }
 

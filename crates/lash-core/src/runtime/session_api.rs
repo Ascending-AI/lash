@@ -585,10 +585,14 @@ impl LashRuntime {
                     "persisted session commands require a claimed queue boundary",
                 )
             })?;
-        let mut commit =
+        let (mut commit, node_id_mapping) =
             crate::store::RuntimeCommit::persisted_state_with_graph_commit(&self.state, graph, &[])
                 .with_operation(operation)
                 .map_err(super::runtime_error_from_store_commit)?;
+        debug_assert!(
+            node_id_mapping.is_empty(),
+            "session-command commits must not carry graph appends"
+        );
         let Some(session_execution_lease) = session_execution_lease else {
             return Err(RuntimeError::new(
                 RuntimeErrorCode::StoreCommitFailed,
