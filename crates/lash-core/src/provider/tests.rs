@@ -2,8 +2,8 @@ use super::support::*;
 use std::num::NonZeroUsize;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-use crate::GenerationOptions;
 use crate::llm::types::{LlmToolChoice, LlmUsage};
+use crate::{GenerationOptions, NonNegativeFiniteF64};
 
 #[derive(Clone, Debug, Default)]
 struct MutatingProvider {
@@ -471,6 +471,8 @@ fn generation_policy_prefers_request_then_provider_then_default() {
     assert_eq!(defaulted.cache_retention, CacheRetention::Short);
     assert!(!defaulted.expose_thinking);
     assert_eq!(defaulted.thinking, "thinking");
+    assert_eq!(defaulted.temperature, None);
+    assert_eq!(defaulted.seed, None);
 
     let provider_limited =
         resolve_generation_policy(&GenerationOptions::default(), &provider_options, 32_768, ());
@@ -480,10 +482,114 @@ fn generation_policy_prefers_request_then_provider_then_default() {
 
     let request_generation = GenerationOptions {
         output_token_cap: NonZeroUsize::new(2_048),
+        temperature: Some(NonNegativeFiniteF64::new(0.25).expect("finite temperature")),
+        seed: Some(-7),
     };
     let request_limited =
         resolve_generation_policy(&request_generation, &provider_options, 32_768, ());
     assert_eq!(request_limited.max_output_tokens, 2_048);
+    assert_eq!(
+        request_limited.temperature.map(|value| value.get()),
+        Some(0.25)
+    );
+    assert_eq!(request_limited.seed, Some(-7));
+}
+
+#[test]
+fn non_negative_finite_f64_rejects_non_finite_and_negative_values() {
+    for rejected in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY, -0.5] {
+        NonNegativeFiniteF64::new(rejected).expect_err("non-finite or negative must be rejected");
+    }
+    assert_eq!(NonNegativeFiniteF64::new(0.0).expect("zero").get(), 0.0);
+    assert_eq!(NonNegativeFiniteF64::new(1.5).expect("positive").get(), 1.5);
+}
+
+#[test]
+fn non_negative_finite_f64_normalizes_negative_zero() {
+    // `-0.0 != 0.0` is false, so a sign test alone lets negative zero through
+    // and it would reach the wire spelled `-0.0`.
+    let zero = NonNegativeFiniteF64::new(-0.0).expect("negative zero is not a negative number");
+    assert!(zero.get().is_sign_positive());
+    assert_eq!(
+        serde_json::to_value(&zero).expect("serialize"),
+        serde_json::json!(0.0)
+    );
+    let decoded: NonNegativeFiniteF64 =
+        serde_json::from_value(serde_json::json!(-0.0)).expect("decode negative zero");
+    assert_eq!(
+        serde_json::to_value(&decoded).expect("serialize"),
+        serde_json::json!(0.0)
+    );
+}
+
+#[test]
+fn non_negative_finite_f64_round_trips_transparently_and_validates_on_decode() {
+    let value = NonNegativeFiniteF64::new(0.7).expect("finite");
+    let encoded = serde_json::to_value(&value).expect("serialize");
+    assert_eq!(encoded, serde_json::json!(0.7));
+    let decoded: NonNegativeFiniteF64 = serde_json::from_value(encoded).expect("deserialize");
+    assert_eq!(decoded, value);
+    serde_json::from_value::<NonNegativeFiniteF64>(serde_json::json!(-1.0))
+        .expect_err("negative must not decode");
+}
+
+#[test]
+fn non_negative_finite_f64_preserves_the_json_spelling_it_decoded() {
+    // Decoding must not re-spell the sender's number: an integer stays an
+    // integer, a decimal stays a decimal.
+    for spelling in ["1", "1.0", "0.7", "2", "9007199254740992"] {
+        let decoded: NonNegativeFiniteF64 =
+            serde_json::from_str(spelling).expect("decode json number");
+        assert_eq!(
+            serde_json::to_string(&decoded).expect("serialize"),
+            spelling,
+            "decoding {spelling} must not change its JSON spelling"
+        );
+    }
+    // Equality is numeric, so the two spellings of one value are one value.
+    let integer: NonNegativeFiniteF64 = serde_json::from_str("1").expect("decode integer");
+    let decimal: NonNegativeFiniteF64 = serde_json::from_str("1.0").expect("decode decimal");
+    assert_eq!(integer, decimal);
+    assert_eq!(integer, NonNegativeFiniteF64::new(1.0).expect("finite"));
+}
+
+#[test]
+fn non_negative_finite_f64_rejects_integers_binary64_cannot_hold() {
+    // 2^53 is the last integer with an exact binary64 representation; past it
+    // `get()` would hand back a different number than the sender wrote.
+    let boundary: NonNegativeFiniteF64 =
+        serde_json::from_str("9007199254740992").expect("2^53 decodes");
+    assert_eq!(boundary.get(), 9_007_199_254_740_992.0);
+    for rejected in ["9007199254740993", "18446744073709551615"] {
+        serde_json::from_str::<NonNegativeFiniteF64>(rejected)
+            .expect_err("an inexact integer must not decode");
+    }
+}
+
+#[test]
+fn generation_options_round_trip_and_stay_comparable() {
+    let options = GenerationOptions {
+        output_token_cap: NonZeroUsize::new(2_048),
+        temperature: Some(NonNegativeFiniteF64::new(0.0).expect("finite")),
+        seed: Some(42),
+    };
+    let encoded = serde_json::to_value(&options).expect("serialize");
+    assert_eq!(
+        encoded,
+        serde_json::json!({
+            "output_token_cap": 2_048,
+            "temperature": 0.0,
+            "seed": 42,
+        })
+    );
+    let decoded: GenerationOptions = serde_json::from_value(encoded).expect("deserialize");
+    // `Eq`, not just `PartialEq`: every durable envelope and protocol type
+    // that carries GenerationOptions depends on it.
+    assert!(decoded == options);
+    assert_eq!(
+        serde_json::to_value(GenerationOptions::default()).expect("serialize default"),
+        serde_json::json!({})
+    );
 }
 
 #[tokio::test]

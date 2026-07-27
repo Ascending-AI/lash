@@ -63,6 +63,11 @@ fn generation_options_from_provider(provider: &crate::ProviderHandle) -> crate::
             .max_output_tokens
             .and_then(|value| usize::try_from(value).ok())
             .and_then(NonZeroUsize::new),
+        // Sampling controls are per-call caller intent; the provider handle
+        // carries no default for them, so this synthesized request expresses
+        // none either.
+        temperature: None,
+        seed: None,
     }
 }
 

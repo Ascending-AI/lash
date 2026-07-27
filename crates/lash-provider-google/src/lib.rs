@@ -547,6 +547,28 @@ mod tests {
     }
 
     #[test]
+    fn caller_sampling_controls_reach_the_generation_config() {
+        let provider = GoogleOAuthProvider::new("access", "refresh", 0);
+
+        let defaulted = GoogleOAuthProvider::build_request(&provider, &request(None), vec![], None);
+        assert_eq!(defaulted["request"]["generationConfig"]["temperature"], 0);
+        // A seed is emitted only when one was asked for.
+        assert!(
+            defaulted["request"]["generationConfig"]
+                .get("seed")
+                .is_none()
+        );
+
+        let mut req = request(None);
+        req.generation.temperature =
+            Some(lash_core::NonNegativeFiniteF64::new(0.8).expect("finite temperature"));
+        req.generation.seed = Some(11);
+        let body = GoogleOAuthProvider::build_request(&provider, &req, vec![], None);
+        assert_eq!(body["request"]["generationConfig"]["temperature"], 0.8);
+        assert_eq!(body["request"]["generationConfig"]["seed"], 11);
+    }
+
+    #[test]
     fn google_text_thought_signature_is_stored_and_replayed_for_same_origin() {
         let signature = base64::engine::general_purpose::STANDARD.encode("sig");
         let value = json!({

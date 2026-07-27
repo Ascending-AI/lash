@@ -296,11 +296,22 @@ impl RemoteModelIntent {
 pub struct RemoteGenerationOptions {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub output_token_cap: Option<u64>,
+    /// Sampling temperature, carried as a JSON number — the same JSON-number
+    /// encoding the core `NonNegativeFiniteF64` uses, and carried through the
+    /// conversion unchanged, so a number survives the round trip exactly as
+    /// the sender spelled it — negative zero is the single exception, and
+    /// normalizes to zero. Validated on the way in: finite, non-negative,
+    /// and exactly representable as a binary64 float (integers up to 2^53).
+    /// `serde_json::Number` also keeps this type `Eq`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub temperature: Option<serde_json::Number>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub seed: Option<i64>,
 }
 
 impl RemoteGenerationOptions {
     pub fn is_empty(&self) -> bool {
-        self.output_token_cap.is_none()
+        self.output_token_cap.is_none() && self.temperature.is_none() && self.seed.is_none()
     }
 
     pub(crate) fn validate(&self, type_name: &'static str) -> Result<(), RemoteProtocolError> {
@@ -309,6 +320,24 @@ impl RemoteGenerationOptions {
                 type_name,
                 message: "generation.output_token_cap must be greater than zero".to_string(),
             });
+        }
+        if let Some(temperature) = &self.temperature {
+            let finite_and_non_negative = temperature.as_f64().is_some_and(|value| value >= 0.0);
+            // The core sampling number binds the same rule: an integer above
+            // 2^53 has no exact binary64 form, so it cannot cross the boundary
+            // unchanged. Hosts that only validate reject exactly what hosts
+            // that convert reject.
+            let exactly_representable = !temperature
+                .as_u64()
+                .is_some_and(|integer| integer > (1_u64 << 53));
+            if !(finite_and_non_negative && exactly_representable) {
+                return Err(RemoteProtocolError::InvalidEnvelope {
+                    type_name,
+                    message: format!(
+                        "generation.temperature must be a finite, non-negative number that binary64 represents exactly, got {temperature}"
+                    ),
+                });
+            }
         }
         Ok(())
     }

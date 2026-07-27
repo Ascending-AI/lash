@@ -19,7 +19,7 @@ mod tests {
     use lash_core::llm::types::{
         AttachmentSource, LlmContentBlock, LlmEventSender, LlmJsonSchema, LlmMessage,
         LlmOutputPart, LlmOutputSpec, LlmRequest, LlmRole, LlmStreamEvent, LlmTerminalReason,
-        LlmToolChoice, LlmToolSpec, LlmUsage,
+        LlmToolChoice, LlmToolSpec, LlmUsage, NonNegativeFiniteF64,
     };
     use lash_core::provider::{
         CacheRetention, ModelCapability, Provider, ProviderOptions, ReasoningCapability,

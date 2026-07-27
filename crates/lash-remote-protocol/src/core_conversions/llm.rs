@@ -389,9 +389,15 @@ impl From<RemoteExecutionEvidence> for core_llm::ExecutionEvidence {
 
 impl From<core_llm::GenerationOptions> for RemoteGenerationOptions {
     fn from(value: core_llm::GenerationOptions) -> Self {
-        let core_llm::GenerationOptions { output_token_cap } = value;
+        let core_llm::GenerationOptions {
+            output_token_cap,
+            temperature,
+            seed,
+        } = value;
         Self {
             output_token_cap: output_token_cap.map(|cap| cap.get() as u64),
+            temperature: temperature.map(Into::into),
+            seed,
         }
     }
 }
@@ -401,11 +407,24 @@ impl TryFrom<RemoteGenerationOptions> for core_llm::GenerationOptions {
 
     fn try_from(value: RemoteGenerationOptions) -> Result<Self, Self::Error> {
         value.validate("RemoteGenerationOptions")?;
-        let RemoteGenerationOptions { output_token_cap } = value;
+        let RemoteGenerationOptions {
+            output_token_cap,
+            temperature,
+            seed,
+        } = value;
+        let temperature = temperature
+            .map(core_llm::NonNegativeFiniteF64::try_from)
+            .transpose()
+            .map_err(|error| RemoteProtocolError::InvalidEnvelope {
+                type_name: "RemoteGenerationOptions",
+                message: format!("generation.temperature is invalid: {error}"),
+            })?;
         Ok(Self {
             output_token_cap: output_token_cap
                 .and_then(|cap| usize::try_from(cap).ok())
                 .and_then(NonZeroUsize::new),
+            temperature,
+            seed,
         })
     }
 }

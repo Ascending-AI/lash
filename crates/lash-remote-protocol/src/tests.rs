@@ -39,6 +39,8 @@ fn remote_llm_request_json_round_trips() {
         output_spec: Some(RemoteLlmOutputSpec::JsonObject),
         generation: RemoteGenerationOptions {
             output_token_cap: Some(128),
+            temperature: Some(serde_json::Number::from_f64(0.25).expect("finite")),
+            seed: Some(-9),
         },
         metadata: HashMap::new(),
     };

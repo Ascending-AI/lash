@@ -76,7 +76,8 @@ pub use direct::{
 pub use lash_sansio::llm::types::{
     AttachmentSource, AttemptOutcome, AttemptRecord, ExecutionEvidence, GenerationOptions,
     LlmCallId, LlmCallRecord, LlmOutputPart, LlmRequest, LlmRequestScope, LlmResponse,
-    LlmTerminalReason, NormalizedError, ProtocolPosition, ProviderFileScope, RetryDecision,
+    LlmTerminalReason, NonNegativeFiniteF64, NonNegativeFiniteF64Error, NormalizedError,
+    ProtocolPosition, ProviderFileScope, RetryDecision,
 };
 pub use lash_sansio::{
     AcceptedInjectedTurnInput, AttachmentCreateMeta, AttachmentId, AttachmentMeta, AttachmentRef,

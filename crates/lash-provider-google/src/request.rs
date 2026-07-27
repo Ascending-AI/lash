@@ -344,17 +344,28 @@ impl GoogleOAuthProvider {
         let thinking_config = Self::thinking_config_from_capability(req);
         let policy =
             resolve_generation_policy(&req.generation, &provider.options, 32_768, thinking_config);
+        // Both sampling controls live under `generationConfig`. The adapter's
+        // greedy temperature default applies only when the caller expressed no
+        // preference; a seed is emitted only when one was asked for.
+        let temperature = policy
+            .temperature
+            .clone()
+            .map(|value| Value::Number(value.into()))
+            .unwrap_or_else(|| json!(0));
         let mut request = json!({
             "model": req.model,
             "user_prompt_id": uuid::Uuid::new_v4().to_string(),
             "request": {
                 "contents": contents,
                 "generationConfig": {
-                    "temperature": 0,
+                    "temperature": temperature,
                     "maxOutputTokens": policy.max_output_tokens,
                 }
             }
         });
+        if let Some(seed) = policy.seed {
+            request["request"]["generationConfig"]["seed"] = json!(seed);
+        }
         if let Some(system_instruction) = Self::system_instruction(req) {
             request["request"]["systemInstruction"] = system_instruction;
         }
