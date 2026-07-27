@@ -3674,13 +3674,14 @@ finish "done""#,
 }
 
 #[test]
-fn rlm_tool_calls_emit_typed_trace_pair_and_structured_exec_diagnostic() -> Result<()> {
+fn rlm_tool_calls_emit_typed_trace_pair_and_inline_boundary_protocol_step() -> Result<()> {
     run_async_test_on_stack_budget("rlm-tool-trace-test", || {
-        rlm_tool_calls_emit_typed_trace_pair_and_structured_exec_diagnostic_inner()
+        rlm_tool_calls_emit_typed_trace_pair_and_inline_boundary_protocol_step_inner()
     })
 }
 
-async fn rlm_tool_calls_emit_typed_trace_pair_and_structured_exec_diagnostic_inner() -> Result<()> {
+async fn rlm_tool_calls_emit_typed_trace_pair_and_inline_boundary_protocol_step_inner() -> Result<()>
+{
     let trace_path = std::env::temp_dir().join(format!(
         "lash-rlm-tool-trace-{}-{}.jsonl",
         std::process::id(),
@@ -3714,6 +3715,17 @@ finish "done""#,
         .lines()
         .map(|line| serde_json::from_str::<serde_json::Value>(line).expect("json log entry"))
         .collect::<Vec<_>>();
+
+    // The inline tier never persists progress boundaries, but the protocol
+    // events returned by those boundaries must still reach the trace sink.
+    // Runtime diagnostics use a separate emitter and do not prove this path.
+    entries
+        .iter()
+        .find(|entry| {
+            entry.get("type").and_then(|v| v.as_str()) == Some("protocol_step")
+                && entry.get("plugin_id").and_then(|v| v.as_str()) == Some("rlm_protocol")
+        })
+        .expect("inline boundary-sourced RLM protocol step");
 
     // Task 1: RLM tool calls emit a single typed Started/Completed trace pair,
     // with span identity stamped so each nests under its turn as tool:<call_id>.
