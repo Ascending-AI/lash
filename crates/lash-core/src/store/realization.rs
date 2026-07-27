@@ -2,6 +2,12 @@ use super::{
     RuntimeCommit, RuntimeCommitResult, SessionCommitStore, StoreError, graph_realization_digest,
 };
 
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct RealizedNodeTimestamp {
+    pub node_id: String,
+    pub timestamp: String,
+}
+
 /// Commit through the production realization boundary.
 ///
 /// Every runtime path that can adopt a commit result calls this function. The
@@ -13,11 +19,27 @@ pub async fn commit_runtime_state_verified(
 ) -> Result<RuntimeCommitResult, StoreError> {
     commit.validate_budget()?;
     let proposed = graph_realization_digest(&commit.graph);
+    let expected_node_ids = commit
+        .graph
+        .appended_nodes()
+        .map(|node| node.node_id.clone())
+        .collect::<Vec<_>>();
     let result = store.commit_runtime_state(commit).await?;
     if proposed != result.realization_digest {
         return Err(StoreError::CommitRealizationMismatch {
             proposed,
             stored: result.realization_digest.clone(),
+        });
+    }
+    let stored_node_ids = result
+        .realized_node_timestamps
+        .iter()
+        .map(|node| node.node_id.clone())
+        .collect::<Vec<_>>();
+    if expected_node_ids != stored_node_ids {
+        return Err(StoreError::CommitNodeRealizationMismatch {
+            expected: expected_node_ids,
+            stored: stored_node_ids,
         });
     }
     Ok(result)
@@ -57,6 +79,14 @@ mod tests {
         ) -> Result<RuntimeCommitResult, StoreError> {
             self.commit_attempts.fetch_add(1, Ordering::SeqCst);
             let realization_digest = graph_realization_digest(&commit.graph);
+            let realized_node_timestamps = commit
+                .graph
+                .appended_nodes()
+                .map(|node| RealizedNodeTimestamp {
+                    node_id: node.node_id.clone(),
+                    timestamp: node.timestamp.clone(),
+                })
+                .collect();
             let manifest = super::super::SessionCheckpoint::new(
                 commit.checkpoint.turn_state,
                 commit.checkpoint.tool_state_ref,
@@ -69,6 +99,7 @@ mod tests {
                 checkpoint_ref: "empty-frame-facade".to_string().into(),
                 manifest,
                 realization_digest,
+                realized_node_timestamps,
                 enqueued_queue_batches: Vec::new(),
                 turn_input_applications: Vec::new(),
             })

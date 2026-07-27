@@ -62,11 +62,12 @@ mod tests {
             node_id: "factory-global-node".to_string(),
             parent_node_id: None,
             timestamp: "2026-07-26T00:00:00Z".to_string(),
-            payload: crate::SessionNodePayload::Event {
-                event: crate::SessionHistoryRecord::Protocol(
-                    crate::ProtocolEvent::typed("global-node-id", serde_json::Value::Null)
-                        .expect("protocol event"),
+            payload: crate::SessionNodePayload::FrameOpen {
+                reason: crate::AgentFrameReason::initial(),
+                assignment: crate::AgentFrameAssignment::from_policy(
+                    crate::SessionPolicy::default(),
                 ),
+                protocol_turn_options: Default::default(),
             },
         };
         let commit = |session_id: &str| {
@@ -83,6 +84,7 @@ mod tests {
                 },
             };
             let mut commit = RuntimeCommit::persisted_state(&state, &[usage]);
+            commit.current_frame_node_id = Some(node.node_id.clone());
             commit.graph = GraphCommitDelta::Append {
                 nodes: vec![node.clone()],
                 leaf_node_id: Some(node.node_id.clone()),
@@ -112,6 +114,66 @@ mod tests {
                 .len(),
             0,
             "the usage mutation preceding node ownership must not leak from a rejected commit"
+        );
+    }
+
+    #[tokio::test]
+    async fn delete_zero_confirmation_aborts_a_corrupt_low_count() {
+        let factory = super::super::InMemorySessionStoreFactory::new();
+        let request = SessionStoreCreateRequest {
+            session_id: "delete-refcount-drift".to_string(),
+            relation: crate::SessionRelation::Root,
+            policy: crate::SessionPolicy::default(),
+        };
+        let store = factory.create_store(&request).await.expect("create store");
+        let concrete = factory
+            .stores
+            .lock()
+            .expect("lock stores")
+            .get(&request.session_id)
+            .cloned()
+            .expect("concrete store");
+        let mut state = RuntimeSessionState {
+            session_id: request.session_id.clone(),
+            ..Default::default()
+        };
+        state.ensure_agent_frame_initialized();
+        store
+            .commit_runtime_state(RuntimeCommit::persisted_state(&state, &[]))
+            .await
+            .expect("commit root frame");
+        let leaf = concrete
+            .raw_leaf_node_id_for_testing()
+            .expect("persisted leaf");
+        concrete.corrupt_node_refcount_for_testing(&leaf, 0);
+
+        let error = factory
+            .delete_session(&request.session_id)
+            .await
+            .expect_err("low cached count must abort deletion");
+
+        assert!(error.contains("cached incoming reference count drifted"));
+        assert!(
+            factory
+                .open_existing_store(&request)
+                .await
+                .expect("open after abort")
+                .is_some(),
+            "the failed zero-confirmation must leave the session live"
+        );
+        assert_eq!(concrete.raw_head_revision_for_testing(), Some(1));
+
+        concrete.corrupt_node_refcount_for_testing(&leaf, 1);
+        factory
+            .delete_session(&request.session_id)
+            .await
+            .expect("delete after repairing count");
+        assert!(
+            factory
+                .open_existing_store(&request)
+                .await
+                .expect("open after delete")
+                .is_none()
         );
     }
 

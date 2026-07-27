@@ -1,8 +1,6 @@
 //! Session-graph persistence and garbage collection on [`Store`].
 //!
-//! Ported from the prior store. The public async surface
-//! (`append_session_graph_nodes`, `load_session_graph`, `gc_unreachable`) keeps
-//! the exact prior store signatures. The shared
+//! The shared
 //! `*_from_conn` helpers are **synchronous** and take a `&rusqlite::Connection`
 //! so `lifecycle::load_picker_info` (and any future caller already on the
 //! connection thread) can reuse them inside a `conn.call` closure — this is the
@@ -118,42 +116,6 @@ impl Store {
         }
     }
 
-    pub async fn append_session_graph_nodes(&self, nodes: &[lash_core::SessionNodeRecord]) {
-        if nodes.is_empty() {
-            return;
-        }
-        let Ok(session_id) = self.selected_session_id() else {
-            tracing::warn!("cannot append graph nodes on an unbound SQLite session store");
-            return;
-        };
-        let nodes = nodes.to_vec();
-        let result = self
-            .conn
-            .write(move |tx| {
-                let mut stmt = tx.prepare(
-                    "INSERT INTO graph_nodes
-                     (session_id, node_id, parent_node_id, node_json, incoming_refs)
-                     VALUES (?1, ?2, ?3, ?4, 1)",
-                )?;
-                for node in &nodes {
-                    let node_json = node
-                        .encode_storage_body()
-                        .map_err(|err| rusqlite::Error::ToSqlConversionFailure(Box::new(err)))?;
-                    stmt.execute(params![
-                        session_id,
-                        node.node_id,
-                        node.parent_node_id,
-                        node_json
-                    ])?;
-                }
-                Ok(())
-            })
-            .await;
-        if let Err(err) = result {
-            tracing::warn!(error = %err, "failed to append session graph nodes");
-        }
-    }
-
     pub async fn load_session_graph(&self) -> lash_core::SessionGraph {
         let Ok(session_id) = self.selected_session_id() else {
             return lash_core::SessionGraph::default();
@@ -188,27 +150,20 @@ impl Store {
     fn live_checkpoint_roots(conn: &Connection) -> Result<Vec<RetainedArtifactRef>, StoreError> {
         let mut roots = Vec::new();
         let mut stmt = conn
-            .prepare("SELECT head_json, head_revision FROM session_head")
+            .prepare(
+                "SELECT checkpoint_ref FROM session_head WHERE checkpoint_ref IS NOT NULL
+                 UNION
+                 SELECT checkpoint_ref FROM node_anchors WHERE pinned = 1",
+            )
             .map_err(sqlite_error)?;
         let rows = stmt
-            .query_map([], |row| {
-                Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
-            })
+            .query_map([], |row| row.get::<_, String>(0))
             .map_err(sqlite_error)?;
         for row in rows {
-            let (head_json, head_revision) = row.map_err(sqlite_error)?;
-            let mut meta: SessionHeadMeta = lash_core::store::decode_versioned_json_record(
-                &head_json,
-                "SessionHeadMeta",
-                lash_core::store::SESSION_HEAD_META_SCHEMA_VERSION,
-            )?;
-            meta.head_revision = head_revision as u64;
-            if let Some(checkpoint_ref) = meta.checkpoint_ref {
-                roots.push(RetainedArtifactRef {
-                    blob_ref: checkpoint_ref,
-                    kind: PersistedArtifactKind::CheckpointManifest,
-                });
-            }
+            roots.push(RetainedArtifactRef {
+                blob_ref: BlobRef(row.map_err(sqlite_error)?),
+                kind: PersistedArtifactKind::CheckpointManifest,
+            });
         }
         Ok(roots)
     }

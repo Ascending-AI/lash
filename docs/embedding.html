@@ -90,22 +90,22 @@
               <tbody>
                 <tr>
                   <td><code>Session</code></td>
-                  <td><code>lash-core</code> runtime state, graph, plugin instances, tool state, usage ledger, queue state, and frame list.</td>
+                  <td><code>lash-core</code> runtime state, graph, plugin instances, tool state, usage ledger, queue state, and a derived current-frame pointer.</td>
                   <td>This is the durable unit behind <code>LashSession</code>. The session id is what app databases and stores should keep.</td>
                 </tr>
                 <tr>
                   <td><code>AgentFrame</code></td>
-                  <td>The current agent assignment: effective policy, plugin options/source, tool access, subagent context, protocol turn options, execution snapshot, provenance, and prior-frame link.</td>
+                  <td>An immutable <code>FrameOpen</code> history node: effective policy, plugin options/source, tool access, subagent context, protocol turn options, and frame reason. Prior-frame relationships are derived from ancestry.</td>
                   <td><code>continue_as</code> appends a new frame in the same session with explicit <code>task</code> + <code>seed</code>. <code>/compact</code> appends a compaction frame seeded by an assistant summary. The facade keeps driving the same session until a real final result or stop.</td>
                 </tr>
                 <tr>
                   <td><code>SessionGraph</code></td>
-                  <td>Durable nodes for inputs, assistant output, tool calls, protocol events, plugin nodes, and frame-switch boundaries. Nodes carry their <code>agent_frame_id</code>.</td>
+                  <td>Durable nodes for inputs, assistant output, tool calls, protocol events, plugin nodes, and explicit <code>FrameOpen</code> boundaries. A node's frame is its nearest <code>FrameOpen</code> ancestor.</td>
                   <td>Read views can show the full session history, while model projection normally reads only the current frame unless a projection explicitly widens scope.</td>
                 </tr>
                 <tr>
                   <td><code>RuntimeSessionState</code></td>
-                  <td>Persisted session envelope: graph, frames, current frame id, policy, plugin/tool snapshots, usage, pending turn input, queued work, checkpoints, and head metadata.</td>
+                  <td>Persisted session envelope: graph, derived current frame node id, policy, plugin/tool snapshots, usage, pending turn input, queued work, checkpoints, and head metadata.</td>
                   <td>Hosts normally never construct it directly, but stores and advanced tools can persist or inspect it through the curated facade modules.</td>
                 </tr>
               </tbody>

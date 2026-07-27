@@ -1,5 +1,3 @@
-use std::collections::HashSet;
-
 use crate::session_model::{ConversationRecord, ProtocolEvent, SessionHistoryRecord};
 use crate::{Message, MessageOrigin, MessageRole, MessageSequence, Part};
 
@@ -145,13 +143,11 @@ fn visit_active_read<'a>(
     }
 
     let mut index = 0;
-    let mut seen_messages = HashSet::new();
-
     for event in active_events {
         match event {
             SessionHistoryRecord::Conversation(record) => {
                 let message = BorrowedChronologicalMessage::from_record(record);
-                if !message.is_transient() && seen_messages.insert(message.id.to_string()) {
+                if !message.is_transient() {
                     visit(BorrowedChronologicalEntry {
                         index,
                         payload: BorrowedChronologicalPayload::Message(message),
@@ -166,18 +162,6 @@ fn visit_active_read<'a>(
                 });
                 index += 1;
             }
-        }
-    }
-
-    seen_messages.reserve(messages.len());
-    for message in messages {
-        let message = BorrowedChronologicalMessage::from_message(message);
-        if !message.is_transient() && seen_messages.insert(message.id.to_string()) {
-            visit(BorrowedChronologicalEntry {
-                index,
-                payload: BorrowedChronologicalPayload::Message(message),
-            });
-            index += 1;
         }
     }
 }
@@ -296,6 +280,14 @@ mod tests {
         assert_eq!(
             borrowed_summary(&events, &messages),
             owned_summary(&projection)
+        );
+        assert_eq!(
+            owned_summary(&projection),
+            vec![
+                "0:message:m1",
+                r#"1:protocol:{"value":"step"}"#,
+                "2:message:m1",
+            ]
         );
     }
 

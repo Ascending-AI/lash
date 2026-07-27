@@ -13,6 +13,23 @@ fn draft_node_id(namespace: &str, ordinal: u64) -> String {
     )
 }
 
+/// Derive a durable frame identity before the surrounding operation commits.
+///
+/// Process provenance can capture the current frame scope immediately, so a
+/// FrameOpen ID cannot use the provisional-to-realized remapping used by
+/// ordinary history nodes.
+pub(crate) fn frame_node_id(session_id: &str, frame_key: &str) -> String {
+    let preimage = format!(
+        "{}:{session_id}:{}:{frame_key}",
+        session_id.len(),
+        frame_key.len()
+    );
+    format!(
+        "frame-node/v1/{}",
+        crate::stable_hash::sha256_hex(preimage.as_bytes())
+    )
+}
+
 #[derive(Clone, Debug, Default, serde::Serialize, serde::Deserialize)]
 pub struct SessionGraphData {
     #[serde(default)]
@@ -105,11 +122,6 @@ enum SessionNodeDraftPayload {
         body: serde_json::Value,
     },
     ProtocolEvent(ProtocolEvent),
-    FrameOpen {
-        reason: crate::AgentFrameReason,
-        assignment: crate::AgentFrameAssignment,
-        protocol_turn_options: crate::ProtocolTurnOptions,
-    },
 }
 
 impl SessionNodeDraft {
@@ -138,20 +150,6 @@ impl SessionNodeDraft {
         match event {
             SessionHistoryRecord::Conversation(record) => Self::message(record.to_message()),
             SessionHistoryRecord::Protocol(event) => Self::protocol_event(event),
-        }
-    }
-
-    pub(crate) fn frame_open(
-        reason: crate::AgentFrameReason,
-        assignment: crate::AgentFrameAssignment,
-        protocol_turn_options: crate::ProtocolTurnOptions,
-    ) -> Self {
-        Self {
-            payload: SessionNodeDraftPayload::FrameOpen {
-                reason,
-                assignment,
-                protocol_turn_options,
-            },
         }
     }
 }
@@ -372,18 +370,6 @@ impl SessionGraphAppendBuilder {
                         },
                     )
                 }
-                SessionNodeDraftPayload::FrameOpen {
-                    reason,
-                    assignment,
-                    protocol_turn_options,
-                } => (
-                    self.next_draft_node_id(),
-                    SessionNodePayload::FrameOpen {
-                        reason,
-                        assignment,
-                        protocol_turn_options,
-                    },
-                ),
             };
             self.existing_ids.insert(node_id.clone());
             self.leaf_node_id = Some(node_id.clone());
@@ -483,6 +469,8 @@ impl SessionGraphCache {
             let node = &graph.nodes[*idx];
             if node.node_id == frame_node_id {
                 in_frame = true;
+            } else if in_frame && matches!(node.payload, SessionNodePayload::FrameOpen { .. }) {
+                break;
             }
             if !in_frame {
                 continue;
@@ -614,22 +602,6 @@ impl SessionNodeRecord {
 
 impl SessionGraph {
     pub fn append_active_read_delta(&mut self, messages: &[Message]) {
-        self.append_active_read_delta_scoped(None, messages);
-    }
-
-    pub fn append_active_read_delta_for_agent_frame(
-        &mut self,
-        agent_frame_id: &str,
-        messages: &[Message],
-    ) {
-        self.append_active_read_delta_scoped(Some(agent_frame_id), messages);
-    }
-
-    fn append_active_read_delta_scoped(
-        &mut self,
-        agent_frame_id: Option<&str>,
-        messages: &[Message],
-    ) {
         let appendable_messages = messages
             .iter()
             .filter(|message| !message.is_transient())
@@ -637,25 +609,11 @@ impl SessionGraph {
             .collect::<Vec<_>>();
 
         self.reserve_append_capacity(appendable_messages.len(), appendable_messages.len());
-        self.append_message_batch_scoped(agent_frame_id, appendable_messages);
+        self.append_message_batch(appendable_messages);
     }
 
-    pub(crate) fn append_active_conversation_messages_for_agent_frame_at(
+    pub(crate) fn append_active_conversation_messages_at(
         &mut self,
-        agent_frame_id: &str,
-        messages: &[Message],
-        timestamp: String,
-    ) {
-        self.append_active_conversation_messages_scoped_at(
-            Some(agent_frame_id),
-            messages,
-            timestamp,
-        );
-    }
-
-    fn append_active_conversation_messages_scoped_at(
-        &mut self,
-        agent_frame_id: Option<&str>,
         messages: &[Message],
         timestamp: String,
     ) {
@@ -665,7 +623,7 @@ impl SessionGraph {
             .cloned()
             .collect::<Vec<_>>();
         self.reserve_append_capacity(appendable_messages.len(), appendable_messages.len());
-        self.append_message_batch_scoped_at(agent_frame_id, appendable_messages, timestamp);
+        self.append_message_batch_at(appendable_messages, timestamp);
     }
 
     pub fn from_nodes(nodes: Vec<SessionNodeRecord>, leaf_node_id: Option<String>) -> Self {
@@ -730,6 +688,24 @@ impl SessionGraph {
         }
     }
 
+    pub(crate) fn apply_realized_node_timestamps(
+        &mut self,
+        realized: &[crate::store::RealizedNodeTimestamp],
+    ) {
+        if realized.is_empty() {
+            return;
+        }
+        let timestamps = realized
+            .iter()
+            .map(|node| (node.node_id.as_str(), node.timestamp.as_str()))
+            .collect::<HashMap<_, _>>();
+        for node in &mut self.data_mut().nodes {
+            if let Some(timestamp) = timestamps.get(node.node_id.as_str()) {
+                node.timestamp = (*timestamp).to_string();
+            }
+        }
+    }
+
     fn reserve_append_capacity(&mut self, additional_nodes: usize, additional_messages: usize) {
         if additional_nodes == 0 {
             return;
@@ -762,29 +738,15 @@ impl SessionGraph {
         self.cache.get_or_init(|| SessionGraphCache::build(self))
     }
 
-    fn append_message_batch_scoped(
-        &mut self,
-        agent_frame_id: Option<&str>,
-        messages: Vec<Message>,
-    ) {
-        self.append_message_batch_scoped_at(
-            agent_frame_id,
-            messages,
-            crate::SystemClock.timestamp_rfc3339(),
-        );
+    fn append_message_batch(&mut self, messages: Vec<Message>) {
+        self.append_message_batch_at(messages, crate::SystemClock.timestamp_rfc3339());
     }
 
-    fn append_message_batch_scoped_at(
-        &mut self,
-        agent_frame_id: Option<&str>,
-        messages: Vec<Message>,
-        timestamp: String,
-    ) {
+    fn append_message_batch_at(&mut self, messages: Vec<Message>, timestamp: String) {
         if messages.is_empty() {
             return;
         }
-        self.append_node_drafts_scoped_at(
-            agent_frame_id,
+        self.append_node_drafts_at_inner(
             None,
             messages.into_iter().map(SessionNodeDraft::message),
             timestamp,
@@ -896,35 +858,7 @@ impl SessionGraph {
     where
         I: IntoIterator<Item = SessionNodeDraft>,
     {
-        self.append_node_drafts_scoped_at(
-            None,
-            None,
-            drafts,
-            crate::SystemClock.timestamp_rfc3339(),
-        )
-    }
-
-    pub(crate) fn append_frame_open_at(
-        &mut self,
-        draft_namespace: &str,
-        reason: crate::AgentFrameReason,
-        assignment: crate::AgentFrameAssignment,
-        protocol_turn_options: crate::ProtocolTurnOptions,
-        timestamp: String,
-    ) -> String {
-        self.append_node_drafts_scoped_at(
-            None,
-            Some(draft_namespace),
-            [SessionNodeDraft::frame_open(
-                reason,
-                assignment,
-                protocol_turn_options,
-            )],
-            timestamp,
-        )
-        .into_iter()
-        .next()
-        .expect("a frame open append creates one node")
+        self.append_node_drafts_at_inner(None, drafts, crate::SystemClock.timestamp_rfc3339())
     }
 
     pub(crate) fn append_frame_open_with_id_at(
@@ -972,9 +906,8 @@ impl SessionGraph {
         frames
     }
 
-    pub(crate) fn append_node_drafts_for_agent_frame_at<I>(
+    pub(crate) fn append_node_drafts_at<I>(
         &mut self,
-        _agent_frame_id: &str,
         draft_namespace: &str,
         drafts: I,
         timestamp: String,
@@ -982,12 +915,11 @@ impl SessionGraph {
     where
         I: IntoIterator<Item = SessionNodeDraft>,
     {
-        self.append_node_drafts_scoped_at(None, Some(draft_namespace), drafts, timestamp)
+        self.append_node_drafts_at_inner(Some(draft_namespace), drafts, timestamp)
     }
 
-    fn append_node_drafts_scoped_at<I>(
+    fn append_node_drafts_at_inner<I>(
         &mut self,
-        _agent_frame_id: Option<&str>,
         draft_namespace: Option<&str>,
         drafts: I,
         timestamp: String,
@@ -1081,22 +1013,6 @@ impl SessionGraph {
     }
 
     pub fn replace_active_read_state(&mut self, messages: &[Message]) {
-        self.replace_active_read_state_scoped(None, messages);
-    }
-
-    pub fn replace_active_read_state_for_agent_frame(
-        &mut self,
-        agent_frame_id: &str,
-        messages: &[Message],
-    ) {
-        self.replace_active_read_state_scoped(Some(agent_frame_id), messages);
-    }
-
-    fn replace_active_read_state_scoped(
-        &mut self,
-        agent_frame_id: Option<&str>,
-        messages: &[Message],
-    ) {
         let current_nodes = self.active_path_nodes();
         let existing_ids = self
             .nodes
@@ -1106,7 +1022,6 @@ impl SessionGraph {
         let replacement = build_active_read_replacement(
             current_nodes,
             &existing_ids,
-            agent_frame_id,
             &format!(
                 "unscoped-replacement:{}",
                 self.leaf_node_id.as_deref().unwrap_or("root")
@@ -1208,7 +1123,6 @@ fn build_tree_children(
 pub(crate) fn build_active_read_replacement<'a>(
     current_nodes: impl IntoIterator<Item = &'a SessionNodeRecord>,
     existing_node_ids: &HashSet<String>,
-    _agent_frame_id: Option<&str>,
     draft_namespace: &str,
     messages: &[Message],
     timestamp: String,
@@ -1404,6 +1318,70 @@ mod tests {
         assert_eq!(read.messages.len(), 2);
         assert_eq!(read.messages[0].id, "same-message-id");
         assert_eq!(read.messages[1].id, "same-message-id");
+    }
+
+    #[test]
+    fn storage_body_excludes_indexed_graph_identity_and_parent_edge() {
+        let node = SessionNodeRecord {
+            node_id: "node-2".to_string(),
+            parent_node_id: Some("node-1".to_string()),
+            timestamp: "2026-07-27T00:00:00Z".to_string(),
+            payload: SessionNodePayload::Event {
+                event: SessionHistoryRecord::Protocol(protocol_event()),
+            },
+        };
+
+        let encoded = node.encode_storage_body().expect("encode storage body");
+        assert!(!encoded.contains("node_id"));
+        assert!(!encoded.contains("parent_node_id"));
+        let decoded = SessionNodeRecord::decode_storage_body(
+            node.node_id.clone(),
+            node.parent_node_id.clone(),
+            &encoded,
+        )
+        .expect("decode storage body");
+
+        assert_eq!(decoded.node_id, node.node_id);
+        assert_eq!(decoded.parent_node_id, node.parent_node_id);
+        assert_eq!(decoded.timestamp, node.timestamp);
+        assert!(matches!(decoded.payload, SessionNodePayload::Event { .. }));
+    }
+
+    #[test]
+    fn nearest_frame_is_derived_from_ancestry() {
+        let assignment = crate::AgentFrameAssignment::from_policy(crate::SessionPolicy::default());
+        let mut graph = SessionGraph::default();
+        let first = frame_node_id("frame-ancestry", "first-frame");
+        assert!(graph.append_frame_open_with_id_at(
+            first.clone(),
+            crate::AgentFrameReason::initial(),
+            assignment.clone(),
+            crate::ProtocolTurnOptions::default(),
+            "2026-07-27T00:00:00Z".to_string(),
+        ));
+        let first_message = graph.append_message(text_message("m1", MessageRole::User, "first"));
+        let second = frame_node_id("frame-ancestry", "second-frame");
+        assert!(graph.append_frame_open_with_id_at(
+            second.clone(),
+            crate::AgentFrameReason::continue_as(),
+            assignment,
+            crate::ProtocolTurnOptions::default(),
+            "2026-07-27T00:00:01Z".to_string(),
+        ));
+        let second_message = graph.append_message(text_message("m2", MessageRole::User, "second"));
+
+        assert_eq!(
+            graph.nearest_frame_node_id(Some(&first_message)),
+            Some(first.as_str())
+        );
+        assert_eq!(
+            graph.nearest_frame_node_id(Some(&second_message)),
+            Some(second.as_str())
+        );
+        assert_eq!(
+            graph.nearest_frame_node_id(graph.leaf_node_id.as_deref()),
+            Some(second.as_str())
+        );
     }
 
     #[test]

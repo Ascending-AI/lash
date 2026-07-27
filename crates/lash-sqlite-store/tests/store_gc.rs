@@ -429,6 +429,7 @@ async fn sqlite_catalog_enforces_global_node_ids_across_sessions() {
             nodes: vec![node.clone()],
             leaf_node_id: Some(node.node_id.clone()),
         };
+        commit.current_frame_node_id = Some(node.node_id.clone());
         commit
     };
 
@@ -498,6 +499,7 @@ async fn sqlite_catalog_leaf_validation_is_session_scoped() {
         nodes: vec![node.clone()],
         leaf_node_id: Some(node.node_id.clone()),
     };
+    first_commit.current_frame_node_id = Some(node.node_id.clone());
     first
         .commit_runtime_state(first_commit)
         .await
@@ -569,6 +571,7 @@ async fn sqlite_maintenance_is_scoped_to_the_bound_session() {
         nodes: vec![node.clone()],
         leaf_node_id: Some(node.node_id.clone()),
     };
+    commit.current_frame_node_id = Some(node.node_id.clone());
     second
         .commit_runtime_state(commit)
         .await
@@ -626,7 +629,10 @@ async fn sqlite_maintenance_is_scoped_to_the_bound_session() {
     assert_eq!(replay.state, lash_core::TurnInputState::Cancelled);
 
     let second_report = second.vacuum().await.expect("vacuum second session");
-    assert_eq!(second_report.removed_node_count, 1);
+    assert_eq!(
+        second_report.removed_node_count, 0,
+        "a live head root cannot be tombstoned by host selection"
+    );
     assert_eq!(second_report.removed_pending_turn_input_tombstone_count, 1);
 }
 

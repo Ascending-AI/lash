@@ -4587,7 +4587,7 @@ async fn external_invoke_can_create_session_from_current_snapshot() {
             .output
             .get("message_count")
             .and_then(|value| value.as_u64()),
-        Some(2)
+        Some(1)
     );
 }
 

@@ -56,7 +56,7 @@ CREATE INDEX IF NOT EXISTS idx_graph_nodes_parent
     ON graph_nodes(parent_node_id);
 
 CREATE TABLE IF NOT EXISTS node_anchors (
-    node_id        TEXT PRIMARY KEY,
+    node_id        TEXT PRIMARY KEY REFERENCES graph_nodes(node_id) ON DELETE CASCADE,
     checkpoint_ref TEXT NOT NULL,
     pinned         INTEGER NOT NULL CHECK (pinned IN (0, 1))
 );

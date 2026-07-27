@@ -357,7 +357,11 @@ async fn failed_append_restores_runtime_and_protocol_session_state() {
         !protocol_dirty.load(Ordering::SeqCst),
         "protocol session must match the rolled-back runtime state"
     );
-    assert!(runtime.state.session_graph.nodes.is_empty());
+    assert_eq!(runtime.state.session_graph.nodes.len(), 1);
+    assert!(matches!(
+        runtime.state.session_graph.nodes[0].payload,
+        crate::SessionNodePayload::FrameOpen { .. }
+    ));
 }
 
 #[tokio::test]

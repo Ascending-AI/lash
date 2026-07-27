@@ -315,8 +315,49 @@ impl Store {
             tracing::warn!(error = %err, "failed to bind SQLite session store");
             return;
         }
-        self.append_session_graph_nodes(&head.graph.nodes).await;
-        self.save_session_head_meta(session_head_meta(&head)).await;
+        let checkpoint = match head.checkpoint_ref.as_ref() {
+            Some(checkpoint_ref) => match self.get_checkpoint(checkpoint_ref).await {
+                Some(checkpoint) => checkpoint,
+                None => {
+                    tracing::warn!(
+                        checkpoint_ref = %checkpoint_ref.0,
+                        "cannot save a session head whose checkpoint is missing"
+                    );
+                    return;
+                }
+            },
+            None => HydratedSessionCheckpoint::default(),
+        };
+        let graph = if head.graph.nodes.is_empty() {
+            GraphCommitDelta::Unchanged {
+                leaf_node_id: head.graph.leaf_node_id.clone(),
+            }
+        } else {
+            GraphCommitDelta::Append {
+                nodes: head.graph.nodes.clone(),
+                leaf_node_id: head.graph.leaf_node_id.clone(),
+            }
+        };
+        let commit = RuntimeCommit {
+            session_id: head.session_id,
+            expected_head_revision: Some(head.head_revision),
+            session_execution_lease: None,
+            release_session_execution_lease: None,
+            config: head.config,
+            current_frame_node_id: head.current_frame_node_id,
+            graph,
+            checkpoint,
+            usage_deltas: head.token_ledger,
+            turn_commit: None,
+            completed_queue_claims: Vec::new(),
+            completed_turn_input_claims: Vec::new(),
+            enqueued_queue_batches: Vec::new(),
+            interrupted_turn_input_turn_id: None,
+            committed_attachment_ids: Vec::new(),
+        };
+        if let Err(err) = self.commit_runtime_state(commit).await {
+            tracing::warn!(error = %err, "failed to persist session head");
+        }
     }
 
     pub async fn load_session_head(&self) -> Option<SessionHead> {

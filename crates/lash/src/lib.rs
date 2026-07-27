@@ -169,10 +169,11 @@ pub mod persistence {
     };
     pub use lash_core::store::queued_work;
     pub use lash_core::store::{
-        GraphCommitDelta, HydratedSessionCheckpoint, OperationId, PersistedSessionRead,
-        RuntimeCommit, RuntimeCommitResult, RuntimeTurnCommitStamp, SessionCheckpoint, SessionHead,
-        SessionHeadMeta, commit_runtime_state_verified, graph_realization_digest,
-        load_persisted_session_state, load_persisted_session_state_active_path,
+        GraphCommitDelta, HydratedSessionCheckpoint, NodeRefcountVerification, OperationId,
+        PersistedSessionRead, RealizedNodeTimestamp, RuntimeCommit, RuntimeCommitResult,
+        RuntimeTurnCommitStamp, SessionCheckpoint, SessionHead, SessionHeadMeta,
+        commit_runtime_state_verified, graph_realization_digest, load_persisted_session_state,
+        load_persisted_session_state_active_path,
     };
     pub use lash_core::{
         AttachmentReclamationReport, AttachmentRootSet, AttachmentStore, InMemoryAttachmentStore,

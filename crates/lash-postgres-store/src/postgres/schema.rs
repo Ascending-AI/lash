@@ -27,6 +27,10 @@ pub(crate) async fn ensure_schema(pool: &PgPool) -> Result<Vec<u8>, StoreError> 
         CREATE INDEX IF NOT EXISTS idx_lash_sessions_leaf
             ON lash_sessions(leaf_node_id);
 
+        CREATE TABLE IF NOT EXISTS lash_deleted_sessions (
+            session_id TEXT PRIMARY KEY
+        );
+
         CREATE TABLE IF NOT EXISTS lash_graph_nodes (
             session_id TEXT NOT NULL,
             seq BIGSERIAL,
@@ -42,7 +46,8 @@ pub(crate) async fn ensure_schema(pool: &PgPool) -> Result<Vec<u8>, StoreError> 
             ON lash_graph_nodes(parent_node_id);
 
         CREATE TABLE IF NOT EXISTS lash_node_anchors (
-            node_id TEXT PRIMARY KEY,
+            node_id TEXT PRIMARY KEY
+                REFERENCES lash_graph_nodes(node_id) ON DELETE CASCADE,
             checkpoint_ref TEXT NOT NULL,
             pinned BOOLEAN NOT NULL
         );

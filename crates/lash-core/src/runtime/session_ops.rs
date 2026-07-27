@@ -102,15 +102,15 @@ impl LashRuntime {
             .as_ref()
             .and_then(|session| session.history_store())
         {
-            let mut graph = crate::store::GraphCommitDelta::Append {
-                nodes: node_ids
-                    .iter()
-                    .filter_map(|id| self.state.session_graph.find_node(id).cloned())
-                    .collect(),
-                leaf_node_id: self.state.session_graph.leaf_node_id.clone(),
-            };
-            let node_ids = derive_graph_commit_node_ids(&mut self.state, &mut graph, &operation)
-                .map_err(|err| SessionError::Protocol(err.to_string()))?;
+            let requested_node_count = node_ids.len();
+            let mut graph = self.state.pending_graph_commit();
+            let persisted_node_ids =
+                derive_graph_commit_node_ids(&mut self.state, &mut graph, &operation)
+                    .map_err(|err| SessionError::Protocol(err.to_string()))?;
+            let node_ids = persisted_node_ids[persisted_node_ids
+                .len()
+                .saturating_sub(requested_node_count)..]
+                .to_vec();
             let mut commit = crate::store::RuntimeCommit::persisted_state_with_graph_commit(
                 &self.state,
                 graph,
@@ -149,7 +149,7 @@ impl LashRuntime {
                 }
             };
             self.state.apply_persisted_commit_result(result);
-            self.state.mark_node_ids_persisted(node_ids.clone());
+            self.state.mark_node_ids_persisted(persisted_node_ids);
             return Ok(crate::AppendSessionNodesResult::Appended {
                 node_ids,
                 leaf_node_id: self
@@ -532,7 +532,7 @@ impl LashRuntime {
                 "failed to encode plugin runtime event identity: {err}"
             ))
         })?;
-        let node_ids = append_session_nodes_to_state_with_clock(
+        append_session_nodes_to_state_with_clock(
             &mut self.state,
             nodes,
             &draft_namespace,
@@ -543,13 +543,7 @@ impl LashRuntime {
             .as_ref()
             .and_then(|session| session.history_store())
         {
-            let mut graph = crate::store::GraphCommitDelta::Append {
-                nodes: node_ids
-                    .iter()
-                    .filter_map(|id| self.state.session_graph.find_node(id).cloned())
-                    .collect(),
-                leaf_node_id: self.state.session_graph.leaf_node_id.clone(),
-            };
+            let mut graph = self.state.pending_graph_commit();
             let persisted_node_ids =
                 derive_graph_commit_node_ids(&mut self.state, &mut graph, &operation).map_err(
                     |err| {

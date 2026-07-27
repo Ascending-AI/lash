@@ -1184,12 +1184,18 @@ async fn agent_frame_provider_id_mismatch_is_reconciled_on_open() -> Result<()> 
         ..Default::default()
     };
     state.ensure_agent_frame_initialized();
-    state
-        .current_agent_frame_mut()
-        .expect("initial frame")
-        .assignment
-        .policy
-        .provider_id = "other-provider".to_string();
+    let leaf_node_id = state.session_graph.leaf_node_id.clone();
+    let mut nodes = state.session_graph.nodes.clone();
+    let frame = nodes
+        .iter_mut()
+        .find(|node| Some(&node.node_id) == state.current_frame_node_id.as_ref())
+        .expect("initial frame node");
+    let lash_core::SessionNodePayload::FrameOpen { assignment, .. } = &mut frame.payload else {
+        panic!("current frame must be a FrameOpen node");
+    };
+    assignment.policy.provider_id = "other-provider".to_string();
+    state.session_graph = lash_core::SessionGraph::from_nodes(nodes, leaf_node_id);
+    state.agent_frames = state.session_graph.agent_frame_records(&state.session_id);
     let store: Arc<dyn lash_core::RuntimePersistence> = Arc::new(SnapshotStore::with_state(state));
     let core = explicit_ephemeral_facets(LashCore::standard_builder())
         .provider(mock_provider())

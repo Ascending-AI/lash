@@ -77,13 +77,6 @@ impl LashRuntime {
             state.policy = policy.clone();
         }
         state.ensure_agent_frame_initialized();
-        let state_policy = state.policy.clone();
-        if let Some(frame) = state.current_agent_frame_mut()
-            && frame.assignment.policy.recorded_provider_id().is_empty()
-            && frame.assignment.policy.model.id.trim().is_empty()
-        {
-            frame.assignment.policy = state_policy;
-        }
         state.policy = state.effective_policy().clone();
         state.protocol_turn_options = state.effective_protocol_turn_options().clone();
         let policy = state.effective_policy().clone();

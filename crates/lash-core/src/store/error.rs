@@ -28,6 +28,8 @@ pub enum StoreError {
         bound_session_id: String,
         attempted_session_id: String,
     },
+    #[error("session `{session_id}` was deleted; recreate it through the session-store factory")]
+    SessionDeleted { session_id: String },
     #[error("store does not support read scope {0:?}")]
     UnsupportedReadScope(SessionReadScope),
     #[error("store head revision conflict: expected {expected:?}, actual {actual}")]
@@ -45,9 +47,7 @@ pub enum StoreError {
     NodeIdCollision { node_id: String },
     #[error("runtime commit leaf {leaf_node_id:?} does not resolve to a live graph node")]
     InvalidGraphLeaf { leaf_node_id: Option<String> },
-    #[error(
-        "runtime commit node `{node_id}` has parent {actual:?}, expected {expected:?} for an append-only chain"
-    )]
+    #[error("runtime commit node `{node_id}` has invalid parent {actual:?}; expected {expected:?}")]
     InvalidGraphParent {
         node_id: String,
         expected: Option<String>,
@@ -57,6 +57,9 @@ pub enum StoreError {
         "session leaf `{leaf_node_id}` has no FrameOpen ancestor; every root graph must begin with a frame"
     )]
     MissingFrameOpenAncestor { leaf_node_id: String },
+    /// A high cached count leaks recoverable storage. A low cached count can
+    /// cascade through shared history and let vacuum make the loss permanent,
+    /// so every destructive zero transition must re-derive this value.
     #[error(
         "node `{node_id}` cached incoming reference count drifted: cached {cached}, derived {derived}"
     )]
@@ -69,6 +72,13 @@ pub enum StoreError {
         "runtime commit realization differs from stored receipt: proposed {proposed}, stored {stored}"
     )]
     CommitRealizationMismatch { proposed: String, stored: String },
+    #[error(
+        "runtime commit node realization differs from stored receipt: expected {expected:?}, stored {stored:?}"
+    )]
+    CommitNodeRealizationMismatch {
+        expected: Vec<String>,
+        stored: Vec<String>,
+    },
     #[error(
         "queued work claim `{claim_id}` for session `{session_id}` is superseded by a newer session-lease generation"
     )]

@@ -19,7 +19,8 @@ pub struct SessionSnapshot {
     pub session_id: String,
     #[serde(default)]
     pub policy: SessionPolicy,
-    #[serde(default)]
+    /// Derived convenience view of `session_graph` FrameOpen nodes.
+    #[serde(skip)]
     pub agent_frames: Vec<AgentFrameRecord>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub current_frame_node_id: Option<String>,
@@ -268,8 +269,6 @@ pub struct OpenAgentFrameRequest {
     pub reason: AgentFrameReason,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub initial_nodes: Vec<SessionAppendNode>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub caused_by: Option<crate::CausalRef>,
 }
 
 impl OpenAgentFrameRequest {
@@ -278,17 +277,11 @@ impl OpenAgentFrameRequest {
             frame_id: frame_id.into(),
             reason,
             initial_nodes: Vec::new(),
-            caused_by: None,
         }
     }
 
     pub fn with_initial_nodes(mut self, initial_nodes: Vec<SessionAppendNode>) -> Self {
         self.initial_nodes = initial_nodes;
-        self
-    }
-
-    pub fn with_caused_by(mut self, caused_by: crate::CausalRef) -> Self {
-        self.caused_by = Some(caused_by);
         self
     }
 }

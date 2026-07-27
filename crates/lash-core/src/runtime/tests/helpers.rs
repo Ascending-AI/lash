@@ -6,7 +6,9 @@ use super::*;
 pub(crate) use crate::runtime::in_memory_store::InMemorySessionStore as RecordingStore;
 
 pub(crate) fn default_state() -> RuntimeSessionState {
-    RuntimeSessionState::default()
+    let mut state = RuntimeSessionState::default();
+    state.ensure_agent_frame_initialized();
+    state
 }
 
 pub(crate) fn inline_scope(scope: crate::ExecutionScope) -> crate::ScopedEffectController<'static> {
@@ -167,6 +169,7 @@ impl ReadModelStateMut for SessionSnapshot {
 
 impl ReadModelStateMut for RuntimeSessionState {
     fn append_message(&mut self, message: Message) {
+        self.ensure_agent_frame_initialized();
         self.session_graph.append_message(message);
     }
 }
@@ -254,9 +257,6 @@ pub(crate) fn set_runtime_provider(runtime: &mut LashRuntime, provider: crate::P
         Arc::new(crate::SingleProviderResolver::new(provider.clone()));
     runtime.policy.provider_id = provider.kind().to_string();
     runtime.state.policy.provider_id = provider.kind().to_string();
-    if let Some(frame) = runtime.state.current_agent_frame_mut() {
-        frame.assignment.policy.provider_id = provider.kind().to_string();
-    }
 }
 
 pub(crate) fn standard_test_policy() -> SessionPolicy {

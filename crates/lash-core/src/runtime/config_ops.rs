@@ -14,9 +14,6 @@ impl LashRuntime {
     pub fn set_model(&mut self, model: crate::ModelSpec) {
         self.policy.model = model;
         self.state.policy.model = self.policy.model.clone();
-        if let Some(frame) = self.state.current_agent_frame_mut() {
-            frame.assignment.policy.model = self.policy.model.clone();
-        }
     }
 
     /// Update provider on the runtime config.
@@ -25,18 +22,12 @@ impl LashRuntime {
             std::sync::Arc::new(crate::SingleProviderResolver::new(provider.clone()));
         self.policy.provider_id = provider.kind().to_string();
         self.state.policy.provider_id = self.policy.provider_id.clone();
-        if let Some(frame) = self.state.current_agent_frame_mut() {
-            frame.assignment.policy.provider_id = self.policy.provider_id.clone();
-        }
     }
 
     /// Update session ID metadata on the runtime config.
     pub fn set_session_id(&mut self, session_id: Option<String>) {
         self.policy.session_id = session_id;
         self.state.policy.session_id = self.policy.session_id.clone();
-        if let Some(frame) = self.state.current_agent_frame_mut() {
-            frame.assignment.policy.session_id = self.policy.session_id.clone();
-        }
     }
 
     pub async fn update_session_config(
@@ -56,9 +47,6 @@ impl LashRuntime {
             self.policy.prompt = prompt;
         }
         self.state.policy = self.policy.clone();
-        if let Some(frame) = self.state.current_agent_frame_mut() {
-            frame.assignment.policy = self.policy.clone();
-        }
         self.apply_session_config_mutations(previous.clone()).await;
         self.notify_session_config_changed(previous).await;
     }

@@ -283,10 +283,6 @@ fn reconcile_loaded_state_policy(state: &mut RuntimeSessionState, policy: &Sessi
     let recorded_provider_id = state.policy.recorded_provider_id().to_string();
     state.policy = policy.clone();
     state.policy.provider_id = recorded_provider_id;
-    let reconciled_policy = state.policy.clone();
-    if let Some(frame) = state.current_agent_frame_mut() {
-        frame.assignment.policy = reconciled_policy;
-    }
 }
 
 async fn load_persisted_state_for_residency(

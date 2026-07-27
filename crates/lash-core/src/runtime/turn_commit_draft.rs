@@ -107,6 +107,10 @@ impl TurnCommitDraft {
     pub(super) fn into_final_state(mut self) -> RuntimeSessionState {
         self.state.persisted_node_ids = self.graph.persisted_node_ids();
         self.state.session_graph = self.graph.into_session_graph();
+        self.state.agent_frames = self
+            .state
+            .session_graph
+            .agent_frame_records(&self.state.session_id);
         self.state
     }
 
@@ -124,6 +128,11 @@ impl TurnCommitDraft {
 
     pub(super) fn remap_node_ids(&mut self, session_id: &str, mapping: &[(String, String)]) {
         self.graph.remap_node_ids(session_id, mapping);
+        if let Some(current) = self.state.current_frame_node_id.as_mut()
+            && let Some((_, derived)) = mapping.iter().find(|(draft, _)| draft == current)
+        {
+            *current = derived.clone();
+        }
     }
 
     fn apply_message_projection(&mut self, messages: &MessageSequence) {

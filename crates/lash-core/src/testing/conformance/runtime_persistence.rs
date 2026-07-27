@@ -240,10 +240,10 @@ where
     commit_rejects_non_derived_append_node_ids(make()).await;
     append_rejects_duplicate_batch_node_ids(make()).await;
     append_rejects_existing_node_id_collision(make()).await;
-    append_rejects_tombstoned_node_id_collision(make()).await;
     commit_rejects_unresolvable_leaf(make()).await;
     commit_rejects_missing_leaf(make()).await;
-    commit_rejects_tombstoned_leaf(make()).await;
+    host_tombstone_cannot_remove_a_reachable_leaf(make()).await;
+    commit_rejects_leaf_without_frame_open_ancestor(make()).await;
     // [`SessionExecutionLeaseStore`]: single-writer lane fencing.
     session_execution_lease_contract(make()).await;
     session_execution_lease_reclaim_contract(make()).await;
@@ -274,10 +274,150 @@ where
     pending_turn_input_cancel_covers_active_and_deferred_states(make()).await;
     pending_active_turn_inputs_defer_unaccepted_once_on_interrupt(make()).await;
     // [`StoreMaintenance`]: tombstone/vacuum/GC retention.
+    verify_node_refcounts_matches_append_edges_and_head_moves(make()).await;
+    tombstoning_zero_ref_node_decrements_its_parent(make()).await;
     tombstone_vacuum_and_gc_are_minimally_consistent(make()).await;
     if options.reclaims_unreachable_blobs {
         gc_reclaims_unreachable_checkpoint_blobs_and_preserves_live(make()).await;
     }
+}
+
+async fn commit_rejects_leaf_without_frame_open_ancestor(store: Arc<dyn RuntimePersistence>) {
+    let state = RuntimeSessionState {
+        session_id: "missing-frame-root".to_string(),
+        ..RuntimeSessionState::default()
+    };
+    let node = SessionNodeRecord {
+        node_id: "unframed-root".to_string(),
+        parent_node_id: None,
+        timestamp: "2026-07-27T00:00:00Z".to_string(),
+        payload: SessionNodePayload::Event {
+            event: crate::SessionHistoryRecord::Protocol(
+                ProtocolEvent::typed("unframed", serde_json::Value::Null).expect("protocol event"),
+            ),
+        },
+    };
+    let commit = RuntimeCommit::persisted_state_with_graph_commit(
+        &state,
+        crate::GraphCommitDelta::Append {
+            nodes: vec![node],
+            leaf_node_id: Some("unframed-root".to_string()),
+        },
+        &[],
+    );
+
+    let error = store
+        .commit_runtime_state(commit)
+        .await
+        .expect_err("every root graph must open with FrameOpen");
+
+    assert!(matches!(
+        error,
+        StoreError::MissingFrameOpenAncestor { leaf_node_id }
+            if leaf_node_id == "unframed-root"
+    ));
+}
+
+async fn verify_node_refcounts_matches_append_edges_and_head_moves(
+    store: Arc<dyn RuntimePersistence>,
+) {
+    let mut state = RuntimeSessionState {
+        session_id: "refcount-scrub".to_string(),
+        ..RuntimeSessionState::default()
+    };
+    state.ensure_agent_frame_initialized();
+    let root_node_ids = state
+        .session_graph
+        .nodes
+        .iter()
+        .map(|node| node.node_id.clone())
+        .collect::<Vec<_>>();
+    let first = store
+        .commit_runtime_state(RuntimeCommit::persisted_state(&state, &[]))
+        .await
+        .expect("commit frame root");
+    state.apply_persisted_commit_result(first);
+    state.mark_node_ids_persisted(root_node_ids);
+    state.append_active_conversation_messages(&[crate::Message {
+        id: "same-host-id".to_string(),
+        role: crate::MessageRole::User,
+        parts: crate::shared_parts(vec![crate::Part {
+            id: "same-host-id.p0".to_string(),
+            kind: crate::PartKind::Text,
+            content: "child".to_string(),
+            attachment: None,
+            tool_call_id: None,
+            tool_name: None,
+            tool_replay: None,
+            prune_state: crate::PruneState::Intact,
+            reasoning_meta: None,
+            response_meta: None,
+        }]),
+        origin: None,
+    }]);
+    let child_node_ids = state
+        .session_graph
+        .nodes
+        .iter()
+        .filter(|node| !state.persisted_node_ids.contains(&node.node_id))
+        .map(|node| node.node_id.clone())
+        .collect::<Vec<_>>();
+    let second = store
+        .commit_runtime_state(RuntimeCommit::persisted_state(&state, &[]))
+        .await
+        .expect("move head to child");
+    state.apply_persisted_commit_result(second);
+    state.mark_node_ids_persisted(child_node_ids);
+
+    let verified = store
+        .verify_node_refcounts()
+        .await
+        .expect("scrub exact cached counts");
+
+    assert_eq!(verified.checked_node_count, 2);
+}
+
+async fn tombstoning_zero_ref_node_decrements_its_parent(store: Arc<dyn RuntimePersistence>) {
+    let state = RuntimeSessionState {
+        session_id: "zero-ref-tombstone".to_string(),
+        current_frame_node_id: Some("root-frame".to_string()),
+        session_graph: crate::SessionGraph::from_nodes(
+            vec![
+                sample_session_node("root-frame", None),
+                sample_session_node("live-leaf", Some("root-frame")),
+                sample_session_node("zero-ref-leaf", Some("root-frame")),
+            ],
+            Some("live-leaf".to_string()),
+        ),
+        ..RuntimeSessionState::default()
+    };
+    commit_runtime_state_for_test(
+        &store,
+        RuntimeCommit::persisted_state(&state, &[]),
+        "zero-ref-tombstone",
+    )
+    .await
+    .expect("commit one rooted and one zero-ref child");
+
+    store
+        .tombstone_nodes(&["zero-ref-leaf".to_string()])
+        .await
+        .expect("tombstone zero-ref node and decrement its parent");
+    assert!(
+        store
+            .load_node("zero-ref-leaf")
+            .await
+            .expect("load tombstoned zero-ref node")
+            .is_none()
+    );
+    assert_eq!(
+        store
+            .verify_node_refcounts()
+            .await
+            .expect("parent count remains exact after zero-ref tombstone")
+            .checked_node_count,
+        2
+    );
 }
 
 async fn turn_input_application_identity_survives_pending_tombstone_vacuum(
@@ -737,11 +877,21 @@ fn sample_session_node(id: &str, parent: Option<&str>) -> SessionNodeRecord {
         node_id: id.to_string(),
         parent_node_id: parent.map(ToOwned::to_owned),
         timestamp: "1970-01-01T00:00:00Z".to_string(),
-        payload: SessionNodePayload::Event {
-            event: crate::SessionHistoryRecord::Protocol(
-                ProtocolEvent::typed("conformance", serde_json::json!({ "node": id }))
-                    .expect("protocol event"),
-            ),
+        payload: if parent.is_none() {
+            SessionNodePayload::FrameOpen {
+                reason: AgentFrameReason::initial(),
+                assignment: crate::AgentFrameAssignment::from_policy(
+                    crate::SessionPolicy::default(),
+                ),
+                protocol_turn_options: ProtocolTurnOptions::default(),
+            }
+        } else {
+            SessionNodePayload::Event {
+                event: crate::SessionHistoryRecord::Protocol(
+                    ProtocolEvent::typed("conformance", serde_json::json!({ "node": id }))
+                        .expect("protocol event"),
+                ),
+            }
         },
     }
 }
@@ -825,6 +975,7 @@ async fn concurrent_head_revision_cas_applies_exactly_once(store: Arc<dyn Runtim
         let node = sample_session_node(node_id, None);
         RuntimeCommit {
             expected_head_revision: Some(0),
+            current_frame_node_id: Some(node_id.to_string()),
             graph: crate::GraphCommitDelta::Append {
                 nodes: vec![node],
                 leaf_node_id: Some(node_id.to_string()),
@@ -1440,6 +1591,7 @@ async fn active_path_read_scope_selects_only_requested_ancestry(
     );
     let state = RuntimeSessionState {
         session_id: "branchy".to_string(),
+        current_frame_node_id: Some("root-node".to_string()),
         session_graph: graph,
         ..RuntimeSessionState::default()
     };
@@ -3316,6 +3468,10 @@ async fn queue_completion_and_turn_commit_stamp_are_atomic(store: Arc<dyn Runtim
         .expect("same final turn commit stamp retries idempotently");
     assert_eq!(retry.head_revision, first.head_revision);
     assert_eq!(retry.checkpoint_ref, first.checkpoint_ref);
+    assert_eq!(
+        retry.realized_node_timestamps,
+        first.realized_node_timestamps
+    );
     assert_eq!(first.enqueued_queue_batches.len(), 1);
     assert_eq!(retry.enqueued_queue_batches.len(), 1);
     assert_eq!(
@@ -4257,14 +4413,14 @@ async fn tombstone_vacuum_and_gc_are_minimally_consistent(store: Arc<dyn Runtime
     store
         .tombstone_nodes(&["node-delete".to_string()])
         .await
-        .expect("tombstone node");
+        .expect("probe live node for reclamation");
     assert!(
         store
             .load_node("node-delete")
             .await
-            .expect("load node after tombstone")
-            .is_none(),
-        "tombstoned nodes must be hidden from direct loads"
+            .expect("load node after reclamation probe")
+            .is_some(),
+        "a host-selected live node must not be tombstoned"
     );
     let read = store
         .load_session(SessionReadScope::FullGraph)
@@ -4272,18 +4428,14 @@ async fn tombstone_vacuum_and_gc_are_minimally_consistent(store: Arc<dyn Runtime
         .expect("load graph after tombstone")
         .expect("session after tombstone");
     assert!(
-        !read
-            .graph
+        read.graph
             .nodes
             .iter()
             .any(|node| node.node_id == "node-delete"),
-        "tombstoned nodes must be hidden from session graph loads"
+        "a reachable node must remain in session graph loads"
     );
     let vacuum = store.vacuum().await.expect("vacuum");
-    assert!(
-        vacuum.removed_node_count <= 1,
-        "vacuum must report only rows removed by this call, got {vacuum:?}"
-    );
+    assert_eq!(vacuum.removed_node_count, 0);
     store
         .gc_unreachable()
         .await
@@ -4763,15 +4915,18 @@ async fn final_commit_stamp_is_idempotent_and_conflicts_on_changed_hash(
         ..RuntimeSessionState::default()
     };
     state.ensure_agent_frame_initialized();
-    state.agent_frames[0].created_at = "2026-07-26T10:00:00Z".to_string();
+    state.session_graph.data_mut().nodes[0].timestamp = "2026-07-26T10:00:00Z".to_string();
     state.execution_state_snapshot = Some(vec![7; 1_024]);
-    let commit = RuntimeCommit::persisted_state(&state, &[]);
-    let turn_commit_hash = commit.turn_commit_hash().expect("turn commit hash");
-    let stamped_commit = commit.with_turn_commit(RuntimeTurnCommitStamp::new(
-        "root",
-        crate::OperationId::turn("root", "provider-turn", "final"),
-        turn_commit_hash.clone(),
-    ));
+    let operation = crate::OperationId::turn("root", "provider-turn", "final");
+    let (stamped_commit, _) = RuntimeCommit::persisted_state(&state, &[])
+        .with_operation(operation.clone())
+        .expect("derive and stamp first commit");
+    let turn_commit_hash = stamped_commit
+        .turn_commit
+        .as_ref()
+        .expect("turn commit stamp")
+        .turn_commit_hash
+        .clone();
 
     let session_lease =
         claim_session_execution_lease_for_test(&store, "root", "provider-turn").await;
@@ -4785,16 +4940,19 @@ async fn final_commit_stamp_is_idempotent_and_conflicts_on_changed_hash(
         .await
         .expect("first final commit requires a live session execution lease");
     let mut replay_state = state.clone();
-    replay_state.agent_frames[0].created_at = "2026-07-26T10:00:09Z".to_string();
-    let replay_commit = RuntimeCommit::persisted_state(&replay_state, &[]);
-    let replay_hash = replay_commit.turn_commit_hash().expect("replay hash");
+    replay_state.session_graph.data_mut().nodes[0].timestamp = "2026-07-26T10:00:09Z".to_string();
+    let (replay_commit, _) = RuntimeCommit::persisted_state(&replay_state, &[])
+        .with_operation(operation.clone())
+        .expect("derive and stamp replay");
+    let replay_hash = replay_commit
+        .turn_commit
+        .as_ref()
+        .expect("replay stamp")
+        .turn_commit_hash
+        .clone();
     assert_eq!(replay_hash, turn_commit_hash);
     let retry = store
-        .commit_runtime_state(replay_commit.with_turn_commit(RuntimeTurnCommitStamp::new(
-            "root",
-            crate::OperationId::turn("root", "provider-turn", "final"),
-            replay_hash,
-        )))
+        .commit_runtime_state(replay_commit)
         .await
         .expect("same final commit retries idempotently without a live lease");
     assert_eq!(retry.head_revision, first.head_revision);
@@ -4810,7 +4968,10 @@ async fn final_commit_stamp_is_idempotent_and_conflicts_on_changed_hash(
     );
     replay_state.apply_persisted_commit_result(retry.clone());
 
-    let mut retry_from_new_head = RuntimeCommit::persisted_state(&state, &[]);
+    let mut retry_from_new_head = RuntimeCommit::persisted_state(&state, &[])
+        .with_operation(operation.clone())
+        .expect("stamp retry from advanced head")
+        .0;
     retry_from_new_head.expected_head_revision = Some(first.head_revision);
     let retry_hash = retry_from_new_head
         .turn_commit_hash()
@@ -4852,9 +5013,12 @@ async fn verified_commit_rejects_receipt_topology_mismatch(store: Arc<dyn Runtim
             node_id: node_id.clone(),
             parent_node_id: None,
             timestamp: "2026-07-26T10:00:00Z".to_string(),
-            payload: crate::SessionNodePayload::Plugin {
-                plugin_type: "guard".to_string(),
-                body: crate::session_graph::SharedJsonValue::new(serde_json::json!({"ok": true})),
+            payload: crate::SessionNodePayload::FrameOpen {
+                reason: AgentFrameReason::initial(),
+                assignment: crate::AgentFrameAssignment::from_policy(
+                    crate::SessionPolicy::default(),
+                ),
+                protocol_turn_options: ProtocolTurnOptions::default(),
             },
         }],
         leaf_node_id: Some(node_id.clone()),
@@ -4942,9 +5106,10 @@ async fn append_rejects_existing_node_id_collision(store: Arc<dyn RuntimePersist
         node_id: colliding_id.clone(),
         parent_node_id: None,
         timestamp: "2026-07-26T10:00:00Z".to_string(),
-        payload: crate::SessionNodePayload::Plugin {
-            plugin_type: "original".to_string(),
-            body: crate::session_graph::SharedJsonValue::new(serde_json::json!({"version": 1})),
+        payload: crate::SessionNodePayload::FrameOpen {
+            reason: AgentFrameReason::new("original"),
+            assignment: crate::AgentFrameAssignment::from_policy(crate::SessionPolicy::default()),
+            protocol_turn_options: ProtocolTurnOptions::default(),
         },
     };
     state.session_graph =
@@ -4955,9 +5120,10 @@ async fn append_rejects_existing_node_id_collision(store: Arc<dyn RuntimePersist
         .expect("seed colliding durable node");
 
     let replacement = crate::SessionNodeRecord {
-        payload: crate::SessionNodePayload::Plugin {
-            plugin_type: "replacement".to_string(),
-            body: crate::session_graph::SharedJsonValue::new(serde_json::json!({"version": 2})),
+        payload: crate::SessionNodePayload::FrameOpen {
+            reason: AgentFrameReason::new("replacement"),
+            assignment: crate::AgentFrameAssignment::from_policy(crate::SessionPolicy::default()),
+            protocol_turn_options: ProtocolTurnOptions::default(),
         },
         ..original
     };
@@ -4982,11 +5148,8 @@ async fn append_rejects_existing_node_id_collision(store: Arc<dyn RuntimePersist
         .await
         .expect("load original node")
         .expect("original node remains");
-    assert_eq!(
-        stored.plugin().map(|(plugin_type, _)| plugin_type),
-        Some("original"),
-        "collision rejection must not overwrite the durable node"
-    );
+    let (reason, _, _) = stored.frame_open().expect("stored frame");
+    assert_eq!(reason.as_str(), "original");
 }
 
 async fn append_rejects_duplicate_batch_node_ids(store: Arc<dyn RuntimePersistence>) {
@@ -5020,45 +5183,6 @@ async fn append_rejects_duplicate_batch_node_ids(store: Arc<dyn RuntimePersisten
             .is_none(),
         "duplicate rejection must happen before any durable write"
     );
-}
-
-async fn append_rejects_tombstoned_node_id_collision(store: Arc<dyn RuntimePersistence>) {
-    let state = RuntimeSessionState {
-        session_id: "root".to_string(),
-        ..RuntimeSessionState::default()
-    };
-    let seed = RuntimeCommit::persisted_state_with_graph_commit(
-        &state,
-        crate::GraphCommitDelta::Append {
-            nodes: vec![sample_session_node("tombstoned-collision", None)],
-            leaf_node_id: Some("tombstoned-collision".to_string()),
-        },
-        &[],
-    );
-    commit_runtime_state_for_test(&store, seed, "tombstoned-seed")
-        .await
-        .expect("seed node before tombstoning");
-    store
-        .tombstone_nodes(&["tombstoned-collision".to_string()])
-        .await
-        .expect("tombstone seeded node");
-
-    let mut append = RuntimeCommit::persisted_state_with_graph_commit(
-        &state,
-        crate::GraphCommitDelta::Append {
-            nodes: vec![sample_session_node("tombstoned-collision", None)],
-            leaf_node_id: Some("tombstoned-collision".to_string()),
-        },
-        &[],
-    );
-    append.expected_head_revision = Some(1);
-    let err = commit_runtime_state_for_test(&store, append, "tombstoned-collision")
-        .await
-        .expect_err("append must not resurrect a tombstoned id");
-    assert!(matches!(
-        err,
-        StoreError::NodeIdCollision { ref node_id } if node_id == "tombstoned-collision"
-    ));
 }
 
 async fn commit_rejects_unresolvable_leaf(store: Arc<dyn RuntimePersistence>) {
@@ -5123,7 +5247,7 @@ async fn commit_rejects_missing_leaf(store: Arc<dyn RuntimePersistence>) {
     );
 }
 
-async fn commit_rejects_tombstoned_leaf(store: Arc<dyn RuntimePersistence>) {
+async fn host_tombstone_cannot_remove_a_reachable_leaf(store: Arc<dyn RuntimePersistence>) {
     let mut state = RuntimeSessionState {
         session_id: "root".to_string(),
         ..RuntimeSessionState::default()
@@ -5145,20 +5269,22 @@ async fn commit_rejects_tombstoned_leaf(store: Arc<dyn RuntimePersistence>) {
         .await
         .expect("tombstone leaf");
 
-    let unchanged = RuntimeCommit::persisted_state_with_graph_commit(
+    let mut unchanged = RuntimeCommit::persisted_state_with_graph_commit(
         &state,
         crate::GraphCommitDelta::Unchanged {
             leaf_node_id: Some("tombstoned-leaf".to_string()),
         },
         &[],
     );
-    let err = commit_runtime_state_for_test(&store, unchanged, "tombstoned-leaf-unchanged")
+    unchanged.current_frame_node_id = Some("tombstoned-leaf".to_string());
+    commit_runtime_state_for_test(&store, unchanged, "tombstoned-leaf-unchanged")
         .await
-        .expect_err("a tombstoned leaf must not resolve in the post-commit live graph");
-    assert!(matches!(
-        err,
-        StoreError::InvalidGraphLeaf {
-            leaf_node_id: Some(ref leaf)
-        } if leaf == "tombstoned-leaf"
-    ));
+        .expect("host tombstone selection cannot override a live head root");
+    assert!(
+        store
+            .load_node("tombstoned-leaf")
+            .await
+            .expect("load protected leaf")
+            .is_some()
+    );
 }

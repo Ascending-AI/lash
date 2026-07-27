@@ -388,6 +388,15 @@ async fn session_store_factory_delete_removes_store_and_is_idempotent(
         .create_store(&request)
         .await
         .expect("create deleted session");
+    let mut state = crate::RuntimeSessionState {
+        session_id: request.session_id.clone(),
+        ..Default::default()
+    };
+    state.ensure_agent_frame_initialized();
+    created
+        .commit_runtime_state(crate::RuntimeCommit::persisted_state(&state, &[]))
+        .await
+        .expect("commit a live graph root before delete");
     created
         .enqueue_pending_turn_input(
             crate::PendingTurnInputDraft::new(
@@ -484,4 +493,14 @@ async fn session_store_factory_delete_removes_store_and_is_idempotent(
         .expect("load recreated session meta")
         .expect("recreated session meta");
     assert_meta_matches_request(&meta, &recreated_request, "recreated-model");
+    let mut recreated_state = crate::RuntimeSessionState {
+        session_id: recreated_request.session_id.clone(),
+        ..Default::default()
+    };
+    recreated_state.ensure_agent_frame_initialized();
+    let error = recreated
+        .commit_runtime_state(crate::RuntimeCommit::persisted_state(&recreated_state, &[]))
+        .await
+        .expect_err("a retained tombstone must reject immediate node-id reuse");
+    assert!(matches!(error, crate::StoreError::NodeIdCollision { .. }));
 }

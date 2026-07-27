@@ -16,26 +16,36 @@ impl SessionStoreFactory for PostgresSessionStoreFactory {
             #[cfg(test)]
             checkpoint_write_transaction_count: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
         };
-        if store
-            .load_session_meta()
+        let meta = SessionMeta {
+            session_id: request.session_id.clone(),
+            session_name: request.session_id.clone(),
+            created_at: current_timestamp_string(),
+            model: request.policy.model.id.clone(),
+            cwd: std::env::current_dir()
+                .ok()
+                .and_then(|path| path.to_str().map(str::to_string)),
+            relation: request.relation.clone(),
+        };
+        let mut tx = self.pool.begin().await.map_err(|err| err.to_string())?;
+        crate::runtime_persistence::lock_session_history_mutation_tx(&mut tx, &request.session_id)
             .await
-            .map_err(|err| err.to_string())?
-            .is_none()
-        {
-            store
-                .save_session_meta(SessionMeta {
-                    session_id: request.session_id.clone(),
-                    session_name: request.session_id.clone(),
-                    created_at: current_timestamp_string(),
-                    model: request.policy.model.id.clone(),
-                    cwd: std::env::current_dir()
-                        .ok()
-                        .and_then(|path| path.to_str().map(str::to_string)),
-                    relation: request.relation.clone(),
-                })
-                .await
-                .map_err(|err| err.to_string())?;
-        }
+            .map_err(|err| err.to_string())?;
+        sqlx::query("DELETE FROM lash_deleted_sessions WHERE session_id = $1")
+            .bind(&request.session_id)
+            .execute(&mut *tx)
+            .await
+            .map_err(|err| err.to_string())?;
+        sqlx::query(
+            "INSERT INTO lash_session_meta (session_id, meta_json)
+             VALUES ($1, $2)
+             ON CONFLICT (session_id) DO NOTHING",
+        )
+        .bind(&request.session_id)
+        .bind(encode_json(&meta))
+        .execute(&mut *tx)
+        .await
+        .map_err(|err| err.to_string())?;
+        tx.commit().await.map_err(|err| err.to_string())?;
         Ok(Arc::new(store))
     }
 
@@ -184,17 +194,31 @@ pub(crate) async fn delete_session_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     session_id: &str,
 ) -> Result<(), StoreError> {
+    crate::runtime_persistence::lock_session_history_mutation_tx(tx, session_id).await?;
+    sqlx::query(
+        "INSERT INTO lash_deleted_sessions (session_id)
+         VALUES ($1)
+         ON CONFLICT (session_id) DO NOTHING",
+    )
+    .bind(session_id)
+    .execute(&mut **tx)
+    .await
+    .map_err(store_sqlx_error)?;
     // Attachment intents are released before the rest of the process-owned
     // store. Process pruning calls this while its terminal row is still locked
     // and deletes that row last, so any failure leaves a process leak instead
     // of making live-looking session state ownerless.
-    let leaf_node_id: Option<String> =
-        sqlx::query_scalar("SELECT leaf_node_id FROM lash_sessions WHERE session_id = $1")
-            .bind(session_id)
-            .fetch_optional(&mut **tx)
-            .await
-            .map_err(store_sqlx_error)?
-            .flatten();
+    let leaf_node_id: Option<String> = sqlx::query_scalar(
+        "SELECT leaf_node_id
+             FROM lash_sessions
+             WHERE session_id = $1
+             FOR UPDATE",
+    )
+    .bind(session_id)
+    .fetch_optional(&mut **tx)
+    .await
+    .map_err(store_sqlx_error)?
+    .flatten();
     sqlx::query("DELETE FROM lash_sessions WHERE session_id = $1")
         .bind(session_id)
         .execute(&mut **tx)

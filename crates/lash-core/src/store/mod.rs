@@ -14,7 +14,7 @@ pub use attachment_manifest::{
 pub use commit_identity::{OperationId, derive_history_node_id, graph_realization_digest};
 pub use error::StoreError;
 pub use lease_timings::{LeaseTimings, LeaseTimingsError};
-pub use realization::commit_runtime_state_verified;
+pub use realization::{RealizedNodeTimestamp, commit_runtime_state_verified};
 
 const PROC_BOOT_ID_PATH: &str = "/proc/sys/kernel/random/boot_id";
 
@@ -91,8 +91,9 @@ mod persisted_state_tests {
 
     #[test]
     fn versioned_json_record_rejects_unsupported_schema_version() {
+        let unsupported = SESSION_HEAD_META_SCHEMA_VERSION + 1;
         let err = decode_versioned_json_record::<SessionHeadMeta>(
-            r#"{"schema_version":2}"#,
+            &format!(r#"{{"schema_version":{unsupported}}}"#),
             "SessionHeadMeta",
             SESSION_HEAD_META_SCHEMA_VERSION,
         )
@@ -102,9 +103,9 @@ mod persisted_state_tests {
             err,
             StoreError::UnsupportedRecordSchemaVersion {
                 record_kind: "SessionHeadMeta",
-                actual: 2,
+                actual,
                 expected: SESSION_HEAD_META_SCHEMA_VERSION
-            }
+            } if actual == unsupported
         ));
     }
 }
@@ -352,7 +353,11 @@ impl GraphCommitDelta {
                 *parent = derived_parent.clone();
             }
             let old = node.node_id.clone();
-            let derived = derive_history_node_id(session_id, operation, ordinal as u64)?;
+            let derived = if matches!(node.payload, crate::SessionNodePayload::FrameOpen { .. }) {
+                old.clone()
+            } else {
+                derive_history_node_id(session_id, operation, ordinal as u64)?
+            };
             node.node_id = derived.clone();
             remapped.insert(old.clone(), derived.clone());
             mapping.push((old, derived));
@@ -365,12 +370,37 @@ impl GraphCommitDelta {
         Ok(mapping)
     }
 
-    pub(crate) fn appended_nodes(&self) -> impl Iterator<Item = &crate::SessionNodeRecord> {
+    pub fn appended_nodes(&self) -> impl Iterator<Item = &crate::SessionNodeRecord> {
         match self {
             Self::Append { nodes, .. } => nodes.as_slice(),
             Self::Unchanged { .. } => &[],
         }
         .iter()
+    }
+
+    pub fn validate_append_topology(&self) -> Result<(), StoreError> {
+        let Self::Append { nodes, .. } = self else {
+            return Ok(());
+        };
+        let proposed_ids = nodes
+            .iter()
+            .map(|node| node.node_id.as_str())
+            .collect::<std::collections::HashSet<_>>();
+        let mut earlier_ids = std::collections::HashSet::with_capacity(nodes.len());
+        for node in nodes {
+            if let Some(parent_node_id) = node.parent_node_id.as_deref()
+                && proposed_ids.contains(parent_node_id)
+                && !earlier_ids.contains(parent_node_id)
+            {
+                return Err(StoreError::InvalidGraphParent {
+                    node_id: node.node_id.clone(),
+                    expected: None,
+                    actual: node.parent_node_id.clone(),
+                });
+            }
+            earlier_ids.insert(node.node_id.as_str());
+        }
+        Ok(())
     }
 }
 
@@ -414,6 +444,12 @@ pub struct RuntimeCommitResult {
     /// attempt's recorded proposal independently of node derivation. Physical
     /// row realization still relies on the backend transaction being atomic.
     pub realization_digest: String,
+    /// Store-realized timestamps for nodes appended by this operation.
+    ///
+    /// Node timestamps are clock-derived and excluded from commit intent, so a
+    /// receipt replay must return the first attempt's values for the resident
+    /// graph to converge with durable history.
+    pub realized_node_timestamps: Vec<RealizedNodeTimestamp>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub enqueued_queue_batches: Vec<crate::QueuedWorkBatch>,
     /// Canonical input applications settled by this idempotent turn commit.
@@ -786,6 +822,9 @@ impl RuntimeCommit {
             return Ok(());
         };
         for (ordinal, node) in nodes.iter().enumerate() {
+            if matches!(node.payload, crate::SessionNodePayload::FrameOpen { .. }) {
+                continue;
+            }
             let expected =
                 derive_history_node_id(&self.session_id, &completed.operation, ordinal as u64)?;
             if node.node_id != expected {
@@ -809,36 +848,6 @@ impl RuntimeCommit {
                     node_id: node.node_id.clone(),
                 });
             }
-        }
-        Ok(())
-    }
-
-    pub fn validate_append_chain(
-        &self,
-        existing_leaf_node_id: Option<&str>,
-    ) -> Result<(), StoreError> {
-        let GraphCommitDelta::Append {
-            nodes,
-            leaf_node_id,
-        } = &self.graph
-        else {
-            return Ok(());
-        };
-        let mut expected_parent = existing_leaf_node_id.map(ToOwned::to_owned);
-        for node in nodes {
-            if node.parent_node_id != expected_parent {
-                return Err(StoreError::InvalidGraphParent {
-                    node_id: node.node_id.clone(),
-                    expected: expected_parent,
-                    actual: node.parent_node_id.clone(),
-                });
-            }
-            expected_parent = Some(node.node_id.clone());
-        }
-        if !nodes.is_empty() && leaf_node_id != &expected_parent {
-            return Err(StoreError::InvalidGraphLeaf {
-                leaf_node_id: leaf_node_id.clone(),
-            });
         }
         Ok(())
     }
@@ -888,23 +897,7 @@ impl RuntimeCommit {
         state: &crate::RuntimeSessionState,
         usage_deltas: &[crate::TokenLedgerEntry],
     ) -> Self {
-        Self {
-            session_id: state.session_id.clone(),
-            expected_head_revision: state.head_revision,
-            session_execution_lease: None,
-            release_session_execution_lease: None,
-            config: persisted_session_config_from_state(state),
-            current_frame_node_id: state.current_frame_node_id.clone(),
-            graph: state.pending_graph_commit(),
-            checkpoint: build_checkpoint_from_persisted_state(state),
-            usage_deltas: usage_deltas.to_vec(),
-            turn_commit: None,
-            completed_queue_claims: Vec::new(),
-            completed_turn_input_claims: Vec::new(),
-            enqueued_queue_batches: Vec::new(),
-            interrupted_turn_input_turn_id: None,
-            committed_attachment_ids: Vec::new(),
-        }
+        Self::persisted_state_with_graph_commit(state, state.pending_graph_commit(), usage_deltas)
     }
 
     pub(crate) fn persisted_state_with_operation(
@@ -937,13 +930,25 @@ impl RuntimeCommit {
         graph: GraphCommitDelta,
         usage_deltas: &[crate::TokenLedgerEntry],
     ) -> Self {
+        let mut projected_graph = state.session_graph.clone();
+        if let GraphCommitDelta::Append { nodes, .. } = &graph {
+            for node in nodes {
+                if projected_graph.find_node(&node.node_id).is_none() {
+                    projected_graph.extend_node_records(std::iter::once(node.clone()));
+                }
+            }
+        }
+        projected_graph.set_leaf_node_id(graph.leaf_node_id().cloned());
+        let current_frame_node_id = projected_graph
+            .nearest_frame_node_id(projected_graph.leaf_node_id.as_deref())
+            .map(ToOwned::to_owned);
         Self {
             session_id: state.session_id.clone(),
             expected_head_revision: state.head_revision,
             session_execution_lease: None,
             release_session_execution_lease: None,
             config: persisted_session_config_from_state(state),
-            current_frame_node_id: state.current_frame_node_id.clone(),
+            current_frame_node_id,
             graph,
             checkpoint: build_checkpoint_from_persisted_state(state),
             usage_deltas: usage_deltas.to_vec(),

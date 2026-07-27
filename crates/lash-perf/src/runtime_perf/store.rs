@@ -586,6 +586,14 @@ impl SessionCommitStore for RuntimePerfStore {
         commit: RuntimeCommit,
     ) -> Result<RuntimeCommitResult, store::StoreError> {
         let realization_digest = store::graph_realization_digest(&commit.graph);
+        let realized_node_timestamps = commit
+            .graph
+            .appended_nodes()
+            .map(|node| store::RealizedNodeTimestamp {
+                node_id: node.node_id.clone(),
+                timestamp: node.timestamp.clone(),
+            })
+            .collect();
         let RuntimeCommit {
             session_id,
             expected_head_revision,
@@ -806,6 +814,7 @@ impl SessionCommitStore for RuntimePerfStore {
             checkpoint_ref,
             manifest,
             realization_digest,
+            realized_node_timestamps,
             enqueued_queue_batches: enqueued_queue_batches
                 .into_iter()
                 .map(|batch| self.enqueue_queued_work_in_memory(batch))

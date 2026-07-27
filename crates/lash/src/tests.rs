@@ -166,6 +166,14 @@ impl lash_core::SessionCommitStore for SnapshotStore {
     {
         let mut read = self.read.lock().expect("snapshot store lock");
         let realization_digest = lash_core::store::graph_realization_digest(&commit.graph);
+        let realized_node_timestamps = commit
+            .graph
+            .appended_nodes()
+            .map(|node| lash_core::store::RealizedNodeTimestamp {
+                node_id: node.node_id.clone(),
+                timestamp: node.timestamp.clone(),
+            })
+            .collect();
         if let Some(completed) = &commit.turn_commit {
             let operation_key = completed.operation.storage_key()?;
             if completed.session_id != commit.session_id {
@@ -249,6 +257,7 @@ impl lash_core::SessionCommitStore for SnapshotStore {
             checkpoint_ref: lash_core::BlobRef("checkpoint".to_string()),
             manifest: lash_core::store::SessionCheckpoint::default(),
             realization_digest,
+            realized_node_timestamps,
             enqueued_queue_batches: Vec::new(),
             turn_input_applications: Vec::new(),
         };

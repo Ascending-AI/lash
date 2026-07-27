@@ -905,6 +905,7 @@ fn normalized_store_error(backend: &str, error: &StoreError) -> String {
         StoreError::CommitNodeBudgetExceeded { .. } => "CommitNodeBudgetExceeded".to_string(),
         StoreError::CommitByteBudgetExceeded { .. } => "CommitByteBudgetExceeded".to_string(),
         StoreError::SessionBindingMismatch { .. } => "SessionBindingMismatch".to_string(),
+        StoreError::SessionDeleted { .. } => "SessionDeleted".to_string(),
         StoreError::UnsupportedReadScope(_) => "UnsupportedReadScope".to_string(),
         StoreError::HeadRevisionConflict { .. } => "HeadRevisionConflict".to_string(),
         StoreError::RuntimeTurnCommitConflict { .. } => "RuntimeTurnCommitConflict".to_string(),
@@ -930,6 +931,9 @@ fn normalized_store_error(backend: &str, error: &StoreError) -> String {
         StoreError::MissingFrameOpenAncestor { .. } => "MissingFrameOpenAncestor".to_string(),
         StoreError::NodeRefcountDrift { .. } => "NodeRefcountDrift".to_string(),
         StoreError::CommitRealizationMismatch { .. } => "CommitRealizationMismatch".to_string(),
+        StoreError::CommitNodeRealizationMismatch { .. } => {
+            "CommitNodeRealizationMismatch".to_string()
+        }
         StoreError::Backend(message) => normalized_backend_error(backend, message),
     }
 }

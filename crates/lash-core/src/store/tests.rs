@@ -38,7 +38,7 @@ fn intent_fixture() -> RuntimeCommit {
         ..crate::RuntimeSessionState::default()
     };
     state.ensure_agent_frame_initialized();
-    state.agent_frames[0].created_at = "2026-07-26T10:00:00Z".to_string();
+    state.session_graph.data_mut().nodes[0].timestamp = "2026-07-26T10:00:00Z".to_string();
     let operation = OperationId::turn("golden-session", "turn-42", "final");
     let node_id =
         derive_history_node_id("golden-session", &operation, 0).expect("derive golden node");
@@ -188,7 +188,7 @@ fn legacy_hash_reproduces_random_committed_message_id_conflict() {
 fn intent_hash_golden_vector() {
     assert_eq!(
         intent_fixture().turn_commit_hash().expect("golden intent"),
-        "fa9c57a925d8ac676acc4bd1a8405e8b69a5361823339eb354b24c56afc1286d"
+        "0fe62517542cefb409fbbd87be90b8db5babc3f1053817cecdf55afd4ae89f64"
     );
 }
 
@@ -394,6 +394,66 @@ fn node_derivation_remaps_in_batch_parent_edges() {
         nodes[1].parent_node_id.as_deref(),
         Some(nodes[0].node_id.as_str())
     );
+}
+
+#[test]
+fn frame_node_identity_is_stable_across_operation_realization() {
+    let operation = OperationId::turn("session", "turn", "final");
+    let frame_node_id = crate::session_graph::frame_node_id("session", "initial-frame");
+    let mut graph = GraphCommitDelta::Append {
+        nodes: vec![crate::SessionNodeRecord {
+            node_id: frame_node_id.clone(),
+            parent_node_id: None,
+            timestamp: "2026-07-26T10:00:00Z".to_string(),
+            payload: crate::SessionNodePayload::FrameOpen {
+                reason: crate::AgentFrameReason::initial(),
+                assignment: crate::AgentFrameAssignment::from_policy(
+                    crate::SessionPolicy::default(),
+                ),
+                protocol_turn_options: crate::ProtocolTurnOptions::default(),
+            },
+        }],
+        leaf_node_id: Some(frame_node_id.clone()),
+    };
+
+    graph
+        .derive_node_ids("session", &operation)
+        .expect("realize frame node");
+
+    let GraphCommitDelta::Append {
+        nodes,
+        leaf_node_id,
+    } = graph
+    else {
+        panic!("fixture is append");
+    };
+    assert_eq!(nodes[0].node_id, frame_node_id);
+    assert_eq!(leaf_node_id, Some(frame_node_id));
+}
+
+#[test]
+fn append_chain_rejects_self_parent_cycles() {
+    let graph = GraphCommitDelta::Append {
+        nodes: vec![crate::SessionNodeRecord {
+            node_id: "cycle".to_string(),
+            parent_node_id: Some("cycle".to_string()),
+            timestamp: "2026-07-26T10:00:00Z".to_string(),
+            payload: crate::SessionNodePayload::Plugin {
+                plugin_type: "cycle".to_string(),
+                body: crate::session_graph::SharedJsonValue::new(serde_json::json!({})),
+            },
+        }],
+        leaf_node_id: Some("cycle".to_string()),
+    };
+
+    assert!(matches!(
+        graph.validate_append_topology(),
+        Err(StoreError::InvalidGraphParent {
+            expected: None,
+            actual: Some(parent),
+            ..
+        }) if parent == "cycle"
+    ));
 }
 
 fn local_liveness(

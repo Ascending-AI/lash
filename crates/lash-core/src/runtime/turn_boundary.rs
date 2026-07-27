@@ -456,10 +456,22 @@ impl TurnBoundary {
                 TurnCommitStage::Drafting(draft) => {
                     draft.remap_node_ids(&session_id, &node_id_mapping)
                 }
-                TurnCommitStage::Finalized(finalized) => finalized
-                    .state
-                    .session_graph
-                    .remap_node_ids(&session_id, &node_id_mapping),
+                TurnCommitStage::Finalized(finalized) => {
+                    finalized
+                        .state
+                        .session_graph
+                        .remap_node_ids(&session_id, &node_id_mapping);
+                    if let Some(current) = finalized.state.current_frame_node_id.as_mut()
+                        && let Some((_, derived)) =
+                            node_id_mapping.iter().find(|(draft, _)| draft == current)
+                    {
+                        *current = derived.clone();
+                    }
+                    finalized.state.agent_frames = finalized
+                        .state
+                        .session_graph
+                        .agent_frame_records(&session_id);
+                }
             }
         }
         let state = self.state_mut();
@@ -594,6 +606,7 @@ mod tests {
         let durable_node_id = graph.nodes[0].node_id.clone();
         let pending_node_id = graph.nodes[1].node_id.clone();
         let mut state = state_with_graph(graph);
+        let frame_node_id = state.current_frame_node_id.clone().expect("initial frame");
         state.persisted_node_ids.insert(durable_node_id);
 
         let draft = TurnCommitDraft::from_state_with_clock(
@@ -609,7 +622,7 @@ mod tests {
                 .iter()
                 .map(|node| node.node_id.as_str())
                 .collect::<Vec<_>>(),
-            vec![pending_node_id.as_str()]
+            vec![frame_node_id.as_str(), pending_node_id.as_str()]
         );
     }
 
@@ -694,11 +707,24 @@ mod tests {
     }
 
     fn state_with_graph(graph: SessionGraph) -> RuntimeSessionState {
-        RuntimeSessionState {
+        let mut state = RuntimeSessionState {
             session_id: "session-1".to_string(),
-            session_graph: graph,
             ..RuntimeSessionState::default()
+        };
+        state.ensure_agent_frame_initialized();
+        if !graph.nodes.is_empty() {
+            let frame_node_id = state.current_frame_node_id.clone().expect("initial frame");
+            let mut nodes = state.session_graph.nodes.clone();
+            nodes.extend(graph.nodes.iter().cloned().map(|mut node| {
+                if node.parent_node_id.is_none() {
+                    node.parent_node_id = Some(frame_node_id.clone());
+                }
+                node
+            }));
+            state.session_graph = SessionGraph::from_nodes(nodes, graph.leaf_node_id.clone());
+            state.agent_frames = state.session_graph.agent_frame_records(&state.session_id);
         }
+        state
     }
 
     async fn leased_boundary(
@@ -742,11 +768,13 @@ mod tests {
             },
             &crate::SystemClock,
         );
+        let expected_frame_node_id =
+            crate::session_graph::frame_node_id(&state.session_id, &frame_id);
 
         assert_eq!(state.session_id, "session-1");
         assert_eq!(
             state.current_frame_node_id.as_deref(),
-            Some(frame_id.as_str())
+            Some(expected_frame_node_id.as_str())
         );
         let current = state.current_agent_frame().expect("current frame");
         assert_eq!(
@@ -757,7 +785,9 @@ mod tests {
             current.reason.as_str(),
             crate::AgentFrameReason::CONTINUE_AS
         );
-        let current_read = state.session_graph.read_model_for_frame(&frame_id);
+        let current_read = state
+            .session_graph
+            .read_model_for_frame(&expected_frame_node_id);
         assert_eq!(current_read.messages.len(), 1);
         assert_eq!(current_read.messages[0].parts[0].content, "seed message");
         let previous_read = state.session_graph.read_model_for_frame(
@@ -779,12 +809,30 @@ mod tests {
         let mut state = state_with_graph(graph);
         state.ensure_agent_frame_initialized();
         let previous_frame_node_id = state.current_frame_node_id.clone();
-        let previous = state
-            .current_agent_frame_mut()
-            .expect("current frame before compaction");
-        previous.assignment.usage_source = Some("root-assignment".to_string());
-        previous.protocol_turn_options =
+        let previous_frame_node_id_value = previous_frame_node_id
+            .as_deref()
+            .expect("current frame")
+            .to_string();
+        let leaf_node_id = state.session_graph.leaf_node_id.clone();
+        let mut nodes = state.session_graph.nodes.clone();
+        let previous = nodes
+            .iter_mut()
+            .find(|node| node.node_id == previous_frame_node_id_value)
+            .expect("current frame node");
+        let crate::SessionNodePayload::FrameOpen {
+            assignment,
+            protocol_turn_options,
+            ..
+        } = &mut previous.payload
+        else {
+            panic!("current frame id must identify FrameOpen");
+        };
+        assignment.usage_source = Some("root-assignment".to_string());
+        *protocol_turn_options =
             crate::ProtocolTurnOptions::from_payload(serde_json::json!({ "mode": "test" }));
+        state.protocol_turn_options = protocol_turn_options.clone();
+        state.session_graph = SessionGraph::from_nodes(nodes, leaf_node_id);
+        state.agent_frames = state.session_graph.agent_frame_records(&state.session_id);
 
         let frame_id = "frame-compaction".to_string();
         let seed_node = crate::SessionAppendNode::message(
@@ -808,7 +856,7 @@ mod tests {
         assert!(opened.opened);
         assert_eq!(
             state.current_frame_node_id.as_deref(),
-            Some(frame_id.as_str())
+            Some(opened.frame_node_id.as_str())
         );
         let current = state.current_agent_frame().expect("current frame");
         assert_eq!(current.reason.as_str(), crate::AgentFrameReason::COMPACTION);
@@ -825,7 +873,9 @@ mod tests {
             serde_json::json!({ "mode": "test" })
         );
 
-        let current_read = state.session_graph.read_model_for_frame(&frame_id);
+        let current_read = state
+            .session_graph
+            .read_model_for_frame(&opened.frame_node_id);
         assert_eq!(current_read.messages.len(), 1);
         assert_eq!(
             current_read.messages[0].parts[0].content,
@@ -857,7 +907,9 @@ mod tests {
             &crate::SystemClock,
         );
         assert!(!replay.opened);
-        let replay_read = state.session_graph.read_model_for_frame(&frame_id);
+        let replay_read = state
+            .session_graph
+            .read_model_for_frame(&replay.frame_node_id);
         assert_eq!(replay_read.messages.len(), 1);
     }
 
@@ -974,7 +1026,7 @@ mod tests {
 
     #[tokio::test]
     async fn final_commit_rejects_a_turn_tail_over_the_node_budget_before_store_mutation() {
-        let messages = (0..=crate::RuntimeCommit::MAX_COMMIT_NODE_COUNT)
+        let messages = (0..crate::RuntimeCommit::MAX_COMMIT_NODE_COUNT)
             .map(|index| {
                 text_message(
                     &format!("message-{index}"),
@@ -1279,7 +1331,7 @@ mod tests {
             .expect("no-store commit");
 
         let state = pipeline.state_mut();
-        assert_eq!(state.session_graph.nodes.len(), graph.nodes.len());
+        assert_eq!(state.session_graph.nodes.len(), graph.nodes.len() + 1);
         assert_eq!(state.token_ledger.len(), usage.len());
         assert!(state.tool_state_snapshot.is_none());
         assert!(state.plugin_snapshot.is_none());

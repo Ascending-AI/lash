@@ -14,3 +14,21 @@ drift bug silently corrupts retirement decisions — whereas the aggregate is re
 truth on every call. Client-side counting via paged list reads was rejected as a substrate
 gap: every retiring host would re-implement the same scan, paying full row payloads to compute
 a count.
+
+## History-node amendment
+
+History nodes use a different retention boundary. Their parent edges, session-head roots, and
+explicit host pins live in the session store, so each backend maintains an `incoming_refs` cache
+beside an indexed `parent_node_id`. A transition to zero is never trusted by itself: before
+tombstoning, the same transaction re-derives the count from edge and root rows and aborts with
+`NodeRefcountDrift` on disagreement. Hosts can run `verify_node_refcounts` to scrub the entire
+catalog and detect forgotten refcount mutation sites.
+
+PostgreSQL history commits and session deletion share a session-keyed transaction lock. A retained
+deletion marker also fences a stale first commit, where no head row exists to lock; only explicit
+session-store recreation clears that marker.
+
+This does not move non-terminal process roots into stored history counts. Processes remain in a
+different store family, and their definition/env liveness continues to be computed on demand by
+`live_reference_summary()`. Folding process transitions into history-node counters would recreate
+the coupling rejected above.

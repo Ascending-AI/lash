@@ -128,7 +128,6 @@ impl TurnGraphEditor {
         let replacement = build_active_read_replacement(
             active_path,
             self.append_builder.existing_node_ids(),
-            None,
             self.append_builder.draft_namespace(),
             messages,
             self.clock.timestamp_rfc3339(),

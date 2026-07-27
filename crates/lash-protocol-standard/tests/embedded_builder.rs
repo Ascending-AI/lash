@@ -2,7 +2,8 @@ use std::sync::Arc;
 
 use lash_core::{
     LashRuntime, Message, MessageRole, ModelSpec, Part, PartKind, PersistedSessionConfig,
-    PersistedTurnState, PruneState, RuntimePersistence, SessionGraph, SessionHead, TokenUsage,
+    PersistedTurnState, PruneState, RuntimePersistence, RuntimeSessionState, SessionGraph,
+    SessionHead, TokenUsage,
 };
 use lash_sqlite_store::Store;
 
@@ -59,16 +60,18 @@ async fn embedded_runtime_builder_loads_state_from_store() {
         })
         .await
         .checkpoint_ref;
+    let mut state = RuntimeSessionState {
+        session_id: "stored-session".to_string(),
+        ..RuntimeSessionState::default()
+    };
+    state.ensure_agent_frame_initialized();
+    state.append_active_read_delta(&[text_message("u0", MessageRole::User, "stored question")]);
     store
         .save_session_head(SessionHead {
             session_id: "stored-session".to_string(),
             head_revision: 0,
-            current_frame_node_id: None,
-            graph: SessionGraph::from_active_read_state(&[text_message(
-                "u0",
-                MessageRole::User,
-                "stored question",
-            )]),
+            current_frame_node_id: state.current_frame_node_id,
+            graph: state.session_graph,
             config: PersistedSessionConfig {
                 provider_id: "openai-compatible".into(),
                 model: test_model_spec(),

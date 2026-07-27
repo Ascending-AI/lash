@@ -1,5 +1,17 @@
 use crate::*;
 
+pub(crate) async fn lock_session_history_mutation_tx(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    session_id: &str,
+) -> Result<(), StoreError> {
+    sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended($1, 1::bigint))")
+        .bind(session_id)
+        .execute(&mut **tx)
+        .await
+        .map_err(store_sqlx_error)?;
+    Ok(())
+}
+
 const POSTGRES_QUEUED_WORK_HEAD_CANDIDATE_PREDICATE: &str = "session_id = $1
        AND available_at_ms <= FLOOR(EXTRACT(EPOCH FROM transaction_timestamp()) * 1000)
        AND (
@@ -52,7 +64,16 @@ pub(crate) async fn derived_node_refcount_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     node_id: &str,
 ) -> Result<i64, StoreError> {
-    sqlx::query_scalar(
+    derived_node_refcount_for_head_move_tx(tx, node_id, None, None).await
+}
+
+async fn derived_node_refcount_for_head_move_tx(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    node_id: &str,
+    removed_head_root: Option<&str>,
+    added_head_root: Option<&str>,
+) -> Result<i64, StoreError> {
+    let stored = sqlx::query_scalar::<_, i64>(
         "SELECT
             (SELECT COUNT(*) FROM lash_graph_nodes
              WHERE parent_node_id = $1 AND tombstoned = FALSE)
@@ -62,7 +83,9 @@ pub(crate) async fn derived_node_refcount_tx(
     .bind(node_id)
     .fetch_one(&mut **tx)
     .await
-    .map_err(store_sqlx_error)
+    .map_err(store_sqlx_error)?;
+    Ok(stored - i64::from(removed_head_root == Some(node_id))
+        + i64::from(added_head_root == Some(node_id)))
 }
 
 /// Remove one counted reference and reclaim a zero-count ancestry prefix.
@@ -70,10 +93,21 @@ pub(crate) async fn derived_node_refcount_tx(
 /// High cached counts only leak recoverable storage. Low cached counts can
 /// cascade through a prefix still shared by another head, after which vacuum
 /// makes the loss permanent. Every destructive zero transition therefore
-/// re-derives liveness from indexed edge/root rows in this transaction.
+/// re-derives liveness from indexed edge/root rows in this transaction. A head
+/// move applies its pending old-root removal and new-root addition to that
+/// query, yielding the post-commit root set before the CAS row is published.
 pub(crate) async fn decrement_node_ref_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     first_node_id: &str,
+) -> Result<(), StoreError> {
+    decrement_node_ref_for_head_move_tx(tx, first_node_id, None, None).await
+}
+
+async fn decrement_node_ref_for_head_move_tx(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    first_node_id: &str,
+    removed_head_root: Option<&str>,
+    added_head_root: Option<&str>,
 ) -> Result<(), StoreError> {
     let mut node_id = first_node_id.to_string();
     loop {
@@ -88,7 +122,13 @@ pub(crate) async fn decrement_node_ref_tx(
         .await
         .map_err(store_sqlx_error)?;
         let Some(row) = row else {
-            let derived = derived_node_refcount_tx(tx, &node_id).await?;
+            let derived = derived_node_refcount_for_head_move_tx(
+                tx,
+                &node_id,
+                removed_head_root,
+                added_head_root,
+            )
+            .await?;
             return Err(StoreError::NodeRefcountDrift {
                 node_id,
                 cached: 0,
@@ -100,7 +140,13 @@ pub(crate) async fn decrement_node_ref_tx(
         if cached > 0 {
             return Ok(());
         }
-        let derived = derived_node_refcount_tx(tx, &node_id).await?;
+        let derived = derived_node_refcount_for_head_move_tx(
+            tx,
+            &node_id,
+            removed_head_root,
+            added_head_root,
+        )
+        .await?;
         if derived != 0 {
             return Err(StoreError::NodeRefcountDrift {
                 node_id,
@@ -274,28 +320,14 @@ impl SessionCommitStore for PostgresSessionStore {
     }
 
     async fn load_node(&self, node_id: &str) -> Result<Option<SessionNodeRecord>, StoreError> {
-        let row = if let Some(session_id) = &self.session_id {
-            sqlx::query(
-                "SELECT node_id, parent_node_id, node_json FROM lash_graph_nodes
-                 WHERE session_id = $1 AND node_id = $2 AND tombstoned = FALSE",
-            )
-            .bind(session_id)
-            .bind(node_id)
-            .fetch_optional(&self.pool)
-            .await
-            .map_err(store_sqlx_error)?
-        } else {
-            sqlx::query(
-                "SELECT node_id, parent_node_id, node_json FROM lash_graph_nodes
-                 WHERE node_id = $1 AND tombstoned = FALSE
-                 ORDER BY session_id ASC
-                 LIMIT 1",
-            )
-            .bind(node_id)
-            .fetch_optional(&self.pool)
-            .await
-            .map_err(store_sqlx_error)?
-        };
+        let row = sqlx::query(
+            "SELECT node_id, parent_node_id, node_json FROM lash_graph_nodes
+             WHERE node_id = $1 AND tombstoned = FALSE",
+        )
+        .bind(node_id)
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(store_sqlx_error)?;
         row.map(|row| {
             let node_id = row.get(0);
             let parent_node_id = row.get(1);
@@ -313,11 +345,37 @@ impl SessionCommitStore for PostgresSessionStore {
         commit.validate_budget()?;
         commit.validate_operation_session()?;
         let realization_digest = lash_core::store::graph_realization_digest(&commit.graph);
+        let realized_node_timestamps = commit
+            .graph
+            .appended_nodes()
+            .map(|node| lash_core::store::RealizedNodeTimestamp {
+                node_id: node.node_id.clone(),
+                timestamp: node.timestamp.clone(),
+            })
+            .collect::<Vec<_>>();
         let now = self.clock.timestamp_ms();
         let mut tx = self.pool.begin().await.map_err(store_sqlx_error)?;
-        // Read the head WITHOUT a lock. The conditional CAS write below is the
-        // stale-writer authority; the session execution lease is only an
-        // advisory serialization optimization.
+        // A head row does not exist during the first commit, so row locking
+        // alone cannot serialize create-versus-delete. This session-keyed lock
+        // is the common authority for every history commit and deletion.
+        lock_session_history_mutation_tx(&mut tx, &commit.session_id).await?;
+        let deleted = sqlx::query_scalar::<_, bool>(
+            "SELECT EXISTS(
+                SELECT 1 FROM lash_deleted_sessions WHERE session_id = $1
+             )",
+        )
+        .bind(&commit.session_id)
+        .fetch_one(&mut *tx)
+        .await
+        .map_err(store_sqlx_error)?;
+        if deleted {
+            return Err(StoreError::SessionDeleted {
+                session_id: commit.session_id.clone(),
+            });
+        }
+        // Read without a lock for early validation and receipt replay. Before
+        // mutating graph reachability, existing sessions lock and recheck this
+        // revision so commit, maintenance, and deletion share one authority.
         let existing = load_session_head_meta_tx(&mut tx, &commit.session_id, false).await?;
         if let Some(bound_session_id) = existing.as_ref().map(|meta| meta.session_id.as_str())
             && bound_session_id != commit.session_id
@@ -382,13 +440,27 @@ impl SessionCommitStore for PostgresSessionStore {
                 actual: actual_revision,
             });
         }
+        if existing.is_some() {
+            let locked_revision = sqlx::query_scalar::<_, i64>(
+                "SELECT head_revision
+                 FROM lash_sessions
+                 WHERE session_id = $1
+                 FOR UPDATE",
+            )
+            .bind(&commit.session_id)
+            .fetch_optional(&mut *tx)
+            .await
+            .map_err(store_sqlx_error)?;
+            if locked_revision != Some(actual_revision as i64) {
+                return Err(StoreError::HeadRevisionConflict {
+                    expected: commit.expected_head_revision.or(Some(actual_revision)),
+                    actual: locked_revision.map_or(0, |revision| revision as u64),
+                });
+            }
+        }
         commit.validate_node_derivation()?;
         commit.validate_append_node_ids_unique()?;
-        commit.validate_append_chain(
-            existing
-                .as_ref()
-                .and_then(|head| head.leaf_node_id.as_deref()),
-        )?;
+        commit.graph.validate_append_topology()?;
         if let GraphCommitDelta::Append { nodes, .. } = &commit.graph {
             let node_ids = nodes
                 .iter()
@@ -545,7 +617,13 @@ impl SessionCommitStore for PostgresSessionStore {
                 }
             }
             if let Some(old_leaf_node_id) = &old_leaf_node_id {
-                decrement_node_ref_tx(&mut tx, old_leaf_node_id).await?;
+                decrement_node_ref_for_head_move_tx(
+                    &mut tx,
+                    old_leaf_node_id,
+                    Some(old_leaf_node_id),
+                    leaf_node_id.as_deref(),
+                )
+                .await?;
             }
         }
         let derived_frame_node_id = match leaf_node_id.as_deref() {
@@ -583,10 +661,9 @@ impl SessionCommitStore for PostgresSessionStore {
             graph_node_count: graph_node_count as usize,
             token_ledger: Vec::new(),
         };
-        // Optimistic CAS on the head revision. The `WHERE head_revision = $5`
-        // guard makes the write succeed only if no concurrent committer moved the
-        // head since our unlocked read above. A brand-new session inserts (no
-        // conflict); an existing one updates only when the revision still matches.
+        // Conditional publication is still required for concurrent first
+        // commits, where no head row existed to lock. Existing sessions already
+        // hold the row lock above; the revision predicate is defense in depth.
         let head_write = sqlx::query(
             "INSERT INTO lash_sessions
              (session_id, head_revision, head_json, checkpoint_ref, leaf_node_id)
@@ -725,6 +802,7 @@ impl SessionCommitStore for PostgresSessionStore {
             checkpoint_ref,
             manifest,
             realization_digest,
+            realized_node_timestamps,
             enqueued_queue_batches,
             turn_input_applications: commit.turn_input_applications(),
         };
@@ -1999,7 +2077,8 @@ impl StoreMaintenance for PostgresSessionStore {
                 "SELECT incoming_refs, parent_node_id
                  FROM lash_graph_nodes
                  WHERE node_id = $1 AND tombstoned = FALSE
-                   AND ($2::TEXT IS NULL OR session_id = $2)",
+                   AND ($2::TEXT IS NULL OR session_id = $2)
+                 FOR UPDATE",
             )
             .bind(id)
             .bind(&self.session_id)
@@ -2105,7 +2184,9 @@ impl StoreMaintenance for PostgresSessionStore {
         // ANY session references it — scoping roots to one session would delete
         // another session's live checkpoint.
         let root_refs = sqlx::query_scalar::<_, String>(
-            "SELECT checkpoint_ref FROM lash_sessions WHERE checkpoint_ref IS NOT NULL",
+            "SELECT checkpoint_ref FROM lash_sessions WHERE checkpoint_ref IS NOT NULL
+             UNION
+             SELECT checkpoint_ref FROM lash_node_anchors WHERE pinned",
         )
         .fetch_all(&mut *tx)
         .await
@@ -2172,14 +2253,16 @@ impl StoreMaintenance for PostgresSessionStore {
 
     async fn verify_node_refcounts(&self) -> Result<NodeRefcountVerification, StoreError> {
         let mut tx = self.pool.begin().await.map_err(store_sqlx_error)?;
+        sqlx::query("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ")
+            .execute(&mut *tx)
+            .await
+            .map_err(store_sqlx_error)?;
         let rows = sqlx::query(
             "SELECT node_id, incoming_refs
              FROM lash_graph_nodes
              WHERE tombstoned = FALSE
-               AND ($1::TEXT IS NULL OR session_id = $1)
              ORDER BY node_id",
         )
-        .bind(&self.session_id)
         .fetch_all(&mut *tx)
         .await
         .map_err(store_sqlx_error)?;
