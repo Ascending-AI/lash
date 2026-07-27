@@ -688,12 +688,21 @@ impl<'run> RuntimeExecutionContext<'run> {
 
     pub async fn signal_process_by_id(
         &self,
-        registry: Arc<dyn crate::ProcessRegistry>,
         process_id: &str,
         signal_name: &str,
         signal_id: String,
         payload: serde_json::Value,
     ) -> Result<crate::ProcessEvent, crate::RuntimeEffectControllerError> {
+        let registry = self
+            .process_event_context
+            .as_ref()
+            .map(|context| Arc::clone(&context.registry))
+            .ok_or_else(|| {
+                crate::RuntimeEffectControllerError::new(
+                    "process_registry_unavailable",
+                    "process signalling is unavailable outside a durable process execution",
+                )
+            })?;
         let event_type = crate::process_signal_event_type(signal_name)?;
         let replay_key = format!("process:{process_id}:signal.{signal_name}:{signal_id}");
         let signal_payload = payload.clone();
@@ -784,35 +793,37 @@ impl<'run> RuntimeExecutionContext<'run> {
         }
     }
 
+    /// Emit an event owned by this process execution.
+    ///
+    /// The process id, registry, and write authority come from the installed
+    /// engine runtime context; callers cannot substitute an unfenced registry
+    /// path.
     pub async fn append_process_event(
         &self,
-        registry: Arc<dyn crate::ProcessRegistry>,
-        process_id: &str,
         request: crate::ProcessEventAppendRequest,
     ) -> Result<crate::ProcessEvent, crate::PluginError> {
-        let authority = self
-            .process_event_context
-            .as_ref()
-            .ok_or_else(|| {
-                crate::PluginError::Session(format!(
-                    "process `{process_id}` event emission omitted its execution authority"
-                ))
-            })?
-            .execution_write_authority
-            .clone();
-        let result = registry
-            .append_event_with_authority(process_id, request, &authority)
-            .await?;
-        if let Some(context) = self.process_event_context.as_ref() {
-            crate::tool_provider::process_events::enqueue_wake_delivery(
-                context.store.clone(),
-                context.session_store_factory.as_ref(),
-                result.wake_delivery,
-                Some(self.session_graph_service()),
-                context.queued_work_driver.as_ref(),
+        let context = self.process_event_context.as_ref().ok_or_else(|| {
+            crate::PluginError::Session(
+                "process event emission is unavailable outside a durable process execution"
+                    .to_string(),
+            )
+        })?;
+        let result = context
+            .registry
+            .append_event_with_authority(
+                &context.process_id,
+                request,
+                &context.execution_write_authority,
             )
             .await?;
-        }
+        crate::tool_provider::process_events::enqueue_wake_delivery(
+            context.store.clone(),
+            context.session_store_factory.as_ref(),
+            result.wake_delivery,
+            Some(self.session_graph_service()),
+            context.queued_work_driver.as_ref(),
+        )
+        .await?;
         Ok(result.event)
     }
 }

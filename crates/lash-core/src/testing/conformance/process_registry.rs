@@ -45,6 +45,7 @@ pub async fn process_registry_with_expected_durability<F>(
 {
     process_registry_reports_declared_durability(make(), expected_tier).await;
     fold::process_record_is_the_fold_of_its_event_log(make()).await;
+    fold::owner_bound_handover_resume_is_folded_and_replayable(make()).await;
     registration_is_idempotent_and_hash_conflicts_fail(make()).await;
     external_refs_and_handle_grant_membership_round_trip(make()).await;
     validates_custom_events_and_materializes_wakes(make()).await;

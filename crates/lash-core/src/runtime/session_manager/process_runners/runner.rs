@@ -109,6 +109,7 @@ impl RuntimeSessionServices {
             .clone()
             .expect("process worker installs execution write authority");
         let registry_for_runtime = Arc::clone(&registry);
+        let process_awaiter_for_runtime = process_awaiter.clone();
         let cancellation_for_runtime = cancellation.clone();
         let controller_for_context = scoped_effect_controller.clone();
         let builder = Box::new(move |tool_catalog: Arc<crate::ToolCatalog>| {
@@ -133,7 +134,7 @@ impl RuntimeSessionServices {
                 registration_for_runtime.id.clone(),
                 execution_write_authority.clone(),
                 Arc::clone(&registry_for_runtime),
-                process_awaiter.clone(),
+                process_awaiter_for_runtime.clone(),
                 services.current.store.clone(),
                 services.current.host.session_store_factory.clone(),
                 services.current.host.queued_work_driver.clone(),
@@ -155,6 +156,7 @@ impl RuntimeSessionServices {
             registration,
             execution_context,
             registry,
+            process_awaiter,
             session_id,
             plugins,
             store,

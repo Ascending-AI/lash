@@ -493,10 +493,7 @@ impl DurableProcessWorker {
                 execution_id,
                 ..
             } => (
-                crate::LeaseOwnerIdentity::opaque(
-                    format!("restate:{process_id}"),
-                    execution_id.clone(),
-                ),
+                crate::LeaseOwnerIdentity::restate_process_execution(process_id, execution_id),
                 0,
             ),
             #[cfg(any(test, feature = "testing"))]
@@ -770,6 +767,9 @@ impl DurableProcessWorker {
     /// one session ([ADR 0011]), so `LashSession::close`/`park` must not touch
     /// them; a host that wants its in-flight owner-bound work terminalized at
     /// shutdown calls this on the worker it is tearing down.
+    /// Restate-owned rows use a substrate invocation owner rather than this
+    /// worker's configured owner, so this local-worker drain does not select
+    /// them; their recovery and abandonment remain Restate/sweep concerns.
     ///
     /// Drain sequence (the operations runbook owns the surrounding steps; this
     /// is the terminal-writing step):

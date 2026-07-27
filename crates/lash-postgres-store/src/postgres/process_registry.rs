@@ -795,7 +795,7 @@ impl ProcessRegistry for PostgresProcessRegistry {
             now,
         )
         .await?;
-        match lash_core::runtime::prepare_process_start(&record, &started)? {
+        match lash_core::runtime::prepare_process_start(&record, &started, authority)? {
             ProcessStartPlan::AlreadyApplied => {
                 tx.commit().await.map_err(plugin_sqlx_error)?;
                 return Ok(ProcessStartOutcome::AlreadyApplied(record));
@@ -820,7 +820,12 @@ impl ProcessRegistry for PostgresProcessRegistry {
             }
             ProcessStartPlan::Append => {}
         }
-        let request = ProcessEventAppendRequest::first_started(process_id, &started);
+        let resumed_from_handover = record
+            .first_started
+            .as_deref()
+            .is_some_and(|retained| authority.permits_owner_bound_resume(retained));
+        let request =
+            ProcessEventAppendRequest::first_started(process_id, &started, resumed_from_handover);
         append_process_event_tx(&mut tx, &mut record, request, now).await?;
         tx.commit().await.map_err(plugin_sqlx_error)?;
         Ok(ProcessStartOutcome::Started(record))

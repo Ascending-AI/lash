@@ -247,18 +247,7 @@ pub async fn run_lashlang_process(
     if is_initial_segment {
         lashlang_execution_trace.emit_started(&artifact);
     }
-    let registry = context.registry();
-    let Some(execution_write_authority) = context
-        .execution_context()
-        .execution_write_authority
-        .clone()
-    else {
-        return Err(lash_core::ProcessInfraError::new(
-            lash_core::PluginError::Session(
-                "process execution did not provide a write fence".to_string(),
-            ),
-        ));
-    };
+    let processes = context.processes();
     let cancellation = context.cancellation_token();
     let (ctx, guard, mut state) = {
         let _phase = context.named_phase("rlm_process.build_context");
@@ -292,8 +281,7 @@ pub async fn run_lashlang_process(
         ctx,
         host_environment,
         artifact_store: engine.artifact_store(),
-        registry,
-        execution_write_authority,
+        processes,
         process_id: process_id.clone(),
         lashlang_execution_trace: lashlang_execution_trace.clone(),
         sleep_sequence: AtomicU64::new(sleep_sequence),
@@ -438,8 +426,7 @@ struct LashlangProcessHost<'run> {
     ctx: lash_core::RuntimeExecutionContext<'run>,
     host_environment: lashlang::LashlangHostEnvironment,
     artifact_store: Arc<dyn lashlang::LashlangArtifactStore>,
-    registry: Arc<dyn lash_core::ProcessRegistry>,
-    execution_write_authority: lash_core::ProcessExecutionWriteAuthority,
+    processes: lash_core::ProcessEngineProcessContext,
     process_id: String,
     lashlang_execution_trace: LashlangProcessExecutionTrace,
     sleep_sequence: AtomicU64,
@@ -660,8 +647,6 @@ impl LashlangProcessHost<'_> {
         let ordinal = self.event_sequence.fetch_add(1, Ordering::Relaxed);
         self.ctx
             .append_process_event(
-                Arc::clone(&self.registry),
-                &self.process_id,
                 lash_core::ProcessEventAppendRequest::new(
                     event_type,
                     process_event_payload(&event.value)?,
@@ -707,12 +692,8 @@ impl LashlangProcessHost<'_> {
                 ordinal: event_ordinal,
             },
         };
-        self.registry
-            .set_process_wait_with_authority(
-                &self.process_id,
-                wait.clone(),
-                &self.execution_write_authority,
-            )
+        self.processes
+            .set_wait(wait.clone())
             .await
             .map_err(|err| ExecutionHostError::new(err.to_string()))?;
         let payload = self
@@ -720,38 +701,27 @@ impl LashlangProcessHost<'_> {
             .await_process_signal_event(&self.process_id, &name, event_ordinal)
             .await
             .map_err(|err| ExecutionHostError::new(err.to_string()))?;
-        self.registry
-            .clear_process_wait_with_authority(&self.process_id, &self.execution_write_authority)
+        self.processes
+            .clear_wait()
             .await
             .map_err(|err| ExecutionHostError::new(err.to_string()))?;
         Ok(lashlang::from_json(payload))
     }
 
     async fn wait_since_ms(&self, key: &str) -> Result<u64, lash_core::PluginError> {
-        if let Some(since_ms) =
-            self.registry
-                .get_process(&self.process_id)
-                .await
-                .and_then(|record| {
-                    let wait = record.wait?;
-                    match &wait.kind {
-                        lash_core::WaitKind::Signal { key: wait_key, .. } if wait_key == key => {
-                            Some(wait.since_ms)
-                        }
-                        _ => None,
-                    }
-                })
-        {
+        if let Some(since_ms) = self.processes.record().await?.and_then(|record| {
+            let wait = record.wait?;
+            match &wait.kind {
+                lash_core::WaitKind::Signal { key: wait_key, .. } if wait_key == key => {
+                    Some(wait.since_ms)
+                }
+                _ => None,
+            }
+        }) {
             return Ok(since_ms);
         }
 
-        for event in self
-            .registry
-            .events_after(&self.process_id, 0)
-            .await?
-            .into_iter()
-            .rev()
-        {
+        for event in self.processes.events_after(0).await?.into_iter().rev() {
             if event.event_type != "process.waiting" {
                 continue;
             }
@@ -779,13 +749,7 @@ impl LashlangProcessHost<'_> {
             self.process_id, signal.name
         );
         self.ctx
-            .signal_process_by_id(
-                Arc::clone(&self.registry),
-                &target,
-                &signal.name,
-                signal_id,
-                payload,
-            )
+            .signal_process_by_id(&target, &signal.name, signal_id, payload)
             .await
             .map_err(|err| ExecutionHostError::new(err.to_string()))?;
         Ok(lashlang::Value::Null)

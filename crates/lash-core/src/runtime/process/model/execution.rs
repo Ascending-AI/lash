@@ -29,6 +29,8 @@ impl ProcessStarted {
 /// Correctness fence presented by the process execution that writes runtime
 /// lifecycle facts. Lash workers present their persisted lease; durable
 /// substrates present a replay-stable execution id bound to one attempt.
+/// Restate successors within that attempt share the root execution id, so this
+/// authority fences attempt generations rather than individual segments.
 #[derive(Clone, Debug)]
 pub enum ProcessExecutionWriteAuthority {
     Lease(ProcessLease),
@@ -36,6 +38,7 @@ pub enum ProcessExecutionWriteAuthority {
         process_id: String,
         execution_id: String,
         attempt: Option<u32>,
+        resume_from: Option<ProcessStarted>,
     },
     #[cfg(any(test, feature = "testing"))]
     #[doc(hidden)]
@@ -54,6 +57,26 @@ impl ProcessExecutionWriteAuthority {
             process_id: process_id.into(),
             execution_id: execution_id.into(),
             attempt: None,
+            resume_from: None,
+        }
+    }
+
+    /// Bind a fresh invocation to a validated durable segment handover.
+    ///
+    /// The retained start fact is checked atomically when the new attempt is
+    /// recorded. This permits both recovery dispositions to continue from a
+    /// durable handover without treating the operation as a restart from
+    /// segment zero.
+    pub fn invocation_resume(
+        process_id: impl Into<String>,
+        execution_id: impl Into<String>,
+        resume_from: ProcessStarted,
+    ) -> Self {
+        Self::Invocation {
+            process_id: process_id.into(),
+            execution_id: execution_id.into(),
+            attempt: None,
+            resume_from: Some(resume_from),
         }
     }
 
@@ -71,11 +94,13 @@ impl ProcessExecutionWriteAuthority {
             Self::Invocation {
                 process_id,
                 execution_id,
+                resume_from,
                 ..
             } => Self::Invocation {
                 process_id: process_id.clone(),
                 execution_id: execution_id.clone(),
                 attempt: Some(attempt),
+                resume_from: resume_from.clone(),
             },
             #[cfg(any(test, feature = "testing"))]
             Self::Testing { process_id } => Self::Testing {
@@ -100,9 +125,10 @@ impl ProcessExecutionWriteAuthority {
                 process_id,
                 execution_id,
                 attempt: Some(attempt),
+                ..
             } => Some(ProcessStarted {
-                owner: crate::LeaseOwnerIdentity::opaque(
-                    format!("restate:{process_id}"),
+                owner: crate::LeaseOwnerIdentity::restate_process_execution(
+                    process_id,
                     execution_id.clone(),
                 ),
                 fencing_token: 0,
@@ -115,10 +141,90 @@ impl ProcessExecutionWriteAuthority {
         }
     }
 
+    pub fn permits_owner_bound_resume(&self, retained: &ProcessStarted) -> bool {
+        matches!(
+            self,
+            Self::Invocation {
+                resume_from: Some(expected),
+                ..
+            } if expected.same_execution(retained)
+        )
+    }
+
+    pub fn validate_resume_predecessor(
+        &self,
+        process_id: &str,
+        retained: Option<&ProcessStarted>,
+    ) -> Result<(), crate::PluginError> {
+        let Self::Invocation {
+            resume_from: Some(expected),
+            ..
+        } = self
+        else {
+            return Ok(());
+        };
+        if retained.is_some_and(|retained| retained.same_execution(expected)) {
+            return Ok(());
+        }
+        self.trace_invocation_denial(
+            process_id,
+            None,
+            retained,
+            "durable handover predecessor does not match retained execution",
+        );
+        Err(crate::PluginError::ProcessLeaseSuperseded {
+            process_id: process_id.to_string(),
+        })
+    }
+
+    fn trace_invocation_denial(
+        &self,
+        process_id: &str,
+        proposed_start: Option<&ProcessStarted>,
+        retained: Option<&ProcessStarted>,
+        reason: &'static str,
+    ) {
+        let Self::Invocation {
+            process_id: authority_process_id,
+            execution_id,
+            attempt,
+            ..
+        } = self
+        else {
+            return;
+        };
+        let presented_owner = crate::LeaseOwnerIdentity::restate_process_execution(
+            authority_process_id,
+            execution_id,
+        );
+        tracing::warn!(
+            process_id,
+            presented_process_id = authority_process_id,
+            presented_owner_id = presented_owner.owner_id,
+            presented_invocation_id = execution_id,
+            presented_attempt = ?attempt,
+            presented_fencing_token = 0_u64,
+            proposed_owner_id = proposed_start.map(|started| started.owner.owner_id.as_str()),
+            proposed_invocation_id =
+                proposed_start.map(|started| started.owner.incarnation_id.as_str()),
+            proposed_attempt = proposed_start.map(|started| started.attempt),
+            proposed_fencing_token = proposed_start.map(|started| started.fencing_token),
+            retained_owner_id = retained.map(|started| started.owner.owner_id.as_str()),
+            retained_invocation_id =
+                retained.map(|started| started.owner.incarnation_id.as_str()),
+            retained_attempt = retained.map(|started| started.attempt),
+            retained_fencing_token = retained.map(|started| started.fencing_token),
+            verdict = "denied",
+            reason,
+            "process invocation fence decision"
+        );
+    }
+
     pub fn validate_invocation_for_start(
         &self,
         process_id: &str,
         started: &ProcessStarted,
+        retained: Option<&ProcessStarted>,
     ) -> Result<(), crate::PluginError> {
         #[cfg(any(test, feature = "testing"))]
         if let Self::Testing {
@@ -145,6 +251,12 @@ impl ProcessExecutionWriteAuthority {
                 .invocation_started()
                 .is_none_or(|authority| !authority.same_execution(started))
         {
+            self.trace_invocation_denial(
+                process_id,
+                Some(started),
+                retained,
+                "presented start identity does not match authority",
+            );
             return Err(crate::PluginError::ProcessLeaseSuperseded {
                 process_id: process_id.to_string(),
             });
@@ -183,6 +295,12 @@ impl ProcessExecutionWriteAuthority {
                 current.is_none_or(|current| !current.same_execution(&authority))
             })
         {
+            self.trace_invocation_denial(
+                process_id,
+                None,
+                current,
+                "presented write identity does not match retained execution",
+            );
             return Err(crate::PluginError::ProcessLeaseSuperseded {
                 process_id: process_id.to_string(),
             });
@@ -278,7 +396,8 @@ pub struct ProcessExecutionContext {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub causal_invocation: Option<crate::RuntimeInvocation>,
     /// Execution-local correctness fence. Substrate handlers reconstruct it
-    /// from their workflow key, so it is deliberately not serialized.
+    /// from their replay-stable invocation identity, so it is deliberately not
+    /// serialized.
     #[serde(skip)]
     pub execution_write_authority: Option<ProcessExecutionWriteAuthority>,
 }

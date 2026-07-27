@@ -396,6 +396,34 @@ struct PausedInfraEngine {
     fail: Arc<tokio::sync::Notify>,
 }
 
+struct FailOnceArtifactReadEngine {
+    reads: Arc<AtomicUsize>,
+}
+
+#[async_trait::async_trait]
+impl crate::ProcessEngine for FailOnceArtifactReadEngine {
+    fn kind(&self) -> &'static str {
+        "fail-once-artifact-read"
+    }
+
+    async fn run(
+        &self,
+        context: crate::ProcessEngineRunContext<'_>,
+        _payload: serde_json::Value,
+    ) -> Result<crate::ProcessRunOutcome, crate::ProcessInfraError> {
+        if self.reads.fetch_add(1, Ordering::SeqCst) == 0 {
+            return Err(crate::ProcessInfraError::new(PluginError::Session(
+                "injected transient artifact-store read failure".to_string(),
+            )));
+        }
+        Ok(ProcessAwaitOutput::Success {
+            value: serde_json::json!({"process_id": context.registration().id}),
+            control: None,
+        }
+        .into())
+    }
+}
+
 #[async_trait::async_trait]
 impl crate::ProcessEngine for PausedInfraEngine {
     fn kind(&self) -> &'static str {
@@ -428,9 +456,10 @@ impl crate::ProcessEngine for BoundaryThenTerminalEngine {
     ) -> Result<crate::ProcessRunOutcome, crate::ProcessInfraError> {
         let run = self.runs.fetch_add(1, Ordering::SeqCst);
         let record = context
-            .registry()
-            .get_process(&context.registration().id)
+            .processes()
+            .record()
             .await
+            .expect("process registry read")
             .expect("process remains registered between segments");
         assert!(!record.is_terminal(), "boundary must not write a terminal");
         if run == 0 {
@@ -635,7 +664,7 @@ impl crate::ProcessEngine for ProductionChainEngine {
         let nodes = payload["nodes"].as_u64().expect("node count") as usize;
         let nested_wait_task = payload["nested_wait_task"].as_bool().unwrap_or(false);
         let catalog = context.resolved_tool_catalog().expect("tool catalog");
-        let registry = context.registry();
+        let processes = context.processes();
         let runtime = context
             .into_runtime_context(catalog)
             .expect("engine runtime context");
@@ -746,16 +775,16 @@ impl crate::ProcessEngine for ProductionChainEngine {
             }
             self.end_work();
             if nested_wait_task && level == 0 {
-                let awaiter = crate::ProcessAwaiter::polling(registry);
+                let processes = processes.clone();
                 let wait_child_id = child_id.clone();
                 crate::task::spawn(inherit_process_execution_permit(async move {
-                    awaiter.await_terminal(&wait_child_id).await
+                    processes.await_terminal(&wait_child_id).await
                 }))
                 .await
                 .expect("nested child-turn task joins")
                 .expect("nested child-turn task observes child terminal");
             } else {
-                crate::ProcessAwaiter::polling(registry)
+                processes
                     .await_terminal(&child_id)
                     .await
                     .expect("parent observes production-started child terminal");
@@ -1834,6 +1863,74 @@ async fn missing_engine_configuration_is_retryable_infrastructure_failure() {
         .await
         .expect("release verification lease");
     drop(worker);
+}
+
+#[tokio::test]
+async fn transient_engine_artifact_read_retries_and_terminally_commits() {
+    let reads = Arc::new(AtomicUsize::new(0));
+    let run_handle = Arc::new(LateBoundProcessRunHandle::default());
+    let (_worker, registry, run_handle, env_ref) = worker_with_engine(
+        1,
+        Arc::new(FailOnceArtifactReadEngine {
+            reads: Arc::clone(&reads),
+        }),
+        run_handle,
+    )
+    .await;
+    registry
+        .register_process(engine_registration(
+            "artifact-read-retry",
+            "fail-once-artifact-read",
+            env_ref,
+            serde_json::Value::Null,
+        ))
+        .await
+        .expect("register fail-once engine row");
+    run_handle
+        .enable_and_drive()
+        .await
+        .expect("drive failing artifact read");
+
+    tokio::time::timeout(Duration::from_secs(1), async {
+        loop {
+            let record = registry
+                .get_process("artifact-read-retry")
+                .await
+                .expect("artifact retry row");
+            if record.first_started.is_some()
+                && !record.is_terminal()
+                && registry
+                    .get_process_lease("artifact-read-retry")
+                    .await
+                    .expect("lease read")
+                    .is_none()
+            {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("transient engine error releases its claim");
+
+    run_handle
+        .enable_and_drive()
+        .await
+        .expect("drive retry after artifact recovery");
+    await_terminal(&registry, "artifact-read-retry").await;
+    let record = registry
+        .get_process("artifact-read-retry")
+        .await
+        .expect("terminal artifact retry row");
+    assert!(record.is_terminal());
+    assert_eq!(
+        record
+            .first_started
+            .as_deref()
+            .map(|started| started.attempt),
+        Some(2)
+    );
+    assert_eq!(reads.load(Ordering::SeqCst), 2);
 }
 
 /// Owner drain (ADR 0019): a host closing gracefully terminalizes its own

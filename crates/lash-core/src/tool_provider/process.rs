@@ -52,7 +52,7 @@ impl ToolSessionProcessAdmin<'_> {
         &self,
         process_id: &str,
         await_output: crate::ProcessAwaitOutput,
-    ) -> Result<crate::ProcessRecord, PluginError> {
+    ) -> Result<crate::ProcessCompletionOutcome, PluginError> {
         self.processes
             .complete_external(
                 &self.session_id,

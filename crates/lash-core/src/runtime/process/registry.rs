@@ -141,6 +141,11 @@ pub trait ProcessRegistry: Send + Sync {
         session_id: &str,
     ) -> Result<ProcessSessionDeleteReport, PluginError>;
 
+    /// Append a host-owned event that is not emitted by the process execution.
+    ///
+    /// This unfenced path is reserved for host signal/cancel coordination.
+    /// Process engines receive only [`ProcessEngineProcessContext`](super::engine::ProcessEngineProcessContext);
+    /// execution-owned events must use its authority-bound emitter.
     async fn append_event(
         &self,
         process_id: &str,

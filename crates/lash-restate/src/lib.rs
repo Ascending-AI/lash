@@ -1673,14 +1673,6 @@ impl RestateProcessIngressRunner {
         let segment_ordinal = latest_handover
             .as_ref()
             .map_or(0, |handover| handover.segment_ordinal);
-        let execution_id = (segment_ordinal > 0)
-            .then(|| {
-                record.first_started.as_deref().and_then(|started| {
-                    (started.owner.owner_id == format!("restate:{process_id}"))
-                        .then(|| started.owner.incarnation_id.clone())
-                })
-            })
-            .flatten();
         let workflow_key = process_segment_workflow_key(&process_id, segment_ordinal);
         let registration = ProcessRegistration {
             id: record.id,
@@ -1704,7 +1696,10 @@ impl RestateProcessIngressRunner {
                     registration,
                     execution_context,
                     segment_ordinal,
-                    execution_id,
+                    // An ingress/sweep submission is a fresh invocation. For a
+                    // mid-chain row the handler validates the durable handover,
+                    // then binds this invocation as the next execution attempt.
+                    execution_id: None,
                 },
             )
             .await
@@ -1919,6 +1914,58 @@ pub struct RestateProcessWorkflowInput {
     /// successors carry it forward so a process chain remains one attempt.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub execution_id: Option<String>,
+}
+
+fn segment_execution_authority(
+    process_id: &str,
+    segment_ordinal: u64,
+    carried_execution_id: Option<&str>,
+    invocation_id: &str,
+    retained_start: Option<&lash_core::ProcessStarted>,
+) -> Result<(String, lash_core::ProcessExecutionWriteAuthority), TerminalError> {
+    if segment_ordinal == 0 {
+        let execution_id = invocation_id.to_string();
+        return Ok((
+            execution_id.clone(),
+            lash_core::ProcessExecutionWriteAuthority::invocation(process_id, execution_id),
+        ));
+    }
+
+    let retained_start = retained_start.ok_or_else(|| {
+        TerminalError::new(format!(
+            "process `{process_id}` segment {segment_ordinal} has a handover without a retained execution start"
+        ))
+    })?;
+    if let Some(carried_execution_id) = carried_execution_id {
+        let retained_execution_id = retained_start
+            .owner
+            .restate_process_execution_id(process_id)
+            .ok_or_else(|| {
+                TerminalError::new(format!(
+                    "process `{process_id}` segment {segment_ordinal} retained a non-Restate execution owner"
+                ))
+            })?;
+        if carried_execution_id != retained_execution_id {
+            return Err(TerminalError::new(format!(
+                "process `{process_id}` segment {segment_ordinal} carried execution `{carried_execution_id}` but retained execution is `{retained_execution_id}`"
+            )));
+        }
+        let execution_id = carried_execution_id.to_string();
+        return Ok((
+            execution_id.clone(),
+            lash_core::ProcessExecutionWriteAuthority::invocation(process_id, execution_id),
+        ));
+    }
+
+    let execution_id = invocation_id.to_string();
+    Ok((
+        execution_id.clone(),
+        lash_core::ProcessExecutionWriteAuthority::invocation_resume(
+            process_id,
+            execution_id,
+            retained_start.clone(),
+        ),
+    ))
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, serde::Deserialize)]
@@ -2268,10 +2315,6 @@ where
         Json(input): Json<RestateProcessWorkflowInput>,
     ) -> HandlerResult<Json<RestateProcessWorkflowOutput>> {
         let process_id = input.registration.id.clone();
-        let execution_id = input
-            .execution_id
-            .clone()
-            .unwrap_or_else(|| ctx.invocation_id().to_string());
         let record = self
             .registry
             .try_get_process(&process_id)
@@ -2385,6 +2428,23 @@ where
                 }
             }
         };
+        if input.segment_ordinal == 0 && input.execution_id.is_some() {
+            tracing::warn!(
+                process_id,
+                presented_execution_id = input.execution_id.as_deref(),
+                invocation_id = %ctx.invocation_id(),
+                verdict = "ignored",
+                "segment-zero execution identity derives exclusively from the Restate invocation"
+            );
+        }
+        let (execution_id, execution_write_authority) = segment_execution_authority(
+            &process_id,
+            input.segment_ordinal,
+            input.execution_id.as_deref(),
+            ctx.invocation_id(),
+            record.first_started.as_deref(),
+        )
+        .map_err(HandlerError::from)?;
         let mut options = RestateEffectControllerOptions::default()
             .segment_effect_budget((self.segment_effect_budget)(&input.registration));
         if let Some(cap) = self.segment_duration_cap {
@@ -2402,12 +2462,7 @@ where
                     input
                         .execution_context
                         .clone()
-                        .with_execution_write_authority(
-                            lash_core::ProcessExecutionWriteAuthority::invocation(
-                                process_id.clone(),
-                                execution_id.clone(),
-                            ),
-                        ),
+                        .with_execution_write_authority(execution_write_authority.clone()),
                     scoped_effect_controller,
                     input.segment_ordinal,
                     handover,

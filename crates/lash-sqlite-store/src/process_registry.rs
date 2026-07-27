@@ -745,7 +745,8 @@ impl ProcessRegistry for SqliteProcessRegistry {
                         Some(&started),
                         now,
                     )?;
-                    match lash_core::runtime::prepare_process_start(&record, &started)? {
+                    match lash_core::runtime::prepare_process_start(&record, &started, &authority)?
+                    {
                         ProcessStartPlan::AlreadyApplied => {
                             return Ok(ProcessStartOutcome::AlreadyApplied(record));
                         }
@@ -767,7 +768,15 @@ impl ProcessRegistry for SqliteProcessRegistry {
                         }
                         ProcessStartPlan::Append => {}
                     }
-                    let request = ProcessEventAppendRequest::first_started(&process_id, &started);
+                    let resumed_from_handover = record
+                        .first_started
+                        .as_deref()
+                        .is_some_and(|retained| authority.permits_owner_bound_resume(retained));
+                    let request = ProcessEventAppendRequest::first_started(
+                        &process_id,
+                        &started,
+                        resumed_from_handover,
+                    );
                     Self::append_event_conn(tx, &mut record, request, now)?;
                     Ok(ProcessStartOutcome::Started(record))
                 })()))
@@ -1408,14 +1417,22 @@ fn validate_process_execution_authority_conn(
     match authority {
         ProcessExecutionWriteAuthority::Invocation { .. } => {
             if let Some(started) = start {
-                authority.validate_invocation_for_start(process_id, started)
+                authority.validate_invocation_for_start(
+                    process_id,
+                    started,
+                    record.first_started.as_deref(),
+                )
             } else {
                 authority.validate_invocation_for_write(process_id, record)
             }
         }
         ProcessExecutionWriteAuthority::Testing { .. } => {
             if let Some(started) = start {
-                authority.validate_invocation_for_start(process_id, started)
+                authority.validate_invocation_for_start(
+                    process_id,
+                    started,
+                    record.first_started.as_deref(),
+                )
             } else {
                 authority.validate_invocation_for_write(process_id, record)
             }

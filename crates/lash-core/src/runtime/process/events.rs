@@ -509,10 +509,17 @@ impl ProcessEventAppendRequest {
         ))
     }
 
-    pub fn first_started(process_id: &str, started: &super::model::ProcessStarted) -> Self {
+    pub fn first_started(
+        process_id: &str,
+        started: &super::model::ProcessStarted,
+        resumed_from_handover: bool,
+    ) -> Self {
         Self::new(
             "process.first_started",
-            serde_json::json!({ "started": started }),
+            serde_json::json!({
+                "started": started,
+                "resumed_from_handover": resumed_from_handover,
+            }),
         )
         .with_replay_key(format!(
             "process:{process_id}:first-started:attempt:{}",

@@ -6422,6 +6422,176 @@ async fn restate_invocation_identity_distinguishes_replay_from_fresh_execution()
 }
 
 #[tokio::test]
+async fn segment_zero_ignores_stale_carried_execution_identity() {
+    let registry = process_registry();
+    registry
+        .register_process(rerunnable_registration("root-stale-id").with_max_attempts(Some(2)))
+        .await
+        .expect("register rerunnable");
+    let (first_authority, first_started) =
+        invocation_started("root-stale-id", "stale-invocation", 1);
+    registry
+        .record_first_started_with_authority(
+            "root-stale-id",
+            first_started.clone(),
+            &first_authority,
+        )
+        .await
+        .expect("record old attempt");
+
+    let (execution_id, authority) = segment_execution_authority(
+        "root-stale-id",
+        0,
+        Some("stale-invocation"),
+        "fresh-invocation",
+        Some(&first_started),
+    )
+    .expect("segment-zero identity");
+    assert_eq!(execution_id, "fresh-invocation");
+    let authority = authority.bind_attempt(2);
+    let mut started = authority
+        .invocation_started()
+        .expect("bound fresh invocation");
+    started.started_at_ms = 2;
+    assert!(matches!(
+        registry
+            .record_first_started_with_authority("root-stale-id", started, &authority)
+            .await
+            .expect("fresh root attempt"),
+        lash_core::ProcessStartOutcome::Started(_)
+    ));
+}
+
+#[tokio::test]
+async fn redriven_mid_chain_segment_consumes_attempt_and_respects_budget() {
+    let registry = process_registry();
+    registry
+        .register_process(
+            owner_bound_registration("owner-bound-redrive").with_max_attempts(Some(2)),
+        )
+        .await
+        .expect("register owner-bound");
+    let (root_authority, root_started) =
+        invocation_started("owner-bound-redrive", "root-invocation", 1);
+    registry
+        .record_first_started_with_authority(
+            "owner-bound-redrive",
+            root_started.clone(),
+            &root_authority,
+        )
+        .await
+        .expect("record root");
+
+    let (_, redrive_authority) = segment_execution_authority(
+        "owner-bound-redrive",
+        1,
+        None,
+        "redrive-invocation-1",
+        Some(&root_started),
+    )
+    .expect("validated handover redrive identity");
+    let redrive_authority = redrive_authority.bind_attempt(2);
+    let mut redrive_started = redrive_authority
+        .invocation_started()
+        .expect("bound redrive");
+    redrive_started.started_at_ms = 2;
+    let redrive_record = match registry
+        .record_first_started_with_authority(
+            "owner-bound-redrive",
+            redrive_started,
+            &redrive_authority,
+        )
+        .await
+        .expect("owner-bound continuation may rebind at a handover")
+    {
+        lash_core::ProcessStartOutcome::Started(record) => record,
+        other => panic!("expected a new continuation attempt, got {other:?}"),
+    };
+    assert_eq!(
+        redrive_record
+            .first_started
+            .as_deref()
+            .map(|started| started.attempt),
+        Some(2)
+    );
+
+    let retained = redrive_record
+        .first_started
+        .as_deref()
+        .expect("retained redrive start");
+    let (_, exhausted_authority) = segment_execution_authority(
+        "owner-bound-redrive",
+        1,
+        None,
+        "redrive-invocation-2",
+        Some(retained),
+    )
+    .expect("second handover redrive identity");
+    let exhausted_authority = exhausted_authority.bind_attempt(3);
+    let exhausted_started = exhausted_authority
+        .invocation_started()
+        .expect("bound exhausted redrive");
+    assert!(matches!(
+        registry
+            .record_first_started_with_authority(
+                "owner-bound-redrive",
+                exhausted_started,
+                &exhausted_authority,
+            )
+            .await
+            .expect("attempt budget verdict"),
+        lash_core::ProcessStartOutcome::AttemptsExhausted {
+            attempts: 2,
+            max_attempts: 2,
+            ..
+        }
+    ));
+}
+
+#[tokio::test]
+async fn rerunnable_mid_chain_redrive_continues_from_validated_handover() {
+    let registry = process_registry();
+    registry
+        .register_process(rerunnable_registration("rerunnable-redrive"))
+        .await
+        .expect("register rerunnable");
+    let (root_authority, root_started) =
+        invocation_started("rerunnable-redrive", "root-invocation", 1);
+    registry
+        .record_first_started_with_authority(
+            "rerunnable-redrive",
+            root_started.clone(),
+            &root_authority,
+        )
+        .await
+        .expect("record root");
+
+    let (_, redrive_authority) = segment_execution_authority(
+        "rerunnable-redrive",
+        1,
+        None,
+        "redrive-invocation",
+        Some(&root_started),
+    )
+    .expect("validated handover redrive identity");
+    let redrive_authority = redrive_authority.bind_attempt(2);
+    let redrive_started = redrive_authority
+        .invocation_started()
+        .expect("bound redrive");
+    assert!(matches!(
+        registry
+            .record_first_started_with_authority(
+                "rerunnable-redrive",
+                redrive_started,
+                &redrive_authority,
+            )
+            .await
+            .expect("rerunnable continuation"),
+        lash_core::ProcessStartOutcome::Started(_)
+    ));
+}
+
+#[tokio::test]
 async fn owner_bound_segment_continuation_reuses_root_invocation_identity() {
     let registry = process_registry();
     registry
@@ -6439,12 +6609,26 @@ async fn owner_bound_segment_continuation_reuses_root_invocation_identity() {
         .await
         .expect("start root segment");
 
+    let (execution_id, successor_authority) = segment_execution_authority(
+        "owner-bound-segment",
+        1,
+        Some("root-invocation"),
+        "successor-handler-invocation",
+        Some(&root_started),
+    )
+    .expect("validated live successor");
+    assert_eq!(execution_id, "root-invocation");
+    let successor_authority = successor_authority.bind_attempt(1);
+    let mut successor_started = successor_authority
+        .invocation_started()
+        .expect("bound successor");
+    successor_started.started_at_ms = root_started.started_at_ms;
     assert!(matches!(
         registry
             .record_first_started_with_authority(
                 "owner-bound-segment",
-                root_started,
-                &root_authority,
+                successor_started,
+                &successor_authority,
             )
             .await
             .expect("mid-chain continuation"),
@@ -6715,6 +6899,11 @@ async fn ingress_sweep_resumes_latest_segment_without_duplicate_segment_zero() {
     assert!(
         requests[0].contains("\"segment_ordinal\":3"),
         "recovery input must preserve the latest ordinal: {}",
+        requests[0]
+    );
+    assert!(
+        !requests[0].contains("\"execution_id\""),
+        "an ingress redrive must mint identity from its new invocation: {}",
         requests[0]
     );
     assert!(!requests[0].starts_with("POST /LashProcessWorkflow/mid-chain/run/send "));

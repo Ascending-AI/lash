@@ -85,6 +85,7 @@ impl ExecutionWritePauseHandle {
 /// Explicit fixture-only conveniences for lifecycle writes whose production
 /// API requires an execution authority.
 #[async_trait::async_trait]
+#[doc(hidden)]
 pub trait TestProcessRegistryWriteExt: ProcessRegistry {
     async fn record_first_started(
         &self,
@@ -831,7 +832,7 @@ impl ProcessRegistry for TestLocalProcessRegistry {
             Some(&started),
             current_epoch_ms(),
         )?;
-        match prepare_process_start(&record.record, &started)? {
+        match prepare_process_start(&record.record, &started, authority)? {
             ProcessStartPlan::AlreadyApplied => {
                 return Ok(ProcessStartOutcome::AlreadyApplied(record.record.clone()));
             }
@@ -853,7 +854,13 @@ impl ProcessRegistry for TestLocalProcessRegistry {
             }
             ProcessStartPlan::Append => {}
         }
-        let request = ProcessEventAppendRequest::first_started(process_id, &started);
+        let resumed_from_handover = record
+            .record
+            .first_started
+            .as_deref()
+            .is_some_and(|retained| authority.permits_owner_bound_resume(retained));
+        let request =
+            ProcessEventAppendRequest::first_started(process_id, &started, resumed_from_handover);
         self.append_managed_event(record, request).await?;
         drop(leases);
         Ok(ProcessStartOutcome::Started(record.record.clone()))
@@ -1267,14 +1274,22 @@ fn validate_in_memory_execution_authority(
     match authority {
         ProcessExecutionWriteAuthority::Invocation { .. } => {
             if let Some(started) = start {
-                authority.validate_invocation_for_start(process_id, started)
+                authority.validate_invocation_for_start(
+                    process_id,
+                    started,
+                    record.first_started.as_deref(),
+                )
             } else {
                 authority.validate_invocation_for_write(process_id, record)
             }
         }
         ProcessExecutionWriteAuthority::Testing { .. } => {
             if let Some(started) = start {
-                authority.validate_invocation_for_start(process_id, started)
+                authority.validate_invocation_for_start(
+                    process_id,
+                    started,
+                    record.first_started.as_deref(),
+                )
             } else {
                 authority.validate_invocation_for_write(process_id, record)
             }

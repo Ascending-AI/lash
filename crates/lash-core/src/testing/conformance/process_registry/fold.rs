@@ -1,4 +1,122 @@
 use super::*;
+use crate::{BoundaryReason, PersistedSegmentHandover, SegmentHandover};
+
+pub(super) async fn owner_bound_handover_resume_is_folded_and_replayable(
+    registry: Arc<dyn ProcessRegistry>,
+) {
+    let process_id = "proc-owner-bound-handover-fold";
+    let base = registry
+        .register_process(owner_bound_registration(process_id))
+        .await
+        .expect("register owner-bound handover fold process");
+
+    let first_authority =
+        ProcessExecutionWriteAuthority::invocation(process_id, "handover-fold-root")
+            .bind_attempt(1);
+    let mut first_started = first_authority
+        .invocation_started()
+        .expect("bound first invocation");
+    first_started.started_at_ms = 11;
+    assert!(matches!(
+        registry
+            .record_first_started_with_authority(
+                process_id,
+                first_started.clone(),
+                &first_authority,
+            )
+            .await
+            .expect("record first owner-bound attempt"),
+        ProcessStartOutcome::Started(_)
+    ));
+
+    registry
+        .put_segment_handover(
+            process_id,
+            PersistedSegmentHandover {
+                segment_ordinal: 1,
+                program_hash: "handover-fold-program".to_string(),
+                handover: SegmentHandover {
+                    reason: BoundaryReason::JournalBudget,
+                    program_hash: Some("handover-fold-program".to_string()),
+                    engine_state: vec![1, 2, 3],
+                },
+            },
+        )
+        .await
+        .expect("record durable segment handover");
+
+    let resume_authority = ProcessExecutionWriteAuthority::invocation_resume(
+        process_id,
+        "handover-fold-resume",
+        first_started,
+    )
+    .bind_attempt(2);
+    let mut resumed_started = resume_authority
+        .invocation_started()
+        .expect("bound resumed invocation");
+    resumed_started.started_at_ms = 12;
+    let folded = match registry
+        .record_first_started_with_authority(process_id, resumed_started.clone(), &resume_authority)
+        .await
+        .expect("record resumed owner-bound attempt")
+    {
+        ProcessStartOutcome::Started(record) => record,
+        other => panic!("expected resumed attempt to start, got {other:?}"),
+    };
+    assert_eq!(
+        folded.first_started.as_deref(),
+        Some(&resumed_started),
+        "the stored fold must retain every field of the resumed attempt"
+    );
+
+    let events = registry
+        .events_after(process_id, 0)
+        .await
+        .expect("load handover-resume lifecycle events");
+    let resume_event = events
+        .iter()
+        .find(|event| {
+            event.event_type == "process.first_started"
+                && event
+                    .payload
+                    .pointer("/started/attempt")
+                    .and_then(|v| v.as_u64())
+                    == Some(2)
+        })
+        .expect("resumed first-started event");
+    assert_eq!(
+        resume_event
+            .payload
+            .get("resumed_from_handover")
+            .and_then(serde_json::Value::as_bool),
+        Some(true),
+        "the resumed attempt event must carry the handover marker"
+    );
+    assert_eq!(
+        resume_event.payload.get("started"),
+        Some(&serde_json::to_value(&resumed_started).expect("serialize resumed attempt")),
+        "the resumed attempt event must preserve every start field"
+    );
+
+    let replayed_from_empty =
+        crate::fold_process_record(base, &events).expect("replay handover resume from empty fold");
+    assert_eq!(
+        serde_json::to_value(&replayed_from_empty).expect("serialize replayed-from-empty fold"),
+        serde_json::to_value(&folded).expect("serialize stored handover-resume fold"),
+        "replaying from the registration base must reproduce the stored fold field-for-field"
+    );
+    assert_eq!(
+        replayed_from_empty.first_started.as_deref(),
+        Some(&resumed_started),
+        "the replayed-from-empty fold must retain every field of the resumed attempt"
+    );
+
+    let replayed = registry
+        .record_first_started_with_authority(process_id, resumed_started, &resume_authority)
+        .await
+        .expect("replay resumed owner-bound attempt");
+    assert!(matches!(replayed, ProcessStartOutcome::AlreadyApplied(_)));
+}
 
 pub(super) async fn process_record_is_the_fold_of_its_event_log(
     registry: Arc<dyn ProcessRegistry>,

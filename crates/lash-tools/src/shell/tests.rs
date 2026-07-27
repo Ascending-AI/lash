@@ -141,7 +141,7 @@ mod tests {
             process_id: &str,
             await_output: lash_core::ProcessAwaitOutput,
             scope: lash_core::ProcessOpScope<'_>,
-        ) -> Result<lash_core::ProcessRecord, PluginError> {
+        ) -> Result<lash_core::ProcessCompletionOutcome, PluginError> {
             let session_scope = Self::session_scope(session_id, &scope);
             if !self
                 .registry
@@ -174,7 +174,6 @@ mod tests {
                     lash_core::ProcessCompletionAuthority::external_owner(),
                 )
                 .await
-                .map(lash_core::ProcessCompletionOutcome::into_record)
         }
 
         async fn await_process(
