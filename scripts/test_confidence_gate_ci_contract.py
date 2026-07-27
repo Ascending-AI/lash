@@ -18,6 +18,7 @@ PERF_WORKFLOW = ROOT / ".github" / "workflows" / "perf.yml"
 RELEASE_WORKFLOW = ROOT / ".github" / "workflows" / "release.yml"
 RELEASE_NOTES = ROOT / "scripts" / "release_notes.py"
 GATE = ROOT / "scripts" / "confidence-gate.sh"
+PUSH_GATE = ROOT / "scripts" / "push-gate.sh"
 QUARANTINE_CHECK = ROOT / "scripts" / "check_test_quarantines.py"
 CARGO_TOML = ROOT / "Cargo.toml"
 JUSTFILE = ROOT / "justfile"
@@ -231,6 +232,14 @@ class ConfidenceGateCiContractTest(unittest.TestCase):
         self.assertIn('git merge-base "origin/${{ github.base_ref }}" HEAD', lint)
         self.assertIn("python3 scripts/release_notes.py check-pr", lint)
         self.assertIn('--summary "$GITHUB_STEP_SUMMARY"', lint)
+
+    def test_push_gate_checks_current_branch_release_notes(self) -> None:
+        push_gate = PUSH_GATE.read_text(encoding="utf-8")
+        check = shell_function_body(push_gate, "check_current_branch_release_notes")
+
+        self.assertIn('git merge-base "$base_ref" HEAD', check)
+        self.assertIn("python3 scripts/release_notes.py check-pr", check)
+        self.assertIn('--range "${merge_base}..HEAD"', check)
 
     def test_lint_job_runs_functional_perf_smoke_without_budgets(self) -> None:
         workflow = WORKFLOW.read_text(encoding="utf-8")

@@ -1007,14 +1007,35 @@ fn generated_catalog_covers_required_adversarial_shapes() {
     );
 }
 
-// FIG-637 owns the append-only contract change. Remove `ignore`, or run this
-// test explicitly, to make every currently-known backend divergence red.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-#[ignore = "FIG-637: preserves known RuntimePersistence backend divergences"]
-async fn cross_backend_store_differential_reports_fig_637_divergences() {
-    let database_url = std::env::var("LASH_POSTGRES_DATABASE_URL").expect(
-        "LASH_POSTGRES_DATABASE_URL is required; this differential must run all three backends",
-    );
+async fn cross_backend_store_differential_agrees() {
+    let database_url = match std::env::var("LASH_POSTGRES_DATABASE_URL") {
+        Ok(database_url) if !database_url.is_empty() => database_url,
+        Ok(_) => {
+            assert_ne!(
+                std::env::var("LASH_REQUIRE_POSTGRES").as_deref(),
+                Ok("1"),
+                "LASH_POSTGRES_DATABASE_URL must be non-empty when LASH_REQUIRE_POSTGRES=1"
+            );
+            eprintln!(
+                "skipping cross-backend store differential: \
+                 LASH_POSTGRES_DATABASE_URL is not set"
+            );
+            return;
+        }
+        Err(error) => {
+            assert_ne!(
+                std::env::var("LASH_REQUIRE_POSTGRES").as_deref(),
+                Ok("1"),
+                "LASH_POSTGRES_DATABASE_URL must be set when LASH_REQUIRE_POSTGRES=1: {error}"
+            );
+            eprintln!(
+                "skipping cross-backend store differential: \
+                 LASH_POSTGRES_DATABASE_URL is not set"
+            );
+            return;
+        }
+    };
     let postgres = PostgresStorage::connect(&database_url)
         .await
         .expect("connect required Postgres differential backend");
