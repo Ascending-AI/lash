@@ -16,3 +16,15 @@ producer (including lash-owned spawn paths) never guesses a policy the host owns
 watermark bound is what makes host projection safe: without it, a host that projects process
 history can silently destroy unprojected evidence, and the failure only surfaces as
 "unknown process" much later.
+
+## Durable-core amendment
+
+ADR 0047 extends the same rule from terminal processes to every reclaim primitive.
+`vacuum`, receipt pruning, effect-journal pruning, and attachment/blob reclamation
+all take an explicit host-supplied `RetentionBound`; none infers a horizon or runs
+as an internal background policy. Where evidence participates in retry,
+idempotency, or host projection, age is only a bound after the owning scope is
+terminal and after the relevant revision, epoch, or change-sequence watermark.
+
+The producer still does not declare a retention class. Lash defines eligibility
+and the Host Application chooses how much eligible evidence to retain.

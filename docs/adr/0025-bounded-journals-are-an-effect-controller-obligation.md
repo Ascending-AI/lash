@@ -143,3 +143,17 @@ no pending external event, so these bind narrowly; but they are mandatory for th
 handover window and for the rare boundary that meets buffered work. Segment handover — including
 any interaction with a pending durable wait or a crash mid-transition — needs Deterministic
 Simulation and fault-matrix coverage before hosts may run unbounded loops on an engine tier.
+
+## Durable-core retention amendment
+
+ADR 0047 applies the bounded-journal obligation to the substrate-owned replay
+tables and commit receipts as well as to one engine invocation. Canonical
+`ExecutionScope` keys make replay rows attributable to their owning turn,
+process, queue drain, deletion, or runtime operation. Substrates expose bounded
+pruning for effect-replay rows and commit receipts; the Host Application supplies
+the `RetentionBound` and schedules the work under ADR 0023.
+
+Pruning is terminal-gated. Age alone never proves that an operation cannot be
+re-driven after an outage, so active or retryable scopes remain ineligible
+regardless of age. The controller remains responsible for making bounded cleanup
+possible; the host remains responsible for choosing the operational horizon.
