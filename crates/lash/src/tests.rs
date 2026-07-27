@@ -223,7 +223,6 @@ impl lash_core::SessionCommitStore for SnapshotStore {
             .map(|read| read.graph.clone())
             .unwrap_or_default();
         let graph = match commit.graph.clone() {
-            lash_core::store::GraphCommitDelta::ReplaceFull(graph) => graph,
             lash_core::store::GraphCommitDelta::Unchanged { leaf_node_id } => {
                 let mut graph = existing_graph;
                 graph.set_leaf_node_id(leaf_node_id);

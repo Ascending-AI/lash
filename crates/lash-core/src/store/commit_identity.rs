@@ -140,10 +140,6 @@ enum GraphCommitIntent<'a> {
         nodes: Vec<SessionNodeIntent<'a>>,
         leaf_node_id: Option<&'a str>,
     },
-    ReplaceFull {
-        nodes: Vec<SessionNodeIntent<'a>>,
-        leaf_node_id: Option<&'a str>,
-    },
 }
 
 impl<'a> From<&'a GraphCommitDelta> for GraphCommitIntent<'a> {
@@ -158,10 +154,6 @@ impl<'a> From<&'a GraphCommitDelta> for GraphCommitIntent<'a> {
             } => Self::Append {
                 nodes: nodes.iter().map(SessionNodeIntent::from).collect(),
                 leaf_node_id: leaf_node_id.as_deref(),
-            },
-            GraphCommitDelta::ReplaceFull(graph) => Self::ReplaceFull {
-                nodes: graph.nodes.iter().map(SessionNodeIntent::from).collect(),
-                leaf_node_id: graph.leaf_node_id.as_deref(),
             },
         }
     }
@@ -378,7 +370,6 @@ pub fn graph_realization_digest(graph: &GraphCommitDelta) -> String {
     let mut components = Vec::<Vec<u8>>::new();
     let nodes: &[crate::SessionNodeRecord] = match graph {
         GraphCommitDelta::Append { nodes, .. } => nodes,
-        GraphCommitDelta::ReplaceFull(graph) => &graph.nodes,
         GraphCommitDelta::Unchanged { .. } => &[],
     };
     for node in nodes {

@@ -12,6 +12,7 @@ use super::{RuntimeError, RuntimeSessionState, TurnCommitDraft, merge_ledger_ent
 mod materialize;
 use materialize::*;
 
+#[derive(Debug)]
 pub(super) struct ProgressBoundaryCommit {
     pub(super) protocol_events: Vec<crate::ProtocolEvent>,
     pub(super) persisted: bool,
@@ -32,6 +33,7 @@ pub(super) struct TurnBoundary {
     clock: Arc<dyn crate::Clock>,
     session_execution_lease: Option<crate::SessionExecutionLeaseFence>,
     operation_scope: crate::ExecutionScope,
+    progress_commit_index: u64,
 }
 
 /// Explicit two-phase lifecycle for a turn commit.
@@ -39,8 +41,7 @@ pub(super) struct TurnBoundary {
 /// A pipeline starts in [`TurnCommitStage::Drafting`] while progress-boundary
 /// commits accumulate against a mutable [`TurnCommitDraft`]. The first call
 /// that needs the assembled session state transitions it (irreversibly) to
-/// [`TurnCommitStage::Finalized`], snapshotting the progress graph commit so
-/// later final commits can reconcile it against the materialized graph.
+/// [`TurnCommitStage::Finalized`].
 enum TurnCommitStage {
     Drafting(Box<TurnCommitDraft>),
     Finalized(Box<FinalizedTurnCommitStage>),
@@ -48,7 +49,6 @@ enum TurnCommitStage {
 
 struct FinalizedTurnCommitStage {
     state: RuntimeSessionState,
-    progress_graph_commit: GraphCommitDelta,
 }
 
 impl TurnCommitStage {
@@ -56,7 +56,6 @@ impl TurnCommitStage {
     fn placeholder() -> Self {
         Self::Finalized(Box::new(FinalizedTurnCommitStage {
             state: RuntimeSessionState::default(),
-            progress_graph_commit: GraphCommitDelta::Unchanged { leaf_node_id: None },
         }))
     }
 }
@@ -81,7 +80,6 @@ struct FinalCommitInput<'a> {
 enum PersistedGraphMark {
     Unchanged,
     Append(Vec<String>),
-    ReplaceFull(Vec<String>),
 }
 
 impl PersistedGraphMark {
@@ -91,13 +89,6 @@ impl PersistedGraphMark {
             GraphCommitDelta::Append { nodes, .. } => {
                 Self::Append(nodes.iter().map(|node| node.node_id.clone()).collect())
             }
-            GraphCommitDelta::ReplaceFull(graph) => Self::ReplaceFull(
-                graph
-                    .nodes
-                    .iter()
-                    .map(|node| node.node_id.clone())
-                    .collect(),
-            ),
         }
     }
 }
@@ -124,6 +115,7 @@ impl TurnBoundary {
             clock,
             session_execution_lease: None,
             operation_scope,
+            progress_commit_index: 0,
         }
     }
 
@@ -321,13 +313,7 @@ impl TurnBoundary {
             Err(err @ StoreError::SessionExecutionLeaseExpired { .. }) => {
                 Err(super::runtime_error_from_store_commit(err))
             }
-            Err(err) => {
-                tracing::warn!("failed to persist runtime progress boundary: {err}");
-                Ok(ProgressBoundaryCommit {
-                    protocol_events,
-                    persisted: false,
-                })
-            }
+            Err(err) => Err(super::runtime_error_from_store_commit(err)),
         }
     }
 
@@ -429,11 +415,8 @@ impl TurnBoundary {
     fn final_state_mut(&mut self) -> &mut RuntimeSessionState {
         self.stage = match std::mem::replace(&mut self.stage, TurnCommitStage::placeholder()) {
             TurnCommitStage::Drafting(draft) => {
-                let progress_graph_commit =
-                    draft.graph_commit(draft.state().graph_replace_required);
                 TurnCommitStage::Finalized(Box::new(FinalizedTurnCommitStage {
                     state: (*draft).into_final_state(),
-                    progress_graph_commit,
                 }))
             }
             finalized => finalized,
@@ -450,13 +433,16 @@ impl TurnBoundary {
         usage_deltas: &[crate::TokenLedgerEntry],
     ) -> Result<(), StoreError> {
         let draft = self.draft_mut();
-        let state = draft.state();
-        let graph = draft.graph_commit(state.graph_replace_required);
+        let graph = draft.graph_commit();
+        let operation = crate::OperationId::new(
+            self.operation_scope.clone(),
+            format!("progress-{}", self.progress_commit_index),
+        );
         self.apply_commit(
             store,
             graph,
             usage_deltas,
-            None,
+            Some(operation),
             Vec::new(),
             Vec::new(),
             Vec::new(),
@@ -466,8 +452,9 @@ impl TurnBoundary {
             Vec::new(),
             None,
         )
-        .await
-        .map(|_| ())
+        .await?;
+        self.progress_commit_index += 1;
+        Ok(())
     }
 
     async fn final_commit_with_snapshots(
@@ -505,40 +492,10 @@ impl TurnBoundary {
         }
         materialize_terminal_output(state, outcome, clock.as_ref(), &terminal_message_id);
         materialize_agent_frame_switch(state, outcome, clock.as_ref());
-        let progress_graph = match &self.stage {
-            TurnCommitStage::Drafting(draft) => {
-                Some(draft.graph_commit(draft.state().graph_replace_required))
-            }
-            TurnCommitStage::Finalized(finalized) => Some(finalized.progress_graph_commit.clone()),
-        };
         let state = self.final_state_mut();
 
         if let Some(store) = store {
-            let graph = if state.graph_replace_required {
-                GraphCommitDelta::ReplaceFull(state.session_graph.clone())
-            } else if state.head_revision.is_none() {
-                match progress_graph {
-                    Some(GraphCommitDelta::Append {
-                        nodes,
-                        leaf_node_id,
-                    }) if state.session_graph.nodes.is_empty() => GraphCommitDelta::ReplaceFull(
-                        crate::SessionGraph::from_nodes(nodes, leaf_node_id),
-                    ),
-                    _ => GraphCommitDelta::ReplaceFull(state.session_graph.clone()),
-                }
-            } else {
-                match progress_graph {
-                    Some(GraphCommitDelta::Unchanged { .. })
-                        if !state.session_graph.nodes.is_empty() =>
-                    {
-                        GraphCommitDelta::ReplaceFull(state.session_graph.clone())
-                    }
-                    Some(graph) => graph,
-                    None => GraphCommitDelta::Unchanged {
-                        leaf_node_id: state.session_graph.leaf_node_id.clone(),
-                    },
-                }
-            };
+            let graph = state.pending_graph_commit();
             let committed_attachment_ids = committed_attachment_ids(state, tool_calls);
             self.apply_commit(
                 store,
@@ -622,14 +579,16 @@ impl TurnBoundary {
         let result = crate::store::commit_runtime_state_verified(store, commit).await?;
         let enqueued_queue_batches = result.enqueued_queue_batches.clone();
         state.apply_persisted_commit_result(result);
+        let persisted_node_ids = match &mark {
+            PersistedGraphMark::Unchanged => Vec::new(),
+            PersistedGraphMark::Append(node_ids) => node_ids.clone(),
+        };
+        state.mark_node_ids_persisted(persisted_node_ids);
         if let TurnCommitStage::Drafting(draft) = &mut self.stage {
             match mark {
                 PersistedGraphMark::Unchanged => {}
                 PersistedGraphMark::Append(node_ids) => {
                     draft.mark_node_ids_persisted(node_ids);
-                }
-                PersistedGraphMark::ReplaceFull(node_ids) => {
-                    draft.replace_persisted_node_ids(node_ids);
                 }
             }
         }
@@ -716,6 +675,34 @@ mod tests {
         }
     }
 
+    #[test]
+    fn turn_draft_appends_resident_nodes_not_yet_durable() {
+        let durable = text_message("durable", MessageRole::User, "already durable");
+        let pending = text_message("pending", MessageRole::Assistant, "not durable yet");
+        let graph = SessionGraph::from_active_read_state(&[durable, pending]);
+        let durable_node_id = graph.nodes[0].node_id.clone();
+        let pending_node_id = graph.nodes[1].node_id.clone();
+        let mut state = state_with_graph(graph);
+        state.persisted_node_ids.insert(durable_node_id);
+        state.graph_flush_required = true;
+
+        let draft = TurnCommitDraft::from_state_with_clock(
+            state,
+            Arc::new(crate::SystemClock),
+            "masked-path-regression",
+        );
+        let GraphCommitDelta::Append { nodes, .. } = draft.graph_commit() else {
+            panic!("the non-durable resident node must remain appendable");
+        };
+        assert_eq!(
+            nodes
+                .iter()
+                .map(|node| node.node_id.as_str())
+                .collect::<Vec<_>>(),
+            vec![pending_node_id.as_str()]
+        );
+    }
+
     fn attachment_ref(id: &str) -> crate::AttachmentRef {
         crate::AttachmentMeta::new(
             crate::AttachmentId::new(id),
@@ -800,6 +787,20 @@ mod tests {
         RuntimeSessionState {
             session_id: "session-1".to_string(),
             session_graph: graph,
+            ..RuntimeSessionState::default()
+        }
+    }
+
+    fn state_with_persisted_graph(graph: SessionGraph) -> RuntimeSessionState {
+        let persisted_node_ids = graph
+            .nodes
+            .iter()
+            .map(|node| node.node_id.clone())
+            .collect();
+        RuntimeSessionState {
+            session_id: "session-1".to_string(),
+            session_graph: graph,
+            persisted_node_ids,
             ..RuntimeSessionState::default()
         }
     }
@@ -966,7 +967,7 @@ mod tests {
             SessionGraph::from_active_read_state(&[text_message("u0", MessageRole::User, "old")]);
         let base_graph = graph.clone();
         graph.append_message(text_message("a0", MessageRole::Assistant, "new"));
-        let state = state_with_graph(base_graph.clone());
+        let state = state_with_persisted_graph(base_graph.clone());
         let store = RecordingStore::default();
         store
             .session_graph
@@ -1069,7 +1070,8 @@ mod tests {
             .lock()
             .expect("lock graph")
             .extend_node_records(base_graph.nodes.iter().cloned());
-        let (mut pipeline, _lease) = leased_boundary(&store, state_with_graph(graph)).await;
+        let (mut pipeline, _lease) =
+            leased_boundary(&store, state_with_persisted_graph(graph)).await;
 
         let boundary = pipeline
             .progress_boundary_with_snapshot(ProgressBoundarySnapshot {
@@ -1180,7 +1182,8 @@ mod tests {
             .lock()
             .expect("lock graph")
             .extend_node_records(graph.nodes.iter().cloned());
-        let (mut pipeline, _lease) = leased_boundary(&store, state_with_graph(graph.clone())).await;
+        let (mut pipeline, _lease) =
+            leased_boundary(&store, state_with_persisted_graph(graph.clone())).await;
 
         let boundary = pipeline
             .progress_boundary_with_snapshot(ProgressBoundarySnapshot {
@@ -1236,7 +1239,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn progress_boundary_logs_and_continues_on_store_failure() {
+    async fn progress_boundary_propagates_store_failure() {
         let user = text_message("u0", MessageRole::User, "hello");
         let assistant = text_message("a0", MessageRole::Assistant, "hi");
         let graph = SessionGraph::from_active_read_state(std::slice::from_ref(&user));
@@ -1253,7 +1256,7 @@ mod tests {
             .await;
         let (mut pipeline, _lease) = leased_boundary(&store, state_with_graph(graph)).await;
 
-        let boundary = pipeline
+        let err = pipeline
             .progress_boundary_with_snapshot(ProgressBoundarySnapshot {
                 policy: SessionPolicy::default(),
                 turn_index: 1,
@@ -1264,10 +1267,9 @@ mod tests {
                 store: Some(&store),
             })
             .await
-            .expect("progress boundary");
+            .expect_err("durable progress write failures must propagate");
 
-        assert!(!boundary.persisted);
-        assert_eq!(boundary.protocol_events.len(), 1);
+        assert_eq!(err.code, super::super::RuntimeErrorCode::StoreCommitFailed);
         assert_eq!(
             *store
                 .runtime_commit_count

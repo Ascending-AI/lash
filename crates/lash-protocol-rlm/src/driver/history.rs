@@ -16,10 +16,11 @@
 //!   flushed as a standalone assistant message (a prose-only finish).
 //! - **Completed-turn precedence.** When a successful terminal step is
 //!   followed by a committed assistant transcript message in the same turn,
-//!   the transcript is canonical. The terminal emission cell and its
-//!   never-observed output echo are omitted. This is derived from event/turn
-//!   ordering, never message content. Without a committed transcript, the
-//!   trajectory renders unchanged.
+//!   the transcript is canonical for assistant prose. Assistant-content events,
+//!   the terminal emission cell, and its never-observed output echo are
+//!   omitted; intermediate trajectory entries remain available. This is
+//!   derived from event/turn ordering, never message content. Without a
+//!   committed transcript, the trajectory renders unchanged.
 //! - **Cache fence.** The last history message is marked with a
 //!   `cache_breakpoint` (`mark_last_history_text_cache_breakpoint`) so the
 //!   provider can reuse the stable history prefix across iterations. Active-turn

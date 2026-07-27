@@ -56,6 +56,7 @@ fn store_error_variant(error: &StoreError) -> &'static str {
         StoreError::RuntimeTurnCommitConflict { .. } => "RuntimeTurnCommitConflict",
         StoreError::NodeIdDerivationMismatch { .. } => "NodeIdDerivationMismatch",
         StoreError::NodeIdCollision { .. } => "NodeIdCollision",
+        StoreError::InvalidGraphLeaf { .. } => "InvalidGraphLeaf",
         StoreError::CommitRealizationMismatch { .. } => "CommitRealizationMismatch",
         StoreError::CommitFrameRealizationMismatch { .. } => "CommitFrameRealizationMismatch",
         StoreError::QueuedWorkClaimSuperseded { .. } => "QueuedWorkClaimSuperseded",

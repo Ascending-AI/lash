@@ -26,12 +26,14 @@ impl TurnCommitDraft {
                 .map(|frame| frame.previous_frame_id.is_none())
                 .unwrap_or(true),
         );
+        let persisted_node_ids = std::mem::take(&mut state.persisted_node_ids);
         let graph = TurnGraphEditor::new(
             base_graph,
             base_read_model,
             state.current_agent_frame_id.clone(),
             draft_namespace,
             clock,
+            persisted_node_ids,
         );
         Self { graph, state }
     }
@@ -107,15 +109,19 @@ impl TurnCommitDraft {
     }
 
     pub(super) fn into_final_state(mut self) -> RuntimeSessionState {
+        self.state.persisted_node_ids = self.graph.persisted_node_ids();
         self.state.session_graph = self.graph.into_session_graph();
+        self.state.graph_flush_required = self
+            .state
+            .session_graph
+            .nodes
+            .iter()
+            .any(|node| !self.state.persisted_node_ids.contains(&node.node_id));
         self.state
     }
 
-    pub(super) fn graph_commit(
-        &self,
-        graph_replace_required: bool,
-    ) -> crate::store::GraphCommitDelta {
-        self.graph.graph_commit(graph_replace_required)
+    pub(super) fn graph_commit(&self) -> crate::store::GraphCommitDelta {
+        self.graph.graph_commit()
     }
 
     pub(super) fn mark_node_ids_persisted<I>(&mut self, node_ids: I)
@@ -123,13 +129,6 @@ impl TurnCommitDraft {
         I: IntoIterator<Item = String>,
     {
         self.graph.mark_node_ids_persisted(node_ids);
-    }
-
-    pub(super) fn replace_persisted_node_ids<I>(&mut self, node_ids: I)
-    where
-        I: IntoIterator<Item = String>,
-    {
-        self.graph.replace_persisted_node_ids(node_ids);
     }
 
     pub(super) fn remap_node_ids(&mut self, session_id: &str, mapping: &[(String, String)]) {

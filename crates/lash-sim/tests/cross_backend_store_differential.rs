@@ -20,9 +20,9 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use lash_core::store::{GraphCommitDelta, RuntimeCommitResult, SessionHeadMeta};
 use lash_core::{
     InMemorySessionStore, LeaseOwnerIdentity, PendingTurnInputDraft, ProtocolEvent, RuntimeCommit,
-    RuntimePersistence, RuntimeSessionState, RuntimeTurnCommitStamp, SessionGraph,
-    SessionHistoryRecord, SessionNodePayload, SessionNodeRecord, StoreError, TurnInput,
-    TurnInputApplication, TurnInputClaim, TurnInputIngress, TurnInputState,
+    RuntimePersistence, RuntimeSessionState, RuntimeTurnCommitStamp, SessionHistoryRecord,
+    SessionNodePayload, SessionNodeRecord, StoreError, TurnInput, TurnInputApplication,
+    TurnInputClaim, TurnInputIngress, TurnInputState,
 };
 use lash_postgres_store::PostgresStorage;
 use rusqlite::OptionalExtension;
@@ -36,7 +36,7 @@ enum CaseName {
     DuplicateAcrossCommits,
     AppendTombstoned,
     AppendTombstonedThenVacuumed,
-    AppendDuplicateAfterReplaceFullSeed,
+    AppendDuplicateAfterAppendSeed,
     StaleExpectedHeadRevision,
     IdenticalAndMutatedTurnCommitReplay,
     SettleClaimAfterLeaseGenerationSuperseded,
@@ -49,9 +49,7 @@ impl CaseName {
             Self::DuplicateAcrossCommits => "duplicate_node_id_across_two_commits",
             Self::AppendTombstoned => "append_onto_tombstoned_node_id",
             Self::AppendTombstonedThenVacuumed => "append_onto_tombstoned_then_vacuumed_node_id",
-            Self::AppendDuplicateAfterReplaceFullSeed => {
-                "append_duplicate_node_id_after_replace_full_seed"
-            }
+            Self::AppendDuplicateAfterAppendSeed => "append_duplicate_node_id_after_append_seed",
             Self::StaleExpectedHeadRevision => "stale_expected_head_revision",
             Self::IdenticalAndMutatedTurnCommitReplay => "identical_and_mutated_turn_commit_replay",
             Self::SettleClaimAfterLeaseGenerationSuperseded => {
@@ -126,10 +124,6 @@ enum GraphSpec {
         nodes: Vec<NodeSpec>,
         leaf_node_id: Option<&'static str>,
     },
-    ReplaceFull {
-        nodes: Vec<NodeSpec>,
-        leaf_node_id: Option<&'static str>,
-    },
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -186,13 +180,6 @@ enum LeaseSlot {
 
 fn append(nodes: Vec<NodeSpec>, leaf_node_id: Option<&'static str>) -> GraphSpec {
     GraphSpec::Append {
-        nodes,
-        leaf_node_id,
-    }
-}
-
-fn replace_full(nodes: Vec<NodeSpec>, leaf_node_id: Option<&'static str>) -> GraphSpec {
-    GraphSpec::ReplaceFull {
         nodes,
         leaf_node_id,
     }
@@ -277,7 +264,7 @@ fn generated_cases() -> Vec<GeneratedCase> {
             ],
         },
         GeneratedCase {
-            name: CaseName::AppendDuplicateAfterReplaceFullSeed,
+            name: CaseName::AppendDuplicateAfterAppendSeed,
             // The store layer has no residency input. A host using
             // `ActivePathOnly` can produce this malformed Append because
             // `unique_message_node_id` de-duplicates only against its resident
@@ -286,7 +273,7 @@ fn generated_cases() -> Vec<GeneratedCase> {
                 commit(
                     "seed_forked_graph",
                     None,
-                    replace_full(
+                    append(
                         vec![
                             NodeSpec::new("root", None, "root"),
                             NodeSpec::new("active-leaf", Some("root"), "active"),
@@ -296,7 +283,7 @@ fn generated_cases() -> Vec<GeneratedCase> {
                     ),
                 ),
                 commit(
-                    "append_duplicate_id_after_replace_full_seed",
+                    "append_duplicate_id_after_append_seed",
                     Some(1),
                     append(
                         vec![NodeSpec::new("off-path", Some("root"), "off-path-mutated")],
@@ -395,13 +382,6 @@ fn materialize_graph(spec: &GraphSpec) -> GraphCommitDelta {
             nodes: nodes.iter().copied().map(NodeSpec::materialize).collect(),
             leaf_node_id: leaf_node_id.map(str::to_string),
         },
-        GraphSpec::ReplaceFull {
-            nodes,
-            leaf_node_id,
-        } => GraphCommitDelta::ReplaceFull(SessionGraph::from_nodes(
-            nodes.iter().copied().map(NodeSpec::materialize).collect(),
-            leaf_node_id.map(str::to_string),
-        )),
     }
 }
 
@@ -878,6 +858,7 @@ fn normalized_store_error(backend: &str, error: &StoreError) -> String {
         StoreError::InvalidRecordSchemaVersion { .. } => "InvalidRecordSchemaVersion".to_string(),
         StoreError::NodeIdDerivationMismatch { .. } => "NodeIdDerivationMismatch".to_string(),
         StoreError::NodeIdCollision { .. } => "NodeIdCollision".to_string(),
+        StoreError::InvalidGraphLeaf { .. } => "InvalidGraphLeaf".to_string(),
         StoreError::CommitRealizationMismatch { .. } => "CommitRealizationMismatch".to_string(),
         StoreError::CommitFrameRealizationMismatch { .. } => {
             "CommitFrameRealizationMismatch".to_string()
@@ -999,7 +980,7 @@ fn generated_catalog_covers_required_adversarial_shapes() {
             "duplicate_node_id_across_two_commits",
             "append_onto_tombstoned_node_id",
             "append_onto_tombstoned_then_vacuumed_node_id",
-            "append_duplicate_node_id_after_replace_full_seed",
+            "append_duplicate_node_id_after_append_seed",
             "stale_expected_head_revision",
             "identical_and_mutated_turn_commit_replay",
             "settle_claim_after_session_lease_generation_superseded_before_reclaim",

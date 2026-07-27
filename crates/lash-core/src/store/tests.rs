@@ -78,6 +78,52 @@ fn intent_fixture() -> RuntimeCommit {
 }
 
 #[test]
+fn first_persisted_state_commit_derives_and_installs_node_ids() {
+    let placeholder = "draft-node/v2:first".to_string();
+    let mut state = crate::RuntimeSessionState {
+        session_id: "first-commit".to_string(),
+        session_graph: crate::SessionGraph::from_nodes(
+            vec![crate::SessionNodeRecord {
+                node_id: placeholder.clone(),
+                parent_node_id: None,
+                caused_by: None,
+                agent_frame_id: None,
+                timestamp: "2026-07-27T00:00:00Z".to_string(),
+                payload: crate::SessionNodePayload::Plugin {
+                    plugin_type: "first-commit".to_string(),
+                    body: crate::session_graph::SharedJsonValue::new(serde_json::json!({})),
+                },
+            }],
+            Some(placeholder),
+        ),
+        graph_flush_required: true,
+        ..crate::RuntimeSessionState::default()
+    };
+    let operation = OperationId::new(
+        crate::ExecutionScope::runtime_operation("first-commit"),
+        "initial",
+    );
+    let expected = derive_history_node_id("first-commit", &operation, 0)
+        .expect("derive expected first node id");
+
+    let (commit, persisted_node_ids) =
+        RuntimeCommit::persisted_state_with_operation(&mut state, &[], operation)
+            .expect("build first append");
+    let GraphCommitDelta::Append {
+        nodes,
+        leaf_node_id,
+    } = commit.graph
+    else {
+        panic!("first graph write must be an append");
+    };
+    assert_eq!(persisted_node_ids, vec![expected.clone()]);
+    assert_eq!(nodes[0].node_id, expected);
+    assert_eq!(leaf_node_id, Some(nodes[0].node_id.clone()));
+    assert_eq!(state.session_graph.nodes[0].node_id, nodes[0].node_id);
+    assert_eq!(state.session_graph.leaf_node_id, leaf_node_id);
+}
+
+#[test]
 fn legacy_hash_reproduces_created_at_replay_conflict() {
     let first = intent_fixture();
     let mut replay = first.clone();

@@ -117,12 +117,12 @@ impl UsageCapability {
         for entry in drained.iter().cloned() {
             merge_ledger_entry(&mut state.token_ledger, entry);
         }
-        let commit = crate::store::RuntimeCommit::persisted_state(&state, &drained)
-            .with_operation(super::super::state::boundary_operation(
-                &state.session_id,
-                boundary_id,
-                "usage-ledger",
-            ))
+        let operation =
+            super::super::state::boundary_operation(&state.session_id, boundary_id, "usage-ledger");
+        let (commit, persisted_node_ids) =
+            crate::store::RuntimeCommit::persisted_state_with_operation(
+                &mut state, &drained, operation,
+            )
             .map_err(|err| crate::PluginError::Session(err.to_string()))?;
         let result = commit_runtime_state_with_fresh_session_execution_lease(
             Arc::clone(store),
@@ -134,6 +134,7 @@ impl UsageCapability {
         .await
         .map_err(|err| crate::PluginError::Session(err.to_string()))?;
         state.apply_persisted_commit_result(result);
+        state.mark_node_ids_persisted(persisted_node_ids);
         Ok(())
     }
 }

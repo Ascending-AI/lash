@@ -10,14 +10,13 @@ use crate::{PluginOperationInvokeError, SessionError};
 use super::LashRuntime;
 use super::state::{
     RuntimeSessionState, append_session_nodes_to_state_with_clock, boundary_operation,
-    derive_graph_commit_node_ids, normalize_session_graph,
+    derive_graph_commit_node_ids,
 };
 
 impl LashRuntime {
     /// Replace the host-owned state envelope.
     pub fn set_persisted_state(&mut self, state: RuntimeSessionState) -> Result<(), SessionError> {
         let mut state = state;
-        normalize_session_graph(&mut state);
         if let Some(session) = self.session.as_ref() {
             session.invalidate_runtime_caches();
             // Restore the persisted tool catalog so the live registry matches the
@@ -150,6 +149,7 @@ impl LashRuntime {
                 }
             };
             self.state.apply_persisted_commit_result(result);
+            self.state.mark_node_ids_persisted(node_ids.clone());
             return Ok(crate::AppendSessionNodesResult::Appended {
                 node_ids,
                 leaf_node_id: self
@@ -223,8 +223,7 @@ impl LashRuntime {
     ) -> Result<crate::SessionSnapshot, SessionError> {
         let mut state = self.export_state();
         state.session_graph.branch_to(node_id);
-        let mut persisted_state = RuntimeSessionState::from_snapshot(state);
-        normalize_session_graph(&mut persisted_state);
+        let persisted_state = RuntimeSessionState::from_snapshot(state);
 
         let policy = persisted_state.policy.clone();
         let host = self.host.clone();
@@ -551,13 +550,14 @@ impl LashRuntime {
                     .collect(),
                 leaf_node_id: self.state.session_graph.leaf_node_id.clone(),
             };
-            derive_graph_commit_node_ids(&mut self.state, &mut graph, &operation).map_err(
-                |err| {
-                    PluginOperationInvokeError::Failed(format!(
-                        "failed to derive plugin runtime event identity: {err}"
-                    ))
-                },
-            )?;
+            let persisted_node_ids =
+                derive_graph_commit_node_ids(&mut self.state, &mut graph, &operation).map_err(
+                    |err| {
+                        PluginOperationInvokeError::Failed(format!(
+                            "failed to derive plugin runtime event identity: {err}"
+                        ))
+                    },
+                )?;
             let mut commit = crate::store::RuntimeCommit::persisted_state_with_graph_commit(
                 &self.state,
                 graph,
@@ -584,13 +584,22 @@ impl LashRuntime {
             {
                 Ok(result) => result,
                 Err(err) => {
-                    self.state = state_before_append;
-                    return Err(PluginOperationInvokeError::Failed(format!(
-                        "failed to persist plugin runtime events: {err}"
-                    )));
+                    let persistence_error =
+                        format!("failed to persist plugin runtime events: {err}");
+                    if let Err(rollback_err) = self
+                        .restore_protocol_session_after_failed_append(state_before_append)
+                        .await
+                    {
+                        return Err(PluginOperationInvokeError::Failed(format!(
+                            "{persistence_error}; failed to restore protocol session: \
+                             {rollback_err}"
+                        )));
+                    }
+                    return Err(PluginOperationInvokeError::Failed(persistence_error));
                 }
             };
             self.state.apply_persisted_commit_result(result);
+            self.state.mark_node_ids_persisted(persisted_node_ids);
         }
         Ok(())
     }
@@ -606,11 +615,13 @@ impl LashRuntime {
         else {
             return Ok(());
         };
-        let commit = crate::store::RuntimeCommit::persisted_state(&self.state, &[])
-            .with_operation(crate::OperationId::new(
-                operation_scope,
-                "plugin-operation-state",
-            ))
+        let operation = crate::OperationId::new(operation_scope, "plugin-operation-state");
+        let (commit, persisted_node_ids) =
+            crate::store::RuntimeCommit::persisted_state_with_operation(
+                &mut self.state,
+                &[],
+                operation,
+            )
             .map_err(|err| {
                 PluginOperationInvokeError::Failed(format!(
                     "failed to identify plugin operation state: {err}"
@@ -630,6 +641,7 @@ impl LashRuntime {
             ))
         })?;
         self.state.apply_persisted_commit_result(result);
+        self.state.mark_node_ids_persisted(persisted_node_ids);
         Ok(())
     }
 }

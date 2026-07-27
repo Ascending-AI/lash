@@ -42,7 +42,7 @@ async fn second_history_bearing_turn_snapshots_the_full_assembled_provider_reque
         .expect("runtime core");
     let session = core
         .session("history-request-snapshot")
-        .open_fresh()
+        .open()
         .await
         .expect("session");
 

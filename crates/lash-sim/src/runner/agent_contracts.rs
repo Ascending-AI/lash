@@ -471,7 +471,7 @@ await task.fail({ reason: "parent observed child failure" })?
     )?;
     let session = core
         .session("sim-agent-failed-child-contract")
-        .open_fresh()
+        .open()
         .await
         .map_err(|err| FixedScriptRunnerError::Runtime(err.to_string()))?;
     let events = Arc::new(RuntimeProofRecordingEvents::default());
@@ -626,7 +626,7 @@ async fn facade_final_value_execution_inner(
         .map_err(|err| FixedScriptRunnerError::Runtime(err.to_string()))?;
     let session = core
         .session(session_id)
-        .open_fresh()
+        .open()
         .await
         .map_err(|err| FixedScriptRunnerError::Runtime(err.to_string()))?;
     let result = session
@@ -729,7 +729,7 @@ async fn facade_agent_process_execution_with_options(
     )?;
     let session = core
         .session(session_id)
-        .open_fresh()
+        .open()
         .await
         .map_err(|err| FixedScriptRunnerError::Runtime(err.to_string()))?;
     let events = Arc::new(RuntimeProofRecordingEvents::default());
@@ -797,7 +797,7 @@ finish { recovered: true }
     )?;
     let session = core
         .session("sim-agent-durable-input-contract")
-        .open_fresh()
+        .open()
         .await
         .map_err(|err| FixedScriptRunnerError::Runtime(err.to_string()))?;
     let events = Arc::new(RuntimeProofRecordingEvents::default());

@@ -12,7 +12,7 @@ use super::usage::TokenLedgerEntry;
 
 /// The runtime's view of a session: the persistable snapshot fields
 /// **plus** scratch fields the runtime tracks but never persists
-/// (head-revision CAS guard, pending dirty-write buffers, replace-graph
+/// (head-revision CAS guard, pending dirty-write buffers, graph-flush
 /// flag). Public serialization goes through [`RuntimeSessionState::to_snapshot`],
 /// which drops runtime-only fields by construction.
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
@@ -63,15 +63,20 @@ pub struct RuntimeSessionState {
     /// the first persisted head.
     #[serde(skip)]
     pub head_revision: Option<u64>,
-    /// Signals that the next commit must write the full graph (for example,
-    /// `heal_orphaned_leaf` repaired an invalid leaf). Cleared after the
-    /// next commit.
+    /// Node ids known to exist durably. This is deliberately independent of
+    /// the resident graph: partial residency omits durable off-path nodes,
+    /// while host-side edits can add resident nodes before they commit.
     #[serde(skip)]
-    pub graph_replace_required: bool,
+    #[doc(hidden)]
+    pub persisted_node_ids: std::collections::HashSet<String>,
+    /// Signals that resident graph nodes still need an append flush.
+    #[serde(skip)]
+    pub graph_flush_required: bool,
 }
 
 impl RuntimeSessionState {
     pub fn from_snapshot(snapshot: SessionSnapshot) -> Self {
+        let graph_flush_required = !snapshot.session_graph.nodes.is_empty();
         let mut state = Self {
             session_id: snapshot.session_id,
             policy: snapshot.policy,
@@ -93,7 +98,8 @@ impl RuntimeSessionState {
             token_ledger: snapshot.token_ledger,
             checkpoint_ref: snapshot.checkpoint_ref,
             head_revision: None,
-            graph_replace_required: false,
+            persisted_node_ids: std::collections::HashSet::new(),
+            graph_flush_required,
         };
         for frame in &mut state.agent_frames {
             frame.execution_state_snapshot = None;
@@ -171,7 +177,7 @@ impl RuntimeSessionState {
     pub fn replace_active_read_state(&mut self, messages: &[Message]) {
         self.session_graph
             .replace_active_read_state_for_agent_frame(&self.current_agent_frame_id, messages);
-        self.graph_replace_required = false;
+        self.graph_flush_required = true;
     }
 
     pub fn append_active_read_delta(&mut self, messages: &[Message]) {
@@ -251,13 +257,45 @@ impl RuntimeSessionState {
             frame.execution_state_ref = execution_state_ref;
             frame.execution_state_snapshot = None;
         }
-        self.graph_replace_required = false;
+        self.graph_flush_required = false;
         self.tool_state_snapshot = None;
         self.plugin_snapshot = None;
         self.execution_state_snapshot = None;
         if let Some(frame) = self.current_agent_frame_mut() {
             frame.execution_state_snapshot = None;
         }
+    }
+
+    pub(crate) fn pending_graph_commit(&self) -> crate::GraphCommitDelta {
+        let nodes = self
+            .session_graph
+            .nodes
+            .iter()
+            .filter(|node| !self.persisted_node_ids.contains(&node.node_id))
+            .cloned()
+            .collect::<Vec<_>>();
+        if nodes.is_empty() {
+            crate::GraphCommitDelta::Unchanged {
+                leaf_node_id: self.session_graph.leaf_node_id.clone(),
+            }
+        } else {
+            crate::GraphCommitDelta::Append {
+                nodes,
+                leaf_node_id: self.session_graph.leaf_node_id.clone(),
+            }
+        }
+    }
+
+    pub(crate) fn mark_node_ids_persisted<I>(&mut self, node_ids: I)
+    where
+        I: IntoIterator<Item = String>,
+    {
+        self.persisted_node_ids.extend(node_ids);
+        self.graph_flush_required = self
+            .session_graph
+            .nodes
+            .iter()
+            .any(|node| !self.persisted_node_ids.contains(&node.node_id));
     }
 
     pub fn discard_runtime_snapshots(&mut self) {
@@ -476,7 +514,8 @@ impl Default for RuntimeSessionState {
             token_ledger: Vec::new(),
             checkpoint_ref: None,
             head_revision: None,
-            graph_replace_required: false,
+            persisted_node_ids: std::collections::HashSet::new(),
+            graph_flush_required: false,
         }
     }
 }
@@ -557,7 +596,7 @@ mod tests {
             plugin_snapshot: Some(crate::PluginSessionSnapshot::default()),
             execution_state_snapshot: Some(vec![1, 2, 3]),
             head_revision: Some(42),
-            graph_replace_required: true,
+            graph_flush_required: true,
             ..RuntimeSessionState::default()
         };
         state.ensure_agent_frame_initialized();
@@ -569,7 +608,8 @@ mod tests {
 
         for runtime_key in [
             "head_revision",
-            "graph_replace_required",
+            "persisted_node_ids",
+            "graph_flush_required",
             "tool_state_snapshot",
             "plugin_snapshot",
             "execution_state_snapshot",
@@ -593,7 +633,7 @@ mod tests {
         assert_eq!(hydrated.session_id, "snapshot-test");
         assert_eq!(hydrated.policy.recorded_provider_id(), "mock");
         assert!(hydrated.head_revision.is_none());
-        assert!(!hydrated.graph_replace_required);
+        assert!(!hydrated.graph_flush_required);
         assert!(hydrated.tool_state_snapshot.is_none());
         assert!(hydrated.plugin_snapshot.is_none());
         assert!(hydrated.execution_state_snapshot.is_none());
@@ -705,7 +745,13 @@ pub(super) fn apply_session_head(
     state.execution_state_snapshot = None;
     state.ensure_agent_frame_initialized();
     state.head_revision = Some(head.head_revision);
-    state.graph_replace_required = false;
+    state.persisted_node_ids = head
+        .graph
+        .nodes
+        .iter()
+        .map(|node| node.node_id.clone())
+        .collect();
+    state.graph_flush_required = false;
     apply_persisted_session_config(&mut state.policy, &head.config);
 }
 
@@ -731,7 +777,9 @@ pub(super) fn append_session_nodes_to_state_with_clock(
         drafts,
         clock.timestamp_rfc3339(),
     );
-    normalize_session_graph(state);
+    if !node_ids.is_empty() {
+        state.graph_flush_required = true;
+    }
     node_ids
 }
 
@@ -801,9 +849,6 @@ pub(super) fn open_agent_frame_in_state_with_clock(
         &request.frame_id,
         clock,
     );
-    if !initial_node_ids.is_empty() {
-        state.graph_replace_required = true;
-    }
     crate::OpenAgentFrameResult {
         frame_id: state.current_agent_frame_id.clone(),
         opened: true,
@@ -873,15 +918,9 @@ fn default_agent_frame_with_clock(
 /// path; if the leaf doesn't resolve against that reduced set, the
 /// caller falls back to a full `load_session_graph()` + `normalize` +
 /// trim.
-pub(super) fn normalize_session_graph(state: &mut RuntimeSessionState) {
-    if state.session_graph.heal_orphaned_leaf() {
-        state.graph_replace_required = true;
-    }
-}
-
 /// Trim the resident node set according to `Residency`. Called AFTER
-/// `normalize_session_graph` during `from_environment` load. Under
-/// `KeepAll` this is a no-op; under `ActivePathOnly` it replaces the
+/// loading during `from_environment`. Under `KeepAll` this is a no-op;
+/// under `ActivePathOnly` it replaces the
 /// resident graph with just the active path. Orphans remain on disk —
 /// the host decides whether/when to tombstone + vacuum them via
 /// `LashRuntime::orphaned_node_ids` + the store primitives.

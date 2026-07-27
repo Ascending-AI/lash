@@ -9,14 +9,12 @@ pub enum SessionCommand {
     // drain time, and the refresh recomputes the surface from live sources
     // regardless — a guard could only fail spuriously.
     RefreshToolCatalog { reason: String },
-    ResetSession { reason: String },
 }
 
 impl SessionCommand {
     pub fn kind(&self) -> &'static str {
         match self {
             Self::RefreshToolCatalog { .. } => "refresh_tool_catalog",
-            Self::ResetSession { .. } => "reset_session",
         }
     }
 

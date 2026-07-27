@@ -90,11 +90,7 @@ async fn run(mode: &str) -> Result<()> {
         "e2e-runner-container",
     );
     let session_builder = core.session(SESSION_ID).session_execution_owner(owner);
-    let session = if mode == "commit" {
-        session_builder.open_fresh().await?
-    } else {
-        session_builder.open().await?
-    };
+    let session = session_builder.open().await?;
 
     match mode {
         "commit" => {

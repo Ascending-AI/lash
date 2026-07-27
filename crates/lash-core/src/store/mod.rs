@@ -323,7 +323,6 @@ pub enum GraphCommitDelta {
         nodes: Vec<crate::SessionNodeRecord>,
         leaf_node_id: Option<String>,
     },
-    ReplaceFull(crate::SessionGraph),
 }
 
 impl GraphCommitDelta {
@@ -332,7 +331,6 @@ impl GraphCommitDelta {
             Self::Unchanged { leaf_node_id } | Self::Append { leaf_node_id, .. } => {
                 leaf_node_id.as_ref()
             }
-            Self::ReplaceFull(graph) => graph.leaf_node_id.as_ref(),
         }
     }
 
@@ -346,7 +344,7 @@ impl GraphCommitDelta {
                 nodes,
                 leaf_node_id,
             } => (nodes, leaf_node_id),
-            Self::Unchanged { .. } | Self::ReplaceFull(_) => return Ok(Vec::new()),
+            Self::Unchanged { .. } => return Ok(Vec::new()),
         };
         let mut remapped = std::collections::HashMap::<String, String>::new();
         let mut mapping = Vec::with_capacity(nodes.len());
@@ -373,6 +371,14 @@ impl GraphCommitDelta {
             *leaf = derived_leaf.clone();
         }
         Ok(mapping)
+    }
+
+    pub(crate) fn appended_nodes(&self) -> impl Iterator<Item = &crate::SessionNodeRecord> {
+        match self {
+            Self::Append { nodes, .. } => nodes.as_slice(),
+            Self::Unchanged { .. } => &[],
+        }
+        .iter()
     }
 }
 
@@ -873,13 +879,7 @@ impl RuntimeCommit {
             config: persisted_session_config_from_state(state),
             agent_frames: state.agent_frames.clone(),
             current_agent_frame_id: state.current_agent_frame_id.clone(),
-            graph: if state.graph_replace_required || state.head_revision.is_none() {
-                GraphCommitDelta::ReplaceFull(state.session_graph.clone())
-            } else {
-                GraphCommitDelta::Unchanged {
-                    leaf_node_id: state.session_graph.leaf_node_id.clone(),
-                }
-            },
+            graph: state.pending_graph_commit(),
             checkpoint: build_checkpoint_from_persisted_state(state),
             usage_deltas: usage_deltas.to_vec(),
             turn_commit: None,
@@ -889,6 +889,28 @@ impl RuntimeCommit {
             interrupted_turn_input_turn_id: None,
             committed_attachment_ids: Vec::new(),
         }
+    }
+
+    pub(crate) fn persisted_state_with_operation(
+        state: &mut crate::RuntimeSessionState,
+        usage_deltas: &[crate::TokenLedgerEntry],
+        operation: OperationId,
+    ) -> Result<(Self, Vec<String>), StoreError> {
+        let mut commit = Self::persisted_state(state, usage_deltas);
+        let mapping = commit
+            .graph
+            .derive_node_ids(&state.session_id, &operation)?;
+        state
+            .session_graph
+            .remap_node_ids(&state.session_id, &mapping);
+        let persisted_node_ids = mapping.iter().map(|(_, derived)| derived.clone()).collect();
+        let hash = commit.turn_commit_hash()?;
+        commit.turn_commit = Some(RuntimeTurnCommitStamp::new(
+            commit.session_id.clone(),
+            operation,
+            hash,
+        ));
+        Ok((commit, persisted_node_ids))
     }
 
     pub(crate) fn persisted_state_with_graph_commit(
@@ -922,6 +944,7 @@ impl RuntimeCommit {
     }
 
     pub fn with_operation(mut self, operation: OperationId) -> Result<Self, StoreError> {
+        self.graph.derive_node_ids(&self.session_id, &operation)?;
         let hash = self.turn_commit_hash()?;
         self.turn_commit = Some(RuntimeTurnCommitStamp::new(
             self.session_id.clone(),
@@ -996,6 +1019,12 @@ fn persisted_session_state_from_head(
     head: SessionHead,
     checkpoint: Option<HydratedSessionCheckpoint>,
 ) -> crate::RuntimeSessionState {
+    let persisted_node_ids = head
+        .graph
+        .nodes
+        .iter()
+        .map(|node| node.node_id.clone())
+        .collect();
     let mut state = crate::RuntimeSessionState {
         session_id: head.session_id,
         policy: crate::SessionPolicy::default(),
@@ -1017,7 +1046,8 @@ fn persisted_session_state_from_head(
         token_ledger: head.token_ledger,
         checkpoint_ref: head.checkpoint_ref.clone(),
         head_revision: Some(head.head_revision),
-        graph_replace_required: false,
+        persisted_node_ids,
+        graph_flush_required: false,
     };
     state.policy.model = head.config.model.clone();
     state.policy.provider_id = head.config.provider_id.clone();

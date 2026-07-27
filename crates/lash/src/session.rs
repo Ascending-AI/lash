@@ -106,33 +106,11 @@ impl SessionBuilder {
         Box::pin(self.open_resolved(policy, state, store)).await
     }
 
-    /// Open this session with a fresh resident graph, ignoring any persisted
-    /// session graph/checkpoint state that may already exist for the same
-    /// session id.
-    ///
-    /// The next successful commit writes a full replacement graph, so normal
-    /// embedders can use this to start over without manually calling
-    /// `load_persisted_session_state` or constructing a `RuntimeSessionState`.
-    /// Use [`Self::open`] for resume and [`Self::open_with_state`] only when
-    /// restoring explicit host-owned state.
-    pub async fn open_fresh(self) -> Result<LashSession> {
-        let policy = self.session_policy();
-        let store = self.create_store(&policy).await?;
-        let state = RuntimeSessionState {
-            session_id: self.session_id.clone(),
-            policy: policy.clone(),
-            graph_replace_required: true,
-            ..RuntimeSessionState::default()
-        };
-        Box::pin(self.open_resolved(policy, state, store)).await
-    }
-
     /// Open with an explicitly supplied runtime state.
     ///
     /// This is for advanced hosts that already own a complete state snapshot.
     /// Normal embedders should use [`Self::open`] to resume according to Lash's
-    /// residency policy or [`Self::open_fresh`] to start over and replace prior
-    /// persisted state on the next commit.
+    /// residency policy.
     pub async fn open_with_state(self, mut state: RuntimeSessionState) -> Result<LashSession> {
         let policy = self.session_policy();
         let store = self.create_store(&policy).await?;
@@ -322,30 +300,13 @@ async fn load_persisted_state_for_residency(
                 .map_err(|err| SessionError::Protocol(format!("failed to load store: {err}")))?;
             Ok(loaded)
         }
-        Residency::ActivePathOnly => {
-            let active = lash_core::store::load_persisted_session_state_active_path(store, None)
+        Residency::ActivePathOnly => Ok(
+            lash_core::store::load_persisted_session_state_active_path(store, None)
                 .await
                 .map_err(|err| {
                     SessionError::Protocol(format!("failed to load active-path store: {err}"))
-                })?;
-            if active
-                .as_ref()
-                .is_some_and(|state| state.session_graph.nodes.is_empty())
-            {
-                let mut full = lash_core::store::load_persisted_session_state(store)
-                    .await
-                    .map_err(|err| {
-                        SessionError::Protocol(format!(
-                            "failed to heal active-path store from full graph: {err}"
-                        ))
-                    })?;
-                if let Some(state) = full.as_mut() {
-                    state.graph_replace_required = true;
-                }
-                return Ok(full);
-            }
-            Ok(active)
-        }
+                })?,
+        ),
     }
 }
 
