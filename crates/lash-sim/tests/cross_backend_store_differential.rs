@@ -26,9 +26,12 @@ use lash_core::{
 };
 use lash_postgres_store::PostgresStorage;
 use rusqlite::OptionalExtension;
-use sqlx::PgPool;
+use sqlx::{Connection, PgConnection, PgPool};
 
 const SESSION_LEASE_TTL_MS: u64 = 60_000;
+// "LASH_PGT" encoded as a positive i64. This must match the shared-database
+// advisory lock used by lash-postgres-store's integration-test harness.
+const SHARED_DATABASE_LOCK_KEY: i64 = 0x4c41_5348_5f50_4754;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum CaseName {
@@ -1068,6 +1071,18 @@ async fn cross_backend_store_differential_agrees() {
             return;
         }
     };
+    // `push-gate` runs workspace tests through nextest, so this test is a
+    // separate process from the Postgres conformance tests. Hold their common
+    // session-level advisory lock for the entire differential: both suites use
+    // the configured database as disposable test state.
+    let mut database_lock = PgConnection::connect(&database_url)
+        .await
+        .expect("connect Postgres differential advisory lock");
+    sqlx::query("SELECT pg_advisory_lock($1)")
+        .bind(SHARED_DATABASE_LOCK_KEY)
+        .execute(&mut database_lock)
+        .await
+        .expect("acquire Postgres differential advisory lock");
     let postgres = PostgresStorage::connect(&database_url)
         .await
         .expect("connect required Postgres differential backend");
