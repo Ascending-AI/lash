@@ -17,7 +17,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use lash_core::store::{GraphAppend, RuntimeCommitResult, SessionHeadMeta};
+use lash_core::store::{GraphAppend, RuntimeCommitResult};
 use lash_core::{
     InMemorySessionStore, IncarnationId, LeaseOwnerIdentity, PendingTurnInputDraft, ProtocolEvent,
     RuntimeCommit, RuntimePersistence, RuntimeSessionState, RuntimeTurnCommitStamp,
@@ -513,8 +513,8 @@ impl RawDurableReader {
             }
             Self::Sqlite { path, session_id } => read_sqlite_durable_state(path, session_id),
             Self::Postgres { pool, session_id } => {
-                let head: Option<(i64, String)> = sqlx::query_as(
-                    "SELECT head_revision, head_json
+                let head: Option<(i64, Option<String>)> = sqlx::query_as(
+                    "SELECT head_revision, leaf_node_id
                      FROM lash_sessions
                      WHERE session_id = $1",
                 )
@@ -522,11 +522,9 @@ impl RawDurableReader {
                 .fetch_optional(pool)
                 .await
                 .expect("read Postgres durable head");
-                let (head_revision, leaf_node_id) =
-                    head.map_or((None, None), |(revision, json)| {
-                        let meta: SessionHeadMeta =
-                            serde_json::from_str(&json).expect("decode Postgres durable head");
-                        (Some(revision as u64), meta.leaf_node_id)
+                let (head_revision, leaf_node_id) = head
+                    .map_or((None, None), |(revision, leaf_node_id)| {
+                        (Some(revision as u64), leaf_node_id)
                     });
                 let rows: Vec<(i64, String, Option<String>, String)> = sqlx::query_as(
                     "SELECT seq, node_id, parent_node_id, node_json
@@ -622,9 +620,9 @@ fn read_sqlite_durable_state(path: &Path, session_id: &str) -> RawDurableState {
         .execute_batch("PRAGMA synchronous=NORMAL; PRAGMA foreign_keys=ON;")
         .expect("configure SQLite durable reader pragmas");
 
-    let head: Option<(i64, String)> = connection
+    let head: Option<(i64, Option<String>)> = connection
         .query_row(
-            "SELECT head_revision, head_json
+            "SELECT head_revision, leaf_node_id
              FROM session_head
              WHERE session_id = ?1",
             [session_id],
@@ -632,10 +630,8 @@ fn read_sqlite_durable_state(path: &Path, session_id: &str) -> RawDurableState {
         )
         .optional()
         .expect("read SQLite durable head");
-    let (head_revision, leaf_node_id) = head.map_or((None, None), |(revision, json)| {
-        let meta: SessionHeadMeta =
-            serde_json::from_str(&json).expect("decode SQLite durable head");
-        (Some(revision as u64), meta.leaf_node_id)
+    let (head_revision, leaf_node_id) = head.map_or((None, None), |(revision, leaf_node_id)| {
+        (Some(revision as u64), leaf_node_id)
     });
     let durable_nodes = {
         let mut statement = connection
