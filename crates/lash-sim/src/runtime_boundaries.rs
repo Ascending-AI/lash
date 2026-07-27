@@ -24,6 +24,13 @@ use crate::clock::SimClock;
 use crate::scheduler::{BoundaryEvent, BoundaryKind};
 use crate::trace::value_digest;
 
+mod process_lifecycle;
+
+use process_lifecycle::{
+    LifecycleSuccessEngine, lifecycle_process_fact, lifecycle_worker, local_process_owner,
+    record_lifecycle_started, register_lifecycle_row, register_rerunnable_lifecycle_row,
+};
+
 const EFFECT_SCOPE_ID: &str = "lash-sim-runtime-boundaries";
 const LEASE_TTL_MS: u64 = 30_000;
 
@@ -845,6 +852,29 @@ impl RuntimeBoundaryHarness {
         let dead_holder = local_process_owner(&host, &boot, "sim-dead-owner", "before-the-crash");
         let silent_owner =
             LeaseOwnerIdentity::opaque("sim-silent-owner", format!("sim-silent-owner:{session}"));
+        let mut runtime_host = lash_core::RuntimeHostConfig::in_memory();
+        runtime_host.process_engines =
+            lash_core::ProcessEngineRegistry::new().with_engine(Arc::new(LifecycleSuccessEngine));
+        let policy = lash_core::SessionPolicy {
+            provider_id: "sim-lifecycle".to_string(),
+            model: lash_core::ModelSpec::from_token_limits(
+                "sim-lifecycle-model",
+                Default::default(),
+                16_384,
+                None,
+            )
+            .map_err(|err| RuntimeBoundaryError::new(err.to_string()))?,
+            ..lash_core::SessionPolicy::default()
+        };
+        let env_ref = lash_core::runtime::persist_process_execution_env(
+            runtime_host.durability.process_env_store.as_ref(),
+            &lash_core::ProcessExecutionEnvSpec::new(
+                lash_core::PluginOptions::default(),
+                policy.clone(),
+            ),
+        )
+        .await
+        .map_err(|err| RuntimeBoundaryError::new(err.to_string()))?;
 
         // (a)+(b): a started OwnerBound row whose holder crashed (still holding a
         // live lease), and a Rerunnable sibling the crash also left mid-flight.
@@ -868,12 +898,7 @@ impl RuntimeBoundaryHarness {
                 ));
             }
         }
-        register_lifecycle_row(
-            registry.as_ref(),
-            "rerun-crashed",
-            RecoveryDisposition::Rerunnable,
-        )
-        .await?;
+        register_rerunnable_lifecycle_row(registry.as_ref(), "rerun-crashed", env_ref).await?;
         record_lifecycle_started(registry.as_ref(), "rerun-crashed", &dead_holder).await?;
 
         // (d): a started OwnerBound row whose silent holder's lease has lapsed
@@ -900,7 +925,12 @@ impl RuntimeBoundaryHarness {
             })?;
 
         // (c): the disposition-driven recovery sweep.
-        let worker = lifecycle_worker(Arc::clone(&registry), sweep_owner.clone());
+        let worker = lifecycle_worker(
+            Arc::clone(&registry),
+            sweep_owner.clone(),
+            runtime_host,
+            policy,
+        );
         worker.drive_pending_processes().await.map_err(|err| {
             RuntimeBoundaryError::new(format!("recovery sweep dispatch failed: {err}"))
         })?;
@@ -1386,160 +1416,6 @@ fn worker_failover_work(
         occurred_at: std::time::UNIX_EPOCH + std::time::Duration::from_millis(occurred_at_ms),
     })
     .map_err(|err| RuntimeBoundaryError::new(format!("build worker-owned work failed: {err}")))
-}
-
-fn local_process_owner(
-    host: &str,
-    boot: &str,
-    owner_id: &str,
-    process_start: &str,
-) -> LeaseOwnerIdentity {
-    LeaseOwnerIdentity {
-        owner_id: owner_id.to_string(),
-        incarnation_id: format!("{owner_id}:incarnation"),
-        liveness: LeaseOwnerLiveness::local_process_for_test(
-            host,
-            boot,
-            std::process::id(),
-            process_start,
-        ),
-    }
-}
-
-/// A bare recovery worker over an in-memory registry: no engine (empty
-/// `PluginHost`), so it drains/sweeps and runs `External` rows to a run terminal
-/// without standing up execution infrastructure — the disposition-driven verdict
-/// keys off the declared disposition, not the input kind.
-fn lifecycle_worker(
-    registry: Arc<dyn lash_core::ProcessRegistry>,
-    owner: LeaseOwnerIdentity,
-) -> lash_core::DurableProcessWorker {
-    lash_core::DurableProcessWorker::new(
-        lash_core::DurableProcessWorkerConfig::new(
-            Arc::new(lash_core::PluginHost::new(Vec::new())),
-            lash_core::RuntimeHostConfig::in_memory(),
-            Arc::new(lash_core::InMemorySessionStoreFactory::new()),
-            registry,
-        )
-        .with_lease_owner(owner),
-    )
-}
-
-async fn register_lifecycle_row(
-    registry: &dyn lash_core::ProcessRegistry,
-    id: &str,
-    disposition: RecoveryDisposition,
-) -> Result<(), RuntimeBoundaryError> {
-    registry
-        .register_process(lash_core::ProcessRegistration::new(
-            id,
-            lash_core::ProcessInput::External {
-                metadata: json!({}),
-            },
-            disposition,
-            lash_core::ProcessProvenance::host(),
-        ))
-        .await
-        .map(|_| ())
-        .map_err(|err| RuntimeBoundaryError::new(format!("register `{id}` failed: {err}")))
-}
-
-async fn record_lifecycle_started(
-    registry: &dyn lash_core::ProcessRegistry,
-    id: &str,
-    owner: &LeaseOwnerIdentity,
-) -> Result<(), RuntimeBoundaryError> {
-    registry
-        .record_first_started(
-            id,
-            lash_core::ProcessStarted {
-                owner: owner.clone(),
-                fencing_token: 0,
-                attempt: 1,
-                started_at_ms: 1,
-            },
-        )
-        .await
-        .map(|_| ())
-        .map_err(|err| {
-            RuntimeBoundaryError::new(format!("record first_started for `{id}` failed: {err}"))
-        })
-}
-
-/// Await a swept row's terminal and record its verdict facts. Death and
-/// authorization are observed INDEPENDENTLY of the abandon writer (a real
-/// liveness check and a registry read), so the evidence oracle cross-checks the
-/// writer against ground truth rather than trusting it.
-async fn lifecycle_process_fact(
-    registry: &Arc<dyn lash_core::ProcessRegistry>,
-    awaiter: &lash_core::ProcessAwaiter,
-    id: &str,
-    disposition: RecoveryDisposition,
-    expected_holder: Option<&LeaseOwnerIdentity>,
-    sweep_owner: &LeaseOwnerIdentity,
-) -> Result<Value, RuntimeBoundaryError> {
-    let output = awaiter.await_terminal(id).await.map_err(|err| {
-        RuntimeBoundaryError::new(format!("await terminal for `{id}` failed: {err}"))
-    })?;
-    let record = registry.get_process(id).await.ok_or_else(|| {
-        RuntimeBoundaryError::new(format!("process `{id}` vanished after terminal"))
-    })?;
-    let reran = matches!(
-        record.status,
-        lash_core::ProcessStatus::Completed { .. }
-            | lash_core::ProcessStatus::Failed { .. }
-            | lash_core::ProcessStatus::Cancelled { .. }
-    );
-    let provably_dead_holder =
-        expected_holder.is_some_and(|holder| holder.is_definitely_dead_for_claimant(sweep_owner));
-    let lease_lapsed = registry
-        .get_process_lease(id)
-        .await
-        .map_err(|err| RuntimeBoundaryError::new(format!("read lease for `{id}` failed: {err}")))?
-        .is_none();
-    let mut fact = json!({
-        "process_id": id,
-        "disposition": disposition_str(disposition),
-        "started": record.first_started.is_some(),
-        "terminal_status": record.status.label(),
-        "reran": reran,
-        "provably_dead_holder": provably_dead_holder,
-        "lease_lapsed": lease_lapsed,
-        "abandon_requested": record.abandon_request.is_some(),
-        "first_started_owner": record
-            .first_started
-            .as_ref()
-            .map(|started| started.owner.owner_id.clone()),
-    });
-    if let lash_core::ProcessAwaitOutput::Abandoned { evidence, .. } = &output {
-        let obj = fact.as_object_mut().expect("lifecycle fact is an object");
-        obj.insert(
-            "abandon_writer".to_string(),
-            json!(abandon_writer_str(evidence.writer)),
-        );
-        obj.insert(
-            "abandon_evidence_owner".to_string(),
-            json!(evidence.owner.as_ref().map(|owner| owner.owner_id.clone())),
-        );
-    }
-    Ok(fact)
-}
-
-fn disposition_str(disposition: RecoveryDisposition) -> &'static str {
-    match disposition {
-        RecoveryDisposition::Rerunnable => "rerunnable",
-        RecoveryDisposition::OwnerBound => "owner_bound",
-        RecoveryDisposition::ExternallyOwned => "externally_owned",
-    }
-}
-
-fn abandon_writer_str(writer: lash_core::AbandonWriter) -> &'static str {
-    match writer {
-        lash_core::AbandonWriter::OwnerDrain => "owner_drain",
-        lash_core::AbandonWriter::Sweep => "sweep",
-        lash_core::AbandonWriter::ReconciledRequest => "reconciled_request",
-        lash_core::AbandonWriter::EngineGaveUp => "engine_gave_up",
-    }
 }
 
 fn boundary_session_alias(event: &BoundaryEvent) -> String {
