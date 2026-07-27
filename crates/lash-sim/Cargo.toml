@@ -30,7 +30,7 @@ lash-protocol-rlm = { workspace = true }
 lash-protocol-standard = { workspace = true }
 lash-postgres-store = { workspace = true }
 lash-rlm-types = { workspace = true }
-lash-sqlite-store = { workspace = true }
+lash-sqlite-store = { workspace = true, features = ["testing"] }
 lash-subagents = { workspace = true }
 lash-tools = { workspace = true }
 serde = { workspace = true, features = ["derive"] }

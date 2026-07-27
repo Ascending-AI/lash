@@ -599,14 +599,15 @@ pub trait AwaitEventResolver: Send + Sync {
     }
 
     /// Whether [`ToolContext::completion_key`](crate::ToolContext::completion_key)
-    /// may issue an externally routable key whose correctness lifetime is only
-    /// this process.
+    /// may issue an externally routable key through this resolver.
     ///
-    /// Controllers that own replay permit completion keys by construction.
-    /// Runtime-owned hosts must opt in explicitly because a restart can strand
-    /// every issued key.
+    /// Replay ownership is only a routing fact and does not imply that another
+    /// process can resolve a key after this one exits. Implementations must opt
+    /// in explicitly either because their await-event ingress and state survive
+    /// process loss or because the deployment explicitly accepts process-local
+    /// key lifetime.
     fn allows_process_lifetime_completion_keys(&self) -> bool {
-        self.replay_ownership() == crate::EffectReplayOwnership::Controller
+        false
     }
 
     async fn await_event_key(

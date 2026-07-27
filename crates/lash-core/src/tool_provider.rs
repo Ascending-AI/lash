@@ -562,14 +562,13 @@ impl<'run> ToolContext<'run> {
             )
         })?;
         let scoped = self.effect_controller.scoped();
-        if scoped.controller().replay_ownership() == crate::EffectReplayOwnership::Runtime
-            && !scoped
-                .controller()
-                .allows_process_lifetime_completion_keys()
+        if !scoped
+            .controller()
+            .allows_process_lifetime_completion_keys()
         {
             return Err(crate::RuntimeError::new(
                 "tool_completion_key_process_lifetime",
-                "completion keys on a runtime-owned effect host can die with the current process; construct InlineEffectHost with allow_process_lifetime_completion_keys() only for an explicitly single-process deployment",
+                "completion keys require an effect controller with process-loss-safe await-event routing; single-process deployments may explicitly opt in with InlineEffectHost::allow_process_lifetime_completion_keys()",
             ));
         }
         let key = scoped
@@ -1055,6 +1054,25 @@ pub trait ToolProvider: Send + Sync + 'static {
 mod tests {
     use super::*;
 
+    struct ControllerOwnedWithoutCompletionKeyCapability;
+
+    impl crate::AwaitEventResolver for ControllerOwnedWithoutCompletionKeyCapability {
+        fn replay_ownership(&self) -> crate::EffectReplayOwnership {
+            crate::EffectReplayOwnership::Controller
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl crate::RuntimeEffectController for ControllerOwnedWithoutCompletionKeyCapability {
+        async fn execute_effect(
+            &self,
+            _envelope: crate::RuntimeEffectEnvelope,
+            _local_executor: crate::RuntimeEffectLocalExecutor<'_>,
+        ) -> Result<crate::RuntimeEffectOutcome, crate::RuntimeEffectControllerError> {
+            unreachable!("completion-key capability is rejected before effect execution")
+        }
+    }
+
     #[test]
     fn tool_context_builder_carries_call_payload_and_cancellation_state() {
         let cancellation = tokio_util::sync::CancellationToken::new();
@@ -1130,11 +1148,46 @@ mod tests {
             .await
             .expect_err("Inline completion keys must refuse by default");
         assert_eq!(error.code.as_str(), "tool_completion_key_process_lifetime");
-        assert!(error.message.contains("die with the current process"));
+        assert!(error.message.contains("process-loss-safe"));
         assert!(
             error
                 .message
                 .contains("allow_process_lifetime_completion_keys")
         );
+    }
+
+    #[tokio::test]
+    async fn controller_replay_ownership_does_not_bypass_completion_key_capability() {
+        let prepared = PreparedToolCall::from_parts(
+            "call-controller-risk",
+            "tool:demo_tool",
+            "demo_tool",
+            serde_json::json!({}),
+            None,
+            serde_json::json!({}),
+        );
+        let context = ToolContext::builder(
+            "session-controller-risk".to_string(),
+            Arc::new(crate::testing::MockSessionManager::default()),
+            Arc::new(crate::testing::MockSessionManager::default()),
+            Arc::new(crate::testing::MockSessionManager::default()),
+            Arc::new(crate::UnavailableProcessService),
+            Arc::new(crate::DefaultProcessCancelAbility),
+            crate::runtime::RuntimeEffectControllerHandle::shared(Arc::new(
+                ControllerOwnedWithoutCompletionKeyCapability,
+            )),
+            Arc::new(crate::SessionAttachmentStore::in_memory()),
+            crate::DirectCompletionClient::unavailable(
+                "direct completions are unavailable in this test context",
+            ),
+        )
+        .prepared_call(&prepared)
+        .build();
+
+        let error = context
+            .completion_key()
+            .await
+            .expect_err("controller ownership alone must not permit completion keys");
+        assert_eq!(error.code.as_str(), "tool_completion_key_process_lifetime");
     }
 }

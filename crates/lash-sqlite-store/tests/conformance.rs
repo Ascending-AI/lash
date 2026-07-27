@@ -30,6 +30,17 @@ fn fresh_db_path(dirs: &Arc<Mutex<Vec<TempDir>>>, file_name: &str) -> PathBuf {
     path
 }
 
+async fn open_ephemeral_effect_controller(
+    scope: ExecutionScope,
+) -> (TempDir, SqliteRuntimeEffectController) {
+    let dir = tempfile::tempdir().expect("effect replay tempdir");
+    let controller =
+        SqliteRuntimeEffectController::open(&dir.path().join("effect-replay.db"), scope)
+            .await
+            .expect("file-backed effect controller");
+    (dir, controller)
+}
+
 fn sync_await<T, F>(future: F) -> T
 where
     T: Send + 'static,
@@ -525,7 +536,7 @@ async fn sqlite_effect_host_satisfies_scope_conformance() {
 }
 
 #[tokio::test]
-async fn sqlite_effect_host_rejects_non_file_backed_path_spellings() {
+async fn sqlite_effect_host_and_controller_reject_non_file_backed_path_spellings() {
     for path in [
         "",
         ":memory:",
@@ -542,7 +553,47 @@ async fn sqlite_effect_host_rejects_non_file_backed_path_spellings() {
                 .contains("requires a file-backed database path"),
             "unexpected error for {path:?}: {error}"
         );
+
+        let error = match SqliteRuntimeEffectController::open(
+            Path::new(path),
+            ExecutionScope::turn("guard-session", "guard-turn"),
+        )
+        .await
+        {
+            Ok(_) => panic!("effect controllers must reject non-file-backed path {path:?}"),
+            Err(error) => error,
+        };
+        assert!(
+            error
+                .to_string()
+                .contains("requires a file-backed database path"),
+            "unexpected controller error for {path:?}: {error}"
+        );
     }
+}
+
+#[cfg(feature = "testing")]
+#[tokio::test]
+async fn sqlite_completion_key_permission_tracks_backing_not_replay_ownership() {
+    let memory = SqliteRuntimeEffectController::memory(ExecutionScope::turn(
+        "memory-session",
+        "memory-turn",
+    ))
+    .await
+    .expect("testing-only memory controller");
+    assert_eq!(
+        memory.replay_ownership(),
+        lash_core::EffectReplayOwnership::Controller
+    );
+    assert!(!memory.allows_process_lifetime_completion_keys());
+
+    let (_file_dir, file) =
+        open_ephemeral_effect_controller(ExecutionScope::turn("file-session", "file-turn")).await;
+    assert_eq!(
+        file.replay_ownership(),
+        lash_core::EffectReplayOwnership::Controller
+    );
+    assert!(file.allows_process_lifetime_completion_keys());
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
@@ -686,12 +737,11 @@ async fn sqlite_effect_host_satisfies_cold_process_await_event_conformance() {
 
 #[tokio::test]
 async fn sqlite_effect_controller_satisfies_replay_conformance() {
-    let controller = SqliteRuntimeEffectController::memory(ExecutionScope::turn(
+    let (_controller_dir, controller) = open_ephemeral_effect_controller(ExecutionScope::turn(
         "effect-conformance-session",
         "effect-conformance-turn",
     ))
-    .await
-    .expect("controller");
+    .await;
 
     lash_core::testing::conformance::effect_controller_concurrent_replay_deterministic(
         &controller,
@@ -699,24 +749,22 @@ async fn sqlite_effect_controller_satisfies_replay_conformance() {
     )
     .await;
 
-    let tool_controller = SqliteRuntimeEffectController::memory(ExecutionScope::turn(
-        "tool-attempt-conformance-session",
-        "tool-attempt-conformance-turn",
-    ))
-    .await
-    .expect("tool attempt controller");
+    let (_tool_controller_dir, tool_controller) =
+        open_ephemeral_effect_controller(ExecutionScope::turn(
+            "tool-attempt-conformance-session",
+            "tool-attempt-conformance-turn",
+        ))
+        .await;
     lash_core::testing::conformance::effect_controller_tool_attempt_fanout_replay_deterministic(
         &tool_controller,
         || tool_controller.start_replay(),
     )
     .await;
 
-    let durable_controller = SqliteRuntimeEffectController::memory(ExecutionScope::turn(
-        "durable-step-session",
-        "durable-step-turn",
-    ))
-    .await
-    .expect("durable step controller");
+    let (_durable_controller_dir, durable_controller) = open_ephemeral_effect_controller(
+        ExecutionScope::turn("durable-step-session", "durable-step-turn"),
+    )
+    .await;
     lash_core::testing::conformance::effect_controller_journaled_effect_replay(
         &durable_controller,
         || durable_controller.start_replay(),
@@ -726,9 +774,8 @@ async fn sqlite_effect_controller_satisfies_replay_conformance() {
 
 #[tokio::test]
 async fn sqlite_effect_controller_replays_without_local_executor() {
-    let controller = SqliteRuntimeEffectController::memory(ExecutionScope::turn("session", "turn"))
-        .await
-        .expect("controller");
+    let (_controller_dir, controller) =
+        open_ephemeral_effect_controller(ExecutionScope::turn("session", "turn")).await;
     let envelope = exec_envelope("exec-replay", "first");
     let first = controller
         .execute_effect(envelope.clone(), returning_executor("recorded"))
@@ -746,9 +793,8 @@ async fn sqlite_effect_controller_replays_without_local_executor() {
 
 #[tokio::test]
 async fn sqlite_effect_controller_reports_envelope_divergent_paths() {
-    let controller = SqliteRuntimeEffectController::memory(ExecutionScope::turn("session", "turn"))
-        .await
-        .expect("controller");
+    let (_controller_dir, controller) =
+        open_ephemeral_effect_controller(ExecutionScope::turn("session", "turn")).await;
     lash_core::testing::conformance::effect_controller_replay_mismatch_diagnostics(
         &controller,
         "sqlite_effect_replay_hash_conflict",
@@ -825,9 +871,8 @@ async fn sqlite_effect_controller_satisfies_lease_fencing_conformance() {
 
 #[tokio::test]
 async fn sqlite_sleep_replay_returns_after_recorded_due_time() {
-    let controller = SqliteRuntimeEffectController::memory(ExecutionScope::turn("session", "turn"))
-        .await
-        .expect("controller");
+    let (_controller_dir, controller) =
+        open_ephemeral_effect_controller(ExecutionScope::turn("session", "turn")).await;
     let envelope = RuntimeEffectEnvelope::new(
         RuntimeInvocation::effect(
             RuntimeScope::for_turn("session", "turn", 1, 0),

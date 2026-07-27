@@ -37,6 +37,6 @@ lash-llm-tools = { workspace = true }
 lashlang = { workspace = true }
 lash-protocol-rlm = { workspace = true }
 lash-protocol-standard = { workspace = true, features = ["lashlang"] }
-lash-sqlite-store = { workspace = true }
+lash-sqlite-store = { workspace = true, features = ["testing"] }
 tempfile = { workspace = true }
 rusqlite = { version = "0.37", features = ["bundled"] }

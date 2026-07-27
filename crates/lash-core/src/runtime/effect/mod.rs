@@ -65,18 +65,24 @@ mod tests {
     }
 
     #[test]
-    fn inline_host_and_scoped_controller_forward_replay_ownership() {
+    fn inline_host_and_scoped_controller_forward_replay_ownership_without_inferring_key_lifetime() {
         let host = InlineEffectHost::new(Arc::new(ControllerOwnedReplay));
         assert_eq!(
             host.replay_ownership(),
             crate::EffectReplayOwnership::Controller
         );
+        assert!(!host.allows_process_lifetime_completion_keys());
         let scoped = host
             .scoped(ExecutionScope::turn("ownership-session", "ownership-turn"))
             .expect("scope wrapped controller");
         assert_eq!(
             scoped.controller().replay_ownership(),
             crate::EffectReplayOwnership::Controller
+        );
+        assert!(
+            !scoped
+                .controller()
+                .allows_process_lifetime_completion_keys()
         );
     }
 

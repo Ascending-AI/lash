@@ -99,6 +99,10 @@ impl AwaitEventResolver for PostgresEffectHost {
         lash_core::EffectReplayOwnership::Controller
     }
 
+    fn allows_process_lifetime_completion_keys(&self) -> bool {
+        true
+    }
+
     async fn await_event_key(
         &self,
         scope: &ExecutionScope,
@@ -573,6 +577,10 @@ impl PostgresRuntimeEffectController {
 impl AwaitEventResolver for PostgresRuntimeEffectController {
     fn replay_ownership(&self) -> lash_core::EffectReplayOwnership {
         lash_core::EffectReplayOwnership::Controller
+    }
+
+    fn allows_process_lifetime_completion_keys(&self) -> bool {
+        true
     }
 
     async fn await_event_key(

@@ -68,6 +68,7 @@ pub struct SqliteEffectHost {
 pub struct SqliteRuntimeEffectController {
     inner: Arc<SqliteEffectReplayInner>,
     scope: ExecutionScope,
+    allows_process_lifetime_completion_keys: bool,
 }
 
 struct ClaimedEffect {
@@ -137,6 +138,10 @@ impl AwaitEventResolver for SqliteEffectHost {
         lash_core::EffectReplayOwnership::Controller
     }
 
+    fn allows_process_lifetime_completion_keys(&self) -> bool {
+        true
+    }
+
     async fn await_event_key(
         &self,
         scope: &ExecutionScope,
@@ -189,6 +194,7 @@ impl EffectHost for SqliteEffectHost {
         let controller = SqliteRuntimeEffectController {
             inner: Arc::clone(&self.inner),
             scope: scope.clone(),
+            allows_process_lifetime_completion_keys: true,
         };
         ScopedEffectController::shared(Arc::new(controller), scope)
     }
@@ -200,6 +206,7 @@ impl EffectHost for SqliteEffectHost {
         let controller = SqliteRuntimeEffectController {
             inner: Arc::clone(&self.inner),
             scope: scope.clone(),
+            allows_process_lifetime_completion_keys: true,
         };
         Ok(Some(ScopedEffectController::shared(
             Arc::new(controller),
@@ -237,16 +244,20 @@ impl SqliteRuntimeEffectController {
         options: SqliteEffectReplayOptions,
         clock: Arc<dyn lash_core::Clock>,
     ) -> tokio_rusqlite::Result<Self> {
+        validate_effect_host_path(path)?;
         Ok(Self {
             inner: open_effect_replay_inner(path, StoreBacking::File, options, clock).await?,
             scope,
+            allows_process_lifetime_completion_keys: true,
         })
     }
 
+    #[cfg(feature = "testing")]
     pub async fn memory(scope: ExecutionScope) -> tokio_rusqlite::Result<Self> {
         Self::memory_with_options(scope, SqliteEffectReplayOptions::default()).await
     }
 
+    #[cfg(feature = "testing")]
     pub async fn memory_with_clock(
         scope: ExecutionScope,
         clock: Arc<dyn lash_core::Clock>,
@@ -255,6 +266,7 @@ impl SqliteRuntimeEffectController {
             .await
     }
 
+    #[cfg(feature = "testing")]
     pub async fn memory_with_options(
         scope: ExecutionScope,
         options: SqliteEffectReplayOptions,
@@ -262,6 +274,7 @@ impl SqliteRuntimeEffectController {
         Self::memory_with_options_and_clock(scope, options, Arc::new(lash_core::SystemClock)).await
     }
 
+    #[cfg(feature = "testing")]
     pub async fn memory_with_options_and_clock(
         scope: ExecutionScope,
         options: SqliteEffectReplayOptions,
@@ -270,6 +283,7 @@ impl SqliteRuntimeEffectController {
         Ok(Self {
             inner: open_effect_replay_memory_inner(options, clock).await?,
             scope,
+            allows_process_lifetime_completion_keys: false,
         })
     }
 
@@ -669,6 +683,10 @@ impl AwaitEventResolver for SqliteRuntimeEffectController {
         lash_core::EffectReplayOwnership::Controller
     }
 
+    fn allows_process_lifetime_completion_keys(&self) -> bool {
+        self.allows_process_lifetime_completion_keys
+    }
+
     async fn await_event_key(
         &self,
         scope: &ExecutionScope,
@@ -801,6 +819,7 @@ async fn open_effect_replay_inner(
     )))
 }
 
+#[cfg(feature = "testing")]
 async fn open_effect_replay_memory_inner(
     options: SqliteEffectReplayOptions,
     clock: Arc<dyn lash_core::Clock>,
