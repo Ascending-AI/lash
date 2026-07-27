@@ -241,6 +241,20 @@ class ConfidenceGateCiContractTest(unittest.TestCase):
         self.assertIn("python3 scripts/release_notes.py check-pr", check)
         self.assertIn('--range "${merge_base}..HEAD"', check)
 
+    def test_push_gate_serializes_live_differential_before_postgres_free_suite(
+        self,
+    ) -> None:
+        push_gate = PUSH_GATE.read_text(encoding="utf-8")
+        postgres = shell_function_body(push_gate, "run_postgres_conformance")
+        workspace = shell_function_body(push_gate, "run_workspace_tests")
+
+        self.assertIn("--test cross_backend_store_differential", postgres)
+        self.assertIn("LASH_REQUIRE_POSTGRES=1", postgres)
+        self.assertIn(
+            "env -u LASH_POSTGRES_DATABASE_URL -u LASH_REQUIRE_POSTGRES",
+            workspace,
+        )
+
     def test_lint_job_runs_functional_perf_smoke_without_budgets(self) -> None:
         workflow = WORKFLOW.read_text(encoding="utf-8")
         lint = workflow_job_block(workflow, "lint")
