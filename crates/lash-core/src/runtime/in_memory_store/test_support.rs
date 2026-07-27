@@ -58,24 +58,38 @@ mod tests {
             .get("second")
             .cloned()
             .expect("second concrete store");
-        let node = crate::SessionNodeRecord {
-            node_id: "factory-global-node".to_string(),
-            parent_node_id: None,
-            timestamp: "2026-07-26T00:00:00Z".to_string(),
-            payload: crate::SessionNodePayload::FrameOpen {
-                frame_key: "factory-global-node".to_string(),
-                reason: crate::AgentFrameReason::initial(),
-                assignment: crate::AgentFrameAssignment::from_policy(
-                    crate::SessionPolicy::default(),
-                ),
-                protocol_turn_options: Default::default(),
-            },
-        };
-        let commit = |session_id: &str| {
-            let state = RuntimeSessionState {
+        let first_incarnation = first
+            .load_session_meta()
+            .await
+            .expect("load first metadata")
+            .expect("first metadata")
+            .incarnation_id;
+        let second_incarnation = second
+            .load_session_meta()
+            .await
+            .expect("load second metadata")
+            .expect("second metadata")
+            .incarnation_id;
+        let commit = |session_id: &str, incarnation_id: crate::IncarnationId| {
+            let mut state = RuntimeSessionState {
                 session_id: session_id.to_string(),
+                incarnation_id,
                 ..Default::default()
             };
+            state.ensure_agent_frame_initialized();
+            let node = crate::SessionNodeRecord {
+                node_id: "factory-global-node".to_string(),
+                parent_node_id: state.session_graph.leaf_node_id.clone(),
+                timestamp: "2026-07-26T00:00:00Z".to_string(),
+                payload: crate::SessionNodePayload::Event {
+                    event: crate::SessionHistoryRecord::Protocol(
+                        crate::ProtocolEvent::typed("global-collision", serde_json::Value::Null)
+                            .expect("protocol event"),
+                    ),
+                },
+            };
+            state.session_graph.push_node_record(node.clone());
+            state.session_graph.set_leaf_node_id(Some(node.node_id));
             let usage = TokenLedgerEntry {
                 source: "rollback-probe".to_string(),
                 model: "test".to_string(),
@@ -84,21 +98,15 @@ mod tests {
                     ..Default::default()
                 },
             };
-            let mut commit = RuntimeCommit::persisted_state(&state, &[usage]);
-            commit.current_frame_node_id = Some(node.node_id.clone());
-            commit.graph = GraphCommitDelta::Append {
-                nodes: vec![node.clone()],
-                leaf_node_id: Some(node.node_id.clone()),
-            };
-            commit
+            RuntimeCommit::persisted_state(&state, &[usage])
         };
 
         first
-            .commit_runtime_state(commit("first"))
+            .commit_runtime_state(commit("first", first_incarnation))
             .await
             .expect("first node insert");
         let error = second
-            .commit_runtime_state(commit("second"))
+            .commit_runtime_state(commit("second", second_incarnation))
             .await
             .expect_err("second session must not reuse a global node id");
 
@@ -136,6 +144,12 @@ mod tests {
             .expect("concrete store");
         let mut state = RuntimeSessionState {
             session_id: request.session_id.clone(),
+            incarnation_id: store
+                .load_session_meta()
+                .await
+                .expect("load metadata")
+                .expect("metadata")
+                .incarnation_id,
             ..Default::default()
         };
         state.ensure_agent_frame_initialized();
