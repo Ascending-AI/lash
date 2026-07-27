@@ -12,8 +12,11 @@ use super::process_coordination::{
 use super::process_filters::list_processes_filters_by_enriched_fields;
 use super::process_references::live_reference_summary_tracks_non_terminal_reference_counts;
 use super::*;
+use crate::ProcessCompletionOutcome;
+use crate::TestProcessRegistryWriteExt;
 
 mod completion_authority;
+mod execution_fencing;
 mod fold;
 mod lease_reclaim;
 /// Run the full [`ProcessRegistry`] conformance suite against the backend
@@ -42,6 +45,7 @@ pub async fn process_registry_with_expected_durability<F>(
 {
     process_registry_reports_declared_durability(make(), expected_tier).await;
     fold::process_record_is_the_fold_of_its_event_log(make()).await;
+    fold::owner_bound_handover_resume_is_folded_and_replayable(make()).await;
     registration_is_idempotent_and_hash_conflicts_fail(make()).await;
     external_refs_and_handle_grant_membership_round_trip(make()).await;
     validates_custom_events_and_materializes_wakes(make()).await;
@@ -53,6 +57,7 @@ pub async fn process_registry_with_expected_durability<F>(
     terminal_and_cancel_events_require_keys(make()).await;
     await_reads_terminal_materialized_output(make()).await;
     disposition_first_started_and_abandon_request_persist(make()).await;
+    execution_fencing::respects_recovery_disposition(make()).await;
     abandoned_terminal_round_trips_and_pins_writer_rules(make()).await;
     completion_authority::completion_authority_validated_against_disposition(make()).await;
     completion_authority::completion_authority_reads_live_disposition_not_stale(make()).await;
@@ -76,7 +81,7 @@ pub async fn process_registry_with_expected_durability<F>(
     stale_lease_completion_cannot_release_live_lease(make()).await;
     stale_process_lease_cannot_complete_or_disturb_current_owner(make()).await;
     expired_process_lease_cannot_complete(make()).await;
-    leased_terminal_completion_replay_returns_existing_record(make()).await;
+    execution_fencing::leased_terminal_replay_returns_stored_record(make()).await;
     lease_reclaim::process_lease_reclaim_contract(make()).await;
     prune_removes_terminal_processes_older_than_cutoff(make()).await;
     awaiter_cross_task_completion_resolves_promptly(make()).await;
@@ -157,6 +162,17 @@ fn owner_bound_registration(id: &str) -> ProcessRegistration {
             metadata: serde_json::Value::Null,
         },
         RecoveryDisposition::OwnerBound,
+        ProcessProvenance::host(),
+    )
+}
+
+pub(super) fn rerunnable_registration(id: &str) -> ProcessRegistration {
+    ProcessRegistration::new(
+        id,
+        ProcessInput::External {
+            metadata: serde_json::Value::Null,
+        },
+        RecoveryDisposition::Rerunnable,
         ProcessProvenance::host(),
     )
 }
@@ -1179,6 +1195,8 @@ async fn disposition_first_started_and_abandon_request_persist(registry: Arc<dyn
     // first_started persists and is immutable once written (first-writer-wins).
     let started = ProcessStarted {
         owner: process_lease_owner("starter"),
+        fencing_token: 0,
+        attempt: 1,
         started_at_ms: 111,
     };
     let recorded = registry
@@ -1191,16 +1209,18 @@ async fn disposition_first_started_and_abandon_request_persist(registry: Arc<dyn
             "proc-disposition",
             ProcessStarted {
                 owner: process_lease_owner("other-starter"),
+                fencing_token: 0,
+                attempt: 2,
                 started_at_ms: 222,
             },
         )
         .await
-        .expect("re-record started");
-    assert_eq!(
-        rerecorded.first_started.as_deref(),
-        Some(&started),
-        "first_started is immutable once written"
-    );
+        .expect_err("a different OwnerBound execution is rejected");
+    assert!(matches!(
+        rerecorded,
+        crate::PluginError::ProcessAlreadyStarted { by, .. }
+            if *by == process_lease_owner("starter")
+    ));
 
     // A live lease is exposed read-side by holder and expiry.
     let holder = registry
@@ -1257,6 +1277,8 @@ async fn disposition_first_started_and_abandon_request_persist(registry: Arc<dyn
                 "missing-process",
                 ProcessStarted {
                     owner: process_lease_owner("x"),
+                    fencing_token: 0,
+                    attempt: 1,
                     started_at_ms: 1,
                 },
             )
@@ -1310,7 +1332,7 @@ async fn abandoned_terminal_round_trips_and_pins_writer_rules(registry: Arc<dyn 
         terminal.status.terminal_state(),
         Some(ProcessTerminalState::Abandoned)
     );
-    match terminal.status {
+    match terminal.into_record().status {
         ProcessStatus::Abandoned {
             await_output: ProcessAwaitOutput::Abandoned { evidence: got, .. },
         } => assert_eq!(
@@ -1332,20 +1354,26 @@ async fn abandoned_terminal_round_trips_and_pins_writer_rules(registry: Arc<dyn 
         "the abandoned status filter includes abandoned rows"
     );
 
-    // A revenant cannot overwrite the terminal — the row is already terminal.
-    assert!(
-        registry
-            .complete_process(
-                "proc-abandoned",
-                ProcessAwaitOutput::Success {
-                    value: serde_json::json!("revenant"),
-                    control: None,
-                },
-                ProcessCompletionAuthority::workflow_key("proc-abandoned"),
-            )
-            .await
-            .is_err(),
-        "a terminal Abandoned row rejects a later terminal write"
+    // A revenant cannot overwrite the terminal: retries adopt the stored
+    // terminal outcome rather than surfacing a retryable conflict.
+    let replayed = registry
+        .complete_process(
+            "proc-abandoned",
+            ProcessAwaitOutput::Success {
+                value: serde_json::json!("revenant"),
+                control: None,
+            },
+            ProcessCompletionAuthority::workflow_key("proc-abandoned"),
+        )
+        .await
+        .expect("terminal retry returns stored outcome");
+    assert!(matches!(
+        &replayed,
+        ProcessCompletionOutcome::Superseded { .. }
+    ));
+    assert_eq!(
+        replayed.status.terminal_state(),
+        Some(ProcessTerminalState::Abandoned)
     );
     assert!(
         registry
@@ -2442,59 +2470,5 @@ async fn expired_process_lease_cannot_complete(registry: Arc<dyn ProcessRegistry
     assert_eq!(
         terminal_events, 0,
         "an expired completion must not append a terminal event"
-    );
-}
-
-async fn leased_terminal_completion_replay_returns_existing_record(
-    registry: Arc<dyn ProcessRegistry>,
-) {
-    let process_id = "proc-lease-terminal-replay";
-    registry
-        .register_process(registration(process_id))
-        .await
-        .expect("register");
-    let current = registry
-        .claim_process_lease(process_id, &process_lease_owner("current-owner"), 60_000)
-        .await
-        .expect("current lease")
-        .acquired()
-        .expect("current lease acquired");
-
-    let output = ProcessAwaitOutput::Success {
-        value: serde_json::json!({"writer": "current"}),
-        control: None,
-    };
-    let completed = registry
-        .complete_process_with_lease(&current, output.clone())
-        .await
-        .expect("current lease completes");
-    assert!(completed.is_terminal());
-    assert!(
-        registry
-            .get_process_lease(process_id)
-            .await
-            .expect("read released lease")
-            .is_none(),
-        "terminal append and lease release must commit together"
-    );
-    let replayed = registry
-        .complete_process_with_lease(&current, output)
-        .await
-        .expect("same leased terminal replay is idempotent");
-    assert_eq!(
-        serde_json::to_value(&replayed).expect("serialize replayed terminal record"),
-        serde_json::to_value(&completed).expect("serialize completed terminal record"),
-        "replaying the same terminal event must return the existing terminal record"
-    );
-    let terminal_events = registry
-        .events_after(process_id, 0)
-        .await
-        .expect("terminal events")
-        .into_iter()
-        .filter(|event| event.semantics.terminal.is_some())
-        .count();
-    assert_eq!(
-        terminal_events, 1,
-        "terminal output must append exactly once"
     );
 }

@@ -245,7 +245,7 @@ impl crate::ProcessService for RuntimeSessionProcessService {
         process_id: &str,
         await_output: crate::ProcessAwaitOutput,
         scope: crate::ProcessOpScope<'_>,
-    ) -> Result<crate::ProcessRecord, crate::PluginError> {
+    ) -> Result<crate::ProcessCompletionOutcome, crate::PluginError> {
         self.services
             .processes
             .complete_external_process(

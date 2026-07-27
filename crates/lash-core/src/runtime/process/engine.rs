@@ -39,6 +39,40 @@ pub enum ProcessRunOutcome {
     SegmentBoundary(SegmentHandover),
 }
 
+/// Failure of the host/runtime infrastructure needed to execute a process.
+///
+/// Infrastructure failures are not producer outcomes and must not be persisted
+/// as terminal process failures. The worker leaves the row claimable so its
+/// configured retry pacing and attempt budget can decide what happens next.
+#[derive(Debug)]
+pub struct ProcessInfraError {
+    source: crate::PluginError,
+}
+
+impl ProcessInfraError {
+    pub fn new(source: crate::PluginError) -> Self {
+        Self { source }
+    }
+
+    pub fn into_plugin_error(self) -> crate::PluginError {
+        self.source
+    }
+}
+
+impl std::fmt::Display for ProcessInfraError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.source.fmt(formatter)
+    }
+}
+
+impl std::error::Error for ProcessInfraError {}
+
+impl From<crate::PluginError> for ProcessInfraError {
+    fn from(source: crate::PluginError) -> Self {
+        Self::new(source)
+    }
+}
+
 impl From<ProcessAwaitOutput> for ProcessRunOutcome {
     fn from(output: ProcessAwaitOutput) -> Self {
         Self::Terminal(Box::new(output))
@@ -110,10 +144,112 @@ type RuntimeContextBuilder<'run> = Box<
         + 'run,
 >;
 
+/// Process-registry capabilities scoped to one engine execution.
+///
+/// Engines can inspect their own record and event history, maintain their
+/// durable wait, emit execution-owned events through the installed authority,
+/// and await other process handles. The underlying registry is deliberately
+/// not exposed: host-owned signal/cancel appends and lifecycle writes remain
+/// outside the engine extension boundary.
+#[derive(Clone)]
+pub struct ProcessEngineProcessContext {
+    process_id: String,
+    registry: Arc<dyn ProcessRegistry>,
+    execution_write_authority: super::model::ProcessExecutionWriteAuthority,
+    awaiter: super::awaiter::ProcessAwaiter,
+    store: Option<Arc<dyn crate::RuntimePersistence>>,
+    session_store_factory: Option<Arc<dyn crate::SessionStoreFactory>>,
+    queued_work_driver: Option<crate::QueuedWorkDriver>,
+}
+
+impl ProcessEngineProcessContext {
+    fn new(
+        process_id: String,
+        registry: Arc<dyn ProcessRegistry>,
+        execution_write_authority: super::model::ProcessExecutionWriteAuthority,
+        awaiter: super::awaiter::ProcessAwaiter,
+        store: Option<Arc<dyn crate::RuntimePersistence>>,
+        session_store_factory: Option<Arc<dyn crate::SessionStoreFactory>>,
+        queued_work_driver: Option<crate::QueuedWorkDriver>,
+    ) -> Self {
+        Self {
+            process_id,
+            registry,
+            execution_write_authority,
+            awaiter,
+            store,
+            session_store_factory,
+            queued_work_driver,
+        }
+    }
+
+    pub fn process_id(&self) -> &str {
+        &self.process_id
+    }
+
+    pub async fn record(&self) -> Result<Option<super::model::ProcessRecord>, crate::PluginError> {
+        self.registry.try_get_process(&self.process_id).await
+    }
+
+    pub async fn events_after(
+        &self,
+        after_sequence: u64,
+    ) -> Result<Vec<super::events::ProcessEvent>, crate::PluginError> {
+        self.registry
+            .events_after(&self.process_id, after_sequence)
+            .await
+    }
+
+    pub async fn emit(
+        &self,
+        request: super::events::ProcessEventAppendRequest,
+    ) -> Result<super::events::ProcessEvent, crate::PluginError> {
+        let result = self
+            .registry
+            .append_event_with_authority(&self.process_id, request, &self.execution_write_authority)
+            .await?;
+        crate::tool_provider::process_events::enqueue_wake_delivery(
+            self.store.clone(),
+            self.session_store_factory.as_ref(),
+            result.wake_delivery,
+            None,
+            self.queued_work_driver.as_ref(),
+        )
+        .await?;
+        Ok(result.event)
+    }
+
+    pub async fn set_wait(
+        &self,
+        wait: super::model::WaitState,
+    ) -> Result<super::model::ProcessRecord, crate::PluginError> {
+        self.registry
+            .set_process_wait_with_authority(
+                &self.process_id,
+                wait,
+                &self.execution_write_authority,
+            )
+            .await
+    }
+
+    pub async fn clear_wait(&self) -> Result<super::model::ProcessRecord, crate::PluginError> {
+        self.registry
+            .clear_process_wait_with_authority(&self.process_id, &self.execution_write_authority)
+            .await
+    }
+
+    pub async fn await_terminal(
+        &self,
+        process_id: &str,
+    ) -> Result<ProcessAwaitOutput, crate::PluginError> {
+        self.awaiter.await_terminal(process_id).await
+    }
+}
+
 pub struct ProcessEngineRunContext<'run> {
     registration: ProcessRegistration,
     execution_context: ProcessExecutionContext,
-    registry: Arc<dyn ProcessRegistry>,
+    processes: ProcessEngineProcessContext,
     session_id: String,
     plugins: Arc<crate::PluginSession>,
     store: Option<Arc<dyn crate::RuntimePersistence>>,
@@ -133,6 +269,7 @@ impl<'run> ProcessEngineRunContext<'run> {
         registration: ProcessRegistration,
         execution_context: ProcessExecutionContext,
         registry: Arc<dyn ProcessRegistry>,
+        process_awaiter: super::awaiter::ProcessAwaiter,
         session_id: String,
         plugins: Arc<crate::PluginSession>,
         store: Option<Arc<dyn crate::RuntimePersistence>>,
@@ -145,10 +282,23 @@ impl<'run> ProcessEngineRunContext<'run> {
         handover: Option<SegmentHandover>,
         runtime_context_builder: RuntimeContextBuilder<'run>,
     ) -> Self {
+        let execution_write_authority = execution_context
+            .execution_write_authority
+            .clone()
+            .expect("process worker installs execution write authority");
+        let processes = ProcessEngineProcessContext::new(
+            registration.id.clone(),
+            registry,
+            execution_write_authority,
+            process_awaiter,
+            store.clone(),
+            session_store_factory.clone(),
+            queued_work_driver.clone(),
+        );
         Self {
             registration,
             execution_context,
-            registry,
+            processes,
             session_id,
             plugins,
             store,
@@ -171,8 +321,8 @@ impl<'run> ProcessEngineRunContext<'run> {
         &self.execution_context
     }
 
-    pub fn registry(&self) -> Arc<dyn ProcessRegistry> {
-        Arc::clone(&self.registry)
+    pub fn processes(&self) -> ProcessEngineProcessContext {
+        self.processes.clone()
     }
 
     pub fn session_id(&self) -> &str {
@@ -295,7 +445,7 @@ pub trait ProcessEngine: Send + Sync {
         &self,
         context: ProcessEngineRunContext<'_>,
         payload: serde_json::Value,
-    ) -> ProcessRunOutcome;
+    ) -> Result<ProcessRunOutcome, ProcessInfraError>;
 
     fn identity(&self, payload: &serde_json::Value) -> ProcessIdentity {
         let _ = payload;

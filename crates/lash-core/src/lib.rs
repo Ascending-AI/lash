@@ -384,6 +384,8 @@ pub use provider::{
 };
 #[cfg(any(test, feature = "testing"))]
 pub use runtime::TestLocalProcessRegistry;
+#[cfg(any(test, feature = "testing"))]
+pub use runtime::TestProcessRegistryWriteExt;
 pub use runtime::promise_semantics;
 pub use runtime::{
     AbandonEvidence, AbandonRequest, AbandonWriter, AgentFrameRun, AssembledTurn, AssistantOutput,
@@ -403,18 +405,20 @@ pub use runtime::{
     PersistedSegmentHandover, ProcessAttach, ProcessAwaitOutput, ProcessAwaiter,
     ProcessCancelAbility, ProcessCancelAllRequest, ProcessCancelRequest, ProcessCancelSource,
     ProcessCancelSummary, ProcessChangeCursor, ProcessChangeHub, ProcessCompletionAuthority,
-    ProcessDrainReport, ProcessEngine, ProcessEngineRegistry, ProcessEngineRunContext,
-    ProcessEngineRunGuard, ProcessEngineRuntimeContext, ProcessEngineValidationContext,
-    ProcessEvent, ProcessEventAppendPlan, ProcessEventAppendRequest, ProcessEventAppendResult,
-    ProcessEventSink, ProcessEventType, ProcessExecutionContext, ProcessExecutionEnvRef,
-    ProcessExecutionEnvSpec, ProcessExecutionEnvStore, ProcessExternalRef, ProcessHandleDescriptor,
-    ProcessHandleGrant, ProcessHandleSummary, ProcessId, ProcessIdentity, ProcessInput,
-    ProcessLease, ProcessLeaseClaimOutcome, ProcessLeaseCompletion, ProcessLifecycleStatus,
-    ProcessListFilter, ProcessListMode, ProcessLiveReferenceSummary, ProcessOpScope,
-    ProcessOriginator, ProcessProvenance, ProcessPruneReport, ProcessRecord, ProcessRegistration,
-    ProcessRegistry, ProcessRunHandle, ProcessRunOutcome, ProcessRuntimeHost, ProcessService,
-    ProcessSessionDeleteReport, ProcessSpawnProvenance, ProcessStartGrant, ProcessStartOptions,
-    ProcessStartRequest, ProcessStarted, ProcessStatus, ProcessStatusFilter,
+    ProcessCompletionOutcome, ProcessDrainReport, ProcessEngine, ProcessEngineProcessContext,
+    ProcessEngineRegistry, ProcessEngineRunContext, ProcessEngineRunGuard,
+    ProcessEngineRuntimeContext, ProcessEngineValidationContext, ProcessEvent,
+    ProcessEventAppendPlan, ProcessEventAppendRequest, ProcessEventAppendResult, ProcessEventSink,
+    ProcessEventType, ProcessExecutionContext, ProcessExecutionEnvRef, ProcessExecutionEnvSpec,
+    ProcessExecutionEnvStore, ProcessExecutionWriteAuthority, ProcessExternalRef,
+    ProcessHandleDescriptor, ProcessHandleGrant, ProcessHandleSummary, ProcessId, ProcessIdentity,
+    ProcessInfraError, ProcessInput, ProcessLease, ProcessLeaseClaimOutcome,
+    ProcessLeaseCompletion, ProcessLifecycleStatus, ProcessListFilter, ProcessListMode,
+    ProcessLiveReferenceSummary, ProcessOpScope, ProcessOriginator, ProcessProvenance,
+    ProcessPruneReport, ProcessRecord, ProcessRegistration, ProcessRegistry, ProcessRunHandle,
+    ProcessRunOutcome, ProcessRuntimeHost, ProcessService, ProcessSessionDeleteReport,
+    ProcessSpawnProvenance, ProcessStartGrant, ProcessStartOptions, ProcessStartOutcome,
+    ProcessStartPlan, ProcessStartRequest, ProcessStarted, ProcessStatus, ProcessStatusFilter,
     ProcessTerminalSemantics, ProcessTerminalSpec, ProcessTerminalState, ProcessValueSelector,
     ProcessWake, ProcessWakeDedupeKey, ProcessWakeDelivery, ProcessWakeDeliveryRequest,
     ProcessWakeSpec, ProcessWorkDriver, ProcessWorkObserver, ProcessWorkSnapshot, PromptUsage,
@@ -450,9 +454,9 @@ pub(crate) use runtime::{
     QueuedWorkClaimBoundary, QueuedWorkCompletion, QueuedWorkItem, QueuedWorkPayload,
     RuntimeReplay, RuntimeSubject, load_process_execution_env, materialize_process_event_semantics,
     persist_process_execution_env, prepare_process_event_append, prepare_process_registration,
-    process_event_invocation, process_event_payload_hash, process_wake_batch_draft,
-    process_wake_input_from_event_payload, process_wake_turn_cause, process_wake_turn_text,
-    require_event_replay,
+    prepare_process_start, process_event_invocation, process_event_payload_hash,
+    process_wake_batch_draft, process_wake_input_from_event_payload, process_wake_turn_cause,
+    process_wake_turn_text, require_event_replay,
 };
 pub use session_model::{
     PLUGIN_RUNTIME_PROTOCOL_PLUGIN_ID, PersistedPluginRuntimeEvent,

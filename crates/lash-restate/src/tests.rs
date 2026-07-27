@@ -2,6 +2,7 @@
 
 use super::*;
 use http_body_util::{BodyExt, Empty};
+use lash_core::TestProcessRegistryWriteExt;
 use lash_core::{ProcessInput, ProcessRegistration, RuntimeScope};
 use lash_http_transport::{HttpResponse, HttpResponseBody, HttpTransport, HttpTransportError};
 use lash_lashlang_runtime::{LashlangToolBinding, ToolDefinitionLashlangExt};
@@ -1276,6 +1277,7 @@ impl<'ctx> RestateControllerContext<'ctx> for Arc<RecordingContext> {
                         registration,
                         execution_context,
                         segment_ordinal: 0,
+                        execution_id: None,
                     },
                     complete_runs,
                 )
@@ -1791,11 +1793,16 @@ impl<'ctx> RestateControllerContext<'ctx> for Arc<ReplayableRecordingContext> {
                 .map_err(TerminalError::from_error)?;
             let cancellation = tokio_util::sync::CancellationToken::new();
             let mut handover = None;
+            let execution_write_authority = lash_core::ProcessExecutionWriteAuthority::invocation(
+                &process_id,
+                format!("test-workflow:{process_id}"),
+            );
             let output = loop {
                 match worker
                     .run_process_segment_with_scoped_effect_controller(
                         registration.clone(),
                         execution_context.clone(),
+                        execution_write_authority.clone(),
                         scoped_effect_controller.clone(),
                         cancellation.clone(),
                         handover,
@@ -4059,6 +4066,36 @@ impl RestateProcessRunner for RecordingRunner {
     }
 }
 
+struct AlreadyStartedRunner {
+    calls: Mutex<usize>,
+    winner: lash_core::LeaseOwnerIdentity,
+}
+
+#[async_trait::async_trait]
+impl RestateProcessRunner for AlreadyStartedRunner {
+    async fn run_process_segment(
+        &self,
+        registration: ProcessRegistration,
+        _execution_context: ProcessExecutionContext,
+        _scoped_effect_controller: lash_core::ScopedEffectController<'_>,
+        _handover: Option<lash_core::SegmentHandover>,
+        _cancellation: tokio_util::sync::CancellationToken,
+    ) -> Result<lash_core::ProcessRunOutcome, PluginError> {
+        *self.calls.lock().expect("runner calls lock") += 1;
+        Err(PluginError::ProcessAlreadyStarted {
+            process_id: registration.id,
+            by: Box::new(self.winner.clone()),
+        })
+    }
+
+    async fn request_process_cancel(
+        &self,
+        _request: RestateProcessCancelRequest,
+    ) -> Result<(), PluginError> {
+        Ok(())
+    }
+}
+
 struct SegmentedRecordingRunner {
     outcomes: Mutex<VecDeque<lash_core::ProcessRunOutcome>>,
     handovers: Mutex<Vec<Option<lash_core::SegmentHandover>>>,
@@ -5856,6 +5893,8 @@ async fn sqlite_sweep_abandons_started_owner_bound_without_rerunning_but_reruns_
             "ob-crashed",
             lash_core::ProcessStarted {
                 owner: dead_holder.clone(),
+                fencing_token: 0,
+                attempt: 1,
                 started_at_ms: 1,
             },
         )
@@ -5881,6 +5920,8 @@ async fn sqlite_sweep_abandons_started_owner_bound_without_rerunning_but_reruns_
             "rerun-crashed",
             lash_core::ProcessStarted {
                 owner: dead_holder.clone(),
+                fencing_token: 0,
+                attempt: 1,
                 started_at_ms: 1,
             },
         )
@@ -6252,13 +6293,376 @@ async fn process_workflow_impl_runs_and_cancels_through_runner() {
 }
 
 #[tokio::test]
+async fn terminal_retry_returns_the_stored_outcome() {
+    let runner = Arc::new(RecordingRunner::default());
+    let registry = process_registry();
+    let workflow = LashProcessWorkflowImpl::new_for_test(runner, registry.clone());
+    registry
+        .register_process(rerunnable_registration("terminal-retry"))
+        .await
+        .expect("register process");
+    let stored = ProcessAwaitOutput::Success {
+        value: serde_json::json!({"winner": "stored"}),
+        control: None,
+    };
+    registry
+        .complete_process(
+            "terminal-retry",
+            stored.clone(),
+            lash_core::ProcessCompletionAuthority::workflow_key("terminal-retry"),
+        )
+        .await
+        .expect("commit terminal");
+
+    let replayed = workflow
+        .complete_with_stored_outcome(
+            "terminal-retry",
+            ProcessAwaitOutput::Failure {
+                class: lash_core::ToolFailureClass::Execution,
+                code: "divergent".to_string(),
+                message: "must not replace the stored outcome".to_string(),
+                raw: None,
+                control: None,
+            },
+        )
+        .await
+        .expect("terminal retry");
+
+    assert_eq!(replayed, stored);
+    assert_eq!(
+        registry
+            .events_after("terminal-retry", 0)
+            .await
+            .expect("terminal events")
+            .into_iter()
+            .filter(|event| event.semantics.terminal.is_some())
+            .count(),
+        1
+    );
+}
+
+fn invocation_started(
+    process_id: &str,
+    execution_id: &str,
+    attempt: u32,
+) -> (
+    lash_core::ProcessExecutionWriteAuthority,
+    lash_core::ProcessStarted,
+) {
+    let authority = lash_core::ProcessExecutionWriteAuthority::invocation(process_id, execution_id)
+        .bind_attempt(attempt);
+    let mut started = authority
+        .invocation_started()
+        .expect("bound invocation authority");
+    started.started_at_ms = u64::from(attempt);
+    (authority, started)
+}
+
+#[tokio::test]
+async fn restate_invocation_identity_distinguishes_replay_from_fresh_execution() {
+    let registry = process_registry();
+    registry
+        .register_process(rerunnable_registration("invocation-rerun").with_max_attempts(Some(2)))
+        .await
+        .expect("register rerunnable");
+
+    let (first_authority, first_started) =
+        invocation_started("invocation-rerun", "invocation-1", 1);
+    assert!(matches!(
+        registry
+            .record_first_started_with_authority(
+                "invocation-rerun",
+                first_started.clone(),
+                &first_authority,
+            )
+            .await
+            .expect("first invocation"),
+        lash_core::ProcessStartOutcome::Started(_)
+    ));
+    assert!(matches!(
+        registry
+            .record_first_started_with_authority(
+                "invocation-rerun",
+                first_started,
+                &first_authority,
+            )
+            .await
+            .expect("cross-replica journal replay"),
+        lash_core::ProcessStartOutcome::AlreadyApplied(_)
+    ));
+
+    let (second_authority, second_started) =
+        invocation_started("invocation-rerun", "invocation-2", 2);
+    assert!(matches!(
+        registry
+            .record_first_started_with_authority(
+                "invocation-rerun",
+                second_started,
+                &second_authority,
+            )
+            .await
+            .expect("fresh invocation"),
+        lash_core::ProcessStartOutcome::Started(_)
+    ));
+    let (third_authority, third_started) =
+        invocation_started("invocation-rerun", "invocation-3", 3);
+    assert!(matches!(
+        registry
+            .record_first_started_with_authority(
+                "invocation-rerun",
+                third_started,
+                &third_authority,
+            )
+            .await
+            .expect("attempt budget verdict"),
+        lash_core::ProcessStartOutcome::AttemptsExhausted {
+            attempts: 2,
+            max_attempts: 2,
+            ..
+        }
+    ));
+}
+
+#[tokio::test]
+async fn segment_zero_ignores_stale_carried_execution_identity() {
+    let registry = process_registry();
+    registry
+        .register_process(rerunnable_registration("root-stale-id").with_max_attempts(Some(2)))
+        .await
+        .expect("register rerunnable");
+    let (first_authority, first_started) =
+        invocation_started("root-stale-id", "stale-invocation", 1);
+    registry
+        .record_first_started_with_authority(
+            "root-stale-id",
+            first_started.clone(),
+            &first_authority,
+        )
+        .await
+        .expect("record old attempt");
+
+    let (execution_id, authority) = segment_execution_authority(
+        "root-stale-id",
+        0,
+        Some("stale-invocation"),
+        "fresh-invocation",
+        Some(&first_started),
+    )
+    .expect("segment-zero identity");
+    assert_eq!(execution_id, "fresh-invocation");
+    let authority = authority.bind_attempt(2);
+    let mut started = authority
+        .invocation_started()
+        .expect("bound fresh invocation");
+    started.started_at_ms = 2;
+    assert!(matches!(
+        registry
+            .record_first_started_with_authority("root-stale-id", started, &authority)
+            .await
+            .expect("fresh root attempt"),
+        lash_core::ProcessStartOutcome::Started(_)
+    ));
+}
+
+#[tokio::test]
+async fn redriven_mid_chain_segment_consumes_attempt_and_respects_budget() {
+    let registry = process_registry();
+    registry
+        .register_process(
+            owner_bound_registration("owner-bound-redrive").with_max_attempts(Some(2)),
+        )
+        .await
+        .expect("register owner-bound");
+    let (root_authority, root_started) =
+        invocation_started("owner-bound-redrive", "root-invocation", 1);
+    registry
+        .record_first_started_with_authority(
+            "owner-bound-redrive",
+            root_started.clone(),
+            &root_authority,
+        )
+        .await
+        .expect("record root");
+
+    let (_, redrive_authority) = segment_execution_authority(
+        "owner-bound-redrive",
+        1,
+        None,
+        "redrive-invocation-1",
+        Some(&root_started),
+    )
+    .expect("validated handover redrive identity");
+    let redrive_authority = redrive_authority.bind_attempt(2);
+    let mut redrive_started = redrive_authority
+        .invocation_started()
+        .expect("bound redrive");
+    redrive_started.started_at_ms = 2;
+    let redrive_record = match registry
+        .record_first_started_with_authority(
+            "owner-bound-redrive",
+            redrive_started,
+            &redrive_authority,
+        )
+        .await
+        .expect("owner-bound continuation may rebind at a handover")
+    {
+        lash_core::ProcessStartOutcome::Started(record) => record,
+        other => panic!("expected a new continuation attempt, got {other:?}"),
+    };
+    assert_eq!(
+        redrive_record
+            .first_started
+            .as_deref()
+            .map(|started| started.attempt),
+        Some(2)
+    );
+
+    let retained = redrive_record
+        .first_started
+        .as_deref()
+        .expect("retained redrive start");
+    let (_, exhausted_authority) = segment_execution_authority(
+        "owner-bound-redrive",
+        1,
+        None,
+        "redrive-invocation-2",
+        Some(retained),
+    )
+    .expect("second handover redrive identity");
+    let exhausted_authority = exhausted_authority.bind_attempt(3);
+    let exhausted_started = exhausted_authority
+        .invocation_started()
+        .expect("bound exhausted redrive");
+    assert!(matches!(
+        registry
+            .record_first_started_with_authority(
+                "owner-bound-redrive",
+                exhausted_started,
+                &exhausted_authority,
+            )
+            .await
+            .expect("attempt budget verdict"),
+        lash_core::ProcessStartOutcome::AttemptsExhausted {
+            attempts: 2,
+            max_attempts: 2,
+            ..
+        }
+    ));
+}
+
+#[tokio::test]
+async fn rerunnable_mid_chain_redrive_continues_from_validated_handover() {
+    let registry = process_registry();
+    registry
+        .register_process(rerunnable_registration("rerunnable-redrive"))
+        .await
+        .expect("register rerunnable");
+    let (root_authority, root_started) =
+        invocation_started("rerunnable-redrive", "root-invocation", 1);
+    registry
+        .record_first_started_with_authority(
+            "rerunnable-redrive",
+            root_started.clone(),
+            &root_authority,
+        )
+        .await
+        .expect("record root");
+
+    let (_, redrive_authority) = segment_execution_authority(
+        "rerunnable-redrive",
+        1,
+        None,
+        "redrive-invocation",
+        Some(&root_started),
+    )
+    .expect("validated handover redrive identity");
+    let redrive_authority = redrive_authority.bind_attempt(2);
+    let redrive_started = redrive_authority
+        .invocation_started()
+        .expect("bound redrive");
+    assert!(matches!(
+        registry
+            .record_first_started_with_authority(
+                "rerunnable-redrive",
+                redrive_started,
+                &redrive_authority,
+            )
+            .await
+            .expect("rerunnable continuation"),
+        lash_core::ProcessStartOutcome::Started(_)
+    ));
+}
+
+#[tokio::test]
+async fn owner_bound_segment_continuation_reuses_root_invocation_identity() {
+    let registry = process_registry();
+    registry
+        .register_process(owner_bound_registration("owner-bound-segment"))
+        .await
+        .expect("register owner-bound");
+    let (root_authority, root_started) =
+        invocation_started("owner-bound-segment", "root-invocation", 1);
+    registry
+        .record_first_started_with_authority(
+            "owner-bound-segment",
+            root_started.clone(),
+            &root_authority,
+        )
+        .await
+        .expect("start root segment");
+
+    let (execution_id, successor_authority) = segment_execution_authority(
+        "owner-bound-segment",
+        1,
+        Some("root-invocation"),
+        "successor-handler-invocation",
+        Some(&root_started),
+    )
+    .expect("validated live successor");
+    assert_eq!(execution_id, "root-invocation");
+    let successor_authority = successor_authority.bind_attempt(1);
+    let mut successor_started = successor_authority
+        .invocation_started()
+        .expect("bound successor");
+    successor_started.started_at_ms = root_started.started_at_ms;
+    assert!(matches!(
+        registry
+            .record_first_started_with_authority(
+                "owner-bound-segment",
+                successor_started,
+                &successor_authority,
+            )
+            .await
+            .expect("mid-chain continuation"),
+        lash_core::ProcessStartOutcome::AlreadyApplied(_)
+    ));
+    let (fresh_authority, fresh_started) =
+        invocation_started("owner-bound-segment", "fresh-invocation", 2);
+    assert!(matches!(
+        registry
+            .record_first_started_with_authority(
+                "owner-bound-segment",
+                fresh_started,
+                &fresh_authority,
+            )
+            .await
+            .expect("fresh owner-bound invocation verdict"),
+        lash_core::ProcessStartOutcome::AlreadyStarted { .. }
+    ));
+}
+
+#[tokio::test]
 async fn run_registration_abandons_restarted_owner_bound_without_running() {
     // ADR 0019: when the engine re-invokes the workflow for an OwnerBound row
     // whose prior incarnation already recorded `first_started` but left no
     // outcome, the run handler must NOT re-execute it. It completes the row as
     // Abandoned{Sweep} — the durable tier's crash-recovery verdict — and returns
     // that output so the durable promise still resolves for awaiters.
-    let runner = Arc::new(RecordingRunner::default());
+    let started_owner = lash_core::LeaseOwnerIdentity::opaque("owner-a", "incarnation-1");
+    let runner = Arc::new(AlreadyStartedRunner {
+        calls: Mutex::new(0),
+        winner: started_owner.clone(),
+    });
     let registry = process_registry();
     let workflow = LashProcessWorkflowImpl::new_for_test(runner.clone(), registry.clone());
     let registration = owner_bound_registration("ob-restart");
@@ -6267,12 +6671,13 @@ async fn run_registration_abandons_restarted_owner_bound_without_running() {
         .await
         .expect("register owner-bound process");
     // Simulate the prior incarnation that began executing but never completed.
-    let started_owner = lash_core::LeaseOwnerIdentity::opaque("owner-a", "incarnation-1");
     registry
         .record_first_started(
             "ob-restart",
             lash_core::ProcessStarted {
                 owner: started_owner.clone(),
+                fencing_token: 0,
+                attempt: 1,
                 started_at_ms: 42,
             },
         )
@@ -6295,12 +6700,10 @@ async fn run_registration_abandons_restarted_owner_bound_without_running() {
         .await
         .expect("run_registration");
 
-    // The runner is never invoked: re-execution of a started OwnerBound row is
-    // refused.
-    assert!(
-        runner.ran.lock().expect("runner ran lock").is_empty(),
-        "a restarted OwnerBound row must not be re-executed"
-    );
+    // The real runner rejects this before user-code execution when its atomic
+    // start write observes the prior OwnerBound attempt. This fake returns the
+    // same typed verdict so the durable tier's terminal decision is exercised.
+    assert_eq!(*runner.calls.lock().expect("runner calls lock"), 1);
     // Both the returned output and the persisted terminal are Abandoned{Sweep},
     // naming the incarnation that began the work as the evidence owner.
     let lash_core::ProcessRunOutcome::Terminal(output) = &output else {
@@ -6498,6 +6901,11 @@ async fn ingress_sweep_resumes_latest_segment_without_duplicate_segment_zero() {
     assert!(
         requests[0].contains("\"segment_ordinal\":3"),
         "recovery input must preserve the latest ordinal: {}",
+        requests[0]
+    );
+    assert!(
+        !requests[0].contains("\"execution_id\""),
+        "an ingress redrive must mint identity from its new invocation: {}",
         requests[0]
     );
     assert!(!requests[0].starts_with("POST /LashProcessWorkflow/mid-chain/run/send "));

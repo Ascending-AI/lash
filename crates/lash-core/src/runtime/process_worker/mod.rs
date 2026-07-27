@@ -5,6 +5,10 @@ use std::sync::Arc;
 use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 use tokio_util::sync::CancellationToken;
 
+use self::registration::registration_from_record;
+
+mod registration;
+
 use super::effect::ProcessRunner;
 use super::session_manager::RuntimeSessionServices;
 use super::{EmbeddedRuntimeBuilder, ProcessWorkDriver, QueuedWorkDriver, RuntimeHostConfig};
@@ -456,6 +460,7 @@ impl DurableProcessWorker {
         &self,
         registration: ProcessRegistration,
         execution_context: ProcessExecutionContext,
+        execution_write_authority: crate::ProcessExecutionWriteAuthority,
         scoped_effect_controller: crate::ScopedEffectController<'_>,
         cancellation: CancellationToken,
         handover: Option<crate::SegmentHandover>,
@@ -471,21 +476,51 @@ impl DurableProcessWorker {
                 registration.id
             )));
         }
-        // Durable, lease-fenced "execution started" fact: recorded immediately
-        // before executing so a later sweep can distinguish a started OwnerBound
-        // row (never re-run) from an unstarted one (runnable by anyone). This is
-        // the shared run path both the inline sweep and the Restate run handler
-        // funnel through. First-writer-wins, so a re-invocation is a no-op.
+        let current = self
+            .config
+            .process_registry
+            .try_get_process(&registration.id)
+            .await?
+            .ok_or_else(|| {
+                PluginError::Session(format!("unknown process `{}`", registration.id))
+            })?;
+        let (owner, fencing_token) = match &execution_write_authority {
+            crate::ProcessExecutionWriteAuthority::Lease(lease) => {
+                (self.config.lease_owner.clone(), lease.fencing_token)
+            }
+            crate::ProcessExecutionWriteAuthority::Invocation {
+                process_id,
+                execution_id,
+                ..
+            } => (
+                crate::LeaseOwnerIdentity::restate_process_execution(process_id, execution_id),
+                0,
+            ),
+        };
+        let attempt = current.first_started.as_deref().map_or(1, |started| {
+            if started.owner.same_incarnation(&owner) && started.fencing_token == fencing_token {
+                started.attempt
+            } else {
+                started.attempt.saturating_add(1)
+            }
+        });
+        let execution_write_authority = execution_write_authority.bind_attempt(attempt);
         self.config
             .process_registry
-            .record_first_started(
+            .record_first_started_with_authority(
                 &registration.id,
                 crate::ProcessStarted {
-                    owner: self.config.lease_owner.clone(),
+                    owner,
+                    fencing_token,
+                    attempt,
                     started_at_ms: self.now_ms(),
                 },
+                &execution_write_authority,
             )
-            .await?;
+            .await?
+            .into_record()?;
+        let execution_context =
+            execution_context.with_execution_write_authority(execution_write_authority);
         let mut runtime = Box::pin(self.runtime_for_registration(&registration)).await?;
         let _attachment_owner_binding = matches!(
             registration.input.as_ref(),
@@ -518,7 +553,7 @@ impl DurableProcessWorker {
                 registration.id
             ))
         })?;
-        Ok(manager
+        manager
             .run_process(
                 registration,
                 execution_context,
@@ -527,7 +562,8 @@ impl DurableProcessWorker {
                 cancellation,
                 handover,
             )
-            .await)
+            .await
+            .map_err(crate::ProcessInfraError::into_plugin_error)
     }
 
     /// Queue every non-terminal process this worker can claim and execute the
@@ -727,6 +763,9 @@ impl DurableProcessWorker {
     /// one session ([ADR 0011]), so `LashSession::close`/`park` must not touch
     /// them; a host that wants its in-flight owner-bound work terminalized at
     /// shutdown calls this on the worker it is tearing down.
+    /// Restate-owned rows use a substrate invocation owner rather than this
+    /// worker's configured owner, so this local-worker drain does not select
+    /// them; their recovery and abandonment remain Restate/sweep concerns.
     ///
     /// Drain sequence (the operations runbook owns the surrounding steps; this
     /// is the terminal-writing step):
@@ -881,14 +920,39 @@ impl DurableProcessWorker {
         };
         // Terminal between the list and the claim. Idempotent by process_id: do
         // not re-execute or re-terminalize a finished process.
-        if self
+        let Some(record) = self
             .config
             .process_registry
-            .get_process(&process_id)
+            .try_get_process(&process_id)
             .await
-            .is_some_and(|current| current.is_terminal())
-        {
+            .ok()
+            .flatten()
+        else {
             self.release_or_log(&lease).await;
+            return;
+        };
+        if record.is_terminal() {
+            self.release_or_log(&lease).await;
+            return;
+        }
+        if record.disposition == RecoveryDisposition::Rerunnable
+            && let (Some(max_attempts), Some(started)) =
+                (record.max_attempts, record.first_started.as_deref())
+            && started.attempt >= max_attempts
+        {
+            self.complete_and_release(
+                &lease,
+                &process_id,
+                ProcessAwaitOutput::Abandoned {
+                    evidence: Box::new(AbandonEvidence {
+                        writer: AbandonWriter::EngineGaveUp,
+                        owner: Some(started.owner.clone()),
+                        epoch_ms: self.now_ms(),
+                    }),
+                    control: None,
+                },
+            )
+            .await;
             return;
         }
 
@@ -1076,17 +1140,16 @@ impl DurableProcessWorker {
                     );
                     return;
                 }
-                // The process could not be run at all (rebuild/store-facet failure):
-                // terminalize as a recovery failure so the row leaves the worklist.
+                // Rebuild/store-facet failures are infrastructure failures, not
+                // producer outcomes. Release the claim without a terminal so a
+                // later sweep can retry.
                 Err(RecoverFailure::Run(err)) => {
-                    let output = ProcessAwaitOutput::Failure {
-                        class: crate::ToolFailureClass::Execution,
-                        code: "process_recovery_failed".to_string(),
-                        message: err.to_string(),
-                        raw: None,
-                        control: None,
-                    };
-                    self.complete_and_release(&lease, &process_id, output).await;
+                    tracing::warn!(
+                        process_id = %process_id,
+                        error = %err,
+                        "process execution infrastructure failed; leaving process claimable",
+                    );
+                    self.release_or_log(&lease).await;
                     return;
                 }
             }
@@ -1199,6 +1262,7 @@ impl DurableProcessWorker {
         let pending = self.run_process_segment_with_scoped_effect_controller(
             registration,
             execution_context,
+            crate::ProcessExecutionWriteAuthority::lease(lease.clone()),
             scoped_effect_controller,
             cancellation.clone(),
             handover,
@@ -1456,21 +1520,6 @@ impl DurableProcessWorker {
             ));
         }
         Ok(())
-    }
-}
-
-/// Rebuild a runnable registration from a persisted row, preserving its declared
-/// disposition (ADR 0019).
-fn registration_from_record(record: ProcessRecord) -> ProcessRegistration {
-    ProcessRegistration {
-        id: record.id,
-        input: record.input,
-        disposition: record.disposition,
-        identity: record.identity,
-        event_types: record.event_types,
-        provenance: record.provenance,
-        env_ref: record.env_ref,
-        wake_target: record.wake_target,
     }
 }
 

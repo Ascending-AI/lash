@@ -57,7 +57,7 @@ impl crate::ProcessEngine for AttachmentWritingEngine {
         &self,
         context: crate::ProcessEngineRunContext<'_>,
         _payload: serde_json::Value,
-    ) -> crate::ProcessRunOutcome {
+    ) -> Result<crate::ProcessRunOutcome, crate::ProcessInfraError> {
         let catalog = context
             .resolved_tool_catalog()
             .expect("resolve process catalog");
@@ -125,11 +125,11 @@ impl crate::ProcessEngine for AttachmentWritingEngine {
             .await
             .expect("process attachment after nested turn");
         drop(runtime);
-        crate::ProcessAwaitOutput::Success {
+        Ok(crate::ProcessAwaitOutput::Success {
             value: serde_json::Value::Null,
             control: None,
         }
-        .into()
+        .into())
     }
 }
 

@@ -397,7 +397,7 @@ impl ProcessCapability {
         process_id: &str,
         await_output: crate::ProcessAwaitOutput,
         scope: crate::ProcessOpScope<'_>,
-    ) -> Result<crate::ProcessRecord, crate::PluginError> {
+    ) -> Result<crate::ProcessCompletionOutcome, crate::PluginError> {
         let runner = self.command_runner(current, &scope)?;
         let session_scope = self.process_scope_for_op(session_id, scope.agent_frame_id());
         // Session-visibility authorization: the caller must hold a live handle

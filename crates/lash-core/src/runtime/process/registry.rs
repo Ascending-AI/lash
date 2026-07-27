@@ -1,15 +1,17 @@
 use crate::plugin::PluginError;
 
+use super::ProcessCompletionOutcome;
 use super::engine::PersistedSegmentHandover;
 use super::events::{
     ProcessAwaitOutput, ProcessCompletionAuthority, ProcessEvent, ProcessEventAppendRequest,
     ProcessEventAppendResult,
 };
 use super::model::{
-    AbandonRequest, ProcessChangeCursor, ProcessExternalRef, ProcessHandleDescriptor,
-    ProcessHandleGrant, ProcessHandleGrantEntry, ProcessLease, ProcessLeaseClaimOutcome,
-    ProcessLeaseCompletion, ProcessListFilter, ProcessRecord, ProcessRegistration,
-    ProcessSessionDeleteReport, ProcessStarted, SessionScope, WaitState,
+    AbandonRequest, ProcessChangeCursor, ProcessExecutionWriteAuthority, ProcessExternalRef,
+    ProcessHandleDescriptor, ProcessHandleGrant, ProcessHandleGrantEntry, ProcessLease,
+    ProcessLeaseClaimOutcome, ProcessLeaseCompletion, ProcessListFilter, ProcessRecord,
+    ProcessRegistration, ProcessSessionDeleteReport, ProcessStartOutcome, ProcessStarted,
+    SessionScope, WaitState,
 };
 use super::references::ProcessLiveReferenceSummary;
 
@@ -139,10 +141,25 @@ pub trait ProcessRegistry: Send + Sync {
         session_id: &str,
     ) -> Result<ProcessSessionDeleteReport, PluginError>;
 
+    /// Append a host-owned event that is not emitted by the process execution.
+    ///
+    /// This unfenced path is reserved for host signal/cancel coordination.
+    /// Process engines receive only [`ProcessEngineProcessContext`](super::engine::ProcessEngineProcessContext);
+    /// execution-owned events must use its authority-bound emitter.
     async fn append_event(
         &self,
         process_id: &str,
         request: ProcessEventAppendRequest,
+    ) -> Result<ProcessEventAppendResult, PluginError>;
+
+    /// Append an event emitted by the currently executing process attempt.
+    ///
+    /// Implementations validate `authority` and append in one atomic write.
+    async fn append_event_with_authority(
+        &self,
+        process_id: &str,
+        request: ProcessEventAppendRequest,
+        authority: &ProcessExecutionWriteAuthority,
     ) -> Result<ProcessEventAppendResult, PluginError>;
 
     async fn events_after(
@@ -218,7 +235,7 @@ pub trait ProcessRegistry: Send + Sync {
         process_id: &str,
         await_output: ProcessAwaitOutput,
         authority: ProcessCompletionAuthority,
-    ) -> Result<ProcessRecord, PluginError>;
+    ) -> Result<ProcessCompletionOutcome, PluginError>;
 
     /// Atomically append the terminal output while the supplied process lease
     /// is still current, then release that lease in the same transaction.
@@ -232,19 +249,19 @@ pub trait ProcessRegistry: Send + Sync {
         &self,
         lease: &ProcessLease,
         await_output: ProcessAwaitOutput,
-    ) -> Result<ProcessRecord, PluginError>;
+    ) -> Result<ProcessCompletionOutcome, PluginError>;
 
     /// Record the durable, lease-fenced "execution started" fact (ADR 0019).
     ///
-    /// First-writer-wins: the first call stores `started`; a later call is an
-    /// idempotent no-op returning the existing record unchanged (the fact is
-    /// immutable once written, so the sweep can prove an OwnerBound row has
-    /// begun executing). Implementations reject unknown process ids.
-    async fn record_first_started(
+    /// The first attempt stores `started`. An identical replay is idempotent.
+    /// Rerunnable recovery replaces the retained fact with the next consecutive
+    /// attempt; OwnerBound recovery rejects a distinct execution.
+    async fn record_first_started_with_authority(
         &self,
         process_id: &str,
         started: ProcessStarted,
-    ) -> Result<ProcessRecord, PluginError>;
+        authority: &ProcessExecutionWriteAuthority,
+    ) -> Result<ProcessStartOutcome, PluginError>;
 
     /// Set the durable, non-terminal Abandon Request marker (ADR 0019).
     ///
@@ -259,13 +276,18 @@ pub trait ProcessRegistry: Send + Sync {
         request: AbandonRequest,
     ) -> Result<ProcessRecord, PluginError>;
 
-    async fn set_process_wait(
+    async fn set_process_wait_with_authority(
         &self,
         process_id: &str,
         wait: WaitState,
+        authority: &ProcessExecutionWriteAuthority,
     ) -> Result<ProcessRecord, PluginError>;
 
-    async fn clear_process_wait(&self, process_id: &str) -> Result<ProcessRecord, PluginError>;
+    async fn clear_process_wait_with_authority(
+        &self,
+        process_id: &str,
+        authority: &ProcessExecutionWriteAuthority,
+    ) -> Result<ProcessRecord, PluginError>;
 
     async fn get_process(&self, process_id: &str) -> Option<ProcessRecord>;
 

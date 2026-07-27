@@ -482,6 +482,25 @@ impl LeaseOwnerIdentity {
         }
     }
 
+    /// Stable owner identity for one Restate process execution invocation.
+    ///
+    /// Construction and recognition share this single representation so a
+    /// formatting drift cannot silently turn a continuation into a fresh
+    /// execution.
+    pub fn restate_process_execution(
+        process_id: &str,
+        execution_id: impl Into<String>,
+    ) -> LeaseOwnerIdentity {
+        Self::opaque(format!("restate:{process_id}"), execution_id)
+    }
+
+    /// Return the Restate execution id when this owner belongs to `process_id`.
+    pub fn restate_process_execution_id(&self, process_id: &str) -> Option<&str> {
+        let expected = Self::restate_process_execution(process_id, &self.incarnation_id);
+        self.same_incarnation(&expected)
+            .then_some(self.incarnation_id.as_str())
+    }
+
     pub fn local_process(
         owner_id: impl Into<String>,
         incarnation_id: impl Into<String>,

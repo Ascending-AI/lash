@@ -52,6 +52,7 @@ fn remote_process_start_request() -> anyhow::Result<()> {
             metadata: json!({ "source": "scheduler" }),
         },
         disposition: RemoteRecoveryDisposition::ExternallyOwned,
+        max_attempts: None,
         env_spec: Some(RemoteProcessExecutionEnvSpec {
             plugin_options: RemoteProcessPluginOptions {
                 plugins: BTreeMap::from([(

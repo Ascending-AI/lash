@@ -74,7 +74,7 @@ pub(crate) trait ProcessRunner: Send + Sync {
         scoped_effect_controller: crate::ScopedEffectController<'_>,
         cancellation: CancellationToken,
         handover: Option<crate::SegmentHandover>,
-    ) -> crate::ProcessRunOutcome;
+    ) -> Result<crate::ProcessRunOutcome, crate::ProcessInfraError>;
 }
 
 pub struct ProcessLocalExecution {

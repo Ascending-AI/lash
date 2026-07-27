@@ -35,6 +35,7 @@
 
 use std::time::{Duration, Instant};
 
+use lash_core::TestProcessRegistryWriteExt;
 use lash_core::{
     LeaseOwnerIdentity, ProcessAwaitOutput, ProcessInput, ProcessLeaseClaimOutcome,
     ProcessProvenance, ProcessRegistration, ProcessRegistry, ProcessStarted, RecoveryDisposition,
@@ -56,15 +57,15 @@ async fn connect() -> PostgresStorage {
         .expect("connect postgres")
 }
 
-/// Mirror of `conformance.rs`'s `registration()` lease-test helper: an external
-/// placeholder row, the shape the process-lease conformance cases register.
+/// An external placeholder row whose rerunnable disposition permits the two
+/// simulated hosts to record and fence local execution attempts.
 fn registration(id: &str) -> ProcessRegistration {
     ProcessRegistration::new(
         id,
         ProcessInput::External {
             metadata: serde_json::Value::Null,
         },
-        RecoveryDisposition::ExternallyOwned,
+        RecoveryDisposition::Rerunnable,
         ProcessProvenance::host(),
     )
 }
@@ -175,6 +176,8 @@ async fn postgres_lease_clock_and_fencing_hold_across_independent_connections() 
     // immutability across connections is checked at the very end.
     let started = ProcessStarted {
         owner: owner_a.clone(),
+        fencing_token: 0,
+        attempt: 1,
         started_at_ms: 111,
     };
     reg_a

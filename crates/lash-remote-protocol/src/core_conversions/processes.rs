@@ -673,6 +673,7 @@ impl From<lash_core::AbandonWriter> for RemoteAbandonWriter {
             lash_core::AbandonWriter::OwnerDrain => Self::OwnerDrain,
             lash_core::AbandonWriter::Sweep => Self::Sweep,
             lash_core::AbandonWriter::ReconciledRequest => Self::ReconciledRequest,
+            lash_core::AbandonWriter::EngineGaveUp => Self::EngineGaveUp,
         }
     }
 }
@@ -683,6 +684,7 @@ impl From<RemoteAbandonWriter> for lash_core::AbandonWriter {
             RemoteAbandonWriter::OwnerDrain => Self::OwnerDrain,
             RemoteAbandonWriter::Sweep => Self::Sweep,
             RemoteAbandonWriter::ReconciledRequest => Self::ReconciledRequest,
+            RemoteAbandonWriter::EngineGaveUp => Self::EngineGaveUp,
         }
     }
 }
@@ -727,10 +729,14 @@ impl From<lash_core::ProcessStarted> for RemoteProcessStarted {
     fn from(value: lash_core::ProcessStarted) -> Self {
         let lash_core::ProcessStarted {
             owner,
+            fencing_token,
+            attempt,
             started_at_ms,
         } = value;
         Self {
             owner: serde_json::to_value(owner).expect("lease owner identity serializes"),
+            fencing_token,
+            attempt,
             started_at_ms,
         }
     }
@@ -742,10 +748,14 @@ impl TryFrom<RemoteProcessStarted> for lash_core::ProcessStarted {
     fn try_from(value: RemoteProcessStarted) -> Result<Self, Self::Error> {
         let RemoteProcessStarted {
             owner,
+            fencing_token,
+            attempt,
             started_at_ms,
         } = value;
         Ok(Self {
             owner: decode_remote_json(owner, "RemoteProcessStarted", "owner")?,
+            fencing_token,
+            attempt,
             started_at_ms,
         })
     }
@@ -1329,6 +1339,7 @@ impl TryFrom<lash_core::ProcessRecord> for RemoteProcessRecord {
             registration_hash: _,
             input,
             disposition,
+            max_attempts,
             identity,
             event_types,
             provenance,
@@ -1346,6 +1357,7 @@ impl TryFrom<lash_core::ProcessRecord> for RemoteProcessRecord {
             process_id: id,
             input: input.as_ref().clone().try_into()?,
             disposition: disposition.into(),
+            max_attempts,
             identity: identity.into(),
             event_types: event_types.into_iter().map(Into::into).collect(),
             provenance: provenance.into(),
@@ -1373,6 +1385,7 @@ impl TryFrom<RemoteProcessRecord> for lash_core::ProcessRecord {
             process_id,
             input,
             disposition,
+            max_attempts,
             identity,
             event_types,
             provenance,
@@ -1392,6 +1405,7 @@ impl TryFrom<RemoteProcessRecord> for lash_core::ProcessRecord {
             disposition.into(),
             provenance.into(),
         )
+        .with_max_attempts(max_attempts)
         .with_identity(identity.into())
         .with_event_types(event_types.into_iter().map(Into::into))
         .with_execution_env_ref(env_ref.map(|env_ref| {
@@ -1635,6 +1649,7 @@ impl TryFrom<RemoteProcessStartRequest> for lash_core::ProcessStartRequest {
             id,
             input,
             disposition,
+            max_attempts,
             env_spec,
             originator,
             wake_target,
@@ -1647,6 +1662,7 @@ impl TryFrom<RemoteProcessStartRequest> for lash_core::ProcessStartRequest {
             disposition.into(),
             originator.into(),
         )
+        .with_max_attempts(max_attempts)
         .with_wake_target(wake_target.map(Into::into))
         .with_grant(grant.map(Into::into))
         .with_event_types(event_types.into_iter().map(Into::into));
@@ -1663,6 +1679,7 @@ impl TryFrom<lash_core::ProcessStartRequest> for RemoteProcessStartRequest {
             id,
             input,
             disposition,
+            max_attempts,
             env_spec,
             originator,
             wake_target,
@@ -1674,6 +1691,7 @@ impl TryFrom<lash_core::ProcessStartRequest> for RemoteProcessStartRequest {
             id,
             input: input.try_into()?,
             disposition: disposition.into(),
+            max_attempts,
             env_spec: env_spec.map(Into::into),
             originator: originator.into(),
             wake_target: wake_target.map(Into::into),

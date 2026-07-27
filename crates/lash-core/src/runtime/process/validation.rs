@@ -8,7 +8,9 @@ use super::events::{
     runtime_lifecycle_event_type,
 };
 use super::materialization::materialize_process_event_semantics;
-use super::model::{ProcessRecord, ProcessRegistration, ProcessStatus};
+use super::model::{
+    ProcessRecord, ProcessRegistration, ProcessStarted, ProcessStatus, RecoveryDisposition,
+};
 use super::time::{epoch_ms_from_system_time, system_time_from_epoch_ms};
 use super::wake::{ProcessWakeDeliveryRequest, process_wake_delivery};
 
@@ -27,6 +29,69 @@ pub enum ProcessEventAppendPlan {
         wake_delivery: Option<ProcessWakeDelivery>,
         occurred_at_ms: u64,
     },
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ProcessStartPlan {
+    Append,
+    AlreadyApplied,
+    AlreadyStarted { by: crate::LeaseOwnerIdentity },
+    AttemptsExhausted { attempts: u32, max_attempts: u32 },
+}
+
+pub fn prepare_process_start(
+    record: &ProcessRecord,
+    started: &ProcessStarted,
+    authority: &super::model::ProcessExecutionWriteAuthority,
+) -> Result<ProcessStartPlan, PluginError> {
+    if record.is_terminal() {
+        return Err(PluginError::Session(format!(
+            "terminal process `{}` cannot start an execution attempt",
+            record.id
+        )));
+    }
+    if record.disposition == RecoveryDisposition::ExternallyOwned {
+        return Err(PluginError::Session(format!(
+            "externally-owned process `{}` cannot start an execution attempt",
+            record.id
+        )));
+    }
+    if record
+        .first_started
+        .as_deref()
+        .is_some_and(|existing| existing.same_execution(started))
+    {
+        return Ok(ProcessStartPlan::AlreadyApplied);
+    }
+    authority.validate_resume_predecessor(record.id.as_str(), record.first_started.as_deref())?;
+
+    let expected_attempt = match record.first_started.as_deref() {
+        None => 1,
+        Some(existing)
+            if record.disposition == RecoveryDisposition::OwnerBound
+                && !authority.permits_owner_bound_resume(existing) =>
+        {
+            return Ok(ProcessStartPlan::AlreadyStarted {
+                by: existing.owner.clone(),
+            });
+        }
+        Some(existing) => existing.attempt.saturating_add(1),
+    };
+    if started.attempt != expected_attempt {
+        return Err(PluginError::Session(format!(
+            "process `{}` execution attempt must be {}, got {}",
+            record.id, expected_attempt, started.attempt
+        )));
+    }
+    if let Some(max_attempts) = record.max_attempts
+        && started.attempt > max_attempts
+    {
+        return Ok(ProcessStartPlan::AttemptsExhausted {
+            attempts: started.attempt.saturating_sub(1),
+            max_attempts,
+        });
+    }
+    Ok(ProcessStartPlan::Append)
 }
 
 pub fn apply_process_status_projection(
@@ -60,12 +125,24 @@ pub fn apply_process_event_projection(
     match event.event_type.as_str() {
         "process.first_started" => {
             let started = lifecycle_payload(event, "started")?;
+            let resumed_from_handover = event
+                .payload
+                .get("resumed_from_handover")
+                .and_then(serde_json::Value::as_bool)
+                .unwrap_or(false);
             match record.first_started.as_deref() {
                 None => record.first_started = Some(Box::new(started)),
-                Some(existing) if existing == &started => {}
+                Some(existing) if existing.same_execution(&started) => {}
+                Some(existing)
+                    if (record.disposition == RecoveryDisposition::Rerunnable
+                        || resumed_from_handover)
+                        && started.attempt == existing.attempt.saturating_add(1) =>
+                {
+                    record.first_started = Some(Box::new(started));
+                }
                 Some(_) => {
                     return Err(PluginError::Session(format!(
-                        "process `{}` already has a different first-started fact",
+                        "process `{}` has an invalid execution-started attempt",
                         record.id
                     )));
                 }
@@ -484,6 +561,12 @@ pub(super) fn validate_process_registration(
             registration.id
         )));
     }
+    if registration.max_attempts == Some(0) {
+        return Err(PluginError::Session(format!(
+            "process `{}` max_attempts must be greater than zero",
+            registration.id
+        )));
+    }
     match registration.input.as_ref() {
         super::model::ProcessInput::ToolCall { .. } | super::model::ProcessInput::Engine { .. } => {
             if registration.env_ref.is_none() {
@@ -631,8 +714,11 @@ mod tests {
                 &record.id,
                 &ProcessStarted {
                     owner: crate::LeaseOwnerIdentity::opaque("owner", "incarnation"),
+                    fencing_token: 0,
+                    attempt: 1,
                     started_at_ms: 2,
                 },
+                false,
             ),
             ProcessEventAppendRequest::wait_entered(&record.id, &wait),
             ProcessEventAppendRequest::wait_cleared(&record.id, &wait),

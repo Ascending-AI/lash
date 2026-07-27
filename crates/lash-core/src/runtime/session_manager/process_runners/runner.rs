@@ -11,7 +11,7 @@ impl crate::runtime::effect::ProcessRunner for RuntimeSessionServices {
         scoped_effect_controller: crate::ScopedEffectController<'_>,
         cancellation: tokio_util::sync::CancellationToken,
         handover: Option<crate::SegmentHandover>,
-    ) -> crate::ProcessRunOutcome {
+    ) -> Result<crate::ProcessRunOutcome, crate::ProcessInfraError> {
         let input = Arc::clone(&registration.input);
         // Hybrid process model by design:
         // - ToolCall, SessionTurn, and External are kernel primitives because
@@ -20,22 +20,27 @@ impl crate::runtime::effect::ProcessRunner for RuntimeSessionServices {
         // This split keeps core process coordination explicit without pulling
         // language-specific runtimes into the kernel.
         match input.as_ref() {
-            crate::ProcessInput::ToolCall { call } => crate::ProcessRunOutcome::Terminal(Box::new(
-                self.run_process_tool_call(ProcessToolCallRun {
-                    registration,
-                    registry: Arc::clone(&registry),
-                    call: call.clone(),
-                    parent_invocation: execution_context.causal_invocation,
-                    scoped_effect_controller,
-                    cancellation,
-                })
-                .await,
-            )),
+            crate::ProcessInput::ToolCall { call } => {
+                Ok(crate::ProcessRunOutcome::Terminal(Box::new(
+                    self.run_process_tool_call(ProcessToolCallRun {
+                        registration,
+                        registry: Arc::clone(&registry),
+                        call: call.clone(),
+                        parent_invocation: execution_context.causal_invocation,
+                        execution_write_authority: execution_context
+                            .execution_write_authority
+                            .expect("process worker installs execution write authority"),
+                        scoped_effect_controller,
+                        cancellation,
+                    })
+                    .await,
+                )))
+            }
             crate::ProcessInput::SessionTurn {
                 create_request,
                 turn_input,
                 ..
-            } => crate::ProcessRunOutcome::Terminal(Box::new(
+            } => Ok(crate::ProcessRunOutcome::Terminal(Box::new(
                 Box::pin(self.run_process_session_turn(
                     registration,
                     *create_request.clone(),
@@ -44,13 +49,11 @@ impl crate::runtime::effect::ProcessRunner for RuntimeSessionServices {
                     cancellation,
                 ))
                 .await,
-            )),
+            ))),
             crate::ProcessInput::Engine { kind, payload } => {
                 let engine = match self.current.host.core.process_engines.require(kind) {
                     Ok(engine) => engine,
-                    Err(err) => {
-                        return process_engine_failure("process_engine_missing", err).into();
-                    }
+                    Err(err) => return Err(crate::ProcessInfraError::new(err)),
                 };
                 let engine_context = self.process_engine_run_context(
                     registration,
@@ -66,14 +69,11 @@ impl crate::runtime::effect::ProcessRunner for RuntimeSessionServices {
             // worker's run path rejects the disposition before dispatch, so this
             // is defensively unreachable. Never fabricate a success outcome for
             // work lash did not observe completing — surface a loud failure.
-            crate::ProcessInput::External { .. } => crate::ProcessAwaitOutput::Failure {
-                class: crate::ToolFailureClass::Internal,
-                code: "external_process_not_executable".to_string(),
-                message: "externally-owned process must not be executed by lash".to_string(),
-                raw: None,
-                control: None,
+            crate::ProcessInput::External { .. } => {
+                Err(crate::ProcessInfraError::new(crate::PluginError::Session(
+                    "externally-owned process must not be executed by lash".to_string(),
+                )))
             }
-            .into(),
         }
     }
 }
@@ -104,7 +104,12 @@ impl RuntimeSessionServices {
         let services = self.clone();
         let registration_for_runtime = registration.clone();
         let execution_context_for_runtime = execution_context.clone();
+        let execution_write_authority = execution_context
+            .execution_write_authority
+            .clone()
+            .expect("process worker installs execution write authority");
         let registry_for_runtime = Arc::clone(&registry);
+        let process_awaiter_for_runtime = process_awaiter.clone();
         let cancellation_for_runtime = cancellation.clone();
         let controller_for_context = scoped_effect_controller.clone();
         let builder = Box::new(move |tool_catalog: Arc<crate::ToolCatalog>| {
@@ -127,8 +132,9 @@ impl RuntimeSessionServices {
             .with_process_registration_context(&registration_for_runtime)
             .with_process_event_context(
                 registration_for_runtime.id.clone(),
+                execution_write_authority.clone(),
                 Arc::clone(&registry_for_runtime),
-                process_awaiter.clone(),
+                process_awaiter_for_runtime.clone(),
                 services.current.store.clone(),
                 services.current.host.session_store_factory.clone(),
                 services.current.host.queued_work_driver.clone(),
@@ -150,6 +156,7 @@ impl RuntimeSessionServices {
             registration,
             execution_context,
             registry,
+            process_awaiter,
             session_id,
             plugins,
             store,
@@ -170,14 +177,4 @@ fn current_execution_env_spec(
 ) -> crate::ProcessExecutionEnvSpec {
     let state = current.snapshot.to_runtime_state();
     state.process_execution_env_spec(&current.policy)
-}
-
-fn process_engine_failure(code: &str, err: crate::PluginError) -> crate::ProcessAwaitOutput {
-    crate::ProcessAwaitOutput::Failure {
-        class: crate::ToolFailureClass::Execution,
-        code: code.to_string(),
-        message: err.to_string(),
-        raw: None,
-        control: None,
-    }
 }

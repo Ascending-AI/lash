@@ -405,7 +405,7 @@ mod tests {
         InputItem, PluginOptions, PreparedToolCall, ProcessEventAppendRequest,
         ProcessExecutionEnvRef, ProcessIdentity, ProcessProvenance, ProcessRegistration,
         SessionCreateRequest, SessionScope, SessionStartPoint, SubagentSessionContext,
-        ToolFailureClass, ToolOutputContract, TurnInput, WaitKind,
+        TestProcessRegistryWriteExt, ToolFailureClass, ToolOutputContract, TurnInput, WaitKind,
     };
 
     fn observer(registry: Arc<dyn ProcessRegistry>) -> ProcessWorkObserver {

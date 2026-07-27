@@ -2,8 +2,9 @@ use crate::plugin::PluginError;
 
 use super::events::{ProcessAwaitOutput, ProcessEvent};
 use super::model::{
-    ProcessCancelSummary, ProcessHandleGrantEntry, ProcessHandleSummary, ProcessListMode,
-    ProcessOpScope, ProcessRecord, ProcessRegistration, ProcessStartOptions, ProcessStartRequest,
+    ProcessCancelSummary, ProcessCompletionOutcome, ProcessHandleGrantEntry, ProcessHandleSummary,
+    ProcessListMode, ProcessOpScope, ProcessRecord, ProcessRegistration, ProcessStartOptions,
+    ProcessStartRequest,
 };
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -174,14 +175,16 @@ pub trait ProcessService: Send + Sync {
     /// Write the terminal outcome for an Externally-Owned process the session
     /// holds a grant for (ADR 0019). Closure for work lash never executes — a
     /// detached command records its immediately-terminal launch fact here. Only
-    /// Externally-Owned rows may be completed this way.
+    /// Externally-Owned rows may be completed this way. The typed completion
+    /// outcome tells the caller whether this write committed, replayed an
+    /// identical terminal, or lost to a different stored terminal.
     async fn complete_external(
         &self,
         session_id: &str,
         process_id: &str,
         await_output: ProcessAwaitOutput,
         scope: ProcessOpScope<'_>,
-    ) -> Result<ProcessRecord, PluginError> {
+    ) -> Result<ProcessCompletionOutcome, PluginError> {
         let _ = (session_id, process_id, await_output, scope);
         Err(PluginError::Session(
             "external process completion is unavailable in this service".to_string(),

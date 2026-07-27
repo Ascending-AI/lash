@@ -28,6 +28,7 @@ impl RuntimeSessionServices {
             registry,
             call,
             parent_invocation,
+            execution_write_authority,
             scoped_effect_controller,
             cancellation,
         } = run;
@@ -56,6 +57,7 @@ impl RuntimeSessionServices {
             .async_process(registration.id.clone(), cancellation)
             .process_events(
                 registration.id.clone(),
+                execution_write_authority,
                 registry,
                 awaiter,
                 self.current.store.clone(),

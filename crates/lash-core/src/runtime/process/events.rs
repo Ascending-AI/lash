@@ -94,6 +94,9 @@ pub enum AbandonWriter {
     /// The sweep reconciled a durable Abandon Request into Abandoned once the
     /// row's lease had lapsed.
     ReconciledRequest,
+    /// The execution engine exhausted the producer-declared attempt budget or
+    /// otherwise gave up retrying a managed process.
+    EngineGaveUp,
 }
 
 /// Evidence attached to an [`ProcessTerminalState::Abandoned`] terminal: which
@@ -384,6 +387,9 @@ impl ProcessAwaitOutput {
                         "process abandoned: reconciled abandon request after the lease lapsed"
                             .to_string()
                     }
+                    AbandonWriter::EngineGaveUp => {
+                        "process abandoned: execution engine exhausted its retry budget".to_string()
+                    }
                 };
                 let mut failure = crate::ToolFailure::tool(
                     crate::ToolFailureClass::External,
@@ -503,12 +509,22 @@ impl ProcessEventAppendRequest {
         ))
     }
 
-    pub fn first_started(process_id: &str, started: &super::model::ProcessStarted) -> Self {
+    pub fn first_started(
+        process_id: &str,
+        started: &super::model::ProcessStarted,
+        resumed_from_handover: bool,
+    ) -> Self {
         Self::new(
             "process.first_started",
-            serde_json::json!({ "started": started }),
+            serde_json::json!({
+                "started": started,
+                "resumed_from_handover": resumed_from_handover,
+            }),
         )
-        .with_replay_key(format!("process:{process_id}:first-started"))
+        .with_replay_key(format!(
+            "process:{process_id}:first-started:attempt:{}",
+            started.attempt
+        ))
     }
 
     pub fn wait_entered(process_id: &str, wait: &super::model::WaitState) -> Self {

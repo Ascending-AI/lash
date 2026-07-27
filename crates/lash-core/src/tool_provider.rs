@@ -128,6 +128,7 @@ impl ToolChildExecutionTraceHook {
 #[derive(Clone)]
 pub(crate) struct ToolProcessEventContext {
     process_id: String,
+    execution_write_authority: crate::ProcessExecutionWriteAuthority,
     registry: Arc<dyn crate::ProcessRegistry>,
     awaiter: crate::ProcessAwaiter,
     store: Option<Arc<dyn crate::RuntimePersistence>>,
@@ -242,9 +243,11 @@ impl<'run> ToolContextBuilder<'run> {
         self
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn process_events(
         mut self,
         process_id: impl Into<String>,
+        execution_write_authority: crate::ProcessExecutionWriteAuthority,
         registry: Arc<dyn crate::ProcessRegistry>,
         awaiter: crate::ProcessAwaiter,
         store: Option<Arc<dyn crate::RuntimePersistence>>,
@@ -253,6 +256,7 @@ impl<'run> ToolContextBuilder<'run> {
     ) -> Self {
         self.process_events = Some(ToolProcessEventContext {
             process_id: process_id.into(),
+            execution_write_authority,
             registry,
             awaiter,
             store,
@@ -601,10 +605,13 @@ impl<'run> ToolContext<'run> {
         mut self,
         process_id: impl Into<String>,
         registry: Arc<dyn crate::ProcessRegistry>,
+        execution_write_authority: crate::ProcessExecutionWriteAuthority,
     ) -> Self {
+        let process_id = process_id.into();
         let awaiter = crate::ProcessAwaiter::polling(Arc::clone(&registry));
         self.process_events = Some(ToolProcessEventContext {
-            process_id: process_id.into(),
+            execution_write_authority,
+            process_id,
             registry,
             awaiter,
             store: None,

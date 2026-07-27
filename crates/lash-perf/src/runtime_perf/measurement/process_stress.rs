@@ -1,3 +1,5 @@
+use lash_core::TestProcessRegistryWriteExt;
+
 const PROCESS_LIST_STRESS_BATCH: usize = 128;
 
 async fn run_once_process_list_stress(chat_turns: usize) -> anyhow::Result<RuntimePerfRunResult> {

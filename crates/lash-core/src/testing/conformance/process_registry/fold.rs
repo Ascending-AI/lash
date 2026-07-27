@@ -1,4 +1,122 @@
 use super::*;
+use crate::{BoundaryReason, PersistedSegmentHandover, SegmentHandover};
+
+pub(super) async fn owner_bound_handover_resume_is_folded_and_replayable(
+    registry: Arc<dyn ProcessRegistry>,
+) {
+    let process_id = "proc-owner-bound-handover-fold";
+    let base = registry
+        .register_process(owner_bound_registration(process_id))
+        .await
+        .expect("register owner-bound handover fold process");
+
+    let first_authority =
+        ProcessExecutionWriteAuthority::invocation(process_id, "handover-fold-root")
+            .bind_attempt(1);
+    let mut first_started = first_authority
+        .invocation_started()
+        .expect("bound first invocation");
+    first_started.started_at_ms = 11;
+    assert!(matches!(
+        registry
+            .record_first_started_with_authority(
+                process_id,
+                first_started.clone(),
+                &first_authority,
+            )
+            .await
+            .expect("record first owner-bound attempt"),
+        ProcessStartOutcome::Started(_)
+    ));
+
+    registry
+        .put_segment_handover(
+            process_id,
+            PersistedSegmentHandover {
+                segment_ordinal: 1,
+                program_hash: "handover-fold-program".to_string(),
+                handover: SegmentHandover {
+                    reason: BoundaryReason::JournalBudget,
+                    program_hash: Some("handover-fold-program".to_string()),
+                    engine_state: vec![1, 2, 3],
+                },
+            },
+        )
+        .await
+        .expect("record durable segment handover");
+
+    let resume_authority = ProcessExecutionWriteAuthority::invocation_resume(
+        process_id,
+        "handover-fold-resume",
+        first_started,
+    )
+    .bind_attempt(2);
+    let mut resumed_started = resume_authority
+        .invocation_started()
+        .expect("bound resumed invocation");
+    resumed_started.started_at_ms = 12;
+    let folded = match registry
+        .record_first_started_with_authority(process_id, resumed_started.clone(), &resume_authority)
+        .await
+        .expect("record resumed owner-bound attempt")
+    {
+        ProcessStartOutcome::Started(record) => record,
+        other => panic!("expected resumed attempt to start, got {other:?}"),
+    };
+    assert_eq!(
+        folded.first_started.as_deref(),
+        Some(&resumed_started),
+        "the stored fold must retain every field of the resumed attempt"
+    );
+
+    let events = registry
+        .events_after(process_id, 0)
+        .await
+        .expect("load handover-resume lifecycle events");
+    let resume_event = events
+        .iter()
+        .find(|event| {
+            event.event_type == "process.first_started"
+                && event
+                    .payload
+                    .pointer("/started/attempt")
+                    .and_then(|v| v.as_u64())
+                    == Some(2)
+        })
+        .expect("resumed first-started event");
+    assert_eq!(
+        resume_event
+            .payload
+            .get("resumed_from_handover")
+            .and_then(serde_json::Value::as_bool),
+        Some(true),
+        "the resumed attempt event must carry the handover marker"
+    );
+    assert_eq!(
+        resume_event.payload.get("started"),
+        Some(&serde_json::to_value(&resumed_started).expect("serialize resumed attempt")),
+        "the resumed attempt event must preserve every start field"
+    );
+
+    let replayed_from_empty =
+        crate::fold_process_record(base, &events).expect("replay handover resume from empty fold");
+    assert_eq!(
+        serde_json::to_value(&replayed_from_empty).expect("serialize replayed-from-empty fold"),
+        serde_json::to_value(&folded).expect("serialize stored handover-resume fold"),
+        "replaying from the registration base must reproduce the stored fold field-for-field"
+    );
+    assert_eq!(
+        replayed_from_empty.first_started.as_deref(),
+        Some(&resumed_started),
+        "the replayed-from-empty fold must retain every field of the resumed attempt"
+    );
+
+    let replayed = registry
+        .record_first_started_with_authority(process_id, resumed_started, &resume_authority)
+        .await
+        .expect("replay resumed owner-bound attempt");
+    assert!(matches!(replayed, ProcessStartOutcome::AlreadyApplied(_)));
+}
 
 pub(super) async fn process_record_is_the_fold_of_its_event_log(
     registry: Arc<dyn ProcessRegistry>,
@@ -6,7 +124,8 @@ pub(super) async fn process_record_is_the_fold_of_its_event_log(
     let process_id = "proc-event-fold";
     let base = registry
         .register_process(
-            registration(process_id).with_extra_event_types([plain_event_type("signal.ready")]),
+            rerunnable_registration(process_id)
+                .with_extra_event_types([plain_event_type("signal.ready")]),
         )
         .await
         .expect("register fold process");
@@ -24,23 +143,38 @@ pub(super) async fn process_record_is_the_fold_of_its_event_log(
     assert_process_record_fold(&registry, &base, "registration").await;
     registry
         .register_process(
-            registration(process_id).with_extra_event_types([plain_event_type("signal.ready")]),
+            rerunnable_registration(process_id)
+                .with_extra_event_types([plain_event_type("signal.ready")]),
         )
         .await
         .expect("replay fold process registration");
     assert_process_record_fold(&registry, &base, "registration replay").await;
 
-    let started = ProcessStarted {
-        owner: process_lease_owner("fold-starter"),
-        started_at_ms: 11,
-    };
+    let first_lease = claim_fold_lease(&registry, process_id, "fold-starter").await;
+    let first_authority = ProcessExecutionWriteAuthority::lease(first_lease.clone());
+    let started = started_for_fold(&first_lease, 1, 11);
     registry
-        .record_first_started(process_id, started)
+        .record_first_started_with_authority(process_id, started, &first_authority)
         .await
         .expect("append first-started lifecycle event");
     assert_process_record_fold(&registry, &base, "first started").await;
     replay_latest_event(&registry, process_id, "process.first_started").await;
     assert_process_record_fold(&registry, &base, "first-started replay").await;
+    release_fold_lease(&registry, &first_lease).await;
+
+    let second_lease = claim_fold_lease(&registry, process_id, "fold-starter-2").await;
+    let execution_authority = ProcessExecutionWriteAuthority::lease(second_lease.clone());
+    registry
+        .record_first_started_with_authority(
+            process_id,
+            started_for_fold(&second_lease, 2, 12),
+            &execution_authority,
+        )
+        .await
+        .expect("append second execution attempt");
+    assert_process_record_fold(&registry, &base, "second execution attempt").await;
+    replay_latest_event(&registry, process_id, "process.first_started").await;
+    assert_process_record_fold(&registry, &base, "second attempt replay").await;
 
     let wait = WaitState {
         kind: WaitKind::Signal {
@@ -52,7 +186,7 @@ pub(super) async fn process_record_is_the_fold_of_its_event_log(
         since_ms: 22,
     };
     registry
-        .set_process_wait(process_id, wait.clone())
+        .set_process_wait_with_authority(process_id, wait.clone(), &execution_authority)
         .await
         .expect("append wait-entered lifecycle event");
     assert_process_record_fold(&registry, &base, "wait entered").await;
@@ -60,7 +194,7 @@ pub(super) async fn process_record_is_the_fold_of_its_event_log(
     assert_process_record_fold(&registry, &base, "wait-entered replay").await;
 
     registry
-        .clear_process_wait(process_id)
+        .clear_process_wait_with_authority(process_id, &execution_authority)
         .await
         .expect("append wait-cleared lifecycle event");
     assert_process_record_fold(&registry, &base, "wait cleared").await;
@@ -74,11 +208,11 @@ pub(super) async fn process_record_is_the_fold_of_its_event_log(
         .expect("load first wait-cycle events");
 
     registry
-        .set_process_wait(process_id, wait.clone())
+        .set_process_wait_with_authority(process_id, wait.clone(), &execution_authority)
         .await
         .expect("replay wait-entered lifecycle event");
     registry
-        .clear_process_wait(process_id)
+        .clear_process_wait_with_authority(process_id, &execution_authority)
         .await
         .expect("replay wait-cleared lifecycle event");
     assert_process_record_fold(&registry, &base, "wait-cycle replay").await;
@@ -111,11 +245,11 @@ pub(super) async fn process_record_is_the_fold_of_its_event_log(
         since_ms: 22,
     };
     registry
-        .set_process_wait(process_id, second_wait)
+        .set_process_wait_with_authority(process_id, second_wait, &execution_authority)
         .await
         .expect("append distinct second wait-entered lifecycle event");
     registry
-        .clear_process_wait(process_id)
+        .clear_process_wait_with_authority(process_id, &execution_authority)
         .await
         .expect("append distinct second wait-cleared lifecycle event");
     assert_process_record_fold(&registry, &base, "second wait cycle").await;
@@ -219,6 +353,7 @@ pub(super) async fn process_record_is_the_fold_of_its_event_log(
         .expect("replay cancel-requested event");
     assert_process_record_fold(&registry, &base, "cancel-request replay").await;
 
+    release_fold_lease(&registry, &second_lease).await;
     complete_and_assert_fold(
         &registry,
         process_id,
@@ -282,6 +417,39 @@ pub(super) async fn process_record_is_the_fold_of_its_event_log(
     }
 }
 
+async fn claim_fold_lease(
+    registry: &Arc<dyn ProcessRegistry>,
+    process_id: &str,
+    owner_id: &str,
+) -> crate::ProcessLease {
+    registry
+        .claim_process_lease(process_id, &process_lease_owner(owner_id), 60_000)
+        .await
+        .expect("claim fold process lease")
+        .acquired()
+        .expect("fold process lease is available")
+}
+
+fn started_for_fold(
+    lease: &crate::ProcessLease,
+    attempt: u32,
+    started_at_ms: u64,
+) -> ProcessStarted {
+    ProcessStarted {
+        owner: lease.owner.clone(),
+        fencing_token: lease.fencing_token,
+        attempt,
+        started_at_ms,
+    }
+}
+
+async fn release_fold_lease(registry: &Arc<dyn ProcessRegistry>, lease: &crate::ProcessLease) {
+    registry
+        .complete_process_lease(&crate::ProcessLeaseCompletion::from_lease(lease))
+        .await
+        .expect("release fold process lease");
+}
+
 async fn replay_latest_event(
     registry: &Arc<dyn ProcessRegistry>,
     process_id: &str,
@@ -316,21 +484,18 @@ async fn complete_and_assert_fold(
     output: ProcessAwaitOutput,
     label: &str,
 ) {
+    let authority = if base.disposition == RecoveryDisposition::ExternallyOwned {
+        ProcessCompletionAuthority::external_owner()
+    } else {
+        ProcessCompletionAuthority::workflow_key("fold-conformance")
+    };
     registry
-        .complete_process(
-            process_id,
-            output.clone(),
-            ProcessCompletionAuthority::external_owner(),
-        )
+        .complete_process(process_id, output.clone(), authority.clone())
         .await
         .expect("append terminal event");
     assert_process_record_fold(registry, base, label).await;
     registry
-        .complete_process(
-            process_id,
-            output,
-            ProcessCompletionAuthority::external_owner(),
-        )
+        .complete_process(process_id, output, authority)
         .await
         .expect("replay terminal event");
     assert_process_record_fold(registry, base, &format!("{label} replay")).await;

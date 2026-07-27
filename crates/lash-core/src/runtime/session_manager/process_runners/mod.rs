@@ -48,6 +48,7 @@ pub(in crate::runtime::session_manager::process_runners) struct ProcessToolCallR
     registry: Arc<dyn crate::ProcessRegistry>,
     call: crate::PreparedToolCall,
     parent_invocation: Option<crate::RuntimeInvocation>,
+    execution_write_authority: crate::ProcessExecutionWriteAuthority,
     scoped_effect_controller: crate::ScopedEffectController<'run>,
     cancellation: tokio_util::sync::CancellationToken,
 }

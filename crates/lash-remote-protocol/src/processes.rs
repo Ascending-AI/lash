@@ -445,6 +445,8 @@ pub struct RemoteProcessRecord {
     pub process_id: String,
     pub input: RemoteProcessInput,
     pub disposition: RemoteRecoveryDisposition,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_attempts: Option<u32>,
     pub identity: RemoteProcessIdentity,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub event_types: Vec<RemoteProcessEventType>,
@@ -771,6 +773,7 @@ pub enum RemoteAbandonWriter {
     OwnerDrain,
     Sweep,
     ReconciledRequest,
+    EngineGaveUp,
 }
 
 /// Wire mirror of Abandoned-terminal evidence. The dead/lapsed owner identity is
@@ -789,7 +792,15 @@ pub struct RemoteAbandonEvidence {
 pub struct RemoteProcessStarted {
     #[serde(default)]
     pub owner: serde_json::Value,
+    #[serde(default)]
+    pub fencing_token: u64,
+    #[serde(default = "remote_first_process_attempt")]
+    pub attempt: u32,
     pub started_at_ms: u64,
+}
+
+const fn remote_first_process_attempt() -> u32 {
+    1
 }
 
 /// Wire mirror of the pending Abandon Request marker.
@@ -1137,6 +1148,8 @@ pub struct RemoteProcessStartRequest {
     pub input: RemoteProcessInput,
     pub disposition: RemoteRecoveryDisposition,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_attempts: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub env_spec: Option<RemoteProcessExecutionEnvSpec>,
     pub originator: RemoteProcessOriginator,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1151,6 +1164,12 @@ impl RemoteProcessStartRequest {
     pub fn validate(&self) -> Result<(), RemoteProtocolError> {
         ensure_protocol_version(self.protocol_version)?;
         require_non_empty("RemoteProcessStartRequest", "id", &self.id)?;
+        if self.max_attempts == Some(0) {
+            return Err(RemoteProtocolError::InvalidEnvelope {
+                type_name: "RemoteProcessStartRequest",
+                message: "max_attempts must be greater than zero when provided".to_string(),
+            });
+        }
         self.input.validate("RemoteProcessStartRequest")?;
         if let Some(env_spec) = &self.env_spec {
             env_spec.validate("RemoteProcessStartRequest")?;

@@ -9,6 +9,19 @@ pub enum PluginError {
     Invoke(String),
     #[error("plugin session error: {0}")]
     Session(String),
+    #[error("process `{process_id}` execution was already started by {by:?}")]
+    ProcessAlreadyStarted {
+        process_id: String,
+        by: Box<crate::LeaseOwnerIdentity>,
+    },
+    #[error("process `{process_id}` exhausted its execution attempts ({attempts}/{max_attempts})")]
+    ProcessAttemptsExhausted {
+        process_id: String,
+        attempts: u32,
+        max_attempts: u32,
+    },
+    #[error("process lease for `{process_id}` is missing or expired (superseded)")]
+    ProcessLeaseSuperseded { process_id: String },
 }
 
 impl From<crate::RuntimeEffectControllerError> for PluginError {

@@ -3,6 +3,7 @@ use std::sync::{Mutex, OnceLock};
 use std::time::Duration;
 
 use super::*;
+use crate::TestProcessRegistryWriteExt;
 use crate::{
     AbandonRequest, AttachmentStore, DurabilityTier, LeaseOwnerIdentity, LeaseOwnerLiveness,
     ProcessExecutionEnvRef, ProcessInput, ProcessListFilter, ProcessRegistration, ProcessStarted,
@@ -390,6 +391,58 @@ struct BoundaryThenTerminalEngine {
     runs: Arc<AtomicUsize>,
 }
 
+struct PausedInfraEngine {
+    started: Arc<tokio::sync::Notify>,
+    fail: Arc<tokio::sync::Notify>,
+}
+
+struct FailOnceArtifactReadEngine {
+    reads: Arc<AtomicUsize>,
+}
+
+#[async_trait::async_trait]
+impl crate::ProcessEngine for FailOnceArtifactReadEngine {
+    fn kind(&self) -> &'static str {
+        "fail-once-artifact-read"
+    }
+
+    async fn run(
+        &self,
+        context: crate::ProcessEngineRunContext<'_>,
+        _payload: serde_json::Value,
+    ) -> Result<crate::ProcessRunOutcome, crate::ProcessInfraError> {
+        if self.reads.fetch_add(1, Ordering::SeqCst) == 0 {
+            return Err(crate::ProcessInfraError::new(PluginError::Session(
+                "injected transient artifact-store read failure".to_string(),
+            )));
+        }
+        Ok(ProcessAwaitOutput::Success {
+            value: serde_json::json!({"process_id": context.registration().id}),
+            control: None,
+        }
+        .into())
+    }
+}
+
+#[async_trait::async_trait]
+impl crate::ProcessEngine for PausedInfraEngine {
+    fn kind(&self) -> &'static str {
+        "paused-infra"
+    }
+
+    async fn run(
+        &self,
+        _context: crate::ProcessEngineRunContext<'_>,
+        _payload: serde_json::Value,
+    ) -> Result<crate::ProcessRunOutcome, crate::ProcessInfraError> {
+        self.started.notify_one();
+        self.fail.notified().await;
+        Err(crate::ProcessInfraError::new(PluginError::Session(
+            "injected infrastructure failure".to_string(),
+        )))
+    }
+}
+
 #[async_trait::async_trait]
 impl crate::ProcessEngine for BoundaryThenTerminalEngine {
     fn kind(&self) -> &'static str {
@@ -400,21 +453,24 @@ impl crate::ProcessEngine for BoundaryThenTerminalEngine {
         &self,
         mut context: crate::ProcessEngineRunContext<'_>,
         _payload: serde_json::Value,
-    ) -> crate::ProcessRunOutcome {
+    ) -> Result<crate::ProcessRunOutcome, crate::ProcessInfraError> {
         let run = self.runs.fetch_add(1, Ordering::SeqCst);
         let record = context
-            .registry()
-            .get_process(&context.registration().id)
+            .processes()
+            .record()
             .await
+            .expect("process registry read")
             .expect("process remains registered between segments");
         assert!(!record.is_terminal(), "boundary must not write a terminal");
         if run == 0 {
             assert!(context.take_handover().is_none());
-            crate::ProcessRunOutcome::SegmentBoundary(crate::SegmentHandover {
-                reason: crate::BoundaryReason::JournalBudget,
-                program_hash: Some("program-v1".to_string()),
-                engine_state: vec![1, 2, 3],
-            })
+            Ok(crate::ProcessRunOutcome::SegmentBoundary(
+                crate::SegmentHandover {
+                    reason: crate::BoundaryReason::JournalBudget,
+                    program_hash: Some("program-v1".to_string()),
+                    engine_state: vec![1, 2, 3],
+                },
+            ))
         } else {
             assert_eq!(
                 context
@@ -423,10 +479,12 @@ impl crate::ProcessEngine for BoundaryThenTerminalEngine {
                     .engine_state,
                 vec![1, 2, 3]
             );
-            crate::ProcessRunOutcome::Terminal(Box::new(ProcessAwaitOutput::Success {
-                value: serde_json::json!({ "segments": 2 }),
-                control: None,
-            }))
+            Ok(crate::ProcessRunOutcome::Terminal(Box::new(
+                ProcessAwaitOutput::Success {
+                    value: serde_json::json!({ "segments": 2 }),
+                    control: None,
+                },
+            )))
         }
     }
 }
@@ -465,15 +523,17 @@ impl crate::ProcessEngine for SnapshotRecordingEngine {
         &self,
         _context: crate::ProcessEngineRunContext<'_>,
         payload: serde_json::Value,
-    ) -> crate::ProcessRunOutcome {
+    ) -> Result<crate::ProcessRunOutcome, crate::ProcessInfraError> {
         self.payloads
             .lock()
             .expect("recorded payloads")
             .push(payload);
-        crate::ProcessRunOutcome::Terminal(Box::new(ProcessAwaitOutput::Success {
-            value: serde_json::json!({ "recorded": true }),
-            control: None,
-        }))
+        Ok(crate::ProcessRunOutcome::Terminal(Box::new(
+            ProcessAwaitOutput::Success {
+                value: serde_json::json!({ "recorded": true }),
+                control: None,
+            },
+        )))
     }
 }
 
@@ -487,12 +547,14 @@ impl crate::ProcessEngine for NestedProcessEngine {
         &self,
         _context: crate::ProcessEngineRunContext<'_>,
         _payload: serde_json::Value,
-    ) -> crate::ProcessRunOutcome {
+    ) -> Result<crate::ProcessRunOutcome, crate::ProcessInfraError> {
         self.runs.fetch_add(1, Ordering::SeqCst);
-        crate::ProcessRunOutcome::Terminal(Box::new(ProcessAwaitOutput::Success {
-            value: serde_json::json!({ "nested": "done" }),
-            control: None,
-        }))
+        Ok(crate::ProcessRunOutcome::Terminal(Box::new(
+            ProcessAwaitOutput::Success {
+                value: serde_json::json!({ "nested": "done" }),
+                control: None,
+            },
+        )))
     }
 }
 
@@ -595,14 +657,14 @@ impl crate::ProcessEngine for ProductionChainEngine {
         &self,
         context: crate::ProcessEngineRunContext<'_>,
         payload: serde_json::Value,
-    ) -> crate::ProcessRunOutcome {
+    ) -> Result<crate::ProcessRunOutcome, crate::ProcessInfraError> {
         let process_id = context.registration().id.clone();
         let role = payload["role"].as_str().expect("chain role");
         let roots = payload["roots"].as_u64().expect("root count") as usize;
         let nodes = payload["nodes"].as_u64().expect("node count") as usize;
         let nested_wait_task = payload["nested_wait_task"].as_bool().unwrap_or(false);
         let catalog = context.resolved_tool_catalog().expect("tool catalog");
-        let registry = context.registry();
+        let processes = context.processes();
         let runtime = context
             .into_runtime_context(catalog)
             .expect("engine runtime context");
@@ -641,7 +703,7 @@ impl crate::ProcessEngine for ProductionChainEngine {
                 .expect("drive production roots");
             drop(runtime);
             runtime_guard.shutdown().await;
-            return Self::success(process_id);
+            return Ok(Self::success(process_id));
         }
 
         self.begin_work();
@@ -713,16 +775,16 @@ impl crate::ProcessEngine for ProductionChainEngine {
             }
             self.end_work();
             if nested_wait_task && level == 0 {
-                let awaiter = crate::ProcessAwaiter::polling(registry);
+                let processes = processes.clone();
                 let wait_child_id = child_id.clone();
                 crate::task::spawn(inherit_process_execution_permit(async move {
-                    awaiter.await_terminal(&wait_child_id).await
+                    processes.await_terminal(&wait_child_id).await
                 }))
                 .await
                 .expect("nested child-turn task joins")
                 .expect("nested child-turn task observes child terminal");
             } else {
-                crate::ProcessAwaiter::polling(registry)
+                processes
                     .await_terminal(&child_id)
                     .await
                     .expect("parent observes production-started child terminal");
@@ -732,7 +794,7 @@ impl crate::ProcessEngine for ProductionChainEngine {
         drop(runtime);
         runtime_guard.shutdown().await;
         self.end_work();
-        Self::success(process_id)
+        Ok(Self::success(process_id))
     }
 }
 
@@ -1506,6 +1568,8 @@ async fn sweep_abandons_started_owner_bound_with_provably_dead_holder() {
             "proc-ob-dead",
             ProcessStarted {
                 owner: dead_holder.clone(),
+                fencing_token: 0,
+                attempt: 1,
                 started_at_ms: 1,
             },
         )
@@ -1537,22 +1601,19 @@ async fn sweep_abandons_started_owner_bound_with_provably_dead_holder() {
     );
 
     // Revenant: the dead owner reappears and tries to complete the row. The
-    // row is already terminal, so the write is rejected — the sweep stayed the
-    // single writer.
-    assert!(
-        registry
-            .complete_process(
-                "proc-ob-dead",
-                ProcessAwaitOutput::Success {
-                    value: serde_json::json!("revenant"),
-                    control: None,
-                },
-                crate::ProcessCompletionAuthority::workflow_key("proc-ob-dead"),
-            )
-            .await
-            .is_err(),
-        "a revenant cannot overwrite an Abandoned terminal"
-    );
+    // terminal append adopts the stored outcome rather than overwriting it.
+    let replayed = registry
+        .complete_process(
+            "proc-ob-dead",
+            ProcessAwaitOutput::Success {
+                value: serde_json::json!("revenant"),
+                control: None,
+            },
+            crate::ProcessCompletionAuthority::workflow_key("proc-ob-dead"),
+        )
+        .await
+        .expect("terminal retry adopts stored outcome");
+    assert!(matches!(replayed.status, ProcessStatus::Abandoned { .. }));
 }
 
 /// A started OwnerBound row whose holder is merely silent (no death evidence)
@@ -1573,6 +1634,8 @@ async fn sweep_skips_started_owner_bound_with_silent_holder() {
             "proc-ob-silent",
             ProcessStarted {
                 owner: LeaseOwnerIdentity::opaque("started-worker", "started-incarnation"),
+                fencing_token: 0,
+                attempt: 1,
                 started_at_ms: 1,
             },
         )
@@ -1628,6 +1691,8 @@ async fn sweep_reconciles_started_owner_bound_after_lease_lapse() {
             "proc-ob-lapse",
             ProcessStarted {
                 owner: LeaseOwnerIdentity::opaque("lapsed-owner", "lapsed-incarnation"),
+                fencing_token: 0,
+                attempt: 1,
                 started_at_ms: 1,
             },
         )
@@ -1667,9 +1732,10 @@ async fn sweep_reconciles_started_owner_bound_after_lease_lapse() {
 
 /// An OwnerBound row that has never started is claimable and runnable by any
 /// worker (first execution is not re-execution): the runner records
-/// `first_started` and drives it to a run terminal, not an Abandoned one.
+/// `first_started`. If execution infrastructure is unavailable, the row stays
+/// non-terminal and becomes claimable again rather than recording a failure.
 #[tokio::test]
-async fn owner_bound_unstarted_runs_once() {
+async fn owner_bound_unstarted_infra_failure_stays_claimable() {
     let registry: Arc<dyn ProcessRegistry> = Arc::new(TestLocalProcessRegistry::default());
     registry
         .register_process(registration_with_disposition(
@@ -1687,8 +1753,37 @@ async fn owner_bound_unstarted_runs_once() {
         .drive_pending_processes()
         .await
         .expect("sweep dispatches");
-    await_terminal(&registry, "proc-ob-unstarted").await;
-
+    tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            if registry
+                .get_process("proc-ob-unstarted")
+                .await
+                .expect("process")
+                .first_started
+                .is_some()
+            {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("runner records first_started before infrastructure fails");
+    let next_owner = local_owner("next-worker", "host-b", "claimant-next");
+    let reclaimed = tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            match registry
+                .claim_process_lease("proc-ob-unstarted", &next_owner, 60_000)
+                .await
+                .expect("claim after infrastructure failure")
+            {
+                crate::ProcessLeaseClaimOutcome::Acquired(lease) => break lease,
+                crate::ProcessLeaseClaimOutcome::Busy { .. } => tokio::task::yield_now().await,
+            }
+        }
+    })
+    .await
+    .expect("infrastructure failure releases its lease");
     let record = registry
         .get_process("proc-ob-unstarted")
         .await
@@ -1697,13 +1792,145 @@ async fn owner_bound_unstarted_runs_once() {
         record.first_started.is_some(),
         "the runner must record first_started before executing an unstarted OwnerBound row"
     );
-    // A run terminal (Failed here, because the External placeholder input has
-    // no execution runtime) — crucially NOT Abandoned. First execution ran.
     assert!(
-        matches!(record.status, ProcessStatus::Failed { .. }),
-        "an unstarted OwnerBound row reaches a run terminal, not an abandoned one, got {:?}",
+        !record.is_terminal(),
+        "infrastructure failure must not write a terminal, got {:?}",
         record.status
     );
+    registry
+        .complete_process_lease(&crate::ProcessLeaseCompletion::from_lease(&reclaimed))
+        .await
+        .expect("release verification claim");
+}
+
+#[tokio::test]
+async fn missing_engine_configuration_is_retryable_infrastructure_failure() {
+    let run_handle = Arc::new(LateBoundProcessRunHandle::default());
+    let (worker, registry, run_handle, env_ref) = worker_with_engine(
+        1,
+        Arc::new(SnapshotRecordingEngine {
+            payloads: Arc::new(Mutex::new(Vec::new())),
+        }),
+        run_handle,
+    )
+    .await;
+    registry
+        .register_process(engine_registration(
+            "missing-engine",
+            "not-installed",
+            env_ref,
+            serde_json::Value::Null,
+        ))
+        .await
+        .expect("register missing engine row");
+    run_handle
+        .enable_and_drive()
+        .await
+        .expect("drive missing engine row");
+
+    tokio::time::timeout(Duration::from_secs(1), async {
+        loop {
+            let record = registry
+                .get_process("missing-engine")
+                .await
+                .expect("missing engine row");
+            let lease = registry
+                .get_process_lease("missing-engine")
+                .await
+                .expect("lease read");
+            if record.first_started.is_some() && lease.is_none() {
+                assert!(!record.is_terminal());
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("infrastructure failure leaves row claimable");
+
+    let next = registry
+        .claim_process_lease(
+            "missing-engine",
+            &local_owner("next-worker", "host-b", "next-start"),
+            60_000,
+        )
+        .await
+        .expect("subsequent claim")
+        .acquired()
+        .expect("row remains claimable");
+    registry
+        .complete_process_lease(&crate::ProcessLeaseCompletion::from_lease(&next))
+        .await
+        .expect("release verification lease");
+    drop(worker);
+}
+
+#[tokio::test]
+async fn transient_engine_artifact_read_retries_and_terminally_commits() {
+    let reads = Arc::new(AtomicUsize::new(0));
+    let run_handle = Arc::new(LateBoundProcessRunHandle::default());
+    let (_worker, registry, run_handle, env_ref) = worker_with_engine(
+        1,
+        Arc::new(FailOnceArtifactReadEngine {
+            reads: Arc::clone(&reads),
+        }),
+        run_handle,
+    )
+    .await;
+    registry
+        .register_process(engine_registration(
+            "artifact-read-retry",
+            "fail-once-artifact-read",
+            env_ref,
+            serde_json::Value::Null,
+        ))
+        .await
+        .expect("register fail-once engine row");
+    run_handle
+        .enable_and_drive()
+        .await
+        .expect("drive failing artifact read");
+
+    tokio::time::timeout(Duration::from_secs(1), async {
+        loop {
+            let record = registry
+                .get_process("artifact-read-retry")
+                .await
+                .expect("artifact retry row");
+            if record.first_started.is_some()
+                && !record.is_terminal()
+                && registry
+                    .get_process_lease("artifact-read-retry")
+                    .await
+                    .expect("lease read")
+                    .is_none()
+            {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("transient engine error releases its claim");
+
+    run_handle
+        .enable_and_drive()
+        .await
+        .expect("drive retry after artifact recovery");
+    await_terminal(&registry, "artifact-read-retry").await;
+    let record = registry
+        .get_process("artifact-read-retry")
+        .await
+        .expect("terminal artifact retry row");
+    assert!(record.is_terminal());
+    assert_eq!(
+        record
+            .first_started
+            .as_deref()
+            .map(|started| started.attempt),
+        Some(2)
+    );
+    assert_eq!(reads.load(Ordering::SeqCst), 2);
 }
 
 /// Owner drain (ADR 0019): a host closing gracefully terminalizes its own
@@ -1728,6 +1955,8 @@ async fn drain_terminalizes_this_hosts_started_owner_bound_work() {
             "mine-started",
             ProcessStarted {
                 owner: owner.clone(),
+                fencing_token: 0,
+                attempt: 1,
                 started_at_ms: 1,
             },
         )
@@ -1747,6 +1976,8 @@ async fn drain_terminalizes_this_hosts_started_owner_bound_work() {
             "theirs-started",
             ProcessStarted {
                 owner: local_owner("other-host", "host-b", "start-b"),
+                fencing_token: 0,
+                attempt: 1,
                 started_at_ms: 1,
             },
         )
@@ -1776,6 +2007,8 @@ async fn drain_terminalizes_this_hosts_started_owner_bound_work() {
             "rerunnable",
             ProcessStarted {
                 owner: owner.clone(),
+                fencing_token: 0,
+                attempt: 1,
                 started_at_ms: 1,
             },
         )
@@ -1799,4 +2032,68 @@ async fn drain_terminalizes_this_hosts_started_owner_bound_work() {
             "{untouched} must be left non-terminal by owner drain",
         );
     }
+}
+
+#[tokio::test]
+async fn inline_start_records_stable_owner_that_owner_drain_can_match() {
+    let started = Arc::new(tokio::sync::Notify::new());
+    let fail = Arc::new(tokio::sync::Notify::new());
+    let run_handle = Arc::new(LateBoundProcessRunHandle::default());
+    let (worker, registry, run_handle, env_ref) = worker_with_engine(
+        1,
+        Arc::new(PausedInfraEngine {
+            started: Arc::clone(&started),
+            fail: Arc::clone(&fail),
+        }),
+        run_handle,
+    )
+    .await;
+    let mut registration = engine_registration(
+        "real-inline-owner-bound",
+        "paused-infra",
+        env_ref,
+        serde_json::Value::Null,
+    );
+    registration.disposition = RecoveryDisposition::OwnerBound;
+    registry
+        .register_process(registration)
+        .await
+        .expect("register owner-bound engine");
+    run_handle
+        .enable_and_drive()
+        .await
+        .expect("drive owner-bound engine");
+    tokio::time::timeout(Duration::from_secs(1), started.notified())
+        .await
+        .expect("engine starts");
+
+    let record = registry
+        .get_process("real-inline-owner-bound")
+        .await
+        .expect("started record");
+    assert_eq!(
+        record.first_started.as_deref().map(|start| &start.owner),
+        Some(&worker.config().lease_owner),
+        "durable start fact uses the stable worker owner"
+    );
+
+    fail.notify_one();
+    tokio::time::timeout(Duration::from_secs(1), async {
+        while registry
+            .get_process_lease("real-inline-owner-bound")
+            .await
+            .expect("lease read")
+            .is_some()
+        {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("infrastructure failure releases the execution lease");
+
+    let report = worker.drain_owner_bound_work().await.expect("owner drain");
+    assert_eq!(
+        report.abandoned,
+        vec!["real-inline-owner-bound".to_string()]
+    );
 }

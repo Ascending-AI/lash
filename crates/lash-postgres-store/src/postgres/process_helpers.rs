@@ -319,9 +319,48 @@ fn encode_process_lease_liveness(liveness: &LeaseOwnerLiveness) -> Result<String
 }
 
 fn process_lease_expired(process_id: &str) -> PluginError {
-    PluginError::Session(format!(
-        "process lease for `{process_id}` is missing or expired"
-    ))
+    PluginError::ProcessLeaseSuperseded {
+        process_id: process_id.to_string(),
+    }
+}
+
+async fn validate_process_execution_authority_tx(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    process_id: &str,
+    record: &ProcessRecord,
+    authority: &ProcessExecutionWriteAuthority,
+    start: Option<&ProcessStarted>,
+    now: u64,
+) -> Result<(), PluginError> {
+    match authority {
+        ProcessExecutionWriteAuthority::Invocation { .. } => {
+            if let Some(started) = start {
+                authority.validate_invocation_for_start(
+                    process_id,
+                    started,
+                    record.first_started.as_deref(),
+                )
+            } else {
+                authority.validate_invocation_for_write(process_id, record)
+            }
+        }
+        ProcessExecutionWriteAuthority::Lease(lease) => {
+            if lease.process_id != process_id {
+                return Err(process_lease_expired(process_id));
+            }
+            let current = load_process_lease_tx(tx, process_id).await?;
+            if guard_lease(current.as_ref(), &lease.lease_token, now)
+                && current.as_ref().is_some_and(|current| {
+                    current.owner.same_incarnation(&lease.owner)
+                        && current.fencing_token == lease.fencing_token
+                })
+            {
+                Ok(())
+            } else {
+                Err(process_lease_expired(process_id))
+            }
+        }
+    }
 }
 
 fn guard_lease(current: Option<&ProcessLease>, lease_token: &str, now: u64) -> bool {

@@ -516,6 +516,7 @@ fn remote_process_dtos_json_round_trip() {
             metadata: serde_json::json!({ "label": "Import" }),
         },
         disposition: RemoteRecoveryDisposition::ExternallyOwned,
+        max_attempts: None,
         env_spec: Some(RemoteProcessExecutionEnvSpec {
             plugin_options: RemoteProcessPluginOptions {
                 plugins: BTreeMap::from([(
@@ -550,6 +551,12 @@ fn remote_process_dtos_json_round_trip() {
         event_types: vec![remote_process_event_type()],
     };
     start.validate().expect("valid process start request");
+    let mut invalid_max_attempts = start.clone();
+    invalid_max_attempts.max_attempts = Some(0);
+    assert!(matches!(
+        invalid_max_attempts.validate(),
+        Err(RemoteProtocolError::InvalidEnvelope { .. })
+    ));
     let decoded: RemoteProcessStartRequest =
         serde_json::from_value(serde_json::to_value(&start).expect("serialize start"))
             .expect("deserialize start");
@@ -845,8 +852,8 @@ fn wrong_protocol_versions_are_rejected() {
     assert!(matches!(
         request.validate(),
         Err(RemoteProtocolError::UnsupportedProtocolVersion {
-            actual: 16,
-            expected: 17,
+            actual: 17,
+            expected: 18,
         })
     ));
 
@@ -928,7 +935,7 @@ fn nested_protocol_versions_must_match_envelope() {
 
 #[test]
 fn remote_process_env_ref_is_validated_but_serializes_as_string() {
-    assert_eq!(REMOTE_PROTOCOL_VERSION, 17);
+    assert_eq!(REMOTE_PROTOCOL_VERSION, 18);
     let env_ref: RemoteProcessExecutionEnvRef =
         canonical_env_ref().parse().expect("canonical env ref");
     assert_eq!(env_ref.as_str(), canonical_env_ref());
@@ -1156,6 +1163,7 @@ fn remote_process_record() -> RemoteProcessRecord {
             metadata: serde_json::json!({ "label": "Import" }),
         },
         disposition: RemoteRecoveryDisposition::ExternallyOwned,
+        max_attempts: None,
         identity: RemoteProcessIdentity {
             kind: "external".to_string(),
             label: Some("Import".to_string()),

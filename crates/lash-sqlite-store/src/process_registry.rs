@@ -506,6 +506,41 @@ impl ProcessRegistry for SqliteProcessRegistry {
         Ok(result)
     }
 
+    async fn append_event_with_authority(
+        &self,
+        process_id: &str,
+        request: ProcessEventAppendRequest,
+        authority: &ProcessExecutionWriteAuthority,
+    ) -> Result<ProcessEventAppendResult, lash_core::PluginError> {
+        let process_id = process_id.to_string();
+        let authority = authority.clone();
+        let occurred_at_ms = self.clock.timestamp_ms();
+        let (result, _appended) = self
+            .conn
+            .write_flow(move |tx| {
+                Ok(tx_outcome((|| {
+                    let mut record =
+                        Self::load_process_conn(tx, &process_id)?.ok_or_else(|| {
+                            lash_core::PluginError::Session(format!(
+                                "unknown process `{process_id}`"
+                            ))
+                        })?;
+                    validate_process_execution_authority_conn(
+                        tx,
+                        &process_id,
+                        &record,
+                        &authority,
+                        None,
+                        occurred_at_ms,
+                    )?;
+                    Self::append_event_conn(tx, &mut record, request, occurred_at_ms)
+                })()))
+            })
+            .await
+            .map_err(process_sqlite_error)??;
+        Ok(result)
+    }
+
     async fn events_after(
         &self,
         process_id: &str,
@@ -661,7 +696,7 @@ impl ProcessRegistry for SqliteProcessRegistry {
         process_id: &str,
         await_output: ProcessAwaitOutput,
         authority: lash_core::ProcessCompletionAuthority,
-    ) -> Result<ProcessRecord, lash_core::PluginError> {
+    ) -> Result<lash_core::ProcessCompletionOutcome, lash_core::PluginError> {
         // Load, validate the authority against the row's declared disposition,
         // and append the terminal event as one atomic transaction, so a
         // concurrent complete→prune→re-register cannot slip a different
@@ -679,17 +714,19 @@ impl ProcessRegistry for SqliteProcessRegistry {
         &self,
         lease: &ProcessLease,
         await_output: ProcessAwaitOutput,
-    ) -> Result<ProcessRecord, lash_core::PluginError> {
+    ) -> Result<lash_core::ProcessCompletionOutcome, lash_core::PluginError> {
         super::process_registry_completion::complete_process_with_lease(self, lease, await_output)
             .await
     }
 
-    async fn record_first_started(
+    async fn record_first_started_with_authority(
         &self,
         process_id: &str,
         started: ProcessStarted,
-    ) -> Result<ProcessRecord, lash_core::PluginError> {
+        authority: &ProcessExecutionWriteAuthority,
+    ) -> Result<ProcessStartOutcome, lash_core::PluginError> {
         let process_id = process_id.to_string();
+        let authority = authority.clone();
         let now = self.clock.timestamp_ms();
         self.conn
             .write_flow(move |tx| {
@@ -700,12 +737,48 @@ impl ProcessRegistry for SqliteProcessRegistry {
                                 "unknown process `{process_id}`"
                             ))
                         })?;
-                    if record.first_started.is_some() {
-                        return Ok(record);
+                    validate_process_execution_authority_conn(
+                        tx,
+                        &process_id,
+                        &record,
+                        &authority,
+                        Some(&started),
+                        now,
+                    )?;
+                    match lash_core::runtime::prepare_process_start(&record, &started, &authority)?
+                    {
+                        ProcessStartPlan::AlreadyApplied => {
+                            return Ok(ProcessStartOutcome::AlreadyApplied(record));
+                        }
+                        ProcessStartPlan::AlreadyStarted { by } => {
+                            return Ok(ProcessStartOutcome::AlreadyStarted {
+                                current: record,
+                                by,
+                            });
+                        }
+                        ProcessStartPlan::AttemptsExhausted {
+                            attempts,
+                            max_attempts,
+                        } => {
+                            return Ok(ProcessStartOutcome::AttemptsExhausted {
+                                current: record,
+                                attempts,
+                                max_attempts,
+                            });
+                        }
+                        ProcessStartPlan::Append => {}
                     }
-                    let request = ProcessEventAppendRequest::first_started(&process_id, &started);
+                    let resumed_from_handover = record
+                        .first_started
+                        .as_deref()
+                        .is_some_and(|retained| authority.permits_owner_bound_resume(retained));
+                    let request = ProcessEventAppendRequest::first_started(
+                        &process_id,
+                        &started,
+                        resumed_from_handover,
+                    );
                     Self::append_event_conn(tx, &mut record, request, now)?;
-                    Ok(record)
+                    Ok(ProcessStartOutcome::Started(record))
                 })()))
             })
             .await
@@ -746,12 +819,14 @@ impl ProcessRegistry for SqliteProcessRegistry {
             .map_err(process_sqlite_error)?
     }
 
-    async fn set_process_wait(
+    async fn set_process_wait_with_authority(
         &self,
         process_id: &str,
         wait: lash_core::WaitState,
+        authority: &ProcessExecutionWriteAuthority,
     ) -> Result<ProcessRecord, lash_core::PluginError> {
         let process_id = process_id.to_string();
+        let authority = authority.clone();
         let now = self.clock.timestamp_ms();
         self.conn
             .write_flow(move |tx| {
@@ -762,6 +837,14 @@ impl ProcessRegistry for SqliteProcessRegistry {
                                 "unknown process `{process_id}`"
                             ))
                         })?;
+                    validate_process_execution_authority_conn(
+                        tx,
+                        &process_id,
+                        &record,
+                        &authority,
+                        None,
+                        now,
+                    )?;
                     if record.is_terminal() {
                         return Err(lash_core::PluginError::Session(format!(
                             "terminal process `{process_id}` cannot enter a wait state"
@@ -779,11 +862,13 @@ impl ProcessRegistry for SqliteProcessRegistry {
             .map_err(process_sqlite_error)?
     }
 
-    async fn clear_process_wait(
+    async fn clear_process_wait_with_authority(
         &self,
         process_id: &str,
+        authority: &ProcessExecutionWriteAuthority,
     ) -> Result<ProcessRecord, lash_core::PluginError> {
         let process_id = process_id.to_string();
+        let authority = authority.clone();
         let now = self.clock.timestamp_ms();
         self.conn
             .write_flow(move |tx| {
@@ -794,6 +879,14 @@ impl ProcessRegistry for SqliteProcessRegistry {
                                 "unknown process `{process_id}`"
                             ))
                         })?;
+                    validate_process_execution_authority_conn(
+                        tx,
+                        &process_id,
+                        &record,
+                        &authority,
+                        None,
+                        now,
+                    )?;
                     let Some(wait) = record.wait.clone() else {
                         return Ok(record);
                     };
@@ -1308,9 +1401,48 @@ impl ProcessRegistry for SqliteProcessRegistry {
 
 /// Loud, stable error for a superseded or expired process lease.
 pub(super) fn process_lease_expired(process_id: &str) -> lash_core::PluginError {
-    lash_core::PluginError::Session(format!(
-        "process lease for `{process_id}` is missing or expired"
-    ))
+    lash_core::PluginError::ProcessLeaseSuperseded {
+        process_id: process_id.to_string(),
+    }
+}
+
+fn validate_process_execution_authority_conn(
+    conn: &rusqlite::Connection,
+    process_id: &str,
+    record: &ProcessRecord,
+    authority: &ProcessExecutionWriteAuthority,
+    start: Option<&ProcessStarted>,
+    now: u64,
+) -> Result<(), lash_core::PluginError> {
+    match authority {
+        ProcessExecutionWriteAuthority::Invocation { .. } => {
+            if let Some(started) = start {
+                authority.validate_invocation_for_start(
+                    process_id,
+                    started,
+                    record.first_started.as_deref(),
+                )
+            } else {
+                authority.validate_invocation_for_write(process_id, record)
+            }
+        }
+        ProcessExecutionWriteAuthority::Lease(lease) => {
+            if lease.process_id != process_id {
+                return Err(process_lease_expired(process_id));
+            }
+            let current = SqliteProcessRegistry::load_process_lease_conn(conn, process_id)?;
+            if guard_lease(current.as_ref(), &lease.lease_token, now)
+                && current.as_ref().is_some_and(|current| {
+                    current.owner.same_incarnation(&lease.owner)
+                        && current.fencing_token == lease.fencing_token
+                })
+            {
+                Ok(())
+            } else {
+                Err(process_lease_expired(process_id))
+            }
+        }
+    }
 }
 
 fn process_lease_owner_from_columns(
