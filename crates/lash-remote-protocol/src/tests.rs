@@ -39,7 +39,6 @@ fn remote_llm_request_json_round_trips() {
         output_spec: Some(RemoteLlmOutputSpec::JsonObject),
         generation: RemoteGenerationOptions {
             output_token_cap: Some(128),
-            ..Default::default()
         },
         metadata: HashMap::new(),
     };
@@ -51,6 +50,24 @@ fn remote_llm_request_json_round_trips() {
     assert_eq!(decoded.request_id, request.request_id);
     assert_eq!(decoded.scope, request.scope);
     assert_eq!(decoded.messages, request.messages);
+}
+
+#[test]
+fn removed_generation_options_are_rejected_rather_than_discarded() {
+    for (key, value) in [
+        ("top_p", serde_json::json!("0.9")),
+        ("stop", serde_json::json!(["\n"])),
+        ("provider_options", serde_json::json!({ "vendor": "x" })),
+        ("unknown_option", serde_json::json!(1)),
+    ] {
+        let payload = serde_json::json!({ "output_token_cap": 128, key: value });
+        let error = serde_json::from_value::<RemoteGenerationOptions>(payload)
+            .expect_err("a removed generation option must not deserialize");
+        assert!(
+            error.to_string().contains(key),
+            "error should name the rejected key {key}, got {error}"
+        );
+    }
 }
 
 #[test]

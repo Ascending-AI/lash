@@ -287,27 +287,20 @@ impl RemoteModelIntent {
     }
 }
 
+/// Closed generation-option set: only options this protocol can actually
+/// deliver to the core request are accepted. Unknown keys — including the
+/// removed `top_p`, `stop` and `provider_options` — fail deserialization
+/// rather than being silently discarded on the way in.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct RemoteGenerationOptions {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub output_token_cap: Option<u64>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub temperature: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub top_p: Option<String>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub stop: Vec<String>,
-    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
-    pub provider_options: HashMap<String, String>,
 }
 
 impl RemoteGenerationOptions {
     pub fn is_empty(&self) -> bool {
         self.output_token_cap.is_none()
-            && self.temperature.is_none()
-            && self.top_p.is_none()
-            && self.stop.is_empty()
-            && self.provider_options.is_empty()
     }
 
     pub(crate) fn validate(&self, type_name: &'static str) -> Result<(), RemoteProtocolError> {

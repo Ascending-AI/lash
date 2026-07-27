@@ -392,10 +392,6 @@ impl From<core_llm::GenerationOptions> for RemoteGenerationOptions {
         let core_llm::GenerationOptions { output_token_cap } = value;
         Self {
             output_token_cap: output_token_cap.map(|cap| cap.get() as u64),
-            temperature: None,
-            top_p: None,
-            stop: Vec::new(),
-            provider_options: HashMap::new(),
         }
     }
 }
@@ -405,13 +401,7 @@ impl TryFrom<RemoteGenerationOptions> for core_llm::GenerationOptions {
 
     fn try_from(value: RemoteGenerationOptions) -> Result<Self, Self::Error> {
         value.validate("RemoteGenerationOptions")?;
-        let RemoteGenerationOptions {
-            output_token_cap,
-            temperature: _,
-            top_p: _,
-            stop: _,
-            provider_options: _,
-        } = value;
+        let RemoteGenerationOptions { output_token_cap } = value;
         Ok(Self {
             output_token_cap: output_token_cap
                 .and_then(|cap| usize::try_from(cap).ok())
