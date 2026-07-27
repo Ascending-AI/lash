@@ -581,22 +581,14 @@ async fn delete_session_from_catalog(root: &Path, session_id: &str) -> Result<()
         .map_err(|err| err.to_string())?;
     ensure_schema(&conn).await.map_err(|err| err.to_string())?;
     conn.write(move |tx| {
-        let leaf_node_id = tx
-            .query_row(
-                "SELECT leaf_node_id FROM session_head WHERE session_id = ?1",
-                params![session_id],
-                |row| row.get::<_, Option<String>>(0),
-            )
-            .optional()?
-            .flatten();
         tx.execute(
             "DELETE FROM session_head WHERE session_id = ?1",
             params![session_id],
         )?;
-        if let Some(leaf_node_id) = leaf_node_id {
-            persistence::decrement_node_ref_conn(tx, &leaf_node_id)
-                .map_err(|err| rusqlite::Error::ToSqlConversionFailure(Box::new(err)))?;
-        }
+        tx.execute(
+            "DELETE FROM graph_nodes WHERE session_id = ?1",
+            params![session_id],
+        )?;
         tx.execute(
             "DELETE FROM queued_work_batches WHERE session_id = ?1",
             params![session_id],
@@ -998,6 +990,52 @@ mod tests {
                 .is_none(),
             "the transaction must roll back the child insert"
         );
+    }
+
+    #[tokio::test]
+    async fn refcount_scrub_detects_corrupt_cached_count() {
+        let store = Store::memory().await.expect("open store");
+        store
+            .bind_session("scrub-refcount-drift")
+            .expect("bind store");
+        let mut state = lash_core::RuntimeSessionState {
+            session_id: "scrub-refcount-drift".to_string(),
+            ..Default::default()
+        };
+        state.ensure_agent_frame_initialized();
+        store
+            .commit_runtime_state(RuntimeCommit::persisted_state(&state, &[]))
+            .await
+            .expect("commit root frame");
+        let frame_node_id = state.current_frame_node_id.expect("frame node");
+        store
+            .conn
+            .write({
+                let frame_node_id = frame_node_id.clone();
+                move |tx| {
+                    tx.execute(
+                        "UPDATE graph_nodes SET incoming_refs = 2 WHERE node_id = ?1",
+                        params![frame_node_id],
+                    )?;
+                    Ok(())
+                }
+            })
+            .await
+            .expect("corrupt cached count");
+
+        let error = store
+            .verify_node_refcounts()
+            .await
+            .expect_err("scrub must detect cached count drift");
+
+        assert!(matches!(
+            error,
+            StoreError::NodeRefcountDrift {
+                node_id,
+                cached: 2,
+                derived: 1,
+            } if node_id == frame_node_id
+        ));
     }
 
     #[tokio::test]

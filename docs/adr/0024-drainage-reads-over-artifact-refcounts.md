@@ -17,16 +17,22 @@ a count.
 
 ## History-node amendment
 
-History nodes use a different retention boundary. Their parent edges, session-head roots, and
-explicit host pins live in the session store, so each backend maintains an `incoming_refs` cache
-beside an indexed `parent_node_id`. A transition to zero is never trusted by itself: before
-tombstoning, the same transaction re-derives the count from edge and root rows and aborts with
-`NodeRefcountDrift` on disagreement. Hosts can run `verify_node_refcounts` to scrub the entire
-catalog and detect forgotten refcount mutation sites.
+History nodes use a different retention boundary. Their parent edges and session-head roots live
+in the session store, so each backend maintains an `incoming_refs` cache beside an indexed
+`parent_node_id`. A transition to zero is never trusted by itself: before tombstoning, the same
+transaction re-derives the count from edge and root rows and aborts with `NodeRefcountDrift` on
+disagreement. Hosts can run `verify_node_refcounts` to scrub the entire catalog from one
+consistent transaction view and detect forgotten refcount mutation sites.
 
-PostgreSQL history commits and session deletion share a session-keyed transaction lock. A retained
-deletion marker also fences a stale first commit, where no head row exists to lock; only explicit
+Deleting a session physically removes every history row it owns, including off-head branches, so
+the session id and its deterministic initial frame id can be reused immediately. PostgreSQL
+history commits and session deletion share a session-keyed transaction lock. A retained deletion
+marker also fences a stale first commit, where no head row exists to lock; only explicit
 session-store recreation clears that marker.
+
+Explicit history pins are deferred until a host pin verb exists. Adding that root kind requires
+the counted mutation and scrub derivation to land together on every backend; a dormant SQL-only
+anchor table is not evidence of a supported root.
 
 This does not move non-terminal process roots into stored history counts. Processes remain in a
 different store family, and their definition/env liveness continues to be computed on demand by

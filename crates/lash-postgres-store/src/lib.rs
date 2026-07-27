@@ -84,6 +84,11 @@ const SCHEMA_COMPONENT: &str = "lash-postgres-store";
 // `ExternalOwner` no longer carries the unverified `granted_to` field, changing
 // the terminal event's replay-key payload hash. Pre-18 databases are rejected
 // and recreated so retries cannot compare terminal events across payload formats.
+//
+// Bumped to 19 for structural FrameOpen history and explicit graph parent edges.
+// Bumped to 20 for transactional node refcounts and destructive-zero confirmation.
+// Both are reject-and-recreate boundaries; older graph rows cannot satisfy the
+// structural history and reclamation invariants.
 const SCHEMA_VERSION: i32 = 20;
 const PROCESS_LEASE_SCHEMA_VERSION: u32 = lash_core::PROCESS_LEASE_SCHEMA_VERSION;
 
@@ -692,6 +697,50 @@ mod tests {
                 .await
                 .expect("check rolled-back child");
         assert!(!child_exists);
+    }
+
+    #[tokio::test]
+    async fn postgres_refcount_scrub_detects_corrupt_cached_count() {
+        let Some(database_url) = postgres_test_support::database_url() else {
+            eprintln!("skipping Postgres refcount scrub proof: database URL is not set");
+            return;
+        };
+        let _database_lock =
+            postgres_test_support::SharedDatabaseLock::acquire(&database_url).await;
+        let storage = PostgresStorage::connect(&database_url)
+            .await
+            .expect("connect refcount scrub storage");
+        let session_id = format!("postgres-refcount-scrub:{}", uuid::Uuid::new_v4());
+        let store = storage.session_store(session_id.clone());
+        let mut state = lash_core::RuntimeSessionState {
+            session_id,
+            ..Default::default()
+        };
+        state.ensure_agent_frame_initialized();
+        store
+            .commit_runtime_state(RuntimeCommit::persisted_state(&state, &[]))
+            .await
+            .expect("commit root frame");
+        let frame_node_id = state.current_frame_node_id.expect("frame node");
+        sqlx::query("UPDATE lash_graph_nodes SET incoming_refs = 2 WHERE node_id = $1")
+            .bind(&frame_node_id)
+            .execute(storage.pool())
+            .await
+            .expect("corrupt cached count");
+
+        let error = store
+            .verify_node_refcounts()
+            .await
+            .expect_err("scrub must detect cached count drift");
+
+        assert!(matches!(
+            error,
+            StoreError::NodeRefcountDrift {
+                node_id,
+                cached: 2,
+                derived: 1,
+            } if node_id == frame_node_id
+        ));
     }
 
     #[tokio::test]

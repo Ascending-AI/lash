@@ -57,6 +57,7 @@ fn store_error_variant(error: &StoreError) -> &'static str {
         StoreError::SessionBindingMismatch { .. } => "SessionBindingMismatch",
         StoreError::SessionDeleted { .. } => "SessionDeleted",
         StoreError::UnsupportedReadScope(_) => "UnsupportedReadScope",
+        StoreError::UnsupportedStoreOperation { .. } => "UnsupportedStoreOperation",
         StoreError::RuntimeTurnCommitConflict { .. } => "RuntimeTurnCommitConflict",
         StoreError::NodeIdDerivationMismatch { .. } => "NodeIdDerivationMismatch",
         StoreError::NodeIdCollision { .. } => "NodeIdCollision",

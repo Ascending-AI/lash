@@ -1496,28 +1496,49 @@ impl QueuedWorkStore for RuntimePerfStore {
 #[async_trait::async_trait]
 impl StoreMaintenance for RuntimePerfStore {
     async fn tombstone_nodes(&self, _ids: &[String]) -> Result<(), store::StoreError> {
-        Ok(())
+        Err(unsupported_maintenance("tombstone_nodes"))
     }
 
     async fn vacuum(&self) -> Result<VacuumReport, store::StoreError> {
-        Ok(VacuumReport::default())
+        Err(unsupported_maintenance("vacuum"))
     }
 
     async fn gc_unreachable(&self) -> Result<GcReport, store::StoreError> {
-        Ok(GcReport::default())
+        Err(unsupported_maintenance("gc_unreachable"))
     }
 
     async fn verify_node_refcounts(
         &self,
     ) -> Result<lash_core::NodeRefcountVerification, store::StoreError> {
-        Ok(lash_core::NodeRefcountVerification::default())
+        Err(unsupported_maintenance("verify_node_refcounts"))
     }
+}
+
+fn unsupported_maintenance(operation: &'static str) -> StoreError {
+    StoreError::UnsupportedStoreOperation { operation }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use lash_core::runtime::{DeliveryPolicy, QueuedWorkPayload, RuntimeSessionState, SlotPolicy};
+
+    #[tokio::test]
+    async fn refcount_scrub_refuses_to_report_false_success() {
+        let store = RuntimePerfStore::default();
+
+        let error = store
+            .verify_node_refcounts()
+            .await
+            .expect_err("perf store does not maintain node refcounts");
+
+        assert!(matches!(
+            error,
+            StoreError::UnsupportedStoreOperation {
+                operation: "verify_node_refcounts"
+            }
+        ));
+    }
 
     #[tokio::test]
     async fn runtime_commit_rejects_cross_session_queue_batches_atomically() {

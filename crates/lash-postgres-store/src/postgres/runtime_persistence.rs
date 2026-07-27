@@ -77,8 +77,7 @@ async fn derived_node_refcount_for_head_move_tx(
         "SELECT
             (SELECT COUNT(*) FROM lash_graph_nodes
              WHERE parent_node_id = $1 AND tombstoned = FALSE)
-          + (SELECT COUNT(*) FROM lash_sessions WHERE leaf_node_id = $1)
-          + (SELECT COUNT(*) FROM lash_node_anchors WHERE node_id = $1 AND pinned)",
+          + (SELECT COUNT(*) FROM lash_sessions WHERE leaf_node_id = $1)",
     )
     .bind(node_id)
     .fetch_one(&mut **tx)
@@ -168,18 +167,19 @@ async fn decrement_node_ref_for_head_move_tx(
 
 async fn nearest_frame_node_id_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    session_id: &str,
     leaf_node_id: &str,
 ) -> Result<Option<String>, StoreError> {
     sqlx::query_scalar(
         "WITH RECURSIVE ancestry(node_id, parent_node_id, node_json, depth) AS (
             SELECT node_id, parent_node_id, node_json, 0
             FROM lash_graph_nodes
-            WHERE node_id = $1 AND tombstoned = FALSE
+            WHERE node_id = $1 AND session_id = $2 AND tombstoned = FALSE
           UNION ALL
             SELECT parent.node_id, parent.parent_node_id, parent.node_json, ancestry.depth + 1
             FROM lash_graph_nodes AS parent
             JOIN ancestry ON parent.node_id = ancestry.parent_node_id
-            WHERE parent.tombstoned = FALSE
+            WHERE parent.session_id = $2 AND parent.tombstoned = FALSE
         )
         SELECT node_id FROM ancestry
         WHERE node_json::jsonb ->> 'kind' = 'frame_open'
@@ -187,6 +187,7 @@ async fn nearest_frame_node_id_tx(
         LIMIT 1",
     )
     .bind(leaf_node_id)
+    .bind(session_id)
     .fetch_optional(&mut **tx)
     .await
     .map_err(store_sqlx_error)
@@ -595,9 +596,12 @@ impl SessionCommitStore for PostgresSessionStore {
                         let changed = sqlx::query(
                             "UPDATE lash_graph_nodes
                              SET incoming_refs = incoming_refs + 1
-                             WHERE node_id = $1 AND tombstoned = FALSE",
+                             WHERE node_id = $1
+                               AND session_id = $2
+                               AND tombstoned = FALSE",
                         )
                         .bind(parent_node_id)
+                        .bind(&commit.session_id)
                         .execute(&mut *tx)
                         .await
                         .map_err(store_sqlx_error)?
@@ -644,7 +648,7 @@ impl SessionCommitStore for PostgresSessionStore {
         }
         let derived_frame_node_id = match leaf_node_id.as_deref() {
             Some(leaf_node_id) => Some(
-                nearest_frame_node_id_tx(&mut tx, leaf_node_id)
+                nearest_frame_node_id_tx(&mut tx, &commit.session_id, leaf_node_id)
                     .await?
                     .ok_or_else(|| StoreError::MissingFrameOpenAncestor {
                         leaf_node_id: leaf_node_id.to_string(),
@@ -2200,9 +2204,7 @@ impl StoreMaintenance for PostgresSessionStore {
         // ANY session references it — scoping roots to one session would delete
         // another session's live checkpoint.
         let root_refs = sqlx::query_scalar::<_, String>(
-            "SELECT checkpoint_ref FROM lash_sessions WHERE checkpoint_ref IS NOT NULL
-             UNION
-             SELECT checkpoint_ref FROM lash_node_anchors WHERE pinned",
+            "SELECT checkpoint_ref FROM lash_sessions WHERE checkpoint_ref IS NOT NULL",
         )
         .fetch_all(&mut *tx)
         .await

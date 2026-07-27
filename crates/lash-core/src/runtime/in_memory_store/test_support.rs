@@ -28,7 +28,7 @@ impl InMemorySessionStore {
 
 #[cfg(test)]
 mod tests {
-    use crate::store::{GraphCommitDelta, SessionCommitStore};
+    use crate::store::{GraphCommitDelta, SessionCommitStore, StoreMaintenance};
     use crate::{
         DeliveryPolicy, MergeKey, QueuedWorkBatch, QueuedWorkCompletion, RuntimeCommit,
         RuntimeSessionState, SessionStoreCreateRequest, SessionStoreFactory, SlotPolicy,
@@ -118,10 +118,10 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn delete_zero_confirmation_aborts_a_corrupt_low_count() {
+    async fn head_move_zero_confirmation_aborts_a_corrupt_low_count() {
         let factory = super::super::InMemorySessionStoreFactory::new();
         let request = SessionStoreCreateRequest {
-            session_id: "delete-refcount-drift".to_string(),
+            session_id: "head-move-refcount-drift".to_string(),
             relation: crate::SessionRelation::Root,
             policy: crate::SessionPolicy::default(),
         };
@@ -138,7 +138,7 @@ mod tests {
             ..Default::default()
         };
         state.ensure_agent_frame_initialized();
-        store
+        let first = store
             .commit_runtime_state(RuntimeCommit::persisted_state(&state, &[]))
             .await
             .expect("commit root frame");
@@ -147,34 +147,87 @@ mod tests {
             .expect("persisted leaf");
         concrete.corrupt_node_refcount_for_testing(&leaf, 0);
 
-        let error = factory
-            .delete_session(&request.session_id)
-            .await
-            .expect_err("low cached count must abort deletion");
-
-        assert!(error.contains("cached incoming reference count drifted"));
-        assert!(
-            factory
-                .open_existing_store(&request)
-                .await
-                .expect("open after abort")
-                .is_some(),
-            "the failed zero-confirmation must leave the session live"
+        let child = crate::SessionNodeRecord {
+            node_id: "head-move-refcount-drift-child".to_string(),
+            parent_node_id: Some(leaf.clone()),
+            timestamp: "2026-07-27T00:00:00Z".to_string(),
+            payload: crate::SessionNodePayload::Event {
+                event: crate::SessionHistoryRecord::Protocol(
+                    crate::ProtocolEvent::typed("child", serde_json::Value::Null)
+                        .expect("protocol event"),
+                ),
+            },
+        };
+        let mut commit = RuntimeCommit::persisted_state_with_graph_commit(
+            &state,
+            GraphCommitDelta::Append {
+                nodes: vec![child.clone()],
+                leaf_node_id: Some(child.node_id.clone()),
+            },
+            &[],
         );
+        commit.expected_head_revision = Some(first.head_revision);
+        let error = store
+            .commit_runtime_state(commit.clone())
+            .await
+            .expect_err("low cached count must abort the head move");
+
+        assert!(matches!(
+            error,
+            StoreError::NodeRefcountDrift {
+                node_id,
+                cached: 0,
+                derived: 1,
+            } if node_id == leaf
+        ));
         assert_eq!(concrete.raw_head_revision_for_testing(), Some(1));
+        assert!(
+            store
+                .load_node(&child.node_id)
+                .await
+                .expect("load child after rejected head move")
+                .is_none(),
+            "the failed zero-confirmation must roll the append back"
+        );
 
         concrete.corrupt_node_refcount_for_testing(&leaf, 1);
-        factory
-            .delete_session(&request.session_id)
+        store
+            .commit_runtime_state(commit)
             .await
-            .expect("delete after repairing count");
-        assert!(
-            factory
-                .open_existing_store(&request)
-                .await
-                .expect("open after delete")
-                .is_none()
-        );
+            .expect("head move after repairing count");
+        assert_eq!(concrete.raw_head_revision_for_testing(), Some(2));
+    }
+
+    #[tokio::test]
+    async fn refcount_scrub_detects_corrupt_cached_count() {
+        let store = super::InMemorySessionStore::new();
+        let mut state = RuntimeSessionState {
+            session_id: "scrub-refcount-drift".to_string(),
+            ..Default::default()
+        };
+        state.ensure_agent_frame_initialized();
+        store
+            .commit_runtime_state(RuntimeCommit::persisted_state(&state, &[]))
+            .await
+            .expect("commit root frame");
+        let leaf = store
+            .raw_leaf_node_id_for_testing()
+            .expect("persisted leaf");
+        store.corrupt_node_refcount_for_testing(&leaf, 2);
+
+        let error = store
+            .verify_node_refcounts()
+            .await
+            .expect_err("scrub must detect cached count drift");
+
+        assert!(matches!(
+            error,
+            StoreError::NodeRefcountDrift {
+                node_id,
+                cached: 2,
+                derived: 1,
+            } if node_id == leaf
+        ));
     }
 
     #[tokio::test]

@@ -755,11 +755,16 @@ pub(super) fn open_agent_frame_in_state_with_clock(
         clock.timestamp_rfc3339(),
     );
     if !opened {
-        return crate::OpenAgentFrameResult {
-            frame_node_id,
-            opened: false,
-            initial_node_ids: Vec::new(),
-        };
+        if state.current_frame_node_id.as_deref() == Some(frame_node_id.as_str()) {
+            return crate::OpenAgentFrameResult {
+                frame_node_id,
+                opened: false,
+                initial_node_ids: Vec::new(),
+            };
+        }
+        state
+            .session_graph
+            .set_leaf_node_id(Some(frame_node_id.clone()));
     }
     state.current_frame_node_id = Some(frame_node_id);
     state.agent_frames = state.session_graph.agent_frame_records(&state.session_id);

@@ -45,15 +45,6 @@ pub(crate) async fn ensure_schema(pool: &PgPool) -> Result<Vec<u8>, StoreError> 
         CREATE INDEX IF NOT EXISTS idx_lash_graph_nodes_parent
             ON lash_graph_nodes(parent_node_id);
 
-        CREATE TABLE IF NOT EXISTS lash_node_anchors (
-            node_id TEXT PRIMARY KEY
-                REFERENCES lash_graph_nodes(node_id) ON DELETE CASCADE,
-            checkpoint_ref TEXT NOT NULL,
-            pinned BOOLEAN NOT NULL
-        );
-        CREATE INDEX IF NOT EXISTS idx_lash_node_anchors_pinned
-            ON lash_node_anchors(node_id) WHERE pinned;
-
         CREATE TABLE IF NOT EXISTS lash_usage_deltas (
             seq BIGSERIAL PRIMARY KEY,
             session_id TEXT NOT NULL,

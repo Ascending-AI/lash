@@ -913,6 +913,55 @@ mod tests {
         assert_eq!(replay_read.messages.len(), 1);
     }
 
+    #[test]
+    fn reopening_a_previous_frame_switches_back_and_materializes_new_seed_nodes() {
+        let clock = crate::SystemClock;
+        let mut state = RuntimeSessionState {
+            session_id: "frame-switch-back".to_string(),
+            ..RuntimeSessionState::default()
+        };
+        state.ensure_agent_frame_initialized_with_clock(&clock);
+        let frame_a = super::super::open_agent_frame_in_state_with_clock(
+            &mut state,
+            crate::OpenAgentFrameRequest::new("frame-a", crate::AgentFrameReason::new("frame-a")),
+            &clock,
+        );
+        assert!(frame_a.opened);
+        let frame_b = super::super::open_agent_frame_in_state_with_clock(
+            &mut state,
+            crate::OpenAgentFrameRequest::new("frame-b", crate::AgentFrameReason::new("frame-b")),
+            &clock,
+        );
+        assert!(frame_b.opened);
+
+        let switched = super::super::open_agent_frame_in_state_with_clock(
+            &mut state,
+            crate::OpenAgentFrameRequest::new("frame-a", crate::AgentFrameReason::new("frame-a"))
+                .with_initial_nodes(vec![crate::SessionAppendNode::message(
+                    crate::PluginMessage::text(MessageRole::Assistant, "new frame-a seed"),
+                )]),
+            &clock,
+        );
+
+        assert!(switched.opened);
+        assert_eq!(switched.frame_node_id, frame_a.frame_node_id);
+        assert_eq!(
+            state.current_frame_node_id.as_deref(),
+            Some(frame_a.frame_node_id.as_str())
+        );
+        assert_eq!(switched.initial_node_ids.len(), 1);
+        assert_ne!(
+            state.session_graph.leaf_node_id.as_deref(),
+            Some(frame_b.frame_node_id.as_str())
+        );
+        assert_eq!(
+            state
+                .session_graph
+                .nearest_frame_node_id(state.session_graph.leaf_node_id.as_deref()),
+            Some(frame_a.frame_node_id.as_str())
+        );
+    }
+
     #[tokio::test]
     async fn progress_boundaries_accumulate_protocol_events_in_the_draft() {
         let user = text_message("u0", MessageRole::User, "hello");

@@ -32,6 +32,8 @@ pub enum StoreError {
     SessionDeleted { session_id: String },
     #[error("store does not support read scope {0:?}")]
     UnsupportedReadScope(SessionReadScope),
+    #[error("store does not support `{operation}`")]
+    UnsupportedStoreOperation { operation: &'static str },
     #[error("store head revision conflict: expected {expected:?}, actual {actual}")]
     HeadRevisionConflict { expected: Option<u64>, actual: u64 },
     #[error(

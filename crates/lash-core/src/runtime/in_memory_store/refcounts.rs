@@ -71,45 +71,25 @@ impl InMemorySessionStore {
         }
     }
 
-    /// Drop this session's leaf root, confirming every destructive zero against
-    /// the in-memory edge rows before publishing any tombstones.
-    pub(super) fn release_head_root_for_delete(&self) -> Result<(), crate::StoreError> {
+    /// Physically reclaim every history row owned by a deleted session.
+    pub(super) fn reclaim_history_for_delete(&self, session_id: &str) {
         let _transaction = self
             .write_transaction
             .lock()
             .expect("lock in-memory write transaction");
-        let leaf_node_id = self
-            .session_head_meta
+        self.global_node_owners
             .lock()
-            .expect("lock session head")
-            .as_ref()
-            .and_then(|meta| meta.leaf_node_id.clone());
-        let Some(node_id) = leaf_node_id else {
-            *self.session_head_meta.lock().expect("lock session head") = None;
-            return Ok(());
-        };
-        let graph = self.session_graph.lock().expect("lock graph");
-        let mut tombstoned = self
-            .tombstoned_node_ids
-            .lock()
-            .expect("lock tombstoned nodes")
-            .clone();
-        let mut counts = self
-            .incoming_node_refs
-            .lock()
-            .expect("lock incoming node refs")
-            .clone();
-        Self::decrement_node_reference(&graph, &mut counts, &mut tombstoned, &node_id, None)?;
-        drop(graph);
+            .expect("lock global in-memory node ids")
+            .retain(|_, owner| owner != session_id);
+        *self.session_graph.lock().expect("lock graph") = crate::SessionGraph::default();
         *self
             .incoming_node_refs
             .lock()
-            .expect("lock incoming node refs") = counts;
+            .expect("lock incoming node refs") = HashMap::new();
         *self
             .tombstoned_node_ids
             .lock()
-            .expect("lock tombstoned nodes") = tombstoned;
+            .expect("lock tombstoned nodes") = HashSet::new();
         *self.session_head_meta.lock().expect("lock session head") = None;
-        Ok(())
     }
 }

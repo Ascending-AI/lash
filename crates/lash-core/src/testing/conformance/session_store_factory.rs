@@ -14,6 +14,7 @@ where
     session_store_factory_create_seeds_and_reopens_meta(make()).await;
     session_store_factory_create_is_idempotent(make()).await;
     attachment_ownership_isolation(make()).await;
+    session_store_factory_rejects_cross_session_graph_parents(make()).await;
     session_store_factory_delete_removes_store_and_is_idempotent(make()).await;
 }
 
@@ -376,6 +377,92 @@ async fn session_store_factory_create_is_idempotent(factory: Arc<dyn crate::Sess
     );
 }
 
+async fn session_store_factory_rejects_cross_session_graph_parents(
+    factory: Arc<dyn crate::SessionStoreFactory>,
+) {
+    let first_request = session_store_request(
+        "graph-parent-owner",
+        "graph-parent-model",
+        crate::SessionRelation::Root,
+    );
+    let second_request = session_store_request(
+        "graph-parent-intruder",
+        "graph-parent-model",
+        crate::SessionRelation::Root,
+    );
+    let first = factory
+        .create_store(&first_request)
+        .await
+        .expect("create graph parent owner");
+    let second = factory
+        .create_store(&second_request)
+        .await
+        .expect("create graph parent intruder");
+    let mut first_state = crate::RuntimeSessionState {
+        session_id: first_request.session_id.clone(),
+        ..Default::default()
+    };
+    first_state.ensure_agent_frame_initialized();
+    first
+        .commit_runtime_state(crate::RuntimeCommit::persisted_state(&first_state, &[]))
+        .await
+        .expect("commit graph parent owner frame");
+    let foreign_parent = first_state
+        .current_frame_node_id
+        .clone()
+        .expect("owner frame node id");
+    let child = crate::SessionNodeRecord {
+        node_id: "cross-session-child".to_string(),
+        parent_node_id: Some(foreign_parent.clone()),
+        timestamp: "2026-07-27T00:00:00Z".to_string(),
+        payload: crate::SessionNodePayload::Event {
+            event: crate::SessionHistoryRecord::Protocol(
+                crate::ProtocolEvent::typed("cross-session", serde_json::Value::Null)
+                    .expect("protocol event"),
+            ),
+        },
+    };
+    let state = crate::RuntimeSessionState {
+        session_id: second_request.session_id.clone(),
+        current_frame_node_id: Some(foreign_parent),
+        ..Default::default()
+    };
+    let error = second
+        .commit_runtime_state(crate::RuntimeCommit::persisted_state_with_graph_commit(
+            &state,
+            crate::GraphCommitDelta::Append {
+                nodes: vec![child.clone()],
+                leaf_node_id: Some(child.node_id.clone()),
+            },
+            &[],
+        ))
+        .await
+        .expect_err("a graph parent must belong to the committing session");
+    assert!(match &error {
+        crate::StoreError::InvalidGraphParent { node_id, .. } => node_id == &child.node_id,
+        crate::StoreError::MissingFrameOpenAncestor { leaf_node_id } => {
+            leaf_node_id == &child.node_id
+        }
+        _ => false,
+    });
+    assert!(
+        second
+            .load_session(crate::SessionReadScope::FullGraph)
+            .await
+            .expect("load intruder after rejection")
+            .is_none(),
+        "cross-session parent rejection must be atomic"
+    );
+    assert_eq!(
+        first
+            .verify_node_refcounts()
+            .await
+            .expect("foreign parent refcount remains exact")
+            .checked_node_count,
+        1
+    );
+}
+
 async fn session_store_factory_delete_removes_store_and_is_idempotent(
     factory: Arc<dyn crate::SessionStoreFactory>,
 ) {
@@ -393,10 +480,34 @@ async fn session_store_factory_delete_removes_store_and_is_idempotent(
         ..Default::default()
     };
     state.ensure_agent_frame_initialized();
+    let frame = state
+        .session_graph
+        .nodes
+        .first()
+        .cloned()
+        .expect("initial frame node");
+    let frame_node_id = frame.node_id.clone();
+    let branch_node = |node_id: &str| crate::SessionNodeRecord {
+        node_id: node_id.to_string(),
+        parent_node_id: Some(frame_node_id.clone()),
+        timestamp: "2026-07-27T00:00:00Z".to_string(),
+        payload: crate::SessionNodePayload::Event {
+            event: crate::SessionHistoryRecord::Protocol(
+                crate::ProtocolEvent::typed(node_id, serde_json::Value::Null)
+                    .expect("protocol event"),
+            ),
+        },
+    };
+    let live_leaf = branch_node("delete-live-leaf");
+    let zero_ref_branch = branch_node("delete-zero-ref-branch");
+    state.session_graph = crate::SessionGraph::from_nodes(
+        vec![frame, live_leaf.clone(), zero_ref_branch.clone()],
+        Some(live_leaf.node_id.clone()),
+    );
     created
         .commit_runtime_state(crate::RuntimeCommit::persisted_state(&state, &[]))
         .await
-        .expect("commit a live graph root before delete");
+        .expect("commit live and zero-ref graph branches before delete");
     created
         .enqueue_pending_turn_input(
             crate::PendingTurnInputDraft::new(
@@ -443,6 +554,16 @@ async fn session_store_factory_delete_removes_store_and_is_idempotent(
         .delete_session(&request.session_id)
         .await
         .expect("delete session");
+    for node_id in [&frame_node_id, &live_leaf.node_id, &zero_ref_branch.node_id] {
+        assert!(
+            created
+                .load_node(node_id)
+                .await
+                .expect("load reclaimed node through stale handle")
+                .is_none(),
+            "delete_session must physically reclaim graph node {node_id}"
+        );
+    }
     assert!(
         factory
             .open_existing_store(&request)
@@ -498,9 +619,18 @@ async fn session_store_factory_delete_removes_store_and_is_idempotent(
         ..Default::default()
     };
     recreated_state.ensure_agent_frame_initialized();
-    let error = recreated
+    recreated
         .commit_runtime_state(crate::RuntimeCommit::persisted_state(&recreated_state, &[]))
         .await
-        .expect_err("a retained tombstone must reject immediate node-id reuse");
-    assert!(matches!(error, crate::StoreError::NodeIdCollision { .. }));
+        .expect("recreated session must be able to reuse its deterministic initial frame id");
+    let read = recreated
+        .load_session(crate::SessionReadScope::FullGraph)
+        .await
+        .expect("load recreated session")
+        .expect("recreated session has a committed head");
+    assert_eq!(read.graph.nodes.len(), 1);
+    assert_eq!(
+        read.graph.leaf_node_id,
+        recreated_state.session_graph.leaf_node_id
+    );
 }

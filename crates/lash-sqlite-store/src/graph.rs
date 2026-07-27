@@ -150,11 +150,7 @@ impl Store {
     fn live_checkpoint_roots(conn: &Connection) -> Result<Vec<RetainedArtifactRef>, StoreError> {
         let mut roots = Vec::new();
         let mut stmt = conn
-            .prepare(
-                "SELECT checkpoint_ref FROM session_head WHERE checkpoint_ref IS NOT NULL
-                 UNION
-                 SELECT checkpoint_ref FROM node_anchors WHERE pinned = 1",
-            )
+            .prepare("SELECT checkpoint_ref FROM session_head WHERE checkpoint_ref IS NOT NULL")
             .map_err(sqlite_error)?;
         let rows = stmt
             .query_map([], |row| row.get::<_, String>(0))

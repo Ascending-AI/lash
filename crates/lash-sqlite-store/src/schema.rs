@@ -55,14 +55,6 @@ CREATE INDEX IF NOT EXISTS idx_graph_nodes_session_seq
 CREATE INDEX IF NOT EXISTS idx_graph_nodes_parent
     ON graph_nodes(parent_node_id);
 
-CREATE TABLE IF NOT EXISTS node_anchors (
-    node_id        TEXT PRIMARY KEY REFERENCES graph_nodes(node_id) ON DELETE CASCADE,
-    checkpoint_ref TEXT NOT NULL,
-    pinned         INTEGER NOT NULL CHECK (pinned IN (0, 1))
-);
-CREATE INDEX IF NOT EXISTS idx_node_anchors_pinned
-    ON node_anchors(node_id) WHERE pinned = 1;
-
 CREATE TABLE IF NOT EXISTS usage_deltas (
     seq                  INTEGER PRIMARY KEY,
     session_id            TEXT NOT NULL,

@@ -907,6 +907,7 @@ fn normalized_store_error(backend: &str, error: &StoreError) -> String {
         StoreError::SessionBindingMismatch { .. } => "SessionBindingMismatch".to_string(),
         StoreError::SessionDeleted { .. } => "SessionDeleted".to_string(),
         StoreError::UnsupportedReadScope(_) => "UnsupportedReadScope".to_string(),
+        StoreError::UnsupportedStoreOperation { .. } => "UnsupportedStoreOperation".to_string(),
         StoreError::HeadRevisionConflict { .. } => "HeadRevisionConflict".to_string(),
         StoreError::RuntimeTurnCommitConflict { .. } => "RuntimeTurnCommitConflict".to_string(),
         StoreError::QueuedWorkClaimSuperseded { .. } => "QueuedWorkClaimSuperseded".to_string(),

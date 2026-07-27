@@ -1495,9 +1495,7 @@ impl SessionStoreFactory for InMemorySessionStoreFactory {
             .get(session_id)
             .cloned();
         if let Some(store) = store {
-            store
-                .release_head_root_for_delete()
-                .map_err(|err| err.to_string())?;
+            store.reclaim_history_for_delete(session_id);
             self.stores
                 .lock()
                 .expect("in-memory store factory")

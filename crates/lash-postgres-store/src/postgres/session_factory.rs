@@ -208,25 +208,16 @@ pub(crate) async fn delete_session_tx(
     // store. Process pruning calls this while its terminal row is still locked
     // and deletes that row last, so any failure leaves a process leak instead
     // of making live-looking session state ownerless.
-    let leaf_node_id: Option<String> = sqlx::query_scalar(
-        "SELECT leaf_node_id
-             FROM lash_sessions
-             WHERE session_id = $1
-             FOR UPDATE",
-    )
-    .bind(session_id)
-    .fetch_optional(&mut **tx)
-    .await
-    .map_err(store_sqlx_error)?
-    .flatten();
     sqlx::query("DELETE FROM lash_sessions WHERE session_id = $1")
         .bind(session_id)
         .execute(&mut **tx)
         .await
         .map_err(store_sqlx_error)?;
-    if let Some(leaf_node_id) = leaf_node_id {
-        decrement_node_ref_tx(tx, &leaf_node_id).await?;
-    }
+    sqlx::query("DELETE FROM lash_graph_nodes WHERE session_id = $1")
+        .bind(session_id)
+        .execute(&mut **tx)
+        .await
+        .map_err(store_sqlx_error)?;
     for sql in [
         "DELETE FROM lash_attachment_manifest WHERE session_id = $1",
         "DELETE FROM lash_queued_work_items WHERE batch_id IN (SELECT batch_id FROM lash_queued_work_batches WHERE session_id = $1)",

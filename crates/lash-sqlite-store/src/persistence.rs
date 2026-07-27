@@ -87,8 +87,7 @@ fn derived_node_refcount_for_head_move_conn(
             "SELECT
             (SELECT COUNT(*) FROM graph_nodes
              WHERE parent_node_id = ?1 AND tombstoned = 0)
-          + (SELECT COUNT(*) FROM session_head WHERE leaf_node_id = ?1)
-          + (SELECT COUNT(*) FROM node_anchors WHERE node_id = ?1 AND pinned = 1)",
+          + (SELECT COUNT(*) FROM session_head WHERE leaf_node_id = ?1)",
             params![node_id],
             |row| row.get(0),
         )
@@ -175,24 +174,25 @@ fn decrement_node_ref_for_head_move_conn(
 
 fn nearest_frame_node_id_conn(
     conn: &Connection,
+    session_id: &str,
     leaf_node_id: &str,
 ) -> Result<Option<String>, StoreError> {
     conn.query_row(
         "WITH RECURSIVE ancestry(node_id, parent_node_id, node_json, depth) AS (
             SELECT node_id, parent_node_id, node_json, 0
             FROM graph_nodes
-            WHERE node_id = ?1 AND tombstoned = 0
+            WHERE node_id = ?1 AND session_id = ?2 AND tombstoned = 0
           UNION ALL
             SELECT parent.node_id, parent.parent_node_id, parent.node_json, ancestry.depth + 1
             FROM graph_nodes AS parent
             JOIN ancestry ON parent.node_id = ancestry.parent_node_id
-            WHERE parent.tombstoned = 0
+            WHERE parent.session_id = ?2 AND parent.tombstoned = 0
         )
         SELECT node_id FROM ancestry
         WHERE json_extract(node_json, '$.kind') = 'frame_open'
         ORDER BY depth ASC
         LIMIT 1",
-        params![leaf_node_id],
+        params![leaf_node_id, session_id],
         |row| row.get(0),
     )
     .optional()
@@ -534,8 +534,10 @@ impl SessionCommitStore for Store {
                                         .execute(
                                             "UPDATE graph_nodes
                                              SET incoming_refs = incoming_refs + 1
-                                             WHERE node_id = ?1 AND tombstoned = 0",
-                                            params![parent_node_id],
+                                             WHERE node_id = ?1
+                                               AND session_id = ?2
+                                               AND tombstoned = 0",
+                                            params![parent_node_id, commit.session_id],
                                         )
                                         .map_err(sqlite_error)?;
                                     if changed != 1 {
@@ -577,11 +579,10 @@ impl SessionCommitStore for Store {
                     }
                     let derived_frame_node_id = match leaf_node_id.as_deref() {
                         Some(leaf_node_id) => Some(
-                            nearest_frame_node_id_conn(tx, leaf_node_id)?.ok_or_else(|| {
-                                StoreError::MissingFrameOpenAncestor {
+                            nearest_frame_node_id_conn(tx, &commit.session_id, leaf_node_id)?
+                                .ok_or_else(|| StoreError::MissingFrameOpenAncestor {
                                     leaf_node_id: leaf_node_id.to_string(),
-                                }
-                            })?,
+                                })?,
                         ),
                         None => None,
                     };
@@ -2369,7 +2370,7 @@ impl StoreMaintenance for Store {
 
     async fn verify_node_refcounts(&self) -> Result<NodeRefcountVerification, StoreError> {
         self.conn
-            .call(|conn| {
+            .write(|conn| {
                 let outcome: Result<NodeRefcountVerification, StoreError> = (|| {
                     let mut stmt = conn
                         .prepare(
