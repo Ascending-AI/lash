@@ -361,7 +361,7 @@ impl ModelStore {
                     .payload
                     .get("expected_graph_node_count")
                     .and_then(Value::as_u64)
-                    .unwrap_or((turn_index * 2) as u64)
+                    .unwrap_or((turn_index * 2 + 1) as u64)
                     as usize;
                 let transcript_message_count = event
                     .payload

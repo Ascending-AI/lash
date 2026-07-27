@@ -1,7 +1,7 @@
 {
   "schema": "lash.sim.trace.v1",
   "seed": 14123330213291275571,
-  "generator_version": "lash-sim.generated-workload.v8",
+  "generator_version": "lash-sim.generated-workload.v9",
   "profile": "full-random",
   "shard": "0/1",
   "workload_family": "deterministic-runtime-state-machine",
@@ -909,7 +909,7 @@
       "at": 40,
       "label": "provider.chat.stream",
       "payload": {
-        "expected_graph_node_count": 2,
+        "expected_graph_node_count": 3,
         "expected_provider_exchange_count": 1,
         "expected_transcript_message_count": 2,
         "provider_kind": "openai-compatible",
@@ -953,7 +953,7 @@
       },
       "observed": {
         "activity_count_nonzero": true,
-        "graph_node_count": 2,
+        "graph_node_count": 3,
         "provider_exchange_count": 1,
         "provider_kind": "openai-compatible",
         "provider_output": "answer 1 for session-001 seed 14123330213291275571 profile full-random path cf9d",
@@ -975,24 +975,24 @@
         "runtime_invariant_facts": {
           "agent_frame": {
             "active_frame_ids": [
-              "root:frame:initial"
+              "frame-node/v1/b6496f5aed358f7c0b15194c0f62a53816ea98b02d6bc83829de567ebc22055d"
             ],
-            "current_agent_frame_id": "root:frame:initial",
             "current_frame_active": true,
             "current_frame_exists": true,
             "frame_count": 1,
             "node_agent_frame_ids_without_record": [],
             "nodes_without_agent_frame": [],
-            "passed": true
+            "passed": true,
+            "current_frame_node_id": "frame-node/v1/b6496f5aed358f7c0b15194c0f62a53816ea98b02d6bc83829de567ebc22055d"
           },
           "graph": {
             "cycle_node_ids": [],
             "duplicate_node_ids": [],
-            "edge_count": 1,
+            "edge_count": 2,
             "leaf_exists": true,
             "leaf_node_id": "m4a943772420744458965595e85e524f0",
             "missing_parent_links": [],
-            "node_count": 2,
+            "node_count": 3,
             "passed": true
           },
           "usage": {
@@ -1088,7 +1088,7 @@
       "at": 41,
       "label": "observer.snapshot",
       "payload": {
-        "expected_graph_node_count": 2,
+        "expected_graph_node_count": 3,
         "expected_transcript_message_count": 2,
         "reconnect": false,
         "runtime_completion": {
@@ -1112,7 +1112,7 @@
         "turn_index": 1
       },
       "observed": {
-        "graph_node_count": 2,
+        "graph_node_count": 3,
         "observer_invariants": {
           "graph_non_empty": true,
           "session_id": true,
@@ -1775,7 +1775,7 @@
       "at": 58,
       "label": "provider.chat.stream",
       "payload": {
-        "expected_graph_node_count": 2,
+        "expected_graph_node_count": 3,
         "expected_provider_exchange_count": 1,
         "expected_transcript_message_count": 2,
         "provider_kind": "openai",
@@ -1827,7 +1827,7 @@
       },
       "observed": {
         "activity_count_nonzero": true,
-        "graph_node_count": 2,
+        "graph_node_count": 3,
         "provider_exchange_count": 1,
         "provider_kind": "openai",
         "provider_output": "answer 1 for session-002 seed 14123330213291275571 profile full-random path ba5a",
@@ -1849,24 +1849,24 @@
         "runtime_invariant_facts": {
           "agent_frame": {
             "active_frame_ids": [
-              "root:frame:initial"
+              "frame-node/v1/987f8072792419586aec426c81645e0af3d8e30d346d06fd06baf1c92a59b7d9"
             ],
-            "current_agent_frame_id": "root:frame:initial",
             "current_frame_active": true,
             "current_frame_exists": true,
             "frame_count": 1,
             "node_agent_frame_ids_without_record": [],
             "nodes_without_agent_frame": [],
-            "passed": true
+            "passed": true,
+            "current_frame_node_id": "frame-node/v1/987f8072792419586aec426c81645e0af3d8e30d346d06fd06baf1c92a59b7d9"
           },
           "graph": {
             "cycle_node_ids": [],
             "duplicate_node_ids": [],
-            "edge_count": 1,
+            "edge_count": 2,
             "leaf_exists": true,
             "leaf_node_id": "mefeaf495074843109c8b20f0090ddb7f",
             "missing_parent_links": [],
-            "node_count": 2,
+            "node_count": 3,
             "passed": true
           },
           "usage": {
@@ -2044,7 +2044,7 @@
       "at": 59,
       "label": "observer.snapshot",
       "payload": {
-        "expected_graph_node_count": 2,
+        "expected_graph_node_count": 3,
         "expected_transcript_message_count": 2,
         "reconnect": false,
         "runtime_completion": {
@@ -2068,7 +2068,7 @@
         "turn_index": 1
       },
       "observed": {
-        "graph_node_count": 2,
+        "graph_node_count": 3,
         "observer_invariants": {
           "graph_non_empty": true,
           "session_id": true,
@@ -2496,7 +2496,7 @@
       "at": 65,
       "label": "provider.chat.stream",
       "payload": {
-        "expected_graph_node_count": 4,
+        "expected_graph_node_count": 5,
         "expected_provider_exchange_count": 2,
         "expected_transcript_message_count": 4,
         "provider_kind": "openai-compatible",
@@ -2540,7 +2540,7 @@
       },
       "observed": {
         "activity_count_nonzero": true,
-        "graph_node_count": 4,
+        "graph_node_count": 5,
         "provider_exchange_count": 2,
         "provider_kind": "openai-compatible",
         "provider_output": "answer 2 for session-001 seed 14123330213291275571 profile full-random path e2e8",
@@ -2562,24 +2562,24 @@
         "runtime_invariant_facts": {
           "agent_frame": {
             "active_frame_ids": [
-              "root:frame:initial"
+              "frame-node/v1/b6496f5aed358f7c0b15194c0f62a53816ea98b02d6bc83829de567ebc22055d"
             ],
-            "current_agent_frame_id": "root:frame:initial",
             "current_frame_active": true,
             "current_frame_exists": true,
             "frame_count": 1,
             "node_agent_frame_ids_without_record": [],
             "nodes_without_agent_frame": [],
-            "passed": true
+            "passed": true,
+            "current_frame_node_id": "frame-node/v1/b6496f5aed358f7c0b15194c0f62a53816ea98b02d6bc83829de567ebc22055d"
           },
           "graph": {
             "cycle_node_ids": [],
             "duplicate_node_ids": [],
-            "edge_count": 3,
+            "edge_count": 4,
             "leaf_exists": true,
             "leaf_node_id": "mf61159797ce3443b97b6a1d06c9329a4",
             "missing_parent_links": [],
-            "node_count": 4,
+            "node_count": 5,
             "passed": true
           },
           "usage": {
@@ -2815,7 +2815,7 @@
       "at": 66,
       "label": "observer.snapshot",
       "payload": {
-        "expected_graph_node_count": 4,
+        "expected_graph_node_count": 5,
         "expected_transcript_message_count": 4,
         "reconnect": false,
         "runtime_completion": {
@@ -2839,7 +2839,7 @@
         "turn_index": 2
       },
       "observed": {
-        "graph_node_count": 4,
+        "graph_node_count": 5,
         "observer_invariants": {
           "graph_non_empty": true,
           "session_id": true,
@@ -3091,7 +3091,7 @@
       "at": 70,
       "label": "provider.chat.stream",
       "payload": {
-        "expected_graph_node_count": 2,
+        "expected_graph_node_count": 3,
         "expected_provider_exchange_count": 1,
         "expected_transcript_message_count": 2,
         "provider_kind": "anthropic",
@@ -3147,7 +3147,7 @@
       },
       "observed": {
         "activity_count_nonzero": true,
-        "graph_node_count": 2,
+        "graph_node_count": 3,
         "provider_exchange_count": 1,
         "provider_kind": "anthropic",
         "provider_output": "answer 1 for session-003 seed 14123330213291275571 profile full-random path e93b",
@@ -3169,24 +3169,24 @@
         "runtime_invariant_facts": {
           "agent_frame": {
             "active_frame_ids": [
-              "root:frame:initial"
+              "frame-node/v1/487960bd53f663b165d4393548d479022f63accb8ab74bb20896ccf6a3f10a68"
             ],
-            "current_agent_frame_id": "root:frame:initial",
             "current_frame_active": true,
             "current_frame_exists": true,
             "frame_count": 1,
             "node_agent_frame_ids_without_record": [],
             "nodes_without_agent_frame": [],
-            "passed": true
+            "passed": true,
+            "current_frame_node_id": "frame-node/v1/487960bd53f663b165d4393548d479022f63accb8ab74bb20896ccf6a3f10a68"
           },
           "graph": {
             "cycle_node_ids": [],
             "duplicate_node_ids": [],
-            "edge_count": 1,
+            "edge_count": 2,
             "leaf_exists": true,
             "leaf_node_id": "mbb58bbd005274e8d9af4f13347a056cd",
             "missing_parent_links": [],
-            "node_count": 2,
+            "node_count": 3,
             "passed": true
           },
           "usage": {
@@ -3282,7 +3282,7 @@
       "at": 71,
       "label": "observer.snapshot",
       "payload": {
-        "expected_graph_node_count": 2,
+        "expected_graph_node_count": 3,
         "expected_transcript_message_count": 2,
         "reconnect": false,
         "runtime_completion": {
@@ -3306,7 +3306,7 @@
         "turn_index": 1
       },
       "observed": {
-        "graph_node_count": 2,
+        "graph_node_count": 3,
         "observer_invariants": {
           "graph_non_empty": true,
           "session_id": true,
@@ -3526,7 +3526,7 @@
       "at": 76,
       "label": "provider.chat.stream",
       "payload": {
-        "expected_graph_node_count": 2,
+        "expected_graph_node_count": 3,
         "expected_provider_exchange_count": 1,
         "expected_transcript_message_count": 2,
         "provider_kind": "google_oauth",
@@ -3566,7 +3566,7 @@
       },
       "observed": {
         "activity_count_nonzero": true,
-        "graph_node_count": 2,
+        "graph_node_count": 3,
         "provider_exchange_count": 1,
         "provider_kind": "google_oauth",
         "provider_output": "answer 1 for session-004 seed 14123330213291275571 profile full-random path ee90",
@@ -3588,24 +3588,24 @@
         "runtime_invariant_facts": {
           "agent_frame": {
             "active_frame_ids": [
-              "root:frame:initial"
+              "frame-node/v1/72cb03dbc888107b8fe74cc654f227034e0bcfb74fea5660c2e0f32ce586f64c"
             ],
-            "current_agent_frame_id": "root:frame:initial",
             "current_frame_active": true,
             "current_frame_exists": true,
             "frame_count": 1,
             "node_agent_frame_ids_without_record": [],
             "nodes_without_agent_frame": [],
-            "passed": true
+            "passed": true,
+            "current_frame_node_id": "frame-node/v1/72cb03dbc888107b8fe74cc654f227034e0bcfb74fea5660c2e0f32ce586f64c"
           },
           "graph": {
             "cycle_node_ids": [],
             "duplicate_node_ids": [],
-            "edge_count": 1,
+            "edge_count": 2,
             "leaf_exists": true,
             "leaf_node_id": "m64a6a5391a8a4faf974548df25a3a91a",
             "missing_parent_links": [],
-            "node_count": 2,
+            "node_count": 3,
             "passed": true
           },
           "usage": {
@@ -3701,7 +3701,7 @@
       "at": 77,
       "label": "observer.snapshot",
       "payload": {
-        "expected_graph_node_count": 2,
+        "expected_graph_node_count": 3,
         "expected_transcript_message_count": 2,
         "reconnect": false,
         "runtime_completion": {
@@ -3725,7 +3725,7 @@
         "turn_index": 1
       },
       "observed": {
-        "graph_node_count": 2,
+        "graph_node_count": 3,
         "observer_invariants": {
           "graph_non_empty": true,
           "session_id": true,
@@ -4086,7 +4086,7 @@
       "at": 85,
       "label": "provider.chat.stream",
       "payload": {
-        "expected_graph_node_count": 4,
+        "expected_graph_node_count": 5,
         "expected_provider_exchange_count": 2,
         "expected_transcript_message_count": 4,
         "provider_kind": "openai",
@@ -4138,7 +4138,7 @@
       },
       "observed": {
         "activity_count_nonzero": true,
-        "graph_node_count": 4,
+        "graph_node_count": 5,
         "provider_exchange_count": 2,
         "provider_kind": "openai",
         "provider_output": "answer 2 for session-002 seed 14123330213291275571 profile full-random path e921",
@@ -4160,24 +4160,24 @@
         "runtime_invariant_facts": {
           "agent_frame": {
             "active_frame_ids": [
-              "root:frame:initial"
+              "frame-node/v1/987f8072792419586aec426c81645e0af3d8e30d346d06fd06baf1c92a59b7d9"
             ],
-            "current_agent_frame_id": "root:frame:initial",
             "current_frame_active": true,
             "current_frame_exists": true,
             "frame_count": 1,
             "node_agent_frame_ids_without_record": [],
             "nodes_without_agent_frame": [],
-            "passed": true
+            "passed": true,
+            "current_frame_node_id": "frame-node/v1/987f8072792419586aec426c81645e0af3d8e30d346d06fd06baf1c92a59b7d9"
           },
           "graph": {
             "cycle_node_ids": [],
             "duplicate_node_ids": [],
-            "edge_count": 3,
+            "edge_count": 4,
             "leaf_exists": true,
             "leaf_node_id": "mcd1a281e276049f2b2b1e058207c5bbe",
             "missing_parent_links": [],
-            "node_count": 4,
+            "node_count": 5,
             "passed": true
           },
           "usage": {
@@ -4320,7 +4320,7 @@
       "at": 86,
       "label": "observer.snapshot",
       "payload": {
-        "expected_graph_node_count": 4,
+        "expected_graph_node_count": 5,
         "expected_transcript_message_count": 4,
         "reconnect": false,
         "runtime_completion": {
@@ -4344,7 +4344,7 @@
         "turn_index": 2
       },
       "observed": {
-        "graph_node_count": 4,
+        "graph_node_count": 5,
         "observer_invariants": {
           "graph_non_empty": true,
           "session_id": true,
@@ -4564,7 +4564,7 @@
       "at": 90,
       "label": "provider.chat.stream",
       "payload": {
-        "expected_graph_node_count": 6,
+        "expected_graph_node_count": 7,
         "expected_provider_exchange_count": 3,
         "expected_transcript_message_count": 6,
         "provider_kind": "openai-compatible",
@@ -4608,7 +4608,7 @@
       },
       "observed": {
         "activity_count_nonzero": true,
-        "graph_node_count": 6,
+        "graph_node_count": 7,
         "provider_exchange_count": 3,
         "provider_kind": "openai-compatible",
         "provider_output": "answer 3 for session-001 seed 14123330213291275571 profile full-random path 7c17",
@@ -4630,24 +4630,24 @@
         "runtime_invariant_facts": {
           "agent_frame": {
             "active_frame_ids": [
-              "root:frame:initial"
+              "frame-node/v1/b6496f5aed358f7c0b15194c0f62a53816ea98b02d6bc83829de567ebc22055d"
             ],
-            "current_agent_frame_id": "root:frame:initial",
             "current_frame_active": true,
             "current_frame_exists": true,
             "frame_count": 1,
             "node_agent_frame_ids_without_record": [],
             "nodes_without_agent_frame": [],
-            "passed": true
+            "passed": true,
+            "current_frame_node_id": "frame-node/v1/b6496f5aed358f7c0b15194c0f62a53816ea98b02d6bc83829de567ebc22055d"
           },
           "graph": {
             "cycle_node_ids": [],
             "duplicate_node_ids": [],
-            "edge_count": 5,
+            "edge_count": 6,
             "leaf_exists": true,
             "leaf_node_id": "mbc384a5b0ff747ee976a522a8e1afea8",
             "missing_parent_links": [],
-            "node_count": 6,
+            "node_count": 7,
             "passed": true
           },
           "usage": {
@@ -4743,7 +4743,7 @@
       "at": 91,
       "label": "observer.snapshot",
       "payload": {
-        "expected_graph_node_count": 6,
+        "expected_graph_node_count": 7,
         "expected_transcript_message_count": 6,
         "reconnect": false,
         "runtime_completion": {
@@ -4767,7 +4767,7 @@
         "turn_index": 3
       },
       "observed": {
-        "graph_node_count": 6,
+        "graph_node_count": 7,
         "observer_invariants": {
           "graph_non_empty": true,
           "session_id": true,
@@ -5412,7 +5412,7 @@
       "at": 98,
       "label": "provider.chat.stream",
       "payload": {
-        "expected_graph_node_count": 4,
+        "expected_graph_node_count": 5,
         "expected_provider_exchange_count": 2,
         "expected_transcript_message_count": 4,
         "provider_kind": "anthropic",
@@ -5468,7 +5468,7 @@
       },
       "observed": {
         "activity_count_nonzero": true,
-        "graph_node_count": 4,
+        "graph_node_count": 5,
         "provider_exchange_count": 2,
         "provider_kind": "anthropic",
         "provider_output": "answer 2 for session-003 seed 14123330213291275571 profile full-random path c5ae",
@@ -5490,24 +5490,24 @@
         "runtime_invariant_facts": {
           "agent_frame": {
             "active_frame_ids": [
-              "root:frame:initial"
+              "frame-node/v1/487960bd53f663b165d4393548d479022f63accb8ab74bb20896ccf6a3f10a68"
             ],
-            "current_agent_frame_id": "root:frame:initial",
             "current_frame_active": true,
             "current_frame_exists": true,
             "frame_count": 1,
             "node_agent_frame_ids_without_record": [],
             "nodes_without_agent_frame": [],
-            "passed": true
+            "passed": true,
+            "current_frame_node_id": "frame-node/v1/487960bd53f663b165d4393548d479022f63accb8ab74bb20896ccf6a3f10a68"
           },
           "graph": {
             "cycle_node_ids": [],
             "duplicate_node_ids": [],
-            "edge_count": 3,
+            "edge_count": 4,
             "leaf_exists": true,
             "leaf_node_id": "m1922df832f254170af8347e5d15ec439",
             "missing_parent_links": [],
-            "node_count": 4,
+            "node_count": 5,
             "passed": true
           },
           "usage": {
@@ -5603,7 +5603,7 @@
       "at": 99,
       "label": "observer.snapshot",
       "payload": {
-        "expected_graph_node_count": 4,
+        "expected_graph_node_count": 5,
         "expected_transcript_message_count": 4,
         "reconnect": false,
         "runtime_completion": {
@@ -5627,7 +5627,7 @@
         "turn_index": 2
       },
       "observed": {
-        "graph_node_count": 4,
+        "graph_node_count": 5,
         "observer_invariants": {
           "graph_non_empty": true,
           "session_id": true,
@@ -5706,7 +5706,7 @@
       "at": 100,
       "label": "provider.chat.stream",
       "payload": {
-        "expected_graph_node_count": 4,
+        "expected_graph_node_count": 5,
         "expected_provider_exchange_count": 2,
         "expected_transcript_message_count": 4,
         "provider_kind": "google_oauth",
@@ -5746,7 +5746,7 @@
       },
       "observed": {
         "activity_count_nonzero": true,
-        "graph_node_count": 4,
+        "graph_node_count": 5,
         "provider_exchange_count": 2,
         "provider_kind": "google_oauth",
         "provider_output": "answer 2 for session-004 seed 14123330213291275571 profile full-random path e09f",
@@ -5768,24 +5768,24 @@
         "runtime_invariant_facts": {
           "agent_frame": {
             "active_frame_ids": [
-              "root:frame:initial"
+              "frame-node/v1/72cb03dbc888107b8fe74cc654f227034e0bcfb74fea5660c2e0f32ce586f64c"
             ],
-            "current_agent_frame_id": "root:frame:initial",
             "current_frame_active": true,
             "current_frame_exists": true,
             "frame_count": 1,
             "node_agent_frame_ids_without_record": [],
             "nodes_without_agent_frame": [],
-            "passed": true
+            "passed": true,
+            "current_frame_node_id": "frame-node/v1/72cb03dbc888107b8fe74cc654f227034e0bcfb74fea5660c2e0f32ce586f64c"
           },
           "graph": {
             "cycle_node_ids": [],
             "duplicate_node_ids": [],
-            "edge_count": 3,
+            "edge_count": 4,
             "leaf_exists": true,
             "leaf_node_id": "m29f1d7eef2624e75b261be29bc4b933d",
             "missing_parent_links": [],
-            "node_count": 4,
+            "node_count": 5,
             "passed": true
           },
           "usage": {
@@ -5999,7 +5999,7 @@
       "at": 101,
       "label": "observer.snapshot",
       "payload": {
-        "expected_graph_node_count": 4,
+        "expected_graph_node_count": 5,
         "expected_transcript_message_count": 4,
         "reconnect": false,
         "runtime_completion": {
@@ -6023,7 +6023,7 @@
         "turn_index": 2
       },
       "observed": {
-        "graph_node_count": 4,
+        "graph_node_count": 5,
         "observer_invariants": {
           "graph_non_empty": true,
           "session_id": true,
@@ -6587,7 +6587,7 @@
       "at": 112,
       "label": "provider.chat.stream",
       "payload": {
-        "expected_graph_node_count": 6,
+        "expected_graph_node_count": 7,
         "expected_provider_exchange_count": 3,
         "expected_transcript_message_count": 6,
         "provider_kind": "openai",
@@ -6639,7 +6639,7 @@
       },
       "observed": {
         "activity_count_nonzero": true,
-        "graph_node_count": 6,
+        "graph_node_count": 7,
         "provider_exchange_count": 3,
         "provider_kind": "openai",
         "provider_output": "answer 3 for session-002 seed 14123330213291275571 profile full-random path db1c",
@@ -6661,24 +6661,24 @@
         "runtime_invariant_facts": {
           "agent_frame": {
             "active_frame_ids": [
-              "root:frame:initial"
+              "frame-node/v1/987f8072792419586aec426c81645e0af3d8e30d346d06fd06baf1c92a59b7d9"
             ],
-            "current_agent_frame_id": "root:frame:initial",
             "current_frame_active": true,
             "current_frame_exists": true,
             "frame_count": 1,
             "node_agent_frame_ids_without_record": [],
             "nodes_without_agent_frame": [],
-            "passed": true
+            "passed": true,
+            "current_frame_node_id": "frame-node/v1/987f8072792419586aec426c81645e0af3d8e30d346d06fd06baf1c92a59b7d9"
           },
           "graph": {
             "cycle_node_ids": [],
             "duplicate_node_ids": [],
-            "edge_count": 5,
+            "edge_count": 6,
             "leaf_exists": true,
             "leaf_node_id": "mbde6538d56f94db4bbc3db7ff0669125",
             "missing_parent_links": [],
-            "node_count": 6,
+            "node_count": 7,
             "passed": true
           },
           "usage": {
@@ -7235,7 +7235,7 @@
       "at": 113,
       "label": "observer.snapshot",
       "payload": {
-        "expected_graph_node_count": 6,
+        "expected_graph_node_count": 7,
         "expected_transcript_message_count": 6,
         "reconnect": false,
         "runtime_completion": {
@@ -7259,7 +7259,7 @@
         "turn_index": 3
       },
       "observed": {
-        "graph_node_count": 6,
+        "graph_node_count": 7,
         "observer_invariants": {
           "graph_non_empty": true,
           "session_id": true,
@@ -7690,7 +7690,7 @@
       "at": 113,
       "label": "observer.reconnect",
       "payload": {
-        "expected_graph_node_count": 6,
+        "expected_graph_node_count": 7,
         "expected_transcript_message_count": 6,
         "reconnect": true,
         "runtime_completion": {
@@ -7714,7 +7714,7 @@
         "turn_index": 3
       },
       "observed": {
-        "graph_node_count": 6,
+        "graph_node_count": 7,
         "observer_invariants": {
           "graph_non_empty": true,
           "session_id": true,
@@ -8559,7 +8559,7 @@
       "at": 124,
       "label": "provider.chat.stream",
       "payload": {
-        "expected_graph_node_count": 6,
+        "expected_graph_node_count": 7,
         "expected_provider_exchange_count": 3,
         "expected_transcript_message_count": 6,
         "provider_kind": "google_oauth",
@@ -8599,7 +8599,7 @@
       },
       "observed": {
         "activity_count_nonzero": true,
-        "graph_node_count": 6,
+        "graph_node_count": 7,
         "provider_exchange_count": 3,
         "provider_kind": "google_oauth",
         "provider_output": "answer 3 for session-004 seed 14123330213291275571 profile full-random path de42",
@@ -8621,24 +8621,24 @@
         "runtime_invariant_facts": {
           "agent_frame": {
             "active_frame_ids": [
-              "root:frame:initial"
+              "frame-node/v1/72cb03dbc888107b8fe74cc654f227034e0bcfb74fea5660c2e0f32ce586f64c"
             ],
-            "current_agent_frame_id": "root:frame:initial",
             "current_frame_active": true,
             "current_frame_exists": true,
             "frame_count": 1,
             "node_agent_frame_ids_without_record": [],
             "nodes_without_agent_frame": [],
-            "passed": true
+            "passed": true,
+            "current_frame_node_id": "frame-node/v1/72cb03dbc888107b8fe74cc654f227034e0bcfb74fea5660c2e0f32ce586f64c"
           },
           "graph": {
             "cycle_node_ids": [],
             "duplicate_node_ids": [],
-            "edge_count": 5,
+            "edge_count": 6,
             "leaf_exists": true,
             "leaf_node_id": "m3ccc73d8aed748d6afc4ec91604e555b",
             "missing_parent_links": [],
-            "node_count": 6,
+            "node_count": 7,
             "passed": true
           },
           "usage": {
@@ -8944,7 +8944,7 @@
       "at": 125,
       "label": "observer.snapshot",
       "payload": {
-        "expected_graph_node_count": 6,
+        "expected_graph_node_count": 7,
         "expected_transcript_message_count": 6,
         "reconnect": false,
         "runtime_completion": {
@@ -8968,7 +8968,7 @@
         "turn_index": 3
       },
       "observed": {
-        "graph_node_count": 6,
+        "graph_node_count": 7,
         "observer_invariants": {
           "graph_non_empty": true,
           "session_id": true,
@@ -9290,7 +9290,7 @@
       "at": 126,
       "label": "provider.chat.stream",
       "payload": {
-        "expected_graph_node_count": 6,
+        "expected_graph_node_count": 7,
         "expected_provider_exchange_count": 3,
         "expected_transcript_message_count": 6,
         "provider_kind": "anthropic",
@@ -9346,7 +9346,7 @@
       },
       "observed": {
         "activity_count_nonzero": true,
-        "graph_node_count": 6,
+        "graph_node_count": 7,
         "provider_exchange_count": 3,
         "provider_kind": "anthropic",
         "provider_output": "answer 3 for session-003 seed 14123330213291275571 profile full-random path 92e5",
@@ -9368,24 +9368,24 @@
         "runtime_invariant_facts": {
           "agent_frame": {
             "active_frame_ids": [
-              "root:frame:initial"
+              "frame-node/v1/487960bd53f663b165d4393548d479022f63accb8ab74bb20896ccf6a3f10a68"
             ],
-            "current_agent_frame_id": "root:frame:initial",
             "current_frame_active": true,
             "current_frame_exists": true,
             "frame_count": 1,
             "node_agent_frame_ids_without_record": [],
             "nodes_without_agent_frame": [],
-            "passed": true
+            "passed": true,
+            "current_frame_node_id": "frame-node/v1/487960bd53f663b165d4393548d479022f63accb8ab74bb20896ccf6a3f10a68"
           },
           "graph": {
             "cycle_node_ids": [],
             "duplicate_node_ids": [],
-            "edge_count": 5,
+            "edge_count": 6,
             "leaf_exists": true,
             "leaf_node_id": "me5aca7533f0e463b8613bad6d8fa1203",
             "missing_parent_links": [],
-            "node_count": 6,
+            "node_count": 7,
             "passed": true
           },
           "usage": {
@@ -9512,7 +9512,7 @@
       "at": 127,
       "label": "observer.snapshot",
       "payload": {
-        "expected_graph_node_count": 6,
+        "expected_graph_node_count": 7,
         "expected_transcript_message_count": 6,
         "reconnect": false,
         "runtime_completion": {
@@ -9536,7 +9536,7 @@
         "turn_index": 3
       },
       "observed": {
-        "graph_node_count": 6,
+        "graph_node_count": 7,
         "observer_invariants": {
           "graph_non_empty": true,
           "session_id": true,
@@ -9599,7 +9599,7 @@
       "at": 130,
       "label": "observer.reconnect",
       "payload": {
-        "expected_graph_node_count": 6,
+        "expected_graph_node_count": 7,
         "expected_transcript_message_count": 6,
         "reconnect": true,
         "runtime_completion": {
@@ -9623,7 +9623,7 @@
         "turn_index": 3
       },
       "observed": {
-        "graph_node_count": 6,
+        "graph_node_count": 7,
         "observer_invariants": {
           "graph_non_empty": true,
           "session_id": true,
@@ -9799,7 +9799,7 @@
       "at": 134,
       "label": "observer.reconnect",
       "payload": {
-        "expected_graph_node_count": 6,
+        "expected_graph_node_count": 7,
         "expected_transcript_message_count": 6,
         "reconnect": true,
         "runtime_completion": {
@@ -9823,7 +9823,7 @@
         "turn_index": 3
       },
       "observed": {
-        "graph_node_count": 6,
+        "graph_node_count": 7,
         "observer_invariants": {
           "graph_non_empty": true,
           "session_id": true,
@@ -10111,7 +10111,7 @@
       "at": 143,
       "label": "observer.reconnect",
       "payload": {
-        "expected_graph_node_count": 6,
+        "expected_graph_node_count": 7,
         "expected_transcript_message_count": 6,
         "reconnect": true,
         "runtime_completion": {
@@ -10135,7 +10135,7 @@
         "turn_index": 3
       },
       "observed": {
-        "graph_node_count": 6,
+        "graph_node_count": 7,
         "observer_invariants": {
           "graph_non_empty": true,
           "session_id": true,
@@ -10677,7 +10677,7 @@
       "at": 154,
       "label": "provider.chat.stream",
       "payload": {
-        "expected_graph_node_count": 8,
+        "expected_graph_node_count": 9,
         "expected_provider_exchange_count": 4,
         "expected_transcript_message_count": 8,
         "provider_kind": "anthropic",
@@ -10733,7 +10733,7 @@
       },
       "observed": {
         "activity_count_nonzero": true,
-        "graph_node_count": 8,
+        "graph_node_count": 9,
         "provider_exchange_count": 4,
         "provider_kind": "anthropic",
         "provider_output": "answer 4 for session-003 seed 14123330213291275571 profile full-random path 3f30",
@@ -10755,24 +10755,24 @@
         "runtime_invariant_facts": {
           "agent_frame": {
             "active_frame_ids": [
-              "root:frame:initial"
+              "frame-node/v1/487960bd53f663b165d4393548d479022f63accb8ab74bb20896ccf6a3f10a68"
             ],
-            "current_agent_frame_id": "root:frame:initial",
             "current_frame_active": true,
             "current_frame_exists": true,
             "frame_count": 1,
             "node_agent_frame_ids_without_record": [],
             "nodes_without_agent_frame": [],
-            "passed": true
+            "passed": true,
+            "current_frame_node_id": "frame-node/v1/487960bd53f663b165d4393548d479022f63accb8ab74bb20896ccf6a3f10a68"
           },
           "graph": {
             "cycle_node_ids": [],
             "duplicate_node_ids": [],
-            "edge_count": 7,
+            "edge_count": 8,
             "leaf_exists": true,
             "leaf_node_id": "m9570f28856b94cc28971f88cf7248585",
             "missing_parent_links": [],
-            "node_count": 8,
+            "node_count": 9,
             "passed": true
           },
           "usage": {
@@ -10868,7 +10868,7 @@
       "at": 155,
       "label": "observer.snapshot",
       "payload": {
-        "expected_graph_node_count": 8,
+        "expected_graph_node_count": 9,
         "expected_transcript_message_count": 8,
         "reconnect": false,
         "runtime_completion": {
@@ -10892,7 +10892,7 @@
         "turn_index": 4
       },
       "observed": {
-        "graph_node_count": 8,
+        "graph_node_count": 9,
         "observer_invariants": {
           "graph_non_empty": true,
           "session_id": true,
@@ -11988,7 +11988,7 @@
       "at": 197,
       "label": "observer.reconnect",
       "payload": {
-        "expected_graph_node_count": 6,
+        "expected_graph_node_count": 7,
         "expected_transcript_message_count": 6,
         "reconnect": true,
         "runtime_completion": {
@@ -12012,7 +12012,7 @@
         "turn_index": 3
       },
       "observed": {
-        "graph_node_count": 6,
+        "graph_node_count": 7,
         "observer_invariants": {
           "graph_non_empty": true,
           "session_id": true,
@@ -12367,7 +12367,7 @@
       "at": 202,
       "label": "provider.chat.stream",
       "payload": {
-        "expected_graph_node_count": 10,
+        "expected_graph_node_count": 11,
         "expected_provider_exchange_count": 5,
         "expected_transcript_message_count": 10,
         "provider_kind": "anthropic",
@@ -12423,7 +12423,7 @@
       },
       "observed": {
         "activity_count_nonzero": true,
-        "graph_node_count": 10,
+        "graph_node_count": 11,
         "provider_exchange_count": 5,
         "provider_kind": "anthropic",
         "provider_output": "answer 5 for session-003 seed 14123330213291275571 profile full-random path bc74",
@@ -12445,24 +12445,24 @@
         "runtime_invariant_facts": {
           "agent_frame": {
             "active_frame_ids": [
-              "root:frame:initial"
+              "frame-node/v1/487960bd53f663b165d4393548d479022f63accb8ab74bb20896ccf6a3f10a68"
             ],
-            "current_agent_frame_id": "root:frame:initial",
             "current_frame_active": true,
             "current_frame_exists": true,
             "frame_count": 1,
             "node_agent_frame_ids_without_record": [],
             "nodes_without_agent_frame": [],
-            "passed": true
+            "passed": true,
+            "current_frame_node_id": "frame-node/v1/487960bd53f663b165d4393548d479022f63accb8ab74bb20896ccf6a3f10a68"
           },
           "graph": {
             "cycle_node_ids": [],
             "duplicate_node_ids": [],
-            "edge_count": 9,
+            "edge_count": 10,
             "leaf_exists": true,
             "leaf_node_id": "m4b84f0d55a6c444d9eb55237aa6a0ef9",
             "missing_parent_links": [],
-            "node_count": 10,
+            "node_count": 11,
             "passed": true
           },
           "usage": {
@@ -12558,7 +12558,7 @@
       "at": 203,
       "label": "observer.snapshot",
       "payload": {
-        "expected_graph_node_count": 10,
+        "expected_graph_node_count": 11,
         "expected_transcript_message_count": 10,
         "reconnect": false,
         "runtime_completion": {
@@ -12582,7 +12582,7 @@
         "turn_index": 5
       },
       "observed": {
-        "graph_node_count": 10,
+        "graph_node_count": 11,
         "observer_invariants": {
           "graph_non_empty": true,
           "session_id": true,
@@ -14150,7 +14150,7 @@
       "at": 230,
       "label": "provider.chat.stream",
       "payload": {
-        "expected_graph_node_count": 12,
+        "expected_graph_node_count": 13,
         "expected_provider_exchange_count": 6,
         "expected_transcript_message_count": 12,
         "provider_kind": "anthropic",
@@ -14206,7 +14206,7 @@
       },
       "observed": {
         "activity_count_nonzero": true,
-        "graph_node_count": 12,
+        "graph_node_count": 13,
         "provider_exchange_count": 6,
         "provider_kind": "anthropic",
         "provider_output": "answer 6 for session-003 seed 14123330213291275571 profile full-random path 69b8",
@@ -14228,24 +14228,24 @@
         "runtime_invariant_facts": {
           "agent_frame": {
             "active_frame_ids": [
-              "root:frame:initial"
+              "frame-node/v1/487960bd53f663b165d4393548d479022f63accb8ab74bb20896ccf6a3f10a68"
             ],
-            "current_agent_frame_id": "root:frame:initial",
             "current_frame_active": true,
             "current_frame_exists": true,
             "frame_count": 1,
             "node_agent_frame_ids_without_record": [],
             "nodes_without_agent_frame": [],
-            "passed": true
+            "passed": true,
+            "current_frame_node_id": "frame-node/v1/487960bd53f663b165d4393548d479022f63accb8ab74bb20896ccf6a3f10a68"
           },
           "graph": {
             "cycle_node_ids": [],
             "duplicate_node_ids": [],
-            "edge_count": 11,
+            "edge_count": 12,
             "leaf_exists": true,
             "leaf_node_id": "m1d37b3cb6b4542c7913d5ac92b3a2cb5",
             "missing_parent_links": [],
-            "node_count": 12,
+            "node_count": 13,
             "passed": true
           },
           "usage": {
@@ -14372,7 +14372,7 @@
       "at": 231,
       "label": "observer.snapshot",
       "payload": {
-        "expected_graph_node_count": 12,
+        "expected_graph_node_count": 13,
         "expected_transcript_message_count": 12,
         "reconnect": false,
         "runtime_completion": {
@@ -14396,7 +14396,7 @@
         "turn_index": 6
       },
       "observed": {
-        "graph_node_count": 12,
+        "graph_node_count": 13,
         "observer_invariants": {
           "graph_non_empty": true,
           "session_id": true,
@@ -14428,7 +14428,7 @@
       "at": 231,
       "label": "observer.reconnect",
       "payload": {
-        "expected_graph_node_count": 12,
+        "expected_graph_node_count": 13,
         "expected_transcript_message_count": 12,
         "reconnect": true,
         "runtime_completion": {
@@ -14452,7 +14452,7 @@
         "turn_index": 6
       },
       "observed": {
-        "graph_node_count": 12,
+        "graph_node_count": 13,
         "observer_invariants": {
           "graph_non_empty": true,
           "session_id": true,
@@ -14830,7 +14830,7 @@
       "at": 241,
       "label": "observer.reconnect",
       "payload": {
-        "expected_graph_node_count": 6,
+        "expected_graph_node_count": 7,
         "expected_transcript_message_count": 6,
         "reconnect": true,
         "runtime_completion": {
@@ -14854,7 +14854,7 @@
         "turn_index": 3
       },
       "observed": {
-        "graph_node_count": 6,
+        "graph_node_count": 7,
         "observer_invariants": {
           "graph_non_empty": true,
           "session_id": true,
@@ -15406,7 +15406,7 @@
       "at": 257,
       "label": "observer.reconnect",
       "payload": {
-        "expected_graph_node_count": 6,
+        "expected_graph_node_count": 7,
         "expected_transcript_message_count": 6,
         "reconnect": true,
         "runtime_completion": {
@@ -15430,7 +15430,7 @@
         "turn_index": 3
       },
       "observed": {
-        "graph_node_count": 6,
+        "graph_node_count": 7,
         "observer_invariants": {
           "graph_non_empty": true,
           "session_id": true,
@@ -16455,7 +16455,7 @@
       "at": 286,
       "label": "provider.chat.stream",
       "payload": {
-        "expected_graph_node_count": 14,
+        "expected_graph_node_count": 15,
         "expected_provider_exchange_count": 7,
         "expected_transcript_message_count": 14,
         "provider_kind": "anthropic",
@@ -16511,7 +16511,7 @@
       },
       "observed": {
         "activity_count_nonzero": true,
-        "graph_node_count": 14,
+        "graph_node_count": 15,
         "provider_exchange_count": 7,
         "provider_kind": "anthropic",
         "provider_output": "answer 7 for session-003 seed 14123330213291275571 profile full-random path 0acc",
@@ -16533,24 +16533,24 @@
         "runtime_invariant_facts": {
           "agent_frame": {
             "active_frame_ids": [
-              "root:frame:initial"
+              "frame-node/v1/487960bd53f663b165d4393548d479022f63accb8ab74bb20896ccf6a3f10a68"
             ],
-            "current_agent_frame_id": "root:frame:initial",
             "current_frame_active": true,
             "current_frame_exists": true,
             "frame_count": 1,
             "node_agent_frame_ids_without_record": [],
             "nodes_without_agent_frame": [],
-            "passed": true
+            "passed": true,
+            "current_frame_node_id": "frame-node/v1/487960bd53f663b165d4393548d479022f63accb8ab74bb20896ccf6a3f10a68"
           },
           "graph": {
             "cycle_node_ids": [],
             "duplicate_node_ids": [],
-            "edge_count": 13,
+            "edge_count": 14,
             "leaf_exists": true,
             "leaf_node_id": "m52440181a98e48678283bf4a5746f5a8",
             "missing_parent_links": [],
-            "node_count": 14,
+            "node_count": 15,
             "passed": true
           },
           "usage": {
@@ -17738,7 +17738,7 @@
       "at": 287,
       "label": "observer.snapshot",
       "payload": {
-        "expected_graph_node_count": 14,
+        "expected_graph_node_count": 15,
         "expected_transcript_message_count": 14,
         "reconnect": false,
         "runtime_completion": {
@@ -17762,7 +17762,7 @@
         "turn_index": 7
       },
       "observed": {
-        "graph_node_count": 14,
+        "graph_node_count": 15,
         "observer_invariants": {
           "graph_non_empty": true,
           "session_id": true,
@@ -20775,7 +20775,7 @@
       "at": 335,
       "label": "observer.reconnect",
       "payload": {
-        "expected_graph_node_count": 14,
+        "expected_graph_node_count": 15,
         "expected_transcript_message_count": 14,
         "reconnect": true,
         "runtime_completion": {
@@ -20799,7 +20799,7 @@
         "turn_index": 7
       },
       "observed": {
-        "graph_node_count": 14,
+        "graph_node_count": 15,
         "observer_invariants": {
           "graph_non_empty": true,
           "session_id": true,
@@ -20831,7 +20831,7 @@
       "at": 337,
       "label": "observer.reconnect",
       "payload": {
-        "expected_graph_node_count": 6,
+        "expected_graph_node_count": 7,
         "expected_transcript_message_count": 6,
         "reconnect": true,
         "runtime_completion": {
@@ -20855,7 +20855,7 @@
         "turn_index": 3
       },
       "observed": {
-        "graph_node_count": 6,
+        "graph_node_count": 7,
         "observer_invariants": {
           "graph_non_empty": true,
           "session_id": true,
@@ -20887,7 +20887,7 @@
       "at": 338,
       "label": "observer.reconnect",
       "payload": {
-        "expected_graph_node_count": 14,
+        "expected_graph_node_count": 15,
         "expected_transcript_message_count": 14,
         "reconnect": true,
         "runtime_completion": {
@@ -20911,7 +20911,7 @@
         "turn_index": 7
       },
       "observed": {
-        "graph_node_count": 14,
+        "graph_node_count": 15,
         "observer_invariants": {
           "graph_non_empty": true,
           "session_id": true,
@@ -21155,7 +21155,7 @@
       "at": 347,
       "label": "observer.reconnect",
       "payload": {
-        "expected_graph_node_count": 14,
+        "expected_graph_node_count": 15,
         "expected_transcript_message_count": 14,
         "reconnect": true,
         "runtime_completion": {
@@ -21179,7 +21179,7 @@
         "turn_index": 7
       },
       "observed": {
-        "graph_node_count": 14,
+        "graph_node_count": 15,
         "observer_invariants": {
           "graph_non_empty": true,
           "session_id": true,
@@ -21506,7 +21506,7 @@
       "at": 358,
       "label": "observer.reconnect",
       "payload": {
-        "expected_graph_node_count": 14,
+        "expected_graph_node_count": 15,
         "expected_transcript_message_count": 14,
         "reconnect": true,
         "runtime_completion": {
@@ -21530,7 +21530,7 @@
         "turn_index": 7
       },
       "observed": {
-        "graph_node_count": 14,
+        "graph_node_count": 15,
         "observer_invariants": {
           "graph_non_empty": true,
           "session_id": true,
@@ -21593,7 +21593,7 @@
       "at": 361,
       "label": "observer.reconnect",
       "payload": {
-        "expected_graph_node_count": 14,
+        "expected_graph_node_count": 15,
         "expected_transcript_message_count": 14,
         "reconnect": true,
         "runtime_completion": {
@@ -21617,7 +21617,7 @@
         "turn_index": 7
       },
       "observed": {
-        "graph_node_count": 14,
+        "graph_node_count": 15,
         "observer_invariants": {
           "graph_non_empty": true,
           "session_id": true,
@@ -22926,7 +22926,7 @@
       "at": 389,
       "label": "observer.reconnect",
       "payload": {
-        "expected_graph_node_count": 14,
+        "expected_graph_node_count": 15,
         "expected_transcript_message_count": 14,
         "reconnect": true,
         "runtime_completion": {
@@ -22950,7 +22950,7 @@
         "turn_index": 7
       },
       "observed": {
-        "graph_node_count": 14,
+        "graph_node_count": 15,
         "observer_invariants": {
           "graph_non_empty": true,
           "session_id": true,
@@ -22982,7 +22982,7 @@
       "at": 391,
       "label": "observer.reconnect",
       "payload": {
-        "expected_graph_node_count": 6,
+        "expected_graph_node_count": 7,
         "expected_transcript_message_count": 6,
         "reconnect": true,
         "runtime_completion": {
@@ -23006,7 +23006,7 @@
         "turn_index": 3
       },
       "observed": {
-        "graph_node_count": 6,
+        "graph_node_count": 7,
         "observer_invariants": {
           "graph_non_empty": true,
           "session_id": true,
@@ -23213,7 +23213,7 @@
       "at": 397,
       "label": "observer.reconnect",
       "payload": {
-        "expected_graph_node_count": 14,
+        "expected_graph_node_count": 15,
         "expected_transcript_message_count": 14,
         "reconnect": true,
         "runtime_completion": {
@@ -23237,7 +23237,7 @@
         "turn_index": 7
       },
       "observed": {
-        "graph_node_count": 14,
+        "graph_node_count": 15,
         "observer_invariants": {
           "graph_non_empty": true,
           "session_id": true,
@@ -24149,7 +24149,7 @@
       "at": 424,
       "label": "observer.reconnect",
       "payload": {
-        "expected_graph_node_count": 14,
+        "expected_graph_node_count": 15,
         "expected_transcript_message_count": 14,
         "reconnect": true,
         "runtime_completion": {
@@ -24173,7 +24173,7 @@
         "turn_index": 7
       },
       "observed": {
-        "graph_node_count": 14,
+        "graph_node_count": 15,
         "observer_invariants": {
           "graph_non_empty": true,
           "session_id": true,
@@ -24380,7 +24380,7 @@
       "at": 427,
       "label": "observer.reconnect",
       "payload": {
-        "expected_graph_node_count": 6,
+        "expected_graph_node_count": 7,
         "expected_transcript_message_count": 6,
         "reconnect": true,
         "runtime_completion": {
@@ -24404,7 +24404,7 @@
         "turn_index": 3
       },
       "observed": {
-        "graph_node_count": 6,
+        "graph_node_count": 7,
         "observer_invariants": {
           "graph_non_empty": true,
           "session_id": true,
@@ -25646,7 +25646,7 @@
       "at": 457,
       "label": "observer.reconnect",
       "payload": {
-        "expected_graph_node_count": 6,
+        "expected_graph_node_count": 7,
         "expected_transcript_message_count": 6,
         "reconnect": true,
         "runtime_completion": {
@@ -25670,7 +25670,7 @@
         "turn_index": 3
       },
       "observed": {
-        "graph_node_count": 6,
+        "graph_node_count": 7,
         "observer_invariants": {
           "graph_non_empty": true,
           "session_id": true,
@@ -27180,7 +27180,7 @@
       "at": 494,
       "label": "observer.reconnect",
       "payload": {
-        "expected_graph_node_count": 6,
+        "expected_graph_node_count": 7,
         "expected_transcript_message_count": 6,
         "reconnect": true,
         "runtime_completion": {
@@ -27204,7 +27204,7 @@
         "turn_index": 3
       },
       "observed": {
-        "graph_node_count": 6,
+        "graph_node_count": 7,
         "observer_invariants": {
           "graph_non_empty": true,
           "session_id": true,
@@ -28050,7 +28050,7 @@
       "at": 512,
       "label": "observer.reconnect",
       "payload": {
-        "expected_graph_node_count": 6,
+        "expected_graph_node_count": 7,
         "expected_transcript_message_count": 6,
         "reconnect": true,
         "runtime_completion": {
@@ -28074,7 +28074,7 @@
         "turn_index": 3
       },
       "observed": {
-        "graph_node_count": 6,
+        "graph_node_count": 7,
         "observer_invariants": {
           "graph_non_empty": true,
           "session_id": true,
@@ -29318,7 +29318,7 @@
       "at": 544,
       "label": "observer.reconnect",
       "payload": {
-        "expected_graph_node_count": 6,
+        "expected_graph_node_count": 7,
         "expected_transcript_message_count": 6,
         "reconnect": true,
         "runtime_completion": {
@@ -29342,7 +29342,7 @@
         "turn_index": 3
       },
       "observed": {
-        "graph_node_count": 6,
+        "graph_node_count": 7,
         "observer_invariants": {
           "graph_non_empty": true,
           "session_id": true,
@@ -31223,9 +31223,9 @@
           3
         ],
         "graph_node_counts": [
-          2,
-          4,
-          6
+          3,
+          5,
+          7
         ],
         "transcript_message_counts": [
           2,
@@ -31320,9 +31320,9 @@
           3
         ],
         "graph_node_counts": [
-          2,
-          4,
-          6
+          3,
+          5,
+          7
         ],
         "transcript_message_counts": [
           2,
@@ -31430,13 +31430,13 @@
           7
         ],
         "graph_node_counts": [
-          2,
-          4,
-          6,
-          8,
-          10,
-          12,
-          14
+          3,
+          5,
+          7,
+          9,
+          11,
+          13,
+          15
         ],
         "transcript_message_counts": [
           2,
@@ -31537,9 +31537,9 @@
           3
         ],
         "graph_node_counts": [
-          2,
-          4,
-          6
+          3,
+          5,
+          7
         ],
         "transcript_message_counts": [
           2,

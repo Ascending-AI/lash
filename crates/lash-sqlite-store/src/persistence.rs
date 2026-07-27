@@ -270,16 +270,27 @@ impl SessionCommitStore for Store {
         node_id: &str,
     ) -> Result<Option<lash_core::SessionNodeRecord>, StoreError> {
         let node_id = node_id.to_string();
+        let session_id = self.session_id.get().cloned();
         let row: Option<(String, Option<String>, String)> = self
             .conn
             .call(move |conn| {
-                conn.query_row(
-                    "SELECT node_id, parent_node_id, node_json FROM graph_nodes
-                     WHERE node_id = ?1 AND tombstoned = 0",
-                    params![node_id],
-                    |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
-                )
-                .optional()
+                if let Some(session_id) = session_id {
+                    conn.query_row(
+                        "SELECT node_id, parent_node_id, node_json FROM graph_nodes
+                         WHERE node_id = ?1 AND session_id = ?2 AND tombstoned = 0",
+                        params![node_id, session_id],
+                        |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+                    )
+                    .optional()
+                } else {
+                    conn.query_row(
+                        "SELECT node_id, parent_node_id, node_json FROM graph_nodes
+                         WHERE node_id = ?1 AND tombstoned = 0",
+                        params![node_id],
+                        |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+                    )
+                    .optional()
+                }
             })
             .await
             .map_err(sqlite_error)?;

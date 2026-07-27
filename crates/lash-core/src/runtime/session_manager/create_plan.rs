@@ -111,6 +111,7 @@ fn build_runtime_state(
     clock: &dyn crate::Clock,
 ) -> RuntimeSessionState {
     base.session_id = session_id;
+    base.head_revision = None;
     base.policy = policy.clone();
     base.reset_initial_agent_frame_with_clock(
         crate::AgentFrameAssignment::from_session_request(request, policy.clone()),

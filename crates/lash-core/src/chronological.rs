@@ -78,6 +78,13 @@ impl<'a> BorrowedChronologicalMessage<'a> {
             origin: self.origin.cloned(),
         }
     }
+
+    fn structurally_matches(self, other: Self) -> bool {
+        self.id == other.id
+            && self.role == other.role
+            && self.parts == other.parts
+            && self.origin == other.origin
+    }
 }
 
 impl ChronologicalProjection {
@@ -143,11 +150,13 @@ fn visit_active_read<'a>(
     }
 
     let mut index = 0;
+    let mut represented_messages = Vec::new();
     for event in active_events {
         match event {
             SessionHistoryRecord::Conversation(record) => {
                 let message = BorrowedChronologicalMessage::from_record(record);
                 if !message.is_transient() {
+                    represented_messages.push(message);
                     visit(BorrowedChronologicalEntry {
                         index,
                         payload: BorrowedChronologicalPayload::Message(message),
@@ -163,6 +172,25 @@ fn visit_active_read<'a>(
                 index += 1;
             }
         }
+    }
+
+    for message in messages {
+        let message = BorrowedChronologicalMessage::from_message(message);
+        if message.is_transient() {
+            continue;
+        }
+        if let Some(position) = represented_messages
+            .iter()
+            .position(|represented| represented.structurally_matches(message))
+        {
+            represented_messages.swap_remove(position);
+            continue;
+        }
+        visit(BorrowedChronologicalEntry {
+            index,
+            payload: BorrowedChronologicalPayload::Message(message),
+        });
+        index += 1;
     }
 }
 
@@ -287,8 +315,30 @@ mod tests {
                 "0:message:m1",
                 r#"1:protocol:{"value":"step"}"#,
                 "2:message:m1",
+                "3:message:m2",
             ]
         );
+    }
+
+    #[test]
+    fn active_event_occurrences_do_not_hide_a_live_same_id_tail() {
+        let first = text_message("same", MessageRole::User, "first");
+        let second = text_message("same", MessageRole::User, "second");
+        let events = vec![SessionHistoryRecord::Conversation(
+            ConversationRecord::from_message(first),
+        )];
+        let messages = MessageSequence::from_owned(vec![second]);
+
+        let projection = ChronologicalProjection::from_turn_view(&events, &messages);
+
+        assert_eq!(
+            owned_summary(&projection),
+            vec!["0:message:same", "1:message:same"]
+        );
+        let ChronologicalPayload::Message(live_tail) = &projection.entries()[1].payload else {
+            panic!("expected the rewritten live message");
+        };
+        assert_eq!(live_tail.parts[0].content, "second");
     }
 
     #[test]

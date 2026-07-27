@@ -13,6 +13,7 @@ pub(super) struct TurnGraphEditor {
     base_graph: Arc<SessionGraph>,
     active_events: Arc<Vec<SessionHistoryRecord>>,
     active_messages: MessageSequence,
+    current_frame_node_id: Option<String>,
     append_builder: crate::session_graph::SessionGraphAppendBuilder,
     appended_nodes: Vec<SessionNodeRecord>,
     appended_node_indices: HashMap<String, usize>,
@@ -24,6 +25,7 @@ impl TurnGraphEditor {
     pub(super) fn new(
         base_graph: Arc<SessionGraph>,
         base_read_model: SessionReadModel,
+        current_frame_node_id: Option<String>,
         draft_namespace: &str,
         clock: Arc<dyn crate::Clock>,
         persisted_node_ids: HashSet<String>,
@@ -35,6 +37,7 @@ impl TurnGraphEditor {
             base_graph,
             active_events: base_read_model.active_events,
             active_messages,
+            current_frame_node_id,
             append_builder,
             appended_nodes: Vec::new(),
             appended_node_indices: HashMap::new(),
@@ -243,6 +246,13 @@ impl TurnGraphEditor {
             current = node.parent_node_id.clone();
         }
         path.reverse();
+        if let Some(frame_node_id) = self.current_frame_node_id.as_deref() {
+            let Some(frame_index) = path.iter().position(|node| node.node_id == frame_node_id)
+            else {
+                return Vec::new();
+            };
+            path.drain(..frame_index);
+        }
         path
     }
 

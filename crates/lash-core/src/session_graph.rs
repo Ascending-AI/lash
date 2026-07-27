@@ -1013,14 +1013,39 @@ impl SessionGraph {
     }
 
     pub fn replace_active_read_state(&mut self, messages: &[Message]) {
-        let current_nodes = self.active_path_nodes();
+        self.replace_active_read_state_from(None, messages);
+    }
+
+    pub(crate) fn replace_active_read_state_for_frame(
+        &mut self,
+        frame_node_id: &str,
+        messages: &[Message],
+    ) {
+        self.replace_active_read_state_from(Some(frame_node_id), messages);
+    }
+
+    fn replace_active_read_state_from(
+        &mut self,
+        frame_node_id: Option<&str>,
+        messages: &[Message],
+    ) {
+        let active_path = self.active_path_nodes();
+        let current_nodes = frame_node_id.map_or(active_path.as_slice(), |frame_node_id| {
+            active_path
+                .iter()
+                .position(|node| node.node_id == frame_node_id)
+                .map_or(&[][..], |index| &active_path[index..])
+        });
+        if frame_node_id.is_some() && current_nodes.is_empty() {
+            return;
+        }
         let existing_ids = self
             .nodes
             .iter()
             .map(|node| node.node_id.clone())
             .collect::<HashSet<_>>();
         let replacement = build_active_read_replacement(
-            current_nodes,
+            current_nodes.iter().copied(),
             &existing_ids,
             &format!(
                 "unscoped-replacement:{}",

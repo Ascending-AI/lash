@@ -933,7 +933,7 @@ impl StateMachinePlanner {
                         "text": provider_turn.text,
                         "turn_index": turn_index,
                         "expected_provider_exchange_count": turn_index,
-                        "expected_graph_node_count": turn_index * 2,
+                        "expected_graph_node_count": turn_index * 2 + 1,
                         "expected_transcript_message_count": turn_index * 2,
                     }),
                 )
@@ -962,7 +962,7 @@ impl StateMachinePlanner {
                     },
                     json!({
                         "turn_index": turn_index,
-                        "expected_graph_node_count": turn_index * 2,
+                        "expected_graph_node_count": turn_index * 2 + 1,
                         "expected_transcript_message_count": turn_index * 2,
                         "reconnect": reconnect,
                     }),

@@ -63,11 +63,26 @@ impl SessionSnapshot {
     }
 
     pub fn replace_active_read_state(&mut self, messages: &[crate::Message]) {
-        self.session_graph.replace_active_read_state(messages);
+        if let Some(frame_node_id) = self.current_frame_node_id.as_deref() {
+            self.session_graph
+                .replace_active_read_state_for_frame(frame_node_id, messages);
+        } else {
+            self.session_graph.replace_active_read_state(messages);
+        }
+        self.current_frame_node_id = self
+            .session_graph
+            .nearest_frame_node_id(self.session_graph.leaf_node_id.as_deref())
+            .map(str::to_string);
+        self.agent_frames = self.session_graph.agent_frame_records(&self.session_id);
     }
 
     pub fn append_active_read_delta(&mut self, messages: &[crate::Message]) {
         self.session_graph.append_active_read_delta(messages);
+        self.current_frame_node_id = self
+            .session_graph
+            .nearest_frame_node_id(self.session_graph.leaf_node_id.as_deref())
+            .map(str::to_string);
+        self.agent_frames = self.session_graph.agent_frame_records(&self.session_id);
     }
 }
 

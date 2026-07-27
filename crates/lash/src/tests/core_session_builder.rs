@@ -1639,7 +1639,7 @@ async fn reopen_reconciles_builder_model_across_all_runtime_consumers() -> Resul
 }
 
 #[tokio::test]
-async fn open_with_state_reconciles_only_the_current_frame() -> Result<()> {
+async fn open_with_state_reconciles_live_policy_without_rewriting_frame_history() -> Result<()> {
     let session_id = "reconcile-open-with-state";
     let persisted = conflicting_reopen_state(session_id);
     let historical_frame_id = persisted.agent_frames[0].frame_node_id.clone();
@@ -1659,8 +1659,9 @@ async fn open_with_state_reconciles_only_the_current_frame() -> Result<()> {
             .expect("current frame")
             .assignment
             .policy
-            .model,
-        builder_model
+            .model
+            .id,
+        "current-frame-model"
     );
     assert_eq!(
         state
@@ -1678,7 +1679,7 @@ async fn open_with_state_reconciles_only_the_current_frame() -> Result<()> {
 }
 
 #[tokio::test]
-async fn queued_worker_state_load_reconciles_only_the_current_frame() -> Result<()> {
+async fn queued_worker_state_load_reconciles_live_policy_without_rewriting_history() -> Result<()> {
     let session_id = "reconcile-queued-worker";
     let persisted = conflicting_reopen_state(session_id);
     let historical_frame_id = persisted.agent_frames[0].frame_node_id.clone();
@@ -1704,8 +1705,9 @@ async fn queued_worker_state_load_reconciles_only_the_current_frame() -> Result<
             .expect("current frame")
             .assignment
             .policy
-            .model,
-        policy.model
+            .model
+            .id,
+        "current-frame-model"
     );
     assert_eq!(
         state

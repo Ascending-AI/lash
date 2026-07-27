@@ -18,6 +18,7 @@ impl TurnCommitDraft {
         clock: Arc<dyn crate::Clock>,
         draft_namespace: &str,
     ) -> Self {
+        state.ensure_agent_frame_initialized_with_clock(clock.as_ref());
         let base_graph = Arc::new(std::mem::take(&mut state.session_graph));
         let base_read_model = state.current_frame_node_id.as_deref().map_or_else(
             || base_graph.read_model(),
@@ -27,6 +28,7 @@ impl TurnCommitDraft {
         let graph = TurnGraphEditor::new(
             base_graph,
             base_read_model,
+            state.current_frame_node_id.clone(),
             draft_namespace,
             clock,
             persisted_node_ids,
@@ -107,10 +109,7 @@ impl TurnCommitDraft {
     pub(super) fn into_final_state(mut self) -> RuntimeSessionState {
         self.state.persisted_node_ids = self.graph.persisted_node_ids();
         self.state.session_graph = self.graph.into_session_graph();
-        self.state.agent_frames = self
-            .state
-            .session_graph
-            .agent_frame_records(&self.state.session_id);
+        self.state.refresh_current_frame_projection();
         self.state
     }
 
@@ -147,5 +146,82 @@ impl TurnCommitDraft {
             self.graph
                 .replace_active_read_state(read_messages.as_slice());
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use super::*;
+    use crate::{
+        AgentFrameReason, Message, MessageRole, OpenAgentFrameRequest, Part, PartKind, PruneState,
+        RuntimeSessionState, shared_parts,
+    };
+
+    fn text_message(id: &str, text: &str) -> Message {
+        Message {
+            id: id.to_string(),
+            role: MessageRole::User,
+            parts: shared_parts(vec![Part {
+                id: format!("{id}.p0"),
+                kind: PartKind::Text,
+                content: text.to_string(),
+                attachment: None,
+                tool_call_id: None,
+                tool_name: None,
+                tool_replay: None,
+                prune_state: PruneState::Intact,
+                reasoning_meta: None,
+                response_meta: None,
+            }]),
+            origin: None,
+        }
+    }
+
+    #[test]
+    fn replacement_cannot_move_the_leaf_behind_the_current_frame() {
+        let clock = crate::SystemClock;
+        let mut state = RuntimeSessionState {
+            session_id: "frame-replacement".to_string(),
+            ..RuntimeSessionState::default()
+        };
+        state.ensure_agent_frame_initialized_with_clock(&clock);
+        state.append_active_conversation_messages_with_clock(
+            &[text_message("old-root", "old root")],
+            &clock,
+        );
+        let opened = super::super::state::open_agent_frame_in_state_with_clock(
+            &mut state,
+            OpenAgentFrameRequest::new("compacted", AgentFrameReason::compaction()),
+            &clock,
+        );
+        assert!(opened.opened);
+        state.append_active_conversation_messages_with_clock(
+            &[text_message("seed", "frame seed")],
+            &clock,
+        );
+
+        let mut draft =
+            TurnCommitDraft::from_state_with_clock(state, Arc::new(clock), "replacement");
+        draft.finalize_turn_read_state(
+            MessageSequence::from_owned(vec![text_message("replacement", "replacement")]),
+            false,
+        );
+        let state = draft.into_final_state();
+
+        assert_eq!(
+            state.current_frame_node_id.as_deref(),
+            Some(opened.frame_node_id.as_str())
+        );
+        assert_eq!(
+            state
+                .session_graph
+                .nearest_frame_node_id(state.session_graph.leaf_node_id.as_deref()),
+            Some(opened.frame_node_id.as_str())
+        );
+        let read = state.read_model();
+        assert_eq!(read.messages.len(), 1);
+        assert_eq!(read.messages[0].id, "replacement");
     }
 }

@@ -195,7 +195,16 @@ impl SessionReadView {
             SessionReadGraph::Owned(graph) => graph,
             SessionReadGraph::Derived { cache, base_graph } => cache.get_or_init(|| {
                 let mut graph = (**base_graph).clone();
-                graph.replace_active_read_state(self.0.read_model.messages.as_slice());
+                if let Some(frame_node_id) =
+                    base_graph.nearest_frame_node_id(base_graph.leaf_node_id.as_deref())
+                {
+                    graph.replace_active_read_state_for_frame(
+                        frame_node_id,
+                        self.0.read_model.messages.as_slice(),
+                    );
+                } else {
+                    graph.replace_active_read_state(self.0.read_model.messages.as_slice());
+                }
                 graph
             }),
         }

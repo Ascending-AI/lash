@@ -168,17 +168,25 @@ impl RuntimeSessionState {
 
     pub fn replace_active_read_state(&mut self, messages: &[Message]) {
         self.ensure_agent_frame_initialized();
-        self.session_graph.replace_active_read_state(messages);
+        if let Some(frame_node_id) = self.current_frame_node_id.as_deref() {
+            self.session_graph
+                .replace_active_read_state_for_frame(frame_node_id, messages);
+        } else {
+            self.session_graph.replace_active_read_state(messages);
+        }
+        self.refresh_current_frame_projection();
     }
 
     pub fn append_active_read_delta(&mut self, messages: &[Message]) {
         self.ensure_agent_frame_initialized();
         self.session_graph.append_active_read_delta(messages);
+        self.refresh_current_frame_projection();
     }
 
     pub fn append_active_conversation_messages(&mut self, messages: &[Message]) {
         self.ensure_agent_frame_initialized();
         self.session_graph.append_active_read_delta(messages);
+        self.refresh_current_frame_projection();
     }
 
     pub(crate) fn append_active_conversation_messages_with_clock(
@@ -189,6 +197,7 @@ impl RuntimeSessionState {
         self.ensure_agent_frame_initialized_with_clock(clock);
         self.session_graph
             .append_active_conversation_messages_at(messages, clock.timestamp_rfc3339());
+        self.refresh_current_frame_projection();
     }
 
     pub fn read_view(&self) -> crate::SessionReadView {
@@ -318,6 +327,14 @@ pub(crate) fn store_plugin_snapshot(
 }
 
 impl RuntimeSessionState {
+    pub(crate) fn refresh_current_frame_projection(&mut self) {
+        self.current_frame_node_id = self
+            .session_graph
+            .nearest_frame_node_id(self.session_graph.leaf_node_id.as_deref())
+            .map(str::to_string);
+        self.agent_frames = self.session_graph.agent_frame_records(&self.session_id);
+    }
+
     pub fn current_agent_frame(&self) -> Option<&crate::AgentFrameRecord> {
         self.agent_frames.iter().find(|frame| {
             Some(frame.frame_node_id.as_str()) == self.current_frame_node_id.as_deref()
@@ -739,7 +756,7 @@ pub(super) fn open_agent_frame_in_state_with_clock(
     );
     if !opened {
         return crate::OpenAgentFrameResult {
-            frame_node_id: state.current_frame_node_id.clone().unwrap_or_default(),
+            frame_node_id,
             opened: false,
             initial_node_ids: Vec::new(),
         };
