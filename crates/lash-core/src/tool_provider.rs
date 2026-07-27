@@ -605,13 +605,12 @@ impl<'run> ToolContext<'run> {
         mut self,
         process_id: impl Into<String>,
         registry: Arc<dyn crate::ProcessRegistry>,
+        execution_write_authority: crate::ProcessExecutionWriteAuthority,
     ) -> Self {
         let process_id = process_id.into();
         let awaiter = crate::ProcessAwaiter::polling(Arc::clone(&registry));
         self.process_events = Some(ToolProcessEventContext {
-            execution_write_authority: crate::ProcessExecutionWriteAuthority::testing(
-                process_id.clone(),
-            ),
+            execution_write_authority,
             process_id,
             registry,
             awaiter,

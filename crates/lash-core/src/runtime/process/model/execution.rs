@@ -40,11 +40,6 @@ pub enum ProcessExecutionWriteAuthority {
         attempt: Option<u32>,
         resume_from: Option<ProcessStarted>,
     },
-    #[cfg(any(test, feature = "testing"))]
-    #[doc(hidden)]
-    Testing {
-        process_id: String,
-    },
 }
 
 impl ProcessExecutionWriteAuthority {
@@ -80,14 +75,6 @@ impl ProcessExecutionWriteAuthority {
         }
     }
 
-    #[cfg(any(test, feature = "testing"))]
-    #[doc(hidden)]
-    pub fn testing(process_id: impl Into<String>) -> Self {
-        Self::Testing {
-            process_id: process_id.into(),
-        }
-    }
-
     pub fn bind_attempt(&self, attempt: u32) -> Self {
         match self {
             Self::Lease(lease) => Self::Lease(lease.clone()),
@@ -102,10 +89,6 @@ impl ProcessExecutionWriteAuthority {
                 attempt: Some(attempt),
                 resume_from: resume_from.clone(),
             },
-            #[cfg(any(test, feature = "testing"))]
-            Self::Testing { process_id } => Self::Testing {
-                process_id: process_id.clone(),
-            },
         }
     }
 
@@ -113,8 +96,6 @@ impl ProcessExecutionWriteAuthority {
         match self {
             Self::Lease(lease) => Some(lease),
             Self::Invocation { .. } => None,
-            #[cfg(any(test, feature = "testing"))]
-            Self::Testing { .. } => None,
         }
     }
 
@@ -136,8 +117,6 @@ impl ProcessExecutionWriteAuthority {
                 started_at_ms: 0,
             }),
             Self::Invocation { attempt: None, .. } => None,
-            #[cfg(any(test, feature = "testing"))]
-            Self::Testing { .. } => None,
         }
     }
 
@@ -226,19 +205,6 @@ impl ProcessExecutionWriteAuthority {
         started: &ProcessStarted,
         retained: Option<&ProcessStarted>,
     ) -> Result<(), crate::PluginError> {
-        #[cfg(any(test, feature = "testing"))]
-        if let Self::Testing {
-            process_id: authority_process_id,
-        } = self
-        {
-            return if authority_process_id == process_id {
-                Ok(())
-            } else {
-                Err(crate::PluginError::ProcessLeaseSuperseded {
-                    process_id: process_id.to_string(),
-                })
-            };
-        }
         let Self::Invocation {
             process_id: authority_process_id,
             ..
@@ -269,19 +235,6 @@ impl ProcessExecutionWriteAuthority {
         process_id: &str,
         record: &ProcessRecord,
     ) -> Result<(), crate::PluginError> {
-        #[cfg(any(test, feature = "testing"))]
-        if let Self::Testing {
-            process_id: authority_process_id,
-        } = self
-        {
-            return if authority_process_id == process_id {
-                Ok(())
-            } else {
-                Err(crate::PluginError::ProcessLeaseSuperseded {
-                    process_id: process_id.to_string(),
-                })
-            };
-        }
         let Self::Invocation {
             process_id: authority_process_id,
             ..

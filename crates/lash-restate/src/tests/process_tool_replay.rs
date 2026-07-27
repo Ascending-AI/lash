@@ -32,7 +32,10 @@ async fn restate_replay_does_not_reexecute_process_owned_tool_call() {
         .run_process_segment_with_scoped_effect_controller(
             registration.clone(),
             ProcessExecutionContext::default(),
-            lash_core::ProcessExecutionWriteAuthority::testing(process_id),
+            lash_core::ProcessExecutionWriteAuthority::invocation(
+                process_id,
+                "process-tool-replay-execution",
+            ),
             first_scope,
             tokio_util::sync::CancellationToken::new(),
             None,
@@ -55,7 +58,10 @@ async fn restate_replay_does_not_reexecute_process_owned_tool_call() {
         .run_process_segment_with_scoped_effect_controller(
             registration,
             ProcessExecutionContext::default(),
-            lash_core::ProcessExecutionWriteAuthority::testing(process_id),
+            lash_core::ProcessExecutionWriteAuthority::invocation(
+                process_id,
+                "process-tool-replay-execution",
+            ),
             replay_scope,
             tokio_util::sync::CancellationToken::new(),
             None,

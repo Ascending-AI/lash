@@ -122,7 +122,6 @@ pub(super) async fn process_record_is_the_fold_of_its_event_log(
     registry: Arc<dyn ProcessRegistry>,
 ) {
     let process_id = "proc-event-fold";
-    let execution_authority = ProcessExecutionWriteAuthority::testing(process_id);
     let base = registry
         .register_process(
             rerunnable_registration(process_id)
@@ -151,28 +150,24 @@ pub(super) async fn process_record_is_the_fold_of_its_event_log(
         .expect("replay fold process registration");
     assert_process_record_fold(&registry, &base, "registration replay").await;
 
-    let started = ProcessStarted {
-        owner: process_lease_owner("fold-starter"),
-        fencing_token: 0,
-        attempt: 1,
-        started_at_ms: 11,
-    };
+    let first_lease = claim_fold_lease(&registry, process_id, "fold-starter").await;
+    let first_authority = ProcessExecutionWriteAuthority::lease(first_lease.clone());
+    let started = started_for_fold(&first_lease, 1, 11);
     registry
-        .record_first_started_with_authority(process_id, started, &execution_authority)
+        .record_first_started_with_authority(process_id, started, &first_authority)
         .await
         .expect("append first-started lifecycle event");
     assert_process_record_fold(&registry, &base, "first started").await;
     replay_latest_event(&registry, process_id, "process.first_started").await;
     assert_process_record_fold(&registry, &base, "first-started replay").await;
+    release_fold_lease(&registry, &first_lease).await;
+
+    let second_lease = claim_fold_lease(&registry, process_id, "fold-starter-2").await;
+    let execution_authority = ProcessExecutionWriteAuthority::lease(second_lease.clone());
     registry
         .record_first_started_with_authority(
             process_id,
-            ProcessStarted {
-                owner: process_lease_owner("fold-starter-2"),
-                fencing_token: 0,
-                attempt: 2,
-                started_at_ms: 12,
-            },
+            started_for_fold(&second_lease, 2, 12),
             &execution_authority,
         )
         .await
@@ -358,6 +353,7 @@ pub(super) async fn process_record_is_the_fold_of_its_event_log(
         .expect("replay cancel-requested event");
     assert_process_record_fold(&registry, &base, "cancel-request replay").await;
 
+    release_fold_lease(&registry, &second_lease).await;
     complete_and_assert_fold(
         &registry,
         process_id,
@@ -419,6 +415,39 @@ pub(super) async fn process_record_is_the_fold_of_its_event_log(
         )
         .await;
     }
+}
+
+async fn claim_fold_lease(
+    registry: &Arc<dyn ProcessRegistry>,
+    process_id: &str,
+    owner_id: &str,
+) -> crate::ProcessLease {
+    registry
+        .claim_process_lease(process_id, &process_lease_owner(owner_id), 60_000)
+        .await
+        .expect("claim fold process lease")
+        .acquired()
+        .expect("fold process lease is available")
+}
+
+fn started_for_fold(
+    lease: &crate::ProcessLease,
+    attempt: u32,
+    started_at_ms: u64,
+) -> ProcessStarted {
+    ProcessStarted {
+        owner: lease.owner.clone(),
+        fencing_token: lease.fencing_token,
+        attempt,
+        started_at_ms,
+    }
+}
+
+async fn release_fold_lease(registry: &Arc<dyn ProcessRegistry>, lease: &crate::ProcessLease) {
+    registry
+        .complete_process_lease(&crate::ProcessLeaseCompletion::from_lease(lease))
+        .await
+        .expect("release fold process lease");
 }
 
 async fn replay_latest_event(

@@ -46,11 +46,12 @@ mod tests {
     fn async_process_context_with_events(
         process_id: &str,
         registry: Arc<dyn lash_core::ProcessRegistry>,
+        execution_write_authority: lash_core::ProcessExecutionWriteAuthority,
         cancel: CancellationToken,
     ) -> lash_core::ToolContext<'static> {
         lash_core::testing::mock_tool_context()
             .with_async_process(process_id, cancel)
-            .with_process_events_for_testing(process_id, registry)
+            .with_process_events_for_testing(process_id, registry, execution_write_authority)
     }
 
     #[derive(Clone, Default)]
@@ -319,6 +320,31 @@ mod tests {
         registry: &lash_core::TestLocalProcessRegistry,
         process_id: &str,
     ) {
+        register_signal_target_with_disposition(
+            registry,
+            process_id,
+            lash_core::RecoveryDisposition::ExternallyOwned,
+        )
+        .await;
+    }
+
+    async fn register_executable_signal_target(
+        registry: &lash_core::TestLocalProcessRegistry,
+        process_id: &str,
+    ) {
+        register_signal_target_with_disposition(
+            registry,
+            process_id,
+            lash_core::RecoveryDisposition::OwnerBound,
+        )
+        .await;
+    }
+
+    async fn register_signal_target_with_disposition(
+        registry: &lash_core::TestLocalProcessRegistry,
+        process_id: &str,
+        disposition: lash_core::RecoveryDisposition,
+    ) {
         registry
             .register_process(
                 lash_core::ProcessRegistration::new(
@@ -326,7 +352,7 @@ mod tests {
                     lash_core::ProcessInput::External {
                         metadata: serde_json::json!({}),
                     },
-                    lash_core::RecoveryDisposition::ExternallyOwned,
+                    disposition,
                     lash_core::ProcessProvenance::host(),
                 )
                 .with_extra_event_types([shell_signal_event_type()]),
@@ -341,6 +367,40 @@ mod tests {
             )
             .await
             .expect("grant handle");
+    }
+
+    async fn claim_signal_target_execution(
+        registry: &lash_core::TestLocalProcessRegistry,
+        process_id: &str,
+    ) -> lash_core::ProcessExecutionWriteAuthority {
+        let lease = registry
+            .claim_process_lease(
+                process_id,
+                &lash_core::LeaseOwnerIdentity::opaque(
+                    format!("shell-test:{process_id}"),
+                    "command-execution",
+                ),
+                60_000,
+            )
+            .await
+            .expect("claim shell process lease")
+            .acquired()
+            .expect("shell process lease is available");
+        let authority = lash_core::ProcessExecutionWriteAuthority::lease(lease.clone());
+        registry
+            .record_first_started_with_authority(
+                process_id,
+                lash_core::ProcessStarted {
+                    owner: lease.owner.clone(),
+                    fencing_token: lease.fencing_token,
+                    attempt: 1,
+                    started_at_ms: 1,
+                },
+                &authority,
+            )
+            .await
+            .expect("record shell process start");
+        authority
     }
 
     #[tokio::test]
@@ -746,11 +806,14 @@ mod tests {
     async fn start_command_process_consumes_stdin_signals() {
         let shell = test_shell();
         let registry = Arc::new(lash_core::TestLocalProcessRegistry::default());
-        register_signal_target(registry.as_ref(), "shell-worker").await;
+        register_executable_signal_target(registry.as_ref(), "shell-worker").await;
+        let execution_write_authority =
+            claim_signal_target_execution(registry.as_ref(), "shell-worker").await;
         let registry_dyn: Arc<dyn lash_core::ProcessRegistry> = registry.clone();
         let ctx = Arc::new(async_process_context_with_events(
             "shell-worker",
             registry_dyn,
+            execution_write_authority,
             CancellationToken::new(),
         ));
         let args = Arc::new(json!({
@@ -801,11 +864,14 @@ mod tests {
     async fn start_command_process_can_close_stdin_from_signal() {
         let shell = test_shell();
         let registry = Arc::new(lash_core::TestLocalProcessRegistry::default());
-        register_signal_target(registry.as_ref(), "shell-close-stdin").await;
+        register_executable_signal_target(registry.as_ref(), "shell-close-stdin").await;
+        let execution_write_authority =
+            claim_signal_target_execution(registry.as_ref(), "shell-close-stdin").await;
         let registry_dyn: Arc<dyn lash_core::ProcessRegistry> = registry.clone();
         let ctx = Arc::new(async_process_context_with_events(
             "shell-close-stdin",
             registry_dyn,
+            execution_write_authority,
             CancellationToken::new(),
         ));
         let args = Arc::new(json!({"cmd": "cat", "login": false}));
@@ -893,11 +959,14 @@ mod tests {
         let shell = test_shell();
         let cmd = "python3 -u -c 'import sys; line = sys.stdin.readline(); print(\"got:\" + line.strip())'";
         let registry = Arc::new(lash_core::TestLocalProcessRegistry::default());
-        register_signal_target(registry.as_ref(), "shell-short").await;
+        register_executable_signal_target(registry.as_ref(), "shell-short").await;
+        let execution_write_authority =
+            claim_signal_target_execution(registry.as_ref(), "shell-short").await;
         let registry_dyn: Arc<dyn lash_core::ProcessRegistry> = registry.clone();
         let ctx = Arc::new(async_process_context_with_events(
             "shell-short",
             registry_dyn,
+            execution_write_authority,
             CancellationToken::new(),
         ));
         let args = Arc::new(json!({"cmd": cmd, "login": false}));

@@ -83,7 +83,8 @@ impl ExecutionWritePauseHandle {
 }
 
 /// Explicit fixture-only conveniences for lifecycle writes whose production
-/// API requires an execution authority.
+/// API requires an execution authority. Each write claims and releases a real
+/// process lease through the registry under test.
 #[async_trait::async_trait]
 #[doc(hidden)]
 pub trait TestProcessRegistryWriteExt: ProcessRegistry {
@@ -92,13 +93,16 @@ pub trait TestProcessRegistryWriteExt: ProcessRegistry {
         process_id: &str,
         started: ProcessStarted,
     ) -> Result<ProcessRecord, PluginError> {
-        self.record_first_started_with_authority(
-            process_id,
-            started,
-            &ProcessExecutionWriteAuthority::testing(process_id),
-        )
-        .await?
-        .into_record()
+        let lease = claim_fixture_write_lease(self, process_id).await?;
+        let result = self
+            .record_first_started_with_authority(
+                process_id,
+                started,
+                &ProcessExecutionWriteAuthority::lease(lease.clone()),
+            )
+            .await
+            .and_then(ProcessStartOutcome::into_record);
+        finish_fixture_write(self, &lease, result).await
     }
 
     async fn set_process_wait(
@@ -106,24 +110,65 @@ pub trait TestProcessRegistryWriteExt: ProcessRegistry {
         process_id: &str,
         wait: WaitState,
     ) -> Result<ProcessRecord, PluginError> {
-        self.set_process_wait_with_authority(
-            process_id,
-            wait,
-            &ProcessExecutionWriteAuthority::testing(process_id),
-        )
-        .await
+        let lease = claim_fixture_write_lease(self, process_id).await?;
+        let result = self
+            .set_process_wait_with_authority(
+                process_id,
+                wait,
+                &ProcessExecutionWriteAuthority::lease(lease.clone()),
+            )
+            .await;
+        finish_fixture_write(self, &lease, result).await
     }
 
     async fn clear_process_wait(&self, process_id: &str) -> Result<ProcessRecord, PluginError> {
-        self.clear_process_wait_with_authority(
-            process_id,
-            &ProcessExecutionWriteAuthority::testing(process_id),
-        )
-        .await
+        let lease = claim_fixture_write_lease(self, process_id).await?;
+        let result = self
+            .clear_process_wait_with_authority(
+                process_id,
+                &ProcessExecutionWriteAuthority::lease(lease.clone()),
+            )
+            .await;
+        finish_fixture_write(self, &lease, result).await
     }
 }
 
 impl<T> TestProcessRegistryWriteExt for T where T: ProcessRegistry + ?Sized {}
+
+async fn claim_fixture_write_lease(
+    registry: &(impl ProcessRegistry + ?Sized),
+    process_id: &str,
+) -> Result<ProcessLease, PluginError> {
+    let owner =
+        crate::LeaseOwnerIdentity::opaque(format!("test-fixture:{process_id}"), "lifecycle-write");
+    match registry
+        .claim_process_lease(process_id, &owner, 60_000)
+        .await?
+    {
+        ProcessLeaseClaimOutcome::Acquired(lease) => Ok(lease),
+        ProcessLeaseClaimOutcome::Busy { holder } => Err(PluginError::Session(format!(
+            "test fixture cannot claim process `{process_id}` held by `{}`",
+            holder.owner.owner_id
+        ))),
+    }
+}
+
+async fn finish_fixture_write<T>(
+    registry: &(impl ProcessRegistry + ?Sized),
+    lease: &ProcessLease,
+    result: Result<T, PluginError>,
+) -> Result<T, PluginError> {
+    let release = registry
+        .complete_process_lease(&ProcessLeaseCompletion::from_lease(lease))
+        .await;
+    match result {
+        Err(error) => Err(error),
+        Ok(value) => {
+            release?;
+            Ok(value)
+        }
+    }
+}
 
 struct ManagedProcessRecord {
     record: ProcessRecord,
@@ -1273,17 +1318,6 @@ fn validate_in_memory_execution_authority(
 ) -> Result<(), PluginError> {
     match authority {
         ProcessExecutionWriteAuthority::Invocation { .. } => {
-            if let Some(started) = start {
-                authority.validate_invocation_for_start(
-                    process_id,
-                    started,
-                    record.first_started.as_deref(),
-                )
-            } else {
-                authority.validate_invocation_for_write(process_id, record)
-            }
-        }
-        ProcessExecutionWriteAuthority::Testing { .. } => {
             if let Some(started) = start {
                 authority.validate_invocation_for_start(
                     process_id,

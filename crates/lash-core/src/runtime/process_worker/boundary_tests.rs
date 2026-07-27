@@ -267,7 +267,10 @@ async fn run(worker: &DurableProcessWorker) -> Result<ProcessRunOutcome, PluginE
         .run_process_segment_with_scoped_effect_controller(
             external_registration(),
             ProcessExecutionContext::default(),
-            crate::ProcessExecutionWriteAuthority::testing("external-process"),
+            crate::ProcessExecutionWriteAuthority::invocation(
+                "external-process",
+                "boundary-test-execution",
+            ),
             scope,
             CancellationToken::new(),
             None,

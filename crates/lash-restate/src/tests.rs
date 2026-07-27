@@ -1793,8 +1793,10 @@ impl<'ctx> RestateControllerContext<'ctx> for Arc<ReplayableRecordingContext> {
                 .map_err(TerminalError::from_error)?;
             let cancellation = tokio_util::sync::CancellationToken::new();
             let mut handover = None;
-            let execution_write_authority =
-                lash_core::ProcessExecutionWriteAuthority::testing(&process_id);
+            let execution_write_authority = lash_core::ProcessExecutionWriteAuthority::invocation(
+                &process_id,
+                format!("test-workflow:{process_id}"),
+            );
             let output = loop {
                 match worker
                     .run_process_segment_with_scoped_effect_controller(

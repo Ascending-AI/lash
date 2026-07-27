@@ -344,17 +344,6 @@ async fn validate_process_execution_authority_tx(
                 authority.validate_invocation_for_write(process_id, record)
             }
         }
-        ProcessExecutionWriteAuthority::Testing { .. } => {
-            if let Some(started) = start {
-                authority.validate_invocation_for_start(
-                    process_id,
-                    started,
-                    record.first_started.as_deref(),
-                )
-            } else {
-                authority.validate_invocation_for_write(process_id, record)
-            }
-        }
         ProcessExecutionWriteAuthority::Lease(lease) => {
             if lease.process_id != process_id {
                 return Err(process_lease_expired(process_id));

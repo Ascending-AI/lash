@@ -496,10 +496,6 @@ impl DurableProcessWorker {
                 crate::LeaseOwnerIdentity::restate_process_execution(process_id, execution_id),
                 0,
             ),
-            #[cfg(any(test, feature = "testing"))]
-            crate::ProcessExecutionWriteAuthority::Testing { .. } => {
-                (self.config.lease_owner.clone(), 0)
-            }
         };
         let attempt = current.first_started.as_deref().map_or(1, |started| {
             if started.owner.same_incarnation(&owner) && started.fencing_token == fencing_token {

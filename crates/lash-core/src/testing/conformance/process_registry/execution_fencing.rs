@@ -190,7 +190,7 @@ pub(super) async fn respects_recovery_disposition(registry: Arc<dyn ProcessRegis
         .record_first_started_with_authority(
             "fence-owner-bound",
             other,
-            &ProcessExecutionWriteAuthority::testing("fence-owner-bound"),
+            &ProcessExecutionWriteAuthority::lease(owner_bound_lease.clone()),
         )
         .await
         .expect("typed owner-bound rejection")
