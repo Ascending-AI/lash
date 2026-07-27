@@ -380,7 +380,7 @@ impl LashRuntime {
         // here would bump the head revision on every park/close, disturbing
         // host-side head-CAS expectations for what is durably a no-op.
         if self.state.checkpoint_ref.is_none()
-            || matches!(self.state.pending_graph_commit(), crate::GraphAppend { .. })
+            || !self.state.pending_graph_commit().nodes.is_empty()
         {
             let proposed = crate::store::RuntimeCommit::persisted_state_for_test(&self.state, &[]);
             let operation = initial_park_operation(&proposed)
