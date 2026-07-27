@@ -125,6 +125,8 @@ impl EmbedError {
     /// - [`RuntimeErrorCode`](lash_core::RuntimeErrorCode) wiring codes:
     ///   `MissingExecutionScopeId`, `ExecutionScopeTurnIdMismatch`,
     ///   `MissingProcessExecutionId`,
+    ///   `StoreCommitNodeBudgetExceeded`,
+    ///   `StoreCommitByteBudgetExceeded`,
     ///   `DurableEffectLiveProtocolExtension`,
     ///   `DurableEffectLivePluginInput`;
     /// - session provider-configuration errors (`ProviderMismatch`,
@@ -152,6 +154,8 @@ impl EmbedError {
                 RuntimeErrorCode::MissingExecutionScopeId
                     | RuntimeErrorCode::ExecutionScopeTurnIdMismatch
                     | RuntimeErrorCode::MissingProcessExecutionId
+                    | RuntimeErrorCode::StoreCommitNodeBudgetExceeded
+                    | RuntimeErrorCode::StoreCommitByteBudgetExceeded
                     | RuntimeErrorCode::DurableEffectLiveProtocolExtension
                     | RuntimeErrorCode::DurableEffectLivePluginInput
             ),
@@ -209,6 +213,18 @@ mod tests {
             EmbedError::MissingEffectHost,
             runtime_error(RuntimeErrorCode::MissingExecutionScopeId),
         ] {
+            assert!(err.is_terminal(), "{err}");
+            assert!(!err.is_retryable(), "{err}");
+        }
+    }
+
+    #[test]
+    fn commit_budget_errors_are_terminal_and_not_retryable() {
+        for code in [
+            RuntimeErrorCode::StoreCommitNodeBudgetExceeded,
+            RuntimeErrorCode::StoreCommitByteBudgetExceeded,
+        ] {
+            let err = runtime_error(code);
             assert!(err.is_terminal(), "{err}");
             assert!(!err.is_retryable(), "{err}");
         }

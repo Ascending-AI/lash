@@ -12,6 +12,14 @@ pub enum RuntimeErrorCode {
     /// write authority was contended. Retrying the same operation unchanged is
     /// safe; reloading or rebasing is not required.
     StoreCommitContended,
+    /// The final runtime commit contains more graph nodes than the shared
+    /// transaction budget permits. The same turn will fail identically until
+    /// the host produces a smaller turn.
+    StoreCommitNodeBudgetExceeded,
+    /// The final runtime commit contains more persisted payload bytes than the
+    /// shared transaction budget permits. The same turn will fail identically
+    /// until the host produces a smaller turn.
+    StoreCommitByteBudgetExceeded,
     /// A process (re-)execution was handed an empty/non-persisted process id.
     /// Process execution identity is the persisted `process_id`; a retry that
     /// cannot present that stable id has lost its idempotency anchor.
@@ -39,6 +47,8 @@ impl RuntimeErrorCode {
             Self::SessionExecutionBusy => "session_execution_busy",
             Self::SessionExecutionLeaseLost => "session_execution_lease_lost",
             Self::StoreCommitContended => "store_commit_contended",
+            Self::StoreCommitNodeBudgetExceeded => "store_commit_node_budget_exceeded",
+            Self::StoreCommitByteBudgetExceeded => "store_commit_byte_budget_exceeded",
             Self::MissingProcessExecutionId => "missing_process_execution_id",
             Self::StoreCommitFailed => "store_commit_failed",
             Self::PluginSessionManager => "plugin_session_manager",
@@ -71,6 +81,8 @@ impl From<&str> for RuntimeErrorCode {
             "session_execution_busy" => Self::SessionExecutionBusy,
             "session_execution_lease_lost" => Self::SessionExecutionLeaseLost,
             "store_commit_contended" => Self::StoreCommitContended,
+            "store_commit_node_budget_exceeded" => Self::StoreCommitNodeBudgetExceeded,
+            "store_commit_byte_budget_exceeded" => Self::StoreCommitByteBudgetExceeded,
             "missing_process_execution_id" => Self::MissingProcessExecutionId,
             "store_commit_failed" => Self::StoreCommitFailed,
             "plugin_session_manager" => Self::PluginSessionManager,

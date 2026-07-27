@@ -247,6 +247,54 @@ async fn standard_core_runs_mock_turn() -> Result<()> {
     Ok(())
 }
 
+#[tokio::test]
+async fn commit_byte_budget_failure_reaches_the_host_as_terminal_and_actionable() -> Result<()> {
+    let oversized_text =
+        "x".repeat(lash_core::RuntimeCommit::MAX_COMMIT_BUDGET_BYTES.saturating_add(1));
+    let provider = crate::testing::TestProvider::builder()
+        .kind("oversized-commit")
+        .complete(move |_request| {
+            let oversized_text = oversized_text.clone();
+            async move { Ok(text_response(&oversized_text)) }
+        })
+        .build()
+        .into_handle();
+    let core = explicit_ephemeral_facets(LashCore::standard_builder())
+        .provider(provider)
+        .model(mock_model_spec())
+        .store_factory(Arc::new(lash_core::InMemorySessionStoreFactory::new()))
+        .build()?;
+    let session = core.session("commit-budget-surface").open().await?;
+
+    let error = match session
+        .turn(TurnInput::text("produce an oversized turn"))
+        .run()
+        .await
+    {
+        Ok(_) => panic!("the oversized turn must fail at the production surface"),
+        Err(error) => error,
+    };
+
+    let EmbedError::Runtime(runtime_error) = &error else {
+        panic!("expected a host-visible runtime error, got {error}");
+    };
+    assert_eq!(
+        runtime_error.code,
+        lash_core::RuntimeErrorCode::StoreCommitByteBudgetExceeded
+    );
+    assert!(
+        runtime_error.message.contains(&format!(
+            "exceeding the {}-byte transaction budget",
+            lash_core::RuntimeCommit::MAX_COMMIT_BUDGET_BYTES
+        )),
+        "{}",
+        runtime_error.message
+    );
+    assert!(error.is_terminal(), "{error}");
+    assert!(!error.is_retryable(), "{error}");
+    Ok(())
+}
+
 #[test]
 fn typed_core_builders_require_explicit_store_choice() {
     let err = match LashCore::standard_builder()

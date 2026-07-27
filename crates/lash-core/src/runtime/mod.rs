@@ -79,11 +79,61 @@ pub(super) fn runtime_error_from_store_commit(err: crate::store::StoreError) -> 
             RuntimeErrorCode::StoreCommitContended,
             "store commit is contended; retry the identical operation unchanged",
         ),
+        err @ crate::store::StoreError::CommitNodeBudgetExceeded { .. } => RuntimeError::new(
+            RuntimeErrorCode::StoreCommitNodeBudgetExceeded,
+            err.to_string(),
+        ),
+        err @ crate::store::StoreError::CommitByteBudgetExceeded { .. } => RuntimeError::new(
+            RuntimeErrorCode::StoreCommitByteBudgetExceeded,
+            err.to_string(),
+        ),
         crate::store::StoreError::SessionExecutionLeaseExpired { session_id } => RuntimeError::new(
             RuntimeErrorCode::SessionExecutionLeaseLost,
             format!("session execution lease for session `{session_id}` was lost before commit"),
         ),
         err => RuntimeError::new(RuntimeErrorCode::StoreCommitFailed, err.to_string()),
+    }
+}
+
+#[cfg(test)]
+mod store_commit_error_tests {
+    use super::{RuntimeErrorCode, runtime_error_from_store_commit};
+    use crate::store::StoreError;
+
+    #[test]
+    fn commit_budget_errors_preserve_the_budget_kind_and_limits() {
+        let node_error = runtime_error_from_store_commit(StoreError::CommitNodeBudgetExceeded {
+            node_count: 513,
+            max_nodes: 512,
+        });
+        assert_eq!(
+            node_error.code,
+            RuntimeErrorCode::StoreCommitNodeBudgetExceeded
+        );
+        assert!(node_error.message.contains("513 graph nodes"));
+        assert!(node_error.message.contains("512-node transaction budget"));
+
+        let byte_error = runtime_error_from_store_commit(StoreError::CommitByteBudgetExceeded {
+            graph_delta_bytes: 900_000,
+            checkpoint_bytes: 150_000,
+            attachment_manifest_bytes: 1,
+            total_bytes: 1_050_001,
+            max_bytes: 1_048_576,
+        });
+        assert_eq!(
+            byte_error.code,
+            RuntimeErrorCode::StoreCommitByteBudgetExceeded
+        );
+        assert!(
+            byte_error
+                .message
+                .contains("1050001 budgeted payload bytes")
+        );
+        assert!(
+            byte_error
+                .message
+                .contains("1048576-byte transaction budget")
+        );
     }
 }
 
