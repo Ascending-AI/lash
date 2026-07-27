@@ -45,17 +45,16 @@ impl RuntimeCommit {
                 ))
             })
         };
-        let graph_delta_bytes =
-            match &self.graph {
-                GraphCommitDelta::Unchanged { .. } => 0,
-                GraphCommitDelta::Append { nodes, .. } => {
-                    nodes
-                        .iter()
-                        .try_fold(0usize, |total, node| -> Result<usize, StoreError> {
-                            Ok(total.saturating_add(measure_json(serde_json::to_vec(node))?))
-                        })?
-                }
-            };
+        let graph_delta_bytes = match &self.graph {
+            GraphCommitDelta::Unchanged { .. } => 0,
+            GraphCommitDelta::Append { nodes, .. } => {
+                nodes
+                    .iter()
+                    .try_fold(0usize, |total, node| -> Result<usize, StoreError> {
+                        Ok(total.saturating_add(measure_json(serde_json::to_vec(node))?))
+                    })?
+            }
+        };
         let checkpoint_bytes = rmp_serde::to_vec_named(&self.checkpoint)
             .map(|bytes| bytes.len())
             .map_err(|err| {

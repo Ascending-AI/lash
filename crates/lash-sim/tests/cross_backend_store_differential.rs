@@ -151,10 +151,12 @@ impl NodeSpec {
         }
     }
 
-    fn materialize(self) -> SessionNodeRecord {
+    fn materialize(self, session_id: &str) -> SessionNodeRecord {
         SessionNodeRecord {
-            node_id: self.node_id.to_string(),
-            parent_node_id: self.parent_node_id.map(str::to_string),
+            node_id: scoped_node_id(session_id, self.node_id),
+            parent_node_id: self
+                .parent_node_id
+                .map(|node_id| scoped_node_id(session_id, node_id)),
             caused_by: None,
             agent_frame_id: None,
             timestamp: "2026-07-26T00:00:00Z".to_string(),
@@ -169,6 +171,10 @@ impl NodeSpec {
             },
         }
     }
+}
+
+fn scoped_node_id(session_id: &str, node_id: &str) -> String {
+    format!("{session_id}:{node_id}")
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -400,7 +406,7 @@ fn generated_cases() -> Vec<GeneratedCase> {
     ]
 }
 
-fn materialize_graph(spec: &GraphSpec) -> GraphCommitDelta {
+fn materialize_graph(session_id: &str, spec: &GraphSpec) -> GraphCommitDelta {
     match spec {
         GraphSpec::Unchanged { leaf_node_id } => GraphCommitDelta::Unchanged {
             leaf_node_id: leaf_node_id.map(str::to_string),
@@ -409,8 +415,12 @@ fn materialize_graph(spec: &GraphSpec) -> GraphCommitDelta {
             nodes,
             leaf_node_id,
         } => GraphCommitDelta::Append {
-            nodes: nodes.iter().copied().map(NodeSpec::materialize).collect(),
-            leaf_node_id: leaf_node_id.map(str::to_string),
+            nodes: nodes
+                .iter()
+                .copied()
+                .map(|node| node.materialize(session_id))
+                .collect(),
+            leaf_node_id: leaf_node_id.map(|node_id| scoped_node_id(session_id, node_id)),
         },
     }
 }
@@ -427,7 +437,7 @@ fn runtime_commit(
     };
     let mut commit = RuntimeCommit::persisted_state(&state, &[]);
     commit.expected_head_revision = expected_head_revision;
-    commit.graph = materialize_graph(graph);
+    commit.graph = materialize_graph(session_id, graph);
     if let Some(turn_commit) = turn_commit {
         commit = commit.with_turn_commit(RuntimeTurnCommitStamp::new(
             session_id,
@@ -501,7 +511,7 @@ struct StepObservation {
 
 enum RawDurableReader {
     InMemory(Arc<InMemorySessionStore>),
-    Sqlite(PathBuf),
+    Sqlite { path: PathBuf, session_id: String },
     Postgres { pool: PgPool, session_id: String },
 }
 
@@ -537,7 +547,7 @@ impl RawDurableReader {
                     pending_turn_inputs,
                 }
             }
-            Self::Sqlite(path) => read_sqlite_durable_state(path),
+            Self::Sqlite { path, session_id } => read_sqlite_durable_state(path, session_id),
             Self::Postgres { pool, session_id } => {
                 let head: Option<(i64, String)> = sqlx::query_as(
                     "SELECT head_revision, head_json
@@ -610,7 +620,7 @@ impl RawDurableReader {
     }
 }
 
-fn read_sqlite_durable_state(path: &Path) -> RawDurableState {
+fn read_sqlite_durable_state(path: &Path, session_id: &str) -> RawDurableState {
     let connection = rusqlite::Connection::open(path).expect("open SQLite durable reader");
     connection
         .busy_timeout(Duration::from_secs(15))
@@ -626,8 +636,8 @@ fn read_sqlite_durable_state(path: &Path) -> RawDurableState {
         .query_row(
             "SELECT head_revision, head_json
              FROM session_head
-             WHERE singleton = 1",
-            [],
+             WHERE session_id = ?1",
+            [session_id],
             |row| Ok((row.get(0)?, row.get(1)?)),
         )
         .optional()
@@ -642,12 +652,12 @@ fn read_sqlite_durable_state(path: &Path) -> RawDurableState {
             .prepare(
                 "SELECT seq, node_id, node_json
                  FROM graph_nodes
-                 WHERE tombstoned = 0
+                 WHERE session_id = ?1 AND tombstoned = 0
                  ORDER BY seq ASC",
             )
             .expect("prepare SQLite durable node read");
         statement
-            .query_map([], |row| {
+            .query_map([session_id], |row| {
                 Ok((
                     row.get::<_, i64>(0)?,
                     row.get::<_, String>(1)?,
@@ -675,11 +685,12 @@ fn read_sqlite_durable_state(path: &Path) -> RawDurableState {
                              ELSE claim_session_lease_generation
                         END
                  FROM pending_turn_inputs
+                 WHERE session_id = ?1
                  ORDER BY enqueue_seq ASC",
             )
             .expect("prepare SQLite pending-input read");
         statement
-            .query_map([], |row| {
+            .query_map([session_id], |row| {
                 Ok((
                     row.get::<_, String>(0)?,
                     row.get::<_, String>(1)?,
@@ -757,7 +768,10 @@ impl BackendRunner {
                 .await
                 .map(|result| Some(result.into())),
             StoreOperation::Tombstone { node_ids } => {
-                let node_ids = node_ids.iter().map(ToString::to_string).collect::<Vec<_>>();
+                let node_ids = node_ids
+                    .iter()
+                    .map(|node_id| scoped_node_id(&self.session_id, node_id))
+                    .collect::<Vec<_>>();
                 self.store.tombstone_nodes(&node_ids).await.map(|_| None)
             }
             StoreOperation::Vacuum => self.store.vacuum().await.map(|_| None),
@@ -867,6 +881,9 @@ impl BackendRunner {
 
 fn normalized_store_error(backend: &str, error: &StoreError) -> String {
     match error {
+        StoreError::Contended => "Contended".to_string(),
+        StoreError::CommitNodeBudgetExceeded { .. } => "CommitNodeBudgetExceeded".to_string(),
+        StoreError::CommitByteBudgetExceeded { .. } => "CommitByteBudgetExceeded".to_string(),
         StoreError::SessionBindingMismatch { .. } => "SessionBindingMismatch".to_string(),
         StoreError::UnsupportedReadScope(_) => "UnsupportedReadScope".to_string(),
         StoreError::HeadRevisionConflict { .. } => "HeadRevisionConflict".to_string(),
@@ -948,7 +965,10 @@ async fn runners_for_case(
             name: "sqlite",
             session_id: session_id.clone(),
             store: sqlite_store,
-            raw_reader: RawDurableReader::Sqlite(sqlite_path),
+            raw_reader: RawDurableReader::Sqlite {
+                path: sqlite_path,
+                session_id: session_id.clone(),
+            },
             first_lease: None,
             successor_lease: None,
             stale_turn_input_claim: None,
