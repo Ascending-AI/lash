@@ -183,6 +183,18 @@ pub(super) async fn lifecycle_process_fact(
         .await
         .map_err(|err| RuntimeBoundaryError::new(format!("read lease for `{id}` failed: {err}")))?
         .is_none();
+    let first_started_owner = record.first_started.as_ref().map(|started| {
+        if started.owner.owner_id == sweep_owner.owner_id
+            || started
+                .owner
+                .owner_id
+                .starts_with(&format!("{}:", sweep_owner.owner_id))
+        {
+            sweep_owner.owner_id.clone()
+        } else {
+            started.owner.owner_id.clone()
+        }
+    });
     let mut fact = json!({
         "process_id": id,
         "disposition": disposition_str(disposition),
@@ -192,10 +204,7 @@ pub(super) async fn lifecycle_process_fact(
         "provably_dead_holder": provably_dead_holder,
         "lease_lapsed": lease_lapsed,
         "abandon_requested": record.abandon_request.is_some(),
-        "first_started_owner": record
-            .first_started
-            .as_ref()
-            .map(|started| started.owner.owner_id.clone()),
+        "first_started_owner": first_started_owner,
     });
     if let ProcessAwaitOutput::Abandoned { evidence, .. } = &output {
         let obj = fact.as_object_mut().expect("lifecycle fact is an object");
