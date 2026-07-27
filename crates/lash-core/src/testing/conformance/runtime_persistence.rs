@@ -974,7 +974,7 @@ async fn concurrent_head_revision_cas_applies_exactly_once(store: Arc<dyn Runtim
         };
         let node = sample_session_node(node_id, None);
         RuntimeCommit {
-            expected_head_revision: Some(0),
+            expected_head_revision: 0,
             current_frame_node_id: Some(node_id.to_string()),
             graph: crate::GraphCommitDelta::Append {
                 nodes: vec![node],
@@ -4972,7 +4972,7 @@ async fn final_commit_stamp_is_idempotent_and_conflicts_on_changed_hash(
         .with_operation(operation.clone())
         .expect("stamp retry from advanced head")
         .0;
-    retry_from_new_head.expected_head_revision = Some(first.head_revision);
+    retry_from_new_head.expected_head_revision = first.head_revision;
     let retry_hash = retry_from_new_head
         .turn_commit_hash()
         .expect("retry commit hash");
@@ -5135,7 +5135,7 @@ async fn append_rejects_existing_node_id_collision(store: Arc<dyn RuntimePersist
         },
         &[],
     );
-    append.expected_head_revision = Some(first.head_revision);
+    append.expected_head_revision = first.head_revision;
     let err = commit_runtime_state_for_test(&store, append, "collision-append")
         .await
         .expect_err("append must reject an id already present in durable history");

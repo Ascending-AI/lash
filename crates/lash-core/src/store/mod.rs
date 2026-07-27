@@ -407,7 +407,7 @@ impl GraphCommitDelta {
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct RuntimeCommit {
     pub session_id: String,
-    pub expected_head_revision: Option<u64>,
+    pub expected_head_revision: u64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub session_execution_lease: Option<SessionExecutionLeaseFence>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -944,7 +944,7 @@ impl RuntimeCommit {
             .map(ToOwned::to_owned);
         Self {
             session_id: state.session_id.clone(),
-            expected_head_revision: state.head_revision,
+            expected_head_revision: state.head_revision.unwrap_or(0),
             session_execution_lease: None,
             release_session_execution_lease: None,
             config: persisted_session_config_from_state(state),

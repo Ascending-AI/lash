@@ -533,6 +533,90 @@ impl LashCore {
         Ok(lash_core::TurnInputAcceptanceReceipt::from(&enqueued))
     }
 
+    /// Retain the current continuation checkpoint for a turn-boundary node.
+    ///
+    /// A point must still be retained when this is called: ordinarily that
+    /// means it is the leaf of a live session. Pin before advancing the head if
+    /// a host wants to make a past turn forkable later.
+    pub async fn pin(&self, node_id: impl AsRef<str>) -> Result<lash_core::ForkPoint> {
+        let Some(store_factory) = self.store_factory.as_ref() else {
+            return Err(EmbedError::MissingSessionStoreFactory);
+        };
+        store_factory
+            .pin(node_id.as_ref())
+            .await
+            .map_err(Into::into)
+    }
+
+    /// Release an explicit continuation pin. A live tip at the same node
+    /// remains forkable through its session-head checkpoint.
+    pub async fn unpin(&self, node_id: impl AsRef<str>) -> Result<()> {
+        let Some(store_factory) = self.store_factory.as_ref() else {
+            return Err(EmbedError::MissingSessionStoreFactory);
+        };
+        store_factory
+            .unpin(node_id.as_ref())
+            .await
+            .map_err(Into::into)
+    }
+
+    /// Enumerate pinned past turns and unpinned live tips that can be forked.
+    pub async fn fork_points(&self) -> Result<Vec<lash_core::ForkPoint>> {
+        let Some(store_factory) = self.store_factory.as_ref() else {
+            return Err(EmbedError::MissingSessionStoreFactory);
+        };
+        store_factory.fork_points().await.map_err(Into::into)
+    }
+
+    /// Create `session_id` at a retained turn boundary without writing graph
+    /// nodes.
+    ///
+    /// Unpinned past turns are ordinarily not retained. That normal outcome is
+    /// returned as
+    /// `EmbedError::Store(StoreError::ForkPointNotRetained { .. })`; Lash never
+    /// silently substitutes a different checkpoint.
+    pub async fn fork_at(
+        &self,
+        node_id: impl Into<String>,
+        session_id: impl Into<String>,
+    ) -> Result<lash_core::ForkSessionResult> {
+        let Some(store_factory) = self.store_factory.as_ref() else {
+            return Err(EmbedError::MissingSessionStoreFactory);
+        };
+        let request = lash_core::ForkSessionRequest {
+            session_id: session_id.into(),
+            node_id: node_id.into(),
+            relation: lash_core::SessionRelation::Root,
+            policy: self.policy.clone(),
+        };
+        let fork = store_factory.fork_at(&request).await?;
+        let Some(process_registry) = self.process_registry() else {
+            return Ok(fork);
+        };
+        let source_scope = lash_core::SessionScope::new(fork.source_session_id.clone());
+        let target_scope = lash_core::SessionScope::new(fork.session_id.clone());
+        let inherited = match process_registry.list_handle_grants(&source_scope).await {
+            Ok(inherited) => inherited,
+            Err(err) => {
+                let _ = store_factory.delete_session(&fork.session_id).await;
+                return Err(err.into());
+            }
+        };
+        for (grant, _) in inherited {
+            if let Err(err) = process_registry
+                .grant_handle(&target_scope, &grant.process_id, grant.descriptor)
+                .await
+            {
+                let _ = process_registry
+                    .delete_session_process_state(&fork.session_id)
+                    .await;
+                let _ = store_factory.delete_session(&fork.session_id).await;
+                return Err(err.into());
+            }
+        }
+        Ok(fork)
+    }
+
     pub async fn delete_session(
         &self,
         session_id: impl AsRef<str>,

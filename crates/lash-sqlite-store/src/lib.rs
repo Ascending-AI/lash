@@ -91,6 +91,7 @@ mod await_event;
 mod blobs;
 mod conn;
 mod effect_replay;
+mod forks;
 mod graph;
 mod leases;
 mod lifecycle;
@@ -107,6 +108,7 @@ use conn::TxOutcome;
 pub use effect_replay::{
     SqliteEffectHost, SqliteEffectReplayOptions, SqliteRuntimeEffectController,
 };
+use forks::*;
 use leases::*;
 use pending_turn_inputs::*;
 use queued_work::*;
@@ -508,6 +510,25 @@ impl SessionStoreFactory for SqliteSessionStoreFactory {
         delete_session_from_catalog(&self.root, session_id).await
     }
 
+    async fn pin(&self, node_id: &str) -> Result<lash_core::ForkPoint, lash_core::StoreError> {
+        pin_in_catalog(&self.root, node_id).await
+    }
+
+    async fn unpin(&self, node_id: &str) -> Result<(), lash_core::StoreError> {
+        unpin_in_catalog(&self.root, node_id).await
+    }
+
+    async fn fork_points(&self) -> Result<Vec<lash_core::ForkPoint>, lash_core::StoreError> {
+        fork_points_in_catalog(&self.root).await
+    }
+
+    async fn fork_at(
+        &self,
+        request: &lash_core::ForkSessionRequest,
+    ) -> Result<lash_core::ForkSessionResult, lash_core::StoreError> {
+        fork_at_in_catalog(&self.root, request).await
+    }
+
     async fn live_attachment_refs(
         &self,
         intent_grace_cutoff_epoch_ms: u64,
@@ -580,55 +601,118 @@ async fn delete_session_from_catalog(root: &Path, session_id: &str) -> Result<()
         .await
         .map_err(|err| err.to_string())?;
     ensure_schema(&conn).await.map_err(|err| err.to_string())?;
-    conn.write(move |tx| {
-        tx.execute(
-            "DELETE FROM session_head WHERE session_id = ?1",
-            params![session_id],
-        )?;
-        tx.execute(
-            "DELETE FROM graph_nodes WHERE session_id = ?1",
-            params![session_id],
-        )?;
-        tx.execute(
-            "DELETE FROM queued_work_batches WHERE session_id = ?1",
-            params![session_id],
-        )?;
-        for table in [
-            "pending_turn_inputs",
-            "attachment_manifest",
-            "runtime_turn_commits",
-            "session_execution_leases",
-            "usage_deltas",
-            "session_meta",
-        ] {
+    conn.write_flow(move |tx| {
+        let outcome: Result<(), lash_core::StoreError> = (|| {
+            let leaf_node_id = tx
+                .query_row(
+                    "SELECT leaf_node_id FROM session_head WHERE session_id = ?1",
+                    params![session_id],
+                    |row| row.get::<_, Option<String>>(0),
+                )
+                .optional()
+                .map_err(sqlite_error)?
+                .flatten();
             tx.execute(
-                &format!("DELETE FROM {table} WHERE session_id = ?1"),
+                "DELETE FROM session_head WHERE session_id = ?1",
                 params![session_id],
-            )?;
-        }
-        // Trigger manifests are the one artifact-ref namespace with an exact
-        // session owner. Module, raw-artifact, and process-environment refs are
-        // content-addressed factory services with no safe session attribution;
-        // their lifecycle remains owned by the host-facing artifact APIs.
-        tx.execute(
-            "DELETE FROM artifact_refs
+            )
+            .map_err(sqlite_error)?;
+            if let Some(leaf_node_id) = leaf_node_id {
+                persistence::decrement_node_ref_conn(tx, &leaf_node_id)?;
+            }
+            let zero_ref_nodes = {
+                let mut stmt = tx
+                    .prepare(
+                        "SELECT node_id, parent_node_id FROM graph_nodes
+                     WHERE session_id = ?1 AND tombstoned = 0 AND incoming_refs = 0
+                     ORDER BY seq DESC",
+                    )
+                    .map_err(sqlite_error)?;
+                let rows = stmt
+                    .query_map(params![session_id], |row| {
+                        Ok((row.get::<_, String>(0)?, row.get::<_, Option<String>>(1)?))
+                    })
+                    .map_err(sqlite_error)?;
+                rows.collect::<Result<Vec<_>, _>>().map_err(sqlite_error)?
+            };
+            for (node_id, parent_node_id) in zero_ref_nodes {
+                let cached = tx
+                    .query_row(
+                        "SELECT incoming_refs FROM graph_nodes
+                     WHERE node_id = ?1 AND tombstoned = 0",
+                        params![node_id],
+                        |row| row.get::<_, i64>(0),
+                    )
+                    .optional()
+                    .map_err(sqlite_error)?;
+                if cached != Some(0) {
+                    continue;
+                }
+                let derived = persistence::derived_node_refcount_conn(tx, &node_id)?;
+                if derived != 0 {
+                    return Err(lash_core::StoreError::NodeRefcountDrift {
+                        node_id,
+                        cached: 0,
+                        derived,
+                    });
+                }
+                tx.execute(
+                    "UPDATE graph_nodes SET tombstoned = 1 WHERE node_id = ?1",
+                    params![node_id],
+                )
+                .map_err(sqlite_error)?;
+                if let Some(parent_node_id) = parent_node_id {
+                    persistence::decrement_node_ref_conn(tx, &parent_node_id)?;
+                }
+            }
+            tx.execute("DELETE FROM graph_nodes WHERE tombstoned = 1", [])
+                .map_err(sqlite_error)?;
+            tx.execute(
+                "DELETE FROM queued_work_batches WHERE session_id = ?1",
+                params![session_id],
+            )
+            .map_err(sqlite_error)?;
+            for table in [
+                "pending_turn_inputs",
+                "attachment_manifest",
+                "runtime_turn_commits",
+                "session_execution_leases",
+                "usage_deltas",
+                "session_meta",
+            ] {
+                tx.execute(
+                    &format!("DELETE FROM {table} WHERE session_id = ?1"),
+                    params![session_id],
+                )
+                .map_err(sqlite_error)?;
+            }
+            // Trigger manifests are the one artifact-ref namespace with an exact
+            // session owner. Module, raw-artifact, and process-environment refs are
+            // content-addressed factory services with no safe session attribution;
+            // their lifecycle remains owned by the host-facing artifact APIs.
+            tx.execute(
+                "DELETE FROM artifact_refs
              WHERE namespace = ?1 AND artifact_ref = ?2",
-            params![
-                attachments::CURRENT_TRIGGER_MANIFEST_NAMESPACE,
-                format!("session:{session_id}")
-            ],
-        )?;
-        // Session deletion used to unlink the whole per-session file. Preserve
-        // that reclaiming behavior for rows whose ownership is now explicit;
-        // global artifact refs above remain roots.
-        Store::gc_unreachable_in_tx(tx).map_err(|err| {
-            rusqlite::Error::ToSqlConversionFailure(Box::new(std::io::Error::other(
-                err.to_string(),
-            )))
-        })?;
-        Ok(())
+                params![
+                    attachments::CURRENT_TRIGGER_MANIFEST_NAMESPACE,
+                    format!("session:{session_id}")
+                ],
+            )
+            .map_err(sqlite_error)?;
+            // Session deletion used to unlink the whole per-session file. Preserve
+            // that reclaiming behavior for rows whose ownership is now explicit;
+            // global artifact refs above remain roots.
+            Store::gc_unreachable_in_tx(tx)
+                .map_err(|err| lash_core::StoreError::Backend(err.to_string()))?;
+            Ok(())
+        })();
+        Ok(match outcome {
+            Ok(value) => TxOutcome::Commit(Ok(value)),
+            Err(err) => TxOutcome::Rollback(Err(err)),
+        })
     })
     .await
+    .map_err(|err| err.to_string())?
     .map_err(|err| err.to_string())
 }
 
@@ -950,7 +1034,7 @@ mod tests {
             },
         };
         let mut commit = RuntimeCommit::persisted_state(&state, &[]);
-        commit.expected_head_revision = Some(1);
+        commit.expected_head_revision = 1;
         commit.graph = GraphCommitDelta::Append {
             nodes: vec![child],
             leaf_node_id: Some(child_node_id.clone()),

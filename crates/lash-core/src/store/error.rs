@@ -34,8 +34,8 @@ pub enum StoreError {
     UnsupportedReadScope(SessionReadScope),
     #[error("store does not support `{operation}`")]
     UnsupportedStoreOperation { operation: &'static str },
-    #[error("store head revision conflict: expected {expected:?}, actual {actual}")]
-    HeadRevisionConflict { expected: Option<u64>, actual: u64 },
+    #[error("store head revision conflict: expected {expected}, actual {actual}")]
+    HeadRevisionConflict { expected: u64, actual: u64 },
     #[error(
         "runtime operation `{turn_id}` for session `{session_id}` was retried with different commit content; reuse an operation identity only for the same logical operation"
     )]
@@ -49,6 +49,10 @@ pub enum StoreError {
     NodeIdCollision { node_id: String },
     #[error("runtime commit leaf {leaf_node_id:?} does not resolve to a live graph node")]
     InvalidGraphLeaf { leaf_node_id: Option<String> },
+    #[error("node `{node_id}` has no retained continuation anchor")]
+    ForkPointNotRetained { node_id: String },
+    #[error("fork target session `{session_id}` already exists")]
+    ForkSessionAlreadyExists { session_id: String },
     #[error("runtime commit node `{node_id}` has invalid parent {actual:?}; expected {expected:?}")]
     InvalidGraphParent {
         node_id: String,

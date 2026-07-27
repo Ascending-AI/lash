@@ -146,7 +146,7 @@ impl lash_core::SessionCommitStore for SnapshotStore {
             if let Some(leaf_node_id) = leaf_node_id {
                 read.graph.set_leaf_node_id(Some(leaf_node_id));
             }
-            read.graph = read.graph.fork_current_path();
+            read.graph = read.graph.trim_to_active_path();
         }
         Ok(read)
     }

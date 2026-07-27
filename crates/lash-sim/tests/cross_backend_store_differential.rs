@@ -74,7 +74,7 @@ struct GeneratedCase {
 enum StoreOperation {
     Commit {
         label: &'static str,
-        expected_head_revision: Option<u64>,
+        expected_head_revision: u64,
         graph: GraphSpec,
         turn_commit: Option<TurnCommitSpec>,
     },
@@ -95,7 +95,7 @@ enum StoreOperation {
     },
     CommitStaleTurnInputClaim {
         current_lease: LeaseSlot,
-        expected_head_revision: Option<u64>,
+        expected_head_revision: u64,
     },
 }
 
@@ -211,11 +211,7 @@ fn unchanged(leaf_node_id: Option<&'static str>) -> GraphSpec {
     GraphSpec::Unchanged { leaf_node_id }
 }
 
-fn commit(
-    label: &'static str,
-    expected_head_revision: Option<u64>,
-    graph: GraphSpec,
-) -> StoreOperation {
+fn commit(label: &'static str, expected_head_revision: u64, graph: GraphSpec) -> StoreOperation {
     StoreOperation::Commit {
         label,
         expected_head_revision,
@@ -233,7 +229,7 @@ fn generated_cases() -> Vec<GeneratedCase> {
             name: CaseName::DuplicateWithinAppend,
             operations: vec![commit(
                 "append_duplicate_batch",
-                None,
+                0,
                 append(vec![original(), mutated()], Some("collision")),
             )],
         },
@@ -242,12 +238,12 @@ fn generated_cases() -> Vec<GeneratedCase> {
             operations: vec![
                 commit(
                     "append_original",
-                    None,
+                    0,
                     append(vec![original()], Some("collision")),
                 ),
                 commit(
                     "append_committed_id_again",
-                    Some(1),
+                    1,
                     append(vec![mutated()], Some("collision")),
                 ),
             ],
@@ -257,7 +253,7 @@ fn generated_cases() -> Vec<GeneratedCase> {
             operations: vec![
                 commit(
                     "append_original",
-                    None,
+                    0,
                     append(vec![original()], Some("collision")),
                 ),
                 StoreOperation::Tombstone {
@@ -265,7 +261,7 @@ fn generated_cases() -> Vec<GeneratedCase> {
                 },
                 commit(
                     "append_tombstoned_id",
-                    Some(1),
+                    1,
                     append(vec![mutated()], Some("collision")),
                 ),
             ],
@@ -275,7 +271,7 @@ fn generated_cases() -> Vec<GeneratedCase> {
             operations: vec![
                 commit(
                     "append_original",
-                    None,
+                    0,
                     append(vec![original()], Some("collision")),
                 ),
                 StoreOperation::Tombstone {
@@ -284,7 +280,7 @@ fn generated_cases() -> Vec<GeneratedCase> {
                 StoreOperation::Vacuum,
                 commit(
                     "append_vacuumed_id",
-                    Some(1),
+                    1,
                     append(vec![mutated()], Some("collision")),
                 ),
             ],
@@ -294,7 +290,7 @@ fn generated_cases() -> Vec<GeneratedCase> {
             operations: vec![
                 commit(
                     "append_original",
-                    None,
+                    0,
                     append(vec![original()], Some("collision")),
                 ),
                 StoreOperation::Tombstone {
@@ -302,7 +298,7 @@ fn generated_cases() -> Vec<GeneratedCase> {
                 },
                 commit(
                     "unchanged_with_tombstoned_leaf",
-                    Some(1),
+                    1,
                     unchanged(Some("collision")),
                 ),
             ],
@@ -316,7 +312,7 @@ fn generated_cases() -> Vec<GeneratedCase> {
             operations: vec![
                 commit(
                     "seed_forked_graph",
-                    None,
+                    0,
                     append(
                         vec![
                             NodeSpec::new("root", None, "root"),
@@ -328,7 +324,7 @@ fn generated_cases() -> Vec<GeneratedCase> {
                 ),
                 commit(
                     "append_duplicate_id_after_append_seed",
-                    Some(1),
+                    1,
                     append(
                         vec![NodeSpec::new("off-path", Some("root"), "off-path-mutated")],
                         Some("active-leaf"),
@@ -341,12 +337,12 @@ fn generated_cases() -> Vec<GeneratedCase> {
             operations: vec![
                 commit(
                     "append_original",
-                    None,
+                    0,
                     append(vec![original()], Some("collision")),
                 ),
                 commit(
                     "append_with_stale_head",
-                    Some(0),
+                    0,
                     append(
                         vec![NodeSpec::new("fresh", Some("collision"), "fresh")],
                         Some("fresh"),
@@ -359,7 +355,7 @@ fn generated_cases() -> Vec<GeneratedCase> {
             operations: vec![
                 StoreOperation::Commit {
                     label: "first_turn_commit",
-                    expected_head_revision: None,
+                    expected_head_revision: 0,
                     graph: append(vec![original()], Some("collision")),
                     turn_commit: Some(TurnCommitSpec {
                         turn_id: "turn-1",
@@ -368,7 +364,7 @@ fn generated_cases() -> Vec<GeneratedCase> {
                 },
                 StoreOperation::Commit {
                     label: "resubmit_identical_turn_commit_hash",
-                    expected_head_revision: None,
+                    expected_head_revision: 0,
                     graph: append(vec![original()], Some("collision")),
                     turn_commit: Some(TurnCommitSpec {
                         turn_id: "turn-1",
@@ -377,7 +373,7 @@ fn generated_cases() -> Vec<GeneratedCase> {
                 },
                 StoreOperation::Commit {
                     label: "resubmit_mutated_turn_commit_hash",
-                    expected_head_revision: Some(1),
+                    expected_head_revision: 1,
                     graph: append(vec![mutated()], Some("collision")),
                     turn_commit: Some(TurnCommitSpec {
                         turn_id: "turn-1",
@@ -410,7 +406,7 @@ fn generated_cases() -> Vec<GeneratedCase> {
                 },
                 StoreOperation::CommitStaleTurnInputClaim {
                     current_lease: LeaseSlot::Successor,
-                    expected_head_revision: None,
+                    expected_head_revision: 0,
                 },
             ],
         },
@@ -438,7 +434,7 @@ fn materialize_graph(session_id: &str, spec: &GraphSpec) -> GraphCommitDelta {
 
 fn runtime_commit(
     session_id: &str,
-    expected_head_revision: Option<u64>,
+    expected_head_revision: u64,
     graph: &GraphSpec,
     turn_commit: Option<TurnCommitSpec>,
 ) -> RuntimeCommit {
@@ -965,6 +961,8 @@ fn normalized_store_error(backend: &str, error: &StoreError) -> String {
         StoreError::NodeIdDerivationMismatch { .. } => "NodeIdDerivationMismatch".to_string(),
         StoreError::NodeIdCollision { .. } => "NodeIdCollision".to_string(),
         StoreError::InvalidGraphLeaf { .. } => "InvalidGraphLeaf".to_string(),
+        StoreError::ForkPointNotRetained { .. } => "ForkPointNotRetained".to_string(),
+        StoreError::ForkSessionAlreadyExists { .. } => "ForkSessionAlreadyExists".to_string(),
         StoreError::InvalidGraphParent { .. } => "InvalidGraphParent".to_string(),
         StoreError::MissingFrameOpenAncestor { .. } => "MissingFrameOpenAncestor".to_string(),
         StoreError::NodeRefcountDrift { .. } => "NodeRefcountDrift".to_string(),

@@ -22,7 +22,7 @@ fn legacy_turn_commit_hash(commit: &RuntimeCommit) -> String {
     }
 
     let mut semantic = commit.clone();
-    semantic.expected_head_revision = None;
+    semantic.expected_head_revision = 0;
     semantic.session_execution_lease = None;
     semantic.release_session_execution_lease = None;
     semantic.turn_commit = None;

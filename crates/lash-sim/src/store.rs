@@ -37,7 +37,7 @@ pub fn backend_fault_observation(
 fn backend_fault_store_error(operation: &str, attempt: usize, retryable: bool) -> StoreError {
     if retryable {
         StoreError::HeadRevisionConflict {
-            expected: attempt.checked_sub(1).map(|value| value as u64),
+            expected: attempt.saturating_sub(1) as u64,
             actual: attempt as u64,
         }
     } else {
@@ -62,6 +62,8 @@ fn store_error_variant(error: &StoreError) -> &'static str {
         StoreError::NodeIdDerivationMismatch { .. } => "NodeIdDerivationMismatch",
         StoreError::NodeIdCollision { .. } => "NodeIdCollision",
         StoreError::InvalidGraphLeaf { .. } => "InvalidGraphLeaf",
+        StoreError::ForkPointNotRetained { .. } => "ForkPointNotRetained",
+        StoreError::ForkSessionAlreadyExists { .. } => "ForkSessionAlreadyExists",
         StoreError::InvalidGraphParent { .. } => "InvalidGraphParent",
         StoreError::MissingFrameOpenAncestor { .. } => "MissingFrameOpenAncestor",
         StoreError::NodeRefcountDrift { .. } => "NodeRefcountDrift",

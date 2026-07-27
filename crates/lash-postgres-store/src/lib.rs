@@ -89,7 +89,10 @@ const SCHEMA_COMPONENT: &str = "lash-postgres-store";
 // Bumped to 20 for transactional node refcounts and destructive-zero confirmation.
 // Both are reject-and-recreate boundaries; older graph rows cannot satisfy the
 // structural history and reclamation invariants.
-const SCHEMA_VERSION: i32 = 20;
+//
+// Bumped to 21 for first-class forks and continuation pins. `lash_node_anchors`
+// joins live heads as both a graph-node root and checkpoint-blob root.
+const SCHEMA_VERSION: i32 = 21;
 const PROCESS_LEASE_SCHEMA_VERSION: u32 = lash_core::PROCESS_LEASE_SCHEMA_VERSION;
 
 #[derive(Clone)]
@@ -664,7 +667,7 @@ mod tests {
             },
         };
         let mut commit = RuntimeCommit::persisted_state(&state, &[]);
-        commit.expected_head_revision = Some(1);
+        commit.expected_head_revision = 1;
         commit.graph = GraphCommitDelta::Append {
             nodes: vec![child],
             leaf_node_id: Some(child_node_id.clone()),

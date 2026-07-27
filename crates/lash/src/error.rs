@@ -20,6 +20,8 @@ pub enum EmbedError {
     MissingProcessEnvStore,
     #[error("failed to create store for session `{session_id}`: {message}")]
     StoreFactory { session_id: String, message: String },
+    #[error("session store operation failed: {0}")]
+    Store(#[from] lash_core::StoreError),
     #[error("store is bound to session `{loaded}` but builder requested `{requested}`")]
     StoreSessionMismatch { loaded: String, requested: String },
     #[error("durable process worker requires a LashCore store factory")]

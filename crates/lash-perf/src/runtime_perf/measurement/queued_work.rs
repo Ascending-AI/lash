@@ -909,7 +909,7 @@ fn queued_work_stress_commit(
 ) -> RuntimeCommit {
     RuntimeCommit {
         session_id: session_id.to_string(),
-        expected_head_revision: None,
+        expected_head_revision: 0,
         session_execution_lease: Some(lease.fence()),
         release_session_execution_lease: release_lease.then(|| lease.completion()),
         config: PersistedSessionConfig::default(),

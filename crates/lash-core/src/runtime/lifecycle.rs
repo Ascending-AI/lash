@@ -172,7 +172,6 @@ impl LashRuntime {
             host,
             services,
             state,
-            runtime_scope_id: Arc::<str>::from(runtime_scope_id),
             runtime_lease_owner,
             managed_sessions: Arc::new(Mutex::new(HashMap::new())),
             managed_turns: Arc::new(Mutex::new(HashMap::new())),

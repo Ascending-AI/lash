@@ -833,7 +833,7 @@ pub(super) fn apply_residency_on_load(
     match residency {
         crate::Residency::KeepAll => {}
         crate::Residency::ActivePathOnly => {
-            state.session_graph = state.session_graph.fork_current_path();
+            state.session_graph = state.session_graph.trim_to_active_path();
         }
     }
 }
@@ -909,7 +909,7 @@ mod residency_tests {
             .leaf_node_id
             .clone()
             .expect("inactive node");
-        state.session_graph.branch_to(root);
+        state.session_graph.set_leaf_node_id(root);
         state.append_active_conversation_messages(&[text_message("active", "active branch")]);
         let active_node = state
             .session_graph

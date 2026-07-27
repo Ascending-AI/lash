@@ -16,6 +16,7 @@ use super::{SessionStoreCreateRequest, SessionStoreFactory};
 use crate::store::RuntimePersistence;
 
 mod attachments;
+mod factory;
 mod maintenance;
 mod queued_work;
 mod refcounts;
@@ -145,13 +146,16 @@ pub struct InMemorySessionStore {
     /// session lease and mutating fenced runtime state atomically. Component
     /// mutexes still guard their data; this mutex supplies the transaction
     /// boundary and lock ordering that SQLite/Postgres provide natively.
-    write_transaction: Mutex<()>,
+    write_transaction: Arc<Mutex<()>>,
     pub(crate) session_head_meta: Mutex<Option<crate::SessionHeadMeta>>,
     pub(crate) session_meta: Mutex<Option<crate::SessionMeta>>,
     pub(crate) session_graph: Mutex<crate::SessionGraph>,
+    global_session_graph: Arc<Mutex<crate::SessionGraph>>,
     global_node_owners: Arc<Mutex<HashMap<String, String>>>,
-    tombstoned_node_ids: Mutex<HashSet<String>>,
-    incoming_node_refs: Mutex<HashMap<String, i64>>,
+    global_session_heads: Arc<Mutex<HashMap<String, Option<String>>>>,
+    node_anchors: Arc<Mutex<HashMap<String, (crate::BlobRef, crate::HydratedSessionCheckpoint)>>>,
+    tombstoned_node_ids: Arc<Mutex<HashSet<String>>>,
+    incoming_node_refs: Arc<Mutex<HashMap<String, i64>>>,
     pub(crate) checkpoint: Mutex<Option<crate::HydratedSessionCheckpoint>>,
     pub(crate) usage_deltas: Mutex<Vec<crate::TokenLedgerEntry>>,
     pub(crate) runtime_commit_count: Mutex<usize>,
@@ -201,22 +205,43 @@ impl InMemorySessionStore {
     /// hide malformed durable rows.
     ///
     pub fn with_clock(clock: Arc<dyn crate::Clock>) -> Self {
-        Self::with_clock_and_node_owners(clock, Arc::new(Mutex::new(HashMap::new())))
+        Self::with_shared_history(
+            clock,
+            Arc::new(Mutex::new(())),
+            Arc::new(Mutex::new(crate::SessionGraph::default())),
+            Arc::new(Mutex::new(HashMap::new())),
+            Arc::new(Mutex::new(HashMap::new())),
+            Arc::new(Mutex::new(HashMap::new())),
+            Arc::new(Mutex::new(HashSet::new())),
+            Arc::new(Mutex::new(HashMap::new())),
+        )
     }
 
-    fn with_clock_and_node_owners(
+    #[allow(clippy::too_many_arguments)]
+    fn with_shared_history(
         clock: Arc<dyn crate::Clock>,
+        write_transaction: Arc<Mutex<()>>,
+        global_session_graph: Arc<Mutex<crate::SessionGraph>>,
         global_node_owners: Arc<Mutex<HashMap<String, String>>>,
+        global_session_heads: Arc<Mutex<HashMap<String, Option<String>>>>,
+        node_anchors: Arc<
+            Mutex<HashMap<String, (crate::BlobRef, crate::HydratedSessionCheckpoint)>>,
+        >,
+        tombstoned_node_ids: Arc<Mutex<HashSet<String>>>,
+        incoming_node_refs: Arc<Mutex<HashMap<String, i64>>>,
     ) -> Self {
         Self {
             clock,
-            write_transaction: Mutex::new(()),
+            write_transaction,
             session_head_meta: Mutex::new(None),
             session_meta: Mutex::new(None),
             session_graph: Mutex::new(crate::SessionGraph::default()),
+            global_session_graph,
             global_node_owners,
-            tombstoned_node_ids: Mutex::new(HashSet::new()),
-            incoming_node_refs: Mutex::new(HashMap::new()),
+            global_session_heads,
+            node_anchors,
+            tombstoned_node_ids,
+            incoming_node_refs,
             checkpoint: Mutex::new(None),
             usage_deltas: Mutex::new(Vec::new()),
             runtime_commit_count: Mutex::new(0),
@@ -759,13 +784,19 @@ impl crate::store::SessionCommitStore for InMemorySessionStore {
             .lock()
             .expect("lock tombstoned nodes")
             .clone();
-        let mut graph = self.session_graph.lock().expect("lock graph").clone();
-        if let crate::store::SessionReadScope::ActivePath { leaf_node_id } = scope {
-            if let Some(leaf_node_id) = leaf_node_id.or_else(|| meta.leaf_node_id.clone()) {
-                graph.set_leaf_node_id(Some(leaf_node_id));
+        let requested_leaf = match scope {
+            crate::store::SessionReadScope::FullGraph => meta.leaf_node_id.clone(),
+            crate::store::SessionReadScope::ActivePath { leaf_node_id } => {
+                leaf_node_id.or_else(|| meta.leaf_node_id.clone())
             }
-            graph = graph.fork_current_path();
-        }
+        };
+        let mut graph = self
+            .global_session_graph
+            .lock()
+            .expect("lock global graph")
+            .clone();
+        graph.set_leaf_node_id(requested_leaf);
+        graph = graph.trim_to_active_path();
         if !tombstoned.is_empty() {
             let leaf_node_id = graph
                 .leaf_node_id
@@ -808,9 +839,9 @@ impl crate::store::SessionCommitStore for InMemorySessionStore {
             return Ok(None);
         }
         Ok(self
-            .session_graph
+            .global_session_graph
             .lock()
-            .expect("lock graph")
+            .expect("lock global graph")
             .find_node(node_id)
             .cloned())
     }
@@ -880,7 +911,7 @@ impl crate::store::SessionCommitStore for InMemorySessionStore {
                 });
             }
         }
-        let expected = commit.expected_head_revision.unwrap_or(0);
+        let expected = commit.expected_head_revision;
         if expected != actual {
             return Err(crate::store::StoreError::HeadRevisionConflict {
                 expected: commit.expected_head_revision,
@@ -907,7 +938,7 @@ impl crate::store::SessionCommitStore for InMemorySessionStore {
             });
         }
         if let crate::store::GraphCommitDelta::Append { nodes, .. } = &commit.graph {
-            let graph = self.session_graph.lock().expect("lock graph");
+            let graph = self.global_session_graph.lock().expect("lock global graph");
             let tombstoned = self
                 .tombstoned_node_ids
                 .lock()
@@ -921,15 +952,15 @@ impl crate::store::SessionCommitStore for InMemorySessionStore {
             }
         }
         let (has_existing_live_nodes, existing_leaf_is_live) = {
-            let graph = self.session_graph.lock().expect("lock graph");
+            let graph = self.global_session_graph.lock().expect("lock global graph");
             let tombstoned = self
                 .tombstoned_node_ids
                 .lock()
                 .expect("lock tombstoned nodes");
-            let has_existing_live_nodes = graph
-                .nodes
-                .iter()
-                .any(|node| !tombstoned.contains(&node.node_id));
+            let has_existing_live_nodes = meta
+                .as_ref()
+                .and_then(|head| head.leaf_node_id.as_ref())
+                .is_some_and(|node_id| !tombstoned.contains(node_id));
             let existing_leaf_is_live = commit.graph.leaf_node_id().is_some_and(|leaf_node_id| {
                 !tombstoned.contains(leaf_node_id) && graph.find_node(leaf_node_id).is_some()
             });
@@ -952,8 +983,37 @@ impl crate::store::SessionCommitStore for InMemorySessionStore {
             }
             _ => {}
         }
+        let old_leaf_node_id = meta.as_ref().and_then(|head| head.leaf_node_id.clone());
+        match &commit.graph {
+            crate::store::GraphCommitDelta::Unchanged { leaf_node_id }
+                if leaf_node_id != &old_leaf_node_id =>
+            {
+                return Err(crate::StoreError::InvalidGraphLeaf {
+                    leaf_node_id: leaf_node_id.clone(),
+                });
+            }
+            crate::store::GraphCommitDelta::Append { nodes, .. }
+                if !nodes.is_empty()
+                    && nodes.first().and_then(|node| node.parent_node_id.as_ref())
+                        != old_leaf_node_id.as_ref() =>
+            {
+                return Err(crate::StoreError::InvalidGraphParent {
+                    node_id: nodes
+                        .first()
+                        .map(|node| node.node_id.clone())
+                        .unwrap_or_default(),
+                    expected: old_leaf_node_id,
+                    actual: nodes.first().and_then(|node| node.parent_node_id.clone()),
+                });
+            }
+            _ => {}
+        }
         {
-            let mut proposed = self.session_graph.lock().expect("lock graph").clone();
+            let mut proposed = self
+                .global_session_graph
+                .lock()
+                .expect("lock global graph")
+                .clone();
             if let crate::store::GraphCommitDelta::Append { nodes, .. } = &commit.graph {
                 proposed.extend_node_records(nodes.iter().cloned());
             }
@@ -975,8 +1035,12 @@ impl crate::store::SessionCommitStore for InMemorySessionStore {
                 return Err(crate::store::StoreError::InvalidGraphLeaf { leaf_node_id: None });
             }
         }
-        let (staged_incoming_node_refs, staged_tombstoned_node_ids) = {
-            let mut proposed = self.session_graph.lock().expect("lock graph").clone();
+        let (staged_incoming_node_refs, staged_tombstoned_node_ids, staged_session_heads) = {
+            let mut proposed = self
+                .global_session_graph
+                .lock()
+                .expect("lock global graph")
+                .clone();
             if let crate::store::GraphCommitDelta::Append { nodes, .. } = &commit.graph {
                 proposed.extend_node_records(nodes.iter().cloned());
             }
@@ -993,6 +1057,19 @@ impl crate::store::SessionCommitStore for InMemorySessionStore {
                 .lock()
                 .expect("lock tombstoned nodes")
                 .clone();
+            let mut session_heads = self
+                .global_session_heads
+                .lock()
+                .expect("lock global session heads")
+                .clone();
+            session_heads.insert(commit.session_id.clone(), new_leaf_node_id.clone());
+            let anchored_node_ids = self
+                .node_anchors
+                .lock()
+                .expect("lock node anchors")
+                .keys()
+                .cloned()
+                .collect::<HashSet<_>>();
             for node in incoming_nodes {
                 counts.insert(node.node_id.clone(), 0);
             }
@@ -1020,11 +1097,12 @@ impl crate::store::SessionCommitStore for InMemorySessionStore {
                         &mut counts,
                         &mut tombstoned,
                         &old_leaf_node_id,
-                        new_leaf_node_id.as_deref(),
+                        &session_heads,
+                        &anchored_node_ids,
                     )?;
                 }
             }
-            (counts, tombstoned)
+            (counts, tombstoned, session_heads)
         };
         {
             let queued = self.queued_work.lock().expect("lock queued work");
@@ -1121,20 +1199,23 @@ impl crate::store::SessionCommitStore for InMemorySessionStore {
                 }
             }
         }
-        let mut graph = self.session_graph.lock().expect("lock graph");
+        let mut global_graph = self.global_session_graph.lock().expect("lock global graph");
         let leaf_node_id = match &commit.graph {
             crate::store::GraphCommitDelta::Unchanged { leaf_node_id } => leaf_node_id.clone(),
             crate::store::GraphCommitDelta::Append {
                 nodes,
                 leaf_node_id,
             } => {
-                graph.extend_node_records(nodes.iter().cloned());
+                global_graph.extend_node_records(nodes.iter().cloned());
                 leaf_node_id.clone()
             }
         };
-        graph.set_leaf_node_id(leaf_node_id.clone());
-        let graph_node_count = graph.nodes.len();
-        drop(graph);
+        let mut resident_graph = global_graph.clone();
+        resident_graph.set_leaf_node_id(leaf_node_id.clone());
+        resident_graph = resident_graph.trim_to_active_path();
+        let graph_node_count = resident_graph.nodes.len();
+        *self.session_graph.lock().expect("lock graph") = resident_graph;
+        drop(global_graph);
         *self
             .incoming_node_refs
             .lock()
@@ -1143,6 +1224,10 @@ impl crate::store::SessionCommitStore for InMemorySessionStore {
             .tombstoned_node_ids
             .lock()
             .expect("lock tombstoned nodes") = staged_tombstoned_node_ids;
+        *self
+            .global_session_heads
+            .lock()
+            .expect("lock global session heads") = staged_session_heads;
         for node in incoming_nodes {
             global_node_owners.insert(node.node_id.clone(), commit.session_id.clone());
         }
@@ -1423,7 +1508,13 @@ impl InMemorySessionStore {
 pub struct InMemorySessionStoreFactory {
     clock: Arc<dyn crate::Clock>,
     stores: Arc<Mutex<HashMap<String, Arc<InMemorySessionStore>>>>,
+    write_transaction: Arc<Mutex<()>>,
+    global_session_graph: Arc<Mutex<crate::SessionGraph>>,
     global_node_owners: Arc<Mutex<HashMap<String, String>>>,
+    global_session_heads: Arc<Mutex<HashMap<String, Option<String>>>>,
+    node_anchors: Arc<Mutex<HashMap<String, (crate::BlobRef, crate::HydratedSessionCheckpoint)>>>,
+    tombstoned_node_ids: Arc<Mutex<HashSet<String>>>,
+    incoming_node_refs: Arc<Mutex<HashMap<String, i64>>>,
 }
 
 impl InMemorySessionStoreFactory {
@@ -1435,7 +1526,13 @@ impl InMemorySessionStoreFactory {
         Self {
             clock,
             stores: Arc::new(Mutex::new(HashMap::new())),
+            write_transaction: Arc::new(Mutex::new(())),
+            global_session_graph: Arc::new(Mutex::new(crate::SessionGraph::default())),
             global_node_owners: Arc::new(Mutex::new(HashMap::new())),
+            global_session_heads: Arc::new(Mutex::new(HashMap::new())),
+            node_anchors: Arc::new(Mutex::new(HashMap::new())),
+            tombstoned_node_ids: Arc::new(Mutex::new(HashSet::new())),
+            incoming_node_refs: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 }
@@ -1443,115 +1540,5 @@ impl InMemorySessionStoreFactory {
 impl Default for InMemorySessionStoreFactory {
     fn default() -> Self {
         Self::new()
-    }
-}
-
-#[async_trait::async_trait]
-impl SessionStoreFactory for InMemorySessionStoreFactory {
-    async fn create_store(
-        &self,
-        request: &SessionStoreCreateRequest,
-    ) -> Result<Arc<dyn RuntimePersistence>, String> {
-        let mut stores = self.stores.lock().expect("in-memory store factory");
-        let store = stores
-            .entry(request.session_id.clone())
-            .or_insert_with(|| {
-                let store = Arc::new(InMemorySessionStore::with_clock_and_node_owners(
-                    Arc::clone(&self.clock),
-                    Arc::clone(&self.global_node_owners),
-                ));
-                *store.session_meta.lock().expect("lock session meta") = Some(crate::SessionMeta {
-                    session_id: request.session_id.clone(),
-                    session_name: request.session_id.clone(),
-                    created_at: self.clock.timestamp_rfc3339(),
-                    model: request.policy.model.id.clone(),
-                    cwd: None,
-                    relation: request.relation.clone(),
-                });
-                store
-            })
-            .clone();
-        Ok(store as Arc<dyn RuntimePersistence>)
-    }
-
-    async fn open_existing_store(
-        &self,
-        request: &SessionStoreCreateRequest,
-    ) -> Result<Option<Arc<dyn RuntimePersistence>>, String> {
-        Ok(self
-            .stores
-            .lock()
-            .expect("in-memory store factory")
-            .get(&request.session_id)
-            .cloned()
-            .map(|store| store as Arc<dyn RuntimePersistence>))
-    }
-
-    async fn delete_session(&self, session_id: &str) -> Result<(), String> {
-        let store = self
-            .stores
-            .lock()
-            .expect("in-memory store factory")
-            .get(session_id)
-            .cloned();
-        if let Some(store) = store {
-            store.reclaim_history_for_delete(session_id);
-            self.stores
-                .lock()
-                .expect("in-memory store factory")
-                .remove(session_id);
-        }
-        Ok(())
-    }
-
-    async fn live_attachment_refs(
-        &self,
-        intent_grace_cutoff_epoch_ms: u64,
-    ) -> Result<std::collections::BTreeSet<crate::AttachmentId>, crate::store::StoreError> {
-        let stores = {
-            self.stores
-                .lock()
-                .expect("in-memory store factory")
-                .values()
-                .cloned()
-                .collect::<Vec<_>>()
-        };
-        let mut refs = std::collections::BTreeSet::new();
-        for store in stores {
-            // Apply age and durable owner-death in one conditional pass (no
-            // list-then-forget race against a concurrent intent refresh), then
-            // union the surviving roots.
-            crate::AttachmentManifest::forget_aged_uncommitted_intents(
-                &*store,
-                intent_grace_cutoff_epoch_ms,
-            )?;
-            refs.extend(crate::AttachmentManifest::list_all_refs(&*store)?);
-        }
-        Ok(refs)
-    }
-
-    async fn has_live_attachment_ref(
-        &self,
-        id: &crate::AttachmentId,
-        intent_grace_cutoff_epoch_ms: u64,
-    ) -> Result<bool, crate::store::StoreError> {
-        let stores = {
-            self.stores
-                .lock()
-                .expect("in-memory store factory")
-                .values()
-                .cloned()
-                .collect::<Vec<_>>()
-        };
-        for store in stores {
-            if crate::AttachmentManifest::has_live_ref_for_id(
-                &*store,
-                id,
-                intent_grace_cutoff_epoch_ms,
-            )? {
-                return Ok(true);
-            }
-        }
-        Ok(false)
     }
 }

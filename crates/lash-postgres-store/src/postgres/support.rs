@@ -317,11 +317,22 @@ pub(crate) async fn load_graph_tx(
         .map_err(store_sqlx_error)?
     } else {
         sqlx::query(
-            "SELECT node_id, parent_node_id, node_json FROM lash_graph_nodes
-             WHERE session_id = $1 AND tombstoned = FALSE
+            "WITH RECURSIVE ancestry(node_id, parent_node_id) AS (
+                 SELECT node_id, parent_node_id FROM lash_graph_nodes
+                 WHERE node_id = $2 AND tombstoned = FALSE
+                 UNION ALL
+                 SELECT parent.node_id, parent.parent_node_id
+                 FROM lash_graph_nodes parent
+                 JOIN ancestry ON parent.node_id = ancestry.parent_node_id
+                 WHERE parent.tombstoned = FALSE
+             )
+             SELECT node_id, parent_node_id, node_json FROM lash_graph_nodes
+             WHERE tombstoned = FALSE
+               AND (session_id = $1 OR node_id IN (SELECT node_id FROM ancestry))
              ORDER BY seq ASC",
         )
         .bind(session_id)
+        .bind(leaf_node_id.as_deref())
         .fetch_all(&mut **tx)
         .await
         .map_err(store_sqlx_error)?

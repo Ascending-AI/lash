@@ -57,7 +57,7 @@ fn lease_owner(owner_id: &str) -> LeaseOwnerIdentity {
     LeaseOwnerIdentity::opaque(owner_id, format!("{owner_id}:incarnation"))
 }
 
-fn commit_at(session_id: &str, expected_head_revision: Option<u64>) -> RuntimeCommit {
+fn commit_at(session_id: &str, expected_head_revision: u64) -> RuntimeCommit {
     let state = RuntimeSessionState {
         session_id: session_id.to_string(),
         ..RuntimeSessionState::default()
@@ -71,7 +71,7 @@ fn commit_at(session_id: &str, expected_head_revision: Option<u64>) -> RuntimeCo
 // Finding 1: the head-revision compare-and-set must serialize across two
 // independent connections to the *same* file database. Two threads, each with
 // its own connection, both read head revision 0 and then commit with
-// `expected_head_revision = Some(0)` as concurrently as a barrier can arrange.
+// `expected_head_revision = 0` as concurrently as a barrier can arrange.
 // Under `BEGIN IMMEDIATE` the second writer blocks on the busy timeout, then
 // reads the now-bumped revision and returns a clean `HeadRevisionConflict`;
 // exactly one commit applies and the persisted head ends at revision 1. Under
@@ -101,7 +101,7 @@ fn head_revision_cas_holds_across_two_connections() {
                 barrier.wait();
                 store
                     .commit_runtime_state(
-                        commit_at("root", Some(0)).with_session_execution_lease(session_fence),
+                        commit_at("root", 0).with_session_execution_lease(session_fence),
                     )
                     .await
             })
@@ -172,7 +172,7 @@ async fn gc_keeps_live_committed_checkpoint_blobs() {
         .acquired()
         .expect("session execution lease");
     let commit = RuntimeCommit {
-        expected_head_revision: Some(0),
+        expected_head_revision: 0,
         ..RuntimeCommit::persisted_state(&state, &[])
     }
     .with_session_execution_lease(session_lease.fence())

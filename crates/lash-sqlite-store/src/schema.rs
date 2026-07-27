@@ -41,6 +41,11 @@ CREATE TABLE IF NOT EXISTS session_head (
 CREATE INDEX IF NOT EXISTS idx_session_head_leaf
     ON session_head(leaf_node_id);
 
+CREATE TABLE IF NOT EXISTS node_anchors (
+    node_id        TEXT PRIMARY KEY,
+    checkpoint_ref TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS graph_nodes (
     seq            INTEGER PRIMARY KEY,
     session_id     TEXT NOT NULL,
@@ -215,9 +220,13 @@ CREATE INDEX IF NOT EXISTS idx_attachment_manifest_owner
 /// databases are rejected and must be recreated.
 ///
 /// Bumped to 14 for FIG-654's reachability model. Parent edges, head roots,
-/// cached incoming counts, and continuation-anchor pins are queryable rows;
+/// and cached incoming counts are queryable rows;
 /// graph structure no longer lives inside `node_json`.
-pub(crate) const SCHEMA_VERSION: i32 = 14;
+///
+/// Bumped to 15 for FIG-634 first-class forks. `node_anchors` makes explicit
+/// continuation pins node and checkpoint roots in the same transaction domain
+/// as heads and graph edges.
+pub(crate) const SCHEMA_VERSION: i32 = 15;
 
 pub(crate) const PROCESS_SCHEMA: &str = "
 CREATE TABLE IF NOT EXISTS processes (

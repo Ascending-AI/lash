@@ -23,13 +23,23 @@ impl Store {
         // called; the runtime view should never see them.
         let mut stmt = conn
             .prepare(
-                "SELECT node_id, parent_node_id, node_json FROM graph_nodes
-                 WHERE session_id = ?1 AND tombstoned = 0
+                "WITH RECURSIVE ancestry(node_id, parent_node_id) AS (
+                     SELECT node_id, parent_node_id FROM graph_nodes
+                     WHERE node_id = ?2 AND tombstoned = 0
+                     UNION ALL
+                     SELECT parent.node_id, parent.parent_node_id
+                     FROM graph_nodes parent
+                     JOIN ancestry ON parent.node_id = ancestry.parent_node_id
+                     WHERE parent.tombstoned = 0
+                 )
+                 SELECT node_id, parent_node_id, node_json FROM graph_nodes
+                 WHERE tombstoned = 0
+                   AND (session_id = ?1 OR node_id IN (SELECT node_id FROM ancestry))
                  ORDER BY seq ASC",
             )
             .map_err(sqlite_error)?;
         let rows = stmt
-            .query_map(params![session_id], |row| {
+            .query_map(params![session_id, leaf_node_id.as_deref()], |row| {
                 Ok((
                     row.get::<_, String>(0)?,
                     row.get::<_, Option<String>>(1)?,
@@ -55,7 +65,7 @@ impl Store {
 
     pub(crate) fn load_active_path_session_graph_from_conn(
         conn: &Connection,
-        session_id: &str,
+        _session_id: &str,
         leaf_node_id: Option<String>,
     ) -> rusqlite::Result<lash_core::SessionGraph> {
         let Some(leaf_node_id) = leaf_node_id else {
@@ -69,7 +79,7 @@ impl Store {
                     parent_node_id,
                     0
                 FROM graph_nodes
-                WHERE session_id = ?1 AND node_id = ?2 AND tombstoned = 0
+                WHERE node_id = ?1 AND tombstoned = 0
               UNION ALL
                 SELECT
                     g.node_id,
@@ -82,7 +92,7 @@ impl Store {
             )
             SELECT node_id, parent_node_id, node_json FROM active ORDER BY depth DESC",
         )?;
-        let rows = stmt.query_map(params![session_id, leaf_node_id.as_str()], |row| {
+        let rows = stmt.query_map(params![leaf_node_id.as_str()], |row| {
             Ok((
                 row.get::<_, String>(0)?,
                 row.get::<_, Option<String>>(1)?,
@@ -150,7 +160,11 @@ impl Store {
     fn live_checkpoint_roots(conn: &Connection) -> Result<Vec<RetainedArtifactRef>, StoreError> {
         let mut roots = Vec::new();
         let mut stmt = conn
-            .prepare("SELECT checkpoint_ref FROM session_head WHERE checkpoint_ref IS NOT NULL")
+            .prepare(
+                "SELECT checkpoint_ref FROM session_head WHERE checkpoint_ref IS NOT NULL
+                 UNION
+                 SELECT checkpoint_ref FROM node_anchors",
+            )
             .map_err(sqlite_error)?;
         let rows = stmt
             .query_map([], |row| row.get::<_, String>(0))

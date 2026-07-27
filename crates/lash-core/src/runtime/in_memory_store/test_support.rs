@@ -166,7 +166,7 @@ mod tests {
             },
             &[],
         );
-        commit.expected_head_revision = Some(first.head_revision);
+        commit.expected_head_revision = first.head_revision;
         let error = store
             .commit_runtime_state(commit.clone())
             .await

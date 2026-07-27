@@ -957,10 +957,6 @@ impl SessionGraph {
             .unwrap_or_default()
     }
 
-    pub fn branch_to(&mut self, node_id: Option<String>) {
-        self.data_mut().leaf_node_id = node_id;
-    }
-
     pub fn set_leaf_node_id(&mut self, node_id: Option<String>) {
         self.data_mut().leaf_node_id = node_id;
     }
@@ -993,7 +989,11 @@ impl SessionGraph {
             .any(|node| node.node_id == node_id)
     }
 
-    pub fn fork_current_path(&self) -> SessionGraph {
+    /// Return a resident graph containing only the current ancestry path.
+    ///
+    /// This is a memory-residency trim. It does not create a durable fork or
+    /// move a persisted session head.
+    pub fn trim_to_active_path(&self) -> SessionGraph {
         let path = self.active_path_nodes();
         SessionGraph::from_nodes(
             path.into_iter().cloned().collect(),

@@ -17,7 +17,8 @@ impl InMemorySessionStore {
         counts: &mut HashMap<String, i64>,
         tombstoned: &mut HashSet<String>,
         first_node_id: &str,
-        head_leaf: Option<&str>,
+        session_heads: &HashMap<String, Option<String>>,
+        anchored_node_ids: &HashSet<String>,
     ) -> Result<(), crate::StoreError> {
         let mut node_id = first_node_id.to_string();
         loop {
@@ -31,7 +32,11 @@ impl InMemorySessionStore {
                             && child.parent_node_id.as_deref() == Some(node_id.as_str())
                     })
                     .count() as i64;
-                let derived_root = i64::from(head_leaf == Some(node_id.as_str()));
+                let derived_root = session_heads
+                    .values()
+                    .filter(|leaf| leaf.as_deref() == Some(node_id.as_str()))
+                    .count() as i64
+                    + i64::from(anchored_node_ids.contains(&node_id));
                 return Err(crate::StoreError::NodeRefcountDrift {
                     node_id,
                     cached: cached_before,
@@ -51,7 +56,11 @@ impl InMemorySessionStore {
                         && child.parent_node_id.as_deref() == Some(node_id.as_str())
                 })
                 .count() as i64;
-            let derived_root = i64::from(head_leaf == Some(node_id.as_str()));
+            let derived_root = session_heads
+                .values()
+                .filter(|leaf| leaf.as_deref() == Some(node_id.as_str()))
+                .count() as i64
+                + i64::from(anchored_node_ids.contains(&node_id));
             let derived = derived_children + derived_root;
             if derived != 0 {
                 return Err(crate::StoreError::NodeRefcountDrift {
@@ -71,25 +80,144 @@ impl InMemorySessionStore {
         }
     }
 
-    /// Physically reclaim every history row owned by a deleted session.
-    pub(super) fn reclaim_history_for_delete(&self, session_id: &str) {
+    /// Drop one session-head root and reclaim only the ancestry that becomes
+    /// unreachable. Node `session_id` is producer provenance, not lifecycle
+    /// ownership once forks share a prefix.
+    pub(super) fn reclaim_history_for_delete(
+        &self,
+        session_id: &str,
+    ) -> Result<(), crate::StoreError> {
         let _transaction = self
             .write_transaction
             .lock()
             .expect("lock in-memory write transaction");
-        self.global_node_owners
+        let mut heads = self
+            .global_session_heads
             .lock()
-            .expect("lock global in-memory node ids")
-            .retain(|_, owner| owner != session_id);
-        *self.session_graph.lock().expect("lock graph") = crate::SessionGraph::default();
+            .expect("lock global session heads")
+            .clone();
+        let graph = self
+            .global_session_graph
+            .lock()
+            .expect("lock global graph")
+            .clone();
+        let mut owners = self
+            .global_node_owners
+            .lock()
+            .expect("lock global node owners")
+            .clone();
+        let mut counts = self
+            .incoming_node_refs
+            .lock()
+            .expect("lock incoming node refs")
+            .clone();
+        let mut tombstoned = self
+            .tombstoned_node_ids
+            .lock()
+            .expect("lock tombstoned nodes")
+            .clone();
+        let anchors = self
+            .node_anchors
+            .lock()
+            .expect("lock node anchors")
+            .keys()
+            .cloned()
+            .collect::<HashSet<_>>();
+
+        let leaf = heads.remove(session_id).flatten();
+        if let Some(leaf) = leaf {
+            Self::decrement_node_reference(
+                &graph,
+                &mut counts,
+                &mut tombstoned,
+                &leaf,
+                &heads,
+                &anchors,
+            )?;
+        }
+
+        let zero_ref_nodes = owners
+            .iter()
+            .filter(|(node_id, owner)| {
+                owner.as_str() == session_id
+                    && !tombstoned.contains(*node_id)
+                    && counts.get(*node_id).copied().unwrap_or_default() == 0
+            })
+            .map(|(node_id, _)| node_id.clone())
+            .collect::<Vec<_>>();
+        for node_id in zero_ref_nodes {
+            let derived_children = graph
+                .nodes
+                .iter()
+                .filter(|child| {
+                    !tombstoned.contains(&child.node_id)
+                        && child.parent_node_id.as_deref() == Some(node_id.as_str())
+                })
+                .count() as i64;
+            let derived_roots = heads
+                .values()
+                .filter(|leaf| leaf.as_deref() == Some(node_id.as_str()))
+                .count() as i64
+                + i64::from(anchors.contains(&node_id));
+            let derived = derived_children + derived_roots;
+            let cached = counts.get(&node_id).copied().unwrap_or_default();
+            if cached != derived {
+                return Err(crate::StoreError::NodeRefcountDrift {
+                    node_id,
+                    cached,
+                    derived,
+                });
+            }
+            if derived != 0 {
+                continue;
+            }
+            tombstoned.insert(node_id.clone());
+            if let Some(parent_node_id) = graph
+                .find_node(&node_id)
+                .and_then(|node| node.parent_node_id.as_ref())
+            {
+                Self::decrement_node_reference(
+                    &graph,
+                    &mut counts,
+                    &mut tombstoned,
+                    parent_node_id,
+                    &heads,
+                    &anchors,
+                )?;
+            }
+        }
+
+        let reclaimed = tombstoned.clone();
+        let nodes = graph
+            .nodes
+            .iter()
+            .filter(|node| !reclaimed.contains(&node.node_id))
+            .cloned()
+            .collect();
+        owners.retain(|node_id, _| !reclaimed.contains(node_id));
+        counts.retain(|node_id, _| !reclaimed.contains(node_id));
+        tombstoned.clear();
+
+        *self
+            .global_session_heads
+            .lock()
+            .expect("lock global session heads") = heads;
+        *self.global_session_graph.lock().expect("lock global graph") =
+            crate::SessionGraph::from_nodes(nodes, None);
+        *self
+            .global_node_owners
+            .lock()
+            .expect("lock global node owners") = owners;
         *self
             .incoming_node_refs
             .lock()
-            .expect("lock incoming node refs") = HashMap::new();
+            .expect("lock incoming node refs") = counts;
         *self
             .tombstoned_node_ids
             .lock()
-            .expect("lock tombstoned nodes") = HashSet::new();
+            .expect("lock tombstoned nodes") = tombstoned;
+        *self.session_graph.lock().expect("lock graph") = crate::SessionGraph::default();
         *self.session_head_meta.lock().expect("lock session head") = None;
+        Ok(())
     }
 }

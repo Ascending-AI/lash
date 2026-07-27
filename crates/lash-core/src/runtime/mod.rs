@@ -1075,6 +1075,37 @@ impl SessionStoreCreateRequest {
     }
 }
 
+/// A durable turn boundary whose continuation checkpoint is currently retained.
+///
+/// Past turn boundaries are not retained by default. A point remains available
+/// while explicitly pinned or while it is the leaf of at least one live
+/// session head.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ForkPoint {
+    pub node_id: String,
+    pub checkpoint_ref: crate::BlobRef,
+    pub pinned: bool,
+}
+
+/// Create a new session head at retained history without writing graph nodes.
+#[derive(Clone, Debug)]
+pub struct ForkSessionRequest {
+    pub session_id: String,
+    pub node_id: String,
+    pub relation: SessionRelation,
+    pub policy: SessionPolicy,
+}
+
+/// Durable identity returned after a zero-node fork.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ForkSessionResult {
+    pub session_id: String,
+    pub node_id: String,
+    /// Session that originally wrote `node_id`. This is process-grant
+    /// provenance, not a required source-session argument to the fork.
+    pub source_session_id: String,
+}
+
 #[async_trait::async_trait]
 pub trait SessionStoreFactory: Send + Sync {
     async fn create_store(
@@ -1090,6 +1121,44 @@ pub trait SessionStoreFactory: Send + Sync {
     }
 
     async fn delete_session(&self, session_id: &str) -> Result<(), String>;
+
+    /// Retain the continuation checkpoint for `node_id`.
+    ///
+    /// A new pin can be created only while some live head is exactly at the
+    /// node, because an unpinned past checkpoint is ordinarily already
+    /// collectible. Re-pinning an existing point is idempotent.
+    async fn pin(&self, node_id: &str) -> Result<ForkPoint, crate::StoreError> {
+        let _ = node_id;
+        Err(crate::StoreError::UnsupportedStoreOperation { operation: "pin" })
+    }
+
+    /// Release an explicit continuation pin. A live head at the same node
+    /// continues to make that tip forkable.
+    async fn unpin(&self, node_id: &str) -> Result<(), crate::StoreError> {
+        let _ = node_id;
+        Err(crate::StoreError::UnsupportedStoreOperation { operation: "unpin" })
+    }
+
+    /// Enumerate retained continuation points. This includes pinned past turns
+    /// and unpinned live tips, de-duplicated by node id.
+    async fn fork_points(&self) -> Result<Vec<ForkPoint>, crate::StoreError> {
+        Err(crate::StoreError::UnsupportedStoreOperation {
+            operation: "fork_points",
+        })
+    }
+
+    /// Add a new session-head root at a retained point without writing graph
+    /// nodes. Returns [`crate::StoreError::ForkPointNotRetained`] for the
+    /// ordinary case where a past turn was not pinned before its head moved.
+    async fn fork_at(
+        &self,
+        request: &ForkSessionRequest,
+    ) -> Result<ForkSessionResult, crate::StoreError> {
+        let _ = request;
+        Err(crate::StoreError::UnsupportedStoreOperation {
+            operation: "fork_at",
+        })
+    }
 
     /// The attachment GC root set across every session this factory owns. An
     /// uncommitted intent is forgotten only when it is old enough and its
@@ -1138,7 +1207,6 @@ pub struct LashRuntime {
     pub(in crate::runtime) host: RuntimeHost,
     pub(in crate::runtime) services: RuntimeServices,
     pub(in crate::runtime) state: RuntimeSessionState,
-    pub(in crate::runtime) runtime_scope_id: Arc<str>,
     pub(in crate::runtime) runtime_lease_owner: crate::LeaseOwnerIdentity,
     pub(in crate::runtime) managed_sessions: Arc<Mutex<HashMap<String, RuntimeHandle>>>,
     pub(in crate::runtime) managed_turns: Arc<Mutex<HashMap<String, ManagedSessionTurn>>>,

@@ -1333,7 +1333,7 @@ async fn active_path_residency_opens_with_active_path_scope() -> Result<()> {
     let mut inactive_message = text_message(lash_core::MessageRole::User, "inactive branch");
     inactive_message.id = "inactive-message".to_string();
     state.append_active_conversation_messages(&[inactive_message]);
-    state.session_graph.branch_to(root);
+    state.session_graph.set_leaf_node_id(root);
     let mut active_message = text_message(lash_core::MessageRole::User, "active branch");
     active_message.id = "active-message".to_string();
     state.append_active_conversation_messages(&[active_message]);
@@ -2189,6 +2189,96 @@ async fn durable_process_worker_config_uses_core_process_registry() -> Result<()
     assert_eq!(
         config.process_execution_concurrency(),
         lash_core::DEFAULT_PROCESS_EXECUTION_CONCURRENCY
+    );
+    Ok(())
+}
+
+#[tokio::test]
+async fn fork_inherits_process_grants_without_inheriting_wake_subscription() -> Result<()> {
+    use lash_core::{ProcessRegistry as _, SessionStoreFactory as _};
+
+    let factory = Arc::new(lash_core::InMemorySessionStoreFactory::new());
+    let registry = Arc::new(TestLocalProcessRegistry::default());
+    let core = explicit_ephemeral_facets(LashCore::standard_builder())
+        .provider(mock_provider())
+        .model(mock_model_spec())
+        .store_factory(Arc::clone(&factory) as Arc<dyn lash_core::SessionStoreFactory>)
+        .process_registry(Arc::clone(&registry) as Arc<dyn lash_core::ProcessRegistry>)
+        .build()?;
+    let policy = lash_core::SessionPolicy {
+        provider_id: mock_provider().kind().to_string(),
+        model: mock_model_spec(),
+        session_id: Some("fork-grant-source".to_string()),
+        ..Default::default()
+    };
+    let source_store = factory
+        .create_store(&lash_core::SessionStoreCreateRequest {
+            session_id: "fork-grant-source".to_string(),
+            relation: lash_core::SessionRelation::Root,
+            policy,
+        })
+        .await
+        .expect("create fork grant source");
+    let mut source_state = lash_core::RuntimeSessionState {
+        session_id: "fork-grant-source".to_string(),
+        ..Default::default()
+    };
+    source_state.ensure_agent_frame_initialized();
+    source_store
+        .commit_runtime_state(lash_core::RuntimeCommit::persisted_state(
+            &source_state,
+            &[],
+        ))
+        .await
+        .expect("commit fork grant source");
+    let fork_node_id = source_state
+        .session_graph
+        .leaf_node_id
+        .clone()
+        .expect("fork grant source leaf");
+    core.pin(&fork_node_id).await?;
+
+    let source_scope = lash_core::SessionScope::new("fork-grant-source");
+    registry
+        .register_process(
+            lash_core::ProcessRegistration::new(
+                "fork-visible-process",
+                lash_core::ProcessInput::External {
+                    metadata: serde_json::Value::Null,
+                },
+                lash_core::RecoveryDisposition::ExternallyOwned,
+                lash_core::ProcessProvenance::host(),
+            )
+            .with_wake_target(Some(source_scope.clone())),
+        )
+        .await
+        .expect("register fork-visible process");
+    registry
+        .grant_handle(
+            &source_scope,
+            "fork-visible-process",
+            lash_core::ProcessHandleDescriptor::new(Some("test"), Some("fork inherited")),
+        )
+        .await
+        .expect("grant source process handle");
+
+    core.fork_at(&fork_node_id, "fork-grant-branch").await?;
+
+    let branch_scope = lash_core::SessionScope::new("fork-grant-branch");
+    let inherited = registry
+        .list_handle_grants(&branch_scope)
+        .await
+        .expect("list inherited grants");
+    assert_eq!(inherited.len(), 1);
+    assert_eq!(inherited[0].0.process_id, "fork-visible-process");
+    assert_eq!(
+        inherited[0]
+            .1
+            .wake_target
+            .as_ref()
+            .map(|scope| scope.session_id.as_str()),
+        Some("fork-grant-source"),
+        "fork observes the process but does not become its wake target"
     );
     Ok(())
 }

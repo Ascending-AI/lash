@@ -71,7 +71,7 @@ impl SessionCommitStore for FacadeStore {
             commit.checkpoint.execution_state_ref,
         );
         Ok(RuntimeCommitResult {
-            head_revision: commit.expected_head_revision.unwrap_or_default() + 1,
+            head_revision: commit.expected_head_revision + 1,
             checkpoint_ref: "checkpoint".to_string().into(),
             manifest,
             realization_digest,
@@ -317,7 +317,7 @@ fn persistence_types_are_nameable(
 ) -> RuntimeCommit {
     RuntimeCommit {
         session_id: "facade".to_string(),
-        expected_head_revision: Some(0),
+        expected_head_revision: 0,
         session_execution_lease: None,
         release_session_execution_lease: None,
         config: Default::default(),

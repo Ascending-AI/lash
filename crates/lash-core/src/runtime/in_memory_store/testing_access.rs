@@ -12,9 +12,9 @@ impl InMemorySessionStore {
             .tombstoned_node_ids
             .lock()
             .expect("lock tombstoned nodes");
-        self.session_graph
+        self.global_session_graph
             .lock()
-            .expect("lock graph")
+            .expect("lock global graph")
             .nodes
             .iter()
             .filter(|node| !tombstoned.contains(&node.node_id))

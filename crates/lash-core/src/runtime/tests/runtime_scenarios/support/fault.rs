@@ -72,7 +72,7 @@ impl RuntimeScenarioContext {
                 StoreError::HeadRevisionConflict {
                     expected,
                     actual,
-                } if expected == stale_head_revision
+                } if Some(expected) == stale_head_revision
                     && actual == result.head_revision
             ),
             "{} stale head produced the wrong error after advisory lease release: {err:?}",

@@ -160,12 +160,13 @@ pub mod persistence {
     pub use lash_core::CheckpointKind;
     pub use lash_core::FileAttachmentStore;
     pub use lash_core::runtime::{
-        DeliveryPolicy, InMemorySessionStore, InMemorySessionStoreFactory, MergeKey,
-        PendingTurnInputClaimDiagnostics, PendingTurnInputDraft, QueuedWorkBatch,
-        QueuedWorkBatchDraft, QueuedWorkClaim, QueuedWorkClaimBoundary, QueuedWorkClass,
-        QueuedWorkCompletion, QueuedWorkItem, QueuedWorkPayload, RuntimeSessionState,
-        SessionStoreCreateRequest, SessionStoreFactory, SlotPolicy, TurnInputCheckpointBoundary,
-        TurnInputClaim, TurnInputCompletion, TurnInputIngress, TurnInputState,
+        DeliveryPolicy, ForkPoint, ForkSessionRequest, ForkSessionResult, InMemorySessionStore,
+        InMemorySessionStoreFactory, MergeKey, PendingTurnInputClaimDiagnostics,
+        PendingTurnInputDraft, QueuedWorkBatch, QueuedWorkBatchDraft, QueuedWorkClaim,
+        QueuedWorkClaimBoundary, QueuedWorkClass, QueuedWorkCompletion, QueuedWorkItem,
+        QueuedWorkPayload, RuntimeSessionState, SessionStoreCreateRequest, SessionStoreFactory,
+        SlotPolicy, TurnInputCheckpointBoundary, TurnInputClaim, TurnInputCompletion,
+        TurnInputIngress, TurnInputState,
     };
     pub use lash_core::store::queued_work;
     pub use lash_core::store::{

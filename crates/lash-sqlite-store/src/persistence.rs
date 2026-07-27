@@ -72,7 +72,10 @@ fn sqlite_queued_work_claim_candidates_sql(boundary: QueuedWorkClaimBoundary) ->
     )
 }
 
-fn derived_node_refcount_conn(conn: &Connection, node_id: &str) -> Result<i64, StoreError> {
+pub(crate) fn derived_node_refcount_conn(
+    conn: &Connection,
+    node_id: &str,
+) -> Result<i64, StoreError> {
     derived_node_refcount_for_head_move_conn(conn, node_id, None, None)
 }
 
@@ -87,7 +90,8 @@ fn derived_node_refcount_for_head_move_conn(
             "SELECT
             (SELECT COUNT(*) FROM graph_nodes
              WHERE parent_node_id = ?1 AND tombstoned = 0)
-          + (SELECT COUNT(*) FROM session_head WHERE leaf_node_id = ?1)",
+          + (SELECT COUNT(*) FROM session_head WHERE leaf_node_id = ?1)
+          + (SELECT COUNT(*) FROM node_anchors WHERE node_id = ?1)",
             params![node_id],
             |row| row.get(0),
         )
@@ -172,27 +176,26 @@ fn decrement_node_ref_for_head_move_conn(
     }
 }
 
-fn nearest_frame_node_id_conn(
+pub(crate) fn nearest_frame_node_id_conn(
     conn: &Connection,
-    session_id: &str,
     leaf_node_id: &str,
 ) -> Result<Option<String>, StoreError> {
     conn.query_row(
         "WITH RECURSIVE ancestry(node_id, parent_node_id, node_json, depth) AS (
             SELECT node_id, parent_node_id, node_json, 0
             FROM graph_nodes
-            WHERE node_id = ?1 AND session_id = ?2 AND tombstoned = 0
+            WHERE node_id = ?1 AND tombstoned = 0
           UNION ALL
             SELECT parent.node_id, parent.parent_node_id, parent.node_json, ancestry.depth + 1
             FROM graph_nodes AS parent
             JOIN ancestry ON parent.node_id = ancestry.parent_node_id
-            WHERE parent.session_id = ?2 AND parent.tombstoned = 0
+            WHERE parent.tombstoned = 0
         )
         SELECT node_id FROM ancestry
         WHERE json_extract(node_json, '$.kind') = 'frame_open'
         ORDER BY depth ASC
         LIMIT 1",
-        params![leaf_node_id, session_id],
+        params![leaf_node_id],
         |row| row.get(0),
     )
     .optional()
@@ -270,27 +273,16 @@ impl SessionCommitStore for Store {
         node_id: &str,
     ) -> Result<Option<lash_core::SessionNodeRecord>, StoreError> {
         let node_id = node_id.to_string();
-        let session_id = self.session_id.get().cloned();
         let row: Option<(String, Option<String>, String)> = self
             .conn
             .call(move |conn| {
-                if let Some(session_id) = session_id {
-                    conn.query_row(
-                        "SELECT node_id, parent_node_id, node_json FROM graph_nodes
-                         WHERE node_id = ?1 AND session_id = ?2 AND tombstoned = 0",
-                        params![node_id, session_id],
-                        |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
-                    )
-                    .optional()
-                } else {
-                    conn.query_row(
-                        "SELECT node_id, parent_node_id, node_json FROM graph_nodes
-                         WHERE node_id = ?1 AND tombstoned = 0",
-                        params![node_id],
-                        |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
-                    )
-                    .optional()
-                }
+                conn.query_row(
+                    "SELECT node_id, parent_node_id, node_json FROM graph_nodes
+                     WHERE node_id = ?1 AND tombstoned = 0",
+                    params![node_id],
+                    |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+                )
+                .optional()
             })
             .await
             .map_err(sqlite_error)?;
@@ -371,7 +363,7 @@ impl SessionCommitStore for Store {
                         }
                     }
                     let actual_revision = existing.as_ref().map_or(0, |meta| meta.head_revision);
-                    let expected_revision = commit.expected_head_revision.unwrap_or(0);
+                    let expected_revision = commit.expected_head_revision;
                     if expected_revision != actual_revision {
                         return Err(StoreError::HeadRevisionConflict {
                             expected: commit.expected_head_revision,
@@ -408,9 +400,9 @@ impl SessionCommitStore for Store {
                         let live = tx
                             .query_row(
                                 "SELECT 1 FROM graph_nodes
-                                 WHERE session_id = ?1 AND node_id = ?2 AND tombstoned = 0
+                                 WHERE node_id = ?1 AND tombstoned = 0
                                  LIMIT 1",
-                                params![commit.session_id, leaf_node_id],
+                                params![leaf_node_id],
                                 |_| Ok(()),
                             )
                             .optional()
@@ -505,6 +497,32 @@ impl SessionCommitStore for Store {
                     let old_leaf_node_id = existing
                         .as_ref()
                         .and_then(|head| head.leaf_node_id.clone());
+                    match &commit.graph {
+                        GraphCommitDelta::Unchanged { leaf_node_id }
+                            if leaf_node_id != &old_leaf_node_id =>
+                        {
+                            return Err(StoreError::InvalidGraphLeaf {
+                                leaf_node_id: leaf_node_id.clone(),
+                            });
+                        }
+                        GraphCommitDelta::Append { nodes, .. }
+                            if !nodes.is_empty()
+                                && nodes.first().and_then(|node| node.parent_node_id.as_ref())
+                                != old_leaf_node_id.as_ref() =>
+                        {
+                            return Err(StoreError::InvalidGraphParent {
+                                node_id: nodes
+                                    .first()
+                                    .map(|node| node.node_id.clone())
+                                    .unwrap_or_default(),
+                                expected: old_leaf_node_id.clone(),
+                                actual: nodes
+                                    .first()
+                                    .and_then(|node| node.parent_node_id.clone()),
+                            });
+                        }
+                        _ => {}
+                    }
                     let leaf_node_id = match &commit.graph {
                         GraphCommitDelta::Unchanged { leaf_node_id } => leaf_node_id.clone(),
                         GraphCommitDelta::Append {
@@ -534,10 +552,8 @@ impl SessionCommitStore for Store {
                                         .execute(
                                             "UPDATE graph_nodes
                                              SET incoming_refs = incoming_refs + 1
-                                             WHERE node_id = ?1
-                                               AND session_id = ?2
-                                               AND tombstoned = 0",
-                                            params![parent_node_id, commit.session_id],
+                                             WHERE node_id = ?1 AND tombstoned = 0",
+                                            params![parent_node_id],
                                         )
                                         .map_err(sqlite_error)?;
                                     if changed != 1 {
@@ -579,7 +595,7 @@ impl SessionCommitStore for Store {
                     }
                     let derived_frame_node_id = match leaf_node_id.as_deref() {
                         Some(leaf_node_id) => Some(
-                            nearest_frame_node_id_conn(tx, &commit.session_id, leaf_node_id)?
+                            nearest_frame_node_id_conn(tx, leaf_node_id)?
                                 .ok_or_else(|| StoreError::MissingFrameOpenAncestor {
                                     leaf_node_id: leaf_node_id.to_string(),
                                 })?,
@@ -594,9 +610,17 @@ impl SessionCommitStore for Store {
                     }
                     let graph_node_count: usize = tx
                         .query_row(
-                            "SELECT COUNT(*) FROM graph_nodes
-                             WHERE session_id = ?1 AND tombstoned = 0",
-                            params![commit.session_id],
+                            "WITH RECURSIVE ancestry(node_id, parent_node_id) AS (
+                                 SELECT node_id, parent_node_id FROM graph_nodes
+                                 WHERE node_id = ?1 AND tombstoned = 0
+                                 UNION ALL
+                                 SELECT parent.node_id, parent.parent_node_id
+                                 FROM graph_nodes parent
+                                 JOIN ancestry ON parent.node_id = ancestry.parent_node_id
+                                 WHERE parent.tombstoned = 0
+                             )
+                             SELECT COUNT(*) FROM ancestry",
+                            params![leaf_node_id],
                             |row| row.get::<_, i64>(0),
                         )
                         .map_err(sqlite_error)? as usize;

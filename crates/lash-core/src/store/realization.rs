@@ -95,7 +95,7 @@ mod tests {
                 commit.checkpoint.execution_state_ref,
             );
             Ok(RuntimeCommitResult {
-                head_revision: commit.expected_head_revision.unwrap_or_default() + 1,
+                head_revision: commit.expected_head_revision + 1,
                 checkpoint_ref: "empty-frame-facade".to_string().into(),
                 manifest,
                 realization_digest,

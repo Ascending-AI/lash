@@ -662,7 +662,7 @@ impl SessionCommitStore for RuntimePerfStore {
             });
         };
         self.verify_session_execution_lease(&session_id, session_execution_lease)?;
-        if expected_head_revision.is_some() && expected_head_revision != Some(actual) {
+        if expected_head_revision != actual {
             return Err(store::StoreError::HeadRevisionConflict {
                 expected: expected_head_revision,
                 actual,
