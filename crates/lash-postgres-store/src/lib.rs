@@ -784,6 +784,12 @@ mod tests {
             .expect("create stale store");
         let mut state = lash_core::RuntimeSessionState {
             session_id: session_id.clone(),
+            incarnation_id: stale_store
+                .load_session_meta()
+                .await
+                .expect("load stale session metadata")
+                .expect("stale session metadata")
+                .incarnation_id,
             ..Default::default()
         };
         state.ensure_agent_frame_initialized();
@@ -807,6 +813,17 @@ mod tests {
             .create_store(&request)
             .await
             .expect("explicitly recreate deleted store");
+        let mut state = lash_core::RuntimeSessionState {
+            session_id: session_id.clone(),
+            incarnation_id: recreated
+                .load_session_meta()
+                .await
+                .expect("load recreated session metadata")
+                .expect("recreated session metadata")
+                .incarnation_id,
+            ..Default::default()
+        };
+        state.ensure_agent_frame_initialized();
         recreated
             .commit_runtime_state(RuntimeCommit::persisted_state(&state, &[]))
             .await

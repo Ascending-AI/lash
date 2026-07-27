@@ -435,7 +435,7 @@ async fn sqlite_catalog_partitions_derived_node_ids_by_incarnation() {
                 ..Default::default()
             },
         };
-        let mut commit = RuntimeCommit::persisted_state(&state, &[usage]);
+        let mut commit = RuntimeCommit::persisted_state(state, &[usage]);
         commit.graph = GraphCommitDelta::Append {
             nodes: vec![node.clone()],
             leaf_node_id: Some(node.node_id.clone()),

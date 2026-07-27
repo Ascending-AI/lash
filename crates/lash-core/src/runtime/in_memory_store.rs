@@ -141,6 +141,9 @@ enum InMemoryQueuedWorkClaimKind {
     },
 }
 
+type InMemoryNodeAnchorRecord = (crate::BlobRef, crate::HydratedSessionCheckpoint, String);
+type InMemoryNodeAnchors = Arc<Mutex<HashMap<String, InMemoryNodeAnchorRecord>>>;
+
 pub struct InMemorySessionStore {
     clock: Arc<dyn crate::Clock>,
     /// Serializes every operation whose correctness depends on observing the
@@ -154,8 +157,7 @@ pub struct InMemorySessionStore {
     global_session_graph: Arc<Mutex<crate::SessionGraph>>,
     global_node_owners: Arc<Mutex<HashMap<String, String>>>,
     global_session_heads: Arc<Mutex<HashMap<String, Option<String>>>>,
-    node_anchors:
-        Arc<Mutex<HashMap<String, (crate::BlobRef, crate::HydratedSessionCheckpoint, String)>>>,
+    node_anchors: InMemoryNodeAnchors,
     tombstoned_node_ids: Arc<Mutex<HashSet<String>>>,
     incoming_node_refs: Arc<Mutex<HashMap<String, i64>>>,
     pub(crate) checkpoint: Mutex<Option<crate::HydratedSessionCheckpoint>>,
@@ -226,9 +228,7 @@ impl InMemorySessionStore {
         global_session_graph: Arc<Mutex<crate::SessionGraph>>,
         global_node_owners: Arc<Mutex<HashMap<String, String>>>,
         global_session_heads: Arc<Mutex<HashMap<String, Option<String>>>>,
-        node_anchors: Arc<
-            Mutex<HashMap<String, (crate::BlobRef, crate::HydratedSessionCheckpoint, String)>>,
-        >,
+        node_anchors: InMemoryNodeAnchors,
         tombstoned_node_ids: Arc<Mutex<HashSet<String>>>,
         incoming_node_refs: Arc<Mutex<HashMap<String, i64>>>,
     ) -> Self {
@@ -1567,8 +1567,7 @@ pub struct InMemorySessionStoreFactory {
     global_session_graph: Arc<Mutex<crate::SessionGraph>>,
     global_node_owners: Arc<Mutex<HashMap<String, String>>>,
     global_session_heads: Arc<Mutex<HashMap<String, Option<String>>>>,
-    node_anchors:
-        Arc<Mutex<HashMap<String, (crate::BlobRef, crate::HydratedSessionCheckpoint, String)>>>,
+    node_anchors: InMemoryNodeAnchors,
     tombstoned_node_ids: Arc<Mutex<HashSet<String>>>,
     incoming_node_refs: Arc<Mutex<HashMap<String, i64>>>,
 }

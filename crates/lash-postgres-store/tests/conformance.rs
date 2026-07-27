@@ -273,6 +273,12 @@ async fn postgres_turn_commit_stamps_use_injected_store_clock_when_configured() 
         .expect("clock test lease acquired");
     let state = lash_core::RuntimeSessionState {
         session_id: SESSION_ID.to_string(),
+        incarnation_id: store
+            .load_session_meta()
+            .await
+            .expect("load clocked session metadata")
+            .expect("clocked session metadata")
+            .incarnation_id,
         ..Default::default()
     };
     let mut commit = lash_core::RuntimeCommit::persisted_state(&state, &[]);
