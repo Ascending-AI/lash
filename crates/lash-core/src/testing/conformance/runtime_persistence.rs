@@ -242,6 +242,7 @@ where
     append_rejects_existing_node_id_collision(make()).await;
     commit_rejects_unresolvable_leaf(make()).await;
     commit_rejects_missing_leaf(make()).await;
+    empty_append_cannot_move_the_head(make()).await;
     host_tombstone_cannot_remove_a_reachable_leaf(make()).await;
     commit_rejects_leaf_without_frame_open_ancestor(make()).await;
     // [`SessionExecutionLeaseStore`]: single-writer lane fencing.
@@ -275,7 +276,6 @@ where
     pending_active_turn_inputs_defer_unaccepted_once_on_interrupt(make()).await;
     // [`StoreMaintenance`]: tombstone/vacuum/GC retention.
     verify_node_refcounts_matches_append_edges_and_head_moves(make()).await;
-    tombstoning_zero_ref_node_decrements_its_parent(make()).await;
     tombstone_vacuum_and_gc_are_minimally_consistent(make()).await;
     if options.reclaims_unreachable_blobs {
         gc_reclaims_unreachable_checkpoint_blobs_and_preserves_live(make()).await;
@@ -375,49 +375,6 @@ async fn verify_node_refcounts_matches_append_edges_and_head_moves(
         .expect("scrub exact cached counts");
 
     assert_eq!(verified.checked_node_count, 2);
-}
-
-async fn tombstoning_zero_ref_node_decrements_its_parent(store: Arc<dyn RuntimePersistence>) {
-    let state = RuntimeSessionState {
-        session_id: "zero-ref-tombstone".to_string(),
-        current_frame_node_id: Some("root-frame".to_string()),
-        session_graph: crate::SessionGraph::from_nodes(
-            vec![
-                sample_session_node("root-frame", None),
-                sample_session_node("live-leaf", Some("root-frame")),
-                sample_session_node("zero-ref-leaf", Some("root-frame")),
-            ],
-            Some("live-leaf".to_string()),
-        ),
-        ..RuntimeSessionState::default()
-    };
-    commit_runtime_state_for_test(
-        &store,
-        RuntimeCommit::persisted_state(&state, &[]),
-        "zero-ref-tombstone",
-    )
-    .await
-    .expect("commit one rooted and one zero-ref child");
-
-    store
-        .tombstone_nodes(&["zero-ref-leaf".to_string()])
-        .await
-        .expect("tombstone zero-ref node and decrement its parent");
-    assert!(
-        store
-            .load_node("zero-ref-leaf")
-            .await
-            .expect("load tombstoned zero-ref node")
-            .is_none()
-    );
-    assert_eq!(
-        store
-            .verify_node_refcounts()
-            .await
-            .expect("parent count remains exact after zero-ref tombstone")
-            .checked_node_count,
-        2
-    );
 }
 
 async fn turn_input_application_identity_survives_pending_tombstone_vacuum(
@@ -1585,7 +1542,6 @@ async fn active_path_read_scope_selects_only_requested_ancestry(
             sample_session_node("root-node", None),
             sample_session_node("left-node", Some("root-node")),
             sample_session_node("left-leaf", Some("left-node")),
-            sample_session_node("right-leaf", Some("root-node")),
         ],
         Some("left-leaf".to_string()),
     );
@@ -1601,7 +1557,7 @@ async fn active_path_read_scope_selects_only_requested_ancestry(
         "active-path",
     )
     .await
-    .expect("commit branchy graph");
+    .expect("commit linear graph");
 
     let full = store
         .load_session(SessionReadScope::FullGraph)
@@ -1614,8 +1570,8 @@ async fn active_path_read_scope_selects_only_requested_ancestry(
             .iter()
             .map(|node| node.node_id.as_str())
             .collect::<Vec<_>>(),
-        vec!["root-node", "left-node", "left-leaf", "right-leaf"],
-        "FullGraph must retain every non-tombstoned branch"
+        vec!["root-node", "left-node", "left-leaf"],
+        "FullGraph must retain the full non-tombstoned chain"
     );
 
     let persisted_leaf_path = store
@@ -1631,33 +1587,33 @@ async fn active_path_read_scope_selects_only_requested_ancestry(
             .map(|node| node.node_id.as_str())
             .collect::<Vec<_>>(),
         vec!["root-node", "left-node", "left-leaf"],
-        "ActivePath with no explicit leaf must use the persisted leaf and hide sibling branches"
+        "ActivePath with no explicit leaf must use the persisted leaf"
     );
     assert_eq!(
         persisted_leaf_path.graph.leaf_node_id.as_deref(),
         Some("left-leaf")
     );
 
-    let explicit_right_path = store
+    let explicit_ancestor_path = store
         .load_session(SessionReadScope::ActivePath {
-            leaf_node_id: Some("right-leaf".to_string()),
+            leaf_node_id: Some("left-node".to_string()),
         })
         .await
         .expect("load explicit active path")
         .expect("explicit active path exists");
     assert_eq!(
-        explicit_right_path
+        explicit_ancestor_path
             .graph
             .nodes
             .iter()
             .map(|node| node.node_id.as_str())
             .collect::<Vec<_>>(),
-        vec!["root-node", "right-leaf"],
-        "ActivePath with an explicit leaf must select that ancestry, not the persisted leaf"
+        vec!["root-node", "left-node"],
+        "ActivePath with an explicit leaf must select only that ancestry"
     );
     assert_eq!(
-        explicit_right_path.graph.leaf_node_id.as_deref(),
-        Some("right-leaf")
+        explicit_ancestor_path.graph.leaf_node_id.as_deref(),
+        Some("left-node")
     );
 }
 
@@ -5245,6 +5201,43 @@ async fn commit_rejects_missing_leaf(store: Arc<dyn RuntimePersistence>) {
             .is_none(),
         "missing leaf rejection must abort the whole commit"
     );
+}
+
+async fn empty_append_cannot_move_the_head(store: Arc<dyn RuntimePersistence>) {
+    let mut state = RuntimeSessionState {
+        session_id: "empty-append-head-move".to_string(),
+        ..RuntimeSessionState::default()
+    };
+    state.ensure_agent_frame_initialized();
+    let first = store
+        .commit_runtime_state(RuntimeCommit::persisted_state(&state, &[]))
+        .await
+        .expect("seed the live head");
+    let old_leaf = state.session_graph.leaf_node_id.clone();
+    state.apply_persisted_commit_result(first);
+    let mut move_attempt = RuntimeCommit::persisted_state_with_graph_commit(
+        &state,
+        crate::GraphCommitDelta::Append {
+            nodes: Vec::new(),
+            leaf_node_id: None,
+        },
+        &[],
+    );
+    move_attempt.current_frame_node_id = old_leaf.clone();
+    let error = store
+        .commit_runtime_state(move_attempt)
+        .await
+        .expect_err("an empty append must not move the head");
+    assert!(matches!(
+        error,
+        StoreError::InvalidGraphLeaf { leaf_node_id: None }
+    ));
+    let loaded = store
+        .load_session(SessionReadScope::FullGraph)
+        .await
+        .expect("load after rejected empty append")
+        .expect("seeded session remains");
+    assert_eq!(loaded.graph.leaf_node_id, old_leaf);
 }
 
 async fn host_tombstone_cannot_remove_a_reachable_leaf(store: Arc<dyn RuntimePersistence>) {

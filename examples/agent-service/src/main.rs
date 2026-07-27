@@ -307,6 +307,10 @@ async fn async_main() -> anyhow_like::Result<()> {
         Some(model_variant),
         durability,
     );
+    state
+        .recover_pending_chat_forks()
+        .await
+        .map_err(|err| format!("recover pending chat forks: {err}"))?;
 
     #[cfg(feature = "restate")]
     if durability == AgentServiceDurability::Restate {

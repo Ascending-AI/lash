@@ -69,6 +69,11 @@ Require exactly one visible selector option whose message count equals the saved
 array length. Query `node_anchors` by its node id and require one row. Save the fully
 scrolled UI as `01-pinned-source.png`.
 
+The product database publishes a branch only after Lash creates its durable head.
+Until that second write finishes, the copied product projection remains pending and
+is omitted from chat reads. On restart, the service rolls back every pending
+projection and its possibly-created Lash session before admitting traffic.
+
 ## Phase 2 — Advance only the source
 
 Click a second legal source-board cell different from the first. Poll until the turn

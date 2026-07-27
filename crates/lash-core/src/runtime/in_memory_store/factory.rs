@@ -6,6 +6,10 @@ impl SessionStoreFactory for InMemorySessionStoreFactory {
         &self,
         request: &SessionStoreCreateRequest,
     ) -> Result<Arc<dyn RuntimePersistence>, String> {
+        let _transaction = self
+            .write_transaction
+            .lock()
+            .expect("lock in-memory write transaction");
         let mut stores = self.stores.lock().expect("in-memory store factory");
         let store = stores
             .entry(request.session_id.clone())
@@ -71,7 +75,7 @@ impl SessionStoreFactory for InMemorySessionStoreFactory {
             .write_transaction
             .lock()
             .expect("lock in-memory write transaction");
-        if let Some((checkpoint_ref, _)) = self
+        if let Some((checkpoint_ref, _, _)) = self
             .node_anchors
             .lock()
             .expect("lock node anchors")
@@ -85,18 +89,22 @@ impl SessionStoreFactory for InMemorySessionStoreFactory {
             });
         }
         let stores = self.stores.lock().expect("in-memory store factory");
-        let retained = stores.values().find_map(|store| {
-            let head = store.session_head_meta.lock().expect("lock session head");
-            (head.as_ref().and_then(|head| head.leaf_node_id.as_deref()) == Some(node_id))
-                .then(|| {
-                    let checkpoint_ref = head.as_ref()?.checkpoint_ref.clone()?;
-                    let checkpoint = store.checkpoint.lock().expect("lock checkpoint").clone()?;
-                    Some((checkpoint_ref, checkpoint))
-                })
-                .flatten()
-        });
+        let retained = stores
+            .iter()
+            .filter_map(|(source_session_id, store)| {
+                let head = store.session_head_meta.lock().expect("lock session head");
+                (head.as_ref().and_then(|head| head.leaf_node_id.as_deref()) == Some(node_id))
+                    .then(|| {
+                        let checkpoint_ref = head.as_ref()?.checkpoint_ref.clone()?;
+                        let checkpoint =
+                            store.checkpoint.lock().expect("lock checkpoint").clone()?;
+                        Some((checkpoint_ref, checkpoint, source_session_id.clone()))
+                    })
+                    .flatten()
+            })
+            .min_by(|left, right| left.2.cmp(&right.2));
         drop(stores);
-        let Some((checkpoint_ref, checkpoint)) = retained else {
+        let Some((checkpoint_ref, checkpoint, source_session_id)) = retained else {
             return Err(crate::StoreError::ForkPointNotRetained {
                 node_id: node_id.to_string(),
             });
@@ -119,10 +127,10 @@ impl SessionStoreFactory for InMemorySessionStoreFactory {
             .expect("lock incoming node refs")
             .entry(node_id.to_string())
             .or_default() += 1;
-        self.node_anchors
-            .lock()
-            .expect("lock node anchors")
-            .insert(node_id.to_string(), (checkpoint_ref.clone(), checkpoint));
+        self.node_anchors.lock().expect("lock node anchors").insert(
+            node_id.to_string(),
+            (checkpoint_ref.clone(), checkpoint, source_session_id),
+        );
         Ok(crate::ForkPoint {
             node_id: node_id.to_string(),
             checkpoint_ref,
@@ -185,7 +193,7 @@ impl SessionStoreFactory for InMemorySessionStoreFactory {
         let anchors = self.node_anchors.lock().expect("lock node anchors");
         let mut points = anchors
             .iter()
-            .map(|(node_id, (checkpoint_ref, _))| {
+            .map(|(node_id, (checkpoint_ref, _, _))| {
                 (
                     node_id.clone(),
                     crate::ForkPoint {
@@ -246,8 +254,8 @@ impl SessionStoreFactory for InMemorySessionStoreFactory {
                 self.stores
                     .lock()
                     .expect("in-memory store factory")
-                    .values()
-                    .find_map(|store| {
+                    .iter()
+                    .filter_map(|(source_session_id, store)| {
                         let head = store.session_head_meta.lock().expect("lock session head");
                         (head.as_ref().and_then(|head| head.leaf_node_id.as_deref())
                             == Some(request.node_id.as_str()))
@@ -255,12 +263,14 @@ impl SessionStoreFactory for InMemorySessionStoreFactory {
                             Some((
                                 head.as_ref()?.checkpoint_ref.clone()?,
                                 store.checkpoint.lock().expect("lock checkpoint").clone()?,
+                                source_session_id.clone(),
                             ))
                         })
                         .flatten()
                     })
+                    .min_by(|left, right| left.2.cmp(&right.2))
             });
-        let Some((checkpoint_ref, checkpoint)) = retained else {
+        let Some((checkpoint_ref, checkpoint, source_session_id)) = retained else {
             return Err(crate::StoreError::ForkPointNotRetained {
                 node_id: request.node_id.clone(),
             });
@@ -270,19 +280,11 @@ impl SessionStoreFactory for InMemorySessionStoreFactory {
             .tombstoned_node_ids
             .lock()
             .expect("lock tombstoned nodes");
-        let source_session_id = self
-            .global_node_owners
-            .lock()
-            .expect("lock global node owners")
-            .get(&request.node_id)
-            .cloned()
-            .filter(|_| {
-                graph.find_node(&request.node_id).is_some()
-                    && !tombstoned.contains(&request.node_id)
-            })
-            .ok_or_else(|| crate::StoreError::ForkPointNotRetained {
+        if graph.find_node(&request.node_id).is_none() || tombstoned.contains(&request.node_id) {
+            return Err(crate::StoreError::ForkPointNotRetained {
                 node_id: request.node_id.clone(),
-            })?;
+            });
+        }
         let current_frame_node_id = graph
             .nearest_frame_node_id(Some(&request.node_id))
             .map(ToOwned::to_owned)

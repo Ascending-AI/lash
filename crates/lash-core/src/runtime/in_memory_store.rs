@@ -153,7 +153,8 @@ pub struct InMemorySessionStore {
     global_session_graph: Arc<Mutex<crate::SessionGraph>>,
     global_node_owners: Arc<Mutex<HashMap<String, String>>>,
     global_session_heads: Arc<Mutex<HashMap<String, Option<String>>>>,
-    node_anchors: Arc<Mutex<HashMap<String, (crate::BlobRef, crate::HydratedSessionCheckpoint)>>>,
+    node_anchors:
+        Arc<Mutex<HashMap<String, (crate::BlobRef, crate::HydratedSessionCheckpoint, String)>>>,
     tombstoned_node_ids: Arc<Mutex<HashSet<String>>>,
     incoming_node_refs: Arc<Mutex<HashMap<String, i64>>>,
     pub(crate) checkpoint: Mutex<Option<crate::HydratedSessionCheckpoint>>,
@@ -225,7 +226,7 @@ impl InMemorySessionStore {
         global_node_owners: Arc<Mutex<HashMap<String, String>>>,
         global_session_heads: Arc<Mutex<HashMap<String, Option<String>>>>,
         node_anchors: Arc<
-            Mutex<HashMap<String, (crate::BlobRef, crate::HydratedSessionCheckpoint)>>,
+            Mutex<HashMap<String, (crate::BlobRef, crate::HydratedSessionCheckpoint, String)>>,
         >,
         tombstoned_node_ids: Arc<Mutex<HashSet<String>>>,
         incoming_node_refs: Arc<Mutex<HashMap<String, i64>>>,
@@ -1031,6 +1032,14 @@ impl crate::store::SessionCommitStore for InMemorySessionStore {
                     actual: nodes.first().and_then(|node| node.parent_node_id.clone()),
                 });
             }
+            crate::store::GraphCommitDelta::Append {
+                nodes,
+                leaf_node_id,
+            } if nodes.is_empty() && leaf_node_id != &old_leaf_node_id => {
+                return Err(crate::StoreError::InvalidGraphLeaf {
+                    leaf_node_id: leaf_node_id.clone(),
+                });
+            }
             _ => {}
         }
         {
@@ -1537,7 +1546,8 @@ pub struct InMemorySessionStoreFactory {
     global_session_graph: Arc<Mutex<crate::SessionGraph>>,
     global_node_owners: Arc<Mutex<HashMap<String, String>>>,
     global_session_heads: Arc<Mutex<HashMap<String, Option<String>>>>,
-    node_anchors: Arc<Mutex<HashMap<String, (crate::BlobRef, crate::HydratedSessionCheckpoint)>>>,
+    node_anchors:
+        Arc<Mutex<HashMap<String, (crate::BlobRef, crate::HydratedSessionCheckpoint, String)>>>,
     tombstoned_node_ids: Arc<Mutex<HashSet<String>>>,
     incoming_node_refs: Arc<Mutex<HashMap<String, i64>>>,
 }

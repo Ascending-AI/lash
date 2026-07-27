@@ -42,8 +42,9 @@ CREATE INDEX IF NOT EXISTS idx_session_head_leaf
     ON session_head(leaf_node_id);
 
 CREATE TABLE IF NOT EXISTS node_anchors (
-    node_id        TEXT PRIMARY KEY,
-    checkpoint_ref TEXT NOT NULL
+    node_id           TEXT PRIMARY KEY,
+    checkpoint_ref    TEXT NOT NULL,
+    source_session_id TEXT NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS graph_nodes (
@@ -226,7 +227,10 @@ CREATE INDEX IF NOT EXISTS idx_attachment_manifest_owner
 /// Bumped to 15 for FIG-634 first-class forks. `node_anchors` makes explicit
 /// continuation pins node and checkpoint roots in the same transaction domain
 /// as heads and graph edges.
-pub(crate) const SCHEMA_VERSION: i32 = 15;
+///
+/// Bumped to 16 so an anchor binds the continuation checkpoint and source
+/// session as one immutable snapshot rather than selecting either later.
+pub(crate) const SCHEMA_VERSION: i32 = 16;
 
 pub(crate) const PROCESS_SCHEMA: &str = "
 CREATE TABLE IF NOT EXISTS processes (

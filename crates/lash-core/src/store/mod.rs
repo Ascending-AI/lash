@@ -4,6 +4,7 @@ mod attachment_manifest;
 mod commit_budget;
 mod commit_identity;
 mod error;
+mod graph_commit;
 mod lease_timings;
 pub mod queued_work;
 mod realization;
@@ -376,31 +377,6 @@ impl GraphCommitDelta {
             Self::Unchanged { .. } => &[],
         }
         .iter()
-    }
-
-    pub fn validate_append_topology(&self) -> Result<(), StoreError> {
-        let Self::Append { nodes, .. } = self else {
-            return Ok(());
-        };
-        let proposed_ids = nodes
-            .iter()
-            .map(|node| node.node_id.as_str())
-            .collect::<std::collections::HashSet<_>>();
-        let mut earlier_ids = std::collections::HashSet::with_capacity(nodes.len());
-        for node in nodes {
-            if let Some(parent_node_id) = node.parent_node_id.as_deref()
-                && proposed_ids.contains(parent_node_id)
-                && !earlier_ids.contains(parent_node_id)
-            {
-                return Err(StoreError::InvalidGraphParent {
-                    node_id: node.node_id.clone(),
-                    expected: None,
-                    actual: node.parent_node_id.clone(),
-                });
-            }
-            earlier_ids.insert(node.node_id.as_str());
-        }
-        Ok(())
     }
 }
 

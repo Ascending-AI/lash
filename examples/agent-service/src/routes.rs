@@ -249,30 +249,13 @@ pub(crate) async fn fork_chat(
     if node_id.is_empty() {
         return Err(AppError::bad_request("branch point is required"));
     }
-    let belongs_to_source = state
+    let target_chat_id = uuid::Uuid::new_v4().to_string();
+    state
         .with_db({
             let source_chat_id = source_chat_id.clone();
             let node_id = node_id.clone();
-            move |db| {
-                Ok(db
-                    .list_branch_points(&source_chat_id)?
-                    .iter()
-                    .any(|point| point.node_id == node_id))
-            }
-        })
-        .await?;
-    if !belongs_to_source {
-        return Err(AppError::bad_request(
-            "branch point does not belong to this chat",
-        ));
-    }
-
-    let target_chat_id = uuid::Uuid::new_v4().to_string();
-    let chat = state
-        .with_db({
-            let node_id = node_id.clone();
             let target_chat_id = target_chat_id.clone();
-            move |db| db.fork_chat_from_branch_point(&node_id, &target_chat_id)
+            move |db| db.prepare_chat_fork(&source_chat_id, &node_id, &target_chat_id)
         })
         .await?;
     if let Err(error) = state.core().fork_at(node_id, target_chat_id.clone()).await {
@@ -281,6 +264,19 @@ pub(crate) async fn fork_chat(
             .await;
         return Err(branch_error(error));
     }
+    let chat = match state
+        .with_db({
+            let target_chat_id = target_chat_id.clone();
+            move |db| db.finish_chat_fork(&target_chat_id)
+        })
+        .await
+    {
+        Ok(chat) => chat,
+        Err(error) => {
+            state.discard_pending_chat_fork(&target_chat_id).await?;
+            return Err(error);
+        }
+    };
     Ok(Json(chat))
 }
 

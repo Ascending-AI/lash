@@ -73,7 +73,8 @@ impl AppDb {
                 created_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL,
                 model TEXT NOT NULL,
-                model_variant TEXT
+                model_variant TEXT,
+                fork_pending INTEGER NOT NULL DEFAULT 0
             );
             CREATE TABLE IF NOT EXISTS messages (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -109,17 +110,19 @@ impl AppDb {
             CREATE INDEX IF NOT EXISTS idx_turn_events_turn_id_id
                 ON turn_events(turn_id, id);
             CREATE TABLE IF NOT EXISTS chat_branch_points (
-                node_id TEXT PRIMARY KEY,
                 source_chat_id TEXT NOT NULL REFERENCES chats(id) ON DELETE CASCADE,
+                node_id TEXT NOT NULL,
                 message_id INTEGER NOT NULL,
                 board_json TEXT NOT NULL,
-                created_at TEXT NOT NULL
+                created_at TEXT NOT NULL,
+                PRIMARY KEY (source_chat_id, node_id)
             );
             CREATE INDEX IF NOT EXISTS idx_chat_branch_points_source_created
                 ON chat_branch_points(source_chat_id, created_at DESC);
             ",
         )?;
         add_column_if_missing(&conn, "chats", "model_variant", "TEXT")?;
+        add_column_if_missing(&conn, "chats", "fork_pending", "INTEGER NOT NULL DEFAULT 0")?;
         add_column_if_missing(&conn, "messages", "kind", "TEXT NOT NULL DEFAULT 'message'")?;
         add_column_if_missing(&conn, "messages", "payload", "TEXT")?;
         let mut db = Self { conn };
@@ -169,7 +172,7 @@ impl AppDb {
     pub(crate) fn list_chats(&mut self) -> AppResult<Vec<ChatSummary>> {
         let mut stmt = self.conn.prepare(
             "SELECT id, title, created_at, updated_at, model, model_variant
-             FROM chats ORDER BY updated_at DESC",
+             FROM chats WHERE fork_pending = 0 ORDER BY updated_at DESC",
         )?;
         let rows = stmt.query_map([], chat_summary_from_row)?;
         rows.collect::<rusqlite::Result<Vec<_>>>()
@@ -210,14 +213,13 @@ impl AppDb {
             "INSERT INTO chat_branch_points
              (node_id, source_chat_id, message_id, board_json, created_at)
              VALUES (?1, ?2, ?3, ?4, ?5)
-             ON CONFLICT(node_id) DO UPDATE SET
-                source_chat_id = excluded.source_chat_id,
+             ON CONFLICT(source_chat_id, node_id) DO UPDATE SET
                 message_id = excluded.message_id,
                 board_json = excluded.board_json,
                 created_at = excluded.created_at",
             params![node_id, source_chat_id, message_id, board_json, created_at],
         )?;
-        self.branch_point(node_id)
+        self.branch_point(source_chat_id, node_id)
     }
 
     pub(crate) fn list_branch_points(
@@ -242,37 +244,34 @@ impl AppDb {
             .map_err(AppError::from)
     }
 
-    pub(crate) fn fork_chat_from_branch_point(
+    pub(crate) fn prepare_chat_fork(
         &mut self,
+        source_chat_id: &str,
         node_id: &str,
         target_chat_id: &str,
-    ) -> AppResult<ChatSummary> {
-        let (source_chat_id, message_id, board_json) = self
+    ) -> AppResult<()> {
+        let (message_id, board_json) = self
             .conn
             .query_row(
-                "SELECT source_chat_id, message_id, board_json
-                 FROM chat_branch_points WHERE node_id = ?1",
-                params![node_id],
-                |row| {
-                    Ok((
-                        row.get::<_, String>(0)?,
-                        row.get::<_, i64>(1)?,
-                        row.get::<_, String>(2)?,
-                    ))
-                },
+                "SELECT message_id, board_json
+                 FROM chat_branch_points
+                 WHERE source_chat_id = ?1 AND node_id = ?2",
+                params![source_chat_id, node_id],
+                |row| Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?)),
             )
             .optional()?
             .ok_or_else(|| AppError {
                 status: StatusCode::NOT_FOUND,
                 message: format!("branch point `{node_id}` not found"),
             })?;
-        let source = self.chat(&source_chat_id)?;
+        let source = self.chat(source_chat_id)?;
         let title = format!("{} · branch", source.title);
         let created_at = now();
         let transaction = self.conn.transaction()?;
         transaction.execute(
-            "INSERT INTO chats (id, title, created_at, updated_at, model, model_variant)
-             VALUES (?1, ?2, ?3, ?3, ?4, ?5)",
+            "INSERT INTO chats
+             (id, title, created_at, updated_at, model, model_variant, fork_pending)
+             VALUES (?1, ?2, ?3, ?3, ?4, ?5, 1)",
             params![
                 target_chat_id,
                 title,
@@ -295,7 +294,29 @@ impl AppDb {
             params![target_chat_id, board_json, created_at],
         )?;
         transaction.commit()?;
+        Ok(())
+    }
+
+    pub(crate) fn finish_chat_fork(&mut self, target_chat_id: &str) -> AppResult<ChatSummary> {
+        let changed = self.conn.execute(
+            "UPDATE chats SET fork_pending = 0 WHERE id = ?1 AND fork_pending = 1",
+            params![target_chat_id],
+        )?;
+        if changed != 1 {
+            return Err(AppError::internal(format!(
+                "pending branch chat `{target_chat_id}` was not found"
+            )));
+        }
         Ok(self.chat(target_chat_id)?)
+    }
+
+    pub(crate) fn pending_chat_forks(&mut self) -> AppResult<Vec<String>> {
+        let mut stmt = self
+            .conn
+            .prepare("SELECT id FROM chats WHERE fork_pending = 1 ORDER BY id")?;
+        let rows = stmt.query_map([], |row| row.get::<_, String>(0))?;
+        rows.collect::<rusqlite::Result<Vec<_>>>()
+            .map_err(AppError::from)
     }
 
     pub(crate) fn delete_chat(&mut self, chat_id: &str) -> AppResult<()> {
@@ -316,7 +337,8 @@ impl AppDb {
 
     fn chat(&mut self, chat_id: &str) -> rusqlite::Result<ChatSummary> {
         self.conn.query_row(
-            "SELECT id, title, created_at, updated_at, model, model_variant FROM chats WHERE id = ?1",
+            "SELECT id, title, created_at, updated_at, model, model_variant
+             FROM chats WHERE id = ?1 AND fork_pending = 0",
             params![chat_id],
             chat_summary_from_row,
         )
@@ -796,7 +818,7 @@ impl AppDb {
         Ok(())
     }
 
-    fn branch_point(&mut self, node_id: &str) -> AppResult<ChatBranchPoint> {
+    fn branch_point(&mut self, source_chat_id: &str, node_id: &str) -> AppResult<ChatBranchPoint> {
         self.conn
             .query_row(
                 "SELECT point.node_id, point.source_chat_id,
@@ -805,9 +827,9 @@ impl AppDb {
                  LEFT JOIN messages message
                    ON message.chat_id = point.source_chat_id
                   AND message.id <= point.message_id
-                 WHERE point.node_id = ?1
+                 WHERE point.source_chat_id = ?1 AND point.node_id = ?2
                  GROUP BY point.node_id, point.source_chat_id, point.created_at",
-                params![node_id],
+                params![source_chat_id, node_id],
                 branch_point_from_row,
             )
             .map_err(AppError::from)
@@ -1005,9 +1027,16 @@ mod tests {
             .expect("insert later message");
         db.upsert_chat_board(&source.id, &default_board())
             .expect("advance board");
-        let branch = db
-            .fork_chat_from_branch_point("node-pinned", "branch")
+        db.prepare_chat_fork(&source.id, "node-pinned", "branch")
             .expect("fork product projection");
+        assert!(
+            db.list_chats()
+                .expect("list while branch is pending")
+                .iter()
+                .all(|chat| chat.id != "branch"),
+            "pending product projection must not be externally visible"
+        );
+        let branch = db.finish_chat_fork("branch").expect("publish branch");
 
         assert_eq!(branch.id, "branch");
         assert_eq!(branch.model, "mock-model");
@@ -1016,5 +1045,20 @@ mod tests {
         assert_eq!(messages.len(), 1);
         assert_eq!(messages[0].text, "before");
         assert_eq!(db.chat_board("branch").expect("branch board"), pinned_board);
+
+        let sibling = db
+            .create_chat("sibling", "mock-model", None)
+            .expect("create sibling");
+        db.insert_message(&sibling.id, "user", "sibling projection")
+            .expect("insert sibling message");
+        db.save_branch_point(&sibling.id, "node-pinned")
+            .expect("the same shared node can be pinned by another chat");
+        assert_eq!(
+            db.list_branch_points(&source.id)
+                .expect("source point remains scoped")[0]
+                .message_count,
+            1,
+            "a sibling chat must not overwrite the source projection"
+        );
     }
 }

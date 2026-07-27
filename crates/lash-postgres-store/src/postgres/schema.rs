@@ -29,7 +29,8 @@ pub(crate) async fn ensure_schema(pool: &PgPool) -> Result<Vec<u8>, StoreError> 
 
         CREATE TABLE IF NOT EXISTS lash_node_anchors (
             node_id TEXT PRIMARY KEY,
-            checkpoint_ref TEXT NOT NULL
+            checkpoint_ref TEXT NOT NULL,
+            source_session_id TEXT NOT NULL
         );
 
         CREATE TABLE IF NOT EXISTS lash_deleted_sessions (

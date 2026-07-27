@@ -521,6 +521,14 @@ impl SessionCommitStore for Store {
                                     .and_then(|node| node.parent_node_id.clone()),
                             });
                         }
+                        GraphCommitDelta::Append {
+                            nodes,
+                            leaf_node_id,
+                        } if nodes.is_empty() && leaf_node_id != &old_leaf_node_id => {
+                            return Err(StoreError::InvalidGraphLeaf {
+                                leaf_node_id: leaf_node_id.clone(),
+                            });
+                        }
                         _ => {}
                     }
                     let leaf_node_id = match &commit.graph {

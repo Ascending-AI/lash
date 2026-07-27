@@ -456,6 +456,39 @@ fn append_chain_rejects_self_parent_cycles() {
     ));
 }
 
+#[test]
+fn append_leaf_must_be_the_terminal_appended_node() {
+    let graph = GraphCommitDelta::Append {
+        nodes: vec![
+            crate::SessionNodeRecord {
+                node_id: "first".to_string(),
+                parent_node_id: None,
+                timestamp: "2026-07-27T00:00:00Z".to_string(),
+                payload: crate::SessionNodePayload::Plugin {
+                    plugin_type: "first".to_string(),
+                    body: crate::session_graph::SharedJsonValue::new(serde_json::json!({})),
+                },
+            },
+            crate::SessionNodeRecord {
+                node_id: "last".to_string(),
+                parent_node_id: Some("first".to_string()),
+                timestamp: "2026-07-27T00:00:00Z".to_string(),
+                payload: crate::SessionNodePayload::Plugin {
+                    plugin_type: "last".to_string(),
+                    body: crate::session_graph::SharedJsonValue::new(serde_json::json!({})),
+                },
+            },
+        ],
+        leaf_node_id: Some("first".to_string()),
+    };
+    assert!(matches!(
+        graph.validate_append_topology(),
+        Err(StoreError::InvalidGraphLeaf {
+            leaf_node_id: Some(leaf)
+        }) if leaf == "first"
+    ));
+}
+
 fn local_liveness(
     host_id: &str,
     boot_id: &str,

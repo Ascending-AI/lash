@@ -92,7 +92,9 @@ const SCHEMA_COMPONENT: &str = "lash-postgres-store";
 //
 // Bumped to 21 for first-class forks and continuation pins. `lash_node_anchors`
 // joins live heads as both a graph-node root and checkpoint-blob root.
-const SCHEMA_VERSION: i32 = 21;
+// Bumped to 22 so each anchor binds one continuation checkpoint and source
+// session snapshot.
+const SCHEMA_VERSION: i32 = 22;
 const PROCESS_LEASE_SCHEMA_VERSION: u32 = lash_core::PROCESS_LEASE_SCHEMA_VERSION;
 
 #[derive(Clone)]

@@ -32,17 +32,18 @@ pub(super) async fn pin_in_catalog(
                     pinned: true,
                 });
             }
-            let checkpoint_ref = tx
+            let retained = tx
                 .query_row(
-                    "SELECT checkpoint_ref FROM session_head
+                    "SELECT session_id, checkpoint_ref FROM session_head
                      WHERE leaf_node_id = ?1 AND checkpoint_ref IS NOT NULL
                      ORDER BY session_id LIMIT 1",
                     params![node_id],
-                    |row| row.get::<_, String>(0),
+                    |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
                 )
                 .optional()
-                .map_err(sqlite_error)?
-                .ok_or_else(|| lash_core::StoreError::ForkPointNotRetained {
+                .map_err(sqlite_error)?;
+            let (source_session_id, checkpoint_ref) =
+                retained.ok_or_else(|| lash_core::StoreError::ForkPointNotRetained {
                     node_id: node_id.clone(),
                 })?;
             let changed = tx
@@ -59,8 +60,9 @@ pub(super) async fn pin_in_catalog(
                 });
             }
             tx.execute(
-                "INSERT INTO node_anchors (node_id, checkpoint_ref) VALUES (?1, ?2)",
-                params![node_id, checkpoint_ref],
+                "INSERT INTO node_anchors
+                 (node_id, checkpoint_ref, source_session_id) VALUES (?1, ?2, ?3)",
+                params![node_id, checkpoint_ref, source_session_id],
             )
             .map_err(sqlite_error)?;
             Ok(lash_core::ForkPoint {
@@ -112,15 +114,25 @@ pub(super) async fn fork_points_in_catalog(
     let conn = open_factory_catalog(root).await?;
     conn.call(|conn| {
         let mut stmt = conn.prepare(
-            "SELECT retained.node_id, retained.checkpoint_ref,
-                    EXISTS(SELECT 1 FROM node_anchors a WHERE a.node_id = retained.node_id)
+            "SELECT node_id, checkpoint_ref, pinned
              FROM (
-                 SELECT node_id, checkpoint_ref FROM node_anchors
-                 UNION
-                 SELECT leaf_node_id, checkpoint_ref FROM session_head
-                 WHERE leaf_node_id IS NOT NULL AND checkpoint_ref IS NOT NULL
-             ) AS retained
-             ORDER BY retained.node_id",
+                 SELECT node_id, checkpoint_ref, pinned,
+                        ROW_NUMBER() OVER (
+                            PARTITION BY node_id ORDER BY priority, source_session_id
+                        ) AS ordinal
+                 FROM (
+                     SELECT node_id, checkpoint_ref, source_session_id,
+                            1 AS pinned, 0 AS priority
+                     FROM node_anchors
+                     UNION ALL
+                     SELECT leaf_node_id, checkpoint_ref, session_id,
+                            0 AS pinned, 1 AS priority
+                     FROM session_head
+                     WHERE leaf_node_id IS NOT NULL AND checkpoint_ref IS NOT NULL
+                 )
+             )
+             WHERE ordinal = 1
+             ORDER BY node_id",
         )?;
         let rows = stmt.query_map([], |row| {
             Ok(lash_core::ForkPoint {
@@ -160,31 +172,24 @@ pub(super) async fn fork_at_in_catalog(
                     session_id: request.session_id.clone(),
                 });
             }
-            let checkpoint_ref = tx
+            let retained = tx
                 .query_row(
-                    "SELECT checkpoint_ref FROM node_anchors WHERE node_id = ?1
-                     UNION ALL
-                     SELECT checkpoint_ref FROM session_head
-                     WHERE leaf_node_id = ?1 AND checkpoint_ref IS NOT NULL
-                     ORDER BY checkpoint_ref LIMIT 1",
+                    "SELECT source_session_id, checkpoint_ref FROM (
+                         SELECT source_session_id, checkpoint_ref, 0 AS priority
+                         FROM node_anchors WHERE node_id = ?1
+                         UNION ALL
+                         SELECT session_id, checkpoint_ref, 1 AS priority
+                         FROM session_head
+                         WHERE leaf_node_id = ?1 AND checkpoint_ref IS NOT NULL
+                     )
+                     ORDER BY priority, source_session_id LIMIT 1",
                     params![request.node_id],
-                    |row| row.get::<_, String>(0),
+                    |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
                 )
                 .optional()
-                .map_err(sqlite_error)?
-                .ok_or_else(|| lash_core::StoreError::ForkPointNotRetained {
-                    node_id: request.node_id.clone(),
-                })?;
-            let source_session_id = tx
-                .query_row(
-                    "SELECT session_id FROM graph_nodes
-                     WHERE node_id = ?1 AND tombstoned = 0",
-                    params![request.node_id],
-                    |row| row.get::<_, String>(0),
-                )
-                .optional()
-                .map_err(sqlite_error)?
-                .ok_or_else(|| lash_core::StoreError::ForkPointNotRetained {
+                .map_err(sqlite_error)?;
+            let (source_session_id, checkpoint_ref) =
+                retained.ok_or_else(|| lash_core::StoreError::ForkPointNotRetained {
                     node_id: request.node_id.clone(),
                 })?;
             let current_frame_node_id =
