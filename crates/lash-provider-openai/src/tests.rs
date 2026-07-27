@@ -11,6 +11,7 @@ use std::collections::VecDeque;
 use std::num::NonZeroUsize;
 use std::sync::Arc;
 mod attachment_tests;
+mod generation_tests;
 
 type ScriptedHttpResponse = (u16, Vec<(String, String)>, &'static str);
 
@@ -144,6 +145,7 @@ fn reasoning_capability() -> ModelCapability {
         }),
         cache_control: None,
         stream_termination: None,
+        sampling: lash_core::SamplingCapability::Configurable,
     }
 }
 
@@ -160,6 +162,7 @@ fn budget_reasoning_capability() -> ModelCapability {
         }),
         cache_control: None,
         stream_termination: None,
+        sampling: lash_core::SamplingCapability::Configurable,
     }
 }
 
@@ -173,6 +176,7 @@ fn toggle_false_reasoning_capability() -> ModelCapability {
         }),
         cache_control: None,
         stream_termination: None,
+        sampling: lash_core::SamplingCapability::Configurable,
     }
 }
 
@@ -1525,45 +1529,6 @@ fn local_preset_suppresses_optional_openai_fields() {
     assert!(responses.get("store").is_none());
     assert!(responses.get("text").is_none());
     assert!(responses.get("prompt_cache_key").is_none());
-}
-
-#[test]
-fn output_token_cap_maps_to_wire_fields() {
-    let options = ProviderOptions {
-        max_output_tokens: Some(9999),
-        ..ProviderOptions::default()
-    };
-    let mut req = request(vec![LlmMessage::text(LlmRole::User, "hello")]);
-    req.generation.output_token_cap = NonZeroUsize::new(2048);
-
-    let responses_body = OpenAiProvider::new("key")
-        .with_options(options.clone())
-        .build_responses_request_body(&req, true)
-        .unwrap();
-    assert_eq!(responses_body["max_output_tokens"], 2048);
-    let provider_limited_responses_body = OpenAiProvider::new("key")
-        .with_options(options.clone())
-        .build_responses_request_body(
-            &request(vec![LlmMessage::text(LlmRole::User, "hello")]),
-            true,
-        )
-        .unwrap();
-    assert_eq!(provider_limited_responses_body["max_output_tokens"], 9999);
-
-    let mut chat_req = req;
-    chat_req.model = "anthropic/claude-sonnet-4.6".to_string();
-    let chat_body = openrouter_provider()
-        .with_options(options.clone())
-        .build_chat_request_body(&chat_req, true)
-        .unwrap();
-    assert_eq!(chat_body["max_tokens"], 2048);
-    let mut provider_limited_chat_req = request(vec![LlmMessage::text(LlmRole::User, "hello")]);
-    provider_limited_chat_req.model = "anthropic/claude-sonnet-4.6".to_string();
-    let provider_limited_chat_body = openrouter_provider()
-        .with_options(options)
-        .build_chat_request_body(&provider_limited_chat_req, true)
-        .unwrap();
-    assert_eq!(provider_limited_chat_body["max_tokens"], 9999);
 }
 
 #[test]

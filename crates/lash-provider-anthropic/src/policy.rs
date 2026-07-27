@@ -19,3 +19,16 @@ pub(crate) enum AnthropicThinkingConfig {
     Budget { budget_tokens: i32 },
     Disabled,
 }
+
+impl AnthropicThinkingConfig {
+    /// Whether the API pins sampling for this configuration, which makes any
+    /// caller-set temperature an error. An exhaustive match, not a negative
+    /// `matches!`: a variant added later has to answer for itself instead of
+    /// defaulting into emitting a temperature the API would reject with 400.
+    pub(crate) fn pins_sampling(&self) -> bool {
+        match self {
+            Self::Adaptive { .. } | Self::Budget { .. } => true,
+            Self::Disabled => false,
+        }
+    }
+}

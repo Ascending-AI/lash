@@ -146,8 +146,9 @@ pub mod tools {
 
 pub mod direct {
     pub use lash_core::llm::types::{
-        AttachmentSource, LlmEventSender, LlmOutputPart, LlmStreamEvent, LlmTerminalReason,
-        LlmUsage, ProviderFileScope,
+        AttachmentSource, GenerationOptions, LlmEventSender, LlmOutputPart, LlmStreamEvent,
+        LlmTerminalReason, LlmUsage, NonNegativeFiniteF64, NonNegativeFiniteF64Error,
+        ProviderFileScope,
     };
     pub use lash_core::{
         DirectCompletion, DirectJsonSchema, DirectLlmClient, DirectLlmCompletion, DirectLlmError,
@@ -452,7 +453,7 @@ pub mod provider {
         CacheControlDialect, LlmTimeouts, ModelCapability, Provider, ProviderComponents,
         ProviderFactory, ProviderHandle, ProviderOptions, ProviderSpec, ReasoningCapability,
         ReasoningDisableEncoding, ReasoningEncoding, ReasoningSelection, RequestTimeout,
-        StreamTermination,
+        SamplingCapability, StreamTermination,
     };
     /// Request/response/error vocabulary of [`Provider::complete`],
     /// re-exported so hosts can implement provider decorators (admission

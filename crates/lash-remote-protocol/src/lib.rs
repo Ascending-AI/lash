@@ -32,8 +32,10 @@ pub use turn_input::*;
 pub use turn_result::*;
 pub use usage_activity::*;
 
-// Bumped to 18: process abandon evidence can name EngineGaveUp.
-pub const REMOTE_PROTOCOL_VERSION: u32 = 18;
+// Bumped to 19: LLM generation options carry temperature as a JSON number
+// (previously a string) plus a seed, drop top_p/stop/provider_options, and
+// reject unknown keys; model capability carries a sampling field.
+pub const REMOTE_PROTOCOL_VERSION: u32 = 19;
 
 pub fn ensure_protocol_version(actual: u32) -> Result<(), RemoteProtocolError> {
     if actual == REMOTE_PROTOCOL_VERSION {

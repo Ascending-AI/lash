@@ -2,8 +2,8 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use lash::direct::{
-    AttachmentSource, DirectLlmClient, DirectLlmError, DirectLlmResult, DirectRequest,
-    LlmEventSender, LlmOutputPart, LlmUsage,
+    AttachmentSource, DirectLlmClient, DirectLlmError, DirectLlmResult, DirectRequest, NonNegativeFiniteF64,
+    NonNegativeFiniteF64Error, GenerationOptions, LlmEventSender, LlmOutputPart, LlmUsage,
 };
 use lash::durability::RuntimeHostConfig;
 use lash::messages::MessageRole;
@@ -374,6 +374,15 @@ fn direct_payload_types_are_nameable(
     let _ = (attachment, event_sender, output, usage, token_usage);
 }
 
+fn generation_option_types_are_nameable(
+    mut request: DirectRequest,
+    temperature: f64,
+) -> Result<GenerationOptions, NonNegativeFiniteF64Error> {
+    request.generation.temperature = Some(NonNegativeFiniteF64::new(temperature)?);
+    request.generation.seed = Some(1);
+    Ok(request.generation)
+}
+
 fn advanced_builder_accepts_runtime_host_config(
     builder: AdvancedLashCoreBuilder,
     config: RuntimeHostConfig,
@@ -523,6 +532,7 @@ fn main() {
     let _ = context_compactor_types_are_nameable();
     let _ = direct_response_type_is_nameable;
     let _ = direct_payload_types_are_nameable;
+    let _ = generation_option_types_are_nameable;
     let _ = advanced_builder_accepts_runtime_host_config;
     let _ = tool_contract_types_are_nameable;
     let _ = tool_catalog_types_are_nameable;

@@ -434,9 +434,24 @@ impl AnthropicProvider {
             };
         }
 
-        // Extended thinking. Temperature is intentionally omitted. Lash does
-        // not currently expose an explicit temperature option, and Anthropic
-        // rejects temperature on thinking requests.
+        // Sampling. Anthropic Messages has no seed field, so a requested seed
+        // is not expressible on this wire. Temperature is expressible, but two
+        // separate facts can take it away, and both answer with HTTP 400 when
+        // ignored: extended thinking pins sampling for the request, and some
+        // models pin it outright (everything released after Claude Opus 4.6).
+        // The second is host-supplied capability, never inferred from the
+        // model name here.
+        if let Some(temperature) = &policy.temperature
+            && !policy
+                .thinking
+                .as_ref()
+                .is_some_and(AnthropicThinkingConfig::pins_sampling)
+            && req.model_capability.allows_caller_temperature()
+        {
+            body["temperature"] = Value::Number(temperature.clone().into());
+        }
+
+        // Extended thinking.
         if let Some(cfg) = policy.thinking {
             let display = if policy.expose_thinking {
                 "summarized"

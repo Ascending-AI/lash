@@ -154,5 +154,6 @@ fn adaptive_reasoning_capability() -> lash::provider::ModelCapability {
         }),
         cache_control: Some(lash::provider::CacheControlDialect::Anthropic),
         stream_termination: None,
+        sampling: lash::provider::SamplingCapability::Configurable,
     }
 }

@@ -33,6 +33,11 @@ impl OpenAiCompatibleProvider {
             "stream": stream,
         });
         apply_max_tokens_field(&mut body, compat.max_tokens_field, policy.max_output_tokens);
+        // Responses accepts `temperature` but has no `seed` field, so a
+        // requested seed is simply not expressible on this wire.
+        if let Some(temperature) = &policy.temperature {
+            body["temperature"] = Value::Number(temperature.clone().into());
+        }
         if !req.tools.is_empty() {
             body["tool_choice"] = json!(shared::tool_choice_value(&req.tool_choice));
         }

@@ -39,6 +39,7 @@ fn capability_for_variant(variant: Option<&str>) -> lash_core::ModelCapability {
         }),
         cache_control: None,
         stream_termination: None,
+        sampling: lash_core::SamplingCapability::Configurable,
     }
 }
 

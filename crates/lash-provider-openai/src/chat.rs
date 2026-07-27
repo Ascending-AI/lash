@@ -392,6 +392,14 @@ impl OpenAiCompatibleProvider {
             body["provider"] = json!(provider_routing);
         }
         apply_max_tokens_field(&mut body, compat.max_tokens_field, policy.max_output_tokens);
+        // Chat Completions is the one dialect that carries both sampling
+        // controls; each is omitted entirely when the caller set nothing.
+        if let Some(temperature) = &policy.temperature {
+            body["temperature"] = Value::Number(temperature.clone().into());
+        }
+        if let Some(seed) = policy.seed {
+            body["seed"] = json!(seed);
+        }
         if !tools.is_empty() {
             body["tools"] = Value::Array(tools);
             body["tool_choice"] = json!(tool_choice_value(&req.tool_choice));

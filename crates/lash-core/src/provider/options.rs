@@ -152,6 +152,13 @@ impl ProviderOptions {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ResolvedGenerationPolicy<TThinking> {
     pub max_output_tokens: u64,
+    /// Requested sampling temperature, or `None` when the caller expressed no
+    /// preference. Adapters with an endpoint default of their own layer it
+    /// beneath this value.
+    pub temperature: Option<crate::NonNegativeFiniteF64>,
+    /// Requested sampling seed, or `None`. Only wires that accept a seed emit
+    /// it; the rest omit it.
+    pub seed: Option<i64>,
     pub cache_retention: CacheRetention,
     pub expose_thinking: bool,
     pub thinking: TThinking,
@@ -169,6 +176,8 @@ pub fn resolve_generation_policy<TThinking>(
         .unwrap_or(provider_default_max_output_tokens);
     ResolvedGenerationPolicy {
         max_output_tokens,
+        temperature: generation.temperature.clone(),
+        seed: generation.seed,
         cache_retention: options.cache_retention,
         expose_thinking: options.expose_thinking,
         thinking,

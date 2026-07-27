@@ -223,9 +223,14 @@ fn llm_request_and_response_round_trip_owned_dtos() {
             }),
             cache_control: Some(core_llm::CacheControlDialect::Anthropic),
             stream_termination: Some(core_llm::StreamTermination::RequireTerminalEvidence),
+            sampling: core_llm::SamplingCapability::Pinned,
         },
         generation: core_llm::GenerationOptions {
             output_token_cap: NonZeroUsize::new(42),
+            temperature: Some(
+                core_llm::NonNegativeFiniteF64::new(0.25).expect("finite temperature"),
+            ),
+            seed: Some(-9),
         },
         scope: core_llm::LlmRequestScope::new(
             "session-1",
@@ -285,6 +290,12 @@ fn llm_request_and_response_round_trip_owned_dtos() {
             ("slow".to_string(), 2048u32)
         ]))
     );
+    assert_eq!(core.generation.output_token_cap, NonZeroUsize::new(42));
+    assert_eq!(
+        core.generation.temperature,
+        Some(core_llm::NonNegativeFiniteF64::new(0.25).expect("finite temperature"))
+    );
+    assert_eq!(core.generation.seed, Some(-9));
     assert_eq!(core.session_id(), "session-1");
     assert_eq!(core.agent_frame_id(), "session-1:frame:test");
     assert_eq!(core.request_id(), "session-1:request:test");
@@ -1415,4 +1426,101 @@ fn observed_process() -> lash_core::ObservedProcess {
         child_session_id: None,
         label: "External".to_string(),
     }
+}
+
+#[test]
+fn remote_generation_options_round_trip_sampling_controls_losslessly() {
+    let core = core_llm::GenerationOptions {
+        output_token_cap: NonZeroUsize::new(2_048),
+        temperature: Some(core_llm::NonNegativeFiniteF64::new(0.7).expect("finite temperature")),
+        seed: Some(-1),
+    };
+    let remote = RemoteGenerationOptions::from(core.clone());
+    let wire = serde_json::to_value(&remote).expect("serialize remote generation options");
+    // The wire form is a JSON number, the same JSON-number encoding core uses
+    // for a sampling temperature.
+    assert_eq!(
+        wire,
+        serde_json::json!({ "output_token_cap": 2_048, "temperature": 0.7, "seed": -1 })
+    );
+    assert_eq!(
+        serde_json::to_value(&core).expect("serialize core generation options")["temperature"],
+        wire["temperature"]
+    );
+    let decoded: RemoteGenerationOptions =
+        serde_json::from_value(wire).expect("deserialize remote generation options");
+    let restored = core_llm::GenerationOptions::try_from(decoded).expect("core generation options");
+    assert_eq!(restored, core);
+}
+
+#[test]
+fn remote_temperature_survives_the_conversion_with_its_spelling_intact() {
+    // Every accepted JSON number crosses the boundary unchanged in both
+    // directions — an integer is not re-spelled as a float on the way in, and
+    // 2^53 is the largest integer that can be accepted at all.
+    for spelling in ["1", "1.0", "0.7", "2", "9007199254740992"] {
+        let payload = format!("{{\"temperature\":{spelling}}}");
+        let remote: RemoteGenerationOptions =
+            serde_json::from_str(&payload).expect("deserialize remote generation options");
+        remote
+            .validate("RemoteGenerationOptions")
+            .expect("temperature passes validation");
+        let core =
+            core_llm::GenerationOptions::try_from(remote).expect("convert to core generation");
+        let round_tripped = serde_json::to_string(&RemoteGenerationOptions::from(core))
+            .expect("serialize remote generation options");
+        assert_eq!(
+            round_tripped, payload,
+            "temperature {spelling} must survive the round trip byte for byte"
+        );
+    }
+}
+
+#[test]
+fn remote_temperature_rejects_integers_binary64_cannot_hold() {
+    // 2^53 + 1 has no exact binary64 form, so accepting it would hand the core
+    // request a different number than the sender wrote. Both the validate-only
+    // path and the converting path refuse it.
+    let remote: RemoteGenerationOptions =
+        serde_json::from_str("{\"temperature\":9007199254740993}").expect("deserialize");
+    let validation_error = remote
+        .validate("RemoteGenerationOptions")
+        .expect_err("an inexact integer temperature must not validate");
+    assert!(
+        validation_error.to_string().contains("binary64"),
+        "{validation_error}"
+    );
+    let conversion_error = core_llm::GenerationOptions::try_from(remote)
+        .expect_err("an inexact integer temperature must not convert");
+    assert!(
+        conversion_error
+            .to_string()
+            .contains("generation.temperature"),
+        "{conversion_error}"
+    );
+}
+
+#[test]
+fn remote_generation_options_reject_a_negative_temperature() {
+    let remote = RemoteGenerationOptions {
+        output_token_cap: None,
+        temperature: Some(serde_json::Number::from_f64(-0.5).expect("finite")),
+        seed: None,
+    };
+    let error = core_llm::GenerationOptions::try_from(remote)
+        .expect_err("a negative temperature must not convert");
+    assert!(
+        error.to_string().contains("generation.temperature"),
+        "{error}"
+    );
+}
+
+#[test]
+fn remote_generation_options_are_omitted_from_the_wire_when_unset() {
+    let remote = RemoteGenerationOptions::from(core_llm::GenerationOptions::default());
+    assert!(remote.is_empty());
+    assert_eq!(
+        serde_json::to_value(&remote).expect("serialize"),
+        serde_json::json!({})
+    );
 }

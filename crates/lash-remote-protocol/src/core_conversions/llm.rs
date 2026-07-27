@@ -89,11 +89,13 @@ impl From<core_llm::ModelCapability> for RemoteModelCapability {
             reasoning,
             cache_control,
             stream_termination,
+            sampling,
         } = value;
         Self {
             reasoning: reasoning.map(Into::into),
             cache_control: cache_control.map(Into::into),
             stream_termination: stream_termination.map(Into::into),
+            sampling: sampling.into(),
         }
     }
 }
@@ -104,11 +106,31 @@ impl From<RemoteModelCapability> for core_llm::ModelCapability {
             reasoning,
             cache_control,
             stream_termination,
+            sampling,
         } = value;
         Self {
             reasoning: reasoning.map(Into::into),
             cache_control: cache_control.map(Into::into),
             stream_termination: stream_termination.map(Into::into),
+            sampling: sampling.into(),
+        }
+    }
+}
+
+impl From<core_llm::SamplingCapability> for RemoteSamplingCapability {
+    fn from(value: core_llm::SamplingCapability) -> Self {
+        match value {
+            core_llm::SamplingCapability::Configurable => Self::Configurable,
+            core_llm::SamplingCapability::Pinned => Self::Pinned,
+        }
+    }
+}
+
+impl From<RemoteSamplingCapability> for core_llm::SamplingCapability {
+    fn from(value: RemoteSamplingCapability) -> Self {
+        match value {
+            RemoteSamplingCapability::Configurable => Self::Configurable,
+            RemoteSamplingCapability::Pinned => Self::Pinned,
         }
     }
 }
@@ -389,13 +411,15 @@ impl From<RemoteExecutionEvidence> for core_llm::ExecutionEvidence {
 
 impl From<core_llm::GenerationOptions> for RemoteGenerationOptions {
     fn from(value: core_llm::GenerationOptions) -> Self {
-        let core_llm::GenerationOptions { output_token_cap } = value;
+        let core_llm::GenerationOptions {
+            output_token_cap,
+            temperature,
+            seed,
+        } = value;
         Self {
             output_token_cap: output_token_cap.map(|cap| cap.get() as u64),
-            temperature: None,
-            top_p: None,
-            stop: Vec::new(),
-            provider_options: HashMap::new(),
+            temperature: temperature.map(Into::into),
+            seed,
         }
     }
 }
@@ -407,15 +431,22 @@ impl TryFrom<RemoteGenerationOptions> for core_llm::GenerationOptions {
         value.validate("RemoteGenerationOptions")?;
         let RemoteGenerationOptions {
             output_token_cap,
-            temperature: _,
-            top_p: _,
-            stop: _,
-            provider_options: _,
+            temperature,
+            seed,
         } = value;
+        let temperature = temperature
+            .map(core_llm::NonNegativeFiniteF64::try_from)
+            .transpose()
+            .map_err(|error| RemoteProtocolError::InvalidEnvelope {
+                type_name: "RemoteGenerationOptions",
+                message: format!("generation.temperature is invalid: {error}"),
+            })?;
         Ok(Self {
             output_token_cap: output_token_cap
                 .and_then(|cap| usize::try_from(cap).ok())
                 .and_then(NonZeroUsize::new),
+            temperature,
+            seed,
         })
     }
 }

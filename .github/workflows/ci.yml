@@ -109,6 +109,13 @@ jobs:
             exit 1
           fi
 
+      # The workspace test run only reaches lash-remote-protocol's core
+      # conversions because `lash` unifies the feature in. Run the crate on its
+      # own so the coverage survives any change to who depends on what, and so
+      # `cargo test -p lash-remote-protocol` stops being a misleading command.
+      - name: Test lash-remote-protocol core conversions
+        run: cargo test -p lash-remote-protocol --features core-conversions --locked
+
       # nextest does not run doctests; keep them covered here (also builds the
       # workspace crates as rlibs, warming the shared cache for the readers).
       - name: Test workspace doctests
