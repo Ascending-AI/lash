@@ -1,9 +1,9 @@
 use lash_core::store::GraphCommitDelta;
 use lash_core::{
-    HydratedSessionCheckpoint, LeaseOwnerIdentity, ModelSpec, PersistedSessionConfig,
-    PersistedTurnState, PluginSessionSnapshot, RuntimeCommit, RuntimeSessionState,
-    SessionCommitStore, SessionExecutionLeaseStore, SessionGraph, SessionHead, SessionPolicy,
-    SessionStoreCreateRequest, SessionStoreFactory, TokenLedgerEntry, TokenUsage, ToolState,
+    HydratedSessionCheckpoint, LeaseOwnerIdentity, ModelSpec, PersistedTurnState,
+    PluginSessionSnapshot, RuntimeCommit, RuntimeSessionState, SessionCommitStore,
+    SessionExecutionLeaseStore, SessionPolicy, SessionStoreCreateRequest, SessionStoreFactory,
+    TokenLedgerEntry, TokenUsage, ToolState,
 };
 use lash_sqlite_store::{
     BlobArtifactDescriptor, BuiltinBlobProfile, SqliteSessionStoreFactory, Store, StoreGcPolicy,
@@ -13,10 +13,6 @@ use lash_sqlite_store::{
 fn model_spec(id: &str) -> ModelSpec {
     ModelSpec::from_token_limits(id, Default::default(), 200_000, None)
         .expect("valid test model spec")
-}
-
-fn test_model_spec() -> ModelSpec {
-    model_spec("gpt-5.4-mini")
 }
 
 fn lease_owner(owner_id: &str) -> LeaseOwnerIdentity {
@@ -34,39 +30,40 @@ fn persisted_tool_state_at_generation(generation: u64) -> ToolState {
 #[tokio::test]
 async fn gc_unreachable_keeps_rooted_checkpoint_blobs() {
     let store = Store::memory().await.expect("store");
-    let stored = store
-        .put_checkpoint(&HydratedSessionCheckpoint {
-            turn_state: PersistedTurnState {
-                turn_index: 1,
-                token_usage: TokenUsage::default(),
-                last_prompt_usage: None,
-                protocol_turn_options: Default::default(),
-            },
-            tool_state_ref: None,
-            tool_state: Some(persisted_tool_state_at_generation(7)),
-            plugin_snapshot_ref: None,
-            plugin_snapshot_revision: Some(11),
-            plugin_snapshot: Some(PluginSessionSnapshot {
-                plugins: Default::default(),
-            }),
-            execution_state_ref: None,
-            execution_state: None,
-        })
-        .await;
+    let checkpoint = HydratedSessionCheckpoint {
+        turn_state: PersistedTurnState {
+            turn_index: 1,
+            token_usage: TokenUsage::default(),
+            last_prompt_usage: None,
+            protocol_turn_options: Default::default(),
+        },
+        tool_state_ref: None,
+        tool_state: Some(persisted_tool_state_at_generation(7)),
+        plugin_snapshot_ref: None,
+        plugin_snapshot_revision: Some(11),
+        plugin_snapshot: Some(PluginSessionSnapshot {
+            plugins: Default::default(),
+        }),
+        execution_state_ref: None,
+        execution_state: None,
+    };
+    let stored = store.put_checkpoint(&checkpoint).await;
+    let mut state = RuntimeSessionState {
+        session_id: "root".to_string(),
+        turn_index: checkpoint.turn_state.turn_index,
+        tool_state_ref: stored.manifest.tool_state_ref.clone(),
+        tool_state_snapshot: checkpoint.tool_state.clone(),
+        plugin_snapshot_ref: stored.manifest.plugin_snapshot_ref.clone(),
+        plugin_snapshot_revision: checkpoint.plugin_snapshot_revision,
+        plugin_snapshot: checkpoint.plugin_snapshot.clone(),
+        checkpoint_ref: Some(stored.checkpoint_ref.clone()),
+        ..RuntimeSessionState::default()
+    };
+    state.ensure_agent_frame_initialized();
     store
-        .save_session_head(SessionHead {
-            session_id: "root".to_string(),
-            head_revision: 0,
-            current_frame_node_id: None,
-            graph: SessionGraph::default(),
-            config: PersistedSessionConfig {
-                provider_id: "openai-compatible".into(),
-                model: test_model_spec(),
-            },
-            checkpoint_ref: Some(stored.checkpoint_ref.clone()),
-            token_ledger: Vec::new(),
-        })
-        .await;
+        .commit_runtime_state(RuntimeCommit::persisted_state(&state, &[]))
+        .await
+        .expect("commit session state");
     let orphan = store
         .put_artifact_blob(BlobArtifactDescriptor::plugin_session_snapshot(), b"orphan")
         .await;

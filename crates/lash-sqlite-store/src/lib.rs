@@ -64,7 +64,7 @@ use lash_core::store::queued_work::{
 };
 use lash_core::store::{
     GraphCommitDelta, HydratedSessionCheckpoint, PersistedSessionRead, RuntimeCommit,
-    RuntimeCommitResult, SessionCheckpoint, SessionHead, SessionHeadMeta,
+    RuntimeCommitResult, SessionCheckpoint, SessionHeadMeta,
 };
 use lash_core::{
     AbandonRequest, AttachmentId, AttachmentIntent, AttachmentManifest, AttachmentManifestEntry,

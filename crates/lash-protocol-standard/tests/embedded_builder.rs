@@ -1,9 +1,8 @@
 use std::sync::Arc;
 
 use lash_core::{
-    LashRuntime, Message, MessageRole, ModelSpec, Part, PartKind, PersistedSessionConfig,
-    PersistedTurnState, PruneState, RuntimePersistence, RuntimeSessionState, SessionGraph,
-    SessionHead, TokenUsage,
+    LashRuntime, Message, MessageRole, ModelSpec, Part, PartKind, PruneState, RuntimeCommit,
+    RuntimePersistence, RuntimeSessionState, SessionCommitStore, SessionPolicy, TokenUsage,
 };
 use lash_sqlite_store::Store;
 
@@ -36,50 +35,29 @@ fn text_message(id: &str, role: MessageRole, content: &str) -> Message {
 #[tokio::test]
 async fn embedded_runtime_builder_loads_state_from_store() {
     let store = Arc::new(Store::memory().await.expect("store"));
-    let checkpoint_ref = store
-        .put_checkpoint(&lash_core::store::HydratedSessionCheckpoint {
-            turn_state: PersistedTurnState {
-                turn_index: 3,
-                token_usage: TokenUsage {
-                    input_tokens: 20,
-                    output_tokens: 5,
-                    cache_read_input_tokens: 2,
-                    cache_write_input_tokens: 0,
-                    reasoning_output_tokens: 1,
-                },
-                last_prompt_usage: None,
-                protocol_turn_options: Default::default(),
-            },
-            tool_state_ref: None,
-            tool_state: None,
-            plugin_snapshot_ref: None,
-            plugin_snapshot_revision: None,
-            plugin_snapshot: None,
-            execution_state_ref: None,
-            execution_state: None,
-        })
-        .await
-        .checkpoint_ref;
     let mut state = RuntimeSessionState {
         session_id: "stored-session".to_string(),
+        policy: SessionPolicy {
+            provider_id: "openai-compatible".into(),
+            model: test_model_spec(),
+            ..SessionPolicy::default()
+        },
+        turn_index: 3,
+        token_usage: TokenUsage {
+            input_tokens: 20,
+            output_tokens: 5,
+            cache_read_input_tokens: 2,
+            cache_write_input_tokens: 0,
+            reasoning_output_tokens: 1,
+        },
         ..RuntimeSessionState::default()
     };
     state.ensure_agent_frame_initialized();
     state.append_active_read_delta(&[text_message("u0", MessageRole::User, "stored question")]);
     store
-        .save_session_head(SessionHead {
-            session_id: "stored-session".to_string(),
-            head_revision: 0,
-            current_frame_node_id: state.current_frame_node_id,
-            graph: state.session_graph,
-            config: PersistedSessionConfig {
-                provider_id: "openai-compatible".into(),
-                model: test_model_spec(),
-            },
-            checkpoint_ref: Some(checkpoint_ref),
-            token_ledger: Vec::new(),
-        })
-        .await;
+        .commit_runtime_state(RuntimeCommit::persisted_state(&state, &[]))
+        .await
+        .expect("commit session state");
 
     let runtime = LashRuntime::builder()
         .with_store(store.clone() as Arc<dyn RuntimePersistence>)
@@ -103,20 +81,19 @@ async fn embedded_runtime_builder_loads_state_from_store() {
 #[tokio::test]
 async fn embedded_runtime_builder_rejects_store_bound_to_different_session_id() {
     let store = Arc::new(Store::memory().await.expect("store"));
+    let state = RuntimeSessionState {
+        session_id: "alpha".to_string(),
+        policy: SessionPolicy {
+            provider_id: "openai-compatible".into(),
+            model: test_model_spec(),
+            ..SessionPolicy::default()
+        },
+        ..RuntimeSessionState::default()
+    };
     store
-        .save_session_head(SessionHead {
-            session_id: "alpha".to_string(),
-            head_revision: 0,
-            current_frame_node_id: None,
-            graph: SessionGraph::default(),
-            config: PersistedSessionConfig {
-                provider_id: "openai-compatible".into(),
-                model: test_model_spec(),
-            },
-            checkpoint_ref: None,
-            token_ledger: Vec::new(),
-        })
-        .await;
+        .commit_runtime_state(RuntimeCommit::persisted_state(&state, &[]))
+        .await
+        .expect("commit session state");
 
     let err = match LashRuntime::builder()
         .with_store(store as Arc<dyn RuntimePersistence>)
