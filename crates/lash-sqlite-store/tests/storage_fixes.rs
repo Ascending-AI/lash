@@ -57,9 +57,14 @@ fn lease_owner(owner_id: &str) -> LeaseOwnerIdentity {
     LeaseOwnerIdentity::opaque(owner_id, format!("{owner_id}:incarnation"))
 }
 
-fn commit_at(session_id: &str, expected_head_revision: u64) -> RuntimeCommit {
+fn commit_at(
+    session_id: &str,
+    incarnation_id: &lash_core::IncarnationId,
+    expected_head_revision: u64,
+) -> RuntimeCommit {
     let state = RuntimeSessionState {
         session_id: session_id.to_string(),
+        incarnation_id: incarnation_id.clone(),
         ..RuntimeSessionState::default()
     };
     RuntimeCommit {
@@ -81,6 +86,7 @@ fn commit_at(session_id: &str, expected_head_revision: u64) -> RuntimeCommit {
 #[test]
 fn head_revision_cas_holds_across_two_connections() {
     let path = unique_db_path("cas");
+    let incarnation_id = lash_core::IncarnationId::fresh();
     let session_fence = {
         let store = block_on(Store::open(&path)).expect("lease store");
         let owner = lease_owner("session-owner");
@@ -93,6 +99,7 @@ fn head_revision_cas_holds_across_two_connections() {
 
     let barrier = Arc::new(std::sync::Barrier::new(2));
     let run = |path: std::path::PathBuf,
+               incarnation_id: lash_core::IncarnationId,
                session_fence: lash_core::SessionExecutionLeaseFence,
                barrier: Arc<std::sync::Barrier>| {
         std::thread::spawn(move || {
@@ -101,15 +108,26 @@ fn head_revision_cas_holds_across_two_connections() {
                 barrier.wait();
                 store
                     .commit_runtime_state(
-                        commit_at("root", 0).with_session_execution_lease(session_fence),
+                        commit_at("root", &incarnation_id, 0)
+                            .with_session_execution_lease(session_fence),
                     )
                     .await
             })
         })
     };
 
-    let handle_a = run(path.clone(), session_fence.clone(), Arc::clone(&barrier));
-    let handle_b = run(path.clone(), session_fence, Arc::clone(&barrier));
+    let handle_a = run(
+        path.clone(),
+        incarnation_id.clone(),
+        session_fence.clone(),
+        Arc::clone(&barrier),
+    );
+    let handle_b = run(
+        path.clone(),
+        incarnation_id,
+        session_fence,
+        Arc::clone(&barrier),
+    );
     let result_a = handle_a.join().expect("thread a");
     let result_b = handle_b.join().expect("thread b");
 
@@ -413,8 +431,8 @@ async fn unsupported_schema_error_reports_real_versions() {
         "error must report the found version 99: {message}"
     );
     assert!(
-        message.contains("schema version 16"),
-        "error must report the real expected version 16: {message}"
+        message.contains("schema version 17"),
+        "error must report the real expected version 17: {message}"
     );
     assert!(
         !message.contains("version 1 only"),
@@ -450,7 +468,7 @@ fn concurrent_first_open_never_observes_version_zero_schema() {
     let user_version: i32 = conn
         .query_row("PRAGMA user_version", [], |row| row.get(0))
         .expect("read user_version");
-    assert_eq!(user_version, 16);
+    assert_eq!(user_version, 17);
 }
 
 #[tokio::test]

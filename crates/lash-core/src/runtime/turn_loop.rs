@@ -462,8 +462,13 @@ impl LashRuntime {
 
         let Some(session) = self.session.as_ref() else {
             self.state.apply_snapshot(&assembled.state);
+            let observation_revision = if self.state.checkpoint_ref.is_some() {
+                self.state.head_revision
+            } else {
+                self.state.turn_index as u64
+            };
             self.last_committed_observation_turn =
-                Some((self.state.head_revision, trace_turn_id.clone()));
+                Some((observation_revision, trace_turn_id.clone()));
             self.emit_completed_turn_trace(&assembled.state, &assembled.outcome, &trace_turn_id);
             publish_terminal_after_commit(
                 turn_control,
@@ -587,8 +592,12 @@ impl LashRuntime {
 
         emit_session_events_to_sink(events, finalized.events).await;
         self.state = turn_pipeline.into_final_state();
-        self.last_committed_observation_turn =
-            Some((self.state.head_revision, trace_turn_id.clone()));
+        let observation_revision = if self.state.checkpoint_ref.is_some() {
+            self.state.head_revision
+        } else {
+            self.state.turn_index as u64
+        };
+        self.last_committed_observation_turn = Some((observation_revision, trace_turn_id.clone()));
         publish_terminal_after_commit(
             turn_control,
             turn_control_resolver,

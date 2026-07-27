@@ -63,6 +63,7 @@ fn session_completion_matches(
 #[derive(Default)]
 struct SnapshotStore {
     read: std::sync::Mutex<Option<lash_core::store::PersistedSessionRead>>,
+    session_meta: std::sync::Mutex<Option<lash_core::SessionMeta>>,
     scopes: std::sync::Mutex<Vec<lash_core::SessionReadScope>>,
     runtime_turn_commits: std::sync::Mutex<
         std::collections::HashMap<
@@ -76,6 +77,15 @@ struct SnapshotStore {
 impl SnapshotStore {
     fn with_state(state: RuntimeSessionState) -> Self {
         let turn_state = state.turn_state();
+        let session_meta = lash_core::SessionMeta {
+            session_id: state.session_id.clone(),
+            incarnation_id: state.incarnation_id.clone(),
+            session_name: state.session_id.clone(),
+            created_at: "test".to_string(),
+            model: state.policy.model.id.clone(),
+            cwd: None,
+            relation: lash_core::SessionRelation::Root,
+        };
         let config = lash_core::PersistedSessionConfig {
             provider_id: state.policy.recorded_provider_id().to_string(),
             model: state.policy.model.clone(),
@@ -95,6 +105,7 @@ impl SnapshotStore {
                 }),
                 token_ledger: Vec::new(),
             })),
+            session_meta: std::sync::Mutex::new(Some(session_meta)),
             scopes: std::sync::Mutex::new(Vec::new()),
             runtime_turn_commits: std::sync::Mutex::new(std::collections::HashMap::new()),
             session_execution_leases: std::sync::Mutex::new(HashMap::new()),
@@ -164,6 +175,20 @@ impl lash_core::SessionCommitStore for SnapshotStore {
         commit: lash_core::store::RuntimeCommit,
     ) -> std::result::Result<lash_core::store::RuntimeCommitResult, lash_core::store::StoreError>
     {
+        {
+            let mut session_meta = self.session_meta.lock().expect("session metadata lock");
+            if session_meta.is_none() {
+                *session_meta = Some(lash_core::SessionMeta {
+                    session_id: commit.session_id.clone(),
+                    incarnation_id: commit.incarnation_id.clone(),
+                    session_name: commit.session_id.clone(),
+                    created_at: "test".to_string(),
+                    model: commit.config.model.id.clone(),
+                    cwd: None,
+                    relation: lash_core::SessionRelation::Root,
+                });
+            }
+        }
         let mut read = self.read.lock().expect("snapshot store lock");
         let realization_digest = lash_core::store::graph_realization_digest(&commit.graph);
         let realized_node_timestamps = commit
@@ -290,15 +315,20 @@ impl lash_core::SessionCommitStore for SnapshotStore {
 
     async fn save_session_meta(
         &self,
-        _meta: lash_core::SessionMeta,
+        meta: lash_core::SessionMeta,
     ) -> std::result::Result<(), lash_core::store::StoreError> {
+        *self.session_meta.lock().expect("session metadata lock") = Some(meta);
         Ok(())
     }
 
     async fn load_session_meta(
         &self,
     ) -> std::result::Result<Option<lash_core::SessionMeta>, lash_core::store::StoreError> {
-        Ok(None)
+        Ok(self
+            .session_meta
+            .lock()
+            .expect("session metadata lock")
+            .clone())
     }
 }
 

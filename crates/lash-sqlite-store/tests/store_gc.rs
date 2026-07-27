@@ -27,6 +27,25 @@ fn persisted_tool_state_at_generation(generation: u64) -> ToolState {
     .expect("deserialize persisted tool state")
 }
 
+async fn factory_state(
+    store: &std::sync::Arc<dyn lash_core::RuntimePersistence>,
+    session_id: &str,
+    head_revision: u64,
+) -> RuntimeSessionState {
+    let incarnation_id = store
+        .load_session_meta()
+        .await
+        .expect("load factory session metadata")
+        .expect("factory session metadata")
+        .incarnation_id;
+    RuntimeSessionState {
+        session_id: session_id.to_string(),
+        incarnation_id,
+        head_revision,
+        ..Default::default()
+    }
+}
+
 #[tokio::test]
 async fn gc_unreachable_keeps_rooted_checkpoint_blobs() {
     let store = Store::memory().await.expect("store");
@@ -275,15 +294,10 @@ async fn sqlite_factory_delete_session_removes_only_the_selected_session() {
         .create_store(&request("keep/me"))
         .await
         .expect("create retained session");
+    let mut deleted_state = factory_state(&deleted_store, "delete/me", 0).await;
+    deleted_state.execution_state_snapshot = Some(vec![1, 2, 3]);
     deleted_store
-        .commit_runtime_state(RuntimeCommit::persisted_state(
-            &RuntimeSessionState {
-                session_id: "delete/me".to_string(),
-                execution_state_snapshot: Some(vec![1, 2, 3]),
-                ..Default::default()
-            },
-            &[],
-        ))
+        .commit_runtime_state(RuntimeCommit::persisted_state(&deleted_state, &[]))
         .await
         .expect("commit deleted session checkpoint");
     {
@@ -383,7 +397,7 @@ async fn sqlite_factory_delete_session_removes_only_the_selected_session() {
 }
 
 #[tokio::test]
-async fn sqlite_catalog_enforces_global_node_ids_across_sessions() {
+async fn sqlite_catalog_partitions_derived_node_ids_by_incarnation() {
     let root = unique_temp_dir("global-node-id");
     let factory = SqliteSessionStoreFactory::new(&root);
     let store_for = |session_id: &str| SessionStoreCreateRequest {
@@ -399,24 +413,22 @@ async fn sqlite_catalog_enforces_global_node_ids_across_sessions() {
         .create_store(&store_for("second"))
         .await
         .expect("second store");
-    let node = lash_core::SessionNodeRecord {
-        node_id: "factory-global-node".to_string(),
-        parent_node_id: None,
-        timestamp: "2026-07-26T00:00:00Z".to_string(),
-        payload: lash_core::SessionNodePayload::FrameOpen {
-            frame_key: "factory-global-node".to_string(),
-            reason: lash_core::AgentFrameReason::initial(),
-            assignment: lash_core::AgentFrameAssignment::from_policy(SessionPolicy::default()),
-            protocol_turn_options: Default::default(),
-        },
-    };
-    let commit = |session_id: &str| {
-        let state = RuntimeSessionState {
-            session_id: session_id.to_string(),
-            ..Default::default()
+    let first_state = factory_state(&first, "first", 0).await;
+    let second_state = factory_state(&second, "second", 0).await;
+    let commit = |state: &RuntimeSessionState| {
+        let node = lash_core::SessionNodeRecord {
+            node_id: lash_core::frame_node_id(&state.incarnation_id, "shared-frame-key"),
+            parent_node_id: None,
+            timestamp: "2026-07-26T00:00:00Z".to_string(),
+            payload: lash_core::SessionNodePayload::FrameOpen {
+                frame_key: "shared-frame-key".to_string(),
+                reason: lash_core::AgentFrameReason::initial(),
+                assignment: lash_core::AgentFrameAssignment::from_policy(SessionPolicy::default()),
+                protocol_turn_options: Default::default(),
+            },
         };
         let usage = TokenLedgerEntry {
-            source: "rollback-probe".to_string(),
+            source: "incarnation-partition-probe".to_string(),
             model: "test".to_string(),
             usage: TokenUsage {
                 input_tokens: 1,
@@ -433,31 +445,19 @@ async fn sqlite_catalog_enforces_global_node_ids_across_sessions() {
     };
 
     first
-        .commit_runtime_state(commit("first"))
+        .commit_runtime_state(commit(&first_state))
         .await
         .expect("first node insert");
-    let error = second
-        .commit_runtime_state(commit("second"))
+    second
+        .commit_runtime_state(commit(&second_state))
         .await
-        .expect_err("second session must not reuse a global node id");
+        .expect("second incarnation derives a distinct node id");
 
-    assert!(matches!(
-        error,
-        lash_core::StoreError::NodeIdCollision { node_id }
-            if node_id == "factory-global-node"
-    ));
-    let conn = rusqlite::Connection::open(factory.catalog_path()).expect("open catalog");
-    let usage_count: i64 = conn
-        .query_row(
-            "SELECT COUNT(*) FROM usage_deltas WHERE session_id = 'second'",
-            [],
-            |row| row.get(0),
-        )
-        .expect("count usage rows");
-    assert_eq!(
-        usage_count, 0,
-        "the usage write before the conflicting node insert must roll back"
-    );
+    let first_node_id = lash_core::frame_node_id(&first_state.incarnation_id, "shared-frame-key");
+    let second_node_id = lash_core::frame_node_id(&second_state.incarnation_id, "shared-frame-key");
+    assert_ne!(first_node_id, second_node_id);
+    assert!(first.load_node(&first_node_id).await.unwrap().is_some());
+    assert!(second.load_node(&second_node_id).await.unwrap().is_some());
 }
 
 #[tokio::test]
@@ -477,24 +477,21 @@ async fn sqlite_catalog_leaf_validation_is_session_scoped() {
         .create_store(&request("leaf-b"))
         .await
         .expect("second store");
+    let first_state = factory_state(&first, "leaf-a", 0).await;
+    let second_state = factory_state(&second, "leaf-b", 0).await;
+    let frame_key = "leaf-a-node";
     let node = lash_core::SessionNodeRecord {
-        node_id: "leaf-a-node".to_string(),
+        node_id: lash_core::frame_node_id(&first_state.incarnation_id, frame_key),
         parent_node_id: None,
         timestamp: "2026-07-26T00:00:00Z".to_string(),
         payload: lash_core::SessionNodePayload::FrameOpen {
-            frame_key: "leaf-a-node".to_string(),
+            frame_key: frame_key.to_string(),
             reason: lash_core::AgentFrameReason::initial(),
             assignment: lash_core::AgentFrameAssignment::from_policy(SessionPolicy::default()),
             protocol_turn_options: Default::default(),
         },
     };
-    let mut first_commit = RuntimeCommit::persisted_state(
-        &RuntimeSessionState {
-            session_id: "leaf-a".to_string(),
-            ..Default::default()
-        },
-        &[],
-    );
+    let mut first_commit = RuntimeCommit::persisted_state(&first_state, &[]);
     first_commit.graph = GraphCommitDelta::Append {
         nodes: vec![node.clone()],
         leaf_node_id: Some(node.node_id.clone()),
@@ -506,24 +503,13 @@ async fn sqlite_catalog_leaf_validation_is_session_scoped() {
         .expect("commit first session node");
 
     second
-        .commit_runtime_state(RuntimeCommit::persisted_state(
-            &RuntimeSessionState {
-                session_id: "leaf-b".to_string(),
-                ..Default::default()
-            },
-            &[],
-        ))
+        .commit_runtime_state(RuntimeCommit::persisted_state(&second_state, &[]))
         .await
         .expect("another session's live node must not invalidate an empty session");
 
-    let mut cross_session_leaf = RuntimeCommit::persisted_state(
-        &RuntimeSessionState {
-            session_id: "leaf-b".to_string(),
-            head_revision: 1,
-            ..Default::default()
-        },
-        &[],
-    );
+    let mut second_state = second_state;
+    second_state.head_revision = 1;
+    let mut cross_session_leaf = RuntimeCommit::persisted_state(&second_state, &[]);
     cross_session_leaf.graph = GraphCommitDelta::Unchanged {
         leaf_node_id: Some(node.node_id),
     };
@@ -550,24 +536,20 @@ async fn sqlite_maintenance_is_scoped_to_the_bound_session() {
         .create_store(&request("maintenance-b"))
         .await
         .expect("second store");
+    let second_state = factory_state(&second, "maintenance-b", 0).await;
+    let frame_key = "maintenance-b-node";
     let node = lash_core::SessionNodeRecord {
-        node_id: "maintenance-b-node".to_string(),
+        node_id: lash_core::frame_node_id(&second_state.incarnation_id, frame_key),
         parent_node_id: None,
         timestamp: "2026-07-26T00:00:00Z".to_string(),
         payload: lash_core::SessionNodePayload::FrameOpen {
-            frame_key: "maintenance-b-node".to_string(),
+            frame_key: frame_key.to_string(),
             reason: lash_core::AgentFrameReason::initial(),
             assignment: lash_core::AgentFrameAssignment::from_policy(SessionPolicy::default()),
             protocol_turn_options: Default::default(),
         },
     };
-    let mut commit = RuntimeCommit::persisted_state(
-        &RuntimeSessionState {
-            session_id: "maintenance-b".to_string(),
-            ..Default::default()
-        },
-        &[],
-    );
+    let mut commit = RuntimeCommit::persisted_state(&second_state, &[]);
     commit.graph = GraphCommitDelta::Append {
         nodes: vec![node.clone()],
         leaf_node_id: Some(node.node_id.clone()),
@@ -649,14 +631,9 @@ async fn sqlite_snapshot_read_propagates_graph_statement_errors() {
         })
         .await
         .expect("create store");
+    let state = factory_state(&store, "graph-read-error", 0).await;
     store
-        .commit_runtime_state(RuntimeCommit::persisted_state(
-            &RuntimeSessionState {
-                session_id: "graph-read-error".to_string(),
-                ..Default::default()
-            },
-            &[],
-        ))
+        .commit_runtime_state(RuntimeCommit::persisted_state(&state, &[]))
         .await
         .expect("commit head");
     rusqlite::Connection::open(factory.catalog_path())
@@ -685,14 +662,9 @@ async fn sqlite_snapshot_read_propagates_usage_statement_errors() {
         })
         .await
         .expect("create store");
+    let state = factory_state(&store, "usage-read-error", 0).await;
     store
-        .commit_runtime_state(RuntimeCommit::persisted_state(
-            &RuntimeSessionState {
-                session_id: "usage-read-error".to_string(),
-                ..Default::default()
-            },
-            &[],
-        ))
+        .commit_runtime_state(RuntimeCommit::persisted_state(&state, &[]))
         .await
         .expect("commit head");
     rusqlite::Connection::open(factory.catalog_path())
