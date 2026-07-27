@@ -56,15 +56,15 @@ async fn connect() -> PostgresStorage {
         .expect("connect postgres")
 }
 
-/// Mirror of `conformance.rs`'s `registration()` lease-test helper: an external
-/// placeholder row, the shape the process-lease conformance cases register.
+/// An external placeholder row whose rerunnable disposition permits the two
+/// simulated hosts to record and fence local execution attempts.
 fn registration(id: &str) -> ProcessRegistration {
     ProcessRegistration::new(
         id,
         ProcessInput::External {
             metadata: serde_json::Value::Null,
         },
-        RecoveryDisposition::ExternallyOwned,
+        RecoveryDisposition::Rerunnable,
         ProcessProvenance::host(),
     )
 }
