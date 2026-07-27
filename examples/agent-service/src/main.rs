@@ -51,8 +51,8 @@ use crate::demo_plugin::{DemoPlugin, DemoPluginConfig};
 #[cfg(feature = "restate")]
 use crate::restate::{AgentServiceTurnWorkflow, AgentServiceTurnWorkflowImpl};
 use crate::routes::{
-    cancel_turn, chat_board, create_chat, index, list_chats, list_messages, send_message, settings,
-    update_chat_model,
+    cancel_turn, chat_board, create_chat, fork_chat, index, list_chat_branch_points, list_chats,
+    list_messages, pin_chat_branch_point, send_message, settings, update_chat_model,
 };
 use crate::state::{AgentServiceDurability, AppStateData, anyhow_like};
 #[cfg(feature = "restate")]
@@ -354,6 +354,11 @@ async fn async_main() -> anyhow_like::Result<()> {
             get(list_messages).post(send_message),
         )
         .route("/api/chats/{chat_id}/board", get(chat_board))
+        .route(
+            "/api/chats/{chat_id}/branch-points",
+            get(list_chat_branch_points).post(pin_chat_branch_point),
+        )
+        .route("/api/chats/{chat_id}/forks", axum::routing::post(fork_chat))
         .route(
             "/api/chats/{chat_id}/turns/{turn_id}/cancel",
             axum::routing::post(cancel_turn),

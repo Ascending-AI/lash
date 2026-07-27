@@ -39,7 +39,7 @@ pub(crate) const INDEX_HTML: &str = r#"<!doctype html>
     .chat-row.active { border-color:var(--sun); background:var(--panel); }
     .chat-title, .chat-model { overflow:hidden; white-space:nowrap; text-overflow:ellipsis; }
     .chat-model { color:var(--muted); font:12px "Chivo Mono", monospace; }
-    main { min-width:0; min-height:0; display:grid; grid-template-rows:auto auto minmax(0,1fr) auto; background:var(--panel); overflow:hidden; }
+    main { min-width:0; min-height:0; display:grid; grid-template-rows:auto auto auto minmax(0,1fr) auto; background:var(--panel); overflow:hidden; }
     .topbar { min-height:66px; padding:12px 20px; border-bottom:1px solid var(--line); display:flex; justify-content:space-between; gap:16px; align-items:center; background:oklch(0.18 0.019 78); }
     .topbar-title { display:grid; gap:2px; min-width:0; }
     .topbar-title strong { font-family:"Chivo Mono", monospace; font-size:13px; color:var(--sun); }
@@ -47,6 +47,9 @@ pub(crate) const INDEX_HTML: &str = r#"<!doctype html>
     .model-controls { display:grid; grid-template-columns:minmax(210px, 340px) 120px; gap:8px; align-items:end; margin-left:auto; }
     .model-controls .field { gap:4px; }
     .model-controls input, .model-controls select { font-family:"Chivo Mono", monospace; font-size:12px; padding:8px; }
+    .branchbar { min-height:52px; padding:9px 20px; border-bottom:1px solid var(--line); display:flex; align-items:center; gap:8px; background:oklch(0.17 0.02 78); }
+    .branchbar select { width:min(420px, 40vw); font:12px "Chivo Mono", monospace; padding:8px; }
+    .branchbar .status { margin-left:auto; color:var(--muted); font:12px "Chivo Mono", monospace; text-align:right; }
     .game { border-bottom:1px solid var(--line); padding:22px 26px; display:grid; grid-template-columns:auto minmax(260px,380px); grid-template-areas:"board status" "board actions"; gap:14px 26px; align-items:start; justify-content:start; background:var(--panel-2); }
     .board { display:grid; grid-template-columns:repeat(3,64px); grid-template-rows:repeat(3,64px); gap:7px; }
     .game .board { grid-area:board; }
@@ -96,6 +99,9 @@ pub(crate) const INDEX_HTML: &str = r#"<!doctype html>
       aside { display:none; }
       .topbar { padding:11px 14px; display:grid; grid-template-columns:1fr auto; }
       .model-controls { grid-column:1 / -1; grid-template-columns:1fr 118px; width:100%; margin-left:0; }
+      .branchbar { padding:10px 14px; flex-wrap:wrap; }
+      .branchbar select { width:100%; order:3; }
+      .branchbar .status { width:100%; margin-left:0; text-align:left; }
       .game { grid-template-columns:1fr; grid-template-areas:"board" "status" "actions"; padding:18px 14px; justify-items:start; }
       .game-status { align-self:start; }
       form { grid-template-columns:1fr; }
@@ -130,6 +136,14 @@ pub(crate) const INDEX_HTML: &str = r#"<!doctype html>
         </div>
         <button id="mobileNew" class="secondary">New chat</button>
       </div>
+      <div class="branchbar" aria-label="Branch controls">
+        <button id="pinBranch" class="secondary" type="button">Pin current turn</button>
+        <select id="branchPoint" aria-label="Pinned turn">
+          <option value="">No pinned turns</option>
+        </select>
+        <button id="forkBranch" type="button">Fork from pin</button>
+        <span id="branchStatus" class="status">Pin a completed turn to preserve a branch point.</span>
+      </div>
       <section class="game">
         <div id="board" class="board"></div>
         <div class="game-status">
@@ -160,6 +174,10 @@ pub(crate) const INDEX_HTML: &str = r#"<!doctype html>
     const gameStatusEl = document.querySelector('#gameStatus');
     const gameHintEl = document.querySelector('#gameHint');
     const resetBoardBtn = document.querySelector('#resetBoard');
+    const pinBranchBtn = document.querySelector('#pinBranch');
+    const forkBranchBtn = document.querySelector('#forkBranch');
+    const branchPointEl = document.querySelector('#branchPoint');
+    const branchStatusEl = document.querySelector('#branchStatus');
     let chats = [];
     let activeChat = null;
     let settings = { default_model:'anthropic/claude-sonnet-4.6', default_model_variant:'high', model_variants:['low','medium','high'] };
@@ -169,6 +187,7 @@ pub(crate) const INDEX_HTML: &str = r#"<!doctype html>
     let pendingCodeBlock = null;
     let pendingTools = [];
     let busy = false;
+    let branchPoints = [];
     const boards = new Map();
 
     function emptyBoard() {
@@ -358,7 +377,10 @@ pub(crate) const INDEX_HTML: &str = r#"<!doctype html>
       chats = await (await api('/api/chats')).json();
       if (!activeChat && chats[0]) activeChat = chats[0].id;
       renderChats();
-      if (activeChat) await loadMessages(activeChat);
+      if (activeChat) {
+        await loadMessages(activeChat);
+        await loadBranchPoints(activeChat);
+      }
     }
     function renderChats() {
       chatsEl.innerHTML = '';
@@ -368,7 +390,12 @@ pub(crate) const INDEX_HTML: &str = r#"<!doctype html>
         b.innerHTML = `<span class="chat-title"></span><span class="chat-model"></span>`;
         b.querySelector('.chat-title').textContent = chat.title;
         b.querySelector('.chat-model').textContent = chat.model_label;
-        b.onclick = async () => { activeChat = chat.id; renderChats(); await loadMessages(chat.id); };
+        b.onclick = async () => {
+          activeChat = chat.id;
+          renderChats();
+          await loadMessages(chat.id);
+          await loadBranchPoints(chat.id);
+        };
         chatsEl.appendChild(b);
       }
       const current = chats.find(c => c.id === activeChat);
@@ -377,7 +404,80 @@ pub(crate) const INDEX_HTML: &str = r#"<!doctype html>
     }
     async function newChat() {
       const chat = await (await api('/api/chats', { method:'POST', body: JSON.stringify(selectedModel()) })).json();
-      chats.unshift(chat); activeChat = chat.id; boards.set(chat.id, emptyBoard()); renderChats(); renderBoard(); messagesEl.innerHTML = '';
+      chats.unshift(chat);
+      activeChat = chat.id;
+      branchPoints = [];
+      boards.set(chat.id, emptyBoard());
+      renderChats();
+      renderBoard();
+      renderBranchPoints();
+      messagesEl.innerHTML = '';
+    }
+    function renderBranchPoints() {
+      branchPointEl.innerHTML = '';
+      for (const point of branchPoints) {
+        const option = document.createElement('option');
+        option.value = point.node_id;
+        const pinnedAt = new Date(point.created_at).toLocaleString();
+        option.textContent = `${point.message_count} messages · ${pinnedAt}`;
+        branchPointEl.appendChild(option);
+      }
+      if (!branchPoints.length) {
+        const option = document.createElement('option');
+        option.value = '';
+        option.textContent = 'No pinned turns';
+        branchPointEl.appendChild(option);
+      }
+      pinBranchBtn.disabled = busy || !activeChat;
+      forkBranchBtn.disabled = busy || !activeChat || !branchPoints.length;
+      branchPointEl.disabled = busy || !branchPoints.length;
+      branchStatusEl.textContent = branchPoints.length
+        ? `${branchPoints.length} retained turn${branchPoints.length === 1 ? '' : 's'} available`
+        : 'Pin a completed turn to preserve a branch point.';
+    }
+    async function loadBranchPoints(chatId) {
+      branchPoints = await (await api(`/api/chats/${chatId}/branch-points`)).json();
+      renderBranchPoints();
+    }
+    async function pinCurrentTurn() {
+      if (!activeChat || busy) return;
+      pinBranchBtn.disabled = true;
+      branchStatusEl.textContent = 'Pinning current turn…';
+      try {
+        const point = await (await api(`/api/chats/${activeChat}/branch-points`, {
+          method:'POST',
+          body:'{}'
+        })).json();
+        await loadBranchPoints(activeChat);
+        branchPointEl.value = point.node_id;
+        branchStatusEl.textContent = `Pinned ${point.message_count} messages as a retained turn.`;
+      } catch (error) {
+        branchStatusEl.textContent = error.message;
+        pinBranchBtn.disabled = false;
+      }
+    }
+    async function forkPinnedTurn() {
+      const sourceChat = activeChat;
+      const nodeId = branchPointEl.value;
+      if (!sourceChat || !nodeId || busy) return;
+      forkBranchBtn.disabled = true;
+      branchStatusEl.textContent = 'Creating branch…';
+      try {
+        const chat = await (await api(`/api/chats/${sourceChat}/forks`, {
+          method:'POST',
+          body:JSON.stringify({ node_id:nodeId })
+        })).json();
+        chats.unshift(chat);
+        activeChat = chat.id;
+        boards.set(chat.id, emptyBoard());
+        renderChats();
+        await loadMessages(chat.id);
+        await loadBranchPoints(chat.id);
+        branchStatusEl.textContent = `Branched from ${sourceChat.slice(0, 8)} at a pinned turn.`;
+      } catch (error) {
+        branchStatusEl.textContent = error.message;
+        forkBranchBtn.disabled = false;
+      }
     }
     async function loadMessages(id) {
       boards.set(id, emptyBoard());
@@ -598,6 +698,8 @@ pub(crate) const INDEX_HTML: &str = r#"<!doctype html>
     document.querySelector('#newChat').onclick = newChat;
     document.querySelector('#mobileNew').onclick = newChat;
     document.querySelector('#resetBoard').onclick = resetBoard;
+    pinBranchBtn.onclick = pinCurrentTurn;
+    forkBranchBtn.onclick = forkPinnedTurn;
     modelInput.addEventListener('change', saveActiveModel);
     variantInput.addEventListener('change', saveActiveModel);
     document.querySelector('#text').addEventListener('keydown', (event) => {
@@ -608,6 +710,7 @@ pub(crate) const INDEX_HTML: &str = r#"<!doctype html>
     });
     form.onsubmit = send;
     renderBoard();
+    renderBranchPoints();
     loadSettings().then(() => loadChats()).then(() => { if (!activeChat) newChat(); else renderBoard(); });
   </script>
 </body>

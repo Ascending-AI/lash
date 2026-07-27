@@ -60,7 +60,7 @@
       </div>
       <aside class="contract">
         <strong>Start fresh for this release</strong>
-        <p>The SQLite schema moves from version 10 to 11, and the Postgres component moves from version 11 to 12. Persistent deployments must use a fresh database; there is no migration chain by policy.</p>
+        <p>The SQLite schema is version 15, and the Postgres durable-core component is version 21. Persistent deployments must use a fresh database when either exact version changes; there is no migration chain by policy.</p>
       </aside>
     </div>
 
@@ -144,6 +144,32 @@ let core = lash::LashCore::rlm_builder(factory)
       <p><code>PostgresStoreConfig</code> applies connection-level backstops by default: a 10 second <code>lock_timeout</code> and a 30 second <code>statement_timeout</code>. Mutating session work first claims the durable session execution lease; session commits then verify that lease fence and perform the head-revision CAS in one transaction. Postgres serialization failures, deadlocks, and lock-acquisition timeouts on the backstop write surface as retryable conflicts so hosts can reload and retry instead of treating ordinary write contention as an opaque backend failure.</p>
       <p>The distributed integration harness is <code>just restate-postgres-workers-e2e</code>. It starts Postgres, MinIO, Restate, a deterministic OpenAI-compatible mock provider, two worker processes behind a Caddy h2c proxy, and a runner. The workers build a normal downstream-style <code>LashCore</code> with <code>PostgresStorage</code>, <code>S3AttachmentStore</code>, <code>PostgresLashlangArtifactStore</code>, <code>PostgresTriggerStore</code>, <code>PostgresProcessRegistry</code>, <code>RestateRuntimeEffectController</code>, <code>RestateProcessDeployment</code>, and JSONL trace sinks.</p>
       <p>The scenario runs real <code>session.turn(input).stream_to(...)</code> turns through the public facade. It covers foreground tools, attachment creation through the configured attachment store, parent/nested/parallel Lashlang processes, durable sleep and wake paths, public trigger registration and delivery, live replay from a stored observation cursor, MinIO byte/metadata assertions, and failover where worker A exits from the real turn path after terminal finish or another durable effect and worker B completes through Restate replay. The runner asserts one provider call per journaled effect, one committed turn, no duplicate runtime rows, and no active Lash Restate invocations left in <code>pending</code>, <code>ready</code>, <code>running</code>, <code>backing-off</code>, or <code>suspended</code>.</p>
+    </div>
+
+    <div class="section" id="fork-sessions">
+      <div class="section-header">
+        <h2>Retain and Fork a Turn</h2>
+        <p>Forking creates a new session head over shared durable history. It writes no transcript nodes and does not move the source session.</p>
+      </div>
+      <p>A live session tip is forkable through its head checkpoint at no extra retention cost. To preserve a turn after the source advances, pin it while it is still the live tip. <code>fork_points()</code> enumerates pinned past turns and current live tips; <code>unpin()</code> releases only the explicit pin.</p>
+      <pre data-lang="rust"><code>let snapshot = session.admin().state().export().await;
+let turn_node_id = snapshot
+    .session_graph
+    .leaf_node_id
+    .clone()
+    .expect("completed turn");
+
+core.pin(&amp;turn_node_id).await?;
+// The source may now run more turns.
+core.fork_at(&amp;turn_node_id, branch_chat_id).await?;
+core.unpin(&amp;turn_node_id).await?;</code></pre>
+      <aside class="contract">
+        <strong>Past turns are not retained by default</strong>
+        <p><code>ForkPointNotRetained</code> is an ordinary host outcome when a past turn was not pinned before its head advanced. Lash never chooses a nearby checkpoint or silently rewinds the source.</p>
+      </aside>
+      <p>The fork inherits the retained checkpoint and AgentFrame lineage. It starts with an empty usage ledger and no execution-scoped queue, lease, receipt, or wake-subscription state. Process handle grants are copied so the fork can observe already-granted work; wake delivery remains addressed only to the subscribed source session.</p>
+      <p>History ownership is reachability, not the session id that first wrote a node. Child edges, live session heads, and explicit pins are counted references. Deleting one sibling stops reclamation at the first shared node still referenced by another head or pin.</p>
+      <p>A host-level rewind is explicit composition: pin the target, fork there, switch the product UI to the new session id, then delete the superseded session. The <code>agent-service</code> example also snapshots its app-owned messages and board when the user pins a turn; Lash does not copy host tables.</p>
     </div>
 
     <div class="section" id="delete-sessions">

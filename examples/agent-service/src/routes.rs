@@ -27,7 +27,7 @@ use tokio::task::JoinHandle;
 use tokio_stream::wrappers::ReceiverStream;
 
 use crate::board::BoardState;
-use crate::db::{ChatMessage, ChatModelSelection, ChatSummary};
+use crate::db::{ChatBranchPoint, ChatMessage, ChatModelSelection, ChatSummary};
 #[cfg(feature = "restate")]
 use crate::restate::send_message_restate;
 #[cfg(feature = "restate")]
@@ -62,6 +62,11 @@ pub(crate) struct SendMessageRequest {
 pub(crate) struct CancelTurnRequest {
     request_id: Option<String>,
     reason: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+pub(crate) struct ForkChatRequest {
+    node_id: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -197,6 +202,86 @@ pub(crate) async fn chat_board(
         })
         .await
         .map(Json)
+}
+
+pub(crate) async fn list_chat_branch_points(
+    State(state): State<AppStateData>,
+    AxumPath(chat_id): AxumPath<String>,
+) -> AppResult<Json<Vec<ChatBranchPoint>>> {
+    state
+        .with_db(move |db| db.list_branch_points(&chat_id))
+        .await
+        .map(Json)
+}
+
+pub(crate) async fn pin_chat_branch_point(
+    State(state): State<AppStateData>,
+    AxumPath(chat_id): AxumPath<String>,
+) -> AppResult<Json<ChatBranchPoint>> {
+    let selection = state
+        .with_db({
+            let chat_id = chat_id.clone();
+            move |db| db.chat_model_selection(&chat_id)
+        })
+        .await?;
+    let session = state
+        .open_session(&chat_id, model_spec_for_chat_selection(&selection)?)
+        .await?;
+    let snapshot = session.admin().state().export().await;
+    let node_id = snapshot
+        .session_graph
+        .leaf_node_id
+        .clone()
+        .ok_or_else(|| AppError::bad_request("the chat has no completed turn to pin"))?;
+    state.core().pin(&node_id).await.map_err(branch_error)?;
+    state
+        .with_db(move |db| db.save_branch_point(&chat_id, &node_id))
+        .await
+        .map(Json)
+}
+
+pub(crate) async fn fork_chat(
+    State(state): State<AppStateData>,
+    AxumPath(source_chat_id): AxumPath<String>,
+    Json(request): Json<ForkChatRequest>,
+) -> AppResult<Json<ChatSummary>> {
+    let node_id = request.node_id.trim().to_string();
+    if node_id.is_empty() {
+        return Err(AppError::bad_request("branch point is required"));
+    }
+    let belongs_to_source = state
+        .with_db({
+            let source_chat_id = source_chat_id.clone();
+            let node_id = node_id.clone();
+            move |db| {
+                Ok(db
+                    .list_branch_points(&source_chat_id)?
+                    .iter()
+                    .any(|point| point.node_id == node_id))
+            }
+        })
+        .await?;
+    if !belongs_to_source {
+        return Err(AppError::bad_request(
+            "branch point does not belong to this chat",
+        ));
+    }
+
+    let target_chat_id = uuid::Uuid::new_v4().to_string();
+    let chat = state
+        .with_db({
+            let node_id = node_id.clone();
+            let target_chat_id = target_chat_id.clone();
+            move |db| db.fork_chat_from_branch_point(&node_id, &target_chat_id)
+        })
+        .await?;
+    if let Err(error) = state.core().fork_at(node_id, target_chat_id.clone()).await {
+        let _ = state
+            .with_db(move |db| db.delete_chat(&target_chat_id))
+            .await;
+        return Err(branch_error(error));
+    }
+    Ok(Json(chat))
 }
 
 pub(crate) async fn send_message(
@@ -753,6 +838,19 @@ fn normalize_model_variant(model_variant: Option<&str>) -> Option<String> {
         .map(str::trim)
         .filter(|variant| !variant.is_empty())
         .map(str::to_string)
+}
+
+fn branch_error(error: lash::EmbedError) -> AppError {
+    if matches!(
+        &error,
+        lash::EmbedError::Store(lash::persistence::StoreError::ForkPointNotRetained { .. })
+    ) {
+        return AppError {
+            status: StatusCode::CONFLICT,
+            message: error.to_string(),
+        };
+    }
+    AppError::internal(error.to_string())
 }
 
 pub(crate) fn assistant_text_for_persistence(output: &TurnOutput, streamed_prose: &str) -> String {
