@@ -25,8 +25,8 @@ impl<'run> ToolDispatchClient<'run> {
                 .context
                 .effect_controller
                 .controller()
-                .durability_tier()
-                == crate::DurabilityTier::Durable
+                .replay_ownership()
+                == crate::EffectReplayOwnership::Controller
         {
             return calls
                 .into_iter()

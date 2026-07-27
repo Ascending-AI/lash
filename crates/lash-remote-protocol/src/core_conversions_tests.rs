@@ -52,14 +52,6 @@ fn turn_cancel_core_conversions_round_trip_every_envelope() {
         let round_trip = lash_core::TurnCancelOutcome::from(remote);
         assert_eq!(round_trip, core_outcome);
     }
-
-    for tier in [
-        lash_core::DurabilityTier::Inline,
-        lash_core::DurabilityTier::Durable,
-    ] {
-        let remote = RemoteTurnControlDurabilityTier::from(tier);
-        assert_eq!(lash_core::DurabilityTier::from(remote), tier);
-    }
 }
 
 #[test]

@@ -938,10 +938,6 @@ mod tests {
 
     #[async_trait::async_trait]
     impl lash_core::ProcessExecutionEnvStore for DurableMemoryProcessEnvStore {
-        fn durability_tier(&self) -> lash_core::DurabilityTier {
-            lash_core::DurabilityTier::Durable
-        }
-
         async fn put_process_execution_env(
             &self,
             env_ref: &lash_core::ProcessExecutionEnvRef,
@@ -959,8 +955,8 @@ mod tests {
     }
 
     impl lash_core::AwaitEventResolver for CountingEffectController {
-        fn durability_tier(&self) -> lash_core::DurabilityTier {
-            lash_core::DurabilityTier::Durable
+        fn replay_ownership(&self) -> lash_core::EffectReplayOwnership {
+            lash_core::EffectReplayOwnership::Controller
         }
     }
 

@@ -17,10 +17,10 @@ use std::time::{Duration, Instant};
 
 use lash_core::{
     AwaitEventKey, AwaitEventResolver, AwaitEventWaitIdentity, CanonicalRuntimeEffectEnvelope,
-    DurabilityTier, EffectHost, ExecutionScope, LeaseTimings, Resolution, ResolveOutcome,
-    RuntimeAwaitEventOptions, RuntimeEffectCommand, RuntimeEffectController,
-    RuntimeEffectControllerError, RuntimeEffectEnvelope, RuntimeEffectLocalExecutor,
-    RuntimeEffectOutcome, RuntimeError, ScopedEffectController, validate_replayed_effect_envelope,
+    EffectHost, ExecutionScope, LeaseTimings, Resolution, ResolveOutcome, RuntimeAwaitEventOptions,
+    RuntimeEffectCommand, RuntimeEffectController, RuntimeEffectControllerError,
+    RuntimeEffectEnvelope, RuntimeEffectLocalExecutor, RuntimeEffectOutcome, RuntimeError,
+    ScopedEffectController, validate_replayed_effect_envelope,
 };
 use tokio_util::sync::CancellationToken;
 
@@ -118,33 +118,9 @@ impl SqliteEffectHost {
         options: SqliteEffectReplayOptions,
         clock: Arc<dyn lash_core::Clock>,
     ) -> tokio_rusqlite::Result<Self> {
+        validate_effect_host_path(path)?;
         Ok(Self {
             inner: open_effect_replay_inner(path, StoreBacking::File, options, clock).await?,
-        })
-    }
-
-    pub async fn memory() -> tokio_rusqlite::Result<Self> {
-        Self::memory_with_options(SqliteEffectReplayOptions::default()).await
-    }
-
-    pub async fn memory_with_clock(
-        clock: Arc<dyn lash_core::Clock>,
-    ) -> tokio_rusqlite::Result<Self> {
-        Self::memory_with_options_and_clock(SqliteEffectReplayOptions::default(), clock).await
-    }
-
-    pub async fn memory_with_options(
-        options: SqliteEffectReplayOptions,
-    ) -> tokio_rusqlite::Result<Self> {
-        Self::memory_with_options_and_clock(options, Arc::new(lash_core::SystemClock)).await
-    }
-
-    pub async fn memory_with_options_and_clock(
-        options: SqliteEffectReplayOptions,
-        clock: Arc<dyn lash_core::Clock>,
-    ) -> tokio_rusqlite::Result<Self> {
-        Ok(Self {
-            inner: open_effect_replay_memory_inner(options, clock).await?,
         })
     }
 
@@ -157,8 +133,8 @@ impl SqliteEffectHost {
 
 #[async_trait::async_trait]
 impl AwaitEventResolver for SqliteEffectHost {
-    fn durability_tier(&self) -> DurabilityTier {
-        DurabilityTier::Durable
+    fn replay_ownership(&self) -> lash_core::EffectReplayOwnership {
+        lash_core::EffectReplayOwnership::Controller
     }
 
     async fn await_event_key(
@@ -689,8 +665,8 @@ impl SqliteRuntimeEffectController {
 
 #[async_trait::async_trait]
 impl AwaitEventResolver for SqliteRuntimeEffectController {
-    fn durability_tier(&self) -> DurabilityTier {
-        DurabilityTier::Durable
+    fn replay_ownership(&self) -> lash_core::EffectReplayOwnership {
+        lash_core::EffectReplayOwnership::Controller
     }
 
     async fn await_event_key(
@@ -791,6 +767,21 @@ impl RuntimeEffectController for SqliteRuntimeEffectController {
             }
         }
     }
+}
+
+fn validate_effect_host_path(path: &Path) -> tokio_rusqlite::Result<()> {
+    let rendered = path.to_string_lossy();
+    if path.as_os_str().is_empty() || rendered == ":memory:" || rendered.starts_with("file:") {
+        return Err(tokio_rusqlite::Error::Error(
+            rusqlite::Error::SqliteFailure(
+                rusqlite::ffi::Error::new(rusqlite::ffi::SQLITE_CANTOPEN),
+                Some(format!(
+                    "SqliteEffectHost requires a file-backed database path, got `{rendered}`"
+                )),
+            ),
+        ));
+    }
+    Ok(())
 }
 
 async fn open_effect_replay_inner(

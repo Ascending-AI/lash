@@ -116,7 +116,7 @@ pub use effect::{
     validate_replayed_effect_envelope,
 };
 pub use environment::{ParkedSession, Residency, RuntimeEnvironment, RuntimeEnvironmentBuilder};
-pub use error::{DurableStoreFacet, RuntimeError, RuntimeErrorCode};
+pub use error::{RuntimeError, RuntimeErrorCode};
 pub use host::{EmbeddedRuntimeHost, ProcessRuntimeHost, RuntimeHostConfig};
 pub use in_memory_store::{InMemorySessionStore, InMemorySessionStoreFactory};
 use io::normalize_input_items;
@@ -1027,12 +1027,6 @@ impl SessionStoreCreateRequest {
 
 #[async_trait::async_trait]
 pub trait SessionStoreFactory: Send + Sync {
-    /// Durability tier the stores produced by this factory provide; defaults to
-    /// [`DurabilityTier::Inline`].
-    fn durability_tier(&self) -> crate::DurabilityTier {
-        crate::DurabilityTier::Inline
-    }
-
     async fn create_store(
         &self,
         request: &SessionStoreCreateRequest,

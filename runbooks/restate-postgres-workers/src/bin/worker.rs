@@ -646,7 +646,7 @@ async fn direct_resolve_durable_wait(
     State(state): State<AppState>,
     AxumJson(request): AxumJson<DirectDurableWaitResolveRequest>,
 ) -> Result<AxumJson<DirectDurableWaitResolveResponse>, (StatusCode, String)> {
-    let outcome = RestateEffectHost::with_ingress_url(state.restate_ingress_url)
+    let outcome = RestateEffectHost::new(state.restate_ingress_url)
         .resolve_await_event(&request.key, request.resolution)
         .await
         .map_err(|err| (StatusCode::INTERNAL_SERVER_ERROR, err.to_string()))?;
@@ -660,7 +660,7 @@ async fn direct_await_durable_wait(
     State(state): State<AppState>,
     AxumJson(request): AxumJson<DirectDurableWaitAwaitRequest>,
 ) -> Result<AxumJson<DirectDurableWaitAwaitResponse>, (StatusCode, String)> {
-    let resolution = RestateEffectHost::with_ingress_url(state.restate_ingress_url)
+    let resolution = RestateEffectHost::new(state.restate_ingress_url)
         .await_await_event(
             &request.key,
             tokio_util::sync::CancellationToken::new(),

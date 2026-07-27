@@ -40,21 +40,17 @@ pub use lash_sansio::sansio;
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 pub const SANSIO_VERSION: &str = lash_sansio::VERSION;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-#[serde(rename_all = "snake_case")]
-/// Persistence strength exposed by a runtime boundary.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+/// Which layer owns replay of runtime effects.
 ///
-/// `Durable` is an end-to-end claim, not merely a journal-storage property. An
-/// effect host may return it only when its journal and complete AwaitEvent
-/// surface pass cold-instance conformance across independent OS processes:
-/// keys, terminals, cancellation sweeps, and revocation must all survive owner
-/// loss and remain observable through the shared substrate. A host with a
-/// durable effect journal but process-local waits must return `Inline`.
-pub enum DurabilityTier {
-    /// State or coordination may be confined to this OS process.
-    Inline,
-    /// Journal and AwaitEvent coordination survive cross-process owner loss.
-    Durable,
+/// This is a mechanical property of an effect controller, not an end-to-end
+/// durability claim. Controller-owned replay means a controller journals or
+/// otherwise replays completed effects; runtime-owned execution means Lash
+/// invokes the local effect path directly on each turn attempt.
+pub enum EffectReplayOwnership {
+    #[default]
+    Runtime,
+    Controller,
 }
 
 // Re-exports
@@ -393,60 +389,59 @@ pub use runtime::{
     AbandonEvidence, AbandonRequest, AbandonWriter, AgentFrameRun, AssembledTurn, AssistantOutput,
     AwaitEventKey, AwaitEventResolver, AwaitEventWaitIdentity, BoundaryReason, CausalRef, Clock,
     CodeOutputRecord, DefaultProcessCancelAbility, DeliveryPolicy, DirectCompletionClient,
-    DurableProcessWorker, DurableProcessWorkerConfig, DurableStoreFacet, EffectHost,
-    EmbeddedRuntimeBuilder, EmbeddedRuntimeHost, EventSink, ExecutionScope, ExecutionSummary,
-    ExternalCompletionError, InMemoryLiveReplayStore, InMemoryLiveReplayStoreConfig,
-    InMemoryProcessExecutionEnvStore, InMemorySessionStore, InMemorySessionStoreFactory,
-    InlineEffectHost, InlineProcessRunHandle, InlineRuntimeEffectController, InputItem,
-    LashRuntime, LiveReplayGap, LiveReplayGapReason, LiveReplayResult, LiveReplayStore,
-    LiveReplayStoreError, LiveReplaySubscribeResult, LiveReplaySubscription, MergeKey,
-    NoopEventSink, NoopTurnActivitySink, ObservedProcess, ObservedProcessEvent, ObservedWorkItem,
-    OutputState, PROCESS_LEASE_SCHEMA_VERSION, ParkedSession, PendingTurnInput,
-    PendingTurnInputCancelOutcome, PendingTurnInputCancelResult, PendingTurnInputCancelTarget,
-    PendingTurnInputClaimDiagnostics, PendingTurnInputDraft, PendingTurnInputSuffixCancelOutcome,
-    PersistedSegmentHandover, ProcessAttach, ProcessAwaitOutput, ProcessAwaiter,
-    ProcessCancelAbility, ProcessCancelAllRequest, ProcessCancelRequest, ProcessCancelSource,
-    ProcessCancelSummary, ProcessChangeCursor, ProcessChangeHub, ProcessCompletionAuthority,
-    ProcessCompletionOutcome, ProcessDrainReport, ProcessEngine, ProcessEngineProcessContext,
-    ProcessEngineRegistry, ProcessEngineRunContext, ProcessEngineRunGuard,
-    ProcessEngineRuntimeContext, ProcessEngineValidationContext, ProcessEvent,
-    ProcessEventAppendPlan, ProcessEventAppendRequest, ProcessEventAppendResult, ProcessEventSink,
-    ProcessEventType, ProcessExecutionContext, ProcessExecutionEnvRef, ProcessExecutionEnvSpec,
-    ProcessExecutionEnvStore, ProcessExecutionWriteAuthority, ProcessExternalRef,
-    ProcessHandleDescriptor, ProcessHandleGrant, ProcessHandleSummary, ProcessId, ProcessIdentity,
-    ProcessInfraError, ProcessInput, ProcessLease, ProcessLeaseClaimOutcome,
-    ProcessLeaseCompletion, ProcessLifecycleStatus, ProcessListFilter, ProcessListMode,
-    ProcessLiveReferenceSummary, ProcessOpScope, ProcessOriginator, ProcessProvenance,
-    ProcessPruneReport, ProcessRecord, ProcessRegistration, ProcessRegistry, ProcessRunHandle,
-    ProcessRunOutcome, ProcessRuntimeHost, ProcessService, ProcessSessionDeleteReport,
-    ProcessSpawnProvenance, ProcessStartGrant, ProcessStartOptions, ProcessStartOutcome,
-    ProcessStartPlan, ProcessStartRequest, ProcessStarted, ProcessStatus, ProcessStatusFilter,
-    ProcessTerminalSemantics, ProcessTerminalSpec, ProcessTerminalState, ProcessValueSelector,
-    ProcessWake, ProcessWakeDedupeKey, ProcessWakeDelivery, ProcessWakeDeliveryRequest,
-    ProcessWakeSpec, ProcessWorkDriver, ProcessWorkObserver, ProcessWorkSnapshot, PromptUsage,
-    ProtocolSessionExtension, ProtocolSessionExtensionHandle, ProtocolTurnExtension,
-    ProtocolTurnExtensionHandle, QueuedWorkDriver, QueuedWorkRunError, QueuedWorkRunErrorClass,
-    QueuedWorkRunHandle, QueuedWorkRunRequest, QueuedWorkWakeDisposition, QueuedWorkWakeFailure,
-    RecoveryDisposition, Residency, Resolution, ResolveOutcome, RuntimeEnvironment,
-    RuntimeEnvironmentBuilder, RuntimeError, RuntimeErrorCode, RuntimeHandle, RuntimeHostConfig,
-    RuntimeObservation, ScopedEffectController, SegmentHandover, SegmentProgress, SessionCommand,
-    SessionCommandReceipt, SessionCursor, SessionCursorError, SessionObservation,
-    SessionObservationEvent, SessionObservationEventPayload, SessionObservationSubscription,
-    SessionProcessEventKind, SessionQueueEventKind, SessionResume, SessionRevision, SessionScope,
-    SessionScopeId, SessionStoreCreateRequest, SessionStoreFactory, SessionUsageReport, SlotPolicy,
-    SystemClock, TerminationPolicy, TokenLedgerEntry, ToolCallLaunch, TurnActivity, TurnActivityId,
-    TurnActivitySink, TurnAddress, TurnAttach, TurnCancelOriginHint, TurnCancelOutcome,
-    TurnCancelReceipt, TurnCancelRequest, TurnCancellationEvidence, TurnContext, TurnEvent,
-    TurnInput, TurnInputAcceptanceReceipt, TurnInputApplication, TurnInputCheckpointBoundary,
-    TurnInputClaim, TurnInputClaimMode, TurnInputCompletion, TurnInputIngress, TurnInputState,
-    TurnIssue, TurnOptions, TurnTerminal, TurnWorkDriver, UnavailableProcessService,
-    UsageReportRow, UsageTotals, WaitKind, WaitState, apply_process_event_projection,
-    apply_process_status_projection, current_epoch_ms, diff_token_ledger, diff_usage_reports,
-    ensure_durable_effect_input, epoch_ms_from_system_time, fold_process_record,
-    process_runtime_session_ids, process_signal_event_type, process_signal_name_from_event_type,
-    process_signal_wait_key, process_wake_delivery, system_time_from_epoch_ms,
-    terminal_append_request, terminal_event_type_name, validate_process_signal_name,
-    watch_process_registry, watch_process_registry_with_sink,
+    DurableProcessWorker, DurableProcessWorkerConfig, EffectHost, EmbeddedRuntimeBuilder,
+    EmbeddedRuntimeHost, EventSink, ExecutionScope, ExecutionSummary, ExternalCompletionError,
+    InMemoryLiveReplayStore, InMemoryLiveReplayStoreConfig, InMemoryProcessExecutionEnvStore,
+    InMemorySessionStore, InMemorySessionStoreFactory, InlineEffectHost, InlineProcessRunHandle,
+    InlineRuntimeEffectController, InputItem, LashRuntime, LiveReplayGap, LiveReplayGapReason,
+    LiveReplayResult, LiveReplayStore, LiveReplayStoreError, LiveReplaySubscribeResult,
+    LiveReplaySubscription, MergeKey, NoopEventSink, NoopTurnActivitySink, ObservedProcess,
+    ObservedProcessEvent, ObservedWorkItem, OutputState, PROCESS_LEASE_SCHEMA_VERSION,
+    ParkedSession, PendingTurnInput, PendingTurnInputCancelOutcome, PendingTurnInputCancelResult,
+    PendingTurnInputCancelTarget, PendingTurnInputClaimDiagnostics, PendingTurnInputDraft,
+    PendingTurnInputSuffixCancelOutcome, PersistedSegmentHandover, ProcessAttach,
+    ProcessAwaitOutput, ProcessAwaiter, ProcessCancelAbility, ProcessCancelAllRequest,
+    ProcessCancelRequest, ProcessCancelSource, ProcessCancelSummary, ProcessChangeCursor,
+    ProcessChangeHub, ProcessCompletionAuthority, ProcessCompletionOutcome, ProcessDrainReport,
+    ProcessEngine, ProcessEngineProcessContext, ProcessEngineRegistry, ProcessEngineRunContext,
+    ProcessEngineRunGuard, ProcessEngineRuntimeContext, ProcessEngineValidationContext,
+    ProcessEvent, ProcessEventAppendPlan, ProcessEventAppendRequest, ProcessEventAppendResult,
+    ProcessEventSink, ProcessEventType, ProcessExecutionContext, ProcessExecutionEnvRef,
+    ProcessExecutionEnvSpec, ProcessExecutionEnvStore, ProcessExecutionWriteAuthority,
+    ProcessExternalRef, ProcessHandleDescriptor, ProcessHandleGrant, ProcessHandleSummary,
+    ProcessId, ProcessIdentity, ProcessInfraError, ProcessInput, ProcessLease,
+    ProcessLeaseClaimOutcome, ProcessLeaseCompletion, ProcessLifecycleStatus, ProcessListFilter,
+    ProcessListMode, ProcessLiveReferenceSummary, ProcessOpScope, ProcessOriginator,
+    ProcessProvenance, ProcessPruneReport, ProcessRecord, ProcessRegistration, ProcessRegistry,
+    ProcessRunHandle, ProcessRunOutcome, ProcessRuntimeHost, ProcessService,
+    ProcessSessionDeleteReport, ProcessSpawnProvenance, ProcessStartGrant, ProcessStartOptions,
+    ProcessStartOutcome, ProcessStartPlan, ProcessStartRequest, ProcessStarted, ProcessStatus,
+    ProcessStatusFilter, ProcessTerminalSemantics, ProcessTerminalSpec, ProcessTerminalState,
+    ProcessValueSelector, ProcessWake, ProcessWakeDedupeKey, ProcessWakeDelivery,
+    ProcessWakeDeliveryRequest, ProcessWakeSpec, ProcessWorkDriver, ProcessWorkObserver,
+    ProcessWorkSnapshot, PromptUsage, ProtocolSessionExtension, ProtocolSessionExtensionHandle,
+    ProtocolTurnExtension, ProtocolTurnExtensionHandle, QueuedWorkDriver, QueuedWorkRunError,
+    QueuedWorkRunErrorClass, QueuedWorkRunHandle, QueuedWorkRunRequest, QueuedWorkWakeDisposition,
+    QueuedWorkWakeFailure, RecoveryDisposition, Residency, Resolution, ResolveOutcome,
+    RuntimeEnvironment, RuntimeEnvironmentBuilder, RuntimeError, RuntimeErrorCode, RuntimeHandle,
+    RuntimeHostConfig, RuntimeObservation, ScopedEffectController, SegmentHandover,
+    SegmentProgress, SessionCommand, SessionCommandReceipt, SessionCursor, SessionCursorError,
+    SessionObservation, SessionObservationEvent, SessionObservationEventPayload,
+    SessionObservationSubscription, SessionProcessEventKind, SessionQueueEventKind, SessionResume,
+    SessionRevision, SessionScope, SessionScopeId, SessionStoreCreateRequest, SessionStoreFactory,
+    SessionUsageReport, SlotPolicy, SystemClock, TerminationPolicy, TokenLedgerEntry,
+    ToolCallLaunch, TurnActivity, TurnActivityId, TurnActivitySink, TurnAddress, TurnAttach,
+    TurnCancelOriginHint, TurnCancelOutcome, TurnCancelReceipt, TurnCancelRequest,
+    TurnCancellationEvidence, TurnContext, TurnEvent, TurnInput, TurnInputAcceptanceReceipt,
+    TurnInputApplication, TurnInputCheckpointBoundary, TurnInputClaim, TurnInputClaimMode,
+    TurnInputCompletion, TurnInputIngress, TurnInputState, TurnIssue, TurnOptions, TurnTerminal,
+    TurnWorkDriver, UnavailableProcessService, UsageReportRow, UsageTotals, WaitKind, WaitState,
+    apply_process_event_projection, apply_process_status_projection, current_epoch_ms,
+    diff_token_ledger, diff_usage_reports, ensure_durable_effect_input, epoch_ms_from_system_time,
+    fold_process_record, process_runtime_session_ids, process_signal_event_type,
+    process_signal_name_from_event_type, process_signal_wait_key, process_wake_delivery,
+    system_time_from_epoch_ms, terminal_append_request, terminal_event_type_name,
+    validate_process_signal_name, watch_process_registry, watch_process_registry_with_sink,
 };
 pub use runtime::{DEFAULT_PROCESS_EXECUTION_CONCURRENCY, ProcessExecutionConcurrencyError};
 #[allow(unused_imports)]

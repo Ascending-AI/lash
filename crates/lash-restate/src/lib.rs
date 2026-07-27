@@ -76,11 +76,11 @@ use std::time::Duration;
 
 use lash_core::{
     AbandonEvidence, AbandonWriter, AwaitEventKey, AwaitEventResolver, AwaitEventWaitIdentity,
-    CanonicalRuntimeEffectEnvelope, DurabilityTier, DurableProcessWorker, EffectHost,
-    ExecutionScope, PluginError, ProcessAttach, ProcessAwaitOutput, ProcessCommand,
-    ProcessCompletionAuthority, ProcessEffectOutcome, ProcessEventSink, ProcessExecutionContext,
-    ProcessExternalRef, ProcessRecord, ProcessRegistration, ProcessRegistry, ProcessRunHandle,
-    ProcessWorkDriver, RecoveryDisposition, Resolution, ResolveOutcome, RuntimeAwaitEventOptions,
+    CanonicalRuntimeEffectEnvelope, DurableProcessWorker, EffectHost, ExecutionScope, PluginError,
+    ProcessAttach, ProcessAwaitOutput, ProcessCommand, ProcessCompletionAuthority,
+    ProcessEffectOutcome, ProcessEventSink, ProcessExecutionContext, ProcessExternalRef,
+    ProcessRecord, ProcessRegistration, ProcessRegistry, ProcessRunHandle, ProcessWorkDriver,
+    RecoveryDisposition, Resolution, ResolveOutcome, RuntimeAwaitEventOptions,
     RuntimeEffectCommand, RuntimeEffectController, RuntimeEffectControllerError,
     RuntimeEffectEnvelope, RuntimeEffectKind, RuntimeEffectLocalExecutor, RuntimeEffectOutcome,
     RuntimeError, RuntimeInvocation, RuntimeSleepOptions, ScopedEffectController, TurnAddress,
@@ -292,13 +292,6 @@ fn validate_segment_program_hash(
         ));
     }
     Ok(persisted.handover)
-}
-
-fn restate_await_event_ingress_required() -> RuntimeError {
-    RuntimeError::new(
-        "restate_await_event_ingress_required",
-        "Restate durable-wait resolution and session revocation require an ingress URL; construct RestateEffectHost with RestateEffectHost::with_ingress_url",
-    )
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, serde::Deserialize)]
@@ -1283,22 +1276,18 @@ impl RestateProcessRunner for RestateCoreProcessRunner {
 /// [`RestateRuntimeEffectController::scoped_effect_controller`] into Lash. If a
 /// caller tries to execute through this deployment host directly, it fails
 /// loudly instead of falling back to inline execution.
-#[derive(Clone, Default)]
+#[derive(Clone)]
 pub struct RestateEffectHost {
     controller: Arc<RestateEffectHostController>,
 }
 
 impl RestateEffectHost {
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    pub fn with_ingress_url(connection: impl Into<RestateConnection>) -> Self {
+    pub fn new(connection: impl Into<RestateConnection>) -> Self {
         Self {
             controller: Arc::new(RestateEffectHostController {
-                await_event_ingress: Some(RestateAwaitEventIngress {
+                await_event_ingress: RestateAwaitEventIngress {
                     ingress: RestateIngressClient::new(connection),
-                }),
+                },
             }),
         }
     }
@@ -1306,8 +1295,8 @@ impl RestateEffectHost {
 
 #[async_trait::async_trait]
 impl AwaitEventResolver for RestateEffectHost {
-    fn durability_tier(&self) -> DurabilityTier {
-        DurabilityTier::Durable
+    fn replay_ownership(&self) -> lash_core::EffectReplayOwnership {
+        lash_core::EffectReplayOwnership::Controller
     }
 
     async fn await_event_key(
@@ -1479,15 +1468,14 @@ async fn await_restate_await_event_via_ingress(
     }
 }
 
-#[derive(Default)]
 struct RestateEffectHostController {
-    await_event_ingress: Option<RestateAwaitEventIngress>,
+    await_event_ingress: RestateAwaitEventIngress,
 }
 
 #[async_trait::async_trait]
 impl AwaitEventResolver for RestateEffectHostController {
-    fn durability_tier(&self) -> DurabilityTier {
-        DurabilityTier::Durable
+    fn replay_ownership(&self) -> lash_core::EffectReplayOwnership {
+        lash_core::EffectReplayOwnership::Controller
     }
 
     async fn await_event_key(
@@ -1495,9 +1483,7 @@ impl AwaitEventResolver for RestateEffectHostController {
         scope: &ExecutionScope,
         wait: AwaitEventWaitIdentity,
     ) -> Result<AwaitEventKey, RuntimeError> {
-        let Some(ingress) = &self.await_event_ingress else {
-            return Err(restate_await_event_ingress_required());
-        };
+        let ingress = &self.await_event_ingress;
         if let Some(session_id) = scope.session_id()
             && restate_session_is_revoked_via_ingress(ingress, session_id).await?
         {
@@ -1514,21 +1500,14 @@ impl AwaitEventResolver for RestateEffectHostController {
         if !restate_await_event_key_is_valid(key) {
             return Ok(ResolveOutcome::UnknownOrRevoked);
         }
-        match &self.await_event_ingress {
-            Some(ingress) => {
-                resolve_restate_await_event_via_ingress(ingress, key, resolution).await
-            }
-            None => Ok(ResolveOutcome::UnknownOrRevoked),
-        }
+        resolve_restate_await_event_via_ingress(&self.await_event_ingress, key, resolution).await
     }
 
     async fn peek_await_event(
         &self,
         key: &AwaitEventKey,
     ) -> Result<Option<Resolution>, RuntimeError> {
-        let Some(ingress) = &self.await_event_ingress else {
-            return Err(restate_await_event_ingress_required());
-        };
+        let ingress = &self.await_event_ingress;
         ensure_restate_key_access_via_ingress(ingress, key).await?;
         let workflow_key = RestateDurableWaitAddress::for_key(key).workflow_key;
         ingress
@@ -1548,24 +1527,18 @@ impl AwaitEventResolver for RestateEffectHostController {
         cancel: tokio_util::sync::CancellationToken,
         deadline: Option<std::time::Instant>,
     ) -> Result<Resolution, RuntimeError> {
-        let Some(ingress) = &self.await_event_ingress else {
-            return Err(restate_await_event_ingress_required());
-        };
+        let ingress = &self.await_event_ingress;
         ensure_restate_key_access_via_ingress(ingress, key).await?;
         await_restate_await_event_via_ingress(ingress, key, cancel, deadline, None).await
     }
 
     async fn revoke_await_events_for_session(&self, session_id: &str) -> Result<(), RuntimeError> {
-        let Some(ingress) = &self.await_event_ingress else {
-            return Err(restate_await_event_ingress_required());
-        };
+        let ingress = &self.await_event_ingress;
         update_restate_session_waits_via_ingress(ingress, session_id, true).await
     }
 
     async fn cancel_await_events_for_session(&self, session_id: &str) -> Result<(), RuntimeError> {
-        let Some(ingress) = &self.await_event_ingress else {
-            return Err(restate_await_event_ingress_required());
-        };
+        let ingress = &self.await_event_ingress;
         update_restate_session_waits_via_ingress(ingress, session_id, false).await
     }
 }
@@ -1588,11 +1561,7 @@ impl RuntimeEffectController for RestateEffectHostController {
                     restate_unknown_or_revoked(),
                 ));
             }
-            let Some(ingress) = &self.await_event_ingress else {
-                return Err(RuntimeEffectControllerError::from(
-                    restate_await_event_ingress_required(),
-                ));
-            };
+            let ingress = &self.await_event_ingress;
             let RuntimeAwaitEventOptions {
                 cancellation,
                 deadline,
@@ -1626,7 +1595,7 @@ impl RuntimeEffectController for RestateEffectHostController {
 /// `LashProcessWorkflow` through the Restate ingress instead of running them
 /// in-process.
 ///
-/// This is the durable tier's process work handle: a host-owned
+/// This is the controller-owned process work handle: a host-owned
 /// [`ProcessWorkDriver`] calls it on ingress-relevant events. Per row, it POSTs
 /// `LashProcessWorkflow/{process_id}/run/send` to the ingress. Restate
 /// coalesces by workflow key, so duplicate submits are idempotent and no Lash
@@ -3333,7 +3302,7 @@ pub struct RestateTurnDeployment {
 impl RestateTurnDeployment {
     pub fn new(connection: impl Into<RestateConnection>) -> Self {
         let connection = connection.into();
-        let effect_host = Arc::new(RestateEffectHost::with_ingress_url(connection.clone()));
+        let effect_host = Arc::new(RestateEffectHost::new(connection.clone()));
         let attach = Arc::new(RestateTurnAttach::new(connection));
         let driver = TurnWorkDriver::new(effect_host.clone()).with_attach(attach.clone());
         Self {
@@ -4095,8 +4064,8 @@ impl<'ctx, C> AwaitEventResolver for RestateRuntimeEffectController<'ctx, C>
 where
     C: RestateControllerContext<'ctx>,
 {
-    fn durability_tier(&self) -> DurabilityTier {
-        DurabilityTier::Durable
+    fn replay_ownership(&self) -> lash_core::EffectReplayOwnership {
+        lash_core::EffectReplayOwnership::Controller
     }
 
     async fn await_event_key(

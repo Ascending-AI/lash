@@ -126,10 +126,6 @@ async fn enqueue_queued_work_tx(
 
 #[async_trait::async_trait]
 impl SessionCommitStore for PostgresSessionStore {
-    fn durability_tier(&self) -> DurabilityTier {
-        DurabilityTier::Durable
-    }
-
     async fn load_session(
         &self,
         scope: SessionReadScope,

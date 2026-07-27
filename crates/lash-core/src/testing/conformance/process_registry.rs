@@ -25,25 +25,20 @@ pub async fn process_registry<F>(make: F)
 where
     F: Fn() -> Arc<dyn ProcessRegistry>,
 {
-    process_registry_with_expected_durability(make, crate::DurabilityTier::Inline).await;
+    process_registry_conformance(make).await;
 }
 /// Run the full [`ProcessRegistry`] suite plus durable reopen checks.
 pub async fn process_registry_reopenable<F>(make: F)
 where
     F: Fn() -> ReopenableProcessRegistry,
 {
-    process_registry_with_expected_durability(|| make().open, crate::DurabilityTier::Durable).await;
+    process_registry_conformance(|| make().open).await;
     process_registry_survives_reopen(make()).await;
 }
-/// Run the full [`ProcessRegistry`] conformance suite against a backend with an
-/// explicit expected durability tier.
-pub async fn process_registry_with_expected_durability<F>(
-    make: F,
-    expected_tier: crate::DurabilityTier,
-) where
+async fn process_registry_conformance<F>(make: F)
+where
     F: Fn() -> Arc<dyn ProcessRegistry>,
 {
-    process_registry_reports_declared_durability(make(), expected_tier).await;
     fold::process_record_is_the_fold_of_its_event_log(make()).await;
     fold::owner_bound_handover_resume_is_folded_and_replayable(make()).await;
     registration_is_idempotent_and_hash_conflicts_fail(make()).await;
@@ -233,17 +228,6 @@ async fn registration_is_idempotent_and_hash_conflicts_fail(registry: Arc<dyn Pr
             .await
             .is_err(),
         "a different registration under the same id must fail with a hash conflict"
-    );
-}
-
-async fn process_registry_reports_declared_durability(
-    registry: Arc<dyn ProcessRegistry>,
-    expected_tier: crate::DurabilityTier,
-) {
-    assert_eq!(
-        registry.durability_tier(),
-        expected_tier,
-        "process registry conformance must pin the backend's declared durability tier"
     );
 }
 

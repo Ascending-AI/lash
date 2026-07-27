@@ -217,7 +217,7 @@ async fn rlm_terminal_contracts(
 
 async fn cancel_turn(core: &LashCore, session: &LashSession) -> anyhow::Result<()> {
     // docs:start:cancel-turn
-    use lash::{DurabilityTier, TurnAddress, TurnOutcome, TurnStop};
+    use lash::{TurnAddress, TurnOutcome, TurnStop};
 
     let turn_id = "incident-summary-42";
     let stream = session
@@ -238,9 +238,7 @@ async fn cancel_turn(core: &LashCore, session: &LashSession) -> anyhow::Result<(
             Some("operator pressed Stop".to_string()),
         )
         .await?;
-    if receipt.durability_tier == DurabilityTier::Inline {
-        // Do not present this receipt as cross-process delivery proof.
-    }
+    let _receipt = receipt;
 
     let result = stream.finish().await?;
     if matches!(result.outcome, TurnOutcome::Stopped(TurnStop::Cancelled)) {

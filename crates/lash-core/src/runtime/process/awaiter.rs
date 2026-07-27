@@ -404,10 +404,6 @@ pub trait ProcessAttach: Send + Sync {
 
 #[async_trait::async_trait]
 impl ProcessRegistry for WatchedProcessRegistry {
-    fn durability_tier(&self) -> crate::DurabilityTier {
-        self.inner.durability_tier()
-    }
-
     async fn register_process(
         &self,
         registration: ProcessRegistration,

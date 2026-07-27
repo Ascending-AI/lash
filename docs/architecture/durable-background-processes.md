@@ -385,25 +385,12 @@ recovery verdict table and the drain / crash / stuck-detection paths:
 
 ## Implementation
 
-Durability is a property of each execution path, derived from what the host
-wired — there is no mode flag. Store traits and effect-host traits carry a
-defaulted `durability_tier()` returning `DurabilityTier::Inline`; durable
-implementations override it to `Durable`. The runtime never silently runs
-nondeterministic work on a non-durable controller picked as a fallback, and a
-durable effect host paired with any ephemeral store facet fails **loudly** at
-the boundary where the tier is known:
-
-- **Scope boundary** (`turn_loop.rs`, resume/stream turn-scoped): when the
-  turn's effect host is `Durable`, all wired store facets must be `Durable`, else
-  `DurableStoreRequired { facet }`.
-- **Worker boundary** (`DurableProcessWorker::ensure_durable_store_facets`): the
-  same check at process-run / runtime rebuild, including the `ProcessRegistry`
-  store facet.
-- **Facade build** (`lash/src/core.rs::ensure_store_peer_coherence`): store
-  peer-coherence only — the per-invocation durable controller is not visible at
-  build, so build checks the stores against each other (durable session store
-  ⇒ durable attachment + artifact store; durable process registry ⇒ durable
-  session store factory + durable trigger store), never the controller.
+Replay behavior is derived from the controller the host wired, not from a
+runtime mode or an end-to-end durability claim. `EffectReplayOwnership::Runtime`
+means Lash executes and records effects locally; `Controller` means the
+controller owns replay and Lash dispatches through it. Store traits do not
+advertise a durability tier, and the runtime does not try to infer deployment
+guarantees by comparing independently wired store facets.
 
 Out-of-turn starts (trigger deliveries; facade `start`; `api.rs`) write
 durable intent and execute via the worker. The silent
@@ -471,8 +458,7 @@ terminal are carried as request config / tool-access, not lost.
   worker-time Lashlang Host Requirements validation from captured Process Plugin
   Options.
 - `crates/lash-core/src/runtime/process/registry.rs` — `ProcessRegistry`
-  defaulted `durability_tier()` + `list_non_terminal()` and the lease ops;
-  state only, no wait loops.
+  `list_non_terminal()` and the lease ops; state only, no wait loops.
 - `crates/lash-core/src/runtime/process/awaiter.rs` — `ProcessChangeHub`,
   watched-registry decorator, `ProcessAwaiter`, and `ProcessAttach`.
 - `crates/lash-core/src/runtime/session_manager/process_runners/control.rs` —
@@ -485,10 +471,8 @@ terminal are carried as request config / tool-access, not lost.
   `InlineEffectHost` / inline controller (stateless; the off-lease
   `tokio::spawn` deleted, `Start` only registers the row, cancel is a durable
   event append).
-- `crates/lash-core/src/runtime/turn_loop.rs` — scope-boundary store-facet
-  check.
-- `crates/lash/src/core.rs` — `ensure_store_peer_coherence` (facade build).
-- `crates/lash-core/src/runtime/error.rs` — `DurableStoreRequired { facet }`.
+- `crates/lash-core/src/runtime/effect/controller.rs` —
+  `EffectReplayOwnership` propagation through scoped controllers.
 - `crates/lash-core/src/store/mod.rs` — committed session state and turn commit stamps
   (the model the process lease mirrors).
 - `crates/lash-subagents/src/rlm.rs` — `agents.spawn` emitting

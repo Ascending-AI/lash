@@ -562,14 +562,14 @@ impl<'run> ToolContext<'run> {
             )
         })?;
         let scoped = self.effect_controller.scoped();
-        if scoped.controller().durability_tier() == crate::DurabilityTier::Inline
+        if scoped.controller().replay_ownership() == crate::EffectReplayOwnership::Runtime
             && !scoped
                 .controller()
                 .allows_process_lifetime_completion_keys()
         {
             return Err(crate::RuntimeError::new(
                 "tool_completion_key_process_lifetime",
-                "completion keys on an Inline-tier host die with the current process; construct the InlineEffectHost with allow_process_lifetime_completion_keys() only for an explicitly single-process deployment",
+                "completion keys on a runtime-owned effect host can die with the current process; construct InlineEffectHost with allow_process_lifetime_completion_keys() only for an explicitly single-process deployment",
             ));
         }
         let key = scoped

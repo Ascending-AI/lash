@@ -1901,27 +1901,11 @@ fn turn_result_total_usage_sums_parent_and_children() {
 }
 
 // =============================================================================
-// Phase-A: facade build store peer-coherence (durable store consistency)
+// Explicit runtime dependency wiring
 // =============================================================================
 //
-// `LashCore::builder().build()` validates store peer-coherence only — it never
-// inspects the effect controller (the build-time controller is inline by
-// construction; the durable controller is per-invocation). These tests use the
-// real durable backends so the durability tier each store reports is the
-// production tier, not a faked one:
-//
-// - durable session store factory => `lash_sqlite_store::SqliteSessionStoreFactory`
-// - durable attachment store       => `lash::FileAttachmentStore`
-// - durable artifact store         => `lash_sqlite_store::Store`
-// - durable process registry       => `lash_sqlite_store::SqliteProcessRegistry`
-// - durable trigger store       => `lash_sqlite_store::SqliteTriggerStore`
-//
-// Ephemeral peers are the named in-memory implementations.
-
-/// An RLM builder with a model + provider already named, ready for the
-/// peer-coherence dependency under test. The artifact store rides the RLM
-/// protocol factory (ADR-0013): its durability tier surfaces through the
-/// contributed Lashlang process engine during the store-peer coherence sweep.
+/// An RLM builder with a model + provider already named, ready for the explicit
+/// dependency wiring under test.
 fn peer_coherence_builder(
     artifact_store: Arc<dyn lash_lashlang_runtime::LashlangArtifactStore>,
 ) -> crate::core::LashCoreBuilder {
@@ -1933,8 +1917,7 @@ fn peer_coherence_builder(
     .model(mock_model_spec())
 }
 
-/// The named in-memory (Inline-tier) Lashlang artifact store used by
-/// peer-coherence tests that do not exercise the artifact facet itself.
+/// The named in-memory Lashlang artifact store used by builder tests.
 fn inline_artifact_store() -> Arc<dyn lash_lashlang_runtime::LashlangArtifactStore> {
     Arc::new(lash_lashlang_runtime::InMemoryLashlangArtifactStore::new())
 }
@@ -1989,30 +1972,6 @@ async fn durable_trigger_store(dir: &std::path::Path) -> Arc<dyn lash_core::Trig
 }
 
 #[tokio::test]
-async fn durable_session_store_rejects_ephemeral_attachment_store_at_build() {
-    let dir = tempfile::tempdir().expect("tempdir");
-    let result = explicit_ephemeral_facets(peer_coherence_builder(
-        durable_artifact_store(dir.path()).await,
-    ))
-    .store_factory(durable_session_store_factory(dir.path()))
-    // Explicit ephemeral attachment store overrides the in-memory default
-    // so the coherence check reads its Inline tier.
-    .attachment_store(Arc::new(lash_core::InMemoryAttachmentStore::new()))
-    .build();
-    let err = expect_build_error(
-        result,
-        "durable session store + ephemeral attachment store must be rejected",
-    );
-
-    assert!(matches!(
-        err,
-        EmbedError::DurableStorePeerRequired {
-            facet: "attachment store"
-        }
-    ));
-}
-
-#[tokio::test]
 async fn builder_requires_explicit_process_env_store_at_build() {
     let result = peer_coherence_builder(inline_artifact_store())
         .effect_host(Arc::new(lash_core::InlineEffectHost::default()))
@@ -2024,82 +1983,6 @@ async fn builder_requires_explicit_process_env_store_at_build() {
     );
 
     assert!(matches!(err, EmbedError::MissingProcessEnvStore));
-}
-
-#[tokio::test]
-async fn durable_session_store_rejects_ephemeral_process_env_store_at_build() {
-    let dir = tempfile::tempdir().expect("tempdir");
-    let result = explicit_ephemeral_facets(peer_coherence_builder(
-        durable_artifact_store(dir.path()).await,
-    ))
-    .store_factory(durable_session_store_factory(dir.path()))
-    .attachment_store(durable_attachment_store(dir.path()))
-    .build();
-    let err = expect_build_error(
-        result,
-        "durable session store + ephemeral process env store must be rejected",
-    );
-
-    assert!(matches!(
-        err,
-        EmbedError::DurableStorePeerRequired {
-            facet: "process execution environment store"
-        }
-    ));
-}
-
-#[tokio::test]
-async fn durable_session_store_rejects_ephemeral_artifact_store_at_build() {
-    let dir = tempfile::tempdir().expect("tempdir");
-    // Explicit ephemeral (Inline) artifact store rides the RLM factory; the
-    // durable attachment + process-env peers clear their facets first, so the
-    // contributed Lashlang process engine's Inline tier is the one that fails.
-    let result = explicit_ephemeral_facets(peer_coherence_builder(inline_artifact_store()))
-        .store_factory(durable_session_store_factory(dir.path()))
-        .attachment_store(durable_attachment_store(dir.path()))
-        .process_env_store(durable_process_env_store(dir.path()).await)
-        .build();
-    let err = expect_build_error(
-        result,
-        "durable session store + ephemeral artifact store must be rejected",
-    );
-
-    // The artifact tier now surfaces through the contributed process engine, so
-    // the violated facet is the engine kind (ADR-0013), not "artifact store".
-    assert!(matches!(
-        err,
-        EmbedError::DurableStorePeerRequired {
-            facet: lash_lashlang_runtime::LASHLANG_ENGINE_KIND
-        }
-    ));
-}
-
-#[tokio::test]
-async fn durable_process_registry_rejects_missing_durable_store_factory_at_build() {
-    // A durable process registry is meaningless without a durable session store
-    // behind it. With no store factory (the in-memory default), the session
-    // store tier is unknown/non-durable, so the registry must be rejected.
-    let dir = tempfile::tempdir().expect("tempdir");
-    let registry = Arc::new(
-        lash_sqlite_store::SqliteProcessRegistry::open(
-            &dir.path().join("processes.db"),
-            dir.path().join("sessions"),
-        )
-        .await
-        .expect("open durable registry"),
-    );
-    let result = explicit_ephemeral_facets(peer_coherence_builder(inline_artifact_store()))
-        .process_registry(registry)
-        .build();
-    let err = expect_build_error(
-        result,
-        "durable process registry without durable store factory must be rejected",
-    );
-
-    assert!(matches!(
-        err,
-        EmbedError::DurableProcessRegistryRequiresStoreFactory
-    ));
 }
 
 #[tokio::test]
@@ -2128,46 +2011,9 @@ async fn all_durable_stores_build_successfully() -> Result<()> {
 }
 
 #[tokio::test]
-async fn durable_process_registry_rejects_ephemeral_trigger_store_at_build() {
-    let dir = tempfile::tempdir().expect("tempdir");
-    let registry = Arc::new(
-        lash_sqlite_store::SqliteProcessRegistry::open(
-            &dir.path().join("processes.db"),
-            dir.path().join("sessions"),
-        )
-        .await
-        .expect("open durable registry"),
-    );
-    let result = peer_coherence_builder(durable_artifact_store(dir.path()).await)
-        .effect_host(Arc::new(lash_core::InlineEffectHost::default()))
-        .store_factory(durable_session_store_factory(dir.path()))
-        .attachment_store(durable_attachment_store(dir.path()))
-        .process_env_store(durable_process_env_store(dir.path()).await)
-        .process_registry(registry)
-        .build();
-    let err = expect_build_error(
-        result,
-        "durable process registry without durable trigger store must be rejected",
-    );
-
-    assert!(matches!(
-        err,
-        EmbedError::DurableStorePeerRequired {
-            facet: "trigger store"
-        }
-    ));
-}
-
-#[tokio::test]
 async fn durable_registry_with_only_child_store_factory_builds() -> Result<()> {
-    // C2 regression: the CLI wires a durable process registry + a durable *child*
-    // store factory (managed child sessions) and NO root `store_factory`. Since
-    // `build()` installs `child_store_factory.or(store_factory)` as the session
-    // store, this wiring is durable end-to-end and must build. The coherence
-    // guard and the work-runner resolver therefore have to read that same
-    // effective factory; reading `store_factory` alone wrongly rejected it with
-    // `DurableProcessRegistryRequiresStoreFactory` even though `build()` would
-    // wire the child factory durably.
+    // The CLI can wire a child store factory without a root store factory.
+    // The process work runner must resolve the same effective factory.
     let dir = tempfile::tempdir().expect("tempdir");
     let registry = Arc::new(
         lash_sqlite_store::SqliteProcessRegistry::open(
@@ -2190,10 +2036,8 @@ async fn durable_registry_with_only_child_store_factory_builds() -> Result<()> {
 
 #[tokio::test]
 async fn explicit_ephemeral_facets_build_successfully() -> Result<()> {
-    // The durable-first guard must not regress inline/in-memory hosts: an
-    // all-ephemeral build (the named in-memory implementations) succeeds,
-    // including the explicit in-memory session store factory that backs
-    // ephemeral process execution.
+    // An all-in-memory build succeeds, including the explicit session store
+    // factory that backs process execution.
     explicit_ephemeral_facets(peer_coherence_builder(inline_artifact_store()))
         .store_factory(Arc::new(lash_core::InMemorySessionStoreFactory::new()))
         .process_registry(Arc::new(TestLocalProcessRegistry::default()))

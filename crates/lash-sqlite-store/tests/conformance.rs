@@ -11,11 +11,11 @@ use lash_core::testing::conformance::{
     ReopenableProcessRegistry, ReopenableRuntimePersistence, ReopenableTriggerStore,
 };
 use lash_core::{
-    AwaitEventKey, AwaitEventResolver, AwaitEventWaitIdentity, DurabilityTier, EffectHost,
-    ExecutionScope, ProcessExecutionEnvStore, ProcessRegistry, Resolution, ResolveOutcome,
-    RuntimeEffectCommand, RuntimeEffectController, RuntimeEffectControllerError,
-    RuntimeEffectEnvelope, RuntimeEffectKind, RuntimeEffectLocalExecutor, RuntimeEffectOutcome,
-    RuntimeInvocation, RuntimePersistence, SessionStoreFactory, TriggerStore,
+    AwaitEventKey, AwaitEventResolver, AwaitEventWaitIdentity, EffectHost, ExecutionScope,
+    ProcessExecutionEnvStore, ProcessRegistry, Resolution, ResolveOutcome, RuntimeEffectCommand,
+    RuntimeEffectController, RuntimeEffectControllerError, RuntimeEffectEnvelope,
+    RuntimeEffectKind, RuntimeEffectLocalExecutor, RuntimeEffectOutcome, RuntimeInvocation,
+    RuntimePersistence, SessionStoreFactory, TriggerStore,
 };
 use lash_sqlite_store::{
     SqliteEffectHost, SqliteEffectReplayOptions, SqliteProcessRegistry,
@@ -235,16 +235,13 @@ async fn sqlite_process_registry_rejects_pre_unit_external_owner_schema_before_s
 #[tokio::test]
 async fn sqlite_session_store_factory_satisfies_conformance() {
     let dirs = Arc::new(Mutex::new(Vec::new()));
-    lash_core::testing::conformance::session_store_factory(
-        || {
-            let dir = tempfile::tempdir().expect("tempdir");
-            let factory = Arc::new(SqliteSessionStoreFactory::new(dir.path()))
-                as Arc<dyn SessionStoreFactory>;
-            dirs.lock().expect("dirs lock").push(dir);
-            factory
-        },
-        DurabilityTier::Durable,
-    )
+    lash_core::testing::conformance::session_store_factory(|| {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let factory =
+            Arc::new(SqliteSessionStoreFactory::new(dir.path())) as Arc<dyn SessionStoreFactory>;
+        dirs.lock().expect("dirs lock").push(dir);
+        factory
+    })
     .await;
 }
 
@@ -350,16 +347,13 @@ async fn sqlite_store_uses_injected_clock_for_expiry() {
 #[tokio::test]
 async fn sqlite_trigger_store_satisfies_conformance() {
     let dirs = Arc::new(Mutex::new(Vec::new()));
-    lash_core::testing::conformance::trigger_store_reopenable(
-        || {
-            let path = fresh_db_path(&dirs, "triggers.db");
-            ReopenableTriggerStore {
-                open: open_trigger_store(&path),
-                reopen: open_trigger_store(&path),
-            }
-        },
-        DurabilityTier::Durable,
-    )
+    lash_core::testing::conformance::trigger_store_reopenable(|| {
+        let path = fresh_db_path(&dirs, "triggers.db");
+        ReopenableTriggerStore {
+            open: open_trigger_store(&path),
+            reopen: open_trigger_store(&path),
+        }
+    })
     .await;
 }
 
@@ -519,12 +513,36 @@ fn raw_count(conn: &rusqlite::Connection, sql: &str, name: &str) -> i64 {
 
 #[tokio::test]
 async fn sqlite_effect_host_satisfies_scope_conformance() {
-    lash_core::testing::conformance::effect_host(|| {
-        Arc::new(sync_await(async {
-            SqliteEffectHost::memory().await.expect("effect host")
+    let dir = tempfile::tempdir().expect("tempdir");
+    let path = dir.path().join("effect-host.db");
+    lash_core::testing::conformance::effect_host(move || {
+        let path = path.clone();
+        Arc::new(sync_await(async move {
+            SqliteEffectHost::open(&path).await.expect("effect host")
         })) as Arc<dyn EffectHost>
     })
     .await;
+}
+
+#[tokio::test]
+async fn sqlite_effect_host_rejects_non_file_backed_path_spellings() {
+    for path in [
+        "",
+        ":memory:",
+        "file::memory:?cache=shared",
+        "file:temporary",
+    ] {
+        let error = match SqliteEffectHost::open(Path::new(path)).await {
+            Ok(_) => panic!("effect hosts must reject non-file-backed path {path:?}"),
+            Err(error) => error,
+        };
+        assert!(
+            error
+                .to_string()
+                .contains("requires a file-backed database path"),
+            "unexpected error for {path:?}: {error}"
+        );
+    }
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]

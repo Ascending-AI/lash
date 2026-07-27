@@ -274,10 +274,6 @@ impl lashlang::LashlangArtifactStore for Store {
 
 #[async_trait::async_trait]
 impl lash_core::ProcessExecutionEnvStore for Store {
-    fn durability_tier(&self) -> DurabilityTier {
-        DurabilityTier::Durable
-    }
-
     async fn put_process_execution_env(
         &self,
         env_ref: &lash_core::ProcessExecutionEnvRef,

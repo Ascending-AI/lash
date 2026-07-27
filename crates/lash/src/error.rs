@@ -25,14 +25,6 @@ pub enum EmbedError {
     #[error("durable process worker requires a LashCore store factory")]
     MissingProcessWorkerStoreFactory,
     #[error(
-        "durable session store requires a durable {facet}; an ephemeral {facet} cannot back a durable session store"
-    )]
-    DurableStorePeerRequired { facet: &'static str },
-    #[error(
-        "durable process registry requires a durable session store factory; call .store_factory(...) with a durable store"
-    )]
-    DurableProcessRegistryRequiresStoreFactory,
-    #[error(
         "a process registry is configured for the default inline process work runner but no session store factory is wired; the runner rebuilds a session runtime per process and cannot do so without one. Wire .store_factory(...) - InMemorySessionStoreFactory::new() for ephemeral process execution, or a durable factory - or use .process_work_driver(...) for an externally driven durable runner."
     )]
     ProcessRegistryRequiresStoreFactory,
@@ -132,7 +124,7 @@ impl EmbedError {
     ///   the host changes its wiring;
     /// - [`RuntimeErrorCode`](lash_core::RuntimeErrorCode) wiring codes:
     ///   `MissingExecutionScopeId`, `ExecutionScopeTurnIdMismatch`,
-    ///   `MissingProcessExecutionId`, `DurableStoreRequired`,
+    ///   `MissingProcessExecutionId`,
     ///   `DurableEffectLiveProtocolExtension`,
     ///   `DurableEffectLivePluginInput`;
     /// - session provider-configuration errors (`ProviderMismatch`,
@@ -148,8 +140,6 @@ impl EmbedError {
             | Self::MissingProcessEnvStore
             | Self::StoreSessionMismatch { .. }
             | Self::MissingProcessWorkerStoreFactory
-            | Self::DurableStorePeerRequired { .. }
-            | Self::DurableProcessRegistryRequiresStoreFactory
             | Self::ProcessRegistryRequiresStoreFactory
             | Self::MissingProcessRegistry
             | Self::ProcessExecutionConcurrency(_)
@@ -162,7 +152,6 @@ impl EmbedError {
                 RuntimeErrorCode::MissingExecutionScopeId
                     | RuntimeErrorCode::ExecutionScopeTurnIdMismatch
                     | RuntimeErrorCode::MissingProcessExecutionId
-                    | RuntimeErrorCode::DurableStoreRequired { .. }
                     | RuntimeErrorCode::DurableEffectLiveProtocolExtension
                     | RuntimeErrorCode::DurableEffectLivePluginInput
             ),
@@ -218,9 +207,6 @@ mod tests {
         for err in [
             EmbedError::MissingProtocolPlugin,
             EmbedError::MissingEffectHost,
-            runtime_error(RuntimeErrorCode::DurableStoreRequired {
-                facet: lash_core::DurableStoreFacet::SessionStore,
-            }),
             runtime_error(RuntimeErrorCode::MissingExecutionScopeId),
         ] {
             assert!(err.is_terminal(), "{err}");

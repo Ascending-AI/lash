@@ -74,10 +74,6 @@ fn sqlite_queued_work_claim_candidates_sql(boundary: QueuedWorkClaimBoundary) ->
 
 #[async_trait::async_trait]
 impl SessionCommitStore for Store {
-    fn durability_tier(&self) -> DurabilityTier {
-        DurabilityTier::Durable
-    }
-
     async fn load_session(
         &self,
         scope: SessionReadScope,

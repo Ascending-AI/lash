@@ -175,7 +175,7 @@ pub trait ProcessRunHandle: Send + Sync {
 ///
 /// Delegates to [`DurableProcessWorker::drive_pending_processes`], the existing
 /// `list_non_terminal -> claim lease -> run -> complete -> release` loop, so the
-/// inline tier reuses the same coordination point as the durable tier.
+/// inline execution reuses the same coordination point as controller-owned execution.
 pub struct InlineProcessRunHandle {
     worker: DurableProcessWorker,
 }

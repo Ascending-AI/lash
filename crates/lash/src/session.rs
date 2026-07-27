@@ -495,9 +495,8 @@ impl LashSession {
     ///
     /// The request is compiled onto the deployment's keyed-promise control
     /// seam. An inline effect host is process-local; another process or a
-    /// replayed owner can observe the request only with a durable engine
-    /// deployment. The returned receipt exposes that durability tier so hosts
-    /// can gate their UX. `origin` is opaque host-domain data that Lash records
+    /// replayed owner can observe the request only with a controller-owned
+    /// replay deployment. `origin` is opaque host-domain data that Lash records
     /// without interpretation. Detached effects are not guaranteed to stop.
     /// `turn_id` is routing identity, not authorization; hosts must authorize
     /// callers before invoking this API.

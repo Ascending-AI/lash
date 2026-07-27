@@ -6,13 +6,6 @@ use serde::{Deserialize, Serialize};
 use crate::registry_errors::{RemoteProtocolError, require_non_empty};
 use crate::{REMOTE_PROTOCOL_VERSION, ensure_protocol_version};
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[serde(rename_all = "snake_case")]
-pub enum RemoteTurnControlDurabilityTier {
-    Inline,
-    Durable,
-}
-
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct RemoteTurnCancellationEvidence {
     pub request_id: String,
@@ -84,7 +77,6 @@ pub struct RemoteTurnCancelReceipt {
     pub protocol_version: u32,
     pub session_id: String,
     pub turn_id: String,
-    pub durability_tier: RemoteTurnControlDurabilityTier,
     pub outcome: RemoteTurnCancelOutcome,
 }
 
@@ -92,14 +84,12 @@ impl RemoteTurnCancelReceipt {
     pub fn new(
         session_id: impl Into<String>,
         turn_id: impl Into<String>,
-        durability_tier: RemoteTurnControlDurabilityTier,
         outcome: RemoteTurnCancelOutcome,
     ) -> Self {
         Self {
             protocol_version: REMOTE_PROTOCOL_VERSION,
             session_id: session_id.into(),
             turn_id: turn_id.into(),
-            durability_tier,
             outcome,
         }
     }

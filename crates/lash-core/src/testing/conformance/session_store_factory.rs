@@ -1,18 +1,17 @@
 //! [`SessionStoreFactory`](crate::SessionStoreFactory) conformance: create,
-//! reopen, delete, session metadata, and declared durability.
+//! reopen, delete, and session metadata.
 
 use super::*;
 
 /// Run the [`SessionStoreFactory`](crate::SessionStoreFactory) conformance
 /// suite against the backend produced by `make`. `make` must return a fresh,
 /// empty factory on each call.
-pub async fn session_store_factory<F>(make: F, expected_tier: DurabilityTier)
+pub async fn session_store_factory<F>(make: F)
 where
     F: Fn() -> Arc<dyn crate::SessionStoreFactory>,
 {
-    session_store_factory_reports_declared_tier(make(), expected_tier);
     session_store_factory_open_missing_returns_none(make()).await;
-    session_store_factory_create_seeds_and_reopens_meta(make(), expected_tier).await;
+    session_store_factory_create_seeds_and_reopens_meta(make()).await;
     session_store_factory_create_is_idempotent(make()).await;
     attachment_ownership_isolation(make()).await;
     session_store_factory_delete_removes_store_and_is_idempotent(make()).await;
@@ -275,17 +274,6 @@ fn assert_meta_matches_request(
     );
 }
 
-fn session_store_factory_reports_declared_tier(
-    factory: Arc<dyn crate::SessionStoreFactory>,
-    expected: DurabilityTier,
-) {
-    assert_eq!(
-        factory.durability_tier(),
-        expected,
-        "factory durability tier must match the backend"
-    );
-}
-
 async fn session_store_factory_open_missing_returns_none(
     factory: Arc<dyn crate::SessionStoreFactory>,
 ) {
@@ -306,7 +294,6 @@ async fn session_store_factory_open_missing_returns_none(
 
 async fn session_store_factory_create_seeds_and_reopens_meta(
     factory: Arc<dyn crate::SessionStoreFactory>,
-    expected_tier: DurabilityTier,
 ) {
     let relation = crate::SessionRelation::Child {
         parent_session_id: "parent-session".to_string(),
@@ -318,11 +305,6 @@ async fn session_store_factory_create_seeds_and_reopens_meta(
         .create_store(&request)
         .await
         .expect("create session store");
-    assert_eq!(
-        created.durability_tier(),
-        expected_tier,
-        "created store durability tier must match the factory"
-    );
     let created_meta = created
         .load_session_meta()
         .await

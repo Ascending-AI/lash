@@ -5,9 +5,9 @@ use lash_core::testing::conformance::{
     ReopenableProcessRegistry, ReopenableRuntimePersistence, ReopenableTriggerStore,
 };
 use lash_core::{
-    AwaitEventKey, AwaitEventResolver, AwaitEventWaitIdentity, DurabilityTier, EffectHost,
-    ExecutionScope, ProcessExecutionEnvStore, ProcessRegistry, Resolution, ResolveOutcome,
-    RuntimePersistence, SessionStoreFactory, TriggerStore,
+    AwaitEventKey, AwaitEventResolver, AwaitEventWaitIdentity, EffectHost, ExecutionScope,
+    ProcessExecutionEnvStore, ProcessRegistry, Resolution, ResolveOutcome, RuntimePersistence,
+    SessionStoreFactory, TriggerStore,
 };
 use lash_postgres_store::{
     PostgresEffectReplayOptions, PostgresRuntimeEffectController, PostgresStorage,
@@ -148,16 +148,13 @@ async fn postgres_session_store_factory_satisfies_conformance_when_configured() 
         return;
     };
     let storage = Arc::new(storage);
-    lash_core::testing::conformance::session_store_factory(
-        || {
-            let storage = Arc::clone(&storage);
-            sync_await(async move {
-                reset(&storage).await;
-                Arc::new(storage.session_store_factory()) as Arc<dyn SessionStoreFactory>
-            })
-        },
-        DurabilityTier::Durable,
-    )
+    lash_core::testing::conformance::session_store_factory(|| {
+        let storage = Arc::clone(&storage);
+        sync_await(async move {
+            reset(&storage).await;
+            Arc::new(storage.session_store_factory()) as Arc<dyn SessionStoreFactory>
+        })
+    })
     .await;
 }
 
@@ -696,17 +693,14 @@ async fn postgres_trigger_store_satisfies_conformance_when_configured() {
         return;
     };
     let storage = Arc::new(storage);
-    lash_core::testing::conformance::trigger_store_reopenable(
-        || {
-            let storage = Arc::clone(&storage);
-            sync_await(async move {
-                reset(&storage).await;
-                let open = Arc::new(storage.trigger_store()) as Arc<dyn TriggerStore>;
-                let reopen = Arc::new(storage.trigger_store()) as Arc<dyn TriggerStore>;
-                ReopenableTriggerStore { open, reopen }
-            })
-        },
-        DurabilityTier::Durable,
-    )
+    lash_core::testing::conformance::trigger_store_reopenable(|| {
+        let storage = Arc::clone(&storage);
+        sync_await(async move {
+            reset(&storage).await;
+            let open = Arc::new(storage.trigger_store()) as Arc<dyn TriggerStore>;
+            let reopen = Arc::new(storage.trigger_store()) as Arc<dyn TriggerStore>;
+            ReopenableTriggerStore { open, reopen }
+        })
+    })
     .await;
 }

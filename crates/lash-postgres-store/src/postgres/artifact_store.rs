@@ -185,10 +185,6 @@ impl lashlang::LashlangArtifactStore for PostgresLashlangArtifactStore {
 
 #[async_trait::async_trait]
 impl lash_core::ProcessExecutionEnvStore for PostgresLashlangArtifactStore {
-    fn durability_tier(&self) -> lash_core::DurabilityTier {
-        lash_core::DurabilityTier::Durable
-    }
-
     async fn put_process_execution_env(
         &self,
         env_ref: &lash_core::ProcessExecutionEnvRef,

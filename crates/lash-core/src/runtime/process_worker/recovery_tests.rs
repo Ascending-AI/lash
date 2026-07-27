@@ -5,7 +5,7 @@ use std::time::Duration;
 use super::*;
 use crate::TestProcessRegistryWriteExt;
 use crate::{
-    AbandonRequest, AttachmentStore, DurabilityTier, LeaseOwnerIdentity, LeaseOwnerLiveness,
+    AbandonRequest, AttachmentStore, LeaseOwnerIdentity, LeaseOwnerLiveness,
     ProcessExecutionEnvRef, ProcessInput, ProcessListFilter, ProcessRegistration, ProcessStarted,
     ProcessStatus, TestLocalProcessRegistry, TriggerStore,
 };
@@ -53,10 +53,6 @@ struct TestSessionStoreFactory;
 
 #[async_trait::async_trait]
 impl SessionStoreFactory for TestSessionStoreFactory {
-    fn durability_tier(&self) -> DurabilityTier {
-        DurabilityTier::Inline
-    }
-
     async fn create_store(
         &self,
         _request: &crate::SessionStoreCreateRequest,
@@ -232,10 +228,6 @@ fn inline_worker_with_trigger_store(
 
     #[async_trait::async_trait]
     impl SessionStoreFactory for InlineSessionStoreFactory {
-        fn durability_tier(&self) -> DurabilityTier {
-            DurabilityTier::Inline
-        }
-
         async fn create_store(
             &self,
             _request: &crate::SessionStoreCreateRequest,

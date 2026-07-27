@@ -2,10 +2,6 @@ use crate::*;
 
 #[async_trait::async_trait]
 impl TriggerStore for PostgresTriggerStore {
-    fn durability_tier(&self) -> DurabilityTier {
-        DurabilityTier::Durable
-    }
-
     async fn execute_command(
         &self,
         operation_id: &str,

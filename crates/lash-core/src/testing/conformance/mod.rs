@@ -70,7 +70,7 @@ use crate::{
     SessionRevision, SlotPolicy, StoreError, TokenLedgerEntry, TokenUsage, ToolState, TurnActivity,
     TurnEvent,
 };
-use crate::{AttachmentStore, AttachmentStoreError, AttachmentStorePersistence, DurabilityTier};
+use crate::{AttachmentStore, AttachmentStoreError, AttachmentStorePersistence};
 use lash_sansio::{AttachmentCreateMeta, AttachmentTypeMetadata, MediaType};
 
 #[cfg(test)]
@@ -131,13 +131,10 @@ mod tests {
 
     #[tokio::test]
     async fn in_memory_process_execution_env_store_satisfies_conformance() {
-        process_execution_env_store(
-            || {
-                Arc::new(crate::InMemoryProcessExecutionEnvStore::new())
-                    as Arc<dyn crate::ProcessExecutionEnvStore>
-            },
-            DurabilityTier::Inline,
-        )
+        process_execution_env_store(|| {
+            Arc::new(crate::InMemoryProcessExecutionEnvStore::new())
+                as Arc<dyn crate::ProcessExecutionEnvStore>
+        })
         .await;
     }
 
@@ -145,10 +142,9 @@ mod tests {
     async fn in_memory_trigger_store_satisfies_conformance() {
         // Independent in-memory instances cannot reopen shared state, so the
         // durable-only `trigger_store_reopenable` vector is genuinely N/A.
-        trigger_store(
-            || Arc::new(crate::InMemoryTriggerStore::default()) as Arc<dyn crate::TriggerStore>,
-            DurabilityTier::Inline,
-        )
+        trigger_store(|| {
+            Arc::new(crate::InMemoryTriggerStore::default()) as Arc<dyn crate::TriggerStore>
+        })
         .await;
     }
 
@@ -187,13 +183,10 @@ mod tests {
 
     #[tokio::test]
     async fn in_memory_session_store_factory_satisfies_conformance() {
-        session_store_factory(
-            || {
-                Arc::new(crate::InMemorySessionStoreFactory::new())
-                    as Arc<dyn crate::SessionStoreFactory>
-            },
-            DurabilityTier::Inline,
-        )
+        session_store_factory(|| {
+            Arc::new(crate::InMemorySessionStoreFactory::new())
+                as Arc<dyn crate::SessionStoreFactory>
+        })
         .await;
     }
 

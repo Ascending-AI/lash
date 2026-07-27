@@ -12,15 +12,14 @@ pub const COLD_INSTANCE_AWAIT_EVENT_VECTOR_COUNT: usize = 8;
 
 /// Run the durable multi-host AwaitEvent suite.
 ///
-/// Inline-tier hosts are intentionally ineligible. Store and engine adapters
-/// call this only after they can reopen independent host objects over one
-/// substrate.
+/// Hosts with runtime-owned replay are intentionally ineligible. Store and
+/// engine adapters call this only after they can reopen independent host
+/// objects over one substrate.
 pub async fn effect_host_await_events_cold_instance<F>(make: F)
 where
     F: Fn() -> Arc<dyn EffectHost>,
 {
     let prefix = format!("cold-await-{}", uuid::Uuid::new_v4());
-    cold_tier_is_durable(make()).await;
     cold_mint_resolve_observe_all_identities(&make, &prefix).await;
     cold_first_writer_wins(&make, &prefix).await;
     cold_replayed_parked_owner(&make, &prefix).await;
@@ -122,14 +121,6 @@ where
                 .expect("tombstone after the first cold redrive finalized");
         }
     }
-}
-
-async fn cold_tier_is_durable(host: Arc<dyn EffectHost>) {
-    assert_eq!(
-        host.durability_tier(),
-        DurabilityTier::Durable,
-        "cold-instance conformance is a gate for Durable hosts; Inline is exempt"
-    );
 }
 
 async fn cold_mint_resolve_observe_all_identities<F>(make: &F, prefix: &str)

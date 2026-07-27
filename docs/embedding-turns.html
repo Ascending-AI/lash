@@ -235,7 +235,7 @@ impl TurnActivitySink for ChannelSink {
             <p>Cancellation is cooperative and first-class: a cancelled turn finishes with <code>TurnOutcome::Stopped(TurnStop::Cancelled)</code>, commits like any other turn, and leaves the session ready for the next turn. In-flight provider streaming is aborted, not awaited.</p>
           </div>
           <p>Host-facing controls retain the stable turn id and call <code>LashSession::request_turn_cancel</code> or a deployment-level <code>TurnWorkDriver::request_cancel</code>. The keyed-promise gate is exact-scope and replay-safe, and <code>await_terminal</code> attaches idempotently to the authoritative result. Restate deployments use <code>RestateTurnDeployment</code> and <code>LashDurableWaitWorkflow</code>, not the Admin API. Cancellation is cooperative: detached effects are not guaranteed to stop. Session and turn ids are routing identity, not authorization.</p>
-          <pre data-lang="rust" data-snippet="embedding_turns#cancel-turn"><code>use lash::{DurabilityTier, TurnAddress, TurnOutcome, TurnStop};
+          <pre data-lang="rust" data-snippet="embedding_turns#cancel-turn"><code>use lash::{TurnAddress, TurnOutcome, TurnStop};
 
 let turn_id = "incident-summary-42";
 let stream = session
@@ -256,9 +256,7 @@ let receipt = session
         Some("operator pressed Stop".to_string()),
     )
     .await?;
-if receipt.durability_tier == DurabilityTier::Inline {
-    // Do not present this receipt as cross-process delivery proof.
-}
+let _receipt = receipt;
 
 let result = stream.finish().await?;
 if matches!(result.outcome, TurnOutcome::Stopped(TurnStop::Cancelled)) {

@@ -25,8 +25,8 @@ impl RecordingDurableEffectController {
 }
 
 impl lash_core::AwaitEventResolver for RecordingDurableEffectController {
-    fn durability_tier(&self) -> DurabilityTier {
-        DurabilityTier::Durable
+    fn replay_ownership(&self) -> lash_core::EffectReplayOwnership {
+        lash_core::EffectReplayOwnership::Controller
     }
 }
 
@@ -157,10 +157,6 @@ struct DurableInMemoryProcessEnvStore {
 
 #[async_trait]
 impl lash_core::ProcessExecutionEnvStore for DurableInMemoryProcessEnvStore {
-    fn durability_tier(&self) -> DurabilityTier {
-        DurabilityTier::Durable
-    }
-
     async fn put_process_execution_env(
         &self,
         env_ref: &lash_core::ProcessExecutionEnvRef,
@@ -181,8 +177,8 @@ impl lash_core::ProcessExecutionEnvStore for DurableInMemoryProcessEnvStore {
 struct DurableNoopEffectHost;
 
 impl lash_core::AwaitEventResolver for DurableNoopEffectHost {
-    fn durability_tier(&self) -> DurabilityTier {
-        DurabilityTier::Durable
+    fn replay_ownership(&self) -> lash_core::EffectReplayOwnership {
+        lash_core::EffectReplayOwnership::Controller
     }
 }
 

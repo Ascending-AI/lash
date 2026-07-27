@@ -451,15 +451,6 @@ pub trait ProcessEngine: Send + Sync {
         let _ = payload;
         ProcessIdentity::new(self.kind())
     }
-
-    /// Durability tier this engine provides. Mirrors
-    /// [`EffectHost::durability_tier`](crate::runtime::AwaitEventResolver::durability_tier):
-    /// an engine that only persists inline reports [`DurabilityTier::Inline`](crate::DurabilityTier::Inline),
-    /// and the store-peer coherence validator rejects wiring it behind a durable
-    /// session store. Defaults to `Inline`.
-    fn durability_tier(&self) -> crate::DurabilityTier {
-        crate::DurabilityTier::Inline
-    }
 }
 
 #[derive(Clone, Default)]
@@ -501,8 +492,7 @@ impl ProcessEngineRegistry {
         self.engines.get(kind).cloned()
     }
 
-    /// Iterate over every registered engine, used by the store-peer coherence
-    /// validator to sweep engine durability tiers.
+    /// Iterate over every registered engine.
     pub fn engines(&self) -> impl Iterator<Item = &Arc<dyn ProcessEngine>> {
         self.engines.values()
     }

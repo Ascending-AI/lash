@@ -238,10 +238,6 @@ impl ProcessExecutionEnvSpec {
 
 #[async_trait::async_trait]
 pub trait ProcessExecutionEnvStore: Send + Sync {
-    fn durability_tier(&self) -> crate::DurabilityTier {
-        crate::DurabilityTier::Inline
-    }
-
     async fn put_process_execution_env(
         &self,
         env_ref: &ProcessExecutionEnvRef,

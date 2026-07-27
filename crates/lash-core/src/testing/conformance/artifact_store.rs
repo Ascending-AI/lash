@@ -24,15 +24,10 @@ fn sample_env_spec() -> crate::ProcessExecutionEnvSpec {
 
 /// Run the [`crate::ProcessExecutionEnvStore`] contract against the store
 /// produced by `make`. `make` must return a fresh, empty store on each call.
-pub async fn process_execution_env_store<F>(make: F, expected_tier: DurabilityTier)
+pub async fn process_execution_env_store<F>(make: F)
 where
     F: Fn() -> Arc<dyn crate::ProcessExecutionEnvStore>,
 {
-    assert_eq!(
-        make().durability_tier(),
-        expected_tier,
-        "process execution env store must report its declared durability tier"
-    );
     process_env_round_trips(make()).await;
     process_env_overwrite(make()).await;
 }
@@ -43,7 +38,7 @@ pub async fn process_execution_env_store_reopenable<F>(make: F)
 where
     F: Fn() -> ReopenableProcessExecutionEnvStore,
 {
-    process_execution_env_store(|| make().open, DurabilityTier::Durable).await;
+    process_execution_env_store(|| make().open).await;
     process_env_survives_reopen(make()).await;
 }
 

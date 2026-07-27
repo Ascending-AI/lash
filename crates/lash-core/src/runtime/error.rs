@@ -1,31 +1,3 @@
-/// Durable store facet that a durable execution path requires but the host
-/// wired as ephemeral.
-///
-/// Names the failing facet so a [`RuntimeErrorCode::DurableStoreRequired`]
-/// can be matched and serialized losslessly per facet.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub enum DurableStoreFacet {
-    AttachmentStore,
-    ProcessEnvStore,
-    SessionStore,
-    ProcessRegistry,
-    TriggerStore,
-}
-
-impl DurableStoreFacet {
-    /// Stable per-facet error-code string (the full
-    /// `durable_store_required:*` code surfaced in traces and host errors).
-    fn as_code(self) -> &'static str {
-        match self {
-            Self::AttachmentStore => "durable_store_required:attachment_store",
-            Self::ProcessEnvStore => "durable_store_required:process_env_store",
-            Self::SessionStore => "durable_store_required:session_store",
-            Self::ProcessRegistry => "durable_store_required:process_registry",
-            Self::TriggerStore => "durable_store_required:trigger_store",
-        }
-    }
-}
-
 /// Stable runtime error code.
 ///
 /// Codes serialize as the same snake_case strings exposed in traces and host
@@ -44,11 +16,6 @@ pub enum RuntimeErrorCode {
     /// Process execution identity is the persisted `process_id`; a retry that
     /// cannot present that stable id has lost its idempotency anchor.
     MissingProcessExecutionId,
-    /// A durable execution path was wired against an ephemeral store for the
-    /// named facet.
-    DurableStoreRequired {
-        facet: DurableStoreFacet,
-    },
     StoreCommitFailed,
     PluginSessionManager,
     PluginFinalizeTurn,
@@ -73,7 +40,6 @@ impl RuntimeErrorCode {
             Self::SessionExecutionLeaseLost => "session_execution_lease_lost",
             Self::StoreCommitContended => "store_commit_contended",
             Self::MissingProcessExecutionId => "missing_process_execution_id",
-            Self::DurableStoreRequired { facet } => facet.as_code(),
             Self::StoreCommitFailed => "store_commit_failed",
             Self::PluginSessionManager => "plugin_session_manager",
             Self::PluginFinalizeTurn => "plugin_finalize_turn",
@@ -106,21 +72,6 @@ impl From<&str> for RuntimeErrorCode {
             "session_execution_lease_lost" => Self::SessionExecutionLeaseLost,
             "store_commit_contended" => Self::StoreCommitContended,
             "missing_process_execution_id" => Self::MissingProcessExecutionId,
-            "durable_store_required:attachment_store" => Self::DurableStoreRequired {
-                facet: DurableStoreFacet::AttachmentStore,
-            },
-            "durable_store_required:process_env_store" => Self::DurableStoreRequired {
-                facet: DurableStoreFacet::ProcessEnvStore,
-            },
-            "durable_store_required:session_store" => Self::DurableStoreRequired {
-                facet: DurableStoreFacet::SessionStore,
-            },
-            "durable_store_required:process_registry" => Self::DurableStoreRequired {
-                facet: DurableStoreFacet::ProcessRegistry,
-            },
-            "durable_store_required:trigger_store" => Self::DurableStoreRequired {
-                facet: DurableStoreFacet::TriggerStore,
-            },
             "store_commit_failed" => Self::StoreCommitFailed,
             "plugin_session_manager" => Self::PluginSessionManager,
             "plugin_finalize_turn" => Self::PluginFinalizeTurn,
@@ -182,22 +133,6 @@ impl RuntimeError {
         self.code == code
     }
 
-    /// Build the loud error raised when a durable execution path was wired
-    /// against an ephemeral store for `facet`.
-    pub fn durable_store_required(facet: DurableStoreFacet) -> Self {
-        let facet_label = match facet {
-            DurableStoreFacet::AttachmentStore => "attachment store",
-            DurableStoreFacet::ProcessEnvStore => "process env store",
-            DurableStoreFacet::SessionStore => "session store",
-            DurableStoreFacet::ProcessRegistry => "process registry",
-            DurableStoreFacet::TriggerStore => "trigger store",
-        };
-        Self::new(
-            RuntimeErrorCode::DurableStoreRequired { facet },
-            format!("durable effect hosts require a durable {facet_label}"),
-        )
-    }
-
     /// Build the loud error raised when a process (re-)execution is handed an
     /// empty/non-persisted id.
     ///
@@ -222,26 +157,7 @@ impl std::error::Error for RuntimeError {}
 
 #[cfg(test)]
 mod tests {
-    use super::{DurableStoreFacet, RuntimeError, RuntimeErrorCode};
-
-    #[test]
-    fn durable_store_required_round_trips_per_facet() {
-        for facet in [
-            DurableStoreFacet::AttachmentStore,
-            DurableStoreFacet::ProcessEnvStore,
-            DurableStoreFacet::SessionStore,
-            DurableStoreFacet::ProcessRegistry,
-            DurableStoreFacet::TriggerStore,
-        ] {
-            let err = RuntimeError::durable_store_required(facet);
-            let json = serde_json::to_value(&err).expect("serialize runtime error");
-            let decoded: RuntimeError = serde_json::from_value(json).expect("decode runtime error");
-            assert_eq!(
-                decoded.code,
-                RuntimeErrorCode::DurableStoreRequired { facet }
-            );
-        }
-    }
+    use super::{RuntimeError, RuntimeErrorCode};
 
     #[test]
     fn missing_process_execution_id_round_trips() {

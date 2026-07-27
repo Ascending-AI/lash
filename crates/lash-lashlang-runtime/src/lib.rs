@@ -16,17 +16,6 @@ pub use lashlang::{
     LashlangArtifactStore, LashlangHostCatalog, LashlangHostEnvironment, LashlangLanguageFeatures,
 };
 
-/// Map the lashlang language crate's durability tier onto the runtime's
-/// [`lash_core::DurabilityTier`]. The two enums are parallel; this is the single
-/// bridge point between them (the parallel `LashlangDurabilityTier` alias is
-/// gone — process engines self-describe their tier via `lash_core::DurabilityTier`).
-pub fn lashlang_durability_tier(tier: lashlang::DurabilityTier) -> lash_core::DurabilityTier {
-    match tier {
-        lashlang::DurabilityTier::Inline => lash_core::DurabilityTier::Inline,
-        lashlang::DurabilityTier::Durable => lash_core::DurabilityTier::Durable,
-    }
-}
-
 pub const LASHLANG_ENGINE_KIND: &str = "lashlang";
 pub const LASHLANG_TOOL_BINDING_KEY: &str = "lashlang.tool";
 pub const LASHLANG_SURFACE_EXTENSION_ID: &str = "lashlang.surface";
@@ -873,10 +862,6 @@ impl lash_core::ProcessEngine for LashlangProcessEngine {
             Ok(input) => lashlang_process_identity(&input),
             Err(_) => lash_core::ProcessIdentity::new(LASHLANG_ENGINE_KIND),
         }
-    }
-
-    fn durability_tier(&self) -> lash_core::DurabilityTier {
-        lashlang_durability_tier(self.artifact_store.durability_tier())
     }
 }
 

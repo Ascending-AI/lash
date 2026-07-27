@@ -652,9 +652,10 @@ pub fn build_e2e_core(config: E2eCoreConfig) -> Result<lash::LashCore> {
         .store_factory(session_store_factory)
         .attachment_store(config.attachment_store)
         .process_env_store(process_env_store)
-        .effect_host(Arc::new(RestateEffectHost::with_ingress_url(
-            config.restate_ingress_url.clone(),
-        )) as Arc<dyn EffectHost>)
+        .effect_host(
+            Arc::new(RestateEffectHost::new(config.restate_ingress_url.clone()))
+                as Arc<dyn EffectHost>,
+        )
         .trigger_store(trigger_store)
         .process_work_driver(config.process_work_driver)
         // Restate turns must enter through an explicit handler-scoped effect
@@ -1102,7 +1103,7 @@ impl E2eTools {
         let restate_ingress_url = self.restate_ingress_url.clone();
         tokio::spawn(async move {
             tokio::time::sleep(Duration::from_millis(50)).await;
-            let host = RestateEffectHost::with_ingress_url(restate_ingress_url);
+            let host = RestateEffectHost::new(restate_ingress_url);
             let resolution = lash_core::Resolution::Ok(result.clone());
             let outcome = host
                 .resolve_await_event(&completion_key, resolution)

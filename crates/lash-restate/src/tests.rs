@@ -245,7 +245,10 @@ fn restate_effect_name_uses_lash_replay_key() {
 
 #[tokio::test]
 async fn restate_effect_host_satisfies_scope_factory_conformance() {
-    lash_core::testing::conformance::effect_host(|| Arc::new(RestateEffectHost::new())).await;
+    lash_core::testing::conformance::effect_host(|| {
+        Arc::new(RestateEffectHost::new("http://127.0.0.1:8080"))
+    })
+    .await;
 }
 
 #[tokio::test]
@@ -661,10 +664,6 @@ struct DurableMemoryProcessEnvStore {
 
 #[async_trait::async_trait]
 impl lash_core::ProcessExecutionEnvStore for DurableMemoryProcessEnvStore {
-    fn durability_tier(&self) -> lash_core::DurabilityTier {
-        lash_core::DurabilityTier::Durable
-    }
-
     async fn put_process_execution_env(
         &self,
         env_ref: &lash_core::ProcessExecutionEnvRef,
@@ -704,10 +703,6 @@ lash_core::impl_noop_attachment_manifest!(CommitRetryStore);
 // segment delegates to `inner`.
 #[async_trait::async_trait]
 impl lash_core::SessionCommitStore for CommitRetryStore {
-    fn durability_tier(&self) -> lash_core::DurabilityTier {
-        lash_core::DurabilityTier::Durable
-    }
-
     async fn load_session(
         &self,
         _scope: lash_core::SessionReadScope,
@@ -2455,16 +2450,6 @@ async fn restate_session_delete_revokes_current_and_future_waits() {
 }
 
 #[tokio::test]
-async fn restate_effect_host_without_ingress_refuses_session_mutation() {
-    let host = RestateEffectHost::new();
-    let err = host
-        .revoke_await_events_for_session("restate-session")
-        .await
-        .expect_err("deployment host without ingress cannot revoke Restate state");
-    assert_eq!(err.code.as_str(), "restate_await_event_ingress_required");
-}
-
-#[tokio::test]
 async fn restate_effect_host_checks_revocation_then_awaits_resolution() {
     let expected = Resolution::Ok(serde_json::json!({ "answer": "approved" }));
     let scripted = Arc::new(ScriptedHttpTransport::new([
@@ -2481,7 +2466,7 @@ async fn restate_effect_host_checks_revocation_then_awaits_resolution() {
             ),
         },
     ]));
-    let host = RestateEffectHost::with_ingress_url(RestateConnection::with_transport(
+    let host = RestateEffectHost::new(RestateConnection::with_transport(
         "https://restate.example",
         scripted.clone(),
     ));
@@ -4019,7 +4004,7 @@ struct RecordedProcessRun {
     wake_target_session_id: Option<String>,
     tool_effect_id: Option<String>,
     execution_scope_id: String,
-    controller_tier: lash_core::DurabilityTier,
+    controller_replay_ownership: lash_core::EffectReplayOwnership,
 }
 
 #[derive(Default)]
@@ -4051,7 +4036,9 @@ impl RestateProcessRunner for RecordingRunner {
                     .causal_invocation
                     .and_then(|invocation| invocation.effect_id().map(str::to_string)),
                 execution_scope_id: scoped_effect_controller.scope_id().to_string(),
-                controller_tier: scoped_effect_controller.controller().durability_tier(),
+                controller_replay_ownership: scoped_effect_controller
+                    .controller()
+                    .replay_ownership(),
             });
         Ok(ProcessAwaitOutput::Success {
             value: serde_json::json!({"ok": true}),
@@ -4956,7 +4943,7 @@ async fn process_workflow_endpoint_smoke_schedules_runs_and_cancels_process() {
             wake_target_session_id: Some("wake-smoke".to_string()),
             tool_effect_id: Some("tool-smoke".to_string()),
             execution_scope_id: "task-smoke".to_string(),
-            controller_tier: lash_core::DurabilityTier::Durable,
+            controller_replay_ownership: lash_core::EffectReplayOwnership::Controller,
         }]
     );
 
@@ -6282,7 +6269,7 @@ async fn process_workflow_impl_runs_and_cancels_through_runner() {
             wake_target_session_id: Some("wake-session".to_string()),
             tool_effect_id: Some("tool-effect".to_string()),
             execution_scope_id: "task-workflow".to_string(),
-            controller_tier: lash_core::DurabilityTier::Inline,
+            controller_replay_ownership: lash_core::EffectReplayOwnership::Runtime,
         }]
     );
     assert_eq!(
@@ -6662,7 +6649,7 @@ async fn run_registration_abandons_restarted_owner_bound_without_running() {
     // ADR 0019: when the engine re-invokes the workflow for an OwnerBound row
     // whose prior incarnation already recorded `first_started` but left no
     // outcome, the run handler must NOT re-execute it. It completes the row as
-    // Abandoned{Sweep} — the durable tier's crash-recovery verdict — and returns
+    // Abandoned{Sweep} — the controller-owned crash-recovery verdict — and returns
     // that output so the durable promise still resolves for awaiters.
     let started_owner = lash_core::LeaseOwnerIdentity::opaque("owner-a", "incarnation-1");
     let runner = Arc::new(AlreadyStartedRunner {
@@ -6708,7 +6695,7 @@ async fn run_registration_abandons_restarted_owner_bound_without_running() {
 
     // The real runner rejects this before user-code execution when its atomic
     // start write observes the prior OwnerBound attempt. This fake returns the
-    // same typed verdict so the durable tier's terminal decision is exercised.
+    // same typed verdict so the controller-owned terminal decision is exercised.
     assert_eq!(*runner.calls.lock().expect("runner calls lock"), 1);
     // Both the returned output and the persisted terminal are Abandoned{Sweep},
     // naming the incarnation that began the work as the evidence owner.

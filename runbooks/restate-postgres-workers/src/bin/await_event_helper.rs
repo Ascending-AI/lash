@@ -25,7 +25,7 @@ async fn main() -> Result<()> {
         "turn_cancel_gate" => AwaitEventWaitIdentity::TurnCancelGate,
         other => anyhow::bail!("unknown identity `{other}`"),
     };
-    let host = RestateEffectHost::with_ingress_url(ingress);
+    let host = RestateEffectHost::new(ingress);
     let key = host
         .await_event_key(&scope, wait)
         .await

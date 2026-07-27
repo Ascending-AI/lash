@@ -977,10 +977,6 @@ impl TriggerDeliveryReservation {
 
 #[async_trait::async_trait]
 pub trait TriggerStore: Send + Sync {
-    fn durability_tier(&self) -> crate::DurabilityTier {
-        crate::DurabilityTier::Inline
-    }
-
     async fn execute_command(
         &self,
         operation_id: &str,

@@ -139,10 +139,6 @@ fn trigger_tx_outcome<T>(
 
 #[async_trait::async_trait]
 impl lash_core::TriggerStore for SqliteTriggerStore {
-    fn durability_tier(&self) -> DurabilityTier {
-        DurabilityTier::Durable
-    }
-
     async fn execute_command(
         &self,
         operation_id: &str,

@@ -946,120 +946,6 @@ impl LashCoreBuilder {
         core
     }
 
-    /// Validate store peer-coherence of the wired durability dependencies.
-    ///
-    /// Durability is established by what the host wired; the per-invocation
-    /// durable controller is not visible here (the build-time controller is
-    /// inline by construction), so this checks the stores against each other
-    /// only — never the controller (see A5 in the durable-first wiring spec):
-    ///
-    /// - a durable session store factory requires a durable attachment and
-    ///   artifact store (they back the same session state);
-    /// - a durable process registry requires a session store factory that is
-    ///   itself durable (the registry's process records are meaningless without
-    ///   a durable session behind them).
-    fn effective_session_store_tier(&self) -> Option<DurabilityTier> {
-        self.child_store_factory
-            .as_ref()
-            .or(self.store_factory.as_ref())
-            .map(|factory| factory.durability_tier())
-    }
-
-    /// Validate store peer-coherence, sweeping every registered process engine.
-    ///
-    /// Runs after the runtime host is resolved and process-engine contributions
-    /// are installed, so it reads the effective effect host / attachment /
-    /// process-env tiers off `core`, and the session-store / trigger-store /
-    /// process-registry tiers captured from the builder before its plugin stack
-    /// was consumed. A durable session store requires every registered engine to
-    /// be durable too.
-    fn ensure_store_peer_coherence(
-        session_store_tier: Option<DurabilityTier>,
-        trigger_store_tier: Option<DurabilityTier>,
-        process_registry_tier: Option<DurabilityTier>,
-        core: &RuntimeHostConfig,
-    ) -> Result<()> {
-        let attachment_tier = Some(
-            core.durability
-                .attachment_store
-                .persistence()
-                .durability_tier(),
-        );
-        let process_env_tier = Some(core.durability.process_env_store.durability_tier());
-        let effect_host_tier = Some(core.control.effect_host.durability_tier());
-
-        if session_store_tier == Some(DurabilityTier::Durable) {
-            if attachment_tier == Some(DurabilityTier::Inline) {
-                return Err(EmbedError::DurableStorePeerRequired {
-                    facet: "attachment store",
-                });
-            }
-            if process_env_tier == Some(DurabilityTier::Inline) {
-                return Err(EmbedError::DurableStorePeerRequired {
-                    facet: "process execution environment store",
-                });
-            }
-            // Every registered process engine must be durable behind a durable
-            // session store, regardless of how it was contributed.
-            for engine in core.process_engines.engines() {
-                if engine.durability_tier() == DurabilityTier::Inline {
-                    return Err(EmbedError::DurableStorePeerRequired {
-                        facet: engine.kind(),
-                    });
-                }
-            }
-        }
-
-        if process_registry_tier == Some(DurabilityTier::Durable) {
-            if session_store_tier != Some(DurabilityTier::Durable) {
-                return Err(EmbedError::DurableProcessRegistryRequiresStoreFactory);
-            }
-            if trigger_store_tier != Some(DurabilityTier::Durable) {
-                return Err(EmbedError::DurableStorePeerRequired {
-                    facet: "trigger store",
-                });
-            }
-            if process_env_tier != Some(DurabilityTier::Durable) {
-                return Err(EmbedError::DurableStorePeerRequired {
-                    facet: "process execution environment store",
-                });
-            }
-        }
-
-        if trigger_store_tier == Some(DurabilityTier::Durable) {
-            if session_store_tier != Some(DurabilityTier::Durable) {
-                return Err(EmbedError::DurableStorePeerRequired {
-                    facet: "session store factory",
-                });
-            }
-            if process_env_tier != Some(DurabilityTier::Durable) {
-                return Err(EmbedError::DurableStorePeerRequired {
-                    facet: "process execution environment store",
-                });
-            }
-            if process_registry_tier == Some(DurabilityTier::Inline) {
-                return Err(EmbedError::DurableStorePeerRequired {
-                    facet: "process registry",
-                });
-            }
-        }
-
-        if effect_host_tier == Some(DurabilityTier::Durable) {
-            if attachment_tier != Some(DurabilityTier::Durable) {
-                return Err(EmbedError::DurableStorePeerRequired {
-                    facet: "attachment store",
-                });
-            }
-            if process_env_tier != Some(DurabilityTier::Durable) {
-                return Err(EmbedError::DurableStorePeerRequired {
-                    facet: "process execution environment store",
-                });
-            }
-        }
-
-        Ok(())
-    }
-
     pub fn build(mut self) -> Result<LashCore> {
         let process_execution_concurrency = self
             .process_execution_concurrency
@@ -1095,20 +981,10 @@ impl LashCoreBuilder {
         };
         let policy = self.session_spec.resolve_against(&base_policy);
 
-        // Capture the store-peer tiers that live on builder fields before the
-        // plugin stack is consumed below; the engine sweep happens after install.
-        let session_store_tier = self.effective_session_store_tier();
-        let trigger_store_tier = self
-            .trigger_store
-            .as_ref()
-            .map(|store| store.durability_tier());
         let process_work_source = self
             .process_work_source
             .clone()
             .watched(self.process_event_sink.clone());
-        let process_registry_tier = process_work_source
-            .process_registry()
-            .map(|registry| registry.durability_tier());
 
         let mut core = self.resolve_runtime_host_config()?;
         if let Some(provider) = self.provider.clone() {
@@ -1136,23 +1012,11 @@ impl LashCoreBuilder {
         // Threaded to every plugin host so core installs the same
         // plugin-contributed process engines wherever it rebuilds a runtime.
         let process_lifecycle_available = process_work_source.has_registry();
-        // Install onto a throwaway clone purely to sweep every registered
-        // engine's durability tier for the coherence check. `env.core` stays
-        // free of plugin-contributed engines so that each runtime-construction
-        // site (session open, queued-work drain, durable process worker)
-        // installs them fresh onto a clean registry — keeping the unique-kind
-        // enforcement in `try_with_engine` a genuine cross-factory check rather
-        // than a self-collision on a registry that already carries them.
-        let core_with_engines = default_plugin_host
+        // Install onto a throwaway clone to validate unique engine kinds.
+        // Runtime-construction sites install the contributions again onto their
+        // own clean registries.
+        let _ = default_plugin_host
             .install_process_engine_contributions(core.clone(), process_lifecycle_available)?;
-        // Coherence runs after engines are installed so it can sweep every
-        // registered engine's durability tier.
-        Self::ensure_store_peer_coherence(
-            session_store_tier,
-            trigger_store_tier,
-            process_registry_tier,
-            &core_with_engines,
-        )?;
 
         let process_registry = process_work_source.process_registry();
 

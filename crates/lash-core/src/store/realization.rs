@@ -18,6 +18,7 @@ pub async fn commit_runtime_state_verified(
     store: &(dyn SessionCommitStore + '_),
     commit: RuntimeCommit,
 ) -> Result<RuntimeCommitResult, StoreError> {
+    commit.validate_budget()?;
     let proposed = graph_realization_digest(&commit.graph);
     let expected_frame_ids = commit
         .agent_frames

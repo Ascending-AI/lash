@@ -1,6 +1,6 @@
 use super::*;
 
-use lash_core::{DurabilityTier, ToolCall, ToolProvider};
+use lash_core::{EffectReplayOwnership, ToolCall, ToolProvider};
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 struct CountingFirstPartyProvider {
@@ -70,10 +70,10 @@ struct ProductionToolCell {
 }
 
 impl ProductionToolCell {
-    async fn new(tier: DurabilityTier, tool_name: &str) -> Self {
-        let context_name = match tier {
-            DurabilityTier::Inline => "inline",
-            DurabilityTier::Durable => "restate-durable",
+    async fn new(replay_ownership: EffectReplayOwnership, tool_name: &str) -> Self {
+        let context_name = match replay_ownership {
+            EffectReplayOwnership::Runtime => "inline",
+            EffectReplayOwnership::Controller => "restate-durable",
         };
         let session_id = format!("tool-context-{context_name}-{tool_name}");
         let turn_id = format!("{session_id}-turn");
@@ -254,7 +254,8 @@ async fn every_registered_first_party_tool_succeeds_and_replays_in_every_context
     for manifest in manifests {
         let _ = args_for(&manifest.name);
 
-        let inline_cell = ProductionToolCell::new(DurabilityTier::Inline, &manifest.name).await;
+        let inline_cell =
+            ProductionToolCell::new(EffectReplayOwnership::Runtime, &manifest.name).await;
         let inline = lash_sqlite_store::SqliteRuntimeEffectController::memory(
             ExecutionScope::turn(&inline_cell.session_id, &inline_cell.turn_id),
         )
@@ -262,7 +263,8 @@ async fn every_registered_first_party_tool_succeeds_and_replays_in_every_context
         .expect("in-process production replay controller");
         inline_cell.run(&inline, || inline.start_replay()).await;
 
-        let durable_cell = ProductionToolCell::new(DurabilityTier::Durable, &manifest.name).await;
+        let durable_cell =
+            ProductionToolCell::new(EffectReplayOwnership::Controller, &manifest.name).await;
         let context = Arc::new(ReplayableRecordingContext::default());
         let durable = RestateRuntimeEffectController::new(Arc::clone(&context));
         durable_cell.run(&durable, || context.start_replay()).await;

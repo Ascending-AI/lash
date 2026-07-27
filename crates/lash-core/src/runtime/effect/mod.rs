@@ -45,6 +45,41 @@ mod tests {
     };
     use std::sync::Arc;
 
+    struct ControllerOwnedReplay;
+
+    impl AwaitEventResolver for ControllerOwnedReplay {
+        fn replay_ownership(&self) -> crate::EffectReplayOwnership {
+            crate::EffectReplayOwnership::Controller
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl RuntimeEffectController for ControllerOwnedReplay {
+        async fn execute_effect(
+            &self,
+            _envelope: RuntimeEffectEnvelope,
+            _local_executor: RuntimeEffectLocalExecutor<'_>,
+        ) -> Result<RuntimeEffectOutcome, RuntimeEffectControllerError> {
+            unreachable!("ownership propagation does not execute effects")
+        }
+    }
+
+    #[test]
+    fn inline_host_and_scoped_controller_forward_replay_ownership() {
+        let host = InlineEffectHost::new(Arc::new(ControllerOwnedReplay));
+        assert_eq!(
+            host.replay_ownership(),
+            crate::EffectReplayOwnership::Controller
+        );
+        let scoped = host
+            .scoped(ExecutionScope::turn("ownership-session", "ownership-turn"))
+            .expect("scope wrapped controller");
+        assert_eq!(
+            scoped.controller().replay_ownership(),
+            crate::EffectReplayOwnership::Controller
+        );
+    }
+
     #[tokio::test]
     async fn runtime_effect_envelope_and_request_specs_round_trip_without_live_fields() {
         let attachment_store = crate::SessionAttachmentStore::in_memory();
