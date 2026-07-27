@@ -754,13 +754,12 @@ pub(super) fn append_session_nodes_to_state_with_clock(
         })
         .collect::<Vec<_>>();
     state.ensure_agent_frame_initialized_with_clock(clock);
-    let node_ids = state.session_graph.append_node_drafts_for_agent_frame_at(
+    state.session_graph.append_node_drafts_for_agent_frame_at(
         &state.current_agent_frame_id,
         draft_namespace,
         drafts,
         clock.timestamp_rfc3339(),
-    );
-    node_ids
+    )
 }
 
 pub(super) fn boundary_operation(
