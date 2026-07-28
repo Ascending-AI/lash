@@ -50,8 +50,86 @@ mod tests {
     use crate::{
         DeliveryPolicy, MergeKey, QueuedWorkBatch, QueuedWorkCompletion, RuntimeCommit,
         RuntimeSessionState, SessionStoreCreateRequest, SessionStoreFactory, SlotPolicy,
-        StoreError, TurnInputCompletion,
+        StoreError, TokenLedgerEntry, TokenUsage, TurnInputCompletion,
     };
+
+    #[tokio::test]
+    async fn factory_rejects_occupied_global_node_id_without_partial_usage() {
+        let factory = super::super::InMemorySessionStoreFactory::new();
+        let request = |session_id: &str| SessionStoreCreateRequest {
+            session_id: session_id.to_string(),
+            relation: crate::SessionRelation::Root,
+            policy: crate::SessionPolicy::default(),
+        };
+        factory
+            .create_store(&request("first"))
+            .await
+            .expect("first store");
+        let second = factory
+            .create_store(&request("second"))
+            .await
+            .expect("second store");
+        let second_concrete = factory
+            .stores
+            .lock()
+            .expect("lock stores")
+            .get("second")
+            .cloned()
+            .expect("second concrete store");
+        let mut second_state = RuntimeSessionState {
+            session_id: "second".to_string(),
+            session_lifetime: crate::SessionLifetime::durable(
+                second
+                    .load_session_meta()
+                    .await
+                    .expect("load second metadata")
+                    .expect("second metadata")
+                    .incarnation_id,
+            ),
+            ..Default::default()
+        };
+        second_state.ensure_agent_frame_initialized();
+        let usage = TokenLedgerEntry {
+            source: "rollback-probe".to_string(),
+            model: "test".to_string(),
+            usage: TokenUsage {
+                input_tokens: 1,
+                ..Default::default()
+            },
+        };
+        let commit = RuntimeCommit::persisted_state_for_test(&second_state, &[usage]);
+        let occupied_node_id = commit
+            .graph
+            .nodes
+            .first()
+            .expect("derived frame node")
+            .node_id
+            .clone();
+        factory
+            .global_node_owners
+            .lock()
+            .expect("lock global node owners")
+            .insert(occupied_node_id.clone(), "first".to_string());
+
+        let error = second
+            .commit_runtime_state(commit)
+            .await
+            .expect_err("second session must not reuse an occupied global node id");
+
+        assert!(matches!(
+            error,
+            StoreError::NodeIdCollision { node_id } if node_id == occupied_node_id
+        ));
+        assert_eq!(
+            second_concrete
+                .usage_deltas
+                .lock()
+                .expect("lock usage")
+                .len(),
+            0,
+            "a rejected ownership collision must not leak usage deltas"
+        );
+    }
 
     #[tokio::test]
     async fn head_move_zero_confirmation_aborts_a_corrupt_low_count() {
