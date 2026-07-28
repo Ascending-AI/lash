@@ -2,7 +2,9 @@
 
 ## Status
 
-accepted
+accepted. Shipped mechanics are stated in the present tense. Rulings whose
+implementation remains pending are labelled as such and name their owning
+ticket.
 
 ## Context
 
@@ -13,6 +15,11 @@ therefore agree on semantic content while realizing different graph topology,
 SQLite could only isolate sessions by putting them in separate files, and a
 branch either copied history or weakened the session-level fences that make
 execution replayable.
+
+The concrete correctness failure was a phantom graph: a retried commit found a
+successful receipt while performing no write, then the runtime adopted its new
+proposal's node ids even though those rows had never been realized. The next
+append targeted a leaf that did not exist.
 
 The durable-core cutover adopts one model:
 
@@ -62,14 +69,15 @@ does not move. Appends are create-only and validate their leaf before writing.
 Full replacement, session reset, fresh-open replacement, orphan healing, and
 in-place rewind are removed rather than emulated. A host rewinds by retaining a
 target, creating a session there, switching to it, and deleting the old session
-when appropriate.
+when the host no longer wants that execution.
 
 Agent Frames are immutable `FrameOpen` nodes. `parent_node_id` is a real indexed
 edge, and the current frame is derived from the nearest `FrameOpen` ancestor
 rather than from a mutable frame vector. A turn commits its graph exactly once.
-The former durability tier is removed: replay ownership remains a mechanical
-property of the configured effect controller, while any end-to-end durability
-claim belongs to the Host Application.
+The runtime durability tier on effect hosts, process engines, and cancellation
+receipts is removed. `EffectReplayOwnership` replaces it with the mechanical
+fact of whether the runtime or its controller owns replay; any end-to-end
+durability claim belongs to the Host Application.
 
 SQLite uses one factory-wide durable-core database so a new session head and
 its references to shared history can change atomically. Because that topology
@@ -77,12 +85,17 @@ widens the blast radius of a writer lock, commits are rejected before opening a
 transaction when they exceed the measured 512-node or 1 MiB logical-payload
 budget.
 
-Reachability is defined by stored edges. Session heads and child nodes keep
-history alive; retained continuation anchors and attachment/blob relations are
-explicit edges rather than inferred predicates. Forking adds a new session root
-and shares the prefix. Ownership is therefore reachability, not
-producer-session exclusivity. Processes remain independent durable objects and
-stay outside stored history-node counts.
+Reachability is defined by stored edges. Session heads, child nodes, and retained
+continuation anchors keep history alive. Forking adds a new session root and
+shares the prefix. Ownership is therefore reachability, not producer-session
+exclusivity. Processes remain independent durable objects and stay outside
+stored history-node counts.
+
+The same ruling applies to attachment/blob liveness, but its implementation is
+pending. Explicit attachment-edge relations, canonical replay keys, bounded
+reclaim surfaces, and the `holds_ref` deletion belong to the L7 retention layer
+of the FIG-636 durable-core cutover. Current attachment liveness still uses
+manifest rows and commit-receipt predicates.
 
 ## ADR-0024 is re-applied at deletion
 
@@ -104,9 +117,10 @@ and `vacuum` can make that loss permanent. Consequently every decrement to zero
 must re-derive the node's incoming references from indexed parent and
 session-root rows in the same transaction. A mismatch aborts with typed
 `NodeRefcountDrift`; a catalog-wide `verify_node_refcounts` scrub detects the
-non-destructive high-count direction. The cost is paid only when a node is
-about to become reclaimable, where ADR-0024's concern is load-bearing and the
-query is bounded to that node's indexed incoming edges.
+drift in either direction. It is the only detector for the non-destructive
+high-count case, which no destructive step visits. The cost is paid only when a
+node is about to become reclaimable, where ADR-0024's concern is load-bearing
+and the query is bounded to that node's indexed incoming edges.
 
 Process roots are deliberately excluded from stored node counts. They live in a
 different store family, so their liveness continues to be recomputed from
@@ -122,9 +136,10 @@ process truth on demand, exactly as ADR-0024 originally required.
   digest matches.
 - A missing leaf, parent, or frame ancestor is corruption, not a repair
   invitation. Append conflicts are typed and never become upserts.
-- Reclamation is host-scheduled and bounded. Every reclaim primitive takes a
-  watermark; receipt and journal cleanup is terminal-gated; attachment
-  liveness is an explicit stored edge.
+- Reclamation remains host-scheduled. The accepted but unbuilt L7 ruling makes
+  every reclaim primitive take a watermark, terminal-gates receipt and journal
+  cleanup, and replaces inferred attachment liveness with explicit stored
+  edges; FIG-636 owns that implementation.
 - Lash owns the effect-journal contract while the configured substrate owns the
   journal. The session commit and effect journal remain separate transactions
   joined by stable operation identity.

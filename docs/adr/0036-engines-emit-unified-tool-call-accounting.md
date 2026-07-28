@@ -60,3 +60,17 @@ turns are not promoted: their uncommitted rows remain live through recovery and
 become reclaimable only after durable supersession proof plus the retention
 window. Explicit `SessionAttachmentStore::delete()` and session deletion still
 drop references eagerly; normal attachment GC then reclaims unrooted bytes.
+
+## Shared-history ruling (implementation pending)
+
+The receipt-based GC oracle and eager per-session reference deletion above
+describe the current implementation. ADR 0028 and ADR 0047 supersede those
+mechanics as a ruling, not as shipped fact. The L7 retention layer of the
+FIG-636 durable-core cutover owns the explicit attachment-edge relations and
+read-guard deletion.
+
+When that layer lands, attachment liveness will derive from stored edges rather
+than durable supersession proof plus receipt retention. Session deletion will
+remove that session's roots and edges without reclaiming attachment edges still
+reachable through another session's shared historical prefix. The tool-call
+accounting ruling and its attachment-preservation bounds are unchanged.

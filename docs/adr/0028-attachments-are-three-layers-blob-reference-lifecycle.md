@@ -146,28 +146,34 @@ awareness — to solve a problem the manifest already models precisely. Reads ar
 now gated by the reference layer, storage is dumb and deduplicated, and lifecycle
 is the host's to schedule.
 
-## Shared-history amendment
+## Shared-history ruling (implementation pending)
 
 ADR 0047 supersedes two parts of the Layer 2 account above.
-`AttachmentManifest::holds_ref` and the per-session read guard are deleted.
-Reference tracking establishes liveness, not authorization: Lash has no principal
-with which to decide whether a caller may read a content-addressed blob. A Host
-Application that exposes attachment reads to untrusted callers must enforce its
-own scope. Without that host check, the factory-wide blob store is an existence
-oracle for a caller that can obtain or compute a content hash.
+The ruling deletes `AttachmentManifest::holds_ref` and the per-session read
+guard. Reference tracking establishes liveness, not authorization: Lash has no
+principal with which to decide whether a caller may read a content-addressed
+blob. After that deletion, a Host Application that exposes attachment reads to
+untrusted callers must enforce its own scope. Without that host check, the
+factory-wide blob store is an existence oracle for a caller that can obtain or
+compute a content hash.
 
-Attachment liveness is now an explicit stored edge. History-node attachments,
-checkpoint attachments, process/artifact roots, and host roots are named
-relations in the durable core. A commit inserts its attachment edges and retires
-the corresponding write-ahead intents in the same transaction; reclaiming a
-node removes its edges in that transaction. A branch shares the historical
-prefix and therefore shares its attachment edges without copying manifest rows.
+The deletion and its replacement are not shipped. `holds_ref` currently gates
+attachment reads, and the attachment-edge relations below do not exist. The L7
+retention layer of the FIG-636 durable-core cutover owns both changes.
 
-This replaces the inferred predicate over commit receipts described above.
-Receipt retention can no longer silently change the GC oracle: edges are truth,
-and attachment/blob counts are only a cache over those edges. Layer 1 remains a
-dumb content-addressed blob store, while Layer 3 remains host-scheduled lifecycle
-policy with explicit bounds.
+The ruling makes attachment liveness an explicit stored edge. History-node
+attachments, checkpoint attachments, process/artifact roots, and host roots
+will be named relations in the durable core. A commit will insert its attachment
+edges and retire the corresponding write-ahead intents in the same transaction;
+reclaiming a node will remove its edges in that transaction. A branch will share
+the historical prefix and therefore its attachment edges without copying
+manifest rows.
+
+Once implemented, this replaces the inferred predicate over commit receipts
+described above. Receipt retention will no longer silently change the GC oracle:
+edges will be truth, and attachment/blob counts only a cache over those edges.
+Layer 1 remains a dumb content-addressed blob store, while Layer 3 remains
+host-scheduled lifecycle policy with explicit bounds.
 
 ## Cross-version consequences
 

@@ -17,14 +17,22 @@ watermark bound is what makes host projection safe: without it, a host that proj
 history can silently destroy unprojected evidence, and the failure only surfaces as
 "unknown process" much later.
 
-## Durable-core amendment
+## Durable-core ruling (implementation pending)
 
-ADR 0047 extends the same rule from terminal processes to every reclaim primitive.
-`vacuum`, receipt pruning, effect-journal pruning, and attachment/blob reclamation
-all take an explicit host-supplied `RetentionBound`; none infers a horizon or runs
-as an internal background policy. Where evidence participates in retry,
-idempotency, or host projection, age is only a bound after the owning scope is
-terminal and after the relevant revision, epoch, or change-sequence watermark.
+ADR 0047 extends the same rule from terminal processes to every reclaim
+primitive. The delayed failure above generalizes: reclaiming retry, idempotency,
+or projection evidence without the host's watermark can silently destroy
+unconsumed proof and surface much later as a different error.
+
+The ruling is that `vacuum`, receipt pruning, effect-journal pruning, and
+attachment/blob reclamation will all take an explicit host-supplied
+`RetentionBound`; none will infer a horizon or run as an internal background
+policy. This is not shipped behavior: `vacuum()` currently takes no bound, and
+the receipt- and effect-journal-pruning surfaces do not exist. The L7 retention
+layer of the FIG-636 durable-core cutover owns that implementation.
+
+Once implemented, age is a bound only after the owning scope is terminal and
+after the relevant revision, epoch, or change-sequence watermark.
 
 The producer still does not declare a retention class. Lash defines eligibility
 and the Host Application chooses how much eligible evidence to retain.

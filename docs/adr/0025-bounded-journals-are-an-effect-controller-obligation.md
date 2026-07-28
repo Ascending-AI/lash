@@ -144,16 +144,21 @@ handover window and for the rare boundary that meets buffered work. Segment hand
 any interaction with a pending durable wait or a crash mid-transition — needs Deterministic
 Simulation and fault-matrix coverage before hosts may run unbounded loops on an engine tier.
 
-## Durable-core retention amendment
+## Durable-core retention ruling (implementation pending)
 
 ADR 0047 applies the bounded-journal obligation to the substrate-owned replay
-tables and commit receipts as well as to one engine invocation. Canonical
-`ExecutionScope` keys make replay rows attributable to their owning turn,
-process, queue drain, deletion, or runtime operation. Substrates expose bounded
-pruning for effect-replay rows and commit receipts; the Host Application supplies
-the `RetentionBound` and schedules the work under ADR 0023.
+tables and commit receipts as well as to one engine invocation. The ruling
+requires canonical `ExecutionScope` replay keys attributable to their owning
+turn, process, queue drain, deletion, or runtime operation, plus bounded pruning
+for effect-replay rows and commit receipts.
 
-Pruning is terminal-gated. Age alone never proves that an operation cannot be
-re-driven after an outage, so active or retryable scopes remain ineligible
-regardless of age. The controller remains responsible for making bounded cleanup
-possible; the host remains responsible for choosing the operational horizon.
+This is not shipped behavior: replay rows still use the lossy
+`(scope_id, replay_key)` primary key, and substrates expose neither pruning
+surface. The L7 retention layer of the FIG-636 durable-core cutover owns the
+canonical-key and pruning implementation. When it lands, the Host Application
+will supply the `RetentionBound` and schedule the work under ADR 0023.
+
+Age alone never proves that an operation cannot be re-driven after an outage,
+so the future pruning surface must be terminal-gated. The controller remains
+responsible for making bounded cleanup possible; the host remains responsible
+for choosing the operational horizon.
