@@ -79,6 +79,7 @@ fn store_error_variant(error: &StoreError) -> &'static str {
         StoreError::UnsupportedRecordSchemaVersion { .. } => "UnsupportedRecordSchemaVersion",
         StoreError::MissingRecordSchemaVersion { .. } => "MissingRecordSchemaVersion",
         StoreError::InvalidRecordSchemaVersion { .. } => "InvalidRecordSchemaVersion",
+        StoreError::CheckpointComponentMissing { .. } => "CheckpointComponentMissing",
     }
 }
 
