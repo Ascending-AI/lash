@@ -377,7 +377,7 @@ pub(super) struct RemoteLocalExecutionRequest {
 #[derive(Clone)]
 pub(crate) struct EffectTaskController {
     requests: mpsc::UnboundedSender<EffectControllerTaskRequest>,
-    durability_tier: crate::DurabilityTier,
+    replay_ownership: crate::EffectReplayOwnership,
     allows_process_lifetime_completion_keys: bool,
     supports_concurrent_effects: bool,
 }
@@ -396,7 +396,7 @@ impl EffectTaskController {
         let (requests, request_rx) = mpsc::unbounded_channel();
         let proxy = Self {
             requests,
-            durability_tier: controller.durability_tier(),
+            replay_ownership: controller.replay_ownership(),
             allows_process_lifetime_completion_keys: controller
                 .allows_process_lifetime_completion_keys(),
             supports_concurrent_effects: controller.supports_concurrent_effects(),
@@ -410,8 +410,8 @@ impl EffectTaskController {
 
 #[async_trait::async_trait]
 impl AwaitEventResolver for EffectTaskController {
-    fn durability_tier(&self) -> crate::DurabilityTier {
-        self.durability_tier
+    fn replay_ownership(&self) -> crate::EffectReplayOwnership {
+        self.replay_ownership
     }
 
     fn allows_process_lifetime_completion_keys(&self) -> bool {
@@ -587,25 +587,27 @@ pub(crate) async fn drive_effect_controller_task(
     }
 }
 
-/// Shared durability and Durable Wait contract for effect boundaries.
+/// Shared effect replay and AwaitEvent contract for effect boundaries.
 ///
 /// Both the deployment-level [`EffectHost`] factory and the per-run
-/// [`RuntimeEffectController`] resolve Durable Waits and describe their
-/// durability; this supertrait is the single declaration of that contract.
+/// [`RuntimeEffectController`] resolve AwaitEvents and describe which layer
+/// owns effect replay.
 #[async_trait::async_trait]
 pub trait AwaitEventResolver: Send + Sync {
-    fn durability_tier(&self) -> crate::DurabilityTier {
-        crate::DurabilityTier::Inline
+    fn replay_ownership(&self) -> crate::EffectReplayOwnership {
+        crate::EffectReplayOwnership::Runtime
     }
 
     /// Whether [`ToolContext::completion_key`](crate::ToolContext::completion_key)
-    /// may issue an externally routable key whose correctness lifetime is only
-    /// this process.
+    /// may issue an externally routable key through this resolver.
     ///
-    /// Durable substrates permit completion keys by construction. Inline-tier
-    /// hosts must opt in explicitly because a restart strands every issued key.
+    /// Replay ownership is only a routing fact and does not imply that another
+    /// process can resolve a key after this one exits. Implementations must opt
+    /// in explicitly either because their await-event ingress and state survive
+    /// process loss or because the deployment explicitly accepts process-local
+    /// key lifetime.
     fn allows_process_lifetime_completion_keys(&self) -> bool {
-        self.durability_tier() == crate::DurabilityTier::Durable
+        false
     }
 
     async fn await_event_key(

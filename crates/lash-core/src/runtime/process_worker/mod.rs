@@ -466,7 +466,6 @@ impl DurableProcessWorker {
         handover: Option<crate::SegmentHandover>,
     ) -> Result<crate::ProcessRunOutcome, PluginError> {
         self.ensure_stable_process_id(&registration)?;
-        self.ensure_durable_store_facets()?;
         // Externally-owned rows are never executed by lash (ADR 0019). Reject the
         // disposition before touching a runtime — the old fabricated-success path
         // for External inputs is deleted.
@@ -1448,61 +1447,6 @@ impl DurableProcessWorker {
         })
     }
 
-    /// Enforce the durable-first wiring invariant at the worker process-run
-    /// boundary: when the worker was wired with a durable effect host, every
-    /// store it will execute against must also be durable. A durable host
-    /// running against any ephemeral store fails loudly here rather than
-    /// silently re-executing a process against non-durable state.
-    ///
-    /// Inline controllers (the default tier) impose no requirement, so
-    /// inline/in-memory workers pass unchanged.
-    fn ensure_durable_store_facets(&self) -> Result<(), PluginError> {
-        if self
-            .config
-            .runtime_host
-            .control
-            .effect_host
-            .durability_tier()
-            != crate::DurabilityTier::Durable
-        {
-            return Ok(());
-        }
-        let require = |facet: crate::DurableStoreFacet| {
-            PluginError::Session(crate::RuntimeError::durable_store_required(facet).to_string())
-        };
-        if self
-            .config
-            .runtime_host
-            .durability
-            .attachment_store
-            .persistence()
-            .durability_tier()
-            != crate::DurabilityTier::Durable
-        {
-            return Err(require(crate::DurableStoreFacet::AttachmentStore));
-        }
-        if self
-            .config
-            .runtime_host
-            .durability
-            .process_env_store
-            .durability_tier()
-            != crate::DurabilityTier::Durable
-        {
-            return Err(require(crate::DurableStoreFacet::ProcessEnvStore));
-        }
-        if self.config.session_store_factory.durability_tier() != crate::DurabilityTier::Durable {
-            return Err(require(crate::DurableStoreFacet::SessionStore));
-        }
-        if self.config.process_registry.durability_tier() != crate::DurabilityTier::Durable {
-            return Err(require(crate::DurableStoreFacet::ProcessRegistry));
-        }
-        if self.config.trigger_store.durability_tier() != crate::DurabilityTier::Durable {
-            return Err(require(crate::DurableStoreFacet::TriggerStore));
-        }
-        Ok(())
-    }
-
     /// Enforce the stable-process-id invariant at every (re-)execution: process
     /// execution identity is the persisted `process_id`, so a retry — a Restate
     /// `run` re-invocation (keyed `LashProcessWorkflow/{process_id}`) or a
@@ -1523,7 +1467,5 @@ impl DurableProcessWorker {
     }
 }
 
-#[cfg(test)]
-mod boundary_tests;
 #[cfg(test)]
 mod recovery_tests;

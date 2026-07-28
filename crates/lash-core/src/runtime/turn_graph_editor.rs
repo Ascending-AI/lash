@@ -4,6 +4,7 @@ use std::sync::Arc;
 use crate::session_graph::SessionReadModel;
 use crate::session_graph::build_active_read_replacement;
 use crate::session_model::SessionHistoryRecord;
+#[cfg(test)]
 use crate::store::GraphCommitDelta;
 use crate::{BaseRenderCache, Message, MessageSequence, SessionGraph, SessionNodeRecord};
 
@@ -148,6 +149,7 @@ impl TurnGraphEditor {
         self.active_messages = MessageSequence::from_owned(replacement.active_messages);
     }
 
+    #[cfg(test)]
     pub(super) fn graph_commit(&self) -> GraphCommitDelta {
         let nodes = self
             .base_graph

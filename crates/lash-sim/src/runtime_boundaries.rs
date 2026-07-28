@@ -1243,7 +1243,7 @@ impl RuntimeBoundaryHarness {
         }
         let registry: Arc<dyn ProcessRegistry> = match &self.effect_replay_store {
             RuntimeEffectReplayStore::Memory => {
-                Arc::new(lash_core::TestLocalProcessRegistry::durable())
+                Arc::new(lash_core::TestLocalProcessRegistry::default())
             }
             RuntimeEffectReplayStore::SqliteFile(path) => {
                 let process_path = path.with_extension("process-registry.sqlite");

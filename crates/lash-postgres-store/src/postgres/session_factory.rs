@@ -2,10 +2,6 @@ use crate::*;
 
 #[async_trait::async_trait]
 impl SessionStoreFactory for PostgresSessionStoreFactory {
-    fn durability_tier(&self) -> DurabilityTier {
-        DurabilityTier::Durable
-    }
-
     async fn create_store(
         &self,
         request: &SessionStoreCreateRequest,

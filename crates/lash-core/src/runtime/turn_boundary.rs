@@ -13,9 +13,8 @@ mod materialize;
 use materialize::*;
 
 #[derive(Debug)]
-pub(super) struct ProgressBoundaryCommit {
+pub(super) struct ProgressBoundaryResult {
     pub(super) protocol_events: Vec<crate::ProtocolEvent>,
-    pub(super) persisted: bool,
 }
 
 struct ProgressBoundarySnapshot<'a> {
@@ -25,7 +24,6 @@ struct ProgressBoundarySnapshot<'a> {
     event_delta: Vec<SessionHistoryRecord>,
     execution_state_snapshot: Option<Option<Vec<u8>>>,
     plugins: Option<&'a PluginSession>,
-    store: Option<&'a (dyn RuntimePersistence + 'a)>,
 }
 
 pub(super) struct TurnBoundary {
@@ -33,15 +31,14 @@ pub(super) struct TurnBoundary {
     clock: Arc<dyn crate::Clock>,
     session_execution_lease: Option<crate::SessionExecutionLeaseFence>,
     operation_scope: crate::ExecutionScope,
-    progress_commit_index: u64,
 }
 
 /// Explicit two-phase lifecycle for a turn commit.
 ///
-/// A pipeline starts in [`TurnCommitStage::Drafting`] while progress-boundary
-/// commits accumulate against a mutable [`TurnCommitDraft`]. The first call
-/// that needs the assembled session state transitions it (irreversibly) to
-/// [`TurnCommitStage::Finalized`].
+/// A pipeline starts in [`TurnCommitStage::Drafting`] while progress boundaries
+/// accumulate in a mutable [`TurnCommitDraft`]. The first call that needs the
+/// assembled session state transitions it (irreversibly) to
+/// [`TurnCommitStage::Finalized`], and the completed turn is committed once.
 enum TurnCommitStage {
     Drafting(Box<TurnCommitDraft>),
     Finalized(Box<FinalizedTurnCommitStage>),
@@ -115,7 +112,6 @@ impl TurnBoundary {
             clock,
             session_execution_lease: None,
             operation_scope,
-            progress_commit_index: 0,
         }
     }
 
@@ -171,7 +167,6 @@ impl TurnBoundary {
 
     pub(super) async fn prepared_checkpoint(
         &mut self,
-        store: Option<&(dyn RuntimePersistence + '_)>,
         policy: SessionPolicy,
         turn_index: usize,
         messages: &MessageSequence,
@@ -182,10 +177,6 @@ impl TurnBoundary {
         }
 
         self.apply_prepared_messages(messages);
-        let Some(store) = store else {
-            return Ok(());
-        };
-
         let plugins = session
             .as_deref()
             .map(|session| Arc::clone(session.plugins()));
@@ -202,7 +193,7 @@ impl TurnBoundary {
         if let Some(plugins) = plugins.as_ref() {
             state.refresh_plugin_snapshots(plugins.as_ref());
         }
-        self.commit_progress_graph(store, &[]).await
+        Ok(())
     }
 
     pub(super) async fn progress_boundary(
@@ -212,41 +203,10 @@ impl TurnBoundary {
         turn_index: usize,
         messages: MessageSequence,
         event_delta: Vec<SessionHistoryRecord>,
-    ) -> Result<ProgressBoundaryCommit, RuntimeError> {
+    ) -> Result<ProgressBoundaryResult, RuntimeError> {
         if !crate::messages_are_prompt_resume_safe(messages.iter()) {
-            return Ok(ProgressBoundaryCommit {
+            return Ok(ProgressBoundaryResult {
                 protocol_events: Vec::new(),
-                persisted: false,
-            });
-        }
-
-        let store = session.history_store();
-        let execution_state_snapshot = Self::snapshot_dirty_execution_state(session).await;
-        let plugins = Arc::clone(session.plugins());
-        self.progress_boundary_with_snapshot(ProgressBoundarySnapshot {
-            policy,
-            turn_index,
-            messages,
-            event_delta,
-            execution_state_snapshot,
-            plugins: Some(plugins.as_ref()),
-            store: store.as_ref().map(|store| store.as_ref()),
-        })
-        .await
-    }
-
-    pub(super) async fn progress_boundary_in_memory(
-        &mut self,
-        session: &mut Session,
-        policy: SessionPolicy,
-        turn_index: usize,
-        messages: MessageSequence,
-        event_delta: Vec<SessionHistoryRecord>,
-    ) -> Result<ProgressBoundaryCommit, RuntimeError> {
-        if !crate::messages_are_prompt_resume_safe(messages.iter()) {
-            return Ok(ProgressBoundaryCommit {
-                protocol_events: Vec::new(),
-                persisted: false,
             });
         }
 
@@ -259,7 +219,6 @@ impl TurnBoundary {
             event_delta,
             execution_state_snapshot,
             plugins: Some(plugins.as_ref()),
-            store: None,
         })
         .await
     }
@@ -267,7 +226,7 @@ impl TurnBoundary {
     async fn progress_boundary_with_snapshot(
         &mut self,
         snapshot: ProgressBoundarySnapshot<'_>,
-    ) -> Result<ProgressBoundaryCommit, RuntimeError> {
+    ) -> Result<ProgressBoundaryResult, RuntimeError> {
         let ProgressBoundarySnapshot {
             policy,
             turn_index,
@@ -275,12 +234,10 @@ impl TurnBoundary {
             event_delta,
             execution_state_snapshot,
             plugins,
-            store,
         } = snapshot;
         if !crate::messages_are_prompt_resume_safe(messages.iter()) {
-            return Ok(ProgressBoundaryCommit {
+            return Ok(ProgressBoundaryResult {
                 protocol_events: Vec::new(),
-                persisted: false,
             });
         }
 
@@ -298,23 +255,7 @@ impl TurnBoundary {
             }
         }
         let protocol_events = self.apply_event_delta(event_delta);
-
-        let Some(store) = store else {
-            return Ok(ProgressBoundaryCommit {
-                protocol_events,
-                persisted: false,
-            });
-        };
-        match self.commit_progress_graph(store, &[]).await {
-            Ok(()) => Ok(ProgressBoundaryCommit {
-                protocol_events,
-                persisted: true,
-            }),
-            Err(err @ StoreError::SessionExecutionLeaseExpired { .. }) => {
-                Err(super::runtime_error_from_store_commit(err))
-            }
-            Err(err) => Err(super::runtime_error_from_store_commit(err)),
-        }
+        Ok(ProgressBoundaryResult { protocol_events })
     }
 
     pub(super) fn export_state_for_assembly(&mut self) -> crate::SessionSnapshot {
@@ -425,36 +366,6 @@ impl TurnBoundary {
             TurnCommitStage::Finalized(finalized) => &mut finalized.state,
             TurnCommitStage::Drafting(_) => unreachable!("stage was just finalized"),
         }
-    }
-
-    async fn commit_progress_graph(
-        &mut self,
-        store: &(dyn RuntimePersistence + '_),
-        usage_deltas: &[crate::TokenLedgerEntry],
-    ) -> Result<(), StoreError> {
-        let draft = self.draft_mut();
-        let graph = draft.graph_commit();
-        let operation = crate::OperationId::new(
-            self.operation_scope.clone(),
-            format!("progress-{}", self.progress_commit_index),
-        );
-        self.apply_commit(
-            store,
-            graph,
-            usage_deltas,
-            Some(operation),
-            Vec::new(),
-            Vec::new(),
-            Vec::new(),
-            Vec::new(),
-            Vec::new(),
-            None,
-            Vec::new(),
-            None,
-        )
-        .await?;
-        self.progress_commit_index += 1;
-        Ok(())
     }
 
     async fn final_commit_with_snapshots(
@@ -702,32 +613,6 @@ mod tests {
         );
     }
 
-    #[tokio::test]
-    async fn resident_base_nodes_are_persisted_once_across_progress_commits() {
-        let graph = SessionGraph::from_active_read_state(&[text_message(
-            "pending",
-            MessageRole::Assistant,
-            "not durable yet",
-        )]);
-        let store = RecordingStore::default();
-        let (mut boundary, _lease) = leased_boundary(&store, state_with_graph(graph)).await;
-
-        boundary
-            .commit_progress_graph(&store, &[])
-            .await
-            .expect("first progress commit");
-        boundary
-            .commit_progress_graph(&store, &[])
-            .await
-            .expect("second progress commit");
-
-        assert_eq!(
-            store.raw_graph_nodes_for_testing().len(),
-            1,
-            "a resident base node must not be re-derived and re-appended after it commits"
-        );
-    }
-
     fn attachment_ref(id: &str) -> crate::AttachmentRef {
         crate::AttachmentMeta::new(
             crate::AttachmentId::new(id),
@@ -812,20 +697,6 @@ mod tests {
         RuntimeSessionState {
             session_id: "session-1".to_string(),
             session_graph: graph,
-            ..RuntimeSessionState::default()
-        }
-    }
-
-    fn state_with_persisted_graph(graph: SessionGraph) -> RuntimeSessionState {
-        let persisted_node_ids = graph
-            .nodes
-            .iter()
-            .map(|node| node.node_id.clone())
-            .collect();
-        RuntimeSessionState {
-            session_id: "session-1".to_string(),
-            session_graph: graph,
-            persisted_node_ids,
             ..RuntimeSessionState::default()
         }
     }
@@ -987,230 +858,59 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn prepared_checkpoint_writes_only_explicit_progress_graph_tail() {
-        let mut graph =
-            SessionGraph::from_active_read_state(&[text_message("u0", MessageRole::User, "old")]);
-        let base_graph = graph.clone();
-        graph.append_message(text_message("a0", MessageRole::Assistant, "new"));
-        let state = state_with_persisted_graph(base_graph.clone());
-        let store = RecordingStore::default();
-        store
-            .session_graph
-            .lock()
-            .expect("lock graph")
-            .extend_node_records(base_graph.nodes.iter().cloned());
-        let (mut pipeline, _lease) = leased_boundary(&store, state).await;
-
-        pipeline
-            .prepared_checkpoint(
-                Some(&store),
-                SessionPolicy::default(),
-                0,
-                &MessageSequence::from_base(
-                    vec![
-                        text_message("u0", MessageRole::User, "old"),
-                        text_message("a0", MessageRole::Assistant, "new"),
-                    ]
-                    .into(),
-                ),
-                None,
-            )
-            .await
-            .expect("commit");
-
-        let mut stored_graph = store.session_graph.lock().expect("lock graph").clone();
-        stored_graph.set_leaf_node_id(
-            store
-                .session_head_meta
-                .lock()
-                .expect("lock head meta")
-                .as_ref()
-                .and_then(|meta| meta.leaf_node_id.clone()),
-        );
-        assert_eq!(stored_graph.nodes.len(), graph.nodes.len());
-        assert_eq!(
-            serde_json::to_value(&stored_graph.nodes[1].payload).expect("stored payload"),
-            serde_json::to_value(&graph.nodes[1].payload).expect("expected payload")
-        );
-        assert_eq!(
-            stored_graph.nodes[1].parent_node_id,
-            stored_graph.nodes.first().map(|node| node.node_id.clone())
-        );
-        assert!(pipeline.state_mut().head_revision.is_some());
-    }
-
-    #[tokio::test]
-    async fn prepared_checkpoint_propagates_store_errors() {
-        let graph =
-            SessionGraph::from_active_read_state(&[text_message("u0", MessageRole::User, "hello")]);
-        let state = state_with_graph(graph);
-        let store = RecordingStore::default();
-        store
-            .save_session_head_meta(crate::SessionHeadMeta {
-                session_id: "other-session".to_string(),
-                ..crate::SessionHeadMeta::default()
-            })
-            .await;
-        let (mut pipeline, _lease) = leased_boundary(&store, state).await;
-
-        let err = pipeline
-            .prepared_checkpoint(
-                Some(&store),
-                SessionPolicy::default(),
-                0,
-                &MessageSequence::from_base(
-                    vec![text_message("u0", MessageRole::User, "hello")].into(),
-                ),
-                None,
-            )
-            .await
-            .expect_err("binding mismatch");
-
-        assert!(matches!(
-            err,
-            StoreError::SessionBindingMismatch {
-                bound_session_id,
-                attempted_session_id
-            } if bound_session_id == "other-session" && attempted_session_id == "session-1"
-        ));
-    }
-
-    #[tokio::test]
-    async fn progress_boundary_uses_typed_messages_without_duplicate_conversation_nodes() {
+    async fn progress_boundaries_accumulate_protocol_events_in_the_draft() {
         let user = text_message("u0", MessageRole::User, "hello");
         let assistant = text_message("a0", MessageRole::Assistant, "hi");
-        let graph = SessionGraph::from_active_read_state(std::slice::from_ref(&user));
-        let base_graph = graph.clone();
-        let event_delta = vec![
-            crate::SessionHistoryRecord::Conversation(ConversationRecord::from_message(
-                user.clone(),
-            )),
-            crate::SessionHistoryRecord::Conversation(ConversationRecord::from_message(
-                assistant.clone(),
-            )),
-        ];
-        let store = RecordingStore::default();
-        store
-            .session_graph
-            .lock()
-            .expect("lock graph")
-            .extend_node_records(base_graph.nodes.iter().cloned());
-        let (mut pipeline, _lease) =
-            leased_boundary(&store, state_with_persisted_graph(graph)).await;
-
-        let boundary = pipeline
-            .progress_boundary_with_snapshot(ProgressBoundarySnapshot {
-                policy: SessionPolicy::default(),
-                turn_index: 1,
-                messages: MessageSequence::from_base(vec![user.clone(), assistant.clone()].into()),
-                event_delta,
-                execution_state_snapshot: None,
-                plugins: None,
-                store: Some(&store),
-            })
-            .await
-            .expect("progress boundary");
-
-        assert!(boundary.persisted);
-        assert!(boundary.protocol_events.is_empty());
-
-        let stored_graph = store.session_graph.lock().expect("lock graph").clone();
-        let conversation_nodes = stored_graph
-            .nodes
-            .iter()
-            .filter(|node| {
-                matches!(
-                    node.event(),
-                    Some(crate::SessionHistoryRecord::Conversation(_))
-                )
-            })
-            .collect::<Vec<_>>();
-        assert_eq!(conversation_nodes.len(), 2);
-        assert_eq!(
-            conversation_nodes[0].message().expect("user message").id,
-            "u0"
-        );
-        assert_eq!(
-            conversation_nodes[1]
-                .message()
-                .expect("assistant message")
-                .id,
-            "a0"
-        );
-        assert!(
-            stored_graph
-                .nodes
-                .iter()
-                .filter(|node| matches!(
-                    node.event(),
-                    Some(crate::SessionHistoryRecord::Conversation(_))
-                ))
-                .all(|node| !node.node_id.starts_with("plugin:"))
-        );
-    }
-
-    #[tokio::test]
-    async fn prepared_checkpoint_without_store_persists_user_before_protocol_event() {
-        let user = text_message("u0", MessageRole::User, "hello");
-        let diagnostic = test_protocol_event("diagnostic");
-        let store = RecordingStore::default();
         let mut pipeline = TurnBoundary::from_state(state_with_graph(SessionGraph::default()));
-
         pipeline
             .prepared_checkpoint(
-                None,
                 SessionPolicy::default(),
                 0,
                 &MessageSequence::from_base(vec![user.clone()].into()),
                 None,
             )
             .await
-            .expect("checkpoint without store");
-        let owner = lease_owner("turn-boundary-test");
-        let lease = store
-            .try_claim_session_execution_lease("session-1", &owner, 60_000)
-            .await
-            .expect("claim test session execution lease")
-            .acquired()
-            .expect("test session execution lease");
-        pipeline = pipeline.with_session_execution_lease(Some(lease.fence()));
+            .expect("prepare checkpoint in memory");
+        let protocol_event =
+            crate::ProtocolEvent::typed("test_protocol", serde_json::json!({"step": "started"}))
+                .expect("protocol event serializes");
+        let event_delta = vec![crate::SessionHistoryRecord::Protocol(protocol_event)];
 
         let boundary = pipeline
             .progress_boundary_with_snapshot(ProgressBoundarySnapshot {
                 policy: SessionPolicy::default(),
                 turn_index: 1,
-                messages: MessageSequence::from_base(vec![user].into()),
-                event_delta: vec![crate::SessionHistoryRecord::Protocol(diagnostic)],
+                messages: MessageSequence::from_base(vec![user, assistant].into()),
+                event_delta,
                 execution_state_snapshot: None,
                 plugins: None,
-                store: Some(&store),
             })
             .await
             .expect("progress boundary");
 
-        assert!(boundary.persisted);
-        let stored_graph = stored_graph_with_head_leaf(&store);
-        let expected = vec!["message:u0", "protocol:diagnostic"];
-        assert_eq!(persisted_event_order(&stored_graph), expected);
-        assert_eq!(chronological_event_order(&stored_graph), expected);
+        assert_eq!(boundary.protocol_events.len(), 1);
+        assert_eq!(pipeline.state().turn_index, 1);
+        assert!(pipeline.state().head_revision.is_none());
     }
 
     #[tokio::test]
-    async fn progress_boundary_persists_assistant_before_protocol_entry() {
+    async fn final_commit_persists_the_complete_turn_tail_once() {
         let user = text_message("u0", MessageRole::User, "hello");
         let assistant = text_message("a0", MessageRole::Assistant, "hi");
         let trajectory = test_protocol_event("trajectory");
-        let graph = SessionGraph::from_active_read_state(std::slice::from_ref(&user));
         let store = RecordingStore::default();
-        store
-            .session_graph
-            .lock()
-            .expect("lock graph")
-            .extend_node_records(graph.nodes.iter().cloned());
         let (mut pipeline, _lease) =
-            leased_boundary(&store, state_with_persisted_graph(graph.clone())).await;
-
-        let boundary = pipeline
+            leased_boundary(&store, state_with_graph(SessionGraph::default())).await;
+        pipeline
+            .prepared_checkpoint(
+                SessionPolicy::default(),
+                0,
+                &MessageSequence::from_base(vec![user.clone()].into()),
+                None,
+            )
+            .await
+            .expect("prepare checkpoint in memory");
+        pipeline
             .progress_boundary_with_snapshot(ProgressBoundarySnapshot {
                 policy: SessionPolicy::default(),
                 turn_index: 1,
@@ -1223,78 +923,9 @@ mod tests {
                 ],
                 execution_state_snapshot: None,
                 plugins: None,
-                store: Some(&store),
             })
             .await
             .expect("progress boundary");
-
-        assert!(boundary.persisted);
-        let stored_graph = stored_graph_with_head_leaf(&store);
-        let expected = vec!["message:u0", "message:a0", "protocol:trajectory"];
-        assert_eq!(persisted_event_order(&stored_graph), expected);
-        assert_eq!(chronological_event_order(&stored_graph), expected);
-    }
-
-    #[tokio::test]
-    async fn progress_boundary_can_update_turn_draft_without_store_commit() {
-        let user = text_message("u0", MessageRole::User, "hello");
-        let assistant = text_message("a0", MessageRole::Assistant, "hi");
-        let graph = SessionGraph::from_active_read_state(std::slice::from_ref(&user));
-        let mut pipeline = TurnBoundary::from_state(state_with_graph(graph));
-        let protocol_event =
-            crate::ProtocolEvent::typed("test_protocol", serde_json::json!({"step": "started"}))
-                .expect("protocol event serializes");
-        let event_delta = vec![crate::SessionHistoryRecord::Protocol(protocol_event)];
-
-        let boundary = pipeline
-            .progress_boundary_with_snapshot(ProgressBoundarySnapshot {
-                policy: SessionPolicy::default(),
-                turn_index: 1,
-                messages: MessageSequence::from_base(vec![user, assistant].into()),
-                event_delta,
-                execution_state_snapshot: None,
-                plugins: None,
-                store: None,
-            })
-            .await
-            .expect("progress boundary");
-        assert!(!boundary.persisted);
-        assert_eq!(boundary.protocol_events.len(), 1);
-        assert_eq!(pipeline.state().turn_index, 1);
-    }
-
-    #[tokio::test]
-    async fn progress_boundary_propagates_store_failure() {
-        let user = text_message("u0", MessageRole::User, "hello");
-        let assistant = text_message("a0", MessageRole::Assistant, "hi");
-        let graph = SessionGraph::from_active_read_state(std::slice::from_ref(&user));
-        let protocol_event =
-            crate::ProtocolEvent::typed("test_protocol", serde_json::json!({"step": "started"}))
-                .expect("protocol event serializes");
-        let event_delta = vec![crate::SessionHistoryRecord::Protocol(protocol_event)];
-        let store = RecordingStore::default();
-        store
-            .save_session_head_meta(crate::SessionHeadMeta {
-                session_id: "other-session".to_string(),
-                ..crate::SessionHeadMeta::default()
-            })
-            .await;
-        let (mut pipeline, _lease) = leased_boundary(&store, state_with_graph(graph)).await;
-
-        let err = pipeline
-            .progress_boundary_with_snapshot(ProgressBoundarySnapshot {
-                policy: SessionPolicy::default(),
-                turn_index: 1,
-                messages: MessageSequence::from_base(vec![user, assistant].into()),
-                event_delta,
-                execution_state_snapshot: None,
-                plugins: None,
-                store: Some(&store),
-            })
-            .await
-            .expect_err("durable progress write failures must propagate");
-
-        assert_eq!(err.code, super::super::RuntimeErrorCode::StoreCommitFailed);
         assert_eq!(
             *store
                 .runtime_commit_count
@@ -1302,6 +933,104 @@ mod tests {
                 .expect("lock runtime commit count"),
             0
         );
+
+        let returned_state = pipeline.export_state_for_assembly();
+        pipeline
+            .final_commit_with_snapshots(FinalCommitInput {
+                returned_state: &returned_state,
+                tool_calls: &[],
+                plugins: None,
+                execution_state_snapshot: None,
+                store: Some(&store),
+                usage_deltas: &[],
+                outcome: &TurnOutcome::Stopped(crate::TurnStop::Cancelled),
+                originating_queue_claims: Vec::new(),
+                originating_turn_input_claims: Vec::new(),
+                completed_queue_claims: Vec::new(),
+                completed_turn_input_claims: Vec::new(),
+                enqueued_queue_batches: Vec::new(),
+                interrupted_turn_input_turn_id: None,
+                session_execution_lease_completion: None,
+            })
+            .await
+            .expect("final commit");
+
+        assert_eq!(
+            *store
+                .runtime_commit_count
+                .lock()
+                .expect("lock runtime commit count"),
+            1
+        );
+        let stored_graph = stored_graph_with_head_leaf(&store);
+        let expected = vec!["message:u0", "message:a0", "protocol:trajectory"];
+        assert_eq!(persisted_event_order(&stored_graph), expected);
+        assert_eq!(chronological_event_order(&stored_graph), expected);
+    }
+
+    #[tokio::test]
+    async fn final_commit_rejects_a_turn_tail_over_the_node_budget_before_store_mutation() {
+        let messages = (0..=crate::RuntimeCommit::MAX_COMMIT_NODE_COUNT)
+            .map(|index| {
+                text_message(
+                    &format!("message-{index}"),
+                    MessageRole::Assistant,
+                    &format!("step {index}"),
+                )
+            })
+            .collect::<Vec<_>>();
+        let store = RecordingStore::default();
+        let (mut pipeline, _lease) =
+            leased_boundary(&store, state_with_graph(SessionGraph::default())).await;
+        pipeline
+            .progress_boundary_with_snapshot(ProgressBoundarySnapshot {
+                policy: SessionPolicy::default(),
+                turn_index: 1,
+                messages: MessageSequence::from_base(messages.into()),
+                event_delta: Vec::new(),
+                execution_state_snapshot: None,
+                plugins: None,
+            })
+            .await
+            .expect("build the oversized turn tail in memory");
+
+        let returned_state = pipeline.export_state_for_assembly();
+        let error = pipeline
+            .final_commit_with_snapshots(FinalCommitInput {
+                returned_state: &returned_state,
+                tool_calls: &[],
+                plugins: None,
+                execution_state_snapshot: None,
+                store: Some(&store),
+                usage_deltas: &[],
+                outcome: &TurnOutcome::Stopped(crate::TurnStop::Cancelled),
+                originating_queue_claims: Vec::new(),
+                originating_turn_input_claims: Vec::new(),
+                completed_queue_claims: Vec::new(),
+                completed_turn_input_claims: Vec::new(),
+                enqueued_queue_batches: Vec::new(),
+                interrupted_turn_input_turn_id: None,
+                session_execution_lease_completion: None,
+            })
+            .await
+            .expect_err("the final append must enforce the transaction node budget");
+
+        assert!(matches!(
+            error,
+            StoreError::CommitNodeBudgetExceeded {
+                node_count,
+                max_nodes,
+            } if node_count == crate::RuntimeCommit::MAX_COMMIT_NODE_COUNT + 1
+                && max_nodes == crate::RuntimeCommit::MAX_COMMIT_NODE_COUNT
+        ));
+        assert_eq!(
+            *store
+                .runtime_commit_count
+                .lock()
+                .expect("lock runtime commit count"),
+            0
+        );
+        assert!(store.raw_graph_nodes_for_testing().is_empty());
     }
     #[test]
     fn committed_attachment_ids_merge_tool_outputs_with_message_refs() {

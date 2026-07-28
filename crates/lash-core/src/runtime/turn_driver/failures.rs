@@ -14,8 +14,10 @@ impl RuntimeTurnDriver<'_> {
     }
 
     pub(super) fn should_abort_for_runtime_effect_error(&self) -> bool {
-        self.scoped_effect_controller.controller().durability_tier()
-            == crate::DurabilityTier::Durable
+        self.scoped_effect_controller
+            .controller()
+            .replay_ownership()
+            == crate::EffectReplayOwnership::Controller
     }
 
     pub(super) fn fail_or_abort_runtime_effect_controller(

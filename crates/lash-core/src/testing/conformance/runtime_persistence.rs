@@ -21,7 +21,6 @@ pub enum AttachmentManifestConformance {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct RuntimePersistenceConformance {
     pub attachment_manifest: AttachmentManifestConformance,
-    pub durability_tier: crate::DurabilityTier,
     /// Whether the backend physically reclaims unreachable checkpoint blobs on
     /// [`gc_unreachable`](crate::StoreMaintenance::gc_unreachable). Blob-backed
     /// durable stores (SQLite, Postgres) set this; the in-memory store keeps
@@ -31,18 +30,16 @@ pub struct RuntimePersistenceConformance {
 }
 
 impl RuntimePersistenceConformance {
-    pub const fn persistent_attachment_manifest(durability_tier: crate::DurabilityTier) -> Self {
+    pub const fn persistent_attachment_manifest() -> Self {
         Self {
             attachment_manifest: AttachmentManifestConformance::Persistent,
-            durability_tier,
             reclaims_unreachable_blobs: false,
         }
     }
 
-    pub const fn noop_attachment_manifest(durability_tier: crate::DurabilityTier) -> Self {
+    pub const fn noop_attachment_manifest() -> Self {
         Self {
             attachment_manifest: AttachmentManifestConformance::Noop,
-            durability_tier,
             reclaims_unreachable_blobs: false,
         }
     }
@@ -60,7 +57,6 @@ impl Default for RuntimePersistenceConformance {
     fn default() -> Self {
         Self {
             attachment_manifest: AttachmentManifestConformance::Persistent,
-            durability_tier: crate::DurabilityTier::Durable,
             reclaims_unreachable_blobs: false,
         }
     }
@@ -87,9 +83,7 @@ where
 {
     runtime_persistence_with_options(
         make,
-        RuntimePersistenceConformance::persistent_attachment_manifest(
-            crate::DurabilityTier::Inline,
-        ),
+        RuntimePersistenceConformance::persistent_attachment_manifest(),
     )
     .await;
 }
@@ -101,10 +95,8 @@ where
 {
     runtime_persistence_with_options(
         || make().open,
-        RuntimePersistenceConformance::persistent_attachment_manifest(
-            crate::DurabilityTier::Durable,
-        )
-        .reclaiming_unreachable_blobs(),
+        RuntimePersistenceConformance::persistent_attachment_manifest()
+            .reclaiming_unreachable_blobs(),
     )
     .await;
     runtime_persistence_survives_reopen(make()).await;
@@ -227,7 +219,6 @@ where
 {
     // [`SessionCommitStore`]: atomic head commits, reads, metadata, the
     // attachment write-ahead manifest, and turn-commit idempotency.
-    runtime_persistence_reports_declared_durability(make(), options.durability_tier).await;
     commit_increments_head_and_round_trips_agent_frames(make()).await;
     concurrent_head_revision_cas_applies_exactly_once(make()).await;
     commit_rejects_a_different_session_id(make()).await;
@@ -978,17 +969,6 @@ async fn load_hydrates_checkpoint_and_usage(store: Arc<dyn RuntimePersistence>) 
     assert_eq!(checkpoint.plugin_snapshot_revision, Some(12));
     assert_eq!(read.token_ledger.len(), 1);
     assert_eq!(read.token_ledger[0].usage.input_tokens, 11);
-}
-
-async fn runtime_persistence_reports_declared_durability(
-    store: Arc<dyn RuntimePersistence>,
-    expected_tier: crate::DurabilityTier,
-) {
-    assert_eq!(
-        store.durability_tier(),
-        expected_tier,
-        "runtime persistence conformance must pin the backend's declared durability tier"
-    );
 }
 
 async fn session_execution_lease_contract(store: Arc<dyn RuntimePersistence>) {

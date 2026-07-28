@@ -13,7 +13,6 @@ use std::sync::{Arc, Mutex};
 
 use super::usage::merge_usage_delta_entries;
 use super::{SessionStoreCreateRequest, SessionStoreFactory};
-use crate::DurabilityTier;
 use crate::store::RuntimePersistence;
 
 mod attachments;
@@ -1395,7 +1394,7 @@ impl InMemorySessionStore {
 
 /// Session-id-keyed factory: the same in-memory store is returned for a given
 /// session across opens (so a worker rebuild sees the session's state), and a
-/// fresh store is created on first use. Inline durability tier.
+/// fresh store is created on first use.
 #[derive(Clone)]
 pub struct InMemorySessionStoreFactory {
     clock: Arc<dyn crate::Clock>,
@@ -1425,10 +1424,6 @@ impl Default for InMemorySessionStoreFactory {
 
 #[async_trait::async_trait]
 impl SessionStoreFactory for InMemorySessionStoreFactory {
-    fn durability_tier(&self) -> DurabilityTier {
-        DurabilityTier::Inline
-    }
-
     async fn create_store(
         &self,
         request: &SessionStoreCreateRequest,

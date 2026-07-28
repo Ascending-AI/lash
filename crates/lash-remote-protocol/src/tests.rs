@@ -341,12 +341,7 @@ fn remote_turn_cancel_envelopes_round_trip() {
         RemoteTurnCancelOutcome::CompletionWonRace,
         RemoteTurnCancelOutcome::UnknownOrRevoked,
     ] {
-        let receipt = RemoteTurnCancelReceipt::new(
-            "session",
-            "turn",
-            RemoteTurnControlDurabilityTier::Durable,
-            outcome,
-        );
+        let receipt = RemoteTurnCancelReceipt::new("session", "turn", outcome);
         receipt.validate().expect("valid cancellation receipt");
         let decoded: RemoteTurnCancelReceipt = serde_json::from_value(
             serde_json::to_value(&receipt).expect("serialize cancellation receipt"),
@@ -871,9 +866,10 @@ fn wrong_protocol_versions_are_rejected() {
     assert!(matches!(
         request.validate(),
         Err(RemoteProtocolError::UnsupportedProtocolVersion {
-            actual: 18,
-            expected: 19,
-        })
+            actual,
+            expected,
+        }) if actual == REMOTE_PROTOCOL_VERSION - 1
+            && expected == REMOTE_PROTOCOL_VERSION
     ));
 
     let mut input = RemoteTurnInput::text("hello");

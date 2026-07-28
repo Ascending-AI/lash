@@ -13,6 +13,9 @@ description = "SQLite-backed session store for the lash agent runtime."
 keywords = ["lash", "agent", "sqlite", "persistence", "store"]
 categories = ["database", "asynchronous"]
 
+[features]
+testing = []
+
 [lints]
 workspace = true
 

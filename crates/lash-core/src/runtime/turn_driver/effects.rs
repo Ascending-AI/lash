@@ -135,14 +135,7 @@ impl RuntimeTurnDriver<'_> {
                     self.host.core.attachment_source_policy.as_ref(),
                 )
                 .await
-                .map_err(|err| {
-                    RuntimeError::new(
-                        RuntimeErrorCode::DurableStoreRequired {
-                            facet: crate::DurableStoreFacet::AttachmentStore,
-                        },
-                        err,
-                    )
-                })?;
+                .map_err(|err| RuntimeError::new(RuntimeErrorCode::StoreCommitFailed, err))?;
             committed_user_messages.extend(materialized.messages);
             turn_causes.extend(materialized.turn_causes);
         }
@@ -152,14 +145,7 @@ impl RuntimeTurnDriver<'_> {
                     self.host.core.durability.attachment_store.as_ref(),
                 )
                 .await
-                .map_err(|err| {
-                    RuntimeError::new(
-                        RuntimeErrorCode::DurableStoreRequired {
-                            facet: crate::DurableStoreFacet::AttachmentStore,
-                        },
-                        err,
-                    )
-                })?;
+                .map_err(|err| RuntimeError::new(RuntimeErrorCode::StoreCommitFailed, err))?;
             send_queued_work_started_event(
                 event_tx,
                 crate::QueuedWorkClaimBoundary::ActiveTurnCheckpoint,
@@ -369,9 +355,7 @@ async fn normalize_plugin_attachment_source(
             .await
             .map_err(|err| {
                 RuntimeError::new(
-                    RuntimeErrorCode::DurableStoreRequired {
-                        facet: crate::DurableStoreFacet::AttachmentStore,
-                    },
+                    RuntimeErrorCode::StoreCommitFailed,
                     format!("failed to store inline checkpoint attachment: {err}"),
                 )
             })?;

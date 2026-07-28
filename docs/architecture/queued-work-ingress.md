@@ -42,7 +42,7 @@ Slash commands remain CLI host commands and are never queued as model work. Tool
 - `LashSession::queued_work()` is an admin/introspection view of non-user queued work.
 - `LashSession::pending_turn_inputs()` is the user-input view used for queue and active-steer previews.
 - Idle dispatch claims durable pending `NextTurn` inputs. Active checkpoints claim only pending `ActiveTurn` inputs anchored to the live turn and admitted by the checkpoint boundary.
-- An active checkpoint claim materializes each accepted input as an ordinary committed user message in the same journaled checkpoint effect. The following progress boundary persists that message before any later model call, so transcript projection and later prompt history use the normal committed path exactly once.
+- An active checkpoint claim materializes each accepted input as an ordinary user message in the in-memory turn tail. Later model calls see that updated prompt immediately, but no progress boundary mutates the session store; the final turn commit persists the complete message and protocol-event tail exactly once.
 - Active inputs that miss the turn's final checkpoint are atomically deferred to `NextTurn` during terminal commit, including normal completion as well as interruption, and become the next turn's ordinary user input.
 - In-flight turn recovery remains durable effect-host replay. Lash does not keep a submission journal for pending turn input; pending-input records cover admission, claim, cancellation, and terminal evidence.
 - `RuntimePersistence::vacuum()` is the retention boundary for terminal pending-input evidence and reports how many pending-input tombstones it physically removed.

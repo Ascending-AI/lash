@@ -44,7 +44,7 @@ pub use crate::turn::{
     message_role, message_text,
 };
 pub use lash_core::{
-    AwaitEventKey, AwaitEventWaitIdentity, DurabilityTier, ExecutionSummary,
+    AwaitEventKey, AwaitEventWaitIdentity, EffectReplayOwnership, ExecutionSummary,
     ExternalCompletionError, InputItem, LlmCallRecord, ModelLimits, ModelSpec, PendingTurnInput,
     PendingTurnInputCancelOutcome, PendingTurnInputCancelResult, PendingTurnInputCancelTarget,
     PendingTurnInputSuffixCancelOutcome, PluginStack, Resolution, ResolveOutcome, SessionCommand,
@@ -331,7 +331,7 @@ pub mod remote {
     pub mod turn_control {
         pub use lash_remote_protocol::turn_control::{
             RemoteTurnCancelOutcome, RemoteTurnCancelReceipt, RemoteTurnCancelRequest,
-            RemoteTurnCancellationEvidence, RemoteTurnControlDurabilityTier,
+            RemoteTurnCancellationEvidence,
         };
     }
 

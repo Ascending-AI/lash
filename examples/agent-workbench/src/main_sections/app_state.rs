@@ -160,7 +160,6 @@ impl AppState {
                     "session_id": address.session_id,
                     "turn_id": address.turn_id,
                     "request_id": request_id,
-                    "durability_tier": receipt.durability_tier,
                     "outcome": format!("{:?}", receipt.outcome),
                     "terminal": terminal,
                     "terminal_error": terminal_error,
@@ -169,7 +168,6 @@ impl AppState {
             );
             receipts.push(TurnCancelReceipt {
                 address,
-                durability_tier: receipt.durability_tier,
                 outcome: receipt.outcome,
                 terminal,
                 terminal_error,

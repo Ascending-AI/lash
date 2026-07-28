@@ -45,8 +45,8 @@ impl Default for InlineEffectHost {
 
 #[async_trait::async_trait]
 impl AwaitEventResolver for InlineEffectHost {
-    fn durability_tier(&self) -> crate::DurabilityTier {
-        self.controller.durability_tier()
+    fn replay_ownership(&self) -> crate::EffectReplayOwnership {
+        self.controller.replay_ownership()
     }
 
     fn allows_process_lifetime_completion_keys(&self) -> bool {
@@ -144,8 +144,8 @@ struct InlineHostScopedController {
 
 #[async_trait::async_trait]
 impl AwaitEventResolver for InlineHostScopedController {
-    fn durability_tier(&self) -> crate::DurabilityTier {
-        self.controller.durability_tier()
+    fn replay_ownership(&self) -> crate::EffectReplayOwnership {
+        self.controller.replay_ownership()
     }
 
     fn allows_process_lifetime_completion_keys(&self) -> bool {

@@ -100,21 +100,3 @@ impl From<RemoteTurnCancelOutcome> for lash_core::TurnCancelOutcome {
         }
     }
 }
-
-impl From<lash_core::DurabilityTier> for RemoteTurnControlDurabilityTier {
-    fn from(value: lash_core::DurabilityTier) -> Self {
-        match value {
-            lash_core::DurabilityTier::Inline => Self::Inline,
-            lash_core::DurabilityTier::Durable => Self::Durable,
-        }
-    }
-}
-
-impl From<RemoteTurnControlDurabilityTier> for lash_core::DurabilityTier {
-    fn from(value: RemoteTurnControlDurabilityTier) -> Self {
-        match value {
-            RemoteTurnControlDurabilityTier::Inline => Self::Inline,
-            RemoteTurnControlDurabilityTier::Durable => Self::Durable,
-        }
-    }
-}

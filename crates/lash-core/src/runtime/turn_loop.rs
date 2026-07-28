@@ -130,15 +130,15 @@ fn scoped_child_turn_controller<'run>(
 
 /// Select the resolver that owns turn-control promises for this deployment.
 ///
-/// Inline promise identity is instance-owned, so every control operation must
-/// use the configured host that [`TurnWorkDriver`] addresses. Durable handlers
-/// keep using their run-scoped controller so control reads and writes remain
-/// replay-aware while the deployment host supplies the concurrent live watch.
+/// Runtime-owned promise identity is instance-owned, so every control operation
+/// must use the configured host that [`TurnWorkDriver`] addresses. Controllers
+/// that own replay use the run-scoped controller so control reads and writes
+/// remain replay-aware while the deployment host supplies the live watch.
 fn turn_control_resolver<'a>(
     effect_host: &'a dyn EffectHost,
     scoped_effect_controller: &'a ScopedEffectController<'_>,
 ) -> &'a dyn AwaitEventResolver {
-    if effect_host.durability_tier() == crate::DurabilityTier::Inline {
+    if effect_host.replay_ownership() == crate::EffectReplayOwnership::Runtime {
         effect_host
     } else {
         scoped_effect_controller.controller()
@@ -1145,66 +1145,6 @@ impl LashRuntime {
         })
     }
 
-    /// Enforce the durable-first wiring invariant at a turn-scope boundary: when
-    /// the host wired a durable effect host, every store reachable from this
-    /// scope must also be durable. A durable host running against any ephemeral
-    /// store fails loudly here rather than silently degrading.
-    ///
-    /// Inline controllers (the default tier) impose no requirement, so
-    /// inline/in-memory hosts pass unchanged.
-    fn ensure_durable_store_facets_for_scope(
-        &self,
-        scoped_effect_controller: &ScopedEffectController<'_>,
-    ) -> Result<(), RuntimeError> {
-        if scoped_effect_controller.controller().durability_tier() != crate::DurabilityTier::Durable
-        {
-            return Ok(());
-        }
-        if self
-            .host
-            .core
-            .durability
-            .attachment_store
-            .persistence()
-            .durability_tier()
-            != crate::DurabilityTier::Durable
-        {
-            return Err(RuntimeError::durable_store_required(
-                crate::DurableStoreFacet::AttachmentStore,
-            ));
-        }
-        if self
-            .host
-            .core
-            .durability
-            .process_env_store
-            .durability_tier()
-            != crate::DurabilityTier::Durable
-        {
-            return Err(RuntimeError::durable_store_required(
-                crate::DurableStoreFacet::ProcessEnvStore,
-            ));
-        }
-        if let Some(store) = self
-            .session
-            .as_ref()
-            .and_then(|session| session.history_store())
-            && store.durability_tier() != crate::DurabilityTier::Durable
-        {
-            return Err(RuntimeError::durable_store_required(
-                crate::DurableStoreFacet::SessionStore,
-            ));
-        }
-        if let Some(process_registry) = self.host.process_registry.as_ref()
-            && process_registry.durability_tier() != crate::DurabilityTier::Durable
-        {
-            return Err(RuntimeError::durable_store_required(
-                crate::DurableStoreFacet::ProcessRegistry,
-            ));
-        }
-        Ok(())
-    }
-
     #[allow(clippy::too_many_arguments)]
     pub(super) async fn stream_turn_with_scoped_effect_controller_inner(
         &mut self,
@@ -1243,7 +1183,6 @@ impl LashRuntime {
                 ),
             ));
         }
-        self.ensure_durable_store_facets_for_scope(&scoped_effect_controller)?;
         let turn_id = input
             .trace_turn_id
             .get_or_insert_with(|| scoped_effect_controller.scope_id().to_string())
@@ -1920,7 +1859,7 @@ impl LashRuntime {
         let turn_control_resolver =
             turn_control_resolver(turn_control_host.as_ref(), &scoped_effect_controller);
         let inline_turn_control_controller =
-            if turn_control_host.durability_tier() == crate::DurabilityTier::Inline {
+            if turn_control_host.replay_ownership() == crate::EffectReplayOwnership::Runtime {
                 Some(turn_control_host.scoped(scoped_effect_controller.execution_scope().clone())?)
             } else {
                 None
@@ -2011,23 +1950,8 @@ impl LashRuntime {
             crate::ExecutionScope::turn(&self.state.session_id, &trace_turn_id),
         )
         .with_session_execution_lease(session_execution_fence.clone());
-        let store = self
-            .session
-            .as_ref()
-            .and_then(|session| session.history_store());
-        // Durable controllers, like Restate, own in-flight replay. Writing
-        // progress checkpoints directly to the shared store would make handler
-        // replay observe a newer partial turn and change effect replay keys.
-        let progress_store = if scoped_effect_controller.controller().durability_tier()
-            == crate::DurabilityTier::Durable
-        {
-            None
-        } else {
-            store.as_ref().map(|store| store.as_ref())
-        };
         turn_pipeline
             .prepared_checkpoint(
-                progress_store,
                 turn_policy.clone(),
                 turn_index,
                 &prepared.messages,

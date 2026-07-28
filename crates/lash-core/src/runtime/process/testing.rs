@@ -29,7 +29,6 @@ use super::validation::{
 
 /// In-memory process registry for core tests.
 pub struct TestLocalProcessRegistry {
-    durability_tier: crate::DurabilityTier,
     managed: Arc<Mutex<ManagedProcessMap>>,
     process_read_error: Arc<Mutex<Option<PluginError>>>,
     next_change_seq: Arc<Mutex<u64>>,
@@ -43,7 +42,6 @@ pub struct TestLocalProcessRegistry {
 impl Default for TestLocalProcessRegistry {
     fn default() -> Self {
         Self {
-            durability_tier: crate::DurabilityTier::Inline,
             managed: Arc::new(Mutex::new(HashMap::new())),
             process_read_error: Arc::new(Mutex::new(None)),
             next_change_seq: Arc::new(Mutex::new(0)),
@@ -211,18 +209,9 @@ impl TestLocalProcessRegistry {
         *self.process_read_error.lock().await = error;
     }
 
-    pub fn with_durability_tier(mut self, durability_tier: crate::DurabilityTier) -> Self {
-        self.durability_tier = durability_tier;
-        self
-    }
-
     pub fn with_trigger_store(mut self, trigger_store: Arc<crate::InMemoryTriggerStore>) -> Self {
         self.trigger_store = Some(trigger_store);
         self
-    }
-
-    pub fn durable() -> Self {
-        Self::default().with_durability_tier(crate::DurabilityTier::Durable)
     }
 
     async fn next_change_seq(&self) -> u64 {
@@ -326,10 +315,6 @@ impl TestLocalProcessRegistry {
 
 #[async_trait::async_trait]
 impl ProcessRegistry for TestLocalProcessRegistry {
-    fn durability_tier(&self) -> crate::DurabilityTier {
-        self.durability_tier
-    }
-
     async fn register_process(
         &self,
         registration: ProcessRegistration,

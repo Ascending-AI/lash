@@ -155,18 +155,8 @@ pub enum TurnCancelOutcome {
 }
 
 /// Result of addressing one turn-cancellation gate.
-///
-/// [`durability_tier`](Self::durability_tier) describes the keyed-promise
-/// deployment that accepted the request. [`crate::DurabilityTier::Inline`]
-/// receipts are process-local: they do not prove that an owner in another OS
-/// process observed the request. Durable cross-process cancellation requires
-/// a [`crate::DurabilityTier::Durable`] effect-host deployment that passes the
-/// full cold-instance AwaitEvent conformance across independent processes. A
-/// durable journal paired with process-local waits must issue `Inline`
-/// receipts.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TurnCancelReceipt {
-    pub durability_tier: crate::DurabilityTier,
     pub outcome: TurnCancelOutcome,
 }
 
@@ -236,12 +226,10 @@ impl TurnWorkDriver {
         request: TurnCancelRequest,
     ) -> Result<TurnCancelReceipt, RuntimeError> {
         request.validate()?;
-        let durability_tier = self.effect_host.durability_tier();
         let key = match cancel_gate_key(self.effect_host.as_ref(), &request.address).await {
             Ok(key) => key,
             Err(err) if err.code.as_str() == "await_event_unknown_or_revoked" => {
                 return Ok(TurnCancelReceipt {
-                    durability_tier,
                     outcome: TurnCancelOutcome::UnknownOrRevoked,
                 });
             }
@@ -263,10 +251,7 @@ impl TurnWorkDriver {
             },
             ResolveOutcome::UnknownOrRevoked => Ok(TurnCancelOutcome::UnknownOrRevoked),
         }?;
-        Ok(TurnCancelReceipt {
-            durability_tier,
-            outcome,
-        })
+        Ok(TurnCancelReceipt { outcome })
     }
 
     pub async fn await_terminal(
@@ -584,7 +569,6 @@ mod tests {
             .request_cancel(request(address.clone(), "request-1"))
             .await
             .expect("request cancellation");
-        assert_eq!(first.durability_tier, crate::DurabilityTier::Inline);
         let evidence = match first.outcome {
             TurnCancelOutcome::Requested(evidence) => evidence,
             other => panic!("expected requested, got {other:?}"),

@@ -114,6 +114,7 @@ impl TurnCommitDraft {
         self.state
     }
 
+    #[cfg(test)]
     pub(super) fn graph_commit(&self) -> crate::store::GraphCommitDelta {
         self.graph.graph_commit()
     }

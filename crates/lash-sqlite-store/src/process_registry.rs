@@ -21,10 +21,6 @@ pub(crate) use support::tx_outcome;
 
 #[async_trait::async_trait]
 impl ProcessRegistry for SqliteProcessRegistry {
-    fn durability_tier(&self) -> DurabilityTier {
-        DurabilityTier::Durable
-    }
-
     async fn register_process(
         &self,
         registration: ProcessRegistration,

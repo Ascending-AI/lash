@@ -1128,12 +1128,6 @@ impl Default for SessionHeadMeta {
 /// paste no-op manifest impls via [`impl_noop_attachment_manifest!`].
 #[async_trait::async_trait]
 pub trait SessionCommitStore: AttachmentManifest + Send + Sync {
-    /// Durability tier this session store provides; defaults to
-    /// [`DurabilityTier::Inline`](crate::DurabilityTier::Inline).
-    fn durability_tier(&self) -> crate::DurabilityTier {
-        crate::DurabilityTier::Inline
-    }
-
     async fn load_session(
         &self,
         scope: SessionReadScope,

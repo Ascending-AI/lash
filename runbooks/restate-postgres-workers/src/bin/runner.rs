@@ -110,9 +110,8 @@ async fn async_main() -> Result<()> {
 
     let conformance_ingress = ingress_url.clone();
     lash_core::testing::conformance::effect_host_await_events_cold_instance(|| {
-        Arc::new(RestateEffectHost::with_ingress_url(
-            conformance_ingress.clone(),
-        )) as Arc<dyn lash_core::EffectHost>
+        Arc::new(RestateEffectHost::new(conformance_ingress.clone()))
+            as Arc<dyn lash_core::EffectHost>
     })
     .await;
     println!(
@@ -492,7 +491,7 @@ async fn run_cold_process_await_event_vectors(admin_url: &str, ingress_url: &str
             "identity": identity,
             "nonce": nonce,
         }));
-        let resolver = RestateEffectHost::with_ingress_url(ingress_url.to_string());
+        let resolver = RestateEffectHost::new(ingress_url.to_string());
         anyhow::ensure!(
             matches!(
                 resolver
@@ -503,7 +502,7 @@ async fn run_cold_process_await_event_vectors(admin_url: &str, ingress_url: &str
             ),
             "killed-helper {identity} resolution did not win"
         );
-        let observer = RestateEffectHost::with_ingress_url(ingress_url.to_string());
+        let observer = RestateEffectHost::new(ingress_url.to_string());
         anyhow::ensure!(
             observer
                 .peek_await_event(&key)
@@ -796,7 +795,7 @@ async fn dump_workflow_timeout_diagnostics(pool: &sqlx::PgPool, workflow_id: &st
         Err(err) => eprintln!("workers-e2e TIMEOUT Restate state query failed: {err:#}"),
     }
 
-    let wait_host = RestateEffectHost::with_ingress_url(ingress_url);
+    let wait_host = RestateEffectHost::new(ingress_url);
     let mut completed_promise_keys = BTreeSet::new();
     for key in &recorded_wait_keys {
         let workflow_key = lash_restate::RestateDurableWaitAddress::for_key(key).workflow_key;
@@ -1810,7 +1809,7 @@ async fn await_durable_wait_on_worker(
 }
 
 async fn run_engine_promise_conformance(admin_url: &str, ingress_url: &str) -> Result<()> {
-    let key_host = RestateEffectHost::with_ingress_url(ingress_url.to_string());
+    let key_host = RestateEffectHost::new(ingress_url.to_string());
     let attached_key = engine_conformance_key(&key_host, "waiter-before-resolution").await?;
     let attached_expected = Resolution::Ok(json!({ "ordering": "waiter-before-resolution" }));
     let attached_wait_key = attached_key.clone();
@@ -1933,10 +1932,6 @@ async fn drive_turn_control_scenarios(storage: &PostgresStorage, ingress_url: &s
         .request_cancel(cancel_request(&before, before_evidence_id))
         .await
         .context("request cancellation before turn start")?;
-    anyhow::ensure!(
-        before_outcome.durability_tier == lash::DurabilityTier::Durable,
-        "before-start cancel used non-durable control: {before_outcome:?}"
-    );
     assert_requested(&before_outcome.outcome, before_evidence_id)?;
     submit_workflow(ingress_url, &before).await?;
     let before_terminal = driver
@@ -1960,10 +1955,6 @@ async fn drive_turn_control_scenarios(storage: &PostgresStorage, ingress_url: &s
         .request_cancel(cancel_request(&cross, cross_evidence_id))
         .await
         .context("request cross-process cancellation")?;
-    anyhow::ensure!(
-        cross_outcome.durability_tier == lash::DurabilityTier::Durable,
-        "cross-process cancel used non-durable control: {cross_outcome:?}"
-    );
     assert_requested(&cross_outcome.outcome, cross_evidence_id)?;
     let cross_terminal = driver
         .await_terminal(&turn_address(&cross))
@@ -2288,9 +2279,7 @@ async fn drive_break_glass_scenario(
     report_workflow_progress(&break_glass.workflow_id, "admin-kill-requested");
     wait_for_invocation_terminal(&admin, &invocation_id).await?;
 
-    let driver = TurnWorkDriver::new(Arc::new(RestateEffectHost::with_ingress_url(
-        ingress_url.to_string(),
-    )));
+    let driver = TurnWorkDriver::new(Arc::new(RestateEffectHost::new(ingress_url.to_string())));
     if let Ok(Ok(terminal)) = tokio::time::timeout(
         Duration::from_secs(3),
         driver.await_terminal(&turn_address(&break_glass)),
@@ -2517,7 +2506,7 @@ async fn wait_for_invocation_suspended(
 /// content-type, so this doubles as live regression coverage for the
 /// empty-body ingress encoding in `update_restate_session_waits_via_ingress`.
 async fn drive_durable_wait_index_scenarios(ingress_url: &str, admin_url: &str) -> Result<()> {
-    let host = RestateEffectHost::with_ingress_url(ingress_url.to_string());
+    let host = RestateEffectHost::new(ingress_url.to_string());
 
     // 1) A controller-owned wait registers in the real Restate session index
     //    and observes cancel_all as a terminal cancellation.

@@ -39,7 +39,6 @@ async fn cancel_before_start_duplicate_replay_and_terminal_attach(host: Arc<dyn 
         .request_cancel(request(address.clone(), "request-1"))
         .await
         .expect("request cancellation");
-    assert_eq!(first.durability_tier, host.durability_tier());
     let evidence = match first.outcome {
         TurnCancelOutcome::Requested(evidence) => evidence,
         other => panic!("expected requested, got {other:?}"),

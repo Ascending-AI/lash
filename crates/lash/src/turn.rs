@@ -221,14 +221,14 @@ impl TurnBuilder {
 
     pub async fn stream_to(self, events: &dyn TurnActivitySink) -> Result<TurnResult> {
         let effect_host = Arc::clone(&self.effect_host);
-        reject_configured_durable_effect_host(effect_host.as_ref(), "turn")?;
+        reject_controller_owned_replay_host(effect_host.as_ref(), "turn")?;
         self.stream_to_with_effect_host(events, effect_host.as_ref())
             .await
     }
 
     pub fn stream(self) -> Result<TurnStream> {
         let effect_host = Arc::clone(&self.effect_host);
-        reject_configured_durable_effect_host(effect_host.as_ref(), "turn stream")?;
+        reject_controller_owned_replay_host(effect_host.as_ref(), "turn stream")?;
         self.stream_with_effect_host(effect_host.as_ref())
     }
 
@@ -597,7 +597,7 @@ impl QueuedTurnBuilder {
 
     pub async fn stream_to(self, events: &dyn TurnActivitySink) -> Result<Option<TurnResult>> {
         let effect_host = Arc::clone(&self.effect_host);
-        reject_configured_durable_effect_host(effect_host.as_ref(), "queued turn")?;
+        reject_controller_owned_replay_host(effect_host.as_ref(), "queued turn")?;
         self.stream_to_with_effect_host(events, effect_host.as_ref())
             .await
     }
@@ -756,11 +756,11 @@ fn trace_turn_id_for_scope(
     }
 }
 
-fn reject_configured_durable_effect_host(
+fn reject_controller_owned_replay_host(
     effect_host: &dyn EffectHost,
     operation: &'static str,
 ) -> Result<()> {
-    if effect_host.durability_tier() == DurabilityTier::Durable {
+    if effect_host.replay_ownership() == EffectReplayOwnership::Controller {
         return Err(EmbedError::DurableEffectHostRequiresHandlerContext { operation });
     }
     Ok(())

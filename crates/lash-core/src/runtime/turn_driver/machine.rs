@@ -52,7 +52,7 @@ impl RuntimeTurnDriver<'_> {
                     event_delta,
                     protocol_iteration,
                 } => {
-                    self.persist_progress_boundary(messages, event_delta, protocol_iteration)
+                    self.apply_progress_boundary(messages, event_delta, protocol_iteration)
                         .await?
                 }
                 Effect::Done {
@@ -107,7 +107,7 @@ impl RuntimeTurnDriver<'_> {
         Ok((crate::MessageSequence::default(), run_offset))
     }
 
-    async fn persist_progress_boundary(
+    async fn apply_progress_boundary(
         &mut self,
         messages: crate::MessageSequence,
         event_delta: Vec<crate::SessionHistoryRecord>,
@@ -116,33 +116,18 @@ impl RuntimeTurnDriver<'_> {
         if !crate::messages_are_prompt_resume_safe(messages.iter()) {
             return Ok(());
         }
-        let boundary = if self.scoped_effect_controller.controller().durability_tier()
-            == crate::DurabilityTier::Durable
-        {
-            self.turn_pipeline
-                .progress_boundary_in_memory(
-                    &mut self.session,
-                    self.policy.policy.clone(),
-                    self.turn_index,
-                    messages,
-                    event_delta,
-                )
-                .await?
-        } else {
-            self.turn_pipeline
-                .progress_boundary(
-                    &mut self.session,
-                    self.policy.policy.clone(),
-                    self.turn_index,
-                    messages,
-                    event_delta,
-                )
-                .await?
-        };
-        if boundary.persisted {
-            for event in &boundary.protocol_events {
-                self.emit_trace(protocol_iteration, protocol_step_trace_event(event));
-            }
+        let boundary = self
+            .turn_pipeline
+            .progress_boundary(
+                &mut self.session,
+                self.policy.policy.clone(),
+                self.turn_index,
+                messages,
+                event_delta,
+            )
+            .await?;
+        for event in &boundary.protocol_events {
+            self.emit_trace(protocol_iteration, protocol_step_trace_event(event));
         }
         Ok(())
     }

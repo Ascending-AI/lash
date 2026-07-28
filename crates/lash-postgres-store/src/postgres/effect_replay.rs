@@ -95,8 +95,12 @@ impl PostgresEffectHost {
 
 #[async_trait::async_trait]
 impl AwaitEventResolver for PostgresEffectHost {
-    fn durability_tier(&self) -> DurabilityTier {
-        DurabilityTier::Durable
+    fn replay_ownership(&self) -> lash_core::EffectReplayOwnership {
+        lash_core::EffectReplayOwnership::Controller
+    }
+
+    fn allows_process_lifetime_completion_keys(&self) -> bool {
+        true
     }
 
     async fn await_event_key(
@@ -571,8 +575,12 @@ impl PostgresRuntimeEffectController {
 
 #[async_trait::async_trait]
 impl AwaitEventResolver for PostgresRuntimeEffectController {
-    fn durability_tier(&self) -> DurabilityTier {
-        DurabilityTier::Durable
+    fn replay_ownership(&self) -> lash_core::EffectReplayOwnership {
+        lash_core::EffectReplayOwnership::Controller
+    }
+
+    fn allows_process_lifetime_completion_keys(&self) -> bool {
+        true
     }
 
     async fn await_event_key(

@@ -34,12 +34,6 @@ pub struct ProcessPruneReport {
 /// `docs/adr/0016-process-waits-live-on-the-work-driver-seam.md`.
 #[async_trait::async_trait]
 pub trait ProcessRegistry: Send + Sync {
-    /// Durability tier this process registry provides; defaults to
-    /// [`DurabilityTier`](crate::DurabilityTier)`::Inline`.
-    fn durability_tier(&self) -> crate::DurabilityTier {
-        crate::DurabilityTier::Inline
-    }
-
     async fn register_process(
         &self,
         registration: ProcessRegistration,
