@@ -220,8 +220,7 @@ impl SessionCommitStore for Store {
                         &tx,
                         &session_id,
                         leaf_node_id.clone(),
-                    )
-                    .map_err(sqlite_error)?;
+                    )?;
                     if !graph.nodes.is_empty() {
                         graph.set_leaf_node_id(leaf_node_id);
                     }

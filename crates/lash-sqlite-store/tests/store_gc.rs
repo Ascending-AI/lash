@@ -1,9 +1,9 @@
 use lash_core::store::GraphAppend;
 use lash_core::{
-    HydratedSessionCheckpoint, LeaseOwnerIdentity, ModelSpec, PersistedTurnState,
-    PluginSessionSnapshot, RuntimeCommit, RuntimeSessionState, SessionCommitStore,
-    SessionExecutionLeaseStore, SessionPolicy, SessionStoreCreateRequest, SessionStoreFactory,
-    TokenLedgerEntry, TokenUsage, ToolState,
+    HydratedSessionCheckpoint, LeaseOwnerIdentity, Message, MessageRole, ModelSpec, Part, PartKind,
+    PersistedTurnState, PluginSessionSnapshot, PruneState, RuntimeCommit, RuntimeSessionState,
+    SessionCommitStore, SessionExecutionLeaseStore, SessionPolicy, SessionStoreCreateRequest,
+    SessionStoreFactory, TokenLedgerEntry, TokenUsage, ToolState, shared_parts,
 };
 use lash_sqlite_store::{
     BlobArtifactDescriptor, BuiltinBlobProfile, SqliteSessionStoreFactory, Store, StoreGcPolicy,
@@ -25,6 +25,26 @@ fn persisted_tool_state_at_generation(generation: u64) -> ToolState {
         "tools": {}
     }))
     .expect("deserialize persisted tool state")
+}
+
+fn user_message(id: &str, content: &str) -> Message {
+    Message {
+        id: id.to_string(),
+        role: MessageRole::User,
+        parts: shared_parts(vec![Part {
+            id: format!("{id}.p0"),
+            kind: PartKind::Text,
+            content: content.to_string(),
+            attachment: None,
+            tool_call_id: None,
+            tool_name: None,
+            tool_replay: None,
+            prune_state: PruneState::Intact,
+            reasoning_meta: None,
+            response_meta: None,
+        }]),
+        origin: None,
+    }
 }
 
 async fn factory_state(
@@ -636,6 +656,121 @@ async fn sqlite_snapshot_read_propagates_graph_statement_errors() {
         store.load_session().await.is_err(),
         "a graph statement error must not decode as an empty snapshot"
     );
+}
+
+#[tokio::test]
+async fn sqlite_snapshot_read_rejects_undecodable_graph_nodes() {
+    let root = unique_temp_dir("graph-node-decode-error");
+    let factory = SqliteSessionStoreFactory::new(&root);
+    let store = factory
+        .create_store(&SessionStoreCreateRequest {
+            session_id: "graph-node-decode-error".to_string(),
+            relation: lash_core::SessionRelation::Root,
+            policy: SessionPolicy::default(),
+        })
+        .await
+        .expect("create store");
+    let mut state = factory_state(&store, "graph-node-decode-error", 0).await;
+    state.ensure_agent_frame_initialized();
+    state.append_active_conversation_messages(&[
+        user_message("first", "first"),
+        user_message("second", "second"),
+    ]);
+    store
+        .commit_runtime_state(RuntimeCommit::persisted_state_for_test(&state, &[]))
+        .await
+        .expect("commit graph");
+    rusqlite::Connection::open(factory.catalog_path())
+        .expect("open catalog")
+        .execute(
+            "UPDATE graph_nodes
+             SET node_json = '{\"totally\":\"unreadable\"}'
+             WHERE node_id = (
+                 SELECT node_id FROM graph_nodes
+                 WHERE session_id = ?1
+                 ORDER BY seq ASC
+                 LIMIT 1 OFFSET 1
+             )",
+            ["graph-node-decode-error"],
+        )
+        .expect("corrupt middle graph node");
+
+    let error = store
+        .load_session()
+        .await
+        .expect_err("an undecodable graph node must fail the snapshot");
+    assert!(
+        error
+            .to_string()
+            .contains("failed to decode session graph node"),
+        "unexpected graph decode error: {error}"
+    );
+}
+
+#[tokio::test]
+async fn sqlite_picker_reads_inherited_history_from_fork_head_columns() {
+    let root = unique_temp_dir("fork-picker");
+    let factory = SqliteSessionStoreFactory::new(&root);
+    let policy = SessionPolicy::default();
+    let source = factory
+        .create_store(&SessionStoreCreateRequest {
+            session_id: "picker-source".to_string(),
+            relation: lash_core::SessionRelation::Root,
+            policy: policy.clone(),
+        })
+        .await
+        .expect("create source store");
+    let mut source_state = factory_state(&source, "picker-source", 0).await;
+    source_state.ensure_agent_frame_initialized();
+    source_state.append_active_conversation_messages(&[
+        user_message("first", "first inherited message"),
+        user_message("second", "second inherited message"),
+    ]);
+    source
+        .commit_runtime_state(RuntimeCommit::persisted_state_for_test(&source_state, &[]))
+        .await
+        .expect("commit source graph");
+    let source_read = source
+        .load_session()
+        .await
+        .expect("load source")
+        .expect("source exists");
+    let source_leaf = source_read.graph.leaf_node_id.clone().expect("source leaf");
+    factory
+        .fork_at(&lash_core::ForkSessionRequest {
+            session_id: "picker-fork".to_string(),
+            node_id: source_leaf,
+            relation: lash_core::SessionRelation::Root,
+            policy,
+        })
+        .await
+        .expect("fork source");
+    let branch = factory
+        .open_existing_store(&SessionStoreCreateRequest {
+            session_id: "picker-fork".to_string(),
+            relation: lash_core::SessionRelation::Root,
+            policy: SessionPolicy::default(),
+        })
+        .await
+        .expect("open fork")
+        .expect("fork exists");
+    let branch_state = lash_core::store::load_persisted_session_state(branch.as_ref())
+        .await
+        .expect("load fork state")
+        .expect("fork state exists");
+    assert_eq!(branch_state.session_graph.nodes.len(), 3);
+
+    let picker_store = Store::open(&factory.catalog_path())
+        .await
+        .expect("open picker store");
+    picker_store
+        .commit_runtime_state(RuntimeCommit::persisted_state_for_test(&branch_state, &[]))
+        .await
+        .expect("bind picker store to fork");
+    let picker = picker_store.load_picker_info().await.expect("picker info");
+
+    assert_eq!(picker.first_user_message, "first inherited message");
+    assert_eq!(picker.user_message_count, 2);
 }
 
 #[tokio::test]

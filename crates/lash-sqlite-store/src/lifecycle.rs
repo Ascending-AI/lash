@@ -185,16 +185,28 @@ impl Store {
                     return Ok(None);
                 };
 
-                let head_json: String = conn
+                let head_row: Option<(String, i64, Option<String>, Option<String>)> = conn
                     .query_row(
-                        "SELECT head_json FROM session_head WHERE session_id = ?1",
+                        "SELECT head_json, head_revision, leaf_node_id, checkpoint_ref
+                         FROM session_head WHERE session_id = ?1",
                         params![session_id],
-                        |row| row.get(0),
+                        |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
                     )
-                    .optional()?
-                    .unwrap_or_else(|| "{}".to_string());
-                let head_meta =
-                    serde_json::from_str::<SessionHeadMeta>(&head_json).unwrap_or_default();
+                    .optional()?;
+                let Some((head_json, head_revision, leaf_node_id, checkpoint_ref)) = head_row
+                else {
+                    return Ok(None);
+                };
+                let mut head_meta =
+                    lash_core::store::decode_versioned_json_record::<SessionHeadMeta>(
+                        &head_json,
+                        "SessionHeadMeta",
+                        lash_core::store::SESSION_HEAD_META_SCHEMA_VERSION,
+                    )
+                    .map_err(|err| rusqlite::Error::ToSqlConversionFailure(Box::new(err)))?;
+                head_meta.head_revision = head_revision as u64;
+                head_meta.leaf_node_id = leaf_node_id;
+                head_meta.checkpoint_ref = checkpoint_ref.map(Into::into);
                 let graph =
                     Self::load_session_graph_from_conn(conn, &session_id, head_meta.leaf_node_id)
                         .unwrap_or_default();
