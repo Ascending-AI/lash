@@ -54,9 +54,9 @@ sub-TTL takeover was impossible for the opaque identities every distributed
 deployment uses. The tempting fix — a `LashCore::shutdown()` drain loop — would
 have moved host policy into the runtime and set the precedent for `health()`,
 `readiness()`, and the rest of framework-hood. Lash's thesis is the opposite:
-the app owns the outer boundaries; lash owns the turn. The same division that
-keeps effect journals inside workflow engines keeps drain policy inside the
-host.
+the app owns the outer boundaries; lash owns the turn. Lash owns the
+effect-journal contract while the configured substrate owns the journal; the
+same boundary discipline keeps drain policy inside the host.
 
 ## Consequences
 

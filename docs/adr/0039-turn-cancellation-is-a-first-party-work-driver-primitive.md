@@ -48,13 +48,15 @@ the demonstrated break-glass is an admin `KILL`, run last because a killed handl
 the shared-session lease.
 
 The keyed-promise implementation uses the existing `AwaitEventResolver` operations and the
-configured effect controller's journal. Reserved `TurnCancelGate` and `TurnTerminal` identities are indexed as control promises:
-ordinary durable-wait cancellation does not sweep them, while session deletion revokes them. This
-adds no session-store method (ADR 0016), no second replay journal (ADR 0012), no store
-polling/watch path, and no claim TTL. A live owner does hold an engine-native keyed-promise
-observation; Restate implements that observation through `LashDurableWaitWorkflow` ingress with
-bounded retry, not its Admin API. The inline registry drains live gate/terminal entries after
-terminal publication and keeps only bounded recent completion and session-revocation caches.
+configured effect controller's journal. Reserved `TurnCancelGate` and
+`TurnTerminal` identities are indexed as control promises: ordinary durable-wait
+cancellation does not sweep them, while session deletion revokes them. This adds
+no session-store method (ADR 0016), no second replay journal (ADR 0012), no
+store polling/watch path, and no claim TTL. A live owner does hold an
+engine-native keyed-promise observation; Restate implements that observation
+through `LashDurableWaitWorkflow` ingress with bounded retry, not its Admin API.
+The inline registry drains live gate/terminal entries after terminal publication
+and keeps only bounded recent completion and session-revocation caches.
 
 We rejected store-side cancellation rows or a lease marker because they add store coordination,
 polling, and recovery races; invocation-id cancellation because it leaks engine identity and can

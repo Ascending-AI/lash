@@ -33,3 +33,17 @@ influences selection. Consequently the agent-turn remote envelope no longer carr
 intent (it was validated and discarded, and could never build a complete spec); the
 direct-request envelope keeps its consumed intent, and removing the field is a remote
 protocol version bump, not a silently tolerated unknown field.
+
+## Immutable-frame amendment
+
+ADR 0047 removes the second mutable copy on which this ADR's reconciliation
+mechanics depended. A `FrameOpen` model assignment is immutable history: reopen
+and config update do not rewrite it, and `effective_policy()` reads only the
+session policy.
+
+The one-resolution-point ruling survives and is stronger. Session policy is the
+single live configuration copy. The config-update door updates the runtime and
+`state.policy`; the next `FrameOpen` captures that current policy, while
+existing frames retain the model they opened with. This supersedes the
+requirements above to reconcile or update a current frame assignment together
+with policy. It does not restore a turn-level overlay.

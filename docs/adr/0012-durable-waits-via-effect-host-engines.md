@@ -16,6 +16,11 @@ The inline substrate owns no replay journal. The session commit store does not a
 this responsibility: effect replay and settled session history remain separate seams
 joined by stable operation identity.
 
+As originally accepted, this ADR said that lash never journals effect outcomes itself,
+while both SQL substrates already did. The code had diverged from the record, and the
+record was wrong. FIG-655 corrected it to the contract/substrate split above rather
+than preserving the rejected claim as settled history.
+
 ## Considered Options
 
 - **Process-event-log journal**: record effect outcomes into the process event log and
