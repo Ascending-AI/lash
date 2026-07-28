@@ -12,7 +12,10 @@
 //! use restate_sdk::prelude::*;
 //!
 //! # #[derive(serde::Serialize, serde::Deserialize)]
-//! # struct TurnRequest { turn_id: String }
+//! # struct TurnRequest {
+//! #     turn_id: String,
+//! #     incarnation_id: lash_core::IncarnationId,
+//! # }
 //! # #[derive(serde::Serialize, serde::Deserialize)]
 //! # struct TurnResponse;
 //! # async fn run_lash_turn(
@@ -37,7 +40,11 @@
 //!         let effect_controller = RestateRuntimeEffectController::new(ctx);
 //!         let turn_id = req.turn_id.clone();
 //!         let scoped_effect_controller = effect_controller
-//!             .scoped_effect_controller(lash_core::ExecutionScope::turn("session", &turn_id))
+//!             .scoped_effect_controller(lash_core::ExecutionScope::turn_incarnation(
+//!                 "session",
+//!                 req.incarnation_id.clone(),
+//!                 &turn_id,
+//!             ))
 //!             .map_err(TerminalError::from_error)?;
 //!         let response = run_lash_turn(scoped_effect_controller, req)
 //!             .await
@@ -501,14 +508,38 @@ fn restate_durable_wait_request(
 
 fn restate_turn_cancel_wait_request(
     invocation: &RuntimeInvocation,
+    turn_cancel_scope: Option<&ExecutionScope>,
 ) -> Result<Option<RestateDurableWaitAwaitRequest>, RuntimeEffectControllerError> {
     let Some(turn_id) = invocation.scope.turn_id.as_deref() else {
         return Ok(None);
     };
-    let key = restate_await_event_key(
-        &ExecutionScope::turn(&invocation.scope.session_id, turn_id),
-        AwaitEventWaitIdentity::TurnCancelGate,
-    )?;
+    let Some(scope) = turn_cancel_scope else {
+        return Err(RuntimeEffectControllerError::new(
+            "restate_turn_cancel_scope_missing",
+            "turn effects that observe cancellation require a durable turn-cancel scope",
+        ));
+    };
+    if matches!(scope, ExecutionScope::Process { .. }) {
+        return Ok(None);
+    }
+    let scope @ ExecutionScope::Turn { .. } = scope else {
+        return Err(RuntimeEffectControllerError::new(
+            "restate_turn_cancel_scope_mismatch",
+            "turn-cancel scope must be a matching turn scope or an explicit process scope",
+        ));
+    };
+    scope
+        .validate_for_durable_host()
+        .map_err(RuntimeEffectControllerError::from)?;
+    if scope.session_id() != Some(invocation.scope.session_id.as_str())
+        || scope.turn_id() != Some(turn_id)
+    {
+        return Err(RuntimeEffectControllerError::new(
+            "restate_turn_cancel_scope_mismatch",
+            "turn-cancel scope must match the runtime effect invocation",
+        ));
+    }
+    let key = restate_await_event_key(scope, AwaitEventWaitIdentity::TurnCancelGate)?;
     Ok(Some(restate_durable_wait_request(
         &key,
         None,
@@ -519,21 +550,23 @@ fn restate_turn_cancel_wait_request(
 fn restate_timer_turn_cancel_wait_request(
     invocation: &RuntimeInvocation,
     observe_turn_cancel: bool,
+    turn_cancel_scope: Option<&ExecutionScope>,
 ) -> Result<Option<RestateDurableWaitAwaitRequest>, RuntimeEffectControllerError> {
     if !observe_turn_cancel {
         return Ok(None);
     }
-    restate_turn_cancel_wait_request(invocation)
+    restate_turn_cancel_wait_request(invocation, turn_cancel_scope)
 }
 
 fn restate_await_event_turn_cancel_wait_request(
     invocation: &RuntimeInvocation,
     observe_turn_cancel: bool,
+    turn_cancel_scope: Option<&ExecutionScope>,
 ) -> Result<Option<RestateDurableWaitAwaitRequest>, RuntimeEffectControllerError> {
     if !observe_turn_cancel {
         return Ok(None);
     }
-    restate_turn_cancel_wait_request(invocation)
+    restate_turn_cancel_wait_request(invocation, turn_cancel_scope)
 }
 
 #[derive(Clone, Debug, Serialize, serde::Deserialize)]
@@ -1355,6 +1388,7 @@ impl EffectHost for RestateEffectHost {
         &'run self,
         scope: ExecutionScope,
     ) -> Result<ScopedEffectController<'run>, RuntimeError> {
+        scope.validate_for_durable_host()?;
         ScopedEffectController::shared(self.controller.clone(), scope)
     }
 
@@ -1362,6 +1396,7 @@ impl EffectHost for RestateEffectHost {
         &self,
         scope: ExecutionScope,
     ) -> Result<Option<ScopedEffectController<'static>>, RuntimeError> {
+        scope.validate_for_durable_host()?;
         Ok(Some(ScopedEffectController::shared(
             self.controller.clone(),
             scope,
@@ -1491,6 +1526,7 @@ impl AwaitEventResolver for RestateEffectHostController {
         scope: &ExecutionScope,
         wait: AwaitEventWaitIdentity,
     ) -> Result<AwaitEventKey, RuntimeError> {
+        scope.validate_for_durable_host()?;
         let ingress = &self.await_event_ingress;
         if let Some(session_id) = scope.session_id()
             && restate_session_is_revoked_via_ingress(ingress, session_id).await?
@@ -3255,8 +3291,9 @@ impl RestateTurnAttach {
 #[async_trait::async_trait]
 impl TurnAttach for RestateTurnAttach {
     async fn await_terminal(&self, address: &TurnAddress) -> Result<TurnTerminal, RuntimeError> {
+        address.execution_scope().validate_for_durable_host()?;
         let key = restate_await_event_key(
-            &ExecutionScope::turn(&address.session_id, &address.turn_id),
+            &address.execution_scope(),
             AwaitEventWaitIdentity::TurnTerminal,
         )?;
         let durable_address = RestateDurableWaitAddress::for_key(&key);
@@ -4029,6 +4066,7 @@ where
         &'run self,
         scope: ExecutionScope,
     ) -> Result<ScopedEffectController<'run>, RuntimeError> {
+        scope.validate_for_durable_host()?;
         ScopedEffectController::borrowed(self, scope)
     }
 
@@ -4085,6 +4123,7 @@ where
         scope: &ExecutionScope,
         wait: AwaitEventWaitIdentity,
     ) -> Result<AwaitEventKey, RuntimeError> {
+        scope.validate_for_durable_host()?;
         if let Some(session_id) = scope.session_id()
             && self
                 .context
@@ -4228,10 +4267,12 @@ where
                 let RuntimeSleepOptions {
                     cancellation,
                     observe_turn_cancel,
+                    turn_cancel_scope,
                 } = local_executor.into_sleep_options();
                 let turn_cancel = restate_timer_turn_cancel_wait_request(
                     &envelope.invocation,
                     observe_turn_cancel,
+                    turn_cancel_scope.as_ref(),
                 )?;
                 match self
                     .context
@@ -4265,10 +4306,12 @@ where
                     deadline,
                     clock,
                     observe_turn_cancel,
+                    turn_cancel_scope,
                 } = local_executor.into_await_event_options()?;
                 let turn_cancel = restate_await_event_turn_cancel_wait_request(
                     &envelope.invocation,
                     observe_turn_cancel,
+                    turn_cancel_scope.as_ref(),
                 )?;
                 match self
                     .context

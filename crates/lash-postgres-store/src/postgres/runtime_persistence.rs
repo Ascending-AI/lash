@@ -366,6 +366,10 @@ impl SessionCommitStore for PostgresSessionStore {
     ) -> Result<RuntimeCommitResult, StoreError> {
         commit.validate_budget()?;
         commit.validate_operation_session()?;
+        self.bind_session_id(&commit.session_id)?;
+        let commit_incarnation_id = commit
+            .durable_incarnation_id("Postgres runtime commit")?
+            .clone();
         let realization_digest = lash_core::store::graph_realization_digest(&commit.graph);
         let realized_node_timestamps = commit
             .graph
@@ -407,27 +411,9 @@ impl SessionCommitStore for PostgresSessionStore {
                 attempted_session_id: commit.session_id,
             });
         }
-        // A session-store handle commits to exactly one session. An explicit
-        // binding (`self.session_id`) is authoritative; otherwise the handle binds
-        // to the first session it commits and rejects any other thereafter.
-        let effective_binding = self
-            .session_id
-            .clone()
-            .or_else(|| self.bound_session.get().cloned());
-        if let Some(bound_session_id) = &effective_binding
-            && commit.session_id != *bound_session_id
-        {
-            return Err(StoreError::SessionBindingMismatch {
-                bound_session_id: bound_session_id.clone(),
-                attempted_session_id: commit.session_id,
-            });
-        }
-        if self.session_id.is_none() {
-            let _ = self.bound_session.set(commit.session_id.clone());
-        }
         let direct_meta = SessionMeta {
             session_id: commit.session_id.clone(),
-            incarnation_id: commit.incarnation_id.clone(),
+            incarnation_id: commit_incarnation_id,
             session_name: commit.session_id.clone(),
             created_at: self.clock.timestamp_rfc3339(),
             model: commit.config.model.id.clone(),
@@ -920,6 +906,46 @@ impl SessionCommitStore for PostgresSessionStore {
         }
         tx.commit().await.map_err(store_sqlx_error)?;
         Ok(result)
+    }
+
+    async fn ensure_session_incarnation(
+        &self,
+        session_id: &str,
+        policy: &lash_core::SessionPolicy,
+    ) -> Result<lash_core::IncarnationId, StoreError> {
+        self.bind_session_id(session_id)?;
+        let meta = SessionMeta {
+            session_id: session_id.to_string(),
+            incarnation_id: lash_core::IncarnationId::mint_for_store(),
+            session_name: session_id.to_string(),
+            created_at: self.clock.timestamp_rfc3339(),
+            model: policy.model.id.clone(),
+            cwd: std::env::current_dir()
+                .ok()
+                .and_then(|path| path.to_str().map(str::to_string)),
+            relation: lash_core::SessionRelation::Root,
+        };
+        let mut tx = self.pool.begin().await.map_err(store_sqlx_error)?;
+        sqlx::query(
+            "INSERT INTO lash_session_meta (session_id, meta_json)
+             VALUES ($1, $2)
+             ON CONFLICT (session_id) DO NOTHING",
+        )
+        .bind(session_id)
+        .bind(encode_json(&meta))
+        .execute(&mut *tx)
+        .await
+        .map_err(store_sqlx_error)?;
+        let durable_meta_json = sqlx::query_scalar::<_, String>(
+            "SELECT meta_json FROM lash_session_meta WHERE session_id = $1",
+        )
+        .bind(session_id)
+        .fetch_one(&mut *tx)
+        .await
+        .map_err(store_sqlx_error)?;
+        tx.commit().await.map_err(store_sqlx_error)?;
+        let durable_meta: SessionMeta = store_decode_json(&durable_meta_json, "session meta")?;
+        Ok(durable_meta.incarnation_id)
     }
 
     async fn save_session_meta(&self, meta: SessionMeta) -> Result<(), StoreError> {

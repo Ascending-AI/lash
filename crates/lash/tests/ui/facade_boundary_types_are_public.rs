@@ -8,16 +8,17 @@ use lash::direct::{
 use lash::durability::RuntimeHostConfig;
 use lash::messages::MessageRole;
 use lash::persistence::{
-    CheckpointKind, GcReport, GraphCommitDelta, LeaseOwnerIdentity, OperationId,
+    CheckpointKind, GcReport, GraphCommitDelta, IncarnationId, LeaseOwnerIdentity, OperationId,
     PersistedSessionRead, PendingTurnInputDraft, QueuedWorkBatch, QueuedWorkBatchDraft,
     QueuedWorkClaim, QueuedWorkClaimBoundary, QueuedWorkStore, RealizedNodeTimestamp, RuntimeCommit,
     RuntimeCommitResult, RuntimePersistence, RuntimeSessionState, RuntimeTurnCommitStamp,
     SessionCheckpoint, SessionCommitStore, SessionExecutionLease,
     SessionExecutionLeaseClaimOutcome, SessionExecutionLeaseCompletion, SessionExecutionLeaseFence,
-    SessionExecutionLeaseStore, SessionMeta, SessionNodeRecord, SessionReadScope, StoreError,
-    StoreMaintenance, TurnInputClaim, TurnInputCheckpointBoundary, TurnInputIngress, TurnInputState,
-    TurnInputStore, VacuumReport, commit_runtime_state_verified, graph_realization_digest,
-    load_persisted_session_state, load_persisted_session_state_active_path,
+    SessionExecutionLeaseStore, SessionLifetime, SessionMeta, SessionNodeRecord, SessionReadScope,
+    StoreError, StoreMaintenance, TurnInputClaim, TurnInputCheckpointBoundary, TurnInputIngress,
+    TurnInputState, TurnInputStore, VacuumReport, commit_runtime_state_verified,
+    graph_realization_digest, load_persisted_session_state,
+    load_persisted_session_state_active_path,
 };
 use lash::usage::{TokenLedgerEntry, TokenUsage};
 use lash::plugins::{
@@ -39,6 +40,14 @@ lash_core::impl_noop_attachment_manifest!(FacadeStore);
 
 #[async_trait]
 impl SessionCommitStore for FacadeStore {
+    async fn ensure_session_incarnation(
+        &self,
+        _session_id: &str,
+        _policy: &lash::runtime::SessionPolicy,
+    ) -> Result<IncarnationId, StoreError> {
+        Ok(IncarnationId::mint_for_store())
+    }
+
     async fn load_session(
         &self,
         _scope: SessionReadScope,
@@ -317,7 +326,7 @@ fn persistence_types_are_nameable(
 ) -> RuntimeCommit {
     RuntimeCommit {
         session_id: "facade".to_string(),
-        incarnation_id: Default::default(),
+        session_lifetime: SessionLifetime::durable(IncarnationId::mint_for_store()),
         expected_head_revision: 0,
         session_execution_lease: None,
         release_session_execution_lease: None,

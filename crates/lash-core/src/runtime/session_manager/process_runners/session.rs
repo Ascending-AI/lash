@@ -36,9 +36,27 @@ impl RuntimeSessionServices {
         };
         let child_session_id = child.session_id.clone();
         let child_turn_id = registration.id.clone();
-        let child_scoped_effect_controller = match scoped_effect_controller.rescope(
-            crate::ExecutionScope::turn(&child_session_id, &child_turn_id),
-        ) {
+        let child_scope = match self
+            .current
+            .turn_scope_by_id(&self.managed, &child_session_id, &child_turn_id)
+            .await
+        {
+            Ok(scope) => scope,
+            Err(err) => {
+                let _ = self
+                    .managed
+                    .close_session(&self.current, &self.usage, &child_session_id)
+                    .await;
+                return crate::ProcessAwaitOutput::from_tool_output(
+                    crate::ToolCallOutput::failure(crate::ToolFailure::tool(
+                        crate::ToolFailureClass::Execution,
+                        "process_session_turn_scope_failed",
+                        err.to_string(),
+                    )),
+                );
+            }
+        };
+        let child_scoped_effect_controller = match scoped_effect_controller.rescope(child_scope) {
             Ok(controller) => controller,
             Err(err) => {
                 let _ = self

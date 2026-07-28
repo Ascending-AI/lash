@@ -508,7 +508,7 @@ async fn final_turn_commit(
         .incarnation_id;
     let state = crate::RuntimeSessionState {
         session_id: session_id.to_string(),
-        incarnation_id,
+        session_lifetime: crate::SessionLifetime::durable(incarnation_id),
         ..crate::RuntimeSessionState::default()
     };
     let mut commit = crate::RuntimeCommit::persisted_state(&state, &[])

@@ -175,11 +175,10 @@ impl ProductionToolCell {
         runtime: &mut lash_core::LashRuntime,
         controller: &dyn RuntimeEffectController,
     ) -> lash_core::AssembledTurn {
-        let scoped_effect_controller = lash_core::ScopedEffectController::borrowed(
-            controller,
-            ExecutionScope::turn(&self.session_id, &self.turn_id),
-        )
-        .expect("scope production tool cell");
+        let turn_scope = runtime.export_persistence_state().turn_scope(&self.turn_id);
+        let scoped_effect_controller =
+            lash_core::ScopedEffectController::borrowed(controller, turn_scope)
+                .expect("scope production tool cell");
         runtime
             .stream_turn(
                 replay_test_input(&self.turn_id),
@@ -256,8 +255,17 @@ async fn every_registered_first_party_tool_succeeds_and_replays_in_every_context
 
         let inline_cell =
             ProductionToolCell::new(EffectReplayOwnership::Runtime, &manifest.name).await;
+        let inline_incarnation = inline_cell
+            .runtime_store
+            .ensure_session_incarnation(&inline_cell.session_id, &inline_cell.policy)
+            .await
+            .expect("realize inline session incarnation");
         let inline = lash_sqlite_store::SqliteRuntimeEffectController::memory(
-            ExecutionScope::turn(&inline_cell.session_id, &inline_cell.turn_id),
+            ExecutionScope::turn_incarnation(
+                &inline_cell.session_id,
+                inline_incarnation,
+                &inline_cell.turn_id,
+            ),
         )
         .await
         .expect("in-process production replay controller");

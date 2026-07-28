@@ -319,6 +319,9 @@ impl SessionCommitStore for Store {
     ) -> Result<RuntimeCommitResult, StoreError> {
         commit.validate_budget()?;
         commit.validate_operation_session()?;
+        let commit_incarnation_id = commit
+            .durable_incarnation_id("SQLite runtime commit")?
+            .clone();
         self.bind_session(&commit.session_id)?;
         let realization_digest = lash_core::store::graph_realization_digest(&commit.graph);
         let realized_node_timestamps = commit
@@ -357,7 +360,7 @@ impl SessionCommitStore for Store {
                          VALUES (?1, ?2, ?1, ?3, ?4, NULL, ?5)",
                         params![
                             commit.session_id,
-                            commit.incarnation_id.as_str(),
+                            commit_incarnation_id.as_str(),
                             created_at,
                             commit.config.model.id,
                             serde_json::to_string(&lash_core::SessionRelation::Root)
@@ -373,7 +376,7 @@ impl SessionCommitStore for Store {
                         )
                         .optional()
                         .map_err(sqlite_error)?
-                        .map(lash_core::IncarnationId::from)
+                        .map(lash_core::IncarnationId::decode_from_store)
                         .ok_or_else(|| {
                             StoreError::Backend(format!(
                                 "session `{}` has no durable session metadata",
@@ -896,6 +899,50 @@ impl SessionCommitStore for Store {
             .map_err(sqlite_error)??;
         self.maybe_auto_gc().await;
         Ok(result)
+    }
+
+    async fn ensure_session_incarnation(
+        &self,
+        session_id: &str,
+        policy: &lash_core::SessionPolicy,
+    ) -> Result<lash_core::IncarnationId, StoreError> {
+        self.bind_session(session_id)?;
+        let session_id = session_id.to_string();
+        let candidate_value = lash_core::IncarnationId::mint_for_store()
+            .as_str()
+            .to_string();
+        let created_at = self.clock.timestamp_rfc3339();
+        let model = policy.model.id.clone();
+        let cwd = std::env::current_dir()
+            .ok()
+            .and_then(|path| path.to_str().map(str::to_string));
+        let relation_json = serde_json::to_string(&lash_core::SessionRelation::Root)
+            .map_err(|error| StoreError::Backend(error.to_string()))?;
+        let durable = self
+            .conn
+            .write(move |tx| {
+                tx.execute(
+                    "INSERT OR IGNORE INTO session_meta
+                     (session_id, incarnation_id, session_name, created_at, model, cwd, relation_json)
+                     VALUES (?1, ?2, ?1, ?3, ?4, ?5, ?6)",
+                    params![
+                        session_id,
+                        candidate_value,
+                        created_at,
+                        model,
+                        cwd,
+                        relation_json,
+                    ],
+                )?;
+                tx.query_row(
+                    "SELECT incarnation_id FROM session_meta WHERE session_id = ?1",
+                    params![session_id],
+                    |row| row.get::<_, String>(0),
+                )
+            })
+            .await
+            .map_err(sqlite_error)?;
+        Ok(lash_core::IncarnationId::decode_from_store(durable))
     }
 
     async fn save_session_meta(&self, meta: SessionMeta) -> Result<(), StoreError> {

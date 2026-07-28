@@ -5,6 +5,7 @@ use std::sync::Arc;
 use tokio_util::sync::CancellationToken;
 
 use crate::runtime::turn_control::ActiveTurnControl;
+use crate::testing::conformance::durable_turn_address;
 use crate::{
     AwaitEventWaitIdentity, EffectHost, ExecutionScope, Resolution, TurnAddress, TurnCancelOutcome,
     TurnCancelRequest, TurnCancellationEvidence, TurnFinish, TurnOutcome, TurnStop, TurnTerminal,
@@ -12,7 +13,7 @@ use crate::{
 };
 
 fn address(label: &str) -> TurnAddress {
-    TurnAddress::new(
+    durable_turn_address(
         format!("turn-control-{label}-{}", uuid::Uuid::new_v4()),
         "turn-a",
     )
@@ -182,8 +183,22 @@ async fn completion_seal_vs_cancel_is_first_writer_wins(host: Arc<dyn EffectHost
 async fn exact_scope_and_session_sweep_isolation(host: Arc<dyn EffectHost>) {
     let driver = TurnWorkDriver::new(Arc::clone(&host));
     let address_a = address("scope");
-    let address_b = TurnAddress::new(&address_a.session_id, "turn-b");
-    let address_future = TurnAddress::new(&address_a.session_id, "turn-future");
+    let address_b = TurnAddress::new_incarnation(
+        &address_a.session_id,
+        address_a
+            .incarnation_id
+            .clone()
+            .expect("conformance address incarnation"),
+        "turn-b",
+    );
+    let address_future = TurnAddress::new_incarnation(
+        &address_a.session_id,
+        address_a
+            .incarnation_id
+            .clone()
+            .expect("conformance address incarnation"),
+        "turn-future",
+    );
 
     let active = Arc::new(
         ActiveTurnControl::new(host.as_ref(), address_a.clone())
@@ -201,7 +216,14 @@ async fn exact_scope_and_session_sweep_isolation(host: Arc<dyn EffectHost>) {
 
     let tool_key = host
         .await_event_key(
-            &ExecutionScope::turn(&address_a.session_id, "tool-turn"),
+            &ExecutionScope::turn_incarnation(
+                &address_a.session_id,
+                address_a
+                    .incarnation_id
+                    .clone()
+                    .expect("conformance address incarnation"),
+                "tool-turn",
+            ),
             AwaitEventWaitIdentity::tool_completion("tool-call"),
         )
         .await

@@ -2230,7 +2230,7 @@ async fn fork_inherits_process_grants_without_inheriting_wake_subscription() -> 
         .incarnation_id;
     let mut source_state = lash_core::RuntimeSessionState {
         session_id: "fork-grant-source".to_string(),
-        incarnation_id: source_incarnation_id,
+        session_lifetime: lash_core::SessionLifetime::durable(source_incarnation_id),
         policy,
         ..Default::default()
     };

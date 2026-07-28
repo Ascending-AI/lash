@@ -772,7 +772,11 @@ impl LashRuntime {
         let turn_control = Arc::new(
             ActiveTurnControl::new(
                 turn_control_resolver,
-                TurnAddress::new(&self.state.session_id, &trace_turn_id),
+                TurnAddress::new_for_lifetime(
+                    &self.state.session_id,
+                    &self.state.session_lifetime,
+                    &trace_turn_id,
+                ),
             )
             .await?,
         );
@@ -811,11 +815,7 @@ impl LashRuntime {
         let mut turn_pipeline = TurnBoundary::from_state_with_clock(
             self.state.clone(),
             Arc::clone(&self.host.core.clock),
-            crate::ExecutionScope::turn_incarnation(
-                &self.state.session_id,
-                self.state.incarnation_id.clone(),
-                &trace_turn_id,
-            ),
+            self.state.turn_scope(&trace_turn_id),
         )
         .with_session_execution_lease(
             session_execution_lease.map(SessionExecutionLeaseGuard::fence),
@@ -1201,11 +1201,7 @@ impl LashRuntime {
             .get_or_insert_with(|| scoped_effect_controller.scope_id().to_string())
             .clone();
         let scoped_effect_controller =
-            scoped_effect_controller.rescope(ExecutionScope::turn_incarnation(
-                &self.state.session_id,
-                self.state.incarnation_id.clone(),
-                &turn_id,
-            ))?;
+            scoped_effect_controller.rescope(self.state.turn_scope(&turn_id))?;
         // The stable execution-scope turn id is attached to every write-ahead
         // intent before ingress, tools, plugins, or envelope normalization can
         // put bytes. Replays bind the same id; no live pending-id state is used.
@@ -1380,7 +1376,11 @@ impl LashRuntime {
                     turn_control_resolver(turn_control_host.as_ref(), &scoped_effect_controller);
                 let turn_control = ActiveTurnControl::new(
                     turn_control_resolver,
-                    TurnAddress::new(&self.state.session_id, &trace_turn_id),
+                    TurnAddress::new_for_lifetime(
+                        &self.state.session_id,
+                        &self.state.session_lifetime,
+                        &trace_turn_id,
+                    ),
                 )
                 .await?
                 .with_local_cancel_origin(input.turn_context.local_cancel_origin_hint());
@@ -1388,11 +1388,7 @@ impl LashRuntime {
                 let mut turn_pipeline = TurnBoundary::from_state_with_clock(
                     self.state.clone(),
                     Arc::clone(&self.host.core.clock),
-                    crate::ExecutionScope::turn_incarnation(
-                        &self.state.session_id,
-                        self.state.incarnation_id.clone(),
-                        &trace_turn_id,
-                    ),
+                    self.state.turn_scope(&trace_turn_id),
                 )
                 .with_session_execution_lease(
                     session_execution_lease.map(SessionExecutionLeaseGuard::fence),
@@ -1789,11 +1785,7 @@ impl LashRuntime {
         let mut turn_pipeline = TurnBoundary::from_state_with_clock(
             self.state.clone(),
             Arc::clone(&self.host.core.clock),
-            crate::ExecutionScope::turn_incarnation(
-                &self.state.session_id,
-                self.state.incarnation_id.clone(),
-                &trace_turn_id,
-            ),
+            self.state.turn_scope(&trace_turn_id),
         )
         .with_session_execution_lease(session_execution_fence);
         turn_pipeline.apply_prepared_messages(&prepared.messages);
@@ -1894,7 +1886,11 @@ impl LashRuntime {
         let turn_control = Arc::new(
             ActiveTurnControl::new(
                 turn_control_resolver,
-                TurnAddress::new(&self.state.session_id, &trace_turn_id),
+                TurnAddress::new_for_lifetime(
+                    &self.state.session_id,
+                    &self.state.session_lifetime,
+                    &trace_turn_id,
+                ),
             )
             .await?
             .with_local_cancel_origin(turn_context.local_cancel_origin_hint()),
@@ -1974,11 +1970,7 @@ impl LashRuntime {
         let mut turn_pipeline = TurnBoundary::from_state_with_clock(
             self.state.clone(),
             Arc::clone(&self.host.core.clock),
-            crate::ExecutionScope::turn_incarnation(
-                &self.state.session_id,
-                self.state.incarnation_id.clone(),
-                &trace_turn_id,
-            ),
+            self.state.turn_scope(&trace_turn_id),
         )
         .with_session_execution_lease(session_execution_fence.clone());
         turn_pipeline

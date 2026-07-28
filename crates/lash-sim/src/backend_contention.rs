@@ -467,7 +467,7 @@ async fn stale_head_transaction_is_rejected(
         .map_or(0, |read| read.head_revision);
     let current = RuntimeSessionState {
         session_id: session_id.to_string(),
-        incarnation_id: incarnation_id.clone(),
+        session_lifetime: lash_core::SessionLifetime::durable(incarnation_id.clone()),
         head_revision: expected_head_revision,
         ..RuntimeSessionState::default()
     };
@@ -477,7 +477,7 @@ async fn stale_head_transaction_is_rejected(
         .map_err(|err| format!("establish current session head: {err}"))?;
     let stale = RuntimeSessionState {
         session_id: session_id.to_string(),
-        incarnation_id,
+        session_lifetime: lash_core::SessionLifetime::durable(incarnation_id),
         head_revision: expected_head_revision,
         ..RuntimeSessionState::default()
     };
@@ -515,7 +515,7 @@ async fn final_commit_retry_and_conflict_are_fenced(
         .incarnation_id;
     let state = RuntimeSessionState {
         session_id: session_id.to_string(),
-        incarnation_id: incarnation_id.clone(),
+        session_lifetime: lash_core::SessionLifetime::durable(incarnation_id.clone()),
         ..RuntimeSessionState::default()
     };
     let base_commit = RuntimeCommit::persisted_state(&state, &[]);
@@ -554,7 +554,7 @@ async fn final_commit_retry_and_conflict_are_fenced(
 
     let changed_state = RuntimeSessionState {
         session_id: session_id.to_string(),
-        incarnation_id,
+        session_lifetime: lash_core::SessionLifetime::durable(incarnation_id),
         turn_index: 1,
         ..RuntimeSessionState::default()
     };

@@ -1,5 +1,11 @@
 use super::*;
 
+impl Default for InMemorySessionStoreFactory {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 #[async_trait::async_trait]
 impl SessionStoreFactory for InMemorySessionStoreFactory {
     async fn create_store(
@@ -26,7 +32,7 @@ impl SessionStoreFactory for InMemorySessionStoreFactory {
                 ));
                 *store.session_meta.lock().expect("lock session meta") = Some(crate::SessionMeta {
                     session_id: request.session_id.clone(),
-                    incarnation_id: crate::IncarnationId::fresh(),
+                    incarnation_id: crate::IncarnationId::mint_for_store(),
                     session_name: request.session_id.clone(),
                     created_at: self.clock.timestamp_rfc3339(),
                     model: request.policy.model.id.clone(),
@@ -364,7 +370,7 @@ impl SessionStoreFactory for InMemorySessionStoreFactory {
             });
         *store.session_meta.lock().expect("lock session meta") = Some(crate::SessionMeta {
             session_id: request.session_id.clone(),
-            incarnation_id: crate::IncarnationId::fresh(),
+            incarnation_id: crate::IncarnationId::mint_for_store(),
             session_name: request.session_id.clone(),
             created_at: self.clock.timestamp_rfc3339(),
             model: request.policy.model.id.clone(),

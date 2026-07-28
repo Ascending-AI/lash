@@ -494,7 +494,15 @@ async fn drive_first_party_cancel_before_start(
     session_id: &str,
 ) -> FirstPartyCancelObs {
     let turn_id = "cancelled-turn";
-    let address = lash::TurnAddress::new(session_id, turn_id);
+    let session = core.session(session_id).open().await.expect("open session");
+    let address = match session.turn_scope(turn_id) {
+        lash::runtime::ExecutionScope::Turn {
+            session_id,
+            turn_id,
+            incarnation_id: Some(incarnation_id),
+        } => lash::TurnAddress::new_incarnation(session_id, incarnation_id, turn_id),
+        scope => panic!("expected durable turn scope, got {scope:?}"),
+    };
     let driver = core.turn_work_driver();
     let first = driver
         .request_cancel(lash::TurnCancelRequest::new(
@@ -526,7 +534,6 @@ async fn drive_first_party_cancel_before_start(
         }) if request_id == "cross-backend-cancel" && origin == "sim-user"
     );
 
-    let session = core.session(session_id).open().await.expect("open session");
     let cancelled = session
         .turn(TurnInput::text("this turn is already cancelled"))
         .turn_id(turn_id)
@@ -586,10 +593,22 @@ async fn sqlite_reopen_preserves_cancelled_turn_commit_and_allows_next_turn() {
         }),
     )
     .await;
+    let first_session = first_core
+        .session(session_id)
+        .open()
+        .await
+        .expect("open first SQLite session");
     let first_driver = first_core.turn_work_driver();
     let outcome = first_driver
         .request_cancel(lash::TurnCancelRequest::new(
-            lash::TurnAddress::new(session_id, turn_id),
+            match first_session.turn_scope(turn_id) {
+                lash::runtime::ExecutionScope::Turn {
+                    session_id,
+                    turn_id,
+                    incarnation_id: Some(incarnation_id),
+                } => lash::TurnAddress::new_incarnation(session_id, incarnation_id, turn_id),
+                scope => panic!("expected durable turn scope, got {scope:?}"),
+            },
             "sqlite-replay-cancel",
             Some("sqlite-replay".to_string()),
         ))
@@ -599,11 +618,6 @@ async fn sqlite_reopen_preserves_cancelled_turn_commit_and_allows_next_turn() {
         outcome.outcome,
         lash::TurnCancelOutcome::Requested(_)
     ));
-    let first_session = first_core
-        .session(session_id)
-        .open()
-        .await
-        .expect("open first SQLite session");
     let cancelled = first_session
         .turn(TurnInput::text("cancel before provider work"))
         .turn_id(turn_id)

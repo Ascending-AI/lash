@@ -187,7 +187,7 @@ impl NodeSpec {
 }
 
 fn differential_incarnation_id(session_id: &str) -> IncarnationId {
-    IncarnationId::from(format!("differential:{session_id}"))
+    IncarnationId::decode_from_store(format!("differential:{session_id}"))
 }
 
 fn differential_frame_key(node_id: &str) -> String {
@@ -200,7 +200,7 @@ fn is_frame_alias(node_id: &str) -> bool {
 
 fn scoped_node_id(session_id: &str, incarnation_id: &IncarnationId, node_id: &str) -> String {
     if is_frame_alias(node_id) {
-        lash_core::frame_node_id(incarnation_id, &differential_frame_key(node_id))
+        lash_core::frame_node_id(session_id, incarnation_id, &differential_frame_key(node_id))
     } else {
         format!("{session_id}:{node_id}")
     }
@@ -466,7 +466,7 @@ fn runtime_commit(
     let incarnation_id = differential_incarnation_id(session_id);
     let state = RuntimeSessionState {
         session_id: session_id.to_string(),
-        incarnation_id: incarnation_id.clone(),
+        session_lifetime: lash_core::SessionLifetime::durable(incarnation_id.clone()),
         ..RuntimeSessionState::default()
     };
     let mut commit = RuntimeCommit::persisted_state(&state, &[]);
@@ -981,6 +981,9 @@ fn normalized_store_error(backend: &str, error: &StoreError) -> String {
         StoreError::CommitNodeBudgetExceeded { .. } => "CommitNodeBudgetExceeded".to_string(),
         StoreError::CommitByteBudgetExceeded { .. } => "CommitByteBudgetExceeded".to_string(),
         StoreError::SessionBindingMismatch { .. } => "SessionBindingMismatch".to_string(),
+        StoreError::EphemeralSessionAtDurableBoundary { .. } => {
+            "EphemeralSessionAtDurableBoundary".to_string()
+        }
         StoreError::SessionDeleted { .. } => "SessionDeleted".to_string(),
         StoreError::SessionIncarnationMismatch {
             session_id,

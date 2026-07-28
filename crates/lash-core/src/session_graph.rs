@@ -16,12 +16,32 @@ fn draft_node_id(namespace: &str, ordinal: u64) -> String {
 /// Derive a durable frame identity before the surrounding operation commits.
 ///
 /// Process provenance can capture the current frame scope immediately, so a
-/// FrameOpen ID cannot use the provisional-to-realized remapping used by
-/// ordinary history nodes.
-pub fn frame_node_id(incarnation_id: &crate::IncarnationId, frame_key: &str) -> String {
+/// FrameOpen ID must be final before runtime effects begin. Store binding may
+/// remap an unpersisted provisional frame at the assembly seam; commit-time
+/// realization must leave it unchanged.
+pub fn frame_node_id(
+    session_id: &str,
+    incarnation_id: &crate::IncarnationId,
+    frame_key: &str,
+) -> String {
+    frame_node_id_from_derivation(session_id, incarnation_id.as_str(), frame_key)
+}
+
+#[doc(hidden)]
+pub fn frame_node_id_for_lifetime(
+    session_id: &str,
+    lifetime: &crate::SessionLifetime,
+    frame_key: &str,
+) -> String {
+    frame_node_id_from_derivation(session_id, lifetime.derivation_id(), frame_key)
+}
+
+fn frame_node_id_from_derivation(session_id: &str, derivation_id: &str, frame_key: &str) -> String {
     let preimage = format!(
-        "{}:{incarnation_id}:{}:{frame_key}",
-        incarnation_id.as_str().len(),
+        "{}:{session_id}:{}:{}:{}:{frame_key}",
+        session_id.len(),
+        derivation_id.len(),
+        derivation_id,
         frame_key.len()
     );
     format!(
@@ -1380,8 +1400,8 @@ mod tests {
     fn nearest_frame_is_derived_from_ancestry() {
         let assignment = crate::AgentFrameAssignment::from_policy(crate::SessionPolicy::default());
         let mut graph = SessionGraph::default();
-        let incarnation_id = crate::IncarnationId::fresh();
-        let first = frame_node_id(&incarnation_id, "first-frame");
+        let incarnation_id = crate::IncarnationId::mint_for_store();
+        let first = frame_node_id("session", &incarnation_id, "first-frame");
         assert!(graph.append_frame_open_with_id_at(
             first.clone(),
             "first-frame".to_string(),
@@ -1391,7 +1411,7 @@ mod tests {
             "2026-07-27T00:00:00Z".to_string(),
         ));
         let first_message = graph.append_message(text_message("m1", MessageRole::User, "first"));
-        let second = frame_node_id(&incarnation_id, "second-frame");
+        let second = frame_node_id("session", &incarnation_id, "second-frame");
         assert!(graph.append_frame_open_with_id_at(
             second.clone(),
             "second-frame".to_string(),

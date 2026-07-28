@@ -18,7 +18,7 @@ impl SessionStoreFactory for PostgresSessionStoreFactory {
         };
         let meta = SessionMeta {
             session_id: request.session_id.clone(),
-            incarnation_id: lash_core::IncarnationId::fresh(),
+            incarnation_id: lash_core::IncarnationId::mint_for_store(),
             session_name: request.session_id.clone(),
             created_at: current_timestamp_string(),
             model: request.policy.model.id.clone(),
@@ -351,7 +351,7 @@ impl SessionStoreFactory for PostgresSessionStoreFactory {
         .map_err(store_sqlx_error)?;
         let meta = SessionMeta {
             session_id: request.session_id.clone(),
-            incarnation_id: lash_core::IncarnationId::fresh(),
+            incarnation_id: lash_core::IncarnationId::mint_for_store(),
             session_name: request.session_id.clone(),
             created_at: current_timestamp_string(),
             model: request.policy.model.id.clone(),

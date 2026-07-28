@@ -408,12 +408,14 @@ async fn session_store_factory_rejects_cross_session_graph_parents(
         .expect("create graph parent intruder");
     let mut first_state = crate::RuntimeSessionState {
         session_id: first_request.session_id.clone(),
-        incarnation_id: first
-            .load_session_meta()
-            .await
-            .expect("load graph parent owner metadata")
-            .expect("graph parent owner metadata")
-            .incarnation_id,
+        session_lifetime: crate::SessionLifetime::durable(
+            first
+                .load_session_meta()
+                .await
+                .expect("load graph parent owner metadata")
+                .expect("graph parent owner metadata")
+                .incarnation_id,
+        ),
         ..Default::default()
     };
     first_state.ensure_agent_frame_initialized();
@@ -427,12 +429,14 @@ async fn session_store_factory_rejects_cross_session_graph_parents(
         .expect("owner frame node id");
     let mut second_state = crate::RuntimeSessionState {
         session_id: second_request.session_id.clone(),
-        incarnation_id: second
-            .load_session_meta()
-            .await
-            .expect("load graph parent intruder metadata")
-            .expect("graph parent intruder metadata")
-            .incarnation_id,
+        session_lifetime: crate::SessionLifetime::durable(
+            second
+                .load_session_meta()
+                .await
+                .expect("load graph parent intruder metadata")
+                .expect("graph parent intruder metadata")
+                .incarnation_id,
+        ),
         ..Default::default()
     };
     second_state.ensure_agent_frame_initialized();
@@ -475,7 +479,7 @@ async fn session_store_factory_rejects_cross_session_graph_parents(
         head_revision: second_state.head_revision,
         persisted_node_ids: second_state.persisted_node_ids,
         session_id: second_state.session_id,
-        incarnation_id: second_state.incarnation_id,
+        session_lifetime: second_state.session_lifetime,
         current_frame_node_id: Some(foreign_parent),
         ..Default::default()
     };
@@ -530,12 +534,14 @@ async fn session_store_factory_fork_semantics(factory: Arc<dyn crate::SessionSto
         .expect("create fork source");
     let mut state = crate::RuntimeSessionState {
         session_id: source_request.session_id.clone(),
-        incarnation_id: source
-            .load_session_meta()
-            .await
-            .expect("load fork source metadata")
-            .expect("fork source metadata")
-            .incarnation_id,
+        session_lifetime: crate::SessionLifetime::durable(
+            source
+                .load_session_meta()
+                .await
+                .expect("load fork source metadata")
+                .expect("fork source metadata")
+                .incarnation_id,
+        ),
         execution_state_snapshot: Some(vec![0xFA, 0xCE]),
         ..Default::default()
     };
@@ -818,12 +824,13 @@ async fn session_store_factory_fork_semantics(factory: Arc<dyn crate::SessionSto
         .expect("load recreated source metadata")
         .expect("recreated source metadata exists");
     assert_ne!(
-        recreated_meta.incarnation_id, state.incarnation_id,
+        Some(&recreated_meta.incarnation_id),
+        state.session_lifetime.as_durable(),
         "delete-then-recreate must mint a new session incarnation"
     );
     let mut recreated_state = crate::RuntimeSessionState {
         session_id: source_request.session_id.clone(),
-        incarnation_id: recreated_meta.incarnation_id,
+        session_lifetime: crate::SessionLifetime::durable(recreated_meta.incarnation_id),
         ..Default::default()
     };
     recreated_state.ensure_agent_frame_initialized();
@@ -926,12 +933,14 @@ async fn session_store_factory_delete_removes_store_and_is_idempotent(
         .expect("create deleted session");
     let mut state = crate::RuntimeSessionState {
         session_id: request.session_id.clone(),
-        incarnation_id: created
-            .load_session_meta()
-            .await
-            .expect("load deleted session metadata")
-            .expect("deleted session metadata")
-            .incarnation_id,
+        session_lifetime: crate::SessionLifetime::durable(
+            created
+                .load_session_meta()
+                .await
+                .expect("load deleted session metadata")
+                .expect("deleted session metadata")
+                .incarnation_id,
+        ),
         ..Default::default()
     };
     state.ensure_agent_frame_initialized();
@@ -1070,7 +1079,7 @@ async fn session_store_factory_delete_removes_store_and_is_idempotent(
     assert_meta_matches_request(&meta, &recreated_request, "recreated-model");
     let mut recreated_state = crate::RuntimeSessionState {
         session_id: recreated_request.session_id.clone(),
-        incarnation_id: meta.incarnation_id,
+        session_lifetime: crate::SessionLifetime::durable(meta.incarnation_id),
         ..Default::default()
     };
     recreated_state.ensure_agent_frame_initialized();

@@ -486,12 +486,13 @@ pub use session_model::context::PreparedContext;
 pub use session_model::{ConversationRecord, ProtocolEvent, SessionHistoryRecord};
 pub use session_model::{RuntimeSessionPolicy, SessionPolicy, SessionSpec};
 pub use store::{
-    AttachmentIntent, AttachmentManifest, AttachmentManifestEntry, BlobRef, GcReport,
-    IncarnationId, LeaseOwnerIdentity, LeaseOwnerLiveness, LeaseTimings, LeaseTimingsError,
-    NodeRefcountVerification, QueuedWorkStore, RuntimePersistence, SessionCommitStore,
-    SessionExecutionLease, SessionExecutionLeaseClaimOutcome, SessionExecutionLeaseCompletion,
-    SessionExecutionLeaseFence, SessionExecutionLeaseStore, SessionMeta, SessionPickerInfo,
-    SessionReadScope, StoreError, StoreMaintenance, TurnInputStore, VacuumReport,
+    AttachmentIntent, AttachmentManifest, AttachmentManifestEntry, BlobRef, EphemeralRunId,
+    GcReport, IncarnationId, LeaseOwnerIdentity, LeaseOwnerLiveness, LeaseTimings,
+    LeaseTimingsError, NodeRefcountVerification, QueuedWorkStore, RuntimePersistence,
+    SessionCommitStore, SessionExecutionLease, SessionExecutionLeaseClaimOutcome,
+    SessionExecutionLeaseCompletion, SessionExecutionLeaseFence, SessionExecutionLeaseStore,
+    SessionLifetime, SessionMeta, SessionPickerInfo, SessionReadScope, StoreError,
+    StoreMaintenance, TurnInputStore, VacuumReport,
 };
 #[allow(unused_imports)]
 pub(crate) use store::{

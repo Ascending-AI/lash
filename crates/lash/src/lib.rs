@@ -182,12 +182,13 @@ pub mod persistence {
         StoredBlobRef, reclaim_unreferenced_attachments,
     };
     pub use lash_core::{
-        BlobRef, GcReport, LeaseOwnerIdentity, LeaseOwnerLiveness, PersistedSessionConfig,
-        PersistedTurnState, ProtocolEvent, QueuedWorkStore, RuntimePersistence, SessionCommitStore,
-        SessionExecutionLease, SessionExecutionLeaseClaimOutcome, SessionExecutionLeaseCompletion,
+        BlobRef, EphemeralRunId, GcReport, IncarnationId, LeaseOwnerIdentity, LeaseOwnerLiveness,
+        PersistedSessionConfig, PersistedTurnState, ProtocolEvent, QueuedWorkStore,
+        RuntimePersistence, SessionCommitStore, SessionExecutionLease,
+        SessionExecutionLeaseClaimOutcome, SessionExecutionLeaseCompletion,
         SessionExecutionLeaseFence, SessionExecutionLeaseStore, SessionGraph, SessionHistoryRecord,
-        SessionMeta, SessionNodeRecord, SessionReadScope, SessionReadView, SessionRelation,
-        StoreError, StoreMaintenance, TurnInputStore, VacuumReport,
+        SessionLifetime, SessionMeta, SessionNodeRecord, SessionReadScope, SessionReadView,
+        SessionRelation, StoreError, StoreMaintenance, TurnInputStore, VacuumReport,
     };
     #[cfg(feature = "rlm")]
     pub use lash_lashlang_runtime::{InMemoryLashlangArtifactStore, LashlangArtifactStore};

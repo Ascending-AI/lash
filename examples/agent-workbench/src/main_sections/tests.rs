@@ -804,22 +804,22 @@ finish "gap source"
         let session_id = state.current_session_id();
         let mut events = state.event_tx.subscribe(&session_id);
         state.track_turn(&session_id, "turn-cancel");
-        state
-            .core
-            .turn_work_driver()
-            .request_cancel(lash::TurnCancelRequest::new(
-                lash::TurnAddress::new(&session_id, "turn-cancel"),
-                "original-stop",
-                Some("user".to_string()),
-            ))
-            .await
-            .expect("seed cancellation request");
         let session = state
             .core
             .session(&session_id)
             .open()
             .await
             .expect("open cancelled session");
+        state
+            .core
+            .turn_work_driver()
+            .request_cancel(lash::TurnCancelRequest::new(
+                session.turn_address("turn-cancel"),
+                "original-stop",
+                Some("user".to_string()),
+            ))
+            .await
+            .expect("seed cancellation request");
         let (cancelled, turn) = tokio::join!(
             cancel_turn(State(state.clone()), Query(SessionQuery::default())),
             session
@@ -857,7 +857,7 @@ finish "gap source"
             .core
             .turn_work_driver()
             .request_cancel(lash::TurnCancelRequest::new(
-                lash::TurnAddress::new(session_id, "turn-cancel"),
+                session.turn_address("turn-cancel"),
                 "duplicate",
                 Some("test-host".to_string()),
             ))

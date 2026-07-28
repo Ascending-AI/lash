@@ -46,6 +46,17 @@ impl crate::plugin::SessionReadService for RuntimeSessionStateService {
 
 #[async_trait::async_trait]
 impl crate::plugin::SessionStateService for RuntimeSessionStateService {
+    async fn turn_scope(
+        &self,
+        session_id: &str,
+        turn_id: &str,
+    ) -> Result<crate::ExecutionScope, crate::PluginError> {
+        self.services
+            .current
+            .turn_scope_by_id(&self.services.managed, session_id, turn_id)
+            .await
+    }
+
     async fn snapshot_current(&self) -> Result<SessionSnapshot, crate::PluginError> {
         self.services.current.snapshot_current().await
     }

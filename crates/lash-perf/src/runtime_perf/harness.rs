@@ -194,6 +194,13 @@ impl BenchmarkRuntime {
             .await;
     }
 
+    pub(crate) fn turn_scope(&self, turn_id: impl Into<String>) -> lash::runtime::ExecutionScope {
+        self.session
+            .as_ref()
+            .expect("benchmark session")
+            .turn_scope(turn_id)
+    }
+
     pub(crate) async fn run_turn(
         &self,
         input: lash::TurnInput,
@@ -202,10 +209,7 @@ impl BenchmarkRuntime {
         let session = self.session.as_ref().expect("benchmark session");
         let effect_host = session.effect_host();
         let scoped_effect_controller = effect_host
-            .scoped(lash::runtime::ExecutionScope::turn(
-                session.session_id(),
-                lash_core::TurnActivityId::fresh().0.to_string(),
-            ))
+            .scoped(session.turn_scope(lash_core::TurnActivityId::fresh().0.to_string()))
             .map_err(anyhow::Error::from)?;
         session
             .turn(input)
@@ -228,10 +232,7 @@ impl BenchmarkRuntime {
         let session = self.session.as_ref().expect("benchmark session");
         let effect_host = session.effect_host();
         let scoped_effect_controller = effect_host
-            .scoped(lash::runtime::ExecutionScope::turn(
-                session.session_id(),
-                turn_id,
-            ))
+            .scoped(session.turn_scope(turn_id))
             .map_err(anyhow::Error::from)?;
         session
             .turn(input)
@@ -278,13 +279,11 @@ impl BenchmarkRuntime {
             .as_ref()
             .ok_or_else(|| anyhow::anyhow!("cancel round-trip provider control missing"))?;
         let driver = self.core().turn_work_driver();
-        let address = lash_core::TurnAddress::new(
-            format!(
-                "runtime-perf-{}",
-                RuntimePerfScenario::TurnCancelRoundTrip.name()
-            ),
-            turn_id,
-        );
+        let address = self
+            .session
+            .as_ref()
+            .expect("benchmark session")
+            .turn_address(turn_id);
         let turn = self.run_turn_with_id(input, turn_id, cancel);
         tokio::pin!(turn);
         tokio::select! {

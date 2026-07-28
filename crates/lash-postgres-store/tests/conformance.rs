@@ -73,6 +73,15 @@ async fn reset(storage: &PostgresStorage) {
     .expect("reset postgres process change clock");
 }
 
+fn durable_turn_scope(session_id: impl Into<String>, turn_id: impl Into<String>) -> ExecutionScope {
+    let session_id = session_id.into();
+    ExecutionScope::turn_incarnation(
+        &session_id,
+        lash_core::IncarnationId::decode_from_store(format!("postgres-test:{session_id}")),
+        turn_id,
+    )
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn postgres_graph_node_primary_key_is_global_when_configured() {
     let Some((_database_lock, storage)) = storage().await else {
@@ -168,7 +177,7 @@ async fn postgres_attachment_owner_cold_replay_conformance_when_configured() {
     };
     reset(&storage).await;
     let storage = Arc::new(storage);
-    let scope = ExecutionScope::turn("attachment-owner-cold-replay", "attachment-owner-turn");
+    let scope = durable_turn_scope("attachment-owner-cold-replay", "attachment-owner-turn");
     let first = Arc::new(storage.runtime_effect_controller(scope.clone()))
         as Arc<dyn lash_core::RuntimeEffectController>;
     let registry = Arc::new(storage.process_registry()) as Arc<dyn ProcessRegistry>;
@@ -273,12 +282,14 @@ async fn postgres_turn_commit_stamps_use_injected_store_clock_when_configured() 
         .expect("clock test lease acquired");
     let state = lash_core::RuntimeSessionState {
         session_id: SESSION_ID.to_string(),
-        incarnation_id: store
-            .load_session_meta()
-            .await
-            .expect("load clocked session metadata")
-            .expect("clocked session metadata")
-            .incarnation_id,
+        session_lifetime: lash_core::SessionLifetime::durable(
+            store
+                .load_session_meta()
+                .await
+                .expect("load clocked session metadata")
+                .expect("clocked session metadata")
+                .incarnation_id,
+        ),
         ..Default::default()
     };
     let mut commit = lash_core::RuntimeCommit::persisted_state(&state, &[]);
@@ -393,6 +404,28 @@ async fn postgres_effect_host_satisfies_cold_instance_await_event_conformance_wh
     drop(database_lock);
 }
 
+#[tokio::test]
+async fn postgres_durable_effect_host_rejects_unincarnated_turn_scope_when_configured() {
+    let Some((_database_lock, storage)) = storage().await else {
+        eprintln!(
+            "skipping Postgres bare-turn scope rejection: LASH_POSTGRES_DATABASE_URL is not set"
+        );
+        return;
+    };
+    reset(&storage).await;
+    let error = match storage
+        .effect_host()
+        .scoped(ExecutionScope::turn("session", "turn"))
+    {
+        Ok(_) => panic!("durable host must reject a bare turn scope"),
+        Err(error) => error,
+    };
+    assert_eq!(
+        error.code.as_str(),
+        "durable_turn_scope_missing_incarnation"
+    );
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn postgres_await_event_key_mint_is_pure_and_signatures_match_sqlite_when_seeded() {
     let Some((_database_lock, storage)) = storage().await else {
@@ -403,7 +436,7 @@ async fn postgres_await_event_key_mint_is_pure_and_signatures_match_sqlite_when_
     };
     reset(&storage).await;
     let database_url = database_url().expect("configured Postgres database URL");
-    let scope = ExecutionScope::turn("pure-key-session", "pure-key-turn");
+    let scope = durable_turn_scope("pure-key-session", "pure-key-turn");
     let wait = AwaitEventWaitIdentity::tool_completion("pure-key-call");
 
     let (first, second) = tokio::join!(
@@ -568,12 +601,12 @@ async fn postgres_runtime_effect_controller_satisfies_conformance_when_configure
 
     let first_incarnation = storage.runtime_effect_controller(ExecutionScope::turn_incarnation(
         "postgres-reused-session",
-        lash_core::IncarnationId::from("postgres-first-incarnation".to_string()),
+        lash_core::IncarnationId::decode_from_store("postgres-first-incarnation".to_string()),
         "postgres-reused-turn",
     ));
     let second_incarnation = storage.runtime_effect_controller(ExecutionScope::turn_incarnation(
         "postgres-reused-session",
-        lash_core::IncarnationId::from("postgres-second-incarnation".to_string()),
+        lash_core::IncarnationId::decode_from_store("postgres-second-incarnation".to_string()),
         "postgres-reused-turn",
     ));
     lash_core::testing::conformance::effect_controller_session_incarnations_are_isolated(
@@ -638,7 +671,7 @@ async fn postgres_effect_controller_satisfies_lease_fencing_conformance_when_con
                 Box::pin(async move {
                     let controller = PostgresRuntimeEffectController::with_options(
                         &storage,
-                        ExecutionScope::turn("session", "turn"),
+                        durable_turn_scope("session", "turn"),
                         PostgresEffectReplayOptions {
                             lease_timings: lash_core::LeaseTimings::from_ttl(ttl)
                                 .expect("conformance lease timings"),

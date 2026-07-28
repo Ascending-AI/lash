@@ -3,6 +3,7 @@ use super::{GraphCommitDelta, IncarnationId, OperationId, StoreError, derive_his
 impl GraphCommitDelta {
     pub(crate) fn derive_node_ids(
         &mut self,
+        session_id: &str,
         incarnation_id: &IncarnationId,
         operation: &OperationId,
     ) -> Result<Vec<(String, String)>, StoreError> {
@@ -24,7 +25,7 @@ impl GraphCommitDelta {
             let old = node.node_id.clone();
             let derived = match &node.payload {
                 crate::SessionNodePayload::FrameOpen { frame_key, .. } => {
-                    crate::session_graph::frame_node_id(incarnation_id, frame_key)
+                    crate::session_graph::frame_node_id(session_id, incarnation_id, frame_key)
                 }
                 _ => derive_history_node_id(incarnation_id, operation, ordinal as u64)?,
             };

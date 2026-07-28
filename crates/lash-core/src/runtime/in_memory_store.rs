@@ -4,8 +4,7 @@
 //! processes without durable backing: a `process` started in a turn (or by a
 //! trigger) is executed by the lease-protected worker, which rebuilds its
 //! session from the store factory — so even an in-memory host needs a factory.
-//! This is the named, opt-in counterpart to a durable factory; there is no
-//! silent in-memory default. Holds the same `RuntimePersistence` contract as the
+//! This explicit opt-in has no silent in-memory default and holds the same `RuntimePersistence` contract as the
 //! durable backend (verified by the `runtime_persistence` conformance suite).
 
 use std::collections::{HashMap, HashSet};
@@ -936,7 +935,7 @@ impl crate::store::SessionCommitStore for InMemorySessionStore {
                 attempted_session_id: batch.session_id.clone(),
             });
         }
-        let durable_incarnation_id = self.durable_incarnation_for_commit(&commit);
+        let durable_incarnation_id = self.durable_incarnation_for_commit(&commit)?;
         commit.validate_node_derivation(&durable_incarnation_id)?;
         if let Some(completed) = &commit.turn_commit {
             let operation_key = completed.operation.storage_key()?;
@@ -1358,6 +1357,38 @@ impl crate::store::SessionCommitStore for InMemorySessionStore {
         Ok(result)
     }
 
+    async fn ensure_session_incarnation(
+        &self,
+        session_id: &str,
+        policy: &crate::SessionPolicy,
+    ) -> Result<crate::IncarnationId, crate::StoreError> {
+        let _transaction = self
+            .write_transaction
+            .lock()
+            .expect("lock in-memory write transaction");
+        let mut durable = self.session_meta.lock().expect("lock session meta");
+        if let Some(meta) = durable.as_ref() {
+            if meta.session_id != session_id {
+                return Err(crate::StoreError::SessionBindingMismatch {
+                    bound_session_id: meta.session_id.clone(),
+                    attempted_session_id: session_id.to_string(),
+                });
+            }
+            return Ok(meta.incarnation_id.clone());
+        }
+        let incarnation_id = crate::IncarnationId::mint_for_store();
+        *durable = Some(crate::SessionMeta {
+            session_id: session_id.to_string(),
+            incarnation_id: incarnation_id.clone(),
+            session_name: session_id.to_string(),
+            created_at: self.clock.timestamp_rfc3339(),
+            model: policy.model.id.clone(),
+            cwd: None,
+            relation: crate::SessionRelation::Root,
+        });
+        Ok(incarnation_id)
+    }
+
     async fn save_session_meta(
         &self,
         meta: crate::store::SessionMeta,
@@ -1532,30 +1563,6 @@ impl crate::store::SessionExecutionLeaseStore for InMemorySessionStore {
     }
 }
 
-/// Test-only introspection: call counters and a head-meta seeder used by the
-/// lash-core runtime tests. Compiled only under `cfg(test)`, so the shipped
-/// embedding surface carries none of it.
-#[cfg(test)]
-impl InMemorySessionStore {
-    pub(crate) async fn save_session_head_meta(&self, meta: crate::SessionHeadMeta) {
-        *self.session_head_meta.lock().expect("lock store") = Some(meta);
-    }
-
-    pub(crate) fn load_session_count(&self) -> usize {
-        self.load_session_count
-            .load(std::sync::atomic::Ordering::Relaxed)
-    }
-
-    pub(crate) fn checkpoint_claim_counts(&self) -> (usize, usize) {
-        (
-            self.checkpoint_probe_count
-                .load(std::sync::atomic::Ordering::Relaxed),
-            self.checkpoint_write_transaction_count
-                .load(std::sync::atomic::Ordering::Relaxed),
-        )
-    }
-}
-
 /// Session-id-keyed factory: the same in-memory store is returned for a given
 /// session across opens (so a worker rebuild sees the session's state), and a
 /// fresh store is created on first use.
@@ -1589,11 +1596,5 @@ impl InMemorySessionStoreFactory {
             tombstoned_node_ids: Arc::new(Mutex::new(HashSet::new())),
             incoming_node_refs: Arc::new(Mutex::new(HashMap::new())),
         }
-    }
-}
-
-impl Default for InMemorySessionStoreFactory {
-    fn default() -> Self {
-        Self::new()
     }
 }

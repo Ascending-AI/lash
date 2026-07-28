@@ -122,6 +122,25 @@ impl ExecutionScope {
         }
     }
 
+    /// Reject a turn scope that would use the pre-incarnation bare-turn
+    /// namespace on a durable host.
+    pub fn validate_for_durable_host(&self) -> Result<(), RuntimeError> {
+        self.validate()?;
+        if matches!(
+            self,
+            Self::Turn {
+                incarnation_id: None,
+                ..
+            }
+        ) {
+            return Err(RuntimeError::new(
+                "durable_turn_scope_missing_incarnation",
+                "durable effect hosts require a store-realized session incarnation for turn scopes",
+            ));
+        }
+        Ok(())
+    }
+
     pub fn session_id(&self) -> Option<&str> {
         match self {
             Self::Turn { session_id, .. }

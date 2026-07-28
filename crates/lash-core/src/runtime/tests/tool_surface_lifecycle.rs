@@ -1,4 +1,5 @@
 use super::*;
+use crate::SessionCommitStore as _;
 use crate::ToolProvider as _;
 use crate::plugin::{SessionAuthorityContext, StaticPluginFactory};
 
@@ -158,6 +159,48 @@ fn catalog_names(runtime: &LashRuntime) -> Vec<String> {
         .filter_map(|entry| entry.get("name").and_then(serde_json::Value::as_str))
         .map(ToOwned::to_owned)
         .collect()
+}
+
+#[tokio::test]
+async fn parked_resume_keeps_the_store_realized_session_lifetime() {
+    let plugin_host = dynamic_plugin_host(Arc::new(DynamicToolSurface::default()));
+    let env = runtime_environment(plugin_host);
+    let store = Arc::new(RecordingStore::default());
+    let runtime = LashRuntime::from_environment(
+        &env,
+        standard_test_policy(),
+        root_state("parked-incarnation"),
+        Some(store.clone() as Arc<dyn crate::RuntimePersistence>),
+    )
+    .await
+    .expect("persistent runtime");
+    let expected = store
+        .load_session_meta()
+        .await
+        .expect("load realized metadata")
+        .expect("realized metadata")
+        .incarnation_id;
+    assert_eq!(
+        runtime
+            .export_persistence_state()
+            .session_lifetime
+            .as_durable(),
+        Some(&expected)
+    );
+
+    let parked = runtime.park().await.expect("park runtime");
+    let resumed = LashRuntime::resume(parked, &env)
+        .await
+        .expect("resume runtime");
+    let state = resumed.export_persistence_state();
+    assert_eq!(state.session_lifetime.as_durable(), Some(&expected));
+    assert!(matches!(
+        state.turn_scope("resumed-turn"),
+        crate::ExecutionScope::Turn {
+            incarnation_id: Some(ref actual),
+            ..
+        } if actual == &expected
+    ));
 }
 
 fn registry(runtime: &LashRuntime) -> Arc<crate::ToolRegistry> {

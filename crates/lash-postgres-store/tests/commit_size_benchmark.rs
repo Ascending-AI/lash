@@ -98,7 +98,12 @@ fn record_attachment_intents(store: &dyn RuntimePersistence, commit: &RuntimeCom
     }
 }
 
-async fn time_commit(store: Arc<dyn RuntimePersistence>, commit: RuntimeCommit) -> Duration {
+async fn time_commit(store: Arc<dyn RuntimePersistence>, mut commit: RuntimeCommit) -> Duration {
+    let incarnation_id = store
+        .ensure_session_incarnation(&commit.session_id, &SessionPolicy::default())
+        .await
+        .expect("realize benchmark session lifetime");
+    commit.session_lifetime = lash_core::SessionLifetime::durable(incarnation_id);
     record_attachment_intents(store.as_ref(), &commit);
     let started = Instant::now();
     store

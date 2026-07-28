@@ -4126,12 +4126,19 @@ async fn cancellation_sealed_before_renewal_failure_remains_evidence_bearing_can
     }));
 
     let turn_id = "cancel-before-renewal-failure";
+    let persisted_state = runtime.export_persistence_state();
+    let turn_scope = inline_scope(persisted_state.turn_scope(turn_id));
+    let turn_address = crate::TurnAddress::new_for_lifetime(
+        &persisted_state.session_id,
+        &persisted_state.session_lifetime,
+        turn_id,
+    );
     let turn = crate::task::spawn(async move {
         runtime
             .run_turn_assembled(
                 TurnInput::text("cancel before the lease renewal fails"),
                 CancellationToken::new(),
-                named_turn_scope("root", turn_id),
+                turn_scope,
             )
             .await
     });
@@ -4141,7 +4148,7 @@ async fn cancellation_sealed_before_renewal_failure_remains_evidence_bearing_can
     let receipt = turn_driver
         .request_cancel(
             crate::TurnCancelRequest::new(
-                crate::TurnAddress::new("root", turn_id),
+                turn_address,
                 "cancel-before-loss-request",
                 Some("test-user".to_string()),
             )
@@ -4806,8 +4813,11 @@ async fn session_manager_persists_child_sessions_in_separate_store() {
     .expect("load session")
     .expect("session read");
     let graph = read.graph;
-    let child_frame_node_id =
-        crate::session_graph::frame_node_id(&meta.incarnation_id, "initial-frame");
+    let child_frame_node_id = crate::session_graph::frame_node_id(
+        &meta.session_id,
+        &meta.incarnation_id,
+        "initial-frame",
+    );
     assert_eq!(
         graph.nodes.first().map(|node| node.node_id.as_str()),
         Some(child_frame_node_id.as_str())

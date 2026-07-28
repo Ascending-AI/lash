@@ -374,6 +374,33 @@ impl PostgresSessionStore {
         )
     }
 
+    fn bind_session_id(&self, attempted_session_id: &str) -> Result<(), StoreError> {
+        if let Some(bound_session_id) = &self.session_id {
+            return if bound_session_id == attempted_session_id {
+                Ok(())
+            } else {
+                Err(StoreError::SessionBindingMismatch {
+                    bound_session_id: bound_session_id.clone(),
+                    attempted_session_id: attempted_session_id.to_string(),
+                })
+            };
+        }
+
+        let _ = self.bound_session.set(attempted_session_id.to_string());
+        let bound_session_id = self
+            .bound_session
+            .get()
+            .expect("OnceLock contains either this session or the concurrent winner");
+        if bound_session_id == attempted_session_id {
+            Ok(())
+        } else {
+            Err(StoreError::SessionBindingMismatch {
+                bound_session_id: bound_session_id.clone(),
+                attempted_session_id: attempted_session_id.to_string(),
+            })
+        }
+    }
+
     async fn selected_session_id(&self) -> Result<Option<String>, StoreError> {
         if let Some(session_id) = &self.session_id {
             return Ok(Some(session_id.clone()));
@@ -419,6 +446,7 @@ mod postgres_test_support;
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Barrier;
     use std::sync::atomic::{AtomicUsize, Ordering};
 
     use super::*;
@@ -449,6 +477,40 @@ mod tests {
             warning_count.load(Ordering::Relaxed),
             1,
             "the legacy factory must warn that process-owner liveness is not wired"
+        );
+    }
+
+    #[tokio::test]
+    async fn unbound_session_store_concurrent_binding_has_exactly_one_winner() {
+        let pool = PgPoolOptions::new()
+            .connect_lazy("postgres://postgres:postgres@127.0.0.1/lash")
+            .expect("lazy test pool");
+        let store = PostgresSessionStore {
+            pool,
+            clock: Arc::new(lash_core::SystemClock),
+            session_id: None,
+            bound_session: Arc::new(OnceLock::new()),
+            checkpoint_probe_count: Arc::new(AtomicUsize::new(0)),
+            checkpoint_write_transaction_count: Arc::new(AtomicUsize::new(0)),
+        };
+        let barrier = Arc::new(Barrier::new(2));
+        let attempts = ["alpha", "beta"].map(|session_id| {
+            let store = store.clone();
+            let barrier = Arc::clone(&barrier);
+            std::thread::spawn(move || {
+                barrier.wait();
+                store.bind_session_id(session_id)
+            })
+        });
+        let results = attempts.map(|attempt| attempt.join().expect("binding thread"));
+
+        assert_eq!(results.iter().filter(|result| result.is_ok()).count(), 1);
+        assert_eq!(
+            results
+                .iter()
+                .filter(|result| matches!(result, Err(StoreError::SessionBindingMismatch { .. })))
+                .count(),
+            1
         );
     }
 
@@ -647,6 +709,11 @@ mod tests {
             session_id: session_id.clone(),
             ..Default::default()
         };
+        let incarnation_id = store
+            .ensure_session_incarnation(&session_id, &state.policy)
+            .await
+            .expect("realize Postgres test session lifetime");
+        state.bind_durable_incarnation(incarnation_id);
         state.ensure_agent_frame_initialized();
         store
             .commit_runtime_state(RuntimeCommit::persisted_state(&state, &[]))
@@ -720,9 +787,14 @@ mod tests {
         let session_id = format!("postgres-refcount-scrub:{}", uuid::Uuid::new_v4());
         let store = storage.session_store(session_id.clone());
         let mut state = lash_core::RuntimeSessionState {
-            session_id,
+            session_id: session_id.clone(),
             ..Default::default()
         };
+        let incarnation_id = store
+            .ensure_session_incarnation(&session_id, &state.policy)
+            .await
+            .expect("realize Postgres test session lifetime");
+        state.bind_durable_incarnation(incarnation_id);
         state.ensure_agent_frame_initialized();
         store
             .commit_runtime_state(RuntimeCommit::persisted_state(&state, &[]))
@@ -784,12 +856,14 @@ mod tests {
             .expect("create stale store");
         let mut state = lash_core::RuntimeSessionState {
             session_id: session_id.clone(),
-            incarnation_id: stale_store
-                .load_session_meta()
-                .await
-                .expect("load stale session metadata")
-                .expect("stale session metadata")
-                .incarnation_id,
+            session_lifetime: lash_core::SessionLifetime::durable(
+                stale_store
+                    .load_session_meta()
+                    .await
+                    .expect("load stale session metadata")
+                    .expect("stale session metadata")
+                    .incarnation_id,
+            ),
             ..Default::default()
         };
         state.ensure_agent_frame_initialized();
@@ -815,12 +889,14 @@ mod tests {
             .expect("explicitly recreate deleted store");
         let mut state = lash_core::RuntimeSessionState {
             session_id: session_id.clone(),
-            incarnation_id: recreated
-                .load_session_meta()
-                .await
-                .expect("load recreated session metadata")
-                .expect("recreated session metadata")
-                .incarnation_id,
+            session_lifetime: lash_core::SessionLifetime::durable(
+                recreated
+                    .load_session_meta()
+                    .await
+                    .expect("load recreated session metadata")
+                    .expect("recreated session metadata")
+                    .incarnation_id,
+            ),
             ..Default::default()
         };
         state.ensure_agent_frame_initialized();

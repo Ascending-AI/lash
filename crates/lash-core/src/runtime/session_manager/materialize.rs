@@ -17,22 +17,13 @@ pub(in crate::runtime::session_manager) async fn materialize_session_create_plan
     // Child-session creation routes through the same assembler as the live open
     // and worker-rebuild paths. A freshly created session has a single path, so
     // it materializes under KeepAll (residency trimming is an open-time concern).
-    let mut initial_runtime_state = plan.initial_runtime_state.clone();
-    if let Some(store) = store_binding.as_deref()
-        && let Some(meta) = store
-            .load_session_meta()
-            .await
-            .map_err(|err| crate::PluginError::Session(err.to_string()))?
-    {
-        initial_runtime_state.incarnation_id = meta.incarnation_id;
-    }
     let mut runtime = LashRuntime::assemble_runtime(
         plan.policy.clone(),
         embedded_host(current),
         plugins,
         crate::runtime::lifecycle::RuntimePersistenceBindings::new(store_binding.clone()),
         current.host.process_registry.clone(),
-        initial_runtime_state,
+        plan.initial_runtime_state.clone(),
         crate::Residency::default(),
     )
     .await

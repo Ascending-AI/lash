@@ -138,7 +138,7 @@ impl CurrentSessionCapability {
         );
         RuntimeSessionState {
             session_id: runtime.state.session_id.clone(),
-            incarnation_id: runtime.state.incarnation_id.clone(),
+            session_lifetime: runtime.state.session_lifetime.clone(),
             policy: runtime.state.policy.clone(),
             agent_frames: runtime.state.agent_frames.clone(),
             current_frame_node_id: runtime.state.current_frame_node_id.clone(),

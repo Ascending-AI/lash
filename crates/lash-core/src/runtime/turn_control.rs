@@ -37,6 +37,8 @@ impl TurnCancelPeekIdentity {
 pub struct TurnAddress {
     pub session_id: String,
     pub turn_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub incarnation_id: Option<crate::IncarnationId>,
 }
 
 impl TurnAddress {
@@ -44,15 +46,48 @@ impl TurnAddress {
         Self {
             session_id: session_id.into(),
             turn_id: turn_id.into(),
+            incarnation_id: None,
         }
     }
 
-    fn scope(&self) -> ExecutionScope {
-        ExecutionScope::turn(&self.session_id, &self.turn_id)
+    pub fn new_incarnation(
+        session_id: impl Into<String>,
+        incarnation_id: crate::IncarnationId,
+        turn_id: impl Into<String>,
+    ) -> Self {
+        Self {
+            session_id: session_id.into(),
+            turn_id: turn_id.into(),
+            incarnation_id: Some(incarnation_id),
+        }
+    }
+
+    pub fn new_for_lifetime(
+        session_id: impl Into<String>,
+        lifetime: &crate::SessionLifetime,
+        turn_id: impl Into<String>,
+    ) -> Self {
+        match lifetime.as_durable() {
+            Some(incarnation_id) => {
+                Self::new_incarnation(session_id, incarnation_id.clone(), turn_id)
+            }
+            None => Self::new(session_id, turn_id),
+        }
+    }
+
+    pub fn execution_scope(&self) -> ExecutionScope {
+        match self.incarnation_id.as_ref() {
+            Some(incarnation_id) => ExecutionScope::turn_incarnation(
+                &self.session_id,
+                incarnation_id.clone(),
+                &self.turn_id,
+            ),
+            None => ExecutionScope::turn(&self.session_id, &self.turn_id),
+        }
     }
 
     fn validate(&self) -> Result<(), RuntimeError> {
-        self.scope().validate()
+        self.execution_scope().validate()
     }
 }
 
@@ -354,7 +389,10 @@ async fn cancel_gate_key(
     address: &TurnAddress,
 ) -> Result<AwaitEventKey, RuntimeError> {
     resolver
-        .await_event_key(&address.scope(), AwaitEventWaitIdentity::TurnCancelGate)
+        .await_event_key(
+            &address.execution_scope(),
+            AwaitEventWaitIdentity::TurnCancelGate,
+        )
         .await
 }
 
@@ -363,7 +401,10 @@ async fn terminal_key(
     address: &TurnAddress,
 ) -> Result<AwaitEventKey, RuntimeError> {
     resolver
-        .await_event_key(&address.scope(), AwaitEventWaitIdentity::TurnTerminal)
+        .await_event_key(
+            &address.execution_scope(),
+            AwaitEventWaitIdentity::TurnTerminal,
+        )
         .await
 }
 
@@ -654,7 +695,7 @@ mod tests {
         };
 
         let scoped = host
-            .scoped(address.scope())
+            .scoped(address.execution_scope())
             .expect("scope recovered turn controller");
         let recovered = ActiveTurnControl::new(host.as_ref(), address)
             .await

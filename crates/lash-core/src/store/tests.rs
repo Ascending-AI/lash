@@ -1,7 +1,7 @@
 use super::*;
 
 fn incarnation(value: &str) -> IncarnationId {
-    IncarnationId::from(value.to_string())
+    IncarnationId::decode_from_store(value.to_string())
 }
 
 fn legacy_turn_commit_hash(commit: &RuntimeCommit) -> String {
@@ -38,15 +38,21 @@ fn legacy_turn_commit_hash(commit: &RuntimeCommit) -> String {
 fn intent_fixture() -> RuntimeCommit {
     let mut state = crate::RuntimeSessionState {
         session_id: "golden-session".to_string(),
-        incarnation_id: incarnation("golden-session"),
+        session_lifetime: SessionLifetime::durable(incarnation("golden-session")),
         turn_index: 7,
         ..crate::RuntimeSessionState::default()
     };
     state.ensure_agent_frame_initialized();
     state.session_graph.data_mut().nodes[0].timestamp = "2026-07-26T10:00:00Z".to_string();
     let operation = OperationId::turn("golden-session", "turn-42", "final");
-    let node_id =
-        derive_history_node_id(&state.incarnation_id, &operation, 0).expect("derive golden node");
+    let node_id = derive_history_node_id(
+        state
+            .durable_incarnation_id("test history derivation")
+            .expect("durable fixture"),
+        &operation,
+        0,
+    )
+    .expect("derive golden node");
     let message = crate::Message {
         id: "payload-message-id".to_string(),
         role: crate::MessageRole::User,
@@ -99,12 +105,19 @@ fn first_persisted_state_commit_derives_and_installs_node_ids() {
         ),
         ..crate::RuntimeSessionState::default()
     };
+    state.bind_durable_incarnation(incarnation("first-commit"));
     let operation = OperationId::new(
         crate::ExecutionScope::runtime_operation("first-commit"),
         "initial",
     );
-    let expected = derive_history_node_id(&state.incarnation_id, &operation, 0)
-        .expect("derive expected first node id");
+    let expected = derive_history_node_id(
+        state
+            .durable_incarnation_id("test history derivation")
+            .expect("durable fixture"),
+        &operation,
+        0,
+    )
+    .expect("derive expected first node id");
 
     let (commit, persisted_node_ids) =
         RuntimeCommit::persisted_state_with_operation(&mut state, &[], operation)
@@ -131,8 +144,14 @@ fn with_operation_returns_the_append_id_mapping() {
     };
     let old_node_id = nodes[0].node_id.clone();
     let operation = OperationId::turn("golden-session", "turn-43", "final");
-    let expected_node_id = derive_history_node_id(&commit.incarnation_id, &operation, 0)
-        .expect("derive replacement node id");
+    let expected_node_id = derive_history_node_id(
+        commit
+            .durable_incarnation_id("test history derivation")
+            .expect("durable fixture"),
+        &operation,
+        0,
+    )
+    .expect("derive replacement node id");
 
     let (commit, mapping) = commit
         .with_operation(operation)
@@ -346,8 +365,12 @@ fn node_derivation_and_realization_digest_are_independent() {
         operation,
         hash,
     ));
+    let incarnation_id = commit
+        .durable_incarnation_id("test validation")
+        .expect("durable fixture")
+        .clone();
     commit
-        .validate_node_derivation(&commit.incarnation_id)
+        .validate_node_derivation(&incarnation_id)
         .expect("derived proposal");
 
     let mut rogue = commit.clone();
@@ -356,7 +379,7 @@ fn node_derivation_and_realization_digest_are_independent() {
     };
     nodes[0].node_id = "rogue".to_string();
     assert!(matches!(
-        rogue.validate_node_derivation(&commit.incarnation_id),
+        rogue.validate_node_derivation(&incarnation_id),
         Err(StoreError::NodeIdDerivationMismatch { .. })
     ));
 
@@ -394,7 +417,7 @@ fn node_derivation_remaps_in_batch_parent_edges() {
         leaf_node_id: Some("draft-b".to_string()),
     };
     graph
-        .derive_node_ids(&incarnation("session"), &operation)
+        .derive_node_ids("session", &incarnation("session"), &operation)
         .expect("derive node ids");
     let GraphCommitDelta::Append { nodes, .. } = graph else {
         panic!("fixture is append");
@@ -409,7 +432,8 @@ fn node_derivation_remaps_in_batch_parent_edges() {
 fn frame_node_identity_is_stable_across_operation_realization() {
     let operation = OperationId::turn("session", "turn", "final");
     let incarnation_id = incarnation("session");
-    let frame_node_id = crate::session_graph::frame_node_id(&incarnation_id, "initial-frame");
+    let frame_node_id =
+        crate::session_graph::frame_node_id("session", &incarnation_id, "initial-frame");
     let mut graph = GraphCommitDelta::Append {
         nodes: vec![crate::SessionNodeRecord {
             node_id: frame_node_id.clone(),
@@ -428,7 +452,7 @@ fn frame_node_identity_is_stable_across_operation_realization() {
     };
 
     graph
-        .derive_node_ids(&incarnation_id, &operation)
+        .derive_node_ids("session", &incarnation_id, &operation)
         .expect("realize frame node");
 
     let GraphCommitDelta::Append {

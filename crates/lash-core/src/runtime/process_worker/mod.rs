@@ -1351,12 +1351,12 @@ impl DurableProcessWorker {
         if policy.recorded_provider_id().is_empty() {
             policy.provider_id = self.config.session_policy.provider_id.clone();
         }
-        self.build_process_runtime(
+        Box::pin(self.build_process_runtime(
             crate::process_runtime_session_ids(&registration.id)[1].clone(),
             policy,
             create_request.plugin_options.clone(),
             "session turn request",
-        )
+        ))
         .await
     }
 
@@ -1379,12 +1379,12 @@ impl DurableProcessWorker {
             env_ref,
         )
         .await?;
-        self.build_process_runtime(
+        Box::pin(self.build_process_runtime(
             crate::process_runtime_session_ids(&registration.id)[0].clone(),
             env.policy,
             env.plugin_options,
             env_ref.as_str(),
-        )
+        ))
         .await
     }
 

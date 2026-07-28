@@ -50,12 +50,14 @@ pub struct RuntimeAwaitEventOptions {
     pub deadline: Option<Instant>,
     pub clock: Arc<dyn crate::Clock>,
     pub observe_turn_cancel: bool,
+    pub turn_cancel_scope: Option<crate::ExecutionScope>,
 }
 
 /// Host controls attached to one sleep effect.
 pub struct RuntimeSleepOptions {
     pub cancellation: CancellationToken,
     pub observe_turn_cancel: bool,
+    pub turn_cancel_scope: Option<crate::ExecutionScope>,
 }
 
 use super::await_events::AwaitEventRegistry;
@@ -244,12 +246,14 @@ enum RuntimeEffectLocalExecutorState<'run> {
         cancellation: CancellationToken,
         clock: Arc<dyn crate::Clock>,
         observe_turn_cancel: bool,
+        turn_cancel_scope: Option<crate::ExecutionScope>,
     },
     ExternalWaitOptions {
         cancellation: CancellationToken,
         deadline: Option<Instant>,
         clock: Arc<dyn crate::Clock>,
         observe_turn_cancel: bool,
+        turn_cancel_scope: Option<crate::ExecutionScope>,
     },
     Process(ProcessLocalExecution),
     Trigger(TriggerLocalExecution),
@@ -311,6 +315,7 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
                 cancellation,
                 clock,
                 observe_turn_cancel: true,
+                turn_cancel_scope: None,
             },
             replay_trace: None,
         }
@@ -331,6 +336,7 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
                 deadline,
                 clock,
                 observe_turn_cancel: true,
+                turn_cancel_scope: None,
             },
             replay_trace: None,
         }
@@ -347,6 +353,19 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
                 observe_turn_cancel: current,
                 ..
             } => *current = observe_turn_cancel,
+            _ => {}
+        }
+        self
+    }
+
+    pub fn with_turn_cancel_scope(mut self, scope: crate::ExecutionScope) -> Self {
+        match &mut self.state {
+            RuntimeEffectLocalExecutorState::SleepOnly {
+                turn_cancel_scope, ..
+            }
+            | RuntimeEffectLocalExecutorState::ExternalWaitOptions {
+                turn_cancel_scope, ..
+            } => *turn_cancel_scope = Some(scope),
             _ => {}
         }
         self
@@ -419,7 +438,7 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
             turn_pipeline: crate::runtime::TurnBoundary::from_state_with_clock(
                 driver.turn_pipeline.state().clone(),
                 Arc::clone(&driver.host.core.clock),
-                crate::ExecutionScope::turn(&driver.session_id, &driver.turn_id),
+                driver.turn_pipeline.state().turn_scope(&driver.turn_id),
             )
             .with_session_execution_lease(driver.session_execution_lease.clone()),
             llm_stream_summaries: driver.llm_stream_summaries.clone(),
@@ -663,21 +682,25 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
                             cancellation,
                             clock,
                             observe_turn_cancel,
+                            turn_cancel_scope,
                         } => RuntimeEffectLocalExecutorState::SleepOnly {
                             cancellation,
                             clock,
                             observe_turn_cancel,
+                            turn_cancel_scope,
                         },
                         RuntimeEffectLocalExecutorState::ExternalWaitOptions {
                             cancellation,
                             deadline,
                             clock,
                             observe_turn_cancel,
+                            turn_cancel_scope,
                         } => RuntimeEffectLocalExecutorState::ExternalWaitOptions {
                             cancellation,
                             deadline,
                             clock,
                             observe_turn_cancel,
+                            turn_cancel_scope,
                         },
                         RuntimeEffectLocalExecutorState::Process(execution) => {
                             RuntimeEffectLocalExecutorState::Process(execution)
@@ -777,17 +800,20 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
                 deadline,
                 clock,
                 observe_turn_cancel,
+                turn_cancel_scope,
             } => Ok(RuntimeAwaitEventOptions {
                 cancellation,
                 deadline,
                 clock,
                 observe_turn_cancel,
+                turn_cancel_scope,
             }),
             _ => Ok(RuntimeAwaitEventOptions {
                 cancellation: CancellationToken::new(),
                 deadline: None,
                 clock: Arc::new(crate::SystemClock),
                 observe_turn_cancel: false,
+                turn_cancel_scope: None,
             }),
         }
     }
@@ -797,14 +823,17 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
             RuntimeEffectLocalExecutorState::SleepOnly {
                 cancellation,
                 observe_turn_cancel,
+                turn_cancel_scope,
                 ..
             } => RuntimeSleepOptions {
                 cancellation,
                 observe_turn_cancel,
+                turn_cancel_scope,
             },
             _ => RuntimeSleepOptions {
                 cancellation: CancellationToken::new(),
                 observe_turn_cancel: false,
+                turn_cancel_scope: None,
             },
         }
     }

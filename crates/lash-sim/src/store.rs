@@ -55,6 +55,7 @@ fn store_error_variant(error: &StoreError) -> &'static str {
         StoreError::HeadRevisionConflict { .. } => "HeadRevisionConflict",
         StoreError::Backend(_) => "Backend",
         StoreError::SessionBindingMismatch { .. } => "SessionBindingMismatch",
+        StoreError::EphemeralSessionAtDurableBoundary { .. } => "EphemeralSessionAtDurableBoundary",
         StoreError::SessionDeleted { .. } => "SessionDeleted",
         StoreError::SessionIncarnationMismatch { .. } => "SessionIncarnationMismatch",
         StoreError::UnsupportedReadScope(_) => "UnsupportedReadScope",

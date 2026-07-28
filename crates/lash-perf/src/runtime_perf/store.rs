@@ -519,6 +519,34 @@ lash_core::impl_noop_attachment_manifest!(RuntimePerfStore);
 
 #[async_trait::async_trait]
 impl SessionCommitStore for RuntimePerfStore {
+    async fn ensure_session_incarnation(
+        &self,
+        session_id: &str,
+        policy: &lash_core::SessionPolicy,
+    ) -> Result<lash_core::IncarnationId, store::StoreError> {
+        let mut meta = self.session_meta.lock().expect("lock perf session meta");
+        if let Some(meta) = meta.as_ref() {
+            if meta.session_id != session_id {
+                return Err(StoreError::SessionBindingMismatch {
+                    bound_session_id: meta.session_id.clone(),
+                    attempted_session_id: session_id.to_string(),
+                });
+            }
+            return Ok(meta.incarnation_id.clone());
+        }
+        let incarnation_id = lash_core::IncarnationId::mint_for_store();
+        *meta = Some(store::SessionMeta {
+            session_id: session_id.to_string(),
+            incarnation_id: incarnation_id.clone(),
+            session_name: session_id.to_string(),
+            created_at: "test".to_string(),
+            model: policy.model.id.clone(),
+            cwd: None,
+            relation: lash_core::SessionRelation::Root,
+        });
+        Ok(incarnation_id)
+    }
+
     async fn load_session(
         &self,
         scope: SessionReadScope,
@@ -595,7 +623,7 @@ impl SessionCommitStore for RuntimePerfStore {
             .collect();
         let RuntimeCommit {
             session_id,
-            incarnation_id: _,
+            session_lifetime: _,
             expected_head_revision,
             config,
             current_frame_node_id,
@@ -1519,82 +1547,4 @@ fn unsupported_maintenance(operation: &'static str) -> StoreError {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use lash_core::runtime::{DeliveryPolicy, QueuedWorkPayload, RuntimeSessionState, SlotPolicy};
-
-    #[tokio::test]
-    async fn refcount_scrub_refuses_to_report_false_success() {
-        let store = RuntimePerfStore::default();
-
-        let error = store
-            .verify_node_refcounts()
-            .await
-            .expect_err("perf store does not maintain node refcounts");
-
-        assert!(matches!(
-            error,
-            StoreError::UnsupportedStoreOperation {
-                operation: "verify_node_refcounts"
-            }
-        ));
-    }
-
-    #[tokio::test]
-    async fn runtime_commit_rejects_cross_session_queue_batches_atomically() {
-        let store = RuntimePerfStore::default();
-        let owner = LeaseOwnerIdentity::opaque("perf-store-test", "cross-session-outbox");
-        let lease = store
-            .try_claim_session_execution_lease("root", &owner, 60_000)
-            .await
-            .expect("claim execution lease")
-            .acquired()
-            .expect("execution lease acquired");
-        let state = RuntimeSessionState {
-            session_id: "root".to_string(),
-            turn_index: 1,
-            ..RuntimeSessionState::default()
-        };
-        let mut commit =
-            RuntimeCommit::persisted_state(&state, &[]).with_session_execution_lease(lease.fence());
-        commit.enqueued_queue_batches = vec![QueuedWorkBatchDraft::new(
-            "other-session",
-            DeliveryPolicy::AfterCurrentTurnCommit,
-            SlotPolicy::Exclusive,
-            vec![QueuedWorkPayload::agent_frame_task(
-                "follow-frame",
-                "follow-on task",
-                None,
-            )],
-        )];
-
-        let error = store
-            .commit_runtime_state(commit)
-            .await
-            .expect_err("cross-session queue batch must reject the commit");
-
-        assert!(matches!(
-            error,
-            StoreError::SessionBindingMismatch {
-                bound_session_id,
-                attempted_session_id,
-            } if bound_session_id == "root" && attempted_session_id == "other-session"
-        ));
-        assert!(
-            store
-                .load_session(SessionReadScope::FullGraph)
-                .await
-                .expect("load session after rejected commit")
-                .is_none(),
-            "rejected commit must not persist session state"
-        );
-        assert!(
-            store
-                .list_queued_work("other-session")
-                .await
-                .expect("list queued work after rejected commit")
-                .is_empty(),
-            "rejected commit must not enqueue cross-session work"
-        );
-    }
-}
+mod tests;

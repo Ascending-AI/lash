@@ -149,13 +149,13 @@ async fn run_managed_session_turn(
     // releasing it, exactly as the former inline path did.
     let mut runtime_guard = runtime.runtime.lock().await;
     let scoped_effect_controller = scoped_effect_controller
-        .rescope(crate::ExecutionScope::turn_incarnation(
-            runtime_guard.state.session_id.clone(),
-            runtime_guard.state.incarnation_id.clone(),
-            scoped_effect_controller
-                .turn_id()
-                .unwrap_or(scoped_effect_controller.scope_id()),
-        ))
+        .rescope(
+            runtime_guard.state.turn_scope(
+                scoped_effect_controller
+                    .turn_id()
+                    .unwrap_or(scoped_effect_controller.scope_id()),
+            ),
+        )
         .map_err(|err| crate::PluginError::Session(err.to_string()))?;
     let result = runtime_guard
         .stream_turn_with_agent_frames(

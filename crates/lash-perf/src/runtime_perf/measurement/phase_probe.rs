@@ -339,10 +339,7 @@ pub(crate) async fn run_once(
             let turn_id = format!("runtime-perf-scoped-{}", turn_index + 1);
             let scoped_effect_controller = lash::runtime::ScopedEffectController::borrowed(
                 &effect_controller,
-                lash::runtime::ExecutionScope::turn(
-                    format!("runtime-perf-{}", scenario.name()),
-                    &turn_id,
-                ),
+                runtime.turn_scope(&turn_id),
             )
             .map_err(anyhow::Error::from)?;
             runtime_perf_timed(

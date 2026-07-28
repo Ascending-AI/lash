@@ -38,6 +38,13 @@ pub enum StoreError {
         expected_incarnation_id: String,
         actual_incarnation_id: String,
     },
+    #[error(
+        "ephemeral session `{session_id}` cannot cross durable boundary `{boundary}` before a store realizes its incarnation"
+    )]
+    EphemeralSessionAtDurableBoundary {
+        session_id: String,
+        boundary: &'static str,
+    },
     #[error("store does not support read scope {0:?}")]
     UnsupportedReadScope(SessionReadScope),
     #[error("store does not support `{operation}`")]

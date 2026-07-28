@@ -64,7 +64,7 @@ fn commit_at(
 ) -> RuntimeCommit {
     let state = RuntimeSessionState {
         session_id: session_id.to_string(),
-        incarnation_id: incarnation_id.clone(),
+        session_lifetime: lash_core::SessionLifetime::durable(incarnation_id.clone()),
         ..RuntimeSessionState::default()
     };
     RuntimeCommit {
@@ -86,7 +86,7 @@ fn commit_at(
 #[test]
 fn head_revision_cas_holds_across_two_connections() {
     let path = unique_db_path("cas");
-    let incarnation_id = lash_core::IncarnationId::fresh();
+    let incarnation_id = lash_core::IncarnationId::mint_for_store();
     let session_fence = {
         let store = block_on(Store::open(&path)).expect("lease store");
         let owner = lease_owner("session-owner");
@@ -172,7 +172,7 @@ async fn gc_keeps_live_committed_checkpoint_blobs() {
         )
         .await;
 
-    let state = RuntimeSessionState {
+    let mut state = RuntimeSessionState {
         session_id: "root".to_string(),
         tool_state_snapshot: Some(persisted_tool_state_at_generation(3)),
         plugin_snapshot: Some(PluginSessionSnapshot {
@@ -182,6 +182,11 @@ async fn gc_keeps_live_committed_checkpoint_blobs() {
         execution_state_snapshot: Some(vec![0xDE, 0xAD, 0xBE, 0xEF]),
         ..RuntimeSessionState::default()
     };
+    let incarnation_id = store
+        .ensure_session_incarnation(&state.session_id, &state.policy)
+        .await
+        .expect("realize session incarnation");
+    state.session_lifetime = lash_core::SessionLifetime::durable(incarnation_id);
     let owner = lease_owner("gc-test");
     let session_lease = store
         .try_claim_session_execution_lease("root", &owner, 60_000)

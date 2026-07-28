@@ -7,6 +7,7 @@ mod error;
 mod graph_commit;
 mod incarnation;
 mod lease_timings;
+mod load;
 pub mod queued_work;
 mod realization;
 
@@ -15,8 +16,12 @@ pub use attachment_manifest::{
 };
 pub use commit_identity::{OperationId, derive_history_node_id, graph_realization_digest};
 pub use error::StoreError;
-pub use incarnation::IncarnationId;
+pub use incarnation::{EphemeralRunId, IncarnationId, SessionLifetime};
 pub use lease_timings::{LeaseTimings, LeaseTimingsError};
+pub use load::{
+    load_persisted_session_state, load_persisted_session_state_active_path,
+    refresh_persisted_session_state,
+};
 pub use realization::{RealizedNodeTimestamp, commit_runtime_state_verified};
 
 const PROC_BOOT_ID_PATH: &str = "/proc/sys/kernel/random/boot_id";
@@ -340,7 +345,7 @@ impl GraphCommitDelta {
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct RuntimeCommit {
     pub session_id: String,
-    pub incarnation_id: IncarnationId,
+    pub session_lifetime: SessionLifetime,
     pub expected_head_revision: u64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub session_execution_lease: Option<SessionExecutionLeaseFence>,
@@ -719,6 +724,18 @@ fn build_checkpoint_from_persisted_state(
 }
 
 impl RuntimeCommit {
+    pub fn durable_incarnation_id(
+        &self,
+        boundary: &'static str,
+    ) -> Result<&IncarnationId, StoreError> {
+        self.session_lifetime.as_durable().ok_or_else(|| {
+            StoreError::EphemeralSessionAtDurableBoundary {
+                session_id: self.session_id.clone(),
+                boundary,
+            }
+        })
+    }
+
     pub fn validate_operation_session(&self) -> Result<(), StoreError> {
         let Some(completed) = &self.turn_commit else {
             return Ok(());
@@ -752,11 +769,12 @@ impl RuntimeCommit {
         &self,
         durable_incarnation_id: &IncarnationId,
     ) -> Result<(), StoreError> {
-        if &self.incarnation_id != durable_incarnation_id {
+        let commit_incarnation_id = self.durable_incarnation_id("runtime commit validation")?;
+        if commit_incarnation_id != durable_incarnation_id {
             return Err(StoreError::SessionIncarnationMismatch {
                 session_id: self.session_id.clone(),
                 expected_incarnation_id: durable_incarnation_id.to_string(),
-                actual_incarnation_id: self.incarnation_id.to_string(),
+                actual_incarnation_id: commit_incarnation_id.to_string(),
             });
         }
         let Some(completed) = &self.turn_commit else {
@@ -768,7 +786,11 @@ impl RuntimeCommit {
         for (ordinal, node) in nodes.iter().enumerate() {
             let expected = match &node.payload {
                 crate::SessionNodePayload::FrameOpen { frame_key, .. } => {
-                    crate::session_graph::frame_node_id(durable_incarnation_id, frame_key)
+                    crate::session_graph::frame_node_id(
+                        &self.session_id,
+                        durable_incarnation_id,
+                        frame_key,
+                    )
                 }
                 _ => derive_history_node_id(
                     durable_incarnation_id,
@@ -797,7 +819,11 @@ impl RuntimeCommit {
             let crate::SessionNodePayload::FrameOpen { frame_key, .. } = &node.payload else {
                 continue;
             };
-            let expected = crate::session_graph::frame_node_id(durable_incarnation_id, frame_key);
+            let expected = crate::session_graph::frame_node_id(
+                &self.session_id,
+                durable_incarnation_id,
+                frame_key,
+            );
             if node.node_id != expected {
                 return Err(StoreError::NodeIdDerivationMismatch {
                     node_id: node.node_id.clone(),
@@ -877,9 +903,11 @@ impl RuntimeCommit {
         operation: OperationId,
     ) -> Result<(Self, Vec<String>), StoreError> {
         let mut commit = Self::persisted_state(state, usage_deltas);
-        let mapping = commit
-            .graph
-            .derive_node_ids(&state.incarnation_id, &operation)?;
+        let mapping = commit.graph.derive_node_ids(
+            &state.session_id,
+            state.durable_incarnation_id("history node derivation")?,
+            &operation,
+        )?;
         state
             .session_graph
             .remap_node_ids(&state.session_id, &mapping);
@@ -915,7 +943,7 @@ impl RuntimeCommit {
             .map(ToOwned::to_owned);
         Self {
             session_id: state.session_id.clone(),
-            incarnation_id: state.incarnation_id.clone(),
+            session_lifetime: state.session_lifetime.clone(),
             expected_head_revision: state.head_revision,
             session_execution_lease: None,
             release_session_execution_lease: None,
@@ -945,9 +973,13 @@ impl RuntimeCommit {
         mut self,
         operation: OperationId,
     ) -> Result<(Self, Vec<(String, String)>), StoreError> {
-        let node_id_mapping = self
-            .graph
-            .derive_node_ids(&self.incarnation_id, &operation)?;
+        let session_id = self.session_id.clone();
+        let incarnation_id = self
+            .durable_incarnation_id("history node derivation")?
+            .clone();
+        let node_id_mapping =
+            self.graph
+                .derive_node_ids(&session_id, &incarnation_id, &operation)?;
         remap_optional_node_id(&mut self.current_frame_node_id, &node_id_mapping);
         let hash = self.turn_commit_hash()?;
         self.turn_commit = Some(RuntimeTurnCommitStamp::new(
@@ -1042,7 +1074,7 @@ fn persisted_session_state_from_head(
     let agent_frames = graph.agent_frame_records(&head.session_id);
     let mut state = crate::RuntimeSessionState {
         session_id: head.session_id,
-        incarnation_id: IncarnationId::fresh(),
+        session_lifetime: SessionLifetime::default(),
         policy: crate::SessionPolicy::default(),
         agent_frames,
         current_frame_node_id: head.current_frame_node_id,
@@ -1149,6 +1181,18 @@ pub trait SessionCommitStore: AttachmentManifest + Send + Sync {
         &self,
         commit: RuntimeCommit,
     ) -> Result<RuntimeCommitResult, StoreError>;
+
+    /// Create the session metadata row if absent, then return the identity
+    /// read back from the store.
+    ///
+    /// Implementations must mint inside this guarded store operation. The
+    /// returned value, not a caller-local candidate, is the only identity a
+    /// persistent runtime may bind into its state.
+    async fn ensure_session_incarnation(
+        &self,
+        session_id: &str,
+        policy: &crate::SessionPolicy,
+    ) -> Result<IncarnationId, StoreError>;
 
     async fn save_session_meta(&self, meta: SessionMeta) -> Result<(), StoreError>;
     async fn load_session_meta(&self) -> Result<Option<SessionMeta>, StoreError>;
@@ -1512,79 +1556,6 @@ impl<T> RuntimePersistence for T where
         + StoreMaintenance
         + ?Sized
 {
-}
-
-fn persisted_session_state_from_read(
-    read: PersistedSessionRead,
-    incarnation_id: IncarnationId,
-) -> crate::RuntimeSessionState {
-    let mut state = persisted_session_state_from_head(
-        SessionHead {
-            session_id: read.session_id,
-            head_revision: read.head_revision,
-            current_frame_node_id: read.current_frame_node_id,
-            graph: read.graph,
-            config: read.config,
-            checkpoint_ref: read.checkpoint_ref,
-            token_ledger: read.token_ledger,
-        },
-        read.checkpoint,
-    );
-    state.incarnation_id = incarnation_id;
-    state
-}
-
-pub async fn load_persisted_session_state(
-    store: &(dyn RuntimePersistence + '_),
-) -> Result<Option<crate::RuntimeSessionState>, StoreError> {
-    let read = store.load_session(SessionReadScope::FullGraph).await?;
-    let Some(read) = read else {
-        return Ok(None);
-    };
-    let meta = store.load_session_meta().await?.ok_or_else(|| {
-        StoreError::Backend(format!(
-            "session `{}` has durable head state but no session metadata",
-            read.session_id
-        ))
-    })?;
-    Ok(Some(persisted_session_state_from_read(
-        read,
-        meta.incarnation_id,
-    )))
-}
-
-pub async fn load_persisted_session_state_active_path(
-    store: &(dyn RuntimePersistence + '_),
-    leaf_node_id: Option<String>,
-) -> Result<Option<crate::RuntimeSessionState>, StoreError> {
-    let read = store
-        .load_session(SessionReadScope::ActivePath { leaf_node_id })
-        .await?;
-    let Some(read) = read else {
-        return Ok(None);
-    };
-    let meta = store.load_session_meta().await?.ok_or_else(|| {
-        StoreError::Backend(format!(
-            "session `{}` has durable head state but no session metadata",
-            read.session_id
-        ))
-    })?;
-    Ok(Some(persisted_session_state_from_read(
-        read,
-        meta.incarnation_id,
-    )))
-}
-
-pub async fn refresh_persisted_session_state(
-    store: &(dyn RuntimePersistence + '_),
-    state: &mut crate::RuntimeSessionState,
-) -> Result<(), StoreError> {
-    if let Some(mut fresh) = load_persisted_session_state(store).await? {
-        fresh.policy.session_id = state.policy.session_id.clone();
-        fresh.policy.max_turns = state.policy.max_turns;
-        *state = fresh;
-    }
-    Ok(())
 }
 
 #[cfg(test)]

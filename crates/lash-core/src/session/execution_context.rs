@@ -613,7 +613,14 @@ impl<'run> RuntimeExecutionContext<'run> {
                     cancellation,
                     std::sync::Arc::clone(&self.dispatch.clock),
                 )
-                .with_turn_cancel_observation(self.observe_turn_cancel),
+                .with_turn_cancel_observation(self.observe_turn_cancel)
+                .with_turn_cancel_scope(
+                    self.dispatch
+                        .effect_controller
+                        .scoped()
+                        .execution_scope()
+                        .clone(),
+                ),
             )
             .await?;
         match outcome {
@@ -666,7 +673,14 @@ impl<'run> RuntimeExecutionContext<'run> {
                     None,
                     std::sync::Arc::clone(&self.dispatch.clock),
                 )
-                .with_turn_cancel_observation(self.observe_turn_cancel),
+                .with_turn_cancel_observation(self.observe_turn_cancel)
+                .with_turn_cancel_scope(
+                    self.dispatch
+                        .effect_controller
+                        .scoped()
+                        .execution_scope()
+                        .clone(),
+                ),
             )
             .await?;
         match outcome.into_await_event()? {

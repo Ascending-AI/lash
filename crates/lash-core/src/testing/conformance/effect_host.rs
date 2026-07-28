@@ -145,6 +145,7 @@ where
     effect_host_await_event_key_is_stable(make()).await;
     effect_host_await_event_accepts_early_resolution(make()).await;
     effect_host_await_event_duplicate_resolution_is_terminal(make()).await;
+    effect_host_await_event_incarnations_are_isolated(make()).await;
     effect_host_await_event_cancel_and_timeout_are_terminal(make()).await;
     effect_host_await_event_revokes_session_scope(make()).await;
     effect_host_await_event_session_cancel_resolves_outstanding_waits(make()).await;
@@ -590,7 +591,7 @@ async fn effect_host_preserves_scope_metadata(host: Arc<dyn EffectHost>) {
     assert_eq!(scoped.scope_id(), "drain-1");
     assert_eq!(scoped.turn_id(), None);
 
-    let turn_scope = ExecutionScope::turn("session-1", "turn-1");
+    let turn_scope = durable_turn_scope("session-1", "turn-1");
     let scoped_turn = host.scoped(turn_scope.clone()).expect("turn scope");
     assert_eq!(scoped_turn.execution_scope(), &turn_scope);
     assert_eq!(scoped_turn.scope_id(), "turn-1");
@@ -633,7 +634,7 @@ async fn effect_host_static_scope_preserves_metadata_when_available(host: Arc<dy
 }
 
 async fn effect_host_await_event_key_is_stable(host: Arc<dyn EffectHost>) {
-    let scope = ExecutionScope::turn("await-event-session-stable", "turn-stable");
+    let scope = durable_turn_scope("await-event-session-stable", "turn-stable");
     let wait = AwaitEventWaitIdentity::tool_completion("call-stable");
 
     let first = host
@@ -649,7 +650,7 @@ async fn effect_host_await_event_key_is_stable(host: Arc<dyn EffectHost>) {
 }
 
 async fn effect_host_await_event_accepts_early_resolution(host: Arc<dyn EffectHost>) {
-    let scope = ExecutionScope::turn("await-event-session-early", "turn-early");
+    let scope = durable_turn_scope("await-event-session-early", "turn-early");
     let key = host
         .await_event_key(
             &scope,
@@ -673,7 +674,7 @@ async fn effect_host_await_event_accepts_early_resolution(host: Arc<dyn EffectHo
 }
 
 async fn effect_host_await_event_duplicate_resolution_is_terminal(host: Arc<dyn EffectHost>) {
-    let scope = ExecutionScope::turn("await-event-session-dupe", "turn-dupe");
+    let scope = durable_turn_scope("await-event-session-dupe", "turn-dupe");
     let key = host
         .await_event_key(&scope, AwaitEventWaitIdentity::tool_completion("call-dupe"))
         .await
@@ -698,8 +699,48 @@ async fn effect_host_await_event_duplicate_resolution_is_terminal(host: Arc<dyn 
     );
 }
 
+async fn effect_host_await_event_incarnations_are_isolated(host: Arc<dyn EffectHost>) {
+    let session_id = format!("await-event-recreated-{}", uuid::Uuid::new_v4());
+    let first_scope = ExecutionScope::turn_incarnation(
+        &session_id,
+        crate::IncarnationId::decode_from_store("conformance:first-lifetime".to_string()),
+        "same-turn",
+    );
+    let second_scope = ExecutionScope::turn_incarnation(
+        &session_id,
+        crate::IncarnationId::decode_from_store("conformance:second-lifetime".to_string()),
+        "same-turn",
+    );
+    let first_key = host
+        .await_event_key(&first_scope, AwaitEventWaitIdentity::TurnTerminal)
+        .await
+        .expect("first-lifetime terminal key");
+    host.resolve_await_event(
+        &first_key,
+        Resolution::Ok(serde_json::json!({ "lifetime": "first" })),
+    )
+    .await
+    .expect("resolve first-lifetime terminal");
+
+    let second_key = host
+        .await_event_key(&second_scope, AwaitEventWaitIdentity::TurnTerminal)
+        .await
+        .expect("second-lifetime terminal key");
+    assert_ne!(
+        first_key.key_id, second_key.key_id,
+        "recreated session lifetimes must not share an await-event key"
+    );
+    assert_eq!(
+        host.peek_await_event(&second_key)
+            .await
+            .expect("peek second-lifetime terminal"),
+        None,
+        "a new session lifetime must not observe the prior lifetime's resolved terminal"
+    );
+}
+
 async fn effect_host_await_event_cancel_and_timeout_are_terminal(host: Arc<dyn EffectHost>) {
-    let cancel_scope = ExecutionScope::turn("await-event-session-cancel", "turn-cancel");
+    let cancel_scope = durable_turn_scope("await-event-session-cancel", "turn-cancel");
     let cancel_key = host
         .await_event_key(
             &cancel_scope,
@@ -723,7 +764,7 @@ async fn effect_host_await_event_cancel_and_timeout_are_terminal(host: Arc<dyn E
         }
     );
 
-    let timeout_scope = ExecutionScope::turn("await-event-session-timeout", "turn-timeout");
+    let timeout_scope = durable_turn_scope("await-event-session-timeout", "turn-timeout");
     let timeout_key = host
         .await_event_key(
             &timeout_scope,
@@ -743,7 +784,7 @@ async fn effect_host_await_event_cancel_and_timeout_are_terminal(host: Arc<dyn E
 }
 
 async fn effect_host_await_event_revokes_session_scope(host: Arc<dyn EffectHost>) {
-    let scope = ExecutionScope::turn("await-event-session-revoke", "turn-revoke");
+    let scope = durable_turn_scope("await-event-session-revoke", "turn-revoke");
     let key = host
         .await_event_key(
             &scope,
@@ -777,7 +818,7 @@ async fn effect_host_await_event_revokes_session_scope(host: Arc<dyn EffectHost>
 async fn effect_host_await_event_session_cancel_resolves_outstanding_waits(
     host: Arc<dyn EffectHost>,
 ) {
-    let scope = ExecutionScope::turn("await-event-session-cancel-waits", "turn-cancel-waits");
+    let scope = durable_turn_scope("await-event-session-cancel-waits", "turn-cancel-waits");
     let key = host
         .await_event_key(
             &scope,
@@ -852,7 +893,7 @@ async fn effect_host_await_event_session_cancel_resolves_outstanding_waits(
 }
 
 async fn effect_host_await_event_rejects_tampered_keys(host: Arc<dyn EffectHost>) {
-    let scope = ExecutionScope::turn("await-event-session-tamper", "turn-tamper");
+    let scope = durable_turn_scope("await-event-session-tamper", "turn-tamper");
     let mut key = host
         .await_event_key(
             &scope,

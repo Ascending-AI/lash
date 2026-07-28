@@ -530,6 +530,14 @@ impl MockSessionManager {
 
 #[async_trait::async_trait]
 impl crate::plugin::SessionStateService for MockSessionManager {
+    async fn turn_scope(
+        &self,
+        session_id: &str,
+        turn_id: &str,
+    ) -> Result<crate::ExecutionScope, PluginError> {
+        Ok(crate::ExecutionScope::turn(session_id, turn_id))
+    }
+
     async fn snapshot_current(&self) -> Result<SessionSnapshot, PluginError> {
         Ok(self.snapshot.clone())
     }

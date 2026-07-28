@@ -77,9 +77,14 @@ struct SnapshotStore {
 impl SnapshotStore {
     fn with_state(state: RuntimeSessionState) -> Self {
         let turn_state = state.turn_state();
+        let incarnation_id = state
+            .session_lifetime
+            .as_durable()
+            .cloned()
+            .unwrap_or_else(lash_core::IncarnationId::mint_for_store);
         let session_meta = lash_core::SessionMeta {
             session_id: state.session_id.clone(),
-            incarnation_id: state.incarnation_id.clone(),
+            incarnation_id,
             session_name: state.session_id.clone(),
             created_at: "test".to_string(),
             model: state.policy.model.id.clone(),
@@ -139,6 +144,34 @@ lash_core::impl_noop_attachment_manifest!(SnapshotStore);
 
 #[async_trait]
 impl lash_core::SessionCommitStore for SnapshotStore {
+    async fn ensure_session_incarnation(
+        &self,
+        session_id: &str,
+        policy: &lash_core::SessionPolicy,
+    ) -> std::result::Result<lash_core::IncarnationId, lash_core::store::StoreError> {
+        let mut meta = self.session_meta.lock().expect("session metadata lock");
+        if let Some(meta) = meta.as_ref() {
+            if meta.session_id != session_id {
+                return Err(lash_core::store::StoreError::SessionBindingMismatch {
+                    bound_session_id: meta.session_id.clone(),
+                    attempted_session_id: session_id.to_string(),
+                });
+            }
+            return Ok(meta.incarnation_id.clone());
+        }
+        let incarnation_id = lash_core::IncarnationId::mint_for_store();
+        *meta = Some(lash_core::SessionMeta {
+            session_id: session_id.to_string(),
+            incarnation_id: incarnation_id.clone(),
+            session_name: session_id.to_string(),
+            created_at: "test".to_string(),
+            model: policy.model.id.clone(),
+            cwd: None,
+            relation: lash_core::SessionRelation::Root,
+        });
+        Ok(incarnation_id)
+    }
+
     async fn load_session(
         &self,
         scope: lash_core::SessionReadScope,
@@ -180,7 +213,9 @@ impl lash_core::SessionCommitStore for SnapshotStore {
             if session_meta.is_none() {
                 *session_meta = Some(lash_core::SessionMeta {
                     session_id: commit.session_id.clone(),
-                    incarnation_id: commit.incarnation_id.clone(),
+                    incarnation_id: commit
+                        .durable_incarnation_id("snapshot-store commit")?
+                        .clone(),
                     session_name: commit.session_id.clone(),
                     created_at: "test".to_string(),
                     model: commit.config.model.id.clone(),
@@ -692,6 +727,24 @@ lash_core::impl_noop_attachment_manifest!(BoundSessionStore);
 
 #[async_trait]
 impl lash_core::SessionCommitStore for BoundSessionStore {
+    async fn ensure_session_incarnation(
+        &self,
+        session_id: &str,
+        _policy: &lash_core::SessionPolicy,
+    ) -> std::result::Result<lash_core::IncarnationId, lash_core::store::StoreError> {
+        let meta = self
+            .load_session_meta()
+            .await?
+            .expect("bound test store metadata");
+        if meta.session_id != session_id {
+            return Err(lash_core::store::StoreError::SessionBindingMismatch {
+                bound_session_id: meta.session_id,
+                attempted_session_id: session_id.to_string(),
+            });
+        }
+        Ok(meta.incarnation_id)
+    }
+
     async fn load_session(
         &self,
         _scope: lash_core::SessionReadScope,
@@ -730,7 +783,7 @@ impl lash_core::SessionCommitStore for BoundSessionStore {
     ) -> std::result::Result<Option<lash_core::SessionMeta>, lash_core::store::StoreError> {
         Ok(Some(lash_core::SessionMeta {
             session_id: self.session_id.clone(),
-            incarnation_id: lash_core::IncarnationId::fresh(),
+            incarnation_id: lash_core::IncarnationId::mint_for_store(),
             session_name: self.session_id.clone(),
             created_at: "test".to_string(),
             model: "mock-model".to_string(),

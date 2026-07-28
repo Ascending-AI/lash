@@ -466,7 +466,7 @@ impl SessionStoreFactory for SqliteSessionStoreFactory {
         );
         let meta = SessionMeta {
             session_id: request.session_id.clone(),
-            incarnation_id: lash_core::IncarnationId::fresh(),
+            incarnation_id: lash_core::IncarnationId::mint_for_store(),
             session_name: request.session_id.clone(),
             created_at: self.clock.timestamp_rfc3339(),
             model: request.policy.model.id.clone(),
@@ -873,7 +873,9 @@ fn load_session_meta_from_conn(conn: &Connection, session_id: &str) -> Option<Se
                 .unwrap_or_default();
             Ok(SessionMeta {
                 session_id: row.get(0)?,
-                incarnation_id: lash_core::IncarnationId::from(row.get::<_, String>(1)?),
+                incarnation_id: lash_core::IncarnationId::decode_from_store(
+                    row.get::<_, String>(1)?,
+                ),
                 session_name: row.get(2)?,
                 created_at: row.get(3)?,
                 model: row.get(4)?,
@@ -941,6 +943,19 @@ mod tests {
     use lash_core::ProcessInput;
     use lashlang::LashlangArtifactStore;
 
+    async fn durable_state(store: &Store, session_id: &str) -> lash_core::RuntimeSessionState {
+        let mut state = lash_core::RuntimeSessionState {
+            session_id: session_id.to_string(),
+            ..Default::default()
+        };
+        let incarnation_id = store
+            .ensure_session_incarnation(session_id, &state.policy)
+            .await
+            .expect("realize SQLite test session lifetime");
+        state.bind_durable_incarnation(incarnation_id);
+        state
+    }
+
     #[tokio::test]
     async fn checkpoint_probe_skips_writes_for_deferred_head() {
         let store = Arc::new(Store::memory().await.expect("open counter store"));
@@ -984,6 +999,7 @@ mod tests {
         let path = dir.path().join("contended.db");
         let store = Store::open(&path).await.expect("open store");
         store.bind_session("contended").expect("bind store");
+        let state = durable_state(&store, "contended").await;
         store
             .conn
             .call(|conn| {
@@ -998,13 +1014,7 @@ mod tests {
             .execute_batch("BEGIN IMMEDIATE")
             .expect("hold catalog writer lock");
         let result = store
-            .commit_runtime_state(RuntimeCommit::persisted_state(
-                &lash_core::RuntimeSessionState {
-                    session_id: "contended".to_string(),
-                    ..Default::default()
-                },
-                &[],
-            ))
+            .commit_runtime_state(RuntimeCommit::persisted_state(&state, &[]))
             .await;
         locker
             .execute_batch("ROLLBACK")
@@ -1017,10 +1027,7 @@ mod tests {
     async fn zero_confirmation_aborts_a_corrupt_low_count_transaction() {
         let store = Store::memory().await.expect("open store");
         store.bind_session("refcount-drift").expect("bind store");
-        let mut state = lash_core::RuntimeSessionState {
-            session_id: "refcount-drift".to_string(),
-            ..Default::default()
-        };
+        let mut state = durable_state(&store, "refcount-drift").await;
         state.ensure_agent_frame_initialized();
         store
             .commit_runtime_state(RuntimeCommit::persisted_state(&state, &[]))
@@ -1102,10 +1109,7 @@ mod tests {
         store
             .bind_session("scrub-refcount-drift")
             .expect("bind store");
-        let mut state = lash_core::RuntimeSessionState {
-            session_id: "scrub-refcount-drift".to_string(),
-            ..Default::default()
-        };
+        let mut state = durable_state(&store, "scrub-refcount-drift").await;
         state.ensure_agent_frame_initialized();
         store
             .commit_runtime_state(RuntimeCommit::persisted_state(&state, &[]))
@@ -1152,10 +1156,7 @@ mod tests {
     async fn maintenance_preserves_typed_refcount_drift() {
         let store = Store::memory().await.expect("open store");
         store.bind_session("maintenance-drift").expect("bind store");
-        let mut state = lash_core::RuntimeSessionState {
-            session_id: "maintenance-drift".to_string(),
-            ..Default::default()
-        };
+        let mut state = durable_state(&store, "maintenance-drift").await;
         state.ensure_agent_frame_initialized();
         store
             .commit_runtime_state(RuntimeCommit::persisted_state(&state, &[]))

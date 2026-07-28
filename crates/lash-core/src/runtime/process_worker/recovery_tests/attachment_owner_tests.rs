@@ -32,11 +32,16 @@ async fn parent_bound_session_store(policy: crate::SessionPolicy) -> Arc<InMemor
         .expect("claim parent session lease")
         .acquired()
         .expect("parent session lease acquired");
-    let state = crate::RuntimeSessionState {
+    let mut state = crate::RuntimeSessionState {
         session_id: PARENT_SESSION_ID.to_string(),
         policy,
         ..crate::RuntimeSessionState::default()
     };
+    let incarnation_id = store
+        .ensure_session_incarnation(&state.session_id, &state.policy)
+        .await
+        .expect("realize parent session lifetime");
+    state.bind_durable_incarnation(incarnation_id);
     store
         .commit_runtime_state(
             crate::RuntimeCommit::persisted_state(&state, &[])
@@ -160,15 +165,14 @@ async fn process_runtime_keeps_state_separate_from_parent_bound_attachment_manif
         .with_session_policy(policy.clone()),
     );
 
-    let runtime = worker
-        .build_process_runtime(
-            format!("process-env:{PROCESS_ID}"),
-            policy,
-            crate::PluginOptions::default(),
-            "parent-bound regression",
-        )
-        .await
-        .expect("build process runtime with parent-bound session factory");
+    let runtime = Box::pin(worker.build_process_runtime(
+        format!("process-env:{PROCESS_ID}"),
+        policy,
+        crate::PluginOptions::default(),
+        "parent-bound regression",
+    ))
+    .await
+    .expect("build process runtime with parent-bound session factory");
     let _owner = runtime
         .host
         .core

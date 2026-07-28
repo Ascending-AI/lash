@@ -1,6 +1,23 @@
 use super::*;
 
 impl CurrentSessionCapability {
+    pub(in crate::runtime::session_manager) async fn turn_scope_by_id(
+        &self,
+        managed: &ManagedSessionCapability,
+        session_id: &str,
+        turn_id: &str,
+    ) -> Result<crate::ExecutionScope, crate::PluginError> {
+        if session_id == self.session_id {
+            return Ok(self.snapshot.to_runtime_state().turn_scope(turn_id));
+        }
+        let runtime = {
+            let registry = managed.registry.lock().await;
+            registry.get(session_id).cloned()
+        }
+        .ok_or_else(|| crate::PluginError::Session(format!("unknown session `{session_id}`")))?;
+        Ok(runtime.observe().persisted_state.turn_scope(turn_id))
+    }
+
     pub(in crate::runtime) async fn current_snapshot_for_store_write(
         &self,
     ) -> Result<RuntimeSessionState, crate::PluginError> {

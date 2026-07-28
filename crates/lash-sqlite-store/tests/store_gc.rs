@@ -40,7 +40,7 @@ async fn factory_state(
         .incarnation_id;
     RuntimeSessionState {
         session_id: session_id.to_string(),
-        incarnation_id,
+        session_lifetime: lash_core::SessionLifetime::durable(incarnation_id),
         head_revision,
         ..Default::default()
     }
@@ -78,6 +78,11 @@ async fn gc_unreachable_keeps_rooted_checkpoint_blobs() {
         checkpoint_ref: Some(stored.checkpoint_ref.clone()),
         ..RuntimeSessionState::default()
     };
+    let incarnation_id = store
+        .ensure_session_incarnation(&state.session_id, &state.policy)
+        .await
+        .expect("realize session incarnation");
+    state.session_lifetime = lash_core::SessionLifetime::durable(incarnation_id);
     state.ensure_agent_frame_initialized();
     store
         .commit_runtime_state(RuntimeCommit::persisted_state(&state, &[]))
@@ -115,10 +120,15 @@ async fn auto_gc_runs_after_commit_without_reentrant_locking() {
     let orphan = store
         .put_artifact_blob(BlobArtifactDescriptor::plugin_session_snapshot(), b"orphan")
         .await;
-    let state = RuntimeSessionState {
+    let mut state = RuntimeSessionState {
         session_id: "auto-gc".to_string(),
         ..RuntimeSessionState::default()
     };
+    let incarnation_id = store
+        .ensure_session_incarnation(&state.session_id, &state.policy)
+        .await
+        .expect("realize session incarnation");
+    state.session_lifetime = lash_core::SessionLifetime::durable(incarnation_id);
     let owner = lease_owner("auto-gc-test");
     let session_lease = store
         .try_claim_session_execution_lease("auto-gc", &owner, 60_000)
@@ -417,7 +427,13 @@ async fn sqlite_catalog_partitions_derived_node_ids_by_incarnation() {
     let second_state = factory_state(&second, "second", 0).await;
     let commit = |state: &RuntimeSessionState| {
         let node = lash_core::SessionNodeRecord {
-            node_id: lash_core::frame_node_id(&state.incarnation_id, "shared-frame-key"),
+            node_id: lash_core::frame_node_id(
+                &state.session_id,
+                state
+                    .durable_incarnation_id("test frame derivation")
+                    .expect("durable fixture"),
+                "shared-frame-key",
+            ),
             parent_node_id: None,
             timestamp: "2026-07-26T00:00:00Z".to_string(),
             payload: lash_core::SessionNodePayload::FrameOpen {
@@ -453,8 +469,20 @@ async fn sqlite_catalog_partitions_derived_node_ids_by_incarnation() {
         .await
         .expect("second incarnation derives a distinct node id");
 
-    let first_node_id = lash_core::frame_node_id(&first_state.incarnation_id, "shared-frame-key");
-    let second_node_id = lash_core::frame_node_id(&second_state.incarnation_id, "shared-frame-key");
+    let first_node_id = lash_core::frame_node_id(
+        &first_state.session_id,
+        first_state
+            .durable_incarnation_id("test frame derivation")
+            .expect("durable fixture"),
+        "shared-frame-key",
+    );
+    let second_node_id = lash_core::frame_node_id(
+        &second_state.session_id,
+        second_state
+            .durable_incarnation_id("test frame derivation")
+            .expect("durable fixture"),
+        "shared-frame-key",
+    );
     assert_ne!(first_node_id, second_node_id);
     assert!(first.load_node(&first_node_id).await.unwrap().is_some());
     assert!(second.load_node(&second_node_id).await.unwrap().is_some());
@@ -481,7 +509,13 @@ async fn sqlite_catalog_leaf_validation_is_session_scoped() {
     let second_state = factory_state(&second, "leaf-b", 0).await;
     let frame_key = "leaf-a-node";
     let node = lash_core::SessionNodeRecord {
-        node_id: lash_core::frame_node_id(&first_state.incarnation_id, frame_key),
+        node_id: lash_core::frame_node_id(
+            &first_state.session_id,
+            first_state
+                .durable_incarnation_id("test frame derivation")
+                .expect("durable fixture"),
+            frame_key,
+        ),
         parent_node_id: None,
         timestamp: "2026-07-26T00:00:00Z".to_string(),
         payload: lash_core::SessionNodePayload::FrameOpen {
@@ -539,7 +573,13 @@ async fn sqlite_maintenance_is_scoped_to_the_bound_session() {
     let second_state = factory_state(&second, "maintenance-b", 0).await;
     let frame_key = "maintenance-b-node";
     let node = lash_core::SessionNodeRecord {
-        node_id: lash_core::frame_node_id(&second_state.incarnation_id, frame_key),
+        node_id: lash_core::frame_node_id(
+            &second_state.session_id,
+            second_state
+                .durable_incarnation_id("test frame derivation")
+                .expect("durable fixture"),
+            frame_key,
+        ),
         parent_node_id: None,
         timestamp: "2026-07-26T00:00:00Z".to_string(),
         payload: lash_core::SessionNodePayload::FrameOpen {

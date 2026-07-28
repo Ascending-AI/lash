@@ -1,6 +1,24 @@
 use super::InMemorySessionStore;
 
 impl InMemorySessionStore {
+    pub(crate) async fn save_session_head_meta(&self, meta: crate::SessionHeadMeta) {
+        *self.session_head_meta.lock().expect("lock store") = Some(meta);
+    }
+
+    pub(crate) fn load_session_count(&self) -> usize {
+        self.load_session_count
+            .load(std::sync::atomic::Ordering::Relaxed)
+    }
+
+    pub(crate) fn checkpoint_claim_counts(&self) -> (usize, usize) {
+        (
+            self.checkpoint_probe_count
+                .load(std::sync::atomic::Ordering::Relaxed),
+            self.checkpoint_write_transaction_count
+                .load(std::sync::atomic::Ordering::Relaxed),
+        )
+    }
+
     pub(crate) fn fail_next_session_execution_lease_renewal(&self) {
         self.fail_next_session_execution_lease_renewal
             .store(true, std::sync::atomic::Ordering::SeqCst);
@@ -73,7 +91,7 @@ mod tests {
         let commit = |session_id: &str, incarnation_id: crate::IncarnationId| {
             let mut state = RuntimeSessionState {
                 session_id: session_id.to_string(),
-                incarnation_id,
+                session_lifetime: crate::SessionLifetime::durable(incarnation_id),
                 ..Default::default()
             };
             state.ensure_agent_frame_initialized();
@@ -144,12 +162,14 @@ mod tests {
             .expect("concrete store");
         let mut state = RuntimeSessionState {
             session_id: request.session_id.clone(),
-            incarnation_id: store
-                .load_session_meta()
-                .await
-                .expect("load metadata")
-                .expect("metadata")
-                .incarnation_id,
+            session_lifetime: crate::SessionLifetime::durable(
+                store
+                    .load_session_meta()
+                    .await
+                    .expect("load metadata")
+                    .expect("metadata")
+                    .incarnation_id,
+            ),
             ..Default::default()
         };
         state.ensure_agent_frame_initialized();
@@ -220,6 +240,11 @@ mod tests {
             session_id: "scrub-refcount-drift".to_string(),
             ..Default::default()
         };
+        let incarnation_id = store
+            .ensure_session_incarnation(&state.session_id, &state.policy)
+            .await
+            .expect("realize scrub session lifetime");
+        state.bind_durable_incarnation(incarnation_id);
         state.ensure_agent_frame_initialized();
         store
             .commit_runtime_state(RuntimeCommit::persisted_state(&state, &[]))
@@ -332,10 +357,15 @@ mod tests {
                 claim_session_lease_generation: 1,
             },
         );
-        let state = RuntimeSessionState {
+        let mut state = RuntimeSessionState {
             session_id: "session".to_string(),
             ..Default::default()
         };
+        let incarnation_id = store
+            .ensure_session_incarnation(&state.session_id, &state.policy)
+            .await
+            .expect("realize stale-claim session lifetime");
+        state.bind_durable_incarnation(incarnation_id);
         let mut commit = RuntimeCommit::persisted_state(&state, &[]);
         commit.completed_queue_claims = vec![QueuedWorkCompletion {
             session_id: "session".to_string(),

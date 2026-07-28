@@ -105,6 +105,14 @@ mod tests {
             })
         }
 
+        async fn ensure_session_incarnation(
+            &self,
+            _session_id: &str,
+            _policy: &crate::SessionPolicy,
+        ) -> Result<crate::IncarnationId, StoreError> {
+            Ok(crate::IncarnationId::mint_for_store())
+        }
+
         async fn save_session_meta(
             &self,
             _meta: super::super::SessionMeta,

@@ -36,7 +36,7 @@ where
 {
     let session_id = format!("{prefix}-parked-session");
     let turn_id = format!("{prefix}-parked-turn");
-    let scope = ExecutionScope::turn(&session_id, &turn_id);
+    let scope = durable_turn_scope(&session_id, &turn_id);
     let key = make()
         .await_event_key(
             &scope,
@@ -134,7 +134,7 @@ where
         AwaitEventWaitIdentity::TurnTerminal,
     ];
     for (index, wait) in identities.into_iter().enumerate() {
-        let scope = ExecutionScope::turn(
+        let scope = durable_turn_scope(
             format!("{prefix}-identity-session-{index}"),
             format!("{prefix}-identity-turn-{index}"),
         );
@@ -179,7 +179,7 @@ async fn cold_first_writer_wins<F>(make: &F, prefix: &str)
 where
     F: Fn() -> Arc<dyn EffectHost>,
 {
-    let address = crate::TurnAddress::new(
+    let address = durable_turn_address(
         format!("{prefix}-race-session"),
         format!("{prefix}-race-turn"),
     );
@@ -209,7 +209,7 @@ async fn cold_key_stability<F>(make: &F, prefix: &str)
 where
     F: Fn() -> Arc<dyn EffectHost>,
 {
-    let scope = ExecutionScope::turn(
+    let scope = durable_turn_scope(
         format!("{prefix}-stable-session"),
         format!("{prefix}-stable-turn"),
     );
@@ -229,7 +229,7 @@ async fn cold_auth_tamper_matrix<F>(make: &F, prefix: &str)
 where
     F: Fn() -> Arc<dyn EffectHost>,
 {
-    let scope = ExecutionScope::turn(
+    let scope = durable_turn_scope(
         format!("{prefix}-auth-session"),
         format!("{prefix}-auth-turn"),
     );
@@ -248,7 +248,7 @@ where
     key_id.key_id.push('0');
     variants.push(key_id);
     let mut scope = key.clone();
-    scope.scope = ExecutionScope::turn(
+    scope.scope = durable_turn_scope(
         format!("{prefix}-auth-session"),
         format!("{prefix}-auth-other-turn"),
     );
@@ -257,7 +257,7 @@ where
     wait.wait = AwaitEventWaitIdentity::tool_completion(format!("{prefix}-other-call"));
     variants.push(wait);
     let mut session = key.clone();
-    session.scope = ExecutionScope::turn(
+    session.scope = durable_turn_scope(
         format!("{prefix}-auth-session-tampered"),
         format!("{prefix}-auth-turn"),
     );
@@ -297,7 +297,7 @@ where
     F: Fn() -> Arc<dyn EffectHost>,
 {
     let session_id = format!("{prefix}-revoked-session");
-    let scope = ExecutionScope::turn(&session_id, format!("{prefix}-revoked-turn"));
+    let scope = durable_turn_scope(&session_id, format!("{prefix}-revoked-turn"));
     let key = make()
         .await_event_key(
             &scope,
@@ -336,7 +336,7 @@ where
     F: Fn() -> Arc<dyn EffectHost>,
 {
     let session_id = format!("{prefix}-sweep-session");
-    let scope = ExecutionScope::turn(&session_id, format!("{prefix}-sweep-turn"));
+    let scope = durable_turn_scope(&session_id, format!("{prefix}-sweep-turn"));
     let ordinary = make()
         .await_event_key(
             &scope,
@@ -402,7 +402,7 @@ async fn cold_terminal_attach_both_orders<F>(make: &F, prefix: &str)
 where
     F: Fn() -> Arc<dyn EffectHost>,
 {
-    let after = crate::TurnAddress::new(
+    let after = durable_turn_address(
         format!("{prefix}-attach-after-session"),
         format!("{prefix}-attach-after-turn"),
     );
@@ -415,7 +415,14 @@ where
     };
     let after_key = make()
         .await_event_key(
-            &ExecutionScope::turn(&after.session_id, &after.turn_id),
+            &ExecutionScope::turn_incarnation(
+                &after.session_id,
+                after
+                    .incarnation_id
+                    .clone()
+                    .expect("conformance address incarnation"),
+                &after.turn_id,
+            ),
             AwaitEventWaitIdentity::TurnTerminal,
         )
         .await
@@ -436,7 +443,7 @@ where
         serde_json::to_value(after_terminal).expect("expected terminal json")
     );
 
-    let before = crate::TurnAddress::new(
+    let before = durable_turn_address(
         format!("{prefix}-attach-before-session"),
         format!("{prefix}-attach-before-turn"),
     );
@@ -456,7 +463,14 @@ where
     });
     let before_key = make()
         .await_event_key(
-            &ExecutionScope::turn(&before.session_id, &before.turn_id),
+            &ExecutionScope::turn_incarnation(
+                &before.session_id,
+                before
+                    .incarnation_id
+                    .clone()
+                    .expect("conformance address incarnation"),
+                &before.turn_id,
+            ),
             AwaitEventWaitIdentity::TurnTerminal,
         )
         .await

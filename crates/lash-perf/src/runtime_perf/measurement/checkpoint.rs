@@ -678,10 +678,10 @@ pub(crate) async fn run_once_embed(
             async {
                 let effect_host = session.effect_host();
                 let scoped_effect_controller = effect_host
-                    .scoped(lash::runtime::ExecutionScope::turn(
-                        session.session_id(),
-                        format!("runtime-perf-embed-{}", turn_index + 1),
-                    ))
+                    .scoped(session.turn_scope(format!(
+                        "runtime-perf-embed-{}",
+                        turn_index + 1
+                    )))
                     .map_err(anyhow::Error::from)?;
                 session
                     .turn(lash_core::TurnInput::text(benchmark_prompt(

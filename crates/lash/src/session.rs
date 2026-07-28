@@ -150,11 +150,6 @@ impl SessionBuilder {
                 requested: self.session_id,
             });
         }
-        if let Some(store) = store.as_deref()
-            && let Some(meta) = store.load_session_meta().await?
-        {
-            state.incarnation_id = meta.incarnation_id;
-        }
         reconcile_loaded_state_policy(&mut state, &policy);
         Box::pin(self.open_resolved(policy, state, store)).await
     }
@@ -178,9 +173,6 @@ impl SessionBuilder {
                     policy: policy.clone(),
                     ..RuntimeSessionState::default()
                 });
-                if let Some(meta) = store.load_session_meta().await? {
-                    state.incarnation_id = meta.incarnation_id;
-                }
                 if state.session_id != self.session_id {
                     return Err(EmbedError::StoreSessionMismatch {
                         loaded: state.session_id,
@@ -307,9 +299,6 @@ pub(crate) async fn load_state_for_residency(
             policy: policy.clone(),
             ..RuntimeSessionState::default()
         });
-    if let Some(meta) = store.load_session_meta().await? {
-        state.incarnation_id = meta.incarnation_id;
-    }
     if state.session_id != session_id {
         return Err(EmbedError::StoreSessionMismatch {
             loaded: state.session_id,
@@ -483,6 +472,24 @@ impl LashSession {
         self.runtime.observe().session_id().to_string()
     }
 
+    /// Build the execution scope for a turn in this opened session.
+    ///
+    /// Persistent sessions include the store-realized incarnation required by
+    /// durable effect hosts; store-less sessions retain an inline turn scope.
+    pub fn turn_scope(&self, turn_id: impl Into<String>) -> lash_core::ExecutionScope {
+        self.runtime.observe().persisted_state.turn_scope(turn_id)
+    }
+
+    /// Build the cancellation and terminal-observation address for a turn.
+    pub fn turn_address(&self, turn_id: impl Into<String>) -> lash_core::TurnAddress {
+        let observation = self.runtime.observe();
+        lash_core::TurnAddress::new_for_lifetime(
+            observation.session_id(),
+            &observation.persisted_state.session_lifetime,
+            turn_id,
+        )
+    }
+
     pub fn policy_snapshot(&self) -> SessionPolicy {
         self.runtime.observe().policy.clone()
     }
@@ -544,8 +551,13 @@ impl LashSession {
         origin: Option<String>,
         reason: Option<String>,
     ) -> Result<lash_core::TurnCancelReceipt> {
+        let observation = self.runtime.observe();
         let mut request = lash_core::TurnCancelRequest::new(
-            lash_core::TurnAddress::new(self.session_id(), turn_id),
+            lash_core::TurnAddress::new_for_lifetime(
+                self.session_id(),
+                &observation.persisted_state.session_lifetime,
+                turn_id,
+            ),
             request_id,
             origin,
         );
