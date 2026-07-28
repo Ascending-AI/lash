@@ -153,13 +153,16 @@ async fn postgres_session_store_factory_satisfies_conformance_when_configured() 
         return;
     };
     let storage = Arc::new(storage);
-    lash_core::testing::conformance::session_store_factory(|| {
-        let storage = Arc::clone(&storage);
-        sync_await(async move {
-            reset(&storage).await;
-            Arc::new(storage.session_store_factory()) as Arc<dyn SessionStoreFactory>
-        })
-    })
+    lash_core::testing::conformance::session_store_factory(
+        || {
+            let storage = Arc::clone(&storage);
+            sync_await(async move {
+                reset(&storage).await;
+                Arc::new(storage.session_store_factory()) as Arc<dyn SessionStoreFactory>
+            })
+        },
+        || Arc::new(storage.unbound_session_store()) as Arc<dyn RuntimePersistence>,
+    )
     .await;
 }
 

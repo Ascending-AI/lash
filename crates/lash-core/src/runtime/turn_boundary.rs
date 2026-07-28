@@ -683,6 +683,12 @@ mod tests {
         store: &RecordingStore,
         state: RuntimeSessionState,
     ) -> (TurnBoundary, crate::SessionExecutionLease) {
+        crate::SessionCommitStore::admit_and_bind_session(
+            store,
+            &crate::SessionBinding::root(state.session_id.clone(), &state.policy),
+        )
+        .await
+        .expect("admit turn-boundary test session");
         let owner = lease_owner("turn-boundary-test");
         let lease = store
             .try_claim_session_execution_lease(&state.session_id, &owner, 60_000)

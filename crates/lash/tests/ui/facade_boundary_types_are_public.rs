@@ -40,12 +40,11 @@ lash_core::impl_noop_attachment_manifest!(FacadeStore);
 
 #[async_trait]
 impl SessionCommitStore for FacadeStore {
-    async fn ensure_session_bound(
+    async fn admit_and_bind_session(
         &self,
-        _session_id: &str,
-        _policy: &lash::runtime::SessionPolicy,
-    ) -> Result<(), StoreError> {
-        Ok(())
+        _binding: &lash::persistence::SessionBinding,
+    ) -> Result<lash::persistence::SessionAdmission, StoreError> {
+        Ok(lash::persistence::SessionAdmission::Created)
     }
 
     async fn load_session(&self) -> Result<Option<PersistedSessionRead>, StoreError> {

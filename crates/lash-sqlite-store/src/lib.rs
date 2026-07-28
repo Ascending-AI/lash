@@ -451,6 +451,7 @@ impl SessionStoreFactory for SqliteSessionStoreFactory {
         &self,
         request: &SessionStoreCreateRequest,
     ) -> Result<Arc<dyn RuntimePersistence>, StoreError> {
+        lash_core::store::validate_session_id(&request.session_id)?;
         std::fs::create_dir_all(&self.root).map_err(|err| StoreError::Backend(err.to_string()))?;
         let path = self.catalog_path();
         let store = Arc::new(
@@ -539,7 +540,7 @@ impl SessionStoreFactory for SqliteSessionStoreFactory {
     }
 
     async fn delete_session(&self, session_id: &str) -> Result<(), String> {
-        delete_session_from_catalog(&self.root, session_id).await
+        delete_session_from_catalog(&self.root, session_id, true).await
     }
 
     async fn pin(&self, node_id: &str) -> Result<lash_core::ForkPoint, lash_core::StoreError> {
@@ -623,7 +624,11 @@ fn warn_process_registry_not_wired() {
     );
 }
 
-async fn delete_session_from_catalog(root: &Path, session_id: &str) -> Result<(), String> {
+async fn delete_session_from_catalog(
+    root: &Path,
+    session_id: &str,
+    tombstone_host_facing_id: bool,
+) -> Result<(), String> {
     let path = root.join("durable-core.db");
     if !path.exists() {
         return Ok(());
@@ -647,16 +652,16 @@ async fn delete_session_from_catalog(root: &Path, session_id: &str) -> Result<()
                 .optional()
                 .map_err(sqlite_error)?
                 .is_some();
-            if !existed {
-                return Ok(());
+            if tombstone_host_facing_id && existed {
+                // Permanent identity evidence for host-facing ids only.
+                // Runtime-internal process session ids are lash-minted and
+                // reclaimed without a tombstone.
+                tx.execute(
+                    "INSERT OR IGNORE INTO deleted_sessions (session_id) VALUES (?1)",
+                    params![session_id],
+                )
+                .map_err(sqlite_error)?;
             }
-            // Permanent identity evidence: vacuum/GC must never remove this
-            // row, because an id used and deleted in this store cannot recur.
-            tx.execute(
-                "INSERT OR IGNORE INTO deleted_sessions (session_id) VALUES (?1)",
-                params![session_id],
-            )
-            .map_err(sqlite_error)?;
             let leaf_node_id = tx
                 .query_row(
                     "SELECT leaf_node_id FROM session_head WHERE session_id = ?1",
@@ -965,7 +970,7 @@ mod tests {
             ..Default::default()
         };
         store
-            .ensure_session_bound(session_id, &state.policy)
+            .admit_and_bind_session(&lash_core::SessionBinding::root(session_id, &state.policy))
             .await
             .expect("bind SQLite test session");
         state

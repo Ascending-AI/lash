@@ -257,7 +257,10 @@ async fn every_registered_first_party_tool_succeeds_and_replays_in_every_context
             ProductionToolCell::new(EffectReplayOwnership::Runtime, &manifest.name).await;
         inline_cell
             .runtime_store
-            .ensure_session_bound(&inline_cell.session_id, &inline_cell.policy)
+            .admit_and_bind_session(&lash_core::SessionBinding::root(
+                inline_cell.session_id.clone(),
+                &inline_cell.policy,
+            ))
             .await
             .expect("bind inline session");
         let inline = lash_sqlite_store::SqliteRuntimeEffectController::memory(

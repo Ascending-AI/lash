@@ -524,7 +524,7 @@ fn restate_turn_cancel_wait_request(
         ));
     };
     scope
-        .validate_for_durable_host()
+        .validate()
         .map_err(RuntimeEffectControllerError::from)?;
     if scope.session_id() != Some(invocation.scope.session_id.as_str())
         || scope.turn_id() != Some(turn_id)
@@ -1384,7 +1384,7 @@ impl EffectHost for RestateEffectHost {
         &'run self,
         scope: ExecutionScope,
     ) -> Result<ScopedEffectController<'run>, RuntimeError> {
-        scope.validate_for_durable_host()?;
+        scope.validate()?;
         ScopedEffectController::shared(self.controller.clone(), scope)
     }
 
@@ -1392,7 +1392,7 @@ impl EffectHost for RestateEffectHost {
         &self,
         scope: ExecutionScope,
     ) -> Result<Option<ScopedEffectController<'static>>, RuntimeError> {
-        scope.validate_for_durable_host()?;
+        scope.validate()?;
         Ok(Some(ScopedEffectController::shared(
             self.controller.clone(),
             scope,
@@ -1531,7 +1531,7 @@ impl AwaitEventResolver for RestateEffectHostController {
         scope: &ExecutionScope,
         wait: AwaitEventWaitIdentity,
     ) -> Result<AwaitEventKey, RuntimeError> {
-        scope.validate_for_durable_host()?;
+        scope.validate()?;
         let ingress = &self.await_event_ingress;
         if let Some(session_id) = scope.session_id()
             && restate_session_is_revoked_via_ingress(ingress, session_id).await?
@@ -3296,7 +3296,7 @@ impl RestateTurnAttach {
 #[async_trait::async_trait]
 impl TurnAttach for RestateTurnAttach {
     async fn await_terminal(&self, address: &TurnAddress) -> Result<TurnTerminal, RuntimeError> {
-        address.execution_scope().validate_for_durable_host()?;
+        address.execution_scope().validate()?;
         let key = restate_await_event_key(
             &address.execution_scope(),
             AwaitEventWaitIdentity::TurnTerminal,
@@ -4071,7 +4071,7 @@ where
         &'run self,
         scope: ExecutionScope,
     ) -> Result<ScopedEffectController<'run>, RuntimeError> {
-        scope.validate_for_durable_host()?;
+        scope.validate()?;
         ScopedEffectController::borrowed(self, scope)
     }
 
@@ -4128,7 +4128,7 @@ where
         scope: &ExecutionScope,
         wait: AwaitEventWaitIdentity,
     ) -> Result<AwaitEventKey, RuntimeError> {
-        scope.validate_for_durable_host()?;
+        scope.validate()?;
         if let Some(session_id) = scope.session_id()
             && self
                 .context

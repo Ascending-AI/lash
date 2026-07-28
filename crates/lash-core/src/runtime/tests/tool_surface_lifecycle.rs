@@ -184,10 +184,20 @@ async fn parked_resume_keeps_the_store_bound_session_id() {
         expected.session_id
     );
 
+    let admissions_before_resume = store
+        .session_admission_count
+        .load(std::sync::atomic::Ordering::SeqCst);
     let parked = runtime.park().await.expect("park runtime");
     let resumed = LashRuntime::resume(parked, &env)
         .await
         .expect("resume runtime");
+    assert_eq!(
+        store
+            .session_admission_count
+            .load(std::sync::atomic::Ordering::SeqCst),
+        admissions_before_resume + 1,
+        "resume must pass through durable admission"
+    );
     let state = resumed.export_persistence_state();
     assert_eq!(state.session_id, expected.session_id);
     assert!(matches!(

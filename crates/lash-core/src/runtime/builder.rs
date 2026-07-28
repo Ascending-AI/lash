@@ -325,6 +325,7 @@ impl EmbeddedRuntimeBuilder {
             persistence,
             self.process_registry,
             state,
+            crate::SessionRelation::Root,
         )
         .await?;
         runtime.host.process_work_driver = self.process_work_driver;

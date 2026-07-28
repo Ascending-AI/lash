@@ -46,6 +46,8 @@ impl InMemorySessionStore {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+
     use crate::store::{GraphAppend, SessionCommitStore};
     use crate::{
         DeliveryPolicy, MergeKey, QueuedWorkBatch, QueuedWorkCompletion, RuntimeCommit,
@@ -194,7 +196,10 @@ mod tests {
             ..Default::default()
         };
         store
-            .ensure_session_bound(&state.session_id, &state.policy)
+            .admit_and_bind_session(&crate::SessionBinding::root(
+                state.session_id.clone(),
+                &state.policy,
+            ))
             .await
             .expect("bind stale-claim session");
         let mut commit = RuntimeCommit::persisted_state_for_test(&state, &[]);
@@ -227,5 +232,64 @@ mod tests {
             store.load_session().await.expect("load session").is_none(),
             "the failed commit must not create a session head"
         );
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn delete_racing_four_creates_never_resurrects_a_session_in_5000_rounds() {
+        const ROUNDS: usize = 5_000;
+
+        for round in 0..ROUNDS {
+            let factory = Arc::new(super::super::InMemorySessionStoreFactory::new());
+            let request = SessionStoreCreateRequest {
+                session_id: format!("delete-create-race-{round}"),
+                relation: crate::SessionRelation::Root,
+                policy: crate::SessionPolicy::default(),
+            };
+            factory
+                .create_store(&request)
+                .await
+                .expect("materialize session before the race");
+
+            let barrier = Arc::new(tokio::sync::Barrier::new(5));
+            let delete_factory = Arc::clone(&factory);
+            let delete_barrier = Arc::clone(&barrier);
+            let deleted_session_id = request.session_id.clone();
+            let delete = tokio::spawn(async move {
+                delete_barrier.wait().await;
+                delete_factory.delete_session(&deleted_session_id).await
+            });
+            let mut creates = Vec::with_capacity(4);
+            for _ in 0..4 {
+                let create_factory = Arc::clone(&factory);
+                let create_barrier = Arc::clone(&barrier);
+                let create_request = request.clone();
+                creates.push(tokio::spawn(async move {
+                    create_barrier.wait().await;
+                    create_factory.create_store(&create_request).await
+                }));
+            }
+
+            delete
+                .await
+                .expect("delete task joined")
+                .expect("delete completed");
+            for create in creates {
+                let _ = create.await.expect("create task joined");
+            }
+
+            assert!(
+                factory
+                    .open_existing_store(&request)
+                    .await
+                    .expect("inspect factory")
+                    .is_none(),
+                "round {round} left a stale store reachable"
+            );
+            assert!(matches!(
+                factory.create_store(&request).await,
+                Err(StoreError::SessionDeleted { session_id })
+                    if session_id == request.session_id
+            ));
+        }
     }
 }

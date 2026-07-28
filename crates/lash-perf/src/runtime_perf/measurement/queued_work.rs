@@ -905,7 +905,9 @@ async fn runtime_perf_commit_state(
         ..RuntimeSessionState::default()
     };
     let policy = state.policy.clone();
-    store.ensure_session_bound(session_id, &policy).await?;
+    store
+        .admit_and_bind_session(&lash_core::SessionBinding::root(session_id, &policy))
+        .await?;
     Ok(state)
 }
 

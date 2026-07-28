@@ -228,6 +228,14 @@ fn node_id_golden_vector() {
 }
 
 #[test]
+fn frame_node_id_golden_vector() {
+    assert_eq!(
+        crate::frame_node_id("golden-session", "frame-42"),
+        "frame-node/v2/dea90a18d10331ef6adf1493fb73edb50b45b8e51d375e4d524524928cfa18bc"
+    );
+}
+
+#[test]
 fn intent_hash_is_independent_of_source_and_map_insertion_order() {
     #[derive(serde::Serialize)]
     struct FirstOuter {

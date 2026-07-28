@@ -12,7 +12,7 @@ pub(crate) async fn lock_session_history_mutation_tx(
     Ok(())
 }
 
-async fn lock_live_session_history_mutation_tx(
+pub(crate) async fn ensure_session_not_deleted_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     session_id: &str,
 ) -> Result<(), StoreError> {
@@ -27,11 +27,12 @@ async fn lock_live_session_history_mutation_tx(
     .await
     .map_err(store_sqlx_error)?;
     if deleted {
-        return Err(StoreError::SessionDeleted {
+        Err(StoreError::SessionDeleted {
             session_id: session_id.to_string(),
-        });
+        })
+    } else {
+        Ok(())
     }
-    Ok(())
 }
 
 const POSTGRES_QUEUED_WORK_HEAD_CANDIDATE_PREDICATE: &str = "session_id = $1
@@ -337,7 +338,7 @@ impl SessionCommitStore for PostgresSessionStore {
         // A head row does not exist during the first commit, so row locking
         // alone cannot serialize create-versus-delete. This session-keyed lock
         // is the common authority for every history commit and deletion.
-        lock_live_session_history_mutation_tx(&mut tx, &commit.session_id).await?;
+        ensure_session_not_deleted_tx(&mut tx, &commit.session_id).await?;
         // Read without a lock for early validation and receipt replay. Before
         // mutating graph reachability, existing sessions lock and recheck this
         // revision so commit, maintenance, and deletion share one authority.
@@ -770,25 +771,24 @@ impl SessionCommitStore for PostgresSessionStore {
         Ok(result)
     }
 
-    async fn ensure_session_bound(
+    async fn admit_and_bind_session(
         &self,
-        session_id: &str,
-        policy: &lash_core::SessionPolicy,
-    ) -> Result<(), StoreError> {
+        binding: &lash_core::SessionBinding,
+    ) -> Result<lash_core::SessionAdmission, StoreError> {
+        binding.validate()?;
+        let session_id = &binding.session_id;
         self.bind_session_id(session_id)?;
         let meta = SessionMeta {
             session_id: session_id.to_string(),
             session_name: session_id.to_string(),
             created_at: self.clock.timestamp_rfc3339(),
-            model: policy.model.id.clone(),
-            cwd: std::env::current_dir()
-                .ok()
-                .and_then(|path| path.to_str().map(str::to_string)),
-            relation: lash_core::SessionRelation::Root,
+            model: binding.model_id.clone(),
+            cwd: binding.cwd.clone(),
+            relation: binding.relation.clone(),
         };
         let mut tx = self.pool.begin().await.map_err(store_sqlx_error)?;
-        lock_live_session_history_mutation_tx(&mut tx, session_id).await?;
-        sqlx::query(
+        ensure_session_not_deleted_tx(&mut tx, session_id).await?;
+        let inserted = sqlx::query(
             "INSERT INTO lash_session_meta (session_id, meta_json)
              VALUES ($1, $2)
              ON CONFLICT (session_id) DO NOTHING",
@@ -799,13 +799,17 @@ impl SessionCommitStore for PostgresSessionStore {
         .await
         .map_err(store_sqlx_error)?;
         tx.commit().await.map_err(store_sqlx_error)?;
-        Ok(())
+        Ok(if inserted.rows_affected() == 1 {
+            lash_core::SessionAdmission::Created
+        } else {
+            lash_core::SessionAdmission::Rebound
+        })
     }
 
     async fn save_session_meta(&self, meta: SessionMeta) -> Result<(), StoreError> {
         self.bind_session_id(&meta.session_id)?;
         let mut tx = self.pool.begin().await.map_err(store_sqlx_error)?;
-        lock_live_session_history_mutation_tx(&mut tx, &meta.session_id).await?;
+        ensure_session_not_deleted_tx(&mut tx, &meta.session_id).await?;
         sqlx::query(
             "INSERT INTO lash_session_meta (session_id, meta_json)
              VALUES ($1, $2)
@@ -912,6 +916,7 @@ impl SessionExecutionLeaseStore for PostgresSessionStore {
         lease_ttl_ms: u64,
     ) -> Result<SessionExecutionLeaseClaimOutcome, StoreError> {
         let mut tx = self.pool.begin().await.map_err(store_sqlx_error)?;
+        ensure_session_not_deleted_tx(&mut tx, session_id).await?;
         lock_session_execution_lease_tx(&mut tx, session_id).await?;
         let now = postgres_transaction_epoch_ms(&mut tx).await?;
         let current = load_session_execution_lease_tx(&mut tx, session_id).await?;
@@ -974,6 +979,7 @@ impl SessionExecutionLeaseStore for PostgresSessionStore {
         lease_ttl_ms: u64,
     ) -> Result<SessionExecutionLeaseClaimOutcome, StoreError> {
         let mut tx = self.pool.begin().await.map_err(store_sqlx_error)?;
+        ensure_session_not_deleted_tx(&mut tx, session_id).await?;
         lock_session_execution_lease_tx(&mut tx, session_id).await?;
         let now = postgres_transaction_epoch_ms(&mut tx).await?;
         let current = load_session_execution_lease_tx(&mut tx, session_id).await?;
@@ -1160,6 +1166,7 @@ impl QueuedWorkStore for PostgresSessionStore {
         batch: QueuedWorkBatchDraft,
     ) -> Result<QueuedWorkBatch, StoreError> {
         let mut tx = self.pool.begin().await.map_err(store_sqlx_error)?;
+        ensure_session_not_deleted_tx(&mut tx, &batch.session_id).await?;
         let queued = enqueue_queued_work_tx(&mut tx, &batch).await?;
         tx.commit().await.map_err(store_sqlx_error)?;
         Ok(queued)
@@ -1722,6 +1729,7 @@ impl TurnInputStore for PostgresSessionStore {
         draft: lash_core::PendingTurnInputDraft,
     ) -> Result<lash_core::PendingTurnInput, StoreError> {
         let mut tx = self.pool.begin().await.map_err(store_sqlx_error)?;
+        ensure_session_not_deleted_tx(&mut tx, &draft.session_id).await?;
         let now = current_epoch_ms();
         let input_id = draft.input_id.clone().unwrap_or_else(|| {
             derive_pending_turn_input_id(&draft.session_id, draft.source_key.as_deref(), now)

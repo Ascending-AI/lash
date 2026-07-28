@@ -97,7 +97,10 @@ async fn gc_unreachable_keeps_rooted_checkpoint_blobs() {
         ..RuntimeSessionState::default()
     };
     store
-        .ensure_session_bound(&state.session_id, &state.policy)
+        .admit_and_bind_session(&lash_core::SessionBinding::root(
+            state.session_id.clone(),
+            &state.policy,
+        ))
         .await
         .expect("bind session to store");
     state.ensure_agent_frame_initialized();
@@ -142,7 +145,10 @@ async fn auto_gc_runs_after_commit_without_reentrant_locking() {
         ..RuntimeSessionState::default()
     };
     store
-        .ensure_session_bound(&state.session_id, &state.policy)
+        .admit_and_bind_session(&lash_core::SessionBinding::root(
+            state.session_id.clone(),
+            &state.policy,
+        ))
         .await
         .expect("bind session to store");
     let owner = lease_owner("auto-gc-test");
@@ -475,7 +481,7 @@ async fn sqlite_catalog_partitions_derived_node_ids_by_session() {
     second
         .commit_runtime_state(commit(&second_state))
         .await
-        .expect("second incarnation derives a distinct node id");
+        .expect("second session derives a distinct node id");
 
     let first_node_id = lash_core::frame_node_id(&first_state.session_id, "shared-frame-key");
     let second_node_id = lash_core::frame_node_id(&second_state.session_id, "shared-frame-key");

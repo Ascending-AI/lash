@@ -26,6 +26,10 @@ pub enum StoreError {
         bound_session_id: String,
         attempted_session_id: String,
     },
+    #[error("session `{session_id}` was admitted without durable session metadata")]
+    SessionBindingNotMaterialized { session_id: String },
+    #[error("invalid session id: {reason}")]
+    InvalidSessionId { reason: &'static str },
     #[error(
         "session `{session_id}` was used and deleted; session ids cannot be reused in this store"
     )]

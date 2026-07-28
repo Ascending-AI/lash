@@ -315,11 +315,13 @@ impl AttachmentManifest for Store {
             let owner_kind = intent.owner_kind.map(AttachmentOwnerKind::as_str);
             let owner_id = intent.owner_id;
             self.conn
-                .call(move |conn| {
-                    // Re-recording refreshes the timestamp and durable owner
-                    // together. GC later composes this age with owner-death proof.
-                    conn.execute(
-                        "INSERT INTO attachment_manifest
+                .write_flow(move |tx| {
+                    let outcome: Result<(), StoreError> = (|| {
+                        crate::persistence::ensure_session_not_deleted_conn(tx, &session_id)?;
+                        // Re-recording refreshes the timestamp and durable owner
+                        // together. GC later composes this age with owner-death proof.
+                        tx.execute(
+                            "INSERT INTO attachment_manifest
                             (attachment_id, session_id, canonical_uri, intent_at_ms,
                              committed_at_ms, owner_kind, owner_id)
                          VALUES (?1, ?2, ?3, ?4, NULL, ?5, ?6)
@@ -328,19 +330,25 @@ impl AttachmentManifest for Store {
                             intent_at_ms = excluded.intent_at_ms,
                             owner_kind = excluded.owner_kind,
                             owner_id = excluded.owner_id",
-                        params![
-                            attachment_id,
-                            session_id,
-                            canonical_uri,
-                            intent_at_ms,
-                            owner_kind,
-                            owner_id
-                        ],
-                    )
+                            params![
+                                attachment_id,
+                                session_id,
+                                canonical_uri,
+                                intent_at_ms,
+                                owner_kind,
+                                owner_id
+                            ],
+                        )
+                        .map_err(sqlite_error)?;
+                        Ok(())
+                    })();
+                    Ok(match outcome {
+                        Ok(()) => TxOutcome::Commit(Ok(())),
+                        Err(err) => TxOutcome::Rollback(Err(err)),
+                    })
                 })
                 .await
-                .map_err(sqlite_error)?;
-            Ok(())
+                .map_err(sqlite_error)?
         })
     }
 
@@ -360,20 +368,29 @@ impl AttachmentManifest for Store {
                 .collect();
             let now = self.clock.timestamp_ms() as i64;
             self.conn
-                .write(move |tx| {
-                    let mut stmt = tx.prepare(
-                        "UPDATE attachment_manifest
+                .write_flow(move |tx| {
+                    let outcome: Result<(), StoreError> = (|| {
+                        crate::persistence::ensure_session_not_deleted_conn(tx, &session_id)?;
+                        let mut stmt = tx
+                            .prepare(
+                                "UPDATE attachment_manifest
                          SET committed_at_ms = COALESCE(committed_at_ms, ?1)
                          WHERE attachment_id = ?2 AND session_id = ?3",
-                    )?;
-                    for id in &attachment_ids {
-                        stmt.execute(params![now, id, session_id])?;
-                    }
-                    Ok(())
+                            )
+                            .map_err(sqlite_error)?;
+                        for id in &attachment_ids {
+                            stmt.execute(params![now, id, session_id])
+                                .map_err(sqlite_error)?;
+                        }
+                        Ok(())
+                    })();
+                    Ok(match outcome {
+                        Ok(()) => TxOutcome::Commit(Ok(())),
+                        Err(err) => TxOutcome::Rollback(Err(err)),
+                    })
                 })
                 .await
-                .map_err(sqlite_error)?;
-            Ok(())
+                .map_err(sqlite_error)?
         })
     }
 

@@ -699,12 +699,11 @@ lash_core::impl_noop_attachment_manifest!(CommitRetryStore);
 // segment delegates to `inner`.
 #[async_trait::async_trait]
 impl lash_core::SessionCommitStore for CommitRetryStore {
-    async fn ensure_session_bound(
+    async fn admit_and_bind_session(
         &self,
-        session_id: &str,
-        policy: &lash_core::SessionPolicy,
-    ) -> Result<(), lash_core::StoreError> {
-        self.inner.ensure_session_bound(session_id, policy).await
+        binding: &lash_core::SessionBinding,
+    ) -> Result<lash_core::SessionAdmission, lash_core::StoreError> {
+        self.inner.admit_and_bind_session(binding).await
     }
 
     async fn load_session(

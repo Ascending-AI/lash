@@ -518,30 +518,30 @@ lash_core::impl_noop_attachment_manifest!(RuntimePerfStore);
 
 #[async_trait::async_trait]
 impl SessionCommitStore for RuntimePerfStore {
-    async fn ensure_session_bound(
+    async fn admit_and_bind_session(
         &self,
-        session_id: &str,
-        policy: &lash_core::SessionPolicy,
-    ) -> Result<(), store::StoreError> {
+        binding: &lash_core::SessionBinding,
+    ) -> Result<lash_core::SessionAdmission, store::StoreError> {
+        binding.validate()?;
         let mut meta = self.session_meta.lock().expect("lock perf session meta");
         if let Some(meta) = meta.as_ref() {
-            if meta.session_id != session_id {
+            if meta.session_id != binding.session_id {
                 return Err(StoreError::SessionBindingMismatch {
                     bound_session_id: meta.session_id.clone(),
-                    attempted_session_id: session_id.to_string(),
+                    attempted_session_id: binding.session_id.clone(),
                 });
             }
-            return Ok(());
+            return Ok(lash_core::SessionAdmission::Rebound);
         }
         *meta = Some(store::SessionMeta {
-            session_id: session_id.to_string(),
-            session_name: session_id.to_string(),
+            session_id: binding.session_id.clone(),
+            session_name: binding.session_id.clone(),
             created_at: "test".to_string(),
-            model: policy.model.id.clone(),
-            cwd: None,
-            relation: lash_core::SessionRelation::Root,
+            model: binding.model_id.clone(),
+            cwd: binding.cwd.clone(),
+            relation: binding.relation.clone(),
         });
-        Ok(())
+        Ok(lash_core::SessionAdmission::Created)
     }
 
     async fn load_session(&self) -> Result<Option<PersistedSessionRead>, store::StoreError> {

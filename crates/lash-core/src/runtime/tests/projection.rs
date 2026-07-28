@@ -287,7 +287,7 @@ async fn preopened_store_binds_without_remapping_initial_frame() {
     let store = Arc::new(RecordingStore::default());
     let policy = standard_test_policy();
     store
-        .ensure_session_bound("preopened-session", &policy)
+        .admit_and_bind_session(&crate::SessionBinding::root("preopened-session", &policy))
         .await
         .expect("preopen store binding");
     let mut state = RuntimeSessionState {

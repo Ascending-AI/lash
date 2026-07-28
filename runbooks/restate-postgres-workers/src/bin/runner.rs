@@ -1930,7 +1930,7 @@ async fn drive_turn_control_scenarios(storage: &PostgresStorage, ingress_url: &s
     let before_evidence_id = "e2e-cancel-before-start";
     let before_outcome = driver
         .request_cancel(cancel_request(
-            turn_address(storage, &before).await?,
+            turn_address(&before).await?,
             before_evidence_id,
         ))
         .await
@@ -1938,7 +1938,7 @@ async fn drive_turn_control_scenarios(storage: &PostgresStorage, ingress_url: &s
     assert_requested(&before_outcome.outcome, before_evidence_id)?;
     submit_workflow(ingress_url, &before).await?;
     let before_terminal = driver
-        .await_terminal(&turn_address(storage, &before).await?)
+        .await_terminal(&turn_address(&before).await?)
         .await
         .context("attach to cancel-before-start terminal")?;
     report_workflow_progress(&before.workflow_id, "terminal-attached");
@@ -1956,14 +1956,14 @@ async fn drive_turn_control_scenarios(storage: &PostgresStorage, ingress_url: &s
     let cross_evidence_id = "e2e-cancel-cross-process";
     let cross_outcome = driver
         .request_cancel(cancel_request(
-            turn_address(storage, &cross).await?,
+            turn_address(&cross).await?,
             cross_evidence_id,
         ))
         .await
         .context("request cross-process cancellation")?;
     assert_requested(&cross_outcome.outcome, cross_evidence_id)?;
     let cross_terminal = driver
-        .await_terminal(&turn_address(storage, &cross).await?)
+        .await_terminal(&turn_address(&cross).await?)
         .await
         .context("attach to cross-process terminal")?;
     report_workflow_progress(&cross.workflow_id, "terminal-attached");
@@ -1985,7 +1985,7 @@ async fn drive_turn_control_scenarios(storage: &PostgresStorage, ingress_url: &s
         signal: None,
     };
     let race_evidence_id = "e2e-cancel-seal-race";
-    let race_cancel = cancel_request(turn_address(storage, &race).await?, race_evidence_id);
+    let race_cancel = cancel_request(turn_address(&race).await?, race_evidence_id);
     let (submitted, race_outcome) = tokio::join!(
         submit_workflow(ingress_url, &race),
         driver.request_cancel(race_cancel),
@@ -1993,7 +1993,7 @@ async fn drive_turn_control_scenarios(storage: &PostgresStorage, ingress_url: &s
     submitted.context("submit completion/cancel race")?;
     let race_outcome = race_outcome.context("request completion/cancel race")?;
     let race_terminal = driver
-        .await_terminal(&turn_address(storage, &race).await?)
+        .await_terminal(&turn_address(&race).await?)
         .await
         .context("attach to completion/cancel race terminal")?;
     report_workflow_progress(&race.workflow_id, "terminal-attached");
@@ -2016,7 +2016,7 @@ async fn drive_turn_control_scenarios(storage: &PostgresStorage, ingress_url: &s
     let recovery_evidence_id = "e2e-cancel-crash-recovery";
     let recovery_outcome = driver
         .request_cancel(cancel_request(
-            turn_address(storage, &recovery).await?,
+            turn_address(&recovery).await?,
             recovery_evidence_id,
         ))
         .await
@@ -2024,7 +2024,7 @@ async fn drive_turn_control_scenarios(storage: &PostgresStorage, ingress_url: &s
     assert_requested(&recovery_outcome.outcome, recovery_evidence_id)?;
     report_workflow_progress(&recovery.workflow_id, "cancel-requested-after-crash");
     let recovery_terminal = driver
-        .await_terminal(&turn_address(storage, &recovery).await?)
+        .await_terminal(&turn_address(&recovery).await?)
         .await
         .context("attach to recovered cancellation terminal")?;
     report_workflow_progress(&recovery.workflow_id, "terminal-attached");
@@ -2064,16 +2064,13 @@ async fn drive_suspended_sleep_cancel_scenario(
     let driver = RestateTurnDeployment::new(ingress_url.to_string()).turn_work_driver();
     let started = Instant::now();
     let receipt = driver
-        .request_cancel(cancel_request(
-            turn_address(storage, &request).await?,
-            evidence_id,
-        ))
+        .request_cancel(cancel_request(turn_address(&request).await?, evidence_id))
         .await
         .context("request cancellation after durable sleep suspended")?;
     assert_requested(&receipt.outcome, evidence_id)?;
     let terminal = tokio::time::timeout(
         Duration::from_secs(10),
-        driver.await_terminal(&turn_address(storage, &request).await?),
+        driver.await_terminal(&turn_address(&request).await?),
     )
     .await
     .context("suspended durable sleep did not wake within 10 seconds")??;
@@ -2123,7 +2120,7 @@ async fn drive_engine_restart_scenario(
     let sleep_cancel_started = Instant::now();
     let sleep_receipt = driver
         .request_cancel(cancel_request(
-            turn_address(storage, &sleeping).await?,
+            turn_address(&sleeping).await?,
             sleep_evidence_id,
         ))
         .await
@@ -2131,7 +2128,7 @@ async fn drive_engine_restart_scenario(
     assert_requested(&sleep_receipt.outcome, sleep_evidence_id)?;
     let sleep_terminal = tokio::time::timeout(
         Duration::from_secs(10),
-        driver.await_terminal(&turn_address(storage, &sleeping).await?),
+        driver.await_terminal(&turn_address(&sleeping).await?),
     )
     .await
     .context("post-restart suspended sleep did not wake within 10 seconds")??;
@@ -2144,7 +2141,7 @@ async fn drive_engine_restart_scenario(
     assert_cancelled_response(&sleep_response, sleep_evidence_id)?;
 
     let evidence_id = "e2e-cancel-after-engine-restart";
-    let parked_address = turn_address(storage, &parked).await?;
+    let parked_address = turn_address(&parked).await?;
     let receipt = driver
         .request_cancel(
             TurnCancelRequest::new(
@@ -2190,7 +2187,7 @@ async fn drive_engine_restart_scenario(
     };
     submit_workflow(ingress_url, &complete).await?;
     let complete_terminal = driver
-        .await_terminal(&turn_address(storage, &complete).await?)
+        .await_terminal(&turn_address(&complete).await?)
         .await
         .context("attach to post-restart completion terminal")?;
     assert_non_cancel_terminal(&complete_terminal)?;
@@ -2299,7 +2296,7 @@ async fn drive_break_glass_scenario(
     let driver = TurnWorkDriver::new(Arc::new(RestateEffectHost::new(ingress_url.to_string())));
     if let Ok(Ok(terminal)) = tokio::time::timeout(
         Duration::from_secs(3),
-        driver.await_terminal(&turn_address(storage, &break_glass).await?),
+        driver.await_terminal(&turn_address(&break_glass).await?),
     )
     .await
     {
@@ -2333,7 +2330,7 @@ fn turn_control_request(workflow_id: &str, fail_once: bool) -> TurnRequest {
     }
 }
 
-async fn turn_address(_storage: &PostgresStorage, request: &TurnRequest) -> Result<TurnAddress> {
+async fn turn_address(request: &TurnRequest) -> Result<TurnAddress> {
     let session_id = turn_session_id(&request.workflow_id);
     Ok(TurnAddress::new(session_id, request.workflow_id.clone()))
 }

@@ -30,9 +30,18 @@ async fn bind_state_to_store(
     policy: &SessionPolicy,
     store: &(dyn crate::store::RuntimePersistence + '_),
     state: &mut RuntimeSessionState,
+    relation: crate::SessionRelation,
 ) -> Result<(), SessionError> {
+    let binding = crate::SessionBinding {
+        session_id: state.session_id.clone(),
+        relation,
+        model_id: policy.model.id.clone(),
+        cwd: std::env::current_dir()
+            .ok()
+            .and_then(|path| path.to_str().map(str::to_string)),
+    };
     store
-        .ensure_session_bound(&state.session_id, policy)
+        .admit_and_bind_session(&binding)
         .await
         .map_err(|err| {
             SessionError::Protocol(format!(
@@ -40,6 +49,32 @@ async fn bind_state_to_store(
                 state.session_id
             ))
         })?;
+    let meta = store
+        .load_session_meta()
+        .await
+        .map_err(|err| {
+            SessionError::Protocol(format!(
+                "failed to verify session `{}` store binding: {err}",
+                state.session_id
+            ))
+        })?
+        .ok_or_else(|| {
+            SessionError::Protocol(
+                crate::StoreError::SessionBindingNotMaterialized {
+                    session_id: state.session_id.clone(),
+                }
+                .to_string(),
+            )
+        })?;
+    if meta.session_id != state.session_id {
+        return Err(SessionError::Protocol(
+            crate::StoreError::SessionBindingMismatch {
+                bound_session_id: meta.session_id,
+                attempted_session_id: state.session_id.clone(),
+            }
+            .to_string(),
+        ));
+    }
     Ok(())
 }
 
@@ -95,9 +130,6 @@ impl LashRuntime {
         services: RuntimeServices,
         mut state: RuntimeSessionState,
     ) -> Result<Self, SessionError> {
-        if state.session_id.is_empty() {
-            state.session_id = uuid::Uuid::new_v4().to_string();
-        }
         // Defaulted state (e.g. `RuntimeSessionState::default()` used
         // by fresh-session constructors) carries an empty policy.
         // Fill it in from the caller's policy so tests and hosts that
@@ -244,7 +276,13 @@ impl LashRuntime {
         services: PersistentRuntimeServices,
         mut state: RuntimeSessionState,
     ) -> Result<Self, SessionError> {
-        bind_state_to_store(&policy, services.store().as_ref(), &mut state).await?;
+        bind_state_to_store(
+            &policy,
+            services.store().as_ref(),
+            &mut state,
+            crate::SessionRelation::Root,
+        )
+        .await?;
         Self::from_host_state(policy, host.into(), services.into_runtime_services(), state).await
     }
 
@@ -255,7 +293,13 @@ impl LashRuntime {
         services: PersistentRuntimeServices,
         mut state: RuntimeSessionState,
     ) -> Result<Self, SessionError> {
-        bind_state_to_store(&policy, services.store().as_ref(), &mut state).await?;
+        bind_state_to_store(
+            &policy,
+            services.store().as_ref(),
+            &mut state,
+            crate::SessionRelation::Root,
+        )
+        .await?;
         Self::from_host_state(policy, host.into(), services.into_runtime_services(), state).await
     }
 
@@ -274,13 +318,14 @@ impl LashRuntime {
         persistence: RuntimePersistenceBindings,
         process_registry: Option<Arc<dyn ProcessRegistry>>,
         mut state: RuntimeSessionState,
+        relation: crate::SessionRelation,
     ) -> Result<Self, SessionError> {
         let RuntimePersistenceBindings {
             runtime_store: store,
             attachment_manifest_store,
         } = persistence;
         if let Some(store) = store.as_deref() {
-            bind_state_to_store(&policy, store, &mut state).await?;
+            bind_state_to_store(&policy, store, &mut state, relation).await?;
         }
         let runtime = match (store, process_registry) {
             (Some(store), Some(registry)) => {
@@ -361,6 +406,7 @@ impl LashRuntime {
             RuntimePersistenceBindings::new(store),
             env.process_registry.as_ref().cloned(),
             state,
+            crate::SessionRelation::Root,
         )
         .await?;
         // Thread the host-owned work drivers onto this session's host so

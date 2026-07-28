@@ -1,20 +1,29 @@
 use super::InMemorySessionStore;
 
 impl InMemorySessionStore {
-    pub(super) fn ensure_session_metadata_for_commit(
+    pub(super) fn ensure_session_not_deleted(
         &self,
-        commit: &crate::RuntimeCommit,
+        session_id: &str,
     ) -> Result<(), crate::StoreError> {
         if self
             .deleted_session_ids
             .lock()
             .expect("lock deleted session ids")
-            .contains(&commit.session_id)
+            .contains(session_id)
         {
-            return Err(crate::StoreError::SessionDeleted {
-                session_id: commit.session_id.clone(),
-            });
+            Err(crate::StoreError::SessionDeleted {
+                session_id: session_id.to_string(),
+            })
+        } else {
+            Ok(())
         }
+    }
+
+    pub(super) fn ensure_session_metadata_for_commit(
+        &self,
+        commit: &crate::RuntimeCommit,
+    ) -> Result<(), crate::StoreError> {
+        self.ensure_session_not_deleted(&commit.session_id)?;
         let mut session_meta = self.session_meta.lock().expect("lock session meta");
         session_meta.get_or_insert_with(|| crate::SessionMeta {
             session_id: commit.session_id.clone(),

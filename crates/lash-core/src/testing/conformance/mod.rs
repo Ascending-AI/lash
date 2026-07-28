@@ -182,10 +182,16 @@ mod tests {
 
     #[tokio::test]
     async fn in_memory_session_store_factory_satisfies_conformance() {
-        session_store_factory(|| {
-            Arc::new(crate::InMemorySessionStoreFactory::new())
-                as Arc<dyn crate::SessionStoreFactory>
-        })
+        session_store_factory(
+            || {
+                Arc::new(crate::InMemorySessionStoreFactory::new())
+                    as Arc<dyn crate::SessionStoreFactory>
+            },
+            || {
+                Arc::new(crate::InMemorySessionStore::default())
+                    as Arc<dyn crate::RuntimePersistence>
+            },
+        )
         .await;
     }
 

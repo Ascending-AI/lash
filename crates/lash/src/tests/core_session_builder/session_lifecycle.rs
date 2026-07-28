@@ -2,6 +2,27 @@ use super::*;
 use crate::rlm::{RlmFinalAnswerFormat, RlmSessionBuilderExt as _, RlmTurnBuilderExt as _};
 use lash_lashlang_runtime::LashlangArtifactStore as _;
 
+#[tokio::test]
+async fn store_less_session_ids_are_single_use_per_core_process() {
+    let core = standard_core();
+    let first = core
+        .session("store-less-single-use")
+        .open()
+        .await
+        .expect("first store-less session");
+    drop(first);
+
+    let error = match core.session("store-less-single-use").open().await {
+        Ok(_) => panic!("store-less session id reuse must fail"),
+        Err(error) => error,
+    };
+    assert!(matches!(
+        error,
+        EmbedError::EphemeralSessionIdReused { session_id }
+            if session_id == "store-less-single-use"
+    ));
+}
+
 fn persisted_tool_state_at_generation(
     state: lash_core::ToolState,
     generation: u64,

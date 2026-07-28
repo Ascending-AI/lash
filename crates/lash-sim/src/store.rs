@@ -55,6 +55,8 @@ fn store_error_variant(error: &StoreError) -> &'static str {
         StoreError::HeadRevisionConflict { .. } => "HeadRevisionConflict",
         StoreError::Backend(_) => "Backend",
         StoreError::SessionBindingMismatch { .. } => "SessionBindingMismatch",
+        StoreError::SessionBindingNotMaterialized { .. } => "SessionBindingNotMaterialized",
+        StoreError::InvalidSessionId { .. } => "InvalidSessionId",
         StoreError::SessionDeleted { .. } => "SessionDeleted",
         StoreError::UnsupportedStoreOperation { .. } => "UnsupportedStoreOperation",
         StoreError::RuntimeTurnCommitConflict { .. } => "RuntimeTurnCommitConflict",

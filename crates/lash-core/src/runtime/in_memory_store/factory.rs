@@ -31,6 +31,8 @@ impl SessionStoreFactory for InMemorySessionStoreFactory {
         &self,
         request: &SessionStoreCreateRequest,
     ) -> Result<Arc<dyn RuntimePersistence>, crate::StoreError> {
+        let binding = crate::SessionBinding::from_create_request(request);
+        binding.validate()?;
         let _transaction = self
             .write_transaction
             .lock()
@@ -63,9 +65,9 @@ impl SessionStoreFactory for InMemorySessionStoreFactory {
                     session_id: request.session_id.clone(),
                     session_name: request.session_id.clone(),
                     created_at: self.clock.timestamp_rfc3339(),
-                    model: request.policy.model.id.clone(),
-                    cwd: None,
-                    relation: request.relation.clone(),
+                    model: binding.model_id.clone(),
+                    cwd: binding.cwd.clone(),
+                    relation: binding.relation.clone(),
                 });
                 store
             })
@@ -98,6 +100,10 @@ impl SessionStoreFactory for InMemorySessionStoreFactory {
             .get(session_id)
             .cloned();
         if let Some(store) = store {
+            self.deleted_session_ids
+                .lock()
+                .expect("lock deleted session ids")
+                .insert(session_id.to_string());
             store
                 .reclaim_history_for_delete(session_id)
                 .map_err(|error| error.to_string())?;
@@ -105,10 +111,6 @@ impl SessionStoreFactory for InMemorySessionStoreFactory {
                 .lock()
                 .expect("in-memory store factory")
                 .remove(session_id);
-            self.deleted_session_ids
-                .lock()
-                .expect("lock deleted session ids")
-                .insert(session_id.to_string());
         }
         Ok(())
     }

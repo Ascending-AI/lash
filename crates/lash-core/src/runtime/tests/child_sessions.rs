@@ -279,7 +279,7 @@ async fn durable_managed_child_writes_to_its_own_attachment_namespace() {
             }),
         },
     ]);
-    let child_factory = RecordingSessionStoreFactory::default();
+    let child_factory = RecordingSessionStoreFactory::default().deferring_metadata_to_admission();
     let root_store = Arc::new(RecordingStore::default());
     let bytes = Arc::new(crate::InMemoryAttachmentStore::new());
     let mut host_config = crate::RuntimeHostConfig::in_memory();
@@ -392,7 +392,7 @@ async fn process_registered_during_first_durable_child_turn_remains_listable_aft
             }),
         },
     ]);
-    let child_factory = RecordingSessionStoreFactory::default();
+    let child_factory = RecordingSessionStoreFactory::default().deferring_metadata_to_admission();
     let root_store = Arc::new(RecordingStore::default());
     let registry = Arc::new(crate::TestLocalProcessRegistry::default());
     let embedded = crate::EmbeddedRuntimeHost::new(crate::RuntimeHostConfig::in_memory())

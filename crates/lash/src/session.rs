@@ -14,6 +14,12 @@ use lash_remote_protocol::{
     RemoteSessionObservationEvent,
 };
 
+/// Builder for one host-named session.
+///
+/// Persistent stores enforce single-use ids durably. A store-less `LashCore`
+/// has no tombstone authority, so it requires a distinct id for every session
+/// opened during that process and rejects reuse with
+/// [`EmbedError::EphemeralSessionIdReused`].
 pub struct SessionBuilder {
     pub(crate) core: LashCore,
     pub(crate) session_id: String,
@@ -204,6 +210,8 @@ impl SessionBuilder {
         state: RuntimeSessionState,
         store: Option<Arc<dyn RuntimePersistence>>,
     ) -> Result<LashSession> {
+        let storeless = store.is_none();
+        let session_id = state.session_id.clone();
         let mut env = self.core.env.clone();
         if let Some(provider) = self.provider.clone().or_else(|| self.core.provider.clone()) {
             env.core.providers.provider_resolver =
@@ -243,6 +251,16 @@ impl SessionBuilder {
             runtime,
             Arc::clone(&self.core.live_replay_store),
         );
+        if storeless
+            && !self
+                .core
+                .ephemeral_session_ids
+                .lock()
+                .expect("ephemeral session id registry")
+                .insert(session_id.clone())
+        {
+            return Err(EmbedError::EphemeralSessionIdReused { session_id });
+        }
         Ok(LashSession {
             runtime: handle,
             effect_host,
@@ -257,12 +275,6 @@ impl SessionBuilder {
         &self,
         policy: &SessionPolicy,
     ) -> Result<Option<Arc<dyn RuntimePersistence>>> {
-        if let Some(store) = self.store.as_ref() {
-            return Ok(Some(Arc::clone(store)));
-        }
-        let Some(factory) = self.core.store_factory.as_ref() else {
-            return Ok(None);
-        };
         let request = SessionStoreCreateRequest {
             session_id: self.session_id.clone(),
             relation: self
@@ -274,6 +286,17 @@ impl SessionBuilder {
                 })
                 .unwrap_or_default(),
             policy: policy.clone(),
+        };
+        if let Some(store) = self.store.as_ref() {
+            store
+                .admit_and_bind_session(&lash_core::SessionBinding::from_create_request(&request))
+                .await
+                .map_err(EmbedError::Store)?;
+            return Ok(Some(Arc::clone(store)));
+        }
+        let Some(factory) = self.core.store_factory.as_ref() else {
+            lash_core::store::validate_session_id(&self.session_id).map_err(EmbedError::Store)?;
+            return Ok(None);
         };
         factory
             .create_store(&request)

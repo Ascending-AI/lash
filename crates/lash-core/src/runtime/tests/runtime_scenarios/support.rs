@@ -171,7 +171,10 @@ impl RuntimeScenarioContext {
 
     async fn execute(&mut self, phase: RuntimeScenarioPhase) {
         self.store
-            .ensure_session_bound(self.session_id, &self.state.policy)
+            .admit_and_bind_session(&crate::SessionBinding::root(
+                self.session_id,
+                &self.state.policy,
+            ))
             .await
             .expect("bind runtime scenario session");
         match phase {

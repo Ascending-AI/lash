@@ -182,8 +182,9 @@ pub mod persistence {
     };
     pub use lash_core::{
         BlobRef, GcReport, LeaseOwnerIdentity, LeaseOwnerLiveness, PersistedSessionConfig,
-        PersistedTurnState, ProtocolEvent, QueuedWorkStore, RuntimePersistence, SessionCommitStore,
-        SessionExecutionLease, SessionExecutionLeaseClaimOutcome, SessionExecutionLeaseCompletion,
+        PersistedTurnState, ProtocolEvent, QueuedWorkStore, RuntimePersistence, SessionAdmission,
+        SessionBinding, SessionCommitStore, SessionExecutionLease,
+        SessionExecutionLeaseClaimOutcome, SessionExecutionLeaseCompletion,
         SessionExecutionLeaseFence, SessionExecutionLeaseStore, SessionGraph, SessionHistoryRecord,
         SessionMeta, SessionNodeRecord, SessionReadView, SessionRelation, StoreError,
         StoreMaintenance, TurnInputStore, VacuumReport,

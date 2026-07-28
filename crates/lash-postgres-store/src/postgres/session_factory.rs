@@ -46,6 +46,7 @@ impl SessionStoreFactory for PostgresSessionStoreFactory {
         &self,
         request: &SessionStoreCreateRequest,
     ) -> Result<Arc<dyn RuntimePersistence>, StoreError> {
+        lash_core::store::validate_session_id(&request.session_id)?;
         let store = PostgresSessionStore {
             pool: self.pool.clone(),
             clock: Arc::clone(&self.clock),
@@ -125,7 +126,7 @@ impl SessionStoreFactory for PostgresSessionStoreFactory {
 
     async fn delete_session(&self, session_id: &str) -> Result<(), String> {
         let mut tx = self.pool.begin().await.map_err(|err| err.to_string())?;
-        delete_session_tx(&mut tx, session_id)
+        delete_session_tx(&mut tx, session_id, true)
             .await
             .map_err(|err| err.to_string())?;
         tx.commit().await.map_err(|err| err.to_string())
@@ -511,19 +512,33 @@ impl SessionStoreFactory for PostgresSessionStoreFactory {
 pub(crate) async fn delete_session_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     session_id: &str,
+    tombstone_host_facing_id: bool,
 ) -> Result<(), StoreError> {
     crate::runtime_persistence::lock_session_history_mutation_tx(tx, session_id).await?;
-    // Permanent identity evidence: vacuum/GC must never remove this row,
-    // because an id used and deleted in this store cannot recur.
-    sqlx::query(
-        "INSERT INTO lash_deleted_sessions (session_id)
-         VALUES ($1)
-         ON CONFLICT (session_id) DO NOTHING",
+    let materialized = sqlx::query_scalar::<_, bool>(
+        "SELECT EXISTS(
+             SELECT 1 FROM lash_session_meta WHERE session_id = $1
+             UNION ALL
+             SELECT 1 FROM lash_sessions WHERE session_id = $1
+         )",
     )
     .bind(session_id)
-    .execute(&mut **tx)
+    .fetch_one(&mut **tx)
     .await
     .map_err(store_sqlx_error)?;
+    if tombstone_host_facing_id && materialized {
+        // Permanent identity evidence for host-facing ids only. Runtime-internal
+        // process session ids are lash-minted and reclaimed without a tombstone.
+        sqlx::query(
+            "INSERT INTO lash_deleted_sessions (session_id)
+             VALUES ($1)
+             ON CONFLICT (session_id) DO NOTHING",
+        )
+        .bind(session_id)
+        .execute(&mut **tx)
+        .await
+        .map_err(store_sqlx_error)?;
+    }
     // Attachment intents are released before the rest of the process-owned
     // store. Process pruning calls this while its terminal row is still locked
     // and deletes that row last, so any failure leaves a process leak instead

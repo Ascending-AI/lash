@@ -490,10 +490,10 @@ pub use session_model::{GenerationOverlay, RuntimeSessionPolicy, SessionPolicy, 
 pub use store::{
     AttachmentIntent, AttachmentManifest, AttachmentManifestEntry, BlobRef, GcReport,
     LeaseOwnerIdentity, LeaseOwnerLiveness, LeaseTimings, LeaseTimingsError, QueuedWorkStore,
-    RuntimePersistence, SessionCommitStore, SessionExecutionLease,
-    SessionExecutionLeaseClaimOutcome, SessionExecutionLeaseCompletion, SessionExecutionLeaseFence,
-    SessionExecutionLeaseStore, SessionMeta, SessionPickerInfo, StoreError, StoreMaintenance,
-    TurnInputStore, VacuumReport,
+    RuntimePersistence, SessionAdmission, SessionBinding, SessionCommitStore,
+    SessionExecutionLease, SessionExecutionLeaseClaimOutcome, SessionExecutionLeaseCompletion,
+    SessionExecutionLeaseFence, SessionExecutionLeaseStore, SessionMeta, SessionPickerInfo,
+    StoreError, StoreMaintenance, TurnInputStore, VacuumReport,
 };
 #[allow(unused_imports)]
 pub(crate) use store::{

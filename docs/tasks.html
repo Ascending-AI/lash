@@ -63,7 +63,7 @@
       <div class="listing__row">
         <div class="listing__label">delete a session</div>
         <div class="listing__body">
-          <p>Call <code>LashCore::delete_session(..., scope)</code> for factory-backed sessions. If a process registry is installed, Lash revokes that session's process grants and wake bookkeeping, deletes its trigger subscriptions, and reports orphaned live processes without cancelling them. See <a href="./persistence.html#delete-sessions">Delete sessions</a>.</p>
+          <p>Call <code>LashCore::delete_session(..., scope)</code> for factory-backed sessions. A materialized host-facing id is permanently retired, so reset flows must rotate to a new id; deleting a never-materialized id is a no-op. If a process registry is installed, Lash revokes that session's process grants and wake bookkeeping, deletes its trigger subscriptions, and reports orphaned live processes without cancelling them. See <a href="./persistence.html#delete-sessions">Delete sessions</a>.</p>
         </div>
       </div>
     </div>

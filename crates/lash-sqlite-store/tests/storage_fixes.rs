@@ -161,7 +161,10 @@ async fn gc_keeps_live_committed_checkpoint_blobs() {
         ..RuntimeSessionState::default()
     };
     store
-        .ensure_session_bound(&state.session_id, &state.policy)
+        .admit_and_bind_session(&lash_core::SessionBinding::root(
+            state.session_id.clone(),
+            &state.policy,
+        ))
         .await
         .expect("bind session to store");
     let owner = lease_owner("gc-test");

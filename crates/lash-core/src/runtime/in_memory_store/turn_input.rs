@@ -13,6 +13,11 @@ impl crate::store::TurnInputStore for InMemorySessionStore {
         &self,
         draft: crate::PendingTurnInputDraft,
     ) -> Result<crate::PendingTurnInput, crate::store::StoreError> {
+        let _transaction = self
+            .write_transaction
+            .lock()
+            .expect("lock in-memory write transaction");
+        self.ensure_session_not_deleted(&draft.session_id)?;
         let mut pending = self
             .pending_turn_inputs
             .lock()

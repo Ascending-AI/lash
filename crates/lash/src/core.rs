@@ -4,6 +4,7 @@ use lash_core::runtime::{
     RuntimeEffectKind, RuntimeEffectLocalExecutor, RuntimeEffectOutcome, RuntimeInvocation,
     RuntimeScope,
 };
+use std::collections::HashSet;
 
 #[derive(Clone)]
 pub struct LashCore {
@@ -23,6 +24,9 @@ pub struct LashCore {
     /// Shared resolution of host-owned work drivers. Shared across `LashCore`
     /// clones so inline process and queued drivers are constructed at most once.
     pub(crate) work_driver: Arc<InlineWorkDriverSlot>,
+    /// Store-less sessions have no durable tombstone authority, so one core
+    /// rejects reuse locally for its full process lifetime.
+    pub(crate) ephemeral_session_ids: Arc<std::sync::Mutex<HashSet<String>>>,
 }
 
 /// How a [`LashCore`] resolves its process work driver, decided at `build()`
@@ -1281,6 +1285,7 @@ impl LashCoreBuilder {
             process_lifecycle_available,
             process_execution_concurrency,
             work_driver: Arc::new(InlineWorkDriverSlot::new(work_driver)),
+            ephemeral_session_ids: Arc::new(std::sync::Mutex::new(HashSet::new())),
         })
     }
 

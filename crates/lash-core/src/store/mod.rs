@@ -113,7 +113,7 @@ mod persisted_state_tests {
     }
 }
 
-#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct SessionMeta {
     pub session_id: String,
     pub session_name: String,
@@ -128,6 +128,75 @@ impl SessionMeta {
     /// [`SessionRelation`] field.
     pub fn parent_session_id(&self) -> Option<&str> {
         self.relation.parent_session_id()
+    }
+}
+
+/// Complete durable identity metadata supplied at session admission.
+///
+/// Session ids are opaque, non-empty UTF-8 strings. Lash deliberately imposes
+/// no additional length or character-set policy; hosts that expose ids in URLs,
+/// filenames, or other constrained namespaces own those boundary rules.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SessionBinding {
+    pub session_id: String,
+    pub relation: crate::SessionRelation,
+    pub model_id: String,
+    pub cwd: Option<String>,
+}
+
+impl SessionBinding {
+    pub fn root(session_id: impl Into<String>, policy: &crate::SessionPolicy) -> Self {
+        Self {
+            session_id: session_id.into(),
+            relation: crate::SessionRelation::Root,
+            model_id: policy.model.id.clone(),
+            cwd: std::env::current_dir()
+                .ok()
+                .and_then(|path| path.to_str().map(str::to_string)),
+        }
+    }
+
+    pub fn from_create_request(request: &crate::SessionStoreCreateRequest) -> Self {
+        Self {
+            session_id: request.session_id.clone(),
+            relation: request.relation.clone(),
+            model_id: request.policy.model.id.clone(),
+            cwd: std::env::current_dir()
+                .ok()
+                .and_then(|path| path.to_str().map(str::to_string)),
+        }
+    }
+
+    pub fn from_meta(meta: &SessionMeta) -> Self {
+        Self {
+            session_id: meta.session_id.clone(),
+            relation: meta.relation.clone(),
+            model_id: meta.model.clone(),
+            cwd: meta.cwd.clone(),
+        }
+    }
+
+    pub fn validate(&self) -> Result<(), StoreError> {
+        validate_session_id(&self.session_id)
+    }
+}
+
+/// Outcome of admitting a session binding to a persistence handle.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SessionAdmission {
+    /// The admission durably created the session metadata row.
+    Created,
+    /// The handle was already durably bound to the same live session.
+    Rebound,
+}
+
+pub fn validate_session_id(session_id: &str) -> Result<(), StoreError> {
+    if session_id.is_empty() {
+        Err(StoreError::InvalidSessionId {
+            reason: "session ids must not be empty",
+        })
+    } else {
+        Ok(())
     }
 }
 
@@ -1081,16 +1150,26 @@ pub trait SessionCommitStore: AttachmentManifest + Send + Sync {
         commit: RuntimeCommit,
     ) -> Result<RuntimeCommitResult, StoreError>;
 
-    /// Bind this store to `session_id`, creating its metadata row if absent.
+    /// Admit `binding.session_id` to this store and bind this handle to it.
     ///
-    /// This is the durable admission seam for pre-opened stores, managed child
-    /// sessions, and parked resume. Implementations must atomically reject an
-    /// id whose permanent deletion tombstone exists.
-    async fn ensure_session_bound(
+    /// This is the authoritative durable admission seam for pre-opened stores,
+    /// managed child sessions, and parked resume. `SessionStoreFactory::create_store`
+    /// is a convenience that must produce the same admission decision.
+    ///
+    /// Implementations must atomically:
+    ///
+    /// 1. reject an empty id with [`StoreError::InvalidSessionId`];
+    /// 2. reject a permanent tombstone with [`StoreError::SessionDeleted`];
+    /// 3. reject a handle bound to another id with
+    ///    [`StoreError::SessionBindingMismatch`];
+    /// 4. create metadata exactly from `binding` when absent, without replacing
+    ///    existing metadata, and return [`SessionAdmission::Created`];
+    /// 5. leave an already-bound same-id session unchanged and return
+    ///    [`SessionAdmission::Rebound`].
+    async fn admit_and_bind_session(
         &self,
-        session_id: &str,
-        policy: &crate::SessionPolicy,
-    ) -> Result<(), StoreError>;
+        binding: &SessionBinding,
+    ) -> Result<SessionAdmission, StoreError>;
 
     async fn save_session_meta(&self, meta: SessionMeta) -> Result<(), StoreError>;
     async fn load_session_meta(&self) -> Result<Option<SessionMeta>, StoreError>;

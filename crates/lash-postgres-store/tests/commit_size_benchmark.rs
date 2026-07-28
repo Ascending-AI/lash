@@ -100,7 +100,10 @@ fn record_attachment_intents(store: &dyn RuntimePersistence, commit: &RuntimeCom
 
 async fn time_commit(store: Arc<dyn RuntimePersistence>, commit: RuntimeCommit) -> Duration {
     store
-        .ensure_session_bound(&commit.session_id, &SessionPolicy::default())
+        .admit_and_bind_session(&lash_core::SessionBinding::root(
+            commit.session_id.clone(),
+            &SessionPolicy::default(),
+        ))
         .await
         .expect("bind benchmark session to store");
     record_attachment_intents(store.as_ref(), &commit);

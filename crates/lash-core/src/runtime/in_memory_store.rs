@@ -196,6 +196,8 @@ pub struct InMemorySessionStore {
     abandoned_queued_work_claim_count: std::sync::atomic::AtomicUsize,
     #[cfg(test)]
     abandoned_turn_input_claim_count: std::sync::atomic::AtomicUsize,
+    #[cfg(test)]
+    pub(crate) session_admission_count: std::sync::atomic::AtomicUsize,
 }
 
 type RuntimeTurnCommitRecord = (String, crate::store::RuntimeCommitResult, u64);
@@ -282,6 +284,8 @@ impl InMemorySessionStore {
             abandoned_queued_work_claim_count: std::sync::atomic::AtomicUsize::new(0),
             #[cfg(test)]
             abandoned_turn_input_claim_count: std::sync::atomic::AtomicUsize::new(0),
+            #[cfg(test)]
+            session_admission_count: std::sync::atomic::AtomicUsize::new(0),
         }
     }
 
@@ -1268,11 +1272,7 @@ impl crate::store::SessionCommitStore for InMemorySessionStore {
                 .insert(blob_ref, body);
         }
         *self.checkpoint.lock().expect("lock checkpoint") = Some(hydrated_checkpoint);
-        crate::AttachmentManifest::commit_refs(
-            self,
-            &commit.session_id,
-            &commit.committed_attachment_ids,
-        )?;
+        self.commit_attachment_refs_in_memory(&commit.session_id, &commit.committed_attachment_ids);
         self.commit_turn_attachment_intents(&commit.session_id, &commit.turn_commit);
         let head_revision = actual + 1;
         *meta = Some(crate::SessionHeadMeta {
@@ -1314,11 +1314,14 @@ impl crate::store::SessionCommitStore for InMemorySessionStore {
         Ok(result)
     }
 
-    async fn ensure_session_bound(
+    async fn admit_and_bind_session(
         &self,
-        session_id: &str,
-        policy: &crate::SessionPolicy,
-    ) -> Result<(), crate::StoreError> {
+        binding: &crate::SessionBinding,
+    ) -> Result<crate::SessionAdmission, crate::StoreError> {
+        #[cfg(test)]
+        self.session_admission_count
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        binding.validate()?;
         let _transaction = self
             .write_transaction
             .lock()
@@ -1327,38 +1330,42 @@ impl crate::store::SessionCommitStore for InMemorySessionStore {
             .deleted_session_ids
             .lock()
             .expect("lock deleted session ids")
-            .contains(session_id)
+            .contains(&binding.session_id)
         {
             return Err(crate::StoreError::SessionDeleted {
-                session_id: session_id.to_string(),
+                session_id: binding.session_id.clone(),
             });
         }
         let mut durable = self.session_meta.lock().expect("lock session meta");
         if let Some(meta) = durable.as_ref() {
-            if meta.session_id != session_id {
+            if meta.session_id != binding.session_id {
                 return Err(crate::StoreError::SessionBindingMismatch {
                     bound_session_id: meta.session_id.clone(),
-                    attempted_session_id: session_id.to_string(),
+                    attempted_session_id: binding.session_id.clone(),
                 });
             }
-            return Ok(());
+            return Ok(crate::SessionAdmission::Rebound);
         }
         *durable = Some(crate::SessionMeta {
-            session_id: session_id.to_string(),
-            session_name: session_id.to_string(),
+            session_id: binding.session_id.clone(),
+            session_name: binding.session_id.clone(),
             created_at: self.clock.timestamp_rfc3339(),
-            model: policy.model.id.clone(),
-            cwd: None,
-            relation: crate::SessionRelation::Root,
+            model: binding.model_id.clone(),
+            cwd: binding.cwd.clone(),
+            relation: binding.relation.clone(),
         });
-        Ok(())
+        Ok(crate::SessionAdmission::Created)
     }
 
     async fn save_session_meta(
         &self,
         meta: crate::store::SessionMeta,
     ) -> Result<(), crate::store::StoreError> {
-        self.save_session_meta_in_memory(meta)
+        let _transaction = self
+            .write_transaction
+            .lock()
+            .expect("lock in-memory write transaction");
+        self.replace_session_meta(meta)
     }
 
     async fn load_session_meta(
@@ -1380,6 +1387,7 @@ impl crate::store::SessionExecutionLeaseStore for InMemorySessionStore {
             .write_transaction
             .lock()
             .expect("lock in-memory write transaction");
+        self.ensure_session_not_deleted(session_id)?;
         let now = self.clock.timestamp_ms();
         let mut leases = self
             .session_execution_leases
@@ -1423,6 +1431,7 @@ impl crate::store::SessionExecutionLeaseStore for InMemorySessionStore {
             .write_transaction
             .lock()
             .expect("lock in-memory write transaction");
+        self.ensure_session_not_deleted(session_id)?;
         let now = self.clock.timestamp_ms();
         let mut leases = self
             .session_execution_leases

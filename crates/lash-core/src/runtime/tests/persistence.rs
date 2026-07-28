@@ -188,7 +188,10 @@ async fn in_memory_claim_validation_serializes_takeover_before_mutation() {
         ..crate::RuntimeSessionState::default()
     };
     store
-        .ensure_session_bound(&state.session_id, &state.policy)
+        .admit_and_bind_session(&crate::SessionBinding::root(
+            state.session_id.clone(),
+            &state.policy,
+        ))
         .await
         .expect("bind contention-test session");
     let err = store

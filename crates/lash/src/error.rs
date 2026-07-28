@@ -22,6 +22,10 @@ pub enum EmbedError {
     StoreFactory { session_id: String, message: String },
     #[error("session store operation failed: {0}")]
     Store(#[from] lash_core::StoreError),
+    #[error(
+        "store-less session id `{session_id}` was already used by this LashCore; store-less sessions require distinct ids per process"
+    )]
+    EphemeralSessionIdReused { session_id: String },
     #[error("store is bound to session `{loaded}` but builder requested `{requested}`")]
     StoreSessionMismatch { loaded: String, requested: String },
     #[error("durable process worker requires a LashCore store factory")]

@@ -6,6 +6,11 @@ impl crate::store::QueuedWorkStore for InMemorySessionStore {
         &self,
         batch: crate::QueuedWorkBatchDraft,
     ) -> Result<crate::QueuedWorkBatch, crate::store::StoreError> {
+        let _transaction = self
+            .write_transaction
+            .lock()
+            .expect("lock in-memory write transaction");
+        self.ensure_session_not_deleted(&batch.session_id)?;
         Ok(self.enqueue_queued_work_in_memory(batch))
     }
 

@@ -16,9 +16,9 @@ fn draft_node_id(namespace: &str, ordinal: u64) -> String {
 /// Derive a durable frame identity before the surrounding operation commits.
 ///
 /// Process provenance can capture the current frame scope immediately, so a
-/// FrameOpen ID must be final before runtime effects begin. Store binding may
-/// remap an unpersisted provisional frame at the assembly seam; commit-time
-/// realization must leave it unchanged.
+/// FrameOpen ID must be final before runtime effects begin. The host-provided
+/// session id fixes the identity before store admission; binding must leave it
+/// unchanged.
 pub fn frame_node_id(session_id: &str, frame_key: &str) -> String {
     let preimage = format!(
         "{}:{session_id}:{}:{frame_key}",
@@ -26,7 +26,7 @@ pub fn frame_node_id(session_id: &str, frame_key: &str) -> String {
         frame_key.len()
     );
     format!(
-        "frame-node/v1/{}",
+        "frame-node/v2/{}",
         crate::stable_hash::sha256_hex(preimage.as_bytes())
     )
 }

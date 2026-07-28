@@ -1299,7 +1299,7 @@ impl ProcessRegistry for PostgresProcessRegistry {
         let mut pruned_processes = 0;
         for process_id in prunable {
             for session_id in lash_core::process_runtime_session_ids(&process_id) {
-                delete_session_tx(&mut tx, &session_id)
+                delete_session_tx(&mut tx, &session_id, false)
                     .await
                     .map_err(|err| PluginError::Session(err.to_string()))?;
             }

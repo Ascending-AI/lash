@@ -316,43 +316,6 @@ impl Store {
             .flatten()
     }
 
-    pub async fn append_usage_deltas(&self, entries: &[lash_core::TokenLedgerEntry]) {
-        if entries.is_empty() {
-            return;
-        }
-        let Ok(session_id) = self.selected_session_id() else {
-            tracing::warn!("cannot append usage on an unbound SQLite session store");
-            return;
-        };
-        let entries = entries.to_vec();
-        let result = self
-            .conn
-            .write(move |tx| {
-                let mut stmt = tx.prepare(
-                    "INSERT INTO usage_deltas (
-                        session_id, source, model, input_tokens, output_tokens, cache_read_input_tokens, cache_write_input_tokens, reasoning_output_tokens
-                    ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
-                )?;
-                for entry in &entries {
-                    stmt.execute(params![
-                        session_id,
-                        entry.source,
-                        entry.model,
-                        entry.usage.input_tokens,
-                        entry.usage.output_tokens,
-                        entry.usage.cache_read_input_tokens,
-                        entry.usage.cache_write_input_tokens,
-                        entry.usage.reasoning_output_tokens,
-                    ])?;
-                }
-                Ok(())
-            })
-            .await;
-        if let Err(err) = result {
-            tracing::warn!(error = %err, "failed to persist usage deltas");
-        }
-    }
-
     pub async fn load_usage_deltas(&self) -> Vec<lash_core::TokenLedgerEntry> {
         let Ok(session_id) = self.selected_session_id() else {
             return Vec::new();

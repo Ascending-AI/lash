@@ -87,12 +87,8 @@ impl ExecutionScope {
 
     /// Canonical typed identity persisted by durable effect journals.
     pub fn journal_identity(&self) -> Result<EffectJournalIdentity, RuntimeError> {
-        self.validate_for_durable_host()?;
-        EffectJournalIdentity::from_scope(self)
-    }
-
-    pub fn validate_for_durable_host(&self) -> Result<(), RuntimeError> {
-        self.validate()
+        self.validate()?;
+        Ok(EffectJournalIdentity::from_scope(self))
     }
 
     pub fn session_id(&self) -> Option<&str> {
@@ -115,7 +111,7 @@ impl ExecutionScope {
         matches!(self, Self::Turn { .. })
     }
 
-    pub(crate) fn validate(&self) -> Result<(), RuntimeError> {
+    pub fn validate(&self) -> Result<(), RuntimeError> {
         let missing = match self {
             Self::Turn {
                 session_id,
@@ -149,7 +145,7 @@ pub struct EffectJournalIdentity {
 }
 
 impl EffectJournalIdentity {
-    fn from_scope(scope: &ExecutionScope) -> Result<Self, RuntimeError> {
+    fn from_scope(scope: &ExecutionScope) -> Self {
         #[derive(Serialize)]
         struct Wire<'a> {
             version: u8,
@@ -184,10 +180,10 @@ impl EffectJournalIdentity {
             execution_id,
         })
         .expect("effect journal identity contains only infallible string fields");
-        Ok(Self {
+        Self {
             key,
             session_id: session_id.map(str::to_string),
-        })
+        }
     }
 
     pub fn key(&self) -> &str {

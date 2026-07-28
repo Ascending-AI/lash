@@ -147,7 +147,7 @@ impl AwaitEventResolver for SqliteEffectHost {
         scope: &ExecutionScope,
         wait: AwaitEventWaitIdentity,
     ) -> Result<AwaitEventKey, RuntimeError> {
-        scope.validate_for_durable_host()?;
+        scope.validate()?;
         self.inner.await_events.key_for(scope, wait).await
     }
 
@@ -193,7 +193,7 @@ impl EffectHost for SqliteEffectHost {
         &'run self,
         scope: ExecutionScope,
     ) -> Result<ScopedEffectController<'run>, RuntimeError> {
-        scope.validate_for_durable_host()?;
+        scope.validate()?;
         let controller = SqliteRuntimeEffectController {
             inner: Arc::clone(&self.inner),
             scope: scope.clone(),
@@ -206,7 +206,7 @@ impl EffectHost for SqliteEffectHost {
         &self,
         scope: ExecutionScope,
     ) -> Result<Option<ScopedEffectController<'static>>, RuntimeError> {
-        scope.validate_for_durable_host()?;
+        scope.validate()?;
         let controller = SqliteRuntimeEffectController {
             inner: Arc::clone(&self.inner),
             scope: scope.clone(),
@@ -731,7 +731,7 @@ impl AwaitEventResolver for SqliteRuntimeEffectController {
         scope: &ExecutionScope,
         wait: AwaitEventWaitIdentity,
     ) -> Result<AwaitEventKey, RuntimeError> {
-        scope.validate_for_durable_host()?;
+        scope.validate()?;
         self.inner.await_events.key_for(scope, wait).await
     }
 
@@ -779,7 +779,7 @@ impl RuntimeEffectController for SqliteRuntimeEffectController {
         local_executor: RuntimeEffectLocalExecutor<'_>,
     ) -> Result<RuntimeEffectOutcome, RuntimeEffectControllerError> {
         self.scope
-            .validate_for_durable_host()
+            .validate()
             .map_err(RuntimeEffectControllerError::from)?;
         let reconstructed_envelope = envelope.canonical_form()?;
         let replay_trace = local_executor.replay_validation_trace().cloned();

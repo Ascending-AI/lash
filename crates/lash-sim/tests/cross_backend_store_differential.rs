@@ -1825,6 +1825,10 @@ fn normalized_store_error(backend: &str, error: &StoreError) -> String {
         StoreError::CommitNodeBudgetExceeded { .. } => "CommitNodeBudgetExceeded".to_string(),
         StoreError::CommitByteBudgetExceeded { .. } => "CommitByteBudgetExceeded".to_string(),
         StoreError::SessionBindingMismatch { .. } => "SessionBindingMismatch".to_string(),
+        StoreError::SessionBindingNotMaterialized { .. } => {
+            "SessionBindingNotMaterialized".to_string()
+        }
+        StoreError::InvalidSessionId { .. } => "InvalidSessionId".to_string(),
         StoreError::SessionDeleted { .. } => "SessionDeleted".to_string(),
         StoreError::UnsupportedStoreOperation { .. } => "UnsupportedStoreOperation".to_string(),
         StoreError::HeadRevisionConflict { .. } => "HeadRevisionConflict".to_string(),

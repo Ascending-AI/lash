@@ -294,11 +294,17 @@ pub(crate) fn test_host_config_with_trace_path_and_stream_events(
 #[derive(Clone, Default)]
 pub(crate) struct RecordingSessionStoreFactory {
     stores: Arc<StdMutex<Vec<Arc<RecordingStore>>>>,
+    defer_metadata_to_admission: bool,
 }
 
 impl RecordingSessionStoreFactory {
     pub(crate) fn stores(&self) -> Vec<Arc<RecordingStore>> {
         self.stores.lock().expect("store factory").clone()
+    }
+
+    pub(crate) fn deferring_metadata_to_admission(mut self) -> Self {
+        self.defer_metadata_to_admission = true;
+        self
     }
 }
 
@@ -309,14 +315,16 @@ impl SessionStoreFactory for RecordingSessionStoreFactory {
         request: &SessionStoreCreateRequest,
     ) -> Result<Arc<dyn crate::store::RuntimePersistence>, crate::StoreError> {
         let store = Arc::new(RecordingStore::default());
-        *store.session_meta.lock().expect("lock session meta") = Some(crate::SessionMeta {
-            session_id: request.session_id.clone(),
-            session_name: request.session_id.clone(),
-            created_at: "2026-04-06T00:00:00Z".to_string(),
-            model: request.policy.model.id.clone(),
-            cwd: None,
-            relation: request.relation.clone(),
-        });
+        if !self.defer_metadata_to_admission {
+            *store.session_meta.lock().expect("lock session meta") = Some(crate::SessionMeta {
+                session_id: request.session_id.clone(),
+                session_name: request.session_id.clone(),
+                created_at: "2026-04-06T00:00:00Z".to_string(),
+                model: request.policy.model.id.clone(),
+                cwd: None,
+                relation: request.relation.clone(),
+            });
+        }
         self.stores
             .lock()
             .expect("store factory")

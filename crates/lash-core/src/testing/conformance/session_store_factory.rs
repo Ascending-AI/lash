@@ -6,13 +6,17 @@ use super::*;
 /// Run the [`SessionStoreFactory`](crate::SessionStoreFactory) conformance
 /// suite against the backend produced by `make`. `make` must return a fresh,
 /// empty factory on each call.
-pub async fn session_store_factory<F>(make: F)
+pub async fn session_store_factory<F, S>(make: F, make_unbound_store: S)
 where
     F: Fn() -> Arc<dyn crate::SessionStoreFactory>,
+    S: Fn() -> Arc<dyn crate::RuntimePersistence>,
 {
+    session_admission_contract(make(), make_unbound_store()).await;
     session_store_factory_open_missing_returns_none(make()).await;
     session_store_factory_create_seeds_and_reopens_meta(make()).await;
     session_store_factory_create_is_idempotent(make()).await;
+    session_store_factory_never_used_delete_is_noop(make()).await;
+    session_store_factory_rejects_writes_after_delete(make()).await;
     attachment_ownership_isolation(make()).await;
     session_store_factory_rejects_cross_session_graph_parents(make()).await;
     session_store_factory_fork_semantics(make()).await;
@@ -55,7 +59,7 @@ pub async fn session_store_factory_delete_fences_stale_handles(
         .expect("delete the session out from under the stale handle");
 
     let ensure_error = stale
-        .ensure_session_bound(&request.session_id, &request.policy)
+        .admit_and_bind_session(&crate::SessionBinding::from_create_request(&request))
         .await
         .expect_err("a stale handle must not reinsert deleted session metadata");
     assert!(
@@ -198,6 +202,10 @@ pub async fn process_prune_deletes_owned_session_stores(
             "process prune left session store {} behind",
             request.session_id
         );
+        factory
+            .create_store(&request)
+            .await
+            .expect("runtime-internal session id must be reclaimable without tombstone");
     }
 }
 
@@ -375,6 +383,250 @@ fn assert_meta_matches_request(
     assert!(
         !meta.created_at.is_empty(),
         "created session metadata must carry a timestamp"
+    );
+}
+
+async fn session_admission_contract(
+    factory: Arc<dyn crate::SessionStoreFactory>,
+    unbound: Arc<dyn crate::RuntimePersistence>,
+) {
+    let empty = crate::SessionBinding::root("", &crate::SessionPolicy::default());
+    assert!(matches!(
+        unbound
+            .admit_and_bind_session(&empty)
+            .await
+            .expect_err("empty session id must be rejected"),
+        crate::StoreError::InvalidSessionId { .. }
+    ));
+
+    let relation = crate::SessionRelation::Child {
+        parent_session_id: "admission-parent".to_string(),
+        caused_by: None,
+    };
+    let request = session_store_request("admission-created", "admission-model", relation.clone());
+    let binding = crate::SessionBinding {
+        session_id: request.session_id.clone(),
+        relation,
+        model_id: request.policy.model.id.clone(),
+        cwd: Some("/tmp/admission-cwd".to_string()),
+    };
+    assert_eq!(
+        unbound
+            .admit_and_bind_session(&binding)
+            .await
+            .expect("admit fresh session"),
+        crate::SessionAdmission::Created
+    );
+    let created_meta = unbound
+        .load_session_meta()
+        .await
+        .expect("load admitted metadata")
+        .expect("admission must durably materialize metadata");
+    assert_eq!(created_meta.session_id, binding.session_id);
+    assert_eq!(created_meta.relation, binding.relation);
+    assert_eq!(created_meta.model, binding.model_id);
+    assert_eq!(created_meta.cwd, binding.cwd);
+
+    let changed_binding = crate::SessionBinding {
+        model_id: "must-not-replace-model".to_string(),
+        relation: crate::SessionRelation::Root,
+        cwd: None,
+        ..binding.clone()
+    };
+    assert_eq!(
+        unbound
+            .admit_and_bind_session(&changed_binding)
+            .await
+            .expect("rebind same session"),
+        crate::SessionAdmission::Rebound
+    );
+    assert_eq!(
+        unbound
+            .load_session_meta()
+            .await
+            .expect("reload rebound metadata")
+            .expect("rebound metadata"),
+        created_meta,
+        "rebind must preserve the original durable binding"
+    );
+
+    let cross_session = crate::SessionBinding {
+        session_id: "admission-other".to_string(),
+        ..binding
+    };
+    assert!(matches!(
+        unbound
+            .admit_and_bind_session(&cross_session)
+            .await
+            .expect_err("cross-session handle reuse must fail"),
+        crate::StoreError::SessionBindingMismatch { .. }
+    ));
+
+    let deleted_request = session_store_request(
+        "admission-deleted",
+        "admission-model",
+        crate::SessionRelation::Root,
+    );
+    let deleted_store = factory
+        .create_store(&deleted_request)
+        .await
+        .expect("create admission deletion fixture");
+    factory
+        .delete_session(&deleted_request.session_id)
+        .await
+        .expect("delete admission fixture");
+    let deleted_binding = crate::SessionBinding::from_create_request(&deleted_request);
+    assert_session_id_was_used_and_deleted(
+        deleted_store
+            .admit_and_bind_session(&deleted_binding)
+            .await
+            .expect_err("deleted id admission must fail"),
+        &deleted_request.session_id,
+    );
+    deleted_store
+        .vacuum()
+        .await
+        .expect("vacuum deleted admission fixture");
+    assert_session_id_was_used_and_deleted(
+        deleted_store
+            .admit_and_bind_session(&deleted_binding)
+            .await
+            .expect_err("vacuum must preserve admission tombstone"),
+        &deleted_request.session_id,
+    );
+}
+
+async fn session_store_factory_never_used_delete_is_noop(
+    factory: Arc<dyn crate::SessionStoreFactory>,
+) {
+    let request = session_store_request(
+        "never-used-delete",
+        "never-used-model",
+        crate::SessionRelation::Root,
+    );
+    factory
+        .delete_session(&request.session_id)
+        .await
+        .expect("delete never-used id is a no-op");
+    factory
+        .create_store(&request)
+        .await
+        .expect("never-used id remains admissible after no-op delete");
+}
+
+async fn session_store_factory_rejects_writes_after_delete(
+    factory: Arc<dyn crate::SessionStoreFactory>,
+) {
+    let request = session_store_request(
+        "write-after-delete",
+        "write-after-delete-model",
+        crate::SessionRelation::Root,
+    );
+    let stale = factory
+        .create_store(&request)
+        .await
+        .expect("create write-after-delete fixture");
+    factory
+        .delete_session(&request.session_id)
+        .await
+        .expect("delete write-after-delete fixture");
+
+    assert_deleted_write(
+        stale
+            .enqueue_pending_turn_input(crate::PendingTurnInputDraft::new(
+                &request.session_id,
+                crate::TurnInputIngress::NextTurn,
+                crate::TurnInput::text("must not persist"),
+            ))
+            .await,
+        &request.session_id,
+        "pending turn input",
+    );
+    assert_deleted_write(
+        stale
+            .enqueue_queued_work(crate::QueuedWorkBatchDraft::new(
+                &request.session_id,
+                crate::DeliveryPolicy::EarliestSafeBoundary,
+                crate::SlotPolicy::Exclusive,
+                vec![crate::QueuedWorkPayload::session_command(
+                    crate::SessionCommand::RefreshToolCatalog {
+                        reason: "must not persist".to_string(),
+                    },
+                )],
+            ))
+            .await,
+        &request.session_id,
+        "queued work",
+    );
+    assert_deleted_write(
+        crate::AttachmentManifest::record_intent(
+            stale.as_ref(),
+            crate::AttachmentIntent {
+                attachment_id: crate::AttachmentId::new("write-after-delete-attachment"),
+                session_id: request.session_id.clone(),
+                canonical_uri: "lash-attachment://write-after-delete".to_string(),
+                intent_at_epoch_ms: 1,
+                owner_kind: None,
+                owner_id: None,
+            },
+        ),
+        &request.session_id,
+        "attachment intent",
+    );
+    assert_deleted_write(
+        stale
+            .try_claim_session_execution_lease(
+                &request.session_id,
+                &crate::LeaseOwnerIdentity::opaque("deleted-owner", "deleted-incarnation"),
+                60_000,
+            )
+            .await,
+        &request.session_id,
+        "session execution lease",
+    );
+
+    let mut state = crate::RuntimeSessionState {
+        session_id: request.session_id.clone(),
+        ..Default::default()
+    };
+    state.ensure_agent_frame_initialized();
+    assert_deleted_write(
+        stale
+            .commit_runtime_state(crate::RuntimeCommit::persisted_state_for_test(
+                &state,
+                &[crate::TokenLedgerEntry {
+                    source: "write-after-delete".to_string(),
+                    model: "write-after-delete-model".to_string(),
+                    usage: crate::TokenUsage {
+                        input_tokens: 1,
+                        ..Default::default()
+                    },
+                }],
+            ))
+            .await,
+        &request.session_id,
+        "usage-bearing runtime commit",
+    );
+
+    factory
+        .delete_session(&request.session_id)
+        .await
+        .expect("re-delete cleans any historical post-delete orphans");
+}
+
+fn assert_deleted_write<T>(result: Result<T, crate::StoreError>, session_id: &str, surface: &str) {
+    let error = match result {
+        Ok(_) => panic!("{surface} write unexpectedly succeeded"),
+        Err(error) => error,
+    };
+    assert!(
+        matches!(
+            error,
+            crate::StoreError::SessionDeleted {
+                session_id: ref deleted
+            } if deleted == session_id
+        ),
+        "{surface} write must fail with SessionDeleted, got {error:?}"
     );
 }
 

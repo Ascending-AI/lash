@@ -38,7 +38,10 @@ async fn parent_bound_session_store(policy: crate::SessionPolicy) -> Arc<InMemor
         ..crate::RuntimeSessionState::default()
     };
     store
-        .ensure_session_bound(&state.session_id, &state.policy)
+        .admit_and_bind_session(&crate::SessionBinding::root(
+            state.session_id.clone(),
+            &state.policy,
+        ))
         .await
         .expect("bind parent session");
     store

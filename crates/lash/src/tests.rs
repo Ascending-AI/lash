@@ -132,30 +132,30 @@ lash_core::impl_noop_attachment_manifest!(SnapshotStore);
 
 #[async_trait]
 impl lash_core::SessionCommitStore for SnapshotStore {
-    async fn ensure_session_bound(
+    async fn admit_and_bind_session(
         &self,
-        session_id: &str,
-        policy: &lash_core::SessionPolicy,
-    ) -> std::result::Result<(), lash_core::store::StoreError> {
+        binding: &lash_core::SessionBinding,
+    ) -> std::result::Result<lash_core::SessionAdmission, lash_core::store::StoreError> {
+        binding.validate()?;
         let mut meta = self.session_meta.lock().expect("session metadata lock");
         if let Some(meta) = meta.as_ref() {
-            if meta.session_id != session_id {
+            if meta.session_id != binding.session_id {
                 return Err(lash_core::store::StoreError::SessionBindingMismatch {
                     bound_session_id: meta.session_id.clone(),
-                    attempted_session_id: session_id.to_string(),
+                    attempted_session_id: binding.session_id.clone(),
                 });
             }
-            return Ok(());
+            return Ok(lash_core::SessionAdmission::Rebound);
         }
         *meta = Some(lash_core::SessionMeta {
-            session_id: session_id.to_string(),
-            session_name: session_id.to_string(),
+            session_id: binding.session_id.clone(),
+            session_name: binding.session_id.clone(),
             created_at: "test".to_string(),
-            model: policy.model.id.clone(),
-            cwd: None,
-            relation: lash_core::SessionRelation::Root,
+            model: binding.model_id.clone(),
+            cwd: binding.cwd.clone(),
+            relation: binding.relation.clone(),
         });
-        Ok(())
+        Ok(lash_core::SessionAdmission::Created)
     }
 
     async fn load_session(
@@ -634,22 +634,21 @@ lash_core::impl_noop_attachment_manifest!(BoundSessionStore);
 
 #[async_trait]
 impl lash_core::SessionCommitStore for BoundSessionStore {
-    async fn ensure_session_bound(
+    async fn admit_and_bind_session(
         &self,
-        session_id: &str,
-        _policy: &lash_core::SessionPolicy,
-    ) -> std::result::Result<(), lash_core::store::StoreError> {
+        binding: &lash_core::SessionBinding,
+    ) -> std::result::Result<lash_core::SessionAdmission, lash_core::store::StoreError> {
         let meta = self
             .load_session_meta()
             .await?
             .expect("bound test store metadata");
-        if meta.session_id != session_id {
+        if meta.session_id != binding.session_id {
             return Err(lash_core::store::StoreError::SessionBindingMismatch {
                 bound_session_id: meta.session_id,
-                attempted_session_id: session_id.to_string(),
+                attempted_session_id: binding.session_id.clone(),
             });
         }
-        Ok(())
+        Ok(lash_core::SessionAdmission::Rebound)
     }
 
     async fn load_session(

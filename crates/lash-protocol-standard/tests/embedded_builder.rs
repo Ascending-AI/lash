@@ -54,7 +54,10 @@ async fn embedded_runtime_builder_loads_state_from_store() {
     };
     state.ensure_agent_frame_initialized();
     store
-        .ensure_session_bound(&state.session_id, &state.policy)
+        .admit_and_bind_session(&lash_core::SessionBinding::root(
+            state.session_id.clone(),
+            &state.policy,
+        ))
         .await
         .expect("bind session to store");
     state.append_active_read_delta(&[text_message("u0", MessageRole::User, "stored question")]);
@@ -95,7 +98,10 @@ async fn embedded_runtime_builder_rejects_store_bound_to_different_session_id() 
         ..RuntimeSessionState::default()
     };
     store
-        .ensure_session_bound(&state.session_id, &state.policy)
+        .admit_and_bind_session(&lash_core::SessionBinding::root(
+            state.session_id.clone(),
+            &state.policy,
+        ))
         .await
         .expect("bind session to store");
     store

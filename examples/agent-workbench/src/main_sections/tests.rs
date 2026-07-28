@@ -1499,7 +1499,7 @@ finish initial
             .add_account("Reset Probe")
             .expect("add account before reset");
         drop(session);
-        let query = Query(SessionQuery::default());
+        let query = Query(SessionQuery { session_id: Some(old_session_id.clone()) });
         let Json(snapshot) = Box::pin(reset_chat(State(state.clone()), query))
             .await
             .expect("reset");
