@@ -153,7 +153,7 @@ mod turn_control_timeout_tests {
                 .await
                 .expect("load state snapshot");
         assert!(snapshot.messages.iter().any(|message| {
-                message.id == "workbench-user:running-turn"
+                message.id == workbench_turn_user_message_id("running-turn")
                 && message.role == "user"
                 && message.text == "restored active prompt"
         }));

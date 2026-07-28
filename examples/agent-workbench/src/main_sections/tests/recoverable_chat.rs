@@ -125,6 +125,70 @@ fn session_event_registry_isolates_channels_and_recreates_after_removal() {
     ));
 }
 
+#[test]
+fn settled_product_reconciliation_keeps_the_cursor_monotonic() {
+    let registry = SessionEventRegistry::new(4);
+    let session_id = "reconciled-session";
+    let committed_id = "m_turn_reconciled-turn_input";
+    registry.publish_identified(
+        session_id,
+        "provisional-message",
+        StreamItem::Message {
+            message: ChatMessage {
+                id: committed_id.to_string(),
+                role: "user".to_string(),
+                text: "settled prompt".to_string(),
+                at: String::new(),
+            },
+        },
+    );
+    registry.publish_identified(
+        session_id,
+        "turn-done",
+        StreamItem::Done {
+            turn_id: Some("reconciled-turn".to_string()),
+        },
+    );
+
+    registry.reconcile_settled(
+        session_id,
+        &BTreeSet::new(),
+        &BTreeSet::new(),
+    );
+    let reconciled = registry.snapshot(session_id);
+    assert_eq!(reconciled.cursor, 2);
+    assert!(reconciled.events.is_empty());
+    assert!(
+        !registry.publish_identified(
+            session_id,
+            "turn-done",
+            StreamItem::Done {
+                turn_id: Some("reconciled-turn".to_string()),
+            },
+        ),
+        "compaction must retain event identity for idempotent workflow replay"
+    );
+    assert_eq!(registry.snapshot(session_id).cursor, 2);
+
+    registry.publish_identified(
+        session_id,
+        "host-only-event",
+        StreamItem::Message {
+            message: ChatMessage {
+                id: "host-only".to_string(),
+                role: "event".to_string(),
+                text: "host event".to_string(),
+                at: String::new(),
+            },
+        },
+    );
+    assert_eq!(
+        registry.snapshot(session_id).events[0].sequence,
+        3,
+        "compaction must not reuse a cursor already observed by a client"
+    );
+}
+
 #[tokio::test]
 async fn product_event_route_lag_emits_durable_ordered_resync() {
     let data_dir = tempfile::tempdir().expect("workbench lag tempdir");
@@ -244,6 +308,189 @@ async fn workbench_state_snapshot_merges_canonical_history_with_partial_product_
             ("host-only-event", "host-only row"),
         ],
         "the Lash read view remains authoritative and product-only rows supplement it"
+    );
+}
+
+#[tokio::test]
+async fn send_turn_state_projection_stays_readable_and_settles_to_durable_truth() {
+    let data_dir = tempfile::tempdir().expect("send turn projection tempdir");
+    let (provider_entered_tx, mut provider_entered_rx) = mpsc::unbounded_channel();
+    let provider_release = Arc::new(tokio::sync::Notify::new());
+    let provider_release_for_completion = Arc::clone(&provider_release);
+    let response_index = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let response_index_for_completion = Arc::clone(&response_index);
+    let provider = lash::testing::TestProvider::builder()
+        .kind("send-turn-state-projection")
+        .complete(move |_| {
+            let provider_entered_tx = provider_entered_tx.clone();
+            let provider_release = Arc::clone(&provider_release_for_completion);
+            let response_index = Arc::clone(&response_index_for_completion);
+            async move {
+                let call = response_index.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                let _ = provider_entered_tx.send(call);
+                if call == 0 {
+                    provider_release.notified().await;
+                }
+                Ok(match call {
+                    0 => {
+                        let mut response = text_response(
+                            "<lashlang>\nprint(\"durable execution disclosure\")\n</lashlang>",
+                        );
+                        response.parts.insert(
+                            0,
+                            lash_core::LlmOutputPart::Reasoning {
+                                text: "durable reasoning disclosure".to_string(),
+                                replay: None,
+                            },
+                        );
+                        response
+                    }
+                    1 => text_response("<lashlang>\nfinish \"settled answer\"\n</lashlang>"),
+                    other => panic!("unexpected provider call {other}"),
+                })
+            }
+        })
+        .build()
+        .into_handle();
+    let mut state =
+        recoverable_chat_test_state_with_provider(data_dir.path(), 16, provider).await;
+    let (restate_ingress_url, mut restate_requests) = spawn_restate_ingress_capture().await;
+    state.restate_ingress_url = restate_ingress_url;
+    let session_id = state.current_session_id();
+    let turn_text = "exercise the user-facing send path";
+
+    let _ = send_turn(
+        State(state.clone()),
+        Query(SessionQuery::default()),
+        Json(TurnRequest {
+            text: turn_text.to_string(),
+            model: Some("test-model".to_string()),
+            model_variant: None,
+            attachment_id: None,
+        }),
+    )
+    .await
+    .expect("send turn through the production handler");
+    let submitted = restate_requests
+        .recv()
+        .await
+        .expect("capture submitted Restate turn");
+    let turn_id = submitted
+        .pointer("/body/turn_id")
+        .and_then(Value::as_str)
+        .expect("submitted turn id")
+        .to_string();
+
+    let run_state = state.clone();
+    let run_turn_id = turn_id.clone();
+    let turn = tokio::spawn(async move {
+        let session = run_state
+            .core
+            .session(session_id)
+            .open()
+            .await
+            .expect("open submitted turn session");
+        let turn_state = Arc::new(Mutex::new(TurnStreamState::default()));
+        let output = session
+            .turn(lash::TurnInput::text(turn_text))
+            .turn_id(run_turn_id.clone())
+            .require_finish()
+            .expect("require finish")
+            .stream_to(&ChannelTurnEvents {
+                turn_state: Arc::clone(&turn_state),
+            })
+            .await
+            .expect("run submitted turn");
+        crate::restate::record_turn_output(
+            &run_state,
+            &session,
+            &run_turn_id,
+            output,
+            turn_state,
+            "test.send_turn.completed",
+        )
+        .await
+        .expect("record submitted turn output");
+        crate::restate::settle_workbench_turn(&run_state, &session.session_id(), &run_turn_id)
+            .await
+            .expect("settle submitted turn");
+    });
+
+    assert_eq!(
+        provider_entered_rx.recv().await,
+        Some(0),
+        "the first provider call must be blocked before the mid-turn read"
+    );
+    let Json(running) = app_state(State(state.clone()), Query(SessionQuery::default()))
+        .await
+        .expect("/api/state must remain readable while the turn lease is held");
+    assert_eq!(running.active_turns.len(), 1);
+
+    provider_release.notify_one();
+    turn.await.expect("submitted turn task");
+    assert_eq!(
+        provider_entered_rx.recv().await,
+        Some(1),
+        "the turn must execute the terminal provider iteration"
+    );
+
+    let Json(settled) = app_state(State(state), Query(SessionQuery::default()))
+        .await
+        .expect("materialize settled state");
+    assert_eq!(
+        settled
+            .messages
+            .iter()
+            .map(|message| (message.role.as_str(), message.text.as_str()))
+            .collect::<Vec<_>>(),
+        vec![("user", turn_text), ("assistant", "settled answer")],
+        "settlement must contain exactly the committed transcript rows"
+    );
+    assert_eq!(
+        settled
+            .transcript
+            .iter()
+            .filter_map(|row| match row {
+                TranscriptRow::Message { message } => {
+                    Some((message.role.as_str(), message.text.as_str()))
+                }
+                TranscriptRow::Reasoning { .. } | TranscriptRow::CodeBlock { .. } => None,
+            })
+            .collect::<Vec<_>>(),
+        vec![("user", turn_text), ("assistant", "settled answer")],
+        "the browser transcript projection must contain the committed message set once"
+    );
+    assert!(
+        settled.transcript.iter().any(|row| matches!(
+            row,
+            TranscriptRow::Reasoning { text, .. }
+                if text == "durable reasoning disclosure"
+        )),
+        "settled state must reconstruct reasoning disclosure from durable history"
+    );
+    assert!(
+        settled.transcript.iter().any(|row| matches!(
+            row,
+            TranscriptRow::CodeBlock { code, output, .. }
+                if code.contains("durable execution disclosure")
+                    && output.contains("durable execution disclosure")
+        )),
+        "settled state must reconstruct code execution and output from durable history"
+    );
+    assert!(
+        settled.product_events.events.iter().all(|event| {
+            !matches!(
+                &event.item,
+                StreamItem::Message { message }
+                    if settled.messages.iter().any(|committed| committed.id == message.id)
+            ) && !matches!(
+                &event.item,
+                StreamItem::Done {
+                    turn_id: Some(done_turn_id)
+                } if done_turn_id == &turn_id
+            )
+        }),
+        "settled message and Done rows must leave the product-event lane"
     );
 }
 

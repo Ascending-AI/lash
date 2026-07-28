@@ -19,7 +19,8 @@ vm.runInNewContext(
     createWorkbenchProjectionState,
     beginStateRecovery,
     recoveryResponseIsCurrent,
-    applyProjectionSnapshot
+    applyProjectionSnapshot,
+    busyAfterStateSnapshot
   };`,
   context,
 );
@@ -28,6 +29,7 @@ const {
   beginStateRecovery,
   recoveryResponseIsCurrent,
   applyProjectionSnapshot,
+  busyAfterStateSnapshot,
 } = context.projectionExports;
 
 function markedSource(begin, end) {
@@ -118,6 +120,65 @@ test("a new session never inherits another session's cursors or identities", () 
   assert.equal(projection.observationCursor, "observation-session-b-0");
   assert.deepEqual([...projection.renderedProductEvents], []);
   assert.deepEqual([...projection.appliedObservationEvents], []);
+});
+
+test("an authoritative settled snapshot clears a busy projection even when Done is pre-applied", () => {
+  const settled = {
+    ...snapshot("session-a", 3, ["turn-done"]),
+    active_turns: [],
+  };
+
+  assert.equal(busyAfterStateSnapshot(settled, true, true), false);
+  assert.equal(
+    busyAfterStateSnapshot({ ...settled, active_turns: [{ turn_id: "active" }] }, true, false),
+    true,
+  );
+});
+
+test("trigger registration controls use the payload subscription key", () => {
+  assert.doesNotMatch(html, /registration\.handle/);
+  assert.match(html, /registration\.subscription_key/);
+  assert.match(html, /dataset\.triggerSubscriptionKey/);
+});
+
+test("settled transcript rendering consumes durable reasoning and code disclosure", () => {
+  const rendered = [];
+  const renderContext = {
+    renderMessage(message) {
+      rendered.push(["message", message.id]);
+    },
+    appendReasoning(text, id, turnId) {
+      rendered.push(["reasoning", id, text, turnId]);
+    },
+    appendCodeBlock(row) {
+      rendered.push(["code_block", row.id, row.code, row.output]);
+    },
+  };
+  vm.runInNewContext(
+    `${markedSource("WORKBENCH_SETTLED_TRANSCRIPT", "WORKBENCH_SETTLED_TRANSCRIPT")}
+     renderStateTranscript({
+       transcript: [
+         { type: "message", message: { id: "committed-user" } },
+         { type: "reasoning", id: "reasoning-1", text: "durable thought" },
+         {
+           type: "code_block",
+           id: "code-1",
+           code: "print(\\"durable\\")",
+           output: "durable"
+         }
+       ]
+     });`,
+    renderContext,
+  );
+
+  assert.deepEqual(
+    rendered,
+    [
+      ["message", "committed-user"],
+      ["reasoning", "reasoning-1", "durable thought", null],
+      ["code_block", "code-1", 'print("durable")', "durable"],
+    ],
+  );
 });
 
 test("a Done product event behaviorally retracts the provisional draft", () => {

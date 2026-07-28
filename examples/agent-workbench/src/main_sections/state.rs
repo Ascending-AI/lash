@@ -60,6 +60,21 @@ struct StateSnapshot {
     usage: lash::usage::SessionUsageReport,
 }
 
+#[derive(Debug, Serialize)]
+struct StateReadSnapshot {
+    #[serde(flatten)]
+    state: StateSnapshot,
+    transcript: Vec<TranscriptRow>,
+}
+
+impl std::ops::Deref for StateReadSnapshot {
+    type Target = StateSnapshot;
+
+    fn deref(&self) -> &Self::Target {
+        &self.state
+    }
+}
+
 #[derive(Clone, Debug)]
 enum WorkbenchAuthorizationAction {
     Observe { session_id: String },
@@ -113,6 +128,36 @@ struct ChatMessage {
     role: String,
     text: String,
     at: String,
+}
+
+fn workbench_turn_user_message_id(turn_id: &str) -> String {
+    format!("m_turn_{turn_id}_input")
+}
+
+fn workbench_turn_id_from_user_message_id(message_id: &str) -> Option<&str> {
+    message_id
+        .strip_prefix("m_turn_")
+        .and_then(|message_id| message_id.strip_suffix("_input"))
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+enum TranscriptRow {
+    Message {
+        message: ChatMessage,
+    },
+    Reasoning {
+        id: String,
+        text: String,
+    },
+    CodeBlock {
+        id: String,
+        language: String,
+        code: String,
+        output: String,
+        error: Option<String>,
+        success: bool,
+    },
 }
 
 #[derive(Debug, Deserialize)]
@@ -276,6 +321,33 @@ struct ProductEventSnapshot {
     events: Vec<ProductEvent>,
 }
 
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+struct ProductEventHistory {
+    cursor: u64,
+    events: Vec<ProductEvent>,
+    #[serde(default)]
+    event_ids: BTreeSet<String>,
+}
+
+impl ProductEventHistory {
+    fn normalized(mut self) -> Self {
+        self.cursor = self
+            .events
+            .last()
+            .map_or(self.cursor, |event| self.cursor.max(event.sequence));
+        self.event_ids
+            .extend(self.events.iter().map(|event| event.event_id.clone()));
+        self
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(untagged)]
+enum PersistedProductEventHistories {
+    Current(HashMap<String, ProductEventHistory>),
+    Legacy(HashMap<String, Vec<ProductEvent>>),
+}
+
 #[derive(Clone, Debug, Serialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 enum ProductStreamItem {
@@ -308,7 +380,7 @@ enum ObservationStreamItem {
 
 #[derive(Clone)]
 struct SessionEventRegistry {
-    histories: Arc<Mutex<HashMap<String, Vec<ProductEvent>>>>,
+    histories: Arc<Mutex<HashMap<String, ProductEventHistory>>>,
     senders: Arc<Mutex<HashMap<String, broadcast::Sender<ProductEvent>>>>,
     channel_capacity: usize,
     path: Option<Arc<PathBuf>>,
@@ -327,8 +399,29 @@ impl SessionEventRegistry {
 
     fn persistent(path: PathBuf, channel_capacity: usize) -> AnyhowResult<Self> {
         let histories = match std::fs::read(&path) {
-            Ok(bytes) => serde_json::from_slice(&bytes)
-                .with_context(|| format!("decode product event log `{}`", path.display()))?,
+            Ok(bytes) => match serde_json::from_slice(&bytes)
+                .with_context(|| format!("decode product event log `{}`", path.display()))?
+            {
+                PersistedProductEventHistories::Current(histories) => histories
+                    .into_iter()
+                    .map(|(session_id, history)| (session_id, history.normalized()))
+                    .collect(),
+                PersistedProductEventHistories::Legacy(histories) => histories
+                    .into_iter()
+                    .map(|(session_id, events)| {
+                        let cursor = events.last().map_or(0, |event| event.sequence);
+                        (
+                            session_id,
+                            ProductEventHistory {
+                                cursor,
+                                events,
+                                event_ids: BTreeSet::new(),
+                            }
+                            .normalized(),
+                        )
+                    })
+                    .collect(),
+            },
             Err(err) if err.kind() == std::io::ErrorKind::NotFound => HashMap::new(),
             Err(err) => {
                 return Err(err)
@@ -368,7 +461,7 @@ impl SessionEventRegistry {
             .expect("product event history lock")
             .get(session_id)
             .into_iter()
-            .flatten()
+            .flat_map(|history| history.events.iter())
             .filter(|event| event.sequence > cursor)
             .cloned()
             .collect();
@@ -396,18 +489,17 @@ impl SessionEventRegistry {
                 .histories
                 .lock()
                 .expect("product event history lock");
-            let events = histories.entry(session_id.to_string()).or_default();
-            if events.iter().any(|event| event.event_id == event_id) {
+            let history = histories.entry(session_id.to_string()).or_default();
+            if !history.event_ids.insert(event_id.clone()) {
                 return false;
             }
+            history.cursor = history.cursor.saturating_add(1);
             let event = ProductEvent {
                 event_id,
-                sequence: events
-                    .last()
-                    .map_or(1, |event| event.sequence.saturating_add(1)),
+                sequence: history.cursor,
                 item,
             };
-            events.push(event.clone());
+            history.events.push(event.clone());
             self.persist_snapshot(&histories);
             event
         };
@@ -416,7 +508,7 @@ impl SessionEventRegistry {
     }
 
     fn snapshot(&self, session_id: &str) -> ProductEventSnapshot {
-        let events = self
+        let history = self
             .histories
             .lock()
             .expect("product event history lock")
@@ -424,8 +516,38 @@ impl SessionEventRegistry {
             .cloned()
             .unwrap_or_default();
         ProductEventSnapshot {
-            cursor: events.last().map_or(0, |event| event.sequence),
-            events,
+            cursor: history.cursor,
+            events: history.events,
+        }
+    }
+
+    fn reconcile_settled(
+        &self,
+        session_id: &str,
+        committed_message_ids: &BTreeSet<String>,
+        active_turn_ids: &BTreeSet<String>,
+    ) {
+        let mut histories = self
+            .histories
+            .lock()
+            .expect("product event history lock");
+        let Some(history) = histories.get_mut(session_id) else {
+            return;
+        };
+        let before = history.events.len();
+        history.events.retain(|event| match &event.item {
+            StreamItem::Message { message } => {
+                !committed_message_ids.contains(&message.id)
+                    && workbench_turn_id_from_user_message_id(&message.id)
+                        .is_none_or(|turn_id| active_turn_ids.contains(turn_id))
+            }
+            StreamItem::Done {
+                turn_id: Some(turn_id),
+            } => active_turn_ids.contains(turn_id),
+            StreamItem::TurnInput { .. } | StreamItem::Done { turn_id: None } => true,
+        });
+        if history.events.len() != before {
+            self.persist_snapshot(&histories);
         }
     }
 
@@ -443,7 +565,7 @@ impl SessionEventRegistry {
             .remove(session_id);
     }
 
-    fn persist_snapshot(&self, histories: &HashMap<String, Vec<ProductEvent>>) {
+    fn persist_snapshot(&self, histories: &HashMap<String, ProductEventHistory>) {
         let Some(path) = self.path.as_deref() else {
             return;
         };

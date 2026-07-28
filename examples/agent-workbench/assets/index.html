@@ -2152,6 +2152,11 @@
         projection.renderedProductEvents.add(event.event_id);
       }
     }
+
+    function busyAfterStateSnapshot(state, authoritative, currentBusy) {
+      if ((state?.active_turns || []).length) return true;
+      return authoritative ? false : currentBusy;
+    }
     // END WORKBENCH_PROJECTION_STATE
 
     const renderedMessages = new Set();
@@ -2670,9 +2675,13 @@
       const el = document.createElement("details");
       el.className = "code-block" + (event.success === false ? " fail" : "");
       el.open = false;
-      el.innerHTML = "<summary></summary><pre></pre>";
+      el.innerHTML = '<summary></summary><pre class="code-source"></pre><pre class="code-output" hidden></pre>';
       renderCodeBlockSummary(el, event, linkedTools);
-      el.querySelector("pre").textContent = event.code || "";
+      el.querySelector(".code-source").textContent = event.code || "";
+      const output = [event.output, event.error].filter(Boolean).join("\n");
+      const outputNode = el.querySelector(".code-output");
+      outputNode.hidden = !output;
+      outputNode.textContent = output;
       for (const tool of linkedTools) appendTool(tool, el);
       return el;
     }
@@ -2696,8 +2705,12 @@
     function updateCodeBlock(el, event, linkedTools = []) {
       el.classList.toggle("fail", event.success === false);
       renderCodeBlockSummary(el, event, linkedTools);
-      const pre = el.querySelector("pre");
+      const pre = el.querySelector(".code-source");
       pre.textContent = event.code || pre.textContent || "";
+      const output = [event.output, event.error].filter(Boolean).join("\n");
+      const outputNode = el.querySelector(".code-output");
+      outputNode.hidden = !output;
+      outputNode.textContent = output;
       for (const tool of linkedTools) appendTool(tool, el);
     }
 
@@ -3109,6 +3122,18 @@
       timeline.appendChild(empty);
     }
 
+    // BEGIN WORKBENCH_SETTLED_TRANSCRIPT
+    function renderStateTranscript(state) {
+      const transcript = state.transcript ||
+        (state.messages || []).map(message => ({ type: "message", message }));
+      for (const row of transcript) {
+        if (row.type === "message") renderMessage(row.message);
+        if (row.type === "reasoning") appendReasoning(row.text, row.id, null);
+        if (row.type === "code_block") appendCodeBlock(row);
+      }
+    }
+    // END WORKBENCH_SETTLED_TRANSCRIPT
+
     async function doReset() {
       if (resetInFlight) return;
       resetInFlight = true;
@@ -3361,32 +3386,33 @@
         return;
       }
       for (const registration of registrations) {
+        const subscriptionKey = registration.subscription_key;
         const row = document.createElement("div");
         row.className = "trigger-registration";
         row.dataset.enabled = String(registration.enabled);
-        row.dataset.triggerHandle = registration.handle;
+        row.dataset.triggerSubscriptionKey = subscriptionKey;
         const name = document.createElement("span");
         name.className = "trigger-registration-name";
-        name.textContent = registration.name || registration.source_type || registration.handle;
-        name.title = registration.handle + " · " + registration.source_type;
+        name.textContent = registration.name || registration.source_type || subscriptionKey;
+        name.title = subscriptionKey + " · " + registration.source_type;
         const actions = document.createElement("span");
         actions.className = "trigger-registration-actions";
         const toggle = document.createElement("button");
         toggle.type = "button";
         toggle.textContent = registration.enabled ? "disable" : "re-enable";
-        toggle.addEventListener("click", () => setTriggerEnabled(registration.handle, !registration.enabled));
+        toggle.addEventListener("click", () => setTriggerEnabled(subscriptionKey, !registration.enabled));
         const remove = document.createElement("button");
         remove.type = "button";
         remove.textContent = "delete";
-        remove.addEventListener("click", () => deleteTrigger(registration.handle));
+        remove.addEventListener("click", () => deleteTrigger(subscriptionKey));
         actions.append(toggle, remove);
         row.append(name, actions);
         triggerRegistrations.appendChild(row);
       }
     }
 
-    async function setTriggerEnabled(handle, enabled) {
-      const response = await fetch("/api/triggers/" + encodeURIComponent(handle) + "/enabled", {
+    async function setTriggerEnabled(subscriptionKey, enabled) {
+      const response = await fetch("/api/triggers/" + encodeURIComponent(subscriptionKey) + "/enabled", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ enabled })
@@ -3398,9 +3424,9 @@
       await loadTriggers();
     }
 
-    async function deleteTrigger(handle) {
-      if (!window.confirm("Delete trigger " + handle + "?")) return;
-      const response = await fetch("/api/triggers/" + encodeURIComponent(handle), { method: "DELETE" });
+    async function deleteTrigger(subscriptionKey) {
+      if (!window.confirm("Delete trigger " + subscriptionKey + "?")) return;
+      const response = await fetch("/api/triggers/" + encodeURIComponent(subscriptionKey), { method: "DELETE" });
       if (!response.ok) {
         await response.text();
         renderError("the trigger could not be deleted");
@@ -3713,7 +3739,7 @@
       webState.textContent = state.settings.web_configured ? "ready" : "not configured";
       sessionId.textContent = state.settings.session_id;
       renderUsage(state.usage);
-      for (const message of state.messages) renderMessage(message);
+      renderStateTranscript(state);
       for (const pending of state.pending_turn_inputs || []) {
         const textItem = (pending.input?.items || []).find(item => item.Text?.text);
         renderIngressReceipt({
@@ -3724,7 +3750,10 @@
         });
       }
       recordTurnInputApplications(state.turn_input_applications);
-      if ((state.active_turns || []).length) setBusy(true, "turn running · restored");
+      const nextBusy = busyAfterStateSnapshot(state, authoritative, busy);
+      if (nextBusy !== busy) {
+        setBusy(nextBusy, nextBusy ? "turn running · restored" : "ready");
+      }
     }
 
     async function fetchStateSnapshot() {

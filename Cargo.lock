@@ -76,6 +76,7 @@ dependencies = [
  "lash-provider-openai",
  "lash-remote-protocol",
  "lash-restate",
+ "lash-rlm-types",
  "lash-runtime",
  "lash-sqlite-store",
  "lash-subagents",
