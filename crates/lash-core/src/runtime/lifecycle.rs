@@ -1,5 +1,24 @@
 use super::*;
 
+fn initial_park_preview(
+    state: &crate::RuntimeSessionState,
+) -> Result<crate::store::RuntimeCommit, crate::StoreError> {
+    let operation =
+        super::state::boundary_operation(&state.session_id, "initial-park-preview", "preview");
+    let mut graph = state.pending_graph_commit();
+    graph.derive_node_ids(
+        &state.session_id,
+        state.durable_incarnation_id("initial park preview")?,
+        &operation,
+    )?;
+    crate::store::RuntimeCommit::persisted_state_with_graph_commit_and_operation(
+        state,
+        graph,
+        &[],
+        operation,
+    )
+}
+
 fn initial_park_operation(
     commit: &crate::store::RuntimeCommit,
 ) -> Result<crate::OperationId, crate::StoreError> {
@@ -382,7 +401,8 @@ impl LashRuntime {
         if self.state.checkpoint_ref.is_none()
             || !self.state.pending_graph_commit().nodes.is_empty()
         {
-            let proposed = crate::store::RuntimeCommit::persisted_state_for_test(&self.state, &[]);
+            let proposed = initial_park_preview(&self.state)
+                .map_err(|err| SessionError::Protocol(err.to_string()))?;
             let operation = initial_park_operation(&proposed)
                 .map_err(|err| SessionError::Protocol(err.to_string()))?;
             let (commit, persisted_node_ids) =
@@ -438,24 +458,51 @@ impl LashRuntime {
 
 #[cfg(test)]
 mod tests {
-    use super::initial_park_operation;
+    use super::{initial_park_operation, initial_park_preview};
+
+    fn user_message(id: &str, content: &str) -> crate::Message {
+        crate::Message {
+            id: id.to_string(),
+            role: crate::MessageRole::User,
+            parts: crate::shared_parts(vec![crate::Part {
+                id: format!("{id}.p0"),
+                kind: crate::PartKind::Text,
+                content: content.to_string(),
+                attachment: None,
+                tool_call_id: None,
+                tool_name: None,
+                tool_replay: None,
+                prune_state: crate::PruneState::Intact,
+                reasoning_meta: None,
+                response_meta: None,
+            }]),
+            origin: None,
+        }
+    }
 
     #[test]
     fn initial_park_identity_is_stable_for_replay_and_distinguishes_content() {
         let mut state = crate::RuntimeSessionState {
             session_id: "park-identity".to_string(),
+            session_lifetime: crate::SessionLifetime::durable(
+                crate::IncarnationId::mint_for_store(),
+            ),
             ..crate::RuntimeSessionState::default()
         };
         state.ensure_agent_frame_initialized();
-        let first = crate::store::RuntimeCommit::persisted_state_for_test(&state, &[]);
+        state.append_active_conversation_messages(&[user_message(
+            "pending-user-message",
+            "persist me before parking",
+        )]);
+        let first = initial_park_preview(&state).expect("first park preview");
 
         let mut retry_state = state.clone();
         retry_state.head_revision = 41;
-        let retry = crate::store::RuntimeCommit::persisted_state_for_test(&retry_state, &[]);
+        let retry = initial_park_preview(&retry_state).expect("retry park preview");
 
         let mut changed_state = retry_state;
         changed_state.turn_index = 1;
-        let changed = crate::store::RuntimeCommit::persisted_state_for_test(&changed_state, &[]);
+        let changed = initial_park_preview(&changed_state).expect("changed park preview");
 
         let first = initial_park_operation(&first).expect("first park identity");
         let retry = initial_park_operation(&retry).expect("retry park identity");
