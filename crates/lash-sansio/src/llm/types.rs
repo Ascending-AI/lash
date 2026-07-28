@@ -609,7 +609,10 @@ pub enum GenerationOptionDisposition {
     NotRequested,
     /// The caller asked for it and the request carries it.
     Applied,
-    /// The caller asked for it and this endpoint has no field for it.
+    /// The caller asked for it and it is not expressible here: the endpoint
+    /// has no field for it, or this adapter's use of the endpoint does not
+    /// send one. Codex declines all three by policy on a dialect that has
+    /// fields for them.
     OmittedUnsupported,
     /// The caller asked for it and sampling is pinned for this request, by the
     /// model's declared capability or by the thinking configuration in use.
@@ -631,7 +634,8 @@ impl GenerationOptionDisposition {
         }
     }
 
-    /// Report an option this endpoint has no field for.
+    /// Report an option this request cannot express — no field for it on the
+    /// endpoint, or none this adapter sends.
     pub fn unsupported(requested: bool) -> Self {
         if requested {
             Self::OmittedUnsupported

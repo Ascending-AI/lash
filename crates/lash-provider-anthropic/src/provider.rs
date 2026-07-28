@@ -192,11 +192,12 @@ impl Provider for AnthropicProvider {
 impl AnthropicProvider {
     /// Which of the caller's generation options this request carries.
     ///
-    /// The assembled body is the evidence, so the record cannot drift from
-    /// what was sent: Messages always carries a `max_tokens`, it has no seed
-    /// field at all, and the one reason a requested temperature is missing is
+    /// Temperature is read off the assembled body, so that record cannot drift
+    /// from what was sent: the one reason a requested temperature is missing is
     /// that this request pins sampling — extended thinking, or a model whose
-    /// host-declared capability says so.
+    /// host-declared capability says so. The other two are read off the dialect
+    /// instead, because for them the body cannot be wrong: Messages always
+    /// carries a `max_tokens`, and it has no seed field at all.
     pub(crate) fn generation_disposition(req: &LlmRequest, body: &Value) -> GenerationDisposition {
         GenerationDisposition {
             output_token_cap: GenerationOptionDisposition::applied(
