@@ -4065,13 +4065,16 @@ async fn durable_agent_frame_follow_through_uses_distinct_turn_scopes_and_commit
         "follow turn replay keys should include {follow_turn_id}: {replay_keys:?}"
     );
 
-    let conn = rusqlite::Connection::open(store_factory.path_for_session(session_id))
+    let conn = rusqlite::Connection::open(store_factory.catalog_path())
         .expect("open session sqlite store");
     let mut stmt = conn
-        .prepare("SELECT turn_id FROM runtime_turn_commits ORDER BY turn_id ASC")
+        .prepare(
+            "SELECT turn_id FROM runtime_turn_commits
+             WHERE session_id = ?1 ORDER BY turn_id ASC",
+        )
         .expect("prepare turn commits");
     let turn_commit_ids = stmt
-        .query_map([], |row| row.get::<_, String>(0))
+        .query_map([session_id], |row| row.get::<_, String>(0))
         .expect("query turn commits")
         .map(|row| row.expect("read turn commit row"))
         .map(|encoded| {

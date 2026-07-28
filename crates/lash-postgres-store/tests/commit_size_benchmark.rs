@@ -1,0 +1,160 @@
+use std::sync::Arc;
+use std::time::{Duration, Instant};
+
+use lash_core::store::GraphCommitDelta;
+use lash_core::{
+    AttachmentId, AttachmentIntent, PersistedSessionConfig, ProtocolEvent, RuntimeCommit,
+    RuntimePersistence, RuntimeSessionState, SessionHistoryRecord, SessionNodePayload,
+    SessionNodeRecord, SessionPolicy, SessionRelation, SessionStoreCreateRequest,
+    SessionStoreFactory,
+};
+use lash_postgres_store::PostgresStorage;
+use lash_sqlite_store::SqliteSessionStoreFactory;
+
+const NODE_COUNTS: &[usize] = &[8, 32, 128, 512];
+const SAMPLES: usize = 7;
+
+fn realistic_commit(session_id: &str, node_count: usize, sample: usize) -> RuntimeCommit {
+    let payload = "turn-tail-token ".repeat(48);
+    let nodes = (0..node_count)
+        .map(|index| {
+            let node_id = format!("{session_id}:node:{index}");
+            SessionNodeRecord {
+                node_id: node_id.clone(),
+                parent_node_id: (index > 0).then(|| format!("{session_id}:node:{}", index - 1)),
+                caused_by: None,
+                agent_frame_id: None,
+                timestamp: "2026-07-26T12:00:00Z".to_string(),
+                payload: SessionNodePayload::Event {
+                    event: SessionHistoryRecord::Protocol(
+                        ProtocolEvent::typed(
+                            "commit-size-benchmark",
+                            serde_json::json!({
+                                "role": if index % 4 == 0 { "assistant" } else { "tool" },
+                                "content": payload,
+                                "ordinal": index,
+                            }),
+                        )
+                        .expect("benchmark protocol event"),
+                    ),
+                },
+            }
+        })
+        .collect::<Vec<_>>();
+    let attachment_count = node_count.div_ceil(512).clamp(1, 16);
+    let attachment_ids = (0..attachment_count)
+        .map(|index| AttachmentId::new(format!("{session_id}:attachment:{index:08}")))
+        .collect::<Vec<_>>();
+    let state = RuntimeSessionState {
+        session_id: session_id.to_string(),
+        policy: SessionPolicy {
+            model: lash_core::ModelSpec::from_token_limits(
+                "benchmark-model",
+                Default::default(),
+                200_000,
+                None,
+            )
+            .expect("benchmark model"),
+            ..SessionPolicy::default()
+        },
+        ..RuntimeSessionState::default()
+    };
+    let mut commit = RuntimeCommit::persisted_state(&state, &[]);
+    commit.config = PersistedSessionConfig {
+        provider_id: "benchmark".to_string(),
+        model: state.policy.model,
+    };
+    commit.graph = GraphCommitDelta::Append {
+        leaf_node_id: nodes.last().map(|node| node.node_id.clone()),
+        nodes,
+    };
+    commit.checkpoint.execution_state = Some(vec![sample as u8; 64 * 1024]);
+    commit.committed_attachment_ids = attachment_ids;
+    commit
+}
+
+fn record_attachment_intents(store: &dyn RuntimePersistence, commit: &RuntimeCommit) {
+    for attachment_id in &commit.committed_attachment_ids {
+        store
+            .record_intent(AttachmentIntent {
+                attachment_id: attachment_id.clone(),
+                session_id: commit.session_id.clone(),
+                canonical_uri: format!("lash-attachment://sha256/{attachment_id}"),
+                intent_at_epoch_ms: 1,
+                owner_kind: None,
+                owner_id: None,
+            })
+            .expect("record benchmark attachment intent");
+    }
+}
+
+async fn time_commit(store: Arc<dyn RuntimePersistence>, commit: RuntimeCommit) -> Duration {
+    record_attachment_intents(store.as_ref(), &commit);
+    let started = Instant::now();
+    store
+        .commit_runtime_state(commit)
+        .await
+        .expect("benchmark commit");
+    started.elapsed()
+}
+
+fn percentile(samples: &mut [Duration], percentile: f64) -> Duration {
+    samples.sort_unstable();
+    let index = ((samples.len() - 1) as f64 * percentile).round() as usize;
+    samples[index]
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[ignore = "measurement benchmark; requires LASH_POSTGRES_DATABASE_URL"]
+async fn measured_commit_size_curve() {
+    let database_url = std::env::var("LASH_POSTGRES_DATABASE_URL")
+        .expect("set LASH_POSTGRES_DATABASE_URL to run the benchmark");
+    let postgres = PostgresStorage::connect(&database_url)
+        .await
+        .expect("connect benchmark Postgres");
+    let sqlite_dir = tempfile::tempdir().expect("SQLite benchmark directory");
+    let sqlite_factory = SqliteSessionStoreFactory::new(sqlite_dir.path());
+
+    println!("backend,node_count,budget_bytes,median_ms,p95_ms,samples");
+    for &node_count in NODE_COUNTS {
+        for backend in ["sqlite", "postgres"] {
+            let mut elapsed = Vec::with_capacity(SAMPLES);
+            let mut budget_bytes = 0;
+            for sample in 0..SAMPLES {
+                let session_id = format!("bench-{backend}-{node_count}-{sample}");
+                let commit = realistic_commit(&session_id, node_count, sample);
+                budget_bytes = serde_json::to_vec(&commit.graph)
+                    .expect("serialize graph delta")
+                    .len()
+                    + serde_json::to_vec(&commit.checkpoint)
+                        .expect("serialize checkpoint")
+                        .len()
+                    + serde_json::to_vec(&commit.committed_attachment_ids)
+                        .expect("serialize attachment manifest work")
+                        .len();
+                let store = match backend {
+                    "sqlite" => sqlite_factory
+                        .create_store(&SessionStoreCreateRequest {
+                            session_id: session_id.clone(),
+                            relation: SessionRelation::Root,
+                            policy: SessionPolicy::default(),
+                        })
+                        .await
+                        .expect("create SQLite benchmark store"),
+                    "postgres" => {
+                        Arc::new(postgres.session_store(&session_id)) as Arc<dyn RuntimePersistence>
+                    }
+                    _ => unreachable!(),
+                };
+                elapsed.push(time_commit(store, commit).await);
+            }
+            let median = percentile(&mut elapsed, 0.5);
+            let p95 = percentile(&mut elapsed, 0.95);
+            println!(
+                "{backend},{node_count},{budget_bytes},{:.3},{:.3},{SAMPLES}",
+                median.as_secs_f64() * 1_000.0,
+                p95.as_secs_f64() * 1_000.0,
+            );
+        }
+    }
+}

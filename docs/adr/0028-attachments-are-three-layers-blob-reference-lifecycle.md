@@ -78,8 +78,8 @@ unconditionally, the in-memory store restamps) precisely so this re-check sees i
 **The delete window and its residual.** The freshness re-check keys off the blob's
 mtime, which a clock-skewed or coarse-timestamp backend can under-report, so after
 it the sweep does a second, authoritative guard: a *targeted root re-check* for the
-single candidate id (`AttachmentRootSet::has_live_attachment_ref` — Postgres one
-indexed `SELECT`, SQLite a first-hit scan of its per-session databases, in-memory a
+single candidate id (`AttachmentRootSet::has_live_attachment_ref` — Postgres and
+SQLite each use one indexed `SELECT`, while in-memory uses a
 map lookup), skipping any blob a session re-referenced since the snapshot. This
 probe is reliable precisely because of the layer-2 write-ahead ordering: the facade
 records the manifest intent *before* the backend `put`, so a root exists no later
@@ -103,10 +103,9 @@ aborting on the first error.
 The root set is a factory-level lever: `SessionStoreFactory::live_attachment_refs`
 (surfaced to the GC through a blanket `AttachmentRootSet` impl) answers in one
 transaction on the global manifest table for Postgres (conditionally delete
-aged, owner-dead intents, then read the survivors), and by iterating the
-factory's per-session databases at sweep time for the per-session-database
-SQLite topology. Process-owner death proof is an explicit host-supplied
-capability: SQLite hosts call
+aged, owner-dead intents, then read the survivors), and in one transaction on
+SQLite's factory-wide durable-core catalog. Process-owner death proof is an
+explicit host-supplied capability: SQLite hosts call
 `SqliteSessionStoreFactory::new_with_process_registry`, while Postgres hosts
 call `PostgresStorage::session_store_factory_with_shared_process_registry` only
 when the registry shares that database. Unwired factories warn and conservatively keep
@@ -114,18 +113,13 @@ process-owned intents forever; they never infer a sibling path or query a table
 that merely happens to have the expected name. SQLite validates the configured
 database's process-registry schema when GC attaches it (not during ordinary
 session open), then evaluates process-row absence in the same
-conditional delete rather than through a read-then-forget race. Directory
-iteration filters to primary
-`<name>-<hash>.db` session databases, skipping the per-session sidecar databases
-(`.effects.db`, `.processes.db`, `.triggers.db`, ...) and stray files it shares the
-directory with; a *primary* session database that fails to open aborts the sweep
-(it might hold live refs, and treating it as empty would delete referenced blobs),
-whereas a non-session file is skipped with a logged warning so one stray file
-never disables GC. Because
+conditional delete rather than through a read-then-forget race. The catalog is
+the sole SQLite root-set authority; if it cannot be opened, the sweep aborts
+rather than treating unreadable live references as absent. Because
 `delete_session` releases a session's manifest rows, and those rows are exactly
 what the root set enumerates, a deleted session's blobs become unreferenced and
-GC collects them — correct by construction, verified for both SQLite (per-session
-database deletion) and Postgres (manifest row deletion). The stated assumption is
+GC collects them — correct by construction, verified for both SQLite and
+Postgres through manifest row deletion. The stated assumption is
 that the backend instance is **exclusive to this lash deployment**: a blob with
 no live ref is genuinely garbage only if every writer to that bucket/directory is
 this deployment's sessions. The reference host (lash-cli) wires the bundled

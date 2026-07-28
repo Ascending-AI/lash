@@ -75,6 +75,10 @@ use turn_driver::*;
 
 pub(super) fn runtime_error_from_store_commit(err: crate::store::StoreError) -> RuntimeError {
     match err {
+        crate::store::StoreError::Contended => RuntimeError::new(
+            RuntimeErrorCode::StoreCommitContended,
+            "store commit is contended; retry the identical operation unchanged",
+        ),
         crate::store::StoreError::SessionExecutionLeaseExpired { session_id } => RuntimeError::new(
             RuntimeErrorCode::SessionExecutionLeaseLost,
             format!("session execution lease for session `{session_id}` was lost before commit"),

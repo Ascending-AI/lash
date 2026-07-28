@@ -18,37 +18,35 @@ use super::*;
 impl Store {
     pub(crate) fn load_session_graph_from_conn(
         conn: &Connection,
+        session_id: &str,
         leaf_node_id: Option<String>,
-    ) -> lash_core::SessionGraph {
+    ) -> Result<lash_core::SessionGraph, StoreError> {
         // Tombstoned rows are physically still present until `vacuum()` is
         // called; the runtime view should never see them.
-        let mut stmt = match conn
-            .prepare("SELECT node_json FROM graph_nodes WHERE tombstoned = 0 ORDER BY seq ASC")
-        {
-            Ok(stmt) => stmt,
-            Err(err) => {
-                tracing::warn!(error = %err, "failed to prepare graph load statement");
-                return lash_core::SessionGraph::from_nodes(Vec::new(), leaf_node_id);
-            }
-        };
-        let rows = match stmt.query_map([], |row| row.get::<_, String>(0)) {
-            Ok(rows) => rows,
-            Err(err) => {
-                tracing::warn!(error = %err, "failed to query graph rows");
-                return lash_core::SessionGraph::from_nodes(Vec::new(), leaf_node_id);
-            }
-        };
+        let mut stmt = conn
+            .prepare(
+                "SELECT node_json FROM graph_nodes
+                 WHERE session_id = ?1 AND tombstoned = 0
+                 ORDER BY seq ASC",
+            )
+            .map_err(sqlite_error)?;
+        let rows = stmt
+            .query_map(params![session_id], |row| row.get::<_, String>(0))
+            .map_err(sqlite_error)?;
         let nodes = rows
-            .filter_map(Result::ok)
-            .filter_map(|node_json| {
-                serde_json::from_str::<lash_core::SessionNodeRecord>(&node_json).ok()
+            .map(|row| {
+                let node_json = row.map_err(sqlite_error)?;
+                serde_json::from_str(&node_json).map_err(|err| {
+                    StoreError::Backend(format!("failed to decode session graph node: {err}"))
+                })
             })
-            .collect();
-        lash_core::SessionGraph::from_nodes(nodes, leaf_node_id)
+            .collect::<Result<Vec<_>, StoreError>>()?;
+        Ok(lash_core::SessionGraph::from_nodes(nodes, leaf_node_id))
     }
 
     pub(crate) fn load_active_path_session_graph_from_conn(
         conn: &Connection,
+        session_id: &str,
         leaf_node_id: Option<String>,
     ) -> rusqlite::Result<lash_core::SessionGraph> {
         let Some(leaf_node_id) = leaf_node_id else {
@@ -62,7 +60,7 @@ impl Store {
                     json_extract(node_json, '$.parent_node_id'),
                     0
                 FROM graph_nodes
-                WHERE node_id = ?1 AND tombstoned = 0
+                WHERE session_id = ?1 AND node_id = ?2 AND tombstoned = 0
               UNION ALL
                 SELECT
                     g.node_id,
@@ -71,11 +69,11 @@ impl Store {
                     active.depth + 1
                 FROM graph_nodes g
                 JOIN active ON g.node_id = active.parent_node_id
-                WHERE g.tombstoned = 0
+                WHERE g.session_id = ?1 AND g.tombstoned = 0
             )
             SELECT node_json FROM active ORDER BY depth DESC",
         )?;
-        let rows = stmt.query_map(params![leaf_node_id.as_str()], |row| {
+        let rows = stmt.query_map(params![session_id, leaf_node_id.as_str()], |row| {
             row.get::<_, String>(0)
         })?;
         let mut nodes = Vec::new();
@@ -105,15 +103,21 @@ impl Store {
         if nodes.is_empty() {
             return;
         }
+        let Ok(session_id) = self.selected_session_id() else {
+            tracing::warn!("cannot append graph nodes on an unbound SQLite session store");
+            return;
+        };
         let nodes = nodes.to_vec();
         let result = self
             .conn
             .write(move |tx| {
-                let mut stmt =
-                    tx.prepare("INSERT INTO graph_nodes (node_id, node_json) VALUES (?1, ?2)")?;
+                let mut stmt = tx.prepare(
+                    "INSERT INTO graph_nodes (session_id, node_id, node_json)
+                     VALUES (?1, ?2, ?3)",
+                )?;
                 for node in &nodes {
                     let node_json = encode_json(node);
-                    stmt.execute(params![node.node_id, node_json])?;
+                    stmt.execute(params![session_id, node.node_id, node_json])?;
                 }
                 Ok(())
             })
@@ -124,10 +128,15 @@ impl Store {
     }
 
     pub async fn load_session_graph(&self) -> lash_core::SessionGraph {
+        let Ok(session_id) = self.selected_session_id() else {
+            return lash_core::SessionGraph::default();
+        };
         self.conn
-            .call(|conn| Ok(Self::load_session_graph_from_conn(conn, None)))
+            .call(move |conn| Ok(Self::load_session_graph_from_conn(conn, &session_id, None)))
             .await
-            .unwrap_or_else(|_| lash_core::SessionGraph::from_nodes(Vec::new(), None))
+            .ok()
+            .and_then(Result::ok)
+            .unwrap_or_default()
     }
 
     pub async fn gc_unreachable(&self) -> GcReport {
@@ -151,15 +160,28 @@ impl Store {
     /// inside the GC `conn.write` closure on the connection thread.
     fn live_checkpoint_roots(conn: &Connection) -> Result<Vec<RetainedArtifactRef>, StoreError> {
         let mut roots = Vec::new();
-        if let Some(checkpoint_ref) = load_session_head_meta_from_conn(conn)
-            .as_ref()
-            .and_then(|meta| meta.checkpoint_ref.as_ref())
-            .cloned()
-        {
-            roots.push(RetainedArtifactRef {
-                blob_ref: checkpoint_ref,
-                kind: PersistedArtifactKind::CheckpointManifest,
-            });
+        let mut stmt = conn
+            .prepare("SELECT head_json, head_revision FROM session_head")
+            .map_err(sqlite_error)?;
+        let rows = stmt
+            .query_map([], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
+            })
+            .map_err(sqlite_error)?;
+        for row in rows {
+            let (head_json, head_revision) = row.map_err(sqlite_error)?;
+            let mut meta: SessionHeadMeta = lash_core::store::decode_versioned_json_record(
+                &head_json,
+                "SessionHeadMeta",
+                lash_core::store::SESSION_HEAD_META_SCHEMA_VERSION,
+            )?;
+            meta.head_revision = head_revision as u64;
+            if let Some(checkpoint_ref) = meta.checkpoint_ref {
+                roots.push(RetainedArtifactRef {
+                    blob_ref: checkpoint_ref,
+                    kind: PersistedArtifactKind::CheckpointManifest,
+                });
+            }
         }
         Ok(roots)
     }
@@ -180,7 +202,7 @@ impl Store {
     /// Synchronous body of [`try_gc_unreachable`], run on the connection thread
     /// inside the `BEGIN IMMEDIATE` transaction so the mark/sweep is atomic and
     /// holds the write lock for its duration.
-    fn gc_unreachable_in_tx(tx: &Transaction<'_>) -> Result<GcReport, StoreError> {
+    pub(crate) fn gc_unreachable_in_tx(tx: &Transaction<'_>) -> Result<GcReport, StoreError> {
         let mut roots = Self::live_checkpoint_roots(tx)?;
         {
             let mut stmt = tx

@@ -10,6 +10,10 @@ use super::InMemorySessionStore;
 #[async_trait::async_trait]
 impl crate::store::StoreMaintenance for InMemorySessionStore {
     async fn tombstone_nodes(&self, ids: &[String]) -> Result<(), crate::store::StoreError> {
+        let _transaction = self
+            .write_transaction
+            .lock()
+            .expect("lock in-memory write transaction");
         self.tombstoned_node_ids
             .lock()
             .expect("lock tombstoned nodes")
@@ -18,6 +22,10 @@ impl crate::store::StoreMaintenance for InMemorySessionStore {
     }
 
     async fn vacuum(&self) -> Result<crate::store::VacuumReport, crate::store::StoreError> {
+        let _transaction = self
+            .write_transaction
+            .lock()
+            .expect("lock in-memory write transaction");
         let ids = {
             let mut tombstoned = self
                 .tombstoned_node_ids
@@ -42,6 +50,10 @@ impl crate::store::StoreMaintenance for InMemorySessionStore {
                 .collect::<Vec<_>>();
             let removed_node_count = before.saturating_sub(nodes.len());
             *graph = crate::SessionGraph::from_nodes(nodes, leaf_node_id);
+            self.global_node_owners
+                .lock()
+                .expect("lock global in-memory node ids")
+                .retain(|node_id, _| !ids.contains(node_id));
             removed_node_count
         };
         let mut pending = self

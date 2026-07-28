@@ -1,7 +1,7 @@
 //! # lash-sqlite-store
 //!
 //! The high-performance local **durable** persistence backend for the lash
-//! agent runtime. One SQLite database per session, opened in WAL journal mode
+//! agent runtime. One factory-wide SQLite durable-core database, opened in WAL journal mode
 //! with a 15-second busy timeout, satisfying the full [`RuntimePersistence`] +
 //! [`AttachmentManifest`] contract from `lash-core`.
 //!
@@ -28,6 +28,16 @@
 //! There is exactly one supported schema (see [`schema::SCHEMA`]). Older
 //! databases must be deleted before opening — we do not carry migration code.
 //!
+//! ## Catalog contention
+//!
+//! Every store handle from one [`SqliteSessionStoreFactory`] writes the same
+//! durable-core database. SQLite WAL permits concurrent readers but has one
+//! writer, so commits for different sessions serialize. This is an accepted
+//! embedded/single-host trade-off: catalog granularity can be tuned later
+//! without weakening crash atomicity. Runtime commits are preflighted against a
+//! measured node-and-byte budget for graph, checkpoint, and attachment-adoption
+//! payloads before entering the catalog write transaction.
+//!
 //! [`RuntimePersistence`]: lash_core::RuntimePersistence
 //! [`AttachmentManifest`]: lash_core::AttachmentManifest
 
@@ -36,7 +46,7 @@ use std::path::{Path, PathBuf};
 #[cfg(test)]
 use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::{AtomicU64, Ordering as AtomicOrdering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, OnceLock};
 
 use flate2::Compression;
 use flate2::read::ZlibDecoder;
@@ -114,6 +124,7 @@ pub use triggers::SqliteTriggerStore;
 /// tokio-rusqlite handle to one database thread).
 pub struct Store {
     conn: SqliteConnection,
+    session_id: OnceLock<String>,
     clock: Arc<dyn lash_core::Clock>,
     artifact_cache: Mutex<BTreeMap<lashlang::ModuleRef, Arc<lashlang::ModuleArtifact>>>,
     options: StoreOptions,
@@ -127,9 +138,9 @@ pub struct Store {
 
 /// SQLite-backed process registry for one configured runtime deployment.
 ///
-/// It is intentionally separate from [`Store`]: session databases persist one
-/// conversation, while this registry persists background process state and
-/// handle visibility across all sessions sharing the registry.
+/// It is intentionally separate from [`Store`]: the durable-core catalog
+/// persists conversations, while this registry persists background process
+/// state and handle visibility across all sessions sharing the registry.
 pub struct SqliteProcessRegistry {
     conn: SqliteConnection,
     clock: Arc<dyn lash_core::Clock>,
@@ -137,7 +148,81 @@ pub struct SqliteProcessRegistry {
 }
 
 fn sqlite_error(err: rusqlite::Error) -> StoreError {
-    StoreError::Backend(err.to_string())
+    match &err {
+        rusqlite::Error::SqliteFailure(code, _)
+            if matches!(
+                code.code,
+                rusqlite::ErrorCode::DatabaseBusy | rusqlite::ErrorCode::DatabaseLocked
+            ) =>
+        {
+            StoreError::Contended
+        }
+        _ => StoreError::Backend(err.to_string()),
+    }
+}
+
+impl Store {
+    fn bind_session(&self, session_id: &str) -> Result<(), StoreError> {
+        if let Some(bound_session_id) = self.session_id.get() {
+            if bound_session_id != session_id {
+                return Err(StoreError::SessionBindingMismatch {
+                    bound_session_id: bound_session_id.clone(),
+                    attempted_session_id: session_id.to_string(),
+                });
+            }
+            return Ok(());
+        }
+        let _ = self.session_id.set(session_id.to_string());
+        if self
+            .session_id
+            .get()
+            .is_some_and(|bound| bound == session_id)
+        {
+            Ok(())
+        } else {
+            Err(StoreError::SessionBindingMismatch {
+                bound_session_id: self.session_id.get().cloned().unwrap_or_default(),
+                attempted_session_id: session_id.to_string(),
+            })
+        }
+    }
+
+    fn selected_session_id(&self) -> Result<String, StoreError> {
+        self.session_id.get().cloned().ok_or_else(|| {
+            StoreError::Backend(
+                "SQLite durable-core store is not bound to a session; use SqliteSessionStoreFactory"
+                    .to_string(),
+            )
+        })
+    }
+
+    async fn resolve_session_id_for_read(&self) -> Result<Option<String>, StoreError> {
+        if let Some(session_id) = self.session_id.get() {
+            return Ok(Some(session_id.clone()));
+        }
+        let session_ids = self
+            .conn
+            .call(|conn| {
+                let mut stmt = conn.prepare(
+                    "SELECT session_id FROM (
+                         SELECT session_id FROM session_head
+                         UNION
+                         SELECT session_id FROM session_meta
+                     )
+                     ORDER BY session_id ASC
+                     LIMIT 2",
+                )?;
+                stmt.query_map([], |row| row.get::<_, String>(0))?
+                    .collect::<Result<Vec<_>, _>>()
+            })
+            .await
+            .map_err(sqlite_error)?;
+        if session_ids.len() != 1 {
+            return Ok(None);
+        }
+        self.bind_session(&session_ids[0])?;
+        Ok(self.session_id.get().cloned())
+    }
 }
 
 fn process_sqlite_error(err: rusqlite::Error) -> lash_core::PluginError {
@@ -278,8 +363,7 @@ pub struct StoredSessionCheckpoint {
     pub manifest: SessionCheckpoint,
 }
 
-/// Explicit first-party factory for one SQLite session database per Lash
-/// session.
+/// Explicit first-party factory for one SQLite durable-core catalog.
 ///
 /// Hosts opt into this by passing it to `lash::LashCoreBuilder::store_factory`.
 /// The factory never becomes a default: app storage and runtime storage remain
@@ -348,8 +432,10 @@ impl SqliteSessionStoreFactory {
         self
     }
 
-    pub fn path_for_session(&self, session_id: &str) -> PathBuf {
-        self.root.join(safe_session_db_file_name(session_id))
+    /// Path to the one durable-core database shared by every session created
+    /// through this factory.
+    pub fn catalog_path(&self) -> PathBuf {
+        self.root.join("durable-core.db")
     }
 }
 
@@ -364,10 +450,11 @@ impl SessionStoreFactory for SqliteSessionStoreFactory {
         request: &SessionStoreCreateRequest,
     ) -> Result<Arc<dyn RuntimePersistence>, String> {
         std::fs::create_dir_all(&self.root).map_err(|err| err.to_string())?;
-        let path = self.path_for_session(&request.session_id);
+        let path = self.catalog_path();
         let store = Arc::new(
-            Store::open_with_options_clock_and_process_registry(
+            Store::open_bound_with_options_clock_and_process_registry(
                 &path,
+                &request.session_id,
                 self.options,
                 Arc::clone(&self.clock),
                 None,
@@ -396,89 +483,59 @@ impl SessionStoreFactory for SqliteSessionStoreFactory {
         &self,
         request: &SessionStoreCreateRequest,
     ) -> Result<Option<Arc<dyn RuntimePersistence>>, String> {
-        let path = self.path_for_session(&request.session_id);
+        let path = self.catalog_path();
         if !path.exists() {
             return Ok(None);
         }
-        self.create_store(request).await.map(Some)
+        let store = Arc::new(
+            Store::open_bound_with_options_clock_and_process_registry(
+                &path,
+                &request.session_id,
+                self.options,
+                Arc::clone(&self.clock),
+                None,
+            )
+            .await
+            .map_err(|err| err.to_string())?,
+        );
+        if store.load_session_meta().await.is_none() {
+            return Ok(None);
+        }
+        Ok(Some(store as Arc<dyn RuntimePersistence>))
     }
 
     async fn delete_session(&self, session_id: &str) -> Result<(), String> {
-        delete_session_files(&self.root, session_id)
+        delete_session_from_catalog(&self.root, session_id).await
     }
 
     async fn live_attachment_refs(
         &self,
         intent_grace_cutoff_epoch_ms: u64,
     ) -> Result<std::collections::BTreeSet<lash_core::AttachmentId>, lash_core::StoreError> {
-        // Per-session-database topology: the factory owns the directory, so it
-        // computes the root set by unioning each session database's refs at
-        // sweep time (the ratified choice over a dual-written factory index).
-        let mut refs = std::collections::BTreeSet::new();
-        let entries = match std::fs::read_dir(&self.root) {
-            Ok(entries) => entries,
-            // No sessions written yet: an empty root set.
-            Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(refs),
-            Err(err) => {
-                return Err(lash_core::StoreError::Backend(format!(
-                    "read session store directory {}: {err}",
-                    self.root.display()
-                )));
-            }
-        };
-        for entry in entries {
-            let path = entry
-                .map_err(|err| lash_core::StoreError::Backend(err.to_string()))?
-                .path();
-            let Some(file_name) = path.file_name().and_then(|name| name.to_str()) else {
-                continue;
-            };
-            // `-wal`/`-shm` sidecars carry the `.db-wal` / `.db-shm` extension,
-            // so they are not `.db` files at all — skip them.
-            if path.extension().and_then(|ext| ext.to_str()) != Some("db") {
-                continue;
-            }
-            // Per-session sidecar databases (`<primary>.effects.db`,
-            // `.processes.db`, `.triggers.db`, `.artifacts.db`, `.process-env.db`)
-            // ARE `.db` files, but are named on top of a primary session database
-            // filename that itself ends in `.db`, so they carry an interior `.db.`
-            // that a primary never does. Skip them — a sidecar (even a corrupt
-            // one) is not a session database and must not abort GC, distinctly
-            // from an *unreadable primary session* database, which must (below).
-            if !is_primary_session_db_name(file_name) {
-                tracing::warn!(
-                    path = %path.display(),
-                    "attachment GC: skipping sidecar database in sessions directory"
-                );
-                continue;
-            }
-            // A primary session database that fails to open might still hold live
-            // refs. Aborting the whole sweep is the safe choice: treating it as
-            // empty would let GC delete blobs it actually references.
-            let store = Store::open_with_options_clock_and_process_registry(
-                &path,
-                self.options,
-                Arc::clone(&self.clock),
-                self.process_registry_path.as_deref(),
-            )
-            .await
-            .map_err(|err| {
-                lash_core::StoreError::Backend(format!(
-                    "attachment GC aborted: session database {} could not be opened: {err}",
-                    path.display()
-                ))
-            })?;
-            // Reconcile terminal-owner intents in this session database
-            // atomically: one conditional DELETE combines age with owner death
-            // (no list-then-forget race against a concurrent intent refresh),
-            // then union what remains.
-            lash_core::AttachmentManifest::forget_aged_uncommitted_intents(
-                &store,
-                intent_grace_cutoff_epoch_ms,
-            )?;
-            refs.extend(lash_core::AttachmentManifest::list_all_refs(&store)?);
+        let path = self.catalog_path();
+        if !path.exists() {
+            return Ok(std::collections::BTreeSet::new());
         }
-        Ok(refs)
+        let store = Store::open_with_options_clock_and_process_registry(
+            &path,
+            self.options,
+            Arc::clone(&self.clock),
+            self.process_registry_path.as_deref(),
+        )
+        .await
+        .map_err(|err| {
+            lash_core::StoreError::Backend(format!(
+                "attachment GC aborted: durable-core catalog {} could not be opened: {err}",
+                path.display()
+            ))
+        })?;
+        lash_core::AttachmentManifest::forget_aged_uncommitted_intents(
+            &store,
+            intent_grace_cutoff_epoch_ms,
+        )?;
+        Ok(lash_core::AttachmentManifest::list_all_refs(&store)?
+            .into_iter()
+            .collect())
     }
 
     async fn has_live_attachment_ref(
@@ -486,54 +543,24 @@ impl SessionStoreFactory for SqliteSessionStoreFactory {
         id: &lash_core::AttachmentId,
         intent_grace_cutoff_epoch_ms: u64,
     ) -> Result<bool, lash_core::StoreError> {
-        // Targeted single-id probe: iterate the per-session databases only until
-        // the first hit rather than unioning every session's refs. Read-only — it
-        // does not reconcile aged intents (the reconciling snapshot already ran).
-        let entries = match std::fs::read_dir(&self.root) {
-            Ok(entries) => entries,
-            Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(false),
-            Err(err) => {
-                return Err(lash_core::StoreError::Backend(format!(
-                    "read session store directory {}: {err}",
-                    self.root.display()
-                )));
-            }
-        };
-        for entry in entries {
-            let path = entry
-                .map_err(|err| lash_core::StoreError::Backend(err.to_string()))?
-                .path();
-            let Some(file_name) = path.file_name().and_then(|name| name.to_str()) else {
-                continue;
-            };
-            if path.extension().and_then(|ext| ext.to_str()) != Some("db") {
-                continue;
-            }
-            if !is_primary_session_db_name(file_name) {
-                continue;
-            }
-            let store = Store::open_with_options_clock_and_process_registry(
-                &path,
-                self.options,
-                Arc::clone(&self.clock),
-                self.process_registry_path.as_deref(),
-            )
-                .await
-                .map_err(|err| {
-                    lash_core::StoreError::Backend(format!(
-                        "attachment GC root re-check aborted: session database {} could not be opened: {err}",
-                        path.display()
-                    ))
-                })?;
-            if lash_core::AttachmentManifest::has_live_ref_for_id(
-                &store,
-                id,
-                intent_grace_cutoff_epoch_ms,
-            )? {
-                return Ok(true);
-            }
+        let path = self.catalog_path();
+        if !path.exists() {
+            return Ok(false);
         }
-        Ok(false)
+        let store = Store::open_with_options_clock_and_process_registry(
+            &path,
+            self.options,
+            Arc::clone(&self.clock),
+            self.process_registry_path.as_deref(),
+        )
+        .await
+        .map_err(|err| {
+            lash_core::StoreError::Backend(format!(
+                "attachment GC root re-check aborted: durable-core catalog {} could not be opened: {err}",
+                path.display()
+            ))
+        })?;
+        lash_core::AttachmentManifest::has_live_ref_for_id(&store, id, intent_grace_cutoff_epoch_ms)
     }
 }
 
@@ -543,67 +570,60 @@ fn warn_process_registry_not_wired() {
     );
 }
 
-fn delete_session_files(root: &Path, session_id: &str) -> Result<(), String> {
-    let db_path = root.join(safe_session_db_file_name(session_id));
-    for path in [
-        db_path.clone(),
-        sqlite_sidecar_path(&db_path, "-wal"),
-        sqlite_sidecar_path(&db_path, "-shm"),
-    ] {
-        match std::fs::remove_file(&path) {
-            Ok(()) => {}
-            Err(err) if err.kind() == std::io::ErrorKind::NotFound => {}
-            Err(err) => {
-                return Err(format!("remove session store {}: {err}", path.display()));
-            }
+async fn delete_session_from_catalog(root: &Path, session_id: &str) -> Result<(), String> {
+    let path = root.join("durable-core.db");
+    if !path.exists() {
+        return Ok(());
+    }
+    let session_id = session_id.to_string();
+    let conn = SqliteConnection::open(&path)
+        .await
+        .map_err(|err| err.to_string())?;
+    ensure_schema(&conn).await.map_err(|err| err.to_string())?;
+    conn.write(move |tx| {
+        tx.execute(
+            "DELETE FROM queued_work_batches WHERE session_id = ?1",
+            params![session_id],
+        )?;
+        for table in [
+            "pending_turn_inputs",
+            "attachment_manifest",
+            "runtime_turn_commits",
+            "session_execution_leases",
+            "usage_deltas",
+            "graph_nodes",
+            "session_head",
+            "session_meta",
+        ] {
+            tx.execute(
+                &format!("DELETE FROM {table} WHERE session_id = ?1"),
+                params![session_id],
+            )?;
         }
-    }
-    Ok(())
-}
-
-/// Whether `file_name` is a primary session database rather than a per-session
-/// sidecar database.
-///
-/// A primary session database ends in `.db` with `.db` appearing *only* as the
-/// final extension. Sidecar databases are named by appending a suffix on top of
-/// the primary filename (which already ends in `.db`), e.g.
-/// `20260710_011120.db.effects.db` or `sess-<hash>.db.processes.db`, so they
-/// carry an interior `.db.` that a primary never does. This structural test is
-/// deliberately independent of how the primary base name is formed — both this
-/// factory's `<safe>-<hash>.db` names and the reference host's `<timestamp>.db`
-/// names are recognised as primaries — because the host, not the factory, owns
-/// the primary naming scheme in the shared sessions directory. (`-wal`/`-shm`
-/// sidecars are excluded earlier: they are not `.db` files at all.)
-fn is_primary_session_db_name(file_name: &str) -> bool {
-    let Some(stem) = file_name.strip_suffix(".db") else {
-        return false;
-    };
-    // A primary's stem is the base name with no further `.db` extension; a
-    // sidecar's stem still contains the primary's trailing `.db` (`...db.effects`).
-    !stem.contains(".db")
-}
-
-fn safe_session_db_file_name(session_id: &str) -> String {
-    let mut safe = session_id
-        .chars()
-        .map(|ch| match ch {
-            'a'..='z' | 'A'..='Z' | '0'..='9' | '-' | '_' => ch,
-            _ => '_',
-        })
-        .collect::<String>();
-    safe = safe.trim_matches('_').to_string();
-    if safe.is_empty() {
-        safe.push_str("session");
-    }
-    safe.truncate(80);
-    let hash = format!("{:x}", Sha256::digest(session_id.as_bytes()));
-    format!("{safe}-{}.db", &hash[..16])
-}
-
-fn sqlite_sidecar_path(path: &Path, suffix: &str) -> PathBuf {
-    let mut sidecar = path.as_os_str().to_os_string();
-    sidecar.push(suffix);
-    PathBuf::from(sidecar)
+        // Trigger manifests are the one artifact-ref namespace with an exact
+        // session owner. Module, raw-artifact, and process-environment refs are
+        // content-addressed factory services with no safe session attribution;
+        // their lifecycle remains owned by the host-facing artifact APIs.
+        tx.execute(
+            "DELETE FROM artifact_refs
+             WHERE namespace = ?1 AND artifact_ref = ?2",
+            params![
+                attachments::CURRENT_TRIGGER_MANIFEST_NAMESPACE,
+                format!("session:{session_id}")
+            ],
+        )?;
+        // Session deletion used to unlink the whole per-session file. Preserve
+        // that reclaiming behavior for rows whose ownership is now explicit;
+        // global artifact refs above remain roots.
+        Store::gc_unreachable_in_tx(tx).map_err(|err| {
+            rusqlite::Error::ToSqlConversionFailure(Box::new(std::io::Error::other(
+                err.to_string(),
+            )))
+        })?;
+        Ok(())
+    })
+    .await
+    .map_err(|err| err.to_string())
 }
 
 fn retained_artifact_refs(checkpoint: &SessionCheckpoint) -> Vec<RetainedArtifactRef> {
@@ -706,11 +726,12 @@ fn decode_artifact_blob(bytes: &[u8]) -> Option<Vec<u8>> {
 /// inside a `conn.call`/`conn.write` closure on the connection thread.
 fn try_load_session_head_meta_from_conn(
     conn: &Connection,
+    session_id: &str,
 ) -> Result<Option<SessionHeadMeta>, StoreError> {
     let row = conn
         .query_row(
-            "SELECT head_json, head_revision FROM session_head WHERE singleton = 1",
-            [],
+            "SELECT head_json, head_revision FROM session_head WHERE session_id = ?1",
+            params![session_id],
             |row| Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?)),
         )
         .optional()
@@ -727,15 +748,20 @@ fn try_load_session_head_meta_from_conn(
     Ok(Some(meta))
 }
 
-fn load_session_head_meta_from_conn(conn: &Connection) -> Option<SessionHeadMeta> {
-    try_load_session_head_meta_from_conn(conn).ok().flatten()
+fn load_session_head_meta_from_conn(
+    conn: &Connection,
+    session_id: &str,
+) -> Option<SessionHeadMeta> {
+    try_load_session_head_meta_from_conn(conn, session_id)
+        .ok()
+        .flatten()
 }
 
-fn load_session_meta_from_conn(conn: &Connection) -> Option<SessionMeta> {
+fn load_session_meta_from_conn(conn: &Connection, session_id: &str) -> Option<SessionMeta> {
     conn.query_row(
         "SELECT session_id, session_name, created_at, model, cwd, relation_json
-         FROM session_meta WHERE singleton = 1",
-        [],
+         FROM session_meta WHERE session_id = ?1",
+        params![session_id],
         |row| {
             let relation_json: Option<String> = row.get(5)?;
             let relation = relation_json
@@ -833,51 +859,66 @@ mod tests {
     }
 
     #[test]
-    fn primary_session_db_names_exclude_sidecars() {
-        // Both primary naming schemes are recognised: this factory's
-        // `<safe>-<hash>.db` and the reference host's `<timestamp>.db`.
-        for primary in [
-            safe_session_db_file_name("sess-1"),
-            "20260710_011120.db".to_string(),
+    fn sqlite_busy_and_locked_errors_are_typed_as_contention() {
+        for code in [
+            rusqlite::ffi::SQLITE_BUSY,
+            rusqlite::ffi::SQLITE_LOCKED,
+            rusqlite::ffi::SQLITE_BUSY_SNAPSHOT,
         ] {
-            assert!(
-                is_primary_session_db_name(&primary),
-                "{primary} must be recognised as a primary session db"
+            let error = rusqlite::Error::SqliteFailure(
+                rusqlite::ffi::Error::new(code),
+                Some("synthetic contention".to_string()),
             );
-            // Sidecar databases suffixed on top of the primary `<name>.db` are not.
-            for suffix in [
-                "effects.db",
-                "processes.db",
-                "triggers.db",
-                "artifacts.db",
-                "process-env.db",
-            ] {
-                assert!(
-                    !is_primary_session_db_name(&format!("{primary}.{suffix}")),
-                    "sidecar {suffix} of {primary} must not be treated as a primary session db"
-                );
-            }
-            // WAL/SHM sidecars are not `.db` files at all.
-            assert!(!is_primary_session_db_name(&format!("{primary}-wal")));
+            assert!(matches!(sqlite_error(error), StoreError::Contended));
         }
     }
 
-    // Fix D: the factory's root-set discovery iterates a directory that also holds
-    // per-session sidecar databases (`.effects.db`, `.processes.db`, ...). It must
-    // skip those without aborting, still surfacing the primary session database's
-    // committed refs.
     #[tokio::test]
-    async fn live_attachment_refs_skips_sidecars() {
+    async fn real_locked_catalog_surfaces_typed_contention() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("contended.db");
+        let store = Store::open(&path).await.expect("open store");
+        store.bind_session("contended").expect("bind store");
+        store
+            .conn
+            .call(|conn| {
+                conn.busy_timeout(std::time::Duration::ZERO)?;
+                Ok(())
+            })
+            .await
+            .expect("disable busy wait");
+
+        let locker = rusqlite::Connection::open(&path).expect("open lock holder");
+        locker
+            .execute_batch("BEGIN IMMEDIATE")
+            .expect("hold catalog writer lock");
+        let result = store
+            .commit_runtime_state(RuntimeCommit::persisted_state(
+                &lash_core::RuntimeSessionState {
+                    session_id: "contended".to_string(),
+                    ..Default::default()
+                },
+                &[],
+            ))
+            .await;
+        locker
+            .execute_batch("ROLLBACK")
+            .expect("release writer lock");
+
+        assert!(matches!(result, Err(StoreError::Contended)));
+    }
+
+    #[tokio::test]
+    async fn live_attachment_refs_reads_the_factory_catalog() {
         let dir = tempfile::tempdir().expect("tempdir");
         let root = dir.path().join("sessions");
         std::fs::create_dir_all(&root).expect("mkdir sessions");
         let factory = SqliteSessionStoreFactory::new(&root);
 
-        // A primary session database with a committed attachment ref.
-        let primary = factory.path_for_session("sess-1");
+        let catalog = factory.catalog_path();
         let attachment_id = lash_core::AttachmentId::new("a".repeat(64));
         {
-            let store = Store::open(&primary).await.expect("open primary");
+            let store = Store::open(&catalog).await.expect("open catalog");
             lash_core::AttachmentManifest::record_intent(
                 &store,
                 lash_core::AttachmentIntent {
@@ -898,61 +939,29 @@ mod tests {
             .expect("commit ref");
         }
 
-        // Sidecar databases the CLI drops next to the primary, plus a stray file.
-        let primary_name = primary
-            .file_name()
-            .and_then(|name| name.to_str())
-            .expect("primary name")
-            .to_string();
-        for suffix in [
-            "effects.db",
-            "processes.db",
-            "triggers.db",
-            "artifacts.db",
-            "process-env.db",
-        ] {
-            std::fs::write(
-                root.join(format!("{primary_name}.{suffix}")),
-                b"not a sqlite database",
-            )
-            .expect("write sidecar");
-        }
-
-        // A cutoff of 0 ages out no intents; the committed ref survives. The
-        // corrupt sidecars are skipped, not opened, so discovery does not abort.
         let refs = SessionStoreFactory::live_attachment_refs(&factory, 0)
             .await
-            .expect("root discovery must not abort on sidecars");
+            .expect("root discovery");
         assert!(
             refs.contains(&attachment_id),
-            "the primary session's committed ref must be discovered"
+            "the catalog's committed ref must be discovered"
         );
-        assert_eq!(
-            refs.len(),
-            1,
-            "only the primary db contributes refs: {refs:?}"
-        );
+        assert_eq!(refs.len(), 1, "only the catalog contributes refs: {refs:?}");
     }
 
-    // Fix D safety: an *unreadable primary* session database (as opposed to a
-    // sidecar) must abort the sweep — never be silently treated as empty, which
-    // would drop its refs and let GC delete blobs it references.
     #[tokio::test]
-    async fn live_attachment_refs_aborts_on_unreadable_primary_session_db() {
+    async fn live_attachment_refs_aborts_on_unreadable_catalog() {
         let dir = tempfile::tempdir().expect("tempdir");
         let root = dir.path().join("sessions");
         std::fs::create_dir_all(&root).expect("mkdir sessions");
         let factory = SqliteSessionStoreFactory::new(&root);
 
-        // A file that reads as a primary session database name (no interior
-        // `.db.`) but is not a valid SQLite database.
-        std::fs::write(root.join("20260710_010101.db"), b"corrupt not-a-db")
-            .expect("write corrupt");
+        std::fs::write(factory.catalog_path(), b"corrupt not-a-db").expect("write corrupt");
 
         let result = SessionStoreFactory::live_attachment_refs(&factory, 0).await;
         assert!(
             result.is_err(),
-            "an unreadable primary session database must abort discovery, got {result:?}"
+            "an unreadable durable-core catalog must abort discovery, got {result:?}"
         );
     }
 

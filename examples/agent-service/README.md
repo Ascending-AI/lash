@@ -77,7 +77,7 @@ turns finish the app-specific `AgentServiceTurnWorkflow/{turn_id}/run/send`
 through `RESTATE_INGRESS_URL`. The endpoint also binds Lash's generic
 `LashProcessWorkflow`, backed by `RestateCoreProcessRunner` and the same
 deployment-level `processes.db`, so background process starts from a turn are
-reconstructed from SQLite session stores instead of running in the route
+reconstructed from the SQLite durable-core catalog instead of running in the route
 process. `AgentServiceTurnWorkflowRequest` carries only stable turn, chat, text,
 model, and model-variant data; board state stays in the app database. The
 workflow creates a `RestateRuntimeEffectController` and calls
@@ -152,8 +152,10 @@ The plugin demonstrates:
   `TurnEvent::ReasoningDelta`, assistant prose as
   `TurnEvent::AssistantProseDelta`, code/tool activity as structured cards, and
   RLM `finish` as `TurnEvent::FinalValue`.
-- Runtime persistence is handled by `SqliteSessionStoreFactory`; each request
-  opens the Lash session from the chat id and store instead of keeping runtime
+- Runtime persistence is handled by `SqliteSessionStoreFactory`; all requests
+  share one factory-wide durable-core SQLite catalog, and each store handle
+  remains bound to one session. Each request opens the Lash session from the
+  chat id and store instead of keeping runtime
   sessions in a process-global map.
 - Product persistence is app-owned: chat rows, board snapshots, reasoning, code
   blocks, tool cards, tool outbox events, and titles stay in the app database.

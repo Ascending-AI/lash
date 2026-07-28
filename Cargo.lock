@@ -1946,6 +1946,7 @@ dependencies = [
  "lash-sansio",
  "lash-trace",
  "proptest",
+ "rmp-serde",
  "schemars",
  "serde",
  "serde_json",

@@ -142,31 +142,32 @@ impl Store {
         }))
     }
 
-    pub(crate) fn load_usage_deltas_conn(conn: &Connection) -> Vec<lash_core::TokenLedgerEntry> {
-        let mut stmt = match conn.prepare(
-            "SELECT source, model, input_tokens, output_tokens, cache_read_input_tokens, cache_write_input_tokens, reasoning_output_tokens
-             FROM usage_deltas ORDER BY seq ASC",
-        ) {
-            Ok(stmt) => stmt,
-            Err(_) => return Vec::new(),
-        };
-        let rows = match stmt.query_map([], |row| {
-            Ok(lash_core::TokenLedgerEntry {
-                source: row.get(0)?,
-                model: row.get(1)?,
-                usage: lash_core::TokenUsage {
-                    input_tokens: row.get(2)?,
-                    output_tokens: row.get(3)?,
-                    cache_read_input_tokens: row.get(4)?,
-                    cache_write_input_tokens: row.get(5)?,
-                    reasoning_output_tokens: row.get(6)?,
-                },
+    pub(crate) fn load_usage_deltas_conn(
+        conn: &Connection,
+        session_id: &str,
+    ) -> Result<Vec<lash_core::TokenLedgerEntry>, StoreError> {
+        let mut stmt = conn
+            .prepare(
+                "SELECT source, model, input_tokens, output_tokens, cache_read_input_tokens, cache_write_input_tokens, reasoning_output_tokens
+             FROM usage_deltas WHERE session_id = ?1 ORDER BY seq ASC",
+            )
+            .map_err(sqlite_error)?;
+        let rows = stmt
+            .query_map(params![session_id], |row| {
+                Ok(lash_core::TokenLedgerEntry {
+                    source: row.get(0)?,
+                    model: row.get(1)?,
+                    usage: lash_core::TokenUsage {
+                        input_tokens: row.get(2)?,
+                        output_tokens: row.get(3)?,
+                        cache_read_input_tokens: row.get(4)?,
+                        cache_write_input_tokens: row.get(5)?,
+                        reasoning_output_tokens: row.get(6)?,
+                    },
+                })
             })
-        }) {
-            Ok(rows) => rows,
-            Err(_) => return Vec::new(),
-        };
-        rows.filter_map(Result::ok).collect()
+            .map_err(sqlite_error)?;
+        rows.collect::<Result<Vec<_>, _>>().map_err(sqlite_error)
     }
 
     /// Persist `stored` bytes under `hash` in the `blobs` table, warning with
@@ -262,17 +263,22 @@ impl Store {
         if entries.is_empty() {
             return;
         }
+        let Ok(session_id) = self.selected_session_id() else {
+            tracing::warn!("cannot append usage on an unbound SQLite session store");
+            return;
+        };
         let entries = entries.to_vec();
         let result = self
             .conn
             .write(move |tx| {
                 let mut stmt = tx.prepare(
                     "INSERT INTO usage_deltas (
-                        source, model, input_tokens, output_tokens, cache_read_input_tokens, cache_write_input_tokens, reasoning_output_tokens
-                    ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                        session_id, source, model, input_tokens, output_tokens, cache_read_input_tokens, cache_write_input_tokens, reasoning_output_tokens
+                    ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
                 )?;
                 for entry in &entries {
                     stmt.execute(params![
+                        session_id,
                         entry.source,
                         entry.model,
                         entry.usage.input_tokens,
@@ -291,9 +297,14 @@ impl Store {
     }
 
     pub async fn load_usage_deltas(&self) -> Vec<lash_core::TokenLedgerEntry> {
+        let Ok(session_id) = self.selected_session_id() else {
+            return Vec::new();
+        };
         self.conn
-            .call(|conn| Ok(Self::load_usage_deltas_conn(conn)))
+            .call(move |conn| Ok(Self::load_usage_deltas_conn(conn, &session_id)))
             .await
+            .ok()
+            .and_then(Result::ok)
             .unwrap_or_default()
     }
 }

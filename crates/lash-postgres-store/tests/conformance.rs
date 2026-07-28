@@ -73,6 +73,25 @@ async fn reset(storage: &PostgresStorage) {
     .expect("reset postgres process change clock");
 }
 
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn postgres_graph_node_primary_key_is_global_when_configured() {
+    let Some((_database_lock, storage)) = storage().await else {
+        eprintln!("skipping Postgres global node-id schema test: database is not configured");
+        return;
+    };
+    let definition: String = sqlx::query_scalar(
+        "SELECT pg_get_constraintdef(oid)
+         FROM pg_constraint
+         WHERE conrelid = 'lash_graph_nodes'::regclass
+           AND contype = 'p'",
+    )
+    .fetch_one(storage.pool())
+    .await
+    .expect("read graph-node primary key");
+
+    assert_eq!(definition, "PRIMARY KEY (node_id)");
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn postgres_runtime_persistence_satisfies_conformance_when_configured() {
     let Some((_database_lock, storage)) = storage().await else {

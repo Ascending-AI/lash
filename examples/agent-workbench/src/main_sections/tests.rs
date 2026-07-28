@@ -5,7 +5,6 @@ mod tests {
     pub(super) fn in_memory_trigger_store() -> Arc<dyn lash::triggers::TriggerStore> {
         Arc::new(lash_core::InMemoryTriggerStore::new())
     }
-    use lash::persistence::QueuedWorkStore;
     use lash::rlm::RlmTurnBuilderExt;
     use lash::tracing::{
         TraceBranchSelection, TraceLashlangChildExecution, TraceLashlangEdgeSelection,
