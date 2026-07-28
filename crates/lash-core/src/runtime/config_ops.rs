@@ -30,11 +30,16 @@ impl LashRuntime {
         self.state.policy.session_id = self.policy.session_id.clone();
     }
 
+    /// Apply a mid-run configuration change. Each argument is an overlay:
+    /// `None` leaves the current value in place, `Some` replaces it. A
+    /// `Some(GenerationOptions::default())` therefore clears the session's
+    /// sampling intent rather than leaving it alone.
     pub async fn update_session_config(
         &mut self,
         provider: Option<ProviderHandle>,
         model: Option<crate::ModelSpec>,
         prompt: Option<crate::PromptLayer>,
+        generation: Option<crate::GenerationOptions>,
     ) {
         let previous = self.session_policy();
         if let Some(provider) = provider {
@@ -46,6 +51,9 @@ impl LashRuntime {
         if let Some(prompt) = prompt {
             self.policy.prompt = prompt;
         }
+        if let Some(generation) = generation {
+            self.policy.generation = generation;
+        }
         self.state.policy = self.policy.clone();
         self.apply_session_config_mutations(previous.clone()).await;
         self.notify_session_config_changed(previous).await;
@@ -54,19 +62,22 @@ impl LashRuntime {
     pub async fn set_prompt_template(&mut self, template: crate::PromptTemplate) {
         let mut prompt = self.policy.prompt.clone();
         prompt.template = Some(template);
-        self.update_session_config(None, None, Some(prompt)).await;
+        self.update_session_config(None, None, Some(prompt), None)
+            .await;
     }
 
     pub async fn clear_prompt_template(&mut self) {
         let mut prompt = self.policy.prompt.clone();
         prompt.template = None;
-        self.update_session_config(None, None, Some(prompt)).await;
+        self.update_session_config(None, None, Some(prompt), None)
+            .await;
     }
 
     pub async fn add_prompt_contribution(&mut self, contribution: crate::PromptContribution) {
         let mut prompt = self.policy.prompt.clone();
         prompt.add_contribution(contribution);
-        self.update_session_config(None, None, Some(prompt)).await;
+        self.update_session_config(None, None, Some(prompt), None)
+            .await;
     }
 
     pub async fn replace_prompt_slot(
@@ -76,13 +87,15 @@ impl LashRuntime {
     ) {
         let mut prompt = self.policy.prompt.clone();
         prompt.replace_slot(slot, contributions);
-        self.update_session_config(None, None, Some(prompt)).await;
+        self.update_session_config(None, None, Some(prompt), None)
+            .await;
     }
 
     pub async fn clear_prompt_slot(&mut self, slot: crate::PromptSlot) {
         let mut prompt = self.policy.prompt.clone();
         prompt.clear_slot(slot);
-        self.update_session_config(None, None, Some(prompt)).await;
+        self.update_session_config(None, None, Some(prompt), None)
+            .await;
     }
 
     /// Re-register the current tool catalog in the live protocol session.

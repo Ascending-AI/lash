@@ -1,5 +1,3 @@
-use std::num::NonZeroUsize;
-
 use lash_sansio::{PreparedPrompt, PromptCache, PromptContributionSet, PromptLayer};
 
 use super::*;
@@ -53,21 +51,6 @@ impl PreparedExecutionEnvironment {
             },
             prompt_cache.as_deref(),
         )
-    }
-}
-
-fn generation_options_from_provider(provider: &crate::ProviderHandle) -> crate::GenerationOptions {
-    crate::GenerationOptions {
-        output_token_cap: provider
-            .options()
-            .max_output_tokens
-            .and_then(|value| usize::try_from(value).ok())
-            .and_then(NonZeroUsize::new),
-        // Sampling controls are per-call caller intent; the provider handle
-        // carries no default for them, so this synthesized request expresses
-        // none either.
-        temperature: None,
-        seed: None,
     }
 }
 
@@ -131,7 +114,7 @@ impl RuntimeTurnDriver<'_> {
             max_turns: session_policy.max_turns,
             model_variant: session_policy.model.variant.clone(),
             model_capability: session_policy.model.capability.clone(),
-            generation: generation_options_from_provider(session_policy.provider()),
+            generation: session_policy.generation.clone(),
             emit_llm_trace: false,
             termination: self.protocol_turn_options.clone(),
         });

@@ -147,7 +147,7 @@ impl SessionAdmin {
     async fn update_config(&self, patch: SessionConfigPatch) -> Result<()> {
         self.with_writer(async |runtime: &mut LashRuntime| {
             runtime
-                .update_session_config(patch.provider, patch.model, patch.prompt)
+                .update_session_config(patch.provider, patch.model, patch.prompt, patch.generation)
                 .await;
         })
         .await;

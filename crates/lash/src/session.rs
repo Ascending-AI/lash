@@ -343,6 +343,9 @@ pub struct SessionConfigPatch {
     pub provider: Option<ProviderHandle>,
     pub model: Option<ModelSpec>,
     pub prompt: Option<PromptLayer>,
+    /// Replacement generation options for the rest of the session. `None`
+    /// leaves the current options in place; an explicit default clears them.
+    pub generation: Option<lash_core::GenerationOptions>,
 }
 
 /// Lightweight, consuming handle returned by [`LashSession::park`].

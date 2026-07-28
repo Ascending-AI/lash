@@ -705,6 +705,7 @@ async fn session_config_change_hook_receives_context_window_updates() {
             Some(alt_provider.into_handle()),
             Some(alt_model.clone()),
             None,
+            None,
         )
         .await;
 
@@ -5082,7 +5083,7 @@ async fn turn_driver_normalizes_alias_effort_into_outgoing_request() {
 
     let mut runtime = runtime_with_plugins(Vec::new(), mock_provider(Vec::new())).await;
     runtime
-        .update_session_config(Some(provider), Some(model), None)
+        .update_session_config(Some(provider), Some(model), None, None)
         .await;
 
     let turn = runtime
@@ -5157,7 +5158,7 @@ async fn turn_driver_rejects_unsupported_effort_before_provider_call() {
 
     let mut runtime = runtime_with_plugins(Vec::new(), mock_provider(Vec::new())).await;
     runtime
-        .update_session_config(Some(provider), Some(model), None)
+        .update_session_config(Some(provider), Some(model), None, None)
         .await;
 
     let turn = runtime
@@ -5188,4 +5189,94 @@ async fn turn_driver_rejects_unsupported_effort_before_provider_call() {
         .expect("llm_provider issue");
     assert_eq!(issue.code.as_deref(), Some("unsupported_effort"));
     assert!(issue.message.contains("Unsupported effort `turbo`"));
+}
+
+#[tokio::test]
+async fn session_generation_options_reach_every_provider_request() {
+    use std::num::NonZeroUsize;
+    use std::sync::{Arc, Mutex};
+
+    let captured: Arc<Mutex<Vec<crate::GenerationOptions>>> = Arc::new(Mutex::new(Vec::new()));
+    let captured_for_provider = Arc::clone(&captured);
+    let provider = TestProvider::builder()
+        .kind("generation-capture")
+        // A provider-level output cap is provider configuration, not request
+        // intent: it must not appear on the request the turn driver builds.
+        // The adapter layers it under the request in `resolve_generation_policy`.
+        .options(crate::ProviderOptions {
+            max_output_tokens: Some(1_024),
+            ..Default::default()
+        })
+        .complete(move |req| {
+            let captured = Arc::clone(&captured_for_provider);
+            async move {
+                captured
+                    .lock()
+                    .expect("capture lock")
+                    .push(req.generation.clone());
+                Ok(LlmResponse {
+                    full_text: "ok".to_string(),
+                    parts: vec![LlmOutputPart::Text {
+                        text: "ok".to_string(),
+                        response_meta: None,
+                    }],
+                    ..LlmResponse::default()
+                })
+            }
+        })
+        .build()
+        .into_handle();
+
+    let mut runtime = runtime_with_plugins(Vec::new(), mock_provider(Vec::new())).await;
+    runtime
+        .update_session_config(Some(provider), None, None, None)
+        .await;
+
+    let run_turn = async |runtime: &mut LashRuntime, turn_id: &'static str| {
+        runtime
+            .run_turn_assembled(
+                TurnInput {
+                    items: vec![InputItem::Text {
+                        text: "hello".to_string(),
+                    }],
+                    protocol_turn_options: None,
+                    trace_turn_id: None,
+                    protocol_extension: None,
+                    turn_context: crate::TurnContext::default(),
+                },
+                CancellationToken::new(),
+                named_turn_scope("root", turn_id),
+            )
+            .await
+            .expect("turn");
+    };
+
+    run_turn(&mut runtime, "generation-default-turn").await;
+
+    let requested = crate::GenerationOptions {
+        output_token_cap: NonZeroUsize::new(64),
+        temperature: Some(crate::NonNegativeFiniteF64::new(0.0).expect("finite temperature")),
+        seed: Some(1234),
+    };
+    runtime
+        .update_session_config(None, None, None, Some(requested.clone()))
+        .await;
+    run_turn(&mut runtime, "generation-requested-turn").await;
+
+    let seen = captured.lock().expect("capture lock").clone();
+    assert_eq!(seen.len(), 2, "each turn issues one provider call");
+    assert_eq!(
+        seen[0],
+        crate::GenerationOptions::default(),
+        "a session that requested nothing must not have provider config echoed back as request intent"
+    );
+    assert_eq!(
+        seen[1], requested,
+        "the session's generation options must reach the provider request verbatim"
+    );
+    assert_eq!(
+        runtime.session_policy().generation,
+        requested,
+        "the requested options are durable session policy, not per-turn state"
+    );
 }
