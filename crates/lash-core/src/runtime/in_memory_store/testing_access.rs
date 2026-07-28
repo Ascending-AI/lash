@@ -60,4 +60,127 @@ impl InMemorySessionStore {
             })
             .collect()
     }
+
+    /// Return the current checkpoint exactly as held by the in-memory durable
+    /// implementation, including both content refs and resolved bodies.
+    pub fn raw_checkpoint_for_testing(&self) -> Option<crate::HydratedSessionCheckpoint> {
+        self.checkpoint.lock().expect("lock checkpoint").clone()
+    }
+
+    /// Return turn-commit receipt identity, intent hash, and replay payload.
+    pub fn raw_runtime_turn_commits_for_testing(
+        &self,
+    ) -> Vec<(String, String, crate::RuntimeCommitResult)> {
+        let mut rows = self
+            .runtime_turn_commits
+            .lock()
+            .expect("lock runtime turn commits")
+            .iter()
+            .map(
+                |((_session_id, operation), (hash, result, _committed_at_ms))| {
+                    (operation.clone(), hash.clone(), result.clone())
+                },
+            )
+            .collect::<Vec<_>>();
+        rows.sort_by(|left, right| left.0.cmp(&right.0));
+        rows
+    }
+
+    /// Return every attachment-manifest row owned by this bound session.
+    pub fn raw_attachment_manifest_for_testing(&self) -> Vec<crate::AttachmentManifestEntry> {
+        let session_id = self
+            .session_meta
+            .lock()
+            .expect("lock session meta")
+            .as_ref()
+            .map(|meta| meta.session_id.clone());
+        let mut rows = self
+            .attachment_manifest
+            .lock()
+            .expect("lock attachment manifest")
+            .values()
+            .filter(|entry| Some(entry.session_id.as_str()) == session_id.as_deref())
+            .cloned()
+            .collect::<Vec<_>>();
+        rows.sort_by(|left, right| left.attachment_id.cmp(&right.attachment_id));
+        rows
+    }
+
+    pub fn raw_usage_deltas_for_testing(&self) -> Vec<crate::TokenLedgerEntry> {
+        self.usage_deltas.lock().expect("lock usage deltas").clone()
+    }
+
+    pub fn raw_session_meta_for_testing(&self) -> Option<crate::SessionMeta> {
+        self.session_meta.lock().expect("lock session meta").clone()
+    }
+
+    /// Install deterministic metadata before a cross-backend differential run.
+    pub fn replace_session_meta_for_testing(&self, meta: crate::SessionMeta) {
+        *self.session_meta.lock().expect("lock session meta") = Some(meta);
+    }
+
+    pub fn raw_session_execution_leases_for_testing(
+        &self,
+    ) -> Vec<(
+        String,
+        Option<crate::LeaseOwnerIdentity>,
+        bool,
+        u64,
+        u64,
+        u64,
+    )> {
+        let mut rows = self
+            .session_execution_leases
+            .lock()
+            .expect("lock session execution leases")
+            .iter()
+            .map(|(session_id, lease)| {
+                (
+                    session_id.clone(),
+                    lease.owner.clone(),
+                    lease.lease_token.is_some(),
+                    lease.fencing_token,
+                    lease.claimed_at_epoch_ms,
+                    lease.expires_at_epoch_ms,
+                )
+            })
+            .collect::<Vec<_>>();
+        rows.sort_by(|left, right| left.0.cmp(&right.0));
+        rows
+    }
+}
+
+impl super::InMemorySessionStoreFactory {
+    /// Return the concrete testing store after `SessionStoreFactory` created it.
+    pub fn raw_store_for_testing(
+        &self,
+        session_id: &str,
+    ) -> Option<std::sync::Arc<InMemorySessionStore>> {
+        self.stores
+            .lock()
+            .expect("lock in-memory stores")
+            .get(session_id)
+            .cloned()
+    }
+
+    /// Return explicit node-anchor rows without mixing in implicit live tips.
+    pub fn raw_node_anchors_for_testing(&self) -> Vec<(String, crate::BlobRef, String)> {
+        let mut rows = self
+            .node_anchors
+            .lock()
+            .expect("lock node anchors")
+            .iter()
+            .map(
+                |(node_id, (checkpoint_ref, _checkpoint, source_session_id))| {
+                    (
+                        node_id.clone(),
+                        checkpoint_ref.clone(),
+                        source_session_id.clone(),
+                    )
+                },
+            )
+            .collect::<Vec<_>>();
+        rows.sort_by(|left, right| left.0.cmp(&right.0));
+        rows
+    }
 }
