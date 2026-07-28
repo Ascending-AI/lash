@@ -15,9 +15,9 @@ carrier of a whole session policy — the current agent frame's assignment, the 
 state, `RemoteProcessExecutionPolicy` on the wire — then carries the sampling intent with
 it instead of silently dropping it at each boundary. Session-wide means session-wide: the
 direct requests plugins issue on the session's behalf (the observational-memory workers,
-the `llm_query` tool) read it from the policy they already read their model from, rather
-than passing `GenerationOptions::default()` and running at provider defaults inside a
-session that asked for repeatability. Provider configuration keeps its own
+the `llm_query` tool) read it from the policy they already read their model from, bounded by
+that model's capacity, rather than passing `GenerationOptions::default()` and running at
+provider defaults inside a session that asked for repeatability. Provider configuration keeps its own
 layer underneath the request, applied once, by the per-adapter resolver that already knows
 which wire has a seed field and which model pins sampling. There is no per-turn override:
 no caller in this workspace expresses sampling per turn, and true per-call intent is
@@ -66,6 +66,26 @@ satisfied by a model that can only produce 8k — so the turn sends the capacity
 adapter's `Applied` on the response and on every attempt of the ledger together, and
 `nothing_omitted()` (nothing was dropped) is joined by `fully_honored()` (nothing was
 dropped *or* reduced) for a host that needs the number it named.
+
+Clamping belongs to the **policy**, not to the turn, so it lives on `ModelSpec` and every
+path that takes generation options *out of a session policy* applies it. The turn driver is
+not the only such path: the direct requests plugins issue on the session's behalf carry the
+policy's options too, and `DirectRequest` has no `ModelLimits` to check a cap against. Left
+to the turn path alone, the fix would have produced the worse version of the same failure —
+after a `set_model` to a smaller model, turns clamp and proceed while every maintenance call
+fails at the provider. So the observational-memory workers and `ToolSessionAdmin` hand out
+options already bounded by the model the same policy names, and a tool that substitutes its
+own model owns that pairing. Clamping is per request, against the model the request runs on;
+the session's stored intent is never rewritten.
+
+One case does lose a named local error. Provider configuration reaches the wire through
+`resolve_generation_policy`, underneath the request, and is not caller intent, so nothing
+checks it: a `ProviderOptions.max_output_tokens` above the model's capacity now fails at the
+provider with its own 400 rather than as `output_token_cap_exceeds_model_capacity`. Before
+this change, agent-session requests synthesized their cap *from* that provider config, which
+is what put it in front of the check. Host configuration validated against host-declared
+capability is a check worth having, but it belongs where provider options are configured,
+not smuggled in through a request field that no longer carries them.
 
 The disposition is deliberately *not* part of `ExecutionEvidence`. ADR 0031 binds that type
 to facts the provider reported about the execution; this is a fact about the request lash

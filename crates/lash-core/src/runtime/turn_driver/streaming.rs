@@ -33,39 +33,6 @@ async fn emit_plugin_runtime_events_runtime(
     }
 }
 
-/// Reduce a requested output-token cap to what the model can produce, and say
-/// whether it had to.
-///
-/// The cap is a bound, not a demand: a session asking for at most 32k against
-/// a model that tops out at 8k is satisfied by 8k. Failing instead made the
-/// one fail-closed option in an otherwise fail-silent struct — and because the
-/// options are durable session policy, a `set_model` to a smaller model would
-/// have failed every remaining turn of the session, non-retryably, forever.
-/// The reduction is reported like every other divergence between what was
-/// asked for and what was sent.
-fn clamp_generation_options(
-    model: &crate::ModelSpec,
-    generation: &mut crate::GenerationOptions,
-) -> bool {
-    let (Some(requested), Some(capacity)) = (
-        generation.output_token_cap,
-        model.limits.output_token_capacity,
-    ) else {
-        return false;
-    };
-    if requested <= capacity {
-        return false;
-    }
-    tracing::debug!(
-        model = %model.id,
-        requested = requested.get(),
-        capacity = capacity.get(),
-        "clamping requested output_token_cap to the model's output_token_capacity"
-    );
-    generation.output_token_cap = Some(capacity);
-    true
-}
-
 /// Report the clamp on every disposition the call produced.
 ///
 /// The adapter knows only that it put the cap it was handed on the wire, so it
@@ -217,8 +184,10 @@ impl RuntimeTurnDriver<'_> {
         cancel: &CancellationToken,
     ) -> RuntimeLlmCallOutcome {
         let mut request = (*request).clone();
-        let clamped_output_token_cap =
-            clamp_generation_options(&self.policy.model, &mut request.generation);
+        let clamped_output_token_cap = self
+            .policy
+            .model
+            .clamp_generation_options(&mut request.generation);
         let request = match crate::attachments::resolve_llm_request_attachments(
             request,
             self.host.core.durability.attachment_store.as_ref(),
