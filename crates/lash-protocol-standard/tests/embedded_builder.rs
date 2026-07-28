@@ -35,7 +35,7 @@ fn text_message(id: &str, role: MessageRole, content: &str) -> Message {
 #[tokio::test]
 async fn embedded_runtime_builder_loads_state_from_store() {
     let store = Arc::new(Store::memory().await.expect("store"));
-    let state = RuntimeSessionState {
+    let mut state = RuntimeSessionState {
         session_id: "stored-session".to_string(),
         policy: SessionPolicy {
             provider_id: "openai-compatible".into(),
@@ -85,7 +85,7 @@ async fn embedded_runtime_builder_loads_state_from_store() {
 #[tokio::test]
 async fn embedded_runtime_builder_rejects_store_bound_to_different_session_id() {
     let store = Arc::new(Store::memory().await.expect("store"));
-    let mut state = RuntimeSessionState {
+    let state = RuntimeSessionState {
         session_id: "alpha".to_string(),
         policy: SessionPolicy {
             provider_id: "openai-compatible".into(),

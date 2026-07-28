@@ -703,7 +703,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn postgres_delete_fences_a_stale_first_commit_until_explicit_recreate() {
+    async fn postgres_delete_permanently_fences_stale_handles_and_session_id_reuse() {
         let Some(database_url) = postgres_test_support::database_url() else {
             eprintln!("skipping Postgres delete fence proof: database URL is not set");
             return;
@@ -745,19 +745,16 @@ mod tests {
             } if session_id == &request.session_id
         ));
 
-        let recreated = factory
-            .create_store(&request)
-            .await
-            .expect("explicitly recreate deleted store");
-        let mut state = lash_core::RuntimeSessionState {
-            session_id: session_id.clone(),
-            ..Default::default()
+        let reuse_error = match factory.create_store(&request).await {
+            Ok(_) => panic!("deleted session id must never be reused"),
+            Err(error) => error,
         };
-        state.ensure_agent_frame_initialized();
-        recreated
-            .commit_runtime_state(RuntimeCommit::persisted_state_for_test(&state, &[]))
-            .await
-            .expect("recreated store accepts first commit");
+        assert!(matches!(
+            reuse_error,
+            StoreError::SessionDeleted {
+                ref session_id
+            } if session_id == &request.session_id
+        ));
     }
 
     #[tokio::test]

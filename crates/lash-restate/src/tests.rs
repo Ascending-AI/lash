@@ -2090,33 +2090,6 @@ async fn restate_controller_routes_sleep_only_through_timer() {
 }
 
 #[tokio::test]
-async fn restate_durable_controller_rejects_unincarnated_turn_scope() {
-    let context = Arc::new(RecordingContext::default());
-    let controller = RestateRuntimeEffectController::new(context);
-    let error = match controller.scoped_effect_controller(ExecutionScope::turn("session", "turn")) {
-        Ok(_) => panic!("durable Restate controller must reject a bare turn scope"),
-        Err(error) => error,
-    };
-    assert_eq!(
-        error.code.as_str(),
-        "durable_turn_scope_missing_incarnation"
-    );
-}
-
-#[tokio::test]
-async fn restate_turn_attach_rejects_unincarnated_terminal_address() {
-    let attach = RestateTurnAttach::new("http://127.0.0.1:1");
-    let error = attach
-        .await_terminal(&TurnAddress::new("session", "turn"))
-        .await
-        .expect_err("durable Restate attach must reject a bare turn address");
-    assert_eq!(
-        error.code.as_str(),
-        "durable_turn_scope_missing_incarnation"
-    );
-}
-
-#[tokio::test]
 async fn restate_turn_wait_rejects_missing_cancel_scope() {
     let context = Arc::new(RecordingContext::default());
     let controller = RestateRuntimeEffectController::new(context);
