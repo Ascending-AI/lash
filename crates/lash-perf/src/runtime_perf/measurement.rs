@@ -15,11 +15,12 @@ use lash_core::sansio::{
     ChatContextProjector, CompletedToolCall, PendingToolCall, ProtocolDriverHandle,
     WaitingExecState, WaitingLlmState,
 };
+use lash_core::store::GraphAppend;
 use lash_core::{
     DriverAction, DriverContextView, Effect, ExecResponse, InputItem, LiveReplayResult,
     LiveReplayStore, LiveReplaySubscribeResult, Message, MessageRole, ModelToolReturn, Part,
     PartKind, ProtocolTurnOptions, PruneState, QueuedWorkStore, Response, RuntimeCommit,
-    RuntimeSessionState, SessionCommitStore, SessionExecutionLease, SessionExecutionLeaseStore,
+    RuntimeSessionState, SessionCommitStore, SessionExecutionLeaseStore,
     SessionObservationEventPayload, SessionRevision, TokenUsage, ToolCallOutput, ToolCancellation,
     ToolFailure, ToolFailureClass, TurnFinish, TurnInput, TurnInputStore, TurnMachine,
     TurnMachineConfig, TurnOutcome, shared_parts,

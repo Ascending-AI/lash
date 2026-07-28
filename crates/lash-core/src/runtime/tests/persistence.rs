@@ -6,13 +6,10 @@ use crate::store::{QueuedWorkStore, SessionCommitStore, SessionExecutionLeaseSto
 // contract as the durable backend so it can't silently drift.
 #[tokio::test]
 async fn recording_store_satisfies_runtime_persistence_conformance() {
-    crate::testing::conformance::runtime_persistence_with_options(
-        || {
-            std::sync::Arc::new(RecordingStore::default())
-                as std::sync::Arc<dyn crate::RuntimePersistence>
-        },
-        crate::testing::conformance::RuntimePersistenceConformance::noop_attachment_manifest(),
-    )
+    crate::testing::conformance::runtime_persistence(|| {
+        std::sync::Arc::new(RecordingStore::default())
+            as std::sync::Arc<dyn crate::RuntimePersistence>
+    })
     .await;
 }
 
@@ -197,8 +194,7 @@ async fn in_memory_claim_validation_serializes_takeover_before_mutation() {
     state.bind_durable_incarnation(incarnation_id);
     let err = store
         .commit_runtime_state(
-            crate::RuntimeCommit::persisted_state(&state, &[])
-                .with_session_execution_lease(live_lease.fence())
+            crate::RuntimeCommit::persisted_state_for_test(&state, &[])
                 .completing_queue_claim(stale_claim.completion()),
         )
         .await

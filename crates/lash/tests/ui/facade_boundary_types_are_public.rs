@@ -8,17 +8,16 @@ use lash::direct::{
 use lash::durability::RuntimeHostConfig;
 use lash::messages::MessageRole;
 use lash::persistence::{
-    CheckpointKind, GcReport, GraphCommitDelta, IncarnationId, LeaseOwnerIdentity, OperationId,
+    CheckpointKind, GcReport, GraphAppend, IncarnationId, LeaseOwnerIdentity, OperationId,
     PersistedSessionRead, PendingTurnInputDraft, QueuedWorkBatch, QueuedWorkBatchDraft,
     QueuedWorkClaim, QueuedWorkClaimBoundary, QueuedWorkStore, RealizedNodeTimestamp, RuntimeCommit,
     RuntimeCommitResult, RuntimePersistence, RuntimeSessionState, RuntimeTurnCommitStamp,
     SessionCheckpoint, SessionCommitStore, SessionExecutionLease,
     SessionExecutionLeaseClaimOutcome, SessionExecutionLeaseCompletion, SessionExecutionLeaseFence,
-    SessionExecutionLeaseStore, SessionLifetime, SessionMeta, SessionNodeRecord, SessionReadScope,
-    StoreError, StoreMaintenance, TurnInputClaim, TurnInputCheckpointBoundary, TurnInputIngress,
+    SessionExecutionLeaseStore, SessionLifetime, SessionMeta, SessionNodeRecord, StoreError,
+    StoreMaintenance, TurnInputClaim, TurnInputCheckpointBoundary, TurnInputIngress,
     TurnInputState, TurnInputStore, VacuumReport, commit_runtime_state_verified,
     graph_realization_digest, load_persisted_session_state,
-    load_persisted_session_state_active_path,
 };
 use lash::usage::{TokenLedgerEntry, TokenUsage};
 use lash::plugins::{
@@ -48,10 +47,7 @@ impl SessionCommitStore for FacadeStore {
         Ok(IncarnationId::mint_for_store())
     }
 
-    async fn load_session(
-        &self,
-        _scope: SessionReadScope,
-    ) -> Result<Option<PersistedSessionRead>, StoreError> {
+    async fn load_session(&self) -> Result<Option<PersistedSessionRead>, StoreError> {
         Ok(None)
     }
 
@@ -301,10 +297,6 @@ impl QueuedWorkStore for FacadeStore {
 
 #[async_trait]
 impl StoreMaintenance for FacadeStore {
-    async fn tombstone_nodes(&self, _ids: &[String]) -> Result<(), StoreError> {
-        Ok(())
-    }
-
     async fn vacuum(&self) -> Result<VacuumReport, StoreError> {
         Ok(VacuumReport::default())
     }
@@ -321,25 +313,24 @@ impl StoreMaintenance for FacadeStore {
 }
 
 fn persistence_types_are_nameable(
-    graph: GraphCommitDelta,
+    graph: GraphAppend,
     ledger: Vec<TokenLedgerEntry>,
 ) -> RuntimeCommit {
     RuntimeCommit {
         session_id: "facade".to_string(),
         session_lifetime: SessionLifetime::durable(IncarnationId::mint_for_store()),
         expected_head_revision: 0,
-        session_execution_lease: None,
         release_session_execution_lease: None,
         config: Default::default(),
         current_frame_node_id: None,
         graph,
         checkpoint: Default::default(),
         usage_deltas: ledger,
-        turn_commit: Some(RuntimeTurnCommitStamp::new(
+        turn_commit: RuntimeTurnCommitStamp::new(
             "facade",
             OperationId::turn("facade", "turn", "final"),
             "sha256:facade",
-        )),
+        ),
         completed_queue_claims: Vec::new(),
         completed_turn_input_claims: Vec::new(),
         enqueued_queue_batches: Vec::new(),
@@ -506,7 +497,6 @@ fn trigger_types_are_homed_in_triggers(
 async fn persistence_load_helpers_are_nameable(
     store: &dyn RuntimePersistence,
 ) -> Result<Option<RuntimeSessionState>, StoreError> {
-    let _ = load_persisted_session_state_active_path(store, None).await?;
     load_persisted_session_state(store).await
 }
 
@@ -558,7 +548,7 @@ fn assert_store_object(_: Arc<dyn RuntimePersistence>) {}
 fn main() {
     assert_store_object(Arc::new(FacadeStore));
     let _ = persistence_types_are_nameable(
-        GraphCommitDelta::Unchanged { leaf_node_id: None },
+        GraphAppend { nodes: Vec::new(), leaf_node_id: None },
         Vec::new(),
     );
     let _ = plugin_types_are_nameable();

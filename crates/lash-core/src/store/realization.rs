@@ -61,7 +61,6 @@ mod tests {
     impl SessionCommitStore for NonValidatingFacadeStore {
         async fn load_session(
             &self,
-            _scope: super::super::SessionReadScope,
         ) -> Result<Option<super::super::PersistedSessionRead>, StoreError> {
             Ok(None)
         }
@@ -130,6 +129,9 @@ mod tests {
         let store = NonValidatingFacadeStore::default();
         let state = crate::RuntimeSessionState {
             session_id: "boundary-budget".to_string(),
+            session_lifetime: crate::SessionLifetime::durable(
+                crate::IncarnationId::mint_for_store(),
+            ),
             ..crate::RuntimeSessionState::default()
         };
         let node = crate::SessionNodeRecord {
@@ -143,8 +145,8 @@ mod tests {
                 ),
             },
         };
-        let mut commit = RuntimeCommit::persisted_state(&state, &[]);
-        commit.graph = super::super::GraphCommitDelta::Append {
+        let mut commit = RuntimeCommit::persisted_state_for_test(&state, &[]);
+        commit.graph = super::super::GraphAppend {
             nodes: (0..=RuntimeCommit::MAX_COMMIT_NODE_COUNT)
                 .map(|index| crate::SessionNodeRecord {
                     node_id: format!("node-{index}"),

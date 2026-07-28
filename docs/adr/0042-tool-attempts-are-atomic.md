@@ -33,12 +33,10 @@ Nested tool-batch dispatch from a tool attempt remains prohibited; authors must
 decompose that composition into process steps.
 
 The former `ToolContext::durable_effects()` facade and its `DurableStep`
-producer are removed. The serialized `DurableStep` command and outcome remain
-accepted for one release so existing journal data can be read, but new code
-does not produce them. External waits use deferred tool completion when the
-whole job has one eventual tool result. Workflows with multiple durable
-effects, waits, or decisions model each boundary as a process step and pass
-durable data between those steps.
+producer are removed, including the serialized command and outcome. External
+waits use deferred tool completion when the whole job has one eventual tool
+result. Workflows with multiple durable effects, waits, or decisions model each
+boundary as a process step and pass durable data between those steps.
 
 Atomic attempts provide replay after a completed outcome: replay returns the
 recorded tool result without invoking the provider or any other in-attempt work

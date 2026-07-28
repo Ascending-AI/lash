@@ -29,16 +29,16 @@
         <div class="section">
           <div class="section-header">
             <h2>No Durable State In Process Memory</h2>
-            <p><code>LashRuntime.state</code> (<code>RuntimeSessionState</code>) is a <strong>rehydratable working copy</strong>, not a source of truth. It is loaded via <code>RuntimePersistence::load_session</code> and refreshed via <code>refresh_session_graph_from_store</code>; <code>Residency</code> controls whether a load rehydrates the full graph or just the active path.</p>
+            <p><code>LashRuntime.state</code> (<code>RuntimeSessionState</code>) is a <strong>rehydratable working copy</strong>, not a source of truth. It is loaded via <code>RuntimePersistence::load_session</code> and refreshed via <code>refresh_session_graph_from_store</code>; durable loads rehydrate the session's leaf-to-root history.</p>
           </div>
           <p>The other in-memory fields on <code>LashRuntime</code> are either ephemeral per-turn accumulators (<code>shared_token_ledger</code>, drained into <code>state</code> at commit) or per-worker coordination (<code>managed_sessions</code>, <code>managed_turns</code>, what <em>this</em> instance is currently running). None of it is durable truth.</p>
           <p>Durable truth lives behind a single trait, <code>RuntimePersistence</code> (<code>crates/lash-core/src/store/mod.rs</code>), whose surface is exactly a durable-object store:</p>
           <ul class="bullets">
             <li><code>load_session</code>, <code>load_node</code>: rehydrate working state.</li>
             <li><code>try_claim_session_execution_lease</code>, <code>renew_session_execution_lease</code>, <code>release_session_execution_lease</code>: the durable single-writer execution lane for a session. Foreground turns, pending user input dispatch, wake delivery, and mutating session commands must hold this lease before touching session work.</li>
-            <li><code>commit_runtime_state</code>: fenced session-head commit. The live session execution lease is verified in the same transaction as the head revision CAS; CAS is the backstop, not the normal concurrency mechanism.</li>
+            <li><code>commit_runtime_state</code>: operation-stamped session-head commit. The head revision CAS is the exclusive commit authority; the session execution lease only coordinates who should spend work.</li>
             <li><code>enqueue_queued_work</code>, <code>claim_ready_queued_work</code>, <code>renew_/abandon_/cancel_*</code>: a durable work queue with <code>claim_id</code>, owner identity plus incarnation, <code>claim_token</code>, and <code>claim_fencing_token</code>. Claims are also fenced by the current session execution lease.</li>
-            <li><code>save_/load_session_meta</code>, <code>tombstone_nodes</code>, <code>vacuum</code>, <code>gc_unreachable</code>.</li>
+            <li><code>save_/load_session_meta</code>, <code>vacuum</code>, <code>gc_unreachable</code>.</li>
           </ul>
           <p>Any backend that satisfies this trait (and the <code>ProcessRegistry</code> / <code>LashlangArtifactStore</code> traits) is a valid store. The backend-agnostic conformance suite (<code>lash_core::testing::conformance</code>) is what guarantees a new backend behaves identically.</p>
         </div>
@@ -101,7 +101,7 @@ flowchart LR
                 <tr><td>queue with claim + fencing tokens</td><td>exactly-once work pickup by any lease-holding session runner</td><td><code>queued_work_batches</code></td></tr>
                 <tr><td>effect replay keys + <code>lash-restate</code></td><td>re-run a turn on another worker, replay effects</td><td><code>crates/lash-restate</code></td></tr>
                 <tr><td><code>lash-postgres-store</code> + <code>lash-s3-store</code></td><td>networked runtime/process/trigger/artifact state plus content-addressed attachment bytes</td><td><code>crates/lash-postgres-store</code>, <code>crates/lash-s3-store</code></td></tr>
-                <tr><td>rehydratable <code>state</code> + <code>Residency</code></td><td>no durable-only memory; reload anywhere</td><td><code>runtime/session_ops.rs</code></td></tr>
+                <tr><td>rehydratable <code>state</code></td><td>no durable-only memory; reload anywhere</td><td><code>runtime/session_ops.rs</code></td></tr>
               </tbody>
             </table>
           </div>
@@ -120,7 +120,7 @@ flowchart LR
                 <tr><td><strong>Turn durability across workers</strong></td><td>Deploy turns under <strong>Restate</strong> with <code>RestateRuntimeEffectController</code>; a crash reruns the handler and replays effect outcomes before the final session commit.</td></tr>
                 <tr><td><strong>Fleet work dispatch</strong></td><td>Restate can push handlers for turn and process workflows, while shared queue and process rows retain claim/fencing semantics for recoverable work. The distributed worker E2E exercises two workers behind an h2c proxy.</td></tr>
                 <tr><td><strong>Session-agnostic ingress</strong></td><td>External signals must route to whichever worker holds the session, so ingress must not be bolted to one session. See Triggers below.</td></tr>
-                <tr><td><strong>Affinity vs pure reload</strong></td><td>A routing policy choice: <code>session_id</code> affinity (warm working-copy cache) vs reload-per-request (simpler, more store reads). The session execution lease supports either; <code>Residency</code> tunes reload cost.</td></tr>
+                <tr><td><strong>Affinity vs pure reload</strong></td><td>A routing policy choice: <code>session_id</code> affinity (warm working-copy cache) vs reload-per-request (simpler, more store reads). The session execution lease supports either.</td></tr>
                 <tr><td><strong>Operations envelope</strong></td><td>Choose Postgres and object-store sizing, Restate retention/ingress topology, trace collection, idempotency-key policy, and replay observability for the host product.</td></tr>
               </tbody>
             </table>

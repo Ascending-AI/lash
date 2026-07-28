@@ -439,8 +439,7 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
                 driver.turn_pipeline.state().clone(),
                 Arc::clone(&driver.host.core.clock),
                 driver.turn_pipeline.state().turn_scope(&driver.turn_id),
-            )
-            .with_session_execution_lease(driver.session_execution_lease.clone()),
+            ),
             llm_stream_summaries: driver.llm_stream_summaries.clone(),
             llm_calls: Vec::new(),
             next_llm_ordinal: driver.next_llm_ordinal,

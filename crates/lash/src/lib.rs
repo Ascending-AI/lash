@@ -170,11 +170,10 @@ pub mod persistence {
     };
     pub use lash_core::store::queued_work;
     pub use lash_core::store::{
-        GraphCommitDelta, HydratedSessionCheckpoint, NodeRefcountVerification, OperationId,
+        GraphAppend, HydratedSessionCheckpoint, NodeRefcountVerification, OperationId,
         PersistedSessionRead, RealizedNodeTimestamp, RuntimeCommit, RuntimeCommitResult,
         RuntimeTurnCommitStamp, SessionCheckpoint, SessionHead, SessionHeadMeta,
         commit_runtime_state_verified, graph_realization_digest, load_persisted_session_state,
-        load_persisted_session_state_active_path,
     };
     pub use lash_core::{
         AttachmentReclamationReport, AttachmentRootSet, AttachmentStore, InMemoryAttachmentStore,
@@ -187,8 +186,8 @@ pub mod persistence {
         RuntimePersistence, SessionCommitStore, SessionExecutionLease,
         SessionExecutionLeaseClaimOutcome, SessionExecutionLeaseCompletion,
         SessionExecutionLeaseFence, SessionExecutionLeaseStore, SessionGraph, SessionHistoryRecord,
-        SessionLifetime, SessionMeta, SessionNodeRecord, SessionReadScope, SessionReadView,
-        SessionRelation, StoreError, StoreMaintenance, TurnInputStore, VacuumReport,
+        SessionLifetime, SessionMeta, SessionNodeRecord, SessionReadView, SessionRelation,
+        StoreError, StoreMaintenance, TurnInputStore, VacuumReport,
     };
     #[cfg(feature = "rlm")]
     pub use lash_lashlang_runtime::{InMemoryLashlangArtifactStore, LashlangArtifactStore};
@@ -388,8 +387,8 @@ pub mod process {
 pub mod durability {
     pub use lash_core::{
         DurableProcessWorker, DurableProcessWorkerConfig, EffectHost, InlineEffectHost,
-        LeaseTimings, LeaseTimingsError, ProcessDrainReport, Residency, RuntimeEnvironment,
-        RuntimeHostConfig, TerminationPolicy,
+        LeaseTimings, LeaseTimingsError, ProcessDrainReport, RuntimeEnvironment, RuntimeHostConfig,
+        TerminationPolicy,
     };
 }
 

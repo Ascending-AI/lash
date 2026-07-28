@@ -3,8 +3,8 @@ use std::sync::Arc;
 
 use lash_core::{
     LeaseOwnerIdentity, LeaseOwnerLiveness, RuntimeCommit, RuntimePersistence, RuntimeSessionState,
-    RuntimeTurnCommitStamp, SessionExecutionLease, SessionExecutionLeaseClaimOutcome,
-    SessionPolicy, SessionRelation, SessionStoreCreateRequest, SessionStoreFactory, StoreError,
+    SessionExecutionLease, SessionExecutionLeaseClaimOutcome, SessionPolicy, SessionRelation,
+    SessionStoreCreateRequest, SessionStoreFactory, StoreError,
 };
 use serde::Serialize;
 use serde_json::{Value, json};
@@ -461,7 +461,7 @@ async fn stale_head_transaction_is_rejected(
         .ok_or_else(|| format!("session `{session_id}` has no metadata"))?
         .incarnation_id;
     let expected_head_revision = store
-        .load_session(lash_core::SessionReadScope::FullGraph)
+        .load_session()
         .await
         .map_err(|err| format!("load current session head: {err}"))?
         .map_or(0, |read| read.head_revision);
@@ -472,7 +472,7 @@ async fn stale_head_transaction_is_rejected(
         ..RuntimeSessionState::default()
     };
     store
-        .commit_runtime_state(RuntimeCommit::persisted_state(&current, &[]))
+        .commit_runtime_state(RuntimeCommit::persisted_state_for_test(&current, &[]))
         .await
         .map_err(|err| format!("establish current session head: {err}"))?;
     let stale = RuntimeSessionState {
@@ -482,7 +482,7 @@ async fn stale_head_transaction_is_rejected(
         ..RuntimeSessionState::default()
     };
     let err = store
-        .commit_runtime_state(RuntimeCommit::persisted_state(&stale, &[]))
+        .commit_runtime_state(RuntimeCommit::persisted_state_for_test(&stale, &[]))
         .await
         .expect_err("stale-head transaction must fail");
     if !matches!(err, StoreError::HeadRevisionConflict { .. }) {
@@ -518,15 +518,11 @@ async fn final_commit_retry_and_conflict_are_fenced(
         session_lifetime: lash_core::SessionLifetime::durable(incarnation_id.clone()),
         ..RuntimeSessionState::default()
     };
-    let base_commit = RuntimeCommit::persisted_state(&state, &[]);
-    let turn_commit_hash = base_commit
-        .turn_commit_hash()
-        .map_err(|err| format!("hash final commit: {err}"))?;
-    let stamped_commit = base_commit.with_turn_commit(RuntimeTurnCommitStamp::new(
-        session_id,
-        lash_core::OperationId::turn(session_id, "backend-contention-final-turn", "final"),
-        turn_commit_hash.clone(),
-    ));
+    let operation =
+        lash_core::OperationId::turn(session_id, "backend-contention-final-turn", "final");
+    let (stamped_commit, _) = RuntimeCommit::persisted_state_for_test(&state, &[])
+        .with_operation(operation.clone())
+        .map_err(|err| format!("stamp final commit: {err}"))?;
     let owner =
         LeaseOwnerIdentity::opaque("final-commit-owner", "final-commit-owner:incarnation-001");
     let lease = acquired(
@@ -539,7 +535,6 @@ async fn final_commit_retry_and_conflict_are_fenced(
         .commit_runtime_state(
             stamped_commit
                 .clone()
-                .with_session_execution_lease(lease.fence())
                 .releasing_session_execution_lease(lease.completion()),
         )
         .await
@@ -558,16 +553,11 @@ async fn final_commit_retry_and_conflict_are_fenced(
         turn_index: 1,
         ..RuntimeSessionState::default()
     };
-    let changed_commit = RuntimeCommit::persisted_state(&changed_state, &[]);
-    let changed_hash = changed_commit
-        .turn_commit_hash()
-        .map_err(|err| format!("hash changed final commit: {err}"))?;
+    let (changed_commit, _) = RuntimeCommit::persisted_state_for_test(&changed_state, &[])
+        .with_operation(operation)
+        .map_err(|err| format!("stamp changed final commit: {err}"))?;
     let err = store
-        .commit_runtime_state(changed_commit.with_turn_commit(RuntimeTurnCommitStamp::new(
-            session_id,
-            lash_core::OperationId::turn(session_id, "backend-contention-final-turn", "final"),
-            changed_hash,
-        )))
+        .commit_runtime_state(changed_commit)
         .await
         .expect_err("changed retry with same turn id must conflict");
     if !matches!(err, StoreError::RuntimeTurnCommitConflict { .. }) {

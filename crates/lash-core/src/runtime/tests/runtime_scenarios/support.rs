@@ -6,8 +6,8 @@ pub(crate) use crate::store::{
 };
 pub(crate) use crate::{
     LeaseOwnerIdentity, LeaseOwnerLiveness, PendingTurnInput, PendingTurnInputDraft, RuntimeCommit,
-    SessionExecutionLease, SessionExecutionLeaseClaimOutcome, SessionReadScope, StoreError,
-    TurnInput, TurnInputCheckpointBoundary, TurnInputClaim, TurnInputIngress, TurnInputState,
+    SessionExecutionLease, SessionExecutionLeaseClaimOutcome, StoreError, TurnInput,
+    TurnInputCheckpointBoundary, TurnInputClaim, TurnInputIngress, TurnInputState,
 };
 pub(crate) use helpers::RecordingStore;
 

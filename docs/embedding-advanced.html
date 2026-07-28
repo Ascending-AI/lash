@@ -81,40 +81,7 @@ let core = lash::LashCore::rlm_builder(factory)
             <h2>Session Lifecycle</h2>
             <p>Two states: <strong>active</strong> (resident, ready) and <strong>parked</strong> (flushed; only id + store reference held). Opening an existing id rehydrates from the store: one read of the graph head plus referenced snapshots.</p>
           </div>
-          <p>Sessions park automatically when the handle drops. Long-running servers can hold thousands of session ids cheaply. Residency policy controls in-memory trimming while a session is active:</p>
-          <div class="two-col">
-            <article class="panel">
-              <h3><code>Residency::KeepAll</code> (default)</h3>
-              <p>All graph nodes stay resident. Fastest re-reads. Interactive sessions.</p>
-            </article>
-            <article class="panel">
-              <h3><code>Residency::ActivePathOnly</code></h3>
-              <p>Only active-path nodes resident; orphans on disk. Lower memory, occasional store reads when crossing forks. Long-lived multi-session servers.</p>
-            </article>
-          </div>
-          <pre data-lang="rust" data-snippet="embedding_advanced#active-path-residency"><code>use std::sync::Arc;
-
-use lash::durability::{InlineEffectHost, Residency};
-use lash::persistence::FileAttachmentStore;
-use lash_sqlite_store::Store;
-
-let factory = lash::rlm::RlmProtocolPluginFactory::new(
-    lash::rlm::RlmProtocolPluginConfig::default(),
-    Arc::new(Store::open(&amp;data_dir.join("artifacts.db")).await?),
-);
-let core = lash::LashCore::rlm_builder(factory)
-    .provider(provider)
-    .model(
-        lash::ModelSpec::from_token_limits(model.clone(), Default::default(), 200_000, None)
-            .expect("valid model metadata"),
-    )
-    .store_factory(store_factory)
-    .effect_host(Arc::new(InlineEffectHost::default()))
-    .attachment_store(Arc::new(FileAttachmentStore::new(
-        data_dir.join("attachments"),
-    )))
-    .residency(Residency::ActivePathOnly)
-    .build()?;</code></pre>
+          <p>Sessions park automatically when the handle drops. Long-running servers can hold thousands of session ids cheaply. Reopening a session loads its one durable leaf-to-root history.</p>
           <p>Plugin background work (tasks tracked via <code>ToolContext::processes()</code>, post-turn observation summaries, MCP warm-ups) continues past turn return. To drain it before returning (one-shot processes that need observations persisted before exit):</p>
           <pre data-lang="rust" data-snippet="embedding_advanced#refresh-background-graph"><code>session.refresh_background_graph().await?;</code></pre>
           <p>Exposed by the CLI as <code>--await-background-work</code> on <code>lash --print</code>. Embedders rarely need it outside short-lived processes.</p>
@@ -367,7 +334,6 @@ let core = lash::LashCore::rlm_builder(factory)
     .attachment_store(std::sync::Arc::new(
         lash::persistence::FileAttachmentStore::new(data_dir.join("attachments")),
     ))
-    .residency(lash::durability::Residency::ActivePathOnly)
     .build()?;</code></pre>
           <p>Streaming is semantic: <code>TurnBuilder::stream</code> emits <code>TurnActivity</code> and resolves to a <code>TurnResult</code>. Raw runtime telemetry belongs in tracing, not the app surface.</p>
         </div>

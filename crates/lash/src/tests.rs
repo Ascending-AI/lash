@@ -64,7 +64,6 @@ fn session_completion_matches(
 struct SnapshotStore {
     read: std::sync::Mutex<Option<lash_core::store::PersistedSessionRead>>,
     session_meta: std::sync::Mutex<Option<lash_core::SessionMeta>>,
-    scopes: std::sync::Mutex<Vec<lash_core::SessionReadScope>>,
     runtime_turn_commits: std::sync::Mutex<
         std::collections::HashMap<
             (String, String),
@@ -111,14 +110,9 @@ impl SnapshotStore {
                 token_ledger: Vec::new(),
             })),
             session_meta: std::sync::Mutex::new(Some(session_meta)),
-            scopes: std::sync::Mutex::new(Vec::new()),
             runtime_turn_commits: std::sync::Mutex::new(std::collections::HashMap::new()),
             session_execution_leases: std::sync::Mutex::new(HashMap::new()),
         }
-    }
-
-    fn scopes(&self) -> Vec<lash_core::SessionReadScope> {
-        self.scopes.lock().expect("snapshot scopes lock").clone()
     }
 
     fn set_head_provider_id(&self, provider_id: impl Into<String>) {
@@ -174,25 +168,11 @@ impl lash_core::SessionCommitStore for SnapshotStore {
 
     async fn load_session(
         &self,
-        scope: lash_core::SessionReadScope,
     ) -> std::result::Result<
         Option<lash_core::store::PersistedSessionRead>,
         lash_core::store::StoreError,
     > {
-        self.scopes
-            .lock()
-            .expect("snapshot scopes lock")
-            .push(scope.clone());
-        let mut read = self.read.lock().expect("snapshot store lock").clone();
-        if let Some(read) = read.as_mut()
-            && let lash_core::SessionReadScope::ActivePath { leaf_node_id } = scope
-        {
-            if let Some(leaf_node_id) = leaf_node_id {
-                read.graph.set_leaf_node_id(Some(leaf_node_id));
-            }
-            read.graph = read.graph.trim_to_active_path();
-        }
-        Ok(read)
+        Ok(self.read.lock().expect("snapshot store lock").clone())
     }
 
     async fn load_node(
@@ -234,74 +214,40 @@ impl lash_core::SessionCommitStore for SnapshotStore {
                 timestamp: node.timestamp.clone(),
             })
             .collect();
-        if let Some(completed) = &commit.turn_commit {
-            let operation_key = completed.operation.storage_key()?;
-            if completed.session_id != commit.session_id {
-                return Err(lash_core::store::StoreError::RuntimeTurnCommitConflict {
-                    session_id: completed.session_id.clone(),
-                    turn_id: operation_key,
-                });
-            }
-            let key = (
-                completed.session_id.clone(),
-                completed.operation.storage_key()?,
-            );
-            if let Some((stored_hash, result)) = self
-                .runtime_turn_commits
-                .lock()
-                .expect("runtime turn commits lock")
-                .get(&key)
-                .cloned()
-            {
-                if stored_hash == completed.turn_commit_hash {
-                    return Ok(result);
-                }
-                return Err(lash_core::store::StoreError::RuntimeTurnCommitConflict {
-                    session_id: completed.session_id.clone(),
-                    turn_id: completed.operation.storage_key()?,
-                });
-            }
-        }
-        let Some(fence) = &commit.session_execution_lease else {
-            return Err(lash_core::store::StoreError::SessionExecutionLeaseExpired {
-                session_id: commit.session_id.clone(),
+        let completed = &commit.turn_commit;
+        let operation_key = completed.operation.storage_key()?;
+        if completed.session_id != commit.session_id {
+            return Err(lash_core::store::StoreError::RuntimeTurnCommitConflict {
+                session_id: completed.session_id.clone(),
+                turn_id: operation_key,
             });
-        };
-        let live_lease = {
-            self.session_execution_leases
-                .lock()
-                .expect("session execution leases lock")
-                .get(&commit.session_id)
-                .cloned()
-        };
-        if !live_lease
-            .as_ref()
-            .is_some_and(|lease| session_fence_matches(lease, fence))
+        }
+        let key = (
+            completed.session_id.clone(),
+            completed.operation.storage_key()?,
+        );
+        if let Some((stored_hash, result)) = self
+            .runtime_turn_commits
+            .lock()
+            .expect("runtime turn commits lock")
+            .get(&key)
+            .cloned()
         {
-            return Err(lash_core::store::StoreError::SessionExecutionLeaseExpired {
-                session_id: commit.session_id.clone(),
+            if stored_hash == completed.turn_commit_hash {
+                return Ok(result);
+            }
+            return Err(lash_core::store::StoreError::RuntimeTurnCommitConflict {
+                session_id: completed.session_id.clone(),
+                turn_id: completed.operation.storage_key()?,
             });
         }
         let existing_graph = read
             .as_ref()
             .map(|read| read.graph.clone())
             .unwrap_or_default();
-        let graph = match commit.graph.clone() {
-            lash_core::store::GraphCommitDelta::Unchanged { leaf_node_id } => {
-                let mut graph = existing_graph;
-                graph.set_leaf_node_id(leaf_node_id);
-                graph
-            }
-            lash_core::store::GraphCommitDelta::Append {
-                nodes,
-                leaf_node_id,
-            } => {
-                let mut graph = existing_graph;
-                graph.extend_node_records(nodes);
-                graph.set_leaf_node_id(leaf_node_id);
-                graph
-            }
-        };
+        let mut graph = existing_graph;
+        graph.extend_node_records(commit.graph.nodes.iter().cloned());
+        graph.set_leaf_node_id(commit.graph.leaf_node_id.clone());
         *read = Some(lash_core::store::PersistedSessionRead {
             session_id: commit.session_id.clone(),
             head_revision: 8,
@@ -321,18 +267,16 @@ impl lash_core::SessionCommitStore for SnapshotStore {
             enqueued_queue_batches: Vec::new(),
             turn_input_applications: Vec::new(),
         };
-        if let Some(completed) = &commit.turn_commit {
-            self.runtime_turn_commits
-                .lock()
-                .expect("runtime turn commits lock")
-                .insert(
-                    (
-                        completed.session_id.clone(),
-                        completed.operation.storage_key()?,
-                    ),
-                    (completed.turn_commit_hash.clone(), result.clone()),
-                );
-        }
+        self.runtime_turn_commits
+            .lock()
+            .expect("runtime turn commits lock")
+            .insert(
+                (
+                    completed.session_id.clone(),
+                    completed.operation.storage_key()?,
+                ),
+                (completed.turn_commit_hash.clone(), result.clone()),
+            );
         if let Some(completion) = &commit.release_session_execution_lease {
             let mut leases = self
                 .session_execution_leases
@@ -673,13 +617,6 @@ impl lash_core::TurnInputStore for SnapshotStore {
 
 #[async_trait]
 impl lash_core::StoreMaintenance for SnapshotStore {
-    async fn tombstone_nodes(
-        &self,
-        _ids: &[String],
-    ) -> std::result::Result<(), lash_core::store::StoreError> {
-        Ok(())
-    }
-
     async fn vacuum(
         &self,
     ) -> std::result::Result<lash_core::VacuumReport, lash_core::store::StoreError> {
@@ -747,7 +684,6 @@ impl lash_core::SessionCommitStore for BoundSessionStore {
 
     async fn load_session(
         &self,
-        _scope: lash_core::SessionReadScope,
     ) -> std::result::Result<
         Option<lash_core::store::PersistedSessionRead>,
         lash_core::store::StoreError,
@@ -1021,13 +957,6 @@ impl lash_core::QueuedWorkStore for BoundSessionStore {
 
 #[async_trait]
 impl lash_core::StoreMaintenance for BoundSessionStore {
-    async fn tombstone_nodes(
-        &self,
-        _ids: &[String],
-    ) -> std::result::Result<(), lash_core::store::StoreError> {
-        Ok(())
-    }
-
     async fn vacuum(
         &self,
     ) -> std::result::Result<lash_core::VacuumReport, lash_core::store::StoreError> {

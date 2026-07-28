@@ -365,8 +365,6 @@ impl SessionStoreFactory for InMemorySessionStoreFactory {
                 current_frame_node_id: Some(current_frame_node_id),
                 checkpoint_ref: Some(checkpoint_ref),
                 leaf_node_id: Some(request.node_id.clone()),
-                graph_node_count: resident_graph.nodes.len(),
-                token_ledger: Vec::new(),
             });
         *store.session_meta.lock().expect("lock session meta") = Some(crate::SessionMeta {
             session_id: request.session_id.clone(),

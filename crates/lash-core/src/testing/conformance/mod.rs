@@ -66,9 +66,8 @@ use crate::{
     RuntimeInvocation, RuntimePersistence, RuntimeScope, RuntimeSessionState, RuntimeSubject,
     RuntimeTurnCommitStamp, ScopedEffectController, SessionMeta, SessionNodePayload,
     SessionNodeRecord, SessionObservationEvent, SessionObservationEventPayload, SessionPolicy,
-    SessionProcessEventKind, SessionQueueEventKind, SessionReadScope, SessionRelation,
-    SessionRevision, SlotPolicy, StoreError, TokenLedgerEntry, TokenUsage, ToolState, TurnActivity,
-    TurnEvent,
+    SessionProcessEventKind, SessionQueueEventKind, SessionRelation, SessionRevision, SlotPolicy,
+    StoreError, TokenLedgerEntry, TokenUsage, ToolState, TurnActivity, TurnEvent,
 };
 use crate::{AttachmentStore, AttachmentStoreError, AttachmentStorePersistence};
 use lash_sansio::{AttachmentCreateMeta, AttachmentTypeMetadata, MediaType};

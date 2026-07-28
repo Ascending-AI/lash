@@ -17,7 +17,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use lash_core::store::{GraphCommitDelta, RuntimeCommitResult, SessionHeadMeta};
+use lash_core::store::{GraphAppend, RuntimeCommitResult};
 use lash_core::{
     InMemorySessionStore, IncarnationId, LeaseOwnerIdentity, PendingTurnInputDraft, ProtocolEvent,
     RuntimeCommit, RuntimePersistence, RuntimeSessionState, RuntimeTurnCommitStamp,
@@ -37,10 +37,8 @@ const SHARED_DATABASE_LOCK_KEY: i64 = 0x4c41_5348_5f50_4754;
 enum CaseName {
     DuplicateWithinAppend,
     DuplicateAcrossCommits,
-    AppendTombstoned,
-    AppendTombstonedThenVacuumed,
-    TombstonedLeaf,
     AppendDuplicateAfterAppendSeed,
+    NodelessLeafMove,
     StaleExpectedHeadRevision,
     IdenticalAndMutatedTurnCommitReplay,
     SettleClaimAfterLeaseGenerationSuperseded,
@@ -51,10 +49,8 @@ impl CaseName {
         match self {
             Self::DuplicateWithinAppend => "duplicate_node_id_within_one_append",
             Self::DuplicateAcrossCommits => "duplicate_node_id_across_two_commits",
-            Self::AppendTombstoned => "append_onto_tombstoned_node_id",
-            Self::AppendTombstonedThenVacuumed => "append_onto_tombstoned_then_vacuumed_node_id",
-            Self::TombstonedLeaf => "unchanged_commit_rejects_tombstoned_leaf",
             Self::AppendDuplicateAfterAppendSeed => "append_duplicate_node_id_after_append_seed",
+            Self::NodelessLeafMove => "nodeless_commit_cannot_move_leaf",
             Self::StaleExpectedHeadRevision => "stale_expected_head_revision",
             Self::IdenticalAndMutatedTurnCommitReplay => "identical_and_mutated_turn_commit_replay",
             Self::SettleClaimAfterLeaseGenerationSuperseded => {
@@ -78,10 +74,6 @@ enum StoreOperation {
         graph: GraphSpec,
         turn_commit: Option<TurnCommitSpec>,
     },
-    Tombstone {
-        node_ids: Vec<&'static str>,
-    },
-    Vacuum,
     EnqueueNextTurnInput,
     AcquireSessionLease {
         slot: LeaseSlot,
@@ -94,7 +86,6 @@ enum StoreOperation {
         lease: LeaseSlot,
     },
     CommitStaleTurnInputClaim {
-        current_lease: LeaseSlot,
         expected_head_revision: u64,
     },
 }
@@ -103,8 +94,6 @@ impl StoreOperation {
     fn label(&self) -> &'static str {
         match self {
             Self::Commit { label, .. } => label,
-            Self::Tombstone { .. } => "tombstone",
-            Self::Vacuum => "vacuum",
             Self::EnqueueNextTurnInput => "enqueue_next_turn_input",
             Self::AcquireSessionLease {
                 slot: LeaseSlot::First,
@@ -124,14 +113,9 @@ impl StoreOperation {
 }
 
 #[derive(Clone, Debug)]
-enum GraphSpec {
-    Unchanged {
-        leaf_node_id: Option<&'static str>,
-    },
-    Append {
-        nodes: Vec<NodeSpec>,
-        leaf_node_id: Option<&'static str>,
-    },
+struct GraphSpec {
+    nodes: Vec<NodeSpec>,
+    leaf_node_id: Option<&'static str>,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -162,7 +146,7 @@ impl NodeSpec {
                 .parent_node_id
                 .map(|node_id| scoped_node_id(session_id, incarnation_id, node_id)),
             timestamp: "2026-07-26T00:00:00Z".to_string(),
-            payload: if self.parent_node_id.is_none() {
+            payload: if is_frame_alias(self.node_id) {
                 SessionNodePayload::FrameOpen {
                     frame_key,
                     reason: lash_core::AgentFrameReason::initial(),
@@ -195,7 +179,10 @@ fn differential_frame_key(node_id: &str) -> String {
 }
 
 fn is_frame_alias(node_id: &str) -> bool {
-    matches!(node_id, "collision" | "root" | "stale-claim-node")
+    matches!(
+        node_id,
+        "active-frame" | "collision" | "root" | "stale-claim-node"
+    )
 }
 
 fn scoped_node_id(session_id: &str, incarnation_id: &IncarnationId, node_id: &str) -> String {
@@ -219,14 +206,10 @@ enum LeaseSlot {
 }
 
 fn append(nodes: Vec<NodeSpec>, leaf_node_id: Option<&'static str>) -> GraphSpec {
-    GraphSpec::Append {
+    GraphSpec {
         nodes,
         leaf_node_id,
     }
-}
-
-fn unchanged(leaf_node_id: Option<&'static str>) -> GraphSpec {
-    GraphSpec::Unchanged { leaf_node_id }
 }
 
 fn commit(label: &'static str, expected_head_revision: u64, graph: GraphSpec) -> StoreOperation {
@@ -267,61 +250,6 @@ fn generated_cases() -> Vec<GeneratedCase> {
             ],
         },
         GeneratedCase {
-            name: CaseName::AppendTombstoned,
-            operations: vec![
-                commit(
-                    "append_original",
-                    0,
-                    append(vec![original()], Some("collision")),
-                ),
-                StoreOperation::Tombstone {
-                    node_ids: vec!["collision"],
-                },
-                commit(
-                    "append_tombstoned_id",
-                    1,
-                    append(vec![mutated()], Some("collision")),
-                ),
-            ],
-        },
-        GeneratedCase {
-            name: CaseName::AppendTombstonedThenVacuumed,
-            operations: vec![
-                commit(
-                    "append_original",
-                    0,
-                    append(vec![original()], Some("collision")),
-                ),
-                StoreOperation::Tombstone {
-                    node_ids: vec!["collision"],
-                },
-                StoreOperation::Vacuum,
-                commit(
-                    "append_vacuumed_id",
-                    1,
-                    append(vec![mutated()], Some("collision")),
-                ),
-            ],
-        },
-        GeneratedCase {
-            name: CaseName::TombstonedLeaf,
-            operations: vec![
-                commit(
-                    "append_original",
-                    0,
-                    append(vec![original()], Some("collision")),
-                ),
-                StoreOperation::Tombstone {
-                    node_ids: vec!["collision"],
-                },
-                commit(
-                    "unchanged_with_tombstoned_leaf",
-                    1,
-                    unchanged(Some("collision")),
-                ),
-            ],
-        },
-        GeneratedCase {
             name: CaseName::AppendDuplicateAfterAppendSeed,
             // A duplicate append id must be rejected even when its parent and
             // terminal leaf otherwise form a valid linear continuation.
@@ -349,6 +277,31 @@ fn generated_cases() -> Vec<GeneratedCase> {
                         Some("active-leaf"),
                     ),
                 ),
+            ],
+        },
+        GeneratedCase {
+            name: CaseName::NodelessLeafMove,
+            operations: vec![
+                commit(
+                    "seed_graph",
+                    0,
+                    append(
+                        vec![
+                            NodeSpec::new("root", None, "root"),
+                            NodeSpec::new("active-frame", Some("root"), "active"),
+                        ],
+                        Some("active-frame"),
+                    ),
+                ),
+                StoreOperation::Commit {
+                    label: "move_leaf_without_appending_nodes",
+                    expected_head_revision: 1,
+                    graph: append(Vec::new(), Some("root")),
+                    turn_commit: Some(TurnCommitSpec {
+                        turn_id: "nodeless-leaf-move",
+                        hash: "nodeless-leaf-move",
+                    }),
+                },
             ],
         },
         GeneratedCase {
@@ -424,7 +377,6 @@ fn generated_cases() -> Vec<GeneratedCase> {
                     owner: "successor-owner",
                 },
                 StoreOperation::CommitStaleTurnInputClaim {
-                    current_lease: LeaseSlot::Successor,
                     expected_head_revision: 0,
                 },
             ],
@@ -436,23 +388,17 @@ fn materialize_graph(
     session_id: &str,
     incarnation_id: &IncarnationId,
     spec: &GraphSpec,
-) -> GraphCommitDelta {
-    match spec {
-        GraphSpec::Unchanged { leaf_node_id } => GraphCommitDelta::Unchanged {
-            leaf_node_id: leaf_node_id.map(str::to_string),
-        },
-        GraphSpec::Append {
-            nodes,
-            leaf_node_id,
-        } => GraphCommitDelta::Append {
-            nodes: nodes
-                .iter()
-                .copied()
-                .map(|node| node.materialize(session_id, incarnation_id))
-                .collect(),
-            leaf_node_id: leaf_node_id
-                .map(|node_id| scoped_node_id(session_id, incarnation_id, node_id)),
-        },
+) -> GraphAppend {
+    GraphAppend {
+        nodes: spec
+            .nodes
+            .iter()
+            .copied()
+            .map(|node| node.materialize(session_id, incarnation_id))
+            .collect(),
+        leaf_node_id: spec
+            .leaf_node_id
+            .map(|node_id| scoped_node_id(session_id, incarnation_id, node_id)),
     }
 }
 
@@ -469,7 +415,7 @@ fn runtime_commit(
         session_lifetime: lash_core::SessionLifetime::durable(incarnation_id.clone()),
         ..RuntimeSessionState::default()
     };
-    let mut commit = RuntimeCommit::persisted_state(&state, &[]);
+    let mut commit = RuntimeCommit::persisted_state_for_test(&state, &[]);
     commit.expected_head_revision = expected_head_revision;
     commit.graph = materialize_graph(session_id, &incarnation_id, graph);
     commit.current_frame_node_id = commit
@@ -480,11 +426,11 @@ fn runtime_commit(
         .map(|node| node.node_id.clone())
         .or(current_frame_node_id);
     if let Some(turn_commit) = turn_commit {
-        commit = commit.with_turn_commit(RuntimeTurnCommitStamp::new(
+        commit.turn_commit = RuntimeTurnCommitStamp::new(
             session_id,
             lash_core::store::OperationId::turn(session_id, turn_commit.turn_id, "differential"),
             turn_commit.hash,
-        ));
+        );
     }
     commit
 }
@@ -597,8 +543,8 @@ impl RawDurableReader {
             }
             Self::Sqlite { path, session_id } => read_sqlite_durable_state(path, session_id),
             Self::Postgres { pool, session_id } => {
-                let head: Option<(i64, String)> = sqlx::query_as(
-                    "SELECT head_revision, head_json
+                let head: Option<(i64, Option<String>)> = sqlx::query_as(
+                    "SELECT head_revision, leaf_node_id
                      FROM lash_sessions
                      WHERE session_id = $1",
                 )
@@ -606,11 +552,9 @@ impl RawDurableReader {
                 .fetch_optional(pool)
                 .await
                 .expect("read Postgres durable head");
-                let (head_revision, leaf_node_id) =
-                    head.map_or((None, None), |(revision, json)| {
-                        let meta: SessionHeadMeta =
-                            serde_json::from_str(&json).expect("decode Postgres durable head");
-                        (Some(revision as u64), meta.leaf_node_id)
+                let (head_revision, leaf_node_id) = head
+                    .map_or((None, None), |(revision, leaf_node_id)| {
+                        (Some(revision as u64), leaf_node_id)
                     });
                 let rows: Vec<(i64, String, Option<String>, String)> = sqlx::query_as(
                     "SELECT seq, node_id, parent_node_id, node_json
@@ -706,9 +650,9 @@ fn read_sqlite_durable_state(path: &Path, session_id: &str) -> RawDurableState {
         .execute_batch("PRAGMA synchronous=NORMAL; PRAGMA foreign_keys=ON;")
         .expect("configure SQLite durable reader pragmas");
 
-    let head: Option<(i64, String)> = connection
+    let head: Option<(i64, Option<String>)> = connection
         .query_row(
-            "SELECT head_revision, head_json
+            "SELECT head_revision, leaf_node_id
              FROM session_head
              WHERE session_id = ?1",
             [session_id],
@@ -716,10 +660,8 @@ fn read_sqlite_durable_state(path: &Path, session_id: &str) -> RawDurableState {
         )
         .optional()
         .expect("read SQLite durable head");
-    let (head_revision, leaf_node_id) = head.map_or((None, None), |(revision, json)| {
-        let meta: SessionHeadMeta =
-            serde_json::from_str(&json).expect("decode SQLite durable head");
-        (Some(revision as u64), meta.leaf_node_id)
+    let (head_revision, leaf_node_id) = head.map_or((None, None), |(revision, leaf_node_id)| {
+        (Some(revision as u64), leaf_node_id)
     });
     let durable_nodes = {
         let mut statement = connection
@@ -851,20 +793,6 @@ impl BackendRunner {
                 }
                 result.map(|result| Some(result.into()))
             }
-            StoreOperation::Tombstone { node_ids } => {
-                let node_ids = node_ids
-                    .iter()
-                    .map(|node_id| {
-                        scoped_node_id(
-                            &self.session_id,
-                            &differential_incarnation_id(&self.session_id),
-                            node_id,
-                        )
-                    })
-                    .collect::<Vec<_>>();
-                self.store.tombstone_nodes(&node_ids).await.map(|_| None)
-            }
-            StoreOperation::Vacuum => self.store.vacuum().await.map(|_| None),
             StoreOperation::EnqueueNextTurnInput => self
                 .store
                 .enqueue_pending_turn_input(
@@ -929,15 +857,13 @@ impl BackendRunner {
                 .await
                 .map(|_| None),
             StoreOperation::CommitStaleTurnInputClaim {
-                current_lease,
                 expected_head_revision,
             } => {
-                let lease = self.lease(*current_lease);
                 let claim = self
                     .stale_turn_input_claim
                     .as_ref()
                     .expect("generated sequence claimed input before stale settlement");
-                let graph = GraphSpec::Append {
+                let graph = GraphSpec {
                     nodes: vec![NodeSpec::new("stale-claim-node", None, "stale-claim")],
                     leaf_node_id: Some("stale-claim-node"),
                 };
@@ -950,7 +876,6 @@ impl BackendRunner {
                             None,
                             self.current_frame_node_id.clone(),
                         )
-                        .with_session_execution_lease(lease.fence())
                         .completing_turn_input_claim(claim.completion()),
                     )
                     .await
@@ -992,7 +917,6 @@ fn normalized_store_error(backend: &str, error: &StoreError) -> String {
         } => format!(
             "SessionIncarnationMismatch({session_id},{expected_incarnation_id},{actual_incarnation_id})"
         ),
-        StoreError::UnsupportedReadScope(_) => "UnsupportedReadScope".to_string(),
         StoreError::UnsupportedStoreOperation { .. } => "UnsupportedStoreOperation".to_string(),
         StoreError::HeadRevisionConflict { .. } => "HeadRevisionConflict".to_string(),
         StoreError::RuntimeTurnCommitConflict { .. } => "RuntimeTurnCommitConflict".to_string(),
@@ -1011,6 +935,7 @@ fn normalized_store_error(backend: &str, error: &StoreError) -> String {
         }
         StoreError::MissingRecordSchemaVersion { .. } => "MissingRecordSchemaVersion".to_string(),
         StoreError::InvalidRecordSchemaVersion { .. } => "InvalidRecordSchemaVersion".to_string(),
+        StoreError::CheckpointComponentMissing { .. } => "CheckpointComponentMissing".to_string(),
         StoreError::NodeIdDerivationMismatch { .. } => "NodeIdDerivationMismatch".to_string(),
         StoreError::NodeIdCollision { .. } => "NodeIdCollision".to_string(),
         StoreError::InvalidGraphLeaf { .. } => "InvalidGraphLeaf".to_string(),
@@ -1138,7 +1063,7 @@ fn render_divergence(
 #[test]
 fn generated_catalog_covers_required_adversarial_shapes() {
     let cases = generated_cases();
-    assert_eq!(cases.len(), 9);
+    assert_eq!(cases.len(), 7);
     assert!(cases.iter().all(|case| !case.operations.is_empty()));
     assert_eq!(
         cases
@@ -1148,10 +1073,8 @@ fn generated_catalog_covers_required_adversarial_shapes() {
         vec![
             "duplicate_node_id_within_one_append",
             "duplicate_node_id_across_two_commits",
-            "append_onto_tombstoned_node_id",
-            "append_onto_tombstoned_then_vacuumed_node_id",
-            "unchanged_commit_rejects_tombstoned_leaf",
             "append_duplicate_node_id_after_append_seed",
+            "nodeless_commit_cannot_move_leaf",
             "stale_expected_head_revision",
             "identical_and_mutated_turn_commit_replay",
             "settle_claim_after_session_lease_generation_superseded_before_reclaim",

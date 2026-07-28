@@ -27,9 +27,7 @@ fn legacy_turn_commit_hash(commit: &RuntimeCommit) -> String {
 
     let mut semantic = commit.clone();
     semantic.expected_head_revision = 0;
-    semantic.session_execution_lease = None;
     semantic.release_session_execution_lease = None;
-    semantic.turn_commit = None;
     let mut value = serde_json::to_value(semantic).expect("serialize legacy commit");
     scrub(&mut value);
     crate::stable_hash::stable_json_sha256_hex(&value).expect("hash legacy commit")
@@ -70,7 +68,7 @@ fn intent_fixture() -> RuntimeCommit {
         }]),
         origin: None,
     };
-    let graph = GraphCommitDelta::Append {
+    let graph = GraphAppend {
         nodes: vec![crate::SessionNodeRecord {
             node_id: node_id.clone(),
             parent_node_id: None,
@@ -83,7 +81,8 @@ fn intent_fixture() -> RuntimeCommit {
         }],
         leaf_node_id: Some(node_id),
     };
-    RuntimeCommit::persisted_state_with_graph_commit(&state, graph, &[])
+    RuntimeCommit::persisted_state_with_graph_commit_and_operation(&state, graph, &[], operation)
+        .expect("build intent fixture")
 }
 
 #[test]
@@ -122,13 +121,10 @@ fn first_persisted_state_commit_derives_and_installs_node_ids() {
     let (commit, persisted_node_ids) =
         RuntimeCommit::persisted_state_with_operation(&mut state, &[], operation)
             .expect("build first append");
-    let GraphCommitDelta::Append {
+    let GraphAppend {
         nodes,
         leaf_node_id,
-    } = commit.graph
-    else {
-        panic!("first graph write must be an append");
-    };
+    } = commit.graph;
     assert_eq!(persisted_node_ids, vec![expected.clone()]);
     assert_eq!(nodes[0].node_id, expected);
     assert_eq!(leaf_node_id, Some(nodes[0].node_id.clone()));
@@ -139,9 +135,7 @@ fn first_persisted_state_commit_derives_and_installs_node_ids() {
 #[test]
 fn with_operation_returns_the_append_id_mapping() {
     let commit = intent_fixture();
-    let GraphCommitDelta::Append { nodes, .. } = &commit.graph else {
-        panic!("fixture graph must append");
-    };
+    let GraphAppend { nodes, .. } = &commit.graph;
     let old_node_id = nodes[0].node_id.clone();
     let operation = OperationId::turn("golden-session", "turn-43", "final");
     let expected_node_id = derive_history_node_id(
@@ -161,13 +155,10 @@ fn with_operation_returns_the_append_id_mapping() {
         mapping,
         vec![(old_node_id.clone(), expected_node_id.clone())]
     );
-    let GraphCommitDelta::Append {
+    let GraphAppend {
         nodes,
         leaf_node_id,
-    } = commit.graph
-    else {
-        panic!("stamped graph must append");
-    };
+    } = commit.graph;
     assert_eq!(nodes[0].node_id, expected_node_id);
     assert_eq!(leaf_node_id, Some(expected_node_id));
 }
@@ -212,8 +203,30 @@ fn legacy_hash_reproduces_random_committed_message_id_conflict() {
 fn intent_hash_golden_vector() {
     assert_eq!(
         intent_fixture().turn_commit_hash().expect("golden intent"),
-        "0fe62517542cefb409fbbd87be90b8db5babc3f1053817cecdf55afd4ae89f64"
+        "c13c70e117af50268f93ae199db1146b93d79e96356f9c8e7fe2289cc3fe6791"
     );
+}
+
+#[test]
+fn session_head_meta_json_omits_column_owned_fields() {
+    let encoded = serde_json::to_value(SessionHeadMeta {
+        schema_version: SESSION_HEAD_META_SCHEMA_VERSION,
+        session_id: "column-owned-head".to_string(),
+        head_revision: 41,
+        config: crate::PersistedSessionConfig::default(),
+        current_frame_node_id: None,
+        checkpoint_ref: Some(BlobRef("checkpoint".to_string())),
+        leaf_node_id: Some("leaf".to_string()),
+    })
+    .expect("serialize session head metadata");
+
+    let object = encoded.as_object().expect("session head metadata object");
+    for column_owned in ["head_revision", "checkpoint_ref", "leaf_node_id"] {
+        assert!(
+            !object.contains_key(column_owned),
+            "{column_owned} must be stored only in its dedicated column"
+        );
+    }
 }
 
 #[test]
@@ -278,9 +291,7 @@ fn intent_hash_is_independent_of_source_and_map_insertion_order() {
     })
     .expect("second body");
     let replace_payload = |commit: &mut RuntimeCommit, body| {
-        let GraphCommitDelta::Append { nodes, .. } = &mut commit.graph else {
-            panic!("fixture is append");
-        };
+        let GraphAppend { nodes, .. } = &mut commit.graph;
         nodes[0].payload = crate::SessionNodePayload::Plugin {
             plugin_type: "ordering".to_string(),
             body: crate::session_graph::SharedJsonValue::new(body),
@@ -299,9 +310,7 @@ fn intent_hash_is_independent_of_source_and_map_insertion_order() {
 fn intent_projection_keeps_payload_timestamp_but_excludes_node_timestamp() {
     let first = intent_fixture();
     let mut observed_later = first.clone();
-    let GraphCommitDelta::Append { nodes, .. } = &mut observed_later.graph else {
-        panic!("fixture is append");
-    };
+    let GraphAppend { nodes, .. } = &mut observed_later.graph;
     nodes[0].timestamp = "2027-01-01T00:00:00Z".to_string();
     assert_eq!(
         first.turn_commit_hash().expect("first hash"),
@@ -314,9 +323,7 @@ fn intent_projection_keeps_payload_timestamp_but_excludes_node_timestamp() {
         (&mut payload_a, "payload-time-a"),
         (&mut payload_b, "payload-time-b"),
     ] {
-        let GraphCommitDelta::Append { nodes, .. } = &mut commit.graph else {
-            panic!("fixture is append");
-        };
+        let GraphAppend { nodes, .. } = &mut commit.graph;
         nodes[0].payload = crate::SessionNodePayload::Plugin {
             plugin_type: "tool-result".to_string(),
             body: crate::session_graph::SharedJsonValue::new(
@@ -360,11 +367,7 @@ fn node_derivation_and_realization_digest_are_independent() {
     let mut commit = intent_fixture();
     let operation = OperationId::turn("golden-session", "turn-42", "final");
     let hash = commit.turn_commit_hash().expect("intent hash");
-    commit.turn_commit = Some(RuntimeTurnCommitStamp::new(
-        "golden-session",
-        operation,
-        hash,
-    ));
+    commit.turn_commit = RuntimeTurnCommitStamp::new("golden-session", operation, hash);
     let incarnation_id = commit
         .durable_incarnation_id("test validation")
         .expect("durable fixture")
@@ -374,9 +377,7 @@ fn node_derivation_and_realization_digest_are_independent() {
         .expect("derived proposal");
 
     let mut rogue = commit.clone();
-    let GraphCommitDelta::Append { nodes, .. } = &mut rogue.graph else {
-        panic!("fixture is append");
-    };
+    let GraphAppend { nodes, .. } = &mut rogue.graph;
     nodes[0].node_id = "rogue".to_string();
     assert!(matches!(
         rogue.validate_node_derivation(&incarnation_id),
@@ -393,7 +394,7 @@ fn node_derivation_and_realization_digest_are_independent() {
 #[test]
 fn node_derivation_remaps_in_batch_parent_edges() {
     let operation = OperationId::turn("session", "turn", "final");
-    let mut graph = GraphCommitDelta::Append {
+    let mut graph = GraphAppend {
         nodes: vec![
             crate::SessionNodeRecord {
                 node_id: "draft-a".to_string(),
@@ -419,9 +420,7 @@ fn node_derivation_remaps_in_batch_parent_edges() {
     graph
         .derive_node_ids("session", &incarnation("session"), &operation)
         .expect("derive node ids");
-    let GraphCommitDelta::Append { nodes, .. } = graph else {
-        panic!("fixture is append");
-    };
+    let GraphAppend { nodes, .. } = graph;
     assert_eq!(
         nodes[1].parent_node_id.as_deref(),
         Some(nodes[0].node_id.as_str())
@@ -434,7 +433,7 @@ fn frame_node_identity_is_stable_across_operation_realization() {
     let incarnation_id = incarnation("session");
     let frame_node_id =
         crate::session_graph::frame_node_id("session", &incarnation_id, "initial-frame");
-    let mut graph = GraphCommitDelta::Append {
+    let mut graph = GraphAppend {
         nodes: vec![crate::SessionNodeRecord {
             node_id: frame_node_id.clone(),
             parent_node_id: None,
@@ -455,20 +454,17 @@ fn frame_node_identity_is_stable_across_operation_realization() {
         .derive_node_ids("session", &incarnation_id, &operation)
         .expect("realize frame node");
 
-    let GraphCommitDelta::Append {
+    let GraphAppend {
         nodes,
         leaf_node_id,
-    } = graph
-    else {
-        panic!("fixture is append");
-    };
+    } = graph;
     assert_eq!(nodes[0].node_id, frame_node_id);
     assert_eq!(leaf_node_id, Some(frame_node_id));
 }
 
 #[test]
 fn append_chain_rejects_self_parent_cycles() {
-    let graph = GraphCommitDelta::Append {
+    let graph = GraphAppend {
         nodes: vec![crate::SessionNodeRecord {
             node_id: "cycle".to_string(),
             parent_node_id: Some("cycle".to_string()),
@@ -493,7 +489,7 @@ fn append_chain_rejects_self_parent_cycles() {
 
 #[test]
 fn append_leaf_must_be_the_terminal_appended_node() {
-    let graph = GraphCommitDelta::Append {
+    let graph = GraphAppend {
         nodes: vec![
             crate::SessionNodeRecord {
                 node_id: "first".to_string(),

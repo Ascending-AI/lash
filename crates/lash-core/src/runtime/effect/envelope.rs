@@ -34,7 +34,6 @@ pub enum RuntimeEffectKind {
     Sleep,
     AwaitEvent,
     PeekAwaitEvent,
-    DurableStep,
 }
 
 impl RuntimeEffectKind {
@@ -52,7 +51,6 @@ impl RuntimeEffectKind {
             Self::Sleep => "sleep",
             Self::AwaitEvent => "await_event",
             Self::PeekAwaitEvent => "peek_await_event",
-            Self::DurableStep => "durable_step",
         }
     }
 }
@@ -289,14 +287,6 @@ fn validate_effect_invocation(
 fn validate_effect_command(
     command: &RuntimeEffectCommand,
 ) -> Result<(), RuntimeEffectControllerError> {
-    if let RuntimeEffectCommand::DurableStep { step_id, .. } = command
-        && step_id.trim().is_empty()
-    {
-        return Err(RuntimeEffectControllerError::new(
-            "runtime_effect_durable_step_id",
-            "runtime effect durable step id must be non-empty",
-        ));
-    }
     if let RuntimeEffectCommand::ToolAttempt {
         call,
         execution_grant: _,
@@ -396,10 +386,6 @@ pub enum RuntimeEffectCommand {
     PeekAwaitEvent {
         key: crate::AwaitEventKey,
     },
-    DurableStep {
-        step_id: String,
-        input: serde_json::Value,
-    },
 }
 
 // Measured 200 B on rustc 1.97.0, x86_64-unknown-linux-gnu (FIG-595).
@@ -426,7 +412,6 @@ impl RuntimeEffectCommand {
             Self::Sleep { .. } => RuntimeEffectKind::Sleep,
             Self::AwaitEvent { .. } => RuntimeEffectKind::AwaitEvent,
             Self::PeekAwaitEvent { .. } => RuntimeEffectKind::PeekAwaitEvent,
-            Self::DurableStep { .. } => RuntimeEffectKind::DurableStep,
         }
     }
 }
@@ -658,9 +643,6 @@ pub enum RuntimeEffectOutcome {
     },
     PeekAwaitEvent {
         resolution: Option<crate::Resolution>,
-    },
-    DurableStep {
-        value: serde_json::Value,
     },
 }
 
@@ -920,16 +902,6 @@ impl RuntimeEffectOutcome {
         }
     }
 
-    pub fn into_durable_step(self) -> Result<serde_json::Value, RuntimeEffectControllerError> {
-        match self {
-            Self::DurableStep { value } => Ok(value),
-            other => Err(RuntimeEffectControllerError::wrong_outcome(
-                RuntimeEffectKind::DurableStep,
-                other.kind(),
-            )),
-        }
-    }
-
     pub fn kind(&self) -> RuntimeEffectKind {
         match self {
             Self::LlmCall { .. } => RuntimeEffectKind::LlmCall,
@@ -944,7 +916,6 @@ impl RuntimeEffectOutcome {
             Self::Sleep => RuntimeEffectKind::Sleep,
             Self::AwaitEvent { .. } => RuntimeEffectKind::AwaitEvent,
             Self::PeekAwaitEvent { .. } => RuntimeEffectKind::PeekAwaitEvent,
-            Self::DurableStep { .. } => RuntimeEffectKind::DurableStep,
         }
     }
 }

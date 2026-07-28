@@ -24,8 +24,8 @@ pub(crate) use lash_core::plugin::runtime_host::SessionStateService;
 pub(crate) use lash_core::{
     AssembledTurn, AttachmentStore, EventSink, ExecutionSummary, LlmCallRecord, Message,
     PluginFactory, PluginMessage, PluginOptions, ProcessRegistry, ProtocolTurnOptions,
-    ProviderHandle, Residency, RuntimeErrorCode, RuntimePersistence, SessionCreateRequest,
-    SessionCursor, SessionError, SessionHandle, SessionObservation, SessionObservationSubscription,
+    ProviderHandle, RuntimeErrorCode, RuntimePersistence, SessionCreateRequest, SessionCursor,
+    SessionError, SessionHandle, SessionObservation, SessionObservationSubscription,
     SessionProcessEventKind, SessionReadView, SessionResume, SessionScope, SessionSnapshot,
     SessionStoreFactory, SessionUsageReport, TerminationPolicy, ToolCallRecord, ToolManifest,
     ToolProvider, ToolRestoreReport, ToolSourceHandle, ToolState, TurnActivitySink,

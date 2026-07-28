@@ -1,9 +1,9 @@
-use lash_core::store::GraphCommitDelta;
+use lash_core::store::GraphAppend;
 use lash_core::{
-    HydratedSessionCheckpoint, LeaseOwnerIdentity, ModelSpec, PersistedTurnState,
-    PluginSessionSnapshot, RuntimeCommit, RuntimeSessionState, SessionCommitStore,
-    SessionExecutionLeaseStore, SessionPolicy, SessionStoreCreateRequest, SessionStoreFactory,
-    TokenLedgerEntry, TokenUsage, ToolState,
+    HydratedSessionCheckpoint, LeaseOwnerIdentity, Message, MessageRole, ModelSpec, Part, PartKind,
+    PersistedTurnState, PluginSessionSnapshot, PruneState, RuntimeCommit, RuntimeSessionState,
+    SessionCommitStore, SessionExecutionLeaseStore, SessionPolicy, SessionStoreCreateRequest,
+    SessionStoreFactory, TokenLedgerEntry, TokenUsage, ToolState, shared_parts,
 };
 use lash_sqlite_store::{
     BlobArtifactDescriptor, BuiltinBlobProfile, SqliteSessionStoreFactory, Store, StoreGcPolicy,
@@ -25,6 +25,26 @@ fn persisted_tool_state_at_generation(generation: u64) -> ToolState {
         "tools": {}
     }))
     .expect("deserialize persisted tool state")
+}
+
+fn user_message(id: &str, content: &str) -> Message {
+    Message {
+        id: id.to_string(),
+        role: MessageRole::User,
+        parts: shared_parts(vec![Part {
+            id: format!("{id}.p0"),
+            kind: PartKind::Text,
+            content: content.to_string(),
+            attachment: None,
+            tool_call_id: None,
+            tool_name: None,
+            tool_replay: None,
+            prune_state: PruneState::Intact,
+            reasoning_meta: None,
+            response_meta: None,
+        }]),
+        origin: None,
+    }
 }
 
 async fn factory_state(
@@ -85,7 +105,7 @@ async fn gc_unreachable_keeps_rooted_checkpoint_blobs() {
     state.session_lifetime = lash_core::SessionLifetime::durable(incarnation_id);
     state.ensure_agent_frame_initialized();
     store
-        .commit_runtime_state(RuntimeCommit::persisted_state(&state, &[]))
+        .commit_runtime_state(RuntimeCommit::persisted_state_for_test(&state, &[]))
         .await
         .expect("commit session state");
     let orphan = store
@@ -139,8 +159,7 @@ async fn auto_gc_runs_after_commit_without_reentrant_locking() {
 
     store
         .commit_runtime_state(
-            RuntimeCommit::persisted_state(&state, &[])
-                .with_session_execution_lease(session_lease.fence())
+            RuntimeCommit::persisted_state_for_test(&state, &[])
                 .releasing_session_execution_lease(session_lease.completion()),
         )
         .await
@@ -307,7 +326,7 @@ async fn sqlite_factory_delete_session_removes_only_the_selected_session() {
     let mut deleted_state = factory_state(&deleted_store, "delete/me", 0).await;
     deleted_state.execution_state_snapshot = Some(vec![1, 2, 3]);
     deleted_store
-        .commit_runtime_state(RuntimeCommit::persisted_state(&deleted_state, &[]))
+        .commit_runtime_state(RuntimeCommit::persisted_state_for_test(&deleted_state, &[]))
         .await
         .expect("commit deleted session checkpoint");
     {
@@ -451,8 +470,8 @@ async fn sqlite_catalog_partitions_derived_node_ids_by_incarnation() {
                 ..Default::default()
             },
         };
-        let mut commit = RuntimeCommit::persisted_state(state, &[usage]);
-        commit.graph = GraphCommitDelta::Append {
+        let mut commit = RuntimeCommit::persisted_state_for_test(state, &[usage]);
+        commit.graph = GraphAppend {
             nodes: vec![node.clone()],
             leaf_node_id: Some(node.node_id.clone()),
         };
@@ -525,8 +544,8 @@ async fn sqlite_catalog_leaf_validation_is_session_scoped() {
             protocol_turn_options: Default::default(),
         },
     };
-    let mut first_commit = RuntimeCommit::persisted_state(&first_state, &[]);
-    first_commit.graph = GraphCommitDelta::Append {
+    let mut first_commit = RuntimeCommit::persisted_state_for_test(&first_state, &[]);
+    first_commit.graph = GraphAppend {
         nodes: vec![node.clone()],
         leaf_node_id: Some(node.node_id.clone()),
     };
@@ -537,14 +556,15 @@ async fn sqlite_catalog_leaf_validation_is_session_scoped() {
         .expect("commit first session node");
 
     second
-        .commit_runtime_state(RuntimeCommit::persisted_state(&second_state, &[]))
+        .commit_runtime_state(RuntimeCommit::persisted_state_for_test(&second_state, &[]))
         .await
         .expect("another session's live node must not invalidate an empty session");
 
     let mut second_state = second_state;
     second_state.head_revision = 1;
-    let mut cross_session_leaf = RuntimeCommit::persisted_state(&second_state, &[]);
-    cross_session_leaf.graph = GraphCommitDelta::Unchanged {
+    let mut cross_session_leaf = RuntimeCommit::persisted_state_for_test(&second_state, &[]);
+    cross_session_leaf.graph = GraphAppend {
+        nodes: Vec::new(),
         leaf_node_id: Some(node.node_id),
     };
     assert!(matches!(
@@ -554,7 +574,7 @@ async fn sqlite_catalog_leaf_validation_is_session_scoped() {
 }
 
 #[tokio::test]
-async fn sqlite_maintenance_is_scoped_to_the_bound_session() {
+async fn sqlite_vacuum_is_scoped_to_the_bound_session() {
     let root = unique_temp_dir("maintenance-scope");
     let factory = SqliteSessionStoreFactory::new(&root);
     let request = |session_id: &str| SessionStoreCreateRequest {
@@ -570,53 +590,6 @@ async fn sqlite_maintenance_is_scoped_to_the_bound_session() {
         .create_store(&request("maintenance-b"))
         .await
         .expect("second store");
-    let second_state = factory_state(&second, "maintenance-b", 0).await;
-    let frame_key = "maintenance-b-node";
-    let node = lash_core::SessionNodeRecord {
-        node_id: lash_core::frame_node_id(
-            &second_state.session_id,
-            second_state
-                .durable_incarnation_id("test frame derivation")
-                .expect("durable fixture"),
-            frame_key,
-        ),
-        parent_node_id: None,
-        timestamp: "2026-07-26T00:00:00Z".to_string(),
-        payload: lash_core::SessionNodePayload::FrameOpen {
-            frame_key: frame_key.to_string(),
-            reason: lash_core::AgentFrameReason::initial(),
-            assignment: lash_core::AgentFrameAssignment::from_policy(SessionPolicy::default()),
-            protocol_turn_options: Default::default(),
-        },
-    };
-    let mut commit = RuntimeCommit::persisted_state(&second_state, &[]);
-    commit.graph = GraphCommitDelta::Append {
-        nodes: vec![node.clone()],
-        leaf_node_id: Some(node.node_id.clone()),
-    };
-    commit.current_frame_node_id = Some(node.node_id.clone());
-    second
-        .commit_runtime_state(commit)
-        .await
-        .expect("commit second session node");
-
-    first
-        .tombstone_nodes(std::slice::from_ref(&node.node_id))
-        .await
-        .expect("cross-session tombstone attempt");
-    assert!(
-        second
-            .load_node(&node.node_id)
-            .await
-            .expect("load second node")
-            .is_some(),
-        "session A must not tombstone session B's node"
-    );
-    second
-        .tombstone_nodes(std::slice::from_ref(&node.node_id))
-        .await
-        .expect("tombstone own node");
-
     let source_key = "maintenance-b-source";
     let cancelled = second
         .enqueue_pending_turn_input(
@@ -652,10 +625,7 @@ async fn sqlite_maintenance_is_scoped_to_the_bound_session() {
     assert_eq!(replay.state, lash_core::TurnInputState::Cancelled);
 
     let second_report = second.vacuum().await.expect("vacuum second session");
-    assert_eq!(
-        second_report.removed_node_count, 0,
-        "a live head root cannot be tombstoned by host selection"
-    );
+    assert_eq!(second_report.removed_node_count, 0);
     assert_eq!(second_report.removed_pending_turn_input_tombstone_count, 1);
 }
 
@@ -671,9 +641,10 @@ async fn sqlite_snapshot_read_propagates_graph_statement_errors() {
         })
         .await
         .expect("create store");
-    let state = factory_state(&store, "graph-read-error", 0).await;
+    let mut state = factory_state(&store, "graph-read-error", 0).await;
+    state.ensure_agent_frame_initialized();
     store
-        .commit_runtime_state(RuntimeCommit::persisted_state(&state, &[]))
+        .commit_runtime_state(RuntimeCommit::persisted_state_for_test(&state, &[]))
         .await
         .expect("commit head");
     rusqlite::Connection::open(factory.catalog_path())
@@ -682,12 +653,124 @@ async fn sqlite_snapshot_read_propagates_graph_statement_errors() {
         .expect("drop graph table");
 
     assert!(
-        store
-            .load_session(lash_core::SessionReadScope::FullGraph)
-            .await
-            .is_err(),
+        store.load_session().await.is_err(),
         "a graph statement error must not decode as an empty snapshot"
     );
+}
+
+#[tokio::test]
+async fn sqlite_snapshot_read_rejects_undecodable_graph_nodes() {
+    let root = unique_temp_dir("graph-node-decode-error");
+    let factory = SqliteSessionStoreFactory::new(&root);
+    let store = factory
+        .create_store(&SessionStoreCreateRequest {
+            session_id: "graph-node-decode-error".to_string(),
+            relation: lash_core::SessionRelation::Root,
+            policy: SessionPolicy::default(),
+        })
+        .await
+        .expect("create store");
+    let mut state = factory_state(&store, "graph-node-decode-error", 0).await;
+    state.ensure_agent_frame_initialized();
+    state.append_active_conversation_messages(&[
+        user_message("first", "first"),
+        user_message("second", "second"),
+    ]);
+    store
+        .commit_runtime_state(RuntimeCommit::persisted_state_for_test(&state, &[]))
+        .await
+        .expect("commit graph");
+    rusqlite::Connection::open(factory.catalog_path())
+        .expect("open catalog")
+        .execute(
+            "UPDATE graph_nodes
+             SET node_json = '{\"totally\":\"unreadable\"}'
+             WHERE node_id = (
+                 SELECT node_id FROM graph_nodes
+                 WHERE session_id = ?1
+                 ORDER BY seq ASC
+                 LIMIT 1 OFFSET 1
+             )",
+            ["graph-node-decode-error"],
+        )
+        .expect("corrupt middle graph node");
+
+    let error = store
+        .load_session()
+        .await
+        .expect_err("an undecodable graph node must fail the snapshot");
+    assert!(
+        error
+            .to_string()
+            .contains("failed to decode session graph node"),
+        "unexpected graph decode error: {error}"
+    );
+}
+
+#[tokio::test]
+async fn sqlite_picker_reads_inherited_history_from_fork_head_columns() {
+    let root = unique_temp_dir("fork-picker");
+    let factory = SqliteSessionStoreFactory::new(&root);
+    let policy = SessionPolicy::default();
+    let source = factory
+        .create_store(&SessionStoreCreateRequest {
+            session_id: "picker-source".to_string(),
+            relation: lash_core::SessionRelation::Root,
+            policy: policy.clone(),
+        })
+        .await
+        .expect("create source store");
+    let mut source_state = factory_state(&source, "picker-source", 0).await;
+    source_state.ensure_agent_frame_initialized();
+    source_state.append_active_conversation_messages(&[
+        user_message("first", "first inherited message"),
+        user_message("second", "second inherited message"),
+    ]);
+    source
+        .commit_runtime_state(RuntimeCommit::persisted_state_for_test(&source_state, &[]))
+        .await
+        .expect("commit source graph");
+    let source_read = source
+        .load_session()
+        .await
+        .expect("load source")
+        .expect("source exists");
+    let source_leaf = source_read.graph.leaf_node_id.clone().expect("source leaf");
+    factory
+        .fork_at(&lash_core::ForkSessionRequest {
+            session_id: "picker-fork".to_string(),
+            node_id: source_leaf,
+            relation: lash_core::SessionRelation::Root,
+            policy,
+        })
+        .await
+        .expect("fork source");
+    let branch = factory
+        .open_existing_store(&SessionStoreCreateRequest {
+            session_id: "picker-fork".to_string(),
+            relation: lash_core::SessionRelation::Root,
+            policy: SessionPolicy::default(),
+        })
+        .await
+        .expect("open fork")
+        .expect("fork exists");
+    let branch_state = lash_core::store::load_persisted_session_state(branch.as_ref())
+        .await
+        .expect("load fork state")
+        .expect("fork state exists");
+    assert_eq!(branch_state.session_graph.nodes.len(), 3);
+
+    let picker_store = Store::open(&factory.catalog_path())
+        .await
+        .expect("open picker store");
+    picker_store
+        .commit_runtime_state(RuntimeCommit::persisted_state_for_test(&branch_state, &[]))
+        .await
+        .expect("bind picker store to fork");
+    let picker = picker_store.load_picker_info().await.expect("picker info");
+
+    assert_eq!(picker.first_user_message, "first inherited message");
+    assert_eq!(picker.user_message_count, 2);
 }
 
 #[tokio::test]
@@ -704,7 +787,7 @@ async fn sqlite_snapshot_read_propagates_usage_statement_errors() {
         .expect("create store");
     let state = factory_state(&store, "usage-read-error", 0).await;
     store
-        .commit_runtime_state(RuntimeCommit::persisted_state(&state, &[]))
+        .commit_runtime_state(RuntimeCommit::persisted_state_for_test(&state, &[]))
         .await
         .expect("commit head");
     rusqlite::Connection::open(factory.catalog_path())
@@ -713,10 +796,7 @@ async fn sqlite_snapshot_read_propagates_usage_statement_errors() {
         .expect("drop usage table");
 
     assert!(
-        store
-            .load_session(lash_core::SessionReadScope::FullGraph)
-            .await
-            .is_err(),
+        store.load_session().await.is_err(),
         "a usage statement error must not decode as an empty ledger"
     );
 }

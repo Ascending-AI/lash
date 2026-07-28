@@ -204,10 +204,7 @@ pub(crate) fn nearest_frame_node_id_conn(
 
 #[async_trait::async_trait]
 impl SessionCommitStore for Store {
-    async fn load_session(
-        &self,
-        scope: SessionReadScope,
-    ) -> Result<Option<PersistedSessionRead>, StoreError> {
+    async fn load_session(&self) -> Result<Option<PersistedSessionRead>, StoreError> {
         let Some(session_id) = self.resolve_session_id_for_read().await? else {
             return Ok(None);
         };
@@ -218,27 +215,12 @@ impl SessionCommitStore for Store {
                     let Some(meta) = try_load_session_head_meta_from_conn(&tx, &session_id)? else {
                         return Ok(None);
                     };
-                    let leaf_node_id = match &scope {
-                        SessionReadScope::FullGraph => meta.leaf_node_id.clone(),
-                        SessionReadScope::ActivePath { leaf_node_id } => {
-                            leaf_node_id.clone().or_else(|| meta.leaf_node_id.clone())
-                        }
-                    };
-                    let mut graph = match scope {
-                        SessionReadScope::FullGraph => Self::load_session_graph_from_conn(
-                            &tx,
-                            &session_id,
-                            meta.leaf_node_id.clone(),
-                        )?,
-                        SessionReadScope::ActivePath { .. } => {
-                            Self::load_active_path_session_graph_from_conn(
-                                &tx,
-                                &session_id,
-                                leaf_node_id.clone(),
-                            )
-                            .map_err(sqlite_error)?
-                        }
-                    };
+                    let leaf_node_id = meta.leaf_node_id.clone();
+                    let mut graph = Self::load_active_path_session_graph_from_conn(
+                        &tx,
+                        &session_id,
+                        leaf_node_id.clone(),
+                    )?;
                     if !graph.nodes.is_empty() {
                         graph.set_leaf_node_id(leaf_node_id);
                     }
@@ -384,7 +366,7 @@ impl SessionCommitStore for Store {
                             ))
                         })?;
                     commit.validate_node_derivation(&durable_incarnation_id)?;
-                    if let Some(completed) = &commit.turn_commit {
+                    { let completed = &commit.turn_commit;
                         let operation_key = completed.operation.storage_key()?;
                         let prior: Option<(String, String)> = tx
                             .query_row(
@@ -426,8 +408,7 @@ impl SessionCommitStore for Store {
                     }
                     commit.validate_append_node_ids_unique()?;
                     commit.graph.validate_append_topology()?;
-                    if let GraphCommitDelta::Append { nodes, .. } = &commit.graph {
-                        for node in nodes {
+                    for node in &commit.graph.nodes {
                             let occupied = tx
                                 .query_row(
                                     "SELECT 1 FROM graph_nodes WHERE node_id = ?1 LIMIT 1",
@@ -443,11 +424,10 @@ impl SessionCommitStore for Store {
                                 });
                             }
                         }
-                    }
                     if let Some(leaf_node_id) = commit.graph.leaf_node_id() {
                         let appended = matches!(
                             &commit.graph,
-                            GraphCommitDelta::Append { nodes, .. }
+                            GraphAppend { nodes, .. }
                                 if nodes.iter().any(|node| &node.node_id == leaf_node_id)
                         );
                         let live = tx
@@ -469,7 +449,7 @@ impl SessionCommitStore for Store {
                     } else {
                         let appends_nodes = matches!(
                             &commit.graph,
-                            GraphCommitDelta::Append { nodes, .. } if !nodes.is_empty()
+                            GraphAppend { nodes, .. } if !nodes.is_empty()
                         );
                         let has_live_nodes = tx
                             .query_row(
@@ -520,6 +500,7 @@ impl SessionCommitStore for Store {
                         ensure_turn_input_completion_owns_all_inputs(completed, owned_rows)?;
                     }
 
+                    Self::validate_checkpoint_component_refs_conn(tx, &commit.checkpoint)?;
                     let stored_checkpoint =
                         Self::put_checkpoint_conn(tx, &commit.checkpoint, blob_profile)
                             .map_err(sqlite_error)?;
@@ -550,47 +531,25 @@ impl SessionCommitStore for Store {
                     let old_leaf_node_id = existing
                         .as_ref()
                         .and_then(|head| head.leaf_node_id.clone());
-                    match &commit.graph {
-                        GraphCommitDelta::Unchanged { leaf_node_id }
-                            if leaf_node_id != &old_leaf_node_id =>
-                        {
+                    match commit.graph.nodes.first() {
+                        None if commit.graph.leaf_node_id != old_leaf_node_id => {
                             return Err(StoreError::InvalidGraphLeaf {
-                                leaf_node_id: leaf_node_id.clone(),
+                                leaf_node_id: commit.graph.leaf_node_id.clone(),
                             });
                         }
-                        GraphCommitDelta::Append { nodes, .. }
-                            if !nodes.is_empty()
-                                && nodes.first().and_then(|node| node.parent_node_id.as_ref())
-                                != old_leaf_node_id.as_ref() =>
+                        Some(first)
+                            if first.parent_node_id.as_ref() != old_leaf_node_id.as_ref() =>
                         {
                             return Err(StoreError::InvalidGraphParent {
-                                node_id: nodes
-                                    .first()
-                                    .map(|node| node.node_id.clone())
-                                    .unwrap_or_default(),
+                                node_id: first.node_id.clone(),
                                 expected: old_leaf_node_id.clone(),
-                                actual: nodes
-                                    .first()
-                                    .and_then(|node| node.parent_node_id.clone()),
-                            });
-                        }
-                        GraphCommitDelta::Append {
-                            nodes,
-                            leaf_node_id,
-                        } if nodes.is_empty() && leaf_node_id != &old_leaf_node_id => {
-                            return Err(StoreError::InvalidGraphLeaf {
-                                leaf_node_id: leaf_node_id.clone(),
+                                actual: first.parent_node_id.clone(),
                             });
                         }
                         _ => {}
                     }
-                    let leaf_node_id = match &commit.graph {
-                        GraphCommitDelta::Unchanged { leaf_node_id } => leaf_node_id.clone(),
-                        GraphCommitDelta::Append {
-                            nodes,
-                            leaf_node_id,
-                        } => {
-                            for node in nodes {
+                    let leaf_node_id = {
+                            for node in &commit.graph.nodes {
                                 let node_json = node.encode_storage_body().map_err(|err| {
                                     StoreError::Backend(format!(
                                         "failed to encode graph node body: {err}"
@@ -626,8 +585,7 @@ impl SessionCommitStore for Store {
                                     }
                                 }
                             }
-                            leaf_node_id.clone()
-                        }
+                            commit.graph.leaf_node_id.clone()
                     };
                     if old_leaf_node_id != leaf_node_id {
                         if let Some(new_leaf_node_id) = &leaf_node_id {
@@ -669,22 +627,6 @@ impl SessionCommitStore for Store {
                             commit.current_frame_node_id, derived_frame_node_id
                         )));
                     }
-                    let graph_node_count: usize = tx
-                        .query_row(
-                            "WITH RECURSIVE ancestry(node_id, parent_node_id) AS (
-                                 SELECT node_id, parent_node_id FROM graph_nodes
-                                 WHERE node_id = ?1 AND tombstoned = 0
-                                 UNION ALL
-                                 SELECT parent.node_id, parent.parent_node_id
-                                 FROM graph_nodes parent
-                                 JOIN ancestry ON parent.node_id = ancestry.parent_node_id
-                                 WHERE parent.tombstoned = 0
-                             )
-                             SELECT COUNT(*) FROM ancestry",
-                            params![leaf_node_id],
-                            |row| row.get::<_, i64>(0),
-                        )
-                        .map_err(sqlite_error)? as usize;
                     let next_revision = actual_revision + 1;
                     let meta = SessionHeadMeta {
                         schema_version: lash_core::store::SESSION_HEAD_META_SCHEMA_VERSION,
@@ -694,8 +636,6 @@ impl SessionCommitStore for Store {
                         current_frame_node_id: derived_frame_node_id,
                         checkpoint_ref: Some(stored_checkpoint.checkpoint_ref.clone()),
                         leaf_node_id,
-                        graph_node_count,
-                        token_ledger: Vec::new(),
                     };
                     tx.execute(
                         "INSERT OR REPLACE INTO session_head
@@ -826,9 +766,7 @@ impl SessionCommitStore for Store {
                                 .map_err(sqlite_error)?;
                         }
                     }
-                    if let Some(turn_commit) = &commit.turn_commit
-                        && let Some(turn_id) = turn_commit.operation.turn_id()
-                    {
+                    if let Some(turn_id) = commit.turn_commit.operation.turn_id() {
                         tx.execute(
                             "UPDATE attachment_manifest
                                  SET committed_at_ms = COALESCE(committed_at_ms, ?1)
@@ -864,7 +802,7 @@ impl SessionCommitStore for Store {
                         enqueued_queue_batches,
                         turn_input_applications: commit.turn_input_applications(),
                     };
-                    if let Some(completed) = &commit.turn_commit {
+                    { let completed = &commit.turn_commit;
                         let operation_key = completed.operation.storage_key()?;
                         tx.execute(
                             "INSERT INTO runtime_turn_commits (
@@ -2392,58 +2330,6 @@ impl TurnInputStore for Store {
 
 #[async_trait::async_trait]
 impl StoreMaintenance for Store {
-    async fn tombstone_nodes(&self, ids: &[String]) -> Result<(), StoreError> {
-        if ids.is_empty() {
-            return Ok(());
-        }
-        let session_id = self.session_id.get().cloned();
-        let ids = ids.to_vec();
-        self.conn
-            .write(move |tx| {
-                for id in &ids {
-                    let row = tx
-                        .query_row(
-                            "SELECT incoming_refs, parent_node_id
-                             FROM graph_nodes
-                             WHERE node_id = ?1 AND tombstoned = 0
-                               AND (?2 IS NULL OR session_id = ?2)",
-                            params![id, session_id],
-                            |row| Ok((row.get::<_, i64>(0)?, row.get::<_, Option<String>>(1)?)),
-                        )
-                        .optional()?;
-                    let Some((cached, parent_node_id)) = row else {
-                        continue;
-                    };
-                    let derived = derived_node_refcount_conn(tx, id)
-                        .map_err(|err| rusqlite::Error::ToSqlConversionFailure(Box::new(err)))?;
-                    if cached != derived {
-                        return Err(rusqlite::Error::ToSqlConversionFailure(Box::new(
-                            StoreError::NodeRefcountDrift {
-                                node_id: id.clone(),
-                                cached,
-                                derived,
-                            },
-                        )));
-                    }
-                    if derived != 0 {
-                        continue;
-                    }
-                    tx.execute(
-                        "UPDATE graph_nodes SET tombstoned = 1 WHERE node_id = ?1",
-                        params![id],
-                    )?;
-                    if let Some(parent_node_id) = parent_node_id {
-                        decrement_node_ref_conn(tx, &parent_node_id).map_err(|err| {
-                            rusqlite::Error::ToSqlConversionFailure(Box::new(err))
-                        })?;
-                    }
-                }
-                Ok(())
-            })
-            .await
-            .map_err(sqlite_error)
-    }
-
     async fn vacuum(&self) -> Result<VacuumReport, StoreError> {
         let session_id = self.session_id.get().cloned();
         let (removed_node_count, removed_pending_turn_input_tombstone_count) = self

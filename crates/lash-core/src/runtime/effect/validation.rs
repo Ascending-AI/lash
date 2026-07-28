@@ -290,13 +290,22 @@ mod tests {
         RuntimeEffectEnvelope::new(
             RuntimeInvocation::effect(
                 RuntimeScope::for_turn("session", "turn", 0, 0),
-                "durable:test",
-                RuntimeEffectKind::DurableStep,
-                "durable:test",
+                "tool-attempt:test",
+                RuntimeEffectKind::ToolAttempt,
+                "tool-attempt:test",
             ),
-            RuntimeEffectCommand::DurableStep {
-                step_id: "test".to_string(),
-                input,
+            RuntimeEffectCommand::ToolAttempt {
+                call: crate::PreparedToolCall::from_parts(
+                    "validation-call",
+                    "tool:validation",
+                    "validation",
+                    input,
+                    None,
+                    serde_json::Value::Null,
+                ),
+                execution_grant: None,
+                attempt: 1,
+                max_attempts: 1,
             },
         )
     }
@@ -323,7 +332,7 @@ mod tests {
                 json!({"tool_results": [{"value": {"embedding_duration_ms": 1761}}]}),
                 json!({"tool_results": [{"value": {"embedding_duration_ms": 532}}]}),
             ),
-            ["command.input.tool_results[0].value.embedding_duration_ms"]
+            ["command.call.args.tool_results[0].value.embedding_duration_ms"]
         );
     }
 
@@ -335,8 +344,8 @@ mod tests {
                 json!({"tool_results": [{"kept": true, "added": 2}]}),
             ),
             [
-                "command.input.tool_results[0].added",
-                "command.input.tool_results[0].removed",
+                "command.call.args.tool_results[0].added",
+                "command.call.args.tool_results[0].removed",
             ]
         );
     }
@@ -349,8 +358,8 @@ mod tests {
                 json!({"tool_results": [{"value": ["second", "first"]}]}),
             ),
             [
-                "command.input.tool_results[0].value[0]",
-                "command.input.tool_results[0].value[1]",
+                "command.call.args.tool_results[0].value[0]",
+                "command.call.args.tool_results[0].value[1]",
             ]
         );
     }
@@ -375,14 +384,14 @@ mod tests {
             RuntimeEffectReplayMismatchSummary {
                 divergent_path_count: 10,
                 first_divergent_paths: vec![
-                    "command.input.f0".to_string(),
-                    "command.input.f1".to_string(),
-                    "command.input.f2".to_string(),
-                    "command.input.f3".to_string(),
-                    "command.input.f4".to_string(),
-                    "command.input.f5".to_string(),
-                    "command.input.f6".to_string(),
-                    "command.input.f7".to_string(),
+                    "command.call.args.f0".to_string(),
+                    "command.call.args.f1".to_string(),
+                    "command.call.args.f2".to_string(),
+                    "command.call.args.f3".to_string(),
+                    "command.call.args.f4".to_string(),
+                    "command.call.args.f5".to_string(),
+                    "command.call.args.f6".to_string(),
+                    "command.call.args.f7".to_string(),
                 ],
             }
         );
@@ -409,7 +418,7 @@ mod tests {
         .expect_err("mismatch");
         assert_eq!(
             error.summary.expect("summary").first_divergent_paths,
-            ["command.input.tool_results[0].value"]
+            ["command.call.args.tool_results[0].value"]
         );
 
         let records = sink.records.lock().expect("trace records");

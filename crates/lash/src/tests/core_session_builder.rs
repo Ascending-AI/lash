@@ -1317,80 +1317,6 @@ async fn core_delete_session_removes_factory_backed_session_state() -> Result<()
 }
 
 #[tokio::test]
-async fn active_path_residency_opens_with_active_path_scope() -> Result<()> {
-    let mut state = RuntimeSessionState {
-        session_id: "active-path".to_string(),
-        policy: lash_core::SessionPolicy {
-            provider_id: mock_provider().kind().to_string(),
-            model: mock_model_spec(),
-            ..Default::default()
-        },
-        ..Default::default()
-    };
-    let mut root_message = text_message(lash_core::MessageRole::User, "root");
-    root_message.id = "root-message".to_string();
-    state.append_active_conversation_messages(&[root_message]);
-    let root = state.session_graph.leaf_node_id.clone();
-    let mut inactive_message = text_message(lash_core::MessageRole::User, "inactive branch");
-    inactive_message.id = "inactive-message".to_string();
-    state.append_active_conversation_messages(&[inactive_message]);
-    state.session_graph.set_leaf_node_id(root);
-    let mut active_message = text_message(lash_core::MessageRole::User, "active branch");
-    active_message.id = "active-message".to_string();
-    state.append_active_conversation_messages(&[active_message]);
-
-    let store = Arc::new(SnapshotStore::with_state(state));
-    let core = explicit_ephemeral_facets(LashCore::standard_builder())
-        .provider(mock_provider())
-        .model(mock_model_spec())
-        .store_factory(Arc::new(ReusableStoreFactory {
-            store: store.clone(),
-        }))
-        .residency(lash_core::Residency::ActivePathOnly)
-        .build()?;
-
-    let reopened = core.session("active-path").open().await?;
-    let messages = reopened.read_view().messages().to_vec();
-    let texts = messages.iter().map(message_text).collect::<Vec<_>>();
-    assert_eq!(texts, vec!["root", "active branch"]);
-    assert_eq!(
-        store.scopes(),
-        vec![lash_core::SessionReadScope::ActivePath { leaf_node_id: None }]
-    );
-    Ok(())
-}
-
-#[tokio::test]
-async fn keep_all_residency_opens_with_full_graph_scope() -> Result<()> {
-    let mut state = RuntimeSessionState {
-        session_id: "keep-all".to_string(),
-        policy: lash_core::SessionPolicy {
-            provider_id: mock_provider().kind().to_string(),
-            model: mock_model_spec(),
-            ..Default::default()
-        },
-        ..Default::default()
-    };
-    state.append_active_conversation_messages(&[text_message(
-        lash_core::MessageRole::User,
-        "already stored",
-    )]);
-    let store = Arc::new(SnapshotStore::with_state(state));
-    let core = explicit_ephemeral_facets(LashCore::standard_builder())
-        .provider(mock_provider())
-        .model(mock_model_spec())
-        .store_factory(Arc::new(ReusableStoreFactory {
-            store: store.clone(),
-        }))
-        .build()?;
-
-    let reopened = core.session("keep-all").open().await?;
-    assert_eq!(reopened.read_view().messages().len(), 1);
-    assert_eq!(store.scopes(), vec![lash_core::SessionReadScope::FullGraph]);
-    Ok(())
-}
-
-#[tokio::test]
 async fn store_session_id_mismatch_is_rejected() -> Result<()> {
     let state = RuntimeSessionState {
         session_id: "actual-session".to_string(),
@@ -1692,13 +1618,7 @@ async fn queued_worker_state_load_reconciles_live_policy_without_rewriting_histo
         ..Default::default()
     };
 
-    let state = crate::session::load_state_for_residency(
-        lash_core::Residency::KeepAll,
-        session_id,
-        &policy,
-        &store,
-    )
-    .await?;
+    let state = crate::session::load_state_from_store(session_id, &policy, &store).await?;
     assert_eq!(state.policy.model, policy.model);
     assert_eq!(
         state
@@ -2236,7 +2156,7 @@ async fn fork_inherits_process_grants_without_inheriting_wake_subscription() -> 
     };
     source_state.ensure_agent_frame_initialized();
     source_store
-        .commit_runtime_state(lash_core::RuntimeCommit::persisted_state(
+        .commit_runtime_state(lash_core::RuntimeCommit::persisted_state_for_test(
             &source_state,
             &[],
         ))
@@ -2284,7 +2204,7 @@ async fn fork_inherits_process_grants_without_inheriting_wake_subscription() -> 
         .expect("open branch store")
         .expect("branch store exists");
     let branch_read = branch_store
-        .load_session(lash_core::SessionReadScope::FullGraph)
+        .load_session()
         .await
         .expect("load branch config")
         .expect("branch head exists");

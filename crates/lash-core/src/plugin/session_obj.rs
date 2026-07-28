@@ -488,26 +488,6 @@ impl PluginSession {
         Ok(PluginSessionSnapshot { plugins })
     }
 
-    pub fn snapshot_is_current(&self, previous: Option<&PluginSessionSnapshot>) -> bool {
-        let Some(previous) = previous else {
-            return false;
-        };
-        if previous.plugins.len() != self.plugins.len() {
-            return false;
-        }
-        for plugin in &self.plugins {
-            let Some(entry) = previous.plugins.get(plugin.id()) else {
-                return false;
-            };
-            if entry.meta.plugin_version != plugin.version()
-                || entry.meta.revision != plugin.snapshot_revision()
-            {
-                return false;
-            }
-        }
-        true
-    }
-
     pub fn snapshot_revision_fingerprint(&self) -> u64 {
         let mut hasher = Sha256::new();
         for plugin in &self.plugins {

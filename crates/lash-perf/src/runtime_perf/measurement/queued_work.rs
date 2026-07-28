@@ -105,9 +105,7 @@ async fn run_once_queued_work_claim_stress(
                 let result = store
                     .commit_runtime_state(queued_work_stress_commit(
                         &commit_state,
-                        &lease,
                         vec![command_claim.completion()],
-                        false,
                     ))
                     .await?;
                 commit_state.apply_persisted_commit_result(result);
@@ -186,9 +184,7 @@ async fn run_once_queued_work_claim_stress(
                 let result = store
                     .commit_runtime_state(queued_work_stress_commit(
                         &commit_state,
-                        &lease,
                         vec![join_claim.completion()],
-                        false,
                     ))
                     .await?;
                 commit_state.apply_persisted_commit_result(result);
@@ -226,9 +222,7 @@ async fn run_once_queued_work_claim_stress(
                 let result = store
                     .commit_runtime_state(queued_work_stress_commit(
                         &commit_state,
-                        &lease,
                         vec![exclusive_claim.completion()],
-                        true,
                     ))
                     .await?;
                 commit_state.apply_persisted_commit_result(result);
@@ -661,8 +655,7 @@ async fn run_once_turn_input_ingress_interrupt(
             async {
                 let result = store
                     .commit_runtime_state(
-                        RuntimeCommit::persisted_state(&commit_state, &[])
-                            .with_session_execution_lease(lease.fence())
+                        RuntimeCommit::persisted_state_for_test(&commit_state, &[])
                             .completing_turn_input_claim(active_claim.completion())
                             .deferring_interrupted_turn_inputs(turn_id.clone()),
                     )
@@ -745,9 +738,7 @@ async fn run_once_turn_input_ingress_interrupt(
             measure_runtime_perf_async_phase("turn_input_ingress.complete_next_turn_inputs", async {
                 let result = store
                     .commit_runtime_state(
-                        RuntimeCommit::persisted_state(&commit_state, &[])
-                            .with_session_execution_lease(lease.fence())
-                            .releasing_session_execution_lease(lease.completion())
+                        RuntimeCommit::persisted_state_for_test(&commit_state, &[])
                             .completing_turn_input_claim(next_claim.completion()),
                     )
                     .await?;
@@ -896,17 +887,12 @@ async fn run_once_turn_input_ingress_interrupt(
 
 fn queued_work_stress_commit(
     state: &RuntimeSessionState,
-    lease: &SessionExecutionLease,
     completed_queue_claims: Vec<QueuedWorkCompletion>,
-    release_lease: bool,
 ) -> RuntimeCommit {
-    let commit = RuntimeCommit::persisted_state(state, &[])
-        .with_session_execution_lease(lease.fence())
-        .completing_queue_claims(completed_queue_claims);
-    if release_lease {
-        commit.releasing_session_execution_lease(lease.completion())
-    } else {
-        commit
+    RuntimeCommit {
+        graph: GraphAppend { nodes: Vec::new(), leaf_node_id: None },
+        completed_queue_claims,
+        ..RuntimeCommit::persisted_state_for_test(state, &[])
     }
 }
 

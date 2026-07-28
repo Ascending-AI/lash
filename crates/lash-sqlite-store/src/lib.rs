@@ -63,7 +63,7 @@ use lash_core::store::queued_work::{
     select_turn_work_claim_prefix,
 };
 use lash_core::store::{
-    GraphCommitDelta, HydratedSessionCheckpoint, PersistedSessionRead, RuntimeCommit,
+    GraphAppend, HydratedSessionCheckpoint, PersistedSessionRead, RuntimeCommit,
     RuntimeCommitResult, SessionCheckpoint, SessionHeadMeta,
 };
 use lash_core::{
@@ -77,7 +77,7 @@ use lash_core::{
     ProcessRecord, ProcessRegistration, ProcessRegistry, ProcessStartOutcome, ProcessStartPlan,
     ProcessStarted, QueuedWorkStore, RuntimePersistence, SessionCommitStore, SessionExecutionLease,
     SessionExecutionLeaseClaimOutcome, SessionExecutionLeaseCompletion, SessionExecutionLeaseFence,
-    SessionExecutionLeaseStore, SessionMeta, SessionPickerInfo, SessionReadScope, SessionScope,
+    SessionExecutionLeaseStore, SessionMeta, SessionPickerInfo, SessionScope,
     SessionStoreCreateRequest, SessionStoreFactory, SlotPolicy, StoreError, StoreMaintenance,
     TurnInputStore, VacuumReport,
 };
@@ -1014,7 +1014,7 @@ mod tests {
             .execute_batch("BEGIN IMMEDIATE")
             .expect("hold catalog writer lock");
         let result = store
-            .commit_runtime_state(RuntimeCommit::persisted_state(&state, &[]))
+            .commit_runtime_state(RuntimeCommit::persisted_state_for_test(&state, &[]))
             .await;
         locker
             .execute_batch("ROLLBACK")
@@ -1030,7 +1030,7 @@ mod tests {
         let mut state = durable_state(&store, "refcount-drift").await;
         state.ensure_agent_frame_initialized();
         store
-            .commit_runtime_state(RuntimeCommit::persisted_state(&state, &[]))
+            .commit_runtime_state(RuntimeCommit::persisted_state_for_test(&state, &[]))
             .await
             .expect("commit root frame");
         let frame_node_id = state.current_frame_node_id.clone().expect("frame node");
@@ -1048,9 +1048,8 @@ mod tests {
             })
             .await
             .expect("corrupt cached count");
-        let child_node_id = "refcount-drift-child".to_string();
         let child = lash_core::SessionNodeRecord {
-            node_id: child_node_id.clone(),
+            node_id: "refcount-drift-child".to_string(),
             parent_node_id: Some(frame_node_id.clone()),
             timestamp: "2026-07-27T00:00:00Z".to_string(),
             payload: lash_core::SessionNodePayload::Event {
@@ -1060,12 +1059,19 @@ mod tests {
                 ),
             },
         };
-        let mut commit = RuntimeCommit::persisted_state(&state, &[]);
+        let mut commit = RuntimeCommit::persisted_state_for_test(&state, &[]);
         commit.expected_head_revision = 1;
-        commit.graph = GraphCommitDelta::Append {
+        commit.graph = GraphAppend {
             nodes: vec![child],
-            leaf_node_id: Some(child_node_id.clone()),
+            leaf_node_id: Some("refcount-drift-child".to_string()),
         };
+        let (commit, _) = commit
+            .with_operation(lash_core::OperationId::new(
+                lash_core::ExecutionScope::runtime_operation("refcount-drift-child"),
+                "commit",
+            ))
+            .expect("derive refcount-drift child identity");
+        let child_node_id = commit.graph.nodes[0].node_id.clone();
 
         let error = store
             .commit_runtime_state(commit)
@@ -1084,7 +1090,7 @@ mod tests {
             "unexpected zero-confirmation error: {error:?}"
         );
         let persisted = store
-            .load_session(SessionReadScope::FullGraph)
+            .load_session()
             .await
             .expect("load after abort")
             .expect("session remains live");
@@ -1112,7 +1118,7 @@ mod tests {
         let mut state = durable_state(&store, "scrub-refcount-drift").await;
         state.ensure_agent_frame_initialized();
         store
-            .commit_runtime_state(RuntimeCommit::persisted_state(&state, &[]))
+            .commit_runtime_state(RuntimeCommit::persisted_state_for_test(&state, &[]))
             .await
             .expect("commit root frame");
         let frame_node_id = state.current_frame_node_id.expect("frame node");
@@ -1148,47 +1154,6 @@ mod tests {
                 node_id,
                 cached: 3,
                 derived: 2,
-            } if node_id == frame_node_id
-        ));
-    }
-
-    #[tokio::test]
-    async fn maintenance_preserves_typed_refcount_drift() {
-        let store = Store::memory().await.expect("open store");
-        store.bind_session("maintenance-drift").expect("bind store");
-        let mut state = durable_state(&store, "maintenance-drift").await;
-        state.ensure_agent_frame_initialized();
-        store
-            .commit_runtime_state(RuntimeCommit::persisted_state(&state, &[]))
-            .await
-            .expect("commit root frame");
-        let frame_node_id = state.current_frame_node_id.clone().expect("frame node");
-        store
-            .conn
-            .write({
-                let frame_node_id = frame_node_id.clone();
-                move |tx| {
-                    tx.execute(
-                        "UPDATE graph_nodes SET incoming_refs = 0 WHERE node_id = ?1",
-                        params![frame_node_id],
-                    )?;
-                    Ok(())
-                }
-            })
-            .await
-            .expect("corrupt cached count");
-
-        let error = store
-            .tombstone_nodes(std::slice::from_ref(&frame_node_id))
-            .await
-            .expect_err("maintenance drift must stay typed");
-
-        assert!(matches!(
-            error,
-            StoreError::NodeRefcountDrift {
-                node_id,
-                cached: 0,
-                derived: 1,
             } if node_id == frame_node_id
         ));
     }

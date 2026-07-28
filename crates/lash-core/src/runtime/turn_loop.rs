@@ -816,9 +816,6 @@ impl LashRuntime {
             self.state.clone(),
             Arc::clone(&self.host.core.clock),
             self.state.turn_scope(&trace_turn_id),
-        )
-        .with_session_execution_lease(
-            session_execution_lease.map(SessionExecutionLeaseGuard::fence),
         );
         turn_pipeline.apply_prepared_messages(&messages);
         self.finish_turn(
@@ -1389,9 +1386,6 @@ impl LashRuntime {
                     self.state.clone(),
                     Arc::clone(&self.host.core.clock),
                     self.state.turn_scope(&trace_turn_id),
-                )
-                .with_session_execution_lease(
-                    session_execution_lease.map(SessionExecutionLeaseGuard::fence),
                 );
                 turn_pipeline.apply_prepared_messages(&messages);
                 let claims = LogicalTurnClaims::new(queued_claims, turn_input_claims);
@@ -1771,7 +1765,7 @@ impl LashRuntime {
         cancel: &CancellationToken,
         session_execution_lease: Option<&SessionExecutionLeaseGuard>,
         session_execution_lease_release_policy: SessionExecutionLeaseReleasePolicy,
-        session_execution_fence: Option<crate::SessionExecutionLeaseFence>,
+        _session_execution_fence: Option<crate::SessionExecutionLeaseFence>,
         turn_control: &ActiveTurnControl,
     ) -> Result<PhysicalTurnExecution, RuntimeError> {
         let Some(abort) = prepared.abort else {
@@ -1786,8 +1780,7 @@ impl LashRuntime {
             self.state.clone(),
             Arc::clone(&self.host.core.clock),
             self.state.turn_scope(&trace_turn_id),
-        )
-        .with_session_execution_lease(session_execution_fence);
+        );
         turn_pipeline.apply_prepared_messages(&prepared.messages);
         let issue = TurnIssue {
             kind: "plugin".to_string(),
@@ -1971,8 +1964,7 @@ impl LashRuntime {
             self.state.clone(),
             Arc::clone(&self.host.core.clock),
             self.state.turn_scope(&trace_turn_id),
-        )
-        .with_session_execution_lease(session_execution_fence.clone());
+        );
         turn_pipeline
             .prepared_checkpoint(
                 turn_policy.clone(),

@@ -12,14 +12,10 @@
 //!   `RuntimeEnvironment::builder().build()`. The builder seeds an explicit
 //!   in-memory core (`RuntimeHostConfig::in_memory`); override it with
 //!   `with_runtime_host_config` for durable stores.
-//! * **Long autonomous agent:** set `residency` to `ActivePathOnly`,
-//!   then have the host periodically call
-//!   `runtime.orphaned_node_ids()` + `store.tombstone_nodes(...)` +
-//!   `store.vacuum()` on its own schedule. lash owns RAM; the host owns
-//!   disk lifecycle.
+//! * **Long autonomous agent:** reuse the environment and let the durable
+//!   store retain the session's single leaf-to-root history chain.
 //! * **Webserver multi-tenant:** one `RuntimeEnvironment` per process,
-//!   `residency: ActivePathOnly`, and `park()` / `resume()` per
-//!   request. HTTP connection pooling is a provider concern —
+//!   `park()` / `resume()` per request. HTTP connection pooling is a provider concern —
 //!   provider crates accept an optional shared HTTP client in
 //!   their constructors, so the host can share one pool across every
 //!   materialized provider.
@@ -33,28 +29,6 @@ use super::InlineEffectHost;
 use super::process::ProcessRegistry;
 use super::{EffectHost, RuntimeHostConfig, TerminationPolicy};
 
-/// Where session nodes live at runtime.
-///
-/// lash owns RAM; the host owns disk lifecycle. Under `ActivePathOnly`
-/// the runtime trims orphans from memory on load, but disk-side
-/// retention (tombstoning + vacuum) is the host's decision — call
-/// `LashRuntime::orphaned_node_ids` when you want the current orphan
-/// set and feed it into `store.tombstone_nodes` / `store.vacuum` on
-/// whatever schedule fits your deployment.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub enum Residency {
-    /// Every node resident in RAM. Default. Best for interactive /
-    /// branching UX where the user may rewind.
-    #[default]
-    KeepAll,
-    /// Only nodes reachable from `leaf_node_id` are resident. Orphans
-    /// live on disk and are loaded on demand via
-    /// `LashRuntime::get_historic_node`. Best for webserver embedders
-    /// with many concurrent idle sessions, and for autonomous agents
-    /// (combined with host-scheduled `tombstone_nodes` + `vacuum`).
-    ActivePathOnly,
-}
-
 /// Shared runtime infrastructure an embedder builds once and reuses
 /// across every `LashRuntime` it constructs.
 ///
@@ -67,13 +41,6 @@ pub struct RuntimeEnvironment {
     // Shared plugin infrastructure. Created once; every session's
     // `PluginSession` is built from it via `PluginHost::build_session`.
     pub plugin_host: Option<Arc<crate::PluginHost>>,
-
-    // RAM footprint policy for the session graph. Default `KeepAll`
-    // matches legacy behaviour. Webserver and autonomous-agent
-    // embedders set `ActivePathOnly`; disk lifecycle is then the
-    // host's responsibility via `orphaned_node_ids` + `tombstone_nodes`
-    // + `vacuum`.
-    pub residency: Residency,
 
     // Host-owned process lifecycle and local execution support.
     pub process_registry: Option<Arc<dyn ProcessRegistry>>,
@@ -133,7 +100,6 @@ impl Default for RuntimeEnvironmentBuilder {
         Self {
             env: RuntimeEnvironment {
                 plugin_host: None,
-                residency: Residency::default(),
                 process_registry: None,
                 trigger_store: Some(Arc::new(crate::InMemoryTriggerStore::default())),
                 session_store_factory: None,
@@ -148,11 +114,6 @@ impl Default for RuntimeEnvironmentBuilder {
 impl RuntimeEnvironmentBuilder {
     pub fn with_plugin_host(mut self, host: Arc<crate::PluginHost>) -> Self {
         self.env.plugin_host = Some(host);
-        self
-    }
-
-    pub fn with_residency(mut self, residency: Residency) -> Self {
-        self.env.residency = residency;
         self
     }
 

@@ -60,7 +60,7 @@ async fn embedded_runtime_builder_loads_state_from_store() {
     state.bind_durable_incarnation(incarnation);
     state.append_active_read_delta(&[text_message("u0", MessageRole::User, "stored question")]);
     store
-        .commit_runtime_state(RuntimeCommit::persisted_state(&state, &[]))
+        .commit_runtime_state(RuntimeCommit::persisted_state_for_test(&state, &[]))
         .await
         .expect("commit session state");
 
@@ -101,7 +101,7 @@ async fn embedded_runtime_builder_rejects_store_bound_to_different_session_id() 
         .expect("realize session incarnation");
     state.bind_durable_incarnation(incarnation);
     store
-        .commit_runtime_state(RuntimeCommit::persisted_state(&state, &[]))
+        .commit_runtime_state(RuntimeCommit::persisted_state_for_test(&state, &[]))
         .await
         .expect("commit session state");
 

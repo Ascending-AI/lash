@@ -18,7 +18,7 @@ use lash_core::store::queued_work::{
     select_leading_session_command, select_turn_work_claim_prefix,
 };
 use lash_core::store::{
-    GraphCommitDelta, HydratedSessionCheckpoint, PersistedSessionRead, RuntimeCommit,
+    GraphAppend, HydratedSessionCheckpoint, PersistedSessionRead, RuntimeCommit,
     RuntimeCommitResult, SessionCheckpoint, SessionHeadMeta,
 };
 use lash_core::{
@@ -35,7 +35,7 @@ use lash_core::{
     RuntimeEffectLocalExecutor, RuntimeEffectOutcome, RuntimeError, RuntimePersistence,
     ScopedEffectController, SessionCommitStore, SessionExecutionLease,
     SessionExecutionLeaseClaimOutcome, SessionExecutionLeaseCompletion, SessionExecutionLeaseFence,
-    SessionExecutionLeaseStore, SessionMeta, SessionNodeRecord, SessionReadScope, SessionScope,
+    SessionExecutionLeaseStore, SessionMeta, SessionNodeRecord, SessionScope,
     SessionStoreCreateRequest, SessionStoreFactory, SlotPolicy, StoreError, StoreMaintenance,
     TokenLedgerEntry, TurnInputStore, VacuumReport, validate_replayed_effect_envelope,
 };
@@ -96,7 +96,10 @@ const SCHEMA_COMPONENT: &str = "lash-postgres-store";
 // session snapshot.
 // Bumped to 23 so reusable session names carry durable per-lifetime
 // incarnation identity in session metadata.
-const SCHEMA_VERSION: i32 = 23;
+// Bumped to 24 so PostgreSQL checkpoints use the shared manifest plus
+// content-addressed component blobs. Pre-24 checkpoint blobs contain the
+// removed backend-only envelope and are rejected at open.
+const SCHEMA_VERSION: i32 = 24;
 const PROCESS_LEASE_SCHEMA_VERSION: u32 = lash_core::PROCESS_LEASE_SCHEMA_VERSION;
 
 #[derive(Clone)]
@@ -716,7 +719,7 @@ mod tests {
         state.bind_durable_incarnation(incarnation_id);
         state.ensure_agent_frame_initialized();
         store
-            .commit_runtime_state(RuntimeCommit::persisted_state(&state, &[]))
+            .commit_runtime_state(RuntimeCommit::persisted_state_for_test(&state, &[]))
             .await
             .expect("commit root frame");
         let frame_node_id = state.current_frame_node_id.clone().expect("frame node");
@@ -725,9 +728,8 @@ mod tests {
             .execute(storage.pool())
             .await
             .expect("corrupt cached count");
-        let child_node_id = format!("postgres-refcount-child:{}", uuid::Uuid::new_v4());
         let child = lash_core::SessionNodeRecord {
-            node_id: child_node_id.clone(),
+            node_id: "postgres-refcount-child".to_string(),
             parent_node_id: Some(frame_node_id.clone()),
             timestamp: "2026-07-27T00:00:00Z".to_string(),
             payload: lash_core::SessionNodePayload::Event {
@@ -737,12 +739,21 @@ mod tests {
                 ),
             },
         };
-        let mut commit = RuntimeCommit::persisted_state(&state, &[]);
+        let mut commit = RuntimeCommit::persisted_state_for_test(&state, &[]);
         commit.expected_head_revision = 1;
-        commit.graph = GraphCommitDelta::Append {
+        commit.graph = GraphAppend {
             nodes: vec![child],
-            leaf_node_id: Some(child_node_id.clone()),
+            leaf_node_id: Some("postgres-refcount-child".to_string()),
         };
+        let (commit, _) = commit
+            .with_operation(lash_core::OperationId::new(
+                lash_core::ExecutionScope::runtime_operation(format!(
+                    "postgres-refcount-drift:{session_id}"
+                )),
+                "commit",
+            ))
+            .expect("derive refcount-drift child identity");
+        let child_node_id = commit.graph.nodes[0].node_id.clone();
 
         let error = store
             .commit_runtime_state(commit)
@@ -797,7 +808,7 @@ mod tests {
         state.bind_durable_incarnation(incarnation_id);
         state.ensure_agent_frame_initialized();
         store
-            .commit_runtime_state(RuntimeCommit::persisted_state(&state, &[]))
+            .commit_runtime_state(RuntimeCommit::persisted_state_for_test(&state, &[]))
             .await
             .expect("commit root frame");
         let frame_node_id = state.current_frame_node_id.expect("frame node");
@@ -873,7 +884,7 @@ mod tests {
             .await
             .expect("delete before first commit");
         let error = stale_store
-            .commit_runtime_state(RuntimeCommit::persisted_state(&state, &[]))
+            .commit_runtime_state(RuntimeCommit::persisted_state_for_test(&state, &[]))
             .await
             .expect_err("stale first commit must not resurrect the session");
         assert!(matches!(
@@ -901,7 +912,7 @@ mod tests {
         };
         state.ensure_agent_frame_initialized();
         recreated
-            .commit_runtime_state(RuntimeCommit::persisted_state(&state, &[]))
+            .commit_runtime_state(RuntimeCommit::persisted_state_for_test(&state, &[]))
             .await
             .expect("recreated store accepts first commit");
     }

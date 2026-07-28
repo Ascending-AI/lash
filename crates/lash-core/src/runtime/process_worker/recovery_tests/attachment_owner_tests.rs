@@ -26,7 +26,7 @@ async fn parent_bound_session_store(policy: crate::SessionPolicy) -> Arc<InMemor
     const PARENT_SESSION_ID: &str = "parent-bound-process-worker";
     let store = Arc::new(InMemorySessionStore::default());
     let owner = crate::LeaseOwnerIdentity::opaque("parent-owner", "parent-incarnation");
-    let lease = store
+    let _lease = store
         .try_claim_session_execution_lease(PARENT_SESSION_ID, &owner, 60_000)
         .await
         .expect("claim parent session lease")
@@ -43,10 +43,7 @@ async fn parent_bound_session_store(policy: crate::SessionPolicy) -> Arc<InMemor
         .expect("realize parent session lifetime");
     state.bind_durable_incarnation(incarnation_id);
     store
-        .commit_runtime_state(
-            crate::RuntimeCommit::persisted_state(&state, &[])
-                .with_session_execution_lease(lease.fence()),
-        )
+        .commit_runtime_state(crate::RuntimeCommit::persisted_state_for_test(&state, &[]))
         .await
         .expect("persist parent session state");
     store

@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use crate::session_model::SessionHistoryRecord;
-use crate::store::{GraphCommitDelta, RuntimeCommit, RuntimePersistence, StoreError};
+use crate::store::{GraphAppend, RuntimeCommit, RuntimePersistence, StoreError};
 use crate::{
     AssembledTurn, MessageSequence, PluginSession, Session, SessionPolicy, SessionReadView,
     ToolCallRecord, TurnOutcome,
@@ -29,7 +29,6 @@ struct ProgressBoundarySnapshot<'a> {
 pub(super) struct TurnBoundary {
     stage: TurnCommitStage,
     clock: Arc<dyn crate::Clock>,
-    session_execution_lease: Option<crate::SessionExecutionLeaseFence>,
     operation_scope: crate::ExecutionScope,
 }
 
@@ -74,22 +73,6 @@ struct FinalCommitInput<'a> {
     session_execution_lease_completion: Option<crate::SessionExecutionLeaseCompletion>,
 }
 
-enum PersistedGraphMark {
-    Unchanged,
-    Append(Vec<String>),
-}
-
-impl PersistedGraphMark {
-    fn from_graph_commit(graph: &GraphCommitDelta) -> Self {
-        match graph {
-            GraphCommitDelta::Unchanged { .. } => Self::Unchanged,
-            GraphCommitDelta::Append { nodes, .. } => {
-                Self::Append(nodes.iter().map(|node| node.node_id.clone()).collect())
-            }
-        }
-    }
-}
-
 impl TurnBoundary {
     #[cfg(test)]
     pub(super) fn from_state(state: RuntimeSessionState) -> Self {
@@ -110,17 +93,8 @@ impl TurnBoundary {
                 operation_scope.id(),
             ))),
             clock,
-            session_execution_lease: None,
             operation_scope,
         }
-    }
-
-    pub(super) fn with_session_execution_lease(
-        mut self,
-        lease: Option<crate::SessionExecutionLeaseFence>,
-    ) -> Self {
-        self.session_execution_lease = lease;
-        self
     }
 
     pub(super) fn state_mut(&mut self) -> &mut RuntimeSessionState {
@@ -412,10 +386,7 @@ impl TurnBoundary {
                 store,
                 graph,
                 usage_deltas,
-                Some(crate::OperationId::new(
-                    self.operation_scope.clone(),
-                    "final",
-                )),
+                crate::OperationId::new(self.operation_scope.clone(), "final"),
                 originating_queue_claims,
                 originating_turn_input_claims,
                 completed_queue_claims,
@@ -436,9 +407,9 @@ impl TurnBoundary {
     async fn apply_commit(
         &mut self,
         store: &(dyn RuntimePersistence + '_),
-        mut graph: GraphCommitDelta,
+        mut graph: GraphAppend,
         usage_deltas: &[crate::TokenLedgerEntry],
-        operation: Option<crate::OperationId>,
+        operation: crate::OperationId,
         originating_queue_claims: Vec<crate::QueuedWorkCompletion>,
         originating_turn_input_claims: Vec<crate::TurnInputCompletion>,
         completed_queue_claims: Vec<crate::QueuedWorkCompletion>,
@@ -448,44 +419,44 @@ impl TurnBoundary {
         committed_attachment_ids: Vec<crate::AttachmentId>,
         session_execution_lease_completion: Option<crate::SessionExecutionLeaseCompletion>,
     ) -> Result<Vec<crate::QueuedWorkBatch>, StoreError> {
-        let session_execution_lease = self.session_execution_lease.clone();
-        if let Some(operation) = &operation {
-            let session_id = self.state().session_id.clone();
-            let incarnation_id = self
-                .state()
-                .durable_incarnation_id("history node derivation")?
-                .clone();
-            let node_id_mapping = graph.derive_node_ids(&session_id, &incarnation_id, operation)?;
-            match &mut self.stage {
-                TurnCommitStage::Drafting(draft) => {
-                    draft.remap_node_ids(&session_id, &node_id_mapping)
+        let session_id = self.state().session_id.clone();
+        let incarnation_id = self
+            .state()
+            .durable_incarnation_id("history node derivation")?
+            .clone();
+        let node_id_mapping = graph.derive_node_ids(&session_id, &incarnation_id, &operation)?;
+        match &mut self.stage {
+            TurnCommitStage::Drafting(draft) => draft.remap_node_ids(&session_id, &node_id_mapping),
+            TurnCommitStage::Finalized(finalized) => {
+                finalized
+                    .state
+                    .session_graph
+                    .remap_node_ids(&session_id, &node_id_mapping);
+                if let Some(current) = finalized.state.current_frame_node_id.as_mut()
+                    && let Some((_, derived)) =
+                        node_id_mapping.iter().find(|(draft, _)| draft == current)
+                {
+                    *current = derived.clone();
                 }
-                TurnCommitStage::Finalized(finalized) => {
-                    finalized
-                        .state
-                        .session_graph
-                        .remap_node_ids(&session_id, &node_id_mapping);
-                    if let Some(current) = finalized.state.current_frame_node_id.as_mut()
-                        && let Some((_, derived)) =
-                            node_id_mapping.iter().find(|(draft, _)| draft == current)
-                    {
-                        *current = derived.clone();
-                    }
-                    finalized.state.agent_frames = finalized
-                        .state
-                        .session_graph
-                        .agent_frame_records(&session_id);
-                }
+                finalized.state.agent_frames = finalized
+                    .state
+                    .session_graph
+                    .agent_frame_records(&session_id);
             }
         }
         let state = self.state_mut();
-        let mark = PersistedGraphMark::from_graph_commit(&graph);
-        let mut commit =
-            RuntimeCommit::persisted_state_with_graph_commit(state, graph, usage_deltas)
-                .with_committed_attachments(committed_attachment_ids);
-        if let Some(lease) = session_execution_lease {
-            commit = commit.with_session_execution_lease(lease);
-        }
+        let persisted_node_ids = graph
+            .nodes
+            .iter()
+            .map(|node| node.node_id.clone())
+            .collect::<Vec<_>>();
+        let mut commit = RuntimeCommit::persisted_state_with_graph_commit_and_operation(
+            state,
+            graph,
+            usage_deltas,
+            operation,
+        )?
+        .with_committed_attachments(committed_attachment_ids);
         if let Some(completion) = session_execution_lease_completion {
             commit = commit.releasing_session_execution_lease(completion);
         }
@@ -495,29 +466,13 @@ impl TurnBoundary {
             .validate_claim_settlement(&originating_queue_claims, &originating_turn_input_claims)?;
         commit.enqueued_queue_batches = enqueued_queue_batches;
         commit.interrupted_turn_input_turn_id = interrupted_turn_input_turn_id;
-        if let Some(operation) = operation {
-            let turn_commit_hash = commit.turn_commit_hash()?;
-            commit.turn_commit = Some(crate::RuntimeTurnCommitStamp::new(
-                commit.session_id.clone(),
-                operation,
-                turn_commit_hash,
-            ));
-        }
+        commit.turn_commit.turn_commit_hash = commit.turn_commit_hash()?;
         let result = crate::store::commit_runtime_state_verified(store, commit).await?;
         let enqueued_queue_batches = result.enqueued_queue_batches.clone();
         state.apply_persisted_commit_result(result);
-        let persisted_node_ids = match &mark {
-            PersistedGraphMark::Unchanged => Vec::new(),
-            PersistedGraphMark::Append(node_ids) => node_ids.clone(),
-        };
-        state.mark_node_ids_persisted(persisted_node_ids);
+        state.mark_node_ids_persisted(persisted_node_ids.clone());
         if let TurnCommitStage::Drafting(draft) = &mut self.stage {
-            match mark {
-                PersistedGraphMark::Unchanged => {}
-                PersistedGraphMark::Append(node_ids) => {
-                    draft.mark_node_ids_persisted(node_ids);
-                }
-            }
+            draft.mark_node_ids_persisted(persisted_node_ids);
         }
         Ok(enqueued_queue_batches)
     }
@@ -618,9 +573,7 @@ mod tests {
             Arc::new(crate::SystemClock),
             "masked-path-regression",
         );
-        let GraphCommitDelta::Append { nodes, .. } = draft.graph_commit() else {
-            panic!("the non-durable resident node must remain appendable");
-        };
+        let GraphAppend { nodes, .. } = draft.graph_commit();
         assert_eq!(
             nodes
                 .iter()
@@ -743,10 +696,7 @@ mod tests {
             .expect("claim test session execution lease")
             .acquired()
             .expect("test session execution lease");
-        (
-            TurnBoundary::from_state(state).with_session_execution_lease(Some(lease.fence())),
-            lease,
-        )
+        (TurnBoundary::from_state(state), lease)
     }
 
     #[test]

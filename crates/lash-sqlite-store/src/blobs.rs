@@ -92,6 +92,47 @@ impl Store {
         })
     }
 
+    pub(crate) fn validate_checkpoint_component_refs_conn(
+        conn: &Connection,
+        checkpoint: &HydratedSessionCheckpoint,
+    ) -> Result<(), StoreError> {
+        for (component, body_is_present, blob_ref) in [
+            (
+                "tool-state",
+                checkpoint.tool_state.is_some(),
+                checkpoint.tool_state_ref.as_ref(),
+            ),
+            (
+                "plugin-snapshot",
+                checkpoint.plugin_snapshot.is_some(),
+                checkpoint.plugin_snapshot_ref.as_ref(),
+            ),
+            (
+                "execution-state",
+                checkpoint.execution_state.is_some(),
+                checkpoint.execution_state_ref.as_ref(),
+            ),
+        ] {
+            let Some(blob_ref) = blob_ref.filter(|_| !body_is_present) else {
+                continue;
+            };
+            let exists: bool = conn
+                .query_row(
+                    "SELECT EXISTS(SELECT 1 FROM blobs WHERE hash = ?1)",
+                    params![blob_ref.as_str()],
+                    |row| row.get(0),
+                )
+                .map_err(sqlite_error)?;
+            if !exists {
+                return Err(StoreError::CheckpointComponentMissing {
+                    component,
+                    blob_ref: blob_ref.clone(),
+                });
+            }
+        }
+        Ok(())
+    }
+
     pub(crate) fn get_blob_conn(conn: &Connection, blob_ref: &BlobRef) -> Option<Vec<u8>> {
         let bytes: Vec<u8> = conn
             .query_row(
@@ -105,12 +146,25 @@ impl Store {
         decode_artifact_blob(&bytes).or(Some(bytes))
     }
 
-    pub(crate) fn get_typed_blob_conn<T: serde::de::DeserializeOwned>(
+    fn get_checkpoint_component_conn<T: serde::de::DeserializeOwned>(
         conn: &Connection,
-        blob_ref: &BlobRef,
-    ) -> Option<T> {
-        let bytes = Self::get_blob_conn(conn, blob_ref)?;
-        decode_msgpack(&bytes)
+        component: &'static str,
+        blob_ref: Option<&BlobRef>,
+    ) -> Result<Option<T>, StoreError> {
+        let Some(blob_ref) = blob_ref else {
+            return Ok(None);
+        };
+        let bytes = Self::get_blob_conn(conn, blob_ref).ok_or_else(|| {
+            StoreError::CheckpointComponentMissing {
+                component,
+                blob_ref: blob_ref.clone(),
+            }
+        })?;
+        decode_msgpack(&bytes).map(Some).ok_or_else(|| {
+            StoreError::Backend(format!(
+                "failed to decode checkpoint {component} component `{blob_ref}`"
+            ))
+        })
     }
 
     pub(crate) fn get_checkpoint_conn(
@@ -124,21 +178,24 @@ impl Store {
         Ok(Some(HydratedSessionCheckpoint {
             turn_state: record.turn_state,
             tool_state_ref: record.tool_state_ref.clone(),
-            tool_state: record
-                .tool_state_ref
-                .as_ref()
-                .and_then(|blob_ref| Self::get_typed_blob_conn(conn, blob_ref)),
+            tool_state: Self::get_checkpoint_component_conn(
+                conn,
+                "tool-state",
+                record.tool_state_ref.as_ref(),
+            )?,
             plugin_snapshot_ref: record.plugin_snapshot_ref.clone(),
-            plugin_snapshot: record
-                .plugin_snapshot_ref
-                .as_ref()
-                .and_then(|blob_ref| Self::get_typed_blob_conn(conn, blob_ref)),
+            plugin_snapshot: Self::get_checkpoint_component_conn(
+                conn,
+                "plugin-snapshot",
+                record.plugin_snapshot_ref.as_ref(),
+            )?,
             plugin_snapshot_revision: record.plugin_snapshot_revision,
             execution_state_ref: record.execution_state_ref.clone(),
-            execution_state: record
-                .execution_state_ref
-                .as_ref()
-                .and_then(|blob_ref| Self::get_typed_blob_conn(conn, blob_ref)),
+            execution_state: Self::get_checkpoint_component_conn(
+                conn,
+                "execution-state",
+                record.execution_state_ref.as_ref(),
+            )?,
         }))
     }
 

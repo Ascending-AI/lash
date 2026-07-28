@@ -5,7 +5,7 @@ use crate::session_graph::SessionReadModel;
 use crate::session_graph::build_active_read_replacement;
 use crate::session_model::SessionHistoryRecord;
 #[cfg(test)]
-use crate::store::GraphCommitDelta;
+use crate::store::GraphAppend;
 use crate::{BaseRenderCache, Message, MessageSequence, SessionGraph, SessionNodeRecord};
 
 #[derive(Debug)]
@@ -149,7 +149,7 @@ impl TurnGraphEditor {
     }
 
     #[cfg(test)]
-    pub(super) fn graph_commit(&self) -> GraphCommitDelta {
+    pub(super) fn graph_commit(&self) -> GraphAppend {
         let nodes = self
             .base_graph
             .nodes
@@ -159,11 +159,12 @@ impl TurnGraphEditor {
             .cloned()
             .collect::<Vec<_>>();
         if nodes.is_empty() {
-            GraphCommitDelta::Unchanged {
+            GraphAppend {
+                nodes: Vec::new(),
                 leaf_node_id: self.leaf_node_id(),
             }
         } else {
-            GraphCommitDelta::Append {
+            GraphAppend {
                 nodes,
                 leaf_node_id: self.leaf_node_id(),
             }

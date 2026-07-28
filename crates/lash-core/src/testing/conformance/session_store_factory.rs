@@ -16,6 +16,7 @@ where
     attachment_ownership_isolation(make()).await;
     session_store_factory_rejects_cross_session_graph_parents(make()).await;
     session_store_factory_fork_semantics(make()).await;
+    session_store_factory_vacuums_organic_retained_tombstone(make()).await;
     session_store_factory_delete_removes_store_and_is_idempotent(make()).await;
 }
 
@@ -420,7 +421,10 @@ async fn session_store_factory_rejects_cross_session_graph_parents(
     };
     first_state.ensure_agent_frame_initialized();
     first
-        .commit_runtime_state(crate::RuntimeCommit::persisted_state(&first_state, &[]))
+        .commit_runtime_state(crate::RuntimeCommit::persisted_state_for_test(
+            &first_state,
+            &[],
+        ))
         .await
         .expect("commit graph parent owner frame");
     let foreign_parent = first_state
@@ -441,21 +445,13 @@ async fn session_store_factory_rejects_cross_session_graph_parents(
     };
     second_state.ensure_agent_frame_initialized();
     let second_result = second
-        .commit_runtime_state(crate::RuntimeCommit::persisted_state(&second_state, &[]))
+        .commit_runtime_state(crate::RuntimeCommit::persisted_state_for_test(
+            &second_state,
+            &[],
+        ))
         .await
         .expect("commit intruder's own frame");
     second_state.apply_persisted_commit_result(second_result);
-    let foreign_path = second
-        .load_session(crate::SessionReadScope::ActivePath {
-            leaf_node_id: Some(foreign_parent.clone()),
-        })
-        .await
-        .expect("probe unrelated active path")
-        .expect("intruder has its own durable head");
-    assert!(
-        foreign_path.graph.nodes.is_empty() && foreign_path.graph.leaf_node_id.is_none(),
-        "ActivePath must not expose a foreign session's ancestry"
-    );
     assert!(
         second
             .load_node(&foreign_parent)
@@ -483,26 +479,28 @@ async fn session_store_factory_rejects_cross_session_graph_parents(
         current_frame_node_id: Some(foreign_parent),
         ..Default::default()
     };
+    let commit = crate::RuntimeCommit::persisted_state_with_graph_commit(
+        &state,
+        crate::GraphAppend {
+            nodes: vec![child],
+            leaf_node_id: Some("cross-session-child".to_string()),
+        },
+        &[],
+    );
+    let child_node_id = commit.graph.nodes[0].node_id.clone();
     let error = second
-        .commit_runtime_state(crate::RuntimeCommit::persisted_state_with_graph_commit(
-            &state,
-            crate::GraphCommitDelta::Append {
-                nodes: vec![child.clone()],
-                leaf_node_id: Some(child.node_id.clone()),
-            },
-            &[],
-        ))
+        .commit_runtime_state(commit)
         .await
         .expect_err("a graph parent must belong to the committing session");
     assert!(match &error {
-        crate::StoreError::InvalidGraphParent { node_id, .. } => node_id == &child.node_id,
+        crate::StoreError::InvalidGraphParent { node_id, .. } => node_id == &child_node_id,
         crate::StoreError::MissingFrameOpenAncestor { leaf_node_id } => {
-            leaf_node_id == &child.node_id
+            leaf_node_id == &child_node_id
         }
         _ => false,
     });
     let intruder_after_rejection = second
-        .load_session(crate::SessionReadScope::FullGraph)
+        .load_session()
         .await
         .expect("load intruder after rejection")
         .expect("intruder head survives rejection");
@@ -558,7 +556,7 @@ async fn session_store_factory_fork_semantics(factory: Arc<dyn crate::SessionSto
         .clone()
         .expect("source root leaf");
     let first = source
-        .commit_runtime_state(crate::RuntimeCommit::persisted_state(
+        .commit_runtime_state(crate::RuntimeCommit::persisted_state_for_test(
             &state,
             &[crate::TokenLedgerEntry {
                 source: "source-only".to_string(),
@@ -722,7 +720,7 @@ async fn session_store_factory_fork_semantics(factory: Arc<dyn crate::SessionSto
         .expect("open fork")
         .expect("fork exists");
     let branch_read = branch
-        .load_session(crate::SessionReadScope::ActivePath { leaf_node_id: None })
+        .load_session()
         .await
         .expect("load fork")
         .expect("fork head");
@@ -849,7 +847,10 @@ async fn session_store_factory_fork_semantics(factory: Arc<dyn crate::SessionSto
         .map(|node| node.node_id.clone())
         .collect::<Vec<_>>();
     let recreated_frame_result = recreated
-        .commit_runtime_state(crate::RuntimeCommit::persisted_state(&recreated_state, &[]))
+        .commit_runtime_state(crate::RuntimeCommit::persisted_state_for_test(
+            &recreated_state,
+            &[],
+        ))
         .await
         .expect("commit recreated frame");
     recreated_state.apply_persisted_commit_result(recreated_frame_result);
@@ -904,19 +905,102 @@ async fn commit_fork_conformance_state(
     store: &Arc<dyn crate::RuntimePersistence>,
     state: &mut crate::RuntimeSessionState,
 ) -> Result<(), crate::StoreError> {
-    let new_node_ids = state
-        .session_graph
-        .nodes
-        .iter()
-        .filter(|node| !state.persisted_node_ids.contains(&node.node_id))
-        .map(|node| node.node_id.clone())
-        .collect::<Vec<_>>();
-    let result = store
-        .commit_runtime_state(crate::RuntimeCommit::persisted_state(state, &[]))
-        .await?;
+    let operation = crate::OperationId::turn(
+        &state.session_id,
+        format!("fork-conformance-{}", state.head_revision),
+        "commit",
+    );
+    let (commit, new_node_ids) =
+        crate::RuntimeCommit::persisted_state_with_operation(state, &[], operation)?;
+    let result = store.commit_runtime_state(commit).await?;
     state.apply_persisted_commit_result(result);
     state.mark_node_ids_persisted(new_node_ids);
     Ok(())
+}
+
+async fn session_store_factory_vacuums_organic_retained_tombstone(
+    factory: Arc<dyn crate::SessionStoreFactory>,
+) {
+    let request = session_store_request(
+        "retained-tombstone-source",
+        "tombstone-model",
+        crate::SessionRelation::Root,
+    );
+    let source = factory
+        .create_store(&request)
+        .await
+        .expect("create retained-tombstone source");
+    let mut state = crate::RuntimeSessionState {
+        session_id: request.session_id.clone(),
+        session_lifetime: crate::SessionLifetime::durable(
+            source
+                .load_session_meta()
+                .await
+                .expect("load retained-tombstone metadata")
+                .expect("retained-tombstone metadata")
+                .incarnation_id,
+        ),
+        ..Default::default()
+    };
+    state.ensure_agent_frame_initialized();
+    let leaf_node_id = state
+        .session_graph
+        .leaf_node_id
+        .clone()
+        .expect("retained-tombstone leaf");
+    source
+        .commit_runtime_state(crate::RuntimeCommit::persisted_state_for_test(&state, &[]))
+        .await
+        .expect("commit retained-tombstone source");
+    factory
+        .pin(&leaf_node_id)
+        .await
+        .expect("pin retained-tombstone leaf");
+    factory
+        .delete_session(&request.session_id)
+        .await
+        .expect("delete retained-tombstone source");
+    factory
+        .unpin(&leaf_node_id)
+        .await
+        .expect("unpin deleted source leaf to zero");
+
+    assert!(
+        source
+            .load_node(&leaf_node_id)
+            .await
+            .expect("read retained tombstone")
+            .is_none(),
+        "decrement-to-zero tombstones must be hidden before vacuum"
+    );
+    let fork_error = factory
+        .fork_at(&crate::ForkSessionRequest {
+            session_id: "retained-tombstone-fork".to_string(),
+            node_id: leaf_node_id.clone(),
+            relation: crate::SessionRelation::Root,
+            policy: request.policy,
+        })
+        .await
+        .expect_err("a retained tombstone must not be forkable");
+    assert!(matches!(
+        fork_error,
+        crate::StoreError::ForkPointNotRetained { node_id } if node_id == leaf_node_id
+    ));
+
+    let report = source.vacuum().await.expect("vacuum retained tombstone");
+    assert_eq!(
+        report.removed_node_count, 1,
+        "vacuum must physically remove the organically created tombstone"
+    );
+    assert_eq!(
+        source
+            .vacuum()
+            .await
+            .expect("repeat retained-tombstone vacuum")
+            .removed_node_count,
+        0,
+        "vacuum must consume each retained tombstone exactly once"
+    );
 }
 
 async fn session_store_factory_delete_removes_store_and_is_idempotent(
@@ -968,7 +1052,7 @@ async fn session_store_factory_delete_removes_store_and_is_idempotent(
         Some(live_leaf.node_id.clone()),
     );
     created
-        .commit_runtime_state(crate::RuntimeCommit::persisted_state(&state, &[]))
+        .commit_runtime_state(crate::RuntimeCommit::persisted_state_for_test(&state, &[]))
         .await
         .expect("commit graph chain before delete");
     created
@@ -1084,11 +1168,14 @@ async fn session_store_factory_delete_removes_store_and_is_idempotent(
     };
     recreated_state.ensure_agent_frame_initialized();
     recreated
-        .commit_runtime_state(crate::RuntimeCommit::persisted_state(&recreated_state, &[]))
+        .commit_runtime_state(crate::RuntimeCommit::persisted_state_for_test(
+            &recreated_state,
+            &[],
+        ))
         .await
         .expect("recreated session must be able to reuse its deterministic initial frame id");
     let read = recreated
-        .load_session(crate::SessionReadScope::FullGraph)
+        .load_session()
         .await
         .expect("load recreated session")
         .expect("recreated session has a committed head");

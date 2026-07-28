@@ -111,19 +111,14 @@ impl LashRuntime {
                 .len()
                 .saturating_sub(requested_node_count)..]
                 .to_vec();
-            let mut commit = crate::store::RuntimeCommit::persisted_state_with_graph_commit(
-                &self.state,
-                graph,
-                &[],
-            );
-            let hash = commit
-                .turn_commit_hash()
+            let commit =
+                crate::store::RuntimeCommit::persisted_state_with_graph_commit_and_operation(
+                    &self.state,
+                    graph,
+                    &[],
+                    operation,
+                )
                 .map_err(|err| SessionError::Protocol(err.to_string()))?;
-            commit.turn_commit = Some(crate::RuntimeTurnCommitStamp::new(
-                self.state.session_id.clone(),
-                operation,
-                hash,
-            ));
             let result = match super::commit_runtime_state_with_fresh_session_execution_lease(
                 store,
                 commit,
@@ -521,21 +516,18 @@ impl LashRuntime {
                         ))
                     },
                 )?;
-            let mut commit = crate::store::RuntimeCommit::persisted_state_with_graph_commit(
-                &self.state,
-                graph,
-                &[],
-            );
-            let hash = commit.turn_commit_hash().map_err(|err| {
-                PluginOperationInvokeError::Failed(format!(
-                    "failed to hash plugin runtime events: {err}"
-                ))
-            })?;
-            commit.turn_commit = Some(crate::RuntimeTurnCommitStamp::new(
-                self.state.session_id.clone(),
-                operation,
-                hash,
-            ));
+            let commit =
+                crate::store::RuntimeCommit::persisted_state_with_graph_commit_and_operation(
+                    &self.state,
+                    graph,
+                    &[],
+                    operation,
+                )
+                .map_err(|err| {
+                    PluginOperationInvokeError::Failed(format!(
+                        "failed to hash plugin runtime events: {err}"
+                    ))
+                })?;
             let result = match super::commit_runtime_state_with_fresh_session_execution_lease(
                 store,
                 commit,

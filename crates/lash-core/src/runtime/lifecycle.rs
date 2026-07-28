@@ -1,5 +1,24 @@
 use super::*;
 
+fn initial_park_preview(
+    state: &crate::RuntimeSessionState,
+) -> Result<crate::store::RuntimeCommit, crate::StoreError> {
+    let operation =
+        super::state::boundary_operation(&state.session_id, "initial-park-preview", "preview");
+    let mut graph = state.pending_graph_commit();
+    graph.derive_node_ids(
+        &state.session_id,
+        state.durable_incarnation_id("initial park preview")?,
+        &operation,
+    )?;
+    crate::store::RuntimeCommit::persisted_state_with_graph_commit_and_operation(
+        state,
+        graph,
+        &[],
+        operation,
+    )
+}
+
 fn initial_park_operation(
     commit: &crate::store::RuntimeCommit,
 ) -> Result<crate::OperationId, crate::StoreError> {
@@ -203,7 +222,6 @@ impl LashRuntime {
             last_committed_lease_continuity: None,
             last_committed_observation_turn: None,
             graph_loaded_from_store: false,
-            residency: Residency::default(),
         })
     }
 
@@ -249,16 +267,14 @@ impl LashRuntime {
         Self::from_host_state(policy, host.into(), services.into_runtime_services(), state).await
     }
 
-    /// Assemble a runtime from already-resolved parts: the central production
-    /// path that maps `(store, process_registry)` to the right host/services
-    /// constructor, applies residency, and stamps it onto the runtime.
+    /// Assemble a runtime from already-resolved parts: the single place that maps
+    /// `(store, process_registry)` to the right host/services constructor.
     ///
     /// Every construction path — the live open (`from_environment`), the worker
     /// rebuild (`EmbeddedRuntimeBuilder::build`), and child-session
-    /// materialization — routes through here so the store/registry wiring and
-    /// residency cannot drift between them. The public persistent-state
-    /// constructors are additional direct `(state, store)` joins and apply the
-    /// same guarded binding before delegating to `from_host_state`.
+    /// materialization — routes through here so the store/registry wiring cannot
+    /// drift between them. Persistent paths bind the supplied state to the
+    /// store's durable session incarnation before constructing the runtime.
     pub(in crate::runtime) async fn assemble_runtime(
         policy: SessionPolicy,
         embedded_host: EmbeddedRuntimeHost,
@@ -266,28 +282,15 @@ impl LashRuntime {
         persistence: RuntimePersistenceBindings,
         process_registry: Option<Arc<dyn ProcessRegistry>>,
         mut state: RuntimeSessionState,
-        residency: Residency,
     ) -> Result<Self, SessionError> {
         let RuntimePersistenceBindings {
             runtime_store: store,
             attachment_manifest_store,
         } = persistence;
-        // ActivePathOnly without a store is a data-loss footgun: trimming drops
-        // orphans from RAM with nowhere to reload them from.
-        if matches!(residency, Residency::ActivePathOnly) && store.is_none() {
-            return Err(SessionError::Protocol(
-                "Residency::ActivePathOnly requires a persistent store — \
-                 without one, trimmed orphans are irrecoverable"
-                    .to_string(),
-            ));
-        }
         if let Some(store) = store.as_deref() {
             bind_state_to_store(&policy, store, &mut state).await?;
         }
-        // Heal FIRST (against the full resident set), then trim to the residency.
-        // `from_host_state` normalizes again, which is safe on a trimmed graph.
-        apply_residency_on_load(&mut state, residency);
-        let mut runtime = match (store, process_registry) {
+        let runtime = match (store, process_registry) {
             (Some(store), Some(registry)) => {
                 let host = ProcessRuntimeHost::new(embedded_host, registry);
                 let mut services = PersistentRuntimeServices::new(plugin_session, store);
@@ -320,7 +323,6 @@ impl LashRuntime {
                 Self::from_embedded_state(policy, embedded_host, services, state).await?
             }
         };
-        runtime.residency = residency;
         Ok(runtime)
     }
 
@@ -367,7 +369,6 @@ impl LashRuntime {
             RuntimePersistenceBindings::new(store),
             env.process_registry.as_ref().cloned(),
             state,
-            env.residency,
         )
         .await?;
         // Thread the host-owned work drivers onto this session's host so
@@ -398,12 +399,10 @@ impl LashRuntime {
         // here would bump the head revision on every park/close, disturbing
         // host-side head-CAS expectations for what is durably a no-op.
         if self.state.checkpoint_ref.is_none()
-            || matches!(
-                self.state.pending_graph_commit(),
-                crate::GraphCommitDelta::Append { .. }
-            )
+            || !self.state.pending_graph_commit().nodes.is_empty()
         {
-            let proposed = crate::store::RuntimeCommit::persisted_state(&self.state, &[]);
+            let proposed = initial_park_preview(&self.state)
+                .map_err(|err| SessionError::Protocol(err.to_string()))?;
             let operation = initial_park_operation(&proposed)
                 .map_err(|err| SessionError::Protocol(err.to_string()))?;
             let (commit, persisted_node_ids) =
@@ -439,28 +438,15 @@ impl LashRuntime {
     }
 
     /// Resume a previously parked session against a shared environment.
-    /// Loads only the active-path graph when
-    /// `env.residency == ActivePathOnly`; under `KeepAll`
-    /// loads the full graph (current behavior).
     pub async fn resume(
         parked: ParkedSession,
         env: &RuntimeEnvironment,
     ) -> Result<Self, SessionError> {
-        // Under ActivePathOnly, skip the full-graph load: fetch head
-        // metadata + the active-path chain only. Durable impls can
-        // ActivePathOnly is an exact store capability. Stores that do
-        // not support it must return UnsupportedReadScope; resume does
-        // not fall back to a full graph load.
-        let loaded = match env.residency {
-            Residency::KeepAll => {
-                crate::store::load_persisted_session_state(parked.store.as_ref()).await
-            }
-            Residency::ActivePathOnly => {
-                crate::store::load_persisted_session_state_active_path(parked.store.as_ref(), None)
-                    .await
-            }
-        }
-        .map_err(|err| SessionError::Protocol(format!("failed to load runtime state: {err}")))?;
+        let loaded = crate::store::load_persisted_session_state(parked.store.as_ref())
+            .await
+            .map_err(|err| {
+                SessionError::Protocol(format!("failed to load runtime state: {err}"))
+            })?;
         let state = loaded.unwrap_or_else(|| RuntimeSessionState {
             session_id: parked.session_id.clone(),
             policy: parked.policy.clone(),
@@ -468,89 +454,55 @@ impl LashRuntime {
         });
         Self::from_environment(env, parked.policy, state, Some(parked.store)).await
     }
-
-    /// Opt-in async read for historic (non-active-path) nodes under
-    /// `Residency::ActivePathOnly`. Plugins that walk the full graph
-    /// call this instead of `session_graph().find_node()` so missing
-    /// nodes surface as `Ok(None)` rather than silently missing.
-    pub async fn get_historic_node(
-        &self,
-        node_id: &str,
-    ) -> Result<Option<crate::SessionNodeRecord>, SessionError> {
-        if let Some(node) = self.state.session_graph.find_node(node_id) {
-            return Ok(Some(node.clone()));
-        }
-        let store = self.services.store.clone().ok_or_else(|| {
-            SessionError::Protocol("get_historic_node() requires a persistent runtime".to_string())
-        })?;
-        store
-            .load_node(node_id)
-            .await
-            .map_err(|err| SessionError::Protocol(format!("failed to load historic node: {err}")))
-    }
-
-    /// Store-resident node IDs that are NOT reachable from the current
-    /// leaf — i.e. orphans eligible for tombstoning. lash owns RAM; the
-    /// host owns disk lifecycle, so this is a primitive the host calls
-    /// on its own schedule (e.g. every N turns, or off-peak).
-    ///
-    /// Typical autonomous-agent loop:
-    ///
-    /// ```ignore
-    /// let orphans = runtime.orphaned_node_ids().await?;
-    /// if !orphans.is_empty() {
-    ///     store.tombstone_nodes(&orphans).await;
-    /// }
-    /// // And less often:
-    /// store.vacuum().await;
-    /// ```
-    pub async fn orphaned_node_ids(&self) -> Result<Vec<String>, SessionError> {
-        let store = self.services.store.clone().ok_or_else(|| {
-            SessionError::Protocol("orphaned_node_ids() requires a persistent runtime".to_string())
-        })?;
-        let Some(read) = store
-            .load_session(crate::store::SessionReadScope::FullGraph)
-            .await
-            .map_err(|err| SessionError::Protocol(format!("failed to load full graph: {err}")))?
-        else {
-            return Ok(Vec::new());
-        };
-        let active: std::collections::HashSet<&str> = read
-            .graph
-            .active_path_nodes()
-            .iter()
-            .map(|node| node.node_id.as_str())
-            .collect();
-        Ok(read
-            .graph
-            .nodes
-            .iter()
-            .filter(|node| !active.contains(node.node_id.as_str()))
-            .map(|node| node.node_id.clone())
-            .collect())
-    }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::initial_park_operation;
+    use super::{initial_park_operation, initial_park_preview};
+
+    fn user_message(id: &str, content: &str) -> crate::Message {
+        crate::Message {
+            id: id.to_string(),
+            role: crate::MessageRole::User,
+            parts: crate::shared_parts(vec![crate::Part {
+                id: format!("{id}.p0"),
+                kind: crate::PartKind::Text,
+                content: content.to_string(),
+                attachment: None,
+                tool_call_id: None,
+                tool_name: None,
+                tool_replay: None,
+                prune_state: crate::PruneState::Intact,
+                reasoning_meta: None,
+                response_meta: None,
+            }]),
+            origin: None,
+        }
+    }
 
     #[test]
     fn initial_park_identity_is_stable_for_replay_and_distinguishes_content() {
         let mut state = crate::RuntimeSessionState {
             session_id: "park-identity".to_string(),
+            session_lifetime: crate::SessionLifetime::durable(
+                crate::IncarnationId::mint_for_store(),
+            ),
             ..crate::RuntimeSessionState::default()
         };
         state.ensure_agent_frame_initialized();
-        let first = crate::store::RuntimeCommit::persisted_state(&state, &[]);
+        state.append_active_conversation_messages(&[user_message(
+            "pending-user-message",
+            "persist me before parking",
+        )]);
+        let first = initial_park_preview(&state).expect("first park preview");
 
         let mut retry_state = state.clone();
         retry_state.head_revision = 41;
-        let retry = crate::store::RuntimeCommit::persisted_state(&retry_state, &[]);
+        let retry = initial_park_preview(&retry_state).expect("retry park preview");
 
         let mut changed_state = retry_state;
         changed_state.turn_index = 1;
-        let changed = crate::store::RuntimeCommit::persisted_state(&changed_state, &[]);
+        let changed = initial_park_preview(&changed_state).expect("changed park preview");
 
         let first = initial_park_operation(&first).expect("first park identity");
         let retry = initial_park_operation(&retry).expect("retry park identity");

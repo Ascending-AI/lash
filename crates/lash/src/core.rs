@@ -272,18 +272,13 @@ impl QueuedWorkRunHandle for InlineQueuedWorkRunHandle {
             .map_err(|error| {
                 lash_core::QueuedWorkRunError::terminal(lash_core::PluginError::Session(error))
             })?;
-        let state = crate::session::load_state_for_residency(
-            self.config.env.residency,
-            &session_id,
-            &policy,
-            store.as_ref(),
-        )
-        .await
-        .map_err(|error| {
-            lash_core::QueuedWorkRunError::terminal(lash_core::PluginError::Session(
-                error.to_string(),
-            ))
-        })?;
+        let state = crate::session::load_state_from_store(&session_id, &policy, store.as_ref())
+            .await
+            .map_err(|error| {
+                lash_core::QueuedWorkRunError::terminal(lash_core::PluginError::Session(
+                    error.to_string(),
+                ))
+            })?;
         let plugin_host = build_plugin_host(
             self.config.protocol_factory.as_ref(),
             self.config.plugin_factories.as_ref(),
@@ -608,7 +603,7 @@ impl LashCore {
                 node_id: node_id.clone(),
             })?;
         let source_config = source_store
-            .load_session(lash_core::SessionReadScope::FullGraph)
+            .load_session()
             .await?
             .ok_or_else(|| lash_core::StoreError::ForkPointNotRetained {
                 node_id: node_id.clone(),
@@ -808,7 +803,6 @@ impl LashCore {
             process_registry,
         )
         .with_session_policy(self.policy.clone())
-        .with_residency(self.env.residency)
         .with_process_execution_concurrency(self.process_execution_concurrency)?;
         if let Some(trigger_store) = self.env.trigger_store.as_ref() {
             config = config.with_trigger_store(Arc::clone(trigger_store));
@@ -854,7 +848,6 @@ pub struct LashCoreBuilder {
     tool_providers: Vec<Arc<dyn ToolProvider>>,
     plugin_stack: PluginStack,
     plugin_host: Option<PluginHost>,
-    residency: Option<Residency>,
     lease_timings: Option<lash_core::LeaseTimings>,
     clock: Option<Arc<dyn lash_core::Clock>>,
     // Single source of truth for process lifecycle support and process-work
@@ -1005,11 +998,6 @@ impl LashCoreBuilder {
 
     pub fn termination(mut self, termination: TerminationPolicy) -> Self {
         self.termination = Some(termination);
-        self
-    }
-
-    pub fn residency(mut self, residency: Residency) -> Self {
-        self.residency = Some(residency);
         self
     }
 
@@ -1193,7 +1181,6 @@ impl LashCoreBuilder {
                 .as_ref()
                 .or(self.store_factory.as_ref()),
             &policy,
-            self.residency.unwrap_or_default(),
             self.trigger_store.as_ref(),
             process_execution_concurrency,
         )?;
@@ -1204,9 +1191,6 @@ impl LashCoreBuilder {
             .with_runtime_host_config(core);
         if let Some(process_registry) = process_registry.as_ref() {
             env_builder = env_builder.with_process_registry(Arc::clone(process_registry));
-        }
-        if let Some(residency) = self.residency {
-            env_builder = env_builder.with_residency(residency);
         }
         if let Some(child_store_factory) = self
             .child_store_factory
@@ -1274,7 +1258,6 @@ impl LashCoreBuilder {
         process_lifecycle_available: bool,
         store_factory: Option<&Arc<dyn SessionStoreFactory>>,
         policy: &SessionPolicy,
-        residency: lash_core::Residency,
         trigger_store: Option<&Arc<dyn lash_core::TriggerStore>>,
         process_execution_concurrency: usize,
     ) -> Result<ProcessWorkDriverSetup> {
@@ -1312,7 +1295,6 @@ impl LashCoreBuilder {
                 &core.clock,
             )))
         }))
-        .with_residency(residency)
         .with_turn_phase_probe_slot(phase_probe_slot)
         .with_process_execution_concurrency(process_execution_concurrency)?;
         if let Some(hub) = process_change_hub {

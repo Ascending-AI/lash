@@ -253,7 +253,7 @@ impl RuntimeSessionState {
         self.execution_state_snapshot = None;
     }
 
-    pub(crate) fn pending_graph_commit(&self) -> crate::GraphCommitDelta {
+    pub(crate) fn pending_graph_commit(&self) -> crate::GraphAppend {
         let nodes = self
             .session_graph
             .nodes
@@ -262,11 +262,12 @@ impl RuntimeSessionState {
             .cloned()
             .collect::<Vec<_>>();
         if nodes.is_empty() {
-            crate::GraphCommitDelta::Unchanged {
+            crate::GraphAppend {
+                nodes: Vec::new(),
                 leaf_node_id: self.session_graph.leaf_node_id.clone(),
             }
         } else {
-            crate::GraphCommitDelta::Append {
+            crate::GraphAppend {
                 nodes,
                 leaf_node_id: self.session_graph.leaf_node_id.clone(),
             }
@@ -782,7 +783,7 @@ pub(super) fn boundary_operation(
 
 pub(super) fn derive_graph_commit_node_ids(
     state: &mut RuntimeSessionState,
-    graph: &mut crate::GraphCommitDelta,
+    graph: &mut crate::GraphAppend,
     operation: &crate::OperationId,
 ) -> Result<Vec<String>, crate::StoreError> {
     let mapping = graph.derive_node_ids(
@@ -893,33 +894,6 @@ fn session_append_node_draft(
     }
 }
 
-/// Heal any graph corruption (orphaned leaf) on load.
-///
-/// Must run BEFORE any residency-based trim (phase-9 feature) because
-/// healing's fallback search relies on having the full node set in RAM.
-/// Under `Residency::ActivePathOnly`, the runtime loads only the active
-/// path; if the leaf doesn't resolve against that reduced set, the
-/// caller falls back to a full `load_session_graph()` + `normalize` +
-/// trim.
-/// Trim the resident node set according to `Residency`. Called AFTER
-/// loading during `from_environment`. Under `KeepAll` this is a no-op;
-/// under `ActivePathOnly` it replaces the
-/// resident graph with just the active path. Orphans remain on disk —
-/// the host decides whether/when to tombstone + vacuum them via
-/// `LashRuntime::orphaned_node_ids` + the store primitives.
-///
-pub(super) fn apply_residency_on_load(
-    state: &mut RuntimeSessionState,
-    residency: crate::Residency,
-) {
-    match residency {
-        crate::Residency::KeepAll => {}
-        crate::Residency::ActivePathOnly => {
-            state.session_graph = state.session_graph.trim_to_active_path();
-        }
-    }
-}
-
 #[cfg(test)]
 mod plugin_snapshot_tests {
     use super::store_plugin_snapshot;
@@ -947,88 +921,6 @@ mod plugin_snapshot_tests {
         assert!(
             target.is_some(),
             "a failed capture must retain the prior snapshot, not erase it"
-        );
-    }
-}
-
-#[cfg(test)]
-mod residency_tests {
-    use super::apply_residency_on_load;
-    use crate::{
-        Message, MessageRole, Part, PartKind, PruneState, Residency, RuntimeSessionState,
-        shared_parts,
-    };
-
-    fn text_message(id: &str, content: &str) -> Message {
-        Message {
-            id: id.to_string(),
-            role: MessageRole::User,
-            parts: shared_parts(vec![Part {
-                id: format!("{id}.p0"),
-                kind: PartKind::Text,
-                content: content.to_string(),
-                attachment: None,
-                tool_call_id: None,
-                tool_name: None,
-                tool_replay: None,
-                prune_state: PruneState::Intact,
-                reasoning_meta: None,
-                response_meta: None,
-            }]),
-            origin: None,
-        }
-    }
-
-    /// Root, an inactive branch off the root, then an active branch off the root.
-    /// Returns the state plus the inactive and active branch node ids.
-    fn branching_state() -> (RuntimeSessionState, String, String) {
-        let mut state = RuntimeSessionState::default();
-        state.append_active_conversation_messages(&[text_message("root", "root")]);
-        let root = state.session_graph.leaf_node_id.clone();
-        state.append_active_conversation_messages(&[text_message("inactive", "inactive branch")]);
-        let inactive_node = state
-            .session_graph
-            .leaf_node_id
-            .clone()
-            .expect("inactive node");
-        state.session_graph.set_leaf_node_id(root);
-        state.append_active_conversation_messages(&[text_message("active", "active branch")]);
-        let active_node = state
-            .session_graph
-            .leaf_node_id
-            .clone()
-            .expect("active node");
-        (state, inactive_node, active_node)
-    }
-
-    #[test]
-    fn active_path_only_trims_orphan_branches_on_load() {
-        // The durable worker rebuild (and session resume) call this to match the
-        // live runtime's residency. ActivePathOnly drops nodes off the active
-        // path so a rebuilt session does not silently retain the full graph.
-        let (mut state, inactive_node, active_node) = branching_state();
-        assert!(
-            state.session_graph.find_node(&inactive_node).is_some(),
-            "the inactive branch is resident before trimming"
-        );
-        apply_residency_on_load(&mut state, Residency::ActivePathOnly);
-        assert!(
-            state.session_graph.find_node(&inactive_node).is_none(),
-            "ActivePathOnly must drop the orphaned inactive branch on rebuild"
-        );
-        assert!(
-            state.session_graph.find_node(&active_node).is_some(),
-            "the active path must be retained"
-        );
-    }
-
-    #[test]
-    fn keep_all_retains_orphan_branches_on_load() {
-        let (mut state, inactive_node, _active_node) = branching_state();
-        apply_residency_on_load(&mut state, Residency::KeepAll);
-        assert!(
-            state.session_graph.find_node(&inactive_node).is_some(),
-            "KeepAll must retain the full resident graph"
         );
     }
 }

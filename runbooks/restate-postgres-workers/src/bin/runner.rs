@@ -3327,7 +3327,7 @@ async fn assert_reopened_session_agrees(
     let session = core.session(DEFAULT_SESSION_ID).open().await?;
     let read = storage
         .session_store(DEFAULT_SESSION_ID)
-        .load_session(lash::persistence::SessionReadScope::FullGraph)
+        .load_session()
         .await
         .context("load persisted runtime session")?
         .context("runtime session was not persisted")?;

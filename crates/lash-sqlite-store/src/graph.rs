@@ -67,12 +67,13 @@ impl Store {
         conn: &Connection,
         session_id: &str,
         leaf_node_id: Option<String>,
-    ) -> rusqlite::Result<lash_core::SessionGraph> {
+    ) -> Result<lash_core::SessionGraph, StoreError> {
         let Some(leaf_node_id) = leaf_node_id else {
             return Ok(lash_core::SessionGraph::default());
         };
-        let mut stmt = conn.prepare(
-            "WITH RECURSIVE bound_path(node_id, parent_node_id) AS (
+        let mut stmt = conn
+            .prepare(
+                "WITH RECURSIVE bound_path(node_id, parent_node_id) AS (
                 SELECT node_id, parent_node_id
                 FROM graph_nodes
                 WHERE node_id = (
@@ -108,24 +109,29 @@ impl Store {
                 WHERE g.tombstoned = 0
             )
             SELECT node_id, parent_node_id, node_json FROM active ORDER BY depth DESC",
-        )?;
-        let rows = stmt.query_map(params![leaf_node_id.as_str(), session_id], |row| {
-            Ok((
-                row.get::<_, String>(0)?,
-                row.get::<_, Option<String>>(1)?,
-                row.get::<_, String>(2)?,
-            ))
-        })?;
+            )
+            .map_err(sqlite_error)?;
+        let rows = stmt
+            .query_map(params![leaf_node_id.as_str(), session_id], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, Option<String>>(1)?,
+                    row.get::<_, String>(2)?,
+                ))
+            })
+            .map_err(sqlite_error)?;
         let mut nodes = Vec::new();
         for row in rows {
-            let (node_id, parent_node_id, node_json) = row?;
-            if let Ok(node) = lash_core::SessionNodeRecord::decode_storage_body(
+            let (node_id, parent_node_id, node_json) = row.map_err(sqlite_error)?;
+            let node = lash_core::SessionNodeRecord::decode_storage_body(
                 node_id,
                 parent_node_id,
                 &node_json,
-            ) {
-                nodes.push(node);
-            }
+            )
+            .map_err(|err| {
+                StoreError::Backend(format!("failed to decode session graph node: {err}"))
+            })?;
+            nodes.push(node);
         }
         let retained_leaf = (!nodes.is_empty()).then_some(leaf_node_id);
         Ok(lash_core::SessionGraph::from_nodes(nodes, retained_leaf))

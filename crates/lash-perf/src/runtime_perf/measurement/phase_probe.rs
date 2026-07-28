@@ -245,12 +245,9 @@ pub(crate) async fn run_once(
             let load_before_alloc = allocator_stats();
             let load_before_memory = process_memory_sample();
             let load_started = Instant::now();
-            let state =
-                lash::persistence::load_persisted_session_state_active_path(store.as_ref(), None)
-                    .await?
-                    .ok_or_else(|| {
-                        anyhow::anyhow!("store_reopen expected persisted session state")
-                    })?;
+            let state = lash::persistence::load_persisted_session_state(store.as_ref())
+                .await?
+                .ok_or_else(|| anyhow::anyhow!("store_reopen expected persisted session state"))?;
             extra_phase_profile.insert(
                 "store_reopen.persisted_load".to_string(),
                 RuntimePerfPhaseRunResult {

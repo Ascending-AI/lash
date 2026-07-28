@@ -54,21 +54,6 @@ fn is_contention_sqlstate(code: &str) -> bool {
     matches!(code, "40001" | "40P01" | "55P03")
 }
 
-#[cfg(test)]
-mod contention_tests {
-    use super::is_contention_sqlstate;
-
-    #[test]
-    fn only_retry_unchanged_sqlstates_are_contention() {
-        for code in ["40001", "40P01", "55P03"] {
-            assert!(is_contention_sqlstate(code), "{code}");
-        }
-        for code in ["23505", "57014", "08006"] {
-            assert!(!is_contention_sqlstate(code), "{code}");
-        }
-    }
-}
-
 pub(crate) fn plugin_sqlx_error(err: sqlx::Error) -> PluginError {
     PluginError::Session(err.to_string())
 }
@@ -146,17 +131,6 @@ pub(crate) fn merge_token_ledger_entries(entries: Vec<TokenLedgerEntry>) -> Vec<
     merged
 }
 
-pub(crate) const POSTGRES_SESSION_CHECKPOINT_ENVELOPE_SCHEMA_VERSION: u32 = 1;
-
-#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
-pub(crate) struct SessionCheckpointEnvelope {
-    schema_version: u32,
-    pub(crate) manifest: SessionCheckpoint,
-    tool_state: Option<lash_core::ToolState>,
-    plugin_snapshot: Option<lash_core::PluginSessionSnapshot>,
-    execution_state: Option<Vec<u8>>,
-}
-
 async fn put_blob_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     content: &[u8],
@@ -175,25 +149,91 @@ async fn put_blob_tx(
     Ok(BlobRef(hash))
 }
 
+async fn get_blob_tx(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    blob_ref: &BlobRef,
+) -> Result<Option<Vec<u8>>, StoreError> {
+    sqlx::query_scalar("SELECT content FROM lash_blobs WHERE hash = $1")
+        .bind(blob_ref.as_str())
+        .fetch_optional(&mut **tx)
+        .await
+        .map_err(store_sqlx_error)
+}
+
+async fn put_checkpoint_component_tx<T: serde::Serialize>(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    component: &'static str,
+    body: Option<&T>,
+    existing_ref: Option<&BlobRef>,
+) -> Result<Option<BlobRef>, StoreError> {
+    if let Some(body) = body {
+        return put_blob_tx(tx, &encode_msgpack(body)).await.map(Some);
+    }
+    let Some(blob_ref) = existing_ref else {
+        return Ok(None);
+    };
+    if get_blob_tx(tx, blob_ref).await?.is_none() {
+        return Err(StoreError::CheckpointComponentMissing {
+            component,
+            blob_ref: blob_ref.clone(),
+        });
+    }
+    Ok(Some(blob_ref.clone()))
+}
+
+async fn get_checkpoint_component_tx<T: serde::de::DeserializeOwned>(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    component: &'static str,
+    blob_ref: Option<&BlobRef>,
+) -> Result<Option<T>, StoreError> {
+    let Some(blob_ref) = blob_ref else {
+        return Ok(None);
+    };
+    let bytes =
+        get_blob_tx(tx, blob_ref)
+            .await?
+            .ok_or_else(|| StoreError::CheckpointComponentMissing {
+                component,
+                blob_ref: blob_ref.clone(),
+            })?;
+    rmp_serde::from_slice(&bytes)
+        .map(Some)
+        .map_err(|err| StoreError::Backend(format!("failed to decode {component}: {err}")))
+}
+
 pub(crate) async fn put_checkpoint_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     checkpoint: &HydratedSessionCheckpoint,
 ) -> Result<(BlobRef, SessionCheckpoint), StoreError> {
+    let tool_state_ref = put_checkpoint_component_tx(
+        tx,
+        "tool-state",
+        checkpoint.tool_state.as_ref(),
+        checkpoint.tool_state_ref.as_ref(),
+    )
+    .await?;
+    let plugin_snapshot_ref = put_checkpoint_component_tx(
+        tx,
+        "plugin-snapshot",
+        checkpoint.plugin_snapshot.as_ref(),
+        checkpoint.plugin_snapshot_ref.as_ref(),
+    )
+    .await?;
+    let execution_state_ref = put_checkpoint_component_tx(
+        tx,
+        "execution-state",
+        checkpoint.execution_state.as_ref(),
+        checkpoint.execution_state_ref.as_ref(),
+    )
+    .await?;
     let manifest = SessionCheckpoint::new(
         checkpoint.turn_state.clone(),
-        checkpoint.tool_state_ref.clone(),
-        checkpoint.plugin_snapshot_ref.clone(),
+        tool_state_ref,
+        plugin_snapshot_ref,
         checkpoint.plugin_snapshot_revision,
-        checkpoint.execution_state_ref.clone(),
+        execution_state_ref,
     );
-    let envelope = SessionCheckpointEnvelope {
-        schema_version: POSTGRES_SESSION_CHECKPOINT_ENVELOPE_SCHEMA_VERSION,
-        manifest: manifest.clone(),
-        tool_state: checkpoint.tool_state.clone(),
-        plugin_snapshot: checkpoint.plugin_snapshot.clone(),
-        execution_state: checkpoint.execution_state.clone(),
-    };
-    let bytes = encode_msgpack(&envelope);
+    let bytes = encode_msgpack(&manifest);
     let checkpoint_ref = put_blob_tx(tx, &bytes).await?;
     Ok((checkpoint_ref, manifest))
 }
@@ -202,34 +242,32 @@ pub(crate) async fn get_checkpoint_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     blob_ref: &BlobRef,
 ) -> Result<Option<HydratedSessionCheckpoint>, StoreError> {
-    let bytes: Option<Vec<u8>> =
-        sqlx::query_scalar("SELECT content FROM lash_blobs WHERE hash = $1")
-            .bind(blob_ref.as_str())
-            .fetch_optional(&mut **tx)
-            .await
-            .map_err(store_sqlx_error)?;
+    let bytes = get_blob_tx(tx, blob_ref).await?;
     let Some(bytes) = bytes else {
         return Ok(None);
     };
-    let envelope: SessionCheckpointEnvelope = decode_versioned_msgpack_record(
+    let manifest: SessionCheckpoint = decode_versioned_msgpack_record(
         &bytes,
-        "PostgresSessionCheckpointEnvelope",
-        POSTGRES_SESSION_CHECKPOINT_ENVELOPE_SCHEMA_VERSION,
-    )?;
-    lash_core::store::ensure_supported_schema_version(
         "SessionCheckpoint",
-        envelope.manifest.schema_version,
         lash_core::store::SESSION_CHECKPOINT_SCHEMA_VERSION,
     )?;
+    let tool_state =
+        get_checkpoint_component_tx(tx, "tool-state", manifest.tool_state_ref.as_ref()).await?;
+    let plugin_snapshot =
+        get_checkpoint_component_tx(tx, "plugin-snapshot", manifest.plugin_snapshot_ref.as_ref())
+            .await?;
+    let execution_state =
+        get_checkpoint_component_tx(tx, "execution-state", manifest.execution_state_ref.as_ref())
+            .await?;
     Ok(Some(HydratedSessionCheckpoint {
-        turn_state: envelope.manifest.turn_state,
-        tool_state_ref: envelope.manifest.tool_state_ref,
-        tool_state: envelope.tool_state,
-        plugin_snapshot_ref: envelope.manifest.plugin_snapshot_ref,
-        plugin_snapshot: envelope.plugin_snapshot,
-        plugin_snapshot_revision: envelope.manifest.plugin_snapshot_revision,
-        execution_state_ref: envelope.manifest.execution_state_ref,
-        execution_state: envelope.execution_state,
+        turn_state: manifest.turn_state,
+        tool_state_ref: manifest.tool_state_ref,
+        tool_state,
+        plugin_snapshot_ref: manifest.plugin_snapshot_ref,
+        plugin_snapshot,
+        plugin_snapshot_revision: manifest.plugin_snapshot_revision,
+        execution_state_ref: manifest.execution_state_ref,
+        execution_state,
     }))
 }
 
@@ -393,4 +431,19 @@ pub(crate) async fn commit_attachment_refs_tx(
         .map_err(store_sqlx_error)?;
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod contention_tests {
+    use super::is_contention_sqlstate;
+
+    #[test]
+    fn only_retry_unchanged_sqlstates_are_contention() {
+        for code in ["40001", "40P01", "55P03"] {
+            assert!(is_contention_sqlstate(code), "{code}");
+        }
+        for code in ["23505", "57014", "08006"] {
+            assert!(!is_contention_sqlstate(code), "{code}");
+        }
+    }
 }

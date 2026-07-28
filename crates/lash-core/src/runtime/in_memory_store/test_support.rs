@@ -46,7 +46,7 @@ impl InMemorySessionStore {
 
 #[cfg(test)]
 mod tests {
-    use crate::store::{GraphCommitDelta, SessionCommitStore, StoreMaintenance};
+    use crate::store::{GraphAppend, SessionCommitStore, StoreMaintenance};
     use crate::{
         DeliveryPolicy, MergeKey, QueuedWorkBatch, QueuedWorkCompletion, RuntimeCommit,
         RuntimeSessionState, SessionStoreCreateRequest, SessionStoreFactory, SlotPolicy,
@@ -54,14 +54,14 @@ mod tests {
     };
 
     #[tokio::test]
-    async fn factory_enforces_global_node_ids_across_sessions() {
+    async fn factory_rejects_occupied_global_node_id_without_partial_usage() {
         let factory = super::super::InMemorySessionStoreFactory::new();
         let request = |session_id: &str| SessionStoreCreateRequest {
             session_id: session_id.to_string(),
             relation: crate::SessionRelation::Root,
             policy: crate::SessionPolicy::default(),
         };
-        let first = factory
+        factory
             .create_store(&request("first"))
             .await
             .expect("first store");
@@ -76,62 +76,49 @@ mod tests {
             .get("second")
             .cloned()
             .expect("second concrete store");
-        let first_incarnation = first
-            .load_session_meta()
-            .await
-            .expect("load first metadata")
-            .expect("first metadata")
-            .incarnation_id;
-        let second_incarnation = second
-            .load_session_meta()
-            .await
-            .expect("load second metadata")
-            .expect("second metadata")
-            .incarnation_id;
-        let commit = |session_id: &str, incarnation_id: crate::IncarnationId| {
-            let mut state = RuntimeSessionState {
-                session_id: session_id.to_string(),
-                session_lifetime: crate::SessionLifetime::durable(incarnation_id),
-                ..Default::default()
-            };
-            state.ensure_agent_frame_initialized();
-            let node = crate::SessionNodeRecord {
-                node_id: "factory-global-node".to_string(),
-                parent_node_id: state.session_graph.leaf_node_id.clone(),
-                timestamp: "2026-07-26T00:00:00Z".to_string(),
-                payload: crate::SessionNodePayload::Event {
-                    event: crate::SessionHistoryRecord::Protocol(
-                        crate::ProtocolEvent::typed("global-collision", serde_json::Value::Null)
-                            .expect("protocol event"),
-                    ),
-                },
-            };
-            state.session_graph.push_node_record(node.clone());
-            state.session_graph.set_leaf_node_id(Some(node.node_id));
-            let usage = TokenLedgerEntry {
-                source: "rollback-probe".to_string(),
-                model: "test".to_string(),
-                usage: TokenUsage {
-                    input_tokens: 1,
-                    ..Default::default()
-                },
-            };
-            RuntimeCommit::persisted_state(&state, &[usage])
+        let mut second_state = RuntimeSessionState {
+            session_id: "second".to_string(),
+            session_lifetime: crate::SessionLifetime::durable(
+                second
+                    .load_session_meta()
+                    .await
+                    .expect("load second metadata")
+                    .expect("second metadata")
+                    .incarnation_id,
+            ),
+            ..Default::default()
         };
+        second_state.ensure_agent_frame_initialized();
+        let usage = TokenLedgerEntry {
+            source: "rollback-probe".to_string(),
+            model: "test".to_string(),
+            usage: TokenUsage {
+                input_tokens: 1,
+                ..Default::default()
+            },
+        };
+        let commit = RuntimeCommit::persisted_state_for_test(&second_state, &[usage]);
+        let occupied_node_id = commit
+            .graph
+            .nodes
+            .first()
+            .expect("derived frame node")
+            .node_id
+            .clone();
+        factory
+            .global_node_owners
+            .lock()
+            .expect("lock global node owners")
+            .insert(occupied_node_id.clone(), "first".to_string());
 
-        first
-            .commit_runtime_state(commit("first", first_incarnation))
-            .await
-            .expect("first node insert");
         let error = second
-            .commit_runtime_state(commit("second", second_incarnation))
+            .commit_runtime_state(commit)
             .await
-            .expect_err("second session must not reuse a global node id");
+            .expect_err("second session must not reuse an occupied global node id");
 
         assert!(matches!(
             error,
-            crate::StoreError::NodeIdCollision { node_id }
-                if node_id == "factory-global-node"
+            StoreError::NodeIdCollision { node_id } if node_id == occupied_node_id
         ));
         assert_eq!(
             second_concrete
@@ -140,7 +127,7 @@ mod tests {
                 .expect("lock usage")
                 .len(),
             0,
-            "the usage mutation preceding node ownership must not leak from a rejected commit"
+            "a rejected ownership collision must not leak usage deltas"
         );
     }
 
@@ -174,7 +161,7 @@ mod tests {
         };
         state.ensure_agent_frame_initialized();
         let first = store
-            .commit_runtime_state(RuntimeCommit::persisted_state(&state, &[]))
+            .commit_runtime_state(RuntimeCommit::persisted_state_for_test(&state, &[]))
             .await
             .expect("commit root frame");
         let leaf = concrete
@@ -195,7 +182,7 @@ mod tests {
         };
         let mut commit = RuntimeCommit::persisted_state_with_graph_commit(
             &state,
-            GraphCommitDelta::Append {
+            GraphAppend {
                 nodes: vec![child.clone()],
                 leaf_node_id: Some(child.node_id.clone()),
             },
@@ -247,7 +234,7 @@ mod tests {
         state.bind_durable_incarnation(incarnation_id);
         state.ensure_agent_frame_initialized();
         store
-            .commit_runtime_state(RuntimeCommit::persisted_state(&state, &[]))
+            .commit_runtime_state(RuntimeCommit::persisted_state_for_test(&state, &[]))
             .await
             .expect("commit root frame");
         let leaf = store
@@ -296,6 +283,9 @@ mod tests {
         let store = super::InMemorySessionStore::new();
         let state = RuntimeSessionState {
             session_id: "budget-before-backend".to_string(),
+            session_lifetime: crate::SessionLifetime::durable(
+                crate::IncarnationId::mint_for_store(),
+            ),
             ..Default::default()
         };
         let node = crate::SessionNodeRecord {
@@ -309,8 +299,8 @@ mod tests {
                 ),
             },
         };
-        let mut commit = RuntimeCommit::persisted_state(&state, &[]);
-        commit.graph = GraphCommitDelta::Append {
+        let mut commit = RuntimeCommit::persisted_state_for_test(&state, &[]);
+        commit.graph = GraphAppend {
             nodes: (0..=RuntimeCommit::MAX_COMMIT_NODE_COUNT)
                 .map(|index| crate::SessionNodeRecord {
                     node_id: format!("node-{index}"),
@@ -366,7 +356,7 @@ mod tests {
             .await
             .expect("realize stale-claim session lifetime");
         state.bind_durable_incarnation(incarnation_id);
-        let mut commit = RuntimeCommit::persisted_state(&state, &[]);
+        let mut commit = RuntimeCommit::persisted_state_for_test(&state, &[]);
         commit.completed_queue_claims = vec![QueuedWorkCompletion {
             session_id: "session".to_string(),
             claim_id: "queue-claim".to_string(),
@@ -393,11 +383,7 @@ mod tests {
             "a later validation failure must not consume an earlier queue claim"
         );
         assert!(
-            store
-                .load_session(crate::SessionReadScope::FullGraph)
-                .await
-                .expect("load session")
-                .is_none(),
+            store.load_session().await.expect("load session").is_none(),
             "the failed commit must not create a session head"
         );
     }

@@ -23,29 +23,7 @@ fn persisted_session_state_from_read(
 pub async fn load_persisted_session_state(
     store: &(dyn RuntimePersistence + '_),
 ) -> Result<Option<crate::RuntimeSessionState>, StoreError> {
-    let read = store.load_session(SessionReadScope::FullGraph).await?;
-    let Some(read) = read else {
-        return Ok(None);
-    };
-    let meta = store.load_session_meta().await?.ok_or_else(|| {
-        StoreError::Backend(format!(
-            "session `{}` has durable head state but no session metadata",
-            read.session_id
-        ))
-    })?;
-    Ok(Some(persisted_session_state_from_read(
-        read,
-        meta.incarnation_id,
-    )))
-}
-
-pub async fn load_persisted_session_state_active_path(
-    store: &(dyn RuntimePersistence + '_),
-    leaf_node_id: Option<String>,
-) -> Result<Option<crate::RuntimeSessionState>, StoreError> {
-    let read = store
-        .load_session(SessionReadScope::ActivePath { leaf_node_id })
-        .await?;
+    let read = store.load_session().await?;
     let Some(read) = read else {
         return Ok(None);
     };

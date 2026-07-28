@@ -1,7 +1,7 @@
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use lash_core::store::GraphCommitDelta;
+use lash_core::store::GraphAppend;
 use lash_core::{
     AttachmentId, AttachmentIntent, PersistedSessionConfig, ProtocolEvent, RuntimeCommit,
     RuntimePersistence, RuntimeSessionState, SessionHistoryRecord, SessionNodePayload,
@@ -68,13 +68,13 @@ fn realistic_commit(session_id: &str, node_count: usize, sample: usize) -> Runti
         },
         ..RuntimeSessionState::default()
     };
-    let mut commit = RuntimeCommit::persisted_state(&state, &[]);
+    let mut commit = RuntimeCommit::persisted_state_for_test(&state, &[]);
     commit.current_frame_node_id = Some(format!("{session_id}:node:0"));
     commit.config = PersistedSessionConfig {
         provider_id: "benchmark".to_string(),
         model: state.policy.model,
     };
-    commit.graph = GraphCommitDelta::Append {
+    commit.graph = GraphAppend {
         leaf_node_id: nodes.last().map(|node| node.node_id.clone()),
         nodes,
     };

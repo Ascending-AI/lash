@@ -98,9 +98,9 @@ misconfiguration (the incarnation may die on an unbounded loop), not a wrong ans
 Investigation confirmed lash has no existing resumable-mid-computation snapshot. A lashlang
 process is a bytecode VM inside one pinned future, re-initialized at `ip: 0` from its original
 arguments each run; the only serializable snapshot is globals, and the session/turn
-`execution_state_snapshot` is owned by the RLM code-executor, not the workflow VM. `DurableStep`
-records one JSON effect result and is not a continuation. So a journal-reset incarnation cannot
-resume at loop iteration K+1 today.
+`execution_state_snapshot` is owned by the RLM code-executor, not the workflow VM. The former
+`DurableStep` recorded one JSON effect result and was not a continuation. So a journal-reset
+incarnation cannot resume at loop iteration K+1 today.
 
 The bounded cross-boundary state is therefore a new **`VmContinuation`** — instruction pointer,
 slots/globals, operand stack, iterator stack/cursors, occurrence counters, and process-host

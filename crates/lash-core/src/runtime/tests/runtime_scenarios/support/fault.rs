@@ -16,14 +16,12 @@ impl RuntimeScenarioContext {
             .turn_claim
             .as_ref()
             .expect("stale queue-completion fault requires a prior TurnWorkClaim phase");
-        let (_, lease) = self.owner_and_lease();
         let mut stale_completion = claim.completion();
         stale_completion.lease_token.push_str(":stale");
         let err = self
             .store()
             .commit_runtime_state(
-                RuntimeCommit::persisted_state(&self.state, &[])
-                    .with_session_execution_lease(lease.fence())
+                RuntimeCommit::persisted_state_for_test(&self.state, &[])
                     .completing_queue_claim(stale_completion),
             )
             .await
@@ -39,18 +37,11 @@ impl RuntimeScenarioContext {
         if !self.lease_released {
             self.commit(RuntimeCommitPhase::new()).await;
         }
-        let lease = self
-            .lease
-            .as_ref()
-            .expect("released-lease check requires a previous session lease");
         let stale_head_revision = self.state.head_revision;
         self.state.turn_index = self.state.turn_index.saturating_add(1);
         let result = self
             .store()
-            .commit_runtime_state(
-                RuntimeCommit::persisted_state(&self.state, &[])
-                    .with_session_execution_lease(lease.fence()),
-            )
+            .commit_runtime_state(RuntimeCommit::persisted_state_for_test(&self.state, &[]))
             .await
             .expect("released advisory lease must not reject a current-head commit");
         self.state.head_revision = result.head_revision;
@@ -60,10 +51,7 @@ impl RuntimeScenarioContext {
         stale_state.turn_index = stale_state.turn_index.saturating_add(1);
         let err = self
             .store()
-            .commit_runtime_state(
-                RuntimeCommit::persisted_state(&stale_state, &[])
-                    .with_session_execution_lease(lease.fence()),
-            )
+            .commit_runtime_state(RuntimeCommit::persisted_state_for_test(&stale_state, &[]))
             .await
             .expect_err("stale head must reject the follow-up commit");
         assert!(

@@ -71,12 +71,6 @@ pub struct DurableProcessWorkerConfig {
     pub queued_work_driver: Option<QueuedWorkDriver>,
     #[doc(hidden)]
     pub turn_phase_probe_slot: crate::runtime::RuntimeTurnPhaseProbeSlot,
-    /// Residency for sessions the worker rebuilds to run a process. Defaults to
-    /// [`Residency::KeepAll`]; a host running [`Residency::ActivePathOnly`] wires
-    /// it here so the worker's rebuilt sessions trim to the active path too,
-    /// instead of silently diverging from the live runtime by keeping the full
-    /// graph resident.
-    pub residency: crate::Residency,
     /// Maximum processes this worker executes inline at once. A run holds its
     /// slot while doing its own work and releases it while parked on work that
     /// another process or external owner must complete. This is a per-worker
@@ -122,7 +116,6 @@ impl DurableProcessWorkerConfig {
             process_work_driver: None,
             queued_work_driver: None,
             turn_phase_probe_slot: crate::runtime::RuntimeTurnPhaseProbeSlot::default(),
-            residency: crate::Residency::default(),
             process_execution_concurrency: ProcessExecutionConcurrency::DEFAULT,
             lease_owner: crate::LeaseOwnerIdentity::opaque(
                 format!("durable-process-worker:{}", uuid::Uuid::new_v4()),
@@ -138,11 +131,6 @@ impl DurableProcessWorkerConfig {
 
     pub fn with_session_policy(mut self, policy: crate::SessionPolicy) -> Self {
         self.session_policy = policy;
-        self
-    }
-
-    pub fn with_residency(mut self, residency: crate::Residency) -> Self {
-        self.residency = residency;
         self
     }
 
@@ -1434,7 +1422,6 @@ impl DurableProcessWorker {
             .with_trigger_store(Arc::clone(&self.config.trigger_store))
             .with_process_registry(Arc::clone(&self.config.process_registry))
             .with_process_work_driver(process_work_driver)
-            .with_residency(self.config.residency)
             .with_attachment_manifest_store(attachment_manifest_store)
             .with_store(store);
         if let Some(driver) = self.config.queued_work_driver.clone() {
