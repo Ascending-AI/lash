@@ -1113,10 +1113,10 @@ async fn live_restate_turn_input_ingress_delivers_once_and_queues_after_settle_i
         1,
         "active injection must be one committed user message: {committed:#?}"
     );
-    let Json(snapshot) = app_state(
+    let Json(snapshot) = Box::pin(app_state(
         State(harness.state.clone()),
         Query(SessionQuery::default()),
-    )
+    ))
     .await
     .expect("load settled workbench HTTP state");
     assert_eq!(

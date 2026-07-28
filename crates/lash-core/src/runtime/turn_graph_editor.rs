@@ -24,10 +24,11 @@ impl TurnGraphEditor {
         base_graph: Arc<SessionGraph>,
         base_read_model: SessionReadModel,
         agent_frame_id: crate::AgentFrameId,
+        draft_namespace: &str,
         clock: Arc<dyn crate::Clock>,
     ) -> Self {
         let append_builder = base_graph
-            .append_builder()
+            .append_builder_in_namespace(draft_namespace)
             .with_agent_frame_id(agent_frame_id);
         let active_messages = MessageSequence::from_base(base_read_model.messages);
         Self {
@@ -66,17 +67,12 @@ impl TurnGraphEditor {
     where
         I: IntoIterator<Item = SessionHistoryRecord>,
     {
-        let mut active_message_ids = self
-            .active_messages
-            .iter()
-            .map(|message| message.id.clone())
-            .collect::<HashSet<_>>();
         let events = events
             .into_iter()
             .filter(|event| match event {
                 SessionHistoryRecord::Conversation(record) => {
                     let message = record.to_message();
-                    !message.is_transient() && active_message_ids.insert(record.id.clone())
+                    !message.is_transient()
                 }
                 SessionHistoryRecord::Protocol(_) => true,
             })
@@ -102,7 +98,8 @@ impl TurnGraphEditor {
         let mut appended = Vec::new();
         for message in next.into_iter().filter(|message| !message.is_transient()) {
             if let Some(current_message) = current.next() {
-                if current_message.id != message.id {
+                if serde_json::to_value(current_message).ok() != serde_json::to_value(message).ok()
+                {
                     return None;
                 }
             } else {
@@ -137,6 +134,7 @@ impl TurnGraphEditor {
             active_path,
             self.append_builder.existing_node_ids(),
             self.append_builder.agent_frame_id(),
+            self.append_builder.draft_namespace(),
             messages,
             self.clock.timestamp_rfc3339(),
         );
@@ -188,6 +186,34 @@ impl TurnGraphEditor {
         I: IntoIterator<Item = String>,
     {
         self.committed_node_ids = node_ids.into_iter().collect();
+    }
+
+    pub(super) fn remap_node_ids(&mut self, session_id: &str, mapping: &[(String, String)]) {
+        if mapping.is_empty() {
+            return;
+        }
+        let by_old = mapping.iter().cloned().collect::<HashMap<_, _>>();
+        for node in &mut self.appended_nodes {
+            if let Some(derived) = by_old.get(&node.node_id) {
+                node.node_id = derived.clone();
+            }
+            if let Some(parent) = node.parent_node_id.as_mut()
+                && let Some(derived) = by_old.get(parent)
+            {
+                *parent = derived.clone();
+            }
+            crate::session_graph::remap_session_node_cause(
+                &mut node.caused_by,
+                session_id,
+                &by_old,
+            );
+        }
+        self.appended_node_indices = self
+            .appended_node_indices
+            .drain()
+            .map(|(id, index)| (by_old.get(&id).cloned().unwrap_or(id), index))
+            .collect();
+        self.append_builder.remap_node_ids(mapping);
     }
 
     pub(super) fn into_session_graph(self) -> SessionGraph {

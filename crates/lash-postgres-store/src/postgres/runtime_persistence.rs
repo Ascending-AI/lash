@@ -205,6 +205,16 @@ impl SessionCommitStore for PostgresSessionStore {
         &self,
         commit: RuntimeCommit,
     ) -> Result<RuntimeCommitResult, StoreError> {
+        commit.validate_operation_session()?;
+        let realization_digest = lash_core::store::graph_realization_digest(&commit.graph);
+        let realized_agent_frames = commit
+            .agent_frames
+            .iter()
+            .map(|frame| lash_core::store::RealizedAgentFrame {
+                frame_id: frame.frame_id.clone(),
+                created_at: frame.created_at.clone(),
+            })
+            .collect();
         let now = self.clock.timestamp_ms();
         let mut tx = self.pool.begin().await.map_err(store_sqlx_error)?;
         // Read the head WITHOUT a lock. The conditional CAS write below is the
@@ -238,19 +248,14 @@ impl SessionCommitStore for PostgresSessionStore {
             let _ = self.bound_session.set(commit.session_id.clone());
         }
         if let Some(completed) = &commit.turn_commit {
-            if completed.session_id != commit.session_id {
-                return Err(StoreError::RuntimeTurnCommitConflict {
-                    session_id: completed.session_id.clone(),
-                    turn_id: completed.turn_id.clone(),
-                });
-            }
+            let operation_key = completed.operation.storage_key()?;
             let prior = sqlx::query(
                 "SELECT turn_commit_hash, result_json
                  FROM lash_runtime_turn_commits
                  WHERE session_id = $1 AND turn_id = $2",
             )
             .bind(&completed.session_id)
-            .bind(&completed.turn_id)
+            .bind(&operation_key)
             .fetch_optional(&mut *tx)
             .await
             .map_err(store_sqlx_error)?;
@@ -267,7 +272,7 @@ impl SessionCommitStore for PostgresSessionStore {
                 }
                 return Err(StoreError::RuntimeTurnCommitConflict {
                     session_id: completed.session_id.clone(),
-                    turn_id: completed.turn_id.clone(),
+                    turn_id: operation_key,
                 });
             }
         }
@@ -278,6 +283,31 @@ impl SessionCommitStore for PostgresSessionStore {
                 expected: commit.expected_head_revision,
                 actual: actual_revision,
             });
+        }
+        commit.validate_node_derivation()?;
+        commit.validate_append_node_ids_unique()?;
+        if let GraphCommitDelta::Append { nodes, .. } = &commit.graph {
+            let node_ids = nodes
+                .iter()
+                .map(|node| node.node_id.as_str())
+                .collect::<Vec<_>>();
+            let occupied = sqlx::query_scalar::<_, String>(
+                "SELECT node_id
+                 FROM lash_graph_nodes
+                 WHERE session_id = $1 AND node_id = ANY($2)",
+            )
+            .bind(&commit.session_id)
+            .bind(&node_ids)
+            .fetch_all(&mut *tx)
+            .await
+            .map_err(store_sqlx_error)?
+            .into_iter()
+            .collect::<std::collections::HashSet<_>>();
+            if let Some(node) = nodes.iter().find(|node| occupied.contains(&node.node_id)) {
+                return Err(StoreError::NodeIdCollision {
+                    node_id: node.node_id.clone(),
+                });
+            }
         }
         for completed in &commit.completed_queue_claims {
             if completed.session_id != commit.session_id {
@@ -315,10 +345,7 @@ impl SessionCommitStore for PostgresSessionStore {
                 for node in nodes {
                     sqlx::query(
                         "INSERT INTO lash_graph_nodes (session_id, node_id, node_json)
-                         VALUES ($1, $2, $3)
-                         ON CONFLICT (session_id, node_id) DO UPDATE SET
-                            node_json = EXCLUDED.node_json,
-                            tombstoned = FALSE",
+                         VALUES ($1, $2, $3)",
                     )
                     .bind(&commit.session_id)
                     .bind(&node.node_id)
@@ -479,18 +506,20 @@ impl SessionCommitStore for PostgresSessionStore {
             &commit.committed_attachment_ids,
         )
         .await?;
-        if let Some(turn_commit) = &commit.turn_commit {
+        if let Some(turn_commit) = &commit.turn_commit
+            && let Some(turn_id) = turn_commit.operation.turn_id()
+        {
             sqlx::query(
                 "UPDATE lash_attachment_manifest
-                 SET committed_at_ms = COALESCE(committed_at_ms, $1)
-                 WHERE session_id = $2
-                   AND owner_kind = 'turn'
-                   AND owner_id = $3
-                   AND committed_at_ms IS NULL",
+                     SET committed_at_ms = COALESCE(committed_at_ms, $1)
+                     WHERE session_id = $2
+                       AND owner_kind = 'turn'
+                       AND owner_id = $3
+                       AND committed_at_ms IS NULL",
             )
             .bind(now as i64)
             .bind(&commit.session_id)
-            .bind(&turn_commit.turn_id)
+            .bind(turn_id)
             .execute(&mut *tx)
             .await
             .map_err(store_sqlx_error)?;
@@ -509,10 +538,13 @@ impl SessionCommitStore for PostgresSessionStore {
             head_revision: next_revision,
             checkpoint_ref,
             manifest,
+            realization_digest,
+            realized_agent_frames,
             enqueued_queue_batches,
             turn_input_applications: commit.turn_input_applications(),
         };
         if let Some(completed) = &commit.turn_commit {
+            let operation_key = completed.operation.storage_key()?;
             sqlx::query(
                 "INSERT INTO lash_runtime_turn_commits (
                     session_id, turn_id, turn_commit_hash, result_json, committed_at_ms
@@ -520,7 +552,7 @@ impl SessionCommitStore for PostgresSessionStore {
                  VALUES ($1, $2, $3, $4, $5)",
             )
             .bind(&completed.session_id)
-            .bind(&completed.turn_id)
+            .bind(operation_key)
             .bind(&completed.turn_commit_hash)
             .bind(encode_json(&result))
             .bind(now as i64)

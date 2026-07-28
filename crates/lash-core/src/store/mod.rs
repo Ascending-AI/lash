@@ -1,13 +1,19 @@
 //! The runtime's settled-session persistence contract and shared store types.
 
 mod attachment_manifest;
+mod commit_identity;
+mod error;
 mod lease_timings;
 pub mod queued_work;
+mod realization;
 
 pub use attachment_manifest::{
     AttachmentIntent, AttachmentManifest, AttachmentManifestEntry, AttachmentOwnerKind,
 };
+pub use commit_identity::{OperationId, derive_history_node_id, graph_realization_digest};
+pub use error::StoreError;
 pub use lease_timings::{LeaseTimings, LeaseTimingsError};
+pub use realization::{RealizedAgentFrame, commit_runtime_state_verified};
 
 const PROC_BOOT_ID_PATH: &str = "/proc/sys/kernel/random/boot_id";
 
@@ -106,86 +112,6 @@ mod persisted_state_tests {
             }
         ));
     }
-}
-
-#[derive(Debug, thiserror::Error)]
-pub enum StoreError {
-    #[error(
-        "store is already bound to session `{bound_session_id}` and cannot be reused for `{attempted_session_id}`"
-    )]
-    SessionBindingMismatch {
-        bound_session_id: String,
-        attempted_session_id: String,
-    },
-    #[error("store does not support read scope {0:?}")]
-    UnsupportedReadScope(SessionReadScope),
-    #[error("store head revision conflict: expected {expected:?}, actual {actual}")]
-    HeadRevisionConflict { expected: Option<u64>, actual: u64 },
-    #[error(
-        "runtime turn `{turn_id}` for session `{session_id}` was already committed with a different commit hash"
-    )]
-    RuntimeTurnCommitConflict { session_id: String, turn_id: String },
-    #[error(
-        "queued work claim `{claim_id}` for session `{session_id}` is superseded by a newer session-lease generation"
-    )]
-    QueuedWorkClaimSuperseded {
-        session_id: String,
-        claim_id: String,
-    },
-    #[error(
-        "turn input claim `{claim_id}` for session `{session_id}` is superseded by a newer session-lease generation"
-    )]
-    TurnInputClaimSuperseded {
-        session_id: String,
-        claim_id: String,
-    },
-    #[error(
-        "runtime commit for session `{session_id}` includes queued-work-derived content without settling claim `{claim_id}`"
-    )]
-    UnsettledQueuedWorkClaim {
-        session_id: String,
-        claim_id: String,
-    },
-    #[error(
-        "runtime commit for session `{session_id}` includes turn-input-derived content without settling claim `{claim_id}`"
-    )]
-    UnsettledTurnInputClaim {
-        session_id: String,
-        claim_id: String,
-    },
-    #[error(
-        "pending turn input source_key `{source_key}` for session `{session_id}` is already bound to input `{existing_input_id}` with different submitted content"
-    )]
-    PendingTurnInputSourceKeyConflict {
-        session_id: String,
-        source_key: String,
-        existing_input_id: String,
-    },
-    #[error("session execution lease for session `{session_id}` is missing or expired")]
-    SessionExecutionLeaseExpired { session_id: String },
-    #[error(
-        "{record_kind} schema_version {actual} is not supported by this binary (expected {expected})"
-    )]
-    UnsupportedRecordSchemaVersion {
-        record_kind: &'static str,
-        actual: u32,
-        expected: u32,
-    },
-    #[error(
-        "{record_kind} is missing schema_version and was written by unsupported pre-versioned state (expected {expected})"
-    )]
-    MissingRecordSchemaVersion {
-        record_kind: &'static str,
-        expected: u32,
-    },
-    #[error("{record_kind} schema_version {actual} is invalid (expected integer {expected})")]
-    InvalidRecordSchemaVersion {
-        record_kind: &'static str,
-        actual: String,
-        expected: u32,
-    },
-    #[error("store backend error: {0}")]
-    Backend(String),
 }
 
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
@@ -409,6 +335,45 @@ impl GraphCommitDelta {
             Self::ReplaceFull(graph) => graph.leaf_node_id.as_ref(),
         }
     }
+
+    pub(crate) fn derive_node_ids(
+        &mut self,
+        session_id: &str,
+        operation: &OperationId,
+    ) -> Result<Vec<(String, String)>, StoreError> {
+        let (nodes, leaf_node_id) = match self {
+            Self::Append {
+                nodes,
+                leaf_node_id,
+            } => (nodes, leaf_node_id),
+            Self::Unchanged { .. } | Self::ReplaceFull(_) => return Ok(Vec::new()),
+        };
+        let mut remapped = std::collections::HashMap::<String, String>::new();
+        let mut mapping = Vec::with_capacity(nodes.len());
+        for (ordinal, node) in nodes.iter_mut().enumerate() {
+            if let Some(parent) = node.parent_node_id.as_mut()
+                && let Some(derived_parent) = remapped.get(parent)
+            {
+                *parent = derived_parent.clone();
+            }
+            crate::session_graph::remap_session_node_cause(
+                &mut node.caused_by,
+                session_id,
+                &remapped,
+            );
+            let old = node.node_id.clone();
+            let derived = derive_history_node_id(session_id, operation, ordinal as u64)?;
+            node.node_id = derived.clone();
+            remapped.insert(old.clone(), derived.clone());
+            mapping.push((old, derived));
+        }
+        if let Some(leaf) = leaf_node_id.as_mut()
+            && let Some(derived_leaf) = remapped.get(leaf)
+        {
+            *leaf = derived_leaf.clone();
+        }
+        Ok(mapping)
+    }
 }
 
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
@@ -434,7 +399,7 @@ pub struct RuntimeCommit {
     pub interrupted_turn_input_turn_id: Option<String>,
     /// Attachment ids explicitly adopted by this commit. In the same
     /// transaction the backend also stamps every uncommitted manifest row owned
-    /// by `turn_commit.turn_id`, including ids that appear only in plain tool
+    /// by the turn id in `turn_commit.operation`, including ids that appear only in plain tool
     /// JSON. This list preserves typed-output and cross-turn re-references;
     /// adoption updates existing rows only and deliberately no-ops when this
     /// session has no matching intent.
@@ -446,6 +411,16 @@ pub struct RuntimeCommitResult {
     pub head_revision: u64,
     pub checkpoint_ref: BlobRef,
     pub manifest: SessionCheckpoint,
+    /// Store-recorded digest of the graph proposal accepted for this operation.
+    ///
+    /// On a receipt hit this compares the retry proposal with the first
+    /// attempt's recorded proposal independently of node derivation. Physical
+    /// row realization still relies on the backend transaction being atomic.
+    pub realization_digest: String,
+    /// Store-realized frame timestamps. Receipts retain references and the
+    /// excluded clock value only; execution snapshot bytes remain in the
+    /// checkpoint/blob path and are never copied into receipt JSON.
+    pub realized_agent_frames: Vec<RealizedAgentFrame>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub enqueued_queue_batches: Vec<crate::QueuedWorkBatch>,
     /// Canonical input applications settled by this idempotent turn commit.
@@ -738,19 +713,19 @@ where
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct RuntimeTurnCommitStamp {
     pub session_id: String,
-    pub turn_id: String,
+    pub operation: OperationId,
     pub turn_commit_hash: String,
 }
 
 impl RuntimeTurnCommitStamp {
     pub fn new(
         session_id: impl Into<String>,
-        turn_id: impl Into<String>,
+        operation: OperationId,
         turn_commit_hash: impl Into<String>,
     ) -> Self {
         Self {
             session_id: session_id.into(),
-            turn_id: turn_id.into(),
+            operation,
             turn_commit_hash: turn_commit_hash.into(),
         }
     }
@@ -781,6 +756,70 @@ fn build_checkpoint_from_persisted_state(
 }
 
 impl RuntimeCommit {
+    pub fn validate_operation_session(&self) -> Result<(), StoreError> {
+        let Some(completed) = &self.turn_commit else {
+            return Ok(());
+        };
+        completed
+            .operation
+            .scope
+            .validate()
+            .map_err(|err| StoreError::Backend(err.to_string()))?;
+        if completed.operation.key.trim().is_empty() {
+            return Err(StoreError::Backend(
+                "commit operation identity requires a non-empty key".to_string(),
+            ));
+        }
+        if completed.session_id != self.session_id
+            || completed
+                .operation
+                .scope
+                .session_id()
+                .is_some_and(|session_id| session_id != self.session_id)
+        {
+            return Err(StoreError::RuntimeTurnCommitConflict {
+                session_id: completed.session_id.clone(),
+                turn_id: completed.operation.storage_key()?,
+            });
+        }
+        Ok(())
+    }
+
+    pub fn validate_node_derivation(&self) -> Result<(), StoreError> {
+        let Some(completed) = &self.turn_commit else {
+            return Ok(());
+        };
+        let GraphCommitDelta::Append { nodes, .. } = &self.graph else {
+            return Ok(());
+        };
+        for (ordinal, node) in nodes.iter().enumerate() {
+            let expected =
+                derive_history_node_id(&self.session_id, &completed.operation, ordinal as u64)?;
+            if node.node_id != expected {
+                return Err(StoreError::NodeIdDerivationMismatch {
+                    node_id: node.node_id.clone(),
+                    expected_node_id: expected,
+                });
+            }
+        }
+        Ok(())
+    }
+
+    pub fn validate_append_node_ids_unique(&self) -> Result<(), StoreError> {
+        let GraphCommitDelta::Append { nodes, .. } = &self.graph else {
+            return Ok(());
+        };
+        let mut seen = std::collections::HashSet::with_capacity(nodes.len());
+        for node in nodes {
+            if !seen.insert(node.node_id.as_str()) {
+                return Err(StoreError::NodeIdCollision {
+                    node_id: node.node_id.clone(),
+                });
+            }
+        }
+        Ok(())
+    }
+
     pub fn turn_input_applications(&self) -> Vec<crate::TurnInputApplication> {
         self.completed_turn_input_claims
             .iter()
@@ -819,20 +858,7 @@ impl RuntimeCommit {
     }
 
     pub fn turn_commit_hash(&self) -> Result<String, StoreError> {
-        let mut semantic_commit = self.clone();
-        semantic_commit.expected_head_revision = None;
-        semantic_commit.session_execution_lease = None;
-        semantic_commit.release_session_execution_lease = None;
-        semantic_commit.turn_commit = None;
-        let mut semantic_commit = serde_json::to_value(&semantic_commit).map_err(|err| {
-            StoreError::Backend(format!("failed to serialize runtime turn commit: {err}"))
-        })?;
-        scrub_turn_commit_hash_value(&mut semantic_commit);
-        crate::stable_hash::stable_json_sha256_hex(&semantic_commit).map_err(|err| {
-            StoreError::Backend(format!(
-                "failed to serialize runtime turn commit hash: {err}"
-            ))
-        })
+        commit_identity::turn_commit_hash(self)
     }
 
     pub fn persisted_state(
@@ -895,6 +921,16 @@ impl RuntimeCommit {
         self
     }
 
+    pub fn with_operation(mut self, operation: OperationId) -> Result<Self, StoreError> {
+        let hash = self.turn_commit_hash()?;
+        self.turn_commit = Some(RuntimeTurnCommitStamp::new(
+            self.session_id.clone(),
+            operation,
+            hash,
+        ));
+        Ok(self)
+    }
+
     pub fn with_session_execution_lease(mut self, lease: SessionExecutionLeaseFence) -> Self {
         self.session_execution_lease = Some(lease);
         self
@@ -953,32 +989,6 @@ impl RuntimeCommit {
     ) -> Self {
         self.committed_attachment_ids = attachment_ids.into_iter().collect();
         self
-    }
-}
-
-fn scrub_turn_commit_hash_value(value: &mut serde_json::Value) {
-    match value {
-        serde_json::Value::Object(map) => {
-            let is_message = map.contains_key("role") && map.contains_key("parts");
-            let is_message_part = map.contains_key("kind")
-                && map.contains_key("content")
-                && map.contains_key("prune_state");
-            if is_message || is_message_part {
-                map.remove("id");
-            }
-            for volatile_key in ["node_id", "parent_node_id", "leaf_node_id", "timestamp"] {
-                map.remove(volatile_key);
-            }
-            for child in map.values_mut() {
-                scrub_turn_commit_hash_value(child);
-            }
-        }
-        serde_json::Value::Array(items) => {
-            for item in items {
-                scrub_turn_commit_hash_value(item);
-            }
-        }
-        _ => {}
     }
 }
 
@@ -1508,44 +1518,4 @@ pub async fn refresh_persisted_session_state(
 }
 
 #[cfg(test)]
-mod tests {
-    use super::{LeaseOwnerIdentity, LeaseOwnerLiveness};
-
-    fn local_liveness(
-        host_id: &str,
-        boot_id: &str,
-        pid: u32,
-        process_start: &str,
-    ) -> LeaseOwnerLiveness {
-        LeaseOwnerLiveness::local_process_for_test(host_id, boot_id, pid, process_start)
-    }
-
-    #[test]
-    fn lease_owner_identity_requires_same_incarnation() {
-        let first = LeaseOwnerIdentity::opaque("owner", "incarnation-a");
-        let same = LeaseOwnerIdentity::opaque("owner", "incarnation-a");
-        let next = LeaseOwnerIdentity::opaque("owner", "incarnation-b");
-
-        assert!(first.same_incarnation(&same));
-        assert!(!first.same_incarnation(&next));
-    }
-
-    #[test]
-    fn local_liveness_only_proves_same_host_boot_dead_processes() {
-        let holder = local_liveness(
-            "host-a",
-            "boot-a",
-            std::process::id(),
-            "not-the-current-process-start",
-        );
-        let same_host_boot = local_liveness("host-a", "boot-a", std::process::id(), "claimant");
-        let other_host = local_liveness("host-b", "boot-a", std::process::id(), "claimant");
-        let other_boot = local_liveness("host-a", "boot-b", std::process::id(), "claimant");
-
-        assert!(holder.is_definitely_dead_for_claimant(&same_host_boot));
-        assert!(!holder.is_definitely_dead_for_claimant(&other_host));
-        assert!(!holder.is_definitely_dead_for_claimant(&other_boot));
-        assert!(!holder.is_definitely_dead_for_claimant(&LeaseOwnerLiveness::Opaque));
-        assert!(!LeaseOwnerLiveness::Opaque.is_definitely_dead_for_claimant(&same_host_boot));
-    }
-}
+mod tests;

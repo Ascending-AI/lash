@@ -162,6 +162,7 @@ impl SessionAdmin {
         self.with_writer(async |runtime: &mut LashRuntime| {
             runtime
                 .append_session_nodes(lash_core::AppendSessionNodesRequest {
+                    operation_id: uuid::Uuid::new_v4().to_string(),
                     nodes: messages
                         .into_iter()
                         .map(lash_core::SessionAppendNode::message)
@@ -183,6 +184,7 @@ impl SessionAdmin {
         self.with_writer(async |runtime: &mut LashRuntime| {
             runtime
                 .append_session_nodes(lash_core::AppendSessionNodesRequest {
+                    operation_id: uuid::Uuid::new_v4().to_string(),
                     nodes: vec![lash_core::SessionAppendNode::plugin(plugin_type, body)],
                     requires_ancestor_node_id: None,
                 })
@@ -477,8 +479,12 @@ impl SessionAdmin {
         let session_id = self.runtime.observe().session_id().to_string();
         let writer = self.runtime.writer();
         let mut runtime = writer.lock().await;
+        let operation_scope = lash_core::ExecutionScope::runtime_operation(format!(
+            "{session_id}:plugin_command:{name}:{}",
+            lash_core::TurnActivityId::fresh().0
+        ));
         let receipt = runtime
-            .run_plugin_command(name, args, Some(session_id))
+            .run_plugin_command(name, args, Some(session_id), operation_scope)
             .await?;
         self.record_plugin_operation_observations(&receipt.events, &receipt.pending_turn_inputs);
         self.runtime.publish_from(&runtime);

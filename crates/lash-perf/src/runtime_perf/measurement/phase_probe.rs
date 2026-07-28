@@ -125,7 +125,7 @@ pub(crate) async fn run_once(
             return run_once_live_replay_pressure(chat_turns).await;
         }
         RuntimePerfScenario::TraceJsonlStandard | RuntimePerfScenario::TraceJsonlExtended => {
-            return run_once_trace_jsonl(scenario, chat_turns).await;
+            return Box::pin(run_once_trace_jsonl(scenario, chat_turns)).await;
         }
         RuntimePerfScenario::OpenAiResponsesSseParse => {
             return run_once_openai_responses_sse_parse(chat_turns).await;
@@ -267,7 +267,7 @@ pub(crate) async fn run_once(
             let hydrate_before_alloc = allocator_stats();
             let hydrate_before_memory = process_memory_sample();
             let hydrate_started = Instant::now();
-            runtime.reopen_with_state(scenario, state).await?;
+            Box::pin(runtime.reopen_with_state(scenario, state)).await?;
             extra_phase_profile.insert(
                 "store_reopen.runtime_hydration".to_string(),
                 RuntimePerfPhaseRunResult {

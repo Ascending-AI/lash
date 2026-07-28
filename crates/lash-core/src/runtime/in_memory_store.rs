@@ -861,7 +861,17 @@ impl crate::store::SessionCommitStore for InMemorySessionStore {
         &self,
         commit: crate::store::RuntimeCommit,
     ) -> Result<crate::store::RuntimeCommitResult, crate::store::StoreError> {
+        commit.validate_operation_session()?;
         let turn_input_applications = commit.turn_input_applications();
+        let realization_digest = crate::store::graph_realization_digest(&commit.graph);
+        let realized_agent_frames = commit
+            .agent_frames
+            .iter()
+            .map(|frame| crate::store::RealizedAgentFrame {
+                frame_id: frame.frame_id.clone(),
+                created_at: frame.created_at.clone(),
+            })
+            .collect();
         let _transaction = self
             .write_transaction
             .lock()
@@ -887,13 +897,8 @@ impl crate::store::SessionCommitStore for InMemorySessionStore {
             });
         }
         if let Some(completed) = &commit.turn_commit {
-            if completed.session_id != commit.session_id {
-                return Err(crate::store::StoreError::RuntimeTurnCommitConflict {
-                    session_id: completed.session_id.clone(),
-                    turn_id: completed.turn_id.clone(),
-                });
-            }
-            let key = (completed.session_id.clone(), completed.turn_id.clone());
+            let operation_key = completed.operation.storage_key()?;
+            let key = (completed.session_id.clone(), operation_key.clone());
             if let Some((stored_hash, result, _committed_at_ms)) = self
                 .runtime_turn_commits
                 .lock()
@@ -909,7 +914,7 @@ impl crate::store::SessionCommitStore for InMemorySessionStore {
                 }
                 return Err(crate::store::StoreError::RuntimeTurnCommitConflict {
                     session_id: completed.session_id.clone(),
-                    turn_id: completed.turn_id.clone(),
+                    turn_id: operation_key,
                 });
             }
         }
@@ -919,6 +924,19 @@ impl crate::store::SessionCommitStore for InMemorySessionStore {
                 expected: commit.expected_head_revision,
                 actual,
             });
+        }
+        commit.validate_node_derivation()?;
+        commit.validate_append_node_ids_unique()?;
+        if let crate::store::GraphCommitDelta::Append { nodes, .. } = &commit.graph {
+            let graph = self.session_graph.lock().expect("lock graph");
+            if let Some(node) = nodes
+                .iter()
+                .find(|node| graph.find_node(&node.node_id).is_some())
+            {
+                return Err(crate::store::StoreError::NodeIdCollision {
+                    node_id: node.node_id.clone(),
+                });
+            }
         }
         for completed in &commit.completed_queue_claims {
             let mut queued = self.queued_work.lock().expect("lock queued work");
@@ -1067,6 +1085,8 @@ impl crate::store::SessionCommitStore for InMemorySessionStore {
             head_revision,
             checkpoint_ref,
             manifest,
+            realization_digest,
+            realized_agent_frames,
             enqueued_queue_batches: commit
                 .enqueued_queue_batches
                 .into_iter()
@@ -1075,11 +1095,12 @@ impl crate::store::SessionCommitStore for InMemorySessionStore {
             turn_input_applications,
         };
         if let Some(completed) = &commit.turn_commit {
+            let operation_key = completed.operation.storage_key()?;
             self.runtime_turn_commits
                 .lock()
                 .expect("lock runtime turn commits")
                 .insert(
-                    (completed.session_id.clone(), completed.turn_id.clone()),
+                    (completed.session_id.clone(), operation_key),
                     (
                         completed.turn_commit_hash.clone(),
                         result.clone(),

@@ -1124,7 +1124,7 @@ async fn plan_mode_after_tool_call_switches_agent_frame_on_fresh_context_approva
         .expect("short circuit carries frame switch");
     match switch {
         lash_core::ToolControl::SwitchAgentFrame { frame_id, task, .. } => {
-            assert!(frame_id.starts_with("plan-frame-"));
+            assert!(frame_id.starts_with("root:frame:plan-exit:after:"));
             assert_eq!(
                 task.as_deref(),
                 Some(

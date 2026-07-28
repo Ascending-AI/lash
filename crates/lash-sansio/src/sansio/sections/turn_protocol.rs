@@ -421,6 +421,10 @@ impl<'a, M: TurnProtocol> DriverContextView<'a, M> {
         self.protocol_run_offset
     }
 
+    pub fn turn_id(&self) -> &str {
+        &self.config.turn_id
+    }
+
     pub fn max_turns(&self) -> Option<usize> {
         self.config.max_turns
     }
@@ -592,6 +596,7 @@ pub struct TurnMachineConfig<M: TurnProtocol = UnitTurnProtocol> {
     pub tool_specs: Arc<Vec<LlmToolSpec>>,
     pub system_prompt: Arc<str>,
     pub session_id: String,
+    pub turn_id: String,
     pub emit_llm_trace: bool,
     pub termination: M::Termination,
     pub turn_limit_final_message: crate::TurnLimitFinalMessage,

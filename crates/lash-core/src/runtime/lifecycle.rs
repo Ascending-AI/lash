@@ -1,5 +1,16 @@
 use super::*;
 
+fn initial_park_operation(
+    commit: &crate::store::RuntimeCommit,
+) -> Result<crate::OperationId, crate::StoreError> {
+    let content_hash = commit.turn_commit_hash()?;
+    Ok(super::state::boundary_operation(
+        &commit.session_id,
+        &format!("content:{content_hash}"),
+        "initial-park",
+    ))
+}
+
 pub(in crate::runtime) struct RuntimePersistenceBindings {
     runtime_store: Option<Arc<dyn crate::store::RuntimePersistence>>,
     attachment_manifest_store: Option<Arc<dyn crate::store::RuntimePersistence>>,
@@ -365,6 +376,11 @@ impl LashRuntime {
         // host-side head-CAS expectations for what is durably a no-op.
         if self.state.head_revision.is_none() || self.state.graph_replace_required {
             let commit = crate::store::RuntimeCommit::persisted_state(&self.state, &[]);
+            let operation = initial_park_operation(&commit)
+                .map_err(|err| SessionError::Protocol(err.to_string()))?;
+            let commit = commit
+                .with_operation(operation)
+                .map_err(|err| SessionError::Protocol(err.to_string()))?;
             let result = commit_runtime_state_with_fresh_session_execution_lease(
                 Arc::clone(&store),
                 commit,
@@ -479,5 +495,42 @@ impl LashRuntime {
             .filter(|node| !active.contains(node.node_id.as_str()))
             .map(|node| node.node_id.clone())
             .collect())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::initial_park_operation;
+
+    #[test]
+    fn initial_park_identity_is_stable_for_replay_and_distinguishes_content() {
+        let mut state = crate::RuntimeSessionState {
+            session_id: "park-identity".to_string(),
+            graph_replace_required: true,
+            ..crate::RuntimeSessionState::default()
+        };
+        state.ensure_agent_frame_initialized();
+        let first = crate::store::RuntimeCommit::persisted_state(&state, &[]);
+
+        let mut retry_state = state.clone();
+        retry_state.head_revision = Some(41);
+        let retry = crate::store::RuntimeCommit::persisted_state(&retry_state, &[]);
+
+        let mut changed_state = retry_state;
+        changed_state.turn_index = 1;
+        let changed = crate::store::RuntimeCommit::persisted_state(&changed_state, &[]);
+
+        let first = initial_park_operation(&first).expect("first park identity");
+        let retry = initial_park_operation(&retry).expect("retry park identity");
+        let changed = initial_park_operation(&changed).expect("changed park identity");
+
+        assert_eq!(
+            first, retry,
+            "optimistic head movement alone must not change replay identity"
+        );
+        assert_ne!(
+            first, changed,
+            "different persisted content must not reuse one park receipt"
+        );
     }
 }

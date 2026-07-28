@@ -413,49 +413,14 @@ jobs:
           LASH_POSTGRES_DATABASE_URL: postgres://lash:lash@localhost:5432/lash
           LASH_REQUIRE_POSTGRES: "1"
 
-      # FIG-637 owns the contract change that will make this oracle green.
-      # Until then CI proves the ignored test reaches all three backends and
-      # fails for exactly the four named, known divergences.
-      - name: Exercise known-red store differential
-        shell: bash
-        run: |
-          oracle_output="$(mktemp)"
-          set +e
-          cargo nextest run -p lash-sim \
-            --test cross_backend_store_differential \
-            --run-ignored ignored-only \
-            --locked -j1 --no-capture 2>&1 | tee "$oracle_output"
-          oracle_status=${PIPESTATUS[0]}
-          set -e
-
-          if test "$oracle_status" -eq 0; then
-            echo "known-red store differential unexpectedly passed"
-            exit 1
-          fi
-
-          if ! grep -F "cross-backend durable state diverged:" "$oracle_output" >/dev/null; then
-            echo "known-red store differential did not reach its final oracle assertion"
-            exit 1
-          fi
-
-          for divergence in \
-            "case=duplicate_node_id_within_one_append step=1 operation=append_duplicate_batch:" \
-            "case=duplicate_node_id_across_two_commits step=2 operation=append_committed_id_again:" \
-            "case=append_onto_tombstoned_node_id step=3 operation=append_tombstoned_id:" \
-            "case=append_duplicate_node_id_after_replace_full_seed step=2 operation=append_duplicate_id_after_replace_full_seed:"
-          do
-            if ! grep -F "$divergence" "$oracle_output" >/dev/null; then
-              echo "known-red store differential missed $divergence"
-              exit 1
-            fi
-          done
-
-          if test "$(grep -c '^case=' "$oracle_output")" -ne 4; then
-            echo "known-red store differential reported an unexpected divergence count"
-            exit 1
-          fi
+      - name: Test cross-backend store differential
+        run: >-
+          cargo nextest run -p lash-sim
+          --test cross_backend_store_differential
+          --locked -j1 --no-capture
         env:
           LASH_POSTGRES_DATABASE_URL: postgres://lash:lash@localhost:5432/lash
+          LASH_REQUIRE_POSTGRES: "1"
 
   stack-budget:
     name: Stack budget

@@ -2844,10 +2844,13 @@ async fn restate_handler_replay_retries_final_lash_commit_idempotently() {
 
     let conn = rusqlite::Connection::open(dir.path().join("session.db"))
         .expect("open raw session sqlite store");
+    let operation_key = lash_core::OperationId::turn(session_id, turn_id, "final")
+        .storage_key()
+        .expect("encode turn commit operation");
     let rows: i64 = conn
         .query_row(
             "SELECT COUNT(*) FROM runtime_turn_commits WHERE session_id = ?1 AND turn_id = ?2",
-            rusqlite::params![session_id, turn_id],
+            rusqlite::params![session_id, operation_key],
             |row| row.get(0),
         )
         .expect("count turn commit stamps");
@@ -2990,10 +2993,13 @@ async fn restate_replay_lease_acquisition_takes_recorded_branch() {
 
     let conn = rusqlite::Connection::open(dir.path().join("session.db"))
         .expect("open raw session sqlite store");
+    let operation_key = lash_core::OperationId::turn(session_id, turn_id, "final")
+        .storage_key()
+        .expect("encode turn commit operation");
     let rows: i64 = conn
         .query_row(
             "SELECT COUNT(*) FROM runtime_turn_commits WHERE session_id = ?1 AND turn_id = ?2",
-            rusqlite::params![session_id, turn_id],
+            rusqlite::params![session_id, operation_key],
             |row| row.get(0),
         )
         .expect("count liveness turn commit stamps");

@@ -67,6 +67,11 @@ async fn append_plugin_nodes(
         .append_session_nodes(
             session_id,
             AppendSessionNodesRequest {
+                operation_id: format!(
+                    "observational-memory:{}:{}",
+                    graph.leaf_node_id.as_deref().unwrap_or("root"),
+                    request_nodes.len()
+                ),
                 nodes: request_nodes,
                 requires_ancestor_node_id: graph.leaf_node_id.clone(),
             },

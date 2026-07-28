@@ -261,9 +261,11 @@ async fn postgres_turn_commit_stamps_use_injected_store_clock_when_configured() 
     };
     let mut commit = lash_core::RuntimeCommit::persisted_state(&state, &[]);
     let hash = commit.turn_commit_hash().expect("turn commit hash");
+    let operation = lash_core::OperationId::turn(SESSION_ID, TURN_ID, "final");
+    let operation_key = operation.storage_key().expect("canonical operation key");
     commit = commit
         .with_turn_commit(lash_core::RuntimeTurnCommitStamp::new(
-            SESSION_ID, TURN_ID, hash,
+            SESSION_ID, operation, hash,
         ))
         .with_session_execution_lease(lease.fence())
         .releasing_session_execution_lease(lease.completion());
@@ -286,7 +288,7 @@ async fn postgres_turn_commit_stamps_use_injected_store_clock_when_configured() 
          WHERE session_id = $1 AND turn_id = $2",
     )
     .bind(SESSION_ID)
-    .bind(TURN_ID)
+    .bind(operation_key)
     .fetch_one(storage.pool())
     .await
     .expect("read turn commit stamp");

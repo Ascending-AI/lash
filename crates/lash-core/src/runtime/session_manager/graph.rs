@@ -10,6 +10,11 @@ impl CurrentSessionCapability {
         session_id: &str,
         request: crate::AppendSessionNodesRequest,
     ) -> Result<crate::AppendSessionNodesResult, crate::PluginError> {
+        if request.operation_id.trim().is_empty() {
+            return Err(crate::PluginError::Session(
+                "session graph append requires a non-empty stable operation_id".to_string(),
+            ));
+        }
         if let Some(runtime) = {
             let registry = managed.registry.lock().await;
             registry.get(session_id).cloned()
@@ -54,24 +59,44 @@ impl CurrentSessionCapability {
                 current_leaf_node_id: state.session_graph.leaf_node_id.clone(),
             });
         }
+        let operation = super::super::state::boundary_operation(
+            &state.session_id,
+            &request.operation_id,
+            "append-session-nodes",
+        );
+        let draft_namespace = operation
+            .storage_key()
+            .map_err(|err| crate::PluginError::Session(err.to_string()))?;
         let node_ids = append_session_nodes_to_state_with_clock(
             &mut state,
             &request.nodes,
+            &draft_namespace,
             self.host.core.clock.as_ref(),
         );
-        let leaf_node_id = state.session_graph.leaf_node_id.clone().unwrap_or_default();
-        let graph = crate::store::GraphCommitDelta::Append {
+        let mut graph = crate::store::GraphCommitDelta::Append {
             nodes: node_ids
                 .iter()
                 .filter_map(|id| state.session_graph.find_node(id).cloned())
                 .collect(),
             leaf_node_id: state.session_graph.leaf_node_id.clone(),
         };
-        let commit = crate::store::RuntimeCommit::persisted_state_with_graph_commit(
+        let node_ids =
+            super::super::state::derive_graph_commit_node_ids(&mut state, &mut graph, &operation)
+                .map_err(|err| crate::PluginError::Session(err.to_string()))?;
+        let leaf_node_id = state.session_graph.leaf_node_id.clone().unwrap_or_default();
+        let mut commit = crate::store::RuntimeCommit::persisted_state_with_graph_commit(
             &state,
             graph,
             &usage_deltas,
         );
+        let hash = commit
+            .turn_commit_hash()
+            .map_err(|err| crate::PluginError::Session(err.to_string()))?;
+        commit.turn_commit = Some(crate::RuntimeTurnCommitStamp::new(
+            state.session_id.clone(),
+            operation,
+            hash,
+        ));
         let result = commit_runtime_state_with_fresh_session_execution_lease(
             Arc::clone(store),
             commit,

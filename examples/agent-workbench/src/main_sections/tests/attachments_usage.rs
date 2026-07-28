@@ -198,9 +198,10 @@ async fn run_attachment_usage_gate(
         );
     }
 
-    let Json(before_restart) = app_state(State(state.clone()), Query(SessionQuery::default()))
-        .await
-        .expect("read pre-restart workbench state API");
+    let Json(before_restart) =
+        Box::pin(app_state(State(state.clone()), Query(SessionQuery::default())))
+            .await
+            .expect("read pre-restart workbench state API");
     assert_usage_report_consistent(&before_restart.usage);
     let call_usage = completed_llm_call_usage(&trace_path);
     assert_eq!(call_usage.len(), 1);
@@ -238,9 +239,10 @@ async fn run_attachment_usage_gate(
         resumed_session_ids,
     );
     assert_retrieved_attachment(&resumed_state, &attachment_id, &png_bytes).await;
-    let Json(after_restart) = app_state(State(resumed_state), Query(SessionQuery::default()))
-        .await
-        .expect("read post-restart workbench state API");
+    let Json(after_restart) =
+        Box::pin(app_state(State(resumed_state), Query(SessionQuery::default())))
+            .await
+            .expect("read post-restart workbench state API");
     assert_eq!(after_restart.usage, persisted_usage);
     assert_usage_report_consistent(&after_restart.usage);
 

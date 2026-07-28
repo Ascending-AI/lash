@@ -509,7 +509,7 @@ async fn final_commit_retry_and_conflict_are_fenced(
         .map_err(|err| format!("hash final commit: {err}"))?;
     let stamped_commit = base_commit.with_turn_commit(RuntimeTurnCommitStamp::new(
         session_id,
-        "backend-contention-final-turn",
+        lash_core::OperationId::turn(session_id, "backend-contention-final-turn", "final"),
         turn_commit_hash.clone(),
     ));
     let owner =
@@ -549,7 +549,7 @@ async fn final_commit_retry_and_conflict_are_fenced(
     let err = store
         .commit_runtime_state(changed_commit.with_turn_commit(RuntimeTurnCommitStamp::new(
             session_id,
-            "backend-contention-final-turn",
+            lash_core::OperationId::turn(session_id, "backend-contention-final-turn", "final"),
             changed_hash,
         )))
         .await

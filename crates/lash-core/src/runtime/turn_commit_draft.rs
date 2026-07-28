@@ -16,6 +16,7 @@ impl TurnCommitDraft {
     pub(super) fn from_state_with_clock(
         mut state: RuntimeSessionState,
         clock: Arc<dyn crate::Clock>,
+        draft_namespace: &str,
     ) -> Self {
         let base_graph = Arc::new(std::mem::take(&mut state.session_graph));
         let base_read_model = base_graph.read_model_for_agent_frame(
@@ -29,6 +30,7 @@ impl TurnCommitDraft {
             base_graph,
             base_read_model,
             state.current_agent_frame_id.clone(),
+            draft_namespace,
             clock,
         );
         Self { graph, state }
@@ -128,6 +130,10 @@ impl TurnCommitDraft {
         I: IntoIterator<Item = String>,
     {
         self.graph.replace_persisted_node_ids(node_ids);
+    }
+
+    pub(super) fn remap_node_ids(&mut self, session_id: &str, mapping: &[(String, String)]) {
+        self.graph.remap_node_ids(session_id, mapping);
     }
 
     fn apply_message_projection(&mut self, messages: &MessageSequence) {

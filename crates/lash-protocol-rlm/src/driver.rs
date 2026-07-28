@@ -633,6 +633,7 @@ mod tests {
             tool_specs: Arc::new(Vec::new()),
             system_prompt: Arc::from("stable RLM system prompt"),
             session_id: "prefix-stability".to_string(),
+            turn_id: "prefix-stability-turn".to_string(),
             emit_llm_trace: false,
             termination: lash_core::ProtocolTurnOptions::typed(RlmCreateExtras::default())
                 .expect("RLM options"),

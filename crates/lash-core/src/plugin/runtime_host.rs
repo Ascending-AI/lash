@@ -210,6 +210,9 @@ impl<'run> SessionTurnRequest<'run> {
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct AppendSessionNodesRequest {
+    /// Caller-stable identity for this logical append. Retries must reuse it
+    /// even when the session head has advanced.
+    pub operation_id: String,
     pub nodes: Vec<SessionAppendNode>,
     #[serde(default)]
     pub requires_ancestor_node_id: Option<String>,

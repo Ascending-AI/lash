@@ -4567,7 +4567,12 @@ async fn external_invoke_can_create_session_from_current_snapshot() {
     );
 
     let result = runtime
-        .run_plugin_command("test.spawn", json!({}), None)
+        .run_plugin_command(
+            "test.spawn",
+            json!({}),
+            None,
+            crate::ExecutionScope::runtime_operation("root:plugin-command:test-spawn"),
+        )
         .await
         .expect("invoke");
     assert_eq!(
@@ -4583,6 +4588,88 @@ async fn external_invoke_can_create_session_from_current_snapshot() {
             .get("message_count")
             .and_then(|value| value.as_u64()),
         Some(2)
+    );
+}
+
+#[tokio::test]
+async fn plugin_command_reuses_caller_scope_on_lost_response_retry() {
+    let plugin: Arc<dyn crate::PluginFactory> = Arc::new(RuntimeTestPluginFactory {
+        build: Arc::new(|_| {
+            Ok(Arc::new(RuntimeTestPlugin {
+                before_turn: None,
+                checkpoint: None,
+                tool_result_projector: None,
+                runtime_event: None,
+                external_registrar: Some(Arc::new(|reg| {
+                    reg.operations().command(
+                        crate::PluginOperationDef {
+                            name: "test.emit".to_string(),
+                            description: "emit one durable event".to_string(),
+                            kind: crate::PluginOperationKind::Command,
+                            session_param: crate::SessionParam::Optional,
+                            input_schema: json!({}),
+                            output_schema: json!({}),
+                        },
+                        Arc::new(|_, _| {
+                            Box::pin(async move {
+                                Ok(crate::plugin::ErasedPluginCommandOutcome {
+                                    output: json!({"ok": true}),
+                                    events: vec![crate::PluginRuntimeEvent::Custom {
+                                        name: "test.event".to_string(),
+                                        payload: json!({"value": 1}),
+                                    }],
+                                    directives: Vec::new(),
+                                })
+                            })
+                        }),
+                    )
+                })),
+            }))
+        }),
+    });
+    let store = Arc::new(RecordingStore::default());
+    let store_trait = store.clone() as Arc<dyn crate::RuntimePersistence>;
+    let mut first = runtime_with_plugins_and_tools_and_host_and_store(
+        vec![Arc::clone(&plugin)],
+        Arc::new(EmptyTools),
+        mock_provider(Vec::new()),
+        test_host_config(),
+        Arc::clone(&store_trait),
+    )
+    .await;
+    let mut retry = runtime_with_plugins_and_tools_and_host_and_store(
+        vec![plugin],
+        Arc::new(EmptyTools),
+        mock_provider(Vec::new()),
+        test_host_config(),
+        store_trait,
+    )
+    .await;
+    let operation_scope =
+        crate::ExecutionScope::runtime_operation("root:plugin-command:stable-request");
+
+    first
+        .run_plugin_command("test.emit", json!({}), None, operation_scope.clone())
+        .await
+        .expect("first command attempt");
+    let committed_after_first = *store
+        .runtime_commit_count
+        .lock()
+        .expect("runtime commit count");
+
+    retry
+        .run_plugin_command("test.emit", json!({}), None, operation_scope)
+        .await
+        .expect("lost-response retry");
+
+    assert_eq!(committed_after_first, 2);
+    assert_eq!(
+        *store
+            .runtime_commit_count
+            .lock()
+            .expect("runtime commit count"),
+        committed_after_first,
+        "retrying one command scope must receipt-hit both durable effects"
     );
 }
 

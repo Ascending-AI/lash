@@ -309,6 +309,7 @@ fn checkpoint_config(
             "Synthetic sans-IO checkpoint profiler prompt. Preserve pending effects across checkpoint restore.",
         ),
         session_id: "runtime-perf-turn-checkpoint".to_string(),
+        turn_id: "runtime-perf-turn".to_string(),
         emit_llm_trace: false,
         termination: ProtocolTurnOptions::default(),
         turn_limit_final_message: Arc::new(runtime_perf_turn_limit_final_message),

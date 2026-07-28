@@ -229,7 +229,7 @@ async fn workbench_state_snapshot_merges_canonical_history_with_partial_product_
         "host-only row",
     );
 
-    let Json(snapshot) = app_state(State(state), Query(SessionQuery::default()))
+    let Json(snapshot) = Box::pin(app_state(State(state), Query(SessionQuery::default())))
         .await
         .expect("materialize merged state");
     assert_eq!(

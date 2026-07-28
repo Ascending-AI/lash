@@ -8,15 +8,15 @@ use lash::direct::{
 use lash::durability::RuntimeHostConfig;
 use lash::messages::MessageRole;
 use lash::persistence::{
-    CheckpointKind, GcReport, GraphCommitDelta, LeaseOwnerIdentity, PersistedSessionRead,
-    PendingTurnInputDraft, QueuedWorkBatch, QueuedWorkBatchDraft, QueuedWorkClaim,
+    CheckpointKind, GcReport, GraphCommitDelta, LeaseOwnerIdentity, OperationId,
+    PersistedSessionRead, PendingTurnInputDraft, QueuedWorkBatch, QueuedWorkBatchDraft, QueuedWorkClaim,
     QueuedWorkClaimBoundary, QueuedWorkStore, RuntimeCommit, RuntimeCommitResult,
     RuntimePersistence, RuntimeSessionState, RuntimeTurnCommitStamp, SessionCheckpoint,
     SessionCommitStore, SessionExecutionLease, SessionExecutionLeaseClaimOutcome,
     SessionExecutionLeaseCompletion, SessionExecutionLeaseFence, SessionExecutionLeaseStore,
     SessionMeta, SessionNodeRecord, SessionReadScope, StoreError, StoreMaintenance, TurnInputClaim,
     TurnInputCheckpointBoundary, TurnInputIngress, TurnInputState, TurnInputStore, VacuumReport,
-    load_persisted_session_state,
+    commit_runtime_state_verified, graph_realization_digest, load_persisted_session_state,
     load_persisted_session_state_active_path,
 };
 use lash::usage::{TokenLedgerEntry, TokenUsage};
@@ -54,6 +54,7 @@ impl SessionCommitStore for FacadeStore {
         &self,
         commit: RuntimeCommit,
     ) -> Result<RuntimeCommitResult, StoreError> {
+        let realization_digest = graph_realization_digest(&commit.graph);
         let manifest = SessionCheckpoint::new(
             commit.checkpoint.turn_state,
             commit.checkpoint.tool_state_ref,
@@ -65,6 +66,8 @@ impl SessionCommitStore for FacadeStore {
             head_revision: commit.expected_head_revision.unwrap_or_default() + 1,
             checkpoint_ref: "checkpoint".to_string().into(),
             manifest,
+            realization_digest,
+            realized_agent_frames: Vec::new(),
             enqueued_queue_batches: Vec::new(),
             turn_input_applications: Vec::new(),
         })
@@ -311,7 +314,7 @@ fn persistence_types_are_nameable(
         usage_deltas: ledger,
         turn_commit: Some(RuntimeTurnCommitStamp::new(
             "facade",
-            "turn",
+            OperationId::turn("facade", "turn", "final"),
             "sha256:facade",
         )),
         completed_queue_claims: Vec::new(),
@@ -484,6 +487,13 @@ async fn persistence_load_helpers_are_nameable(
     load_persisted_session_state(store).await
 }
 
+async fn verified_commit_chokepoint_is_nameable(
+    store: &dyn SessionCommitStore,
+    commit: RuntimeCommit,
+) -> Result<RuntimeCommitResult, StoreError> {
+    commit_runtime_state_verified(store, commit).await
+}
+
 // Types that appear in facade public signatures must have a reachable facade
 // home (no bare `lash_core::` leak). See lib.rs contract: "Every public name
 // has exactly one home."
@@ -541,6 +551,7 @@ fn main() {
     let _ = provider_reliability_types_are_nameable;
     let _ = model_spec_types_are_nameable;
     let _ = persistence_load_helpers_are_nameable;
+    let _ = verified_commit_chokepoint_is_nameable;
     let _ = observation_types_are_homed_in_observe;
     let _ = trigger_types_are_homed_in_triggers;
     let _ = cancellation_token_is_at_root;

@@ -5,6 +5,33 @@ use std::sync::{Arc, OnceLock};
 use crate::session_model::{ConversationRecord, ProtocolEvent, SessionHistoryRecord};
 use crate::{BaseRenderCache, Clock, Message, MessageRole, PromptUsage, TokenUsage};
 
+pub(crate) fn remap_session_node_cause(
+    caused_by: &mut Option<crate::CausalRef>,
+    session_id: &str,
+    mapping: &HashMap<String, String>,
+) {
+    let Some(crate::CausalRef::SessionNode {
+        session_id: cause_session_id,
+        node_id,
+    }) = caused_by
+    else {
+        return;
+    };
+    if cause_session_id == session_id
+        && let Some(derived) = mapping.get(node_id)
+    {
+        *node_id = derived.clone();
+    }
+}
+
+fn draft_node_id(namespace: &str, ordinal: u64) -> String {
+    let preimage = format!("{}:{namespace}:{ordinal}", namespace.len());
+    format!(
+        "draft-node/v2/{}",
+        crate::stable_hash::sha256_hex(preimage.as_bytes())
+    )
+}
+
 #[derive(Clone, Debug, Default, serde::Serialize, serde::Deserialize)]
 pub struct SessionGraphData {
     #[serde(default)]
@@ -234,6 +261,8 @@ pub(crate) struct SessionGraphAppendBuilder {
     existing_ids: HashSet<String>,
     leaf_node_id: Option<String>,
     agent_frame_id: Option<crate::AgentFrameId>,
+    draft_namespace: String,
+    next_draft_ordinal: u64,
 }
 
 impl SessionGraphAppendBuilder {
@@ -247,6 +276,10 @@ impl SessionGraphAppendBuilder {
 
     pub(crate) fn agent_frame_id(&self) -> Option<&str> {
         self.agent_frame_id.as_deref()
+    }
+
+    pub(crate) fn draft_namespace(&self) -> &str {
+        &self.draft_namespace
     }
 
     pub(crate) fn leaf_node_id(&self) -> Option<&String> {
@@ -267,6 +300,23 @@ impl SessionGraphAppendBuilder {
 
     pub(crate) fn existing_node_ids(&self) -> &HashSet<String> {
         &self.existing_ids
+    }
+
+    pub(crate) fn remap_node_ids(&mut self, mapping: &[(String, String)]) {
+        if mapping.is_empty() {
+            return;
+        }
+        let mapping = mapping.iter().cloned().collect::<HashMap<_, _>>();
+        self.existing_ids = self
+            .existing_ids
+            .drain()
+            .map(|id| mapping.get(&id).cloned().unwrap_or(id))
+            .collect();
+        if let Some(leaf) = self.leaf_node_id.as_mut()
+            && let Some(derived) = mapping.get(leaf)
+        {
+            *leaf = derived.clone();
+        }
     }
 
     pub(crate) fn append_messages_at<I>(
@@ -306,11 +356,8 @@ impl SessionGraphAppendBuilder {
         for draft in drafts {
             let parent_node_id = self.leaf_node_id.clone();
             let (node_id, caused_by, payload) = match draft.payload {
-                SessionNodeDraftPayload::Message(mut message) => {
-                    if message.id.is_empty() {
-                        message.id = fresh_node_id("m");
-                    }
-                    let node_id = unique_message_node_id(&message.id, &self.existing_ids);
+                SessionNodeDraftPayload::Message(message) => {
+                    let node_id = self.next_draft_node_id();
                     let caused_by = draft
                         .caused_by
                         .or_else(|| causal_ref_from_message_origin(&message.origin));
@@ -325,7 +372,7 @@ impl SessionGraphAppendBuilder {
                     )
                 }
                 SessionNodeDraftPayload::Plugin { plugin_type, body } => {
-                    let node_id = fresh_semantic_node_id("plugin", &self.existing_ids);
+                    let node_id = self.next_draft_node_id();
                     (
                         node_id,
                         draft.caused_by,
@@ -336,7 +383,7 @@ impl SessionGraphAppendBuilder {
                     )
                 }
                 SessionNodeDraftPayload::ProtocolEvent(event) => {
-                    let node_id = fresh_semantic_node_id("protocol", &self.existing_ids);
+                    let node_id = self.next_draft_node_id();
                     (
                         node_id,
                         draft.caused_by,
@@ -359,6 +406,16 @@ impl SessionGraphAppendBuilder {
         }
         nodes
     }
+
+    fn next_draft_node_id(&mut self) -> String {
+        loop {
+            let candidate = draft_node_id(&self.draft_namespace, self.next_draft_ordinal);
+            self.next_draft_ordinal += 1;
+            if !self.existing_ids.contains(&candidate) {
+                return candidate;
+            }
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -367,11 +424,6 @@ struct SessionGraphCache {
     active_path_indices: Vec<usize>,
     active_events: Arc<Vec<SessionHistoryRecord>>,
     active_messages: Arc<Vec<Message>>,
-    /// Index from `Message::id` to its position in `active_messages`,
-    /// kept in sync with the vec so dedup on append is O(1) instead of an
-    /// O(n) linear scan (which made long sessions quadratic in message
-    /// count).
-    active_message_ids: HashMap<String, usize>,
     /// Memoized render of `active_messages`. Shared with every
     /// `MessageSequence` built off this read model so the chat projector's
     /// per-iteration `render_prompt` walk only happens once per turn.
@@ -407,7 +459,6 @@ impl SessionGraphCache {
             active_path_indices,
             active_events: Arc::new(Vec::new()),
             active_messages: Arc::new(Vec::new()),
-            active_message_ids: HashMap::new(),
             prompt_render_cache: Arc::new(BaseRenderCache::new()),
         };
         cache.rebuild_read_model(graph);
@@ -416,8 +467,6 @@ impl SessionGraphCache {
 
     fn rebuild_read_model(&mut self, graph: &SessionGraph) {
         let mut active_messages = Vec::with_capacity(self.active_path_indices.len());
-        let mut active_message_ids: HashMap<String, usize> =
-            HashMap::with_capacity(self.active_path_indices.len());
         let mut active_events = Vec::with_capacity(self.active_path_indices.len());
         for idx in &self.active_path_indices {
             let node = &graph.nodes[*idx];
@@ -425,15 +474,13 @@ impl SessionGraphCache {
                 active_events.push(event.clone());
             }
             if let Some(message) = node.message() {
-                if !message.is_transient() && !active_message_ids.contains_key(&message.id) {
-                    active_message_ids.insert(message.id.clone(), active_messages.len());
+                if !message.is_transient() {
                     active_messages.push(message);
                 }
                 continue;
             }
         }
         self.active_messages = Arc::new(active_messages);
-        self.active_message_ids = active_message_ids;
         self.active_events = Arc::new(active_events);
         self.prompt_render_cache = Arc::new(BaseRenderCache::new());
     }
@@ -445,7 +492,6 @@ impl SessionGraphCache {
         include_unscoped: bool,
     ) -> SessionReadModel {
         let mut active_messages = Vec::with_capacity(self.active_path_indices.len());
-        let mut active_message_ids = HashSet::new();
         let mut active_events = Vec::with_capacity(self.active_path_indices.len());
         for idx in &self.active_path_indices {
             let node = &graph.nodes[*idx];
@@ -456,7 +502,7 @@ impl SessionGraphCache {
                 active_events.push(event.clone());
             }
             if let Some(message) = node.message() {
-                if !message.is_transient() && active_message_ids.insert(message.id.clone()) {
+                if !message.is_transient() {
                     active_messages.push(message);
                 }
                 continue;
@@ -486,11 +532,8 @@ impl SessionGraphCache {
         }
         if let Some(message) = node.message()
             && !message.is_transient()
-            && !self.active_message_ids.contains_key(&message.id)
         {
             let messages = Arc::make_mut(&mut self.active_messages);
-            self.active_message_ids
-                .insert(message.id.clone(), messages.len());
             messages.push(message);
             self.prompt_render_cache = Arc::new(BaseRenderCache::new());
         }
@@ -556,23 +599,11 @@ impl SessionGraph {
         agent_frame_id: Option<&str>,
         messages: &[Message],
     ) {
-        let appendable_messages = {
-            let read_model = agent_frame_id
-                .map(|frame_id| self.read_model_for_agent_frame(frame_id, false))
-                .unwrap_or_else(|| self.read_model());
-            let mut seen_message_ids = read_model
-                .messages
-                .iter()
-                .map(|message| message.id.as_str())
-                .collect::<HashSet<_>>();
-            messages
-                .iter()
-                .filter(|message| {
-                    !message.is_transient() && seen_message_ids.insert(message.id.as_str())
-                })
-                .cloned()
-                .collect::<Vec<_>>()
-        };
+        let appendable_messages = messages
+            .iter()
+            .filter(|message| !message.is_transient())
+            .cloned()
+            .collect::<Vec<_>>();
 
         self.reserve_append_capacity(appendable_messages.len(), appendable_messages.len());
         self.append_message_batch_scoped(agent_frame_id, appendable_messages);
@@ -637,10 +668,23 @@ impl SessionGraph {
     }
 
     pub(crate) fn append_builder(&self) -> SessionGraphAppendBuilder {
+        let namespace = self.leaf_node_id.as_deref().map_or_else(
+            || "unscoped-root".to_string(),
+            |leaf| format!("unscoped:{leaf}"),
+        );
+        self.append_builder_in_namespace(namespace)
+    }
+
+    pub(crate) fn append_builder_in_namespace(
+        &self,
+        draft_namespace: impl Into<String>,
+    ) -> SessionGraphAppendBuilder {
         SessionGraphAppendBuilder {
             existing_ids: self.nodes.iter().map(|node| node.node_id.clone()).collect(),
             leaf_node_id: self.leaf_node_id.clone(),
             agent_frame_id: None,
+            draft_namespace: draft_namespace.into(),
+            next_draft_ordinal: 0,
         }
     }
 
@@ -648,9 +692,33 @@ impl SessionGraph {
         self.cache = Arc::new(OnceLock::new());
     }
 
-    fn data_mut(&mut self) -> &mut SessionGraphData {
+    pub(crate) fn data_mut(&mut self) -> &mut SessionGraphData {
         self.invalidate_cache();
         Arc::make_mut(&mut self.inner)
+    }
+
+    pub(crate) fn remap_node_ids(&mut self, session_id: &str, mapping: &[(String, String)]) {
+        if mapping.is_empty() {
+            return;
+        }
+        let mapping = mapping.iter().cloned().collect::<HashMap<_, _>>();
+        let data = self.data_mut();
+        for node in &mut data.nodes {
+            if let Some(derived) = mapping.get(&node.node_id) {
+                node.node_id = derived.clone();
+            }
+            if let Some(parent) = node.parent_node_id.as_mut()
+                && let Some(derived) = mapping.get(parent)
+            {
+                *parent = derived.clone();
+            }
+            remap_session_node_cause(&mut node.caused_by, session_id, &mapping);
+        }
+        if let Some(leaf) = data.leaf_node_id.as_mut()
+            && let Some(derived) = mapping.get(leaf)
+        {
+            *leaf = derived.clone();
+        }
     }
 
     fn reserve_append_capacity(&mut self, additional_nodes: usize, additional_messages: usize) {
@@ -708,6 +776,7 @@ impl SessionGraph {
         }
         self.append_node_drafts_scoped_at(
             agent_frame_id,
+            None,
             messages.into_iter().map(SessionNodeDraft::message),
             timestamp,
         );
@@ -800,31 +869,46 @@ impl SessionGraph {
     where
         I: IntoIterator<Item = SessionNodeDraft>,
     {
-        self.append_node_drafts_scoped_at(None, drafts, crate::SystemClock.timestamp_rfc3339())
+        self.append_node_drafts_scoped_at(
+            None,
+            None,
+            drafts,
+            crate::SystemClock.timestamp_rfc3339(),
+        )
     }
 
     pub(crate) fn append_node_drafts_for_agent_frame_at<I>(
         &mut self,
         agent_frame_id: &str,
+        draft_namespace: &str,
         drafts: I,
         timestamp: String,
     ) -> Vec<String>
     where
         I: IntoIterator<Item = SessionNodeDraft>,
     {
-        self.append_node_drafts_scoped_at(Some(agent_frame_id), drafts, timestamp)
+        self.append_node_drafts_scoped_at(
+            Some(agent_frame_id),
+            Some(draft_namespace),
+            drafts,
+            timestamp,
+        )
     }
 
     fn append_node_drafts_scoped_at<I>(
         &mut self,
         agent_frame_id: Option<&str>,
+        draft_namespace: Option<&str>,
         drafts: I,
         timestamp: String,
     ) -> Vec<String>
     where
         I: IntoIterator<Item = SessionNodeDraft>,
     {
-        let mut builder = self.append_builder();
+        let mut builder = draft_namespace.map_or_else(
+            || self.append_builder(),
+            |namespace| self.append_builder_in_namespace(namespace),
+        );
         if let Some(agent_frame_id) = agent_frame_id {
             builder = builder.with_agent_frame_id(agent_frame_id.to_string());
         }
@@ -959,6 +1043,10 @@ impl SessionGraph {
             current_nodes,
             &existing_ids,
             agent_frame_id,
+            &format!(
+                "unscoped-replacement:{}",
+                self.leaf_node_id.as_deref().unwrap_or("root")
+            ),
             messages,
             crate::SystemClock.timestamp_rfc3339(),
         );
@@ -974,10 +1062,11 @@ impl SessionGraph {
     }
 
     pub fn message_tree(&self) -> Vec<SessionMessageTreeNode> {
-        let active_message_ids = self
+        let active_node_ids = self
             .active_path_nodes()
             .into_iter()
-            .filter_map(|node| node.message().map(|message| message.id.clone()))
+            .filter(|node| node.message().is_some())
+            .map(|node| node.node_id.clone())
             .collect::<HashSet<_>>();
 
         let message_nodes = self
@@ -993,7 +1082,7 @@ impl SessionGraph {
                     message,
                     timestamp: node.timestamp.clone(),
                     children: Vec::new(),
-                    active: active_message_ids.contains(&node.node_id),
+                    active: active_node_ids.contains(&node.node_id),
                 })
             })
             .collect::<Vec<_>>();
@@ -1067,6 +1156,7 @@ pub(crate) fn build_active_read_replacement<'a>(
     current_nodes: impl IntoIterator<Item = &'a SessionNodeRecord>,
     existing_node_ids: &HashSet<String>,
     agent_frame_id: Option<&str>,
+    draft_namespace: &str,
     messages: &[Message],
     timestamp: String,
 ) -> ActiveReadReplacement {
@@ -1077,8 +1167,6 @@ pub(crate) fn build_active_read_replacement<'a>(
 
     let mut active_events = Vec::new();
     let mut active_messages = Vec::new();
-    let mut active_message_ids = HashSet::new();
-    let mut seen_active_read_keys = HashSet::new();
     let mut target_idx = 0usize;
     let mut leaf_node_id = None;
     for node in current_nodes {
@@ -1089,31 +1177,19 @@ pub(crate) fn build_active_read_replacement<'a>(
         {
             continue;
         }
-        if let Some(key) = recognized_active_read_key(node) {
-            if !seen_active_read_keys.insert(key.clone()) {
-                continue;
-            }
+        if let Some(current_message) = node.message() {
             let Some(target_item) = target.get(target_idx) else {
                 break;
             };
-            if key != format!("message:{}", target_item.id) {
+            if serde_json::to_value(&current_message).ok() != serde_json::to_value(target_item).ok()
+            {
                 break;
             }
-            push_active_read_node(
-                node,
-                &mut active_events,
-                &mut active_messages,
-                &mut active_message_ids,
-            );
+            push_active_read_node(node, &mut active_events, &mut active_messages);
             leaf_node_id = Some(node.node_id.clone());
             target_idx += 1;
         } else {
-            push_active_read_node(
-                node,
-                &mut active_events,
-                &mut active_messages,
-                &mut active_message_ids,
-            );
+            push_active_read_node(node, &mut active_events, &mut active_messages);
             leaf_node_id = Some(node.node_id.clone());
         }
     }
@@ -1124,7 +1200,7 @@ pub(crate) fn build_active_read_replacement<'a>(
     for message in target.into_iter().skip(target_idx) {
         let parent_node_id = leaf_node_id.clone();
         let node_id =
-            unique_message_node_id_for_replacement(&message.id, existing_node_ids, &new_node_ids);
+            next_replacement_draft_node_id(existing_node_ids, &new_node_ids, draft_namespace);
         let node = SessionNodeRecord {
             node_id,
             parent_node_id,
@@ -1139,12 +1215,7 @@ pub(crate) fn build_active_read_replacement<'a>(
         };
         new_node_ids.insert(node.node_id.clone());
         leaf_node_id = Some(node.node_id.clone());
-        push_active_read_node(
-            &node,
-            &mut active_events,
-            &mut active_messages,
-            &mut active_message_ids,
-        );
+        push_active_read_node(&node, &mut active_events, &mut active_messages);
         new_tail_nodes.push(node);
     }
 
@@ -1160,27 +1231,29 @@ fn push_active_read_node(
     node: &SessionNodeRecord,
     active_events: &mut Vec<SessionHistoryRecord>,
     active_messages: &mut Vec<Message>,
-    active_message_ids: &mut HashSet<String>,
 ) {
     if let Some(event) = node.event() {
         active_events.push(event.clone());
     }
     if let Some(message) = node.message()
         && !message.is_transient()
-        && active_message_ids.insert(message.id.clone())
     {
         active_messages.push(message);
     }
 }
 
-fn recognized_active_read_key(node: &SessionNodeRecord) -> Option<String> {
-    match &node.payload {
-        SessionNodePayload::Event { event } => match event {
-            SessionHistoryRecord::Conversation(record) => Some(format!("message:{}", record.id)),
-            _ => None,
-        },
-        SessionNodePayload::Plugin { .. } => None,
+fn next_replacement_draft_node_id(
+    existing_ids: &HashSet<String>,
+    new_ids: &HashSet<String>,
+    draft_namespace: &str,
+) -> String {
+    for ordinal in 0_u64.. {
+        let candidate = draft_node_id(draft_namespace, ordinal);
+        if !existing_ids.contains(&candidate) && !new_ids.contains(&candidate) {
+            return candidate;
+        }
     }
+    unreachable!("draft node id space exhausted")
 }
 
 fn causal_ref_from_message_origin(
@@ -1198,57 +1271,6 @@ fn causal_ref_from_message_origin(
         process_id: process_id.clone(),
         sequence: *sequence,
     })
-}
-
-fn fresh_semantic_node_id(prefix: &str, existing_ids: &HashSet<String>) -> String {
-    loop {
-        let candidate = format!("{prefix}:{}", uuid::Uuid::new_v4().simple());
-        if !existing_ids.contains(&candidate) {
-            return candidate;
-        }
-    }
-}
-
-fn unique_message_node_id(message_id: &str, existing_ids: &HashSet<String>) -> String {
-    if !existing_ids.contains(message_id) {
-        return message_id.to_string();
-    }
-    let base = format!("message:{message_id}");
-    if !existing_ids.contains(&base) {
-        return base;
-    }
-    for suffix in 2.. {
-        let candidate = format!("{base}:{suffix}");
-        if !existing_ids.contains(&candidate) {
-            return candidate;
-        }
-    }
-    unreachable!("message node id space exhausted")
-}
-
-fn unique_message_node_id_for_replacement(
-    message_id: &str,
-    existing_ids: &HashSet<String>,
-    new_ids: &HashSet<String>,
-) -> String {
-    if !existing_ids.contains(message_id) && !new_ids.contains(message_id) {
-        return message_id.to_string();
-    }
-    let base = format!("message:{message_id}");
-    if !existing_ids.contains(&base) && !new_ids.contains(&base) {
-        return base;
-    }
-    for suffix in 2.. {
-        let candidate = format!("{base}:{suffix}");
-        if !existing_ids.contains(&candidate) && !new_ids.contains(&candidate) {
-            return candidate;
-        }
-    }
-    unreachable!("message node id space exhausted")
-}
-
-fn fresh_node_id(prefix: &str) -> String {
-    format!("{prefix}{}", uuid::Uuid::new_v4().simple())
 }
 
 fn first_message_search_text(message: &Message) -> String {
@@ -1297,16 +1319,76 @@ mod tests {
     }
 
     #[test]
-    fn typed_append_node_ids_use_semantic_prefixes() {
+    fn draft_node_ids_are_opaque_distinct_and_ignore_message_ids() {
         let mut graph = SessionGraph::default();
 
         let message_id = graph.append_message(text_message("m1", MessageRole::User, "hello"));
         let protocol_id = graph.append_protocol_event(protocol_event());
         let plugin_id = graph.append_plugin("example", serde_json::json!({"ok": true}));
 
-        assert_eq!(message_id, "m1");
-        assert!(protocol_id.starts_with("protocol:"));
-        assert!(plugin_id.starts_with("plugin:"));
+        assert_ne!(message_id, "m1");
+        assert!(message_id.starts_with("draft-node/v2/"));
+        assert!(protocol_id.starts_with("draft-node/v2/"));
+        assert!(plugin_id.starts_with("draft-node/v2/"));
+        assert_ne!(message_id, protocol_id);
+        assert_ne!(protocol_id, plugin_id);
+    }
+
+    #[test]
+    fn draft_node_ids_are_stable_per_boundary_and_distinct_across_boundaries() {
+        let graph = SessionGraph::default();
+        let message = text_message("same-message", MessageRole::User, "hello");
+        let timestamp = "2026-07-26T10:00:00Z".to_string();
+
+        let mut first = graph.append_builder_in_namespace("turn:one");
+        let first_id = first.append_messages_at([message.clone()], timestamp.clone())[0]
+            .node_id
+            .clone();
+        let mut replay = graph.append_builder_in_namespace("turn:one");
+        let replay_id = replay.append_messages_at([message.clone()], timestamp.clone())[0]
+            .node_id
+            .clone();
+        let mut next_turn = graph.append_builder_in_namespace("turn:two");
+        let next_turn_id = next_turn.append_messages_at([message], timestamp)[0]
+            .node_id
+            .clone();
+
+        assert_eq!(first_id, replay_id);
+        assert_ne!(first_id, next_turn_id);
+    }
+
+    #[test]
+    fn read_model_preserves_distinct_nodes_with_identical_messages() {
+        let mut graph = SessionGraph::default();
+        let message = text_message("same-message-id", MessageRole::User, "same content");
+
+        let first = graph.append_message(message.clone());
+        let second = graph.append_message(message);
+
+        assert_ne!(first, second);
+        let read = graph.read_model();
+        assert_eq!(read.messages.len(), 2);
+        assert_eq!(read.messages[0].id, "same-message-id");
+        assert_eq!(read.messages[1].id, "same-message-id");
+    }
+
+    #[test]
+    fn message_tree_marks_active_nodes_without_using_message_identity() {
+        let mut graph = SessionGraph::default();
+        let message = text_message("same-message-id", MessageRole::User, "same content");
+        let root = graph.append_message(message.clone());
+        let inactive = graph.append_message(message.clone());
+        graph.set_leaf_node_id(Some(root));
+        let active = graph.append_message(message);
+
+        let tree = graph.message_tree();
+        assert_eq!(tree.len(), 1);
+        assert!(tree[0].active);
+        assert_eq!(tree[0].children.len(), 2);
+        assert_eq!(tree[0].children[0].node_id, inactive);
+        assert!(!tree[0].children[0].active);
+        assert_eq!(tree[0].children[1].node_id, active);
+        assert!(tree[0].children[1].active);
     }
 
     #[test]
@@ -1322,24 +1404,14 @@ mod tests {
     }
 
     #[test]
-    fn graph_writers_do_not_put_active_read_events_under_plugin_ids() {
+    fn graph_writers_keep_payload_kind_out_of_draft_identity() {
         let mut graph = SessionGraph::default();
         graph.append_message(text_message("m1", MessageRole::User, "hello"));
         graph.append_protocol_event(protocol_event());
         graph.append_plugin("example", serde_json::json!({"ok": true}));
 
         for node in &graph.nodes {
-            match node.event() {
-                Some(SessionHistoryRecord::Conversation(_)) => {
-                    assert!(!node.node_id.starts_with("plugin:"), "{:?}", node);
-                }
-                Some(SessionHistoryRecord::Protocol(_)) => {
-                    assert!(node.node_id.starts_with("protocol:"), "{:?}", node);
-                }
-                None => {
-                    assert!(node.node_id.starts_with("plugin:"), "{:?}", node);
-                }
-            }
+            assert!(node.node_id.starts_with("draft-node/v2/"), "{:?}", node);
         }
     }
 }

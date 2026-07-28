@@ -158,6 +158,16 @@ impl SessionCommitStore for Store {
         &self,
         commit: RuntimeCommit,
     ) -> Result<RuntimeCommitResult, StoreError> {
+        commit.validate_operation_session()?;
+        let realization_digest = lash_core::store::graph_realization_digest(&commit.graph);
+        let realized_agent_frames = commit
+            .agent_frames
+            .iter()
+            .map(|frame| lash_core::store::RealizedAgentFrame {
+                frame_id: frame.frame_id.clone(),
+                created_at: frame.created_at.clone(),
+            })
+            .collect::<Vec<_>>();
         let blob_profile = self.options.blob_profile;
         let now = self.clock.timestamp_ms();
         let enqueue_nonce_start = self.commit_count.fetch_add(
@@ -179,17 +189,12 @@ impl SessionCommitStore for Store {
                         });
                     }
                     if let Some(completed) = &commit.turn_commit {
-                        if completed.session_id != commit.session_id {
-                            return Err(StoreError::RuntimeTurnCommitConflict {
-                                session_id: completed.session_id.clone(),
-                                turn_id: completed.turn_id.clone(),
-                            });
-                        }
+                        let operation_key = completed.operation.storage_key()?;
                         let prior: Option<(String, String)> = tx
                             .query_row(
                                 "SELECT turn_commit_hash, result_json FROM runtime_turn_commits
                                  WHERE session_id = ?1 AND turn_id = ?2",
-                                params![completed.session_id, completed.turn_id],
+                                params![completed.session_id, operation_key],
                                 |row| Ok((row.get(0)?, row.get(1)?)),
                             )
                             .optional()
@@ -211,7 +216,7 @@ impl SessionCommitStore for Store {
                             }
                             return Err(StoreError::RuntimeTurnCommitConflict {
                                 session_id: completed.session_id.clone(),
-                                turn_id: completed.turn_id.clone(),
+                                turn_id: completed.operation.storage_key()?,
                             });
                         }
                     }
@@ -222,6 +227,26 @@ impl SessionCommitStore for Store {
                             expected: commit.expected_head_revision,
                             actual: actual_revision,
                         });
+                    }
+                    commit.validate_node_derivation()?;
+                    commit.validate_append_node_ids_unique()?;
+                    if let GraphCommitDelta::Append { nodes, .. } = &commit.graph {
+                        for node in nodes {
+                            let occupied = tx
+                                .query_row(
+                                    "SELECT 1 FROM graph_nodes WHERE node_id = ?1 LIMIT 1",
+                                    params![node.node_id],
+                                    |_| Ok(()),
+                                )
+                                .optional()
+                                .map_err(sqlite_error)?
+                                .is_some();
+                            if occupied {
+                                return Err(StoreError::NodeIdCollision {
+                                    node_id: node.node_id.clone(),
+                                });
+                            }
+                        }
                     }
                     for completed in &commit.completed_queue_claims {
                         if completed.session_id != commit.session_id {
@@ -459,15 +484,17 @@ impl SessionCommitStore for Store {
                                 .map_err(sqlite_error)?;
                         }
                     }
-                    if let Some(turn_commit) = &commit.turn_commit {
+                    if let Some(turn_commit) = &commit.turn_commit
+                        && let Some(turn_id) = turn_commit.operation.turn_id()
+                    {
                         tx.execute(
                             "UPDATE attachment_manifest
-                             SET committed_at_ms = COALESCE(committed_at_ms, ?1)
-                             WHERE session_id = ?2
-                               AND owner_kind = 'turn'
-                               AND owner_id = ?3
-                               AND committed_at_ms IS NULL",
-                            params![now as i64, commit.session_id, turn_commit.turn_id],
+                                 SET committed_at_ms = COALESCE(committed_at_ms, ?1)
+                                 WHERE session_id = ?2
+                                   AND owner_kind = 'turn'
+                                   AND owner_id = ?3
+                                   AND committed_at_ms IS NULL",
+                            params![now as i64, commit.session_id, turn_id],
                         )
                         .map_err(sqlite_error)?;
                     }
@@ -490,10 +517,13 @@ impl SessionCommitStore for Store {
                         head_revision: next_revision,
                         checkpoint_ref: stored_checkpoint.checkpoint_ref,
                         manifest: stored_checkpoint.manifest,
+                        realization_digest: realization_digest.clone(),
+                        realized_agent_frames: realized_agent_frames.clone(),
                         enqueued_queue_batches,
                         turn_input_applications: commit.turn_input_applications(),
                     };
                     if let Some(completed) = &commit.turn_commit {
+                        let operation_key = completed.operation.storage_key()?;
                         tx.execute(
                             "INSERT INTO runtime_turn_commits (
                                 session_id, turn_id, turn_commit_hash, result_json, committed_at_ms
@@ -501,7 +531,7 @@ impl SessionCommitStore for Store {
                              VALUES (?1, ?2, ?3, ?4, ?5)",
                             params![
                                 completed.session_id,
-                                completed.turn_id,
+                                operation_key,
                                 completed.turn_commit_hash,
                                 encode_json(&result),
                                 now as i64

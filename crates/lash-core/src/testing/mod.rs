@@ -1159,7 +1159,6 @@ mod test_protocol_fakes {
             text_streamed: bool,
         ) -> Vec<DriverAction> {
             use crate::sansio::{CheckpointResumeAction, PendingToolCall};
-            use crate::session_model::fresh_message_id;
             use crate::{
                 CheckpointKind, Message, MessageRole, Part, PartKind, PruneState,
                 SessionStreamEvent,
@@ -1221,7 +1220,11 @@ mod test_protocol_fakes {
                     )));
                     return actions;
                 }
-                let asst_id = fresh_message_id();
+                let asst_id = format!(
+                    "m_standard_{}_{}_assistant",
+                    ctx.turn_id(),
+                    ctx.protocol_iteration()
+                );
                 let outcome_text = assistant_text.clone();
                 let parts_out = vec![Part {
                     id: format!("{asst_id}.p0"),
@@ -1252,7 +1255,11 @@ mod test_protocol_fakes {
                 return actions;
             }
 
-            let asst_id = fresh_message_id();
+            let asst_id = format!(
+                "m_standard_{}_{}_assistant",
+                ctx.turn_id(),
+                ctx.protocol_iteration()
+            );
             let mut assistant_parts = Vec::new();
             if !assistant_text.trim().is_empty() {
                 assistant_parts.push(Part {
@@ -1311,7 +1318,6 @@ mod test_protocol_fakes {
             completed: Vec<CompletedToolCall>,
         ) -> Vec<DriverAction> {
             use crate::sansio::CheckpointResumeAction;
-            use crate::session_model::fresh_message_id;
             use crate::{
                 CheckpointKind, Message, MessageRole, Part, PartKind, PruneState,
                 SessionStreamEvent,
@@ -1388,7 +1394,11 @@ mod test_protocol_fakes {
                 }
             }
             if !result_parts.is_empty() {
-                let user_id = fresh_message_id();
+                let user_id = format!(
+                    "m_standard_{}_{}_tool_results",
+                    ctx.turn_id(),
+                    ctx.protocol_iteration()
+                );
                 reassign_part_ids(&user_id, &mut result_parts);
                 actions.push(DriverAction::AppendEvents(vec![
                     SessionHistoryRecord::Conversation(ConversationRecord::from_message(Message {
@@ -1408,7 +1418,10 @@ mod test_protocol_fakes {
             if let Some(max_turns) = ctx.max_turns()
                 && next_protocol_iteration >= ctx.protocol_run_offset() + max_turns
             {
-                let message_id = fresh_message_id();
+                let message_id = format!(
+                    "m_standard_{}_{next_protocol_iteration}_turn_limit",
+                    ctx.turn_id()
+                );
                 actions.push(DriverAction::AppendEvents(vec![
                     SessionHistoryRecord::Conversation(ConversationRecord::from_message(
                         test_turn_limit_final_message(message_id, max_turns),

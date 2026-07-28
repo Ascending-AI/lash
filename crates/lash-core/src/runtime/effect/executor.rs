@@ -419,6 +419,7 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
             turn_pipeline: crate::runtime::TurnBoundary::from_state_with_clock(
                 driver.turn_pipeline.state().clone(),
                 Arc::clone(&driver.host.core.clock),
+                crate::ExecutionScope::turn(&driver.session_id, &driver.turn_id),
             )
             .with_session_execution_lease(driver.session_execution_lease.clone()),
             llm_stream_summaries: driver.llm_stream_summaries.clone(),

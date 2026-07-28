@@ -39,6 +39,39 @@ run_release_script_tests() {
   python3 scripts/test_release_notes.py
 }
 
+resolve_release_notes_base() {
+  local configured_base="${LASH_PR_BASE_REF:-${GITHUB_BASE_REF:-}}"
+  if [ -z "$configured_base" ] && command -v gh >/dev/null 2>&1; then
+    configured_base="$(gh pr view --json baseRefName --jq .baseRefName 2>/dev/null || true)"
+  fi
+  configured_base="${configured_base:-main}"
+
+  local candidates
+  case "$configured_base" in
+    refs/* | origin/*) candidates=("$configured_base") ;;
+    *) candidates=("origin/$configured_base" "$configured_base") ;;
+  esac
+
+  local candidate
+  for candidate in "${candidates[@]}"; do
+    if git rev-parse --verify --quiet "${candidate}^{commit}" >/dev/null; then
+      printf '%s\n' "$candidate"
+      return
+    fi
+  done
+
+  echo "Cannot resolve release-note base ref: $configured_base" >&2
+  return 1
+}
+
+check_current_branch_release_notes() {
+  step "Current branch release notes"
+  local base_ref merge_base
+  base_ref="$(resolve_release_notes_base)"
+  merge_base="$(git merge-base "$base_ref" HEAD)"
+  python3 scripts/release_notes.py check-pr --range "${merge_base}..HEAD"
+}
+
 run_runtime_feature_boundary_check() {
   step "lash-runtime feature boundary"
   cargo check -p lash-runtime --no-default-features --locked
@@ -67,11 +100,13 @@ run_workspace_tests() {
   step "Workspace tests"
   if cargo nextest --version >/dev/null 2>&1; then
     # shellcheck disable=SC2086
-    cargo nextest run --workspace --locked ${ci_features}
+    env -u LASH_POSTGRES_DATABASE_URL -u LASH_REQUIRE_POSTGRES \
+      cargo nextest run --workspace --locked ${ci_features}
   else
     echo "cargo-nextest is not installed; falling back to cargo test for local push gate." >&2
     # shellcheck disable=SC2086
-    cargo test --workspace --locked ${ci_features}
+    env -u LASH_POSTGRES_DATABASE_URL -u LASH_REQUIRE_POSTGRES \
+      cargo test --workspace --locked ${ci_features}
   fi
 }
 
@@ -98,9 +133,25 @@ run_postgres_conformance() {
     sleep 1
   done
 
-  LASH_POSTGRES_DATABASE_URL="postgres://lash:lash@127.0.0.1:${port}/lash" \
+  local database_url="postgres://lash:lash@127.0.0.1:${port}/lash"
+  LASH_POSTGRES_DATABASE_URL="$database_url" \
     LASH_REQUIRE_POSTGRES=1 \
     cargo test -p lash-postgres-store --locked
+
+  step "Cross-backend store differential"
+  if cargo nextest --version >/dev/null 2>&1; then
+    LASH_POSTGRES_DATABASE_URL="$database_url" \
+      LASH_REQUIRE_POSTGRES=1 \
+      cargo nextest run -p lash-sim \
+        --test cross_backend_store_differential \
+        --locked -j1 --no-capture
+  else
+    LASH_POSTGRES_DATABASE_URL="$database_url" \
+      LASH_REQUIRE_POSTGRES=1 \
+      cargo test -p lash-sim \
+        --test cross_backend_store_differential \
+        --locked -- --nocapture --test-threads=1
+  fi
 }
 
 configure_bindgen_headers
@@ -128,19 +179,19 @@ step "Test quarantine metadata"
 python3 scripts/check_test_quarantines.py
 
 run_release_script_tests
+check_current_branch_release_notes
 
 step "Workspace check"
 # shellcheck disable=SC2086
 cargo check --workspace --all-targets --locked ${ci_features}
 
 run_runtime_feature_boundary_check
+run_postgres_conformance
 run_workspace_tests
 
 step "Workspace doctests"
 # shellcheck disable=SC2086
 cargo test --doc --workspace --locked ${ci_features}
-
-run_postgres_conformance
 
 step "Workflow graph example integration"
 just workflow-graph-integration-verify
