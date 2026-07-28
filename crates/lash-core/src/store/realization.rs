@@ -95,7 +95,7 @@ mod tests {
                 commit.checkpoint.execution_state_ref,
             );
             Ok(RuntimeCommitResult {
-                head_revision: commit.expected_head_revision.unwrap_or_default() + 1,
+                head_revision: commit.expected_head_revision + 1,
                 checkpoint_ref: "empty-frame-facade".to_string().into(),
                 manifest,
                 realization_digest,
@@ -103,6 +103,14 @@ mod tests {
                 enqueued_queue_batches: Vec::new(),
                 turn_input_applications: Vec::new(),
             })
+        }
+
+        async fn ensure_session_incarnation(
+            &self,
+            _session_id: &str,
+            _policy: &crate::SessionPolicy,
+        ) -> Result<crate::IncarnationId, StoreError> {
+            Ok(crate::IncarnationId::mint_for_store())
         }
 
         async fn save_session_meta(

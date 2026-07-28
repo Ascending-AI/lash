@@ -533,6 +533,163 @@ impl LashCore {
         Ok(lash_core::TurnInputAcceptanceReceipt::from(&enqueued))
     }
 
+    /// Retain the current continuation checkpoint for a turn-boundary node.
+    ///
+    /// A point must still be retained when this is called: ordinarily that
+    /// means it is the leaf of a live session. Pin before advancing the head if
+    /// a host wants to make a past turn forkable later.
+    pub async fn pin(&self, node_id: impl AsRef<str>) -> Result<lash_core::ForkPoint> {
+        let Some(store_factory) = self.store_factory.as_ref() else {
+            return Err(EmbedError::MissingSessionStoreFactory);
+        };
+        store_factory
+            .pin(node_id.as_ref())
+            .await
+            .map_err(Into::into)
+    }
+
+    /// Release an explicit continuation pin. A live tip at the same node
+    /// remains forkable through its session-head checkpoint.
+    pub async fn unpin(&self, node_id: impl AsRef<str>) -> Result<()> {
+        let Some(store_factory) = self.store_factory.as_ref() else {
+            return Err(EmbedError::MissingSessionStoreFactory);
+        };
+        store_factory
+            .unpin(node_id.as_ref())
+            .await
+            .map_err(Into::into)
+    }
+
+    /// Enumerate pinned past turns and unpinned live tips that can be forked.
+    pub async fn fork_points(&self) -> Result<Vec<lash_core::ForkPoint>> {
+        let Some(store_factory) = self.store_factory.as_ref() else {
+            return Err(EmbedError::MissingSessionStoreFactory);
+        };
+        store_factory.fork_points().await.map_err(Into::into)
+    }
+
+    /// Create `session_id` at a retained turn boundary without writing graph
+    /// nodes.
+    ///
+    /// Unpinned past turns are ordinarily not retained. That normal outcome is
+    /// returned as
+    /// `EmbedError::Store(StoreError::ForkPointNotRetained { .. })`; Lash never
+    /// silently substitutes a different checkpoint.
+    pub async fn fork_at(
+        &self,
+        node_id: impl Into<String>,
+        session_id: impl Into<String>,
+    ) -> Result<lash_core::ForkSessionResult> {
+        let Some(store_factory) = self.store_factory.as_ref() else {
+            return Err(EmbedError::MissingSessionStoreFactory);
+        };
+        let node_id = node_id.into();
+        let session_id = session_id.into();
+        let point = store_factory
+            .fork_points()
+            .await?
+            .into_iter()
+            .find(|point| point.node_id == node_id)
+            .ok_or_else(|| lash_core::StoreError::ForkPointNotRetained {
+                node_id: node_id.clone(),
+            })?;
+        let source_store = store_factory
+            .open_existing_store(&lash_core::SessionStoreCreateRequest {
+                session_id: point.source_session_id.clone(),
+                relation: lash_core::SessionRelation::Root,
+                policy: self.policy.clone(),
+            })
+            .await
+            .map_err(|message| EmbedError::StoreFactory {
+                session_id: point.source_session_id.clone(),
+                message,
+            })?
+            .ok_or_else(|| lash_core::StoreError::ForkPointNotRetained {
+                node_id: node_id.clone(),
+            })?;
+        let source_config = source_store
+            .load_session(lash_core::SessionReadScope::FullGraph)
+            .await?
+            .ok_or_else(|| lash_core::StoreError::ForkPointNotRetained {
+                node_id: node_id.clone(),
+            })?
+            .config;
+        let inherited = if let Some(process_registry) = self.process_registry() {
+            process_registry
+                .list_handle_grants(&lash_core::SessionScope::new(
+                    point.source_session_id.clone(),
+                ))
+                .await?
+                .into_iter()
+                .map(|(grant, _)| grant)
+                .collect()
+        } else {
+            Vec::new()
+        };
+        let mut fork_policy = self.policy.clone();
+        fork_policy.provider_id = source_config.provider_id;
+        fork_policy.model = source_config.model;
+        let request = lash_core::ForkSessionRequest {
+            session_id,
+            node_id,
+            relation: lash_core::SessionRelation::Fork {
+                source_session_id: point.source_session_id,
+                source_node_id: point.node_id,
+                process_grants: inherited.clone(),
+            },
+            policy: fork_policy,
+        };
+        let fork = store_factory.fork_at(&request).await?;
+        let Some(process_registry) = self.process_registry() else {
+            return Ok(fork);
+        };
+        let target_scope = lash_core::SessionScope::new(fork.session_id.clone());
+        for grant in inherited {
+            if let Err(err) = process_registry
+                .grant_handle(&target_scope, &grant.process_id, grant.descriptor)
+                .await
+            {
+                let _ = process_registry
+                    .delete_session_process_state(&fork.session_id)
+                    .await;
+                let _ = store_factory.delete_session(&fork.session_id).await;
+                return Err(err.into());
+            }
+        }
+        let create_request = lash_core::SessionStoreCreateRequest {
+            session_id: request.session_id,
+            relation: request.relation,
+            policy: request.policy,
+        };
+        let branch_store = store_factory
+            .open_existing_store(&create_request)
+            .await
+            .map_err(|error| {
+                lash_core::StoreError::Backend(format!(
+                    "failed to reopen fork store `{}`: {error}",
+                    create_request.session_id
+                ))
+            })?
+            .ok_or_else(|| {
+                lash_core::StoreError::Backend(format!(
+                    "fork store `{}` disappeared before grant publication completed",
+                    create_request.session_id
+                ))
+            })?;
+        let mut meta = branch_store.load_session_meta().await?.ok_or_else(|| {
+            lash_core::StoreError::Backend(format!(
+                "fork store `{}` has no session metadata",
+                create_request.session_id
+            ))
+        })?;
+        let lash_core::SessionRelation::Fork { process_grants, .. } = &mut meta.relation else {
+            unreachable!("fork factory must persist fork metadata");
+        };
+        process_grants.clear();
+        branch_store.save_session_meta(meta).await?;
+        Ok(fork)
+    }
+
     pub async fn delete_session(
         &self,
         session_id: impl AsRef<str>,

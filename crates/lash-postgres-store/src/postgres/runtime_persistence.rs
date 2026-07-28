@@ -77,7 +77,8 @@ async fn derived_node_refcount_for_head_move_tx(
         "SELECT
             (SELECT COUNT(*) FROM lash_graph_nodes
              WHERE parent_node_id = $1 AND tombstoned = FALSE)
-          + (SELECT COUNT(*) FROM lash_sessions WHERE leaf_node_id = $1)",
+          + (SELECT COUNT(*) FROM lash_sessions WHERE leaf_node_id = $1)
+          + (SELECT COUNT(*) FROM lash_node_anchors WHERE node_id = $1)",
     )
     .bind(node_id)
     .fetch_one(&mut **tx)
@@ -165,21 +166,20 @@ async fn decrement_node_ref_for_head_move_tx(
     }
 }
 
-async fn nearest_frame_node_id_tx(
+pub(crate) async fn nearest_frame_node_id_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
-    session_id: &str,
     leaf_node_id: &str,
 ) -> Result<Option<String>, StoreError> {
     sqlx::query_scalar(
         "WITH RECURSIVE ancestry(node_id, parent_node_id, node_json, depth) AS (
             SELECT node_id, parent_node_id, node_json, 0
             FROM lash_graph_nodes
-            WHERE node_id = $1 AND session_id = $2 AND tombstoned = FALSE
+            WHERE node_id = $1 AND tombstoned = FALSE
           UNION ALL
             SELECT parent.node_id, parent.parent_node_id, parent.node_json, ancestry.depth + 1
             FROM lash_graph_nodes AS parent
             JOIN ancestry ON parent.node_id = ancestry.parent_node_id
-            WHERE parent.session_id = $2 AND parent.tombstoned = FALSE
+            WHERE parent.tombstoned = FALSE
         )
         SELECT node_id FROM ancestry
         WHERE node_json::jsonb ->> 'kind' = 'frame_open'
@@ -187,7 +187,6 @@ async fn nearest_frame_node_id_tx(
         LIMIT 1",
     )
     .bind(leaf_node_id)
-    .bind(session_id)
     .fetch_optional(&mut **tx)
     .await
     .map_err(store_sqlx_error)
@@ -321,30 +320,36 @@ impl SessionCommitStore for PostgresSessionStore {
     }
 
     async fn load_node(&self, node_id: &str) -> Result<Option<SessionNodeRecord>, StoreError> {
-        let session_id = self
-            .session_id
-            .as_ref()
-            .or_else(|| self.bound_session.get());
-        let row = if let Some(session_id) = session_id {
-            sqlx::query(
-                "SELECT node_id, parent_node_id, node_json FROM lash_graph_nodes
-                 WHERE node_id = $1 AND session_id = $2 AND tombstoned = FALSE",
-            )
-            .bind(node_id)
-            .bind(session_id)
-            .fetch_optional(&self.pool)
-            .await
-            .map_err(store_sqlx_error)?
-        } else {
-            sqlx::query(
-                "SELECT node_id, parent_node_id, node_json FROM lash_graph_nodes
-                 WHERE node_id = $1 AND tombstoned = FALSE",
-            )
-            .bind(node_id)
-            .fetch_optional(&self.pool)
-            .await
-            .map_err(store_sqlx_error)?
+        let Some(session_id) = self.selected_session_id().await? else {
+            return Ok(None);
         };
+        let row = sqlx::query(
+            "WITH RECURSIVE ancestry(node_id, parent_node_id) AS (
+                 SELECT node.node_id, node.parent_node_id
+                 FROM lash_graph_nodes node
+                 JOIN lash_sessions head ON head.leaf_node_id = node.node_id
+                 WHERE head.session_id = $2 AND node.tombstoned = FALSE
+                 UNION ALL
+                 SELECT parent.node_id, parent.parent_node_id
+                 FROM lash_graph_nodes parent
+                 JOIN ancestry child ON parent.node_id = child.parent_node_id
+                 WHERE parent.tombstoned = FALSE
+             )
+             SELECT node_id, parent_node_id, node_json FROM lash_graph_nodes
+             WHERE node_id = $1 AND tombstoned = FALSE
+               AND (
+                   session_id = $2
+                   OR EXISTS (
+                       SELECT 1 FROM ancestry
+                       WHERE ancestry.node_id = lash_graph_nodes.node_id
+                   )
+               )",
+        )
+        .bind(node_id)
+        .bind(session_id)
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(store_sqlx_error)?;
         row.map(|row| {
             let node_id = row.get(0);
             let parent_node_id = row.get(1);
@@ -361,6 +366,10 @@ impl SessionCommitStore for PostgresSessionStore {
     ) -> Result<RuntimeCommitResult, StoreError> {
         commit.validate_budget()?;
         commit.validate_operation_session()?;
+        self.bind_session_id(&commit.session_id)?;
+        let commit_incarnation_id = commit
+            .durable_incarnation_id("Postgres runtime commit")?
+            .clone();
         let realization_digest = lash_core::store::graph_realization_digest(&commit.graph);
         let realized_node_timestamps = commit
             .graph
@@ -402,24 +411,40 @@ impl SessionCommitStore for PostgresSessionStore {
                 attempted_session_id: commit.session_id,
             });
         }
-        // A session-store handle commits to exactly one session. An explicit
-        // binding (`self.session_id`) is authoritative; otherwise the handle binds
-        // to the first session it commits and rejects any other thereafter.
-        let effective_binding = self
-            .session_id
-            .clone()
-            .or_else(|| self.bound_session.get().cloned());
-        if let Some(bound_session_id) = &effective_binding
-            && commit.session_id != *bound_session_id
-        {
-            return Err(StoreError::SessionBindingMismatch {
-                bound_session_id: bound_session_id.clone(),
-                attempted_session_id: commit.session_id,
-            });
-        }
-        if self.session_id.is_none() {
-            let _ = self.bound_session.set(commit.session_id.clone());
-        }
+        let direct_meta = SessionMeta {
+            session_id: commit.session_id.clone(),
+            incarnation_id: commit_incarnation_id,
+            session_name: commit.session_id.clone(),
+            created_at: self.clock.timestamp_rfc3339(),
+            model: commit.config.model.id.clone(),
+            cwd: None,
+            relation: lash_core::SessionRelation::Root,
+        };
+        sqlx::query(
+            "INSERT INTO lash_session_meta (session_id, meta_json)
+             VALUES ($1, $2)
+             ON CONFLICT (session_id) DO NOTHING",
+        )
+        .bind(&commit.session_id)
+        .bind(encode_json(&direct_meta))
+        .execute(&mut *tx)
+        .await
+        .map_err(store_sqlx_error)?;
+        let durable_meta_json = sqlx::query_scalar::<_, String>(
+            "SELECT meta_json FROM lash_session_meta WHERE session_id = $1",
+        )
+        .bind(&commit.session_id)
+        .fetch_optional(&mut *tx)
+        .await
+        .map_err(store_sqlx_error)?
+        .ok_or_else(|| {
+            StoreError::Backend(format!(
+                "session `{}` has no durable session metadata",
+                commit.session_id
+            ))
+        })?;
+        let durable_meta: SessionMeta = store_decode_json(&durable_meta_json, "session meta")?;
+        commit.validate_node_derivation(&durable_meta.incarnation_id)?;
         if let Some(completed) = &commit.turn_commit {
             let operation_key = completed.operation.storage_key()?;
             let prior = sqlx::query(
@@ -450,7 +475,7 @@ impl SessionCommitStore for PostgresSessionStore {
             }
         }
         let actual_revision = existing.as_ref().map_or(0, |meta| meta.head_revision);
-        let expected_revision = commit.expected_head_revision.unwrap_or(0);
+        let expected_revision = commit.expected_head_revision;
         if expected_revision != actual_revision {
             return Err(StoreError::HeadRevisionConflict {
                 expected: commit.expected_head_revision,
@@ -470,12 +495,11 @@ impl SessionCommitStore for PostgresSessionStore {
             .map_err(store_sqlx_error)?;
             if locked_revision != Some(actual_revision as i64) {
                 return Err(StoreError::HeadRevisionConflict {
-                    expected: commit.expected_head_revision.or(Some(actual_revision)),
+                    expected: commit.expected_head_revision,
                     actual: locked_revision.map_or(0, |revision| revision as u64),
                 });
             }
         }
-        commit.validate_node_derivation()?;
         commit.validate_append_node_ids_unique()?;
         commit.graph.validate_append_topology()?;
         if let GraphCommitDelta::Append { nodes, .. } = &commit.graph {
@@ -486,9 +510,8 @@ impl SessionCommitStore for PostgresSessionStore {
             let occupied = sqlx::query_scalar::<_, String>(
                 "SELECT node_id
                  FROM lash_graph_nodes
-                 WHERE session_id = $1 AND node_id = ANY($2)",
+                 WHERE node_id = ANY($1)",
             )
-            .bind(&commit.session_id)
             .bind(&node_ids)
             .fetch_all(&mut *tx)
             .await
@@ -510,10 +533,9 @@ impl SessionCommitStore for PostgresSessionStore {
             let live = sqlx::query_scalar::<_, bool>(
                 "SELECT EXISTS(
                     SELECT 1 FROM lash_graph_nodes
-                    WHERE session_id = $1 AND node_id = $2 AND tombstoned = FALSE
+                    WHERE node_id = $1 AND tombstoned = FALSE
                 )",
             )
-            .bind(&commit.session_id)
             .bind(leaf_node_id)
             .fetch_one(&mut *tx)
             .await
@@ -570,6 +592,36 @@ impl SessionCommitStore for PostgresSessionStore {
                 .map_err(store_sqlx_error)?;
         }
         let old_leaf_node_id = existing.as_ref().and_then(|head| head.leaf_node_id.clone());
+        match &commit.graph {
+            GraphCommitDelta::Unchanged { leaf_node_id } if leaf_node_id != &old_leaf_node_id => {
+                return Err(StoreError::InvalidGraphLeaf {
+                    leaf_node_id: leaf_node_id.clone(),
+                });
+            }
+            GraphCommitDelta::Append { nodes, .. }
+                if !nodes.is_empty()
+                    && nodes.first().and_then(|node| node.parent_node_id.as_ref())
+                        != old_leaf_node_id.as_ref() =>
+            {
+                return Err(StoreError::InvalidGraphParent {
+                    node_id: nodes
+                        .first()
+                        .map(|node| node.node_id.clone())
+                        .unwrap_or_default(),
+                    expected: old_leaf_node_id.clone(),
+                    actual: nodes.first().and_then(|node| node.parent_node_id.clone()),
+                });
+            }
+            GraphCommitDelta::Append {
+                nodes,
+                leaf_node_id,
+            } if nodes.is_empty() && leaf_node_id != &old_leaf_node_id => {
+                return Err(StoreError::InvalidGraphLeaf {
+                    leaf_node_id: leaf_node_id.clone(),
+                });
+            }
+            _ => {}
+        }
         let leaf_node_id = match &commit.graph {
             GraphCommitDelta::Unchanged { leaf_node_id } => leaf_node_id.clone(),
             GraphCommitDelta::Append {
@@ -596,12 +648,9 @@ impl SessionCommitStore for PostgresSessionStore {
                         let changed = sqlx::query(
                             "UPDATE lash_graph_nodes
                              SET incoming_refs = incoming_refs + 1
-                             WHERE node_id = $1
-                               AND session_id = $2
-                               AND tombstoned = FALSE",
+                             WHERE node_id = $1 AND tombstoned = FALSE",
                         )
                         .bind(parent_node_id)
-                        .bind(&commit.session_id)
                         .execute(&mut *tx)
                         .await
                         .map_err(store_sqlx_error)?
@@ -648,7 +697,7 @@ impl SessionCommitStore for PostgresSessionStore {
         }
         let derived_frame_node_id = match leaf_node_id.as_deref() {
             Some(leaf_node_id) => Some(
-                nearest_frame_node_id_tx(&mut tx, &commit.session_id, leaf_node_id)
+                nearest_frame_node_id_tx(&mut tx, leaf_node_id)
                     .await?
                     .ok_or_else(|| StoreError::MissingFrameOpenAncestor {
                         leaf_node_id: leaf_node_id.to_string(),
@@ -663,9 +712,18 @@ impl SessionCommitStore for PostgresSessionStore {
             )));
         }
         let graph_node_count: i64 = sqlx::query_scalar(
-            "SELECT COUNT(*) FROM lash_graph_nodes WHERE session_id = $1 AND tombstoned = FALSE",
+            "WITH RECURSIVE ancestry(node_id, parent_node_id) AS (
+                 SELECT node_id, parent_node_id FROM lash_graph_nodes
+                 WHERE node_id = $1 AND tombstoned = FALSE
+                 UNION ALL
+                 SELECT parent.node_id, parent.parent_node_id
+                 FROM lash_graph_nodes parent
+                 JOIN ancestry ON parent.node_id = ancestry.parent_node_id
+                 WHERE parent.tombstoned = FALSE
+             )
+             SELECT COUNT(*) FROM ancestry",
         )
-        .bind(&commit.session_id)
+        .bind(leaf_node_id.as_deref())
         .fetch_one(&mut *tx)
         .await
         .map_err(store_sqlx_error)?;
@@ -728,7 +786,7 @@ impl SessionCommitStore for PostgresSessionStore {
             .map_err(store_sqlx_error)?
             .map_or(actual_revision, |revision| revision as u64);
             return Err(StoreError::HeadRevisionConflict {
-                expected: commit.expected_head_revision.or(Some(actual_revision)),
+                expected: commit.expected_head_revision,
                 actual: actual_now,
             });
         }
@@ -850,17 +908,70 @@ impl SessionCommitStore for PostgresSessionStore {
         Ok(result)
     }
 
-    async fn save_session_meta(&self, meta: SessionMeta) -> Result<(), StoreError> {
+    async fn ensure_session_incarnation(
+        &self,
+        session_id: &str,
+        policy: &lash_core::SessionPolicy,
+    ) -> Result<lash_core::IncarnationId, StoreError> {
+        self.bind_session_id(session_id)?;
+        let meta = SessionMeta {
+            session_id: session_id.to_string(),
+            incarnation_id: lash_core::IncarnationId::mint_for_store(),
+            session_name: session_id.to_string(),
+            created_at: self.clock.timestamp_rfc3339(),
+            model: policy.model.id.clone(),
+            cwd: std::env::current_dir()
+                .ok()
+                .and_then(|path| path.to_str().map(str::to_string)),
+            relation: lash_core::SessionRelation::Root,
+        };
+        let mut tx = self.pool.begin().await.map_err(store_sqlx_error)?;
         sqlx::query(
             "INSERT INTO lash_session_meta (session_id, meta_json)
              VALUES ($1, $2)
-             ON CONFLICT (session_id) DO UPDATE SET meta_json = EXCLUDED.meta_json",
+             ON CONFLICT (session_id) DO NOTHING",
+        )
+        .bind(session_id)
+        .bind(encode_json(&meta))
+        .execute(&mut *tx)
+        .await
+        .map_err(store_sqlx_error)?;
+        let durable_meta_json = sqlx::query_scalar::<_, String>(
+            "SELECT meta_json FROM lash_session_meta WHERE session_id = $1",
+        )
+        .bind(session_id)
+        .fetch_one(&mut *tx)
+        .await
+        .map_err(store_sqlx_error)?;
+        tx.commit().await.map_err(store_sqlx_error)?;
+        let durable_meta: SessionMeta = store_decode_json(&durable_meta_json, "session meta")?;
+        Ok(durable_meta.incarnation_id)
+    }
+
+    async fn save_session_meta(&self, meta: SessionMeta) -> Result<(), StoreError> {
+        let updated = sqlx::query(
+            "INSERT INTO lash_session_meta (session_id, meta_json)
+             VALUES ($1, $2)
+             ON CONFLICT (session_id) DO UPDATE SET meta_json = EXCLUDED.meta_json
+             WHERE lash_session_meta.meta_json::jsonb ->> 'incarnation_id' = $3",
         )
         .bind(&meta.session_id)
         .bind(encode_json(&meta))
+        .bind(meta.incarnation_id.as_str())
         .execute(&self.pool)
         .await
         .map_err(store_sqlx_error)?;
+        if updated.rows_affected() == 0 {
+            let existing = self.load_session_meta().await?;
+            return Err(StoreError::SessionIncarnationMismatch {
+                session_id: meta.session_id,
+                expected_incarnation_id: existing.map_or_else(
+                    || "<missing>".to_string(),
+                    |existing| existing.incarnation_id.to_string(),
+                ),
+                actual_incarnation_id: meta.incarnation_id.to_string(),
+            });
+        }
         Ok(())
     }
 
@@ -2204,7 +2315,9 @@ impl StoreMaintenance for PostgresSessionStore {
         // ANY session references it — scoping roots to one session would delete
         // another session's live checkpoint.
         let root_refs = sqlx::query_scalar::<_, String>(
-            "SELECT checkpoint_ref FROM lash_sessions WHERE checkpoint_ref IS NOT NULL",
+            "SELECT checkpoint_ref FROM lash_sessions WHERE checkpoint_ref IS NOT NULL
+             UNION
+             SELECT checkpoint_ref FROM lash_node_anchors",
         )
         .fetch_all(&mut *tx)
         .await

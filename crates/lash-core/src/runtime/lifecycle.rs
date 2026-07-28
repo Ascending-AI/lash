@@ -11,6 +11,27 @@ fn initial_park_operation(
     ))
 }
 
+async fn bind_state_to_store(
+    policy: &SessionPolicy,
+    store: &(dyn crate::store::RuntimePersistence + '_),
+    state: &mut RuntimeSessionState,
+) -> Result<(), SessionError> {
+    if state.session_id.is_empty() {
+        state.session_id = uuid::Uuid::new_v4().to_string();
+    }
+    let incarnation_id = store
+        .ensure_session_incarnation(&state.session_id, policy)
+        .await
+        .map_err(|err| {
+            SessionError::Protocol(format!(
+                "failed to bind durable incarnation for session `{}`: {err}",
+                state.session_id
+            ))
+        })?;
+    state.bind_durable_incarnation(incarnation_id);
+    Ok(())
+}
+
 pub(in crate::runtime) struct RuntimePersistenceBindings {
     runtime_store: Option<Arc<dyn crate::store::RuntimePersistence>>,
     attachment_manifest_store: Option<Arc<dyn crate::store::RuntimePersistence>>,
@@ -172,7 +193,6 @@ impl LashRuntime {
             host,
             services,
             state,
-            runtime_scope_id: Arc::<str>::from(runtime_scope_id),
             runtime_lease_owner,
             managed_sessions: Arc::new(Mutex::new(HashMap::new())),
             managed_turns: Arc::new(Mutex::new(HashMap::new())),
@@ -212,8 +232,9 @@ impl LashRuntime {
         policy: SessionPolicy,
         host: EmbeddedRuntimeHost,
         services: PersistentRuntimeServices,
-        state: RuntimeSessionState,
+        mut state: RuntimeSessionState,
     ) -> Result<Self, SessionError> {
+        bind_state_to_store(&policy, services.store().as_ref(), &mut state).await?;
         Self::from_host_state(policy, host.into(), services.into_runtime_services(), state).await
     }
 
@@ -222,21 +243,22 @@ impl LashRuntime {
         policy: SessionPolicy,
         host: ProcessRuntimeHost,
         services: PersistentRuntimeServices,
-        state: RuntimeSessionState,
+        mut state: RuntimeSessionState,
     ) -> Result<Self, SessionError> {
+        bind_state_to_store(&policy, services.store().as_ref(), &mut state).await?;
         Self::from_host_state(policy, host.into(), services.into_runtime_services(), state).await
     }
 
-    /// Assemble a runtime from already-resolved parts: the single place that maps
-    /// `(store, process_registry)` to the right host/services constructor, applies
-    /// residency, and stamps it onto the runtime.
+    /// Assemble a runtime from already-resolved parts: the central production
+    /// path that maps `(store, process_registry)` to the right host/services
+    /// constructor, applies residency, and stamps it onto the runtime.
     ///
     /// Every construction path — the live open (`from_environment`), the worker
     /// rebuild (`EmbeddedRuntimeBuilder::build`), and child-session
     /// materialization — routes through here so the store/registry wiring and
-    /// residency cannot drift between them. That drift previously shipped: the
-    /// worker rebuild silently kept the full graph and skipped the persisted
-    /// tool-catalog restore that the live path applied.
+    /// residency cannot drift between them. The public persistent-state
+    /// constructors are additional direct `(state, store)` joins and apply the
+    /// same guarded binding before delegating to `from_host_state`.
     pub(in crate::runtime) async fn assemble_runtime(
         policy: SessionPolicy,
         embedded_host: EmbeddedRuntimeHost,
@@ -259,6 +281,9 @@ impl LashRuntime {
                     .to_string(),
             ));
         }
+        if let Some(store) = store.as_deref() {
+            bind_state_to_store(&policy, store, &mut state).await?;
+        }
         // Heal FIRST (against the full resident set), then trim to the residency.
         // `from_host_state` normalizes again, which is safe on a trimmed graph.
         apply_residency_on_load(&mut state, residency);
@@ -269,14 +294,21 @@ impl LashRuntime {
                 if let Some(manifest_store) = attachment_manifest_store {
                     services = services.with_attachment_manifest_store(manifest_store);
                 }
-                Self::from_persistent_background_state(policy, host, services, state).await?
+                Self::from_host_state(policy, host.into(), services.into_runtime_services(), state)
+                    .await?
             }
             (Some(store), None) => {
                 let mut services = PersistentRuntimeServices::new(plugin_session, store);
                 if let Some(manifest_store) = attachment_manifest_store {
                     services = services.with_attachment_manifest_store(manifest_store);
                 }
-                Self::from_persistent_embedded_state(policy, embedded_host, services, state).await?
+                Self::from_host_state(
+                    policy,
+                    embedded_host.into(),
+                    services.into_runtime_services(),
+                    state,
+                )
+                .await?
             }
             (None, Some(registry)) => {
                 let host = ProcessRuntimeHost::new(embedded_host, registry);
@@ -365,7 +397,7 @@ impl LashRuntime {
         // persisted or has pending graph nodes; an unconditional commit
         // here would bump the head revision on every park/close, disturbing
         // host-side head-CAS expectations for what is durably a no-op.
-        if self.state.head_revision.is_none()
+        if self.state.checkpoint_ref.is_none()
             || matches!(
                 self.state.pending_graph_commit(),
                 crate::GraphCommitDelta::Append { .. }
@@ -513,7 +545,7 @@ mod tests {
         let first = crate::store::RuntimeCommit::persisted_state(&state, &[]);
 
         let mut retry_state = state.clone();
-        retry_state.head_revision = Some(41);
+        retry_state.head_revision = 41;
         let retry = crate::store::RuntimeCommit::persisted_state(&retry_state, &[]);
 
         let mut changed_state = retry_state;

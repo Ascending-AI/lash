@@ -23,13 +23,23 @@ impl Store {
         // called; the runtime view should never see them.
         let mut stmt = conn
             .prepare(
-                "SELECT node_id, parent_node_id, node_json FROM graph_nodes
-                 WHERE session_id = ?1 AND tombstoned = 0
+                "WITH RECURSIVE ancestry(node_id, parent_node_id) AS (
+                     SELECT node_id, parent_node_id FROM graph_nodes
+                     WHERE node_id = ?2 AND tombstoned = 0
+                     UNION ALL
+                     SELECT parent.node_id, parent.parent_node_id
+                     FROM graph_nodes parent
+                     JOIN ancestry ON parent.node_id = ancestry.parent_node_id
+                     WHERE parent.tombstoned = 0
+                 )
+                 SELECT node_id, parent_node_id, node_json FROM graph_nodes
+                 WHERE tombstoned = 0
+                   AND (session_id = ?1 OR node_id IN (SELECT node_id FROM ancestry))
                  ORDER BY seq ASC",
             )
             .map_err(sqlite_error)?;
         let rows = stmt
-            .query_map(params![session_id], |row| {
+            .query_map(params![session_id, leaf_node_id.as_deref()], |row| {
                 Ok((
                     row.get::<_, String>(0)?,
                     row.get::<_, Option<String>>(1)?,
@@ -62,14 +72,31 @@ impl Store {
             return Ok(lash_core::SessionGraph::default());
         };
         let mut stmt = conn.prepare(
-            "WITH RECURSIVE active(node_id, node_json, parent_node_id, depth) AS (
+            "WITH RECURSIVE bound_path(node_id, parent_node_id) AS (
+                SELECT node_id, parent_node_id
+                FROM graph_nodes
+                WHERE node_id = (
+                    SELECT leaf_node_id FROM session_head WHERE session_id = ?2
+                ) AND tombstoned = 0
+              UNION ALL
+                SELECT parent.node_id, parent.parent_node_id
+                FROM graph_nodes parent
+                JOIN bound_path ON parent.node_id = bound_path.parent_node_id
+                WHERE parent.tombstoned = 0
+            ),
+            active(node_id, node_json, parent_node_id, depth) AS (
                 SELECT
                     node_id,
                     node_json,
                     parent_node_id,
                     0
                 FROM graph_nodes
-                WHERE session_id = ?1 AND node_id = ?2 AND tombstoned = 0
+                WHERE node_id = ?1
+                  AND tombstoned = 0
+                  AND (
+                      session_id = ?2
+                      OR node_id IN (SELECT node_id FROM bound_path)
+                  )
               UNION ALL
                 SELECT
                     g.node_id,
@@ -82,7 +109,7 @@ impl Store {
             )
             SELECT node_id, parent_node_id, node_json FROM active ORDER BY depth DESC",
         )?;
-        let rows = stmt.query_map(params![session_id, leaf_node_id.as_str()], |row| {
+        let rows = stmt.query_map(params![leaf_node_id.as_str(), session_id], |row| {
             Ok((
                 row.get::<_, String>(0)?,
                 row.get::<_, Option<String>>(1)?,
@@ -100,10 +127,8 @@ impl Store {
                 nodes.push(node);
             }
         }
-        Ok(lash_core::SessionGraph::from_nodes(
-            nodes,
-            Some(leaf_node_id),
-        ))
+        let retained_leaf = (!nodes.is_empty()).then_some(leaf_node_id);
+        Ok(lash_core::SessionGraph::from_nodes(nodes, retained_leaf))
     }
 
     pub(crate) async fn maybe_auto_gc(&self) {
@@ -150,7 +175,11 @@ impl Store {
     fn live_checkpoint_roots(conn: &Connection) -> Result<Vec<RetainedArtifactRef>, StoreError> {
         let mut roots = Vec::new();
         let mut stmt = conn
-            .prepare("SELECT checkpoint_ref FROM session_head WHERE checkpoint_ref IS NOT NULL")
+            .prepare(
+                "SELECT checkpoint_ref FROM session_head WHERE checkpoint_ref IS NOT NULL
+                 UNION
+                 SELECT checkpoint_ref FROM node_anchors",
+            )
             .map_err(sqlite_error)?;
         let rows = stmt
             .query_map([], |row| row.get::<_, String>(0))

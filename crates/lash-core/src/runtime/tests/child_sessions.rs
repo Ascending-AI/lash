@@ -4,6 +4,46 @@ use crate::ToolProvider as _;
 
 struct AttachmentWritingTool;
 
+struct FirstTurnProcessTool;
+
+#[async_trait::async_trait]
+impl crate::ToolProvider for FirstTurnProcessTool {
+    fn tool_manifests(&self) -> Vec<crate::ToolManifest> {
+        vec![first_turn_process_tool_definition().manifest()]
+    }
+
+    fn resolve_contract(&self, name: &str) -> Option<Arc<crate::ToolContract>> {
+        (name == "start_first_turn_process")
+            .then(|| Arc::new(first_turn_process_tool_definition().contract()))
+    }
+
+    async fn execute(&self, call: crate::ToolCall<'_>) -> crate::ToolResult {
+        match call
+            .context
+            .processes()
+            .start(crate::ProcessStartRequest::external(
+                "child-first-turn-process",
+                crate::ProcessOriginator::host(),
+                serde_json::json!({ "source": "first child turn" }),
+            ))
+            .await
+        {
+            Ok(process) => crate::ToolResult::ok(serde_json::json!({ "process": process.id })),
+            Err(err) => crate::ToolResult::err_fmt(err),
+        }
+    }
+}
+
+fn first_turn_process_tool_definition() -> crate::ToolDefinition {
+    crate::ToolDefinition::raw(
+        "tool:start_first_turn_process",
+        "start_first_turn_process",
+        "register an externally owned process during the first child turn",
+        crate::ToolDefinition::default_input_schema(),
+        serde_json::json!({ "type": "object", "additionalProperties": false }),
+    )
+}
+
 #[derive(Clone)]
 struct NestedChildSessionTool {
     parents: Arc<std::sync::Mutex<Vec<String>>>,
@@ -324,6 +364,116 @@ async fn durable_managed_child_writes_to_its_own_attachment_namespace() {
         !crate::AttachmentManifest::holds_ref(&*root_store, "root", &id)
             .expect("root manifest lookup"),
         "root session must not hold a ref for the child's attachment"
+    );
+}
+
+#[tokio::test]
+async fn process_registered_during_first_durable_child_turn_remains_listable_after_commit() {
+    let transport = mock_provider(vec![
+        MockCall {
+            stream_events: vec![LlmStreamEvent::Part(LlmOutputPart::ToolCall {
+                call_id: "child-process-call".to_string(),
+                tool_name: "start_first_turn_process".to_string(),
+                input_json: "{}".to_string(),
+                replay: None,
+            })],
+            response: Ok(LlmResponse::default()),
+        },
+        MockCall {
+            stream_events: Vec::new(),
+            response: Ok(LlmResponse {
+                full_text: "process registered".to_string(),
+                parts: vec![LlmOutputPart::Text {
+                    text: "process registered".to_string(),
+                    response_meta: None,
+                }],
+                response_metadata: Default::default(),
+                ..LlmResponse::default()
+            }),
+        },
+    ]);
+    let child_factory = RecordingSessionStoreFactory::default();
+    let root_store = Arc::new(RecordingStore::default());
+    let registry = Arc::new(crate::TestLocalProcessRegistry::default());
+    let embedded = crate::EmbeddedRuntimeHost::new(crate::RuntimeHostConfig::in_memory())
+        .with_session_store_factory(Arc::new(child_factory.clone()));
+    let host = crate::ProcessRuntimeHost::new(embedded, registry);
+    let mut runtime = LashRuntime::from_persistent_background_state(
+        standard_test_policy(),
+        host,
+        crate::PersistentRuntimeServices::new(
+            plugin_session_with_tools("root", Arc::new(FirstTurnProcessTool)),
+            root_store as Arc<dyn crate::store::RuntimePersistence>,
+        ),
+        RuntimeSessionState {
+            session_id: "root".to_string(),
+            ..RuntimeSessionState::default()
+        },
+    )
+    .await
+    .expect("durable root runtime");
+    set_runtime_provider(&mut runtime, transport.into_handle());
+
+    let lifecycle = runtime
+        .session_lifecycle_service()
+        .expect("session lifecycle");
+    let child = lifecycle
+        .create_session(
+            crate::SessionCreateRequest::child_session(
+                "root",
+                crate::SessionStartPoint::Empty,
+                crate::PluginOptions::default(),
+            )
+            .with_session_id("process-child")
+            .with_plugin_source(crate::SessionPluginSource::CurrentSessionFork),
+        )
+        .await
+        .expect("durable child session");
+    let child_incarnation = child_factory
+        .stores()
+        .into_iter()
+        .find_map(|store| {
+            store
+                .session_meta
+                .lock()
+                .expect("lock child metadata")
+                .as_ref()
+                .filter(|meta| meta.session_id == child.session_id)
+                .map(|meta| meta.incarnation_id.clone())
+        })
+        .expect("child store incarnation");
+    let turn_id = "process-child-first-turn";
+    let controller = crate::ScopedEffectController::shared(
+        Arc::new(crate::InlineRuntimeEffectController::default()),
+        crate::ExecutionScope::turn_incarnation(&child.session_id, child_incarnation, turn_id),
+    )
+    .expect("child effect controller");
+    lifecycle
+        .start_turn(
+            crate::SessionTurnRequest::new(
+                &child.session_id,
+                turn_id,
+                TurnInput::text("register the process"),
+                controller,
+            )
+            .expect("child turn request"),
+        )
+        .await
+        .expect("first child turn");
+
+    let child_handle = runtime
+        .managed_sessions
+        .lock()
+        .await
+        .get(&child.session_id)
+        .cloned()
+        .expect("managed child runtime");
+    let handles = child_handle.observe().list_all_process_handles().await;
+    assert!(
+        handles
+            .iter()
+            .any(|handle| handle.id == "child-first-turn-process"),
+        "the process grant must remain reachable from the durable child frame after commit: {handles:?}"
     );
 }
 

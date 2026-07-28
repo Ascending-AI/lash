@@ -391,8 +391,9 @@ pub use runtime::{
     CodeOutputRecord, DefaultProcessCancelAbility, DeliveryPolicy, DirectCompletionClient,
     DurableProcessWorker, DurableProcessWorkerConfig, EffectHost, EmbeddedRuntimeBuilder,
     EmbeddedRuntimeHost, EventSink, ExecutionScope, ExecutionSummary, ExternalCompletionError,
-    InMemoryLiveReplayStore, InMemoryLiveReplayStoreConfig, InMemoryProcessExecutionEnvStore,
-    InMemorySessionStore, InMemorySessionStoreFactory, InlineEffectHost, InlineProcessRunHandle,
+    ForkPoint, ForkSessionRequest, ForkSessionResult, InMemoryLiveReplayStore,
+    InMemoryLiveReplayStoreConfig, InMemoryProcessExecutionEnvStore, InMemorySessionStore,
+    InMemorySessionStoreFactory, InlineEffectHost, InlineProcessRunHandle,
     InlineRuntimeEffectController, InputItem, LashRuntime, LiveReplayGap, LiveReplayGapReason,
     LiveReplayResult, LiveReplayStore, LiveReplayStoreError, LiveReplaySubscribeResult,
     LiveReplaySubscription, MergeKey, NoopEventSink, NoopTurnActivitySink, ObservedProcess,
@@ -479,18 +480,19 @@ pub use session::{
 };
 pub use session_graph::{
     PersistedSessionConfig, PersistedTurnState, SessionGraph, SessionMessageTreeNode,
-    SessionNodePayload, SessionNodeRecord,
+    SessionNodePayload, SessionNodeRecord, frame_node_id,
 };
 pub use session_model::context::PreparedContext;
 pub use session_model::{ConversationRecord, ProtocolEvent, SessionHistoryRecord};
 pub use session_model::{RuntimeSessionPolicy, SessionPolicy, SessionSpec};
 pub use store::{
-    AttachmentIntent, AttachmentManifest, AttachmentManifestEntry, BlobRef, GcReport,
-    LeaseOwnerIdentity, LeaseOwnerLiveness, LeaseTimings, LeaseTimingsError,
-    NodeRefcountVerification, QueuedWorkStore, RuntimePersistence, SessionCommitStore,
-    SessionExecutionLease, SessionExecutionLeaseClaimOutcome, SessionExecutionLeaseCompletion,
-    SessionExecutionLeaseFence, SessionExecutionLeaseStore, SessionMeta, SessionPickerInfo,
-    SessionReadScope, StoreError, StoreMaintenance, TurnInputStore, VacuumReport,
+    AttachmentIntent, AttachmentManifest, AttachmentManifestEntry, BlobRef, EphemeralRunId,
+    GcReport, IncarnationId, LeaseOwnerIdentity, LeaseOwnerLiveness, LeaseTimings,
+    LeaseTimingsError, NodeRefcountVerification, QueuedWorkStore, RuntimePersistence,
+    SessionCommitStore, SessionExecutionLease, SessionExecutionLeaseClaimOutcome,
+    SessionExecutionLeaseCompletion, SessionExecutionLeaseFence, SessionExecutionLeaseStore,
+    SessionLifetime, SessionMeta, SessionPickerInfo, SessionReadScope, StoreError,
+    StoreMaintenance, TurnInputStore, VacuumReport,
 };
 #[allow(unused_imports)]
 pub(crate) use store::{

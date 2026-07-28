@@ -259,19 +259,6 @@ impl SessionAdmin {
         .await
     }
 
-    async fn branch_to_node(
-        &self,
-        target_leaf: Option<String>,
-    ) -> Result<lash_core::SessionSnapshot> {
-        self.with_writer(async |runtime: &mut LashRuntime| {
-            runtime
-                .branch_to_node(target_leaf)
-                .await
-                .map_err(Into::into)
-        })
-        .await
-    }
-
     /// Refresh the session graph from any background process that signalled it
     /// changed. This is the honest name for what the core `await_background_work`
     /// call does — a session-graph resync, **not** a terminal wait on background
@@ -1200,13 +1187,6 @@ impl SessionStateAdmin {
 
     pub async fn set_persisted(&self, state: RuntimeSessionState) -> Result<()> {
         self.control.set_persisted_state(state).await
-    }
-
-    pub async fn branch_to_node(
-        &self,
-        target_leaf: Option<String>,
-    ) -> Result<lash_core::SessionSnapshot> {
-        self.control.branch_to_node(target_leaf).await
     }
 
     pub async fn persist_current(&self) -> Result<RuntimeSessionState> {

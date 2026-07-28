@@ -24,15 +24,16 @@ transaction re-derives the count from edge and root rows and aborts with `NodeRe
 disagreement. Hosts can run `verify_node_refcounts` to scrub the entire catalog from one
 consistent transaction view and detect forgotten refcount mutation sites.
 
-Deleting a session physically removes every history row it owns, including off-head branches, so
-the session id and its deterministic initial frame id can be reused immediately. PostgreSQL
-history commits and session deletion share a session-keyed transaction lock. A retained deletion
-marker also fences a stale first commit, where no head row exists to lock; only explicit
-session-store recreation clears that marker.
+History ownership is shared reachability, not producer-session exclusivity. Child edges, live
+session heads, and explicit continuation pins are all counted roots. Deleting a session removes
+its head, then reclaims only producer rows whose derived count is zero; the decrement cascade
+stops at the first shared prefix node. PostgreSQL history commits, forks, pin changes, and
+deletion use transaction locks that make those root mutations serializable.
 
-Explicit history pins are deferred until a host pin verb exists. Adding that root kind requires
-the counted mutation and scrub derivation to land together on every backend; a dormant SQL-only
-anchor table is not evidence of a supported root.
+`pin` now captures a live head's node, checkpoint, and source session as one immutable anchor.
+`unpin` releases that counted root, and `fork_at` adds a new head root without copying graph
+nodes. Refcount verification and checkpoint-blob GC derive both live heads and anchors on every
+backend.
 
 This does not move non-terminal process roots into stored history counts. Processes remain in a
 different store family, and their definition/env liveness continues to be computed on demand by

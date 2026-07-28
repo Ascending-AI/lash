@@ -278,38 +278,60 @@ impl Store {
             .flatten()
     }
 
-    pub async fn save_session_meta(&self, meta: SessionMeta) {
-        if let Err(err) = self.bind_session(&meta.session_id) {
-            tracing::warn!(error = %err, "failed to bind SQLite session store");
-            return;
-        }
+    pub async fn save_session_meta(&self, meta: SessionMeta) -> Result<(), StoreError> {
+        self.bind_session(&meta.session_id)?;
         let relation_json = serde_json::to_string(&meta.relation).ok();
-        let session_id_for_log = meta.session_id.clone();
-        let result = self
+        let session_id = meta.session_id.clone();
+        let incarnation_id = meta.incarnation_id.clone();
+        let changed = self
             .conn
             .call(move |conn| {
-                conn.execute(
-                    "INSERT OR REPLACE INTO session_meta
-                     (session_id, session_name, created_at, model, cwd, relation_json)
-                     VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                let updated = conn.execute(
+                    "UPDATE session_meta
+                     SET session_name = ?3, created_at = ?4, model = ?5, cwd = ?6, relation_json = ?7
+                     WHERE session_id = ?1 AND incarnation_id = ?2",
                     params![
                         meta.session_id,
+                        meta.incarnation_id.as_str(),
                         meta.session_name,
                         meta.created_at,
                         meta.model,
                         meta.cwd,
-                        relation_json
+                        relation_json,
                     ],
-                )
+                )?;
+                if updated == 1 {
+                    return Ok(true);
+                }
+                let inserted = conn.execute(
+                    "INSERT OR IGNORE INTO session_meta
+                     (session_id, incarnation_id, session_name, created_at, model, cwd, relation_json)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                    params![
+                        meta.session_id,
+                        meta.incarnation_id.as_str(),
+                        meta.session_name,
+                        meta.created_at,
+                        meta.model,
+                        meta.cwd,
+                        relation_json,
+                    ],
+                )?;
+                Ok(inserted == 1)
             })
-            .await;
-        if let Err(err) = result {
-            tracing::warn!(
-                error = %err,
-                session_id = session_id_for_log,
-                "failed to persist session metadata"
-            );
+            .await
+            .map_err(sqlite_error)?;
+        if !changed {
+            return Err(StoreError::SessionIncarnationMismatch {
+                session_id,
+                expected_incarnation_id: self.load_session_meta().await.map_or_else(
+                    || "<missing>".to_string(),
+                    |meta| meta.incarnation_id.to_string(),
+                ),
+                actual_incarnation_id: incarnation_id.to_string(),
+            });
         }
+        Ok(())
     }
 
     pub async fn load_session_meta(&self) -> Option<SessionMeta> {

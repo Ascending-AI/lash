@@ -18,6 +18,13 @@ use super::usage::TokenLedgerEntry;
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct RuntimeSessionState {
     pub session_id: String,
+    /// Lifetime identity for this runtime state.
+    ///
+    /// Defaulted and snapshot-derived states are explicitly ephemeral. A
+    /// persistent runtime replaces this value with the identity realized and
+    /// read back by its store before any frame or effect scope is opened.
+    #[serde(skip)]
+    pub session_lifetime: crate::SessionLifetime,
     #[serde(default)]
     pub policy: SessionPolicy,
     /// Derived cache of FrameOpen nodes; never serialized or persisted.
@@ -59,11 +66,11 @@ pub struct RuntimeSessionState {
     pub token_ledger: Vec<TokenLedgerEntry>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub checkpoint_ref: Option<crate::store::BlobRef>,
-    /// Store head revision observed by the runtime. Lease-fenced commits use it
-    /// as the stale-writer CAS backstop; `None` means the runtime is creating
-    /// the first persisted head.
+    /// Store head revision observed by the runtime. Revision zero is the
+    /// create/fork baseline; `checkpoint_ref` distinguishes an unpersisted
+    /// empty runtime from a durable revision-zero fork.
     #[serde(skip)]
-    pub head_revision: Option<u64>,
+    pub head_revision: u64,
     /// Node ids known to exist durably. This is deliberately independent of
     /// the resident graph: partial residency omits durable off-path nodes,
     /// while host-side edits can add resident nodes before they commit.
@@ -79,6 +86,7 @@ impl RuntimeSessionState {
             .agent_frame_records(&snapshot.session_id);
         let mut state = Self {
             session_id: snapshot.session_id,
+            session_lifetime: crate::SessionLifetime::default(),
             policy: snapshot.policy,
             agent_frames,
             current_frame_node_id: snapshot.current_frame_node_id,
@@ -97,7 +105,7 @@ impl RuntimeSessionState {
             execution_state_snapshot: None,
             token_ledger: snapshot.token_ledger,
             checkpoint_ref: snapshot.checkpoint_ref,
-            head_revision: None,
+            head_revision: 0,
             persisted_node_ids: std::collections::HashSet::new(),
         };
         state.ensure_agent_frame_initialized();
@@ -226,7 +234,7 @@ impl RuntimeSessionState {
     }
 
     pub fn apply_persisted_commit_result(&mut self, result: crate::store::RuntimeCommitResult) {
-        self.head_revision = Some(result.head_revision);
+        self.head_revision = result.head_revision;
         self.checkpoint_ref = Some(result.checkpoint_ref);
         self.session_graph
             .apply_realized_node_timestamps(&result.realized_node_timestamps);
@@ -327,6 +335,58 @@ pub(crate) fn store_plugin_snapshot(
 }
 
 impl RuntimeSessionState {
+    pub fn bind_durable_incarnation(&mut self, incarnation_id: crate::IncarnationId) {
+        let frame_mapping = self
+            .session_graph
+            .nodes
+            .iter()
+            .filter(|node| !self.persisted_node_ids.contains(&node.node_id))
+            .filter_map(|node| {
+                let crate::SessionNodePayload::FrameOpen { frame_key, .. } = &node.payload else {
+                    return None;
+                };
+                let durable_node_id =
+                    crate::frame_node_id(&self.session_id, &incarnation_id, frame_key);
+                (durable_node_id != node.node_id).then(|| (node.node_id.clone(), durable_node_id))
+            })
+            .collect::<Vec<_>>();
+        self.session_lifetime = crate::SessionLifetime::durable(incarnation_id);
+        self.session_graph
+            .remap_node_ids(&self.session_id, &frame_mapping);
+        if let Some(current) = self.current_frame_node_id.as_mut()
+            && let Some((_, durable)) = frame_mapping
+                .iter()
+                .find(|(provisional, _)| provisional == current)
+        {
+            *current = durable.clone();
+        }
+        self.agent_frames = self.session_graph.agent_frame_records(&self.session_id);
+    }
+
+    pub fn durable_incarnation_id(
+        &self,
+        boundary: &'static str,
+    ) -> Result<&crate::IncarnationId, crate::StoreError> {
+        self.session_lifetime.as_durable().ok_or_else(|| {
+            crate::StoreError::EphemeralSessionAtDurableBoundary {
+                session_id: self.session_id.clone(),
+                boundary,
+            }
+        })
+    }
+
+    pub fn turn_scope(&self, turn_id: impl Into<String>) -> crate::ExecutionScope {
+        let turn_id = turn_id.into();
+        match self.session_lifetime.as_durable() {
+            Some(incarnation_id) => crate::ExecutionScope::turn_incarnation(
+                &self.session_id,
+                incarnation_id.clone(),
+                turn_id,
+            ),
+            None => crate::ExecutionScope::turn(&self.session_id, turn_id),
+        }
+    }
+
     pub(crate) fn refresh_current_frame_projection(&mut self) {
         self.current_frame_node_id = self
             .session_graph
@@ -387,9 +447,15 @@ impl RuntimeSessionState {
             return;
         }
         let assignment = crate::AgentFrameAssignment::from_policy(self.policy.clone());
-        let frame_node_id = crate::session_graph::frame_node_id(&self.session_id, "initial-frame");
+        let frame_key = "initial-frame";
+        let frame_node_id = crate::session_graph::frame_node_id_for_lifetime(
+            &self.session_id,
+            &self.session_lifetime,
+            frame_key,
+        );
         self.session_graph.append_frame_open_with_id_at(
             frame_node_id.clone(),
+            frame_key.to_string(),
             crate::AgentFrameReason::initial(),
             assignment,
             self.protocol_turn_options.clone(),
@@ -419,9 +485,15 @@ impl RuntimeSessionState {
     ) {
         self.policy = assignment.policy.clone();
         self.protocol_turn_options = protocol_turn_options.clone();
-        let frame_node_id = crate::session_graph::frame_node_id(&self.session_id, "initial-frame");
+        let frame_key = "initial-frame";
+        let frame_node_id = crate::session_graph::frame_node_id_for_lifetime(
+            &self.session_id,
+            &self.session_lifetime,
+            frame_key,
+        );
         self.session_graph.append_frame_open_with_id_at(
             frame_node_id.clone(),
+            frame_key.to_string(),
             crate::AgentFrameReason::initial(),
             assignment,
             protocol_turn_options,
@@ -436,6 +508,7 @@ impl Default for RuntimeSessionState {
     fn default() -> Self {
         Self {
             session_id: "root".to_string(),
+            session_lifetime: crate::SessionLifetime::default(),
             policy: SessionPolicy::default(),
             agent_frames: Vec::new(),
             current_frame_node_id: None,
@@ -454,7 +527,7 @@ impl Default for RuntimeSessionState {
             execution_state_snapshot: None,
             token_ledger: Vec::new(),
             checkpoint_ref: None,
-            head_revision: None,
+            head_revision: 0,
             persisted_node_ids: std::collections::HashSet::new(),
         }
     }
@@ -535,7 +608,7 @@ mod tests {
             tool_state_snapshot: Some(crate::ToolState::default()),
             plugin_snapshot: Some(crate::PluginSessionSnapshot::default()),
             execution_state_snapshot: Some(vec![1, 2, 3]),
-            head_revision: Some(42),
+            head_revision: 42,
             ..RuntimeSessionState::default()
         };
         state.ensure_agent_frame_initialized();
@@ -561,7 +634,7 @@ mod tests {
 
         assert_eq!(hydrated.session_id, "snapshot-test");
         assert_eq!(hydrated.policy.recorded_provider_id(), "mock");
-        assert!(hydrated.head_revision.is_none());
+        assert_eq!(hydrated.head_revision, 0);
         assert!(hydrated.tool_state_snapshot.is_none());
         assert!(hydrated.plugin_snapshot.is_none());
         assert!(hydrated.execution_state_snapshot.is_none());
@@ -663,7 +736,7 @@ pub(super) fn apply_session_head(
     state.execution_state_ref = None;
     state.execution_state_snapshot = None;
     state.ensure_agent_frame_initialized();
-    state.head_revision = Some(head.head_revision);
+    state.head_revision = head.head_revision;
     state.persisted_node_ids = head
         .graph
         .nodes
@@ -712,7 +785,11 @@ pub(super) fn derive_graph_commit_node_ids(
     graph: &mut crate::GraphCommitDelta,
     operation: &crate::OperationId,
 ) -> Result<Vec<String>, crate::StoreError> {
-    let mapping = graph.derive_node_ids(&state.session_id, operation)?;
+    let mapping = graph.derive_node_ids(
+        &state.session_id,
+        state.durable_incarnation_id("history node derivation")?,
+        operation,
+    )?;
     state
         .session_graph
         .remap_node_ids(&state.session_id, &mapping);
@@ -746,9 +823,14 @@ pub(super) fn open_agent_frame_in_state_with_clock(
         .unwrap_or_else(|| crate::AgentFrameAssignment::from_policy(state.policy.clone()));
     assignment.policy = state.policy.clone();
     let protocol_turn_options = state.protocol_turn_options.clone();
-    let frame_node_id = crate::session_graph::frame_node_id(&state.session_id, &request.frame_id);
+    let frame_node_id = crate::session_graph::frame_node_id_for_lifetime(
+        &state.session_id,
+        &state.session_lifetime,
+        &request.frame_id,
+    );
     let opened = state.session_graph.append_frame_open_with_id_at(
         frame_node_id.clone(),
+        request.frame_id.clone(),
         request.reason,
         assignment,
         protocol_turn_options,
@@ -833,7 +915,7 @@ pub(super) fn apply_residency_on_load(
     match residency {
         crate::Residency::KeepAll => {}
         crate::Residency::ActivePathOnly => {
-            state.session_graph = state.session_graph.fork_current_path();
+            state.session_graph = state.session_graph.trim_to_active_path();
         }
     }
 }
@@ -909,7 +991,7 @@ mod residency_tests {
             .leaf_node_id
             .clone()
             .expect("inactive node");
-        state.session_graph.branch_to(root);
+        state.session_graph.set_leaf_node_id(root);
         state.append_active_conversation_messages(&[text_message("active", "active branch")]);
         let active_node = state
             .session_graph

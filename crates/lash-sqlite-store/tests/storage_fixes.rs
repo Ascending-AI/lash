@@ -57,9 +57,14 @@ fn lease_owner(owner_id: &str) -> LeaseOwnerIdentity {
     LeaseOwnerIdentity::opaque(owner_id, format!("{owner_id}:incarnation"))
 }
 
-fn commit_at(session_id: &str, expected_head_revision: Option<u64>) -> RuntimeCommit {
+fn commit_at(
+    session_id: &str,
+    incarnation_id: &lash_core::IncarnationId,
+    expected_head_revision: u64,
+) -> RuntimeCommit {
     let state = RuntimeSessionState {
         session_id: session_id.to_string(),
+        session_lifetime: lash_core::SessionLifetime::durable(incarnation_id.clone()),
         ..RuntimeSessionState::default()
     };
     RuntimeCommit {
@@ -71,7 +76,7 @@ fn commit_at(session_id: &str, expected_head_revision: Option<u64>) -> RuntimeCo
 // Finding 1: the head-revision compare-and-set must serialize across two
 // independent connections to the *same* file database. Two threads, each with
 // its own connection, both read head revision 0 and then commit with
-// `expected_head_revision = Some(0)` as concurrently as a barrier can arrange.
+// `expected_head_revision = 0` as concurrently as a barrier can arrange.
 // Under `BEGIN IMMEDIATE` the second writer blocks on the busy timeout, then
 // reads the now-bumped revision and returns a clean `HeadRevisionConflict`;
 // exactly one commit applies and the persisted head ends at revision 1. Under
@@ -81,6 +86,7 @@ fn commit_at(session_id: &str, expected_head_revision: Option<u64>) -> RuntimeCo
 #[test]
 fn head_revision_cas_holds_across_two_connections() {
     let path = unique_db_path("cas");
+    let incarnation_id = lash_core::IncarnationId::mint_for_store();
     let session_fence = {
         let store = block_on(Store::open(&path)).expect("lease store");
         let owner = lease_owner("session-owner");
@@ -93,6 +99,7 @@ fn head_revision_cas_holds_across_two_connections() {
 
     let barrier = Arc::new(std::sync::Barrier::new(2));
     let run = |path: std::path::PathBuf,
+               incarnation_id: lash_core::IncarnationId,
                session_fence: lash_core::SessionExecutionLeaseFence,
                barrier: Arc<std::sync::Barrier>| {
         std::thread::spawn(move || {
@@ -101,15 +108,26 @@ fn head_revision_cas_holds_across_two_connections() {
                 barrier.wait();
                 store
                     .commit_runtime_state(
-                        commit_at("root", Some(0)).with_session_execution_lease(session_fence),
+                        commit_at("root", &incarnation_id, 0)
+                            .with_session_execution_lease(session_fence),
                     )
                     .await
             })
         })
     };
 
-    let handle_a = run(path.clone(), session_fence.clone(), Arc::clone(&barrier));
-    let handle_b = run(path.clone(), session_fence, Arc::clone(&barrier));
+    let handle_a = run(
+        path.clone(),
+        incarnation_id.clone(),
+        session_fence.clone(),
+        Arc::clone(&barrier),
+    );
+    let handle_b = run(
+        path.clone(),
+        incarnation_id,
+        session_fence,
+        Arc::clone(&barrier),
+    );
     let result_a = handle_a.join().expect("thread a");
     let result_b = handle_b.join().expect("thread b");
 
@@ -154,7 +172,7 @@ async fn gc_keeps_live_committed_checkpoint_blobs() {
         )
         .await;
 
-    let state = RuntimeSessionState {
+    let mut state = RuntimeSessionState {
         session_id: "root".to_string(),
         tool_state_snapshot: Some(persisted_tool_state_at_generation(3)),
         plugin_snapshot: Some(PluginSessionSnapshot {
@@ -164,6 +182,11 @@ async fn gc_keeps_live_committed_checkpoint_blobs() {
         execution_state_snapshot: Some(vec![0xDE, 0xAD, 0xBE, 0xEF]),
         ..RuntimeSessionState::default()
     };
+    let incarnation_id = store
+        .ensure_session_incarnation(&state.session_id, &state.policy)
+        .await
+        .expect("realize session incarnation");
+    state.session_lifetime = lash_core::SessionLifetime::durable(incarnation_id);
     let owner = lease_owner("gc-test");
     let session_lease = store
         .try_claim_session_execution_lease("root", &owner, 60_000)
@@ -172,7 +195,7 @@ async fn gc_keeps_live_committed_checkpoint_blobs() {
         .acquired()
         .expect("session execution lease");
     let commit = RuntimeCommit {
-        expected_head_revision: Some(0),
+        expected_head_revision: 0,
         ..RuntimeCommit::persisted_state(&state, &[])
     }
     .with_session_execution_lease(session_lease.fence())
@@ -413,8 +436,8 @@ async fn unsupported_schema_error_reports_real_versions() {
         "error must report the found version 99: {message}"
     );
     assert!(
-        message.contains("schema version 14"),
-        "error must report the real expected version 14: {message}"
+        message.contains("schema version 17"),
+        "error must report the real expected version 17: {message}"
     );
     assert!(
         !message.contains("version 1 only"),
@@ -450,7 +473,7 @@ fn concurrent_first_open_never_observes_version_zero_schema() {
     let user_version: i32 = conn
         .query_row("PRAGMA user_version", [], |row| row.get(0))
         .expect("read user_version");
-    assert_eq!(user_version, 14);
+    assert_eq!(user_version, 17);
 }
 
 #[tokio::test]

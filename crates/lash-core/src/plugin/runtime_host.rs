@@ -5,6 +5,16 @@ use crate::SessionAppendNode;
 
 #[async_trait::async_trait]
 pub trait SessionStateService: Send + Sync {
+    async fn turn_scope(
+        &self,
+        _session_id: &str,
+        _turn_id: &str,
+    ) -> Result<crate::ExecutionScope, PluginError> {
+        Err(PluginError::Session(
+            "session turn scopes are unavailable in this runtime".to_string(),
+        ))
+    }
+
     async fn snapshot_current(&self) -> Result<SessionSnapshot, PluginError> {
         Err(PluginError::Session(
             "session snapshots are unavailable in this runtime".to_string(),

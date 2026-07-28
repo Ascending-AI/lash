@@ -199,7 +199,8 @@ pub async fn attachment_owner_cold_replay(mut backend: AttachmentOwnerColdReplay
     assert_plain_json_outcome(&replay_plain, &plain_id);
     assert_typed_outcome(&replay_typed, &typed_id);
 
-    let stamped_commit = final_turn_commit(SESSION_ID, TURN_ID, vec![typed_id.clone()]);
+    let stamped_commit =
+        final_turn_commit(&store_b, SESSION_ID, TURN_ID, vec![typed_id.clone()]).await;
     let first_result = commit_with_lease(&store_b, stamped_commit.clone(), "first-commit").await;
     let duplicate = store_b
         .commit_runtime_state(stamped_commit)
@@ -395,7 +396,7 @@ async fn superseded_turn_leg(backend: &AttachmentOwnerColdReplayBackend) {
     (backend.advance_clock)(1_000);
     commit_with_lease(
         &store,
-        final_turn_commit(SESSION_ID, "later-turn", Vec::new()),
+        final_turn_commit(&store, SESSION_ID, "later-turn", Vec::new()).await,
         "later-turn-owner",
     )
     .await;
@@ -493,13 +494,21 @@ async fn process_owner_leg(backend: &AttachmentOwnerColdReplayBackend) {
     ));
 }
 
-fn final_turn_commit(
+async fn final_turn_commit(
+    store: &Arc<dyn crate::RuntimePersistence>,
     session_id: &str,
     turn_id: &str,
     adopted_attachment_ids: Vec<crate::AttachmentId>,
 ) -> crate::RuntimeCommit {
+    let incarnation_id = store
+        .load_session_meta()
+        .await
+        .expect("load commit session metadata")
+        .expect("commit session metadata exists")
+        .incarnation_id;
     let state = crate::RuntimeSessionState {
         session_id: session_id.to_string(),
+        session_lifetime: crate::SessionLifetime::durable(incarnation_id),
         ..crate::RuntimeSessionState::default()
     };
     let mut commit = crate::RuntimeCommit::persisted_state(&state, &[])

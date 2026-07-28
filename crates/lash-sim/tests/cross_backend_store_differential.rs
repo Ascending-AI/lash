@@ -19,10 +19,10 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use lash_core::store::{GraphCommitDelta, RuntimeCommitResult, SessionHeadMeta};
 use lash_core::{
-    InMemorySessionStore, LeaseOwnerIdentity, PendingTurnInputDraft, ProtocolEvent, RuntimeCommit,
-    RuntimePersistence, RuntimeSessionState, RuntimeTurnCommitStamp, SessionHistoryRecord,
-    SessionNodePayload, SessionNodeRecord, StoreError, TurnInput, TurnInputApplication,
-    TurnInputClaim, TurnInputIngress, TurnInputState,
+    InMemorySessionStore, IncarnationId, LeaseOwnerIdentity, PendingTurnInputDraft, ProtocolEvent,
+    RuntimeCommit, RuntimePersistence, RuntimeSessionState, RuntimeTurnCommitStamp,
+    SessionHistoryRecord, SessionNodePayload, SessionNodeRecord, StoreError, TurnInput,
+    TurnInputApplication, TurnInputClaim, TurnInputIngress, TurnInputState,
 };
 use lash_postgres_store::PostgresStorage;
 use rusqlite::OptionalExtension;
@@ -74,7 +74,7 @@ struct GeneratedCase {
 enum StoreOperation {
     Commit {
         label: &'static str,
-        expected_head_revision: Option<u64>,
+        expected_head_revision: u64,
         graph: GraphSpec,
         turn_commit: Option<TurnCommitSpec>,
     },
@@ -95,7 +95,7 @@ enum StoreOperation {
     },
     CommitStaleTurnInputClaim {
         current_lease: LeaseSlot,
-        expected_head_revision: Option<u64>,
+        expected_head_revision: u64,
     },
 }
 
@@ -154,15 +154,17 @@ impl NodeSpec {
         }
     }
 
-    fn materialize(self, session_id: &str) -> SessionNodeRecord {
+    fn materialize(self, session_id: &str, incarnation_id: &IncarnationId) -> SessionNodeRecord {
+        let frame_key = differential_frame_key(self.node_id);
         SessionNodeRecord {
-            node_id: scoped_node_id(session_id, self.node_id),
+            node_id: scoped_node_id(session_id, incarnation_id, self.node_id),
             parent_node_id: self
                 .parent_node_id
-                .map(|node_id| scoped_node_id(session_id, node_id)),
+                .map(|node_id| scoped_node_id(session_id, incarnation_id, node_id)),
             timestamp: "2026-07-26T00:00:00Z".to_string(),
             payload: if self.parent_node_id.is_none() {
                 SessionNodePayload::FrameOpen {
+                    frame_key,
                     reason: lash_core::AgentFrameReason::initial(),
                     assignment: lash_core::AgentFrameAssignment::from_policy(
                         lash_core::SessionPolicy::default(),
@@ -184,8 +186,24 @@ impl NodeSpec {
     }
 }
 
-fn scoped_node_id(session_id: &str, node_id: &str) -> String {
-    format!("{session_id}:{node_id}")
+fn differential_incarnation_id(session_id: &str) -> IncarnationId {
+    IncarnationId::decode_from_store(format!("differential:{session_id}"))
+}
+
+fn differential_frame_key(node_id: &str) -> String {
+    format!("differential-frame:{node_id}")
+}
+
+fn is_frame_alias(node_id: &str) -> bool {
+    matches!(node_id, "collision" | "root" | "stale-claim-node")
+}
+
+fn scoped_node_id(session_id: &str, incarnation_id: &IncarnationId, node_id: &str) -> String {
+    if is_frame_alias(node_id) {
+        lash_core::frame_node_id(session_id, incarnation_id, &differential_frame_key(node_id))
+    } else {
+        format!("{session_id}:{node_id}")
+    }
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -211,11 +229,7 @@ fn unchanged(leaf_node_id: Option<&'static str>) -> GraphSpec {
     GraphSpec::Unchanged { leaf_node_id }
 }
 
-fn commit(
-    label: &'static str,
-    expected_head_revision: Option<u64>,
-    graph: GraphSpec,
-) -> StoreOperation {
+fn commit(label: &'static str, expected_head_revision: u64, graph: GraphSpec) -> StoreOperation {
     StoreOperation::Commit {
         label,
         expected_head_revision,
@@ -233,7 +247,7 @@ fn generated_cases() -> Vec<GeneratedCase> {
             name: CaseName::DuplicateWithinAppend,
             operations: vec![commit(
                 "append_duplicate_batch",
-                None,
+                0,
                 append(vec![original(), mutated()], Some("collision")),
             )],
         },
@@ -242,12 +256,12 @@ fn generated_cases() -> Vec<GeneratedCase> {
             operations: vec![
                 commit(
                     "append_original",
-                    None,
+                    0,
                     append(vec![original()], Some("collision")),
                 ),
                 commit(
                     "append_committed_id_again",
-                    Some(1),
+                    1,
                     append(vec![mutated()], Some("collision")),
                 ),
             ],
@@ -257,7 +271,7 @@ fn generated_cases() -> Vec<GeneratedCase> {
             operations: vec![
                 commit(
                     "append_original",
-                    None,
+                    0,
                     append(vec![original()], Some("collision")),
                 ),
                 StoreOperation::Tombstone {
@@ -265,7 +279,7 @@ fn generated_cases() -> Vec<GeneratedCase> {
                 },
                 commit(
                     "append_tombstoned_id",
-                    Some(1),
+                    1,
                     append(vec![mutated()], Some("collision")),
                 ),
             ],
@@ -275,7 +289,7 @@ fn generated_cases() -> Vec<GeneratedCase> {
             operations: vec![
                 commit(
                     "append_original",
-                    None,
+                    0,
                     append(vec![original()], Some("collision")),
                 ),
                 StoreOperation::Tombstone {
@@ -284,7 +298,7 @@ fn generated_cases() -> Vec<GeneratedCase> {
                 StoreOperation::Vacuum,
                 commit(
                     "append_vacuumed_id",
-                    Some(1),
+                    1,
                     append(vec![mutated()], Some("collision")),
                 ),
             ],
@@ -294,7 +308,7 @@ fn generated_cases() -> Vec<GeneratedCase> {
             operations: vec![
                 commit(
                     "append_original",
-                    None,
+                    0,
                     append(vec![original()], Some("collision")),
                 ),
                 StoreOperation::Tombstone {
@@ -302,35 +316,36 @@ fn generated_cases() -> Vec<GeneratedCase> {
                 },
                 commit(
                     "unchanged_with_tombstoned_leaf",
-                    Some(1),
+                    1,
                     unchanged(Some("collision")),
                 ),
             ],
         },
         GeneratedCase {
             name: CaseName::AppendDuplicateAfterAppendSeed,
-            // The store layer has no residency input. A host using
-            // `ActivePathOnly` can produce this malformed Append because
-            // `unique_message_node_id` de-duplicates only against its resident
-            // set; the restored host-layer differential covers that path.
+            // A duplicate append id must be rejected even when its parent and
+            // terminal leaf otherwise form a valid linear continuation.
             operations: vec![
                 commit(
-                    "seed_forked_graph",
-                    None,
+                    "seed_graph",
+                    0,
                     append(
                         vec![
                             NodeSpec::new("root", None, "root"),
                             NodeSpec::new("active-leaf", Some("root"), "active"),
-                            NodeSpec::new("off-path", Some("root"), "off-path-original"),
                         ],
                         Some("active-leaf"),
                     ),
                 ),
                 commit(
                     "append_duplicate_id_after_append_seed",
-                    Some(1),
+                    1,
                     append(
-                        vec![NodeSpec::new("off-path", Some("root"), "off-path-mutated")],
+                        vec![NodeSpec::new(
+                            "active-leaf",
+                            Some("active-leaf"),
+                            "duplicate",
+                        )],
                         Some("active-leaf"),
                     ),
                 ),
@@ -341,12 +356,12 @@ fn generated_cases() -> Vec<GeneratedCase> {
             operations: vec![
                 commit(
                     "append_original",
-                    None,
+                    0,
                     append(vec![original()], Some("collision")),
                 ),
                 commit(
                     "append_with_stale_head",
-                    Some(0),
+                    0,
                     append(
                         vec![NodeSpec::new("fresh", Some("collision"), "fresh")],
                         Some("fresh"),
@@ -359,7 +374,7 @@ fn generated_cases() -> Vec<GeneratedCase> {
             operations: vec![
                 StoreOperation::Commit {
                     label: "first_turn_commit",
-                    expected_head_revision: None,
+                    expected_head_revision: 0,
                     graph: append(vec![original()], Some("collision")),
                     turn_commit: Some(TurnCommitSpec {
                         turn_id: "turn-1",
@@ -368,7 +383,7 @@ fn generated_cases() -> Vec<GeneratedCase> {
                 },
                 StoreOperation::Commit {
                     label: "resubmit_identical_turn_commit_hash",
-                    expected_head_revision: None,
+                    expected_head_revision: 0,
                     graph: append(vec![original()], Some("collision")),
                     turn_commit: Some(TurnCommitSpec {
                         turn_id: "turn-1",
@@ -377,7 +392,7 @@ fn generated_cases() -> Vec<GeneratedCase> {
                 },
                 StoreOperation::Commit {
                     label: "resubmit_mutated_turn_commit_hash",
-                    expected_head_revision: Some(1),
+                    expected_head_revision: 1,
                     graph: append(vec![mutated()], Some("collision")),
                     turn_commit: Some(TurnCommitSpec {
                         turn_id: "turn-1",
@@ -410,14 +425,18 @@ fn generated_cases() -> Vec<GeneratedCase> {
                 },
                 StoreOperation::CommitStaleTurnInputClaim {
                     current_lease: LeaseSlot::Successor,
-                    expected_head_revision: None,
+                    expected_head_revision: 0,
                 },
             ],
         },
     ]
 }
 
-fn materialize_graph(session_id: &str, spec: &GraphSpec) -> GraphCommitDelta {
+fn materialize_graph(
+    session_id: &str,
+    incarnation_id: &IncarnationId,
+    spec: &GraphSpec,
+) -> GraphCommitDelta {
     match spec {
         GraphSpec::Unchanged { leaf_node_id } => GraphCommitDelta::Unchanged {
             leaf_node_id: leaf_node_id.map(str::to_string),
@@ -429,35 +448,37 @@ fn materialize_graph(session_id: &str, spec: &GraphSpec) -> GraphCommitDelta {
             nodes: nodes
                 .iter()
                 .copied()
-                .map(|node| node.materialize(session_id))
+                .map(|node| node.materialize(session_id, incarnation_id))
                 .collect(),
-            leaf_node_id: leaf_node_id.map(|node_id| scoped_node_id(session_id, node_id)),
+            leaf_node_id: leaf_node_id
+                .map(|node_id| scoped_node_id(session_id, incarnation_id, node_id)),
         },
     }
 }
 
 fn runtime_commit(
     session_id: &str,
-    expected_head_revision: Option<u64>,
+    expected_head_revision: u64,
     graph: &GraphSpec,
     turn_commit: Option<TurnCommitSpec>,
+    current_frame_node_id: Option<String>,
 ) -> RuntimeCommit {
+    let incarnation_id = differential_incarnation_id(session_id);
     let state = RuntimeSessionState {
         session_id: session_id.to_string(),
+        session_lifetime: lash_core::SessionLifetime::durable(incarnation_id.clone()),
         ..RuntimeSessionState::default()
     };
     let mut commit = RuntimeCommit::persisted_state(&state, &[]);
     commit.expected_head_revision = expected_head_revision;
-    commit.graph = materialize_graph(session_id, graph);
-    commit.current_frame_node_id = match graph {
-        GraphSpec::Unchanged { leaf_node_id } => {
-            leaf_node_id.map(|node_id| scoped_node_id(session_id, node_id))
-        }
-        GraphSpec::Append { nodes, .. } => nodes
-            .first()
-            .map(|node| node.parent_node_id.unwrap_or(node.node_id))
-            .map(|node_id| scoped_node_id(session_id, node_id)),
-    };
+    commit.graph = materialize_graph(session_id, &incarnation_id, graph);
+    commit.current_frame_node_id = commit
+        .graph
+        .appended_nodes()
+        .filter(|node| matches!(node.payload, SessionNodePayload::FrameOpen { .. }))
+        .last()
+        .map(|node| node.node_id.clone())
+        .or(current_frame_node_id);
     if let Some(turn_commit) = turn_commit {
         commit = commit.with_turn_commit(RuntimeTurnCommitStamp::new(
             session_id,
@@ -786,6 +807,7 @@ struct BackendRunner {
     first_lease: Option<lash_core::SessionExecutionLease>,
     successor_lease: Option<lash_core::SessionExecutionLease>,
     stale_turn_input_claim: Option<TurnInputClaim>,
+    current_frame_node_id: Option<String>,
 }
 
 impl BackendRunner {
@@ -814,20 +836,31 @@ impl BackendRunner {
                 graph,
                 turn_commit,
                 ..
-            } => self
-                .store
-                .commit_runtime_state(runtime_commit(
+            } => {
+                let commit = runtime_commit(
                     &self.session_id,
                     *expected_head_revision,
                     graph,
                     *turn_commit,
-                ))
-                .await
-                .map(|result| Some(result.into())),
+                    self.current_frame_node_id.clone(),
+                );
+                let next_frame_node_id = commit.current_frame_node_id.clone();
+                let result = self.store.commit_runtime_state(commit).await;
+                if result.is_ok() {
+                    self.current_frame_node_id = next_frame_node_id;
+                }
+                result.map(|result| Some(result.into()))
+            }
             StoreOperation::Tombstone { node_ids } => {
                 let node_ids = node_ids
                     .iter()
-                    .map(|node_id| scoped_node_id(&self.session_id, node_id))
+                    .map(|node_id| {
+                        scoped_node_id(
+                            &self.session_id,
+                            &differential_incarnation_id(&self.session_id),
+                            node_id,
+                        )
+                    })
                     .collect::<Vec<_>>();
                 self.store.tombstone_nodes(&node_ids).await.map(|_| None)
             }
@@ -910,9 +943,15 @@ impl BackendRunner {
                 };
                 self.store
                     .commit_runtime_state(
-                        runtime_commit(&self.session_id, *expected_head_revision, &graph, None)
-                            .with_session_execution_lease(lease.fence())
-                            .completing_turn_input_claim(claim.completion()),
+                        runtime_commit(
+                            &self.session_id,
+                            *expected_head_revision,
+                            &graph,
+                            None,
+                            self.current_frame_node_id.clone(),
+                        )
+                        .with_session_execution_lease(lease.fence())
+                        .completing_turn_input_claim(claim.completion()),
                     )
                     .await
                     .map(|result| Some(result.into()))
@@ -942,7 +981,17 @@ fn normalized_store_error(backend: &str, error: &StoreError) -> String {
         StoreError::CommitNodeBudgetExceeded { .. } => "CommitNodeBudgetExceeded".to_string(),
         StoreError::CommitByteBudgetExceeded { .. } => "CommitByteBudgetExceeded".to_string(),
         StoreError::SessionBindingMismatch { .. } => "SessionBindingMismatch".to_string(),
+        StoreError::EphemeralSessionAtDurableBoundary { .. } => {
+            "EphemeralSessionAtDurableBoundary".to_string()
+        }
         StoreError::SessionDeleted { .. } => "SessionDeleted".to_string(),
+        StoreError::SessionIncarnationMismatch {
+            session_id,
+            expected_incarnation_id,
+            actual_incarnation_id,
+        } => format!(
+            "SessionIncarnationMismatch({session_id},{expected_incarnation_id},{actual_incarnation_id})"
+        ),
         StoreError::UnsupportedReadScope(_) => "UnsupportedReadScope".to_string(),
         StoreError::UnsupportedStoreOperation { .. } => "UnsupportedStoreOperation".to_string(),
         StoreError::HeadRevisionConflict { .. } => "HeadRevisionConflict".to_string(),
@@ -965,9 +1014,15 @@ fn normalized_store_error(backend: &str, error: &StoreError) -> String {
         StoreError::NodeIdDerivationMismatch { .. } => "NodeIdDerivationMismatch".to_string(),
         StoreError::NodeIdCollision { .. } => "NodeIdCollision".to_string(),
         StoreError::InvalidGraphLeaf { .. } => "InvalidGraphLeaf".to_string(),
+        StoreError::ForkPointNotRetained { .. } => "ForkPointNotRetained".to_string(),
+        StoreError::ForkSessionAlreadyExists { .. } => "ForkSessionAlreadyExists".to_string(),
         StoreError::InvalidGraphParent { .. } => "InvalidGraphParent".to_string(),
         StoreError::MissingFrameOpenAncestor { .. } => "MissingFrameOpenAncestor".to_string(),
-        StoreError::NodeRefcountDrift { .. } => "NodeRefcountDrift".to_string(),
+        StoreError::NodeRefcountDrift {
+            node_id,
+            cached,
+            derived,
+        } => format!("NodeRefcountDrift({node_id},{cached},{derived})"),
         StoreError::CommitRealizationMismatch { .. } => "CommitRealizationMismatch".to_string(),
         StoreError::CommitNodeRealizationMismatch { .. } => {
             "CommitNodeRealizationMismatch".to_string()
@@ -1022,6 +1077,7 @@ async fn runners_for_case(
             first_lease: None,
             successor_lease: None,
             stale_turn_input_claim: None,
+            current_frame_node_id: None,
         },
         BackendRunner {
             name: "sqlite",
@@ -1034,6 +1090,7 @@ async fn runners_for_case(
             first_lease: None,
             successor_lease: None,
             stale_turn_input_claim: None,
+            current_frame_node_id: None,
         },
         BackendRunner {
             name: "postgres",
@@ -1046,6 +1103,7 @@ async fn runners_for_case(
             first_lease: None,
             successor_lease: None,
             stale_turn_input_claim: None,
+            current_frame_node_id: None,
         },
     ]
 }

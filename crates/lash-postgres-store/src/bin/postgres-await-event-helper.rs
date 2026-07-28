@@ -16,8 +16,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         return Err("unexpected helper arguments".into());
     }
 
-    let scope = ExecutionScope::turn(
-        format!("cold-process-{nonce}-session"),
+    let session_id = format!("cold-process-{nonce}-session");
+    let scope = ExecutionScope::turn_incarnation(
+        &session_id,
+        lash_core::IncarnationId::decode_from_store(format!("postgres-helper:{session_id}")),
         format!("cold-process-{nonce}-turn"),
     );
     let wait = match identity.as_str() {

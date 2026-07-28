@@ -254,7 +254,8 @@ impl RuntimeTurnDriver<'_> {
                     cancel.clone(),
                     deadline,
                     Arc::clone(&self.host.core.clock),
-                ),
+                )
+                .with_turn_cancel_scope(scoped_effect_controller.execution_scope().clone()),
             )
             .await?;
         RuntimeEffectOutcome::into_await_event(outcome)

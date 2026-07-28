@@ -147,6 +147,7 @@ impl AwaitEventResolver for SqliteEffectHost {
         scope: &ExecutionScope,
         wait: AwaitEventWaitIdentity,
     ) -> Result<AwaitEventKey, RuntimeError> {
+        scope.validate_for_durable_host()?;
         self.inner.await_events.key_for(scope, wait).await
     }
 
@@ -191,6 +192,7 @@ impl EffectHost for SqliteEffectHost {
         &'run self,
         scope: ExecutionScope,
     ) -> Result<ScopedEffectController<'run>, RuntimeError> {
+        scope.validate_for_durable_host()?;
         let controller = SqliteRuntimeEffectController {
             inner: Arc::clone(&self.inner),
             scope: scope.clone(),
@@ -203,6 +205,7 @@ impl EffectHost for SqliteEffectHost {
         &self,
         scope: ExecutionScope,
     ) -> Result<Option<ScopedEffectController<'static>>, RuntimeError> {
+        scope.validate_for_durable_host()?;
         let controller = SqliteRuntimeEffectController {
             inner: Arc::clone(&self.inner),
             scope: scope.clone(),
@@ -311,7 +314,7 @@ impl SqliteRuntimeEffectController {
         let envelope_hash = reconstructed_envelope.hash().to_string();
         let envelope_json =
             serde_json::to_string(reconstructed_envelope).map_err(effect_encode_error)?;
-        let scope_id = self.scope.id().to_string();
+        let scope_id = self.scope.journal_id();
         let now = self.inner.clock.timestamp_ms();
         let lease_token = self.inner.next_lease_token();
         let due_at_ms = sleep_due_at_ms(envelope, now);
@@ -692,6 +695,7 @@ impl AwaitEventResolver for SqliteRuntimeEffectController {
         scope: &ExecutionScope,
         wait: AwaitEventWaitIdentity,
     ) -> Result<AwaitEventKey, RuntimeError> {
+        scope.validate_for_durable_host()?;
         self.inner.await_events.key_for(scope, wait).await
     }
 
@@ -738,6 +742,9 @@ impl RuntimeEffectController for SqliteRuntimeEffectController {
         envelope: RuntimeEffectEnvelope,
         local_executor: RuntimeEffectLocalExecutor<'_>,
     ) -> Result<RuntimeEffectOutcome, RuntimeEffectControllerError> {
+        self.scope
+            .validate_for_durable_host()
+            .map_err(RuntimeEffectControllerError::from)?;
         let reconstructed_envelope = envelope.canonical_form()?;
         let replay_trace = local_executor.replay_validation_trace().cloned();
         loop {

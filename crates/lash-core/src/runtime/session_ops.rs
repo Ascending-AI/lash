@@ -217,37 +217,6 @@ impl LashRuntime {
         protocol_session.validate_turn_extension(extension).await
     }
 
-    pub async fn branch_to_node(
-        &mut self,
-        node_id: Option<String>,
-    ) -> Result<crate::SessionSnapshot, SessionError> {
-        let mut state = self.export_state();
-        state.session_graph.branch_to(node_id);
-        let persisted_state = RuntimeSessionState::from_snapshot(state);
-
-        let policy = persisted_state.policy.clone();
-        let host = self.host.clone();
-        let services = self.services.clone();
-        let managed_sessions = Arc::clone(&self.managed_sessions);
-        let managed_turns = Arc::clone(&self.managed_turns);
-        let process_sync_needed = Arc::clone(&self.process_sync_needed);
-        let runtime_scope_id = Arc::clone(&self.runtime_scope_id);
-        let runtime_lease_owner = self.runtime_lease_owner.clone();
-        let turn_phase_probe = self.turn_phase_probe.clone();
-
-        let mut rebuilt = Self::from_host_state(policy, host, services, persisted_state).await?;
-        rebuilt.managed_sessions = managed_sessions;
-        rebuilt.managed_turns = managed_turns;
-        rebuilt.process_sync_needed = process_sync_needed;
-        rebuilt.runtime_scope_id = runtime_scope_id;
-        rebuilt.runtime_lease_owner = runtime_lease_owner;
-        rebuilt.turn_phase_probe = turn_phase_probe;
-
-        let exported = rebuilt.export_state();
-        *self = rebuilt;
-        Ok(exported)
-    }
-
     /// Promote a managed child session into the foreground runtime.
     ///
     /// Child sessions created through `SessionLifecycleService::create_session` are real

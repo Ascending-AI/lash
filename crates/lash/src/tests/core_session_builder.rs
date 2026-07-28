@@ -107,6 +107,7 @@ fn conflicting_reopen_state(session_id: &str) -> RuntimeSessionState {
         parent_node_id: state.session_graph.leaf_node_id.clone(),
         timestamp: "2026-07-27T00:00:00Z".to_string(),
         payload: lash_core::SessionNodePayload::FrameOpen {
+            frame_key: format!("conflicting-frame-{session_id}"),
             reason: lash_core::AgentFrameReason::continue_as(),
             assignment: lash_core::AgentFrameAssignment::from_policy(current_policy),
             protocol_turn_options: Default::default(),
@@ -1333,7 +1334,7 @@ async fn active_path_residency_opens_with_active_path_scope() -> Result<()> {
     let mut inactive_message = text_message(lash_core::MessageRole::User, "inactive branch");
     inactive_message.id = "inactive-message".to_string();
     state.append_active_conversation_messages(&[inactive_message]);
-    state.session_graph.branch_to(root);
+    state.session_graph.set_leaf_node_id(root);
     let mut active_message = text_message(lash_core::MessageRole::User, "active branch");
     active_message.id = "active-message".to_string();
     state.append_active_conversation_messages(&[active_message]);
@@ -2189,6 +2190,188 @@ async fn durable_process_worker_config_uses_core_process_registry() -> Result<()
     assert_eq!(
         config.process_execution_concurrency(),
         lash_core::DEFAULT_PROCESS_EXECUTION_CONCURRENCY
+    );
+    Ok(())
+}
+
+#[tokio::test]
+async fn fork_inherits_process_grants_without_inheriting_wake_subscription() -> Result<()> {
+    use lash_core::{ProcessRegistry as _, SessionStoreFactory as _};
+
+    let factory = Arc::new(lash_core::InMemorySessionStoreFactory::new());
+    let registry = Arc::new(TestLocalProcessRegistry::default());
+    let core = explicit_ephemeral_facets(LashCore::standard_builder())
+        .provider(mock_provider())
+        .model(mock_model_spec())
+        .store_factory(Arc::clone(&factory) as Arc<dyn lash_core::SessionStoreFactory>)
+        .process_registry(Arc::clone(&registry) as Arc<dyn lash_core::ProcessRegistry>)
+        .build()?;
+    let mut source_model = mock_model_spec();
+    source_model.id = "fork-source-model".to_string();
+    let policy = lash_core::SessionPolicy {
+        provider_id: "fork-source-provider".to_string(),
+        model: source_model,
+        session_id: Some("fork-grant-source".to_string()),
+        ..Default::default()
+    };
+    let source_store = factory
+        .create_store(&lash_core::SessionStoreCreateRequest {
+            session_id: "fork-grant-source".to_string(),
+            relation: lash_core::SessionRelation::Root,
+            policy: policy.clone(),
+        })
+        .await
+        .expect("create fork grant source");
+    let source_incarnation_id = source_store
+        .load_session_meta()
+        .await
+        .expect("load source metadata")
+        .expect("source metadata exists")
+        .incarnation_id;
+    let mut source_state = lash_core::RuntimeSessionState {
+        session_id: "fork-grant-source".to_string(),
+        session_lifetime: lash_core::SessionLifetime::durable(source_incarnation_id),
+        policy,
+        ..Default::default()
+    };
+    source_state.ensure_agent_frame_initialized();
+    source_store
+        .commit_runtime_state(lash_core::RuntimeCommit::persisted_state(
+            &source_state,
+            &[],
+        ))
+        .await
+        .expect("commit fork grant source");
+    let fork_node_id = source_state
+        .session_graph
+        .leaf_node_id
+        .clone()
+        .expect("fork grant source leaf");
+    core.pin(&fork_node_id).await?;
+
+    let source_scope = lash_core::SessionScope::new("fork-grant-source");
+    registry
+        .register_process(
+            lash_core::ProcessRegistration::new(
+                "fork-visible-process",
+                lash_core::ProcessInput::External {
+                    metadata: serde_json::Value::Null,
+                },
+                lash_core::RecoveryDisposition::ExternallyOwned,
+                lash_core::ProcessProvenance::host(),
+            )
+            .with_wake_target(Some(source_scope.clone())),
+        )
+        .await
+        .expect("register fork-visible process");
+    registry
+        .grant_handle(
+            &source_scope,
+            "fork-visible-process",
+            lash_core::ProcessHandleDescriptor::new(Some("test"), Some("fork inherited")),
+        )
+        .await
+        .expect("grant source process handle");
+
+    core.fork_at(&fork_node_id, "fork-grant-branch").await?;
+    let branch_store = factory
+        .open_existing_store(&lash_core::SessionStoreCreateRequest {
+            session_id: "fork-grant-branch".to_string(),
+            relation: lash_core::SessionRelation::Root,
+            policy: lash_core::SessionPolicy::default(),
+        })
+        .await
+        .expect("open branch store")
+        .expect("branch store exists");
+    let branch_read = branch_store
+        .load_session(lash_core::SessionReadScope::FullGraph)
+        .await
+        .expect("load branch config")
+        .expect("branch head exists");
+    assert_eq!(branch_read.config.provider_id, "fork-source-provider");
+    assert_eq!(branch_read.config.model.id, "fork-source-model");
+
+    let branch_scope = lash_core::SessionScope::new("fork-grant-branch");
+    let inherited = registry
+        .list_handle_grants(&branch_scope)
+        .await
+        .expect("list inherited grants");
+    assert_eq!(inherited.len(), 1);
+    assert_eq!(inherited[0].0.process_id, "fork-visible-process");
+    assert_eq!(
+        inherited[0]
+            .1
+            .wake_target
+            .as_ref()
+            .map(|scope| scope.session_id.as_str()),
+        Some("fork-grant-source"),
+        "fork observes the process but does not become its wake target"
+    );
+    let published_meta = branch_store
+        .load_session_meta()
+        .await
+        .expect("load published fork metadata")
+        .expect("published fork metadata exists");
+    let lash_core::SessionRelation::Fork { process_grants, .. } = &published_meta.relation else {
+        panic!("branch metadata must retain its fork relation");
+    };
+    assert!(
+        process_grants.is_empty(),
+        "successfully published grants must be consumed from the recovery snapshot"
+    );
+
+    let mut recovery_meta = published_meta;
+    let lash_core::SessionRelation::Fork { process_grants, .. } = &mut recovery_meta.relation
+    else {
+        unreachable!("relation was checked above");
+    };
+    process_grants.push(lash_core::ProcessHandleGrant {
+        session_id: "fork-grant-source".to_string(),
+        process_id: "fork-visible-process".to_string(),
+        descriptor: lash_core::ProcessHandleDescriptor::new(Some("test"), Some("fork inherited")),
+    });
+    branch_store
+        .save_session_meta(recovery_meta)
+        .await
+        .expect("simulate a crash before grant snapshot consumption");
+    registry
+        .revoke_handle(&branch_scope, "fork-visible-process")
+        .await
+        .expect("remove the partially published grant");
+    core.session("fork-grant-branch").open().await?;
+    assert_eq!(
+        registry
+            .list_handle_grants(&branch_scope)
+            .await
+            .expect("list recovered fork grants")
+            .len(),
+        1,
+        "opening a durable fork must reconcile an unconsumed grant snapshot"
+    );
+    let recovered_meta = branch_store
+        .load_session_meta()
+        .await
+        .expect("load recovered fork metadata")
+        .expect("recovered fork metadata exists");
+    let lash_core::SessionRelation::Fork { process_grants, .. } = &recovered_meta.relation else {
+        unreachable!("relation was checked above");
+    };
+    assert!(
+        process_grants.is_empty(),
+        "recovery must consume the snapshot after idempotent publication"
+    );
+    registry
+        .revoke_handle(&branch_scope, "fork-visible-process")
+        .await
+        .expect("deliberately revoke the recovered grant");
+    core.session("fork-grant-branch").open().await?;
+    assert!(
+        registry
+            .list_handle_grants(&branch_scope)
+            .await
+            .expect("list grants after deliberate revocation")
+            .is_empty(),
+        "a later deliberate revocation must remain revoked"
     );
     Ok(())
 }

@@ -451,7 +451,11 @@ impl TurnBoundary {
         let session_execution_lease = self.session_execution_lease.clone();
         if let Some(operation) = &operation {
             let session_id = self.state().session_id.clone();
-            let node_id_mapping = graph.derive_node_ids(&session_id, operation)?;
+            let incarnation_id = self
+                .state()
+                .durable_incarnation_id("history node derivation")?
+                .clone();
+            let node_id_mapping = graph.derive_node_ids(&session_id, &incarnation_id, operation)?;
             match &mut self.stage {
                 TurnCommitStage::Drafting(draft) => {
                     draft.remap_node_ids(&session_id, &node_id_mapping)
@@ -711,6 +715,7 @@ mod tests {
             session_id: "session-1".to_string(),
             ..RuntimeSessionState::default()
         };
+        state.bind_durable_incarnation(crate::IncarnationId::mint_for_store());
         state.ensure_agent_frame_initialized();
         if !graph.nodes.is_empty() {
             let frame_node_id = state.current_frame_node_id.clone().expect("initial frame");
@@ -768,8 +773,11 @@ mod tests {
             },
             &crate::SystemClock,
         );
-        let expected_frame_node_id =
-            crate::session_graph::frame_node_id(&state.session_id, &frame_id);
+        let expected_frame_node_id = crate::session_graph::frame_node_id_for_lifetime(
+            &state.session_id,
+            &state.session_lifetime,
+            &frame_id,
+        );
 
         assert_eq!(state.session_id, "session-1");
         assert_eq!(
@@ -995,7 +1003,7 @@ mod tests {
 
         assert_eq!(boundary.protocol_events.len(), 1);
         assert_eq!(pipeline.state().turn_index, 1);
-        assert!(pipeline.state().head_revision.is_none());
+        assert_eq!(pipeline.state().head_revision, 0);
     }
 
     #[tokio::test]
@@ -1258,7 +1266,7 @@ mod tests {
         );
         assert_eq!(pipeline.state_mut().token_ledger.len(), 2);
         assert!(pipeline.state_mut().execution_state_snapshot().is_none());
-        assert!(pipeline.state_mut().head_revision.is_some());
+        assert!(pipeline.state_mut().head_revision > 0);
     }
 
     #[tokio::test]

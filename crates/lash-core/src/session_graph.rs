@@ -16,12 +16,32 @@ fn draft_node_id(namespace: &str, ordinal: u64) -> String {
 /// Derive a durable frame identity before the surrounding operation commits.
 ///
 /// Process provenance can capture the current frame scope immediately, so a
-/// FrameOpen ID cannot use the provisional-to-realized remapping used by
-/// ordinary history nodes.
-pub(crate) fn frame_node_id(session_id: &str, frame_key: &str) -> String {
+/// FrameOpen ID must be final before runtime effects begin. Store binding may
+/// remap an unpersisted provisional frame at the assembly seam; commit-time
+/// realization must leave it unchanged.
+pub fn frame_node_id(
+    session_id: &str,
+    incarnation_id: &crate::IncarnationId,
+    frame_key: &str,
+) -> String {
+    frame_node_id_from_derivation(session_id, incarnation_id.as_str(), frame_key)
+}
+
+#[doc(hidden)]
+pub fn frame_node_id_for_lifetime(
+    session_id: &str,
+    lifetime: &crate::SessionLifetime,
+    frame_key: &str,
+) -> String {
+    frame_node_id_from_derivation(session_id, lifetime.derivation_id(), frame_key)
+}
+
+fn frame_node_id_from_derivation(session_id: &str, derivation_id: &str, frame_key: &str) -> String {
     let preimage = format!(
-        "{}:{session_id}:{}:{frame_key}",
+        "{}:{session_id}:{}:{}:{}:{frame_key}",
         session_id.len(),
+        derivation_id.len(),
+        derivation_id,
         frame_key.len()
     );
     format!(
@@ -205,6 +225,7 @@ pub enum SessionNodePayload {
         body: SharedJsonValue,
     },
     FrameOpen {
+        frame_key: String,
         reason: crate::AgentFrameReason,
         assignment: crate::AgentFrameAssignment,
         protocol_turn_options: crate::ProtocolTurnOptions,
@@ -586,6 +607,7 @@ impl SessionNodeRecord {
                 reason,
                 assignment,
                 protocol_turn_options,
+                ..
             } => Some((reason, assignment, protocol_turn_options)),
             SessionNodePayload::Event { .. } | SessionNodePayload::Plugin { .. } => None,
         }
@@ -864,6 +886,7 @@ impl SessionGraph {
     pub(crate) fn append_frame_open_with_id_at(
         &mut self,
         frame_node_id: String,
+        frame_key: String,
         reason: crate::AgentFrameReason,
         assignment: crate::AgentFrameAssignment,
         protocol_turn_options: crate::ProtocolTurnOptions,
@@ -877,6 +900,7 @@ impl SessionGraph {
             parent_node_id: self.leaf_node_id.clone(),
             timestamp,
             payload: SessionNodePayload::FrameOpen {
+                frame_key,
                 reason,
                 assignment,
                 protocol_turn_options,
@@ -957,10 +981,6 @@ impl SessionGraph {
             .unwrap_or_default()
     }
 
-    pub fn branch_to(&mut self, node_id: Option<String>) {
-        self.data_mut().leaf_node_id = node_id;
-    }
-
     pub fn set_leaf_node_id(&mut self, node_id: Option<String>) {
         self.data_mut().leaf_node_id = node_id;
     }
@@ -993,7 +1013,11 @@ impl SessionGraph {
             .any(|node| node.node_id == node_id)
     }
 
-    pub fn fork_current_path(&self) -> SessionGraph {
+    /// Return a resident graph containing only the current ancestry path.
+    ///
+    /// This is a memory-residency trim. It does not create a durable fork or
+    /// move a persisted session head.
+    pub fn trim_to_active_path(&self) -> SessionGraph {
         let path = self.active_path_nodes();
         SessionGraph::from_nodes(
             path.into_iter().cloned().collect(),
@@ -1376,18 +1400,21 @@ mod tests {
     fn nearest_frame_is_derived_from_ancestry() {
         let assignment = crate::AgentFrameAssignment::from_policy(crate::SessionPolicy::default());
         let mut graph = SessionGraph::default();
-        let first = frame_node_id("frame-ancestry", "first-frame");
+        let incarnation_id = crate::IncarnationId::mint_for_store();
+        let first = frame_node_id("session", &incarnation_id, "first-frame");
         assert!(graph.append_frame_open_with_id_at(
             first.clone(),
+            "first-frame".to_string(),
             crate::AgentFrameReason::initial(),
             assignment.clone(),
             crate::ProtocolTurnOptions::default(),
             "2026-07-27T00:00:00Z".to_string(),
         ));
         let first_message = graph.append_message(text_message("m1", MessageRole::User, "first"));
-        let second = frame_node_id("frame-ancestry", "second-frame");
+        let second = frame_node_id("session", &incarnation_id, "second-frame");
         assert!(graph.append_frame_open_with_id_at(
             second.clone(),
+            "second-frame".to_string(),
             crate::AgentFrameReason::continue_as(),
             assignment,
             crate::ProtocolTurnOptions::default(),

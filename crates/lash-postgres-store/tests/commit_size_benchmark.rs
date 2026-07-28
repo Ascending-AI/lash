@@ -25,6 +25,7 @@ fn realistic_commit(session_id: &str, node_count: usize, sample: usize) -> Runti
                 timestamp: "2026-07-26T12:00:00Z".to_string(),
                 payload: if index == 0 {
                     SessionNodePayload::FrameOpen {
+                        frame_key: "benchmark-frame".to_string(),
                         reason: lash_core::AgentFrameReason::initial(),
                         assignment: lash_core::AgentFrameAssignment::from_policy(
                             SessionPolicy::default(),
@@ -97,7 +98,12 @@ fn record_attachment_intents(store: &dyn RuntimePersistence, commit: &RuntimeCom
     }
 }
 
-async fn time_commit(store: Arc<dyn RuntimePersistence>, commit: RuntimeCommit) -> Duration {
+async fn time_commit(store: Arc<dyn RuntimePersistence>, mut commit: RuntimeCommit) -> Duration {
+    let incarnation_id = store
+        .ensure_session_incarnation(&commit.session_id, &SessionPolicy::default())
+        .await
+        .expect("realize benchmark session lifetime");
+    commit.session_lifetime = lash_core::SessionLifetime::durable(incarnation_id);
     record_attachment_intents(store.as_ref(), &commit);
     let started = Instant::now();
     store

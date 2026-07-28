@@ -184,6 +184,7 @@ pub async fn runtime_persistence_clock_expiry(
 
     let stale_state = RuntimeSessionState {
         session_id: session_id.to_string(),
+        session_lifetime: conformance_lifetime(session_id),
         ..RuntimeSessionState::default()
     };
     let stale_commit = store
@@ -242,6 +243,7 @@ where
     append_rejects_existing_node_id_collision(make()).await;
     commit_rejects_unresolvable_leaf(make()).await;
     commit_rejects_missing_leaf(make()).await;
+    empty_append_cannot_move_the_head(make()).await;
     host_tombstone_cannot_remove_a_reachable_leaf(make()).await;
     commit_rejects_leaf_without_frame_open_ancestor(make()).await;
     // [`SessionExecutionLeaseStore`]: single-writer lane fencing.
@@ -275,7 +277,6 @@ where
     pending_active_turn_inputs_defer_unaccepted_once_on_interrupt(make()).await;
     // [`StoreMaintenance`]: tombstone/vacuum/GC retention.
     verify_node_refcounts_matches_append_edges_and_head_moves(make()).await;
-    tombstoning_zero_ref_node_decrements_its_parent(make()).await;
     tombstone_vacuum_and_gc_are_minimally_consistent(make()).await;
     if options.reclaims_unreachable_blobs {
         gc_reclaims_unreachable_checkpoint_blobs_and_preserves_live(make()).await;
@@ -285,6 +286,7 @@ where
 async fn commit_rejects_leaf_without_frame_open_ancestor(store: Arc<dyn RuntimePersistence>) {
     let state = RuntimeSessionState {
         session_id: "missing-frame-root".to_string(),
+        session_lifetime: conformance_lifetime("missing-frame-root"),
         ..RuntimeSessionState::default()
     };
     let node = SessionNodeRecord {
@@ -323,6 +325,7 @@ async fn verify_node_refcounts_matches_append_edges_and_head_moves(
 ) {
     let mut state = RuntimeSessionState {
         session_id: "refcount-scrub".to_string(),
+        session_lifetime: conformance_lifetime("refcount-scrub"),
         ..RuntimeSessionState::default()
     };
     state.ensure_agent_frame_initialized();
@@ -377,49 +380,6 @@ async fn verify_node_refcounts_matches_append_edges_and_head_moves(
     assert_eq!(verified.checked_node_count, 2);
 }
 
-async fn tombstoning_zero_ref_node_decrements_its_parent(store: Arc<dyn RuntimePersistence>) {
-    let state = RuntimeSessionState {
-        session_id: "zero-ref-tombstone".to_string(),
-        current_frame_node_id: Some("root-frame".to_string()),
-        session_graph: crate::SessionGraph::from_nodes(
-            vec![
-                sample_session_node("root-frame", None),
-                sample_session_node("live-leaf", Some("root-frame")),
-                sample_session_node("zero-ref-leaf", Some("root-frame")),
-            ],
-            Some("live-leaf".to_string()),
-        ),
-        ..RuntimeSessionState::default()
-    };
-    commit_runtime_state_for_test(
-        &store,
-        RuntimeCommit::persisted_state(&state, &[]),
-        "zero-ref-tombstone",
-    )
-    .await
-    .expect("commit one rooted and one zero-ref child");
-
-    store
-        .tombstone_nodes(&["zero-ref-leaf".to_string()])
-        .await
-        .expect("tombstone zero-ref node and decrement its parent");
-    assert!(
-        store
-            .load_node("zero-ref-leaf")
-            .await
-            .expect("load tombstoned zero-ref node")
-            .is_none()
-    );
-    assert_eq!(
-        store
-            .verify_node_refcounts()
-            .await
-            .expect("parent count remains exact after zero-ref tombstone")
-            .checked_node_count,
-        2
-    );
-}
-
 async fn turn_input_application_identity_survives_pending_tombstone_vacuum(
     store: Arc<dyn RuntimePersistence>,
 ) {
@@ -428,6 +388,7 @@ async fn turn_input_application_identity_survives_pending_tombstone_vacuum(
     let lease = claim_session_execution_lease_for_test(&store, session_id, owner_id).await;
     let mut state = RuntimeSessionState {
         session_id: session_id.to_string(),
+        session_lifetime: conformance_lifetime(session_id),
         ..RuntimeSessionState::default()
     };
     let mut expected = Vec::new();
@@ -481,7 +442,7 @@ async fn turn_input_application_identity_survives_pending_tombstone_vacuum(
             .commit_runtime_state(commit)
             .await
             .expect("commit application identity");
-        state.head_revision = Some(result.head_revision);
+        state.head_revision = result.head_revision;
 
         assert_eq!(result.turn_input_applications, turn_expected);
         expected.extend(turn_expected);
@@ -812,6 +773,14 @@ fn lease_owner(owner_id: &str) -> crate::LeaseOwnerIdentity {
     crate::LeaseOwnerIdentity::opaque(owner_id, format!("{owner_id}:incarnation"))
 }
 
+fn conformance_incarnation(session_id: &str) -> crate::IncarnationId {
+    crate::IncarnationId::decode_from_store(format!("conformance:{session_id}"))
+}
+
+fn conformance_lifetime(session_id: impl AsRef<str>) -> crate::SessionLifetime {
+    crate::SessionLifetime::durable(conformance_incarnation(session_id.as_ref()))
+}
+
 fn local_lease_owner(
     owner_id: &str,
     incarnation_id: &str,
@@ -872,13 +841,23 @@ async fn commit_runtime_state_for_test(
         .await
 }
 
-fn sample_session_node(id: &str, parent: Option<&str>) -> SessionNodeRecord {
+fn sample_session_node(
+    session_id: &str,
+    incarnation_id: &crate::IncarnationId,
+    id: &str,
+    parent: Option<&str>,
+) -> SessionNodeRecord {
+    let node_id = parent.map_or_else(
+        || crate::frame_node_id(session_id, incarnation_id, id),
+        |_| id.to_string(),
+    );
     SessionNodeRecord {
-        node_id: id.to_string(),
+        node_id,
         parent_node_id: parent.map(ToOwned::to_owned),
         timestamp: "1970-01-01T00:00:00Z".to_string(),
         payload: if parent.is_none() {
             SessionNodePayload::FrameOpen {
+                frame_key: id.to_string(),
                 reason: AgentFrameReason::initial(),
                 assignment: crate::AgentFrameAssignment::from_policy(
                     crate::SessionPolicy::default(),
@@ -910,6 +889,7 @@ fn attachment_intent(id: &str) -> AttachmentIntent {
 async fn commit_increments_head_and_round_trips_agent_frames(store: Arc<dyn RuntimePersistence>) {
     let mut state = RuntimeSessionState {
         session_id: "root".to_string(),
+        session_lifetime: conformance_lifetime("root"),
         policy: SessionPolicy {
             model: ModelSpec::from_token_limits("gpt-5.4-mini", Default::default(), 200_000, None)
                 .expect("valid model spec"),
@@ -924,14 +904,20 @@ async fn commit_increments_head_and_round_trips_agent_frames(store: Arc<dyn Runt
         .assignment
         .clone();
     let custom_reason = AgentFrameReason::new("plan_mode");
+    let second_frame_node_id = crate::session_graph::frame_node_id_for_lifetime(
+        &state.session_id,
+        &state.session_lifetime,
+        "frame-2",
+    );
     assert!(state.session_graph.append_frame_open_with_id_at(
+        second_frame_node_id.clone(),
         "frame-2".to_string(),
         custom_reason.clone(),
         assignment,
         ProtocolTurnOptions::default(),
         "2026-07-27T00:00:00Z".to_string(),
     ));
-    state.current_frame_node_id = Some("frame-2".to_string());
+    state.current_frame_node_id = Some(second_frame_node_id.clone());
     state.agent_frames = state.session_graph.agent_frame_records("root");
     state.set_execution_state_snapshot(Some(b"frame-vm".to_vec()));
 
@@ -948,12 +934,15 @@ async fn commit_increments_head_and_round_trips_agent_frames(store: Arc<dyn Runt
         .expect("load session")
         .expect("session read");
 
-    assert_eq!(read.current_frame_node_id.as_deref(), Some("frame-2"));
+    assert_eq!(
+        read.current_frame_node_id.as_deref(),
+        Some(second_frame_node_id.as_str())
+    );
     let frames = read.graph.agent_frame_records("root");
     assert_eq!(frames.len(), 2);
     let current = frames
         .iter()
-        .find(|frame| frame.frame_node_id == "frame-2")
+        .find(|frame| frame.frame_node_id == second_frame_node_id)
         .expect("current frame");
     assert_eq!(current.reason, custom_reason);
     assert_eq!(
@@ -967,18 +956,21 @@ async fn commit_increments_head_and_round_trips_agent_frames(store: Arc<dyn Runt
 async fn concurrent_head_revision_cas_applies_exactly_once(store: Arc<dyn RuntimePersistence>) {
     let session_id = "concurrent-head-cas";
     let lease = claim_session_execution_lease_for_test(&store, session_id, "cas-owner").await;
+    let incarnation_id = crate::IncarnationId::mint_for_store();
     let make_commit = |node_id: &str| {
         let state = RuntimeSessionState {
             session_id: session_id.to_string(),
+            session_lifetime: crate::SessionLifetime::durable(incarnation_id.clone()),
             ..RuntimeSessionState::default()
         };
-        let node = sample_session_node(node_id, None);
+        let node = sample_session_node(session_id, &incarnation_id, node_id, None);
+        let derived_node_id = node.node_id.clone();
         RuntimeCommit {
-            expected_head_revision: Some(0),
-            current_frame_node_id: Some(node_id.to_string()),
+            expected_head_revision: 0,
+            current_frame_node_id: Some(derived_node_id.clone()),
             graph: crate::GraphCommitDelta::Append {
                 nodes: vec![node],
-                leaf_node_id: Some(node_id.to_string()),
+                leaf_node_id: Some(derived_node_id),
             },
             ..RuntimeCommit::persisted_state(&state, &[])
         }
@@ -1028,11 +1020,11 @@ async fn concurrent_head_revision_cas_applies_exactly_once(store: Arc<dyn Runtim
         .expect("concurrent head-CAS winner persisted a session");
     assert_eq!(persisted.head_revision, 1, "exactly one commit applied");
     assert_eq!(persisted.graph.nodes.len(), 1, "exactly one graph applied");
+    let left_node_id = crate::frame_node_id(session_id, &incarnation_id, "cas-left");
+    let right_node_id = crate::frame_node_id(session_id, &incarnation_id, "cas-right");
     assert!(
-        matches!(
-            persisted.graph.nodes[0].node_id.as_str(),
-            "cas-left" | "cas-right"
-        ),
+        persisted.graph.nodes[0].node_id == left_node_id
+            || persisted.graph.nodes[0].node_id == right_node_id,
         "the persisted graph must come from one of the two writers"
     );
     release_session_execution_lease_for_test(&store, &lease).await;
@@ -1041,6 +1033,7 @@ async fn concurrent_head_revision_cas_applies_exactly_once(store: Arc<dyn Runtim
 async fn commit_rejects_a_different_session_id(store: Arc<dyn RuntimePersistence>) {
     let alpha = RuntimeSessionState {
         session_id: "alpha".to_string(),
+        session_lifetime: conformance_lifetime("alpha"),
         ..RuntimeSessionState::default()
     };
     commit_runtime_state_for_test(
@@ -1052,6 +1045,7 @@ async fn commit_rejects_a_different_session_id(store: Arc<dyn RuntimePersistence
     .expect("first commit binds the session");
     let beta = RuntimeSessionState {
         session_id: "beta".to_string(),
+        session_lifetime: conformance_lifetime("beta"),
         ..RuntimeSessionState::default()
     };
     let result = commit_runtime_state_for_test(
@@ -1069,6 +1063,7 @@ async fn commit_rejects_a_different_session_id(store: Arc<dyn RuntimePersistence
 async fn load_hydrates_checkpoint_and_usage(store: Arc<dyn RuntimePersistence>) {
     let state = RuntimeSessionState {
         session_id: "hydrated".to_string(),
+        session_lifetime: conformance_lifetime("hydrated"),
         tool_state_snapshot: Some(ToolState::default().with_generation(9)),
         plugin_snapshot_revision: Some(12),
         plugin_snapshot: Some(PluginSessionSnapshot {
@@ -1221,13 +1216,14 @@ async fn session_execution_lease_contract(store: Arc<dyn RuntimePersistence>) {
 
     let mut state = RuntimeSessionState {
         session_id: "root".to_string(),
+        session_lifetime: conformance_lifetime("root"),
         ..RuntimeSessionState::default()
     };
     let lease_free_commit = store
         .commit_runtime_state(RuntimeCommit::persisted_state(&state, &[]))
         .await
         .expect("head CAS, not the advisory lease, authorizes commit");
-    state.head_revision = Some(lease_free_commit.head_revision);
+    state.head_revision = lease_free_commit.head_revision;
 
     let commit_lease = claim_session_execution_lease_for_test(&store, "root", "commit-owner").await;
     let lease_commit = store
@@ -1238,12 +1234,13 @@ async fn session_execution_lease_contract(store: Arc<dyn RuntimePersistence>) {
         )
         .await
         .expect("advisory lease-bearing commit");
-    state.head_revision = Some(lease_commit.head_revision);
+    state.head_revision = lease_commit.head_revision;
     let after_commit = claim_session_execution_lease_for_test(&store, "root", "after-commit").await;
     release_session_execution_lease_for_test(&store, &after_commit).await;
 
     let turn_state = RuntimeSessionState {
         session_id: "root".to_string(),
+        session_lifetime: state.session_lifetime.clone(),
         turn_index: 1,
         head_revision: state.head_revision,
         ..RuntimeSessionState::default()
@@ -1580,18 +1577,21 @@ async fn session_execution_lease_reclaim_contract(store: Arc<dyn RuntimePersiste
 async fn active_path_read_scope_selects_only_requested_ancestry(
     store: Arc<dyn RuntimePersistence>,
 ) {
+    let incarnation_id = crate::IncarnationId::mint_for_store();
+    let root = sample_session_node("branchy", &incarnation_id, "root-node", None);
+    let root_node_id = root.node_id.clone();
     let graph = crate::SessionGraph::from_nodes(
         vec![
-            sample_session_node("root-node", None),
-            sample_session_node("left-node", Some("root-node")),
-            sample_session_node("left-leaf", Some("left-node")),
-            sample_session_node("right-leaf", Some("root-node")),
+            root,
+            sample_session_node("branchy", &incarnation_id, "left-node", Some(&root_node_id)),
+            sample_session_node("branchy", &incarnation_id, "left-leaf", Some("left-node")),
         ],
         Some("left-leaf".to_string()),
     );
     let state = RuntimeSessionState {
         session_id: "branchy".to_string(),
-        current_frame_node_id: Some("root-node".to_string()),
+        session_lifetime: crate::SessionLifetime::durable(incarnation_id),
+        current_frame_node_id: Some(root_node_id.clone()),
         session_graph: graph,
         ..RuntimeSessionState::default()
     };
@@ -1601,7 +1601,7 @@ async fn active_path_read_scope_selects_only_requested_ancestry(
         "active-path",
     )
     .await
-    .expect("commit branchy graph");
+    .expect("commit linear graph");
 
     let full = store
         .load_session(SessionReadScope::FullGraph)
@@ -1614,8 +1614,8 @@ async fn active_path_read_scope_selects_only_requested_ancestry(
             .iter()
             .map(|node| node.node_id.as_str())
             .collect::<Vec<_>>(),
-        vec!["root-node", "left-node", "left-leaf", "right-leaf"],
-        "FullGraph must retain every non-tombstoned branch"
+        vec![root_node_id.as_str(), "left-node", "left-leaf"],
+        "FullGraph must retain the full non-tombstoned chain"
     );
 
     let persisted_leaf_path = store
@@ -1630,34 +1630,34 @@ async fn active_path_read_scope_selects_only_requested_ancestry(
             .iter()
             .map(|node| node.node_id.as_str())
             .collect::<Vec<_>>(),
-        vec!["root-node", "left-node", "left-leaf"],
-        "ActivePath with no explicit leaf must use the persisted leaf and hide sibling branches"
+        vec![root_node_id.as_str(), "left-node", "left-leaf"],
+        "ActivePath with no explicit leaf must use the persisted leaf"
     );
     assert_eq!(
         persisted_leaf_path.graph.leaf_node_id.as_deref(),
         Some("left-leaf")
     );
 
-    let explicit_right_path = store
+    let explicit_ancestor_path = store
         .load_session(SessionReadScope::ActivePath {
-            leaf_node_id: Some("right-leaf".to_string()),
+            leaf_node_id: Some("left-node".to_string()),
         })
         .await
         .expect("load explicit active path")
         .expect("explicit active path exists");
     assert_eq!(
-        explicit_right_path
+        explicit_ancestor_path
             .graph
             .nodes
             .iter()
             .map(|node| node.node_id.as_str())
             .collect::<Vec<_>>(),
-        vec!["root-node", "right-leaf"],
-        "ActivePath with an explicit leaf must select that ancestry, not the persisted leaf"
+        vec![root_node_id.as_str(), "left-node"],
+        "ActivePath with an explicit leaf must select only that ancestry"
     );
     assert_eq!(
-        explicit_right_path.graph.leaf_node_id.as_deref(),
-        Some("right-leaf")
+        explicit_ancestor_path.graph.leaf_node_id.as_deref(),
+        Some("left-node")
     );
 }
 
@@ -1682,6 +1682,7 @@ async fn attachment_manifest_records_intent_and_commit_stamps(store: Arc<dyn Run
         .expect("commit attachment ref out of band");
     let state = RuntimeSessionState {
         session_id: "root".to_string(),
+        session_lifetime: conformance_lifetime("root"),
         ..RuntimeSessionState::default()
     };
     commit_runtime_state_for_test(
@@ -2155,6 +2156,7 @@ async fn queued_work_exact_claim_uses_selected_batch_ids(store: Arc<dyn RuntimeP
     );
     let state = RuntimeSessionState {
         session_id: "root".to_string(),
+        session_lifetime: conformance_lifetime("root"),
         ..RuntimeSessionState::default()
     };
     store
@@ -2254,6 +2256,7 @@ async fn queued_work_classes_gate_command_and_turn_claims(store: Arc<dyn Runtime
     );
     let state = RuntimeSessionState {
         session_id: "root".to_string(),
+        session_lifetime: conformance_lifetime("root"),
         ..RuntimeSessionState::default()
     };
     store
@@ -2441,6 +2444,7 @@ async fn queued_work_claims_respect_boundaries_abandon_and_stale_completion(
     // by claim id + lease token; the abandon+reclaim is what supersedes it).
     let stale_state = RuntimeSessionState {
         session_id: "root".to_string(),
+        session_lifetime: conformance_lifetime("root"),
         ..RuntimeSessionState::default()
     };
     let stale_err = commit_runtime_state_for_test(
@@ -2535,6 +2539,7 @@ pub async fn queued_work_claims_supersede_across_session_lease_generations(
 
     let stale_state = RuntimeSessionState {
         session_id: "root".to_string(),
+        session_lifetime: conformance_lifetime("root"),
         ..RuntimeSessionState::default()
     };
     let stale_err = store
@@ -3273,6 +3278,7 @@ async fn queued_work_completion_is_lease_guarded(store: Arc<dyn RuntimePersisten
     stale_completion.lease_token.push_str(":stale");
     let state = RuntimeSessionState {
         session_id: "root".to_string(),
+        session_lifetime: conformance_lifetime("root"),
         ..RuntimeSessionState::default()
     };
     let err = store
@@ -3354,6 +3360,7 @@ async fn queue_completion_and_turn_commit_stamp_are_atomic(store: Arc<dyn Runtim
     assert_eq!(input_claim.inputs[0].input_id, input.input_id);
     let state = RuntimeSessionState {
         session_id: "root".to_string(),
+        session_lifetime: conformance_lifetime("root"),
         turn_index: 41,
         ..RuntimeSessionState::default()
     };
@@ -3889,6 +3896,7 @@ async fn pending_turn_input_claims_reclaim_complete_and_fence(store: Arc<dyn Run
 
     let state = RuntimeSessionState {
         session_id: "root".to_string(),
+        session_lifetime: conformance_lifetime("root"),
         ..RuntimeSessionState::default()
     };
     let err = store
@@ -4011,6 +4019,7 @@ pub async fn turn_input_claims_supersede_across_session_lease_generations(
 
     let stale_state = RuntimeSessionState {
         session_id: "root".to_string(),
+        session_lifetime: conformance_lifetime("root"),
         ..RuntimeSessionState::default()
     };
     let stale_err = store
@@ -4131,6 +4140,7 @@ async fn pending_turn_input_cancel_covers_active_and_deferred_states(
     let lease = claim_session_execution_lease_for_test(&store, "root", "cancel-input-owner").await;
     let state = RuntimeSessionState {
         session_id: "root".to_string(),
+        session_lifetime: conformance_lifetime("root"),
         ..RuntimeSessionState::default()
     };
     store
@@ -4261,6 +4271,7 @@ async fn pending_active_turn_inputs_defer_unaccepted_once_on_interrupt(
 
     let state = RuntimeSessionState {
         session_id: "root".to_string(),
+        session_lifetime: conformance_lifetime("root"),
         ..RuntimeSessionState::default()
     };
     let interrupt_result = store
@@ -4273,7 +4284,7 @@ async fn pending_active_turn_inputs_defer_unaccepted_once_on_interrupt(
         .await
         .expect("interrupt commit completes accepted inputs and defers unaccepted inputs");
     let mut state = state;
-    state.head_revision = Some(interrupt_result.head_revision);
+    state.head_revision = interrupt_result.head_revision;
     let pending_after_interrupt = store
         .list_pending_turn_inputs("root")
         .await
@@ -4360,6 +4371,7 @@ async fn pending_active_turn_inputs_defer_unaccepted_once_on_interrupt(
 async fn session_metadata_round_trips(store: Arc<dyn RuntimePersistence>) {
     let meta = SessionMeta {
         session_id: "root".to_string(),
+        incarnation_id: crate::IncarnationId::mint_for_store(),
         session_name: "Conformance Root".to_string(),
         created_at: "2026-06-02T00:00:00Z".to_string(),
         model: "gpt-5.4-mini".to_string(),
@@ -4384,18 +4396,22 @@ async fn session_metadata_round_trips(store: Arc<dyn RuntimePersistence>) {
 }
 
 async fn tombstone_vacuum_and_gc_are_minimally_consistent(store: Arc<dyn RuntimePersistence>) {
+    let incarnation_id = crate::IncarnationId::mint_for_store();
+    let root = sample_session_node("root", &incarnation_id, "node-live", None);
+    let root_node_id = root.node_id.clone();
     let mut state = RuntimeSessionState {
         session_id: "root".to_string(),
+        session_lifetime: crate::SessionLifetime::durable(incarnation_id.clone()),
         session_graph: crate::SessionGraph::from_nodes(
             vec![
-                sample_session_node("node-live", None),
-                sample_session_node("node-delete", Some("node-live")),
+                root,
+                sample_session_node("root", &incarnation_id, "node-delete", Some(&root_node_id)),
             ],
             Some("node-delete".to_string()),
         ),
         ..RuntimeSessionState::default()
     };
-    state.head_revision = None;
+    state.head_revision = 0;
     commit_runtime_state_for_test(
         &store,
         RuntimeCommit::persisted_state(&state, &[]),
@@ -4452,6 +4468,7 @@ async fn gc_reclaims_unreachable_checkpoint_blobs_and_preserves_live(
     // First commit writes a live checkpoint blob.
     let v1 = RuntimeSessionState {
         session_id: "gc-blobs".to_string(),
+        session_lifetime: conformance_lifetime("gc-blobs"),
         tool_state_snapshot: Some(ToolState::default().with_generation(1)),
         ..RuntimeSessionState::default()
     };
@@ -4466,8 +4483,9 @@ async fn gc_reclaims_unreachable_checkpoint_blobs_and_preserves_live(
     // blob is now unreachable from every session head.
     let v2 = RuntimeSessionState {
         session_id: "gc-blobs".to_string(),
+        session_lifetime: v1.session_lifetime.clone(),
         tool_state_snapshot: Some(ToolState::default().with_generation(2)),
-        head_revision: Some(v1_result.head_revision),
+        head_revision: v1_result.head_revision,
         ..RuntimeSessionState::default()
     };
     commit_runtime_state_for_test(
@@ -4614,6 +4632,7 @@ async fn runtime_persistence_survives_reopen(factory: ReopenableRuntimePersisten
 
     let meta = SessionMeta {
         session_id: "root".to_string(),
+        incarnation_id: crate::IncarnationId::mint_for_store(),
         session_name: "Durable Root".to_string(),
         created_at: "2026-06-02T00:00:00Z".to_string(),
         model: "gpt-5.4-mini".to_string(),
@@ -4627,6 +4646,7 @@ async fn runtime_persistence_survives_reopen(factory: ReopenableRuntimePersisten
         .expect("save meta");
     let mut state = RuntimeSessionState {
         session_id: "root".to_string(),
+        session_lifetime: crate::SessionLifetime::durable(meta.incarnation_id.clone()),
         tool_state_snapshot: Some(ToolState::default().with_generation(77)),
         ..RuntimeSessionState::default()
     };
@@ -4637,7 +4657,7 @@ async fn runtime_persistence_survives_reopen(factory: ReopenableRuntimePersisten
     )
     .await
     .expect("commit state");
-    state.head_revision = Some(initial_commit.head_revision);
+    state.head_revision = initial_commit.head_revision;
 
     let application_lease =
         claim_session_execution_lease_for_test(&factory.open, "root", "reopen-applications").await;
@@ -4689,7 +4709,7 @@ async fn runtime_persistence_survives_reopen(factory: ReopenableRuntimePersisten
             )))
             .await
             .expect("commit reopen application");
-        state.head_revision = Some(result.head_revision);
+        state.head_revision = result.head_revision;
     }
     let queued = factory
         .open
@@ -4886,6 +4906,7 @@ async fn queued_wake_delivery_is_source_key_idempotent_and_claimed_once(
     ));
     let state = RuntimeSessionState {
         session_id: "root".to_string(),
+        session_lifetime: conformance_lifetime("root"),
         ..RuntimeSessionState::default()
     };
     store
@@ -4912,6 +4933,7 @@ async fn final_commit_stamp_is_idempotent_and_conflicts_on_changed_hash(
 ) {
     let mut state = RuntimeSessionState {
         session_id: "root".to_string(),
+        session_lifetime: conformance_lifetime("root"),
         ..RuntimeSessionState::default()
     };
     state.ensure_agent_frame_initialized();
@@ -4972,7 +4994,7 @@ async fn final_commit_stamp_is_idempotent_and_conflicts_on_changed_hash(
         .with_operation(operation.clone())
         .expect("stamp retry from advanced head")
         .0;
-    retry_from_new_head.expected_head_revision = Some(first.head_revision);
+    retry_from_new_head.expected_head_revision = first.head_revision;
     let retry_hash = retry_from_new_head
         .turn_commit_hash()
         .expect("retry commit hash");
@@ -4983,6 +5005,7 @@ async fn final_commit_stamp_is_idempotent_and_conflicts_on_changed_hash(
 
     let changed_state = RuntimeSessionState {
         session_id: "root".to_string(),
+        session_lifetime: state.session_lifetime.clone(),
         turn_index: 1,
         ..RuntimeSessionState::default()
     };
@@ -5002,18 +5025,24 @@ async fn final_commit_stamp_is_idempotent_and_conflicts_on_changed_hash(
 async fn verified_commit_rejects_receipt_topology_mismatch(store: Arc<dyn RuntimePersistence>) {
     let mut state = RuntimeSessionState {
         session_id: "root".to_string(),
+        session_lifetime: conformance_lifetime("root"),
         ..RuntimeSessionState::default()
     };
     state.ensure_agent_frame_initialized();
     let operation = crate::OperationId::turn("root", "realization-guard", "final");
-    let node_id = crate::store::derive_history_node_id("root", &operation, 0)
-        .expect("derive guarded node id");
+    let frame_key = "realization-guard-frame";
+    let node_id = crate::session_graph::frame_node_id_for_lifetime(
+        &state.session_id,
+        &state.session_lifetime,
+        frame_key,
+    );
     let graph = crate::GraphCommitDelta::Append {
         nodes: vec![crate::SessionNodeRecord {
             node_id: node_id.clone(),
             parent_node_id: None,
             timestamp: "2026-07-26T10:00:00Z".to_string(),
             payload: crate::SessionNodePayload::FrameOpen {
+                frame_key: frame_key.to_string(),
                 reason: AgentFrameReason::initial(),
                 assignment: crate::AgentFrameAssignment::from_policy(
                     crate::SessionPolicy::default(),
@@ -5059,6 +5088,7 @@ async fn verified_commit_rejects_receipt_topology_mismatch(store: Arc<dyn Runtim
 async fn commit_rejects_non_derived_append_node_ids(store: Arc<dyn RuntimePersistence>) {
     let mut state = RuntimeSessionState {
         session_id: "root".to_string(),
+        session_lifetime: conformance_lifetime("root"),
         ..RuntimeSessionState::default()
     };
     state.ensure_agent_frame_initialized();
@@ -5095,18 +5125,22 @@ async fn commit_rejects_non_derived_append_node_ids(store: Arc<dyn RuntimePersis
 async fn append_rejects_existing_node_id_collision(store: Arc<dyn RuntimePersistence>) {
     let mut state = RuntimeSessionState {
         session_id: "root".to_string(),
+        session_lifetime: conformance_lifetime("root"),
         ..RuntimeSessionState::default()
     };
     state.ensure_agent_frame_initialized();
-    let append_operation =
-        crate::OperationId::turn("root", "collision-append", "append-session-nodes");
-    let colliding_id = crate::store::derive_history_node_id("root", &append_operation, 0)
-        .expect("derive collision id");
+    let frame_key = "collision-frame";
+    let colliding_id = crate::session_graph::frame_node_id_for_lifetime(
+        &state.session_id,
+        &state.session_lifetime,
+        frame_key,
+    );
     let original = crate::SessionNodeRecord {
         node_id: colliding_id.clone(),
         parent_node_id: None,
         timestamp: "2026-07-26T10:00:00Z".to_string(),
         payload: crate::SessionNodePayload::FrameOpen {
+            frame_key: frame_key.to_string(),
             reason: AgentFrameReason::new("original"),
             assignment: crate::AgentFrameAssignment::from_policy(crate::SessionPolicy::default()),
             protocol_turn_options: ProtocolTurnOptions::default(),
@@ -5121,6 +5155,7 @@ async fn append_rejects_existing_node_id_collision(store: Arc<dyn RuntimePersist
 
     let replacement = crate::SessionNodeRecord {
         payload: crate::SessionNodePayload::FrameOpen {
+            frame_key: frame_key.to_string(),
             reason: AgentFrameReason::new("replacement"),
             assignment: crate::AgentFrameAssignment::from_policy(crate::SessionPolicy::default()),
             protocol_turn_options: ProtocolTurnOptions::default(),
@@ -5135,7 +5170,7 @@ async fn append_rejects_existing_node_id_collision(store: Arc<dyn RuntimePersist
         },
         &[],
     );
-    append.expected_head_revision = Some(first.head_revision);
+    append.expected_head_revision = first.head_revision;
     let err = commit_runtime_state_for_test(&store, append, "collision-append")
         .await
         .expect_err("append must reject an id already present in durable history");
@@ -5155,16 +5190,19 @@ async fn append_rejects_existing_node_id_collision(store: Arc<dyn RuntimePersist
 async fn append_rejects_duplicate_batch_node_ids(store: Arc<dyn RuntimePersistence>) {
     let state = RuntimeSessionState {
         session_id: "root".to_string(),
+        session_lifetime: conformance_lifetime("root"),
         ..RuntimeSessionState::default()
     };
+    let incarnation_id = conformance_incarnation("root");
+    let duplicate_node_id = crate::frame_node_id("root", &incarnation_id, "duplicate");
     let commit = RuntimeCommit::persisted_state_with_graph_commit(
         &state,
         crate::GraphCommitDelta::Append {
             nodes: vec![
-                sample_session_node("duplicate", None),
-                sample_session_node("duplicate", None),
+                sample_session_node("root", &incarnation_id, "duplicate", None),
+                sample_session_node("root", &incarnation_id, "duplicate", None),
             ],
-            leaf_node_id: Some("duplicate".to_string()),
+            leaf_node_id: Some(duplicate_node_id.clone()),
         },
         &[],
     );
@@ -5173,7 +5211,7 @@ async fn append_rejects_duplicate_batch_node_ids(store: Arc<dyn RuntimePersisten
         .expect_err("a duplicate id in one append must abort the whole commit");
     assert!(matches!(
         err,
-        StoreError::NodeIdCollision { ref node_id } if node_id == "duplicate"
+        StoreError::NodeIdCollision { ref node_id } if node_id == &duplicate_node_id
     ));
     assert!(
         store
@@ -5188,12 +5226,18 @@ async fn append_rejects_duplicate_batch_node_ids(store: Arc<dyn RuntimePersisten
 async fn commit_rejects_unresolvable_leaf(store: Arc<dyn RuntimePersistence>) {
     let state = RuntimeSessionState {
         session_id: "root".to_string(),
+        session_lifetime: conformance_lifetime("root"),
         ..RuntimeSessionState::default()
     };
     let commit = RuntimeCommit::persisted_state_with_graph_commit(
         &state,
         crate::GraphCommitDelta::Append {
-            nodes: vec![sample_session_node("valid-node", None)],
+            nodes: vec![sample_session_node(
+                "root",
+                &conformance_incarnation("root"),
+                "valid-node",
+                None,
+            )],
             leaf_node_id: Some("missing-leaf".to_string()),
         },
         &[],
@@ -5207,9 +5251,11 @@ async fn commit_rejects_unresolvable_leaf(store: Arc<dyn RuntimePersistence>) {
             leaf_node_id: Some(ref leaf)
         } if leaf == "missing-leaf"
     ));
+    let valid_node_id =
+        crate::frame_node_id("root", &conformance_incarnation("root"), "valid-node");
     assert!(
         store
-            .load_node("valid-node")
+            .load_node(&valid_node_id)
             .await
             .expect("load after leaf rejection")
             .is_none(),
@@ -5220,12 +5266,18 @@ async fn commit_rejects_unresolvable_leaf(store: Arc<dyn RuntimePersistence>) {
 async fn commit_rejects_missing_leaf(store: Arc<dyn RuntimePersistence>) {
     let state = RuntimeSessionState {
         session_id: "root".to_string(),
+        session_lifetime: conformance_lifetime("root"),
         ..RuntimeSessionState::default()
     };
     let missing = RuntimeCommit::persisted_state_with_graph_commit(
         &state,
         crate::GraphCommitDelta::Append {
-            nodes: vec![sample_session_node("node-without-leaf", None)],
+            nodes: vec![sample_session_node(
+                "root",
+                &conformance_incarnation("root"),
+                "node-without-leaf",
+                None,
+            )],
             leaf_node_id: None,
         },
         &[],
@@ -5237,9 +5289,14 @@ async fn commit_rejects_missing_leaf(store: Arc<dyn RuntimePersistence>) {
         err,
         StoreError::InvalidGraphLeaf { leaf_node_id: None }
     ));
+    let node_without_leaf_id = crate::frame_node_id(
+        "root",
+        &conformance_incarnation("root"),
+        "node-without-leaf",
+    );
     assert!(
         store
-            .load_node("node-without-leaf")
+            .load_node(&node_without_leaf_id)
             .await
             .expect("load after missing leaf rejection")
             .is_none(),
@@ -5247,42 +5304,88 @@ async fn commit_rejects_missing_leaf(store: Arc<dyn RuntimePersistence>) {
     );
 }
 
+async fn empty_append_cannot_move_the_head(store: Arc<dyn RuntimePersistence>) {
+    let mut state = RuntimeSessionState {
+        session_id: "empty-append-head-move".to_string(),
+        session_lifetime: conformance_lifetime("empty-append-head-move"),
+        ..RuntimeSessionState::default()
+    };
+    state.ensure_agent_frame_initialized();
+    let first = store
+        .commit_runtime_state(RuntimeCommit::persisted_state(&state, &[]))
+        .await
+        .expect("seed the live head");
+    let old_leaf = state.session_graph.leaf_node_id.clone();
+    state.apply_persisted_commit_result(first);
+    let mut move_attempt = RuntimeCommit::persisted_state_with_graph_commit(
+        &state,
+        crate::GraphCommitDelta::Append {
+            nodes: Vec::new(),
+            leaf_node_id: None,
+        },
+        &[],
+    );
+    move_attempt.current_frame_node_id = old_leaf.clone();
+    let error = store
+        .commit_runtime_state(move_attempt)
+        .await
+        .expect_err("an empty append must not move the head");
+    assert!(matches!(
+        error,
+        StoreError::InvalidGraphLeaf { leaf_node_id: None }
+    ));
+    let loaded = store
+        .load_session(SessionReadScope::FullGraph)
+        .await
+        .expect("load after rejected empty append")
+        .expect("seeded session remains");
+    assert_eq!(loaded.graph.leaf_node_id, old_leaf);
+}
+
 async fn host_tombstone_cannot_remove_a_reachable_leaf(store: Arc<dyn RuntimePersistence>) {
     let mut state = RuntimeSessionState {
         session_id: "root".to_string(),
+        session_lifetime: conformance_lifetime("root"),
         ..RuntimeSessionState::default()
     };
+    let incarnation_id = conformance_incarnation("root");
+    let tombstoned_leaf_id = crate::frame_node_id("root", &incarnation_id, "tombstoned-leaf");
     let seed = RuntimeCommit::persisted_state_with_graph_commit(
         &state,
         crate::GraphCommitDelta::Append {
-            nodes: vec![sample_session_node("tombstoned-leaf", None)],
-            leaf_node_id: Some("tombstoned-leaf".to_string()),
+            nodes: vec![sample_session_node(
+                "root",
+                &incarnation_id,
+                "tombstoned-leaf",
+                None,
+            )],
+            leaf_node_id: Some(tombstoned_leaf_id.clone()),
         },
         &[],
     );
     let result = commit_runtime_state_for_test(&store, seed, "tombstoned-leaf-seed")
         .await
         .expect("seed leaf");
-    state.head_revision = Some(result.head_revision);
+    state.head_revision = result.head_revision;
     store
-        .tombstone_nodes(&["tombstoned-leaf".to_string()])
+        .tombstone_nodes(std::slice::from_ref(&tombstoned_leaf_id))
         .await
         .expect("tombstone leaf");
 
     let mut unchanged = RuntimeCommit::persisted_state_with_graph_commit(
         &state,
         crate::GraphCommitDelta::Unchanged {
-            leaf_node_id: Some("tombstoned-leaf".to_string()),
+            leaf_node_id: Some(tombstoned_leaf_id.clone()),
         },
         &[],
     );
-    unchanged.current_frame_node_id = Some("tombstoned-leaf".to_string());
+    unchanged.current_frame_node_id = Some(tombstoned_leaf_id.clone());
     commit_runtime_state_for_test(&store, unchanged, "tombstoned-leaf-unchanged")
         .await
         .expect("host tombstone selection cannot override a live head root");
     assert!(
         store
-            .load_node("tombstoned-leaf")
+            .load_node(&tombstoned_leaf_id)
             .await
             .expect("load protected leaf")
             .is_some()

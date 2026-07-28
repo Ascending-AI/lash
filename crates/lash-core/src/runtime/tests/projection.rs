@@ -1,4 +1,5 @@
 use super::*;
+use crate::SessionCommitStore as _;
 
 struct AppendRollbackProtocolFactory {
     store: Arc<RecordingStore>,
@@ -238,6 +239,20 @@ async fn completed_turns_are_persisted_for_custom_runtime_store() {
     )
     .await
     .expect("runtime");
+    let realized_incarnation = store
+        .load_session_meta()
+        .await
+        .expect("load realized metadata")
+        .expect("persistent constructor realizes metadata")
+        .incarnation_id;
+    assert_eq!(
+        runtime
+            .export_persistence_state()
+            .session_lifetime
+            .as_durable(),
+        Some(&realized_incarnation),
+        "a new persistent runtime must bind the identity read back from its store"
+    );
     set_runtime_provider(&mut runtime, transport.clone().into_handle());
 
     let _turn = runtime
@@ -272,6 +287,61 @@ async fn completed_turns_are_persisted_for_custom_runtime_store() {
     assert_eq!(messages[0].parts[0].content, "where did this go?");
     assert_eq!(messages[1].role, MessageRole::Assistant);
     assert_eq!(messages[1].parts[0].content, "Stored answer");
+}
+
+#[tokio::test]
+async fn preopened_store_identity_rebinds_initial_frame_before_runtime_effects() {
+    let store = Arc::new(RecordingStore::default());
+    let policy = standard_test_policy();
+    let expected = store
+        .ensure_session_incarnation("preopened-session", &policy)
+        .await
+        .expect("preopen store identity");
+    let mut state = RuntimeSessionState {
+        session_id: "preopened-session".to_string(),
+        policy: policy.clone(),
+        ..RuntimeSessionState::default()
+    };
+    state.ensure_agent_frame_initialized();
+    let provisional_frame = state
+        .current_frame_node_id
+        .clone()
+        .expect("provisional initial frame");
+    let runtime = LashRuntime::from_persistent_embedded_state(
+        policy,
+        test_host_config(),
+        crate::PersistentRuntimeServices::new(
+            plugin_session_with_tools("preopened-session", Arc::new(EmptyTools)),
+            store as Arc<dyn crate::store::RuntimePersistence>,
+        ),
+        state,
+    )
+    .await
+    .expect("preopened persistent runtime");
+    let bound = runtime.export_persistence_state();
+    assert_eq!(bound.session_lifetime.as_durable(), Some(&expected));
+    let frame = bound.current_agent_frame().expect("bound initial frame");
+    let crate::SessionNodePayload::FrameOpen { frame_key, .. } = &bound
+        .session_graph
+        .find_node(&frame.frame_node_id)
+        .expect("bound frame node")
+        .payload
+    else {
+        panic!("current agent frame must resolve to FrameOpen");
+    };
+    assert_ne!(frame.frame_node_id, provisional_frame);
+    assert_eq!(
+        frame.frame_node_id,
+        crate::frame_node_id("preopened-session", &expected, frame_key),
+        "an unpersisted frame opened before assembly must be rebound before effects can capture it"
+    );
+    assert!(matches!(
+        bound.turn_scope("first-turn"),
+        crate::ExecutionScope::Turn {
+            incarnation_id: Some(ref actual),
+            ..
+        } if actual == &expected
+    ));
 }
 
 #[tokio::test]

@@ -311,6 +311,7 @@ impl SessionStoreFactory for RecordingSessionStoreFactory {
         let store = Arc::new(RecordingStore::default());
         *store.session_meta.lock().expect("lock session meta") = Some(crate::SessionMeta {
             session_id: request.session_id.clone(),
+            incarnation_id: crate::IncarnationId::mint_for_store(),
             session_name: request.session_id.clone(),
             created_at: "2026-04-06T00:00:00Z".to_string(),
             model: request.policy.model.id.clone(),
@@ -515,9 +516,8 @@ pub(crate) async fn runtime_with_plugins_and_tools_and_host_and_store(
     )));
     let plugin_host = crate::PluginHost::new(factories);
     let plugin_session = plugin_host.build_session("root", None).expect("plugins");
-    let services =
-        crate::PersistentRuntimeServices::new(plugin_session, store).into_runtime_services();
-    let mut runtime = LashRuntime::from_embedded_state(
+    let services = crate::PersistentRuntimeServices::new(plugin_session, store);
+    let mut runtime = LashRuntime::from_persistent_embedded_state(
         standard_test_policy(),
         host,
         services,

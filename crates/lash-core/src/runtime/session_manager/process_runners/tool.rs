@@ -135,6 +135,13 @@ impl RuntimeSessionServices {
                                 .deadline
                                 .map(|duration| dispatch.clock.now() + duration),
                             std::sync::Arc::clone(&dispatch.clock),
+                        )
+                        .with_turn_cancel_scope(
+                            dispatch
+                                .effect_controller
+                                .scoped()
+                                .execution_scope()
+                                .clone(),
                         ),
                     ),
                 )

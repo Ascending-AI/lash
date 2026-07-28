@@ -21,6 +21,15 @@ mod process_tool_replay;
 mod tool_context_conformance;
 use endpoint_protocol::invoke_process_workflow_endpoint;
 
+fn durable_turn_scope(session_id: impl Into<String>, turn_id: impl Into<String>) -> ExecutionScope {
+    let session_id = session_id.into();
+    ExecutionScope::turn_incarnation(
+        &session_id,
+        lash_core::IncarnationId::decode_from_store(format!("restate-test:{session_id}")),
+        turn_id,
+    )
+}
+
 struct PanicsWhenPolledAfterReady {
     completed: bool,
 }
@@ -349,7 +358,7 @@ async fn restate_handler_controller_journals_typed_trigger_execution() {
 async fn journaled_cancel_peeks_replay_while_live_watcher_observes_later_cancel() {
     let context = Arc::new(ReplayableRecordingContext::default());
     let controller = RestateRuntimeEffectController::new(Arc::clone(&context));
-    let scope = ExecutionScope::turn("journaled-peek-session", "journaled-peek-turn");
+    let scope = durable_turn_scope("journaled-peek-session", "journaled-peek-turn");
     let key = controller
         .await_event_key(&scope, AwaitEventWaitIdentity::TurnCancelGate)
         .await
@@ -703,6 +712,16 @@ lash_core::impl_noop_attachment_manifest!(CommitRetryStore);
 // segment delegates to `inner`.
 #[async_trait::async_trait]
 impl lash_core::SessionCommitStore for CommitRetryStore {
+    async fn ensure_session_incarnation(
+        &self,
+        session_id: &str,
+        policy: &lash_core::SessionPolicy,
+    ) -> Result<lash_core::IncarnationId, lash_core::StoreError> {
+        self.inner
+            .ensure_session_incarnation(session_id, policy)
+            .await
+    }
+
     async fn load_session(
         &self,
         _scope: lash_core::SessionReadScope,
@@ -1016,7 +1035,7 @@ fn restate_command_execution_plan_is_explicit_for_every_command() {
         (
             RuntimeEffectCommand::AwaitEvent {
                 key: restate_await_event_key(
-                    &ExecutionScope::turn("session", "turn"),
+                    &durable_turn_scope("session", "turn"),
                     AwaitEventWaitIdentity::Custom {
                         key: "event".to_string(),
                     },
@@ -1922,6 +1941,7 @@ fn runtime_invocation(kind: RuntimeEffectKind, effect_id: &str) -> RuntimeInvoca
 
 #[test]
 fn restate_turn_cancel_race_excludes_process_owned_waits() {
+    let turn_scope = durable_turn_scope("session", "turn");
     let process_scoped_sleep = RuntimeInvocation::effect(
         lash_core::runtime::RuntimeScope::for_turn("session", "turn", 1, 0),
         "parent:process:worker:sleep:1",
@@ -1929,16 +1949,27 @@ fn restate_turn_cancel_race_excludes_process_owned_waits() {
         "session:turn:1:0:process:worker:sleep:1",
     );
     assert!(
-        restate_timer_turn_cancel_wait_request(&process_scoped_sleep, false)
+        restate_timer_turn_cancel_wait_request(&process_scoped_sleep, false, None)
             .expect("process sleep classification")
             .is_none(),
         "background process sleep must outlive its originating turn"
+    );
+    assert!(
+        restate_timer_turn_cancel_wait_request(
+            &process_scoped_sleep,
+            true,
+            Some(&ExecutionScope::process("worker")),
+        )
+        .expect("explicit process scope")
+        .is_none(),
+        "an explicitly process-owned wait must not observe its causal turn's cancel gate"
     );
 
     assert!(
         restate_await_event_turn_cancel_wait_request(
             &runtime_invocation(RuntimeEffectKind::AwaitEvent, "process-wait"),
             false,
+            None,
         )
         .expect("process await-event classification")
         .is_none(),
@@ -1949,6 +1980,7 @@ fn restate_turn_cancel_race_excludes_process_owned_waits() {
         restate_timer_turn_cancel_wait_request(
             &runtime_invocation(RuntimeEffectKind::Sleep, "turn-sleep"),
             true,
+            Some(&turn_scope),
         )
         .expect("turn sleep classification")
         .is_some(),
@@ -1959,6 +1991,7 @@ fn restate_turn_cancel_race_excludes_process_owned_waits() {
         restate_await_event_turn_cancel_wait_request(
             &runtime_invocation(RuntimeEffectKind::AwaitEvent, "turn-process-wait"),
             true,
+            Some(&turn_scope),
         )
         .expect("foreground process await-event classification")
         .is_some(),
@@ -2087,6 +2120,50 @@ async fn restate_controller_routes_sleep_only_through_timer() {
 }
 
 #[tokio::test]
+async fn restate_durable_controller_rejects_unincarnated_turn_scope() {
+    let context = Arc::new(RecordingContext::default());
+    let controller = RestateRuntimeEffectController::new(context);
+    let error = match controller.scoped_effect_controller(ExecutionScope::turn("session", "turn")) {
+        Ok(_) => panic!("durable Restate controller must reject a bare turn scope"),
+        Err(error) => error,
+    };
+    assert_eq!(
+        error.code.as_str(),
+        "durable_turn_scope_missing_incarnation"
+    );
+}
+
+#[tokio::test]
+async fn restate_turn_attach_rejects_unincarnated_terminal_address() {
+    let attach = RestateTurnAttach::new("http://127.0.0.1:1");
+    let error = attach
+        .await_terminal(&TurnAddress::new("session", "turn"))
+        .await
+        .expect_err("durable Restate attach must reject a bare turn address");
+    assert_eq!(
+        error.code.as_str(),
+        "durable_turn_scope_missing_incarnation"
+    );
+}
+
+#[tokio::test]
+async fn restate_turn_wait_rejects_missing_cancel_scope() {
+    let context = Arc::new(RecordingContext::default());
+    let controller = RestateRuntimeEffectController::new(context);
+    let error = controller
+        .execute_effect(
+            RuntimeEffectEnvelope::new(
+                runtime_invocation(RuntimeEffectKind::Sleep, "missing-cancel-scope"),
+                RuntimeEffectCommand::Sleep { duration_ms: 1 },
+            ),
+            RuntimeEffectLocalExecutor::sleep(tokio_util::sync::CancellationToken::new()),
+        )
+        .await
+        .expect_err("turn sleep must not silently disable durable cancellation");
+    assert_eq!(error.code.as_str(), "restate_turn_cancel_scope_missing");
+}
+
+#[tokio::test]
 async fn restate_timer_stops_when_its_fresh_attempt_is_cancelled() {
     let context = Arc::new(RecordingContext::default());
     context.block_sleeps.store(true, Ordering::SeqCst);
@@ -2102,7 +2179,8 @@ async fn restate_timer_stops_when_its_fresh_attempt_is_cancelled() {
                     duration_ms: 60_000,
                 },
             ),
-            RuntimeEffectLocalExecutor::sleep(cancellation),
+            RuntimeEffectLocalExecutor::sleep(cancellation)
+                .with_turn_cancel_scope(durable_turn_scope("session", "turn")),
         )
         .await
         .expect_err("cancelled Restate timer must stop the interpreter attempt");
@@ -2130,7 +2208,8 @@ async fn restate_suspended_timer_is_woken_by_the_durable_turn_cancel_gate() {
                         duration_ms: 300_000,
                     },
                 ),
-                RuntimeEffectLocalExecutor::sleep(task_cancellation),
+                RuntimeEffectLocalExecutor::sleep(task_cancellation)
+                    .with_turn_cancel_scope(durable_turn_scope("session", "turn")),
             )
             .await
     });
@@ -2138,7 +2217,7 @@ async fn restate_suspended_timer_is_woken_by_the_durable_turn_cancel_gate() {
     assert!(!sleep.is_finished(), "timer must genuinely remain pending");
 
     let cancel_key = restate_await_event_key(
-        &ExecutionScope::turn("session", "turn"),
+        &durable_turn_scope("session", "turn"),
         AwaitEventWaitIdentity::TurnCancelGate,
     )
     .expect("cancel gate key");
@@ -2169,7 +2248,7 @@ async fn restate_suspended_timer_is_woken_by_the_durable_turn_cancel_gate() {
 async fn restate_suspended_await_event_is_woken_by_the_durable_turn_cancel_gate() {
     let context = Arc::new(RecordingContext::default());
     let awaited_key = restate_await_event_key(
-        &ExecutionScope::turn("session", "turn"),
+        &durable_turn_scope("session", "turn"),
         AwaitEventWaitIdentity::Custom {
             key: "wait-for-signal".to_string(),
         },
@@ -2185,7 +2264,8 @@ async fn restate_suspended_await_event_is_woken_by_the_durable_turn_cancel_gate(
                     runtime_invocation(RuntimeEffectKind::AwaitEvent, "suspended-await-event"),
                     RuntimeEffectCommand::AwaitEvent { key: awaited_key },
                 ),
-                RuntimeEffectLocalExecutor::await_event(task_cancellation, None),
+                RuntimeEffectLocalExecutor::await_event(task_cancellation, None)
+                    .with_turn_cancel_scope(durable_turn_scope("session", "turn")),
             )
             .await
     });
@@ -2196,7 +2276,7 @@ async fn restate_suspended_await_event_is_woken_by_the_durable_turn_cancel_gate(
     );
 
     let cancel_key = restate_await_event_key(
-        &ExecutionScope::turn("session", "turn"),
+        &durable_turn_scope("session", "turn"),
         AwaitEventWaitIdentity::TurnCancelGate,
     )
     .expect("cancel gate key");
@@ -2233,7 +2313,7 @@ async fn restate_routes_every_execution_scope_to_an_exact_durable_wait_address()
     let context = Arc::new(RecordingContext::default());
     let host = RestateRuntimeEffectController::new(context.clone());
     let scopes = [
-        ExecutionScope::turn("session", "turn"),
+        durable_turn_scope("session", "turn"),
         ExecutionScope::process("process"),
         ExecutionScope::queue_drain("session", "drain"),
         ExecutionScope::session_delete("session"),
@@ -2275,7 +2355,7 @@ async fn restate_routes_every_execution_scope_to_an_exact_durable_wait_address()
 async fn restate_execute_effect_honors_cancellation_and_terminalizes_late_resolution() {
     let context = Arc::new(RecordingContext::default());
     let key = restate_await_event_key(
-        &ExecutionScope::turn("cancel-session", "cancel-turn"),
+        &durable_turn_scope("session", "turn"),
         AwaitEventWaitIdentity::tool_completion("cancel-tool"),
     )
     .expect("cancel wait key");
@@ -2290,7 +2370,8 @@ async fn restate_execute_effect_honors_cancellation_and_terminalizes_late_resolu
                     runtime_invocation(RuntimeEffectKind::AwaitEvent, "cancel-wait"),
                     RuntimeEffectCommand::AwaitEvent { key: task_key },
                 ),
-                RuntimeEffectLocalExecutor::await_event(task_cancellation, None),
+                RuntimeEffectLocalExecutor::await_event(task_cancellation, None)
+                    .with_turn_cancel_scope(durable_turn_scope("session", "turn")),
             )
             .await
     });
@@ -2383,7 +2464,7 @@ async fn restate_session_cancel_cancels_current_waits_but_allows_new_waits() {
     );
 
     let next_key = restate_await_event_key(
-        &ExecutionScope::turn("cancel-session", "turn-two"),
+        &durable_turn_scope("cancel-session", "turn-two"),
         AwaitEventWaitIdentity::Custom {
             key: "next".to_string(),
         },
@@ -2432,7 +2513,7 @@ async fn restate_session_delete_revokes_current_and_future_waits() {
     );
 
     let future_key = restate_await_event_key(
-        &ExecutionScope::turn("deleted-session", "future-turn"),
+        &durable_turn_scope("deleted-session", "future-turn"),
         AwaitEventWaitIdentity::Custom {
             key: "future".to_string(),
         },
@@ -2477,7 +2558,7 @@ async fn restate_effect_host_checks_revocation_then_awaits_resolution() {
         scripted.clone(),
     ));
     let key = restate_await_event_key(
-        &ExecutionScope::turn("single-call-session", "single-call-turn"),
+        &durable_turn_scope("single-call-session", "single-call-turn"),
         AwaitEventWaitIdentity::Custom {
             key: "single-call-wait".to_string(),
         },
@@ -2721,7 +2802,7 @@ async fn run_restate_replay_turn(
 ) -> lash_core::AssembledTurn {
     let controller = RestateRuntimeEffectController::new(context);
     let scoped_effect_controller = controller
-        .scoped_effect_controller(ExecutionScope::turn(session_id, turn_id))
+        .scoped_effect_controller(durable_turn_scope(session_id, turn_id))
         .expect("scoped restate controller");
     runtime
         .stream_turn(
@@ -2835,13 +2916,10 @@ async fn restate_handler_replay_retries_final_lash_commit_idempotently() {
 
     let conn = rusqlite::Connection::open(dir.path().join("session.db"))
         .expect("open raw session sqlite store");
-    let operation_key = lash_core::OperationId::turn(session_id, turn_id, "final")
-        .storage_key()
-        .expect("encode turn commit operation");
     let rows: i64 = conn
         .query_row(
-            "SELECT COUNT(*) FROM runtime_turn_commits WHERE session_id = ?1 AND turn_id = ?2",
-            rusqlite::params![session_id, operation_key],
+            "SELECT COUNT(*) FROM runtime_turn_commits WHERE session_id = ?1",
+            rusqlite::params![session_id],
             |row| row.get(0),
         )
         .expect("count turn commit stamps");
@@ -2944,7 +3022,7 @@ async fn restate_replay_lease_acquisition_takes_recorded_branch() {
         replay_test_runtime(session_id, policy, initial_state, host, runtime_store).await;
     let controller = RestateRuntimeEffectController::new(Arc::clone(&context));
     let scoped_effect_controller = controller
-        .scoped_effect_controller(ExecutionScope::turn(session_id, turn_id))
+        .scoped_effect_controller(durable_turn_scope(session_id, turn_id))
         .expect("scoped replay controller");
     let replay_turn = fresh_worker
         .stream_turn(
@@ -2984,13 +3062,10 @@ async fn restate_replay_lease_acquisition_takes_recorded_branch() {
 
     let conn = rusqlite::Connection::open(dir.path().join("session.db"))
         .expect("open raw session sqlite store");
-    let operation_key = lash_core::OperationId::turn(session_id, turn_id, "final")
-        .storage_key()
-        .expect("encode turn commit operation");
     let rows: i64 = conn
         .query_row(
-            "SELECT COUNT(*) FROM runtime_turn_commits WHERE session_id = ?1 AND turn_id = ?2",
-            rusqlite::params![session_id, operation_key],
+            "SELECT COUNT(*) FROM runtime_turn_commits WHERE session_id = ?1",
+            rusqlite::params![session_id],
             |row| row.get(0),
         )
         .expect("count liveness turn commit stamps");
@@ -3187,13 +3262,17 @@ finish (await handle)?
     ))
     .await;
     let first_context = Arc::clone(&context);
-    let first_turn = tokio::spawn(async move {
+    let mut first_turn = tokio::spawn(async move {
         run_restate_replay_turn(&mut first, first_context, session_id, turn_id).await
     });
-    let completion_key = completion_key_rx
-        .await
-        .expect("pending tool must publish its completion key")
-        .expect("pending tool must obtain its completion key");
+    let completion_key = tokio::select! {
+        completion_key = completion_key_rx => completion_key
+            .expect("pending tool must publish its completion key")
+            .expect("pending tool must obtain its completion key"),
+        turn = &mut first_turn => panic!(
+            "first turn completed before the pending tool published its completion key: {turn:?}"
+        ),
+    };
     let resolver = RestateRuntimeEffectController::new(Arc::clone(&context));
     assert_eq!(
         resolver
@@ -3575,7 +3654,8 @@ async fn run_parent_shaped_start_await_suspend_flow(
             runtime_invocation(RuntimeEffectKind::AwaitEvent, "parent-flow-suspend"),
             RuntimeEffectCommand::AwaitEvent { key: suspend_key },
         ),
-        RuntimeEffectLocalExecutor::await_event(tokio_util::sync::CancellationToken::new(), None),
+        RuntimeEffectLocalExecutor::await_event(tokio_util::sync::CancellationToken::new(), None)
+            .with_turn_cancel_scope(durable_turn_scope("session", "turn")),
     )
     .await
     .expect("parent flow await resume event");

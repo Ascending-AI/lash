@@ -928,6 +928,13 @@ impl RuntimeExecutionContext<'_> {
                     cancellation,
                     deadline,
                     std::sync::Arc::clone(&self.dispatch.clock),
+                )
+                .with_turn_cancel_scope(
+                    self.dispatch
+                        .effect_controller
+                        .scoped()
+                        .execution_scope()
+                        .clone(),
                 ),
             )
             .await;

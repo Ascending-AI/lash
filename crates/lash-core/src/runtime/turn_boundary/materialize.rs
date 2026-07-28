@@ -90,7 +90,11 @@ pub(super) fn materialize_agent_frame_switch(
     else {
         return;
     };
-    let requested_frame_node_id = crate::session_graph::frame_node_id(&state.session_id, frame_id);
+    let requested_frame_node_id = crate::session_graph::frame_node_id_for_lifetime(
+        &state.session_id,
+        &state.session_lifetime,
+        frame_id,
+    );
     if frame_id.trim().is_empty()
         || state.current_frame_node_id.as_deref() == Some(requested_frame_node_id.as_str())
     {

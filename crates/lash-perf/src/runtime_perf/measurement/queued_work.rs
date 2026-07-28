@@ -19,7 +19,9 @@ async fn run_once_queued_work_claim_stress(
     let build_before_alloc = allocator_stats();
     let build_started = Instant::now();
     let store = Arc::new(RuntimePerfStore::default());
-    let mut runtime = build_runtime_with_store(scenario, Some(Arc::clone(&store)), None).await?;
+    let _runtime =
+        build_runtime_with_store(scenario, Some(Arc::clone(&store)), None).await?;
+    let mut commit_state = runtime_perf_commit_state(store.as_ref(), &session_id).await?;
     let build_runtime_ms = elapsed_ms(build_started);
     let build_runtime_alloc = alloc_delta(build_before_alloc, allocator_stats());
     let after_build_memory = process_memory_sample();
@@ -100,16 +102,16 @@ async fn run_once_queued_work_claim_stress(
 
         let (_, phase) =
             measure_runtime_perf_async_phase("queued_work.complete_session_command", async {
-                store
+                let result = store
                     .commit_runtime_state(queued_work_stress_commit(
-                        &session_id,
+                        &commit_state,
                         &lease,
                         vec![command_claim.completion()],
                         false,
                     ))
-                    .await
-                    .map(|_| ())
-                    .map_err(anyhow::Error::from)
+                    .await?;
+                commit_state.apply_persisted_commit_result(result);
+                Ok::<(), anyhow::Error>(())
             })
             .await?;
         phase_profile.insert(phase.0, phase.1);
@@ -181,16 +183,16 @@ async fn run_once_queued_work_claim_stress(
 
         let (_, phase) =
             measure_runtime_perf_async_phase("queued_work.complete_join_turn_work", async {
-                store
+                let result = store
                     .commit_runtime_state(queued_work_stress_commit(
-                        &session_id,
+                        &commit_state,
                         &lease,
                         vec![join_claim.completion()],
                         false,
                     ))
-                    .await
-                    .map(|_| ())
-                    .map_err(anyhow::Error::from)
+                    .await?;
+                commit_state.apply_persisted_commit_result(result);
+                Ok::<(), anyhow::Error>(())
             })
             .await?;
         phase_profile.insert(phase.0, phase.1);
@@ -221,16 +223,16 @@ async fn run_once_queued_work_claim_stress(
 
         let (_, phase) =
             measure_runtime_perf_async_phase("queued_work.complete_exclusive_turn_work", async {
-                store
+                let result = store
                     .commit_runtime_state(queued_work_stress_commit(
-                        &session_id,
+                        &commit_state,
                         &lease,
                         vec![exclusive_claim.completion()],
                         true,
                     ))
-                    .await
-                    .map(|_| ())
-                    .map_err(anyhow::Error::from)
+                    .await?;
+                commit_state.apply_persisted_commit_result(result);
+                Ok::<(), anyhow::Error>(())
             })
             .await?;
         phase_profile.insert(phase.0, phase.1);
@@ -307,8 +309,6 @@ async fn run_once_queued_work_claim_stress(
     let after_export_memory = process_memory_sample();
     let total_alloc = alloc_delta(total_before_alloc, allocator_stats());
     let last_turn_memory = turns.last().map(|turn| &turn.memory);
-    runtime.close().await?;
-
     Ok(RuntimePerfRunResult {
         scenario: scenario.name().to_string(),
         scenario_harness: scenario.scenario_harness().name().to_string(),
@@ -474,6 +474,7 @@ async fn run_once_turn_input_ingress_interrupt(
     let build_before_alloc = allocator_stats();
     let build_started = Instant::now();
     let store = Arc::new(RuntimePerfStore::default());
+    let mut commit_state = runtime_perf_commit_state(store.as_ref(), &session_id).await?;
     let build_runtime_ms = elapsed_ms(build_started);
     let build_runtime_alloc = alloc_delta(build_before_alloc, allocator_stats());
     let after_build_memory = process_memory_sample();
@@ -658,20 +659,16 @@ async fn run_once_turn_input_ingress_interrupt(
         let (_, phase) = measure_runtime_perf_async_phase(
             "turn_input_ingress.complete_active_and_defer",
             async {
-                let state = RuntimeSessionState {
-                    session_id: session_id.clone(),
-                    ..RuntimeSessionState::default()
-                };
-                store
+                let result = store
                     .commit_runtime_state(
-                        RuntimeCommit::persisted_state(&state, &[])
+                        RuntimeCommit::persisted_state(&commit_state, &[])
                             .with_session_execution_lease(lease.fence())
                             .completing_turn_input_claim(active_claim.completion())
                             .deferring_interrupted_turn_inputs(turn_id.clone()),
                     )
-                    .await
-                    .map(|_| ())
-                    .map_err(anyhow::Error::from)
+                    .await?;
+                commit_state.apply_persisted_commit_result(result);
+                Ok::<(), anyhow::Error>(())
             },
         )
         .await?;
@@ -746,20 +743,16 @@ async fn run_once_turn_input_ingress_interrupt(
 
         let (_, phase) =
             measure_runtime_perf_async_phase("turn_input_ingress.complete_next_turn_inputs", async {
-                let state = RuntimeSessionState {
-                    session_id: session_id.clone(),
-                    ..RuntimeSessionState::default()
-                };
-                store
+                let result = store
                     .commit_runtime_state(
-                        RuntimeCommit::persisted_state(&state, &[])
+                        RuntimeCommit::persisted_state(&commit_state, &[])
                             .with_session_execution_lease(lease.fence())
                             .releasing_session_execution_lease(lease.completion())
                             .completing_turn_input_claim(next_claim.completion()),
                     )
-                    .await
-                    .map(|_| ())
-                    .map_err(anyhow::Error::from)
+                    .await?;
+                commit_state.apply_persisted_commit_result(result);
+                Ok::<(), anyhow::Error>(())
             })
             .await?;
         phase_profile.insert(phase.0, phase.1);
@@ -902,26 +895,52 @@ async fn run_once_turn_input_ingress_interrupt(
 }
 
 fn queued_work_stress_commit(
-    session_id: &str,
+    state: &RuntimeSessionState,
     lease: &SessionExecutionLease,
     completed_queue_claims: Vec<QueuedWorkCompletion>,
     release_lease: bool,
 ) -> RuntimeCommit {
-    RuntimeCommit {
+    let commit = RuntimeCommit::persisted_state(state, &[])
+        .with_session_execution_lease(lease.fence())
+        .completing_queue_claims(completed_queue_claims);
+    if release_lease {
+        commit.releasing_session_execution_lease(lease.completion())
+    } else {
+        commit
+    }
+}
+
+async fn runtime_perf_commit_state(
+    store: &RuntimePerfStore,
+    session_id: &str,
+) -> anyhow::Result<RuntimeSessionState> {
+    let mut state = RuntimeSessionState {
         session_id: session_id.to_string(),
-        expected_head_revision: None,
-        session_execution_lease: Some(lease.fence()),
-        release_session_execution_lease: release_lease.then(|| lease.completion()),
-        config: PersistedSessionConfig::default(),
-        current_frame_node_id: None,
-        graph: GraphCommitDelta::Unchanged { leaf_node_id: None },
-        checkpoint: HydratedSessionCheckpoint::default(),
-        usage_deltas: Vec::new(),
-        turn_commit: None,
-        completed_queue_claims,
-        completed_turn_input_claims: Vec::new(),
-        enqueued_queue_batches: Vec::new(),
-        interrupted_turn_input_turn_id: None,
-        committed_attachment_ids: Vec::new(),
+        ..RuntimeSessionState::default()
+    };
+    let policy = state.policy.clone();
+    let incarnation_id = store
+        .ensure_session_incarnation(session_id, &policy)
+        .await?;
+    state.bind_durable_incarnation(incarnation_id);
+    Ok(state)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn queued_work_claim_stress_advances_its_commit_cursor() {
+        run_once_queued_work_claim_stress(1)
+            .await
+            .expect("queued-work stress scenario");
+    }
+
+    #[tokio::test]
+    async fn turn_input_ingress_stress_advances_its_commit_cursor() {
+        run_once_turn_input_ingress_interrupt(1)
+            .await
+            .expect("turn-input ingress stress scenario");
     }
 }

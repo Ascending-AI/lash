@@ -1,6 +1,6 @@
 use anyhow::{Context, Result};
 use lash_core::AwaitEventResolver as _;
-use lash_core::{AwaitEventWaitIdentity, ExecutionScope};
+use lash_core::{AwaitEventWaitIdentity, ExecutionScope, IncarnationId};
 use lash_restate::RestateEffectHost;
 use std::io::Write as _;
 
@@ -14,8 +14,10 @@ async fn main() -> Result<()> {
     let nonce = args.next().context("missing vector nonce")?;
     anyhow::ensure!(args.next().is_none(), "unexpected helper arguments");
 
-    let scope = ExecutionScope::turn(
-        format!("cold-process-{nonce}-session"),
+    let session_id = format!("cold-process-{nonce}-session");
+    let scope = ExecutionScope::turn_incarnation(
+        &session_id,
+        IncarnationId::decode_from_store(format!("workers-e2e-fixture:{session_id}")),
         format!("cold-process-{nonce}-turn"),
     );
     let wait = match identity.as_str() {

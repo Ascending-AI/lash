@@ -7,8 +7,11 @@ const EXAMPLE_BINDING_KEY: &str = "example.call_path";
 
 #[test]
 fn turn_cancel_core_conversions_round_trip_every_envelope() {
+    let lifetime = lash_core::SessionLifetime::durable(
+        lash_core::IncarnationId::decode_from_store("remote-incarnation".to_string()),
+    );
     let core_request = lash_core::TurnCancelRequest::new(
-        lash_core::TurnAddress::new("session", "turn"),
+        lash_core::TurnAddress::new_for_lifetime("session", &lifetime, "turn"),
         "cancel-request",
         Some("queue-superseder".to_string()),
     )
@@ -17,8 +20,9 @@ fn turn_cancel_core_conversions_round_trip_every_envelope() {
     remote_request
         .validate()
         .expect("valid remote cancel request");
-    let round_trip =
-        lash_core::TurnCancelRequest::try_from(remote_request).expect("core cancel request");
+    let round_trip = remote_request
+        .try_into_core_for_lifetime(&lifetime)
+        .expect("core cancel request");
     assert_eq!(round_trip, core_request);
 
     let evidence = lash_core::TurnCancellationEvidence {

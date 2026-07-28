@@ -18,6 +18,7 @@ impl SessionStoreFactory for PostgresSessionStoreFactory {
         };
         let meta = SessionMeta {
             session_id: request.session_id.clone(),
+            incarnation_id: lash_core::IncarnationId::mint_for_store(),
             session_name: request.session_id.clone(),
             created_at: current_timestamp_string(),
             model: request.policy.model.id.clone(),
@@ -81,6 +82,301 @@ impl SessionStoreFactory for PostgresSessionStoreFactory {
             .await
             .map_err(|err| err.to_string())?;
         tx.commit().await.map_err(|err| err.to_string())
+    }
+
+    async fn pin(&self, node_id: &str) -> Result<lash_core::ForkPoint, StoreError> {
+        let mut tx = self.pool.begin().await.map_err(store_sqlx_error)?;
+        let live_node = sqlx::query_scalar::<_, bool>(
+            "SELECT TRUE FROM lash_graph_nodes
+             WHERE node_id = $1 AND tombstoned = FALSE
+             FOR UPDATE",
+        )
+        .bind(node_id)
+        .fetch_optional(&mut *tx)
+        .await
+        .map_err(store_sqlx_error)?;
+        if live_node.is_none() {
+            return Err(StoreError::ForkPointNotRetained {
+                node_id: node_id.to_string(),
+            });
+        }
+        if let Some((checkpoint_ref, source_session_id)) = sqlx::query_as::<_, (String, String)>(
+            "SELECT checkpoint_ref, source_session_id
+             FROM lash_node_anchors WHERE node_id = $1",
+        )
+        .bind(node_id)
+        .fetch_optional(&mut *tx)
+        .await
+        .map_err(store_sqlx_error)?
+        {
+            tx.commit().await.map_err(store_sqlx_error)?;
+            return Ok(lash_core::ForkPoint {
+                node_id: node_id.to_string(),
+                checkpoint_ref: checkpoint_ref.into(),
+                source_session_id,
+                pinned: true,
+            });
+        }
+        let retained = sqlx::query_as::<_, (String, String)>(
+            "SELECT session_id, checkpoint_ref FROM lash_sessions
+             WHERE leaf_node_id = $1 AND checkpoint_ref IS NOT NULL
+             ORDER BY session_id LIMIT 1
+             FOR SHARE",
+        )
+        .bind(node_id)
+        .fetch_optional(&mut *tx)
+        .await
+        .map_err(store_sqlx_error)?;
+        let (source_session_id, checkpoint_ref) =
+            retained.ok_or_else(|| StoreError::ForkPointNotRetained {
+                node_id: node_id.to_string(),
+            })?;
+        let changed = sqlx::query(
+            "UPDATE lash_graph_nodes SET incoming_refs = incoming_refs + 1
+             WHERE node_id = $1 AND tombstoned = FALSE",
+        )
+        .bind(node_id)
+        .execute(&mut *tx)
+        .await
+        .map_err(store_sqlx_error)?
+        .rows_affected();
+        if changed != 1 {
+            return Err(StoreError::ForkPointNotRetained {
+                node_id: node_id.to_string(),
+            });
+        }
+        sqlx::query(
+            "INSERT INTO lash_node_anchors (node_id, checkpoint_ref, source_session_id)
+             VALUES ($1, $2, $3)",
+        )
+        .bind(node_id)
+        .bind(&checkpoint_ref)
+        .bind(&source_session_id)
+        .execute(&mut *tx)
+        .await
+        .map_err(store_sqlx_error)?;
+        tx.commit().await.map_err(store_sqlx_error)?;
+        Ok(lash_core::ForkPoint {
+            node_id: node_id.to_string(),
+            checkpoint_ref: checkpoint_ref.into(),
+            source_session_id,
+            pinned: true,
+        })
+    }
+
+    async fn unpin(&self, node_id: &str) -> Result<(), StoreError> {
+        let mut tx = self.pool.begin().await.map_err(store_sqlx_error)?;
+        sqlx::query(
+            "SELECT node_id FROM lash_graph_nodes
+             WHERE node_id = $1 AND tombstoned = FALSE
+             FOR UPDATE",
+        )
+        .bind(node_id)
+        .fetch_optional(&mut *tx)
+        .await
+        .map_err(store_sqlx_error)?;
+        let removed = sqlx::query("DELETE FROM lash_node_anchors WHERE node_id = $1")
+            .bind(node_id)
+            .execute(&mut *tx)
+            .await
+            .map_err(store_sqlx_error)?
+            .rows_affected();
+        if removed == 1 {
+            crate::runtime_persistence::decrement_node_ref_tx(&mut tx, node_id).await?;
+        }
+        tx.commit().await.map_err(store_sqlx_error)
+    }
+
+    async fn fork_points(&self) -> Result<Vec<lash_core::ForkPoint>, StoreError> {
+        let rows = sqlx::query(
+            "SELECT node_id, checkpoint_ref, source_session_id, pinned
+             FROM (
+                 SELECT DISTINCT ON (node_id)
+                        node_id, checkpoint_ref, source_session_id, pinned
+                 FROM (
+                     SELECT node_id, checkpoint_ref, source_session_id,
+                            TRUE AS pinned, 0 AS priority
+                     FROM lash_node_anchors
+                     UNION ALL
+                     SELECT leaf_node_id, checkpoint_ref, session_id,
+                            FALSE AS pinned, 1 AS priority
+                     FROM lash_sessions
+                     WHERE leaf_node_id IS NOT NULL AND checkpoint_ref IS NOT NULL
+                 ) candidates
+                 ORDER BY node_id, priority, source_session_id
+             ) retained
+             ORDER BY node_id",
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map_err(store_sqlx_error)?;
+        Ok(rows
+            .into_iter()
+            .map(|row| lash_core::ForkPoint {
+                node_id: row.get(0),
+                checkpoint_ref: BlobRef(row.get(1)),
+                source_session_id: row.get(2),
+                pinned: row.get(3),
+            })
+            .collect())
+    }
+
+    async fn fork_at(
+        &self,
+        request: &lash_core::ForkSessionRequest,
+    ) -> Result<lash_core::ForkSessionResult, StoreError> {
+        let mut tx = self.pool.begin().await.map_err(store_sqlx_error)?;
+        crate::runtime_persistence::lock_session_history_mutation_tx(&mut tx, &request.session_id)
+            .await?;
+        let exists = sqlx::query_scalar::<_, bool>(
+            "SELECT EXISTS(
+                 SELECT 1 FROM lash_sessions WHERE session_id = $1
+                 UNION ALL
+                 SELECT 1 FROM lash_session_meta WHERE session_id = $1
+             )",
+        )
+        .bind(&request.session_id)
+        .fetch_one(&mut *tx)
+        .await
+        .map_err(store_sqlx_error)?;
+        if exists {
+            return Err(StoreError::ForkSessionAlreadyExists {
+                session_id: request.session_id.clone(),
+            });
+        }
+        let live_node = sqlx::query_scalar::<_, bool>(
+            "SELECT TRUE FROM lash_graph_nodes
+             WHERE node_id = $1 AND tombstoned = FALSE
+             FOR UPDATE",
+        )
+        .bind(&request.node_id)
+        .fetch_optional(&mut *tx)
+        .await
+        .map_err(store_sqlx_error)?;
+        if live_node.is_none() {
+            return Err(StoreError::ForkPointNotRetained {
+                node_id: request.node_id.clone(),
+            });
+        }
+        let retained = sqlx::query_as::<_, (String, String)>(
+            "SELECT source_session_id, checkpoint_ref FROM (
+                 SELECT source_session_id, checkpoint_ref, 0 AS priority
+                 FROM lash_node_anchors WHERE node_id = $1
+                 UNION ALL
+                 SELECT session_id, checkpoint_ref, 1 AS priority FROM lash_sessions
+                 WHERE leaf_node_id = $1 AND checkpoint_ref IS NOT NULL
+             ) retained
+             ORDER BY priority, source_session_id LIMIT 1",
+        )
+        .bind(&request.node_id)
+        .fetch_optional(&mut *tx)
+        .await
+        .map_err(store_sqlx_error)?;
+        let (source_session_id, checkpoint_ref) =
+            retained.ok_or_else(|| StoreError::ForkPointNotRetained {
+                node_id: request.node_id.clone(),
+            })?;
+        if let lash_core::SessionRelation::Fork {
+            source_session_id: expected,
+            ..
+        } = &request.relation
+            && expected != &source_session_id
+        {
+            return Err(StoreError::ForkPointNotRetained {
+                node_id: request.node_id.clone(),
+            });
+        }
+        let current_frame_node_id =
+            crate::runtime_persistence::nearest_frame_node_id_tx(&mut tx, &request.node_id)
+                .await?
+                .ok_or_else(|| StoreError::MissingFrameOpenAncestor {
+                    leaf_node_id: request.node_id.clone(),
+                })?;
+        let graph_node_count = sqlx::query_scalar::<_, i64>(
+            "WITH RECURSIVE ancestry(node_id, parent_node_id) AS (
+                 SELECT node_id, parent_node_id FROM lash_graph_nodes
+                 WHERE node_id = $1 AND tombstoned = FALSE
+                 UNION ALL
+                 SELECT parent.node_id, parent.parent_node_id
+                 FROM lash_graph_nodes parent
+                 JOIN ancestry ON parent.node_id = ancestry.parent_node_id
+                 WHERE parent.tombstoned = FALSE
+             )
+             SELECT COUNT(*) FROM ancestry",
+        )
+        .bind(&request.node_id)
+        .fetch_one(&mut *tx)
+        .await
+        .map_err(store_sqlx_error)? as usize;
+        let changed = sqlx::query(
+            "UPDATE lash_graph_nodes SET incoming_refs = incoming_refs + 1
+             WHERE node_id = $1 AND tombstoned = FALSE",
+        )
+        .bind(&request.node_id)
+        .execute(&mut *tx)
+        .await
+        .map_err(store_sqlx_error)?
+        .rows_affected();
+        if changed != 1 {
+            return Err(StoreError::ForkPointNotRetained {
+                node_id: request.node_id.clone(),
+            });
+        }
+        let config = lash_core::PersistedSessionConfig {
+            provider_id: request.policy.recorded_provider_id().to_string(),
+            model: request.policy.model.clone(),
+        };
+        let head = lash_core::store::SessionHeadMeta {
+            schema_version: lash_core::store::SESSION_HEAD_META_SCHEMA_VERSION,
+            session_id: request.session_id.clone(),
+            head_revision: 0,
+            config,
+            current_frame_node_id: Some(current_frame_node_id),
+            checkpoint_ref: Some(checkpoint_ref.clone().into()),
+            leaf_node_id: Some(request.node_id.clone()),
+            graph_node_count,
+            token_ledger: Vec::new(),
+        };
+        sqlx::query(
+            "INSERT INTO lash_sessions
+             (session_id, head_revision, head_json, checkpoint_ref, leaf_node_id)
+             VALUES ($1, 0, $2, $3, $4)",
+        )
+        .bind(&request.session_id)
+        .bind(encode_json(&head))
+        .bind(&checkpoint_ref)
+        .bind(&request.node_id)
+        .execute(&mut *tx)
+        .await
+        .map_err(store_sqlx_error)?;
+        let meta = SessionMeta {
+            session_id: request.session_id.clone(),
+            incarnation_id: lash_core::IncarnationId::mint_for_store(),
+            session_name: request.session_id.clone(),
+            created_at: current_timestamp_string(),
+            model: request.policy.model.id.clone(),
+            cwd: std::env::current_dir()
+                .ok()
+                .and_then(|path| path.to_str().map(str::to_string)),
+            relation: request.relation.clone(),
+        };
+        sqlx::query("INSERT INTO lash_session_meta (session_id, meta_json) VALUES ($1, $2)")
+            .bind(&request.session_id)
+            .bind(encode_json(&meta))
+            .execute(&mut *tx)
+            .await
+            .map_err(store_sqlx_error)?;
+        sqlx::query("DELETE FROM lash_deleted_sessions WHERE session_id = $1")
+            .bind(&request.session_id)
+            .execute(&mut *tx)
+            .await
+            .map_err(store_sqlx_error)?;
+        tx.commit().await.map_err(store_sqlx_error)?;
+        Ok(lash_core::ForkSessionResult {
+            session_id: request.session_id.clone(),
+            node_id: request.node_id.clone(),
+            source_session_id,
+        })
     }
 
     async fn live_attachment_refs(
@@ -208,13 +504,65 @@ pub(crate) async fn delete_session_tx(
     // store. Process pruning calls this while its terminal row is still locked
     // and deletes that row last, so any failure leaves a process leak instead
     // of making live-looking session state ownerless.
+    let leaf_node_id = sqlx::query_scalar::<_, String>(
+        "SELECT leaf_node_id FROM lash_sessions
+         WHERE session_id = $1 AND leaf_node_id IS NOT NULL
+         FOR UPDATE",
+    )
+    .bind(session_id)
+    .fetch_optional(&mut **tx)
+    .await
+    .map_err(store_sqlx_error)?;
     sqlx::query("DELETE FROM lash_sessions WHERE session_id = $1")
         .bind(session_id)
         .execute(&mut **tx)
         .await
         .map_err(store_sqlx_error)?;
-    sqlx::query("DELETE FROM lash_graph_nodes WHERE session_id = $1")
-        .bind(session_id)
+    if let Some(leaf_node_id) = leaf_node_id {
+        crate::runtime_persistence::decrement_node_ref_tx(tx, &leaf_node_id).await?;
+    }
+    let zero_ref_nodes = sqlx::query(
+        "SELECT node_id, parent_node_id FROM lash_graph_nodes
+         WHERE session_id = $1 AND tombstoned = FALSE AND incoming_refs = 0
+         ORDER BY seq DESC
+         FOR UPDATE",
+    )
+    .bind(session_id)
+    .fetch_all(&mut **tx)
+    .await
+    .map_err(store_sqlx_error)?;
+    for row in zero_ref_nodes {
+        let node_id: String = row.get(0);
+        let parent_node_id: Option<String> = row.get(1);
+        let cached = sqlx::query_scalar::<_, i64>(
+            "SELECT incoming_refs FROM lash_graph_nodes
+             WHERE node_id = $1 AND tombstoned = FALSE",
+        )
+        .bind(&node_id)
+        .fetch_optional(&mut **tx)
+        .await
+        .map_err(store_sqlx_error)?;
+        if cached != Some(0) {
+            continue;
+        }
+        let derived = crate::runtime_persistence::derived_node_refcount_tx(tx, &node_id).await?;
+        if derived != 0 {
+            return Err(StoreError::NodeRefcountDrift {
+                node_id,
+                cached: 0,
+                derived,
+            });
+        }
+        sqlx::query("UPDATE lash_graph_nodes SET tombstoned = TRUE WHERE node_id = $1")
+            .bind(&node_id)
+            .execute(&mut **tx)
+            .await
+            .map_err(store_sqlx_error)?;
+        if let Some(parent_node_id) = parent_node_id {
+            crate::runtime_persistence::decrement_node_ref_tx(tx, &parent_node_id).await?;
+        }
+    }
+    sqlx::query("DELETE FROM lash_graph_nodes WHERE tombstoned = TRUE")
         .execute(&mut **tx)
         .await
         .map_err(store_sqlx_error)?;

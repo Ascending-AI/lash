@@ -175,7 +175,7 @@ impl LashRuntime {
         let Some(read) = read else {
             return Ok(());
         };
-        let has_newer_graph = self.state.head_revision != Some(read.head_revision)
+        let has_newer_graph = self.state.head_revision != read.head_revision
             || read.graph.leaf_node_id != self.state.session_graph.leaf_node_id
             || read.checkpoint_ref != self.state.checkpoint_ref;
         if !has_newer_graph {

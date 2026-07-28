@@ -115,7 +115,7 @@ fn build_runtime_state(
         _ => current_frame_node_drafts(&base),
     };
     base.session_id = session_id;
-    base.head_revision = None;
+    base.head_revision = 0;
     base.policy = policy.clone();
     base.session_graph = crate::SessionGraph::default();
     base.agent_frames.clear();

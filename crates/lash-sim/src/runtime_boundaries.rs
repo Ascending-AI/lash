@@ -1072,7 +1072,7 @@ impl RuntimeBoundaryHarness {
                 ))
             })?;
         let (head_revision, session_graph, persisted_node_ids) = current.map_or_else(
-            || (None, lash_core::SessionGraph::default(), HashSet::new()),
+            || (0, lash_core::SessionGraph::default(), HashSet::new()),
             |read| {
                 let persisted_node_ids = read
                     .graph
@@ -1080,11 +1080,27 @@ impl RuntimeBoundaryHarness {
                     .iter()
                     .map(|node| node.node_id.clone())
                     .collect();
-                (Some(read.head_revision), read.graph, persisted_node_ids)
+                (read.head_revision, read.graph, persisted_node_ids)
             },
         );
         let stale_state = RuntimeSessionState {
             session_id: session.to_string(),
+            session_lifetime: lash_core::SessionLifetime::durable(
+                store
+                    .load_session_meta()
+                    .await
+                    .map_err(|err| {
+                        RuntimeBoundaryError::new(format!(
+                            "load session metadata before stale claim completion: {err}"
+                        ))
+                    })?
+                    .ok_or_else(|| {
+                        RuntimeBoundaryError::new(format!(
+                            "session `{session}` has no metadata before stale claim completion"
+                        ))
+                    })?
+                    .incarnation_id,
+            ),
             session_graph,
             persisted_node_ids,
             head_revision,

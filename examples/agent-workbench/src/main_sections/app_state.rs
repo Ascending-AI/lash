@@ -91,9 +91,16 @@ impl AppState {
         session_id: &str,
     ) -> Result<Vec<TurnCancelReceipt>, AppError> {
         let active = self.active_turns.for_session(session_id);
+        let session = self
+            .core
+            .session(session_id)
+            .open()
+            .await
+            .map_err(AppError::internal)?;
         let mut receipts = Vec::with_capacity(active.len());
         let mut operation_ids = Vec::with_capacity(active.len());
-        for address in active {
+        for tracked_address in active {
+            let address = session.turn_address(&tracked_address.turn_id);
             let request_id = format!("workbench-stop-{}", uuid::Uuid::new_v4());
             operation_ids.push(format!("{}:{request_id}", address.turn_id));
             let driver = self.core.turn_work_driver();

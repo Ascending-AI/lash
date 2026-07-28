@@ -1,6 +1,24 @@
 use super::InMemorySessionStore;
 
 impl InMemorySessionStore {
+    pub(crate) async fn save_session_head_meta(&self, meta: crate::SessionHeadMeta) {
+        *self.session_head_meta.lock().expect("lock store") = Some(meta);
+    }
+
+    pub(crate) fn load_session_count(&self) -> usize {
+        self.load_session_count
+            .load(std::sync::atomic::Ordering::Relaxed)
+    }
+
+    pub(crate) fn checkpoint_claim_counts(&self) -> (usize, usize) {
+        (
+            self.checkpoint_probe_count
+                .load(std::sync::atomic::Ordering::Relaxed),
+            self.checkpoint_write_transaction_count
+                .load(std::sync::atomic::Ordering::Relaxed),
+        )
+    }
+
     pub(crate) fn fail_next_session_execution_lease_renewal(&self) {
         self.fail_next_session_execution_lease_renewal
             .store(true, std::sync::atomic::Ordering::SeqCst);
@@ -58,23 +76,38 @@ mod tests {
             .get("second")
             .cloned()
             .expect("second concrete store");
-        let node = crate::SessionNodeRecord {
-            node_id: "factory-global-node".to_string(),
-            parent_node_id: None,
-            timestamp: "2026-07-26T00:00:00Z".to_string(),
-            payload: crate::SessionNodePayload::FrameOpen {
-                reason: crate::AgentFrameReason::initial(),
-                assignment: crate::AgentFrameAssignment::from_policy(
-                    crate::SessionPolicy::default(),
-                ),
-                protocol_turn_options: Default::default(),
-            },
-        };
-        let commit = |session_id: &str| {
-            let state = RuntimeSessionState {
+        let first_incarnation = first
+            .load_session_meta()
+            .await
+            .expect("load first metadata")
+            .expect("first metadata")
+            .incarnation_id;
+        let second_incarnation = second
+            .load_session_meta()
+            .await
+            .expect("load second metadata")
+            .expect("second metadata")
+            .incarnation_id;
+        let commit = |session_id: &str, incarnation_id: crate::IncarnationId| {
+            let mut state = RuntimeSessionState {
                 session_id: session_id.to_string(),
+                session_lifetime: crate::SessionLifetime::durable(incarnation_id),
                 ..Default::default()
             };
+            state.ensure_agent_frame_initialized();
+            let node = crate::SessionNodeRecord {
+                node_id: "factory-global-node".to_string(),
+                parent_node_id: state.session_graph.leaf_node_id.clone(),
+                timestamp: "2026-07-26T00:00:00Z".to_string(),
+                payload: crate::SessionNodePayload::Event {
+                    event: crate::SessionHistoryRecord::Protocol(
+                        crate::ProtocolEvent::typed("global-collision", serde_json::Value::Null)
+                            .expect("protocol event"),
+                    ),
+                },
+            };
+            state.session_graph.push_node_record(node.clone());
+            state.session_graph.set_leaf_node_id(Some(node.node_id));
             let usage = TokenLedgerEntry {
                 source: "rollback-probe".to_string(),
                 model: "test".to_string(),
@@ -83,21 +116,15 @@ mod tests {
                     ..Default::default()
                 },
             };
-            let mut commit = RuntimeCommit::persisted_state(&state, &[usage]);
-            commit.current_frame_node_id = Some(node.node_id.clone());
-            commit.graph = GraphCommitDelta::Append {
-                nodes: vec![node.clone()],
-                leaf_node_id: Some(node.node_id.clone()),
-            };
-            commit
+            RuntimeCommit::persisted_state(&state, &[usage])
         };
 
         first
-            .commit_runtime_state(commit("first"))
+            .commit_runtime_state(commit("first", first_incarnation))
             .await
             .expect("first node insert");
         let error = second
-            .commit_runtime_state(commit("second"))
+            .commit_runtime_state(commit("second", second_incarnation))
             .await
             .expect_err("second session must not reuse a global node id");
 
@@ -135,6 +162,14 @@ mod tests {
             .expect("concrete store");
         let mut state = RuntimeSessionState {
             session_id: request.session_id.clone(),
+            session_lifetime: crate::SessionLifetime::durable(
+                store
+                    .load_session_meta()
+                    .await
+                    .expect("load metadata")
+                    .expect("metadata")
+                    .incarnation_id,
+            ),
             ..Default::default()
         };
         state.ensure_agent_frame_initialized();
@@ -166,7 +201,7 @@ mod tests {
             },
             &[],
         );
-        commit.expected_head_revision = Some(first.head_revision);
+        commit.expected_head_revision = first.head_revision;
         let error = store
             .commit_runtime_state(commit.clone())
             .await
@@ -199,12 +234,17 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn refcount_scrub_detects_corrupt_cached_count() {
+    async fn refcount_scrub_counts_anchor_roots_when_detecting_drift() {
         let store = super::InMemorySessionStore::new();
         let mut state = RuntimeSessionState {
             session_id: "scrub-refcount-drift".to_string(),
             ..Default::default()
         };
+        let incarnation_id = store
+            .ensure_session_incarnation(&state.session_id, &state.policy)
+            .await
+            .expect("realize scrub session lifetime");
+        state.bind_durable_incarnation(incarnation_id);
         state.ensure_agent_frame_initialized();
         store
             .commit_runtime_state(RuntimeCommit::persisted_state(&state, &[]))
@@ -213,7 +253,28 @@ mod tests {
         let leaf = store
             .raw_leaf_node_id_for_testing()
             .expect("persisted leaf");
-        store.corrupt_node_refcount_for_testing(&leaf, 2);
+        let checkpoint_ref = store
+            .session_head_meta
+            .lock()
+            .expect("lock head")
+            .as_ref()
+            .and_then(|head| head.checkpoint_ref.clone())
+            .expect("checkpoint ref");
+        let checkpoint = store
+            .checkpoint
+            .lock()
+            .expect("lock checkpoint")
+            .clone()
+            .expect("checkpoint");
+        store.node_anchors.lock().expect("lock anchors").insert(
+            leaf.clone(),
+            (
+                checkpoint_ref,
+                checkpoint,
+                "scrub-refcount-drift".to_string(),
+            ),
+        );
+        store.corrupt_node_refcount_for_testing(&leaf, 3);
 
         let error = store
             .verify_node_refcounts()
@@ -224,8 +285,8 @@ mod tests {
             error,
             StoreError::NodeRefcountDrift {
                 node_id,
-                cached: 2,
-                derived: 1,
+                cached: 3,
+                derived: 2,
             } if node_id == leaf
         ));
     }
@@ -296,10 +357,15 @@ mod tests {
                 claim_session_lease_generation: 1,
             },
         );
-        let state = RuntimeSessionState {
+        let mut state = RuntimeSessionState {
             session_id: "session".to_string(),
             ..Default::default()
         };
+        let incarnation_id = store
+            .ensure_session_incarnation(&state.session_id, &state.policy)
+            .await
+            .expect("realize stale-claim session lifetime");
+        state.bind_durable_incarnation(incarnation_id);
         let mut commit = RuntimeCommit::persisted_state(&state, &[]);
         commit.completed_queue_claims = vec![QueuedWorkCompletion {
             session_id: "session".to_string(),

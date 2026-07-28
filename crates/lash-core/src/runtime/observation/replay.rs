@@ -33,17 +33,20 @@ impl SessionRevision {
     }
 
     pub(super) fn from_runtime(runtime: &LashRuntime) -> Self {
-        Self(
-            runtime
-                .state
-                .head_revision
-                .unwrap_or(runtime.state.turn_index as u64),
-        )
+        Self(if runtime.state.checkpoint_ref.is_some() {
+            runtime.state.head_revision
+        } else {
+            runtime.state.turn_index as u64
+        })
     }
 
     #[cfg(test)]
     pub(super) fn from_state(state: &RuntimeSessionState) -> Self {
-        Self(state.head_revision.unwrap_or(state.turn_index as u64))
+        Self(if state.checkpoint_ref.is_some() {
+            state.head_revision
+        } else {
+            state.turn_index as u64
+        })
     }
 }
 

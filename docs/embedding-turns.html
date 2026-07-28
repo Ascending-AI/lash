@@ -267,7 +267,7 @@ if matches!(result.outcome, TurnOutcome::Stopped(TurnStop::Cancelled)) {
 let terminal = core
     .turn_work_driver()
     .await_terminal_with_timeout(
-        &amp;TurnAddress::new(session.session_id(), turn_id),
+        &amp;session.turn_address(turn_id),
         std::time::Duration::from_secs(30),
     )
     .await?;</code></pre>

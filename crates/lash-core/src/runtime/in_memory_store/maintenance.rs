@@ -14,13 +14,19 @@ impl crate::store::StoreMaintenance for InMemorySessionStore {
             .write_transaction
             .lock()
             .expect("lock in-memory write transaction");
-        let graph = self.session_graph.lock().expect("lock graph");
-        let head_leaf = self
-            .session_head_meta
+        let graph = self.global_session_graph.lock().expect("lock global graph");
+        let session_heads = self
+            .global_session_heads
             .lock()
-            .expect("lock session head")
-            .as_ref()
-            .and_then(|meta| meta.leaf_node_id.clone());
+            .expect("lock global session heads")
+            .clone();
+        let anchored_node_ids = self
+            .node_anchors
+            .lock()
+            .expect("lock node anchors")
+            .keys()
+            .cloned()
+            .collect::<std::collections::HashSet<_>>();
         let mut counts = self
             .incoming_node_refs
             .lock()
@@ -43,7 +49,11 @@ impl crate::store::StoreMaintenance for InMemorySessionStore {
                         && child.parent_node_id.as_deref() == Some(node_id.as_str())
                 })
                 .count() as i64;
-            let derived_root = i64::from(head_leaf.as_deref() == Some(node_id.as_str()));
+            let derived_root = session_heads
+                .values()
+                .filter(|leaf| leaf.as_deref() == Some(node_id.as_str()))
+                .count() as i64
+                + i64::from(anchored_node_ids.contains(node_id));
             let derived = derived_children + derived_root;
             let cached = counts.get(node_id).copied().unwrap_or_default();
             if cached != derived {
@@ -66,7 +76,8 @@ impl crate::store::StoreMaintenance for InMemorySessionStore {
                     &mut counts,
                     &mut tombstoned,
                     parent_node_id,
-                    head_leaf.as_deref(),
+                    &session_heads,
+                    &anchored_node_ids,
                 )?;
             }
         }
@@ -97,7 +108,7 @@ impl crate::store::StoreMaintenance for InMemorySessionStore {
         let removed_node_count = if ids.is_empty() {
             0
         } else {
-            let mut graph = self.session_graph.lock().expect("lock graph");
+            let mut graph = self.global_session_graph.lock().expect("lock global graph");
             let before = graph.nodes.len();
             let leaf_node_id = graph
                 .leaf_node_id
@@ -145,18 +156,16 @@ impl crate::store::StoreMaintenance for InMemorySessionStore {
             .write_transaction
             .lock()
             .expect("lock in-memory write transaction");
-        let graph = self.session_graph.lock().expect("lock graph");
+        let graph = self.global_session_graph.lock().expect("lock global graph");
         let tombstoned = self
             .tombstoned_node_ids
             .lock()
             .expect("lock tombstoned nodes");
-        let head_leaf = self
-            .session_head_meta
+        let session_heads = self
+            .global_session_heads
             .lock()
-            .expect("lock session head")
-            .as_ref()
-            .and_then(|meta| meta.leaf_node_id.as_deref())
-            .map(ToOwned::to_owned);
+            .expect("lock global session heads");
+        let anchored_node_ids = self.node_anchors.lock().expect("lock node anchors");
         let cached = self
             .incoming_node_refs
             .lock()
@@ -171,7 +180,11 @@ impl crate::store::StoreMaintenance for InMemorySessionStore {
                 .iter()
                 .filter(|child| child.parent_node_id.as_deref() == Some(node.node_id.as_str()))
                 .count() as i64;
-            let derived_root = i64::from(head_leaf.as_deref() == Some(node.node_id.as_str()));
+            let derived_root = session_heads
+                .values()
+                .filter(|leaf| leaf.as_deref() == Some(node.node_id.as_str()))
+                .count() as i64
+                + i64::from(anchored_node_ids.contains_key(&node.node_id));
             let derived = derived_children + derived_root;
             let cached = cached.get(&node.node_id).copied().unwrap_or_default();
             if cached != derived {

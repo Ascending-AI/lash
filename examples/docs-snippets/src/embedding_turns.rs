@@ -249,7 +249,7 @@ async fn cancel_turn(core: &LashCore, session: &LashSession) -> anyhow::Result<(
     let terminal = core
         .turn_work_driver()
         .await_terminal_with_timeout(
-            &TurnAddress::new(session.session_id(), turn_id),
+            &session.turn_address(turn_id),
             std::time::Duration::from_secs(30),
         )
         .await?;

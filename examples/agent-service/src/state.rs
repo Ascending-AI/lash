@@ -144,6 +144,27 @@ impl AppStateData {
         .await
         .map_err(|err| AppError::internal(format!("database task failed: {err}")))?
     }
+
+    pub(crate) async fn discard_pending_chat_fork(&self, chat_id: &str) -> AppResult<()> {
+        let effect_host = self.core.effect_host();
+        let scope = effect_host
+            .scoped(lash::runtime::ExecutionScope::session_delete(chat_id))
+            .map_err(|err| AppError::internal(err.to_string()))?;
+        self.core
+            .delete_session(chat_id, scope)
+            .await
+            .map_err(|err| AppError::internal(err.to_string()))?;
+        let chat_id = chat_id.to_string();
+        self.with_db(move |db| db.delete_chat(&chat_id)).await
+    }
+
+    pub(crate) async fn recover_pending_chat_forks(&self) -> AppResult<()> {
+        let pending = self.with_db(|db| db.pending_chat_forks()).await?;
+        for chat_id in pending {
+            self.discard_pending_chat_fork(&chat_id).await?;
+        }
+        Ok(())
+    }
 }
 
 #[derive(Debug)]

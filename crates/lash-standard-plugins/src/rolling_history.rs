@@ -222,6 +222,7 @@ async fn summarize_compaction_prefix(
     state: &SessionSnapshot,
     prefix_messages: Vec<Message>,
     instructions: Option<&str>,
+    sessions: Arc<dyn lash_core::plugin::runtime_host::SessionStateService>,
     session_lifecycle: Arc<dyn lash_core::plugin::runtime_host::SessionLifecycleService>,
     scoped_effect_controller: lash_core::ScopedEffectController<'_>,
 ) -> Result<Option<String>, ContextError> {
@@ -268,9 +269,13 @@ async fn summarize_compaction_prefix(
     let prompt_text = with_instructions(&base_prompt, instructions);
 
     let turn_id = compaction_turn_id(scoped_effect_controller.scope_id());
+    let turn_scope = sessions
+        .turn_scope(&handle.session_id, &turn_id)
+        .await
+        .map_err(ContextError::from)?;
     let compaction_effect_controller = lash_core::ScopedEffectController::borrowed(
         scoped_effect_controller.controller(),
-        lash_core::ExecutionScope::turn(&handle.session_id, &turn_id),
+        turn_scope,
     )
     .map_err(|err| ContextError::Session(err.to_string()))?;
     let request = lash_core::SessionTurnRequest::new(
@@ -314,6 +319,7 @@ async fn compact_messages_core(
     state: &SessionSnapshot,
     messages: &[Message],
     instructions: Option<&str>,
+    sessions: Arc<dyn lash_core::plugin::runtime_host::SessionStateService>,
     session_lifecycle: Arc<dyn lash_core::plugin::runtime_host::SessionLifecycleService>,
     scoped_effect_controller: lash_core::ScopedEffectController<'_>,
 ) -> Result<Option<ContextCompaction>, ContextError> {
@@ -328,6 +334,7 @@ async fn compact_messages_core(
         state,
         prefix_messages,
         instructions,
+        sessions,
         session_lifecycle,
         scoped_effect_controller,
     )
@@ -457,6 +464,7 @@ impl ContextCompactor for RollingContextCompactor {
         ctx: &CompactionContext<'_>,
     ) -> Result<Option<ContextCompaction>, ContextError> {
         let session_id = ctx.session_id.clone();
+        let sessions = Arc::clone(&ctx.sessions);
         let session_lifecycle = Arc::clone(&ctx.session_lifecycle);
         let scoped_effect_controller = ctx.scoped_effect_controller.clone();
 
@@ -465,6 +473,7 @@ impl ContextCompactor for RollingContextCompactor {
             &ctx.state.to_snapshot(),
             ctx.state.messages(),
             ctx.instructions.as_deref(),
+            sessions,
             session_lifecycle,
             scoped_effect_controller,
         )
