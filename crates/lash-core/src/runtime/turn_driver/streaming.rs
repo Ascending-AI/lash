@@ -37,12 +37,13 @@ async fn emit_plugin_runtime_events_runtime(
 ///
 /// The adapter knows only that it put the cap it was handed on the wire, so it
 /// reports `Applied`; the runtime is the only layer that saw the larger number
-/// the caller asked for. This narrows that report on the response and on each
-/// attempt of the ledger alike, so no carrier of the fate of this request
-/// disagrees with another. An adapter that reports nothing keeps reporting
-/// nothing: `None` means unreported, not "nothing happened".
+/// the caller asked for. This narrows that report on every carrier of it — the
+/// response, each attempt of the ledger, and the partial response an error
+/// carries when the adapter salvaged one — so no two accounts of the same
+/// request disagree. An adapter that reports nothing keeps reporting nothing:
+/// `None` means unreported, not "nothing happened".
 fn record_clamped_output_token_cap(
-    response: Option<&mut LlmResponse>,
+    result: &mut Result<LlmResponse, LlmCallError>,
     call_record: Option<&mut crate::LlmCallRecord>,
 ) {
     fn narrow(disposition: Option<&mut crate::GenerationDisposition>) {
@@ -53,7 +54,15 @@ fn record_clamped_output_token_cap(
         }
     }
 
-    narrow(response.and_then(|response| response.generation_disposition.as_mut()));
+    match result {
+        Ok(response) => narrow(response.generation_disposition.as_mut()),
+        Err(error) => narrow(
+            error
+                .partial_response
+                .as_deref_mut()
+                .and_then(|partial| partial.generation_disposition.as_mut()),
+        ),
+    }
     if let Some(call_record) = call_record {
         for attempt in &mut call_record.attempts {
             narrow(attempt.generation_disposition.as_mut());
@@ -423,7 +432,7 @@ impl RuntimeTurnDriver<'_> {
 
         let mut result = result;
         if clamped_output_token_cap {
-            record_clamped_output_token_cap(result.as_mut().ok(), call_record.as_mut());
+            record_clamped_output_token_cap(&mut result, call_record.as_mut());
         }
 
         self.finish_assistant_stream_hooks(assistant_stream_finish_reason(
@@ -1153,4 +1162,103 @@ async fn collect_trailing_usage_before_abort<T>(
     }
     llm_task.abort();
     latest
+}
+
+#[cfg(test)]
+mod clamp_report_tests {
+    use super::*;
+
+    fn applied() -> Option<crate::GenerationDisposition> {
+        Some(crate::GenerationDisposition {
+            output_token_cap: crate::GenerationOptionDisposition::Applied,
+            temperature: crate::GenerationOptionDisposition::Applied,
+            seed: crate::GenerationOptionDisposition::NotRequested,
+        })
+    }
+
+    fn cap_of(
+        disposition: Option<crate::GenerationDisposition>,
+    ) -> crate::GenerationOptionDisposition {
+        disposition
+            .expect("a reported disposition")
+            .output_token_cap
+    }
+
+    /// A failed call still leaves accounts of itself behind: the ledger
+    /// attempt, and the partial response an adapter salvaged onto the error.
+    /// Narrowing one and not the other is how the same attempt comes to say
+    /// two different things.
+    #[test]
+    fn a_failed_calls_partial_response_agrees_with_its_ledger_attempt() {
+        let mut result: Result<LlmResponse, LlmCallError> = Err(LlmCallError {
+            message: "stream ended early".to_string(),
+            retryable: false,
+            kind: crate::ProviderFailureKind::Unknown,
+            raw: None,
+            code: None,
+            terminal_reason: crate::LlmTerminalReason::ProviderError,
+            request_body: None,
+            partial_response: Some(Box::new(LlmResponse {
+                generation_disposition: applied(),
+                ..LlmResponse::default()
+            })),
+        });
+        let mut call_record = crate::LlmCallRecord {
+            call_id: crate::LlmCallId("call".to_string()),
+            label: None,
+            attempts: vec![crate::AttemptRecord {
+                ordinal: 1,
+                started_at: 0,
+                duration: std::time::Duration::ZERO,
+                outcome: crate::AttemptOutcome::Failed,
+                protocol_position: crate::ProtocolPosition::OutputStarted,
+                retry_budget_consumed: true,
+                retry_decision: None,
+                error: None,
+                evidence: None,
+                generation_disposition: applied(),
+                usage: None,
+            }],
+        };
+
+        record_clamped_output_token_cap(&mut result, Some(&mut call_record));
+
+        let partial = result
+            .expect_err("the call failed")
+            .partial_response
+            .expect("the adapter salvaged a partial");
+        assert_eq!(
+            cap_of(partial.generation_disposition),
+            crate::GenerationOptionDisposition::ClampedToCapacity
+        );
+        assert_eq!(
+            cap_of(call_record.attempts[0].generation_disposition),
+            crate::GenerationOptionDisposition::ClampedToCapacity
+        );
+    }
+
+    /// An adapter that reports nothing keeps reporting nothing, and an option
+    /// the adapter dropped is not overwritten with a clamp it never applied.
+    #[test]
+    fn narrowing_only_touches_a_cap_the_adapter_reported_as_applied() {
+        let mut unreported: Result<LlmResponse, LlmCallError> = Ok(LlmResponse::default());
+        record_clamped_output_token_cap(&mut unreported, None);
+        assert!(
+            unreported.expect("ok").generation_disposition.is_none(),
+            "None means unreported, not an invitation to invent a report"
+        );
+
+        let mut dropped: Result<LlmResponse, LlmCallError> = Ok(LlmResponse {
+            generation_disposition: Some(crate::GenerationDisposition {
+                output_token_cap: crate::GenerationOptionDisposition::OmittedUnsupported,
+                ..Default::default()
+            }),
+            ..LlmResponse::default()
+        });
+        record_clamped_output_token_cap(&mut dropped, None);
+        assert_eq!(
+            cap_of(dropped.expect("ok").generation_disposition),
+            crate::GenerationOptionDisposition::OmittedUnsupported
+        );
+    }
 }
