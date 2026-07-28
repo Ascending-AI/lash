@@ -248,6 +248,120 @@ async fn workbench_state_snapshot_merges_canonical_history_with_partial_product_
 }
 
 #[tokio::test]
+async fn send_turn_state_projection_stays_readable_while_turn_runs() {
+    let data_dir = tempfile::tempdir().expect("send turn projection tempdir");
+    let (provider_entered_tx, mut provider_entered_rx) = mpsc::unbounded_channel();
+    let provider_release = Arc::new(tokio::sync::Notify::new());
+    let provider_release_for_completion = Arc::clone(&provider_release);
+    let response_index = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let response_index_for_completion = Arc::clone(&response_index);
+    let provider = lash::testing::TestProvider::builder()
+        .kind("send-turn-state-projection")
+        .complete(move |_| {
+            let provider_entered_tx = provider_entered_tx.clone();
+            let provider_release = Arc::clone(&provider_release_for_completion);
+            let response_index = Arc::clone(&response_index_for_completion);
+            async move {
+                let call = response_index.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                let _ = provider_entered_tx.send(call);
+                if call == 0 {
+                    provider_release.notified().await;
+                }
+                Ok(match call {
+                    0 => text_response(
+                        "<lashlang>\nprint(\"durable execution disclosure\")\n</lashlang>",
+                    ),
+                    1 => text_response("<lashlang>\nfinish \"settled answer\"\n</lashlang>"),
+                    other => panic!("unexpected provider call {other}"),
+                })
+            }
+        })
+        .build()
+        .into_handle();
+    let mut state =
+        recoverable_chat_test_state_with_provider(data_dir.path(), 16, provider).await;
+    let (restate_ingress_url, mut restate_requests) = spawn_restate_ingress_capture().await;
+    state.restate_ingress_url = restate_ingress_url;
+    let session_id = state.current_session_id();
+    let turn_text = "exercise the user-facing send path";
+
+    let _ = send_turn(
+        State(state.clone()),
+        Query(SessionQuery::default()),
+        Json(TurnRequest {
+            text: turn_text.to_string(),
+            model: Some("test-model".to_string()),
+            model_variant: None,
+            attachment_id: None,
+        }),
+    )
+    .await
+    .expect("send turn through the production handler");
+    let submitted = restate_requests
+        .recv()
+        .await
+        .expect("capture submitted Restate turn");
+    let turn_id = submitted
+        .pointer("/body/turn_id")
+        .and_then(Value::as_str)
+        .expect("submitted turn id")
+        .to_string();
+
+    let run_state = state.clone();
+    let run_turn_id = turn_id.clone();
+    let turn = tokio::spawn(async move {
+        let session = run_state
+            .core
+            .session(session_id)
+            .open()
+            .await
+            .expect("open submitted turn session");
+        let turn_state = Arc::new(Mutex::new(TurnStreamState::default()));
+        let output = session
+            .turn(lash::TurnInput::text(turn_text))
+            .turn_id(run_turn_id.clone())
+            .require_finish()
+            .expect("require finish")
+            .stream_to(&ChannelTurnEvents {
+                turn_state: Arc::clone(&turn_state),
+            })
+            .await
+            .expect("run submitted turn");
+        crate::restate::record_turn_output(
+            &run_state,
+            &session,
+            &run_turn_id,
+            output,
+            turn_state,
+            "test.send_turn.completed",
+        )
+        .await
+        .expect("record submitted turn output");
+        crate::restate::settle_workbench_turn(&run_state, &session.session_id(), &run_turn_id)
+            .await
+            .expect("settle submitted turn");
+    });
+
+    assert_eq!(
+        provider_entered_rx.recv().await,
+        Some(0),
+        "the first provider call must be blocked before the mid-turn read"
+    );
+    let Json(running) = app_state(State(state.clone()), Query(SessionQuery::default()))
+        .await
+        .expect("/api/state must remain readable while the turn lease is held");
+    assert_eq!(running.active_turns.len(), 1);
+
+    provider_release.notify_one();
+    turn.await.expect("submitted turn task");
+    assert_eq!(
+        provider_entered_rx.recv().await,
+        Some(1),
+        "the turn must execute the terminal provider iteration"
+    );
+}
+
+#[tokio::test]
 async fn workbench_sequential_settled_turn_cancels_each_emit_done() {
     let data_dir = tempfile::tempdir().expect("workbench cancel identity tempdir");
     let state = recoverable_chat_test_state(data_dir.path(), 16).await;

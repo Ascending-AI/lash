@@ -19,7 +19,8 @@ vm.runInNewContext(
     createWorkbenchProjectionState,
     beginStateRecovery,
     recoveryResponseIsCurrent,
-    applyProjectionSnapshot
+    applyProjectionSnapshot,
+    busyAfterStateSnapshot
   };`,
   context,
 );
@@ -28,6 +29,7 @@ const {
   beginStateRecovery,
   recoveryResponseIsCurrent,
   applyProjectionSnapshot,
+  busyAfterStateSnapshot,
 } = context.projectionExports;
 
 function markedSource(begin, end) {
@@ -118,6 +120,25 @@ test("a new session never inherits another session's cursors or identities", () 
   assert.equal(projection.observationCursor, "observation-session-b-0");
   assert.deepEqual([...projection.renderedProductEvents], []);
   assert.deepEqual([...projection.appliedObservationEvents], []);
+});
+
+test("an authoritative settled snapshot clears a busy projection even when Done is pre-applied", () => {
+  const settled = {
+    ...snapshot("session-a", 3, ["turn-done"]),
+    active_turns: [],
+  };
+
+  assert.equal(busyAfterStateSnapshot(settled, true, true), false);
+  assert.equal(
+    busyAfterStateSnapshot({ ...settled, active_turns: [{ turn_id: "active" }] }, true, false),
+    true,
+  );
+});
+
+test("trigger registration controls use the payload subscription key", () => {
+  assert.doesNotMatch(html, /registration\.handle/);
+  assert.match(html, /registration\.subscription_key/);
+  assert.match(html, /dataset\.triggerSubscriptionKey/);
 });
 
 test("a Done product event behaviorally retracts the provisional draft", () => {

@@ -2152,6 +2152,11 @@
         projection.renderedProductEvents.add(event.event_id);
       }
     }
+
+    function busyAfterStateSnapshot(state, authoritative, currentBusy) {
+      if ((state?.active_turns || []).length) return true;
+      return authoritative ? false : currentBusy;
+    }
     // END WORKBENCH_PROJECTION_STATE
 
     const renderedMessages = new Set();
@@ -3361,32 +3366,33 @@
         return;
       }
       for (const registration of registrations) {
+        const subscriptionKey = registration.subscription_key;
         const row = document.createElement("div");
         row.className = "trigger-registration";
         row.dataset.enabled = String(registration.enabled);
-        row.dataset.triggerHandle = registration.handle;
+        row.dataset.triggerSubscriptionKey = subscriptionKey;
         const name = document.createElement("span");
         name.className = "trigger-registration-name";
-        name.textContent = registration.name || registration.source_type || registration.handle;
-        name.title = registration.handle + " · " + registration.source_type;
+        name.textContent = registration.name || registration.source_type || subscriptionKey;
+        name.title = subscriptionKey + " · " + registration.source_type;
         const actions = document.createElement("span");
         actions.className = "trigger-registration-actions";
         const toggle = document.createElement("button");
         toggle.type = "button";
         toggle.textContent = registration.enabled ? "disable" : "re-enable";
-        toggle.addEventListener("click", () => setTriggerEnabled(registration.handle, !registration.enabled));
+        toggle.addEventListener("click", () => setTriggerEnabled(subscriptionKey, !registration.enabled));
         const remove = document.createElement("button");
         remove.type = "button";
         remove.textContent = "delete";
-        remove.addEventListener("click", () => deleteTrigger(registration.handle));
+        remove.addEventListener("click", () => deleteTrigger(subscriptionKey));
         actions.append(toggle, remove);
         row.append(name, actions);
         triggerRegistrations.appendChild(row);
       }
     }
 
-    async function setTriggerEnabled(handle, enabled) {
-      const response = await fetch("/api/triggers/" + encodeURIComponent(handle) + "/enabled", {
+    async function setTriggerEnabled(subscriptionKey, enabled) {
+      const response = await fetch("/api/triggers/" + encodeURIComponent(subscriptionKey) + "/enabled", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ enabled })
@@ -3398,9 +3404,9 @@
       await loadTriggers();
     }
 
-    async function deleteTrigger(handle) {
-      if (!window.confirm("Delete trigger " + handle + "?")) return;
-      const response = await fetch("/api/triggers/" + encodeURIComponent(handle), { method: "DELETE" });
+    async function deleteTrigger(subscriptionKey) {
+      if (!window.confirm("Delete trigger " + subscriptionKey + "?")) return;
+      const response = await fetch("/api/triggers/" + encodeURIComponent(subscriptionKey), { method: "DELETE" });
       if (!response.ok) {
         await response.text();
         renderError("the trigger could not be deleted");
@@ -3724,7 +3730,10 @@
         });
       }
       recordTurnInputApplications(state.turn_input_applications);
-      if ((state.active_turns || []).length) setBusy(true, "turn running · restored");
+      const nextBusy = busyAfterStateSnapshot(state, authoritative, busy);
+      if (nextBusy !== busy) {
+        setBusy(nextBusy, nextBusy ? "turn running · restored" : "ready");
+      }
     }
 
     async function fetchStateSnapshot() {

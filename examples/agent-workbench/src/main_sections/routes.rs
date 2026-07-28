@@ -61,7 +61,7 @@ async fn app_state(
             read_view: observation_snapshot.read_view,
             cursor: observation_snapshot.cursor,
         });
-    session.close().await.map_err(AppError::internal)?;
+    drop(session);
     let active_turns = state.active_turns.for_session(&session_id);
     let rendered_message_ids = messages
         .iter()
