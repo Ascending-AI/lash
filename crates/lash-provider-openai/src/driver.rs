@@ -101,6 +101,7 @@ pub(crate) async fn complete(
                 .collect(),
         );
     }
+    let generation_disposition = Some(generation_disposition(&req.generation, &body));
     let body_bytes = serde_json::to_vec(&body)
         .map_err(|e| LlmTransportError::new(format!("{}: {e}", endpoint.serialize_error())))?;
     emit_provider_request_trace(
@@ -224,6 +225,7 @@ pub(crate) async fn complete(
             }
             if let Some(partial) = failure.partial_response.as_deref_mut() {
                 partial.response_metadata = response_metadata;
+                partial.generation_disposition = generation_disposition;
             }
             if let (Some(partial), Some(provider_request_id)) = (
                 failure.partial_response.as_deref_mut(),
@@ -259,6 +261,7 @@ pub(crate) async fn complete(
     // cost is accepted deliberately for the existing cross-provider contract.
     response.request_body = Some(request_body_for_error);
     response.response_metadata = capture.into_map();
+    response.generation_disposition = generation_disposition;
     Ok(response)
 }
 
@@ -387,6 +390,7 @@ fn complete_buffered_responses(
         request_body: None,
         http_summary: Some(CompletionEndpoint::Responses.http_summary(&url, false)),
         execution_evidence: None,
+        generation_disposition: None,
         response_metadata: Default::default(),
     })
 }
@@ -477,6 +481,7 @@ fn complete_buffered_chat(
         request_body: None,
         http_summary: Some(CompletionEndpoint::ChatCompletions.http_summary(&url, false)),
         execution_evidence,
+        generation_disposition: None,
         response_metadata: Default::default(),
     })
 }
@@ -613,6 +618,7 @@ async fn drive_streaming_responses(
         request_body: None,
         http_summary: Some(CompletionEndpoint::Responses.http_summary(&url, true)),
         execution_evidence: None,
+        generation_disposition: None,
         response_metadata: Default::default(),
     })
 }
@@ -708,6 +714,7 @@ async fn drive_streaming_chat(
         request_body: None,
         http_summary: Some(CompletionEndpoint::ChatCompletions.http_summary(&url, true)),
         execution_evidence,
+        generation_disposition: None,
         response_metadata: Default::default(),
     })
 }
@@ -729,6 +736,7 @@ fn chat_response_from_state(state: ChatStreamState, url: &str) -> LlmResponse {
         request_body: None,
         http_summary: Some(CompletionEndpoint::ChatCompletions.http_summary(url, true)),
         execution_evidence,
+        generation_disposition: None,
         response_metadata: Default::default(),
     }
 }

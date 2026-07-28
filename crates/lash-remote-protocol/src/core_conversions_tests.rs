@@ -336,6 +336,7 @@ fn llm_request_and_response_round_trip_owned_dtos() {
             reasoning_output_tokens: Some(0),
             provider_finish_reason: Some("stop".to_string()),
         }),
+        generation_disposition: None,
         response_metadata: response_metadata.clone(),
     };
     let remote = RemoteLlmResponse::from_core("request-1", response);

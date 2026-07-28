@@ -275,6 +275,7 @@ impl DirectLlmClient {
                                 0,
                                 Some(result.terminal_reason),
                                 crate::trace::trace_output_parts(&result.parts),
+                                result.generation_disposition,
                             ),
                             usage: Some(crate::trace::trace_usage_from_llm(&result.usage)),
                             provider_usage: result.provider_usage.clone(),

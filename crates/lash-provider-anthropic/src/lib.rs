@@ -643,10 +643,30 @@ mod tests {
         );
         assert!(body.get("temperature").is_none());
 
+        // Omission stays silent so one session-wide temperature keeps working
+        // across mixed models, but it is reported rather than invisible: the
+        // host can see that its request was not honored.
+        req.generation.seed = Some(11);
+        let pinned_disposition = AnthropicProvider::generation_disposition(&req, &body);
+        assert_eq!(
+            pinned_disposition.temperature,
+            lash_core::llm::types::GenerationOptionDisposition::OmittedSamplingPinned
+        );
+        assert_eq!(
+            pinned_disposition.seed,
+            lash_core::llm::types::GenerationOptionDisposition::OmittedUnsupported,
+            "Anthropic Messages has no seed field"
+        );
+        assert!(!pinned_disposition.nothing_omitted());
+
         // The same request against a model that allows it still emits.
         req.model_capability.sampling = lash_core::SamplingCapability::Configurable;
         let configurable = provider.build_request_body(&req).expect("body");
         assert_eq!(configurable["temperature"], json!(0.25));
+        assert_eq!(
+            AnthropicProvider::generation_disposition(&req, &configurable).temperature,
+            lash_core::llm::types::GenerationOptionDisposition::Applied
+        );
     }
 
     #[test]

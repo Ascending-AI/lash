@@ -175,6 +175,7 @@ impl ProviderHandle {
                         retry_decision: None,
                         error: None,
                         evidence: response.execution_evidence.clone(),
+                        generation_disposition: response.generation_disposition,
                         usage: response
                             .provider_usage
                             .as_ref()
@@ -419,6 +420,7 @@ fn failure_attempt_record(
             diagnostic: bounded_redacted_diagnostic(&failure.message),
         }),
         evidence,
+        generation_disposition: partial.and_then(|response| response.generation_disposition),
         usage: partial.and_then(|response| {
             (response.provider_usage.is_some()
                 || response.usage != crate::llm::types::LlmUsage::default())

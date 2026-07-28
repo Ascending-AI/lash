@@ -63,6 +63,41 @@ pub(crate) fn empty_response_error(raw: String) -> lash_core::llm::transport::Ll
         .with_raw(raw)
 }
 
+/// Which of the caller's generation options an assembled OpenAI-compatible
+/// body carries.
+///
+/// The body is the evidence, so the record cannot drift from what was sent:
+/// a compat profile that omits the token-cap field, a dialect without a seed
+/// (Responses, Codex), and Codex declining both sampling controls all look the
+/// same on the wire — the key is simply absent. None of these endpoints drops
+/// a control because sampling is pinned; that is an Anthropic-only fact.
+pub(crate) fn generation_disposition(
+    generation: &lash_core::llm::types::GenerationOptions,
+    body: &Value,
+) -> lash_core::llm::types::GenerationDisposition {
+    use lash_core::llm::types::{GenerationDisposition, GenerationOptionDisposition};
+
+    fn record(requested: bool, emitted: bool) -> GenerationOptionDisposition {
+        if emitted {
+            GenerationOptionDisposition::applied(requested)
+        } else {
+            GenerationOptionDisposition::unsupported(requested)
+        }
+    }
+
+    let cap_emitted = ["max_tokens", "max_completion_tokens", "max_output_tokens"]
+        .iter()
+        .any(|field| body.get(field).is_some());
+    GenerationDisposition {
+        output_token_cap: record(generation.output_token_cap.is_some(), cap_emitted),
+        temperature: record(
+            generation.temperature.is_some(),
+            body.get("temperature").is_some(),
+        ),
+        seed: record(generation.seed.is_some(), body.get("seed").is_some()),
+    }
+}
+
 pub(crate) fn apply_max_tokens_field(
     body: &mut Value,
     field: crate::config::OpenAiCompatMaxTokensField,

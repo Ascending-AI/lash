@@ -103,6 +103,11 @@ fn main() {
                         output_token_capacity: Some(1),
                     },
                 },
+                generation: lash::remote::llm::RemoteGenerationOptions {
+                    output_token_cap: Some(256),
+                    temperature: None,
+                    seed: Some(7),
+                },
                 ..Default::default()
             },
         }),
@@ -112,4 +117,14 @@ fn main() {
         event_types: Vec::new(),
     };
     process_start.validate().unwrap();
+
+    let disposition = lash::remote::llm::RemoteGenerationDisposition {
+        output_token_cap: lash::remote::llm::RemoteGenerationOptionDisposition::Applied,
+        temperature: lash::remote::llm::RemoteGenerationOptionDisposition::OmittedSamplingPinned,
+        seed: lash::remote::llm::RemoteGenerationOptionDisposition::OmittedUnsupported,
+    };
+    assert_ne!(
+        disposition.seed,
+        lash::remote::llm::RemoteGenerationOptionDisposition::NotRequested
+    );
 }

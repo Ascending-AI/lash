@@ -136,13 +136,30 @@ fn remote_llm_response_json_round_trips() {
             reasoning_output_tokens: Some(0),
             provider_finish_reason: Some("stop".to_string()),
         }),
+        generation_disposition: Some(RemoteGenerationDisposition {
+            output_token_cap: RemoteGenerationOptionDisposition::Applied,
+            temperature: RemoteGenerationOptionDisposition::OmittedSamplingPinned,
+            seed: RemoteGenerationOptionDisposition::OmittedUnsupported,
+        }),
     };
 
     response.validate().expect("valid response");
     let value = serde_json::to_value(&response).expect("serialize");
+    assert_eq!(
+        value["generation_disposition"],
+        serde_json::json!({
+            "output_token_cap": "applied",
+            "temperature": "omitted_sampling_pinned",
+            "seed": "omitted_unsupported",
+        })
+    );
     let decoded: RemoteLlmResponse = serde_json::from_value(value).expect("deserialize");
     assert_eq!(decoded.protocol_version, REMOTE_PROTOCOL_VERSION);
     assert_eq!(decoded.full_text, "done");
+    assert_eq!(
+        decoded.generation_disposition,
+        response.generation_disposition
+    );
 }
 
 #[test]

@@ -92,6 +92,7 @@ mod tests {
                 Some(LlmEventSender::new(|_| {})),
                 None,
                 StreamTermination::EofTolerated,
+                None,
             )
             .await
             .expect("Google default permits clean EOF");
@@ -110,6 +111,7 @@ mod tests {
                 })),
                 None,
                 StreamTermination::RequireTerminalEvidence,
+                None,
             )
             .await
             .expect_err("strict Google route requires finishReason");
@@ -152,6 +154,7 @@ mod tests {
                 Some(LlmEventSender::new(|_| {})),
                 None,
                 StreamTermination::RequireTerminalEvidence,
+                None,
             )
             .await
             .expect("finishReason is terminal evidence");

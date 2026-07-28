@@ -307,6 +307,7 @@ impl RemoteLlmResponse {
             request_body,
             http_summary,
             execution_evidence,
+            generation_disposition,
             response_metadata,
         } = value;
         let mut diagnostics = Vec::new();
@@ -333,6 +334,7 @@ impl RemoteLlmResponse {
                 data: response_metadata,
             },
             execution_evidence: execution_evidence.map(Into::into),
+            generation_disposition: generation_disposition.map(Into::into),
         }
     }
 }
@@ -349,6 +351,7 @@ impl From<RemoteLlmResponse> for core_llm::LlmResponse {
             diagnostics,
             provider_metadata,
             execution_evidence,
+            generation_disposition,
         } = value;
         let RemoteProviderMetadata {
             usage: provider_usage,
@@ -366,7 +369,64 @@ impl From<RemoteLlmResponse> for core_llm::LlmResponse {
             request_body,
             http_summary,
             execution_evidence: execution_evidence.map(Into::into),
+            generation_disposition: generation_disposition.map(Into::into),
             response_metadata,
+        }
+    }
+}
+
+impl From<core_llm::GenerationDisposition> for RemoteGenerationDisposition {
+    fn from(value: core_llm::GenerationDisposition) -> Self {
+        let core_llm::GenerationDisposition {
+            output_token_cap,
+            temperature,
+            seed,
+        } = value;
+        Self {
+            output_token_cap: output_token_cap.into(),
+            temperature: temperature.into(),
+            seed: seed.into(),
+        }
+    }
+}
+
+impl From<RemoteGenerationDisposition> for core_llm::GenerationDisposition {
+    fn from(value: RemoteGenerationDisposition) -> Self {
+        let RemoteGenerationDisposition {
+            output_token_cap,
+            temperature,
+            seed,
+        } = value;
+        Self {
+            output_token_cap: output_token_cap.into(),
+            temperature: temperature.into(),
+            seed: seed.into(),
+        }
+    }
+}
+
+impl From<core_llm::GenerationOptionDisposition> for RemoteGenerationOptionDisposition {
+    fn from(value: core_llm::GenerationOptionDisposition) -> Self {
+        match value {
+            core_llm::GenerationOptionDisposition::NotRequested => Self::NotRequested,
+            core_llm::GenerationOptionDisposition::Applied => Self::Applied,
+            core_llm::GenerationOptionDisposition::OmittedUnsupported => Self::OmittedUnsupported,
+            core_llm::GenerationOptionDisposition::OmittedSamplingPinned => {
+                Self::OmittedSamplingPinned
+            }
+        }
+    }
+}
+
+impl From<RemoteGenerationOptionDisposition> for core_llm::GenerationOptionDisposition {
+    fn from(value: RemoteGenerationOptionDisposition) -> Self {
+        match value {
+            RemoteGenerationOptionDisposition::NotRequested => Self::NotRequested,
+            RemoteGenerationOptionDisposition::Applied => Self::Applied,
+            RemoteGenerationOptionDisposition::OmittedUnsupported => Self::OmittedUnsupported,
+            RemoteGenerationOptionDisposition::OmittedSamplingPinned => {
+                Self::OmittedSamplingPinned
+            }
         }
     }
 }

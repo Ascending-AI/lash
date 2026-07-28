@@ -3,7 +3,8 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use lash::direct::{
     AttachmentSource, DirectLlmClient, DirectLlmError, DirectLlmResult, DirectRequest, NonNegativeFiniteF64,
-    NonNegativeFiniteF64Error, GenerationOptions, LlmEventSender, LlmOutputPart, LlmUsage,
+    NonNegativeFiniteF64Error, GenerationDisposition, GenerationOptionDisposition,
+    GenerationOptions, LlmEventSender, LlmOutputPart, LlmUsage,
 };
 use lash::durability::RuntimeHostConfig;
 use lash::messages::MessageRole;
@@ -388,6 +389,15 @@ fn generation_option_types_are_nameable(
     request.generation.temperature = Some(NonNegativeFiniteF64::new(temperature)?);
     request.generation.seed = Some(1);
     Ok(request.generation)
+}
+
+fn generation_disposition_is_readable(
+    response: lash::direct::DirectLlmResult,
+) -> Option<(GenerationDisposition, bool)> {
+    let disposition = response.generation_disposition?;
+    let requested_temperature_survived =
+        disposition.temperature == GenerationOptionDisposition::Applied;
+    Some((disposition, requested_temperature_survived))
 }
 
 fn advanced_builder_accepts_runtime_host_config(

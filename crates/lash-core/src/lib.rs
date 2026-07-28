@@ -70,10 +70,10 @@ pub use direct::{
     DirectOutputSpec, DirectPart, DirectRequest, DirectRole,
 };
 pub use lash_sansio::llm::types::{
-    AttachmentSource, AttemptOutcome, AttemptRecord, ExecutionEvidence, GenerationOptions,
-    LlmCallId, LlmCallRecord, LlmOutputPart, LlmRequest, LlmRequestScope, LlmResponse,
-    LlmTerminalReason, NonNegativeFiniteF64, NonNegativeFiniteF64Error, NormalizedError,
-    ProtocolPosition, ProviderFileScope, RetryDecision,
+    AttachmentSource, AttemptOutcome, AttemptRecord, ExecutionEvidence, GenerationDisposition,
+    GenerationOptionDisposition, GenerationOptions, LlmCallId, LlmCallRecord, LlmOutputPart,
+    LlmRequest, LlmRequestScope, LlmResponse, LlmTerminalReason, NonNegativeFiniteF64,
+    NonNegativeFiniteF64Error, NormalizedError, ProtocolPosition, ProviderFileScope, RetryDecision,
 };
 pub use lash_sansio::{
     AcceptedInjectedTurnInput, AttachmentCreateMeta, AttachmentId, AttachmentMeta, AttachmentRef,

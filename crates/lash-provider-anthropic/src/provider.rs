@@ -54,6 +54,7 @@ impl Provider for AnthropicProvider {
             .unwrap_or_else(|| DEFAULT_BASE_URL.to_string());
 
         let body = self.build_request_body(&req)?;
+        let generation_disposition = Some(Self::generation_disposition(&req, &body));
         let request_body_bytes = serde_json::to_vec(&body).map_err(|err| {
             LlmTransportError::new(format!("Failed to serialize Anthropic body: {err}"))
                 .with_kind(ProviderFailureKind::Validation)
@@ -146,6 +147,7 @@ impl Provider for AnthropicProvider {
                 state.clone(),
                 request_body.clone(),
                 &url,
+                generation_disposition,
             )));
         }
         if stream_termination == StreamTermination::RequireTerminalEvidence
@@ -156,7 +158,12 @@ impl Provider for AnthropicProvider {
                     .with_kind(ProviderFailureKind::Stream)
                     .with_code("stream_ended_before_message_stop")
                     .retryable(true)
-                    .with_partial_response(Self::partial_response(state, request_body, &url)),
+                    .with_partial_response(Self::partial_response(
+                        state,
+                        request_body,
+                        &url,
+                        generation_disposition,
+                    )),
             );
         }
 
@@ -172,6 +179,7 @@ impl Provider for AnthropicProvider {
             request_body,
             http_summary: Some(format!("HTTP POST {} (stream)", url)),
             execution_evidence: None,
+            generation_disposition,
             response_metadata: Default::default(),
         })
     }
@@ -182,10 +190,32 @@ impl Provider for AnthropicProvider {
 }
 
 impl AnthropicProvider {
+    /// Which of the caller's generation options this request carries.
+    ///
+    /// The assembled body is the evidence, so the record cannot drift from
+    /// what was sent: Messages always carries a `max_tokens`, it has no seed
+    /// field at all, and the one reason a requested temperature is missing is
+    /// that this request pins sampling — extended thinking, or a model whose
+    /// host-declared capability says so.
+    pub(crate) fn generation_disposition(req: &LlmRequest, body: &Value) -> GenerationDisposition {
+        GenerationDisposition {
+            output_token_cap: GenerationOptionDisposition::applied(
+                req.generation.output_token_cap.is_some(),
+            ),
+            temperature: if body.get("temperature").is_some() {
+                GenerationOptionDisposition::Applied
+            } else {
+                GenerationOptionDisposition::sampling_pinned(req.generation.temperature.is_some())
+            },
+            seed: GenerationOptionDisposition::unsupported(req.generation.seed.is_some()),
+        }
+    }
+
     fn partial_response(
         mut state: StreamState,
         request_body: Option<String>,
         url: &str,
+        generation_disposition: Option<GenerationDisposition>,
     ) -> LlmResponse {
         let provider_usage = state.provider_usage.take();
         let (parts, full_text, usage, _) = Self::finalize(state);
@@ -199,6 +229,7 @@ impl AnthropicProvider {
             request_body,
             http_summary: Some(format!("HTTP POST {url} (stream)")),
             execution_evidence: None,
+            generation_disposition,
             response_metadata: Default::default(),
         }
     }

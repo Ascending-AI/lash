@@ -1174,6 +1174,7 @@ async fn plan_mode_plugin_does_not_rewrite_assistant_output() {
                 request_body: None,
                 http_summary: None,
                 execution_evidence: None,
+                generation_disposition: None,
                 response_metadata: Default::default(),
             },
         )

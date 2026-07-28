@@ -2462,3 +2462,30 @@ mod conformance {
 
 #[path = "provider_routing_tests.rs"]
 mod provider_routing_tests;
+
+#[test]
+fn generation_disposition_reports_what_each_dialect_carried() {
+    use crate::common::generation_disposition;
+    use lash_core::llm::types::GenerationOptionDisposition::{Applied, OmittedUnsupported};
+
+    let provider = openrouter_provider();
+    let mut req = request(vec![LlmMessage::text(LlmRole::User, "hello")]);
+    req.generation.temperature = Some(lash_core::NonNegativeFiniteF64::new(0.25).unwrap());
+    req.generation.seed = Some(7);
+
+    // Chat Completions carries both sampling controls.
+    let chat = provider.build_chat_request_body(&req, false).unwrap();
+    let chat = generation_disposition(&req.generation, &chat);
+    assert_eq!((chat.temperature, chat.seed), (Applied, Applied));
+    assert!(chat.nothing_omitted());
+
+    // Responses has no seed field, so a repeatability request is dropped —
+    // silently on the wire, but not in the report.
+    let responses = provider.build_responses_request_body(&req, false).unwrap();
+    let responses = generation_disposition(&req.generation, &responses);
+    assert_eq!(
+        (responses.temperature, responses.seed),
+        (Applied, OmittedUnsupported)
+    );
+    assert!(!responses.nothing_omitted());
+}

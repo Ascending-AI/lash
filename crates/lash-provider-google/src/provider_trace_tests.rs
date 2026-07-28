@@ -87,6 +87,7 @@ async fn extended_provider_trace_captures_exact_serialized_google_body_without_a
                 event_sink.lock().expect("event lock").push(event);
             })),
             StreamTermination::EofTolerated,
+            None,
         )
         .await
         .expect("completion succeeds");
@@ -126,6 +127,7 @@ async fn extended_provider_trace_captures_exact_serialized_google_body_without_a
                 error_event_sink.lock().expect("event lock").push(event);
             })),
             StreamTermination::EofTolerated,
+            None,
         )
         .await
         .expect_err("provider error is returned");

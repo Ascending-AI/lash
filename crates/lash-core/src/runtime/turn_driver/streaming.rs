@@ -332,6 +332,7 @@ impl RuntimeTurnDriver<'_> {
                             request_body: None,
                             http_summary: None,
                             execution_evidence: None,
+                            generation_disposition: None,
                             response_metadata: Default::default(),
                         };
                         stream_accumulator.apply_to_response(&mut resp);
@@ -527,6 +528,7 @@ impl RuntimeTurnDriver<'_> {
                             0,
                             None,
                             response_parts,
+                            None,
                         ),
                         usage: Some(crate::trace::trace_usage_from_session(&usage)),
                         provider_usage,

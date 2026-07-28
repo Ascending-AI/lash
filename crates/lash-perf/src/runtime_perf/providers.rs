@@ -138,6 +138,7 @@ pub(crate) fn benchmark_provider_with_control(
                     request_body: None,
                     http_summary: None,
                     execution_evidence: None,
+                    generation_disposition: None,
                     response_metadata: Default::default(),
                 })
             }

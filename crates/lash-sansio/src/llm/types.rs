@@ -575,6 +575,89 @@ impl GenerationOptions {
     }
 }
 
+/// What became of one caller-requested generation option on one request.
+///
+/// Adapters emit what their wire can express and omit the rest — a model that
+/// pins sampling, extended thinking, or an endpoint with no seed field all
+/// take an option away without failing the call. This names which happened so
+/// a host can tell an honored request from a silently dropped one.
+#[derive(
+    Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize, Hash,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum GenerationOptionDisposition {
+    /// The caller expressed no preference, so there was nothing to apply.
+    #[default]
+    NotRequested,
+    /// The caller asked for it and the request carries it.
+    Applied,
+    /// The caller asked for it and this endpoint has no field for it.
+    OmittedUnsupported,
+    /// The caller asked for it and sampling is pinned for this request, by the
+    /// model's declared capability or by the thinking configuration in use.
+    OmittedSamplingPinned,
+}
+
+impl GenerationOptionDisposition {
+    /// Report an option the wire carries whenever it is requested.
+    pub fn applied(requested: bool) -> Self {
+        if requested {
+            Self::Applied
+        } else {
+            Self::NotRequested
+        }
+    }
+
+    /// Report an option this endpoint has no field for.
+    pub fn unsupported(requested: bool) -> Self {
+        if requested {
+            Self::OmittedUnsupported
+        } else {
+            Self::NotRequested
+        }
+    }
+
+    /// Report an option dropped because sampling is pinned for this request.
+    pub fn sampling_pinned(requested: bool) -> Self {
+        if requested {
+            Self::OmittedSamplingPinned
+        } else {
+            Self::NotRequested
+        }
+    }
+
+    /// Whether a requested option was dropped rather than sent.
+    pub fn is_omitted(self) -> bool {
+        matches!(self, Self::OmittedUnsupported | Self::OmittedSamplingPinned)
+    }
+}
+
+/// Adapter-reported fate of a request's [`GenerationOptions`].
+///
+/// This is request-side, adapter-owned bookkeeping and deliberately separate
+/// from [`ExecutionEvidence`], which carries only facts the provider reported
+/// about the execution. A host that needs repeatability asserts
+/// [`nothing_omitted`](Self::nothing_omitted) rather than trusting that a
+/// session-wide temperature survived every model it ran against.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct GenerationDisposition {
+    #[serde(default)]
+    pub output_token_cap: GenerationOptionDisposition,
+    #[serde(default)]
+    pub temperature: GenerationOptionDisposition,
+    #[serde(default)]
+    pub seed: GenerationOptionDisposition,
+}
+
+impl GenerationDisposition {
+    /// Every option the caller asked for reached the wire.
+    pub fn nothing_omitted(&self) -> bool {
+        !self.output_token_cap.is_omitted()
+            && !self.temperature.is_omitted()
+            && !self.seed.is_omitted()
+    }
+}
+
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct LlmRequest {
     pub model: String,
@@ -835,6 +918,10 @@ pub struct AttemptRecord {
     pub error: Option<NormalizedError>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub evidence: Option<ExecutionEvidence>,
+    /// Which of the caller's generation options this attempt's request
+    /// carried, as reported by the adapter that built it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub generation_disposition: Option<GenerationDisposition>,
     /// Provider-reported usage only. Absence is not zero usage.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub usage: Option<LlmUsage>,
@@ -860,6 +947,11 @@ pub struct LlmResponse {
     pub http_summary: Option<String>,
     #[serde(default)]
     pub execution_evidence: Option<ExecutionEvidence>,
+    /// Which of the caller's generation options the adapter put on this
+    /// request's wire. `None` means the adapter does not report, which is
+    /// distinct from a report that nothing was requested.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub generation_disposition: Option<GenerationDisposition>,
     /// Allowlisted wire observations captured by the provider driver
     /// (`header:<lowercased-name>` and `body:<json-pointer>` keys). Population is
     /// host-supplied endpoint configuration; empty unless explicitly requested.
@@ -871,6 +963,47 @@ pub struct LlmResponse {
 pub struct ModelSelection {
     pub model: &'static str,
     pub variant: Option<&'static str>,
+}
+
+#[cfg(test)]
+mod generation_disposition_tests {
+    use super::*;
+
+    #[test]
+    fn only_requested_options_can_be_omitted() {
+        // An adapter reports every option, not only the dropped ones, so a
+        // wire that carries a control the caller never set is not mistaken
+        // for an honored request.
+        let untouched = GenerationDisposition {
+            output_token_cap: GenerationOptionDisposition::applied(false),
+            temperature: GenerationOptionDisposition::sampling_pinned(false),
+            seed: GenerationOptionDisposition::unsupported(false),
+        };
+        assert_eq!(untouched, GenerationDisposition::default());
+        assert!(untouched.nothing_omitted());
+
+        let dropped = GenerationDisposition {
+            output_token_cap: GenerationOptionDisposition::applied(true),
+            temperature: GenerationOptionDisposition::sampling_pinned(true),
+            seed: GenerationOptionDisposition::unsupported(true),
+        };
+        assert_eq!(
+            dropped.output_token_cap,
+            GenerationOptionDisposition::Applied
+        );
+        assert!(!dropped.output_token_cap.is_omitted());
+        assert!(dropped.temperature.is_omitted());
+        assert!(dropped.seed.is_omitted());
+        assert!(!dropped.nothing_omitted());
+        assert_eq!(
+            serde_json::to_value(dropped).expect("serialize disposition"),
+            serde_json::json!({
+                "output_token_cap": "applied",
+                "temperature": "omitted_sampling_pinned",
+                "seed": "omitted_unsupported",
+            })
+        );
+    }
 }
 
 #[cfg(test)]
@@ -903,6 +1036,11 @@ mod attempt_record_tests {
                     evidence: Some(ExecutionEvidence {
                         reasoning_output_tokens: Some(0),
                         ..ExecutionEvidence::default()
+                    }),
+                    generation_disposition: Some(GenerationDisposition {
+                        output_token_cap: GenerationOptionDisposition::Applied,
+                        temperature: GenerationOptionDisposition::OmittedSamplingPinned,
+                        seed: GenerationOptionDisposition::OmittedUnsupported,
                     }),
                     usage: None,
                 }],

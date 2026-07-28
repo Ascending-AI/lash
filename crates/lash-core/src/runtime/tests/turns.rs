@@ -5280,3 +5280,82 @@ async fn session_generation_options_reach_every_provider_request() {
         "the requested options are durable session policy, not per-turn state"
     );
 }
+
+#[tokio::test]
+async fn omitted_generation_options_are_reported_on_the_turn_llm_call_record() {
+    use std::num::NonZeroUsize;
+
+    // The adapter's silent omission (a model that pins sampling, a wire with
+    // no seed field) stays silent so one session-wide setting works across
+    // mixed models — but the turn record says what actually reached the wire,
+    // so a host asserting repeatability learns it was not honored.
+    let dropped_sampling = crate::GenerationDisposition {
+        output_token_cap: crate::GenerationOptionDisposition::Applied,
+        temperature: crate::GenerationOptionDisposition::OmittedSamplingPinned,
+        seed: crate::GenerationOptionDisposition::OmittedUnsupported,
+    };
+    let provider = TestProvider::builder()
+        .kind("disposition-reporting")
+        .complete(move |_req| async move {
+            Ok(LlmResponse {
+                full_text: "ok".to_string(),
+                parts: vec![LlmOutputPart::Text {
+                    text: "ok".to_string(),
+                    response_meta: None,
+                }],
+                generation_disposition: Some(dropped_sampling),
+                ..LlmResponse::default()
+            })
+        })
+        .build()
+        .into_handle();
+
+    let mut runtime = runtime_with_plugins(Vec::new(), mock_provider(Vec::new())).await;
+    runtime
+        .update_session_config(
+            Some(provider),
+            None,
+            None,
+            Some(crate::GenerationOptions {
+                output_token_cap: NonZeroUsize::new(128),
+                temperature: Some(
+                    crate::NonNegativeFiniteF64::new(0.2).expect("finite temperature"),
+                ),
+                seed: Some(99),
+            }),
+        )
+        .await;
+
+    let turn = runtime
+        .run_turn_assembled(
+            TurnInput {
+                items: vec![InputItem::Text {
+                    text: "hello".to_string(),
+                }],
+                protocol_turn_options: None,
+                trace_turn_id: None,
+                protocol_extension: None,
+                turn_context: crate::TurnContext::default(),
+            },
+            CancellationToken::new(),
+            named_turn_scope("root", "generation-disposition-turn"),
+        )
+        .await
+        .expect("turn");
+
+    let attempt = turn
+        .llm_calls
+        .first()
+        .expect("one provider call")
+        .attempts
+        .first()
+        .expect("one attempt");
+    let reported = attempt
+        .generation_disposition
+        .expect("the adapter reported what it sent");
+    assert_eq!(reported, dropped_sampling);
+    assert!(
+        !reported.nothing_omitted(),
+        "a host asserting repeatability must be able to see the omission"
+    );
+}
