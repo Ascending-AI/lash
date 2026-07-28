@@ -54,21 +54,6 @@ fn is_contention_sqlstate(code: &str) -> bool {
     matches!(code, "40001" | "40P01" | "55P03")
 }
 
-#[cfg(test)]
-mod contention_tests {
-    use super::is_contention_sqlstate;
-
-    #[test]
-    fn only_retry_unchanged_sqlstates_are_contention() {
-        for code in ["40001", "40P01", "55P03"] {
-            assert!(is_contention_sqlstate(code), "{code}");
-        }
-        for code in ["23505", "57014", "08006"] {
-            assert!(!is_contention_sqlstate(code), "{code}");
-        }
-    }
-}
-
 pub(crate) fn plugin_sqlx_error(err: sqlx::Error) -> PluginError {
     PluginError::Session(err.to_string())
 }
@@ -446,4 +431,19 @@ pub(crate) async fn commit_attachment_refs_tx(
         .map_err(store_sqlx_error)?;
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod contention_tests {
+    use super::is_contention_sqlstate;
+
+    #[test]
+    fn only_retry_unchanged_sqlstates_are_contention() {
+        for code in ["40001", "40P01", "55P03"] {
+            assert!(is_contention_sqlstate(code), "{code}");
+        }
+        for code in ["23505", "57014", "08006"] {
+            assert!(!is_contention_sqlstate(code), "{code}");
+        }
+    }
 }
