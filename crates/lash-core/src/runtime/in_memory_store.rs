@@ -1076,30 +1076,29 @@ impl crate::store::SessionCommitStore for InMemorySessionStore {
                 .cloned()
                 .collect::<HashSet<_>>();
             for node in incoming_nodes {
-                if let Some(parent_node_id) = &node.parent_node_id {
-                    if proposed.find_node(parent_node_id).is_none()
-                        || tombstoned.contains(parent_node_id)
-                    {
-                        return Err(crate::store::StoreError::InvalidGraphParent {
-                            node_id: node.node_id.clone(),
-                            expected: node.parent_node_id.clone(),
-                            actual: None,
-                        });
-                    }
+                if let Some(parent_node_id) = &node.parent_node_id
+                    && (proposed.find_node(parent_node_id).is_none()
+                        || tombstoned.contains(parent_node_id))
+                {
+                    return Err(crate::store::StoreError::InvalidGraphParent {
+                        node_id: node.node_id.clone(),
+                        expected: node.parent_node_id.clone(),
+                        actual: None,
+                    });
                 }
             }
             let mut live_child_counts = Self::live_child_counts(&proposed, &tombstoned);
-            if old_leaf_node_id != new_leaf_node_id {
-                if let Some(old_leaf_node_id) = old_leaf_node_id {
-                    Self::reclaim_unreachable_ancestry(
-                        &proposed,
-                        &mut live_child_counts,
-                        &mut tombstoned,
-                        &old_leaf_node_id,
-                        &session_heads,
-                        &anchored_node_ids,
-                    );
-                }
+            if old_leaf_node_id != new_leaf_node_id
+                && let Some(old_leaf_node_id) = old_leaf_node_id
+            {
+                Self::reclaim_unreachable_ancestry(
+                    &proposed,
+                    &mut live_child_counts,
+                    &mut tombstoned,
+                    &old_leaf_node_id,
+                    &session_heads,
+                    &anchored_node_ids,
+                );
             }
             (tombstoned, session_heads)
         };
