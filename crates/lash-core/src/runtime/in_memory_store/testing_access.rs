@@ -114,8 +114,17 @@ impl InMemorySessionStore {
         self.session_meta.lock().expect("lock session meta").clone()
     }
 
-    /// Install deterministic metadata before a cross-backend differential run.
+    /// Install deterministic metadata and its incarnation fence before a
+    /// cross-backend differential run.
     pub fn replace_session_meta_for_testing(&self, meta: crate::SessionMeta) {
+        let _transaction = self
+            .write_transaction
+            .lock()
+            .expect("lock in-memory write transaction");
+        self.session_incarnations
+            .lock()
+            .expect("lock session incarnations")
+            .insert(meta.session_id.clone(), meta.incarnation_id.clone());
         *self.session_meta.lock().expect("lock session meta") = Some(meta);
     }
 
