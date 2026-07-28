@@ -1005,27 +1005,29 @@ pub fn runtime_session_graph_contract(summary: &AbstractWorldSummary) -> OracleV
                     ),
                 );
             }
-            let expected_min_count = turn_index * 2;
-            if session.graph_node_counts.get(index).copied().unwrap_or(0) < expected_min_count {
+            let expected_graph_min_count = turn_index * 2 + 1;
+            if session.graph_node_counts.get(index).copied().unwrap_or(0) < expected_graph_min_count
+            {
                 return OracleVerdict::failed(
                     RUNTIME_SESSION_GRAPH_ORACLE,
                     format!(
-                        "session `{}` turn {turn_index} graph had fewer than {expected_min_count} nodes",
+                        "session `{}` turn {turn_index} graph had fewer than {expected_graph_min_count} nodes",
                         session.alias
                     ),
                 );
             }
+            let expected_transcript_min_count = turn_index * 2;
             if session
                 .transcript_message_counts
                 .get(index)
                 .copied()
                 .unwrap_or(0)
-                < expected_min_count
+                < expected_transcript_min_count
             {
                 return OracleVerdict::failed(
                     RUNTIME_SESSION_GRAPH_ORACLE,
                     format!(
-                        "session `{}` turn {turn_index} transcript had fewer than {expected_min_count} messages",
+                        "session `{}` turn {turn_index} transcript had fewer than {expected_transcript_min_count} messages",
                         session.alias
                     ),
                 );
@@ -1116,7 +1118,7 @@ pub fn runtime_single_active_agent_frame(events: &[DeliveredBoundary]) -> Oracle
                 format!(
                     "provider boundary `{}` observed current_frame=`{}` active={:?} current_exists={} current_active={} unknown_node_frames={:?}",
                     event.boundary_id,
-                    facts.current_agent_frame_id,
+                    facts.current_frame_node_id,
                     facts.active_frame_ids,
                     facts.current_frame_exists,
                     facts.current_frame_active,
@@ -8546,7 +8548,7 @@ mod tests {
                         "answer for session-001 turn 3".to_string(),
                     ],
                     provider_exchange_counts: vec![1, 2, 3],
-                    graph_node_counts: vec![2, 4, 6],
+                    graph_node_counts: vec![3, 5, 7],
                     transcript_message_counts: vec![2, 4, 6],
                     tool_outputs: vec!["tool result for session-001".to_string()],
                     exec_code_outputs: vec!["exec result for session-001".to_string()],
@@ -8571,7 +8573,7 @@ mod tests {
                         "answer for session-002 turn 2".to_string(),
                     ],
                     provider_exchange_counts: vec![1, 2],
-                    graph_node_counts: vec![2, 4],
+                    graph_node_counts: vec![3, 5],
                     transcript_message_counts: vec![2, 4],
                     tool_outputs: Vec::new(),
                     exec_code_outputs: Vec::new(),

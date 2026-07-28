@@ -5,29 +5,27 @@ use std::sync::{Arc, OnceLock};
 use crate::session_model::{ConversationRecord, ProtocolEvent, SessionHistoryRecord};
 use crate::{BaseRenderCache, Clock, Message, MessageRole, PromptUsage, TokenUsage};
 
-pub(crate) fn remap_session_node_cause(
-    caused_by: &mut Option<crate::CausalRef>,
-    session_id: &str,
-    mapping: &HashMap<String, String>,
-) {
-    let Some(crate::CausalRef::SessionNode {
-        session_id: cause_session_id,
-        node_id,
-    }) = caused_by
-    else {
-        return;
-    };
-    if cause_session_id == session_id
-        && let Some(derived) = mapping.get(node_id)
-    {
-        *node_id = derived.clone();
-    }
-}
-
 fn draft_node_id(namespace: &str, ordinal: u64) -> String {
     let preimage = format!("{}:{namespace}:{ordinal}", namespace.len());
     format!(
         "draft-node/v2/{}",
+        crate::stable_hash::sha256_hex(preimage.as_bytes())
+    )
+}
+
+/// Derive a durable frame identity before the surrounding operation commits.
+///
+/// Process provenance can capture the current frame scope immediately, so a
+/// FrameOpen ID cannot use the provisional-to-realized remapping used by
+/// ordinary history nodes.
+pub(crate) fn frame_node_id(session_id: &str, frame_key: &str) -> String {
+    let preimage = format!(
+        "{}:{session_id}:{}:{frame_key}",
+        session_id.len(),
+        frame_key.len()
+    );
+    format!(
+        "frame-node/v1/{}",
         crate::stable_hash::sha256_hex(preimage.as_bytes())
     )
 }
@@ -99,19 +97,21 @@ pub struct SessionNodeRecord {
     pub node_id: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub parent_node_id: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub caused_by: Option<crate::CausalRef>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub agent_frame_id: Option<crate::AgentFrameId>,
     pub timestamp: String,
     #[serde(flatten)]
     pub payload: SessionNodePayload,
 }
 
+#[derive(serde::Serialize, serde::Deserialize)]
+struct StoredSessionNodeBody {
+    timestamp: String,
+    #[serde(flatten)]
+    payload: SessionNodePayload,
+}
+
 #[derive(Clone, Debug)]
 pub(crate) struct SessionNodeDraft {
     payload: SessionNodeDraftPayload,
-    caused_by: Option<crate::CausalRef>,
 }
 
 #[derive(Clone, Debug)]
@@ -128,7 +128,6 @@ impl SessionNodeDraft {
     pub(crate) fn message(message: Message) -> Self {
         Self {
             payload: SessionNodeDraftPayload::Message(message),
-            caused_by: None,
         }
     }
 
@@ -138,14 +137,12 @@ impl SessionNodeDraft {
                 plugin_type: plugin_type.into(),
                 body,
             },
-            caused_by: None,
         }
     }
 
     pub(crate) fn protocol_event(event: ProtocolEvent) -> Self {
         Self {
             payload: SessionNodeDraftPayload::ProtocolEvent(event),
-            caused_by: None,
         }
     }
 
@@ -154,11 +151,6 @@ impl SessionNodeDraft {
             SessionHistoryRecord::Conversation(record) => Self::message(record.to_message()),
             SessionHistoryRecord::Protocol(event) => Self::protocol_event(event),
         }
-    }
-
-    pub(crate) fn with_caused_by(mut self, caused_by: Option<crate::CausalRef>) -> Self {
-        self.caused_by = caused_by;
-        self
     }
 }
 
@@ -212,6 +204,11 @@ pub enum SessionNodePayload {
         plugin_type: String,
         body: SharedJsonValue,
     },
+    FrameOpen {
+        reason: crate::AgentFrameReason,
+        assignment: crate::AgentFrameAssignment,
+        protocol_turn_options: crate::ProtocolTurnOptions,
+    },
 }
 
 #[derive(Clone, Debug, Default, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
@@ -260,24 +257,11 @@ pub(crate) struct SessionReadModel {
 pub(crate) struct SessionGraphAppendBuilder {
     existing_ids: HashSet<String>,
     leaf_node_id: Option<String>,
-    agent_frame_id: Option<crate::AgentFrameId>,
     draft_namespace: String,
     next_draft_ordinal: u64,
 }
 
 impl SessionGraphAppendBuilder {
-    pub(crate) fn with_agent_frame_id(
-        mut self,
-        agent_frame_id: impl Into<crate::AgentFrameId>,
-    ) -> Self {
-        self.agent_frame_id = Some(agent_frame_id.into());
-        self
-    }
-
-    pub(crate) fn agent_frame_id(&self) -> Option<&str> {
-        self.agent_frame_id.as_deref()
-    }
-
     pub(crate) fn draft_namespace(&self) -> &str {
         &self.draft_namespace
     }
@@ -355,15 +339,11 @@ impl SessionGraphAppendBuilder {
         let mut nodes = Vec::new();
         for draft in drafts {
             let parent_node_id = self.leaf_node_id.clone();
-            let (node_id, caused_by, payload) = match draft.payload {
+            let (node_id, payload) = match draft.payload {
                 SessionNodeDraftPayload::Message(message) => {
                     let node_id = self.next_draft_node_id();
-                    let caused_by = draft
-                        .caused_by
-                        .or_else(|| causal_ref_from_message_origin(&message.origin));
                     (
                         node_id,
-                        caused_by,
                         SessionNodePayload::Event {
                             event: SessionHistoryRecord::Conversation(
                                 ConversationRecord::from_message(message),
@@ -375,7 +355,6 @@ impl SessionGraphAppendBuilder {
                     let node_id = self.next_draft_node_id();
                     (
                         node_id,
-                        draft.caused_by,
                         SessionNodePayload::Plugin {
                             plugin_type,
                             body: SharedJsonValue::new(body),
@@ -386,7 +365,6 @@ impl SessionGraphAppendBuilder {
                     let node_id = self.next_draft_node_id();
                     (
                         node_id,
-                        draft.caused_by,
                         SessionNodePayload::Event {
                             event: SessionHistoryRecord::Protocol(event),
                         },
@@ -398,8 +376,6 @@ impl SessionGraphAppendBuilder {
             nodes.push(SessionNodeRecord {
                 node_id,
                 parent_node_id,
-                caused_by,
-                agent_frame_id: self.agent_frame_id.clone(),
                 timestamp: timestamp.clone(),
                 payload,
             });
@@ -485,17 +461,18 @@ impl SessionGraphCache {
         self.prompt_render_cache = Arc::new(BaseRenderCache::new());
     }
 
-    fn read_model_for_agent_frame(
-        &self,
-        graph: &SessionGraph,
-        frame_id: &str,
-        include_unscoped: bool,
-    ) -> SessionReadModel {
+    fn read_model_for_frame(&self, graph: &SessionGraph, frame_node_id: &str) -> SessionReadModel {
         let mut active_messages = Vec::with_capacity(self.active_path_indices.len());
         let mut active_events = Vec::with_capacity(self.active_path_indices.len());
+        let mut in_frame = false;
         for idx in &self.active_path_indices {
             let node = &graph.nodes[*idx];
-            if !node_belongs_to_agent_frame(node, frame_id, include_unscoped) {
+            if node.node_id == frame_node_id {
+                in_frame = true;
+            } else if in_frame && matches!(node.payload, SessionNodePayload::FrameOpen { .. }) {
+                break;
+            }
+            if !in_frame {
                 continue;
             }
             if let Some(event) = node.event() {
@@ -549,10 +526,35 @@ impl SessionGraphCache {
 }
 
 impl SessionNodeRecord {
+    /// Encode only immutable node content for `node_json`.
+    ///
+    /// Identity and graph structure are columns so SQL can index, join, and
+    /// re-derive reachability without parsing an opaque JSON blob.
+    pub fn encode_storage_body(&self) -> Result<String, serde_json::Error> {
+        serde_json::to_string(&StoredSessionNodeBody {
+            timestamp: self.timestamp.clone(),
+            payload: self.payload.clone(),
+        })
+    }
+
+    pub fn decode_storage_body(
+        node_id: String,
+        parent_node_id: Option<String>,
+        node_json: &str,
+    ) -> Result<Self, serde_json::Error> {
+        let body = serde_json::from_str::<StoredSessionNodeBody>(node_json)?;
+        Ok(Self {
+            node_id,
+            parent_node_id,
+            timestamp: body.timestamp,
+            payload: body.payload,
+        })
+    }
+
     pub fn event(&self) -> Option<&SessionHistoryRecord> {
         match &self.payload {
             SessionNodePayload::Event { event } => Some(event),
-            SessionNodePayload::Plugin { .. } => None,
+            SessionNodePayload::Plugin { .. } | SessionNodePayload::FrameOpen { .. } => None,
         }
     }
 
@@ -565,10 +567,27 @@ impl SessionNodeRecord {
 
     pub fn plugin(&self) -> Option<(&str, &serde_json::Value)> {
         match &self.payload {
-            SessionNodePayload::Event { .. } => None,
+            SessionNodePayload::Event { .. } | SessionNodePayload::FrameOpen { .. } => None,
             SessionNodePayload::Plugin { plugin_type, body } => {
                 Some((plugin_type.as_str(), body.as_ref()))
             }
+        }
+    }
+
+    pub fn frame_open(
+        &self,
+    ) -> Option<(
+        &crate::AgentFrameReason,
+        &crate::AgentFrameAssignment,
+        &crate::ProtocolTurnOptions,
+    )> {
+        match &self.payload {
+            SessionNodePayload::FrameOpen {
+                reason,
+                assignment,
+                protocol_turn_options,
+            } => Some((reason, assignment, protocol_turn_options)),
+            SessionNodePayload::Event { .. } | SessionNodePayload::Plugin { .. } => None,
         }
     }
 
@@ -583,22 +602,6 @@ impl SessionNodeRecord {
 
 impl SessionGraph {
     pub fn append_active_read_delta(&mut self, messages: &[Message]) {
-        self.append_active_read_delta_scoped(None, messages);
-    }
-
-    pub fn append_active_read_delta_for_agent_frame(
-        &mut self,
-        agent_frame_id: &str,
-        messages: &[Message],
-    ) {
-        self.append_active_read_delta_scoped(Some(agent_frame_id), messages);
-    }
-
-    fn append_active_read_delta_scoped(
-        &mut self,
-        agent_frame_id: Option<&str>,
-        messages: &[Message],
-    ) {
         let appendable_messages = messages
             .iter()
             .filter(|message| !message.is_transient())
@@ -606,45 +609,11 @@ impl SessionGraph {
             .collect::<Vec<_>>();
 
         self.reserve_append_capacity(appendable_messages.len(), appendable_messages.len());
-        self.append_message_batch_scoped(agent_frame_id, appendable_messages);
+        self.append_message_batch(appendable_messages);
     }
 
-    pub(crate) fn append_active_conversation_messages_for_agent_frame(
+    pub(crate) fn append_active_conversation_messages_at(
         &mut self,
-        agent_frame_id: &str,
-        messages: &[Message],
-    ) {
-        self.append_active_conversation_messages_scoped(Some(agent_frame_id), messages);
-    }
-
-    fn append_active_conversation_messages_scoped(
-        &mut self,
-        agent_frame_id: Option<&str>,
-        messages: &[Message],
-    ) {
-        self.append_active_conversation_messages_scoped_at(
-            agent_frame_id,
-            messages,
-            crate::SystemClock.timestamp_rfc3339(),
-        );
-    }
-
-    pub(crate) fn append_active_conversation_messages_for_agent_frame_at(
-        &mut self,
-        agent_frame_id: &str,
-        messages: &[Message],
-        timestamp: String,
-    ) {
-        self.append_active_conversation_messages_scoped_at(
-            Some(agent_frame_id),
-            messages,
-            timestamp,
-        );
-    }
-
-    fn append_active_conversation_messages_scoped_at(
-        &mut self,
-        agent_frame_id: Option<&str>,
         messages: &[Message],
         timestamp: String,
     ) {
@@ -654,7 +623,7 @@ impl SessionGraph {
             .cloned()
             .collect::<Vec<_>>();
         self.reserve_append_capacity(appendable_messages.len(), appendable_messages.len());
-        self.append_message_batch_scoped_at(agent_frame_id, appendable_messages, timestamp);
+        self.append_message_batch_at(appendable_messages, timestamp);
     }
 
     pub fn from_nodes(nodes: Vec<SessionNodeRecord>, leaf_node_id: Option<String>) -> Self {
@@ -682,7 +651,6 @@ impl SessionGraph {
         SessionGraphAppendBuilder {
             existing_ids: self.nodes.iter().map(|node| node.node_id.clone()).collect(),
             leaf_node_id: self.leaf_node_id.clone(),
-            agent_frame_id: None,
             draft_namespace: draft_namespace.into(),
             next_draft_ordinal: 0,
         }
@@ -697,7 +665,7 @@ impl SessionGraph {
         Arc::make_mut(&mut self.inner)
     }
 
-    pub(crate) fn remap_node_ids(&mut self, session_id: &str, mapping: &[(String, String)]) {
+    pub(crate) fn remap_node_ids(&mut self, _session_id: &str, mapping: &[(String, String)]) {
         if mapping.is_empty() {
             return;
         }
@@ -712,12 +680,29 @@ impl SessionGraph {
             {
                 *parent = derived.clone();
             }
-            remap_session_node_cause(&mut node.caused_by, session_id, &mapping);
         }
         if let Some(leaf) = data.leaf_node_id.as_mut()
             && let Some(derived) = mapping.get(leaf)
         {
             *leaf = derived.clone();
+        }
+    }
+
+    pub(crate) fn apply_realized_node_timestamps(
+        &mut self,
+        realized: &[crate::store::RealizedNodeTimestamp],
+    ) {
+        if realized.is_empty() {
+            return;
+        }
+        let timestamps = realized
+            .iter()
+            .map(|node| (node.node_id.as_str(), node.timestamp.as_str()))
+            .collect::<HashMap<_, _>>();
+        for node in &mut self.data_mut().nodes {
+            if let Some(timestamp) = timestamps.get(node.node_id.as_str()) {
+                node.timestamp = (*timestamp).to_string();
+            }
         }
     }
 
@@ -753,29 +738,15 @@ impl SessionGraph {
         self.cache.get_or_init(|| SessionGraphCache::build(self))
     }
 
-    fn append_message_batch_scoped(
-        &mut self,
-        agent_frame_id: Option<&str>,
-        messages: Vec<Message>,
-    ) {
-        self.append_message_batch_scoped_at(
-            agent_frame_id,
-            messages,
-            crate::SystemClock.timestamp_rfc3339(),
-        );
+    fn append_message_batch(&mut self, messages: Vec<Message>) {
+        self.append_message_batch_at(messages, crate::SystemClock.timestamp_rfc3339());
     }
 
-    fn append_message_batch_scoped_at(
-        &mut self,
-        agent_frame_id: Option<&str>,
-        messages: Vec<Message>,
-        timestamp: String,
-    ) {
+    fn append_message_batch_at(&mut self, messages: Vec<Message>, timestamp: String) {
         if messages.is_empty() {
             return;
         }
-        self.append_node_drafts_scoped_at(
-            agent_frame_id,
+        self.append_node_drafts_at_inner(
             None,
             messages.into_iter().map(SessionNodeDraft::message),
             timestamp,
@@ -842,16 +813,34 @@ impl SessionGraph {
         }
     }
 
-    pub(crate) fn read_model_for_agent_frame(
-        &self,
-        frame_id: &str,
-        include_unscoped: bool,
-    ) -> SessionReadModel {
-        if frame_id.is_empty() {
+    pub(crate) fn read_model_for_frame(&self, frame_node_id: &str) -> SessionReadModel {
+        if frame_node_id.is_empty() {
             return self.read_model();
         }
-        self.cache()
-            .read_model_for_agent_frame(self, frame_id, include_unscoped)
+        self.cache().read_model_for_frame(self, frame_node_id)
+    }
+
+    /// Resolve the canonical current frame for `leaf_node_id`.
+    ///
+    /// The head caches this answer for bounded reads, but ancestry remains the
+    /// truth and is used to validate every stored pointer.
+    pub fn nearest_frame_node_id(&self, leaf_node_id: Option<&str>) -> Option<&str> {
+        let by_id = self
+            .nodes
+            .iter()
+            .map(|node| (node.node_id.as_str(), node))
+            .collect::<HashMap<_, _>>();
+        let mut current = leaf_node_id.and_then(|node_id| by_id.get(node_id).copied());
+        while let Some(node) = current {
+            if matches!(node.payload, SessionNodePayload::FrameOpen { .. }) {
+                return Some(node.node_id.as_str());
+            }
+            current = node
+                .parent_node_id
+                .as_deref()
+                .and_then(|parent| by_id.get(parent).copied());
+        }
+        None
     }
 
     pub fn append_protocol_event(&mut self, event: ProtocolEvent) -> String {
@@ -869,17 +858,56 @@ impl SessionGraph {
     where
         I: IntoIterator<Item = SessionNodeDraft>,
     {
-        self.append_node_drafts_scoped_at(
-            None,
-            None,
-            drafts,
-            crate::SystemClock.timestamp_rfc3339(),
-        )
+        self.append_node_drafts_at_inner(None, drafts, crate::SystemClock.timestamp_rfc3339())
     }
 
-    pub(crate) fn append_node_drafts_for_agent_frame_at<I>(
+    pub(crate) fn append_frame_open_with_id_at(
         &mut self,
-        agent_frame_id: &str,
+        frame_node_id: String,
+        reason: crate::AgentFrameReason,
+        assignment: crate::AgentFrameAssignment,
+        protocol_turn_options: crate::ProtocolTurnOptions,
+        timestamp: String,
+    ) -> bool {
+        if self.find_node(&frame_node_id).is_some() {
+            return false;
+        }
+        self.append_prebuilt_nodes(vec![SessionNodeRecord {
+            node_id: frame_node_id,
+            parent_node_id: self.leaf_node_id.clone(),
+            timestamp,
+            payload: SessionNodePayload::FrameOpen {
+                reason,
+                assignment,
+                protocol_turn_options,
+            },
+        }]);
+        true
+    }
+
+    pub fn agent_frame_records(&self, session_id: &str) -> Vec<crate::AgentFrameRecord> {
+        let mut previous_frame_node_id = None;
+        let mut frames = Vec::new();
+        for node in self.active_path_nodes() {
+            let Some((reason, assignment, protocol_turn_options)) = node.frame_open() else {
+                continue;
+            };
+            frames.push(crate::AgentFrameRecord::new_at(
+                node.node_id.clone(),
+                session_id.to_string(),
+                previous_frame_node_id.clone(),
+                reason.clone(),
+                assignment.clone(),
+                protocol_turn_options.clone(),
+                node.timestamp.clone(),
+            ));
+            previous_frame_node_id = Some(node.node_id.clone());
+        }
+        frames
+    }
+
+    pub(crate) fn append_node_drafts_at<I>(
+        &mut self,
         draft_namespace: &str,
         drafts: I,
         timestamp: String,
@@ -887,17 +915,11 @@ impl SessionGraph {
     where
         I: IntoIterator<Item = SessionNodeDraft>,
     {
-        self.append_node_drafts_scoped_at(
-            Some(agent_frame_id),
-            Some(draft_namespace),
-            drafts,
-            timestamp,
-        )
+        self.append_node_drafts_at_inner(Some(draft_namespace), drafts, timestamp)
     }
 
-    fn append_node_drafts_scoped_at<I>(
+    fn append_node_drafts_at_inner<I>(
         &mut self,
-        agent_frame_id: Option<&str>,
         draft_namespace: Option<&str>,
         drafts: I,
         timestamp: String,
@@ -909,9 +931,6 @@ impl SessionGraph {
             || self.append_builder(),
             |namespace| self.append_builder_in_namespace(namespace),
         );
-        if let Some(agent_frame_id) = agent_frame_id {
-            builder = builder.with_agent_frame_id(agent_frame_id.to_string());
-        }
         let nodes = builder.append_drafts_at(drafts, timestamp);
         let node_ids = nodes
             .iter()
@@ -994,32 +1013,40 @@ impl SessionGraph {
     }
 
     pub fn replace_active_read_state(&mut self, messages: &[Message]) {
-        self.replace_active_read_state_scoped(None, messages);
+        self.replace_active_read_state_from(None, messages);
     }
 
-    pub fn replace_active_read_state_for_agent_frame(
+    pub(crate) fn replace_active_read_state_for_frame(
         &mut self,
-        agent_frame_id: &str,
+        frame_node_id: &str,
         messages: &[Message],
     ) {
-        self.replace_active_read_state_scoped(Some(agent_frame_id), messages);
+        self.replace_active_read_state_from(Some(frame_node_id), messages);
     }
 
-    fn replace_active_read_state_scoped(
+    fn replace_active_read_state_from(
         &mut self,
-        agent_frame_id: Option<&str>,
+        frame_node_id: Option<&str>,
         messages: &[Message],
     ) {
-        let current_nodes = self.active_path_nodes();
+        let active_path = self.active_path_nodes();
+        let current_nodes = frame_node_id.map_or(active_path.as_slice(), |frame_node_id| {
+            active_path
+                .iter()
+                .position(|node| node.node_id == frame_node_id)
+                .map_or(&[][..], |index| &active_path[index..])
+        });
+        if frame_node_id.is_some() && current_nodes.is_empty() {
+            return;
+        }
         let existing_ids = self
             .nodes
             .iter()
             .map(|node| node.node_id.clone())
             .collect::<HashSet<_>>();
         let replacement = build_active_read_replacement(
-            current_nodes,
+            current_nodes.iter().copied(),
             &existing_ids,
-            agent_frame_id,
             &format!(
                 "unscoped-replacement:{}",
                 self.leaf_node_id.as_deref().unwrap_or("root")
@@ -1118,21 +1145,9 @@ fn build_tree_children(
     children
 }
 
-fn node_belongs_to_agent_frame(
-    node: &SessionNodeRecord,
-    frame_id: &str,
-    include_unscoped: bool,
-) -> bool {
-    match node.agent_frame_id.as_deref() {
-        Some(node_frame_id) => node_frame_id == frame_id,
-        None => include_unscoped,
-    }
-}
-
 pub(crate) fn build_active_read_replacement<'a>(
     current_nodes: impl IntoIterator<Item = &'a SessionNodeRecord>,
     existing_node_ids: &HashSet<String>,
-    agent_frame_id: Option<&str>,
     draft_namespace: &str,
     messages: &[Message],
     timestamp: String,
@@ -1181,8 +1196,6 @@ pub(crate) fn build_active_read_replacement<'a>(
         let node = SessionNodeRecord {
             node_id,
             parent_node_id,
-            caused_by: causal_ref_from_message_origin(&message.origin),
-            agent_frame_id: agent_frame_id.map(ToOwned::to_owned),
             timestamp: timestamp.clone(),
             payload: SessionNodePayload::Event {
                 event: SessionHistoryRecord::Conversation(ConversationRecord::from_message(
@@ -1231,23 +1244,6 @@ fn next_replacement_draft_node_id(
         }
     }
     unreachable!("draft node id space exhausted")
-}
-
-fn causal_ref_from_message_origin(
-    origin: &Option<crate::MessageOrigin>,
-) -> Option<crate::CausalRef> {
-    let Some(crate::MessageOrigin::Process {
-        process_id,
-        sequence,
-        ..
-    }) = origin
-    else {
-        return None;
-    };
-    Some(crate::CausalRef::ProcessEvent {
-        process_id: process_id.clone(),
-        sequence: *sequence,
-    })
 }
 
 fn first_message_search_text(message: &Message) -> String {
@@ -1347,6 +1343,70 @@ mod tests {
         assert_eq!(read.messages.len(), 2);
         assert_eq!(read.messages[0].id, "same-message-id");
         assert_eq!(read.messages[1].id, "same-message-id");
+    }
+
+    #[test]
+    fn storage_body_excludes_indexed_graph_identity_and_parent_edge() {
+        let node = SessionNodeRecord {
+            node_id: "node-2".to_string(),
+            parent_node_id: Some("node-1".to_string()),
+            timestamp: "2026-07-27T00:00:00Z".to_string(),
+            payload: SessionNodePayload::Event {
+                event: SessionHistoryRecord::Protocol(protocol_event()),
+            },
+        };
+
+        let encoded = node.encode_storage_body().expect("encode storage body");
+        assert!(!encoded.contains("node_id"));
+        assert!(!encoded.contains("parent_node_id"));
+        let decoded = SessionNodeRecord::decode_storage_body(
+            node.node_id.clone(),
+            node.parent_node_id.clone(),
+            &encoded,
+        )
+        .expect("decode storage body");
+
+        assert_eq!(decoded.node_id, node.node_id);
+        assert_eq!(decoded.parent_node_id, node.parent_node_id);
+        assert_eq!(decoded.timestamp, node.timestamp);
+        assert!(matches!(decoded.payload, SessionNodePayload::Event { .. }));
+    }
+
+    #[test]
+    fn nearest_frame_is_derived_from_ancestry() {
+        let assignment = crate::AgentFrameAssignment::from_policy(crate::SessionPolicy::default());
+        let mut graph = SessionGraph::default();
+        let first = frame_node_id("frame-ancestry", "first-frame");
+        assert!(graph.append_frame_open_with_id_at(
+            first.clone(),
+            crate::AgentFrameReason::initial(),
+            assignment.clone(),
+            crate::ProtocolTurnOptions::default(),
+            "2026-07-27T00:00:00Z".to_string(),
+        ));
+        let first_message = graph.append_message(text_message("m1", MessageRole::User, "first"));
+        let second = frame_node_id("frame-ancestry", "second-frame");
+        assert!(graph.append_frame_open_with_id_at(
+            second.clone(),
+            crate::AgentFrameReason::continue_as(),
+            assignment,
+            crate::ProtocolTurnOptions::default(),
+            "2026-07-27T00:00:01Z".to_string(),
+        ));
+        let second_message = graph.append_message(text_message("m2", MessageRole::User, "second"));
+
+        assert_eq!(
+            graph.nearest_frame_node_id(Some(&first_message)),
+            Some(first.as_str())
+        );
+        assert_eq!(
+            graph.nearest_frame_node_id(Some(&second_message)),
+            Some(second.as_str())
+        );
+        assert_eq!(
+            graph.nearest_frame_node_id(graph.leaf_node_id.as_deref()),
+            Some(second.as_str())
+        );
     }
 
     #[test]

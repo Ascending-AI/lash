@@ -85,8 +85,7 @@ impl SnapshotStore {
                 session_id: state.session_id,
                 head_revision: 7,
                 config,
-                agent_frames: state.agent_frames,
-                current_agent_frame_id: state.current_agent_frame_id,
+                current_frame_node_id: state.current_frame_node_id,
                 graph: state.session_graph,
                 checkpoint_ref: None,
                 checkpoint: Some(lash_core::store::HydratedSessionCheckpoint {
@@ -113,9 +112,14 @@ impl SnapshotStore {
         };
         let provider_id = provider_id.into();
         read.config.provider_id = provider_id.clone();
-        for frame in &mut read.agent_frames {
-            frame.assignment.policy.provider_id = provider_id.clone();
+        let leaf_node_id = read.graph.leaf_node_id.clone();
+        let mut nodes = read.graph.nodes.clone();
+        for node in &mut nodes {
+            if let lash_core::SessionNodePayload::FrameOpen { assignment, .. } = &mut node.payload {
+                assignment.policy.provider_id = provider_id.clone();
+            }
         }
+        read.graph = lash_core::SessionGraph::from_nodes(nodes, leaf_node_id);
         read.head_revision += 1;
     }
 }
@@ -162,12 +166,12 @@ impl lash_core::SessionCommitStore for SnapshotStore {
     {
         let mut read = self.read.lock().expect("snapshot store lock");
         let realization_digest = lash_core::store::graph_realization_digest(&commit.graph);
-        let realized_agent_frames = commit
-            .agent_frames
-            .iter()
-            .map(|frame| lash_core::store::RealizedAgentFrame {
-                frame_id: frame.frame_id.clone(),
-                created_at: frame.created_at.clone(),
+        let realized_node_timestamps = commit
+            .graph
+            .appended_nodes()
+            .map(|node| lash_core::store::RealizedNodeTimestamp {
+                node_id: node.node_id.clone(),
+                timestamp: node.timestamp.clone(),
             })
             .collect();
         if let Some(completed) = &commit.turn_commit {
@@ -242,8 +246,7 @@ impl lash_core::SessionCommitStore for SnapshotStore {
             session_id: commit.session_id.clone(),
             head_revision: 8,
             config: commit.config,
-            agent_frames: commit.agent_frames,
-            current_agent_frame_id: commit.current_agent_frame_id,
+            current_frame_node_id: commit.current_frame_node_id,
             graph,
             checkpoint_ref: Some(lash_core::BlobRef("checkpoint".to_string())),
             checkpoint: Some(commit.checkpoint),
@@ -254,7 +257,7 @@ impl lash_core::SessionCommitStore for SnapshotStore {
             checkpoint_ref: lash_core::BlobRef("checkpoint".to_string()),
             manifest: lash_core::store::SessionCheckpoint::default(),
             realization_digest,
-            realized_agent_frames,
+            realized_node_timestamps,
             enqueued_queue_batches: Vec::new(),
             turn_input_applications: Vec::new(),
         };
@@ -623,6 +626,13 @@ impl lash_core::StoreMaintenance for SnapshotStore {
     ) -> std::result::Result<lash_core::GcReport, lash_core::store::StoreError> {
         Ok(lash_core::GcReport::default())
     }
+
+    async fn verify_node_refcounts(
+        &self,
+    ) -> std::result::Result<lash_core::NodeRefcountVerification, lash_core::store::StoreError>
+    {
+        Ok(lash_core::NodeRefcountVerification::default())
+    }
 }
 
 #[derive(Clone)]
@@ -944,6 +954,13 @@ impl lash_core::StoreMaintenance for BoundSessionStore {
         &self,
     ) -> std::result::Result<lash_core::GcReport, lash_core::store::StoreError> {
         Ok(lash_core::GcReport::default())
+    }
+
+    async fn verify_node_refcounts(
+        &self,
+    ) -> std::result::Result<lash_core::NodeRefcountVerification, lash_core::store::StoreError>
+    {
+        Ok(lash_core::NodeRefcountVerification::default())
     }
 }
 

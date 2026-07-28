@@ -283,10 +283,6 @@ fn reconcile_loaded_state_policy(state: &mut RuntimeSessionState, policy: &Sessi
     let recorded_provider_id = state.policy.recorded_provider_id().to_string();
     state.policy = policy.clone();
     state.policy.provider_id = recorded_provider_id;
-    let reconciled_policy = state.policy.clone();
-    if let Some(frame) = state.current_agent_frame_mut() {
-        frame.assignment.policy = reconciled_policy;
-    }
 }
 
 async fn load_persisted_state_for_residency(
@@ -833,8 +829,9 @@ impl LashSession {
         if let Some(slot) = &self.process_phase_probe_slot {
             let observation = self.runtime.observe();
             slot.set_for_session(observation.session_id(), Arc::clone(&probe));
-            let current_frame = observation.persisted_state.current_agent_frame_id.as_str();
-            if !current_frame.is_empty() {
+            if let Some(current_frame) =
+                observation.persisted_state.current_frame_node_id.as_deref()
+            {
                 let scope = lash_core::SessionScope::for_agent_frame(
                     observation.session_id(),
                     current_frame,

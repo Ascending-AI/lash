@@ -121,13 +121,31 @@ pub(in crate::runtime) struct RuntimeSessionProcessService {
 }
 
 impl CurrentSessionCapability {
-    fn snapshot_meta_without_graph(runtime: &LashRuntime) -> RuntimeSessionState {
+    fn snapshot_meta_with_frame_root(runtime: &LashRuntime) -> RuntimeSessionState {
+        let frame_root =
+            runtime
+                .state
+                .current_agent_frame()
+                .map(|frame| crate::SessionNodeRecord {
+                    node_id: frame.frame_node_id.clone(),
+                    parent_node_id: None,
+                    timestamp: frame.created_at.clone(),
+                    payload: crate::SessionNodePayload::FrameOpen {
+                        reason: frame.reason.clone(),
+                        assignment: frame.assignment.clone(),
+                        protocol_turn_options: frame.protocol_turn_options.clone(),
+                    },
+                });
+        let session_graph = crate::SessionGraph::from_nodes(
+            frame_root.iter().cloned().collect(),
+            frame_root.map(|node| node.node_id),
+        );
         RuntimeSessionState {
             session_id: runtime.state.session_id.clone(),
             policy: runtime.state.policy.clone(),
             agent_frames: runtime.state.agent_frames.clone(),
-            current_agent_frame_id: runtime.state.current_agent_frame_id.clone(),
-            session_graph: crate::SessionGraph::default(),
+            current_frame_node_id: runtime.state.current_frame_node_id.clone(),
+            session_graph,
             turn_index: runtime.state.turn_index,
             token_usage: runtime.state.token_usage.clone(),
             last_prompt_usage: runtime.state.last_prompt_usage.clone(),
@@ -159,7 +177,7 @@ impl CurrentSessionCapability {
             } else {
                 let read_model = runtime.state.read_model();
                 CurrentSnapshot::ReadModel {
-                    meta: Self::snapshot_meta_without_graph(runtime),
+                    meta: Self::snapshot_meta_with_frame_root(runtime),
                     messages: read_model.messages,
                 }
             },

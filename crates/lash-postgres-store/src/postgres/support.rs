@@ -239,9 +239,11 @@ pub(crate) async fn load_session_head_meta_tx(
     for_update: bool,
 ) -> Result<Option<SessionHeadMeta>, StoreError> {
     let sql = if for_update {
-        "SELECT head_json, head_revision FROM lash_sessions WHERE session_id = $1 FOR UPDATE"
+        "SELECT head_json, head_revision, leaf_node_id, checkpoint_ref
+         FROM lash_sessions WHERE session_id = $1 FOR UPDATE"
     } else {
-        "SELECT head_json, head_revision FROM lash_sessions WHERE session_id = $1"
+        "SELECT head_json, head_revision, leaf_node_id, checkpoint_ref
+         FROM lash_sessions WHERE session_id = $1"
     };
     let row = sqlx::query(sql)
         .bind(session_id)
@@ -253,12 +255,16 @@ pub(crate) async fn load_session_head_meta_tx(
     };
     let head_json: String = row.get(0);
     let head_revision: i64 = row.get(1);
+    let leaf_node_id: Option<String> = row.get(2);
+    let checkpoint_ref: Option<String> = row.get(3);
     let mut meta: SessionHeadMeta = lash_core::store::decode_versioned_json_record(
         &head_json,
         "SessionHeadMeta",
         lash_core::store::SESSION_HEAD_META_SCHEMA_VERSION,
     )?;
     meta.head_revision = head_revision as u64;
+    meta.leaf_node_id = leaf_node_id;
+    meta.checkpoint_ref = checkpoint_ref.map(Into::into);
     Ok(Some(meta))
 }
 
@@ -287,41 +293,51 @@ pub(crate) async fn load_graph_tx(
     leaf_node_id: Option<String>,
     active_path: bool,
 ) -> Result<lash_core::SessionGraph, StoreError> {
-    let rows = sqlx::query(
-        "SELECT node_json FROM lash_graph_nodes
-         WHERE session_id = $1 AND tombstoned = FALSE
-         ORDER BY seq ASC",
-    )
-    .bind(session_id)
-    .fetch_all(&mut **tx)
-    .await
-    .map_err(store_sqlx_error)?;
+    let rows = if active_path {
+        let Some(leaf_node_id) = leaf_node_id.as_deref() else {
+            return Ok(lash_core::SessionGraph::default());
+        };
+        sqlx::query(
+            "WITH RECURSIVE active(node_id, parent_node_id, node_json, depth) AS (
+                SELECT node_id, parent_node_id, node_json, 0
+                FROM lash_graph_nodes
+                WHERE node_id = $1 AND tombstoned = FALSE
+              UNION ALL
+                SELECT parent.node_id, parent.parent_node_id, parent.node_json, active.depth + 1
+                FROM lash_graph_nodes AS parent
+                JOIN active ON parent.node_id = active.parent_node_id
+                WHERE parent.tombstoned = FALSE
+            )
+            SELECT node_id, parent_node_id, node_json
+            FROM active ORDER BY depth DESC",
+        )
+        .bind(leaf_node_id)
+        .fetch_all(&mut **tx)
+        .await
+        .map_err(store_sqlx_error)?
+    } else {
+        sqlx::query(
+            "SELECT node_id, parent_node_id, node_json FROM lash_graph_nodes
+             WHERE session_id = $1 AND tombstoned = FALSE
+             ORDER BY seq ASC",
+        )
+        .bind(session_id)
+        .fetch_all(&mut **tx)
+        .await
+        .map_err(store_sqlx_error)?
+    };
     let mut nodes = Vec::<SessionNodeRecord>::new();
     for row in rows {
-        let json: String = row.get(0);
-        nodes.push(store_decode_json(&json, "session graph node")?);
-    }
-    if active_path && let Some(leaf) = leaf_node_id.clone() {
-        let wanted = active_path_node_ids(&nodes, &leaf);
-        nodes.retain(|node| wanted.contains(&node.node_id));
+        let node_id: String = row.get(0);
+        let parent_node_id: Option<String> = row.get(1);
+        let json: String = row.get(2);
+        nodes.push(
+            SessionNodeRecord::decode_storage_body(node_id, parent_node_id, &json).map_err(
+                |err| StoreError::Backend(format!("failed to decode session graph node: {err}")),
+            )?,
+        );
     }
     Ok(lash_core::SessionGraph::from_nodes(nodes, leaf_node_id))
-}
-
-fn active_path_node_ids(nodes: &[SessionNodeRecord], leaf_node_id: &str) -> HashSet<String> {
-    let mut parent_by_id = std::collections::BTreeMap::new();
-    for node in nodes {
-        parent_by_id.insert(node.node_id.clone(), node.parent_node_id.clone());
-    }
-    let mut wanted = HashSet::new();
-    let mut cursor = Some(leaf_node_id.to_string());
-    while let Some(node_id) = cursor {
-        if !wanted.insert(node_id.clone()) {
-            break;
-        }
-        cursor = parent_by_id.get(&node_id).cloned().flatten();
-    }
-    wanted
 }
 
 pub(crate) async fn commit_attachment_refs_tx(

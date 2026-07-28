@@ -160,17 +160,25 @@ impl NodeSpec {
             parent_node_id: self
                 .parent_node_id
                 .map(|node_id| scoped_node_id(session_id, node_id)),
-            caused_by: None,
-            agent_frame_id: None,
             timestamp: "2026-07-26T00:00:00Z".to_string(),
-            payload: SessionNodePayload::Event {
-                event: SessionHistoryRecord::Protocol(
-                    ProtocolEvent::typed(
-                        "store-differential",
-                        serde_json::json!({ "contents": self.contents }),
-                    )
-                    .expect("valid differential protocol event"),
-                ),
+            payload: if self.parent_node_id.is_none() {
+                SessionNodePayload::FrameOpen {
+                    reason: lash_core::AgentFrameReason::initial(),
+                    assignment: lash_core::AgentFrameAssignment::from_policy(
+                        lash_core::SessionPolicy::default(),
+                    ),
+                    protocol_turn_options: Default::default(),
+                }
+            } else {
+                SessionNodePayload::Event {
+                    event: SessionHistoryRecord::Protocol(
+                        ProtocolEvent::typed(
+                            "store-differential",
+                            serde_json::json!({ "contents": self.contents }),
+                        )
+                        .expect("valid differential protocol event"),
+                    ),
+                }
             },
         }
     }
@@ -441,6 +449,15 @@ fn runtime_commit(
     let mut commit = RuntimeCommit::persisted_state(&state, &[]);
     commit.expected_head_revision = expected_head_revision;
     commit.graph = materialize_graph(session_id, graph);
+    commit.current_frame_node_id = match graph {
+        GraphSpec::Unchanged { leaf_node_id } => {
+            leaf_node_id.map(|node_id| scoped_node_id(session_id, node_id))
+        }
+        GraphSpec::Append { nodes, .. } => nodes
+            .first()
+            .map(|node| node.parent_node_id.unwrap_or(node.node_id))
+            .map(|node_id| scoped_node_id(session_id, node_id)),
+    };
     if let Some(turn_commit) = turn_commit {
         commit = commit.with_turn_commit(RuntimeTurnCommitStamp::new(
             session_id,
@@ -458,6 +475,11 @@ struct DurableNode {
     // contract-visible without comparing backend-local sequence counters.
     ordinal: usize,
     node_id: String,
+    // Compared as its own field rather than inside `bytes`: SQL keeps parent
+    // topology in an indexed column while the in-memory record carries it in
+    // the struct, so byte comparison alone would report a physical layout
+    // choice as drift while leaving the edge itself uncompared.
+    parent_node_id: Option<String>,
     // Both SQL backends currently store node_json as TEXT. A future jsonb
     // migration would reserialize values and make every byte comparison red
     // for a reason outside the persistence contract.
@@ -470,6 +492,7 @@ impl std::fmt::Debug for DurableNode {
             .debug_struct("DurableNode")
             .field("ordinal", &self.ordinal)
             .field("node_id", &self.node_id)
+            .field("parent_node_id", &self.parent_node_id)
             .field("bytes", &String::from_utf8_lossy(&self.bytes))
             .finish()
     }
@@ -529,7 +552,8 @@ impl RawDurableReader {
                     .map(|(ordinal, node)| DurableNode {
                         ordinal,
                         node_id: node.node_id.clone(),
-                        bytes: serde_json::to_vec(&node).expect("encode in-memory durable node"),
+                        parent_node_id: node.parent_node_id.clone(),
+                        bytes: normalized_in_memory_node_json(&node),
                     })
                     .collect();
                 let pending_turn_inputs = store
@@ -567,8 +591,8 @@ impl RawDurableReader {
                             serde_json::from_str(&json).expect("decode Postgres durable head");
                         (Some(revision as u64), meta.leaf_node_id)
                     });
-                let rows: Vec<(i64, String, String)> = sqlx::query_as(
-                    "SELECT seq, node_id, node_json
+                let rows: Vec<(i64, String, Option<String>, String)> = sqlx::query_as(
+                    "SELECT seq, node_id, parent_node_id, node_json
                      FROM lash_graph_nodes
                      WHERE session_id = $1 AND tombstoned = FALSE
                      ORDER BY seq ASC",
@@ -580,11 +604,14 @@ impl RawDurableReader {
                 let durable_nodes = rows
                     .into_iter()
                     .enumerate()
-                    .map(|(ordinal, (_seq, node_id, node_json))| DurableNode {
-                        ordinal,
-                        node_id,
-                        bytes: node_json.into_bytes(),
-                    })
+                    .map(
+                        |(ordinal, (_seq, node_id, parent_node_id, node_json))| DurableNode {
+                            ordinal,
+                            node_id,
+                            parent_node_id,
+                            bytes: normalized_sql_node_json(&node_json),
+                        },
+                    )
                     .collect();
                 let pending_rows: Vec<(String, String, Option<i64>)> = sqlx::query_as(
                     "SELECT input_id, state,
@@ -623,6 +650,29 @@ impl RawDurableReader {
     }
 }
 
+fn normalized_in_memory_node_json(node: &lash_core::SessionNodeRecord) -> Vec<u8> {
+    let mut value = serde_json::to_value(node).expect("encode in-memory durable node");
+    let object = value
+        .as_object_mut()
+        .expect("session node serializes as an object");
+    // SQL stores node identity and parent topology in indexed columns and keeps
+    // only the payload envelope in node_json. Both are compared as dedicated
+    // `DurableNode` fields, so removing them here drops a physical layout
+    // difference from the byte comparison without dropping any coverage.
+    object.remove("node_id");
+    object.remove("parent_node_id");
+    normalized_node_json(value)
+}
+
+fn normalized_sql_node_json(node_json: &str) -> Vec<u8> {
+    let value = serde_json::from_str(node_json).expect("decode SQL durable node");
+    normalized_node_json(value)
+}
+
+fn normalized_node_json(value: serde_json::Value) -> Vec<u8> {
+    serde_json::to_vec(&value).expect("encode normalized durable node")
+}
+
 fn read_sqlite_durable_state(path: &Path, session_id: &str) -> RawDurableState {
     let connection = rusqlite::Connection::open(path).expect("open SQLite durable reader");
     connection
@@ -653,7 +703,7 @@ fn read_sqlite_durable_state(path: &Path, session_id: &str) -> RawDurableState {
     let durable_nodes = {
         let mut statement = connection
             .prepare(
-                "SELECT seq, node_id, node_json
+                "SELECT seq, node_id, parent_node_id, node_json
                  FROM graph_nodes
                  WHERE session_id = ?1 AND tombstoned = 0
                  ORDER BY seq ASC",
@@ -664,7 +714,8 @@ fn read_sqlite_durable_state(path: &Path, session_id: &str) -> RawDurableState {
                 Ok((
                     row.get::<_, i64>(0)?,
                     row.get::<_, String>(1)?,
-                    row.get::<_, String>(2)?,
+                    row.get::<_, Option<String>>(2)?,
+                    row.get::<_, String>(3)?,
                 ))
             })
             .expect("read SQLite durable nodes")
@@ -672,11 +723,14 @@ fn read_sqlite_durable_state(path: &Path, session_id: &str) -> RawDurableState {
             .expect("decode SQLite durable nodes")
             .into_iter()
             .enumerate()
-            .map(|(ordinal, (_seq, node_id, node_json))| DurableNode {
-                ordinal,
-                node_id,
-                bytes: node_json.into_bytes(),
-            })
+            .map(
+                |(ordinal, (_seq, node_id, parent_node_id, node_json))| DurableNode {
+                    ordinal,
+                    node_id,
+                    parent_node_id,
+                    bytes: normalized_sql_node_json(&node_json),
+                },
+            )
             .collect()
     };
     let pending_turn_inputs = {
@@ -888,7 +942,9 @@ fn normalized_store_error(backend: &str, error: &StoreError) -> String {
         StoreError::CommitNodeBudgetExceeded { .. } => "CommitNodeBudgetExceeded".to_string(),
         StoreError::CommitByteBudgetExceeded { .. } => "CommitByteBudgetExceeded".to_string(),
         StoreError::SessionBindingMismatch { .. } => "SessionBindingMismatch".to_string(),
+        StoreError::SessionDeleted { .. } => "SessionDeleted".to_string(),
         StoreError::UnsupportedReadScope(_) => "UnsupportedReadScope".to_string(),
+        StoreError::UnsupportedStoreOperation { .. } => "UnsupportedStoreOperation".to_string(),
         StoreError::HeadRevisionConflict { .. } => "HeadRevisionConflict".to_string(),
         StoreError::RuntimeTurnCommitConflict { .. } => "RuntimeTurnCommitConflict".to_string(),
         StoreError::QueuedWorkClaimSuperseded { .. } => "QueuedWorkClaimSuperseded".to_string(),
@@ -909,9 +965,12 @@ fn normalized_store_error(backend: &str, error: &StoreError) -> String {
         StoreError::NodeIdDerivationMismatch { .. } => "NodeIdDerivationMismatch".to_string(),
         StoreError::NodeIdCollision { .. } => "NodeIdCollision".to_string(),
         StoreError::InvalidGraphLeaf { .. } => "InvalidGraphLeaf".to_string(),
+        StoreError::InvalidGraphParent { .. } => "InvalidGraphParent".to_string(),
+        StoreError::MissingFrameOpenAncestor { .. } => "MissingFrameOpenAncestor".to_string(),
+        StoreError::NodeRefcountDrift { .. } => "NodeRefcountDrift".to_string(),
         StoreError::CommitRealizationMismatch { .. } => "CommitRealizationMismatch".to_string(),
-        StoreError::CommitFrameRealizationMismatch { .. } => {
-            "CommitFrameRealizationMismatch".to_string()
+        StoreError::CommitNodeRealizationMismatch { .. } => {
+            "CommitNodeRealizationMismatch".to_string()
         }
         StoreError::Backend(message) => normalized_backend_error(backend, message),
     }

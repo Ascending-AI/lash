@@ -64,18 +64,18 @@ use lash_core::store::queued_work::{
 };
 use lash_core::store::{
     GraphCommitDelta, HydratedSessionCheckpoint, PersistedSessionRead, RuntimeCommit,
-    RuntimeCommitResult, SessionCheckpoint, SessionHead, SessionHeadMeta,
+    RuntimeCommitResult, SessionCheckpoint, SessionHeadMeta,
 };
 use lash_core::{
     AbandonRequest, AttachmentId, AttachmentIntent, AttachmentManifest, AttachmentManifestEntry,
     AttachmentOwnerKind, BlobRef, DeliveryPolicy, GcReport, LeaseOwnerIdentity, LeaseOwnerLiveness,
-    MergeKey, PROCESS_LEASE_SCHEMA_VERSION, PersistedSegmentHandover, ProcessAwaitOutput,
-    ProcessChangeCursor, ProcessEvent, ProcessEventAppendRequest, ProcessEventAppendResult,
-    ProcessExecutionWriteAuthority, ProcessExternalRef, ProcessHandleDescriptor,
-    ProcessHandleGrant, ProcessLease, ProcessLeaseClaimOutcome, ProcessLeaseCompletion,
-    ProcessListFilter, ProcessLiveReferenceSummary, ProcessPruneReport, ProcessRecord,
-    ProcessRegistration, ProcessRegistry, ProcessStartOutcome, ProcessStartPlan, ProcessStarted,
-    QueuedWorkStore, RuntimePersistence, SessionCommitStore, SessionExecutionLease,
+    MergeKey, NodeRefcountVerification, PROCESS_LEASE_SCHEMA_VERSION, PersistedSegmentHandover,
+    ProcessAwaitOutput, ProcessChangeCursor, ProcessEvent, ProcessEventAppendRequest,
+    ProcessEventAppendResult, ProcessExecutionWriteAuthority, ProcessExternalRef,
+    ProcessHandleDescriptor, ProcessHandleGrant, ProcessLease, ProcessLeaseClaimOutcome,
+    ProcessLeaseCompletion, ProcessListFilter, ProcessLiveReferenceSummary, ProcessPruneReport,
+    ProcessRecord, ProcessRegistration, ProcessRegistry, ProcessStartOutcome, ProcessStartPlan,
+    ProcessStarted, QueuedWorkStore, RuntimePersistence, SessionCommitStore, SessionExecutionLease,
     SessionExecutionLeaseClaimOutcome, SessionExecutionLeaseCompletion, SessionExecutionLeaseFence,
     SessionExecutionLeaseStore, SessionMeta, SessionPickerInfo, SessionReadScope, SessionScope,
     SessionStoreCreateRequest, SessionStoreFactory, SlotPolicy, StoreError, StoreMaintenance,
@@ -148,7 +148,7 @@ pub struct SqliteProcessRegistry {
 }
 
 fn sqlite_error(err: rusqlite::Error) -> StoreError {
-    match &err {
+    match err {
         rusqlite::Error::SqliteFailure(code, _)
             if matches!(
                 code.code,
@@ -157,7 +157,11 @@ fn sqlite_error(err: rusqlite::Error) -> StoreError {
         {
             StoreError::Contended
         }
-        _ => StoreError::Backend(err.to_string()),
+        rusqlite::Error::ToSqlConversionFailure(error) => match error.downcast::<StoreError>() {
+            Ok(error) => *error,
+            Err(error) => StoreError::Backend(error.to_string()),
+        },
+        err => StoreError::Backend(err.to_string()),
     }
 }
 
@@ -578,6 +582,14 @@ async fn delete_session_from_catalog(root: &Path, session_id: &str) -> Result<()
     ensure_schema(&conn).await.map_err(|err| err.to_string())?;
     conn.write(move |tx| {
         tx.execute(
+            "DELETE FROM session_head WHERE session_id = ?1",
+            params![session_id],
+        )?;
+        tx.execute(
+            "DELETE FROM graph_nodes WHERE session_id = ?1",
+            params![session_id],
+        )?;
+        tx.execute(
             "DELETE FROM queued_work_batches WHERE session_id = ?1",
             params![session_id],
         )?;
@@ -587,8 +599,6 @@ async fn delete_session_from_catalog(root: &Path, session_id: &str) -> Result<()
             "runtime_turn_commits",
             "session_execution_leases",
             "usage_deltas",
-            "graph_nodes",
-            "session_head",
             "session_meta",
         ] {
             tx.execute(
@@ -643,21 +653,6 @@ fn retained_artifact_refs(checkpoint: &SessionCheckpoint) -> Vec<RetainedArtifac
         });
     }
     refs
-}
-
-fn session_head_meta(head: &SessionHead) -> SessionHeadMeta {
-    SessionHeadMeta {
-        schema_version: lash_core::store::SESSION_HEAD_META_SCHEMA_VERSION,
-        session_id: head.session_id.clone(),
-        head_revision: 0,
-        config: head.config.clone(),
-        agent_frames: head.agent_frames.clone(),
-        current_agent_frame_id: head.current_agent_frame_id.clone(),
-        checkpoint_ref: head.checkpoint_ref.clone(),
-        leaf_node_id: head.graph.leaf_node_id.clone(),
-        graph_node_count: head.graph.nodes.len(),
-        token_ledger: Vec::new(),
-    }
 }
 
 fn encode_json<T: serde::Serialize>(value: &T) -> String {
@@ -726,13 +721,21 @@ fn try_load_session_head_meta_from_conn(
 ) -> Result<Option<SessionHeadMeta>, StoreError> {
     let row = conn
         .query_row(
-            "SELECT head_json, head_revision FROM session_head WHERE session_id = ?1",
+            "SELECT head_json, head_revision, leaf_node_id, checkpoint_ref
+             FROM session_head WHERE session_id = ?1",
             params![session_id],
-            |row| Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?)),
+            |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, i64>(1)?,
+                    row.get::<_, Option<String>>(2)?,
+                    row.get::<_, Option<String>>(3)?,
+                ))
+            },
         )
         .optional()
         .map_err(sqlite_error)?;
-    let Some((head_json, head_revision)) = row else {
+    let Some((head_json, head_revision, leaf_node_id, checkpoint_ref)) = row else {
         return Ok(None);
     };
     let mut meta: SessionHeadMeta = lash_core::store::decode_versioned_json_record(
@@ -741,6 +744,8 @@ fn try_load_session_head_meta_from_conn(
         lash_core::store::SESSION_HEAD_META_SCHEMA_VERSION,
     )?;
     meta.head_revision = head_revision as u64;
+    meta.leaf_node_id = leaf_node_id;
+    meta.checkpoint_ref = checkpoint_ref.map(Into::into);
     Ok(Some(meta))
 }
 
@@ -902,6 +907,179 @@ mod tests {
             .expect("release writer lock");
 
         assert!(matches!(result, Err(StoreError::Contended)));
+    }
+
+    #[tokio::test]
+    async fn zero_confirmation_aborts_a_corrupt_low_count_transaction() {
+        let store = Store::memory().await.expect("open store");
+        store.bind_session("refcount-drift").expect("bind store");
+        let mut state = lash_core::RuntimeSessionState {
+            session_id: "refcount-drift".to_string(),
+            ..Default::default()
+        };
+        state.ensure_agent_frame_initialized();
+        store
+            .commit_runtime_state(RuntimeCommit::persisted_state(&state, &[]))
+            .await
+            .expect("commit root frame");
+        let frame_node_id = state.current_frame_node_id.clone().expect("frame node");
+        store
+            .conn
+            .write({
+                let frame_node_id = frame_node_id.clone();
+                move |tx| {
+                    tx.execute(
+                        "UPDATE graph_nodes SET incoming_refs = 0 WHERE node_id = ?1",
+                        params![frame_node_id],
+                    )?;
+                    Ok(())
+                }
+            })
+            .await
+            .expect("corrupt cached count");
+        let child_node_id = "refcount-drift-child".to_string();
+        let child = lash_core::SessionNodeRecord {
+            node_id: child_node_id.clone(),
+            parent_node_id: Some(frame_node_id.clone()),
+            timestamp: "2026-07-27T00:00:00Z".to_string(),
+            payload: lash_core::SessionNodePayload::Event {
+                event: lash_core::SessionHistoryRecord::Protocol(
+                    lash_core::ProtocolEvent::typed("refcount-drift", serde_json::Value::Null)
+                        .expect("protocol event"),
+                ),
+            },
+        };
+        let mut commit = RuntimeCommit::persisted_state(&state, &[]);
+        commit.expected_head_revision = Some(1);
+        commit.graph = GraphCommitDelta::Append {
+            nodes: vec![child],
+            leaf_node_id: Some(child_node_id.clone()),
+        };
+
+        let error = store
+            .commit_runtime_state(commit)
+            .await
+            .expect_err("zero-confirmation must abort");
+
+        assert!(
+            matches!(
+                &error,
+                StoreError::NodeRefcountDrift {
+                    node_id,
+                    cached: 0,
+                    derived: 1,
+                } if node_id == &frame_node_id
+            ),
+            "unexpected zero-confirmation error: {error:?}"
+        );
+        let persisted = store
+            .load_session(SessionReadScope::FullGraph)
+            .await
+            .expect("load after abort")
+            .expect("session remains live");
+        assert_eq!(persisted.head_revision, 1);
+        assert_eq!(
+            persisted.graph.leaf_node_id.as_deref(),
+            Some(frame_node_id.as_str())
+        );
+        assert!(
+            store
+                .load_node(&child_node_id)
+                .await
+                .expect("load aborted child")
+                .is_none(),
+            "the transaction must roll back the child insert"
+        );
+    }
+
+    #[tokio::test]
+    async fn refcount_scrub_detects_corrupt_cached_count() {
+        let store = Store::memory().await.expect("open store");
+        store
+            .bind_session("scrub-refcount-drift")
+            .expect("bind store");
+        let mut state = lash_core::RuntimeSessionState {
+            session_id: "scrub-refcount-drift".to_string(),
+            ..Default::default()
+        };
+        state.ensure_agent_frame_initialized();
+        store
+            .commit_runtime_state(RuntimeCommit::persisted_state(&state, &[]))
+            .await
+            .expect("commit root frame");
+        let frame_node_id = state.current_frame_node_id.expect("frame node");
+        store
+            .conn
+            .write({
+                let frame_node_id = frame_node_id.clone();
+                move |tx| {
+                    tx.execute(
+                        "UPDATE graph_nodes SET incoming_refs = 2 WHERE node_id = ?1",
+                        params![frame_node_id],
+                    )?;
+                    Ok(())
+                }
+            })
+            .await
+            .expect("corrupt cached count");
+
+        let error = store
+            .verify_node_refcounts()
+            .await
+            .expect_err("scrub must detect cached count drift");
+
+        assert!(matches!(
+            error,
+            StoreError::NodeRefcountDrift {
+                node_id,
+                cached: 2,
+                derived: 1,
+            } if node_id == frame_node_id
+        ));
+    }
+
+    #[tokio::test]
+    async fn maintenance_preserves_typed_refcount_drift() {
+        let store = Store::memory().await.expect("open store");
+        store.bind_session("maintenance-drift").expect("bind store");
+        let mut state = lash_core::RuntimeSessionState {
+            session_id: "maintenance-drift".to_string(),
+            ..Default::default()
+        };
+        state.ensure_agent_frame_initialized();
+        store
+            .commit_runtime_state(RuntimeCommit::persisted_state(&state, &[]))
+            .await
+            .expect("commit root frame");
+        let frame_node_id = state.current_frame_node_id.clone().expect("frame node");
+        store
+            .conn
+            .write({
+                let frame_node_id = frame_node_id.clone();
+                move |tx| {
+                    tx.execute(
+                        "UPDATE graph_nodes SET incoming_refs = 0 WHERE node_id = ?1",
+                        params![frame_node_id],
+                    )?;
+                    Ok(())
+                }
+            })
+            .await
+            .expect("corrupt cached count");
+
+        let error = store
+            .tombstone_nodes(std::slice::from_ref(&frame_node_id))
+            .await
+            .expect_err("maintenance drift must stay typed");
+
+        assert!(matches!(
+            error,
+            StoreError::NodeRefcountDrift {
+                node_id,
+                cached: 0,
+                derived: 1,
+            } if node_id == frame_node_id
+        ));
     }
 
     #[tokio::test]

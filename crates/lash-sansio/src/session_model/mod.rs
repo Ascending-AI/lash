@@ -56,59 +56,31 @@ impl ProtocolEvent {
 pub enum SessionAppendNode {
     Message {
         message: PluginMessage,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        caused_by: Option<crate::CausalRef>,
     },
     ProtocolEvent {
         event: ProtocolEvent,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        caused_by: Option<crate::CausalRef>,
     },
     Plugin {
         plugin_type: String,
         #[serde(default)]
         body: serde_json::Value,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        caused_by: Option<crate::CausalRef>,
     },
 }
 
 impl SessionAppendNode {
     pub fn message(message: PluginMessage) -> Self {
-        Self::Message {
-            message,
-            caused_by: None,
-        }
+        Self::Message { message }
     }
 
     pub fn plugin(plugin_type: impl Into<String>, body: serde_json::Value) -> Self {
         Self::Plugin {
             plugin_type: plugin_type.into(),
             body,
-            caused_by: None,
         }
     }
 
     pub fn protocol_event(event: ProtocolEvent) -> Self {
-        Self::ProtocolEvent {
-            event,
-            caused_by: None,
-        }
-    }
-
-    pub fn with_caused_by(mut self, caused_by: crate::CausalRef) -> Self {
-        match &mut self {
-            Self::Message {
-                caused_by: cause, ..
-            }
-            | Self::ProtocolEvent {
-                caused_by: cause, ..
-            }
-            | Self::Plugin {
-                caused_by: cause, ..
-            } => *cause = Some(caused_by),
-        }
-        self
+        Self::ProtocolEvent { event }
     }
 }
 

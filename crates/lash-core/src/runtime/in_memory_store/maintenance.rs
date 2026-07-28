@@ -14,10 +14,71 @@ impl crate::store::StoreMaintenance for InMemorySessionStore {
             .write_transaction
             .lock()
             .expect("lock in-memory write transaction");
-        self.tombstoned_node_ids
+        let graph = self.session_graph.lock().expect("lock graph");
+        let head_leaf = self
+            .session_head_meta
+            .lock()
+            .expect("lock session head")
+            .as_ref()
+            .and_then(|meta| meta.leaf_node_id.clone());
+        let mut counts = self
+            .incoming_node_refs
+            .lock()
+            .expect("lock incoming node refs")
+            .clone();
+        let mut tombstoned = self
+            .tombstoned_node_ids
             .lock()
             .expect("lock tombstoned nodes")
-            .extend(ids.iter().cloned());
+            .clone();
+        for node_id in ids {
+            if tombstoned.contains(node_id) || graph.find_node(node_id).is_none() {
+                continue;
+            }
+            let derived_children = graph
+                .nodes
+                .iter()
+                .filter(|child| {
+                    !tombstoned.contains(&child.node_id)
+                        && child.parent_node_id.as_deref() == Some(node_id.as_str())
+                })
+                .count() as i64;
+            let derived_root = i64::from(head_leaf.as_deref() == Some(node_id.as_str()));
+            let derived = derived_children + derived_root;
+            let cached = counts.get(node_id).copied().unwrap_or_default();
+            if cached != derived {
+                return Err(crate::store::StoreError::NodeRefcountDrift {
+                    node_id: node_id.clone(),
+                    cached,
+                    derived,
+                });
+            }
+            if derived != 0 {
+                continue;
+            }
+            tombstoned.insert(node_id.clone());
+            if let Some(parent_node_id) = graph
+                .find_node(node_id)
+                .and_then(|node| node.parent_node_id.as_deref())
+            {
+                InMemorySessionStore::decrement_node_reference(
+                    &graph,
+                    &mut counts,
+                    &mut tombstoned,
+                    parent_node_id,
+                    head_leaf.as_deref(),
+                )?;
+            }
+        }
+        drop(graph);
+        *self
+            .incoming_node_refs
+            .lock()
+            .expect("lock incoming node refs") = counts;
+        *self
+            .tombstoned_node_ids
+            .lock()
+            .expect("lock tombstoned nodes") = tombstoned;
         Ok(())
     }
 
@@ -75,5 +136,54 @@ impl crate::store::StoreMaintenance for InMemorySessionStore {
 
     async fn gc_unreachable(&self) -> Result<crate::store::GcReport, crate::store::StoreError> {
         Ok(crate::store::GcReport::default())
+    }
+
+    async fn verify_node_refcounts(
+        &self,
+    ) -> Result<crate::store::NodeRefcountVerification, crate::store::StoreError> {
+        let _transaction = self
+            .write_transaction
+            .lock()
+            .expect("lock in-memory write transaction");
+        let graph = self.session_graph.lock().expect("lock graph");
+        let tombstoned = self
+            .tombstoned_node_ids
+            .lock()
+            .expect("lock tombstoned nodes");
+        let head_leaf = self
+            .session_head_meta
+            .lock()
+            .expect("lock session head")
+            .as_ref()
+            .and_then(|meta| meta.leaf_node_id.as_deref())
+            .map(ToOwned::to_owned);
+        let cached = self
+            .incoming_node_refs
+            .lock()
+            .expect("lock incoming node refs");
+        let live_nodes = graph
+            .nodes
+            .iter()
+            .filter(|node| !tombstoned.contains(&node.node_id))
+            .collect::<Vec<_>>();
+        for node in &live_nodes {
+            let derived_children = live_nodes
+                .iter()
+                .filter(|child| child.parent_node_id.as_deref() == Some(node.node_id.as_str()))
+                .count() as i64;
+            let derived_root = i64::from(head_leaf.as_deref() == Some(node.node_id.as_str()));
+            let derived = derived_children + derived_root;
+            let cached = cached.get(&node.node_id).copied().unwrap_or_default();
+            if cached != derived {
+                return Err(crate::store::StoreError::NodeRefcountDrift {
+                    node_id: node.node_id.clone(),
+                    cached,
+                    derived,
+                });
+            }
+        }
+        Ok(crate::store::NodeRefcountVerification {
+            checked_node_count: live_nodes.len(),
+        })
     }
 }

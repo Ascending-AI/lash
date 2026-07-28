@@ -233,7 +233,11 @@ impl RuntimeTurnDriver<'_> {
         let llm_request = LlmRequest {
             scope: crate::LlmRequestScope::new(
                 self.session_id.clone(),
-                self.turn_pipeline.state().current_agent_frame_id.clone(),
+                self.turn_pipeline
+                    .state()
+                    .current_frame_node_id
+                    .clone()
+                    .unwrap_or_default(),
                 format!(
                     "{}:turn:{}:llm:{}",
                     self.session_id, self.turn_id, protocol_iteration

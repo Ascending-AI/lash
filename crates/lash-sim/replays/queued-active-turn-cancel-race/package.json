@@ -3,9 +3,9 @@
   "fixture_id": "queued-active-turn-cancel-race",
   "status": "promoted_deterministic_regression_guard",
   "trace": "trace.json",
-  "generator_version": "lash-sim.generated-workload.v8",
-  "source": "generated fast-random (seed 7313380382653661636, seed_index 0) DST trace, regenerated against generator lash-sim.generated-workload.v8 on 2026-06-29 (refreshed from the stale v6 promotion)",
-  "source_trace_sha256": "eab5d23f39eac7a417bd066cf3507a99b0383294f6db8e6c7afb38508cbcd232",
+  "generator_version": "lash-sim.generated-workload.v9",
+  "source": "generated fast-random (seed 7313380382653661636, seed_index 0) DST trace, migrated to structural FrameOpen history against generator lash-sim.generated-workload.v9 on 2026-07-27",
+  "source_trace_sha256": "f046a84b7c67f8464cc2305a382364b0730db473566aa66c76ace2f99abbbea7",
   "historical_production_regression": false,
   "regression_contract": "active-turn queued input stays hidden, then cancellation terminalizes the pending row before any later idle claim can surface it",
   "required_boundary_kinds": [

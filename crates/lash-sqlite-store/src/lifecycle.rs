@@ -269,29 +269,6 @@ impl Store {
         )
     }
 
-    pub async fn save_session_head_meta(&self, meta: SessionHeadMeta) {
-        if let Err(err) = self.bind_session(&meta.session_id) {
-            tracing::warn!(error = %err, "failed to bind SQLite session store");
-            return;
-        }
-        let head_json = encode_json(&meta);
-        let session_id = meta.session_id.clone();
-        let head_revision = meta.head_revision as i64;
-        let result = self
-            .conn
-            .call(move |conn| {
-                conn.execute(
-                    "INSERT OR REPLACE INTO session_head (session_id, head_json, head_revision)
-                     VALUES (?1, ?2, ?3)",
-                    params![session_id, head_json, head_revision],
-                )
-            })
-            .await;
-        if let Err(err) = result {
-            tracing::warn!(error = %err, "failed to persist session head");
-        }
-    }
-
     pub async fn load_session_head_meta(&self) -> Option<SessionHeadMeta> {
         let session_id = self.session_id.get()?.clone();
         self.conn
@@ -299,31 +276,6 @@ impl Store {
             .await
             .ok()
             .flatten()
-    }
-
-    pub async fn save_session_head(&self, head: SessionHead) {
-        if let Err(err) = self.bind_session(&head.session_id) {
-            tracing::warn!(error = %err, "failed to bind SQLite session store");
-            return;
-        }
-        self.append_session_graph_nodes(&head.graph.nodes).await;
-        self.save_session_head_meta(session_head_meta(&head)).await;
-    }
-
-    pub async fn load_session_head(&self) -> Option<SessionHead> {
-        let meta = self.load_session_head_meta().await?;
-        let mut graph = self.load_session_graph().await;
-        graph.set_leaf_node_id(meta.leaf_node_id.clone());
-        Some(SessionHead {
-            session_id: meta.session_id,
-            head_revision: meta.head_revision,
-            agent_frames: meta.agent_frames,
-            current_agent_frame_id: meta.current_agent_frame_id,
-            graph,
-            config: meta.config,
-            checkpoint_ref: meta.checkpoint_ref,
-            token_ledger: merge_token_ledger_entries(self.load_usage_deltas().await),
-        })
     }
 
     pub async fn save_session_meta(&self, meta: SessionMeta) {

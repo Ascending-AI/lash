@@ -171,11 +171,14 @@ async fn compact_context_opens_compaction_frame_and_preserves_prior_frame() -> R
         .run()
         .await?;
     let before = session.admin().state().persist_current().await?;
-    let previous_frame_id = before.current_agent_frame_id.clone();
+    let previous_frame_node_id = before.current_frame_node_id.clone();
     let observation_cursor = session.observe().current_observation().cursor;
     assert!(
         before.session_graph.nodes.iter().any(|node| {
-            node.agent_frame_id.as_deref() == Some(previous_frame_id.as_str())
+            before
+                .session_graph
+                .nearest_frame_node_id(Some(&node.node_id))
+                == previous_frame_node_id.as_deref()
                 && node
                     .message()
                     .is_some_and(|message| message.parts[0].content.contains("old durable request"))
@@ -223,15 +226,15 @@ async fn compact_context_opens_compaction_frame_and_preserves_prior_frame() -> R
     let current = after
         .agent_frames
         .iter()
-        .find(|frame| frame.frame_id == after.current_agent_frame_id)
+        .find(|frame| Some(&frame.frame_node_id) == after.current_frame_node_id.as_ref())
         .expect("current frame");
     assert_eq!(
         current.reason.as_str(),
         lash_core::AgentFrameReason::COMPACTION
     );
     assert_eq!(
-        current.previous_frame_id.as_deref(),
-        Some(previous_frame_id.as_str())
+        current.previous_frame_node_id.as_deref(),
+        previous_frame_node_id.as_deref()
     );
     assert_eq!(
         current.assignment.policy.provider_id,
@@ -243,7 +246,10 @@ async fn compact_context_opens_compaction_frame_and_preserves_prior_frame() -> R
     );
     assert!(
         after.session_graph.nodes.iter().any(|node| {
-            node.agent_frame_id.as_deref() == Some(previous_frame_id.as_str())
+            after
+                .session_graph
+                .nearest_frame_node_id(Some(&node.node_id))
+                == previous_frame_node_id.as_deref()
                 && node
                     .message()
                     .is_some_and(|message| message.parts[0].content.contains("old durable request"))
@@ -252,7 +258,10 @@ async fn compact_context_opens_compaction_frame_and_preserves_prior_frame() -> R
     );
     assert!(
         after.session_graph.nodes.iter().any(|node| {
-            node.agent_frame_id.as_deref() == Some(after.current_agent_frame_id.as_str())
+            after
+                .session_graph
+                .nearest_frame_node_id(Some(&node.node_id))
+                == after.current_frame_node_id.as_deref()
                 && node.message().is_some_and(|message| {
                     message.parts[0]
                         .content

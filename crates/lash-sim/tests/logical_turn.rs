@@ -204,7 +204,12 @@ fn canonical_seed_nodes(state: &lash_core::SessionSnapshot, frame_id: &str) -> V
         .session_graph
         .nodes
         .iter()
-        .filter(|node| node.agent_frame_id.as_deref() == Some(frame_id))
+        .filter(|node| {
+            state
+                .session_graph
+                .nearest_frame_node_id(Some(&node.node_id))
+                == Some(frame_id)
+        })
         .filter_map(|node| match &node.payload {
             SessionNodePayload::Plugin { plugin_type, body } => Some(json!({
                 "kind": "plugin",
@@ -377,8 +382,13 @@ async fn claimed_switch_is_seeded_atomic_ordered_and_exactly_once() {
         first_output.assistant_message(),
         Some("seeded follow-on complete")
     );
-    let observed_seed_nodes =
-        canonical_seed_nodes(&first_output.result.state, "sim-seeded-follow-frame");
+    let frame_node_id = first_output
+        .result
+        .state
+        .current_frame_node_id
+        .as_deref()
+        .expect("seeded follow-on frame");
+    let observed_seed_nodes = canonical_seed_nodes(&first_output.result.state, frame_node_id);
     assert!(
         frame_switch_seeds(&[FrameSwitchSeedObservation {
             protocol: "standard".to_string(),

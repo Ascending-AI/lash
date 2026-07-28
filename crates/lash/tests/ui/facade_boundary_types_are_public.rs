@@ -9,15 +9,15 @@ use lash::durability::RuntimeHostConfig;
 use lash::messages::MessageRole;
 use lash::persistence::{
     CheckpointKind, GcReport, GraphCommitDelta, LeaseOwnerIdentity, OperationId,
-    PersistedSessionRead, PendingTurnInputDraft, QueuedWorkBatch, QueuedWorkBatchDraft, QueuedWorkClaim,
-    QueuedWorkClaimBoundary, QueuedWorkStore, RuntimeCommit, RuntimeCommitResult,
-    RuntimePersistence, RuntimeSessionState, RuntimeTurnCommitStamp, SessionCheckpoint,
-    SessionCommitStore, SessionExecutionLease, SessionExecutionLeaseClaimOutcome,
-    SessionExecutionLeaseCompletion, SessionExecutionLeaseFence, SessionExecutionLeaseStore,
-    SessionMeta, SessionNodeRecord, SessionReadScope, StoreError, StoreMaintenance, TurnInputClaim,
-    TurnInputCheckpointBoundary, TurnInputIngress, TurnInputState, TurnInputStore, VacuumReport,
-    commit_runtime_state_verified, graph_realization_digest, load_persisted_session_state,
-    load_persisted_session_state_active_path,
+    PersistedSessionRead, PendingTurnInputDraft, QueuedWorkBatch, QueuedWorkBatchDraft,
+    QueuedWorkClaim, QueuedWorkClaimBoundary, QueuedWorkStore, RealizedNodeTimestamp, RuntimeCommit,
+    RuntimeCommitResult, RuntimePersistence, RuntimeSessionState, RuntimeTurnCommitStamp,
+    SessionCheckpoint, SessionCommitStore, SessionExecutionLease,
+    SessionExecutionLeaseClaimOutcome, SessionExecutionLeaseCompletion, SessionExecutionLeaseFence,
+    SessionExecutionLeaseStore, SessionMeta, SessionNodeRecord, SessionReadScope, StoreError,
+    StoreMaintenance, TurnInputClaim, TurnInputCheckpointBoundary, TurnInputIngress, TurnInputState,
+    TurnInputStore, VacuumReport, commit_runtime_state_verified, graph_realization_digest,
+    load_persisted_session_state, load_persisted_session_state_active_path,
 };
 use lash::usage::{TokenLedgerEntry, TokenUsage};
 use lash::plugins::{
@@ -55,6 +55,14 @@ impl SessionCommitStore for FacadeStore {
         commit: RuntimeCommit,
     ) -> Result<RuntimeCommitResult, StoreError> {
         let realization_digest = graph_realization_digest(&commit.graph);
+        let realized_node_timestamps = commit
+            .graph
+            .appended_nodes()
+            .map(|node| RealizedNodeTimestamp {
+                node_id: node.node_id.clone(),
+                timestamp: node.timestamp.clone(),
+            })
+            .collect();
         let manifest = SessionCheckpoint::new(
             commit.checkpoint.turn_state,
             commit.checkpoint.tool_state_ref,
@@ -67,7 +75,7 @@ impl SessionCommitStore for FacadeStore {
             checkpoint_ref: "checkpoint".to_string().into(),
             manifest,
             realization_digest,
-            realized_agent_frames: Vec::new(),
+            realized_node_timestamps,
             enqueued_queue_batches: Vec::new(),
             turn_input_applications: Vec::new(),
         })
@@ -295,6 +303,12 @@ impl StoreMaintenance for FacadeStore {
     async fn gc_unreachable(&self) -> Result<GcReport, StoreError> {
         Ok(GcReport::default())
     }
+
+    async fn verify_node_refcounts(
+        &self,
+    ) -> Result<lash::persistence::NodeRefcountVerification, StoreError> {
+        Ok(lash::persistence::NodeRefcountVerification::default())
+    }
 }
 
 fn persistence_types_are_nameable(
@@ -307,8 +321,7 @@ fn persistence_types_are_nameable(
         session_execution_lease: None,
         release_session_execution_lease: None,
         config: Default::default(),
-        agent_frames: Vec::new(),
-        current_agent_frame_id: String::new(),
+        current_frame_node_id: None,
         graph,
         checkpoint: Default::default(),
         usage_deltas: ledger,

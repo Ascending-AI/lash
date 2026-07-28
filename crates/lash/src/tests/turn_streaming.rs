@@ -2760,7 +2760,7 @@ fn rlm_active_input_reaches_the_next_provider_iteration() -> Result<()> {
         assert!(!first_messages.contains("mid-turn injection marker"));
         assert!(
             second_messages.contains("mid-turn injection marker"),
-            "active input was claimed but omitted from the next RLM provider request"
+            "active input was claimed but omitted from the next RLM provider request: {second_messages}"
         );
         assert_eq!(
             serde_json::to_string(&requests[1][1..requests[1].len() - 1])

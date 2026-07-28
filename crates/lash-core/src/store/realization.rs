@@ -3,27 +3,26 @@ use super::{
 };
 
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-pub struct RealizedAgentFrame {
-    pub frame_id: crate::AgentFrameId,
-    pub created_at: String,
+pub struct RealizedNodeTimestamp {
+    pub node_id: String,
+    pub timestamp: String,
 }
 
 /// Commit through the production realization boundary.
 ///
 /// Every runtime path that can adopt a commit result calls this function. The
 /// graph digest compares the current proposal with the receipt recorded by the
-/// first successful attempt, while the frame-id check prevents a partial or
-/// defaulted facade result from erasing live frame metadata.
+/// first successful attempt.
 pub async fn commit_runtime_state_verified(
     store: &(dyn SessionCommitStore + '_),
     commit: RuntimeCommit,
 ) -> Result<RuntimeCommitResult, StoreError> {
     commit.validate_budget()?;
     let proposed = graph_realization_digest(&commit.graph);
-    let expected_frame_ids = commit
-        .agent_frames
-        .iter()
-        .map(|frame| frame.frame_id.clone())
+    let expected_node_ids = commit
+        .graph
+        .appended_nodes()
+        .map(|node| node.node_id.clone())
         .collect::<Vec<_>>();
     let result = store.commit_runtime_state(commit).await?;
     if proposed != result.realization_digest {
@@ -32,15 +31,15 @@ pub async fn commit_runtime_state_verified(
             stored: result.realization_digest.clone(),
         });
     }
-    let stored_frame_ids = result
-        .realized_agent_frames
+    let stored_node_ids = result
+        .realized_node_timestamps
         .iter()
-        .map(|frame| frame.frame_id.clone())
+        .map(|node| node.node_id.clone())
         .collect::<Vec<_>>();
-    if expected_frame_ids != stored_frame_ids {
-        return Err(StoreError::CommitFrameRealizationMismatch {
-            expected: expected_frame_ids,
-            stored: stored_frame_ids,
+    if expected_node_ids != stored_node_ids {
+        return Err(StoreError::CommitNodeRealizationMismatch {
+            expected: expected_node_ids,
+            stored: stored_node_ids,
         });
     }
     Ok(result)
@@ -54,7 +53,6 @@ mod tests {
     #[derive(Default)]
     struct NonValidatingFacadeStore {
         commit_attempts: AtomicUsize,
-        drop_frame_realization: bool,
     }
 
     crate::impl_noop_attachment_manifest!(NonValidatingFacadeStore);
@@ -81,18 +79,14 @@ mod tests {
         ) -> Result<RuntimeCommitResult, StoreError> {
             self.commit_attempts.fetch_add(1, Ordering::SeqCst);
             let realization_digest = graph_realization_digest(&commit.graph);
-            let realized_agent_frames = if self.drop_frame_realization {
-                Vec::new()
-            } else {
-                commit
-                    .agent_frames
-                    .iter()
-                    .map(|frame| RealizedAgentFrame {
-                        frame_id: frame.frame_id.clone(),
-                        created_at: frame.created_at.clone(),
-                    })
-                    .collect()
-            };
+            let realized_node_timestamps = commit
+                .graph
+                .appended_nodes()
+                .map(|node| RealizedNodeTimestamp {
+                    node_id: node.node_id.clone(),
+                    timestamp: node.timestamp.clone(),
+                })
+                .collect();
             let manifest = super::super::SessionCheckpoint::new(
                 commit.checkpoint.turn_state,
                 commit.checkpoint.tool_state_ref,
@@ -105,7 +99,7 @@ mod tests {
                 checkpoint_ref: "empty-frame-facade".to_string().into(),
                 manifest,
                 realization_digest,
-                realized_agent_frames,
+                realized_node_timestamps,
                 enqueued_queue_batches: Vec::new(),
                 turn_input_applications: Vec::new(),
             })
@@ -124,38 +118,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn verified_commit_rejects_facade_that_drops_frame_realization() {
-        let store = NonValidatingFacadeStore {
-            drop_frame_realization: true,
-            ..NonValidatingFacadeStore::default()
-        };
-        let mut state = crate::RuntimeSessionState {
-            session_id: "frame-guard".to_string(),
-            ..crate::RuntimeSessionState::default()
-        };
-        state.ensure_agent_frame_initialized();
-        let expected = state
-            .agent_frames
-            .iter()
-            .map(|frame| frame.frame_id.clone())
-            .collect::<Vec<_>>();
-        let commit = RuntimeCommit::persisted_state(&state, &[]);
-
-        let err = commit_runtime_state_verified(&store, commit)
-            .await
-            .expect_err("an empty facade frame echo must be rejected");
-
-        assert!(matches!(
-            err,
-            StoreError::CommitFrameRealizationMismatch {
-                expected: actual_expected,
-                stored,
-            } if actual_expected == expected && stored.is_empty()
-        ));
-        assert_eq!(store.commit_attempts.load(Ordering::SeqCst), 1);
-    }
-
-    #[tokio::test]
     async fn verified_commit_rejects_node_budget_before_calling_a_non_validating_store() {
         let store = NonValidatingFacadeStore::default();
         let state = crate::RuntimeSessionState {
@@ -165,8 +127,6 @@ mod tests {
         let node = crate::SessionNodeRecord {
             node_id: "node".to_string(),
             parent_node_id: None,
-            caused_by: None,
-            agent_frame_id: None,
             timestamp: "2026-07-27T00:00:00Z".to_string(),
             payload: crate::SessionNodePayload::Event {
                 event: crate::SessionHistoryRecord::Protocol(

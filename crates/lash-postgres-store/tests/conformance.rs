@@ -313,9 +313,9 @@ async fn postgres_turn_commit_stamps_use_injected_store_clock_when_configured() 
 }
 
 // Blocker 1: `from_pool` must enforce the same component schema-version gate as
-// `connect`/`connect_with`. Writing the pre-unit-external-owner version (17) into
-// `lash_schema_versions` and then constructing over the pool must fail loudly with
-// the mismatch error, so a pre-cutover database can never be adopted post-bump.
+// `connect`/`connect_with`. Writing the immediately preceding version into
+// `lash_schema_versions` and then constructing over the pool must fail loudly
+// with the mismatch error, so a pre-cutover database can never be adopted.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn postgres_from_pool_enforces_schema_version_gate_when_configured() {
     let Some((_database_lock, storage)) = storage().await else {
@@ -323,11 +323,19 @@ async fn postgres_from_pool_enforces_schema_version_gate_when_configured() {
         return;
     };
     let pool = storage.pool().clone();
+    let current_version: i32 = sqlx::query_scalar(
+        "SELECT version FROM lash_schema_versions WHERE component = 'lash-postgres-store'",
+    )
+    .fetch_one(&pool)
+    .await
+    .expect("read current schema version");
+    let stale_version = current_version - 1;
     // Force the recorded component version to a stale value.
     sqlx::query(
-        "INSERT INTO lash_schema_versions (component, version) VALUES ('lash-postgres-store', 17)
+        "INSERT INTO lash_schema_versions (component, version) VALUES ('lash-postgres-store', $1)
          ON CONFLICT (component) DO UPDATE SET version = EXCLUDED.version",
     )
+    .bind(stale_version)
     .execute(&pool)
     .await
     .expect("write stale schema version");
@@ -337,18 +345,20 @@ async fn postgres_from_pool_enforces_schema_version_gate_when_configured() {
     // Restore the correct version BEFORE asserting so a failed assert never leaves
     // the shared database wedged for other cases.
     sqlx::query(
-        "UPDATE lash_schema_versions SET version = 18 WHERE component = 'lash-postgres-store'",
+        "UPDATE lash_schema_versions SET version = $1 WHERE component = 'lash-postgres-store'",
     )
+    .bind(current_version)
     .execute(&pool)
     .await
     .expect("restore schema version");
 
     let message = match result {
-        Ok(_) => panic!("from_pool must reject a version-17 database"),
+        Ok(_) => panic!("from_pool must reject a stale schema version"),
         Err(err) => err.to_string(),
     };
     assert!(
-        message.contains("version 17") && message.contains("expected 18"),
+        message.contains(&format!("version {stale_version}"))
+            && message.contains(&format!("expected {current_version}")),
         "expected a schema-version mismatch error, got: {message}"
     );
 }

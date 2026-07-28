@@ -71,16 +71,15 @@ impl CurrentSessionCapability {
             &draft_namespace,
             self.host.core.clock.as_ref(),
         );
-        let mut graph = crate::store::GraphCommitDelta::Append {
-            nodes: node_ids
-                .iter()
-                .filter_map(|id| state.session_graph.find_node(id).cloned())
-                .collect(),
-            leaf_node_id: state.session_graph.leaf_node_id.clone(),
-        };
-        let node_ids =
+        let requested_node_count = node_ids.len();
+        let mut graph = state.pending_graph_commit();
+        let persisted_node_ids =
             super::super::state::derive_graph_commit_node_ids(&mut state, &mut graph, &operation)
                 .map_err(|err| crate::PluginError::Session(err.to_string()))?;
+        let node_ids = persisted_node_ids[persisted_node_ids
+            .len()
+            .saturating_sub(requested_node_count)..]
+            .to_vec();
         let leaf_node_id = state.session_graph.leaf_node_id.clone().unwrap_or_default();
         let mut commit = crate::store::RuntimeCommit::persisted_state_with_graph_commit(
             &state,

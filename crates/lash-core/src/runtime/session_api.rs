@@ -41,9 +41,6 @@ impl LashRuntime {
     /// Override protocol-owned turn options for this session.
     pub fn set_protocol_turn_options(&mut self, options: crate::ProtocolTurnOptions) {
         self.state.protocol_turn_options = options.clone();
-        if let Some(frame) = self.state.current_agent_frame_mut() {
-            frame.protocol_turn_options = options.clone();
-        }
         self.protocol_turn_options = options;
     }
 
@@ -52,14 +49,12 @@ impl LashRuntime {
         &self.state.protocol_turn_options
     }
 
-    /// Override protocol-owned turn options and mirror them to **every** agent
-    /// frame. Used by the protocol materialization hook (apply-at-open): the
-    /// last applied value is recorded on the session and on all frames.
+    /// Override protocol-owned turn options during materialization.
+    ///
+    /// Existing `FrameOpen` nodes are immutable historical snapshots; the next
+    /// opened frame captures this live value.
     pub fn set_protocol_turn_options_all_frames(&mut self, options: crate::ProtocolTurnOptions) {
         self.state.protocol_turn_options = options.clone();
-        for frame in &mut self.state.agent_frames {
-            frame.protocol_turn_options = options.clone();
-        }
         self.protocol_turn_options = options;
     }
 
@@ -131,9 +126,6 @@ impl LashRuntime {
     pub fn export_persisted_state(&self) -> RuntimeSessionState {
         let mut state = self.state.clone();
         state.protocol_turn_options = self.protocol_turn_options.clone();
-        if let Some(frame) = state.current_agent_frame_mut() {
-            frame.protocol_turn_options = self.protocol_turn_options.clone();
-        }
         if let Some(session) = self.session.as_ref() {
             let snapshot = session.plugins().tool_registry().export_state();
             state.tool_state_generation = Some(snapshot.generation());
@@ -192,8 +184,7 @@ impl LashRuntime {
         let head = crate::store::SessionHead {
             session_id: read.session_id.clone(),
             head_revision: read.head_revision,
-            agent_frames: read.agent_frames.clone(),
-            current_agent_frame_id: read.current_agent_frame_id.clone(),
+            current_frame_node_id: read.current_frame_node_id.clone(),
             graph: read.graph,
             config: read.config.clone(),
             checkpoint_ref: read.checkpoint_ref.clone(),
@@ -345,7 +336,10 @@ impl LashRuntime {
         let frame_id = compaction_frame_id(
             &self.state.session_id,
             &compaction_boundary,
-            &self.state.current_agent_frame_id,
+            self.state
+                .current_frame_node_id
+                .as_deref()
+                .unwrap_or_default(),
         );
         let result = self.open_agent_frame(
             crate::OpenAgentFrameRequest::new(frame_id, crate::AgentFrameReason::compaction())
@@ -560,9 +554,6 @@ impl LashRuntime {
         self.refresh_session_tool_catalog()
             .await
             .map_err(|err| RuntimeError::new("session_command_refresh_tools", err.to_string()))?;
-        let graph = crate::store::GraphCommitDelta::Unchanged {
-            leaf_node_id: self.state.session_graph.leaf_node_id.clone(),
-        };
         let Some(store) = self
             .session
             .as_ref()
@@ -585,14 +576,13 @@ impl LashRuntime {
                     "persisted session commands require a claimed queue boundary",
                 )
             })?;
-        let (mut commit, node_id_mapping) =
-            crate::store::RuntimeCommit::persisted_state_with_graph_commit(&self.state, graph, &[])
-                .with_operation(operation)
-                .map_err(super::runtime_error_from_store_commit)?;
-        debug_assert!(
-            node_id_mapping.is_empty(),
-            "session-command commits must not carry graph appends"
-        );
+        let (mut commit, persisted_node_ids) =
+            crate::store::RuntimeCommit::persisted_state_with_operation(
+                &mut self.state,
+                &[],
+                operation,
+            )
+            .map_err(super::runtime_error_from_store_commit)?;
         let Some(session_execution_lease) = session_execution_lease else {
             return Err(RuntimeError::new(
                 RuntimeErrorCode::StoreCommitFailed,
@@ -607,12 +597,17 @@ impl LashRuntime {
             .await
             .map_err(super::runtime_error_from_store_commit)?;
         self.state.apply_persisted_commit_result(result);
+        self.state.mark_node_ids_persisted(persisted_node_ids);
         Ok(())
     }
 }
 
-fn compaction_frame_id(session_id: &str, boundary_id: &str, previous_frame_id: &str) -> String {
-    format!("{session_id}:frame:compaction:{boundary_id}:after:{previous_frame_id}")
+fn compaction_frame_id(
+    session_id: &str,
+    boundary_id: &str,
+    previous_frame_node_id: &str,
+) -> String {
+    format!("{session_id}:frame:compaction:{boundary_id}:after:{previous_frame_node_id}")
 }
 
 pub(in crate::runtime) fn queued_turn_input_store_required() -> RuntimeError {

@@ -557,8 +557,7 @@ impl SessionCommitStore for RuntimePerfStore {
             session_id: meta.session_id,
             head_revision: meta.head_revision,
             config: meta.config,
-            agent_frames: meta.agent_frames,
-            current_agent_frame_id: meta.current_agent_frame_id,
+            current_frame_node_id: meta.current_frame_node_id,
             graph,
             checkpoint_ref: meta.checkpoint_ref,
             checkpoint: None,
@@ -587,12 +586,19 @@ impl SessionCommitStore for RuntimePerfStore {
         commit: RuntimeCommit,
     ) -> Result<RuntimeCommitResult, store::StoreError> {
         let realization_digest = store::graph_realization_digest(&commit.graph);
+        let realized_node_timestamps = commit
+            .graph
+            .appended_nodes()
+            .map(|node| store::RealizedNodeTimestamp {
+                node_id: node.node_id.clone(),
+                timestamp: node.timestamp.clone(),
+            })
+            .collect();
         let RuntimeCommit {
             session_id,
             expected_head_revision,
             config,
-            agent_frames,
-            current_agent_frame_id,
+            current_frame_node_id,
             graph: graph_delta,
             checkpoint,
             usage_deltas,
@@ -605,13 +611,6 @@ impl SessionCommitStore for RuntimePerfStore {
             release_session_execution_lease,
             committed_attachment_ids: _,
         } = commit;
-        let realized_agent_frames = agent_frames
-            .iter()
-            .map(|frame| store::RealizedAgentFrame {
-                frame_id: frame.frame_id.clone(),
-                created_at: frame.created_at.clone(),
-            })
-            .collect();
         if let Some(batch) = enqueued_queue_batches
             .iter()
             .find(|batch| batch.session_id != session_id)
@@ -800,8 +799,7 @@ impl SessionCommitStore for RuntimePerfStore {
             session_id: session_id.clone(),
             head_revision,
             config,
-            agent_frames,
-            current_agent_frame_id,
+            current_frame_node_id,
             checkpoint_ref: Some(checkpoint_ref.clone()),
             leaf_node_id,
             graph_node_count,
@@ -816,7 +814,7 @@ impl SessionCommitStore for RuntimePerfStore {
             checkpoint_ref,
             manifest,
             realization_digest,
-            realized_agent_frames,
+            realized_node_timestamps,
             enqueued_queue_batches: enqueued_queue_batches
                 .into_iter()
                 .map(|batch| self.enqueue_queued_work_in_memory(batch))
@@ -1498,22 +1496,49 @@ impl QueuedWorkStore for RuntimePerfStore {
 #[async_trait::async_trait]
 impl StoreMaintenance for RuntimePerfStore {
     async fn tombstone_nodes(&self, _ids: &[String]) -> Result<(), store::StoreError> {
-        Ok(())
+        Err(unsupported_maintenance("tombstone_nodes"))
     }
 
     async fn vacuum(&self) -> Result<VacuumReport, store::StoreError> {
-        Ok(VacuumReport::default())
+        Err(unsupported_maintenance("vacuum"))
     }
 
     async fn gc_unreachable(&self) -> Result<GcReport, store::StoreError> {
-        Ok(GcReport::default())
+        Err(unsupported_maintenance("gc_unreachable"))
     }
+
+    async fn verify_node_refcounts(
+        &self,
+    ) -> Result<lash_core::NodeRefcountVerification, store::StoreError> {
+        Err(unsupported_maintenance("verify_node_refcounts"))
+    }
+}
+
+fn unsupported_maintenance(operation: &'static str) -> StoreError {
+    StoreError::UnsupportedStoreOperation { operation }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use lash_core::runtime::{DeliveryPolicy, QueuedWorkPayload, RuntimeSessionState, SlotPolicy};
+
+    #[tokio::test]
+    async fn refcount_scrub_refuses_to_report_false_success() {
+        let store = RuntimePerfStore::default();
+
+        let error = store
+            .verify_node_refcounts()
+            .await
+            .expect_err("perf store does not maintain node refcounts");
+
+        assert!(matches!(
+            error,
+            StoreError::UnsupportedStoreOperation {
+                operation: "verify_node_refcounts"
+            }
+        ));
+    }
 
     #[tokio::test]
     async fn runtime_commit_rejects_cross_session_queue_batches_atomically() {

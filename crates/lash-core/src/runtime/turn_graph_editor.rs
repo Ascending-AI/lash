@@ -13,6 +13,7 @@ pub(super) struct TurnGraphEditor {
     base_graph: Arc<SessionGraph>,
     active_events: Arc<Vec<SessionHistoryRecord>>,
     active_messages: MessageSequence,
+    current_frame_node_id: Option<String>,
     append_builder: crate::session_graph::SessionGraphAppendBuilder,
     appended_nodes: Vec<SessionNodeRecord>,
     appended_node_indices: HashMap<String, usize>,
@@ -24,20 +25,19 @@ impl TurnGraphEditor {
     pub(super) fn new(
         base_graph: Arc<SessionGraph>,
         base_read_model: SessionReadModel,
-        agent_frame_id: crate::AgentFrameId,
+        current_frame_node_id: Option<String>,
         draft_namespace: &str,
         clock: Arc<dyn crate::Clock>,
         persisted_node_ids: HashSet<String>,
     ) -> Self {
-        let append_builder = base_graph
-            .append_builder_in_namespace(draft_namespace)
-            .with_agent_frame_id(agent_frame_id);
+        let append_builder = base_graph.append_builder_in_namespace(draft_namespace);
         let active_messages = MessageSequence::from_base(base_read_model.messages);
         Self {
             committed_node_ids: persisted_node_ids,
             base_graph,
             active_events: base_read_model.active_events,
             active_messages,
+            current_frame_node_id,
             append_builder,
             appended_nodes: Vec::new(),
             appended_node_indices: HashMap::new(),
@@ -131,7 +131,6 @@ impl TurnGraphEditor {
         let replacement = build_active_read_replacement(
             active_path,
             self.append_builder.existing_node_ids(),
-            self.append_builder.agent_frame_id(),
             self.append_builder.draft_namespace(),
             messages,
             self.clock.timestamp_rfc3339(),
@@ -197,11 +196,6 @@ impl TurnGraphEditor {
             {
                 *parent = derived.clone();
             }
-            crate::session_graph::remap_session_node_cause(
-                &mut node.caused_by,
-                session_id,
-                &by_old,
-            );
         }
         self.appended_node_indices = self
             .appended_node_indices
@@ -252,6 +246,13 @@ impl TurnGraphEditor {
             current = node.parent_node_id.clone();
         }
         path.reverse();
+        if let Some(frame_node_id) = self.current_frame_node_id.as_deref() {
+            let Some(frame_index) = path.iter().position(|node| node.node_id == frame_node_id)
+            else {
+                return Vec::new();
+            };
+            path.drain(..frame_index);
+        }
         path
     }
 

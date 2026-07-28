@@ -28,7 +28,7 @@ impl InMemorySessionStore {
 
 #[cfg(test)]
 mod tests {
-    use crate::store::{GraphCommitDelta, SessionCommitStore};
+    use crate::store::{GraphCommitDelta, SessionCommitStore, StoreMaintenance};
     use crate::{
         DeliveryPolicy, MergeKey, QueuedWorkBatch, QueuedWorkCompletion, RuntimeCommit,
         RuntimeSessionState, SessionStoreCreateRequest, SessionStoreFactory, SlotPolicy,
@@ -61,14 +61,13 @@ mod tests {
         let node = crate::SessionNodeRecord {
             node_id: "factory-global-node".to_string(),
             parent_node_id: None,
-            caused_by: None,
-            agent_frame_id: None,
             timestamp: "2026-07-26T00:00:00Z".to_string(),
-            payload: crate::SessionNodePayload::Event {
-                event: crate::SessionHistoryRecord::Protocol(
-                    crate::ProtocolEvent::typed("global-node-id", serde_json::Value::Null)
-                        .expect("protocol event"),
+            payload: crate::SessionNodePayload::FrameOpen {
+                reason: crate::AgentFrameReason::initial(),
+                assignment: crate::AgentFrameAssignment::from_policy(
+                    crate::SessionPolicy::default(),
                 ),
+                protocol_turn_options: Default::default(),
             },
         };
         let commit = |session_id: &str| {
@@ -85,6 +84,7 @@ mod tests {
                 },
             };
             let mut commit = RuntimeCommit::persisted_state(&state, &[usage]);
+            commit.current_frame_node_id = Some(node.node_id.clone());
             commit.graph = GraphCommitDelta::Append {
                 nodes: vec![node.clone()],
                 leaf_node_id: Some(node.node_id.clone()),
@@ -118,6 +118,119 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn head_move_zero_confirmation_aborts_a_corrupt_low_count() {
+        let factory = super::super::InMemorySessionStoreFactory::new();
+        let request = SessionStoreCreateRequest {
+            session_id: "head-move-refcount-drift".to_string(),
+            relation: crate::SessionRelation::Root,
+            policy: crate::SessionPolicy::default(),
+        };
+        let store = factory.create_store(&request).await.expect("create store");
+        let concrete = factory
+            .stores
+            .lock()
+            .expect("lock stores")
+            .get(&request.session_id)
+            .cloned()
+            .expect("concrete store");
+        let mut state = RuntimeSessionState {
+            session_id: request.session_id.clone(),
+            ..Default::default()
+        };
+        state.ensure_agent_frame_initialized();
+        let first = store
+            .commit_runtime_state(RuntimeCommit::persisted_state(&state, &[]))
+            .await
+            .expect("commit root frame");
+        let leaf = concrete
+            .raw_leaf_node_id_for_testing()
+            .expect("persisted leaf");
+        concrete.corrupt_node_refcount_for_testing(&leaf, 0);
+
+        let child = crate::SessionNodeRecord {
+            node_id: "head-move-refcount-drift-child".to_string(),
+            parent_node_id: Some(leaf.clone()),
+            timestamp: "2026-07-27T00:00:00Z".to_string(),
+            payload: crate::SessionNodePayload::Event {
+                event: crate::SessionHistoryRecord::Protocol(
+                    crate::ProtocolEvent::typed("child", serde_json::Value::Null)
+                        .expect("protocol event"),
+                ),
+            },
+        };
+        let mut commit = RuntimeCommit::persisted_state_with_graph_commit(
+            &state,
+            GraphCommitDelta::Append {
+                nodes: vec![child.clone()],
+                leaf_node_id: Some(child.node_id.clone()),
+            },
+            &[],
+        );
+        commit.expected_head_revision = Some(first.head_revision);
+        let error = store
+            .commit_runtime_state(commit.clone())
+            .await
+            .expect_err("low cached count must abort the head move");
+
+        assert!(matches!(
+            error,
+            StoreError::NodeRefcountDrift {
+                node_id,
+                cached: 0,
+                derived: 1,
+            } if node_id == leaf
+        ));
+        assert_eq!(concrete.raw_head_revision_for_testing(), Some(1));
+        assert!(
+            store
+                .load_node(&child.node_id)
+                .await
+                .expect("load child after rejected head move")
+                .is_none(),
+            "the failed zero-confirmation must roll the append back"
+        );
+
+        concrete.corrupt_node_refcount_for_testing(&leaf, 1);
+        store
+            .commit_runtime_state(commit)
+            .await
+            .expect("head move after repairing count");
+        assert_eq!(concrete.raw_head_revision_for_testing(), Some(2));
+    }
+
+    #[tokio::test]
+    async fn refcount_scrub_detects_corrupt_cached_count() {
+        let store = super::InMemorySessionStore::new();
+        let mut state = RuntimeSessionState {
+            session_id: "scrub-refcount-drift".to_string(),
+            ..Default::default()
+        };
+        state.ensure_agent_frame_initialized();
+        store
+            .commit_runtime_state(RuntimeCommit::persisted_state(&state, &[]))
+            .await
+            .expect("commit root frame");
+        let leaf = store
+            .raw_leaf_node_id_for_testing()
+            .expect("persisted leaf");
+        store.corrupt_node_refcount_for_testing(&leaf, 2);
+
+        let error = store
+            .verify_node_refcounts()
+            .await
+            .expect_err("scrub must detect cached count drift");
+
+        assert!(matches!(
+            error,
+            StoreError::NodeRefcountDrift {
+                node_id,
+                cached: 2,
+                derived: 1,
+            } if node_id == leaf
+        ));
+    }
+
+    #[tokio::test]
     async fn budget_rejection_happens_before_backend_transaction_work() {
         let store = super::InMemorySessionStore::new();
         let state = RuntimeSessionState {
@@ -127,8 +240,6 @@ mod tests {
         let node = crate::SessionNodeRecord {
             node_id: "node".to_string(),
             parent_node_id: None,
-            caused_by: None,
-            agent_frame_id: None,
             timestamp: "2026-07-26T00:00:00Z".to_string(),
             payload: crate::SessionNodePayload::Event {
                 event: crate::SessionHistoryRecord::Protocol(

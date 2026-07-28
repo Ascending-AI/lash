@@ -7,6 +7,12 @@ impl RuntimeScenarioContext {
             self.state.turn_index = turn_index;
         }
         let (_, lease) = self.owner_and_lease();
+        let persisted_node_ids = self
+            .state
+            .pending_graph_commit()
+            .appended_nodes()
+            .map(|node| node.node_id.clone())
+            .collect::<Vec<_>>();
         let mut commit = RuntimeCommit::persisted_state(&self.state, &[])
             .with_session_execution_lease(lease.fence())
             .completing_queue_claims(self.command_claim.iter().map(QueuedWorkClaim::completion));
@@ -18,7 +24,8 @@ impl RuntimeScenarioContext {
             .commit_runtime_state(commit)
             .await
             .expect("commit runtime scenario checkpoint");
-        self.state.head_revision = Some(result.head_revision);
+        self.state.apply_persisted_commit_result(result);
+        self.state.mark_node_ids_persisted(persisted_node_ids);
         self.command_claim = None;
 
         if !phase.pending_turn_inputs_after_deferral.is_empty() {

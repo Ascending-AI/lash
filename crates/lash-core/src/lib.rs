@@ -346,7 +346,7 @@ pub use lash_trace::{
 pub use llm::transport::{LlmTransportError, ProviderFailure, ProviderFailureKind};
 pub use model::{ModelLimits, ModelSpec};
 pub use plugin::{
-    AgentFrameAssignment, AgentFrameId, AgentFrameReason, AgentFrameRecord, AgentFrameStatus,
+    AgentFrameAssignment, AgentFrameId, AgentFrameReason, AgentFrameRecord,
     AppendSessionNodesRequest, AppendSessionNodesResult, AssistantResponseHookContext,
     AssistantResponseTransform, AssistantStreamHookContext, AssistantStreamTransform,
     CheckpointHookContext, CompactionContext, ContextCompaction, ContextCompactor, ContextError,
@@ -486,11 +486,11 @@ pub use session_model::{ConversationRecord, ProtocolEvent, SessionHistoryRecord}
 pub use session_model::{RuntimeSessionPolicy, SessionPolicy, SessionSpec};
 pub use store::{
     AttachmentIntent, AttachmentManifest, AttachmentManifestEntry, BlobRef, GcReport,
-    LeaseOwnerIdentity, LeaseOwnerLiveness, LeaseTimings, LeaseTimingsError, QueuedWorkStore,
-    RuntimePersistence, SessionCommitStore, SessionExecutionLease,
-    SessionExecutionLeaseClaimOutcome, SessionExecutionLeaseCompletion, SessionExecutionLeaseFence,
-    SessionExecutionLeaseStore, SessionMeta, SessionPickerInfo, SessionReadScope, StoreError,
-    StoreMaintenance, TurnInputStore, VacuumReport,
+    LeaseOwnerIdentity, LeaseOwnerLiveness, LeaseTimings, LeaseTimingsError,
+    NodeRefcountVerification, QueuedWorkStore, RuntimePersistence, SessionCommitStore,
+    SessionExecutionLease, SessionExecutionLeaseClaimOutcome, SessionExecutionLeaseCompletion,
+    SessionExecutionLeaseFence, SessionExecutionLeaseStore, SessionMeta, SessionPickerInfo,
+    SessionReadScope, StoreError, StoreMaintenance, TurnInputStore, VacuumReport,
 };
 #[allow(unused_imports)]
 pub(crate) use store::{

@@ -22,21 +22,29 @@ fn realistic_commit(session_id: &str, node_count: usize, sample: usize) -> Runti
             SessionNodeRecord {
                 node_id: node_id.clone(),
                 parent_node_id: (index > 0).then(|| format!("{session_id}:node:{}", index - 1)),
-                caused_by: None,
-                agent_frame_id: None,
                 timestamp: "2026-07-26T12:00:00Z".to_string(),
-                payload: SessionNodePayload::Event {
-                    event: SessionHistoryRecord::Protocol(
-                        ProtocolEvent::typed(
-                            "commit-size-benchmark",
-                            serde_json::json!({
-                                "role": if index % 4 == 0 { "assistant" } else { "tool" },
-                                "content": payload,
-                                "ordinal": index,
-                            }),
-                        )
-                        .expect("benchmark protocol event"),
-                    ),
+                payload: if index == 0 {
+                    SessionNodePayload::FrameOpen {
+                        reason: lash_core::AgentFrameReason::initial(),
+                        assignment: lash_core::AgentFrameAssignment::from_policy(
+                            SessionPolicy::default(),
+                        ),
+                        protocol_turn_options: Default::default(),
+                    }
+                } else {
+                    SessionNodePayload::Event {
+                        event: SessionHistoryRecord::Protocol(
+                            ProtocolEvent::typed(
+                                "commit-size-benchmark",
+                                serde_json::json!({
+                                    "role": if index % 4 == 0 { "assistant" } else { "tool" },
+                                    "content": payload,
+                                    "ordinal": index,
+                                }),
+                            )
+                            .expect("benchmark protocol event"),
+                        ),
+                    }
                 },
             }
         })
@@ -60,6 +68,7 @@ fn realistic_commit(session_id: &str, node_count: usize, sample: usize) -> Runti
         ..RuntimeSessionState::default()
     };
     let mut commit = RuntimeCommit::persisted_state(&state, &[]);
+    commit.current_frame_node_id = Some(format!("{session_id}:node:0"));
     commit.config = PersistedSessionConfig {
         provider_id: "benchmark".to_string(),
         model: state.policy.model,

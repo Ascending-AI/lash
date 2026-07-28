@@ -322,8 +322,7 @@ impl SessionAdmin {
         let observation = self.runtime.observe();
         let root = observation.process_scope();
         let mut scopes = vec![root.clone()];
-        let frame_id = observation.persisted_state.current_agent_frame_id.as_str();
-        if !frame_id.is_empty() {
+        if let Some(frame_id) = observation.persisted_state.current_frame_node_id.as_deref() {
             let frame_scope =
                 lash_core::SessionScope::for_agent_frame(observation.session_id(), frame_id);
             if frame_scope.id() != root.id() {

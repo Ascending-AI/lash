@@ -38,7 +38,7 @@ fn intent_fixture() -> RuntimeCommit {
         ..crate::RuntimeSessionState::default()
     };
     state.ensure_agent_frame_initialized();
-    state.agent_frames[0].created_at = "2026-07-26T10:00:00Z".to_string();
+    state.session_graph.data_mut().nodes[0].timestamp = "2026-07-26T10:00:00Z".to_string();
     let operation = OperationId::turn("golden-session", "turn-42", "final");
     let node_id =
         derive_history_node_id("golden-session", &operation, 0).expect("derive golden node");
@@ -63,8 +63,6 @@ fn intent_fixture() -> RuntimeCommit {
         nodes: vec![crate::SessionNodeRecord {
             node_id: node_id.clone(),
             parent_node_id: None,
-            caused_by: None,
-            agent_frame_id: Some(state.current_agent_frame_id.clone()),
             timestamp: "2026-07-26T10:00:01Z".to_string(),
             payload: crate::SessionNodePayload::Event {
                 event: crate::SessionHistoryRecord::Conversation(
@@ -86,8 +84,6 @@ fn first_persisted_state_commit_derives_and_installs_node_ids() {
             vec![crate::SessionNodeRecord {
                 node_id: placeholder.clone(),
                 parent_node_id: None,
-                caused_by: None,
-                agent_frame_id: None,
                 timestamp: "2026-07-27T00:00:00Z".to_string(),
                 payload: crate::SessionNodePayload::Plugin {
                     plugin_type: "first-commit".to_string(),
@@ -153,24 +149,6 @@ fn with_operation_returns_the_append_id_mapping() {
 }
 
 #[test]
-fn legacy_hash_reproduces_created_at_replay_conflict() {
-    let first = intent_fixture();
-    let mut replay = first.clone();
-    replay.agent_frames[0].created_at = "2026-07-26T10:00:09Z".to_string();
-
-    assert_ne!(
-        legacy_turn_commit_hash(&first),
-        legacy_turn_commit_hash(&replay),
-        "the pre-L2 scrubber hashes live frame creation time"
-    );
-    assert_eq!(
-        first.turn_commit_hash().expect("first intent"),
-        replay.turn_commit_hash().expect("replay intent"),
-        "L2 excludes clock-derived frame time"
-    );
-}
-
-#[test]
 fn legacy_hash_reproduces_random_committed_message_id_conflict() {
     let mut first = intent_fixture();
     first.completed_turn_input_claims = vec![crate::TurnInputCompletion {
@@ -210,7 +188,7 @@ fn legacy_hash_reproduces_random_committed_message_id_conflict() {
 fn intent_hash_golden_vector() {
     assert_eq!(
         intent_fixture().turn_commit_hash().expect("golden intent"),
-        "fa9c57a925d8ac676acc4bd1a8405e8b69a5361823339eb354b24c56afc1286d"
+        "0fe62517542cefb409fbbd87be90b8db5babc3f1053817cecdf55afd4ae89f64"
     );
 }
 
@@ -381,15 +359,13 @@ fn node_derivation_and_realization_digest_are_independent() {
 }
 
 #[test]
-fn node_derivation_remaps_in_batch_session_node_causes() {
+fn node_derivation_remaps_in_batch_parent_edges() {
     let operation = OperationId::turn("session", "turn", "final");
     let mut graph = GraphCommitDelta::Append {
         nodes: vec![
             crate::SessionNodeRecord {
                 node_id: "draft-a".to_string(),
                 parent_node_id: None,
-                caused_by: None,
-                agent_frame_id: None,
                 timestamp: "2026-07-26T10:00:00Z".to_string(),
                 payload: crate::SessionNodePayload::Plugin {
                     plugin_type: "first".to_string(),
@@ -399,11 +375,6 @@ fn node_derivation_remaps_in_batch_session_node_causes() {
             crate::SessionNodeRecord {
                 node_id: "draft-b".to_string(),
                 parent_node_id: Some("draft-a".to_string()),
-                caused_by: Some(crate::CausalRef::SessionNode {
-                    session_id: "session".to_string(),
-                    node_id: "draft-a".to_string(),
-                }),
-                agent_frame_id: None,
                 timestamp: "2026-07-26T10:00:00Z".to_string(),
                 payload: crate::SessionNodePayload::Plugin {
                     plugin_type: "second".to_string(),
@@ -423,12 +394,65 @@ fn node_derivation_remaps_in_batch_session_node_causes() {
         nodes[1].parent_node_id.as_deref(),
         Some(nodes[0].node_id.as_str())
     );
+}
+
+#[test]
+fn frame_node_identity_is_stable_across_operation_realization() {
+    let operation = OperationId::turn("session", "turn", "final");
+    let frame_node_id = crate::session_graph::frame_node_id("session", "initial-frame");
+    let mut graph = GraphCommitDelta::Append {
+        nodes: vec![crate::SessionNodeRecord {
+            node_id: frame_node_id.clone(),
+            parent_node_id: None,
+            timestamp: "2026-07-26T10:00:00Z".to_string(),
+            payload: crate::SessionNodePayload::FrameOpen {
+                reason: crate::AgentFrameReason::initial(),
+                assignment: crate::AgentFrameAssignment::from_policy(
+                    crate::SessionPolicy::default(),
+                ),
+                protocol_turn_options: crate::ProtocolTurnOptions::default(),
+            },
+        }],
+        leaf_node_id: Some(frame_node_id.clone()),
+    };
+
+    graph
+        .derive_node_ids("session", &operation)
+        .expect("realize frame node");
+
+    let GraphCommitDelta::Append {
+        nodes,
+        leaf_node_id,
+    } = graph
+    else {
+        panic!("fixture is append");
+    };
+    assert_eq!(nodes[0].node_id, frame_node_id);
+    assert_eq!(leaf_node_id, Some(frame_node_id));
+}
+
+#[test]
+fn append_chain_rejects_self_parent_cycles() {
+    let graph = GraphCommitDelta::Append {
+        nodes: vec![crate::SessionNodeRecord {
+            node_id: "cycle".to_string(),
+            parent_node_id: Some("cycle".to_string()),
+            timestamp: "2026-07-26T10:00:00Z".to_string(),
+            payload: crate::SessionNodePayload::Plugin {
+                plugin_type: "cycle".to_string(),
+                body: crate::session_graph::SharedJsonValue::new(serde_json::json!({})),
+            },
+        }],
+        leaf_node_id: Some("cycle".to_string()),
+    };
+
     assert!(matches!(
-        &nodes[1].caused_by,
-        Some(crate::CausalRef::SessionNode {
-            session_id,
-            node_id,
-        }) if session_id == "session" && node_id == &nodes[0].node_id
+        graph.validate_append_topology(),
+        Err(StoreError::InvalidGraphParent {
+            expected: None,
+            actual: Some(parent),
+            ..
+        }) if parent == "cycle"
     ));
 }
 

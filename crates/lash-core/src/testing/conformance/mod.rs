@@ -56,8 +56,8 @@ use crate::{
     SessionScopeId, WaitKind, WaitState,
 };
 use crate::{
-    AgentFrameReason, AgentFrameRecord, AttachmentId, AttachmentIntent, AwaitEventWaitIdentity,
-    CausalRef, DeliveryPolicy, EffectHost, ExecutionScope, LiveReplayGapReason, LiveReplayResult,
+    AgentFrameReason, AttachmentId, AttachmentIntent, AwaitEventWaitIdentity, CausalRef,
+    DeliveryPolicy, EffectHost, ExecutionScope, LiveReplayGapReason, LiveReplayResult,
     LiveReplayStore, LiveReplayStoreError, LiveReplaySubscribeResult, MergeKey, ModelSpec,
     PluginSessionSnapshot, ProtocolEvent, ProtocolTurnOptions, QueuedWorkBatch,
     QueuedWorkBatchDraft, QueuedWorkClaimBoundary, QueuedWorkPayload, Resolution, ResolveOutcome,

@@ -25,14 +25,15 @@ use lash_core::{
     AbandonRequest, AttachmentId, AttachmentIntent, AttachmentManifest, AttachmentManifestEntry,
     AttachmentOwnerKind, AwaitEventResolver, BlobRef, CanonicalRuntimeEffectEnvelope,
     DeliveryPolicy, EffectHost, ExecutionScope, GcReport, LeaseOwnerIdentity, LeaseOwnerLiveness,
-    MergeKey, PersistedSegmentHandover, ProcessAwaitOutput, ProcessChangeCursor, ProcessEvent,
-    ProcessEventAppendRequest, ProcessEventAppendResult, ProcessExecutionWriteAuthority,
-    ProcessExternalRef, ProcessHandleDescriptor, ProcessHandleGrant, ProcessLease,
-    ProcessLeaseCompletion, ProcessLiveReferenceSummary, ProcessPruneReport, ProcessRecord,
-    ProcessRegistration, ProcessRegistry, ProcessStartOutcome, ProcessStartPlan, ProcessStarted,
-    QueuedWorkStore, RuntimeEffectCommand, RuntimeEffectController, RuntimeEffectControllerError,
-    RuntimeEffectEnvelope, RuntimeEffectLocalExecutor, RuntimeEffectOutcome, RuntimeError,
-    RuntimePersistence, ScopedEffectController, SessionCommitStore, SessionExecutionLease,
+    MergeKey, NodeRefcountVerification, PersistedSegmentHandover, ProcessAwaitOutput,
+    ProcessChangeCursor, ProcessEvent, ProcessEventAppendRequest, ProcessEventAppendResult,
+    ProcessExecutionWriteAuthority, ProcessExternalRef, ProcessHandleDescriptor,
+    ProcessHandleGrant, ProcessLease, ProcessLeaseCompletion, ProcessLiveReferenceSummary,
+    ProcessPruneReport, ProcessRecord, ProcessRegistration, ProcessRegistry, ProcessStartOutcome,
+    ProcessStartPlan, ProcessStarted, QueuedWorkStore, RuntimeEffectCommand,
+    RuntimeEffectController, RuntimeEffectControllerError, RuntimeEffectEnvelope,
+    RuntimeEffectLocalExecutor, RuntimeEffectOutcome, RuntimeError, RuntimePersistence,
+    ScopedEffectController, SessionCommitStore, SessionExecutionLease,
     SessionExecutionLeaseClaimOutcome, SessionExecutionLeaseCompletion, SessionExecutionLeaseFence,
     SessionExecutionLeaseStore, SessionMeta, SessionNodeRecord, SessionReadScope, SessionScope,
     SessionStoreCreateRequest, SessionStoreFactory, SlotPolicy, StoreError, StoreMaintenance,
@@ -83,7 +84,12 @@ const SCHEMA_COMPONENT: &str = "lash-postgres-store";
 // `ExternalOwner` no longer carries the unverified `granted_to` field, changing
 // the terminal event's replay-key payload hash. Pre-18 databases are rejected
 // and recreated so retries cannot compare terminal events across payload formats.
-const SCHEMA_VERSION: i32 = 18;
+//
+// Bumped to 19 for structural FrameOpen history and explicit graph parent edges.
+// Bumped to 20 for transactional node refcounts and destructive-zero confirmation.
+// Both are reject-and-recreate boundaries; older graph rows cannot satisfy the
+// structural history and reclamation invariants.
+const SCHEMA_VERSION: i32 = 20;
 const PROCESS_LEASE_SCHEMA_VERSION: u32 = lash_core::PROCESS_LEASE_SCHEMA_VERSION;
 
 #[derive(Clone)]
@@ -135,12 +141,10 @@ pub struct PostgresLashlangArtifactStore {
 /// Connection-pool and per-connection timeout knobs for [`PostgresStorage`].
 ///
 /// Mutating session work first claims the durable session execution lease.
-/// Session commits then verify that lease fence and use **optimistic CAS** on
-/// the head (`UPDATE … WHERE head_revision = expected`) as a stale-writer
-/// backstop, not as the normal cross-worker concurrency primitive.
-/// `lock_timeout` is defense in depth: it caps how long the fenced CAS write
-/// may wait on the head row's lock before erroring (surfaced as a retryable
-/// conflict), so a pathological burst can never starve the pool.
+/// History commits and deletion share a session-keyed transaction lock, then
+/// existing-session commits lock and verify the head revision before changing
+/// reachability counts. The final conditional write remains a stale-writer
+/// fence. `lock_timeout` caps lock waits before surfacing retryable contention.
 #[derive(Clone, Debug)]
 pub struct PostgresStoreConfig {
     /// Maximum pooled connections. Default 16.
@@ -617,6 +621,179 @@ mod tests {
             .execute(storage.pool())
             .await
             .expect("clean claim-fence head");
+    }
+
+    #[tokio::test]
+    async fn postgres_zero_confirmation_aborts_a_corrupt_low_count_transaction() {
+        let Some(database_url) = postgres_test_support::database_url() else {
+            eprintln!("skipping Postgres refcount drift proof: database URL is not set");
+            return;
+        };
+        let _database_lock =
+            postgres_test_support::SharedDatabaseLock::acquire(&database_url).await;
+        let storage = PostgresStorage::connect(&database_url)
+            .await
+            .expect("connect refcount drift storage");
+        let session_id = format!("postgres-refcount-drift:{}", uuid::Uuid::new_v4());
+        let store = storage.session_store(session_id.clone());
+        let mut state = lash_core::RuntimeSessionState {
+            session_id: session_id.clone(),
+            ..Default::default()
+        };
+        state.ensure_agent_frame_initialized();
+        store
+            .commit_runtime_state(RuntimeCommit::persisted_state(&state, &[]))
+            .await
+            .expect("commit root frame");
+        let frame_node_id = state.current_frame_node_id.clone().expect("frame node");
+        sqlx::query("UPDATE lash_graph_nodes SET incoming_refs = 0 WHERE node_id = $1")
+            .bind(&frame_node_id)
+            .execute(storage.pool())
+            .await
+            .expect("corrupt cached count");
+        let child_node_id = format!("postgres-refcount-child:{}", uuid::Uuid::new_v4());
+        let child = lash_core::SessionNodeRecord {
+            node_id: child_node_id.clone(),
+            parent_node_id: Some(frame_node_id.clone()),
+            timestamp: "2026-07-27T00:00:00Z".to_string(),
+            payload: lash_core::SessionNodePayload::Event {
+                event: lash_core::SessionHistoryRecord::Protocol(
+                    lash_core::ProtocolEvent::typed("refcount-drift", serde_json::Value::Null)
+                        .expect("protocol event"),
+                ),
+            },
+        };
+        let mut commit = RuntimeCommit::persisted_state(&state, &[]);
+        commit.expected_head_revision = Some(1);
+        commit.graph = GraphCommitDelta::Append {
+            nodes: vec![child],
+            leaf_node_id: Some(child_node_id.clone()),
+        };
+
+        let error = store
+            .commit_runtime_state(commit)
+            .await
+            .expect_err("zero-confirmation must abort");
+
+        assert!(matches!(
+            error,
+            StoreError::NodeRefcountDrift {
+                ref node_id,
+                cached: 0,
+                derived: 1,
+            } if node_id == &frame_node_id
+        ));
+        let revision: i64 =
+            sqlx::query_scalar("SELECT head_revision FROM lash_sessions WHERE session_id = $1")
+                .bind(&session_id)
+                .fetch_one(storage.pool())
+                .await
+                .expect("load unchanged head");
+        assert_eq!(revision, 1);
+        let child_exists: bool =
+            sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM lash_graph_nodes WHERE node_id = $1)")
+                .bind(&child_node_id)
+                .fetch_one(storage.pool())
+                .await
+                .expect("check rolled-back child");
+        assert!(!child_exists);
+    }
+
+    #[tokio::test]
+    async fn postgres_refcount_scrub_detects_corrupt_cached_count() {
+        let Some(database_url) = postgres_test_support::database_url() else {
+            eprintln!("skipping Postgres refcount scrub proof: database URL is not set");
+            return;
+        };
+        let _database_lock =
+            postgres_test_support::SharedDatabaseLock::acquire(&database_url).await;
+        let storage = PostgresStorage::connect(&database_url)
+            .await
+            .expect("connect refcount scrub storage");
+        let session_id = format!("postgres-refcount-scrub:{}", uuid::Uuid::new_v4());
+        let store = storage.session_store(session_id.clone());
+        let mut state = lash_core::RuntimeSessionState {
+            session_id,
+            ..Default::default()
+        };
+        state.ensure_agent_frame_initialized();
+        store
+            .commit_runtime_state(RuntimeCommit::persisted_state(&state, &[]))
+            .await
+            .expect("commit root frame");
+        let frame_node_id = state.current_frame_node_id.expect("frame node");
+        sqlx::query("UPDATE lash_graph_nodes SET incoming_refs = 2 WHERE node_id = $1")
+            .bind(&frame_node_id)
+            .execute(storage.pool())
+            .await
+            .expect("corrupt cached count");
+
+        let error = store
+            .verify_node_refcounts()
+            .await
+            .expect_err("scrub must detect cached count drift");
+
+        assert!(matches!(
+            error,
+            StoreError::NodeRefcountDrift {
+                node_id,
+                cached: 2,
+                derived: 1,
+            } if node_id == frame_node_id
+        ));
+    }
+
+    #[tokio::test]
+    async fn postgres_delete_fences_a_stale_first_commit_until_explicit_recreate() {
+        let Some(database_url) = postgres_test_support::database_url() else {
+            eprintln!("skipping Postgres delete fence proof: database URL is not set");
+            return;
+        };
+        let _database_lock =
+            postgres_test_support::SharedDatabaseLock::acquire(&database_url).await;
+        let storage = PostgresStorage::connect(&database_url)
+            .await
+            .expect("connect delete fence storage");
+        let factory = storage.session_store_factory_with_shared_process_registry();
+        let session_id = format!("postgres-delete-fence:{}", uuid::Uuid::new_v4());
+        let request = SessionStoreCreateRequest {
+            session_id: session_id.clone(),
+            relation: lash_core::SessionRelation::Root,
+            policy: Default::default(),
+        };
+        let stale_store = factory
+            .create_store(&request)
+            .await
+            .expect("create stale store");
+        let mut state = lash_core::RuntimeSessionState {
+            session_id: session_id.clone(),
+            ..Default::default()
+        };
+        state.ensure_agent_frame_initialized();
+
+        factory
+            .delete_session(&session_id)
+            .await
+            .expect("delete before first commit");
+        let error = stale_store
+            .commit_runtime_state(RuntimeCommit::persisted_state(&state, &[]))
+            .await
+            .expect_err("stale first commit must not resurrect the session");
+        assert!(matches!(
+            error,
+            StoreError::SessionDeleted {
+                ref session_id
+            } if session_id == &request.session_id
+        ));
+
+        let recreated = factory
+            .create_store(&request)
+            .await
+            .expect("explicitly recreate deleted store");
+        recreated
+            .commit_runtime_state(RuntimeCommit::persisted_state(&state, &[]))
+            .await
+            .expect("recreated store accepts first commit");
     }
 
     #[tokio::test]

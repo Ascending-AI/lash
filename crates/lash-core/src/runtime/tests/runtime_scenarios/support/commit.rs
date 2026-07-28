@@ -4,6 +4,12 @@ impl RuntimeScenarioContext {
     pub(super) async fn commit(&mut self, phase: RuntimeCommitPhase) {
         self.ensure_lease().await;
         let (_, lease) = self.owner_and_lease();
+        let persisted_node_ids = self
+            .state
+            .pending_graph_commit()
+            .appended_nodes()
+            .map(|node| node.node_id.clone())
+            .collect::<Vec<_>>();
         let final_commit = RuntimeCommit::persisted_state(&self.state, &[])
             .with_session_execution_lease(lease.fence())
             .releasing_session_execution_lease(lease.completion())
@@ -21,7 +27,8 @@ impl RuntimeScenarioContext {
             .commit_runtime_state(final_commit)
             .await
             .expect("commit runtime scenario final state");
-        self.state.head_revision = Some(result.head_revision);
+        self.state.apply_persisted_commit_result(result);
+        self.state.mark_node_ids_persisted(persisted_node_ids);
         self.command_claim = None;
         self.turn_claim = None;
         self.turn_input_claim = None;

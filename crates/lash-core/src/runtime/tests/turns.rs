@@ -4806,6 +4806,23 @@ async fn session_manager_persists_child_sessions_in_separate_store() {
     .expect("load session")
     .expect("session read");
     let graph = read.graph;
+    let child_frame_node_id = crate::session_graph::frame_node_id("child-store", "initial-frame");
+    assert_eq!(
+        graph.nodes.first().map(|node| node.node_id.as_str()),
+        Some(child_frame_node_id.as_str())
+    );
+    assert_eq!(
+        graph
+            .nodes
+            .first()
+            .and_then(|node| node.parent_node_id.as_deref()),
+        None
+    );
+    assert!(
+        graph.nodes.iter().all(
+            |node| node.node_id != crate::session_graph::frame_node_id("root", "initial-frame")
+        )
+    );
     let read_model = graph.read_model();
     let messages = read_model.messages.as_slice();
     assert_eq!(messages.len(), 1);

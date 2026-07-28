@@ -96,19 +96,25 @@ fn conflicting_reopen_state(session_id: &str) -> RuntimeSessionState {
         session_id: session_id.to_string(),
         policy: historical_policy.clone(),
         agent_frames: Vec::new(),
-        current_agent_frame_id: String::new(),
+        current_frame_node_id: None,
         ..Default::default()
     };
     state.ensure_agent_frame_initialized();
-    state.append_agent_frame(lash_core::AgentFrameRecord::new(
-        format!("agent-frame:{session_id}:current"),
-        session_id,
-        None,
-        lash_core::AgentFrameReason::continue_as(),
-        None,
-        lash_core::AgentFrameAssignment::from_policy(current_policy),
-        Default::default(),
-    ));
+    let frame_node_id = format!("agent-frame:{session_id}:current");
+    let mut nodes = state.session_graph.nodes.clone();
+    nodes.push(lash_core::SessionNodeRecord {
+        node_id: frame_node_id.clone(),
+        parent_node_id: state.session_graph.leaf_node_id.clone(),
+        timestamp: "2026-07-27T00:00:00Z".to_string(),
+        payload: lash_core::SessionNodePayload::FrameOpen {
+            reason: lash_core::AgentFrameReason::continue_as(),
+            assignment: lash_core::AgentFrameAssignment::from_policy(current_policy),
+            protocol_turn_options: Default::default(),
+        },
+    });
+    state.session_graph = lash_core::SessionGraph::from_nodes(nodes, Some(frame_node_id.clone()));
+    state.current_frame_node_id = Some(frame_node_id);
+    state.agent_frames = state.session_graph.agent_frame_records(session_id);
     state.policy = lash_core::SessionPolicy {
         provider_id: "persisted-provider".to_string(),
         model: model_spec("top-level-model", None, 33_333),
@@ -1096,7 +1102,7 @@ async fn persisted_provider_id_rebinds_to_live_provider_on_open() -> Result<()> 
             model: mock_model_spec(),
             ..Default::default()
         },
-        current_agent_frame_id: String::new(),
+        current_frame_node_id: None,
         agent_frames: Vec::new(),
         ..Default::default()
     };
@@ -1134,7 +1140,7 @@ async fn persisted_provider_id_mismatch_fails_at_turn_execution() -> Result<()> 
             model: mock_model_spec(),
             ..Default::default()
         },
-        current_agent_frame_id: String::new(),
+        current_frame_node_id: None,
         agent_frames: Vec::new(),
         ..Default::default()
     };
@@ -1173,17 +1179,23 @@ async fn agent_frame_provider_id_mismatch_is_reconciled_on_open() -> Result<()> 
             model: mock_model_spec(),
             ..Default::default()
         },
-        current_agent_frame_id: String::new(),
+        current_frame_node_id: None,
         agent_frames: Vec::new(),
         ..Default::default()
     };
     state.ensure_agent_frame_initialized();
-    state
-        .current_agent_frame_mut()
-        .expect("initial frame")
-        .assignment
-        .policy
-        .provider_id = "other-provider".to_string();
+    let leaf_node_id = state.session_graph.leaf_node_id.clone();
+    let mut nodes = state.session_graph.nodes.clone();
+    let frame = nodes
+        .iter_mut()
+        .find(|node| Some(&node.node_id) == state.current_frame_node_id.as_ref())
+        .expect("initial frame node");
+    let lash_core::SessionNodePayload::FrameOpen { assignment, .. } = &mut frame.payload else {
+        panic!("current frame must be a FrameOpen node");
+    };
+    assignment.policy.provider_id = "other-provider".to_string();
+    state.session_graph = lash_core::SessionGraph::from_nodes(nodes, leaf_node_id);
+    state.agent_frames = state.session_graph.agent_frame_records(&state.session_id);
     let store: Arc<dyn lash_core::RuntimePersistence> = Arc::new(SnapshotStore::with_state(state));
     let core = explicit_ephemeral_facets(LashCore::standard_builder())
         .provider(mock_provider())
@@ -1212,7 +1224,7 @@ async fn refreshed_head_provider_id_mismatch_fails_before_turn() -> Result<()> {
             model: mock_model_spec(),
             ..Default::default()
         },
-        current_agent_frame_id: String::new(),
+        current_frame_node_id: None,
         agent_frames: Vec::new(),
         ..Default::default()
     };
@@ -1485,7 +1497,7 @@ async fn reopen_reconciles_builder_model_across_all_runtime_consumers() -> Resul
     let session_id = "reconcile-open";
     let builder_model = model_spec("builder-model", None, 77_777);
     let persisted = conflicting_reopen_state(session_id);
-    let historical_frame_id = persisted.agent_frames[0].frame_id.clone();
+    let historical_frame_id = persisted.agent_frames[0].frame_node_id.clone();
     let store: Arc<dyn lash_core::RuntimePersistence> =
         Arc::new(SnapshotStore::with_state(persisted));
     let requests = Arc::new(std::sync::Mutex::new(Vec::new()));
@@ -1575,7 +1587,7 @@ async fn reopen_reconciles_builder_model_across_all_runtime_consumers() -> Resul
     let historical = state
         .agent_frames
         .iter()
-        .find(|frame| frame.frame_id == historical_frame_id)
+        .find(|frame| frame.frame_node_id == historical_frame_id)
         .expect("historical frame remains");
     assert_eq!(historical.assignment.policy.model.id, "historical-model");
     let current = state.current_agent_frame().expect("current follow frame");
@@ -1627,10 +1639,10 @@ async fn reopen_reconciles_builder_model_across_all_runtime_consumers() -> Resul
 }
 
 #[tokio::test]
-async fn open_with_state_reconciles_only_the_current_frame() -> Result<()> {
+async fn open_with_state_reconciles_live_policy_without_rewriting_frame_history() -> Result<()> {
     let session_id = "reconcile-open-with-state";
     let persisted = conflicting_reopen_state(session_id);
-    let historical_frame_id = persisted.agent_frames[0].frame_id.clone();
+    let historical_frame_id = persisted.agent_frames[0].frame_node_id.clone();
     let builder_model = model_spec("builder-model", None, 77_777);
     let core = explicit_ephemeral_facets(LashCore::standard_builder())
         .provider(mock_provider())
@@ -1647,14 +1659,15 @@ async fn open_with_state_reconciles_only_the_current_frame() -> Result<()> {
             .expect("current frame")
             .assignment
             .policy
-            .model,
-        builder_model
+            .model
+            .id,
+        "current-frame-model"
     );
     assert_eq!(
         state
             .agent_frames
             .iter()
-            .find(|frame| frame.frame_id == historical_frame_id)
+            .find(|frame| frame.frame_node_id == historical_frame_id)
             .expect("historical frame")
             .assignment
             .policy
@@ -1666,10 +1679,10 @@ async fn open_with_state_reconciles_only_the_current_frame() -> Result<()> {
 }
 
 #[tokio::test]
-async fn queued_worker_state_load_reconciles_only_the_current_frame() -> Result<()> {
+async fn queued_worker_state_load_reconciles_live_policy_without_rewriting_history() -> Result<()> {
     let session_id = "reconcile-queued-worker";
     let persisted = conflicting_reopen_state(session_id);
-    let historical_frame_id = persisted.agent_frames[0].frame_id.clone();
+    let historical_frame_id = persisted.agent_frames[0].frame_node_id.clone();
     let store = SnapshotStore::with_state(persisted);
     let policy = lash_core::SessionPolicy {
         provider_id: "builder-provider".to_string(),
@@ -1692,14 +1705,15 @@ async fn queued_worker_state_load_reconciles_only_the_current_frame() -> Result<
             .expect("current frame")
             .assignment
             .policy
-            .model,
-        policy.model
+            .model
+            .id,
+        "current-frame-model"
     );
     assert_eq!(
         state
             .agent_frames
             .iter()
-            .find(|frame| frame.frame_id == historical_frame_id)
+            .find(|frame| frame.frame_node_id == historical_frame_id)
             .expect("historical frame")
             .assignment
             .policy

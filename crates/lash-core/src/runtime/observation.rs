@@ -195,8 +195,7 @@ impl RuntimeObservation {
     ) -> Vec<ProcessHandleSummary> {
         let root_scope = self.process_scope();
         let mut entries = list_scope_process_handles(executor, &root_scope, mode).await;
-        let agent_frame_id = self.persisted_state.current_agent_frame_id.as_str();
-        if !agent_frame_id.is_empty() {
+        if let Some(agent_frame_id) = self.persisted_state.current_frame_node_id.as_deref() {
             let frame_scope =
                 crate::SessionScope::for_agent_frame(self.session_id.as_ref(), agent_frame_id);
             if frame_scope.id() != root_scope.id() {
@@ -294,15 +293,13 @@ impl RuntimeHandle {
             .then(|| runtime.last_committed_turn_id_for_revision(revision))
             .flatten();
         let (state, read_view, usage_report) = export_observation_state(runtime);
-        if previous.persisted_state.current_agent_frame_id != state.current_agent_frame_id
-            && !state.current_agent_frame_id.is_empty()
+        if previous.persisted_state.current_frame_node_id != state.current_frame_node_id
+            && let Some(frame_id) = state.current_frame_node_id.clone()
             && let Err(err) = self.live_replay_store.append(
                 runtime.session_id(),
                 revision,
                 None,
-                SessionObservationEventPayload::AgentFrameSwitched {
-                    frame_id: state.current_agent_frame_id.clone(),
-                },
+                SessionObservationEventPayload::AgentFrameSwitched { frame_id },
             )
         {
             tracing::warn!(
@@ -829,7 +826,7 @@ mod tests {
         let cursor = handle.observe().cursor().clone();
         let writer = handle.writer();
         let mut runtime = writer.lock().await;
-        runtime.state.current_agent_frame_id = "next-frame".to_string();
+        runtime.state.current_frame_node_id = Some("next-frame".to_string());
 
         handle.publish_from(&runtime);
         let SessionResume::Replayed { events } = handle
