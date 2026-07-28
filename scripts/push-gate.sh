@@ -99,6 +99,7 @@ run_postgres_conformance() {
   done
 
   LASH_POSTGRES_DATABASE_URL="postgres://lash:lash@127.0.0.1:${port}/lash" \
+    LASH_REQUIRE_POSTGRES=1 \
     cargo test -p lash-postgres-store --locked
 }
 

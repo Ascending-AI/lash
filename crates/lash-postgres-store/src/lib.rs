@@ -377,16 +377,31 @@ impl PostgresSessionStore {
 
 mod await_event;
 
-include!("postgres/schema.rs");
-include!("postgres/support.rs");
-include!("postgres/attachments.rs");
-include!("postgres/effect_replay.rs");
-include!("postgres/session_factory.rs");
-include!("postgres/runtime_persistence.rs");
-include!("postgres/process_helpers.rs");
-include!("postgres/process_registry.rs");
-include!("postgres/trigger_store.rs");
-include!("postgres/artifact_store.rs");
+#[path = "postgres/artifact_store.rs"]
+mod artifact_store;
+#[path = "postgres/attachments.rs"]
+mod attachments;
+#[path = "postgres/effect_replay.rs"]
+mod effect_replay;
+#[path = "postgres/process_helpers.rs"]
+mod process_helpers;
+#[path = "postgres/process_registry.rs"]
+mod process_registry;
+#[path = "postgres/runtime_persistence.rs"]
+mod runtime_persistence;
+#[path = "postgres/schema.rs"]
+mod schema;
+#[path = "postgres/session_factory.rs"]
+mod session_factory;
+#[path = "postgres/support.rs"]
+mod support;
+#[path = "postgres/trigger_store.rs"]
+mod trigger_store;
+
+pub use effect_replay::{
+    PostgresEffectHost, PostgresEffectReplayOptions, PostgresRuntimeEffectController,
+};
+use {process_helpers::*, runtime_persistence::*, schema::*, session_factory::*, support::*};
 
 #[cfg(test)]
 #[path = "../tests/support/mod.rs"]
@@ -394,11 +409,42 @@ mod postgres_test_support;
 
 #[cfg(test)]
 mod tests {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
     use super::*;
+    use tracing_subscriber::layer::{Context, SubscriberExt};
+    use tracing_subscriber::{Layer, Registry};
+
+    struct WarningCounter(Arc<AtomicUsize>);
+
+    impl<S> Layer<S> for WarningCounter
+    where
+        S: tracing::Subscriber,
+    {
+        fn on_event(&self, event: &tracing::Event<'_>, _context: Context<'_, S>) {
+            if *event.metadata().level() == tracing::Level::WARN {
+                self.0.fetch_add(1, Ordering::Relaxed);
+            }
+        }
+    }
+
+    #[test]
+    fn unwired_process_registry_factory_warns() {
+        let warning_count = Arc::new(AtomicUsize::new(0));
+        let subscriber = Registry::default().with(WarningCounter(Arc::clone(&warning_count)));
+
+        tracing::subscriber::with_default(subscriber, warn_postgres_process_registry_not_wired);
+
+        assert_eq!(
+            warning_count.load(Ordering::Relaxed),
+            1,
+            "the legacy factory must warn that process-owner liveness is not wired"
+        );
+    }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn postgres_claim_completion_is_locked_and_zero_rows_roll_back_the_head() {
-        let Ok(database_url) = std::env::var("LASH_POSTGRES_DATABASE_URL") else {
+        let Some(database_url) = postgres_test_support::database_url() else {
             eprintln!("skipping Postgres claim-completion fence: database URL is not set");
             return;
         };
@@ -576,7 +622,7 @@ mod tests {
 
     #[tokio::test]
     async fn checkpoint_probe_skips_writes_for_deferred_head_when_configured() {
-        let Ok(database_url) = std::env::var("LASH_POSTGRES_DATABASE_URL") else {
+        let Some(database_url) = postgres_test_support::database_url() else {
             eprintln!("skipping Postgres checkpoint counter: database URL is not set");
             return;
         };

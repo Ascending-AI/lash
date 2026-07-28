@@ -1,3 +1,5 @@
+use crate::*;
+
 #[async_trait::async_trait]
 impl TriggerStore for PostgresTriggerStore {
     fn durability_tier(&self) -> DurabilityTier {
@@ -25,10 +27,8 @@ impl TriggerStore for PostgresTriggerStore {
         let receipt_id =
             lash_core::trigger_operation_receipt_id(command.owner_scope(), operation_id)?;
         let subscription_key = command.subscription_key().unwrap_or_default().to_string();
-        let subscription_id = lash_core::deterministic_subscription_id(
-            command.owner_scope(),
-            &subscription_key,
-        )?;
+        let subscription_id =
+            lash_core::deterministic_subscription_id(command.owner_scope(), &subscription_key)?;
         let mut tx = self.pool.begin().await.map_err(plugin_sqlx_error)?;
         sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))")
             .bind(&subscription_id)
@@ -345,10 +345,14 @@ impl TriggerStore for PostgresTriggerStore {
             query.push(" AND source_key = ").push_bind(source_key);
         }
         if let Some(start_ms) = filter.occurred_at_start_ms {
-            query.push(" AND occurred_at_ms >= ").push_bind(start_ms as i64);
+            query
+                .push(" AND occurred_at_ms >= ")
+                .push_bind(start_ms as i64);
         }
         if let Some(end_ms) = filter.occurred_at_end_ms {
-            query.push(" AND occurred_at_ms < ").push_bind(end_ms as i64);
+            query
+                .push(" AND occurred_at_ms < ")
+                .push_bind(end_ms as i64);
         }
         query.push(" ORDER BY occurred_at_ms ASC, occurrence_id ASC");
         let rows = query
@@ -406,14 +410,14 @@ impl TriggerStore for PostgresTriggerStore {
 
     async fn prune_mutation_receipts(&self, cutoff_epoch_ms: u64) -> Result<usize, PluginError> {
         let cutoff_epoch_ms = i64::try_from(cutoff_epoch_ms).unwrap_or(i64::MAX);
-        Ok(sqlx::query(
-            "DELETE FROM lash_trigger_mutation_receipts WHERE created_at_ms < $1",
+        Ok(
+            sqlx::query("DELETE FROM lash_trigger_mutation_receipts WHERE created_at_ms < $1")
+                .bind(cutoff_epoch_ms)
+                .execute(&self.pool)
+                .await
+                .map_err(plugin_sqlx_error)?
+                .rows_affected() as usize,
         )
-        .bind(cutoff_epoch_ms)
-        .execute(&self.pool)
-        .await
-        .map_err(plugin_sqlx_error)?
-        .rows_affected() as usize)
     }
 }
 
@@ -510,8 +514,7 @@ async fn postgres_delivery_snapshots(
                 subscription: serde_json::from_str(&json).map_err(process_decode_error)?,
                 process_id: row.get(0),
                 created_at_ms: row.get::<i64, _>(1) as u64,
-                reservation_status:
-                    lash_core::TriggerDeliveryReservationStatus::AlreadyReserved,
+                reservation_status: lash_core::TriggerDeliveryReservationStatus::AlreadyReserved,
             })
         })
         .collect()
@@ -534,23 +537,18 @@ async fn list_deliveries_where(
     if let Some(value) = value {
         query = query.bind(value);
     }
-    let rows = query
-        .fetch_all(pool)
-        .await
-        .map_err(plugin_sqlx_error)?;
+    let rows = query.fetch_all(pool).await.map_err(plugin_sqlx_error)?;
     rows.into_iter()
         .map(|row| {
             let occurrence_json: String = row.get(2);
             let subscription_json: String = row.get(3);
             Ok(TriggerDeliveryReservation {
-                occurrence: serde_json::from_str(&occurrence_json)
-                    .map_err(process_decode_error)?,
+                occurrence: serde_json::from_str(&occurrence_json).map_err(process_decode_error)?,
                 subscription: serde_json::from_str(&subscription_json)
                     .map_err(process_decode_error)?,
                 process_id: row.get(0),
                 created_at_ms: row.get::<i64, _>(1) as u64,
-                reservation_status:
-                    lash_core::TriggerDeliveryReservationStatus::AlreadyReserved,
+                reservation_status: lash_core::TriggerDeliveryReservationStatus::AlreadyReserved,
             })
         })
         .collect()

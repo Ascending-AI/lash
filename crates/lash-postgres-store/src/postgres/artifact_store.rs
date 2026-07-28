@@ -1,3 +1,5 @@
+use crate::*;
+
 /// Logical keyspaces multiplexed onto `lash_lashlang_artifacts`. Each namespace
 /// owns its own half of the `(namespace, artifact_ref)` composite primary key,
 /// so a key value that happens to collide across namespaces (a module ref that
@@ -58,9 +60,13 @@ impl lashlang::LashlangArtifactStore for PostgresLashlangArtifactStore {
         let bytes = artifact
             .to_store_bytes()
             .map_err(lashlang::ArtifactStoreError::from)?;
-        self.put_namespaced_bytes(MODULE_ARTIFACT_NAMESPACE, artifact.module_ref.as_str(), &bytes)
-            .await
-            .map_err(|err| lashlang::ArtifactStoreError::Backend(err.to_string()))
+        self.put_namespaced_bytes(
+            MODULE_ARTIFACT_NAMESPACE,
+            artifact.module_ref.as_str(),
+            &bytes,
+        )
+        .await
+        .map_err(|err| lashlang::ArtifactStoreError::Backend(err.to_string()))
     }
 
     async fn get_module_artifact(

@@ -38,3 +38,4 @@ lash-sqlite-store = { workspace = true }
 rusqlite = { version = "0.37", features = ["bundled"] }
 tempfile = { workspace = true }
 tokio = { workspace = true, features = ["full"] }
+tracing-subscriber = { workspace = true }

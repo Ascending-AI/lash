@@ -1,3 +1,5 @@
+use crate::*;
+
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
 use crate::await_event::PostgresAwaitEvents;
@@ -685,11 +687,7 @@ struct PostgresPrepareInputs {
 }
 
 impl PostgresEffectReplayInner {
-    fn new(
-        pool: PgPool,
-        signing_secret: Arc<[u8]>,
-        options: PostgresEffectReplayOptions,
-    ) -> Self {
+    fn new(pool: PgPool, signing_secret: Arc<[u8]>, options: PostgresEffectReplayOptions) -> Self {
         let sequence = POSTGRES_EFFECT_OWNER_COUNTER.fetch_add(1, Ordering::SeqCst);
         let await_events = PostgresAwaitEvents::new(pool.clone(), signing_secret);
         Self {

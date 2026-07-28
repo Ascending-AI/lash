@@ -1,5 +1,6 @@
-const POSTGRES_QUEUED_WORK_HEAD_CANDIDATE_PREDICATE: &str =
-    "session_id = $1
+use crate::*;
+
+const POSTGRES_QUEUED_WORK_HEAD_CANDIDATE_PREDICATE: &str = "session_id = $1
        AND available_at_ms <= FLOOR(EXTRACT(EPOCH FROM transaction_timestamp()) * 1000)
        AND (
             claim_token IS NULL
@@ -596,7 +597,7 @@ async fn complete_queued_work_claims_tx(
     Ok(())
 }
 
-async fn complete_turn_input_claims_tx(
+pub(crate) async fn complete_turn_input_claims_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     completed_claims: &[lash_core::TurnInputCompletion],
 ) -> Result<(), StoreError> {
@@ -1018,12 +1019,12 @@ impl QueuedWorkStore for PostgresSessionStore {
         let generation = session_execution_lease.fencing_token;
         let now = postgres_transaction_epoch_ms(&mut tx).await?;
         let rows = sqlx::query(&postgres_queued_work_claim_candidates_sql(boundary))
-        .bind(session_id)
-        .bind(generation as i64)
-        .bind(claim_scan_limit(max_batches))
-        .fetch_all(&mut *tx)
-        .await
-        .map_err(store_sqlx_error)?;
+            .bind(session_id)
+            .bind(generation as i64)
+            .bind(claim_scan_limit(max_batches))
+            .fetch_all(&mut *tx)
+            .await
+            .map_err(store_sqlx_error)?;
         let mut selected = Vec::new();
         for row in rows {
             let row = queued_batch_row(row)?;
@@ -1119,13 +1120,7 @@ impl QueuedWorkStore for PostgresSessionStore {
         checkpoint: lash_core::CheckpointKind,
         max_inputs: usize,
         max_batches: usize,
-    ) -> Result<
-        (
-            Option<lash_core::TurnInputClaim>,
-            Option<QueuedWorkClaim>,
-        ),
-        StoreError,
-    > {
+    ) -> Result<(Option<lash_core::TurnInputClaim>, Option<QueuedWorkClaim>), StoreError> {
         #[cfg(test)]
         self.checkpoint_probe_count
             .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
@@ -1639,9 +1634,7 @@ impl TurnInputStore for PostgresSessionStore {
             load_pending_turn_input_row_by_target_tx(&mut tx, session_id, &anchor, true).await?
         else {
             tx.commit().await.map_err(store_sqlx_error)?;
-            return Ok(
-                lash_core::PendingTurnInputSuffixCancelOutcome::AnchorNotFound { anchor },
-            );
+            return Ok(lash_core::PendingTurnInputSuffixCancelOutcome::AnchorNotFound { anchor });
         };
         let rows = sqlx::query(
             "SELECT enqueue_seq, input_id, session_id, source_key, ingress_json,
@@ -1666,10 +1659,7 @@ impl TurnInputStore for PostgresSessionStore {
             );
         }
         tx.commit().await.map_err(store_sqlx_error)?;
-        Ok(lash_core::PendingTurnInputSuffixCancelOutcome::Outcomes {
-            anchor,
-            outcomes,
-        })
+        Ok(lash_core::PendingTurnInputSuffixCancelOutcome::Outcomes { anchor, outcomes })
     }
 
     async fn claim_active_turn_inputs(
@@ -1721,9 +1711,7 @@ impl TurnInputStore for PostgresSessionStore {
             lash_core::TurnInputClaimMode::ActiveTurn { .. } => {
                 lash_core::TurnInputState::PendingActive
             }
-            lash_core::TurnInputClaimMode::NextTurn => {
-                lash_core::TurnInputState::DeferredNextTurn
-            }
+            lash_core::TurnInputClaimMode::NextTurn => lash_core::TurnInputState::DeferredNextTurn,
         };
         sqlx::query(
             "UPDATE lash_pending_turn_inputs
@@ -1854,8 +1842,8 @@ impl StoreMaintenance for PostgresSessionStore {
         };
         Ok(VacuumReport {
             removed_node_count: removed_node_count as usize,
-            removed_pending_turn_input_tombstone_count:
-                removed_pending_turn_input_tombstone_count as usize,
+            removed_pending_turn_input_tombstone_count: removed_pending_turn_input_tombstone_count
+                as usize,
         })
     }
 
@@ -1925,12 +1913,11 @@ impl StoreMaintenance for PostgresSessionStore {
                 retained.insert(child.0);
             }
         }
-        let all_hashes = sqlx::query_scalar::<_, String>(
-            "SELECT hash FROM lash_blobs ORDER BY hash ASC",
-        )
-        .fetch_all(&mut *tx)
-        .await
-        .map_err(store_sqlx_error)?;
+        let all_hashes =
+            sqlx::query_scalar::<_, String>("SELECT hash FROM lash_blobs ORDER BY hash ASC")
+                .fetch_all(&mut *tx)
+                .await
+                .map_err(store_sqlx_error)?;
         let mut deleted_blob_count = 0usize;
         for hash in &all_hashes {
             if retained.contains(hash) {
@@ -1985,9 +1972,8 @@ async fn checkpoint_work_pending_postgres(
     if max_inputs == 0 && max_batches == 0 {
         return Ok(false);
     }
-    let head_candidate = postgres_queued_work_head_candidate_cte(
-        QueuedWorkClaimBoundary::ActiveTurnCheckpoint,
-    );
+    let head_candidate =
+        postgres_queued_work_head_candidate_cte(QueuedWorkClaimBoundary::ActiveTurnCheckpoint);
     let sql = format!(
         "WITH {head_candidate}
          SELECT (
@@ -2020,18 +2006,18 @@ async fn checkpoint_work_pending_postgres(
          )"
     );
     sqlx::query_scalar(&sql)
-    .bind(session_id)
-    .bind(generation as i64)
-    .bind(turn_id)
-    .bind(match checkpoint {
-        lash_core::CheckpointKind::AfterWork => "after_work",
-        lash_core::CheckpointKind::BeforeCompletion => "before_completion",
-    })
-    .bind(max_inputs as i64)
-    .bind(max_batches as i64)
-    .fetch_one(pool)
-    .await
-    .map_err(store_sqlx_error)
+        .bind(session_id)
+        .bind(generation as i64)
+        .bind(turn_id)
+        .bind(match checkpoint {
+            lash_core::CheckpointKind::AfterWork => "after_work",
+            lash_core::CheckpointKind::BeforeCompletion => "before_completion",
+        })
+        .bind(max_inputs as i64)
+        .bind(max_batches as i64)
+        .fetch_one(pool)
+        .await
+        .map_err(store_sqlx_error)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -2049,12 +2035,12 @@ async fn claim_ready_queued_work_postgres_tx(
     let generation = session_execution_lease.fencing_token;
     let now = postgres_transaction_epoch_ms(tx).await?;
     let rows = sqlx::query(&postgres_queued_work_claim_candidates_sql(boundary))
-    .bind(session_id)
-    .bind(generation as i64)
-    .bind(claim_scan_limit(max_batches))
-    .fetch_all(&mut **tx)
-    .await
-    .map_err(store_sqlx_error)?;
+        .bind(session_id)
+        .bind(generation as i64)
+        .bind(claim_scan_limit(max_batches))
+        .fetch_all(&mut **tx)
+        .await
+        .map_err(store_sqlx_error)?;
     let mut selected = Vec::new();
     for row in rows {
         let row = queued_batch_row(row)?;
@@ -2091,13 +2077,7 @@ async fn claim_ready_queued_work_postgres_tx(
     }
     selected.truncate(selected_len);
     selected_batches.truncate(selected_len);
-    let lease = QueuedWorkClaimLease::derive(
-        &candidates[0],
-        session_id,
-        owner,
-        now,
-        generation,
-    );
+    let lease = QueuedWorkClaimLease::derive(&candidates[0], session_id, owner, now, generation);
     let liveness_json = encode_liveness(&owner.liveness)?;
     for row in &selected {
         let changed = sqlx::query(
@@ -2221,9 +2201,7 @@ async fn claim_pending_turn_inputs_postgres_tx(
     let lease = TurnInputClaimLease::derive(head, session_id, owner, now, generation);
     let liveness_json = encode_liveness(&owner.liveness)?;
     let state_after_claim = match &mode {
-        lash_core::TurnInputClaimMode::ActiveTurn { .. } => {
-            lash_core::TurnInputState::Accepted
-        }
+        lash_core::TurnInputClaimMode::ActiveTurn { .. } => lash_core::TurnInputState::Accepted,
         lash_core::TurnInputClaimMode::NextTurn => lash_core::TurnInputState::DeferredNextTurn,
     };
     let mut inputs = Vec::new();
@@ -2359,9 +2337,7 @@ async fn claim_pending_turn_inputs_postgres(
     let lease = TurnInputClaimLease::derive(head, session_id, owner, now, generation);
     let liveness_json = encode_liveness(&owner.liveness)?;
     let state_after_claim = match &mode {
-        lash_core::TurnInputClaimMode::ActiveTurn { .. } => {
-            lash_core::TurnInputState::Accepted
-        }
+        lash_core::TurnInputClaimMode::ActiveTurn { .. } => lash_core::TurnInputState::Accepted,
         lash_core::TurnInputClaimMode::NextTurn => lash_core::TurnInputState::DeferredNextTurn,
     };
     let mut inputs = Vec::new();
@@ -2417,15 +2393,15 @@ async fn claim_pending_turn_inputs_postgres(
     }))
 }
 
-struct SessionExecutionLeaseRow {
+pub(crate) struct SessionExecutionLeaseRow {
     owner: Option<LeaseOwnerIdentity>,
-    lease_token: Option<String>,
-    fencing_token: u64,
+    pub(crate) lease_token: Option<String>,
+    pub(crate) fencing_token: u64,
     claimed_at_ms: u64,
-    expires_at_ms: u64,
+    pub(crate) expires_at_ms: u64,
 }
 
-async fn load_session_execution_lease_tx(
+pub(crate) async fn load_session_execution_lease_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     session_id: &str,
 ) -> Result<Option<SessionExecutionLeaseRow>, StoreError> {
@@ -2450,7 +2426,7 @@ async fn load_session_execution_lease_tx(
     }))
 }
 
-fn lease_owner_from_columns(
+pub(crate) fn lease_owner_from_columns(
     owner_id: Option<String>,
     incarnation_id: Option<String>,
     liveness_json: Option<String>,

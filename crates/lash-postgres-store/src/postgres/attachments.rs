@@ -1,3 +1,5 @@
+use crate::*;
+
 impl AttachmentManifest for PostgresSessionStore {
     fn record_intent(&self, intent: AttachmentIntent) -> Result<(), StoreError> {
         let pool = self.pool.clone();
@@ -89,12 +91,12 @@ impl AttachmentManifest for PostgresSessionStore {
                 "DELETE FROM lash_attachment_manifest
                  WHERE session_id = $1 AND attachment_id = $2",
             )
-                .bind(session_id)
-                .bind(attachment_id)
-                .execute(&pool)
-                .await
-                .map(|_| ())
-                .map_err(store_sqlx_error)
+            .bind(session_id)
+            .bind(attachment_id)
+            .execute(&pool)
+            .await
+            .map(|_| ())
+            .map_err(store_sqlx_error)
         })
     }
 
@@ -124,12 +126,10 @@ impl AttachmentManifest for PostgresSessionStore {
     fn list_all_refs(&self) -> Result<Vec<AttachmentId>, StoreError> {
         let pool = self.pool.clone();
         block_on_detached(async move {
-            let rows = sqlx::query(
-                "SELECT DISTINCT attachment_id FROM lash_attachment_manifest",
-            )
-            .fetch_all(&pool)
-            .await
-            .map_err(store_sqlx_error)?;
+            let rows = sqlx::query("SELECT DISTINCT attachment_id FROM lash_attachment_manifest")
+                .fetch_all(&pool)
+                .await
+                .map_err(store_sqlx_error)?;
             Ok(rows
                 .into_iter()
                 .map(|row| AttachmentId::new(row.get::<String, _>(0)))

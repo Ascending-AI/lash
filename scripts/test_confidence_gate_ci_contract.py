@@ -6,6 +6,7 @@ import json
 import pathlib
 import re
 import runpy
+import subprocess
 import tempfile
 import unittest
 
@@ -55,6 +56,39 @@ def workflow_job_block(workflow: str, job_id: str) -> str:
     if next_job is None:
         return workflow[start:]
     return workflow[start : start + len(marker) + next_job.start()]
+
+
+def shell_function_body(script: str, function_name: str) -> str:
+    start_match = re.search(
+        rf"^{re.escape(function_name)}\(\) \{{\n", script, re.MULTILINE
+    )
+    if start_match is None:
+        raise AssertionError(f"missing shell function {function_name}")
+    next_function = re.search(
+        r"^[a-zA-Z_][a-zA-Z0-9_]*\(\) \{\n",
+        script[start_match.end() :],
+        re.MULTILINE,
+    )
+    if next_function is None:
+        return script[start_match.end() :]
+    return script[start_match.end() : start_match.end() + next_function.start()]
+
+
+def shell_logical_commands(script: str) -> list[str]:
+    commands: list[str] = []
+    current = ""
+    for line in script.splitlines():
+        stripped = line.strip()
+        current = f"{current} {stripped}".strip()
+        if current.endswith("\\"):
+            current = current[:-1].rstrip()
+            continue
+        if current:
+            commands.append(current)
+        current = ""
+    if current:
+        commands.append(current)
+    return commands
 
 
 class ConfidenceGateCiContractTest(unittest.TestCase):
@@ -482,24 +516,241 @@ class ConfidenceGateCiContractTest(unittest.TestCase):
         for snippet in required_repro_snippets:
             self.assertIn(snippet, repro)
 
-    def test_static_replay_matrix_does_not_claim_generated_backend_static_replay(self) -> None:
+    def test_model_replay_artifact_does_not_claim_backend_equivalence(self) -> None:
         gate = GATE.read_text(encoding="utf-8")
 
         required_snippets = [
-            'step "Static replay evidence matrix"',
-            "generated_static_backend_skip_reason=",
-            "generated_backend_fixture_static_skip_reason=",
+            'step "Model replay evidence"',
+            "run_model_replay_suite()",
+            'replay_dir="${out_dir}/sim/model-replay"',
             "generated_backend_regression_fixture",
-            '"schema": "lash.confidence.static-replay-evidence-matrix.v1"',
-            "backend equivalence is proved by per-seed generated workload rerun artifacts",
+            '"schema": "lash.confidence.model-replay-evidence.v1"',
+            "Backend equivalence is not claimed by this artifact",
         ]
         for snippet in required_snippets:
             self.assertIn(snippet, gate)
 
+        self.assertNotIn("run_cross_backend_replay_suite", gate)
+        self.assertNotIn("sim/cross-backend-replay", gate)
+        replay_command = shell_function_body(gate, "run_model_replay_command")
+        row_format = re.search(
+            r"""printf\s+'(?P<json>\{.*?\})\\n'""", replay_command, re.DOTALL
+        )
+        self.assertIsNotNone(row_format)
+        row_keys = set(
+            re.findall(r'"([^"]+)"\s*:', row_format.group("json"))
+        )
+        self.assertNotIn("backend", row_keys)
+        self.assertNotIn("skip_reason", row_keys)
         self.assertNotIn("backend_replayable_regression", gate)
         self.assertNotIn(
             "Every generated trace and every backend-replayable regression trace is replayed through model, SQLite, and Postgres",
             gate,
+        )
+
+    def test_model_replay_empty_corpus_writes_failed_verdict_and_exits_nonzero(
+        self,
+    ) -> None:
+        gate = GATE.read_text(encoding="utf-8")
+        replay_suite = shell_function_body(gate, "run_model_replay_suite")
+        harness = f"""\
+set -euo pipefail
+out_dir="$1"
+step() {{ :; }}
+run_model_replay_suite() {{
+{replay_suite}
+run_model_replay_suite
+"""
+        with tempfile.TemporaryDirectory() as directory:
+            completed = subprocess.run(
+                ["bash", "-c", harness, "model-replay-contract", directory],
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            summary_path = (
+                pathlib.Path(directory) / "sim" / "model-replay" / "summary.json"
+            )
+            self.assertEqual(
+                completed.returncode,
+                1,
+                f"empty replay corpus did not fail:\n{completed.stdout}\n{completed.stderr}",
+            )
+            summary = json.loads(summary_path.read_text(encoding="utf-8"))
+            self.assertEqual(summary["status"], "failed")
+            self.assertEqual(summary["row_count"], 0)
+
+    def test_seeded_mutation_failure_writes_failed_verdict_and_exits_nonzero(
+        self,
+    ) -> None:
+        gate = GATE.read_text(encoding="utf-8")
+        recorded = shell_function_body(gate, "run_mutants_recorded")
+        finalize = shell_function_body(gate, "finalize_mutation_gate")
+        harness = f"""\
+set -euo pipefail
+out_dir="$1"
+mutation_scope="smoke"
+mutation_failures=0
+write_mutation_evidence_summary() {{ :; }}
+write_confidence_summary() {{ printf '%s\\n' "$1" >"${{out_dir}}/summary-verdict"; }}
+run_mutants_recorded() {{
+{recorded}
+finalize_mutation_gate() {{
+{finalize}
+seeded_mutation_failure() {{
+  if [ "${{CARGO_TARGET_DIR:-}}" != "target" ]; then
+    return 3
+  fi
+  return 2
+}}
+export CARGO_TARGET_DIR="deliberately-shared-target"
+run_mutants_recorded \
+  "seeded survivor" \
+  "${{out_dir}}/seeded-mutant" \
+  seeded_mutation_failure
+finalize_mutation_gate
+"""
+        with tempfile.TemporaryDirectory() as directory:
+            completed = subprocess.run(
+                ["bash", "-c", harness, "mutation-contract", directory],
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            artifact = pathlib.Path(directory) / "seeded-mutant"
+            command_status = json.loads(
+                (artifact / "confidence-status.json").read_text(encoding="utf-8")
+            )
+            self.assertEqual(command_status["status"], "failed")
+            self.assertEqual(command_status["exit_code"], 2)
+            self.assertEqual(
+                completed.returncode,
+                1,
+                f"seeded mutation failure did not fail:\n{completed.stdout}\n{completed.stderr}",
+            )
+            self.assertEqual(
+                (pathlib.Path(directory) / "summary-verdict").read_text(
+                    encoding="utf-8"
+                ),
+                "failed\n",
+            )
+
+    def test_mutation_failure_is_aggregated_after_full_lane_evidence(self) -> None:
+        gate = GATE.read_text(encoding="utf-8")
+        main = gate[gate.rindex("\nrun_scenario_harnesses\n") :]
+
+        smoke = main.index("run_mutation_smoke")
+        broad_postgres = main.index("run_broad_postgres_evidence")
+        conformance = main.index("run_postgres_conformance")
+        workers_e2e = main.index("run_restate_postgres_workers_e2e")
+        full_mutation = main.index("run_mutation_full")
+        aggregate = main.index("finalize_mutation_gate")
+
+        self.assertLess(smoke, broad_postgres)
+        self.assertLess(broad_postgres, conformance)
+        self.assertLess(conformance, workers_e2e)
+        self.assertLess(workers_e2e, full_mutation)
+        self.assertLess(full_mutation, aggregate)
+        self.assertEqual(main.count("finalize_mutation_gate"), 1)
+        self.assertIn("if ! finalize_mutation_gate; then\n    exit 1\n  fi", main)
+
+    def test_durable_stores_are_critical_coverage_and_mutation_packages(self) -> None:
+        workflow = WORKFLOW.read_text(encoding="utf-8")
+        confidence_workflow = CONFIDENCE_WORKFLOW.read_text(encoding="utf-8")
+        gate = GATE.read_text(encoding="utf-8")
+
+        critical_packages = gate.split("critical_packages=(", 1)[1].split(")", 1)[0]
+        self.assertIn("lash-sqlite-store", critical_packages)
+        self.assertIn("lash-postgres-store", critical_packages)
+        for function_name in ("run_mutation_smoke", "run_mutation_full"):
+            body = shell_function_body(gate, function_name)
+            loop_headers = re.findall(
+                r"^\s*for\s+package\s+in\s+(.+);\s*do\s*$", body, re.MULTILINE
+            )
+            self.assertEqual(['"${critical_packages[@]}"'], loop_headers)
+            self.assertIn('if [ "$package" = "lash-postgres-store" ]; then', body)
+            self.assertIn("run_postgres_mutants_recorded", body)
+
+        postgres_mutation = shell_function_body(
+            gate, "run_postgres_mutants_recorded"
+        )
+        self.assertIn('start_mutation_postgres "$artifact"', postgres_mutation)
+        self.assertIn(
+            'LASH_POSTGRES_DATABASE_URL="$mutation_postgres_database_url"',
+            postgres_mutation,
+        )
+        self.assertIn("LASH_REQUIRE_POSTGRES=1", postgres_mutation)
+        self.assertIn('"$@" --jobs "$mutation_jobs"', postgres_mutation)
+
+        derive_jobs = shell_function_body(gate, "derive_mutation_jobs")
+        harness = f"""\
+set -euo pipefail
+out_dir="$(mktemp -d)"
+derive_mutation_jobs() {{
+{derive_jobs}
+[ "$(derive_mutation_jobs 1)" = 1 ]
+[ "$(derive_mutation_jobs 4)" = 2 ]
+[ "$(derive_mutation_jobs 8)" = 4 ]
+[ "$(derive_mutation_jobs 32)" = 4 ]
+"""
+        completed = subprocess.run(
+            ["bash", "-c", harness],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        self.assertEqual(
+            completed.returncode,
+            0,
+            f"machine-derived mutation job contract failed:\n"
+            f"{completed.stdout}\n{completed.stderr}",
+        )
+        self.assertEqual(gate.count('local jobs="${LASH_MUTATION_JOBS:-2}"'), 0)
+
+        coverage_body = shell_function_body(gate, "run_coverage_blind_spots")
+        coverage_loops = re.findall(
+            r"^\s*for\s+package\s+in\s+(.+);\s*do\s*$",
+            coverage_body,
+            re.MULTILINE,
+        )
+        self.assertEqual(['"${critical_packages[@]}"'], coverage_loops)
+        self.assertIn('coverage_package_args+=(-p "$package")', coverage_body)
+        self.assertIn(
+            '''critical_package_regex="$(IFS='|'; printf '%s' "${critical_packages[*]}")"''',
+            coverage_body,
+        )
+        self.assertIn(
+            'awk -v critical_package_regex="$critical_package_regex"',
+            coverage_body,
+        )
+        self.assertIn(
+            'file ~ ("/crates/(" critical_package_regex ")/")',
+            coverage_body,
+        )
+        self.assertIn('if [ "$lane" = "full" ]; then', gate)
+        self.assertIn('cron: "29 4 * * 0"', confidence_workflow)
+        self.assertNotIn("scripts/confidence-gate.sh default", workflow)
+
+    def test_postgres_ci_lane_requires_database_configuration(self) -> None:
+        workflow = WORKFLOW.read_text(encoding="utf-8")
+        gate = GATE.read_text(encoding="utf-8")
+
+        self.assertIn('LASH_REQUIRE_POSTGRES: "1"', workflow)
+        conformance_calls = [
+            command
+            for command in shell_logical_commands(gate)
+            if re.search(
+                r"\bcargo test -p lash-postgres-store\b.*(?:^|\s)--test\s+conformance(?:\s|$)",
+                command,
+            )
+        ]
+        self.assertGreater(len(conformance_calls), 0)
+        self.assertEqual(
+            len(conformance_calls),
+            sum(
+                "LASH_REQUIRE_POSTGRES=1" in command
+                for command in conformance_calls
+            ),
         )
 
     def test_generated_postgres_dynamic_rerun_is_bounded_and_artifacted(self) -> None:
