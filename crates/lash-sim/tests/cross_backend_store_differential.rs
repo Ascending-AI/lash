@@ -475,6 +475,11 @@ struct DurableNode {
     // contract-visible without comparing backend-local sequence counters.
     ordinal: usize,
     node_id: String,
+    // Compared as its own field rather than inside `bytes`: SQL keeps parent
+    // topology in an indexed column while the in-memory record carries it in
+    // the struct, so byte comparison alone would report a physical layout
+    // choice as drift while leaving the edge itself uncompared.
+    parent_node_id: Option<String>,
     // Both SQL backends currently store node_json as TEXT. A future jsonb
     // migration would reserialize values and make every byte comparison red
     // for a reason outside the persistence contract.
@@ -487,6 +492,7 @@ impl std::fmt::Debug for DurableNode {
             .debug_struct("DurableNode")
             .field("ordinal", &self.ordinal)
             .field("node_id", &self.node_id)
+            .field("parent_node_id", &self.parent_node_id)
             .field("bytes", &String::from_utf8_lossy(&self.bytes))
             .finish()
     }
@@ -546,7 +552,8 @@ impl RawDurableReader {
                     .map(|(ordinal, node)| DurableNode {
                         ordinal,
                         node_id: node.node_id.clone(),
-                        bytes: serde_json::to_vec(&node).expect("encode in-memory durable node"),
+                        parent_node_id: node.parent_node_id.clone(),
+                        bytes: normalized_in_memory_node_json(&node),
                     })
                     .collect();
                 let pending_turn_inputs = store
@@ -584,8 +591,8 @@ impl RawDurableReader {
                             serde_json::from_str(&json).expect("decode Postgres durable head");
                         (Some(revision as u64), meta.leaf_node_id)
                     });
-                let rows: Vec<(i64, String, String)> = sqlx::query_as(
-                    "SELECT seq, node_id, node_json
+                let rows: Vec<(i64, String, Option<String>, String)> = sqlx::query_as(
+                    "SELECT seq, node_id, parent_node_id, node_json
                      FROM lash_graph_nodes
                      WHERE session_id = $1 AND tombstoned = FALSE
                      ORDER BY seq ASC",
@@ -597,11 +604,14 @@ impl RawDurableReader {
                 let durable_nodes = rows
                     .into_iter()
                     .enumerate()
-                    .map(|(ordinal, (_seq, node_id, node_json))| DurableNode {
-                        ordinal,
-                        node_id,
-                        bytes: node_json.into_bytes(),
-                    })
+                    .map(
+                        |(ordinal, (_seq, node_id, parent_node_id, node_json))| DurableNode {
+                            ordinal,
+                            node_id,
+                            parent_node_id,
+                            bytes: normalized_sql_node_json(&node_json),
+                        },
+                    )
                     .collect();
                 let pending_rows: Vec<(String, String, Option<i64>)> = sqlx::query_as(
                     "SELECT input_id, state,
@@ -640,6 +650,29 @@ impl RawDurableReader {
     }
 }
 
+fn normalized_in_memory_node_json(node: &lash_core::SessionNodeRecord) -> Vec<u8> {
+    let mut value = serde_json::to_value(node).expect("encode in-memory durable node");
+    let object = value
+        .as_object_mut()
+        .expect("session node serializes as an object");
+    // SQL stores node identity and parent topology in indexed columns and keeps
+    // only the payload envelope in node_json. Both are compared as dedicated
+    // `DurableNode` fields, so removing them here drops a physical layout
+    // difference from the byte comparison without dropping any coverage.
+    object.remove("node_id");
+    object.remove("parent_node_id");
+    normalized_node_json(value)
+}
+
+fn normalized_sql_node_json(node_json: &str) -> Vec<u8> {
+    let value = serde_json::from_str(node_json).expect("decode SQL durable node");
+    normalized_node_json(value)
+}
+
+fn normalized_node_json(value: serde_json::Value) -> Vec<u8> {
+    serde_json::to_vec(&value).expect("encode normalized durable node")
+}
+
 fn read_sqlite_durable_state(path: &Path, session_id: &str) -> RawDurableState {
     let connection = rusqlite::Connection::open(path).expect("open SQLite durable reader");
     connection
@@ -670,7 +703,7 @@ fn read_sqlite_durable_state(path: &Path, session_id: &str) -> RawDurableState {
     let durable_nodes = {
         let mut statement = connection
             .prepare(
-                "SELECT seq, node_id, node_json
+                "SELECT seq, node_id, parent_node_id, node_json
                  FROM graph_nodes
                  WHERE session_id = ?1 AND tombstoned = 0
                  ORDER BY seq ASC",
@@ -681,7 +714,8 @@ fn read_sqlite_durable_state(path: &Path, session_id: &str) -> RawDurableState {
                 Ok((
                     row.get::<_, i64>(0)?,
                     row.get::<_, String>(1)?,
-                    row.get::<_, String>(2)?,
+                    row.get::<_, Option<String>>(2)?,
+                    row.get::<_, String>(3)?,
                 ))
             })
             .expect("read SQLite durable nodes")
@@ -689,11 +723,14 @@ fn read_sqlite_durable_state(path: &Path, session_id: &str) -> RawDurableState {
             .expect("decode SQLite durable nodes")
             .into_iter()
             .enumerate()
-            .map(|(ordinal, (_seq, node_id, node_json))| DurableNode {
-                ordinal,
-                node_id,
-                bytes: node_json.into_bytes(),
-            })
+            .map(
+                |(ordinal, (_seq, node_id, parent_node_id, node_json))| DurableNode {
+                    ordinal,
+                    node_id,
+                    parent_node_id,
+                    bytes: normalized_sql_node_json(&node_json),
+                },
+            )
             .collect()
     };
     let pending_turn_inputs = {
