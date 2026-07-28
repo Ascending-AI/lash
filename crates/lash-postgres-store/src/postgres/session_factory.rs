@@ -131,20 +131,6 @@ impl SessionStoreFactory for PostgresSessionStoreFactory {
             retained.ok_or_else(|| StoreError::ForkPointNotRetained {
                 node_id: node_id.to_string(),
             })?;
-        let changed = sqlx::query(
-            "UPDATE lash_graph_nodes SET incoming_refs = incoming_refs + 1
-             WHERE node_id = $1 AND tombstoned = FALSE",
-        )
-        .bind(node_id)
-        .execute(&mut *tx)
-        .await
-        .map_err(store_sqlx_error)?
-        .rows_affected();
-        if changed != 1 {
-            return Err(StoreError::ForkPointNotRetained {
-                node_id: node_id.to_string(),
-            });
-        }
         sqlx::query(
             "INSERT INTO lash_node_anchors (node_id, checkpoint_ref, source_session_id)
              VALUES ($1, $2, $3)",
@@ -182,7 +168,7 @@ impl SessionStoreFactory for PostgresSessionStoreFactory {
             .map_err(store_sqlx_error)?
             .rows_affected();
         if removed == 1 {
-            crate::runtime_persistence::decrement_node_ref_tx(&mut tx, node_id).await?;
+            crate::runtime_persistence::retire_unreachable_ancestry_tx(&mut tx, node_id).await?;
         }
         tx.commit().await.map_err(store_sqlx_error)
     }
@@ -292,20 +278,6 @@ impl SessionStoreFactory for PostgresSessionStoreFactory {
                 .ok_or_else(|| StoreError::MissingFrameOpenAncestor {
                     leaf_node_id: request.node_id.clone(),
                 })?;
-        let changed = sqlx::query(
-            "UPDATE lash_graph_nodes SET incoming_refs = incoming_refs + 1
-             WHERE node_id = $1 AND tombstoned = FALSE",
-        )
-        .bind(&request.node_id)
-        .execute(&mut *tx)
-        .await
-        .map_err(store_sqlx_error)?
-        .rows_affected();
-        if changed != 1 {
-            return Err(StoreError::ForkPointNotRetained {
-                node_id: request.node_id.clone(),
-            });
-        }
         let config = lash_core::PersistedSessionConfig {
             provider_id: request.policy.recorded_provider_id().to_string(),
             model: request.policy.model.clone(),
@@ -501,48 +473,32 @@ pub(crate) async fn delete_session_tx(
         .await
         .map_err(store_sqlx_error)?;
     if let Some(leaf_node_id) = leaf_node_id {
-        crate::runtime_persistence::decrement_node_ref_tx(tx, &leaf_node_id).await?;
+        crate::runtime_persistence::retire_unreachable_ancestry_tx(tx, &leaf_node_id).await?;
     }
-    let zero_ref_nodes = sqlx::query(
-        "SELECT node_id, parent_node_id FROM lash_graph_nodes
-         WHERE session_id = $1 AND tombstoned = FALSE AND incoming_refs = 0
-         ORDER BY seq DESC
-         FOR UPDATE",
+    let unreachable_candidates = sqlx::query_scalar::<_, String>(
+        "SELECT g.node_id FROM lash_graph_nodes AS g
+         WHERE g.session_id = $1 AND g.tombstoned = FALSE
+           AND NOT EXISTS (
+               SELECT 1 FROM lash_graph_nodes AS child
+               WHERE child.parent_node_id = g.node_id
+                 AND child.tombstoned = FALSE
+           )
+           AND NOT EXISTS (
+               SELECT 1 FROM lash_sessions AS head
+               WHERE head.leaf_node_id = g.node_id
+           )
+           AND NOT EXISTS (
+               SELECT 1 FROM lash_node_anchors AS anchor
+               WHERE anchor.node_id = g.node_id
+           )
+         ORDER BY g.seq DESC",
     )
     .bind(session_id)
     .fetch_all(&mut **tx)
     .await
     .map_err(store_sqlx_error)?;
-    for row in zero_ref_nodes {
-        let node_id: String = row.get(0);
-        let parent_node_id: Option<String> = row.get(1);
-        let cached = sqlx::query_scalar::<_, i64>(
-            "SELECT incoming_refs FROM lash_graph_nodes
-             WHERE node_id = $1 AND tombstoned = FALSE",
-        )
-        .bind(&node_id)
-        .fetch_optional(&mut **tx)
-        .await
-        .map_err(store_sqlx_error)?;
-        if cached != Some(0) {
-            continue;
-        }
-        let derived = crate::runtime_persistence::derived_node_refcount_tx(tx, &node_id).await?;
-        if derived != 0 {
-            return Err(StoreError::NodeRefcountDrift {
-                node_id,
-                cached: 0,
-                derived,
-            });
-        }
-        sqlx::query("UPDATE lash_graph_nodes SET tombstoned = TRUE WHERE node_id = $1")
-            .bind(&node_id)
-            .execute(&mut **tx)
-            .await
-            .map_err(store_sqlx_error)?;
-        if let Some(parent_node_id) = parent_node_id {
-            crate::runtime_persistence::decrement_node_ref_tx(tx, &parent_node_id).await?;
-        }
+    for node_id in unreachable_candidates {
+        crate::runtime_persistence::retire_unreachable_ancestry_tx(tx, &node_id).await?;
     }
     sqlx::query("DELETE FROM lash_graph_nodes WHERE tombstoned = TRUE")
         .execute(&mut **tx)

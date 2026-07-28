@@ -205,8 +205,6 @@ where
     turn_input_claims_supersede_across_session_lease_generations(make()).await;
     pending_turn_input_cancel_covers_active_and_deferred_states(make()).await;
     pending_active_turn_inputs_defer_unaccepted_once_on_interrupt(make()).await;
-    // [`StoreMaintenance`]: tombstone/vacuum/GC retention.
-    verify_node_refcounts_matches_append_edges_and_head_moves(make()).await;
 }
 
 /// A backend must mint refs for checkpoint bodies and resolve those refs when
@@ -345,66 +343,6 @@ async fn commit_rejects_leaf_without_frame_open_ancestor(store: Arc<dyn RuntimeP
         StoreError::MissingFrameOpenAncestor { leaf_node_id }
             if leaf_node_id == expected_leaf_node_id
     ));
-}
-
-async fn verify_node_refcounts_matches_append_edges_and_head_moves(
-    store: Arc<dyn RuntimePersistence>,
-) {
-    let mut state = RuntimeSessionState {
-        session_id: "refcount-scrub".to_string(),
-        session_lifetime: conformance_lifetime("refcount-scrub"),
-        ..RuntimeSessionState::default()
-    };
-    state.ensure_agent_frame_initialized();
-    let root_node_ids = state
-        .session_graph
-        .nodes
-        .iter()
-        .map(|node| node.node_id.clone())
-        .collect::<Vec<_>>();
-    let first = store
-        .commit_runtime_state(RuntimeCommit::persisted_state_for_test(&state, &[]))
-        .await
-        .expect("commit frame root");
-    state.apply_persisted_commit_result(first);
-    state.mark_node_ids_persisted(root_node_ids);
-    state.append_active_conversation_messages(&[crate::Message {
-        id: "same-host-id".to_string(),
-        role: crate::MessageRole::User,
-        parts: crate::shared_parts(vec![crate::Part {
-            id: "same-host-id.p0".to_string(),
-            kind: crate::PartKind::Text,
-            content: "child".to_string(),
-            attachment: None,
-            tool_call_id: None,
-            tool_name: None,
-            tool_replay: None,
-            prune_state: crate::PruneState::Intact,
-            reasoning_meta: None,
-            response_meta: None,
-        }]),
-        origin: None,
-    }]);
-    let child_node_ids = state
-        .session_graph
-        .nodes
-        .iter()
-        .filter(|node| !state.persisted_node_ids.contains(&node.node_id))
-        .map(|node| node.node_id.clone())
-        .collect::<Vec<_>>();
-    let second = store
-        .commit_runtime_state(RuntimeCommit::persisted_state_for_test(&state, &[]))
-        .await
-        .expect("move head to child");
-    state.apply_persisted_commit_result(second);
-    state.mark_node_ids_persisted(child_node_ids);
-
-    let verified = store
-        .verify_node_refcounts()
-        .await
-        .expect("scrub exact cached counts");
-
-    assert_eq!(verified.checked_node_count, 2);
 }
 
 async fn turn_input_application_identity_survives_pending_tombstone_vacuum(

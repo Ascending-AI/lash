@@ -1476,12 +1476,6 @@ impl StoreMaintenance for RuntimePerfStore {
     async fn gc_unreachable(&self) -> Result<GcReport, store::StoreError> {
         Err(unsupported_maintenance("gc_unreachable"))
     }
-
-    async fn verify_node_refcounts(
-        &self,
-    ) -> Result<lash_core::NodeRefcountVerification, store::StoreError> {
-        Err(unsupported_maintenance("verify_node_refcounts"))
-    }
 }
 
 fn unsupported_maintenance(operation: &'static str) -> StoreError {

@@ -43,7 +43,6 @@ pub(crate) async fn ensure_schema(pool: &PgPool) -> Result<Vec<u8>, StoreError> 
             node_id TEXT PRIMARY KEY,
             parent_node_id TEXT,
             node_json TEXT NOT NULL,
-            incoming_refs BIGINT NOT NULL DEFAULT 0 CHECK (incoming_refs >= 0),
             tombstoned BOOLEAN NOT NULL DEFAULT FALSE
         );
         CREATE INDEX IF NOT EXISTS idx_lash_graph_nodes_seq

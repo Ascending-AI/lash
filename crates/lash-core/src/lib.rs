@@ -488,11 +488,10 @@ pub use session_model::{RuntimeSessionPolicy, SessionPolicy, SessionSpec};
 pub use store::{
     AttachmentIntent, AttachmentManifest, AttachmentManifestEntry, BlobRef, EphemeralRunId,
     GcReport, IncarnationId, LeaseOwnerIdentity, LeaseOwnerLiveness, LeaseTimings,
-    LeaseTimingsError, NodeRefcountVerification, QueuedWorkStore, RuntimePersistence,
-    SessionCommitStore, SessionExecutionLease, SessionExecutionLeaseClaimOutcome,
-    SessionExecutionLeaseCompletion, SessionExecutionLeaseFence, SessionExecutionLeaseStore,
-    SessionLifetime, SessionMeta, SessionPickerInfo, StoreError, StoreMaintenance, TurnInputStore,
-    VacuumReport,
+    LeaseTimingsError, QueuedWorkStore, RuntimePersistence, SessionCommitStore,
+    SessionExecutionLease, SessionExecutionLeaseClaimOutcome, SessionExecutionLeaseCompletion,
+    SessionExecutionLeaseFence, SessionExecutionLeaseStore, SessionLifetime, SessionMeta,
+    SessionPickerInfo, StoreError, StoreMaintenance, TurnInputStore, VacuumReport,
 };
 #[allow(unused_imports)]
 pub(crate) use store::{

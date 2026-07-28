@@ -53,7 +53,6 @@ CREATE TABLE IF NOT EXISTS graph_nodes (
     node_id        TEXT NOT NULL UNIQUE,
     parent_node_id TEXT,
     node_json      TEXT NOT NULL,
-    incoming_refs  INTEGER NOT NULL DEFAULT 0 CHECK (incoming_refs >= 0),
     tombstoned     INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS idx_graph_nodes_session_seq
@@ -234,7 +233,13 @@ CREATE INDEX IF NOT EXISTS idx_attachment_manifest_owner
 ///
 /// Bumped to 17 so a reusable session name has a durable per-lifetime
 /// incarnation for node and effect-replay identity.
-pub(crate) const SCHEMA_VERSION: i32 = 18;
+///
+/// Bumped to 18 because runtime commit receipts no longer persist the removed
+/// realization digest; stores derive their lookup hash from commit content.
+///
+/// Bumped to 19 to remove cached graph-node reference counts. Node retirement
+/// now derives liveness from parent edges, session heads, and anchors.
+pub(crate) const SCHEMA_VERSION: i32 = 19;
 
 pub(crate) const PROCESS_SCHEMA: &str = "
 CREATE TABLE IF NOT EXISTS processes (

@@ -302,12 +302,6 @@ impl StoreMaintenance for FacadeStore {
     async fn gc_unreachable(&self) -> Result<GcReport, StoreError> {
         Ok(GcReport::default())
     }
-
-    async fn verify_node_refcounts(
-        &self,
-    ) -> Result<lash::persistence::NodeRefcountVerification, StoreError> {
-        Ok(lash::persistence::NodeRefcountVerification::default())
-    }
 }
 
 fn persistence_types_are_nameable(

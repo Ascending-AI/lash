@@ -40,13 +40,6 @@ impl InMemorySessionStore {
             .map(|meta| meta.head_revision)
     }
 
-    pub fn corrupt_node_refcount_for_testing(&self, node_id: &str, incoming_refs: i64) {
-        self.incoming_node_refs
-            .lock()
-            .expect("lock incoming node refs")
-            .insert(node_id.to_string(), incoming_refs);
-    }
-
     /// Return raw pending-input lifecycle state for differential tests.
     pub fn raw_pending_turn_inputs_for_testing(
         &self,

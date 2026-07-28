@@ -932,11 +932,6 @@ fn normalized_store_error(backend: &str, error: &StoreError) -> String {
         StoreError::ForkSessionAlreadyExists { .. } => "ForkSessionAlreadyExists".to_string(),
         StoreError::InvalidGraphParent { .. } => "InvalidGraphParent".to_string(),
         StoreError::MissingFrameOpenAncestor { .. } => "MissingFrameOpenAncestor".to_string(),
-        StoreError::NodeRefcountDrift {
-            node_id,
-            cached,
-            derived,
-        } => format!("NodeRefcountDrift({node_id},{cached},{derived})"),
         StoreError::Backend(message) => normalized_backend_error(backend, message),
     }
 }

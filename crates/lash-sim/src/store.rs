@@ -67,7 +67,6 @@ fn store_error_variant(error: &StoreError) -> &'static str {
         StoreError::ForkSessionAlreadyExists { .. } => "ForkSessionAlreadyExists",
         StoreError::InvalidGraphParent { .. } => "InvalidGraphParent",
         StoreError::MissingFrameOpenAncestor { .. } => "MissingFrameOpenAncestor",
-        StoreError::NodeRefcountDrift { .. } => "NodeRefcountDrift",
         StoreError::QueuedWorkClaimSuperseded { .. } => "QueuedWorkClaimSuperseded",
         StoreError::TurnInputClaimSuperseded { .. } => "TurnInputClaimSuperseded",
         StoreError::UnsettledQueuedWorkClaim { .. } => "UnsettledQueuedWorkClaim",

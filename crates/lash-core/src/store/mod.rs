@@ -190,13 +190,6 @@ pub struct VacuumReport {
     pub removed_pending_turn_input_tombstone_count: usize,
 }
 
-/// Result of comparing cached node counts with references re-derived from the
-/// indexed edge and root rows.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub struct NodeRefcountVerification {
-    pub checked_node_count: usize,
-}
-
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct SessionCheckpoint {
     pub schema_version: u32,
@@ -1472,13 +1465,6 @@ pub trait StoreMaintenance: Send + Sync {
 
     /// Delete blobs no longer reachable from any retained root.
     async fn gc_unreachable(&self) -> Result<GcReport, StoreError>;
-
-    /// Re-derive every live node's incoming references from edge rows.
-    ///
-    /// Process roots deliberately remain outside this stored count because
-    /// they live in another store family; `live_reference_summary` continues
-    /// to aggregate those roots on demand (ADR 0024).
-    async fn verify_node_refcounts(&self) -> Result<NodeRefcountVerification, StoreError>;
 }
 
 /// Exact settled-session persistence protocol required by the runtime.

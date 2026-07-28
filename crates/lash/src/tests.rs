@@ -616,13 +616,6 @@ impl lash_core::StoreMaintenance for SnapshotStore {
     ) -> std::result::Result<lash_core::GcReport, lash_core::store::StoreError> {
         Ok(lash_core::GcReport::default())
     }
-
-    async fn verify_node_refcounts(
-        &self,
-    ) -> std::result::Result<lash_core::NodeRefcountVerification, lash_core::store::StoreError>
-    {
-        Ok(lash_core::NodeRefcountVerification::default())
-    }
 }
 
 #[derive(Clone)]
@@ -955,13 +948,6 @@ impl lash_core::StoreMaintenance for BoundSessionStore {
         &self,
     ) -> std::result::Result<lash_core::GcReport, lash_core::store::StoreError> {
         Ok(lash_core::GcReport::default())
-    }
-
-    async fn verify_node_refcounts(
-        &self,
-    ) -> std::result::Result<lash_core::NodeRefcountVerification, lash_core::store::StoreError>
-    {
-        Ok(lash_core::NodeRefcountVerification::default())
     }
 }
 

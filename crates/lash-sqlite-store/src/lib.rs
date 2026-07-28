@@ -69,13 +69,13 @@ use lash_core::store::{
 use lash_core::{
     AbandonRequest, AttachmentId, AttachmentIntent, AttachmentManifest, AttachmentManifestEntry,
     AttachmentOwnerKind, BlobRef, DeliveryPolicy, GcReport, LeaseOwnerIdentity, LeaseOwnerLiveness,
-    MergeKey, NodeRefcountVerification, PROCESS_LEASE_SCHEMA_VERSION, PersistedSegmentHandover,
-    ProcessAwaitOutput, ProcessChangeCursor, ProcessEvent, ProcessEventAppendRequest,
-    ProcessEventAppendResult, ProcessExecutionWriteAuthority, ProcessExternalRef,
-    ProcessHandleDescriptor, ProcessHandleGrant, ProcessLease, ProcessLeaseClaimOutcome,
-    ProcessLeaseCompletion, ProcessListFilter, ProcessLiveReferenceSummary, ProcessPruneReport,
-    ProcessRecord, ProcessRegistration, ProcessRegistry, ProcessStartOutcome, ProcessStartPlan,
-    ProcessStarted, QueuedWorkStore, RuntimePersistence, SessionCommitStore, SessionExecutionLease,
+    MergeKey, PROCESS_LEASE_SCHEMA_VERSION, PersistedSegmentHandover, ProcessAwaitOutput,
+    ProcessChangeCursor, ProcessEvent, ProcessEventAppendRequest, ProcessEventAppendResult,
+    ProcessExecutionWriteAuthority, ProcessExternalRef, ProcessHandleDescriptor,
+    ProcessHandleGrant, ProcessLease, ProcessLeaseClaimOutcome, ProcessLeaseCompletion,
+    ProcessListFilter, ProcessLiveReferenceSummary, ProcessPruneReport, ProcessRecord,
+    ProcessRegistration, ProcessRegistry, ProcessStartOutcome, ProcessStartPlan, ProcessStarted,
+    QueuedWorkStore, RuntimePersistence, SessionCommitStore, SessionExecutionLease,
     SessionExecutionLeaseClaimOutcome, SessionExecutionLeaseCompletion, SessionExecutionLeaseFence,
     SessionExecutionLeaseStore, SessionMeta, SessionPickerInfo, SessionScope,
     SessionStoreCreateRequest, SessionStoreFactory, SlotPolicy, StoreError, StoreMaintenance,
@@ -637,52 +637,36 @@ async fn delete_session_from_catalog(root: &Path, session_id: &str) -> Result<()
             )
             .map_err(sqlite_error)?;
             if let Some(leaf_node_id) = leaf_node_id {
-                persistence::decrement_node_ref_conn(tx, &leaf_node_id)?;
+                persistence::retire_unreachable_ancestry_conn(tx, &leaf_node_id)?;
             }
-            let zero_ref_nodes = {
+            let unreachable_candidates = {
                 let mut stmt = tx
                     .prepare(
-                        "SELECT node_id, parent_node_id FROM graph_nodes
-                     WHERE session_id = ?1 AND tombstoned = 0 AND incoming_refs = 0
-                     ORDER BY seq DESC",
+                        "SELECT g.node_id FROM graph_nodes AS g
+                         WHERE g.session_id = ?1 AND g.tombstoned = 0
+                           AND NOT EXISTS (
+                               SELECT 1 FROM graph_nodes AS child
+                               WHERE child.parent_node_id = g.node_id
+                                 AND child.tombstoned = 0
+                           )
+                           AND NOT EXISTS (
+                               SELECT 1 FROM session_head AS head
+                               WHERE head.leaf_node_id = g.node_id
+                           )
+                           AND NOT EXISTS (
+                               SELECT 1 FROM node_anchors AS anchor
+                               WHERE anchor.node_id = g.node_id
+                           )
+                         ORDER BY g.seq DESC",
                     )
                     .map_err(sqlite_error)?;
                 let rows = stmt
-                    .query_map(params![session_id], |row| {
-                        Ok((row.get::<_, String>(0)?, row.get::<_, Option<String>>(1)?))
-                    })
+                    .query_map(params![session_id], |row| row.get::<_, String>(0))
                     .map_err(sqlite_error)?;
                 rows.collect::<Result<Vec<_>, _>>().map_err(sqlite_error)?
             };
-            for (node_id, parent_node_id) in zero_ref_nodes {
-                let cached = tx
-                    .query_row(
-                        "SELECT incoming_refs FROM graph_nodes
-                     WHERE node_id = ?1 AND tombstoned = 0",
-                        params![node_id],
-                        |row| row.get::<_, i64>(0),
-                    )
-                    .optional()
-                    .map_err(sqlite_error)?;
-                if cached != Some(0) {
-                    continue;
-                }
-                let derived = persistence::derived_node_refcount_conn(tx, &node_id)?;
-                if derived != 0 {
-                    return Err(lash_core::StoreError::NodeRefcountDrift {
-                        node_id,
-                        cached: 0,
-                        derived,
-                    });
-                }
-                tx.execute(
-                    "UPDATE graph_nodes SET tombstoned = 1 WHERE node_id = ?1",
-                    params![node_id],
-                )
-                .map_err(sqlite_error)?;
-                if let Some(parent_node_id) = parent_node_id {
-                    persistence::decrement_node_ref_conn(tx, &parent_node_id)?;
-                }
+            for node_id in unreachable_candidates {
+                persistence::retire_unreachable_ancestry_conn(tx, &node_id)?;
             }
             tx.execute("DELETE FROM graph_nodes WHERE tombstoned = 1", [])
                 .map_err(sqlite_error)?;
@@ -1021,141 +1005,6 @@ mod tests {
             .expect("release writer lock");
 
         assert!(matches!(result, Err(StoreError::Contended)));
-    }
-
-    #[tokio::test]
-    async fn zero_confirmation_aborts_a_corrupt_low_count_transaction() {
-        let store = Store::memory().await.expect("open store");
-        store.bind_session("refcount-drift").expect("bind store");
-        let mut state = durable_state(&store, "refcount-drift").await;
-        state.ensure_agent_frame_initialized();
-        store
-            .commit_runtime_state(RuntimeCommit::persisted_state_for_test(&state, &[]))
-            .await
-            .expect("commit root frame");
-        let frame_node_id = state.current_frame_node_id.clone().expect("frame node");
-        store
-            .conn
-            .write({
-                let frame_node_id = frame_node_id.clone();
-                move |tx| {
-                    tx.execute(
-                        "UPDATE graph_nodes SET incoming_refs = 0 WHERE node_id = ?1",
-                        params![frame_node_id],
-                    )?;
-                    Ok(())
-                }
-            })
-            .await
-            .expect("corrupt cached count");
-        let child = lash_core::SessionNodeRecord {
-            node_id: "refcount-drift-child".to_string(),
-            parent_node_id: Some(frame_node_id.clone()),
-            timestamp: "2026-07-27T00:00:00Z".to_string(),
-            payload: lash_core::SessionNodePayload::Event {
-                event: lash_core::SessionHistoryRecord::Protocol(
-                    lash_core::ProtocolEvent::typed("refcount-drift", serde_json::Value::Null)
-                        .expect("protocol event"),
-                ),
-            },
-        };
-        let mut commit = RuntimeCommit::persisted_state_for_test(&state, &[]);
-        commit.expected_head_revision = 1;
-        commit.graph = GraphAppend {
-            nodes: vec![child],
-            leaf_node_id: Some("refcount-drift-child".to_string()),
-        };
-        let (commit, _) = commit
-            .with_operation(lash_core::OperationId::new(
-                lash_core::ExecutionScope::runtime_operation("refcount-drift-child"),
-                "commit",
-            ))
-            .expect("derive refcount-drift child identity");
-        let child_node_id = commit.graph.nodes[0].node_id.clone();
-
-        let error = store
-            .commit_runtime_state(commit)
-            .await
-            .expect_err("zero-confirmation must abort");
-
-        assert!(
-            matches!(
-                &error,
-                StoreError::NodeRefcountDrift {
-                    node_id,
-                    cached: 0,
-                    derived: 1,
-                } if node_id == &frame_node_id
-            ),
-            "unexpected zero-confirmation error: {error:?}"
-        );
-        let persisted = store
-            .load_session()
-            .await
-            .expect("load after abort")
-            .expect("session remains live");
-        assert_eq!(persisted.head_revision, 1);
-        assert_eq!(
-            persisted.graph.leaf_node_id.as_deref(),
-            Some(frame_node_id.as_str())
-        );
-        assert!(
-            store
-                .load_node(&child_node_id)
-                .await
-                .expect("load aborted child")
-                .is_none(),
-            "the transaction must roll back the child insert"
-        );
-    }
-
-    #[tokio::test]
-    async fn refcount_scrub_counts_anchor_roots_when_detecting_drift() {
-        let store = Store::memory().await.expect("open store");
-        store
-            .bind_session("scrub-refcount-drift")
-            .expect("bind store");
-        let mut state = durable_state(&store, "scrub-refcount-drift").await;
-        state.ensure_agent_frame_initialized();
-        store
-            .commit_runtime_state(RuntimeCommit::persisted_state_for_test(&state, &[]))
-            .await
-            .expect("commit root frame");
-        let frame_node_id = state.current_frame_node_id.expect("frame node");
-        store
-            .conn
-            .write({
-                let frame_node_id = frame_node_id.clone();
-                move |tx| {
-                    tx.execute(
-                        "INSERT INTO node_anchors
-                         (node_id, checkpoint_ref, source_session_id)
-                         VALUES (?1, 'anchor-checkpoint', 'scrub-refcount-drift')",
-                        params![frame_node_id],
-                    )?;
-                    tx.execute(
-                        "UPDATE graph_nodes SET incoming_refs = 3 WHERE node_id = ?1",
-                        params![frame_node_id],
-                    )?;
-                    Ok(())
-                }
-            })
-            .await
-            .expect("corrupt cached count");
-
-        let error = store
-            .verify_node_refcounts()
-            .await
-            .expect_err("scrub must detect cached count drift");
-
-        assert!(matches!(
-            error,
-            StoreError::NodeRefcountDrift {
-                node_id,
-                cached: 3,
-                derived: 2,
-            } if node_id == frame_node_id
-        ));
     }
 
     #[tokio::test]
