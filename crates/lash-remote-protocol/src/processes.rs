@@ -1056,6 +1056,14 @@ pub struct RemoteProcessExecutionPolicy {
     pub max_turns: Option<usize>,
     #[serde(default, skip_serializing_if = "RemotePromptLayer::is_empty")]
     pub prompt: RemotePromptLayer,
+    /// Session-wide generation intent, mirroring `SessionPolicy.generation`.
+    /// A remote peer that persists an execution policy without it would
+    /// resume the session with uncontrolled sampling.
+    #[serde(
+        default,
+        skip_serializing_if = "crate::llm::RemoteGenerationOptions::is_empty"
+    )]
+    pub generation: crate::llm::RemoteGenerationOptions,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -1110,6 +1118,7 @@ impl RemoteProcessExecutionEnvSpec {
                         .to_string(),
             });
         }
+        self.policy.generation.validate(type_name)?;
         Ok(())
     }
 }

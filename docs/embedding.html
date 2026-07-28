@@ -177,7 +177,7 @@ println!("{assistant_text}");</code></pre>
             <dt><code>LashCore::standard_builder()</code> / <code>LashCore::rlm_builder(factory)</code></dt>
             <dd>Sugar entry points for the built-in protocols. <code>standard_builder()</code> opens native provider-tool sessions; <code>rlm_builder(factory)</code> opens Lashlang/RLM sessions from a host-configured RLM protocol factory.</dd>
             <dt><code>SessionSpec</code></dt>
-            <dd>Provider, model/variant, max context tokens, max turns, prompt layer. Root cores: <code>SessionSpec::new()</code>. Children and subagents: <code>SessionSpec::inherit()</code>.</dd>
+            <dd>Provider, model/variant, max context tokens, max turns, prompt layer, generation options. Root cores: <code>SessionSpec::new()</code>. Children and subagents: <code>SessionSpec::inherit()</code>. <code>.generation(...)</code> sets the sampling intent — output token cap, temperature, seed — that every LLM call in the session carries, including subagent turns and turns after a resume; leaving it unset inherits the parent's.</dd>
             <dt><code>PluginStack</code></dt>
             <dd>Ordered plugin factory list. <code>LashCore::standard_builder()</code> and <code>LashCore::rlm_builder(factory)</code> pre-seed their protocol plugin and the default runtime stack; generic <code>LashCore::builder()</code> requires an explicit protocol plugin. All paths still require explicit effect and attachment facets before <code>build()</code>; RLM also requires a Lashlang artifact store.</dd>
             <dt><code>LashSession</code></dt>

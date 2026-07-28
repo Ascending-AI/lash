@@ -121,6 +121,11 @@ pub struct SessionPolicy {
     pub autonomous: bool,
     pub max_turns: Option<usize>,
     pub prompt: crate::PromptLayer,
+    /// Caller-owned generation intent applied to every LLM call this session
+    /// makes. It lives on the policy rather than on a single turn because it
+    /// is session-wide truth: child sessions resolve their spec against this
+    /// policy, and a resumed session restores it with the rest of the policy.
+    pub generation: crate::GenerationOptions,
 }
 
 impl SessionPolicy {
@@ -152,6 +157,9 @@ impl serde::Serialize for SessionPolicy {
         if !self.prompt.is_empty() {
             fields += 1;
         }
+        if self.generation != crate::GenerationOptions::default() {
+            fields += 1;
+        }
         let mut state = serializer.serialize_struct("SessionPolicy", fields)?;
         state.serialize_field("model", &self.model)?;
         state.serialize_field("provider_id", self.recorded_provider_id())?;
@@ -160,6 +168,9 @@ impl serde::Serialize for SessionPolicy {
         state.serialize_field("max_turns", &self.max_turns)?;
         if !self.prompt.is_empty() {
             state.serialize_field("prompt", &self.prompt)?;
+        }
+        if self.generation != crate::GenerationOptions::default() {
+            state.serialize_field("generation", &self.generation)?;
         }
         state.end()
     }
@@ -185,6 +196,8 @@ impl<'de> serde::Deserialize<'de> for SessionPolicy {
             max_turns: Option<usize>,
             #[serde(default)]
             prompt: crate::PromptLayer,
+            #[serde(default)]
+            generation: crate::GenerationOptions,
         }
 
         let value = serde_json::Value::deserialize(deserializer)?;
@@ -204,6 +217,7 @@ impl<'de> serde::Deserialize<'de> for SessionPolicy {
             autonomous: wire.autonomous,
             max_turns: wire.max_turns,
             prompt: wire.prompt,
+            generation: wire.generation,
         })
     }
 }
@@ -263,6 +277,10 @@ pub struct SessionSpec {
     pub model: Option<ModelSpec>,
     pub max_turns: Option<Option<usize>>,
     pub prompt: Option<crate::PromptLayer>,
+    /// Generation intent for every LLM call the session makes. `None` inherits
+    /// the base policy's options; `Some` replaces them wholesale, so an
+    /// explicitly empty [`crate::GenerationOptions`] clears an inherited one.
+    pub generation: Option<crate::GenerationOptions>,
 }
 
 impl SessionSpec {
@@ -275,6 +293,7 @@ impl SessionSpec {
             model: None,
             max_turns: None,
             prompt: None,
+            generation: None,
         }
     }
 
@@ -316,6 +335,12 @@ impl SessionSpec {
         self
     }
 
+    /// Set the generation options every LLM call in the session carries.
+    pub fn generation(mut self, generation: crate::GenerationOptions) -> Self {
+        self.generation = Some(generation);
+        self
+    }
+
     pub fn resolve_against(&self, base: &SessionPolicy) -> SessionPolicy {
         let mut policy = base.clone();
         if let Some(provider_id) = self.provider_id.as_ref() {
@@ -329,6 +354,9 @@ impl SessionSpec {
         }
         if let Some(prompt) = self.prompt.as_ref() {
             policy.prompt = prompt.clone();
+        }
+        if let Some(generation) = self.generation.as_ref() {
+            policy.generation = generation.clone();
         }
         policy
     }
@@ -408,5 +436,67 @@ mod tests {
 
         assert_eq!(value["provider_id"], "mock-provider");
         assert!(value.get("provider").is_none());
+    }
+
+    #[test]
+    fn session_policy_persists_generation_options_only_when_set() {
+        let mut policy = SessionPolicy::default();
+        let value = serde_json::to_value(&policy).expect("serialize policy");
+        assert!(
+            value.get("generation").is_none(),
+            "a policy expressing no generation intent must not write the key"
+        );
+
+        policy.generation = crate::GenerationOptions {
+            output_token_cap: std::num::NonZeroUsize::new(4096),
+            temperature: Some(crate::NonNegativeFiniteF64::new(0.0).expect("finite temperature")),
+            seed: Some(1234),
+        };
+        let value = serde_json::to_value(&policy).expect("serialize policy");
+        assert_eq!(
+            value["generation"],
+            serde_json::json!({
+                "output_token_cap": 4096,
+                "temperature": 0.0,
+                "seed": 1234,
+            })
+        );
+
+        let restored: SessionPolicy = serde_json::from_value(value).expect("deserialize policy");
+        assert_eq!(restored.generation, policy.generation);
+    }
+
+    #[test]
+    fn session_spec_generation_inherits_when_absent_and_replaces_when_present() {
+        let base = SessionPolicy {
+            generation: crate::GenerationOptions {
+                temperature: Some(
+                    crate::NonNegativeFiniteF64::new(0.7).expect("finite temperature"),
+                ),
+                seed: Some(9),
+                ..Default::default()
+            },
+            ..SessionPolicy::default()
+        };
+
+        let inherited = SessionSpec::inherit().resolve_against(&base);
+        assert_eq!(inherited.generation, base.generation);
+
+        let replaced = SessionSpec::inherit()
+            .generation(crate::GenerationOptions {
+                seed: Some(11),
+                ..Default::default()
+            })
+            .resolve_against(&base);
+        assert_eq!(replaced.generation.seed, Some(11));
+        assert_eq!(
+            replaced.generation.temperature, None,
+            "an explicit spec replaces the inherited options rather than merging into them"
+        );
+
+        let cleared = SessionSpec::inherit()
+            .generation(crate::GenerationOptions::default())
+            .resolve_against(&base);
+        assert_eq!(cleared.generation, crate::GenerationOptions::default());
     }
 }

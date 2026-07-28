@@ -1339,6 +1339,8 @@ impl DurableProcessWorker {
         if policy.recorded_provider_id().is_empty() {
             policy.provider_id = self.config.session_policy.provider_id.clone();
         }
+        // Boxed: building a process runtime is a rare, cold path whose future
+        // holds a whole session policy, so it stays off the caller's stack.
         Box::pin(self.build_process_runtime(
             crate::process_runtime_session_ids(&registration.id)[1].clone(),
             policy,

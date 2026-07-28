@@ -578,6 +578,13 @@ fn process_start_requests_round_trip_core_values() {
                 Some(512),
             )
             .expect("model"),
+            generation: lash_core::GenerationOptions {
+                output_token_cap: std::num::NonZeroUsize::new(256),
+                temperature: Some(
+                    lash_core::NonNegativeFiniteF64::new(0.25).expect("finite temperature"),
+                ),
+                seed: Some(4242),
+            },
             ..Default::default()
         },
     ))
