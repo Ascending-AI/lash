@@ -99,7 +99,7 @@ const SCHEMA_COMPONENT: &str = "lash-postgres-store";
 // Bumped to 24 so PostgreSQL checkpoints use the shared manifest plus
 // content-addressed component blobs. Pre-24 checkpoint blobs contain the
 // removed backend-only envelope and are rejected at open.
-const SCHEMA_VERSION: i32 = 24;
+const SCHEMA_VERSION: i32 = 25;
 const PROCESS_LEASE_SCHEMA_VERSION: u32 = lash_core::PROCESS_LEASE_SCHEMA_VERSION;
 
 #[derive(Clone)]

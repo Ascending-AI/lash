@@ -352,11 +352,11 @@ impl SessionCommitStore for PostgresSessionStore {
     ) -> Result<RuntimeCommitResult, StoreError> {
         commit.validate_budget()?;
         commit.validate_operation_session()?;
+        let turn_commit_hash = commit.turn_commit_hash()?;
         self.bind_session_id(&commit.session_id)?;
         let commit_incarnation_id = commit
             .durable_incarnation_id("Postgres runtime commit")?
             .clone();
-        let realization_digest = lash_core::store::graph_realization_digest(&commit.graph);
         let realized_node_timestamps = commit
             .graph
             .appended_nodes()
@@ -439,7 +439,7 @@ impl SessionCommitStore for PostgresSessionStore {
                  FROM lash_runtime_turn_commits
                  WHERE session_id = $1 AND turn_id = $2",
             )
-            .bind(&completed.session_id)
+            .bind(&commit.session_id)
             .bind(&operation_key)
             .fetch_optional(&mut *tx)
             .await
@@ -447,7 +447,7 @@ impl SessionCommitStore for PostgresSessionStore {
             if let Some(row) = prior {
                 let hash: String = row.get(0);
                 let result_json: String = row.get(1);
-                if hash == completed.turn_commit_hash {
+                if hash == turn_commit_hash {
                     let result = store_decode_json(&result_json, "runtime turn commit result")?;
                     if let Some(completion) = commit.release_session_execution_lease.as_ref() {
                         release_session_execution_lease_tx(&mut tx, completion).await?;
@@ -456,7 +456,7 @@ impl SessionCommitStore for PostgresSessionStore {
                     return Ok(result);
                 }
                 return Err(StoreError::RuntimeTurnCommitConflict {
-                    session_id: completed.session_id.clone(),
+                    session_id: commit.session_id.clone(),
                     turn_id: operation_key,
                 });
             }
@@ -830,7 +830,6 @@ impl SessionCommitStore for PostgresSessionStore {
             head_revision: next_revision,
             checkpoint_ref,
             manifest,
-            realization_digest,
             realized_node_timestamps,
             enqueued_queue_batches,
             turn_input_applications: commit.turn_input_applications(),
@@ -844,9 +843,9 @@ impl SessionCommitStore for PostgresSessionStore {
                  )
                  VALUES ($1, $2, $3, $4, $5)",
             )
-            .bind(&completed.session_id)
+            .bind(&commit.session_id)
             .bind(operation_key)
-            .bind(&completed.turn_commit_hash)
+            .bind(&turn_commit_hash)
             .bind(encode_json(&result))
             .bind(now as i64)
             .execute(&mut *tx)

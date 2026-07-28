@@ -592,7 +592,7 @@ impl SessionCommitStore for RuntimePerfStore {
         &self,
         commit: RuntimeCommit,
     ) -> Result<RuntimeCommitResult, store::StoreError> {
-        let realization_digest = store::graph_realization_digest(&commit.graph);
+        let turn_commit_hash = commit.turn_commit_hash()?;
         let realized_node_timestamps = commit
             .graph
             .appended_nodes()
@@ -634,16 +634,7 @@ impl SessionCommitStore for RuntimePerfStore {
         let actual = meta_guard.as_ref().map_or(0, |meta| meta.head_revision);
         let completed = &turn_commit;
         let operation_key = completed.operation.storage_key()?;
-        if completed.session_id != session_id {
-            return Err(StoreError::RuntimeTurnCommitConflict {
-                session_id: completed.session_id.clone(),
-                turn_id: operation_key,
-            });
-        }
-        let key = (
-            completed.session_id.clone(),
-            completed.operation.storage_key()?,
-        );
+        let key = (session_id.clone(), operation_key.clone());
         if let Some((stored_hash, result)) = self
             .runtime_turn_commits
             .lock()
@@ -651,15 +642,15 @@ impl SessionCommitStore for RuntimePerfStore {
             .get(&key)
             .cloned()
         {
-            if stored_hash == completed.turn_commit_hash {
+            if stored_hash == turn_commit_hash {
                 if let Some(completion) = release_session_execution_lease.as_ref() {
                     self.release_session_execution_lease_in_memory(completion);
                 }
                 return Ok(result);
             }
             return Err(StoreError::RuntimeTurnCommitConflict {
-                session_id: completed.session_id.clone(),
-                turn_id: completed.operation.storage_key()?,
+                session_id,
+                turn_id: operation_key,
             });
         }
         if expected_head_revision != actual {
@@ -802,7 +793,6 @@ impl SessionCommitStore for RuntimePerfStore {
             head_revision,
             checkpoint_ref,
             manifest,
-            realization_digest,
             realized_node_timestamps,
             enqueued_queue_batches: enqueued_queue_batches
                 .into_iter()
@@ -814,11 +804,8 @@ impl SessionCommitStore for RuntimePerfStore {
             .lock()
             .expect("lock perf runtime turn commits")
             .insert(
-                (
-                    completed.session_id.clone(),
-                    completed.operation.storage_key()?,
-                ),
-                (completed.turn_commit_hash.clone(), result.clone()),
+                (session_id, completed.operation.storage_key()?),
+                (turn_commit_hash, result.clone()),
             );
         if let Some(completion) = release_session_execution_lease.as_ref() {
             self.release_session_execution_lease_in_memory(completion);

@@ -14,7 +14,7 @@ mod realization;
 pub use attachment_manifest::{
     AttachmentIntent, AttachmentManifest, AttachmentManifestEntry, AttachmentOwnerKind,
 };
-pub use commit_identity::{OperationId, derive_history_node_id, graph_realization_digest};
+pub use commit_identity::{OperationId, derive_history_node_id};
 pub use error::StoreError;
 pub use incarnation::{EphemeralRunId, IncarnationId, SessionLifetime};
 pub use lease_timings::{LeaseTimings, LeaseTimingsError};
@@ -353,12 +353,6 @@ pub struct RuntimeCommitResult {
     pub head_revision: u64,
     pub checkpoint_ref: BlobRef,
     pub manifest: SessionCheckpoint,
-    /// Store-recorded digest of the graph proposal accepted for this operation.
-    ///
-    /// On a receipt hit this compares the retry proposal with the first
-    /// attempt's recorded proposal independently of node derivation. Physical
-    /// row realization still relies on the backend transaction being atomic.
-    pub realization_digest: String,
     /// Store-realized timestamps for nodes appended by this operation.
     ///
     /// Node timestamps are clock-derived and excluded from commit intent, so a
@@ -656,22 +650,12 @@ where
 
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct RuntimeTurnCommitStamp {
-    pub session_id: String,
     pub operation: OperationId,
-    pub turn_commit_hash: String,
 }
 
 impl RuntimeTurnCommitStamp {
-    pub fn new(
-        session_id: impl Into<String>,
-        operation: OperationId,
-        turn_commit_hash: impl Into<String>,
-    ) -> Self {
-        Self {
-            session_id: session_id.into(),
-            operation,
-            turn_commit_hash: turn_commit_hash.into(),
-        }
+    pub fn new(operation: OperationId) -> Self {
+        Self { operation }
     }
 }
 
@@ -724,15 +708,14 @@ impl RuntimeCommit {
                 "commit operation identity requires a non-empty key".to_string(),
             ));
         }
-        if completed.session_id != self.session_id
-            || completed
-                .operation
-                .scope
-                .session_id()
-                .is_some_and(|session_id| session_id != self.session_id)
+        if completed
+            .operation
+            .scope
+            .session_id()
+            .is_some_and(|session_id| session_id != self.session_id)
         {
             return Err(StoreError::RuntimeTurnCommitConflict {
-                session_id: completed.session_id.clone(),
+                session_id: self.session_id.clone(),
                 turn_id: completed.operation.storage_key()?,
             });
         }
@@ -933,7 +916,7 @@ impl RuntimeCommit {
         let current_frame_node_id = projected_graph
             .nearest_frame_node_id(projected_graph.leaf_node_id.as_deref())
             .map(ToOwned::to_owned);
-        let mut commit = Self {
+        Ok(Self {
             session_id: state.session_id.clone(),
             session_lifetime: state.session_lifetime.clone(),
             expected_head_revision: state.head_revision,
@@ -943,19 +926,13 @@ impl RuntimeCommit {
             graph,
             checkpoint: build_checkpoint_from_persisted_state(state),
             usage_deltas: usage_deltas.to_vec(),
-            turn_commit: RuntimeTurnCommitStamp::new(
-                state.session_id.clone(),
-                operation,
-                String::new(),
-            ),
+            turn_commit: RuntimeTurnCommitStamp::new(operation),
             completed_queue_claims: Vec::new(),
             completed_turn_input_claims: Vec::new(),
             enqueued_queue_batches: Vec::new(),
             interrupted_turn_input_turn_id: None,
             committed_attachment_ids: Vec::new(),
-        };
-        commit.turn_commit.turn_commit_hash = commit.turn_commit_hash()?;
-        Ok(commit)
+        })
     }
 
     /// Derive append-node identities, stamp the operation, and return the
@@ -973,10 +950,7 @@ impl RuntimeCommit {
             self.graph
                 .derive_node_ids(&session_id, &incarnation_id, &operation)?;
         remap_optional_node_id(&mut self.current_frame_node_id, &node_id_mapping);
-        self.turn_commit =
-            RuntimeTurnCommitStamp::new(self.session_id.clone(), operation, String::new());
-        let hash = self.turn_commit_hash()?;
-        self.turn_commit.turn_commit_hash = hash;
+        self.turn_commit = RuntimeTurnCommitStamp::new(operation);
         Ok((self, node_id_mapping))
     }
 

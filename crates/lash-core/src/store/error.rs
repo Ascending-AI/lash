@@ -86,17 +86,6 @@ pub enum StoreError {
         derived: i64,
     },
     #[error(
-        "runtime commit realization differs from stored receipt: proposed {proposed}, stored {stored}"
-    )]
-    CommitRealizationMismatch { proposed: String, stored: String },
-    #[error(
-        "runtime commit node realization differs from stored receipt: expected {expected:?}, stored {stored:?}"
-    )]
-    CommitNodeRealizationMismatch {
-        expected: Vec<String>,
-        stored: Vec<String>,
-    },
-    #[error(
         "queued work claim `{claim_id}` for session `{session_id}` is superseded by a newer session-lease generation"
     )]
     QueuedWorkClaimSuperseded {

@@ -312,25 +312,3 @@ pub fn derive_history_node_id(
         )
     ))
 }
-
-pub fn graph_realization_digest(graph: &GraphAppend) -> String {
-    let mut components = Vec::<Vec<u8>>::new();
-    for node in &graph.nodes {
-        components.push(node.node_id.as_bytes().to_vec());
-        components.push(optional_digest_component(node.parent_node_id.as_deref()));
-    }
-    components.push(optional_digest_component(
-        graph.leaf_node_id().map(String::as_str),
-    ));
-    let refs = components.iter().map(Vec::as_slice).collect::<Vec<_>>();
-    domain_hash("lash-realization/v1", &refs)
-}
-
-fn optional_digest_component(value: Option<&str>) -> Vec<u8> {
-    let mut encoded = Vec::with_capacity(value.map_or(1, |value| value.len() + 1));
-    encoded.push(u8::from(value.is_some()));
-    if let Some(value) = value {
-        encoded.extend_from_slice(value.as_bytes());
-    }
-    encoded
-}

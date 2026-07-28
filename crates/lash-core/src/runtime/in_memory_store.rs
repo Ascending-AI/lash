@@ -853,8 +853,9 @@ impl crate::store::SessionCommitStore for InMemorySessionStore {
     ) -> Result<crate::store::RuntimeCommitResult, crate::store::StoreError> {
         commit.validate_budget()?;
         commit.validate_operation_session()?;
+        let session_id = commit.session_id.clone();
+        let turn_commit_hash = commit.turn_commit_hash()?;
         let turn_input_applications = commit.turn_input_applications();
-        let realization_digest = crate::store::graph_realization_digest(&commit.graph);
         let realized_node_timestamps = commit
             .graph
             .appended_nodes()
@@ -894,7 +895,7 @@ impl crate::store::SessionCommitStore for InMemorySessionStore {
         commit.validate_node_derivation(&durable_incarnation_id)?;
         let completed = &commit.turn_commit;
         let operation_key = completed.operation.storage_key()?;
-        let key = (completed.session_id.clone(), operation_key.clone());
+        let key = (session_id.clone(), operation_key.clone());
         if let Some((stored_hash, result, _committed_at_ms)) = self
             .runtime_turn_commits
             .lock()
@@ -902,14 +903,14 @@ impl crate::store::SessionCommitStore for InMemorySessionStore {
             .get(&key)
             .cloned()
         {
-            if stored_hash == completed.turn_commit_hash {
+            if stored_hash == turn_commit_hash {
                 if let Some(completion) = commit.release_session_execution_lease.as_ref() {
                     self.release_session_execution_lease_in_memory(completion);
                 }
                 return Ok(result);
             }
             return Err(crate::store::StoreError::RuntimeTurnCommitConflict {
-                session_id: completed.session_id.clone(),
+                session_id,
                 turn_id: operation_key,
             });
         }
@@ -1286,7 +1287,7 @@ impl crate::store::SessionCommitStore for InMemorySessionStore {
             &commit.session_id,
             &commit.committed_attachment_ids,
         )?;
-        self.commit_turn_attachment_intents(&commit.turn_commit);
+        self.commit_turn_attachment_intents(&commit.session_id, &commit.turn_commit);
         let head_revision = actual + 1;
         *meta = Some(crate::SessionHeadMeta {
             schema_version: crate::store::SESSION_HEAD_META_SCHEMA_VERSION,
@@ -1305,7 +1306,6 @@ impl crate::store::SessionCommitStore for InMemorySessionStore {
             head_revision,
             checkpoint_ref,
             manifest,
-            realization_digest,
             realized_node_timestamps,
             enqueued_queue_batches: commit
                 .enqueued_queue_batches
@@ -1319,12 +1319,8 @@ impl crate::store::SessionCommitStore for InMemorySessionStore {
             .lock()
             .expect("lock runtime turn commits")
             .insert(
-                (commit.turn_commit.session_id.clone(), operation_key),
-                (
-                    commit.turn_commit.turn_commit_hash.clone(),
-                    result.clone(),
-                    self.clock.timestamp_ms(),
-                ),
+                (session_id, operation_key),
+                (turn_commit_hash, result.clone(), self.clock.timestamp_ms()),
             );
         if let Some(completion) = commit.release_session_execution_lease.as_ref() {
             self.release_session_execution_lease_in_memory(completion);

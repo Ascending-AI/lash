@@ -17,7 +17,7 @@ use lash::persistence::{
     SessionExecutionLeaseStore, SessionLifetime, SessionMeta, SessionNodeRecord, StoreError,
     StoreMaintenance, TurnInputClaim, TurnInputCheckpointBoundary, TurnInputIngress,
     TurnInputState, TurnInputStore, VacuumReport, commit_runtime_state_verified,
-    graph_realization_digest, load_persisted_session_state,
+    load_persisted_session_state,
 };
 use lash::usage::{TokenLedgerEntry, TokenUsage};
 use lash::plugins::{
@@ -59,7 +59,6 @@ impl SessionCommitStore for FacadeStore {
         &self,
         commit: RuntimeCommit,
     ) -> Result<RuntimeCommitResult, StoreError> {
-        let realization_digest = graph_realization_digest(&commit.graph);
         let realized_node_timestamps = commit
             .graph
             .appended_nodes()
@@ -79,7 +78,6 @@ impl SessionCommitStore for FacadeStore {
             head_revision: commit.expected_head_revision + 1,
             checkpoint_ref: "checkpoint".to_string().into(),
             manifest,
-            realization_digest,
             realized_node_timestamps,
             enqueued_queue_batches: Vec::new(),
             turn_input_applications: Vec::new(),
@@ -326,11 +324,9 @@ fn persistence_types_are_nameable(
         graph,
         checkpoint: Default::default(),
         usage_deltas: ledger,
-        turn_commit: RuntimeTurnCommitStamp::new(
-            "facade",
-            OperationId::turn("facade", "turn", "final"),
-            "sha256:facade",
-        ),
+        turn_commit: RuntimeTurnCommitStamp::new(OperationId::turn(
+            "facade", "turn", "final",
+        )),
         completed_queue_claims: Vec::new(),
         completed_turn_input_claims: Vec::new(),
         enqueued_queue_batches: Vec::new(),

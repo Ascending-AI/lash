@@ -68,8 +68,6 @@ fn store_error_variant(error: &StoreError) -> &'static str {
         StoreError::InvalidGraphParent { .. } => "InvalidGraphParent",
         StoreError::MissingFrameOpenAncestor { .. } => "MissingFrameOpenAncestor",
         StoreError::NodeRefcountDrift { .. } => "NodeRefcountDrift",
-        StoreError::CommitRealizationMismatch { .. } => "CommitRealizationMismatch",
-        StoreError::CommitNodeRealizationMismatch { .. } => "CommitNodeRealizationMismatch",
         StoreError::QueuedWorkClaimSuperseded { .. } => "QueuedWorkClaimSuperseded",
         StoreError::TurnInputClaimSuperseded { .. } => "TurnInputClaimSuperseded",
         StoreError::UnsettledQueuedWorkClaim { .. } => "UnsettledQueuedWorkClaim",

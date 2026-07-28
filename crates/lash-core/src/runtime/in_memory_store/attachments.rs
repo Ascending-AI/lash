@@ -10,6 +10,7 @@ use super::InMemorySessionStore;
 impl InMemorySessionStore {
     pub(super) fn commit_turn_attachment_intents(
         &self,
+        session_id: &str,
         completed: &crate::store::RuntimeTurnCommitStamp,
     ) {
         let now = self.clock.timestamp_ms();
@@ -20,7 +21,7 @@ impl InMemorySessionStore {
             .values_mut()
         {
             let turn_id = completed.operation.turn_id();
-            if entry.session_id == completed.session_id
+            if entry.session_id == session_id
                 && entry.owner_kind == Some(crate::AttachmentOwnerKind::Turn)
                 && entry.owner_id.as_deref() == turn_id
                 && entry.committed_at_epoch_ms.is_none()

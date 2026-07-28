@@ -234,7 +234,7 @@ CREATE INDEX IF NOT EXISTS idx_attachment_manifest_owner
 ///
 /// Bumped to 17 so a reusable session name has a durable per-lifetime
 /// incarnation for node and effect-replay identity.
-pub(crate) const SCHEMA_VERSION: i32 = 17;
+pub(crate) const SCHEMA_VERSION: i32 = 18;
 
 pub(crate) const PROCESS_SCHEMA: &str = "
 CREATE TABLE IF NOT EXISTS processes (

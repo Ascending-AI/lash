@@ -196,7 +196,6 @@ fn scoped_node_id(session_id: &str, incarnation_id: &IncarnationId, node_id: &st
 #[derive(Clone, Copy, Debug)]
 struct TurnCommitSpec {
     turn_id: &'static str,
-    hash: &'static str,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -299,7 +298,6 @@ fn generated_cases() -> Vec<GeneratedCase> {
                     graph: append(Vec::new(), Some("root")),
                     turn_commit: Some(TurnCommitSpec {
                         turn_id: "nodeless-leaf-move",
-                        hash: "nodeless-leaf-move",
                     }),
                 },
             ],
@@ -329,28 +327,19 @@ fn generated_cases() -> Vec<GeneratedCase> {
                     label: "first_turn_commit",
                     expected_head_revision: 0,
                     graph: append(vec![original()], Some("collision")),
-                    turn_commit: Some(TurnCommitSpec {
-                        turn_id: "turn-1",
-                        hash: "identical-hash",
-                    }),
+                    turn_commit: Some(TurnCommitSpec { turn_id: "turn-1" }),
                 },
                 StoreOperation::Commit {
                     label: "resubmit_identical_turn_commit_hash",
                     expected_head_revision: 0,
                     graph: append(vec![original()], Some("collision")),
-                    turn_commit: Some(TurnCommitSpec {
-                        turn_id: "turn-1",
-                        hash: "identical-hash",
-                    }),
+                    turn_commit: Some(TurnCommitSpec { turn_id: "turn-1" }),
                 },
                 StoreOperation::Commit {
                     label: "resubmit_mutated_turn_commit_hash",
                     expected_head_revision: 1,
                     graph: append(vec![mutated()], Some("collision")),
-                    turn_commit: Some(TurnCommitSpec {
-                        turn_id: "turn-1",
-                        hash: "mutated-hash",
-                    }),
+                    turn_commit: Some(TurnCommitSpec { turn_id: "turn-1" }),
                 },
             ],
         },
@@ -426,11 +415,11 @@ fn runtime_commit(
         .map(|node| node.node_id.clone())
         .or(current_frame_node_id);
     if let Some(turn_commit) = turn_commit {
-        commit.turn_commit = RuntimeTurnCommitStamp::new(
+        commit.turn_commit = RuntimeTurnCommitStamp::new(lash_core::store::OperationId::turn(
             session_id,
-            lash_core::store::OperationId::turn(session_id, turn_commit.turn_id, "differential"),
-            turn_commit.hash,
-        );
+            turn_commit.turn_id,
+            "differential",
+        ));
     }
     commit
 }
@@ -948,10 +937,6 @@ fn normalized_store_error(backend: &str, error: &StoreError) -> String {
             cached,
             derived,
         } => format!("NodeRefcountDrift({node_id},{cached},{derived})"),
-        StoreError::CommitRealizationMismatch { .. } => "CommitRealizationMismatch".to_string(),
-        StoreError::CommitNodeRealizationMismatch { .. } => {
-            "CommitNodeRealizationMismatch".to_string()
-        }
         StoreError::Backend(message) => normalized_backend_error(backend, message),
     }
 }

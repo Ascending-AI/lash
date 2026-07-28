@@ -168,7 +168,7 @@ where
     attachment_manifest_keeps_same_content_ownership_per_session(make()).await;
     attachment_manifest_reference_tracking_and_gc_root_set(make()).await;
     final_commit_stamp_is_idempotent_and_conflicts_on_changed_hash(make()).await;
-    verified_commit_rejects_receipt_topology_mismatch(make()).await;
+    store_computed_hash_rejects_mutated_commit(make()).await;
     commit_rejects_non_derived_append_node_ids(make()).await;
     append_rejects_duplicate_batch_node_ids(make()).await;
     append_rejects_existing_node_id_collision(make()).await;
@@ -453,14 +453,9 @@ async fn turn_input_application_identity_survives_pending_tombstone_vacuum(
         if turn_index == 1 {
             commit = commit.releasing_session_execution_lease(lease.completion());
         }
-        let hash = commit
-            .turn_commit_hash()
-            .expect("hash application turn commit");
-        commit.turn_commit = crate::RuntimeTurnCommitStamp::new(
-            session_id,
-            crate::OperationId::turn(session_id, turn_id, "final"),
-            hash,
-        );
+        commit.turn_commit = crate::RuntimeTurnCommitStamp::new(crate::OperationId::turn(
+            session_id, turn_id, "final",
+        ));
         if turn_index == 1 {
             replay = Some(commit.clone());
         }
@@ -1269,13 +1264,12 @@ async fn session_execution_lease_contract(store: Arc<dyn RuntimePersistence>) {
         ..RuntimeSessionState::default()
     };
     let turn_commit = RuntimeCommit::persisted_state_for_test(&turn_state, &[]);
-    let turn_hash = turn_commit.turn_commit_hash().expect("turn hash");
     let mut turn_commit = turn_commit;
-    turn_commit.turn_commit = RuntimeTurnCommitStamp::new(
+    turn_commit.turn_commit = RuntimeTurnCommitStamp::new(crate::OperationId::turn(
         "root",
-        crate::OperationId::turn("root", "lease-replay-turn", "final"),
-        turn_hash,
-    );
+        "lease-replay-turn",
+        "final",
+    ));
     let turn_lease = claim_session_execution_lease_for_test(&store, "root", "turn-owner").await;
     let first_result = store
         .commit_runtime_state(
@@ -3339,12 +3333,8 @@ async fn queue_completion_and_turn_commit_stamp_are_atomic(store: Arc<dyn Runtim
         )
         .with_source_key("agent-frame-handoff:turn-atomic"),
     ];
-    let commit_hash = base_commit.turn_commit_hash().expect("turn commit hash");
-    let turn_commit = RuntimeTurnCommitStamp::new(
-        "root",
-        crate::OperationId::turn("root", "turn-atomic", "final"),
-        commit_hash.clone(),
-    );
+    let turn_commit =
+        RuntimeTurnCommitStamp::new(crate::OperationId::turn("root", "turn-atomic", "final"));
     base_commit.turn_commit = turn_commit.clone();
     let mut stale_queue_completion = claim.completion();
     stale_queue_completion.lease_token.push_str(":stale");
@@ -3418,11 +3408,11 @@ async fn queue_completion_and_turn_commit_stamp_are_atomic(store: Arc<dyn Runtim
     let retry = store
         .commit_runtime_state({
             let mut retry = base_commit;
-            retry.turn_commit = RuntimeTurnCommitStamp::new(
+            retry.turn_commit = RuntimeTurnCommitStamp::new(crate::OperationId::turn(
                 "root",
-                crate::OperationId::turn("root", "turn-atomic", "final"),
-                commit_hash,
-            );
+                "turn-atomic",
+                "final",
+            ));
             retry
                 .releasing_session_execution_lease(session_lease.completion())
                 .completing_turn_input_claim(input_claim.completion())
@@ -4583,14 +4573,8 @@ async fn runtime_persistence_survives_reopen(factory: ReopenableRuntimePersisten
         if turn_index == 1 {
             commit = commit.releasing_session_execution_lease(application_lease.completion());
         }
-        let hash = commit
-            .turn_commit_hash()
-            .expect("hash reopen application turn commit");
-        commit.turn_commit = RuntimeTurnCommitStamp::new(
-            "root",
-            crate::OperationId::turn("root", turn_id, "final"),
-            hash,
-        );
+        commit.turn_commit =
+            RuntimeTurnCommitStamp::new(crate::OperationId::turn("root", turn_id, "final"));
         let result = factory
             .open
             .commit_runtime_state(commit)
@@ -4829,7 +4813,9 @@ async fn final_commit_stamp_is_idempotent_and_conflicts_on_changed_hash(
     let (stamped_commit, _) = RuntimeCommit::persisted_state_for_test(&state, &[])
         .with_operation(operation.clone())
         .expect("derive and stamp first commit");
-    let turn_commit_hash = stamped_commit.turn_commit.turn_commit_hash.clone();
+    let turn_commit_hash = stamped_commit
+        .turn_commit_hash()
+        .expect("first commit hash");
 
     let session_lease =
         claim_session_execution_lease_for_test(&store, "root", "provider-turn").await;
@@ -4846,7 +4832,9 @@ async fn final_commit_stamp_is_idempotent_and_conflicts_on_changed_hash(
     let (replay_commit, _) = RuntimeCommit::persisted_state_for_test(&replay_state, &[])
         .with_operation(operation.clone())
         .expect("derive and stamp replay");
-    let replay_hash = replay_commit.turn_commit.turn_commit_hash.clone();
+    let replay_hash = replay_commit
+        .turn_commit_hash()
+        .expect("replay commit hash");
     assert_eq!(replay_hash, turn_commit_hash);
     let retry = store
         .commit_runtime_state(replay_commit)
@@ -4854,10 +4842,6 @@ async fn final_commit_stamp_is_idempotent_and_conflicts_on_changed_hash(
         .expect("same final commit retries idempotently without a live lease");
     assert_eq!(retry.head_revision, first.head_revision);
     assert_eq!(retry.checkpoint_ref, first.checkpoint_ref);
-    assert_eq!(
-        first.realization_digest,
-        crate::store::graph_realization_digest(&stamped_commit.graph)
-    );
     let receipt_json = serde_json::to_string(&first).expect("serialize commit receipt");
     assert!(
         !receipt_json.contains("execution_state_snapshot"),
@@ -4885,12 +4869,8 @@ async fn final_commit_stamp_is_idempotent_and_conflicts_on_changed_hash(
         ..RuntimeSessionState::default()
     };
     let mut changed = RuntimeCommit::persisted_state_for_test(&changed_state, &[]);
-    let changed_hash = changed.turn_commit_hash().expect("changed commit hash");
-    changed.turn_commit = RuntimeTurnCommitStamp::new(
-        "root",
-        crate::OperationId::turn("root", "provider-turn", "final"),
-        changed_hash,
-    );
+    changed.turn_commit =
+        RuntimeTurnCommitStamp::new(crate::OperationId::turn("root", "provider-turn", "final"));
     let err = store
         .commit_runtime_state(changed)
         .await
@@ -4898,7 +4878,7 @@ async fn final_commit_stamp_is_idempotent_and_conflicts_on_changed_hash(
     assert!(matches!(err, StoreError::RuntimeTurnCommitConflict { .. }));
 }
 
-async fn verified_commit_rejects_receipt_topology_mismatch(store: Arc<dyn RuntimePersistence>) {
+async fn store_computed_hash_rejects_mutated_commit(store: Arc<dyn RuntimePersistence>) {
     let mut state = RuntimeSessionState {
         session_id: "root".to_string(),
         session_lifetime: conformance_lifetime("root"),
@@ -4941,13 +4921,21 @@ async fn verified_commit_rejects_receipt_topology_mismatch(store: Arc<dyn Runtim
         .await
         .expect("first guarded commit");
 
+    let first_hash = first.turn_commit_hash().expect("first store-computed hash");
     let mut divergent_replay = first;
     let crate::GraphAppend { nodes, .. } = &mut divergent_replay.graph;
     nodes[0].parent_node_id = Some("proposal-only-parent".to_string());
+    let divergent_hash = divergent_replay
+        .turn_commit_hash()
+        .expect("mutated store-computed hash");
+    assert_ne!(
+        divergent_hash, first_hash,
+        "the receipt identity must cover mutated topology"
+    );
     let err = crate::store::commit_runtime_state_verified(store.as_ref(), divergent_replay)
         .await
-        .expect_err("verified receipt hit must reject a divergent topology");
-    assert!(matches!(err, StoreError::CommitRealizationMismatch { .. }));
+        .expect_err("the store must reject a mutated commit reusing an operation id");
+    assert!(matches!(err, StoreError::RuntimeTurnCommitConflict { .. }));
     let stored = store
         .load_node(&node_id)
         .await
@@ -4980,8 +4968,7 @@ async fn commit_rejects_non_derived_append_node_ids(store: Arc<dyn RuntimePersis
         leaf_node_id: Some("rogue-node-id".to_string()),
     };
     let mut commit = RuntimeCommit::persisted_state_with_graph_commit(&state, graph, &[]);
-    let hash = commit.turn_commit_hash().expect("hash rogue proposal");
-    commit.turn_commit = RuntimeTurnCommitStamp::new("root", operation, hash);
+    commit.turn_commit = RuntimeTurnCommitStamp::new(operation);
     let err = commit_runtime_state_for_test(&store, commit, "node-guard")
         .await
         .expect_err("store must rederive append node ids before writing");

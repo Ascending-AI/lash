@@ -363,11 +363,10 @@ fn derived_node_ids_are_incarnation_operation_and_ordinal_scoped() {
 }
 
 #[test]
-fn node_derivation_and_realization_digest_are_independent() {
+fn node_derivation_guard_rejects_rogue_ids() {
     let mut commit = intent_fixture();
     let operation = OperationId::turn("golden-session", "turn-42", "final");
-    let hash = commit.turn_commit_hash().expect("intent hash");
-    commit.turn_commit = RuntimeTurnCommitStamp::new("golden-session", operation, hash);
+    commit.turn_commit = RuntimeTurnCommitStamp::new(operation);
     let incarnation_id = commit
         .durable_incarnation_id("test validation")
         .expect("durable fixture")
@@ -383,12 +382,6 @@ fn node_derivation_and_realization_digest_are_independent() {
         rogue.validate_node_derivation(&incarnation_id),
         Err(StoreError::NodeIdDerivationMismatch { .. })
     ));
-
-    assert_ne!(
-        graph_realization_digest(&commit.graph),
-        graph_realization_digest(&rogue.graph),
-        "realization digest must observe ids without invoking derivation"
-    );
 }
 
 #[test]

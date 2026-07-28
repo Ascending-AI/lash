@@ -301,11 +301,11 @@ impl SessionCommitStore for Store {
     ) -> Result<RuntimeCommitResult, StoreError> {
         commit.validate_budget()?;
         commit.validate_operation_session()?;
+        let turn_commit_hash = commit.turn_commit_hash()?;
         let commit_incarnation_id = commit
             .durable_incarnation_id("SQLite runtime commit")?
             .clone();
         self.bind_session(&commit.session_id)?;
-        let realization_digest = lash_core::store::graph_realization_digest(&commit.graph);
         let realized_node_timestamps = commit
             .graph
             .appended_nodes()
@@ -372,13 +372,13 @@ impl SessionCommitStore for Store {
                             .query_row(
                                 "SELECT turn_commit_hash, result_json FROM runtime_turn_commits
                                  WHERE session_id = ?1 AND turn_id = ?2",
-                                params![completed.session_id, operation_key],
+                                params![commit.session_id, operation_key],
                                 |row| Ok((row.get(0)?, row.get(1)?)),
                             )
                             .optional()
                             .map_err(sqlite_error)?;
-                        if let Some((turn_commit_hash, result_json)) = prior {
-                            if turn_commit_hash == completed.turn_commit_hash {
+                        if let Some((stored_hash, result_json)) = prior {
+                            if stored_hash == turn_commit_hash {
                                 let result: RuntimeCommitResult =
                                     serde_json::from_str(&result_json).map_err(|err| {
                                         StoreError::Backend(format!(
@@ -393,7 +393,7 @@ impl SessionCommitStore for Store {
                                 return Ok(result);
                             }
                             return Err(StoreError::RuntimeTurnCommitConflict {
-                                session_id: completed.session_id.clone(),
+                                session_id: commit.session_id.clone(),
                                 turn_id: completed.operation.storage_key()?,
                             });
                         }
@@ -797,7 +797,6 @@ impl SessionCommitStore for Store {
                         head_revision: next_revision,
                         checkpoint_ref: stored_checkpoint.checkpoint_ref,
                         manifest: stored_checkpoint.manifest,
-                        realization_digest: realization_digest.clone(),
                         realized_node_timestamps: realized_node_timestamps.clone(),
                         enqueued_queue_batches,
                         turn_input_applications: commit.turn_input_applications(),
@@ -810,9 +809,9 @@ impl SessionCommitStore for Store {
                              )
                              VALUES (?1, ?2, ?3, ?4, ?5)",
                             params![
-                                completed.session_id,
+                                commit.session_id,
                                 operation_key,
-                                completed.turn_commit_hash,
+                                turn_commit_hash,
                                 encode_json(&result),
                                 now as i64
                             ],
