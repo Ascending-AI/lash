@@ -97,7 +97,9 @@ terminal write with `complete_process_with_lease` (ADR 0019); the recovery
 sweep, including its own externally-owned-abandon reconcile, claims a lease and
 completes atomically through that path. `ProcessCompletionAuthority` governs only
 the deliberately unleased writers whose discipline lives elsewhere. No store-side
-watch/wait and no lash-owned effect journal is introduced.
+watch/wait and no second replay journal is introduced: lash owns the
+effect-journal contract, and the configured substrate owns the journal (ADR
+0012).
 
 ## Consequences
 

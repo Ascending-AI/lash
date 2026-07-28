@@ -143,3 +143,30 @@ no pending external event, so these bind narrowly; but they are mandatory for th
 handover window and for the rare boundary that meets buffered work. Segment handover — including
 any interaction with a pending durable wait or a crash mid-transition — needs Deterministic
 Simulation and fault-matrix coverage before hosts may run unbounded loops on an engine tier.
+
+## Durable-core lifecycle retention (implemented)
+
+ADR 0047 applies the bounded-journal obligation to the substrate-owned replay
+table as well as to one engine invocation. The effect-host/controller contract
+now retires journals through typed `EffectJournalRetirement` targets:
+`Session { session_id, incarnation_id }` and `Process { process_id }`.
+
+Engine-less SQL controllers persist a versioned canonical identity for the
+complete `ExecutionScope`. The human-facing `ExecutionScope::id()` remains a
+display value, not a durable key. Session-owned rows also carry indexed
+`session_id` and `incarnation_id` join columns. Session deletion removes the
+exact retired incarnation; terminal-process retention removes the exact
+canonical process scope. Cleanup neither parses `scope_id` nor prefix-matches
+it.
+
+This keeps the inline SQL table as the engine-less tier's replay source without
+making it append-only. Session journals live until that incarnation is deleted,
+and process journals live until host-scheduled terminal-process retention
+prunes the process. SQLite effect schema 5 and PostgreSQL store schema 27 are
+reject-and-recreate cutovers with no compatibility path.
+
+Restate keeps its native invocation journal and native retention. Its effect
+host creates and deletes no SQL replay rows, so lifecycle retirement is a
+no-op there. `StoreMaintenance` remains maintenance for the domain session
+store and does not know about effect-journal tables; lifecycle owners call the
+effect host directly.

@@ -39,7 +39,7 @@ This is the plain agreement the original ruling called for: edges and roots are 
 not truth reconciled against a maintained count. Removing the count also removes the conservative
 high-drift leak mode and the low-drift operational failure mode.
 
-This does not move non-terminal process roots into stored history counts. Processes remain in a
-different store family, and their definition/env liveness continues to be computed on demand by
-`live_reference_summary()`. Folding process transitions into history-node counters would recreate
-the coupling rejected above.
+This does not move non-terminal process roots into stored history reachability. Processes remain
+in a different store family, and their definition/env liveness continues to be computed on demand
+by `live_reference_summary()`. Folding process transitions into history-node reachability would
+recreate the coupling rejected above.
