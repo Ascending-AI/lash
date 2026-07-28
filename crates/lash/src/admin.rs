@@ -1,5 +1,5 @@
-pub(crate) use crate::session::SessionConfigPatch;
 use crate::support::*;
+pub(crate) use lash_core::SessionConfigPatch;
 pub use lash_core::{AcceptedInjectedTurnInput, PluginCommand, PluginQuery, PluginTask};
 
 #[derive(Clone)]
@@ -146,9 +146,7 @@ impl SessionAdmin {
 
     async fn update_config(&self, patch: SessionConfigPatch) -> Result<()> {
         self.with_writer(async |runtime: &mut LashRuntime| {
-            runtime
-                .update_session_config(patch.provider, patch.model, patch.prompt)
-                .await;
+            runtime.update_session_config(patch).await;
         })
         .await;
         Ok(())

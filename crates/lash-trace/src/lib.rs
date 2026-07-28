@@ -426,6 +426,12 @@ pub struct TraceLlmResponse {
     pub terminal_reason: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub parts: Option<Value>,
+    /// Which of the caller's generation options the adapter put on the wire,
+    /// as the runtime's `GenerationDisposition` serializes. Absent when the
+    /// adapter does not report, which is not the same as reporting that
+    /// nothing was requested.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub generation_disposition: Option<Value>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]

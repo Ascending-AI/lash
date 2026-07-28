@@ -286,3 +286,88 @@ fn parse_memory_output_extracts_xml_sections() {
     assert_eq!(parsed.current_task.as_deref(), Some("Work"));
     assert_eq!(parsed.suggested_response.as_deref(), Some("Continue"));
 }
+
+#[tokio::test]
+async fn maintenance_calls_carry_the_session_options_bounded_by_the_session_model() {
+    // These calls take their generation options from the session policy, and
+    // the direct path they use has no model limits to check a cap against. A
+    // session that capped output and then moved to a smaller model must not
+    // keep taking turns (which clamp) while every maintenance call sends an
+    // over-capacity cap and fails at the provider.
+    let host = Arc::new(RecordingHost::default());
+    let config = ObservationalMemoryConfig {
+        observation_buffer_tokens: 1,
+        observation_max_tokens_per_batch: 1,
+        ..Default::default()
+    };
+    let hook = crate::observational_memory_event_hook(config);
+
+    let mut graph = SessionGraph::default();
+    graph.append_message(user_message("committed-message", &"x".repeat(64)).message);
+
+    let requested = lash_core::GenerationOptions {
+        output_token_cap: std::num::NonZeroUsize::new(32_000),
+        temperature: Some(lash_core::NonNegativeFiniteF64::new(0.0).expect("finite temperature")),
+        seed: Some(42),
+    };
+    let mut policy = lash_core::testing::mock_session_policy();
+    policy.model = lash_core::ModelSpec::from_token_limits(
+        "small-output-model",
+        Default::default(),
+        200_000,
+        Some(2_048),
+    )
+    .expect("valid test model");
+    policy.generation = requested.clone();
+
+    let captured: Arc<Mutex<Vec<lash_core::GenerationOptions>>> = Arc::new(Mutex::new(Vec::new()));
+    let captured_for_client = Arc::clone(&captured);
+    let sessions: Arc<dyn SessionStateService> = host.clone();
+    let session_graph: Arc<dyn SessionGraphService> = host.clone();
+    let context = SessionStateChangedContext {
+        session_id: "session".to_string(),
+        state: SessionReadView::from_snapshot(&SessionSnapshot {
+            session_id: "session".to_string(),
+            session_graph: graph,
+            policy,
+            ..Default::default()
+        }),
+        sessions,
+        session_graph,
+        direct_completions: DirectCompletionClient::from_fn(
+            move |request: DirectRequest, _usage_source: String| {
+                captured_for_client
+                    .lock()
+                    .expect("capture lock")
+                    .push(request.generation.clone());
+                Ok(DirectCompletion {
+                    text: "<observations>\nDate: May 19, 2026\n- Bounded.\n</observations>\n<current-task>\nVerify.\n</current-task>\n<suggested-response>\nContinue.\n</suggested-response>"
+                        .to_string(),
+                    usage: Default::default(),
+                    llm_call: lash_core::LlmCallRecord {
+                        call_id: lash_core::LlmCallId("observational-memory-test".to_string()),
+                        label: None,
+                        attempts: Vec::new(),
+                    },
+                })
+            },
+        ),
+    };
+
+    hook(PluginLifecycleEvent::TurnPersisted(Box::new(context)))
+        .await
+        .expect("turn persisted hook");
+
+    let seen = captured.lock().expect("capture lock").clone();
+    let sent = seen.first().expect("one maintenance call");
+    assert_eq!(
+        sent.output_token_cap,
+        std::num::NonZeroUsize::new(2_048),
+        "the cap is bounded by what the session's model can produce"
+    );
+    assert_eq!(
+        (sent.temperature.clone(), sent.seed),
+        (requested.temperature, requested.seed),
+        "the session's sampling intent still reaches its own maintenance calls"
+    );
+}

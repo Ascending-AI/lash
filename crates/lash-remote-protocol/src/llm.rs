@@ -150,6 +150,37 @@ pub struct RemoteLlmResponse {
     pub provider_metadata: RemoteProviderMetadata,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub execution_evidence: Option<RemoteExecutionEvidence>,
+    /// Which of the caller's generation options the worker's adapter put on
+    /// the wire. Absent when the adapter does not report, which is distinct
+    /// from a report that nothing was requested.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub generation_disposition: Option<RemoteGenerationDisposition>,
+}
+
+/// Mirror of the core `GenerationDisposition`: the adapter-reported fate of a
+/// request's generation options, so a remote host can tell an honored
+/// repeatability request from a silently dropped one.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct RemoteGenerationDisposition {
+    #[serde(default)]
+    pub output_token_cap: RemoteGenerationOptionDisposition,
+    #[serde(default)]
+    pub temperature: RemoteGenerationOptionDisposition,
+    #[serde(default)]
+    pub seed: RemoteGenerationOptionDisposition,
+}
+
+/// Mirror of the core `GenerationOptionDisposition`.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum RemoteGenerationOptionDisposition {
+    #[default]
+    NotRequested,
+    Applied,
+    OmittedUnsupported,
+    OmittedSamplingPinned,
+    ClampedToCapacity,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]

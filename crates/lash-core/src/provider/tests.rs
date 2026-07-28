@@ -149,6 +149,7 @@ impl Provider for MutatingProvider {
             request_body: None,
             http_summary: None,
             execution_evidence: None,
+            generation_disposition: None,
             response_metadata: Default::default(),
         })
     }
@@ -198,6 +199,7 @@ impl Provider for FailingProvider {
             request_body: None,
             http_summary: None,
             execution_evidence: None,
+            generation_disposition: None,
             response_metadata: Default::default(),
         })
     }
@@ -267,6 +269,7 @@ impl Provider for StatusFailingProvider {
             request_body: None,
             http_summary: None,
             execution_evidence: None,
+            generation_disposition: None,
             response_metadata: Default::default(),
         })
     }

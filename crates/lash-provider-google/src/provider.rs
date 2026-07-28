@@ -13,6 +13,21 @@ impl GoogleOAuthProvider {
             })
     }
 
+    /// Which of the caller's generation options a Cloud Code request carries.
+    ///
+    /// `generationConfig` expresses all three — `maxOutputTokens` is always
+    /// written, and both sampling controls are written whenever the caller set
+    /// them — so nothing this runtime can ask for is dropped on this wire.
+    pub(crate) fn generation_disposition(req: &LlmRequest) -> GenerationDisposition {
+        GenerationDisposition {
+            output_token_cap: GenerationOptionDisposition::applied(
+                req.generation.output_token_cap.is_some(),
+            ),
+            temperature: GenerationOptionDisposition::applied(req.generation.temperature.is_some()),
+            seed: GenerationOptionDisposition::applied(req.generation.seed.is_some()),
+        }
+    }
+
     pub(crate) async fn execute_request(
         &self,
         access_token: &str,
@@ -20,6 +35,7 @@ impl GoogleOAuthProvider {
         stream_events: Option<lash_core::llm::types::LlmEventSender>,
         provider_trace: Option<lash_core::llm::types::LlmProviderTraceSender>,
         stream_termination: StreamTermination,
+        generation_disposition: Option<GenerationDisposition>,
     ) -> Result<LlmResponse, LlmTransportError> {
         let request_body_bytes = serde_json::to_vec(&request).map_err(|err| {
             LlmTransportError::new(format!("Failed to serialize Cloud Code body: {err}"))
@@ -114,6 +130,7 @@ impl GoogleOAuthProvider {
                 request_body,
                 http_summary: Some(format!("HTTP POST {}", url)),
                 execution_evidence: None,
+                generation_disposition,
                 response_metadata: Default::default(),
             });
         }
@@ -183,6 +200,7 @@ impl GoogleOAuthProvider {
                 request_body: request_body.clone(),
                 http_summary: Some(format!("HTTP POST {url} (stream)")),
                 execution_evidence: None,
+                generation_disposition,
                 response_metadata: Default::default(),
             }
         };
@@ -236,6 +254,7 @@ impl GoogleOAuthProvider {
             request_body,
             http_summary: Some(format!("HTTP POST {}", url)),
             execution_evidence: None,
+            generation_disposition,
             response_metadata: Default::default(),
         })
     }
@@ -430,6 +449,7 @@ impl Provider for GoogleOAuthProvider {
         };
 
         let request = Self::build_request(self, &req, contents, project_id.as_deref());
+        let generation_disposition = Some(Self::generation_disposition(&req));
 
         match self
             .execute_request(
@@ -438,6 +458,7 @@ impl Provider for GoogleOAuthProvider {
                 stream_events.clone(),
                 provider_trace.clone(),
                 stream_termination,
+                generation_disposition,
             )
             .await
         {
@@ -451,6 +472,7 @@ impl Provider for GoogleOAuthProvider {
                     stream_events,
                     provider_trace,
                     stream_termination,
+                    generation_disposition,
                 )
                 .await
             }

@@ -258,6 +258,7 @@ fn session_store_request(
             autonomous: false,
             max_turns: None,
             prompt: crate::PromptLayer::new(),
+            generation: crate::GenerationOptions::default(),
         },
     }
 }

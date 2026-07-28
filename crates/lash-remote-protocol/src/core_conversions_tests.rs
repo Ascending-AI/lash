@@ -336,6 +336,7 @@ fn llm_request_and_response_round_trip_owned_dtos() {
             reasoning_output_tokens: Some(0),
             provider_finish_reason: Some("stop".to_string()),
         }),
+        generation_disposition: None,
         response_metadata: response_metadata.clone(),
     };
     let remote = RemoteLlmResponse::from_core("request-1", response);
@@ -578,6 +579,13 @@ fn process_start_requests_round_trip_core_values() {
                 Some(512),
             )
             .expect("model"),
+            generation: lash_core::GenerationOptions {
+                output_token_cap: std::num::NonZeroUsize::new(256),
+                temperature: Some(
+                    lash_core::NonNegativeFiniteF64::new(0.25).expect("finite temperature"),
+                ),
+                seed: Some(4242),
+            },
             ..Default::default()
         },
     ))
@@ -1518,5 +1526,25 @@ fn remote_generation_options_are_omitted_from_the_wire_when_unset() {
     assert_eq!(
         serde_json::to_value(&remote).expect("serialize"),
         serde_json::json!({})
+    );
+}
+
+#[test]
+fn every_generation_option_disposition_crosses_the_boundary_in_both_directions() {
+    for core in [
+        core_llm::GenerationOptionDisposition::NotRequested,
+        core_llm::GenerationOptionDisposition::Applied,
+        core_llm::GenerationOptionDisposition::OmittedUnsupported,
+        core_llm::GenerationOptionDisposition::OmittedSamplingPinned,
+        core_llm::GenerationOptionDisposition::ClampedToCapacity,
+    ] {
+        let remote = RemoteGenerationOptionDisposition::from(core);
+        assert_eq!(core_llm::GenerationOptionDisposition::from(remote), core);
+    }
+
+    assert_eq!(
+        serde_json::to_value(RemoteGenerationOptionDisposition::ClampedToCapacity)
+            .expect("serialize"),
+        serde_json::json!("clamped_to_capacity")
     );
 }

@@ -37,7 +37,6 @@ pub use crate::plugin_binding::PluginBinding;
 pub use crate::prompt_layer::PromptLayerSink;
 pub use crate::session::{
     EnqueueTurnBuilder, LashSession, ObservableSession, ParkedSession, SessionBuilder,
-    SessionConfigPatch,
 };
 pub use crate::turn::{
     QueuedTurnBuilder, TurnActivityFanout, TurnBuilder, TurnOutput, TurnResult, TurnStream,
@@ -45,14 +44,15 @@ pub use crate::turn::{
 };
 pub use lash_core::{
     AwaitEventKey, AwaitEventWaitIdentity, EffectReplayOwnership, ExecutionSummary,
-    ExternalCompletionError, InputItem, LlmCallRecord, ModelLimits, ModelSpec, PendingTurnInput,
-    PendingTurnInputCancelOutcome, PendingTurnInputCancelResult, PendingTurnInputCancelTarget,
-    PendingTurnInputSuffixCancelOutcome, PluginStack, Resolution, ResolveOutcome, SessionCommand,
-    SessionCommandReceipt, SessionCreateRequest, SessionSpec, SessionStartPoint, TurnActivity,
-    TurnActivityId, TurnActivitySink, TurnAddress, TurnAttach, TurnCancelOriginHint,
-    TurnCancelOutcome, TurnCancelReceipt, TurnCancelRequest, TurnCancellationEvidence, TurnCause,
-    TurnEvent, TurnFinish, TurnInput, TurnInputAcceptanceReceipt, TurnInputApplication,
-    TurnOutcome, TurnStop, TurnTerminal, TurnWorkDriver,
+    ExternalCompletionError, GenerationOverlay, InputItem, LlmCallRecord, ModelLimits, ModelSpec,
+    PendingTurnInput, PendingTurnInputCancelOutcome, PendingTurnInputCancelResult,
+    PendingTurnInputCancelTarget, PendingTurnInputSuffixCancelOutcome, PluginStack, Resolution,
+    ResolveOutcome, SessionCommand, SessionCommandReceipt, SessionConfigPatch,
+    SessionCreateRequest, SessionSpec, SessionStartPoint, TurnActivity, TurnActivityId,
+    TurnActivitySink, TurnAddress, TurnAttach, TurnCancelOriginHint, TurnCancelOutcome,
+    TurnCancelReceipt, TurnCancelRequest, TurnCancellationEvidence, TurnCause, TurnEvent,
+    TurnFinish, TurnInput, TurnInputAcceptanceReceipt, TurnInputApplication, TurnOutcome, TurnStop,
+    TurnTerminal, TurnWorkDriver,
 };
 /// Cooperative cancellation handle accepted by
 /// [`TurnBuilder::cancel`](crate::TurnBuilder::cancel); re-exported so
@@ -146,9 +146,9 @@ pub mod tools {
 
 pub mod direct {
     pub use lash_core::llm::types::{
-        AttachmentSource, GenerationOptions, LlmEventSender, LlmOutputPart, LlmStreamEvent,
-        LlmTerminalReason, LlmUsage, NonNegativeFiniteF64, NonNegativeFiniteF64Error,
-        ProviderFileScope,
+        AttachmentSource, GenerationDisposition, GenerationOptionDisposition, GenerationOptions,
+        LlmEventSender, LlmOutputPart, LlmStreamEvent, LlmTerminalReason, LlmUsage,
+        NonNegativeFiniteF64, NonNegativeFiniteF64Error, ProviderFileScope,
     };
     pub use lash_core::{
         DirectCompletion, DirectJsonSchema, DirectLlmClient, DirectLlmCompletion, DirectLlmError,
@@ -235,14 +235,15 @@ pub mod remote {
     pub mod llm {
         pub use lash_remote_protocol::llm::{
             RemoteAttachmentRef, RemoteAttachmentSource, RemoteAttachmentTypeMetadata,
-            RemoteDiagnostic, RemoteExecutionEvidence, RemoteGenerationOptions,
-            RemoteLlmContentBlock, RemoteLlmMessage, RemoteLlmOutputPart, RemoteLlmOutputSpec,
-            RemoteLlmRequest, RemoteLlmRequestScope, RemoteLlmResponse, RemoteLlmRole,
-            RemoteLlmTerminalReason, RemoteLlmToolChoice, RemoteLlmToolSpec, RemoteModelCapability,
-            RemoteModelIntent, RemoteProviderFailureKind, RemoteProviderFileScope,
-            RemoteProviderMetadata, RemoteProviderReasoningReplay, RemoteProviderReplayMeta,
-            RemoteReasoningCapability, RemoteReasoningDisableEncoding, RemoteReasoningEncoding,
-            RemoteReasoningSelection, RemoteResponseTextMeta, RemoteSchemaProjectionOverride,
+            RemoteDiagnostic, RemoteExecutionEvidence, RemoteGenerationDisposition,
+            RemoteGenerationOptionDisposition, RemoteGenerationOptions, RemoteLlmContentBlock,
+            RemoteLlmMessage, RemoteLlmOutputPart, RemoteLlmOutputSpec, RemoteLlmRequest,
+            RemoteLlmRequestScope, RemoteLlmResponse, RemoteLlmRole, RemoteLlmTerminalReason,
+            RemoteLlmToolChoice, RemoteLlmToolSpec, RemoteModelCapability, RemoteModelIntent,
+            RemoteProviderFailureKind, RemoteProviderFileScope, RemoteProviderMetadata,
+            RemoteProviderReasoningReplay, RemoteProviderReplayMeta, RemoteReasoningCapability,
+            RemoteReasoningDisableEncoding, RemoteReasoningEncoding, RemoteReasoningSelection,
+            RemoteResponseTextMeta, RemoteSchemaProjectionOverride,
         };
     }
 

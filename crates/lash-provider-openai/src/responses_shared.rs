@@ -659,6 +659,7 @@ pub fn response_from_stream_state(
         request_body,
         http_summary: Some(http_summary),
         execution_evidence: None,
+        generation_disposition: None,
         response_metadata: Default::default(),
     }
 }

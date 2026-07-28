@@ -3,6 +3,7 @@ mod builder;
 pub(crate) mod causal;
 mod clock;
 mod config_ops;
+pub use config_ops::SessionConfigPatch;
 mod effect;
 pub use effect::promise_semantics;
 mod environment;

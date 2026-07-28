@@ -1132,6 +1132,7 @@ impl From<lash_core::SessionPolicy> for RemoteProcessExecutionPolicy {
             autonomous,
             max_turns,
             prompt,
+            generation,
         } = value;
         Self {
             model: model.into(),
@@ -1140,6 +1141,7 @@ impl From<lash_core::SessionPolicy> for RemoteProcessExecutionPolicy {
             autonomous,
             max_turns,
             prompt: prompt.into(),
+            generation: generation.into(),
         }
     }
 }
@@ -1155,6 +1157,7 @@ impl TryFrom<RemoteProcessExecutionPolicy> for lash_core::SessionPolicy {
             autonomous,
             max_turns,
             prompt,
+            generation,
         } = value;
         Ok(Self {
             model: model.try_into()?,
@@ -1163,6 +1166,7 @@ impl TryFrom<RemoteProcessExecutionPolicy> for lash_core::SessionPolicy {
             autonomous,
             max_turns,
             prompt: prompt.into(),
+            generation: generation.try_into()?,
         })
     }
 }

@@ -59,6 +59,7 @@ pub(crate) fn emit_llm_trace_completed(
                 duration_ms,
                 Some(response.terminal_reason),
                 crate::trace::trace_output_parts(&response.parts),
+                response.generation_disposition,
             ),
             usage: Some(crate::trace::trace_usage_from_llm(&response.usage)),
             provider_usage: response.provider_usage.clone(),

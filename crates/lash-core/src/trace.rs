@@ -396,12 +396,15 @@ pub(crate) fn trace_llm_response(
     duration_ms: u64,
     terminal_reason: Option<crate::LlmTerminalReason>,
     parts: Option<serde_json::Value>,
+    generation_disposition: Option<crate::GenerationDisposition>,
 ) -> TraceLlmResponse {
     TraceLlmResponse {
         text,
         duration_ms,
         terminal_reason: terminal_reason.map(|reason| reason.code().to_string()),
         parts,
+        generation_disposition: generation_disposition
+            .and_then(|disposition| serde_json::to_value(disposition).ok()),
     }
 }
 

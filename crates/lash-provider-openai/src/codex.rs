@@ -17,7 +17,8 @@ use crate::reasoning::ReasoningWireIntent;
 use crate::responses_shared as shared;
 use lash_core::llm::transport::{LlmTransportError, ProviderFailure, ProviderFailureKind};
 use lash_core::llm::types::{
-    LlmOutputSpec, LlmRequest, LlmResponse, LlmStreamEvent, LlmTerminalReason, LlmUsage,
+    GenerationDisposition, GenerationOptionDisposition, GenerationOptions, LlmOutputSpec,
+    LlmRequest, LlmResponse, LlmStreamEvent, LlmTerminalReason, LlmUsage,
 };
 use lash_core::provider::{
     CacheRetention, DefaultProviderFailureClassifier, Provider, ProviderComponents,
@@ -471,6 +472,20 @@ impl CodexProvider {
             std::env::consts::OS,
             std::env::consts::ARCH
         )
+    }
+
+    /// Which of the caller's generation options a Codex request carries: none
+    /// of them. The Responses dialect Codex speaks has no seed field, and this
+    /// adapter sends neither a temperature nor a token cap, for the same
+    /// reason it leaves the rest of the sampling surface to the endpoint.
+    fn generation_disposition(generation: &GenerationOptions) -> GenerationDisposition {
+        GenerationDisposition {
+            output_token_cap: GenerationOptionDisposition::unsupported(
+                generation.output_token_cap.is_some(),
+            ),
+            temperature: GenerationOptionDisposition::unsupported(generation.temperature.is_some()),
+            seed: GenerationOptionDisposition::unsupported(generation.seed.is_some()),
+        }
     }
 
     pub(crate) fn build_request_body(
@@ -1383,6 +1398,7 @@ impl CodexProvider {
                 self.websocket_http_summary(&diagnostics),
             );
             partial.terminal_reason = LlmTerminalReason::Unknown;
+            partial.generation_disposition = Some(Self::generation_disposition(&req.generation));
             self.release_websocket_lease(
                 lease.take().expect("websocket lease is present"),
                 false,
@@ -1413,6 +1429,7 @@ impl CodexProvider {
             self.websocket_http_summary(&diagnostics),
         );
         response.http_summary = Some(self.websocket_http_summary(&diagnostics));
+        response.generation_disposition = Some(Self::generation_disposition(&req.generation));
         self.release_websocket_lease(
             lease.take().expect("websocket lease is present"),
             true,
@@ -1761,11 +1778,13 @@ impl Provider for CodexProvider {
             if Self::looks_like_sse_payload(&text) {
                 let mut state = shared::ResponsesStreamState::default();
                 shared::parse_sse_payload(PROVIDER, &text, &mut state)?;
-                let response = shared::response_from_stream_state(
+                let mut response = shared::response_from_stream_state(
                     state,
                     request_body,
                     format!("HTTP POST {} (stream/fallback)", self.responses_url),
                 );
+                response.generation_disposition =
+                    Some(Self::generation_disposition(&req.generation));
                 if let Some(tx) = &stream_events {
                     if response.usage != LlmUsage::default() {
                         tx.send(LlmStreamEvent::Usage(response.usage.clone()));
@@ -1826,6 +1845,7 @@ impl Provider for CodexProvider {
                 request_body,
                 http_summary: Some(format!("HTTP POST {}", self.responses_url)),
                 execution_evidence: None,
+                generation_disposition: Some(Self::generation_disposition(&req.generation)),
                 response_metadata: Default::default(),
             });
         }
@@ -1883,6 +1903,7 @@ impl Provider for CodexProvider {
                 format!("HTTP POST {} (stream)", self.responses_url),
             );
             partial.terminal_reason = LlmTerminalReason::Unknown;
+            partial.generation_disposition = Some(Self::generation_disposition(&req.generation));
             return Err(error.with_partial_response(partial));
         }
 
@@ -1895,6 +1916,7 @@ impl Provider for CodexProvider {
                 format!("HTTP POST {} (stream)", self.responses_url),
             );
             partial.terminal_reason = LlmTerminalReason::Unknown;
+            partial.generation_disposition = Some(Self::generation_disposition(&req.generation));
             return Err(LlmTransportError::new(
                 "Codex stream ended before a terminal response event",
             )
@@ -1920,11 +1942,13 @@ impl Provider for CodexProvider {
             .with_code("empty_stream"));
         }
 
-        Ok(shared::response_from_stream_state(
+        let mut response = shared::response_from_stream_state(
             state,
             request_body,
             format!("HTTP POST {} (stream)", self.responses_url),
-        ))
+        );
+        response.generation_disposition = Some(Self::generation_disposition(&req.generation));
+        Ok(response)
     }
 
     async fn close(&self) -> Result<(), LlmTransportError> {

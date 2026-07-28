@@ -245,7 +245,7 @@ impl TraceSink for FanoutTraceSink {
             </article>
             <article class="panel">
               <h3>LLM interaction</h3>
-              <p><code>LlmCallStarted</code>, <code>LlmCallCompleted</code>, <code>LlmCallFailed</code>. Provider, model, variant, request shape.</p>
+              <p><code>LlmCallStarted</code>, <code>LlmCallCompleted</code>, <code>LlmCallFailed</code>. Provider, model, variant, request shape. <code>LlmCallCompleted</code> also carries <code>generation_disposition</code> when the adapter reports one: per generation option, whether the caller requested it and whether the request that ran actually carried it.</p>
             </article>
             <article class="panel">
               <h3>Streaming (extended only)</h3>

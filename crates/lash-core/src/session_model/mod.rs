@@ -121,6 +121,20 @@ pub struct SessionPolicy {
     pub autonomous: bool,
     pub max_turns: Option<usize>,
     pub prompt: crate::PromptLayer,
+    /// Caller-owned generation intent applied to every LLM call this session
+    /// makes. It lives on the policy rather than on a single turn because it
+    /// is session-wide truth: child sessions resolve their spec against this
+    /// policy, and every carrier of a whole session policy carries it too.
+    ///
+    /// It travels with the rest of the policy on reopen, which per ADR 0030
+    /// means the host's configuration is the authority wherever a host is
+    /// there to supply one: a facade reopen resolves the host's current spec
+    /// and reconciles it over loaded state, exactly as it does for the model
+    /// and the prompt. The persisted copy is what a session resumes with when
+    /// no live host reconciles it — the process/remote path, where
+    /// `RemoteProcessExecutionPolicy` mirrors this field, and core embedders
+    /// that hand [`crate::LashRuntime`] a loaded state directly.
+    pub generation: crate::GenerationOptions,
 }
 
 impl SessionPolicy {
@@ -152,6 +166,9 @@ impl serde::Serialize for SessionPolicy {
         if !self.prompt.is_empty() {
             fields += 1;
         }
+        if self.generation != crate::GenerationOptions::default() {
+            fields += 1;
+        }
         let mut state = serializer.serialize_struct("SessionPolicy", fields)?;
         state.serialize_field("model", &self.model)?;
         state.serialize_field("provider_id", self.recorded_provider_id())?;
@@ -160,6 +177,9 @@ impl serde::Serialize for SessionPolicy {
         state.serialize_field("max_turns", &self.max_turns)?;
         if !self.prompt.is_empty() {
             state.serialize_field("prompt", &self.prompt)?;
+        }
+        if self.generation != crate::GenerationOptions::default() {
+            state.serialize_field("generation", &self.generation)?;
         }
         state.end()
     }
@@ -185,6 +205,8 @@ impl<'de> serde::Deserialize<'de> for SessionPolicy {
             max_turns: Option<usize>,
             #[serde(default)]
             prompt: crate::PromptLayer,
+            #[serde(default)]
+            generation: crate::GenerationOptions,
         }
 
         let value = serde_json::Value::deserialize(deserializer)?;
@@ -204,6 +226,7 @@ impl<'de> serde::Deserialize<'de> for SessionPolicy {
             autonomous: wire.autonomous,
             max_turns: wire.max_turns,
             prompt: wire.prompt,
+            generation: wire.generation,
         })
     }
 }
@@ -251,6 +274,33 @@ impl std::ops::DerefMut for RuntimeSessionPolicy {
     }
 }
 
+/// How a [`SessionSpec`] layers generation intent over the policy it resolves
+/// against.
+///
+/// [`crate::GenerationOptions`] is three independently optional options, not
+/// one value, so the default overlay is per-field: a child that caps output
+/// tokens keeps the temperature and seed its parent pinned. Discarding
+/// inherited intent stays available, but it has to be asked for.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum GenerationOverlay {
+    /// Layer the set options over the inherited ones. Options this overlay
+    /// leaves unset keep the value they inherit.
+    Merge(crate::GenerationOptions),
+    /// Use exactly these options, discarding every inherited one. A default
+    /// [`crate::GenerationOptions`] therefore clears the inherited intent.
+    Replace(crate::GenerationOptions),
+}
+
+impl GenerationOverlay {
+    /// Resolve this overlay against the options it inherits.
+    pub fn resolve(&self, inherited: &crate::GenerationOptions) -> crate::GenerationOptions {
+        match self {
+            Self::Merge(generation) => generation.merged_over(inherited),
+            Self::Replace(generation) => generation.clone(),
+        }
+    }
+}
+
 /// Reusable session configuration overlay.
 ///
 /// `SessionSpec` is the public configuration shape for callers that want to
@@ -263,6 +313,11 @@ pub struct SessionSpec {
     pub model: Option<ModelSpec>,
     pub max_turns: Option<Option<usize>>,
     pub prompt: Option<crate::PromptLayer>,
+    /// Generation intent for every LLM call the session makes. `None` inherits
+    /// the base policy's options unchanged; `Some` applies a
+    /// [`GenerationOverlay`], which merges per option unless it explicitly
+    /// replaces.
+    pub generation: Option<GenerationOverlay>,
 }
 
 impl SessionSpec {
@@ -275,6 +330,7 @@ impl SessionSpec {
             model: None,
             max_turns: None,
             prompt: None,
+            generation: None,
         }
     }
 
@@ -316,6 +372,33 @@ impl SessionSpec {
         self
     }
 
+    /// Layer generation options over the ones the session inherits.
+    ///
+    /// Options this call leaves unset keep their inherited value, so a
+    /// subagent spec that caps output tokens does not silently drop the
+    /// temperature and seed its parent pinned. Use
+    /// [`replace_generation`](Self::replace_generation) or
+    /// [`clear_generation`](Self::clear_generation) to discard what is
+    /// inherited.
+    pub fn generation(mut self, generation: crate::GenerationOptions) -> Self {
+        self.generation = Some(GenerationOverlay::Merge(generation));
+        self
+    }
+
+    /// Use exactly these generation options, discarding every inherited one.
+    pub fn replace_generation(mut self, generation: crate::GenerationOptions) -> Self {
+        self.generation = Some(GenerationOverlay::Replace(generation));
+        self
+    }
+
+    /// Drop the inherited generation options and express none of your own.
+    pub fn clear_generation(mut self) -> Self {
+        self.generation = Some(GenerationOverlay::Replace(
+            crate::GenerationOptions::default(),
+        ));
+        self
+    }
+
     pub fn resolve_against(&self, base: &SessionPolicy) -> SessionPolicy {
         let mut policy = base.clone();
         if let Some(provider_id) = self.provider_id.as_ref() {
@@ -329,6 +412,9 @@ impl SessionSpec {
         }
         if let Some(prompt) = self.prompt.as_ref() {
             policy.prompt = prompt.clone();
+        }
+        if let Some(generation) = self.generation.as_ref() {
+            policy.generation = generation.resolve(&policy.generation);
         }
         policy
     }
@@ -408,5 +494,133 @@ mod tests {
 
         assert_eq!(value["provider_id"], "mock-provider");
         assert!(value.get("provider").is_none());
+    }
+
+    #[test]
+    fn session_policy_persists_generation_options_only_when_set() {
+        let mut policy = SessionPolicy::default();
+        let value = serde_json::to_value(&policy).expect("serialize policy");
+        assert!(
+            value.get("generation").is_none(),
+            "a policy expressing no generation intent must not write the key"
+        );
+
+        policy.generation = crate::GenerationOptions {
+            output_token_cap: std::num::NonZeroUsize::new(4096),
+            temperature: Some(crate::NonNegativeFiniteF64::new(0.0).expect("finite temperature")),
+            seed: Some(1234),
+        };
+        let value = serde_json::to_value(&policy).expect("serialize policy");
+        assert_eq!(
+            value["generation"],
+            serde_json::json!({
+                "output_token_cap": 4096,
+                "temperature": 0.0,
+                "seed": 1234,
+            })
+        );
+
+        let restored: SessionPolicy = serde_json::from_value(value).expect("deserialize policy");
+        assert_eq!(restored.generation, policy.generation);
+    }
+
+    fn pinned_base_policy() -> SessionPolicy {
+        SessionPolicy {
+            generation: crate::GenerationOptions {
+                temperature: Some(
+                    crate::NonNegativeFiniteF64::new(0.7).expect("finite temperature"),
+                ),
+                seed: Some(9),
+                ..Default::default()
+            },
+            ..SessionPolicy::default()
+        }
+    }
+
+    #[test]
+    fn session_spec_generation_inherits_when_absent_and_merges_per_option_when_present() {
+        let base = pinned_base_policy();
+
+        let inherited = SessionSpec::inherit().resolve_against(&base);
+        assert_eq!(inherited.generation, base.generation);
+
+        let merged = SessionSpec::inherit()
+            .generation(crate::GenerationOptions {
+                seed: Some(11),
+                ..Default::default()
+            })
+            .resolve_against(&base);
+        assert_eq!(merged.generation.seed, Some(11));
+        assert_eq!(
+            merged.generation.temperature, base.generation.temperature,
+            "an option the spec leaves unset keeps the value it inherits"
+        );
+    }
+
+    #[test]
+    fn session_spec_generation_merge_keeps_a_parent_pin_a_child_never_mentioned() {
+        // A parent pins sampling for a repeatable benchmark; a subagent
+        // capability only bounds its own output length. The subagent must not
+        // silently fall back to provider-default sampling — nothing reports
+        // an option the child never requested.
+        let base = SessionPolicy {
+            generation: crate::GenerationOptions {
+                temperature: Some(
+                    crate::NonNegativeFiniteF64::new(0.0).expect("finite temperature"),
+                ),
+                seed: Some(42),
+                ..Default::default()
+            },
+            ..SessionPolicy::default()
+        };
+
+        let child = SessionSpec::inherit()
+            .generation(crate::GenerationOptions {
+                output_token_cap: std::num::NonZeroUsize::new(4096),
+                ..Default::default()
+            })
+            .resolve_against(&base);
+
+        assert_eq!(
+            child.generation,
+            crate::GenerationOptions {
+                output_token_cap: std::num::NonZeroUsize::new(4096),
+                temperature: base.generation.temperature.clone(),
+                seed: Some(42),
+            }
+        );
+    }
+
+    #[test]
+    fn session_spec_generation_replaces_and_clears_only_when_asked() {
+        let base = pinned_base_policy();
+
+        let replaced = SessionSpec::inherit()
+            .replace_generation(crate::GenerationOptions {
+                seed: Some(11),
+                ..Default::default()
+            })
+            .resolve_against(&base);
+        assert_eq!(
+            replaced.generation,
+            crate::GenerationOptions {
+                seed: Some(11),
+                ..Default::default()
+            },
+            "an explicit replace discards every inherited option"
+        );
+
+        let cleared = SessionSpec::inherit()
+            .clear_generation()
+            .resolve_against(&base);
+        assert_eq!(cleared.generation, crate::GenerationOptions::default());
+
+        let merged_default = SessionSpec::inherit()
+            .generation(crate::GenerationOptions::default())
+            .resolve_against(&base);
+        assert_eq!(
+            merged_default.generation, base.generation,
+            "an empty merge overlay expresses nothing and so clears nothing"
+        );
     }
 }

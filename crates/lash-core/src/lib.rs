@@ -70,10 +70,10 @@ pub use direct::{
     DirectOutputSpec, DirectPart, DirectRequest, DirectRole,
 };
 pub use lash_sansio::llm::types::{
-    AttachmentSource, AttemptOutcome, AttemptRecord, ExecutionEvidence, GenerationOptions,
-    LlmCallId, LlmCallRecord, LlmOutputPart, LlmRequest, LlmRequestScope, LlmResponse,
-    LlmTerminalReason, NonNegativeFiniteF64, NonNegativeFiniteF64Error, NormalizedError,
-    ProtocolPosition, ProviderFileScope, RetryDecision,
+    AttachmentSource, AttemptOutcome, AttemptRecord, ExecutionEvidence, GenerationDisposition,
+    GenerationOptionDisposition, GenerationOptions, LlmCallId, LlmCallRecord, LlmOutputPart,
+    LlmRequest, LlmRequestScope, LlmResponse, LlmTerminalReason, NonNegativeFiniteF64,
+    NonNegativeFiniteF64Error, NormalizedError, ProtocolPosition, ProviderFileScope, RetryDecision,
 };
 pub use lash_sansio::{
     AcceptedInjectedTurnInput, AttachmentCreateMeta, AttachmentId, AttachmentMeta, AttachmentRef,
@@ -464,6 +464,7 @@ pub use session_model::{
 // Effect / process-control types consumed by external effect hosts (e.g.
 // lash-restate's workflows) and their integration tests. Kept on the public
 // surface; the rest of the runtime block above stays crate-internal.
+pub use runtime::SessionConfigPatch;
 pub use runtime::{
     CanonicalRuntimeEffectEnvelope, LlmRequestSpec, ProcessCommand, ProcessEffectOutcome,
     ProcessEventSemanticsSpec, RuntimeAwaitEventOptions, RuntimeEffectCommand,
@@ -485,7 +486,7 @@ pub use session_graph::{
 };
 pub use session_model::context::PreparedContext;
 pub use session_model::{ConversationRecord, ProtocolEvent, SessionHistoryRecord};
-pub use session_model::{RuntimeSessionPolicy, SessionPolicy, SessionSpec};
+pub use session_model::{GenerationOverlay, RuntimeSessionPolicy, SessionPolicy, SessionSpec};
 pub use store::{
     AttachmentIntent, AttachmentManifest, AttachmentManifestEntry, BlobRef, EphemeralRunId,
     GcReport, IncarnationId, LeaseOwnerIdentity, LeaseOwnerLiveness, LeaseTimings,

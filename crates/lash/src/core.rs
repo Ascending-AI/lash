@@ -969,6 +969,13 @@ impl LashCoreBuilder {
         self
     }
 
+    /// Generation options — output token cap, temperature, seed — carried by
+    /// every LLM call in every session this core opens.
+    pub fn generation(mut self, generation: lash_core::GenerationOptions) -> Self {
+        self.session_spec = self.session_spec.generation(generation);
+        self
+    }
+
     pub fn session_spec(mut self, spec: SessionSpec) -> Self {
         self.session_spec = spec;
         self

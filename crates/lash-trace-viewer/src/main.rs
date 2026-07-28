@@ -1279,6 +1279,7 @@ mod tests {
                     duration_ms: 12,
                     terminal_reason: None,
                     parts: None,
+                    generation_disposition: None,
                 },
                 usage: Some(usage()),
                 provider_usage: None,

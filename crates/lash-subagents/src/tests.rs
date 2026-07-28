@@ -55,6 +55,10 @@ fn lashlang_block(code: &str) -> String {
 fn static_capability_policy_fields_distinguish_inherit_set_and_clear() {
     let current = SessionPolicy {
         model: model_spec("parent-model", Some("parent-variant".to_string()), 200_000),
+        generation: lash_core::GenerationOptions {
+            seed: Some(77),
+            ..Default::default()
+        },
         ..SessionPolicy::default()
     };
     let spec = SessionSpec::inherit().model(model_spec("child-model", None, 100_000));
@@ -67,6 +71,18 @@ fn static_capability_policy_fields_distinguish_inherit_set_and_clear() {
         policy.model.variant,
         lash_core::ReasoningSelection::ProviderDefault
     );
+    assert_eq!(
+        policy.generation, current.generation,
+        "a child inherits the parent's sampling intent instead of falling back to provider defaults"
+    );
+
+    let pinned = SessionSpec::inherit().generation(lash_core::GenerationOptions {
+        seed: Some(5),
+        ..Default::default()
+    });
+    let registry = CapabilityRegistry::new().with(Arc::new(StaticCapability::new("child", pinned)));
+    let policy = build_session_policy(&registry, &current, "child").expect("policy");
+    assert_eq!(policy.generation.seed, Some(5));
 }
 
 struct CustomRequestCapability;

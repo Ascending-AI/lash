@@ -107,6 +107,9 @@ impl LlmToolsProvider {
             .model_variant
             .clone()
             .unwrap_or(session_model.model_variant);
+        // The sub-question runs on the session's behalf, so it carries the
+        // session's sampling intent rather than provider defaults.
+        let generation = session_model.generation;
         let response_schema = llm_query_response_schema(output_schema.as_ref());
         let prompt = llm_query_prompt(&task, &inputs, output_schema.as_ref());
 
@@ -139,7 +142,7 @@ impl LlmToolsProvider {
                     attachments: Vec::new(),
                     output,
                     stream_events: None,
-                    generation: lash_core::GenerationOptions::default(),
+                    generation,
                     session_id: Some(format!("{}-llm-query", context.session_id())),
                     caused_by: None,
                     replay: None,

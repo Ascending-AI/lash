@@ -62,6 +62,12 @@ async fn run_worker_turn(
     system_prompt: &str,
     prompt: &str,
 ) -> Result<ParsedMemoryOutput, PluginError> {
+    // The direct path has no model limits to check a cap against, so the
+    // options are bounded here, where the policy that carries them and the
+    // model they will run on are both in hand. Without this, a session that
+    // capped output and then moved to a smaller model would keep taking turns
+    // (which clamp) while every maintenance call failed at the provider.
+    let generation = policy.model.clamped_generation(&policy.generation);
     let completion = om_host
         .direct_completion(
             DirectRequest {
@@ -81,7 +87,7 @@ async fn run_worker_turn(
                 attachments: Vec::new(),
                 output: DirectOutputSpec::Text,
                 stream_events: None,
-                generation: lash_core::GenerationOptions::default(),
+                generation,
                 session_id: Some(format!("{}-om-{worker_kind}", om_host.session_id())),
                 caused_by: None,
                 replay: None,

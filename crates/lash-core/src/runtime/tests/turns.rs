@@ -701,11 +701,11 @@ async fn session_config_change_hook_receives_context_window_updates() {
         crate::ModelSpec::from_token_limits("alt-model", Default::default(), 123_456, None)
             .expect("valid model spec");
     runtime
-        .update_session_config(
-            Some(alt_provider.into_handle()),
-            Some(alt_model.clone()),
-            None,
-        )
+        .update_session_config(crate::SessionConfigPatch {
+            provider: Some(alt_provider.into_handle()),
+            model: Some(alt_model.clone()),
+            ..Default::default()
+        })
         .await;
 
     let changes = observed.lock().await;
@@ -5082,7 +5082,11 @@ async fn turn_driver_normalizes_alias_effort_into_outgoing_request() {
 
     let mut runtime = runtime_with_plugins(Vec::new(), mock_provider(Vec::new())).await;
     runtime
-        .update_session_config(Some(provider), Some(model), None)
+        .update_session_config(crate::SessionConfigPatch {
+            provider: Some(provider),
+            model: Some(model),
+            ..Default::default()
+        })
         .await;
 
     let turn = runtime
@@ -5157,7 +5161,11 @@ async fn turn_driver_rejects_unsupported_effort_before_provider_call() {
 
     let mut runtime = runtime_with_plugins(Vec::new(), mock_provider(Vec::new())).await;
     runtime
-        .update_session_config(Some(provider), Some(model), None)
+        .update_session_config(crate::SessionConfigPatch {
+            provider: Some(provider),
+            model: Some(model),
+            ..Default::default()
+        })
         .await;
 
     let turn = runtime
@@ -5188,4 +5196,353 @@ async fn turn_driver_rejects_unsupported_effort_before_provider_call() {
         .expect("llm_provider issue");
     assert_eq!(issue.code.as_deref(), Some("unsupported_effort"));
     assert!(issue.message.contains("Unsupported effort `turbo`"));
+}
+
+#[tokio::test]
+async fn session_generation_options_reach_every_provider_request() {
+    use std::num::NonZeroUsize;
+    use std::sync::{Arc, Mutex};
+
+    let captured: Arc<Mutex<Vec<crate::GenerationOptions>>> = Arc::new(Mutex::new(Vec::new()));
+    let captured_for_provider = Arc::clone(&captured);
+    let provider = TestProvider::builder()
+        .kind("generation-capture")
+        // A provider-level output cap is provider configuration, not request
+        // intent: it must not appear on the request the turn driver builds.
+        // The adapter layers it under the request in `resolve_generation_policy`.
+        .options(crate::ProviderOptions {
+            max_output_tokens: Some(1_024),
+            ..Default::default()
+        })
+        .complete(move |req| {
+            let captured = Arc::clone(&captured_for_provider);
+            async move {
+                captured
+                    .lock()
+                    .expect("capture lock")
+                    .push(req.generation.clone());
+                Ok(LlmResponse {
+                    full_text: "ok".to_string(),
+                    parts: vec![LlmOutputPart::Text {
+                        text: "ok".to_string(),
+                        response_meta: None,
+                    }],
+                    ..LlmResponse::default()
+                })
+            }
+        })
+        .build()
+        .into_handle();
+
+    let mut runtime = runtime_with_plugins(Vec::new(), mock_provider(Vec::new())).await;
+    runtime
+        .update_session_config(crate::SessionConfigPatch {
+            provider: Some(provider),
+            ..Default::default()
+        })
+        .await;
+
+    let run_turn = async |runtime: &mut LashRuntime, turn_id: &'static str| {
+        runtime
+            .run_turn_assembled(
+                TurnInput {
+                    items: vec![InputItem::Text {
+                        text: "hello".to_string(),
+                    }],
+                    protocol_turn_options: None,
+                    trace_turn_id: None,
+                    protocol_extension: None,
+                    turn_context: crate::TurnContext::default(),
+                },
+                CancellationToken::new(),
+                named_turn_scope("root", turn_id),
+            )
+            .await
+            .expect("turn");
+    };
+
+    run_turn(&mut runtime, "generation-default-turn").await;
+
+    let requested = crate::GenerationOptions {
+        output_token_cap: NonZeroUsize::new(64),
+        temperature: Some(crate::NonNegativeFiniteF64::new(0.0).expect("finite temperature")),
+        seed: Some(1234),
+    };
+    runtime
+        .update_session_config(crate::SessionConfigPatch {
+            generation: Some(crate::GenerationOverlay::Replace(requested.clone())),
+            ..Default::default()
+        })
+        .await;
+    run_turn(&mut runtime, "generation-requested-turn").await;
+
+    let seen = captured.lock().expect("capture lock").clone();
+    assert_eq!(seen.len(), 2, "each turn issues one provider call");
+    assert_eq!(
+        seen[0],
+        crate::GenerationOptions::default(),
+        "a session that requested nothing must not have provider config echoed back as request intent"
+    );
+    assert_eq!(
+        seen[1], requested,
+        "the session's generation options must reach the provider request verbatim"
+    );
+    assert_eq!(
+        runtime.session_policy().generation,
+        requested,
+        "the requested options are durable session policy, not per-turn state"
+    );
+}
+
+#[tokio::test]
+async fn omitted_generation_options_are_reported_on_the_turn_llm_call_record() {
+    use std::num::NonZeroUsize;
+
+    // The adapter's silent omission (a model that pins sampling, a wire with
+    // no seed field) stays silent so one session-wide setting works across
+    // mixed models — but the turn record says what actually reached the wire,
+    // so a host asserting repeatability learns it was not honored.
+    let dropped_sampling = crate::GenerationDisposition {
+        output_token_cap: crate::GenerationOptionDisposition::Applied,
+        temperature: crate::GenerationOptionDisposition::OmittedSamplingPinned,
+        seed: crate::GenerationOptionDisposition::OmittedUnsupported,
+    };
+    let provider = TestProvider::builder()
+        .kind("disposition-reporting")
+        .complete(move |_req| async move {
+            Ok(LlmResponse {
+                full_text: "ok".to_string(),
+                parts: vec![LlmOutputPart::Text {
+                    text: "ok".to_string(),
+                    response_meta: None,
+                }],
+                generation_disposition: Some(dropped_sampling),
+                ..LlmResponse::default()
+            })
+        })
+        .build()
+        .into_handle();
+
+    let mut runtime = runtime_with_plugins(Vec::new(), mock_provider(Vec::new())).await;
+    runtime
+        .update_session_config(crate::SessionConfigPatch {
+            provider: Some(provider),
+            generation: Some(crate::GenerationOverlay::Replace(
+                crate::GenerationOptions {
+                    output_token_cap: NonZeroUsize::new(128),
+                    temperature: Some(
+                        crate::NonNegativeFiniteF64::new(0.2).expect("finite temperature"),
+                    ),
+                    seed: Some(99),
+                },
+            )),
+            ..Default::default()
+        })
+        .await;
+
+    let turn = runtime
+        .run_turn_assembled(
+            TurnInput {
+                items: vec![InputItem::Text {
+                    text: "hello".to_string(),
+                }],
+                protocol_turn_options: None,
+                trace_turn_id: None,
+                protocol_extension: None,
+                turn_context: crate::TurnContext::default(),
+            },
+            CancellationToken::new(),
+            named_turn_scope("root", "generation-disposition-turn"),
+        )
+        .await
+        .expect("turn");
+
+    let attempt = turn
+        .llm_calls
+        .first()
+        .expect("one provider call")
+        .attempts
+        .first()
+        .expect("one attempt");
+    let reported = attempt
+        .generation_disposition
+        .expect("the adapter reported what it sent");
+    assert_eq!(reported, dropped_sampling);
+    assert!(
+        !reported.nothing_omitted(),
+        "a host asserting repeatability must be able to see the omission"
+    );
+}
+
+#[tokio::test]
+async fn an_output_token_cap_above_the_model_clamps_and_says_so() {
+    use std::num::NonZeroUsize;
+    use std::sync::{Arc, Mutex};
+
+    // The cap is a bound, not a demand, and it is durable session policy: a
+    // `set_model` to a smaller model must not leave the session failing every
+    // remaining turn. The turn sends what the model can produce and the
+    // disposition says the number was reduced.
+    let captured: Arc<Mutex<Vec<crate::GenerationOptions>>> = Arc::new(Mutex::new(Vec::new()));
+    let captured_for_provider = Arc::clone(&captured);
+    let provider = TestProvider::builder()
+        .kind("clamping-capture")
+        .complete(move |req| {
+            let captured = Arc::clone(&captured_for_provider);
+            async move {
+                captured
+                    .lock()
+                    .expect("capture lock")
+                    .push(req.generation.clone());
+                Ok(LlmResponse {
+                    full_text: "ok".to_string(),
+                    parts: vec![LlmOutputPart::Text {
+                        text: "ok".to_string(),
+                        response_meta: None,
+                    }],
+                    // The adapter reports the cap it was handed as applied; it
+                    // has no idea a larger one was asked for.
+                    generation_disposition: Some(crate::GenerationDisposition {
+                        output_token_cap: crate::GenerationOptionDisposition::Applied,
+                        temperature: crate::GenerationOptionDisposition::Applied,
+                        seed: crate::GenerationOptionDisposition::NotRequested,
+                    }),
+                    ..LlmResponse::default()
+                })
+            }
+        })
+        .build()
+        .into_handle();
+
+    let mut runtime = runtime_with_plugins(Vec::new(), mock_provider(Vec::new())).await;
+    runtime
+        .update_session_config(crate::SessionConfigPatch {
+            provider: Some(provider),
+            model: Some(
+                crate::ModelSpec::from_token_limits(
+                    "small-output-model",
+                    Default::default(),
+                    200_000,
+                    Some(2_048),
+                )
+                .expect("valid test model"),
+            ),
+            generation: Some(crate::GenerationOverlay::Replace(
+                crate::GenerationOptions {
+                    output_token_cap: NonZeroUsize::new(32_000),
+                    temperature: Some(
+                        crate::NonNegativeFiniteF64::new(0.0).expect("finite temperature"),
+                    ),
+                    seed: None,
+                },
+            )),
+            ..Default::default()
+        })
+        .await;
+
+    let turn = runtime
+        .run_turn_assembled(
+            TurnInput {
+                items: vec![InputItem::Text {
+                    text: "hello".to_string(),
+                }],
+                protocol_turn_options: None,
+                trace_turn_id: None,
+                protocol_extension: None,
+                turn_context: crate::TurnContext::default(),
+            },
+            CancellationToken::new(),
+            named_turn_scope("root", "clamped-cap-turn"),
+        )
+        .await
+        .expect("a cap above the model's capacity must not fail the turn");
+
+    let seen = captured.lock().expect("capture lock").clone();
+    assert_eq!(
+        seen.first().expect("one provider call").output_token_cap,
+        NonZeroUsize::new(2_048),
+        "the request carries the model's capacity, not the larger cap asked for"
+    );
+    assert_eq!(
+        runtime.session_policy().generation.output_token_cap,
+        NonZeroUsize::new(32_000),
+        "clamping is per request against the current model; the session's intent is unchanged"
+    );
+
+    let reported = turn
+        .llm_calls
+        .first()
+        .expect("one provider call")
+        .attempts
+        .first()
+        .expect("one attempt")
+        .generation_disposition
+        .expect("the adapter reported what it sent");
+    assert_eq!(
+        reported.output_token_cap,
+        crate::GenerationOptionDisposition::ClampedToCapacity
+    );
+    assert!(
+        reported.nothing_omitted(),
+        "a clamped cap reached the wire; it was not dropped"
+    );
+    assert!(
+        !reported.fully_honored(),
+        "a host that needs the number it asked for must be able to see the reduction"
+    );
+}
+
+#[tokio::test]
+async fn a_mid_run_generation_patch_merges_like_the_spec_overlay_does() {
+    use std::num::NonZeroUsize;
+
+    // Both surfaces that set generation options speak one vocabulary. A patch
+    // naming only a cap must not drop a temperature and seed the session
+    // pinned — the loss `SessionSpec`'s overlay exists to prevent, one API
+    // over — and replacing stays available for a host that means it.
+    let mut runtime = runtime_with_plugins(Vec::new(), mock_provider(Vec::new())).await;
+    let pinned = crate::GenerationOptions {
+        output_token_cap: None,
+        temperature: Some(crate::NonNegativeFiniteF64::new(0.0).expect("finite temperature")),
+        seed: Some(42),
+    };
+    runtime
+        .update_session_config(crate::SessionConfigPatch {
+            generation: Some(crate::GenerationOverlay::Replace(pinned.clone())),
+            ..Default::default()
+        })
+        .await;
+
+    runtime
+        .update_session_config(crate::SessionConfigPatch {
+            generation: Some(crate::GenerationOverlay::Merge(crate::GenerationOptions {
+                output_token_cap: NonZeroUsize::new(4_096),
+                ..Default::default()
+            })),
+            ..Default::default()
+        })
+        .await;
+    assert_eq!(
+        runtime.session_policy().generation,
+        crate::GenerationOptions {
+            output_token_cap: NonZeroUsize::new(4_096),
+            temperature: pinned.temperature.clone(),
+            seed: Some(42),
+        },
+        "a patch that names only a cap keeps the sampling the session pinned"
+    );
+
+    runtime
+        .update_session_config(crate::SessionConfigPatch {
+            generation: Some(crate::GenerationOverlay::Replace(
+                crate::GenerationOptions::default(),
+            )),
+            ..Default::default()
+        })
+        .await;
+    assert_eq!(
+        runtime.session_policy().generation,
+        crate::GenerationOptions::default(),
+        "an explicit replace still clears every option"
+    );
 }

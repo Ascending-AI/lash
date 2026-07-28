@@ -136,13 +136,30 @@ fn remote_llm_response_json_round_trips() {
             reasoning_output_tokens: Some(0),
             provider_finish_reason: Some("stop".to_string()),
         }),
+        generation_disposition: Some(RemoteGenerationDisposition {
+            output_token_cap: RemoteGenerationOptionDisposition::Applied,
+            temperature: RemoteGenerationOptionDisposition::OmittedSamplingPinned,
+            seed: RemoteGenerationOptionDisposition::OmittedUnsupported,
+        }),
     };
 
     response.validate().expect("valid response");
     let value = serde_json::to_value(&response).expect("serialize");
+    assert_eq!(
+        value["generation_disposition"],
+        serde_json::json!({
+            "output_token_cap": "applied",
+            "temperature": "omitted_sampling_pinned",
+            "seed": "omitted_unsupported",
+        })
+    );
     let decoded: RemoteLlmResponse = serde_json::from_value(value).expect("deserialize");
     assert_eq!(decoded.protocol_version, REMOTE_PROTOCOL_VERSION);
     assert_eq!(decoded.full_text, "done");
+    assert_eq!(
+        decoded.generation_disposition,
+        response.generation_disposition
+    );
 }
 
 #[test]
@@ -950,7 +967,7 @@ fn nested_protocol_versions_must_match_envelope() {
 
 #[test]
 fn remote_process_env_ref_is_validated_but_serializes_as_string() {
-    assert_eq!(REMOTE_PROTOCOL_VERSION, 19);
+    assert_eq!(REMOTE_PROTOCOL_VERSION, 20);
     let env_ref: RemoteProcessExecutionEnvRef =
         canonical_env_ref().parse().expect("canonical env ref");
     assert_eq!(env_ref.as_str(), canonical_env_ref());
@@ -999,6 +1016,62 @@ fn remote_process_env_persistence_dtos_validate() {
     invalid.env_spec.policy.model.limits.context_window_tokens = 0;
     assert!(matches!(
         invalid.validate(),
+        Err(RemoteProtocolError::InvalidEnvelope { .. })
+    ));
+}
+
+#[test]
+fn process_execution_policy_carries_session_generation_options() {
+    let mut policy = RemoteProcessExecutionPolicy {
+        provider_id: "remote-provider".to_string(),
+        model: RemoteProcessModelSpec {
+            id: "remote-model".to_string(),
+            limits: RemoteProcessModelLimits {
+                context_window_tokens: 4096,
+                output_token_capacity: Some(1024),
+            },
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    assert!(
+        serde_json::to_value(&policy)
+            .expect("serialize policy")
+            .get("generation")
+            .is_none(),
+        "a policy expressing no generation intent must not write the key"
+    );
+
+    policy.generation = RemoteGenerationOptions {
+        output_token_cap: Some(512),
+        temperature: Some(serde_json::Number::from_f64(0.25).expect("finite temperature")),
+        seed: Some(7),
+    };
+    let value = serde_json::to_value(&policy).expect("serialize policy");
+    assert_eq!(
+        value["generation"],
+        serde_json::json!({
+            "output_token_cap": 512,
+            "temperature": 0.25,
+            "seed": 7,
+        })
+    );
+    let decoded: RemoteProcessExecutionPolicy =
+        serde_json::from_value(value).expect("deserialize policy");
+    assert_eq!(decoded, policy);
+
+    // The env spec validates the options it carries, so a zero cap fails at
+    // the boundary instead of reaching a provider.
+    let mut env_spec = RemoteProcessExecutionEnvSpec {
+        plugin_options: RemoteProcessPluginOptions::default(),
+        policy,
+    };
+    env_spec
+        .validate("RemoteProcessExecutionEnvSpec")
+        .expect("valid env spec");
+    env_spec.policy.generation.output_token_cap = Some(0);
+    assert!(matches!(
+        env_spec.validate("RemoteProcessExecutionEnvSpec"),
         Err(RemoteProtocolError::InvalidEnvelope { .. })
     ));
 }
