@@ -16,6 +16,7 @@ where
     attachment_ownership_isolation(make()).await;
     session_store_factory_rejects_cross_session_graph_parents(make()).await;
     session_store_factory_fork_semantics(make()).await;
+    session_store_factory_vacuums_organic_retained_tombstone(make()).await;
     session_store_factory_delete_removes_store_and_is_idempotent(make()).await;
 }
 
@@ -915,6 +916,91 @@ async fn commit_fork_conformance_state(
     state.apply_persisted_commit_result(result);
     state.mark_node_ids_persisted(new_node_ids);
     Ok(())
+}
+
+async fn session_store_factory_vacuums_organic_retained_tombstone(
+    factory: Arc<dyn crate::SessionStoreFactory>,
+) {
+    let request = session_store_request(
+        "retained-tombstone-source",
+        "tombstone-model",
+        crate::SessionRelation::Root,
+    );
+    let source = factory
+        .create_store(&request)
+        .await
+        .expect("create retained-tombstone source");
+    let mut state = crate::RuntimeSessionState {
+        session_id: request.session_id.clone(),
+        session_lifetime: crate::SessionLifetime::durable(
+            source
+                .load_session_meta()
+                .await
+                .expect("load retained-tombstone metadata")
+                .expect("retained-tombstone metadata")
+                .incarnation_id,
+        ),
+        ..Default::default()
+    };
+    state.ensure_agent_frame_initialized();
+    let leaf_node_id = state
+        .session_graph
+        .leaf_node_id
+        .clone()
+        .expect("retained-tombstone leaf");
+    source
+        .commit_runtime_state(crate::RuntimeCommit::persisted_state_for_test(&state, &[]))
+        .await
+        .expect("commit retained-tombstone source");
+    factory
+        .pin(&leaf_node_id)
+        .await
+        .expect("pin retained-tombstone leaf");
+    factory
+        .delete_session(&request.session_id)
+        .await
+        .expect("delete retained-tombstone source");
+    factory
+        .unpin(&leaf_node_id)
+        .await
+        .expect("unpin deleted source leaf to zero");
+
+    assert!(
+        source
+            .load_node(&leaf_node_id)
+            .await
+            .expect("read retained tombstone")
+            .is_none(),
+        "decrement-to-zero tombstones must be hidden before vacuum"
+    );
+    let fork_error = factory
+        .fork_at(&crate::ForkSessionRequest {
+            session_id: "retained-tombstone-fork".to_string(),
+            node_id: leaf_node_id.clone(),
+            relation: crate::SessionRelation::Root,
+            policy: request.policy,
+        })
+        .await
+        .expect_err("a retained tombstone must not be forkable");
+    assert!(matches!(
+        fork_error,
+        crate::StoreError::ForkPointNotRetained { node_id } if node_id == leaf_node_id
+    ));
+
+    let report = source.vacuum().await.expect("vacuum retained tombstone");
+    assert_eq!(
+        report.removed_node_count, 1,
+        "vacuum must physically remove the organically created tombstone"
+    );
+    assert_eq!(
+        source
+            .vacuum()
+            .await
+            .expect("repeat retained-tombstone vacuum")
+            .removed_node_count,
+        0,
+        "vacuum must consume each retained tombstone exactly once"
+    );
 }
 
 async fn session_store_factory_delete_removes_store_and_is_idempotent(
