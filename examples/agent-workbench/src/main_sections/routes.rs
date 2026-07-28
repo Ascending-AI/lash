@@ -21,7 +21,7 @@ async fn app_state(
         .session(session_id.clone())
         .open()
         .await
-        .map_err(AppError::internal)?;
+        .map_err(AppError::session_open)?;
     let observation_snapshot = session.observe().recoverable_chat_snapshot();
     let active_turns = state.active_turns.for_session(&session_id);
     let active_turn_ids = active_turns

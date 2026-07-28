@@ -237,26 +237,7 @@ mod tests {
         );
     }
 
-    #[test]
-    fn workbench_ui_renders_accounts_panel() {
-        assert!(ui::INDEX_HTML.contains("id=\"accountsView\""));
-        assert!(ui::INDEX_HTML.contains("data-view=\"accounts\""));
-        assert!(ui::INDEX_HTML.contains("id=\"accountAddForm\""));
-        assert!(ui::INDEX_HTML.contains("async function loadAccounts"));
-        assert!(ui::INDEX_HTML.contains("async function deleteAccount"));
-    }
-
-    #[test]
-    fn workbench_ui_distinguishes_running_turn_ingress_actions() {
-        assert!(ui::INDEX_HTML.contains("id=\"injectNow\""));
-        assert!(ui::INDEX_HTML.contains("id=\"queueNext\""));
-        assert!(ui::INDEX_HTML.contains("injected now"));
-        assert!(ui::INDEX_HTML.contains("queued next"));
-        assert!(ui::INDEX_HTML.contains("/api/turn/input"));
-        assert!(ui::INDEX_HTML.contains("event.type === \"turn_input\""));
-        assert!(ui::INDEX_HTML.contains("event.type === \"message\""));
-        assert!(ui::INDEX_HTML.contains("renderMessage(event.message)"));
-    }
+    include!("tests/ui_contract.rs");
 
     #[test]
     fn mail_received_event_type_matches_source_type() {
@@ -1563,6 +1544,21 @@ finish initial
             graph_index.graphs.is_empty(),
             "new session graph index should be empty after reset: {graph_index:#?}"
         );
+        core_store_factory
+            .delete_session(&old_session_id)
+            .await
+            .expect("retire old session for route check");
+        let retired_error = Box::pin(app_state(
+            State(state.clone()),
+            Query(SessionQuery {
+                session_id: Some(old_session_id.clone()),
+            }),
+        ))
+        .await
+        .expect_err("retired session state must be refused");
+        assert_eq!(retired_error.status, StatusCode::CONFLICT);
+        assert!(retired_error.message.contains(&old_session_id));
+        assert!(retired_error.message.contains("was used and deleted"));
         let _ = std::fs::remove_dir_all(data_dir);
     }
 
