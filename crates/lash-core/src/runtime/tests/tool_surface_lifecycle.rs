@@ -169,7 +169,7 @@ async fn parked_resume_keeps_the_store_bound_session_id() {
     let runtime = LashRuntime::from_environment(
         &env,
         standard_test_policy(),
-        root_state("parked-incarnation"),
+        root_state("parked-session"),
         Some(store.clone() as Arc<dyn crate::RuntimePersistence>),
     )
     .await
@@ -195,7 +195,7 @@ async fn parked_resume_keeps_the_store_bound_session_id() {
         crate::ExecutionScope::Turn {
             ref session_id,
             ref turn_id,
-        } if session_id == "parked-incarnation" && turn_id == "resumed-turn"
+        } if session_id == "parked-session" && turn_id == "resumed-turn"
     ));
 }
 

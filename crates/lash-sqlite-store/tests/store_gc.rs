@@ -421,7 +421,7 @@ async fn sqlite_factory_delete_session_removes_only_the_selected_session() {
 }
 
 #[tokio::test]
-async fn sqlite_catalog_partitions_derived_node_ids_by_incarnation() {
+async fn sqlite_catalog_partitions_derived_node_ids_by_session() {
     let root = unique_temp_dir("global-node-id");
     let factory = SqliteSessionStoreFactory::new(&root);
     let store_for = |session_id: &str| SessionStoreCreateRequest {
@@ -452,7 +452,7 @@ async fn sqlite_catalog_partitions_derived_node_ids_by_incarnation() {
             },
         };
         let usage = TokenLedgerEntry {
-            source: "incarnation-partition-probe".to_string(),
+            source: "session-partition-probe".to_string(),
             model: "test".to_string(),
             usage: TokenUsage {
                 input_tokens: 1,
