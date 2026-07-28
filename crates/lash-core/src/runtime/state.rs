@@ -388,6 +388,18 @@ impl RuntimeSessionState {
         }
     }
 
+    pub fn queue_drain_scope(&self, drain_id: impl Into<String>) -> crate::ExecutionScope {
+        let drain_id = drain_id.into();
+        match self.session_lifetime.as_durable() {
+            Some(incarnation_id) => crate::ExecutionScope::queue_drain_incarnation(
+                &self.session_id,
+                incarnation_id.clone(),
+                drain_id,
+            ),
+            None => crate::ExecutionScope::queue_drain(&self.session_id, drain_id),
+        }
+    }
+
     pub(crate) fn refresh_current_frame_projection(&mut self) {
         self.current_frame_node_id = self
             .session_graph

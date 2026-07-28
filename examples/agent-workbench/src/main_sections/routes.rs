@@ -798,11 +798,17 @@ async fn reset_chat(
 ) -> Result<Json<StateSnapshot>, AppError> {
     let old_session_id = query.resolve(&state)?;
     restate::cancel_cron_jobs_for_session(&state, &old_session_id, "reset").await?;
+    let execution_scope = state
+        .core
+        .session_delete_scope(&old_session_id)
+        .await
+        .map_err(AppError::internal)?;
     restate::submit_session_delete(
         &state,
         restate::WorkbenchSessionDeleteWorkflowRequest {
             operation_id: format!("workbench-delete-{}", uuid::Uuid::new_v4()),
             session_id: old_session_id.clone(),
+            execution_scope,
         },
     )
     .await?;

@@ -753,11 +753,18 @@ finish "started lifecycle gates"
     )
     .await;
 
+    let execution_scope = harness
+        .state
+        .core
+        .session_delete_scope(&deleted_session_id)
+        .await
+        .expect("resolve deleted session incarnation");
     let delete_invocation_id = restate::submit_session_delete(
         &harness.state,
         restate::WorkbenchSessionDeleteWorkflowRequest {
             operation_id: format!("workbench-delete-{}", uuid::Uuid::new_v4()),
             session_id: deleted_session_id.clone(),
+            execution_scope,
         },
     )
     .await

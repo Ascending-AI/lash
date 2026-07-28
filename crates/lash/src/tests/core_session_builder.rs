@@ -1307,12 +1307,47 @@ async fn core_delete_session_removes_factory_backed_session_state() -> Result<()
     drop(session);
 
     let report = core
-        .delete_session("delete-session", session_delete_scope("delete-session"))
+        .delete_session(
+            "delete-session",
+            session_delete_scope(&core, "delete-session").await,
+        )
         .await?;
     let reopened = core.session("delete-session").open().await?;
 
     assert_eq!(report.session_id, "delete-session");
     assert!(reopened.read_view().messages().is_empty());
+    Ok(())
+}
+
+#[tokio::test]
+async fn core_delete_session_retires_the_deleted_lifetime_effect_journal() -> Result<()> {
+    let factory = Arc::new(DeletingStoreFactory::default());
+    let effect_host = Arc::new(lash_core::testing::conformance::RecordingEffectHost::default());
+    let core = explicit_ephemeral_facets(LashCore::standard_builder())
+        .provider(mock_provider())
+        .model(mock_model_spec())
+        .store_factory(factory)
+        .effect_host(effect_host.clone())
+        .build()?;
+    drop(core.session("retire-delete-session").open().await?);
+
+    let execution_scope = core.session_delete_scope("retire-delete-session").await?;
+    let incarnation_id = execution_scope
+        .incarnation_id()
+        .expect("session delete scope incarnation")
+        .clone();
+    let scoped = effect_host
+        .scoped_static(execution_scope)?
+        .expect("recording host static scope");
+    core.delete_session("retire-delete-session", scoped).await?;
+
+    assert_eq!(
+        effect_host.retirements(),
+        vec![lash_core::EffectJournalRetirement::session(
+            "retire-delete-session",
+            incarnation_id,
+        )]
+    );
     Ok(())
 }
 

@@ -401,7 +401,7 @@ async fn postgres_effect_host_satisfies_cold_instance_await_event_conformance_wh
 }
 
 #[tokio::test]
-async fn postgres_durable_effect_host_rejects_unincarnated_turn_scope_when_configured() {
+async fn postgres_durable_effect_host_rejects_unincarnated_session_scopes_when_configured() {
     let Some((_database_lock, storage)) = storage().await else {
         eprintln!(
             "skipping Postgres bare-turn scope rejection: LASH_POSTGRES_DATABASE_URL is not set"
@@ -420,6 +420,19 @@ async fn postgres_durable_effect_host_rejects_unincarnated_turn_scope_when_confi
         error.code.as_str(),
         "durable_turn_scope_missing_incarnation"
     );
+    for scope in [
+        ExecutionScope::queue_drain("session", "drain"),
+        ExecutionScope::session_delete("session"),
+    ] {
+        let error = match storage.effect_host().scoped(scope) {
+            Ok(_) => panic!("durable host must reject a bare session-lifetime scope"),
+            Err(error) => error,
+        };
+        assert_eq!(
+            error.code.as_str(),
+            "durable_session_scope_missing_incarnation"
+        );
+    }
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
@@ -594,6 +607,21 @@ async fn postgres_runtime_effect_controller_satisfies_conformance_when_configure
         return;
     };
     reset(&storage).await;
+
+    let host = storage.effect_host();
+    lash_core::testing::conformance::effect_host_session_scope_journals_are_isolated(&host).await;
+    lash_core::testing::conformance::effect_host_retires_session_journal(&host).await;
+    lash_core::testing::conformance::effect_host_retires_process_journal(&host).await;
+    let retained: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM lash_runtime_effect_replay
+         WHERE session_id = $1 AND incarnation_id = $2",
+    )
+    .bind("retired-journal-session")
+    .bind("retired-journal-incarnation")
+    .fetch_one(storage.pool())
+    .await
+    .expect("count retained Postgres session journal rows");
+    assert_eq!(retained, 0);
 
     let first_incarnation = storage.runtime_effect_controller(ExecutionScope::turn_incarnation(
         "postgres-reused-session",

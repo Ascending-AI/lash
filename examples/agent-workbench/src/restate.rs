@@ -63,6 +63,7 @@ pub(crate) struct WorkbenchButtonTriggerWorkflowRequest {
 pub(crate) struct WorkbenchSessionDeleteWorkflowRequest {
     pub operation_id: String,
     pub session_id: String,
+    pub execution_scope: lash_core::ExecutionScope,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -843,9 +844,7 @@ async fn run_session_delete(
     controller: &lash_restate::RestateRuntimeEffectController<'_, WorkflowContext<'_>>,
 ) -> Result<(), AppError> {
     let scoped_effect_controller = controller
-        .scoped_effect_controller(lash::runtime::ExecutionScope::session_delete(
-            &request.session_id,
-        ))
+        .scoped_effect_controller(request.execution_scope)
         .map_err(AppError::internal)?;
     let report = state
         .core

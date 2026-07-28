@@ -1006,6 +1006,19 @@ impl lash_core::SessionStoreFactory for DeletingStoreFactory {
         Ok(store as Arc<dyn lash_core::RuntimePersistence>)
     }
 
+    async fn open_existing_store(
+        &self,
+        request: &lash_core::SessionStoreCreateRequest,
+    ) -> std::result::Result<Option<Arc<dyn lash_core::RuntimePersistence>>, String> {
+        Ok(self
+            .stores
+            .lock()
+            .expect("deleting factory lock")
+            .get(&request.session_id)
+            .cloned()
+            .map(|store| store as Arc<dyn lash_core::RuntimePersistence>))
+    }
+
     async fn delete_session(&self, session_id: &str) -> std::result::Result<(), String> {
         self.stores
             .lock()
@@ -1856,8 +1869,15 @@ fn runtime_operation_scope(
         .expect("effect host supplies an owned runtime operation scope")
 }
 
-fn session_delete_scope(session_id: &str) -> lash_core::ScopedEffectController<'static> {
-    inline_scope(lash_core::ExecutionScope::session_delete(session_id))
+async fn session_delete_scope(
+    core: &LashCore,
+    session_id: &str,
+) -> lash_core::ScopedEffectController<'static> {
+    inline_scope(
+        core.session_delete_scope(session_id)
+            .await
+            .expect("session delete execution scope"),
+    )
 }
 
 fn explicit_ephemeral_facets(

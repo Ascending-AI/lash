@@ -15,8 +15,8 @@ mod trigger;
 
 pub use control::{
     AwaitEventKey, AwaitEventResolver, AwaitEventWaitIdentity, BoundaryReason, EffectHost,
-    ExecutionScope, ExternalCompletionError, Resolution, ResolveOutcome, RuntimeEffectController,
-    ScopedEffectController, SegmentProgress,
+    EffectJournalIdentity, EffectJournalRetirement, ExecutionScope, ExternalCompletionError,
+    Resolution, ResolveOutcome, RuntimeEffectController, ScopedEffectController, SegmentProgress,
 };
 pub(crate) use control::{
     EffectTaskController, RuntimeEffectControllerHandle, drive_effect_controller_task,

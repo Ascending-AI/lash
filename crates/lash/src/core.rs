@@ -313,7 +313,7 @@ impl QueuedWorkRunHandle for InlineQueuedWorkRunHandle {
             runtime,
             Arc::clone(&self.config.live_replay_store),
         );
-        let scope = lash_core::ExecutionScope::queue_drain(session_id, reason);
+        let scope = handle.observe().persisted_state.queue_drain_scope(reason);
         let scoped = effect_host.scoped(scope).map_err(|error| {
             lash_core::QueuedWorkRunError::terminal(lash_core::PluginError::Session(
                 error.to_string(),
@@ -388,6 +388,54 @@ impl LashCore {
             plugin_factories: Vec::new(),
             plugin_options: PluginOptions::default(),
         }
+    }
+
+    async fn current_session_incarnation(
+        &self,
+        session_id: &str,
+    ) -> Result<Option<lash_core::IncarnationId>> {
+        let Some(store_factory) = self.store_factory.as_ref() else {
+            return Err(EmbedError::MissingSessionStoreFactory);
+        };
+        let request = lash_core::SessionStoreCreateRequest {
+            session_id: session_id.to_string(),
+            relation: lash_core::SessionRelation::Root,
+            policy: self.policy.clone(),
+        };
+        let Some(store) = store_factory
+            .open_existing_store(&request)
+            .await
+            .map_err(|message| EmbedError::StoreFactory {
+                session_id: session_id.to_string(),
+                message,
+            })?
+        else {
+            return Ok(None);
+        };
+        Ok(store
+            .load_session_meta()
+            .await?
+            .map(|meta| meta.incarnation_id))
+    }
+
+    /// Build the lifetime-qualified effect scope required to delete the
+    /// currently stored incarnation of `session_id`.
+    pub async fn session_delete_scope(
+        &self,
+        session_id: impl AsRef<str>,
+    ) -> Result<lash_core::ExecutionScope> {
+        let session_id = session_id.as_ref();
+        let incarnation_id = self
+            .current_session_incarnation(session_id)
+            .await?
+            .ok_or_else(|| EmbedError::StoreFactory {
+                session_id: session_id.to_string(),
+                message: "session does not exist".to_string(),
+            })?;
+        Ok(lash_core::ExecutionScope::session_delete_incarnation(
+            session_id,
+            incarnation_id,
+        ))
     }
 
     /// Rebuild a live session from a [`ParkedSession`](crate::ParkedSession)
@@ -694,6 +742,30 @@ impl LashCore {
         let Some(store_factory) = self.store_factory.as_ref() else {
             return Err(EmbedError::MissingSessionStoreFactory);
         };
+        let requested_incarnation = match scoped_effect_controller.execution_scope() {
+            lash_core::ExecutionScope::SessionDelete {
+                session_id: scoped_session_id,
+                incarnation_id: Some(incarnation_id),
+            } if scoped_session_id == &session_id => incarnation_id.clone(),
+            _ => {
+                return Err(lash_core::RuntimeError::new(
+                    "session_delete_scope_mismatch",
+                    "session deletion requires a matching lifetime-qualified SessionDelete scope",
+                )
+                .into());
+            }
+        };
+        if let Some(current_incarnation) = self.current_session_incarnation(&session_id).await?
+            && current_incarnation != requested_incarnation
+        {
+            return Err(lash_core::RuntimeError::new(
+                "session_delete_incarnation_mismatch",
+                format!(
+                    "session `{session_id}` is incarnation `{current_incarnation}`, not requested incarnation `{requested_incarnation}`"
+                ),
+            )
+            .into());
+        }
         let process = if let Some(process_registry) = self.env.process_registry.as_ref() {
             let invocation = RuntimeInvocation::effect(
                 RuntimeScope::new(session_id.clone()),
@@ -762,6 +834,19 @@ impl LashCore {
             .map_err(|message| EmbedError::StoreFactory {
                 session_id: session_id.clone(),
                 message,
+            })?;
+        self.env
+            .core
+            .control
+            .effect_host
+            .retire_effect_journal(lash_core::EffectJournalRetirement::session(
+                &session_id,
+                requested_incarnation,
+            ))
+            .await
+            .map_err(|err| EmbedError::SessionDeleteProcess {
+                session_id: session_id.clone(),
+                message: err.to_string(),
             })?;
         Ok(SessionDeleteReport {
             session_id,

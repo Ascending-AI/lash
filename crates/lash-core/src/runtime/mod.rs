@@ -154,9 +154,10 @@ pub use clock::{Clock, SystemClock};
 pub(crate) use effect::RuntimeEffectControllerHandle;
 pub use effect::{
     AwaitEventKey, AwaitEventResolver, AwaitEventWaitIdentity, BoundaryReason,
-    CanonicalRuntimeEffectEnvelope, CausalRef, EffectHost, ExecutionScope, ExternalCompletionError,
-    InlineEffectHost, InlineRuntimeEffectController, LlmAttachmentSpec, LlmRequestSpec,
-    ProcessCommand, ProcessEffectOutcome, Resolution, ResolveOutcome, RuntimeAwaitEventOptions,
+    CanonicalRuntimeEffectEnvelope, CausalRef, EffectHost, EffectJournalIdentity,
+    EffectJournalRetirement, ExecutionScope, ExternalCompletionError, InlineEffectHost,
+    InlineRuntimeEffectController, LlmAttachmentSpec, LlmRequestSpec, ProcessCommand,
+    ProcessEffectOutcome, Resolution, ResolveOutcome, RuntimeAwaitEventOptions,
     RuntimeDirectLlmOutcome, RuntimeEffectCommand, RuntimeEffectController,
     RuntimeEffectControllerError, RuntimeEffectEnvelope, RuntimeEffectKind,
     RuntimeEffectLocalExecutor, RuntimeEffectOutcome, RuntimeEffectReplayMismatchSummary,

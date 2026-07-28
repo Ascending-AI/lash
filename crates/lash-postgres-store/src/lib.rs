@@ -102,7 +102,9 @@ const SCHEMA_COMPONENT: &str = "lash-postgres-store";
 // realization digest; stores derive their lookup hash from commit content.
 // Bumped to 26 to remove cached graph-node reference counts. Node retirement
 // now derives liveness from parent edges, session heads, and anchors.
-const SCHEMA_VERSION: i32 = 26;
+// Bumped to 27 for canonical typed effect-journal identity and indexed
+// session/incarnation lifecycle joins. Pre-27 databases are rejected.
+const SCHEMA_VERSION: i32 = 27;
 const PROCESS_LEASE_SCHEMA_VERSION: u32 = lash_core::PROCESS_LEASE_SCHEMA_VERSION;
 
 #[derive(Clone)]

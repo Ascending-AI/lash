@@ -326,7 +326,28 @@ impl Processes {
     /// `cutoff_epoch_ms`, returning what was reclaimed. Non-terminal rows are
     /// never touched. Choose a cutoff comfortably longer than any live await.
     pub async fn prune(&self, cutoff_epoch_ms: u64) -> Result<lash_core::ProcessPruneReport> {
-        self.registry()?
+        let registry = self.registry()?;
+        let candidates = registry
+            .list_processes(&lash_core::ProcessListFilter {
+                status: lash_core::ProcessStatusFilter::Any,
+                ..lash_core::ProcessListFilter::default()
+            })
+            .await?;
+        for process in candidates
+            .into_iter()
+            .filter(|process| process.is_terminal() && process.updated_at_ms < cutoff_epoch_ms)
+        {
+            self.core
+                .env
+                .core
+                .control
+                .effect_host
+                .retire_effect_journal(lash_core::EffectJournalRetirement::process(
+                    process.id.clone(),
+                ))
+                .await?;
+        }
+        registry
             .prune_terminal_processes(cutoff_epoch_ms, None, None)
             .await
             .map_err(Into::into)

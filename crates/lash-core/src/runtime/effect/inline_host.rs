@@ -5,8 +5,8 @@ use tokio_util::sync::CancellationToken;
 
 use super::{
     AwaitEventKey, AwaitEventResolver, AwaitEventWaitIdentity, BoundaryReason, EffectHost,
-    ExecutionScope, InlineRuntimeEffectController, Resolution, ResolveOutcome,
-    RuntimeEffectController, RuntimeEffectControllerError, RuntimeEffectEnvelope,
+    EffectJournalRetirement, ExecutionScope, InlineRuntimeEffectController, Resolution,
+    ResolveOutcome, RuntimeEffectController, RuntimeEffectControllerError, RuntimeEffectEnvelope,
     RuntimeEffectLocalExecutor, RuntimeEffectOutcome, ScopedEffectController, SegmentProgress,
 };
 use crate::RuntimeError;
@@ -133,6 +133,13 @@ impl EffectHost for InlineEffectHost {
             }),
             scope,
         )?))
+    }
+
+    async fn retire_effect_journal(
+        &self,
+        _retirement: EffectJournalRetirement,
+    ) -> Result<usize, RuntimeError> {
+        Ok(0)
     }
 }
 

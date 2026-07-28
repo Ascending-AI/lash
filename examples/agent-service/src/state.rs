@@ -147,8 +147,13 @@ impl AppStateData {
 
     pub(crate) async fn discard_pending_chat_fork(&self, chat_id: &str) -> AppResult<()> {
         let effect_host = self.core.effect_host();
+        let execution_scope = self
+            .core
+            .session_delete_scope(chat_id)
+            .await
+            .map_err(|err| AppError::internal(err.to_string()))?;
         let scope = effect_host
-            .scoped(lash::runtime::ExecutionScope::session_delete(chat_id))
+            .scoped(execution_scope)
             .map_err(|err| AppError::internal(err.to_string()))?;
         self.core
             .delete_session(chat_id, scope)
