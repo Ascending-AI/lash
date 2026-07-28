@@ -12,6 +12,28 @@ pub(crate) async fn lock_session_history_mutation_tx(
     Ok(())
 }
 
+async fn lock_live_session_history_mutation_tx(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    session_id: &str,
+) -> Result<(), StoreError> {
+    lock_session_history_mutation_tx(tx, session_id).await?;
+    let deleted = sqlx::query_scalar::<_, bool>(
+        "SELECT EXISTS(
+            SELECT 1 FROM lash_deleted_sessions WHERE session_id = $1
+         )",
+    )
+    .bind(session_id)
+    .fetch_one(&mut **tx)
+    .await
+    .map_err(store_sqlx_error)?;
+    if deleted {
+        return Err(StoreError::SessionDeleted {
+            session_id: session_id.to_string(),
+        });
+    }
+    Ok(())
+}
+
 const POSTGRES_QUEUED_WORK_HEAD_CANDIDATE_PREDICATE: &str = "session_id = $1
        AND available_at_ms <= FLOOR(EXTRACT(EPOCH FROM transaction_timestamp()) * 1000)
        AND (
@@ -318,21 +340,7 @@ impl SessionCommitStore for PostgresSessionStore {
         // A head row does not exist during the first commit, so row locking
         // alone cannot serialize create-versus-delete. This session-keyed lock
         // is the common authority for every history commit and deletion.
-        lock_session_history_mutation_tx(&mut tx, &commit.session_id).await?;
-        let deleted = sqlx::query_scalar::<_, bool>(
-            "SELECT EXISTS(
-                SELECT 1 FROM lash_deleted_sessions WHERE session_id = $1
-             )",
-        )
-        .bind(&commit.session_id)
-        .fetch_one(&mut *tx)
-        .await
-        .map_err(store_sqlx_error)?;
-        if deleted {
-            return Err(StoreError::SessionDeleted {
-                session_id: commit.session_id.clone(),
-            });
-        }
+        lock_live_session_history_mutation_tx(&mut tx, &commit.session_id).await?;
         // Read without a lock for early validation and receipt replay. Before
         // mutating graph reachability, existing sessions lock and recheck this
         // revision so commit, maintenance, and deletion share one authority.
@@ -798,6 +806,7 @@ impl SessionCommitStore for PostgresSessionStore {
             relation: lash_core::SessionRelation::Root,
         };
         let mut tx = self.pool.begin().await.map_err(store_sqlx_error)?;
+        lock_live_session_history_mutation_tx(&mut tx, session_id).await?;
         sqlx::query(
             "INSERT INTO lash_session_meta (session_id, meta_json)
              VALUES ($1, $2)
@@ -821,6 +830,9 @@ impl SessionCommitStore for PostgresSessionStore {
     }
 
     async fn save_session_meta(&self, meta: SessionMeta) -> Result<(), StoreError> {
+        self.bind_session_id(&meta.session_id)?;
+        let mut tx = self.pool.begin().await.map_err(store_sqlx_error)?;
+        lock_live_session_history_mutation_tx(&mut tx, &meta.session_id).await?;
         let updated = sqlx::query(
             "INSERT INTO lash_session_meta (session_id, meta_json)
              VALUES ($1, $2)
@@ -830,11 +842,19 @@ impl SessionCommitStore for PostgresSessionStore {
         .bind(&meta.session_id)
         .bind(encode_json(&meta))
         .bind(meta.incarnation_id.as_str())
-        .execute(&self.pool)
+        .execute(&mut *tx)
         .await
         .map_err(store_sqlx_error)?;
         if updated.rows_affected() == 0 {
-            let existing = self.load_session_meta().await?;
+            let existing = sqlx::query_scalar::<_, String>(
+                "SELECT meta_json FROM lash_session_meta WHERE session_id = $1",
+            )
+            .bind(&meta.session_id)
+            .fetch_optional(&mut *tx)
+            .await
+            .map_err(store_sqlx_error)?
+            .map(|json| store_decode_json::<SessionMeta>(&json, "session meta"))
+            .transpose()?;
             return Err(StoreError::SessionIncarnationMismatch {
                 session_id: meta.session_id,
                 expected_incarnation_id: existing.map_or_else(
@@ -844,6 +864,7 @@ impl SessionCommitStore for PostgresSessionStore {
                 actual_incarnation_id: meta.incarnation_id.to_string(),
             });
         }
+        tx.commit().await.map_err(store_sqlx_error)?;
         Ok(())
     }
 

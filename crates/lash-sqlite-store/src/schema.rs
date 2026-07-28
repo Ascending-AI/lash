@@ -47,6 +47,10 @@ CREATE TABLE IF NOT EXISTS node_anchors (
     source_session_id TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS deleted_sessions (
+    session_id TEXT PRIMARY KEY
+);
+
 CREATE TABLE IF NOT EXISTS graph_nodes (
     seq            INTEGER PRIMARY KEY,
     session_id     TEXT NOT NULL,
@@ -239,7 +243,11 @@ CREATE INDEX IF NOT EXISTS idx_attachment_manifest_owner
 ///
 /// Bumped to 19 to remove cached graph-node reference counts. Node retirement
 /// now derives liveness from parent edges, session heads, and anchors.
-pub(crate) const SCHEMA_VERSION: i32 = 19;
+///
+/// Bumped to 20 so deletion tombstones fence commits through stale session
+/// handles. Tombstones intentionally have the same unbounded lifetime as the
+/// PostgreSQL backend and are lifted only by explicit session recreation.
+pub(crate) const SCHEMA_VERSION: i32 = 20;
 
 pub(crate) const PROCESS_SCHEMA: &str = "
 CREATE TABLE IF NOT EXISTS processes (

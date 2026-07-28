@@ -65,10 +65,6 @@ impl InMemorySessionStore {
         &self,
         session_id: &str,
     ) -> Result<(), crate::StoreError> {
-        let _transaction = self
-            .write_transaction
-            .lock()
-            .expect("lock in-memory write transaction");
         let mut heads = self
             .global_session_heads
             .lock()

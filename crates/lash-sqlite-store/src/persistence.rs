@@ -25,6 +25,27 @@
 
 use super::*;
 
+pub(crate) fn ensure_session_not_deleted_conn(
+    conn: &rusqlite::Connection,
+    session_id: &str,
+) -> Result<(), StoreError> {
+    let deleted = conn
+        .query_row(
+            "SELECT 1 FROM deleted_sessions WHERE session_id = ?1",
+            params![session_id],
+            |_| Ok(()),
+        )
+        .optional()
+        .map_err(sqlite_error)?
+        .is_some();
+    if deleted {
+        return Err(StoreError::SessionDeleted {
+            session_id: session_id.to_string(),
+        });
+    }
+    Ok(())
+}
+
 const SQLITE_QUEUED_WORK_HEAD_CANDIDATE_PREDICATE: &str = "session_id = ?1
        AND available_at_ms <= ?2
        AND (
@@ -267,6 +288,7 @@ impl SessionCommitStore for Store {
             .conn
             .write_flow(move |tx| {
                 let outcome: Result<RuntimeCommitResult, StoreError> = (|| {
+                    ensure_session_not_deleted_conn(tx, &commit.session_id)?;
                     let existing =
                         try_load_session_head_meta_from_conn(tx, &commit.session_id)?;
                     if let Some(bound_session_id) =
@@ -763,28 +785,37 @@ impl SessionCommitStore for Store {
             .map_err(|error| StoreError::Backend(error.to_string()))?;
         let durable = self
             .conn
-            .write(move |tx| {
-                tx.execute(
-                    "INSERT OR IGNORE INTO session_meta
-                     (session_id, incarnation_id, session_name, created_at, model, cwd, relation_json)
-                     VALUES (?1, ?2, ?1, ?3, ?4, ?5, ?6)",
-                    params![
-                        session_id,
-                        candidate_value,
-                        created_at,
-                        model,
-                        cwd,
-                        relation_json,
-                    ],
-                )?;
-                tx.query_row(
-                    "SELECT incarnation_id FROM session_meta WHERE session_id = ?1",
-                    params![session_id],
-                    |row| row.get::<_, String>(0),
-                )
+            .write_flow(move |tx| {
+                let outcome: Result<String, StoreError> = (|| {
+                    ensure_session_not_deleted_conn(tx, &session_id)?;
+                    tx.execute(
+                        "INSERT OR IGNORE INTO session_meta
+                         (session_id, incarnation_id, session_name, created_at, model, cwd, relation_json)
+                         VALUES (?1, ?2, ?1, ?3, ?4, ?5, ?6)",
+                        params![
+                            session_id,
+                            candidate_value,
+                            created_at,
+                            model,
+                            cwd,
+                            relation_json,
+                        ],
+                    )
+                    .map_err(sqlite_error)?;
+                    tx.query_row(
+                        "SELECT incarnation_id FROM session_meta WHERE session_id = ?1",
+                        params![session_id],
+                        |row| row.get::<_, String>(0),
+                    )
+                    .map_err(sqlite_error)
+                })();
+                match outcome {
+                    Ok(value) => Ok(TxOutcome::Commit(Ok(value))),
+                    Err(error) => Ok(TxOutcome::Rollback(Err(error))),
+                }
             })
             .await
-            .map_err(sqlite_error)?;
+            .map_err(sqlite_error)??;
         Ok(lash_core::IncarnationId::decode_from_store(durable))
     }
 

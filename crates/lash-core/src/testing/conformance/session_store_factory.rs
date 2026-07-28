@@ -18,6 +18,129 @@ where
     session_store_factory_fork_semantics(make()).await;
     session_store_factory_vacuums_organic_retained_tombstone(make()).await;
     session_store_factory_delete_removes_store_and_is_idempotent(make()).await;
+    session_store_factory_delete_fences_stale_handles(make()).await;
+}
+
+/// Deleting a session must fence handles that were opened before the delete.
+///
+/// A store handle held by an in-flight turn outlives `delete_session`. If that
+/// stale handle can still commit, the delete is undone: the session row, its
+/// metadata, and its history come back under the *old* incarnation, and the
+/// host that asked for the deletion has no signal that it failed.
+pub async fn session_store_factory_delete_fences_stale_handles(
+    factory: Arc<dyn crate::SessionStoreFactory>,
+) {
+    let request = session_store_request(
+        "delete-fence-stale-handle",
+        "delete-fence-model",
+        crate::SessionRelation::Root,
+    );
+    let stale = factory
+        .create_store(&request)
+        .await
+        .expect("create the handle that will go stale");
+    let stale_meta = stale
+        .load_session_meta()
+        .await
+        .expect("load stale handle metadata")
+        .expect("stale handle metadata");
+    let mut state = crate::RuntimeSessionState {
+        session_id: request.session_id.clone(),
+        session_lifetime: crate::SessionLifetime::durable(stale_meta.incarnation_id.clone()),
+        ..Default::default()
+    };
+    state.ensure_agent_frame_initialized();
+
+    factory
+        .delete_session(&request.session_id)
+        .await
+        .expect("delete the session out from under the stale handle");
+
+    let ensure_error = stale
+        .ensure_session_incarnation(&request.session_id, &request.policy)
+        .await
+        .expect_err("a stale handle must not reinsert deleted incarnation metadata");
+    assert!(
+        matches!(
+            ensure_error,
+            crate::StoreError::SessionDeleted { ref session_id }
+                if session_id == &request.session_id
+        ),
+        "stale incarnation creation must be fenced as deleted, got: {ensure_error}"
+    );
+    let save_error = stale
+        .save_session_meta(stale_meta)
+        .await
+        .expect_err("a stale handle must not restore deleted session metadata");
+    assert!(
+        matches!(
+            save_error,
+            crate::StoreError::SessionDeleted { ref session_id }
+                if session_id == &request.session_id
+        ),
+        "stale metadata writes must be fenced as deleted, got: {save_error}"
+    );
+
+    let error = stale
+        .commit_runtime_state(crate::RuntimeCommit::persisted_state_for_test(&state, &[]))
+        .await
+        .expect_err("a stale handle must not resurrect a deleted session");
+    assert!(
+        matches!(
+            error,
+            crate::StoreError::SessionDeleted { ref session_id }
+                if session_id == &request.session_id
+        ),
+        "a stale commit into a deleted session must be fenced as deleted, got: {error}"
+    );
+    assert!(
+        factory
+            .open_existing_store(&request)
+            .await
+            .expect("open after the fenced commit")
+            .is_none(),
+        "a fenced commit must leave the session deleted"
+    );
+
+    let recreated = factory
+        .create_store(&request)
+        .await
+        .expect("explicitly recreate the deleted session");
+    let mut recreated_state = crate::RuntimeSessionState {
+        session_id: request.session_id.clone(),
+        session_lifetime: crate::SessionLifetime::durable(
+            recreated
+                .load_session_meta()
+                .await
+                .expect("load recreated metadata")
+                .expect("recreated metadata")
+                .incarnation_id,
+        ),
+        ..Default::default()
+    };
+    recreated_state.ensure_agent_frame_initialized();
+    recreated
+        .commit_runtime_state(crate::RuntimeCommit::persisted_state_for_test(
+            &recreated_state,
+            &[],
+        ))
+        .await
+        .expect("an explicit recreate must lift the fence");
+
+    let stale_error = stale
+        .commit_runtime_state(crate::RuntimeCommit::persisted_state_for_test(&state, &[]))
+        .await
+        .expect_err("the pre-delete handle must remain fenced after explicit recreation");
+    assert!(
+        matches!(
+            stale_error,
+            crate::StoreError::SessionIncarnationMismatch {
+                ref session_id,
+                ..
+            } if session_id == &request.session_id
+        ),
+        "a pre-delete handle must not replace the recreated incarnation, got: {stale_error}"
+    );
 }
 
 /// Process-retention conformance: pruning a terminal process releases its

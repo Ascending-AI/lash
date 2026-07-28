@@ -280,6 +280,11 @@ pub(super) async fn fork_at_in_catalog(
                 ],
             )
             .map_err(sqlite_error)?;
+            tx.execute(
+                "DELETE FROM deleted_sessions WHERE session_id = ?1",
+                params![request.session_id],
+            )
+            .map_err(sqlite_error)?;
             Ok(lash_core::ForkSessionResult {
                 session_id: request.session_id,
                 node_id: request.node_id,
