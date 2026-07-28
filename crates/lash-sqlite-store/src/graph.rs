@@ -1,8 +1,8 @@
 //! Session-graph persistence and garbage collection on [`Store`].
 //!
 //! Ported from the prior store. The public async surface
-//! (`replace_session_graph`, `append_session_graph_nodes`, `load_session_graph`,
-//! `gc_unreachable`) keeps the exact the prior store signatures. The shared
+//! (`append_session_graph_nodes`, `load_session_graph`, `gc_unreachable`) keeps
+//! the exact prior store signatures. The shared
 //! `*_from_conn` helpers are **synchronous** and take a `&rusqlite::Connection`
 //! so `lifecycle::load_picker_info` (and any future caller already on the
 //! connection thread) can reuse them inside a `conn.call` closure — this is the
@@ -98,26 +98,6 @@ impl Store {
         let commits = self.commit_count.fetch_add(1, AtomicOrdering::Relaxed) + 1;
         if interval != 0 && commits.is_multiple_of(interval) {
             let _ = self.gc_unreachable().await;
-        }
-    }
-
-    pub async fn replace_session_graph(&self, graph: &lash_core::SessionGraph) {
-        let nodes = graph.nodes.clone();
-        let result = self
-            .conn
-            .write(move |tx| {
-                tx.execute("DELETE FROM graph_nodes", [])?;
-                let mut stmt =
-                    tx.prepare("INSERT INTO graph_nodes (node_id, node_json) VALUES (?1, ?2)")?;
-                for node in &nodes {
-                    let node_json = encode_json(node);
-                    stmt.execute(params![node.node_id, node_json])?;
-                }
-                Ok(())
-            })
-            .await;
-        if let Err(err) = result {
-            tracing::warn!(error = %err, "failed to replace session graph");
         }
     }
 

@@ -117,7 +117,7 @@ async fn cache_dialect_rlm_prompt_prefix_is_byte_stable_across_iterations() {
             .expect("RLM prefix-stability core");
         let session = core
             .session(format!("prefix-stability-{}", model.replace('/', "-")))
-            .open_fresh()
+            .open()
             .await
             .expect("RLM prefix-stability session");
 

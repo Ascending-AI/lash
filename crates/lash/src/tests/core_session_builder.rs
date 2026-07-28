@@ -1016,68 +1016,6 @@ async fn park_with_a_live_handle_reports_session_still_in_use() -> Result<()> {
     Ok(())
 }
 
-#[tokio::test]
-async fn open_fresh_ignores_persisted_state_and_replaces_it_on_commit() -> Result<()> {
-    let mut state = RuntimeSessionState {
-        session_id: "fresh-start".to_string(),
-        policy: lash_core::SessionPolicy {
-            provider_id: mock_provider().kind().to_string(),
-            model: mock_model_spec(),
-            ..Default::default()
-        },
-        ..Default::default()
-    };
-    state.append_active_conversation_messages(&[text_message(
-        lash_core::MessageRole::User,
-        "already stored",
-    )]);
-    let store = Arc::new(SnapshotStore::with_state(state));
-    let core = explicit_ephemeral_facets(LashCore::standard_builder())
-        .provider(mock_provider())
-        .model(mock_model_spec())
-        .store_factory(Arc::new(ReusableStoreFactory {
-            store: store.clone(),
-        }))
-        .build()?;
-
-    let resumed = core.session("fresh-start").open().await?;
-    assert_eq!(
-        message_text(&resumed.read_view().messages()[0]),
-        "already stored"
-    );
-    drop(resumed);
-
-    let scopes_before_fresh = store.scopes().len();
-    let fresh = core.session("fresh-start").open_fresh().await?;
-    assert!(
-        fresh.read_view().messages().is_empty(),
-        "fresh opens must not expose persisted messages"
-    );
-    assert_eq!(fresh.policy_snapshot().recorded_provider_id(), "embed-test");
-    assert_eq!(
-        store.scopes().len(),
-        scopes_before_fresh,
-        "open_fresh must not load persisted session state"
-    );
-
-    fresh.turn(TurnInput::text("new root")).run().await?;
-    drop(fresh);
-
-    let reopened = core.session("fresh-start").open().await?;
-    let texts = reopened
-        .read_view()
-        .messages()
-        .iter()
-        .map(message_text)
-        .collect::<Vec<_>>();
-    assert!(texts.contains(&"new root".to_string()));
-    assert!(
-        !texts.contains(&"already stored".to_string()),
-        "fresh commit must replace the prior persisted graph"
-    );
-    Ok(())
-}
-
 #[test]
 fn session_policy_serializes_provider_id_without_provider_config() -> Result<()> {
     let provider = crate::testing::TestProvider::builder()

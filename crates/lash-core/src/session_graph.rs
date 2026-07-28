@@ -974,29 +974,6 @@ impl SessionGraph {
             .any(|node| node.node_id == node_id)
     }
 
-    /// If `leaf_node_id` points to a node that no longer exists in
-    /// `self.nodes` (e.g. after compaction rewrote the graph, or a
-    /// stored session referenced a node that was later purged), fall
-    /// back to the most recent message node. Returns `true` if the
-    /// leaf was repaired. Call this on load paths where an orphan
-    /// leaf would project to an empty transcript and silently drop
-    /// the user's history.
-    pub fn heal_orphaned_leaf(&mut self) -> bool {
-        if let Some(leaf) = self.leaf_node_id.as_ref()
-            && self.find_node(leaf).is_none()
-        {
-            let fallback = self
-                .nodes
-                .iter()
-                .rev()
-                .find(|node| node.message().is_some())
-                .map(|node| node.node_id.clone());
-            self.data_mut().leaf_node_id = fallback;
-            return true;
-        }
-        false
-    }
-
     pub fn fork_current_path(&self) -> SessionGraph {
         let path = self.active_path_nodes();
         SessionGraph::from_nodes(

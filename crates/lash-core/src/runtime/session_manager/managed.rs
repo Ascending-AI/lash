@@ -7,18 +7,21 @@ impl ManagedSessionCapability {
         &self,
         usage: &UsageCapability,
         plan: SessionCreatePlan,
-        materialized: MaterializedSession,
+        mut materialized: MaterializedSession,
     ) -> Result<SessionHandle, crate::PluginError> {
         if let Some(store) = &materialized.store_binding {
             let mut persisted_state = materialized.runtime.export_persisted_state();
-            super::normalize_session_graph(&mut persisted_state);
-            persisted_state.graph_replace_required = true;
-            let commit = crate::store::RuntimeCommit::persisted_state(&persisted_state, &[])
-                .with_operation(super::super::state::boundary_operation(
-                    &persisted_state.session_id,
-                    &plan.session_id,
-                    "create-session",
-                ))
+            let operation = super::super::state::boundary_operation(
+                &persisted_state.session_id,
+                &plan.session_id,
+                "create-session",
+            );
+            let (commit, persisted_node_ids) =
+                crate::store::RuntimeCommit::persisted_state_with_operation(
+                    &mut persisted_state,
+                    &[],
+                    operation,
+                )
                 .map_err(|err| crate::PluginError::Session(err.to_string()))?;
             let result = commit_runtime_state_with_fresh_session_execution_lease(
                 Arc::clone(store),
@@ -30,6 +33,8 @@ impl ManagedSessionCapability {
             .await
             .map_err(|err| crate::PluginError::Session(err.to_string()))?;
             persisted_state.apply_persisted_commit_result(result);
+            persisted_state.mark_node_ids_persisted(persisted_node_ids);
+            materialized.runtime.state = persisted_state;
         }
         self.registry.lock().await.insert(
             plan.session_id.clone(),

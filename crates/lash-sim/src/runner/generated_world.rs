@@ -238,7 +238,7 @@ impl GeneratedRuntimeWorld {
         )?;
         let session = core
             .session(event.actor_alias.clone())
-            .open_fresh()
+            .open()
             .await
             .map_err(|err| FixedScriptRunnerError::Runtime(err.to_string()))?;
         if session.session_id() != event.actor_alias {
@@ -828,7 +828,7 @@ impl GeneratedRuntimeWorld {
             .map_err(|err| FixedScriptRunnerError::Runtime(err.to_string()))?;
         let session = core
             .session(session_alias.clone())
-            .open_fresh()
+            .open()
             .await
             .map_err(|err| FixedScriptRunnerError::Runtime(err.to_string()))?;
         let turn_session = session.clone();

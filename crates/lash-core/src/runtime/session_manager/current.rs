@@ -14,7 +14,6 @@ impl CurrentSessionCapability {
                     ))
                 })?;
         }
-        super::normalize_session_graph(&mut state);
         Ok(state)
     }
 
@@ -24,8 +23,7 @@ impl CurrentSessionCapability {
         session_id: &str,
     ) -> Result<SessionSnapshot, crate::PluginError> {
         if session_id == self.session_id {
-            let mut state = self.snapshot.to_runtime_state();
-            super::normalize_session_graph(&mut state);
+            let state = self.snapshot.to_runtime_state();
             return Ok(state.to_snapshot());
         }
         let runtime = {
@@ -81,8 +79,7 @@ impl CurrentSessionCapability {
     pub(in crate::runtime::session_manager) async fn snapshot_current(
         &self,
     ) -> Result<SessionSnapshot, crate::PluginError> {
-        let mut state = self.snapshot.to_runtime_state();
-        super::normalize_session_graph(&mut state);
+        let state = self.snapshot.to_runtime_state();
         Ok(state.to_snapshot())
     }
 

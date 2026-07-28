@@ -110,45 +110,41 @@ impl RlmHistoryProjection {
     }
 }
 
-/// Find terminal protocol mechanics superseded by a committed assistant
-/// transcript from the same turn. The relationship is derived from event
-/// provenance: a terminal step and a later assistant message before the next
-/// user/event turn boundary share one completed turn. Content is never
-/// compared. A terminal step with no committed message remains unchanged.
+/// Find protocol prose and terminal mechanics superseded by a committed
+/// assistant transcript from the same turn. The relationship is derived from
+/// event provenance: protocol entries and a later assistant message before the
+/// next user/event turn boundary share one completed turn. Content is never
+/// compared. Intermediate trajectory entries remain available, while their
+/// prose is represented by the canonical transcript. A terminal step with no
+/// committed message remains unchanged.
 fn completed_turn_internal_indices(entries: &[lash_core::ChronologicalEntry]) -> HashSet<usize> {
     let mut suppressed = HashSet::new();
-    let mut pending_assistant_content = None;
+    let mut assistant_content_indices = Vec::new();
     let mut terminal_step = None;
 
     for entry in entries {
         match &entry.payload {
             ChronologicalPayload::Message(message) => match message.role {
                 MessageRole::User | MessageRole::Event => {
-                    pending_assistant_content = None;
+                    assistant_content_indices.clear();
                     terminal_step = None;
                 }
                 MessageRole::Assistant => {
                     if history_item_from_message(message).is_some()
-                        && let Some((step_index, content_index)) = terminal_step.take()
+                        && let Some(step_index) = terminal_step.take()
                     {
                         suppressed.insert(step_index);
-                        if let Some(content_index) = content_index {
-                            suppressed.insert(content_index);
-                        }
+                        suppressed.extend(assistant_content_indices.drain(..));
                     }
                 }
                 MessageRole::System => {}
             },
             ChronologicalPayload::ProtocolEvent(event) => match decode_rlm_protocol_event(event) {
                 Some(RlmProtocolEvent::RlmAssistantContent(_)) => {
-                    pending_assistant_content = Some(entry.index);
+                    assistant_content_indices.push(entry.index);
                 }
                 Some(RlmProtocolEvent::RlmTrajectoryEntry(step)) => {
-                    let content_index = pending_assistant_content.take();
-                    terminal_step = step
-                        .final_output
-                        .is_some()
-                        .then_some((entry.index, content_index));
+                    terminal_step = step.final_output.is_some().then_some(entry.index);
                 }
                 _ => {}
             },
@@ -565,6 +561,77 @@ mod tests {
         assert!(matches!(
             &projection.history()[3],
             RlmHistoryItem::LashlangStep { id, .. } if id == "retained"
+        ));
+    }
+
+    #[test]
+    fn completed_turn_projection_keeps_intermediate_steps_without_duplicate_prose() {
+        let intermediate = RlmTrajectoryEntry {
+            id: "intermediate".to_string(),
+            protocol_iteration: 0,
+            code: "missing_name".to_string(),
+            output: Vec::new(),
+            images: Vec::new(),
+            error: Some("unknown name".to_string()),
+            final_output: None,
+        };
+        let terminal = RlmTrajectoryEntry {
+            id: "terminal".to_string(),
+            protocol_iteration: 1,
+            code: "finish \"done\"".to_string(),
+            output: Vec::new(),
+            images: Vec::new(),
+            error: None,
+            final_output: Some(serde_json::json!("done")),
+        };
+        let events = [
+            lash_core::SessionHistoryRecord::Conversation(
+                lash_core::ConversationRecord::from_message(message(
+                    "u1",
+                    MessageRole::User,
+                    "start",
+                )),
+            ),
+            lash_core::SessionHistoryRecord::Protocol(rlm_protocol_event(
+                RlmProtocolEvent::RlmAssistantContent(lash_rlm_types::RlmAssistantContent {
+                    id: "intermediate-content".to_string(),
+                    reasoning: String::new(),
+                    prose: "surviving prose".to_string(),
+                }),
+            )),
+            lash_core::SessionHistoryRecord::Protocol(rlm_protocol_event(
+                RlmProtocolEvent::RlmTrajectoryEntry(intermediate),
+            )),
+            lash_core::SessionHistoryRecord::Protocol(rlm_protocol_event(
+                RlmProtocolEvent::RlmTrajectoryEntry(terminal),
+            )),
+            lash_core::SessionHistoryRecord::Conversation(
+                lash_core::ConversationRecord::from_message(message(
+                    "a1",
+                    MessageRole::Assistant,
+                    "surviving prose\n\ndone",
+                )),
+            ),
+        ];
+        let chronological = lash_core::ChronologicalProjection::from_turn_view(
+            &events,
+            &lash_core::MessageSequence::default(),
+        );
+        let projection = rlm_history_projection(&chronological);
+
+        assert!(projection.suppresses_chronological(1));
+        assert!(!projection.suppresses_chronological(2));
+        assert!(projection.suppresses_chronological(3));
+        assert_eq!(projection.len(), 3);
+        assert!(matches!(
+            &projection.history()[1],
+            RlmHistoryItem::LashlangStep { id, error, .. }
+                if id == "intermediate" && error.as_deref() == Some("unknown name")
+        ));
+        assert!(matches!(
+            &projection.history()[2],
+            RlmHistoryItem::Message { content, .. }
+                if content == "surviving prose\n\ndone"
         ));
     }
 }

@@ -248,6 +248,48 @@ impl SessionCommitStore for Store {
                             }
                         }
                     }
+                    if let Some(leaf_node_id) = commit.graph.leaf_node_id() {
+                        let appended = matches!(
+                            &commit.graph,
+                            GraphCommitDelta::Append { nodes, .. }
+                                if nodes.iter().any(|node| &node.node_id == leaf_node_id)
+                        );
+                        let live = tx
+                            .query_row(
+                                "SELECT 1 FROM graph_nodes
+                                 WHERE node_id = ?1 AND tombstoned = 0
+                                 LIMIT 1",
+                                params![leaf_node_id],
+                                |_| Ok(()),
+                            )
+                            .optional()
+                            .map_err(sqlite_error)?
+                            .is_some();
+                        if !appended && !live {
+                            return Err(StoreError::InvalidGraphLeaf {
+                                leaf_node_id: Some(leaf_node_id.clone()),
+                            });
+                        }
+                    } else {
+                        let appends_nodes = matches!(
+                            &commit.graph,
+                            GraphCommitDelta::Append { nodes, .. } if !nodes.is_empty()
+                        );
+                        let has_live_nodes = tx
+                            .query_row(
+                                "SELECT 1 FROM graph_nodes
+                                 WHERE tombstoned = 0
+                                 LIMIT 1",
+                                [],
+                                |_| Ok(()),
+                            )
+                            .optional()
+                            .map_err(sqlite_error)?
+                            .is_some();
+                        if appends_nodes || has_live_nodes {
+                            return Err(StoreError::InvalidGraphLeaf { leaf_node_id: None });
+                        }
+                    }
                     for completed in &commit.completed_queue_claims {
                         if completed.session_id != commit.session_id {
                             return Err(StoreError::QueuedWorkClaimSuperseded {
@@ -323,19 +365,6 @@ impl SessionCommitStore for Store {
                                 .map_err(sqlite_error)?;
                             }
                             leaf_node_id.clone()
-                        }
-                        GraphCommitDelta::ReplaceFull(graph) => {
-                            tx.execute("DELETE FROM graph_nodes", [])
-                                .map_err(sqlite_error)?;
-                            for node in &graph.nodes {
-                                let node_json = encode_json(node);
-                                tx.execute(
-                                    "INSERT INTO graph_nodes (node_id, node_json) VALUES (?1, ?2)",
-                                    params![node.node_id, node_json],
-                                )
-                                .map_err(sqlite_error)?;
-                            }
-                            graph.leaf_node_id.clone()
                         }
                     };
                     let graph_node_count: usize = tx

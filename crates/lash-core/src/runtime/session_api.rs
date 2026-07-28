@@ -143,7 +143,6 @@ impl LashRuntime {
             state.plugin_snapshot_revision =
                 Some(session.plugins().snapshot_revision_fingerprint());
         }
-        normalize_session_graph(&mut state);
         state
     }
 
@@ -164,12 +163,6 @@ impl LashRuntime {
     }
 
     pub(super) async fn refresh_session_graph_from_store(&mut self) -> Result<(), SessionError> {
-        // Fresh replacement opens intentionally start from an empty resident
-        // graph and commit a full replacement. Do not resurrect the old head
-        // before that first commit.
-        if self.state.graph_replace_required && self.state.head_revision.is_none() {
-            return Ok(());
-        }
         let Some(store) = self
             .session
             .as_ref()
@@ -563,27 +556,12 @@ impl LashRuntime {
         self.refresh_session_graph_from_store()
             .await
             .map_err(|err| RuntimeError::new("session_command_refresh", err.to_string()))?;
-        let graph = match command {
-            crate::SessionCommand::RefreshToolCatalog { .. } => {
-                self.refresh_session_tool_catalog().await.map_err(|err| {
-                    RuntimeError::new("session_command_refresh_tools", err.to_string())
-                })?;
-                crate::store::GraphCommitDelta::Unchanged {
-                    leaf_node_id: self.state.session_graph.leaf_node_id.clone(),
-                }
-            }
-            crate::SessionCommand::ResetSession { .. } => {
-                let mut state = crate::RuntimeSessionState {
-                    session_id: self.state.session_id.clone(),
-                    policy: self.policy.clone(),
-                    graph_replace_required: true,
-                    ..crate::RuntimeSessionState::default()
-                };
-                state.ensure_agent_frame_initialized();
-                self.set_persisted_state(state)
-                    .map_err(|err| RuntimeError::new("session_command_reset", err.to_string()))?;
-                crate::store::GraphCommitDelta::ReplaceFull(self.state.session_graph.clone())
-            }
+        let crate::SessionCommand::RefreshToolCatalog { .. } = command;
+        self.refresh_session_tool_catalog()
+            .await
+            .map_err(|err| RuntimeError::new("session_command_refresh_tools", err.to_string()))?;
+        let graph = crate::store::GraphCommitDelta::Unchanged {
+            leaf_node_id: self.state.session_graph.leaf_node_id.clone(),
         };
         let Some(store) = self
             .session
@@ -607,10 +585,14 @@ impl LashRuntime {
                     "persisted session commands require a claimed queue boundary",
                 )
             })?;
-        let mut commit =
+        let (mut commit, node_id_mapping) =
             crate::store::RuntimeCommit::persisted_state_with_graph_commit(&self.state, graph, &[])
                 .with_operation(operation)
                 .map_err(super::runtime_error_from_store_commit)?;
+        debug_assert!(
+            node_id_mapping.is_empty(),
+            "session-command commits must not carry graph appends"
+        );
         let Some(session_execution_lease) = session_execution_lease else {
             return Err(RuntimeError::new(
                 RuntimeErrorCode::StoreCommitFailed,

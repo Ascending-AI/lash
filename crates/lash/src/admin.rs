@@ -982,21 +982,6 @@ impl SessionCommandAdmin {
             )
             .await
     }
-
-    pub async fn reset(
-        &self,
-        reason: impl Into<String>,
-        idempotency_key: impl Into<String>,
-    ) -> Result<lash_core::SessionCommandReceipt> {
-        self.control
-            .submit_session_command(
-                lash_core::SessionCommand::ResetSession {
-                    reason: reason.into(),
-                },
-                idempotency_key,
-            )
-            .await
-    }
 }
 
 /// Session-scoped read controls for Lashlang trigger registrations.

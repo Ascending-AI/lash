@@ -110,7 +110,6 @@ fn build_runtime_state(
     policy: &SessionPolicy,
     clock: &dyn crate::Clock,
 ) -> RuntimeSessionState {
-    normalize_session_graph(&mut base);
     base.session_id = session_id;
     base.policy = policy.clone();
     base.reset_initial_agent_frame_with_clock(
@@ -125,6 +124,5 @@ fn build_runtime_state(
         &draft_namespace,
         clock,
     );
-    normalize_session_graph(&mut base);
     base
 }

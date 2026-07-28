@@ -309,6 +309,47 @@ impl SessionCommitStore for PostgresSessionStore {
                 });
             }
         }
+        if let Some(leaf_node_id) = commit.graph.leaf_node_id() {
+            let appended = matches!(
+                &commit.graph,
+                GraphCommitDelta::Append { nodes, .. }
+                    if nodes.iter().any(|node| &node.node_id == leaf_node_id)
+            );
+            let live = sqlx::query_scalar::<_, bool>(
+                "SELECT EXISTS(
+                    SELECT 1 FROM lash_graph_nodes
+                    WHERE session_id = $1 AND node_id = $2 AND tombstoned = FALSE
+                )",
+            )
+            .bind(&commit.session_id)
+            .bind(leaf_node_id)
+            .fetch_one(&mut *tx)
+            .await
+            .map_err(store_sqlx_error)?;
+            if !appended && !live {
+                return Err(StoreError::InvalidGraphLeaf {
+                    leaf_node_id: Some(leaf_node_id.clone()),
+                });
+            }
+        } else {
+            let appends_nodes = matches!(
+                &commit.graph,
+                GraphCommitDelta::Append { nodes, .. } if !nodes.is_empty()
+            );
+            let has_live_nodes = sqlx::query_scalar::<_, bool>(
+                "SELECT EXISTS(
+                    SELECT 1 FROM lash_graph_nodes
+                    WHERE session_id = $1 AND tombstoned = FALSE
+                )",
+            )
+            .bind(&commit.session_id)
+            .fetch_one(&mut *tx)
+            .await
+            .map_err(store_sqlx_error)?;
+            if appends_nodes || has_live_nodes {
+                return Err(StoreError::InvalidGraphLeaf { leaf_node_id: None });
+            }
+        }
         for completed in &commit.completed_queue_claims {
             if completed.session_id != commit.session_id {
                 return Err(StoreError::QueuedWorkClaimSuperseded {
@@ -355,26 +396,6 @@ impl SessionCommitStore for PostgresSessionStore {
                     .map_err(store_sqlx_error)?;
                 }
                 leaf_node_id.clone()
-            }
-            GraphCommitDelta::ReplaceFull(graph) => {
-                sqlx::query("DELETE FROM lash_graph_nodes WHERE session_id = $1")
-                    .bind(&commit.session_id)
-                    .execute(&mut *tx)
-                    .await
-                    .map_err(store_sqlx_error)?;
-                for node in &graph.nodes {
-                    sqlx::query(
-                        "INSERT INTO lash_graph_nodes (session_id, node_id, node_json)
-                         VALUES ($1, $2, $3)",
-                    )
-                    .bind(&commit.session_id)
-                    .bind(&node.node_id)
-                    .bind(encode_json(node))
-                    .execute(&mut *tx)
-                    .await
-                    .map_err(store_sqlx_error)?;
-                }
-                graph.leaf_node_id.clone()
             }
         };
         let graph_node_count: i64 = sqlx::query_scalar(

@@ -174,7 +174,7 @@ async fn captured_rlm_iterations() -> Vec<LlmRequest> {
         .expect("RLM cache regression core");
     let session = core
         .session("cache-regression-session")
-        .open_fresh()
+        .open()
         .await
         .expect("RLM cache regression session");
     session

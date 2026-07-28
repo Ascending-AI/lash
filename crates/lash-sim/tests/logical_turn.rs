@@ -300,7 +300,7 @@ async fn claimed_switch_is_seeded_atomic_ordered_and_exactly_once() {
         .expect("build logical-turn sim core");
     let session = core
         .session("logical-turn-sim")
-        .open_fresh()
+        .open()
         .await
         .expect("open sim session");
     let first = session
@@ -504,7 +504,7 @@ async fn claims_settle_for_finish_cancel_error_and_chain_bound() {
     let finish_core = standard_core(finish_provider, Arc::new(NoTools), finish_trace.clone());
     let finish_session = finish_core
         .session("logical-turn-finish")
-        .open_fresh()
+        .open()
         .await
         .expect("open finish session");
     finish_session
@@ -547,7 +547,7 @@ async fn claims_settle_for_finish_cancel_error_and_chain_bound() {
     let cancel_core = standard_core(cancel_provider, Arc::new(NoTools), cancel_trace.clone());
     let cancel_session = cancel_core
         .session("logical-turn-cancel")
-        .open_fresh()
+        .open()
         .await
         .expect("open cancel session");
     cancel_session
@@ -585,7 +585,7 @@ async fn claims_settle_for_finish_cancel_error_and_chain_bound() {
     );
     let error_session = error_core
         .session("logical-turn-error")
-        .open_fresh()
+        .open()
         .await
         .expect("open error session");
     error_session
@@ -646,7 +646,7 @@ async fn claims_settle_for_finish_cancel_error_and_chain_bound() {
     );
     let bound_session = bound_core
         .session("logical-turn-bound")
-        .open_fresh()
+        .open()
         .await
         .expect("open bound session");
     bound_session
@@ -750,7 +750,7 @@ finish { baton: baton }
         .expect("build RLM seed sim core");
     let session = core
         .session("logical-turn-rlm-seed")
-        .open_fresh()
+        .open()
         .await
         .expect("open RLM seed session");
     session

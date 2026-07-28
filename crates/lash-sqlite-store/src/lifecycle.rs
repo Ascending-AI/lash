@@ -270,7 +270,7 @@ impl Store {
     }
 
     pub async fn save_session_head(&self, head: SessionHead) {
-        self.replace_session_graph(&head.graph).await;
+        self.append_session_graph_nodes(&head.graph.nodes).await;
         self.save_session_head_meta(session_head_meta(&head)).await;
     }
 
@@ -288,43 +288,6 @@ impl Store {
             checkpoint_ref: meta.checkpoint_ref,
             token_ledger: merge_token_ledger_entries(self.load_usage_deltas().await),
         })
-    }
-
-    pub async fn head_copy_from_store(&self, source: &Store) {
-        if let Some(head) = source.load_session_head().await {
-            if let Some(checkpoint_ref) = &head.checkpoint_ref
-                && let Some(record) = source
-                    .get_typed_blob::<SessionCheckpoint>(checkpoint_ref)
-                    .await
-            {
-                for blob_ref in [
-                    record.tool_state_ref.as_ref(),
-                    record.plugin_snapshot_ref.as_ref(),
-                ]
-                .into_iter()
-                .flatten()
-                {
-                    if let Some(blob) = source.get_blob(blob_ref).await {
-                        let descriptor = match record
-                            .tool_state_ref
-                            .as_ref()
-                            .filter(|candidate| *candidate == blob_ref)
-                        {
-                            Some(_) => BlobArtifactDescriptor::tool_state_snapshot(),
-                            None => BlobArtifactDescriptor::plugin_session_snapshot(),
-                        };
-                        let _ = self.put_artifact_blob(descriptor, &blob).await;
-                    }
-                }
-                if let Some(blob) = source.get_blob(checkpoint_ref).await {
-                    let _ = self
-                        .put_artifact_blob(BlobArtifactDescriptor::checkpoint_manifest(), &blob)
-                        .await;
-                }
-            }
-            self.replace_session_graph(&head.graph).await;
-            self.save_session_head_meta(session_head_meta(&head)).await;
-        }
     }
 
     pub async fn save_session_meta(&self, meta: SessionMeta) {

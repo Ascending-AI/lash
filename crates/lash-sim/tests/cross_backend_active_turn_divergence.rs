@@ -230,7 +230,7 @@ async fn drive_cancel_before_turn(
 ) -> (Vec<TurnObs>, String) {
     let session = core
         .session(session_id.to_string())
-        .open_fresh()
+        .open()
         .await
         .expect("open fresh");
     let t1 = format!("{session_id}:provider:001");
@@ -269,7 +269,7 @@ async fn drive_cancel_after_turn(
 ) -> (Vec<TurnObs>, String) {
     let session = core
         .session(session_id.to_string())
-        .open_fresh()
+        .open()
         .await
         .expect("open fresh");
     let t1 = format!("{session_id}:provider:001");
@@ -310,7 +310,7 @@ async fn drive_no_cancel_control(
 ) -> Vec<TurnObs> {
     let session = core
         .session(session_id.to_string())
-        .open_fresh()
+        .open()
         .await
         .expect("open fresh");
     let t1 = format!("{session_id}:provider:001");
@@ -343,7 +343,7 @@ async fn drive_claim_then_cancel(
 ) -> (Vec<TurnObs>, String) {
     let session = core
         .session(session_id.to_string())
-        .open_fresh()
+        .open()
         .await
         .expect("open fresh");
     let t1 = format!("{session_id}:provider:001");
@@ -526,11 +526,7 @@ async fn drive_first_party_cancel_before_start(
         }) if request_id == "cross-backend-cancel" && origin == "sim-user"
     );
 
-    let session = core
-        .session(session_id)
-        .open_fresh()
-        .await
-        .expect("open session");
+    let session = core.session(session_id).open().await.expect("open session");
     let cancelled = session
         .turn(TurnInput::text("this turn is already cancelled"))
         .turn_id(turn_id)
@@ -605,7 +601,7 @@ async fn sqlite_reopen_preserves_cancelled_turn_commit_and_allows_next_turn() {
     ));
     let first_session = first_core
         .session(session_id)
-        .open_fresh()
+        .open()
         .await
         .expect("open first SQLite session");
     let cancelled = first_session

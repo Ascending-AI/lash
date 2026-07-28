@@ -929,14 +929,49 @@ impl crate::store::SessionCommitStore for InMemorySessionStore {
         commit.validate_append_node_ids_unique()?;
         if let crate::store::GraphCommitDelta::Append { nodes, .. } = &commit.graph {
             let graph = self.session_graph.lock().expect("lock graph");
-            if let Some(node) = nodes
-                .iter()
-                .find(|node| graph.find_node(&node.node_id).is_some())
-            {
+            let tombstoned = self
+                .tombstoned_node_ids
+                .lock()
+                .expect("lock tombstoned nodes");
+            if let Some(node) = nodes.iter().find(|node| {
+                graph.find_node(&node.node_id).is_some() || tombstoned.contains(&node.node_id)
+            }) {
                 return Err(crate::store::StoreError::NodeIdCollision {
                     node_id: node.node_id.clone(),
                 });
             }
+        }
+        let (has_existing_live_nodes, existing_leaf_is_live) = {
+            let graph = self.session_graph.lock().expect("lock graph");
+            let tombstoned = self
+                .tombstoned_node_ids
+                .lock()
+                .expect("lock tombstoned nodes");
+            let has_existing_live_nodes = graph
+                .nodes
+                .iter()
+                .any(|node| !tombstoned.contains(&node.node_id));
+            let existing_leaf_is_live = commit.graph.leaf_node_id().is_some_and(|leaf_node_id| {
+                !tombstoned.contains(leaf_node_id) && graph.find_node(leaf_node_id).is_some()
+            });
+            (has_existing_live_nodes, existing_leaf_is_live)
+        };
+        match commit.graph.leaf_node_id() {
+            Some(leaf_node_id)
+                if !commit
+                    .graph
+                    .appended_nodes()
+                    .any(|node| &node.node_id == leaf_node_id)
+                    && !existing_leaf_is_live =>
+            {
+                return Err(crate::store::StoreError::InvalidGraphLeaf {
+                    leaf_node_id: Some(leaf_node_id.clone()),
+                });
+            }
+            None if commit.graph.appended_nodes().next().is_some() || has_existing_live_nodes => {
+                return Err(crate::store::StoreError::InvalidGraphLeaf { leaf_node_id: None });
+            }
+            _ => {}
         }
         for completed in &commit.completed_queue_claims {
             let mut queued = self.queued_work.lock().expect("lock queued work");
@@ -1017,32 +1052,19 @@ impl crate::store::SessionCommitStore for InMemorySessionStore {
             }
         }
         let mut graph = self.session_graph.lock().expect("lock graph");
-        let mut committed_node_ids = Vec::new();
         let leaf_node_id = match &commit.graph {
             crate::store::GraphCommitDelta::Unchanged { leaf_node_id } => leaf_node_id.clone(),
             crate::store::GraphCommitDelta::Append {
                 nodes,
                 leaf_node_id,
             } => {
-                committed_node_ids.extend(nodes.iter().map(|node| node.node_id.clone()));
                 graph.extend_node_records(nodes.iter().cloned());
                 leaf_node_id.clone()
             }
-            crate::store::GraphCommitDelta::ReplaceFull(next) => {
-                committed_node_ids.extend(next.nodes.iter().map(|node| node.node_id.clone()));
-                *graph = next.clone();
-                next.leaf_node_id.clone()
-            }
         };
+        graph.set_leaf_node_id(leaf_node_id.clone());
         let graph_node_count = graph.nodes.len();
         drop(graph);
-        if !committed_node_ids.is_empty() {
-            let committed_node_ids = committed_node_ids.into_iter().collect::<HashSet<_>>();
-            self.tombstoned_node_ids
-                .lock()
-                .expect("lock tombstoned nodes")
-                .retain(|node_id| !committed_node_ids.contains(node_id));
-        }
         self.usage_deltas
             .lock()
             .expect("lock usage deltas")

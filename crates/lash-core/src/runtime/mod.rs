@@ -176,7 +176,7 @@ pub use session_manager::DirectCompletionClient;
 pub use state::RuntimeSessionState;
 use state::{
     append_session_nodes_to_state_with_clock, apply_residency_on_load, apply_session_checkpoint,
-    apply_session_head, normalize_session_graph, open_agent_frame_in_state_with_clock,
+    apply_session_head, open_agent_frame_in_state_with_clock,
 };
 pub use turn_control::{
     TurnAddress, TurnAttach, TurnCancelOriginHint, TurnCancelOutcome, TurnCancelReceipt,

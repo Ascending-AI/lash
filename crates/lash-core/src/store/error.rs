@@ -24,6 +24,8 @@ pub enum StoreError {
     },
     #[error("runtime commit node id `{node_id}` already exists in durable session history")]
     NodeIdCollision { node_id: String },
+    #[error("runtime commit leaf {leaf_node_id:?} does not resolve to a live graph node")]
+    InvalidGraphLeaf { leaf_node_id: Option<String> },
     #[error(
         "runtime commit realization differs from stored receipt: proposed {proposed}, stored {stored}"
     )]

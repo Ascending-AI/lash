@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::fmt;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -1063,18 +1063,31 @@ impl RuntimeBoundaryHarness {
         // rewrote the batch's claim id + lease token, so settling the crashed
         // worker's original claim through the runtime commit path is rejected as
         // superseded (ADR 0029).
-        let expected_head_revision = store
+        let current = store
             .load_session(SessionReadScope::FullGraph)
             .await
             .map_err(|err| {
                 RuntimeBoundaryError::new(format!(
                     "load current head before stale claim completion: {err}"
                 ))
-            })?
-            .map(|read| read.head_revision);
+            })?;
+        let (head_revision, session_graph, persisted_node_ids) = current.map_or_else(
+            || (None, lash_core::SessionGraph::default(), HashSet::new()),
+            |read| {
+                let persisted_node_ids = read
+                    .graph
+                    .nodes
+                    .iter()
+                    .map(|node| node.node_id.clone())
+                    .collect();
+                (Some(read.head_revision), read.graph, persisted_node_ids)
+            },
+        );
         let stale_state = RuntimeSessionState {
             session_id: session.to_string(),
-            head_revision: expected_head_revision,
+            session_graph,
+            persisted_node_ids,
+            head_revision,
             ..RuntimeSessionState::default()
         };
         let stale_work_completion_rejected = matches!(

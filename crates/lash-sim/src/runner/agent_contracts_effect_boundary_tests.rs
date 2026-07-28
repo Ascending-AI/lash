@@ -238,7 +238,7 @@ finish (await handle)?
     .expect("build batch envelope contract");
     let session = core
         .session("sim-agent-batched-tool-attempt-envelope")
-        .open_fresh()
+        .open()
         .await
         .expect("open batch envelope contract session");
 

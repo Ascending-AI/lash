@@ -702,12 +702,8 @@ impl SessionCommitStore for RuntimePerfStore {
                 graph.extend_node_records(nodes);
                 leaf_node_id
             }
-            GraphCommitDelta::ReplaceFull(next) => {
-                let leaf_node_id = next.leaf_node_id.clone();
-                *graph = next;
-                leaf_node_id
-            }
         };
+        graph.set_leaf_node_id(leaf_node_id.clone());
         if !usage_deltas.is_empty() {
             self.usage_deltas
                 .lock()

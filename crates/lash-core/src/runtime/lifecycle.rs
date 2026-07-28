@@ -86,7 +86,6 @@ impl LashRuntime {
         }
         state.policy = state.effective_policy().clone();
         state.protocol_turn_options = state.effective_protocol_turn_options().clone();
-        normalize_session_graph(&mut state);
         let policy = state.effective_policy().clone();
         if policy.model.id.trim().is_empty() {
             return Err(SessionError::Protocol(
@@ -269,7 +268,6 @@ impl LashRuntime {
         }
         // Heal FIRST (against the full resident set), then trim to the residency.
         // `from_host_state` normalizes again, which is safe on a trimmed graph.
-        normalize_session_graph(&mut state);
         apply_residency_on_load(&mut state, residency);
         let mut runtime = match (store, process_registry) {
             (Some(store), Some(registry)) => {
@@ -371,15 +369,24 @@ impl LashRuntime {
         // its own boundary (turn final commit, config updates, queued-work
         // drains), so a runtime between boundaries already equals its last
         // commit. Flushing is only needed when the state has never been
-        // persisted or requires a full graph replace; an unconditional commit
+        // persisted or has pending graph nodes; an unconditional commit
         // here would bump the head revision on every park/close, disturbing
         // host-side head-CAS expectations for what is durably a no-op.
-        if self.state.head_revision.is_none() || self.state.graph_replace_required {
-            let commit = crate::store::RuntimeCommit::persisted_state(&self.state, &[]);
-            let operation = initial_park_operation(&commit)
+        if self.state.head_revision.is_none()
+            || matches!(
+                self.state.pending_graph_commit(),
+                crate::GraphCommitDelta::Append { .. }
+            )
+        {
+            let proposed = crate::store::RuntimeCommit::persisted_state(&self.state, &[]);
+            let operation = initial_park_operation(&proposed)
                 .map_err(|err| SessionError::Protocol(err.to_string()))?;
-            let commit = commit
-                .with_operation(operation)
+            let (commit, persisted_node_ids) =
+                crate::store::RuntimeCommit::persisted_state_with_operation(
+                    &mut self.state,
+                    &[],
+                    operation,
+                )
                 .map_err(|err| SessionError::Protocol(err.to_string()))?;
             let result = commit_runtime_state_with_fresh_session_execution_lease(
                 Arc::clone(&store),
@@ -393,6 +400,7 @@ impl LashRuntime {
                 SessionError::Protocol(format!("failed to persist runtime state: {err}"))
             })?;
             self.state.apply_persisted_commit_result(result);
+            self.state.mark_node_ids_persisted(persisted_node_ids);
         }
         // Drain pending tombstones if any. Under KeepHistory this is a
         // no-op (tombstones never get added). Under DropOrphans, a future
@@ -506,7 +514,6 @@ mod tests {
     fn initial_park_identity_is_stable_for_replay_and_distinguishes_content() {
         let mut state = crate::RuntimeSessionState {
             session_id: "park-identity".to_string(),
-            graph_replace_required: true,
             ..crate::RuntimeSessionState::default()
         };
         state.ensure_agent_frame_initialized();

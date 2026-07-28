@@ -26,17 +26,14 @@ impl TurnGraphEditor {
         agent_frame_id: crate::AgentFrameId,
         draft_namespace: &str,
         clock: Arc<dyn crate::Clock>,
+        persisted_node_ids: HashSet<String>,
     ) -> Self {
         let append_builder = base_graph
             .append_builder_in_namespace(draft_namespace)
             .with_agent_frame_id(agent_frame_id);
         let active_messages = MessageSequence::from_base(base_read_model.messages);
         Self {
-            committed_node_ids: base_graph
-                .nodes
-                .iter()
-                .map(|node| node.node_id.clone())
-                .collect(),
+            committed_node_ids: persisted_node_ids,
             base_graph,
             active_events: base_read_model.active_events,
             active_messages,
@@ -151,14 +148,12 @@ impl TurnGraphEditor {
         self.active_messages = MessageSequence::from_owned(replacement.active_messages);
     }
 
-    pub(super) fn graph_commit(&self, graph_replace_required: bool) -> GraphCommitDelta {
-        if graph_replace_required {
-            return GraphCommitDelta::ReplaceFull(self.materialized_graph());
-        }
-
+    pub(super) fn graph_commit(&self) -> GraphCommitDelta {
         let nodes = self
-            .appended_nodes
+            .base_graph
+            .nodes
             .iter()
+            .chain(self.appended_nodes.iter())
             .filter(|node| !self.committed_node_ids.contains(&node.node_id))
             .cloned()
             .collect::<Vec<_>>();
@@ -181,11 +176,8 @@ impl TurnGraphEditor {
         self.committed_node_ids.extend(node_ids);
     }
 
-    pub(super) fn replace_persisted_node_ids<I>(&mut self, node_ids: I)
-    where
-        I: IntoIterator<Item = String>,
-    {
-        self.committed_node_ids = node_ids.into_iter().collect();
+    pub(super) fn persisted_node_ids(&self) -> HashSet<String> {
+        self.committed_node_ids.clone()
     }
 
     pub(super) fn remap_node_ids(&mut self, session_id: &str, mapping: &[(String, String)]) {
@@ -193,6 +185,7 @@ impl TurnGraphEditor {
             return;
         }
         let by_old = mapping.iter().cloned().collect::<HashMap<_, _>>();
+        Arc::make_mut(&mut self.base_graph).remap_node_ids(session_id, mapping);
         for node in &mut self.appended_nodes {
             if let Some(derived) = by_old.get(&node.node_id) {
                 node.node_id = derived.clone();
@@ -239,16 +232,6 @@ impl TurnGraphEditor {
 
     fn leaf_node_id(&self) -> Option<String> {
         self.append_builder.leaf_node_id().cloned()
-    }
-
-    fn materialized_graph(&self) -> SessionGraph {
-        if self.appended_nodes.is_empty() {
-            return self.base_graph.as_ref().clone();
-        }
-        let mut nodes = Vec::with_capacity(self.base_graph.nodes.len() + self.appended_nodes.len());
-        nodes.extend(self.base_graph.nodes.iter().cloned());
-        nodes.extend(self.appended_nodes.iter().cloned());
-        SessionGraph::from_nodes(nodes, self.leaf_node_id())
     }
 
     fn active_path_nodes(&self) -> Vec<&SessionNodeRecord> {

@@ -402,7 +402,7 @@ impl SqliteRuntimeReplayWorld {
         .await?;
         let session = core
             .session(event.actor_alias.clone())
-            .open_fresh()
+            .open()
             .await
             .map_err(|err| SqliteReplayError::Runtime(err.to_string()))?;
         if session.session_id() != event.actor_alias {
