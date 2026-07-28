@@ -138,8 +138,6 @@ registry. Hosts can delete and rotate the current session with `DELETE /api/sess
 (`POST /api/reset` remains the UI-compatible alias) without deleting Runtime Processes.
 Rotation is required: a deleted session id is permanently retired and cannot
 be reopened in the same store.
-Rotation is required: a deleted session id is permanently retired and cannot
-be reopened in the same store.
 The **stop turn** button (or **Esc**) cooperatively cancels the exact running
 turn: `POST /api/turn/cancel` sends its stable session and turn address through
 `TurnWorkDriver::request_cancel`. The request lives on Lash's durable
