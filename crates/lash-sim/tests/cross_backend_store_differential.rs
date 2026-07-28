@@ -561,9 +561,9 @@ fn runtime_commit(
 
 #[derive(Clone, Debug)]
 struct CheckpointComponentRefs {
-    tool_state: BlobRef,
-    plugin_snapshot: BlobRef,
-    execution_state: BlobRef,
+    tool_state: Option<BlobRef>,
+    plugin_snapshot: Option<BlobRef>,
+    execution_state: Option<BlobRef>,
 }
 
 fn checkpoint_bodies() -> HydratedSessionCheckpoint {
@@ -622,10 +622,10 @@ fn checkpoint_from_spec(
             let refs = prior_refs.expect("body commit recorded component refs");
             HydratedSessionCheckpoint {
                 turn_state: checkpoint_bodies().turn_state,
-                tool_state_ref: Some(refs.tool_state.clone()),
-                plugin_snapshot_ref: Some(refs.plugin_snapshot.clone()),
+                tool_state_ref: refs.tool_state.clone(),
+                plugin_snapshot_ref: refs.plugin_snapshot.clone(),
                 plugin_snapshot_revision: Some(11),
-                execution_state_ref: Some(refs.execution_state.clone()),
+                execution_state_ref: refs.execution_state.clone(),
                 ..Default::default()
             }
         }
@@ -1647,21 +1647,9 @@ impl BackendRunner {
                         self.current_leaf_node_id = next_leaf_node_id;
                         if matches!(*checkpoint, CheckpointSpec::Bodies) {
                             self.checkpoint_component_refs = Some(CheckpointComponentRefs {
-                                tool_state: result
-                                    .manifest
-                                    .tool_state_ref
-                                    .clone()
-                                    .expect("body commit returns tool-state ref"),
-                                plugin_snapshot: result
-                                    .manifest
-                                    .plugin_snapshot_ref
-                                    .clone()
-                                    .expect("body commit returns plugin-snapshot ref"),
-                                execution_state: result
-                                    .manifest
-                                    .execution_state_ref
-                                    .clone()
-                                    .expect("body commit returns execution-state ref"),
+                                tool_state: result.manifest.tool_state_ref.clone(),
+                                plugin_snapshot: result.manifest.plugin_snapshot_ref.clone(),
+                                execution_state: result.manifest.execution_state_ref.clone(),
                             });
                         }
                         Ok(Some(result.into()))
