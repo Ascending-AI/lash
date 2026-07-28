@@ -485,7 +485,7 @@ pub use session_graph::{
 };
 pub use session_model::context::PreparedContext;
 pub use session_model::{ConversationRecord, ProtocolEvent, SessionHistoryRecord};
-pub use session_model::{RuntimeSessionPolicy, SessionPolicy, SessionSpec};
+pub use session_model::{GenerationOverlay, RuntimeSessionPolicy, SessionPolicy, SessionSpec};
 pub use store::{
     AttachmentIntent, AttachmentManifest, AttachmentManifestEntry, BlobRef, EphemeralRunId,
     GcReport, IncarnationId, LeaseOwnerIdentity, LeaseOwnerLiveness, LeaseTimings,

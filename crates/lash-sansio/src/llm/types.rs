@@ -573,6 +573,24 @@ impl GenerationOptions {
             .map(NonZeroUsize::get)
             .map(|value| value as u64)
     }
+
+    /// Layer these options over `base`: an option this value sets wins, an
+    /// option it leaves unset keeps the base's.
+    ///
+    /// Every option is independently optional, so replacing the struct
+    /// wholesale would drop intent the caller never spoke about. This is the
+    /// same per-field layering `resolve_generation_policy` already applies
+    /// between a request and provider configuration.
+    pub fn merged_over(&self, base: &Self) -> Self {
+        Self {
+            output_token_cap: self.output_token_cap.or(base.output_token_cap),
+            temperature: self
+                .temperature
+                .clone()
+                .or_else(|| base.temperature.clone()),
+            seed: self.seed.or(base.seed),
+        }
+    }
 }
 
 /// What became of one caller-requested generation option on one request.
