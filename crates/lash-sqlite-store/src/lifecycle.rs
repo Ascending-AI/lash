@@ -197,16 +197,18 @@ impl Store {
                 else {
                     return Ok(None);
                 };
-                let mut head_meta =
-                    lash_core::store::decode_versioned_json_record::<SessionHeadMeta>(
-                        &head_json,
-                        "SessionHeadMeta",
-                        lash_core::store::SESSION_HEAD_META_SCHEMA_VERSION,
-                    )
-                    .map_err(|err| rusqlite::Error::ToSqlConversionFailure(Box::new(err)))?;
-                head_meta.head_revision = head_revision as u64;
-                head_meta.leaf_node_id = leaf_node_id;
-                head_meta.checkpoint_ref = checkpoint_ref.map(Into::into);
+                let payload = lash_core::store::decode_versioned_json_record::<SessionHeadPayload>(
+                    &head_json,
+                    "SessionHeadMeta",
+                    lash_core::store::SESSION_HEAD_META_SCHEMA_VERSION,
+                )
+                .map_err(|err| rusqlite::Error::ToSqlConversionFailure(Box::new(err)))?;
+                let head_meta = SessionHeadMeta::assemble(
+                    payload,
+                    head_revision as u64,
+                    checkpoint_ref.map(Into::into),
+                    leaf_node_id,
+                );
                 let graph =
                     Self::load_session_graph_from_conn(conn, &session_id, head_meta.leaf_node_id)
                         .unwrap_or_default();

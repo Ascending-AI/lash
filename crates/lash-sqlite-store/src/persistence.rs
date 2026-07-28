@@ -533,22 +533,24 @@ impl SessionCommitStore for Store {
                         )));
                     }
                     let next_revision = actual_revision + 1;
-                    let meta = SessionHeadMeta {
-                        schema_version: lash_core::store::SESSION_HEAD_META_SCHEMA_VERSION,
-                        session_id: commit.session_id.clone(),
-                        head_revision: next_revision,
-                        config: commit.config.clone(),
-                        current_frame_node_id: derived_frame_node_id,
-                        checkpoint_ref: Some(stored_checkpoint.checkpoint_ref.clone()),
+                    let meta = SessionHeadMeta::assemble(
+                        SessionHeadPayload {
+                            schema_version: lash_core::store::SESSION_HEAD_META_SCHEMA_VERSION,
+                            session_id: commit.session_id.clone(),
+                            config: commit.config.clone(),
+                            current_frame_node_id: derived_frame_node_id,
+                        },
+                        next_revision,
+                        Some(stored_checkpoint.checkpoint_ref.clone()),
                         leaf_node_id,
-                    };
+                    );
                     tx.execute(
                         "INSERT OR REPLACE INTO session_head
                          (session_id, head_json, head_revision, leaf_node_id, checkpoint_ref)
                          VALUES (?1, ?2, ?3, ?4, ?5)",
                         params![
                             meta.session_id,
-                            encode_json(&meta),
+                            encode_json(&meta.payload()),
                             meta.head_revision as i64,
                             meta.leaf_node_id,
                             meta.checkpoint_ref.as_ref().map(BlobRef::as_str),

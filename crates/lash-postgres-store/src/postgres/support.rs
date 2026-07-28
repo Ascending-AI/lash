@@ -295,15 +295,17 @@ pub(crate) async fn load_session_head_meta_tx(
     let head_revision: i64 = row.get(1);
     let leaf_node_id: Option<String> = row.get(2);
     let checkpoint_ref: Option<String> = row.get(3);
-    let mut meta: SessionHeadMeta = lash_core::store::decode_versioned_json_record(
+    let payload: SessionHeadPayload = lash_core::store::decode_versioned_json_record(
         &head_json,
         "SessionHeadMeta",
         lash_core::store::SESSION_HEAD_META_SCHEMA_VERSION,
     )?;
-    meta.head_revision = head_revision as u64;
-    meta.leaf_node_id = leaf_node_id;
-    meta.checkpoint_ref = checkpoint_ref.map(Into::into);
-    Ok(Some(meta))
+    Ok(Some(SessionHeadMeta::assemble(
+        payload,
+        head_revision as u64,
+        checkpoint_ref.map(Into::into),
+        leaf_node_id,
+    )))
 }
 
 pub(crate) async fn load_usage_deltas_tx(

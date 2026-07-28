@@ -64,7 +64,7 @@ use lash_core::store::queued_work::{
 };
 use lash_core::store::{
     GraphAppend, HydratedSessionCheckpoint, PersistedSessionRead, RuntimeCommit,
-    RuntimeCommitResult, SessionCheckpoint, SessionHeadMeta,
+    RuntimeCommitResult, SessionCheckpoint, SessionHeadMeta, SessionHeadPayload,
 };
 use lash_core::{
     AbandonRequest, AttachmentId, AttachmentIntent, AttachmentManifest, AttachmentManifestEntry,
@@ -865,15 +865,17 @@ fn try_load_session_head_meta_from_conn(
     let Some((head_json, head_revision, leaf_node_id, checkpoint_ref)) = row else {
         return Ok(None);
     };
-    let mut meta: SessionHeadMeta = lash_core::store::decode_versioned_json_record(
+    let payload: SessionHeadPayload = lash_core::store::decode_versioned_json_record(
         &head_json,
         "SessionHeadMeta",
         lash_core::store::SESSION_HEAD_META_SCHEMA_VERSION,
     )?;
-    meta.head_revision = head_revision as u64;
-    meta.leaf_node_id = leaf_node_id;
-    meta.checkpoint_ref = checkpoint_ref.map(Into::into);
-    Ok(Some(meta))
+    Ok(Some(SessionHeadMeta::assemble(
+        payload,
+        head_revision as u64,
+        checkpoint_ref.map(Into::into),
+        leaf_node_id,
+    )))
 }
 
 fn load_session_head_meta_from_conn(

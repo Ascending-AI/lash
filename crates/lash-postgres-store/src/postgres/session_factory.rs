@@ -357,22 +357,24 @@ impl SessionStoreFactory for PostgresSessionStoreFactory {
             provider_id: request.policy.recorded_provider_id().to_string(),
             model: request.policy.model.clone(),
         };
-        let head = lash_core::store::SessionHeadMeta {
-            schema_version: lash_core::store::SESSION_HEAD_META_SCHEMA_VERSION,
-            session_id: request.session_id.clone(),
-            head_revision: 0,
-            config,
-            current_frame_node_id: Some(current_frame_node_id),
-            checkpoint_ref: Some(checkpoint_ref.clone().into()),
-            leaf_node_id: Some(request.node_id.clone()),
-        };
+        let head = lash_core::store::SessionHeadMeta::assemble(
+            lash_core::store::SessionHeadPayload {
+                schema_version: lash_core::store::SESSION_HEAD_META_SCHEMA_VERSION,
+                session_id: request.session_id.clone(),
+                config,
+                current_frame_node_id: Some(current_frame_node_id),
+            },
+            0,
+            Some(checkpoint_ref.clone().into()),
+            Some(request.node_id.clone()),
+        );
         sqlx::query(
             "INSERT INTO lash_sessions
              (session_id, head_revision, head_json, checkpoint_ref, leaf_node_id)
              VALUES ($1, 0, $2, $3, $4)",
         )
         .bind(&request.session_id)
-        .bind(encode_json(&head))
+        .bind(encode_json(&head.payload()))
         .bind(&checkpoint_ref)
         .bind(&request.node_id)
         .execute(&mut *tx)

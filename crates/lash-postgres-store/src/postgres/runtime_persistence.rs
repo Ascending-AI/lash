@@ -592,15 +592,17 @@ impl SessionCommitStore for PostgresSessionStore {
             )));
         }
         let next_revision = actual_revision + 1;
-        let meta = SessionHeadMeta {
-            schema_version: lash_core::store::SESSION_HEAD_META_SCHEMA_VERSION,
-            session_id: commit.session_id.clone(),
-            head_revision: next_revision,
-            config: commit.config.clone(),
-            current_frame_node_id: derived_frame_node_id,
-            checkpoint_ref: Some(checkpoint_ref.clone()),
+        let meta = SessionHeadMeta::assemble(
+            SessionHeadPayload {
+                schema_version: lash_core::store::SESSION_HEAD_META_SCHEMA_VERSION,
+                session_id: commit.session_id.clone(),
+                config: commit.config.clone(),
+                current_frame_node_id: derived_frame_node_id,
+            },
+            next_revision,
+            Some(checkpoint_ref.clone()),
             leaf_node_id,
-        };
+        );
         // Conditional publication is still required for concurrent first
         // commits, where no head row existed to lock. Existing sessions already
         // hold the row lock above; the revision predicate is defense in depth.
@@ -617,7 +619,7 @@ impl SessionCommitStore for PostgresSessionStore {
         )
         .bind(&commit.session_id)
         .bind(next_revision as i64)
-        .bind(encode_json(&meta))
+        .bind(encode_json(&meta.payload()))
         .bind(checkpoint_ref.as_str())
         .bind(meta.leaf_node_id.as_deref())
         .bind(actual_revision as i64)

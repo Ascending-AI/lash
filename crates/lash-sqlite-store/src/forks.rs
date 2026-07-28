@@ -319,22 +319,24 @@ pub(super) async fn fork_at_in_catalog(
                 provider_id: request.policy.recorded_provider_id().to_string(),
                 model: request.policy.model.clone(),
             };
-            let meta = lash_core::store::SessionHeadMeta {
-                schema_version: lash_core::store::SESSION_HEAD_META_SCHEMA_VERSION,
-                session_id: request.session_id.clone(),
-                head_revision: 0,
-                config,
-                current_frame_node_id: Some(current_frame_node_id),
-                checkpoint_ref: Some(checkpoint_ref.clone().into()),
-                leaf_node_id: Some(request.node_id.clone()),
-            };
+            let meta = lash_core::store::SessionHeadMeta::assemble(
+                lash_core::store::SessionHeadPayload {
+                    schema_version: lash_core::store::SESSION_HEAD_META_SCHEMA_VERSION,
+                    session_id: request.session_id.clone(),
+                    config,
+                    current_frame_node_id: Some(current_frame_node_id),
+                },
+                0,
+                Some(checkpoint_ref.clone().into()),
+                Some(request.node_id.clone()),
+            );
             tx.execute(
                 "INSERT INTO session_head
                  (session_id, head_json, head_revision, leaf_node_id, checkpoint_ref)
                  VALUES (?1, ?2, 0, ?3, ?4)",
                 params![
                     request.session_id,
-                    encode_json(&meta),
+                    encode_json(&meta.payload()),
                     request.node_id,
                     checkpoint_ref
                 ],

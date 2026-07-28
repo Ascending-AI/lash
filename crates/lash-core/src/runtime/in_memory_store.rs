@@ -1275,15 +1275,17 @@ impl crate::store::SessionCommitStore for InMemorySessionStore {
         self.commit_attachment_refs_in_memory(&commit.session_id, &commit.committed_attachment_ids);
         self.commit_turn_attachment_intents(&commit.session_id, &commit.turn_commit);
         let head_revision = actual + 1;
-        *meta = Some(crate::SessionHeadMeta {
-            schema_version: crate::store::SESSION_HEAD_META_SCHEMA_VERSION,
-            session_id: commit.session_id,
+        *meta = Some(crate::SessionHeadMeta::assemble(
+            crate::SessionHeadPayload {
+                schema_version: crate::store::SESSION_HEAD_META_SCHEMA_VERSION,
+                session_id: commit.session_id,
+                config: commit.config,
+                current_frame_node_id: commit.current_frame_node_id,
+            },
             head_revision,
-            config: commit.config,
-            current_frame_node_id: commit.current_frame_node_id,
-            checkpoint_ref: Some(checkpoint_ref.clone()),
+            Some(checkpoint_ref.clone()),
             leaf_node_id,
-        });
+        ));
         *self
             .runtime_commit_count
             .lock()

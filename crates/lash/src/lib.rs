@@ -172,8 +172,8 @@ pub mod persistence {
     pub use lash_core::store::{
         GraphAppend, HydratedSessionCheckpoint, OperationId, PersistedSessionRead,
         RealizedNodeTimestamp, RuntimeCommit, RuntimeCommitResult, RuntimeTurnCommitStamp,
-        SessionCheckpoint, SessionHead, SessionHeadMeta, commit_runtime_state_verified,
-        load_persisted_session_state,
+        SessionCheckpoint, SessionHead, SessionHeadMeta, SessionHeadPayload,
+        commit_runtime_state_verified, load_persisted_session_state,
     };
     pub use lash_core::{
         AttachmentReclamationReport, AttachmentRootSet, AttachmentStore, InMemoryAttachmentStore,

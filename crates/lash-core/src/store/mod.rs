@@ -55,7 +55,7 @@ mod persisted_state_tests {
 
     #[test]
     fn versioned_json_record_rejects_missing_schema_version() {
-        let err = decode_versioned_json_record::<SessionHeadMeta>(
+        let err = decode_versioned_json_record::<SessionHeadPayload>(
             "{}",
             "SessionHeadMeta",
             SESSION_HEAD_META_SCHEMA_VERSION,
@@ -73,7 +73,7 @@ mod persisted_state_tests {
 
     #[test]
     fn versioned_json_record_rejects_invalid_schema_version() {
-        let err = decode_versioned_json_record::<SessionHeadMeta>(
+        let err = decode_versioned_json_record::<SessionHeadPayload>(
             r#"{"schema_version":"1"}"#,
             "SessionHeadMeta",
             SESSION_HEAD_META_SCHEMA_VERSION,
@@ -93,7 +93,7 @@ mod persisted_state_tests {
     #[test]
     fn versioned_json_record_rejects_unsupported_schema_version() {
         let unsupported = SESSION_HEAD_META_SCHEMA_VERSION + 1;
-        let err = decode_versioned_json_record::<SessionHeadMeta>(
+        let err = decode_versioned_json_record::<SessionHeadPayload>(
             &format!(r#"{{"schema_version":{unsupported}}}"#),
             "SessionHeadMeta",
             SESSION_HEAD_META_SCHEMA_VERSION,
@@ -328,20 +328,64 @@ pub struct SessionHead {
     pub token_ledger: Vec<crate::TokenLedgerEntry>,
 }
 
+/// JSON-owned fields persisted in a session head's `head_json` column.
+///
+/// Revision and graph/checkpoint references live in dedicated columns and are
+/// deliberately absent from this serializable payload.
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
-pub struct SessionHeadMeta {
+pub struct SessionHeadPayload {
     pub schema_version: u32,
     #[serde(default = "default_root_session_id")]
     pub session_id: String,
-    #[serde(skip)]
-    pub head_revision: u64,
     pub config: crate::PersistedSessionConfig,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub current_frame_node_id: Option<String>,
-    #[serde(skip)]
+}
+
+/// Fully assembled session-head metadata returned by a store.
+///
+/// This type is intentionally not serializable. Store implementations decode a
+/// [`SessionHeadPayload`] and must supply the three column-owned values through
+/// [`Self::assemble`].
+#[derive(Clone, Debug)]
+pub struct SessionHeadMeta {
+    pub schema_version: u32,
+    pub session_id: String,
+    pub head_revision: u64,
+    pub config: crate::PersistedSessionConfig,
+    pub current_frame_node_id: Option<String>,
     pub checkpoint_ref: Option<BlobRef>,
-    #[serde(skip)]
     pub leaf_node_id: Option<String>,
+}
+
+impl SessionHeadMeta {
+    /// Combine the JSON payload with all dedicated-column values.
+    pub fn assemble(
+        payload: SessionHeadPayload,
+        head_revision: u64,
+        checkpoint_ref: Option<BlobRef>,
+        leaf_node_id: Option<String>,
+    ) -> Self {
+        Self {
+            schema_version: payload.schema_version,
+            session_id: payload.session_id,
+            head_revision,
+            config: payload.config,
+            current_frame_node_id: payload.current_frame_node_id,
+            checkpoint_ref,
+            leaf_node_id,
+        }
+    }
+
+    /// Project the exact value that may be serialized into `head_json`.
+    pub fn payload(&self) -> SessionHeadPayload {
+        SessionHeadPayload {
+            schema_version: self.schema_version,
+            session_id: self.session_id.clone(),
+            config: self.config.clone(),
+            current_frame_node_id: self.current_frame_node_id.clone(),
+        }
+    }
 }
 
 fn persisted_session_config_from_state(
@@ -984,16 +1028,13 @@ impl Default for SessionHead {
     }
 }
 
-impl Default for SessionHeadMeta {
+impl Default for SessionHeadPayload {
     fn default() -> Self {
         Self {
             schema_version: SESSION_HEAD_META_SCHEMA_VERSION,
             session_id: default_root_session_id(),
-            head_revision: 0,
             config: crate::PersistedSessionConfig::default(),
             current_frame_node_id: None,
-            checkpoint_ref: None,
-            leaf_node_id: None,
         }
     }
 }

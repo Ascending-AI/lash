@@ -498,7 +498,7 @@ pub use store::{
 #[allow(unused_imports)]
 pub(crate) use store::{
     GraphAppend, PersistedSessionRead, RuntimeCommitResult, SessionCheckpoint, SessionHeadMeta,
-    ensure_supported_schema_version, load_persisted_session_state,
+    SessionHeadPayload, ensure_supported_schema_version, load_persisted_session_state,
 };
 pub use store::{
     HydratedSessionCheckpoint, OperationId, RuntimeCommit, RuntimeTurnCommitStamp, SessionHead,

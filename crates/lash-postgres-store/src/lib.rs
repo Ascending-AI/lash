@@ -19,7 +19,7 @@ use lash_core::store::queued_work::{
 };
 use lash_core::store::{
     GraphAppend, HydratedSessionCheckpoint, PersistedSessionRead, RuntimeCommit,
-    RuntimeCommitResult, SessionCheckpoint, SessionHeadMeta,
+    RuntimeCommitResult, SessionCheckpoint, SessionHeadMeta, SessionHeadPayload,
 };
 use lash_core::{
     AbandonRequest, AttachmentId, AttachmentIntent, AttachmentManifest, AttachmentManifestEntry,

@@ -9,6 +9,7 @@ use lash_core::runtime::{
 use lash_core::store;
 use lash_core::store::{
     PersistedSessionRead, RuntimeCommitResult, SessionCheckpoint, SessionHeadMeta,
+    SessionHeadPayload,
 };
 use lash_core::{
     BlobRef, GcReport, LeaseOwnerIdentity, QueuedWorkStore, RuntimeCommit, RuntimePersistence,
@@ -763,15 +764,17 @@ impl SessionCommitStore for RuntimePerfStore {
         let id = self.next_blob_id.fetch_add(1, Ordering::Relaxed);
         let checkpoint_ref = BlobRef(format!("perf-checkpoint-{id}"));
         let head_revision = actual + 1;
-        *meta_guard = Some(SessionHeadMeta {
-            schema_version: lash_core::store::SESSION_HEAD_META_SCHEMA_VERSION,
-            session_id: session_id.clone(),
+        *meta_guard = Some(SessionHeadMeta::assemble(
+            SessionHeadPayload {
+                schema_version: lash_core::store::SESSION_HEAD_META_SCHEMA_VERSION,
+                session_id: session_id.clone(),
+                config,
+                current_frame_node_id,
+            },
             head_revision,
-            config,
-            current_frame_node_id,
-            checkpoint_ref: Some(checkpoint_ref.clone()),
+            Some(checkpoint_ref.clone()),
             leaf_node_id,
-        });
+        ));
         let turn_input_applications = completed_turn_input_claims
             .iter()
             .flat_map(|completion| completion.applications.iter().cloned())
