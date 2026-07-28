@@ -11,9 +11,9 @@ We decided that **generation intent belongs to the session policy**. `SessionSpe
 is the public overlay and it resolves into `SessionPolicy.generation`, the value every LLM
 call in the session carries. The policy is the right home rather than the spec alone,
 because subagent specs resolve against the parent's *live* policy, and because every
-carrier of a whole session policy — the current agent frame's assignment, the persisted
-state, `RemoteProcessExecutionPolicy` on the wire — then carries the sampling intent with
-it instead of silently dropping it at each boundary. Session-wide means session-wide: the
+carrier of a whole session policy — `SessionCreateRequest` on the child-session wire,
+`RemoteProcessExecutionPolicy` on the process/remote wire — then carries the sampling
+intent with it instead of silently dropping it at each boundary. Session-wide means session-wide: the
 direct requests plugins issue on the session's behalf (the observational-memory workers,
 the `llm_query` tool) read it from the policy they already read their model from, bounded by
 that model's capacity, rather than passing `GenerationOptions::default()` and running at
@@ -50,10 +50,18 @@ wins, for generation exactly as for the model and the prompt.** The facade recon
 policy it resolves from the host's spec over loaded state, so a mid-run
 `update_session_config` change lasts until the host reopens with a spec that says otherwise
 — the same lifetime a mid-run `set_model` has. Pairing the host's new model with the
-store's old temperature would be the anomaly. The persisted copy is what a session resumes
-with wherever no live host reconciles it: the process/remote path, and core embedders that
-hand `LashRuntime` a loaded state directly. A facade host that wants the recorded options
-back reads them from the store and supplies them, as it does for any other policy field.
+store's old temperature would be the anomaly.
+
+That is the whole story on the durable side, because the session store is not a carrier of
+generation intent at all: what it records of a session's configuration is
+`PersistedSessionConfig` — provider id and model, the two facts that identify what produced
+the history. Generation options travel on the policy through the seams that hand a *whole*
+policy across a boundary and find no host on the far side: a process/remote execution
+environment, and a `RuntimeSessionState` a core embedder holds and hands back to
+`LashRuntime`. Forking is the case that makes the rule visible. A fork creates a session
+head at a retained point, not a second authority over configuration, so a branch resolves
+the host's spec when it opens exactly as a reopen of its source would; only `provider_id`
+comes from the record, naming the provider that produced the history the branch continues.
 
 Session-wide defaults make the adapter's silent omissions matter. Anthropic drops a
 caller-set temperature when the model's host-declared capability pins sampling or extended

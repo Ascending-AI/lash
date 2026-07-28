@@ -2373,3 +2373,92 @@ async fn registry_without_store_factory_fails_loudly() {
         EmbedError::ProcessRegistryRequiresStoreFactory
     ));
 }
+
+#[tokio::test]
+async fn a_fork_runs_under_the_hosts_generation_intent_not_the_branch_points() -> Result<()> {
+    use lash_core::SessionStoreFactory as _;
+
+    // Forking creates a session head at a retained point; it does not create a
+    // second authority over configuration. The branch resolves the host's spec
+    // when it opens, exactly as a reopen of the source would, so the sampling a
+    // benchmark pinned on the core reaches the branch too. Only `provider_id`
+    // comes from the record, because it names which provider produced the
+    // history the branch continues.
+    let host_generation = lash_core::GenerationOptions {
+        output_token_cap: std::num::NonZeroUsize::new(4_096),
+        temperature: Some(lash_core::NonNegativeFiniteF64::new(0.0).expect("finite temperature")),
+        seed: Some(42),
+    };
+    let factory = Arc::new(lash_core::InMemorySessionStoreFactory::new());
+    let core = explicit_ephemeral_facets(LashCore::standard_builder())
+        .provider(mock_provider())
+        .model(mock_model_spec())
+        .generation(host_generation.clone())
+        .store_factory(Arc::clone(&factory) as Arc<dyn lash_core::SessionStoreFactory>)
+        .build()?;
+
+    let mut source_model = mock_model_spec();
+    source_model.id = "fork-source-model".to_string();
+    let source_policy = lash_core::SessionPolicy {
+        provider_id: "fork-source-provider".to_string(),
+        model: source_model,
+        session_id: Some("generation-fork-source".to_string()),
+        // The branch point ran with sampling of its own. It is not a second
+        // source of truth for the branch.
+        generation: lash_core::GenerationOptions {
+            seed: Some(9),
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    let source_store = factory
+        .create_store(&lash_core::SessionStoreCreateRequest {
+            session_id: "generation-fork-source".to_string(),
+            relation: lash_core::SessionRelation::Root,
+            policy: source_policy.clone(),
+        })
+        .await
+        .expect("create fork source");
+    let source_incarnation_id = source_store
+        .load_session_meta()
+        .await
+        .expect("load source metadata")
+        .expect("source metadata exists")
+        .incarnation_id;
+    let mut source_state = lash_core::RuntimeSessionState {
+        session_id: "generation-fork-source".to_string(),
+        session_lifetime: lash_core::SessionLifetime::durable(source_incarnation_id),
+        policy: source_policy,
+        ..Default::default()
+    };
+    source_state.ensure_agent_frame_initialized();
+    source_store
+        .commit_runtime_state(lash_core::RuntimeCommit::persisted_state_for_test(
+            &source_state,
+            &[],
+        ))
+        .await
+        .expect("commit fork source");
+    let fork_node_id = source_state
+        .session_graph
+        .leaf_node_id
+        .clone()
+        .expect("fork source leaf");
+    core.pin(&fork_node_id).await?;
+
+    core.fork_at(&fork_node_id, "generation-fork-branch")
+        .await?;
+
+    let branch = core.session("generation-fork-branch").open().await?;
+    let branch_state = branch.admin().state().persist_current().await?;
+    assert_eq!(
+        branch_state.policy.generation, host_generation,
+        "a branch resolves the host's generation intent, like every other reopen"
+    );
+    assert_eq!(
+        branch_state.policy.recorded_provider_id(),
+        "fork-source-provider",
+        "the branch still records the provider that produced the history it continues"
+    );
+    Ok(())
+}

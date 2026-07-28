@@ -312,17 +312,19 @@ pub(crate) async fn load_state_from_store(
 ///
 /// ADR 0030's single resolution point: the host supplies the session's
 /// configuration when it constructs *or reopens* a session, and that value is
-/// reconciled into every live and stored copy before the runtime starts. So
-/// this is deliberately wholesale — model, prompt, turn budget and generation
-/// options all come from the host, and a mid-run
+/// reconciled before the runtime starts. So this is deliberately wholesale —
+/// model, prompt, turn budget and generation options all come from the host,
+/// and a mid-run
 /// [`LashRuntime::update_session_config`](lash_core::LashRuntime::update_session_config)
 /// change lasts until the host reopens with a spec that says otherwise, for
-/// every one of them alike. Persisted policy is the record of what the session
-/// last executed with; a host that wants it back reads it and supplies it.
+/// every one of them alike. A session opened at a fork point is a reopen like
+/// any other; branching history does not branch configuration.
 ///
 /// `provider_id` is the exception, and stays the recorded one: it names which
-/// provider produced the history in the store rather than which one the host
-/// is configured with now.
+/// provider produced the history rather than which provider the host is
+/// configured with now. It is also the only configuration a store keeps
+/// besides the model — `PersistedSessionConfig` is those
+/// two facts — so there is no third opinion here to reconcile against.
 fn reconcile_loaded_state_policy(state: &mut RuntimeSessionState, policy: &SessionPolicy) {
     let recorded_provider_id = state.policy.recorded_provider_id().to_string();
     state.policy = policy.clone();
