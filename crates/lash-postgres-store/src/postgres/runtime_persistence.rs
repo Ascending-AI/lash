@@ -2198,17 +2198,15 @@ impl StoreMaintenance for PostgresSessionStore {
     }
 
     /// Checkpoint-rooted mark/sweep over `lash_blobs`, mirroring the SQLite
-    /// store's semantics ([`GcReport`] fields match). Postgres inlines the
-    /// tool/plugin/execution snapshots inside each checkpoint envelope, so
-    /// `lash_blobs` holds only checkpoint envelopes and the reachable set is the
-    /// set of live checkpoint refs (plus any child artifact ref an envelope
-    /// still names — usually none, but retained defensively). The three
+    /// store's semantics ([`GcReport`] fields match). PostgreSQL stores each
+    /// checkpoint as one manifest plus separately addressed tool, plugin, and
+    /// execution-state components. The three
     /// Lashlang artifact namespaces live in a separate, upsert-in-place table
     /// (`lash_lashlang_artifacts`) that never orphans, so GC does not touch it.
     async fn gc_unreachable(&self) -> Result<GcReport, StoreError> {
         let mut tx = self.pool.begin().await.map_err(store_sqlx_error)?;
         // Serialize against concurrent checkpoint-blob writers. Every commit
-        // INSERTs its new envelope into `lash_blobs` (holding a ROW EXCLUSIVE
+        // INSERTs its new manifest into `lash_blobs` (holding a ROW EXCLUSIVE
         // lock) inside the same transaction that repoints `lash_sessions`, so an
         // EXCLUSIVE table lock makes the root read and the sweep atomic with
         // respect to every committer: a commit racing GC either lands fully
@@ -2217,7 +2215,7 @@ impl StoreMaintenance for PostgresSessionStore {
         tx.execute("LOCK TABLE lash_blobs IN EXCLUSIVE MODE")
             .await
             .map_err(store_sqlx_error)?;
-        // Roots: every live session's checkpoint envelope, across ALL sessions.
+        // Roots: every live session's checkpoint manifest, across ALL sessions.
         // `lash_blobs` is a content-addressed table shared by the whole
         // database, so a blob shared across sessions must stay reachable while
         // ANY session references it — scoping roots to one session would delete
@@ -2236,8 +2234,8 @@ impl StoreMaintenance for PostgresSessionStore {
             if !retained.insert(checkpoint_hash.clone()) {
                 continue;
             }
-            // A rooted envelope is live. Decode it and retain any child artifact
-            // blob it still references. A present-yet-undecodable envelope is a
+            // A rooted manifest is live. Decode it and retain every component
+            // blob it references. A present-yet-undecodable manifest is a
             // hard error so GC aborts rather than dropping a live checkpoint's
             // children; an absent one was already collected on a prior run.
             let bytes: Option<Vec<u8>> =
@@ -2249,15 +2247,15 @@ impl StoreMaintenance for PostgresSessionStore {
             let Some(bytes) = bytes else {
                 continue;
             };
-            let envelope: SessionCheckpointEnvelope = decode_versioned_msgpack_record(
+            let manifest: SessionCheckpoint = decode_versioned_msgpack_record(
                 &bytes,
-                "PostgresSessionCheckpointEnvelope",
-                POSTGRES_SESSION_CHECKPOINT_ENVELOPE_SCHEMA_VERSION,
+                "SessionCheckpoint",
+                lash_core::store::SESSION_CHECKPOINT_SCHEMA_VERSION,
             )?;
             for child in [
-                envelope.manifest.tool_state_ref,
-                envelope.manifest.plugin_snapshot_ref,
-                envelope.manifest.execution_state_ref,
+                manifest.tool_state_ref,
+                manifest.plugin_snapshot_ref,
+                manifest.execution_state_ref,
             ]
             .into_iter()
             .flatten()

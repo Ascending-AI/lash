@@ -500,6 +500,7 @@ impl SessionCommitStore for Store {
                         ensure_turn_input_completion_owns_all_inputs(completed, owned_rows)?;
                     }
 
+                    Self::validate_checkpoint_component_refs_conn(tx, &commit.checkpoint)?;
                     let stored_checkpoint =
                         Self::put_checkpoint_conn(tx, &commit.checkpoint, blob_profile)
                             .map_err(sqlite_error)?;

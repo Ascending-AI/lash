@@ -1148,6 +1148,14 @@ impl Default for SessionHeadMeta {
 /// [`SessionAttachmentStore`](crate::SessionAttachmentStore)
 /// without dual-trait casting. Backends with no attachment-write story can
 /// paste no-op manifest impls via [`impl_noop_attachment_manifest!`].
+///
+/// Checkpoint components have one backend-independent durable shape. When a
+/// commit supplies a tool-state, plugin-snapshot, or execution-state body, the
+/// backend must store it under a content ref and return that ref in
+/// [`RuntimeCommitResult::manifest`]. A later commit may carry the ref without
+/// the body to mean "unchanged"; the backend must resolve the existing body
+/// when hydrating the checkpoint. A ref-only commit whose component is absent
+/// must fail instead of persisting a checkpoint that hydrates to `None`.
 #[async_trait::async_trait]
 pub trait SessionCommitStore: AttachmentManifest + Send + Sync {
     async fn load_session(&self) -> Result<Option<PersistedSessionRead>, StoreError>;

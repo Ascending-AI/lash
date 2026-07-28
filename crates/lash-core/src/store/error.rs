@@ -155,6 +155,11 @@ pub enum StoreError {
         actual: String,
         expected: u32,
     },
+    #[error("checkpoint {component} component `{blob_ref}` is not present in the store")]
+    CheckpointComponentMissing {
+        component: &'static str,
+        blob_ref: crate::BlobRef,
+    },
     #[error("store backend error: {0}")]
     Backend(String),
 }

@@ -96,7 +96,10 @@ const SCHEMA_COMPONENT: &str = "lash-postgres-store";
 // session snapshot.
 // Bumped to 23 so reusable session names carry durable per-lifetime
 // incarnation identity in session metadata.
-const SCHEMA_VERSION: i32 = 23;
+// Bumped to 24 so PostgreSQL checkpoints use the shared manifest plus
+// content-addressed component blobs. Pre-24 checkpoint blobs contain the
+// removed backend-only envelope and are rejected at open.
+const SCHEMA_VERSION: i32 = 24;
 const PROCESS_LEASE_SCHEMA_VERSION: u32 = lash_core::PROCESS_LEASE_SCHEMA_VERSION;
 
 #[derive(Clone)]

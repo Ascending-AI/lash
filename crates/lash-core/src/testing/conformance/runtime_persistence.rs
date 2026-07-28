@@ -160,6 +160,8 @@ where
     concurrent_head_revision_cas_applies_exactly_once(make()).await;
     commit_rejects_a_different_session_id(make()).await;
     load_hydrates_checkpoint_and_usage(make()).await;
+    checkpoint_component_refs_preserve_clean_state(make()).await;
+    checkpoint_rejects_unknown_component_ref(make()).await;
     session_read_loads_persisted_history(make()).await;
     session_metadata_round_trips(make()).await;
     attachment_manifest_records_intent_and_commit_stamps(make()).await;
@@ -205,6 +207,102 @@ where
     pending_active_turn_inputs_defer_unaccepted_once_on_interrupt(make()).await;
     // [`StoreMaintenance`]: tombstone/vacuum/GC retention.
     verify_node_refcounts_matches_append_edges_and_head_moves(make()).await;
+}
+
+/// A backend must mint refs for checkpoint bodies and resolve those refs when
+/// the next clean commit carries no replacement bodies.
+pub async fn checkpoint_component_refs_preserve_clean_state(store: Arc<dyn RuntimePersistence>) {
+    let mut state = RuntimeSessionState {
+        session_id: "checkpoint-component-refs".to_string(),
+        session_lifetime: conformance_lifetime("checkpoint-component-refs"),
+        tool_state_snapshot: Some(ToolState::default().with_generation(91)),
+        plugin_snapshot_revision: Some(37),
+        plugin_snapshot: Some(PluginSessionSnapshot::default()),
+        execution_state_snapshot: Some(b"rlm-globals-before-clean-commit".to_vec()),
+        ..RuntimeSessionState::default()
+    };
+
+    let first = commit_runtime_state_for_test(
+        &store,
+        RuntimeCommit::persisted_state_for_test(&state, &[]),
+        "checkpoint-component-refs-first",
+    )
+    .await
+    .expect("commit checkpoint component bodies");
+    assert!(
+        first.manifest.tool_state_ref.is_some(),
+        "a stored tool-state body must return its content ref"
+    );
+    assert!(
+        first.manifest.plugin_snapshot_ref.is_some(),
+        "a stored plugin-snapshot body must return its content ref"
+    );
+    assert!(
+        first.manifest.execution_state_ref.is_some(),
+        "a stored execution-state body must return its content ref"
+    );
+
+    state.apply_persisted_commit_result(first);
+    assert!(state.tool_state_snapshot.is_none());
+    assert!(state.plugin_snapshot.is_none());
+    assert!(state.execution_state_snapshot.is_none());
+
+    let second = commit_runtime_state_for_test(
+        &store,
+        RuntimeCommit::persisted_state_for_test(&state, &[]),
+        "checkpoint-component-refs-second",
+    )
+    .await
+    .expect("commit unchanged checkpoint component refs");
+    state.apply_persisted_commit_result(second);
+
+    let read = store
+        .load_session()
+        .await
+        .expect("cold-load refs-only checkpoint")
+        .expect("refs-only checkpoint session");
+    let checkpoint = read.checkpoint.expect("hydrated refs-only checkpoint");
+    assert_eq!(
+        checkpoint.tool_state.as_ref().map(ToolState::generation),
+        Some(91)
+    );
+    assert!(
+        checkpoint.plugin_snapshot.is_some(),
+        "refs-only commit must preserve the plugin snapshot body"
+    );
+    assert_eq!(checkpoint.plugin_snapshot_revision, Some(37));
+    assert_eq!(
+        checkpoint.execution_state.as_deref(),
+        Some(&b"rlm-globals-before-clean-commit"[..]),
+        "refs-only commit must preserve execution state across a cold load"
+    );
+}
+
+/// A ref-only checkpoint commit is valid only when every referenced component
+/// already exists in the backend.
+pub async fn checkpoint_rejects_unknown_component_ref(store: Arc<dyn RuntimePersistence>) {
+    let state = RuntimeSessionState {
+        session_id: "checkpoint-unknown-ref".to_string(),
+        session_lifetime: conformance_lifetime("checkpoint-unknown-ref"),
+        execution_state_ref: Some(crate::BlobRef(
+            "checkpoint-component-that-was-never-stored".to_string(),
+        )),
+        ..RuntimeSessionState::default()
+    };
+
+    let error = commit_runtime_state_for_test(
+        &store,
+        RuntimeCommit::persisted_state_for_test(&state, &[]),
+        "checkpoint-unknown-ref",
+    )
+    .await
+    .expect_err("a checkpoint must reject a ref whose body is absent");
+    assert!(
+        error
+            .to_string()
+            .contains("checkpoint-component-that-was-never-stored"),
+        "missing-component error must identify the unresolved ref: {error}"
+    );
 }
 
 async fn commit_rejects_leaf_without_frame_open_ancestor(store: Arc<dyn RuntimePersistence>) {

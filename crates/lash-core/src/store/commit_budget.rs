@@ -12,9 +12,9 @@ impl RuntimeCommit {
     /// checkpoint, and attachment-manifest ids a single commit may carry.
     ///
     /// Graph nodes use their exact JSON row representation. Checkpoints use a
-    /// backend-neutral named-MessagePack representation of the hydrated value:
-    /// PostgreSQL writes the same fields in one envelope, while SQLite splits
-    /// them into named-MessagePack blobs and may compress those blobs.
+    /// backend-neutral named-MessagePack representation of the hydrated value.
+    /// Durable backends store the manifest and present component bodies as
+    /// separately addressed named-MessagePack blobs; SQLite may compress them.
     /// Attachment ids use the exact UTF-8 bytes bound into manifest updates.
     /// Backend envelope, compression, row, and page overhead is deliberately
     /// outside this caller-controlled logical-payload budget.

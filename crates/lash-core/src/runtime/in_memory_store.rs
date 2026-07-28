@@ -14,6 +14,7 @@ use super::usage::merge_usage_delta_entries;
 use super::{SessionStoreCreateRequest, SessionStoreFactory};
 use crate::store::RuntimePersistence;
 mod attachments;
+mod checkpoints;
 mod factory;
 mod incarnation;
 mod maintenance;
@@ -160,6 +161,9 @@ pub struct InMemorySessionStore {
     tombstoned_node_ids: Arc<Mutex<HashSet<String>>>,
     incoming_node_refs: Arc<Mutex<HashMap<String, i64>>>,
     pub(crate) checkpoint: Mutex<Option<crate::HydratedSessionCheckpoint>>,
+    tool_state_blobs: Mutex<HashMap<crate::BlobRef, crate::ToolState>>,
+    plugin_snapshot_blobs: Mutex<HashMap<crate::BlobRef, crate::PluginSessionSnapshot>>,
+    execution_state_blobs: Mutex<HashMap<crate::BlobRef, Vec<u8>>>,
     pub(crate) usage_deltas: Mutex<Vec<crate::TokenLedgerEntry>>,
     pub(crate) runtime_commit_count: Mutex<usize>,
     runtime_turn_commits: Mutex<RuntimeTurnCommitMap>,
@@ -244,6 +248,9 @@ impl InMemorySessionStore {
             tombstoned_node_ids,
             incoming_node_refs,
             checkpoint: Mutex::new(None),
+            tool_state_blobs: Mutex::new(HashMap::new()),
+            plugin_snapshot_blobs: Mutex::new(HashMap::new()),
+            execution_state_blobs: Mutex::new(HashMap::new()),
             usage_deltas: Mutex::new(Vec::new()),
             runtime_commit_count: Mutex::new(0),
             runtime_turn_commits: Mutex::new(std::collections::HashMap::new()),
@@ -913,6 +920,34 @@ impl crate::store::SessionCommitStore for InMemorySessionStore {
                 actual,
             });
         }
+        let (tool_state_ref, tool_state) = checkpoints::resolve_component(
+            &self.tool_state_blobs,
+            "tool-state",
+            commit.checkpoint.tool_state.as_ref(),
+            commit.checkpoint.tool_state_ref.as_ref(),
+        )?;
+        let (plugin_snapshot_ref, plugin_snapshot) = checkpoints::resolve_component(
+            &self.plugin_snapshot_blobs,
+            "plugin-snapshot",
+            commit.checkpoint.plugin_snapshot.as_ref(),
+            commit.checkpoint.plugin_snapshot_ref.as_ref(),
+        )?;
+        let (execution_state_ref, execution_state) = checkpoints::resolve_component(
+            &self.execution_state_blobs,
+            "execution-state",
+            commit.checkpoint.execution_state.as_ref(),
+            commit.checkpoint.execution_state_ref.as_ref(),
+        )?;
+        let hydrated_checkpoint = crate::HydratedSessionCheckpoint {
+            turn_state: commit.checkpoint.turn_state.clone(),
+            tool_state_ref,
+            tool_state,
+            plugin_snapshot_ref,
+            plugin_snapshot,
+            plugin_snapshot_revision: commit.checkpoint.plugin_snapshot_revision,
+            execution_state_ref,
+            execution_state,
+        };
         commit.validate_append_node_ids_unique()?;
         commit.graph.validate_append_topology()?;
         let incoming_nodes = commit.graph.nodes.as_slice();
@@ -1205,15 +1240,47 @@ impl crate::store::SessionCommitStore for InMemorySessionStore {
             .lock()
             .expect("lock usage deltas")
             .extend(commit.usage_deltas.iter().cloned());
-        let checkpoint_ref = crate::BlobRef(format!("recording-checkpoint-{}", actual + 1));
         let manifest = crate::store::SessionCheckpoint::new(
-            commit.checkpoint.turn_state.clone(),
-            commit.checkpoint.tool_state_ref.clone(),
-            commit.checkpoint.plugin_snapshot_ref.clone(),
-            commit.checkpoint.plugin_snapshot_revision,
-            commit.checkpoint.execution_state_ref.clone(),
+            hydrated_checkpoint.turn_state.clone(),
+            hydrated_checkpoint.tool_state_ref.clone(),
+            hydrated_checkpoint.plugin_snapshot_ref.clone(),
+            hydrated_checkpoint.plugin_snapshot_revision,
+            hydrated_checkpoint.execution_state_ref.clone(),
         );
-        *self.checkpoint.lock().expect("lock checkpoint") = Some(commit.checkpoint);
+        let checkpoint_bytes = rmp_serde::to_vec_named(&manifest).map_err(|err| {
+            crate::store::StoreError::Backend(format!(
+                "failed to encode in-memory checkpoint manifest: {err}"
+            ))
+        })?;
+        let checkpoint_ref = crate::BlobRef(crate::stable_hash::sha256_hex(&checkpoint_bytes));
+        if let (Some(blob_ref), Some(body)) = (
+            hydrated_checkpoint.tool_state_ref.clone(),
+            hydrated_checkpoint.tool_state.clone(),
+        ) {
+            self.tool_state_blobs
+                .lock()
+                .expect("lock in-memory tool-state blobs")
+                .insert(blob_ref, body);
+        }
+        if let (Some(blob_ref), Some(body)) = (
+            hydrated_checkpoint.plugin_snapshot_ref.clone(),
+            hydrated_checkpoint.plugin_snapshot.clone(),
+        ) {
+            self.plugin_snapshot_blobs
+                .lock()
+                .expect("lock in-memory plugin-snapshot blobs")
+                .insert(blob_ref, body);
+        }
+        if let (Some(blob_ref), Some(body)) = (
+            hydrated_checkpoint.execution_state_ref.clone(),
+            hydrated_checkpoint.execution_state.clone(),
+        ) {
+            self.execution_state_blobs
+                .lock()
+                .expect("lock in-memory execution-state blobs")
+                .insert(blob_ref, body);
+        }
+        *self.checkpoint.lock().expect("lock checkpoint") = Some(hydrated_checkpoint);
         crate::AttachmentManifest::commit_refs(
             self,
             &commit.session_id,
