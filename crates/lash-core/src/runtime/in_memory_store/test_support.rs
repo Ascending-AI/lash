@@ -78,14 +78,6 @@ mod tests {
             .expect("second concrete store");
         let mut second_state = RuntimeSessionState {
             session_id: "second".to_string(),
-            session_lifetime: crate::SessionLifetime::durable(
-                second
-                    .load_session_meta()
-                    .await
-                    .expect("load second metadata")
-                    .expect("second metadata")
-                    .incarnation_id,
-            ),
             ..Default::default()
         };
         second_state.ensure_agent_frame_initialized();
@@ -136,9 +128,6 @@ mod tests {
         let store = super::InMemorySessionStore::new();
         let state = RuntimeSessionState {
             session_id: "budget-before-backend".to_string(),
-            session_lifetime: crate::SessionLifetime::durable(
-                crate::IncarnationId::mint_for_store(),
-            ),
             ..Default::default()
         };
         let node = crate::SessionNodeRecord {
@@ -200,15 +189,14 @@ mod tests {
                 claim_session_lease_generation: 1,
             },
         );
-        let mut state = RuntimeSessionState {
+        let state = RuntimeSessionState {
             session_id: "session".to_string(),
             ..Default::default()
         };
-        let incarnation_id = store
-            .ensure_session_incarnation(&state.session_id, &state.policy)
+        store
+            .ensure_session_bound(&state.session_id, &state.policy)
             .await
-            .expect("realize stale-claim session lifetime");
-        state.bind_durable_incarnation(incarnation_id);
+            .expect("bind stale-claim session");
         let mut commit = RuntimeCommit::persisted_state_for_test(&state, &[]);
         commit.completed_queue_claims = vec![QueuedWorkCompletion {
             session_id: "session".to_string(),

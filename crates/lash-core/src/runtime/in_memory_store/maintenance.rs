@@ -10,6 +10,8 @@ use super::InMemorySessionStore;
 #[async_trait::async_trait]
 impl crate::store::StoreMaintenance for InMemorySessionStore {
     async fn vacuum(&self) -> Result<crate::store::VacuumReport, crate::store::StoreError> {
+        // `deleted_session_ids` is deliberately exempt: it is permanent
+        // identity evidence that prevents reuse after all other state is gone.
         let _transaction = self
             .write_transaction
             .lock()

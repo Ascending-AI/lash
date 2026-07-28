@@ -18,11 +18,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     let session_id = format!("cold-process-{nonce}-session");
-    let scope = ExecutionScope::turn_incarnation(
-        &session_id,
-        lash_core::IncarnationId::decode_from_store(format!("sqlite-helper:{session_id}")),
-        format!("cold-process-{nonce}-turn"),
-    );
+    let scope = ExecutionScope::turn(&session_id, format!("cold-process-{nonce}-turn"));
     let wait = match identity.as_str() {
         "tool_completion" => {
             AwaitEventWaitIdentity::tool_completion(format!("cold-process-{nonce}-call"))

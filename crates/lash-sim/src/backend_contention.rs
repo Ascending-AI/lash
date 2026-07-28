@@ -454,12 +454,6 @@ async fn stale_head_transaction_is_rejected(
     session_id: &str,
     store: Arc<dyn RuntimePersistence>,
 ) -> Result<BackendContentionOperation, String> {
-    let incarnation_id = store
-        .load_session_meta()
-        .await
-        .map_err(|err| format!("load session metadata: {err}"))?
-        .ok_or_else(|| format!("session `{session_id}` has no metadata"))?
-        .incarnation_id;
     let expected_head_revision = store
         .load_session()
         .await
@@ -467,7 +461,6 @@ async fn stale_head_transaction_is_rejected(
         .map_or(0, |read| read.head_revision);
     let current = RuntimeSessionState {
         session_id: session_id.to_string(),
-        session_lifetime: lash_core::SessionLifetime::durable(incarnation_id.clone()),
         head_revision: expected_head_revision,
         ..RuntimeSessionState::default()
     };
@@ -477,7 +470,6 @@ async fn stale_head_transaction_is_rejected(
         .map_err(|err| format!("establish current session head: {err}"))?;
     let stale = RuntimeSessionState {
         session_id: session_id.to_string(),
-        session_lifetime: lash_core::SessionLifetime::durable(incarnation_id),
         head_revision: expected_head_revision,
         ..RuntimeSessionState::default()
     };
@@ -507,15 +499,8 @@ async fn final_commit_retry_and_conflict_are_fenced(
     session_id: &str,
     store: Arc<dyn RuntimePersistence>,
 ) -> Result<BackendContentionOperation, String> {
-    let incarnation_id = store
-        .load_session_meta()
-        .await
-        .map_err(|err| format!("load session metadata: {err}"))?
-        .ok_or_else(|| format!("session `{session_id}` has no metadata"))?
-        .incarnation_id;
     let state = RuntimeSessionState {
         session_id: session_id.to_string(),
-        session_lifetime: lash_core::SessionLifetime::durable(incarnation_id.clone()),
         ..RuntimeSessionState::default()
     };
     let operation =
@@ -549,7 +534,6 @@ async fn final_commit_retry_and_conflict_are_fenced(
 
     let changed_state = RuntimeSessionState {
         session_id: session_id.to_string(),
-        session_lifetime: lash_core::SessionLifetime::durable(incarnation_id),
         turn_index: 1,
         ..RuntimeSessionState::default()
     };

@@ -6,9 +6,6 @@ async fn runtime_commit_rejects_cross_session_queue_batches_atomically() {
     let store = RuntimePerfStore::default();
     let state = RuntimeSessionState {
         session_id: "root".to_string(),
-        session_lifetime: lash_core::SessionLifetime::durable(
-            lash_core::IncarnationId::mint_for_store(),
-        ),
         turn_index: 1,
         ..RuntimeSessionState::default()
     };

@@ -279,10 +279,7 @@ impl SessionBuilder {
             .create_store(&request)
             .await
             .map(Some)
-            .map_err(|message| EmbedError::StoreFactory {
-                session_id: self.session_id.clone(),
-                message,
-            })
+            .map_err(EmbedError::Store)
     }
 }
 
@@ -470,8 +467,7 @@ impl LashSession {
 
     /// Build the execution scope for a turn in this opened session.
     ///
-    /// Persistent sessions include the store-realized incarnation required by
-    /// durable effect hosts; store-less sessions retain an inline turn scope.
+    /// Durable and store-less sessions use the same host-provided session id.
     pub fn turn_scope(&self, turn_id: impl Into<String>) -> lash_core::ExecutionScope {
         self.runtime.observe().persisted_state.turn_scope(turn_id)
     }
@@ -479,11 +475,7 @@ impl LashSession {
     /// Build the cancellation and terminal-observation address for a turn.
     pub fn turn_address(&self, turn_id: impl Into<String>) -> lash_core::TurnAddress {
         let observation = self.runtime.observe();
-        lash_core::TurnAddress::new_for_lifetime(
-            observation.session_id(),
-            &observation.persisted_state.session_lifetime,
-            turn_id,
-        )
+        lash_core::TurnAddress::new(observation.session_id(), turn_id)
     }
 
     pub fn policy_snapshot(&self) -> SessionPolicy {
@@ -547,13 +539,8 @@ impl LashSession {
         origin: Option<String>,
         reason: Option<String>,
     ) -> Result<lash_core::TurnCancelReceipt> {
-        let observation = self.runtime.observe();
         let mut request = lash_core::TurnCancelRequest::new(
-            lash_core::TurnAddress::new_for_lifetime(
-                self.session_id(),
-                &observation.persisted_state.session_lifetime,
-                turn_id,
-            ),
+            lash_core::TurnAddress::new(self.session_id(), turn_id),
             request_id,
             origin,
         );

@@ -72,12 +72,12 @@ mod tests {
             })
         }
 
-        async fn ensure_session_incarnation(
+        async fn ensure_session_bound(
             &self,
             _session_id: &str,
             _policy: &crate::SessionPolicy,
-        ) -> Result<crate::IncarnationId, StoreError> {
-            Ok(crate::IncarnationId::mint_for_store())
+        ) -> Result<(), StoreError> {
+            Ok(())
         }
 
         async fn save_session_meta(
@@ -97,9 +97,6 @@ mod tests {
         let store = NonValidatingFacadeStore::default();
         let state = crate::RuntimeSessionState {
             session_id: "boundary-budget".to_string(),
-            session_lifetime: crate::SessionLifetime::durable(
-                crate::IncarnationId::mint_for_store(),
-            ),
             ..crate::RuntimeSessionState::default()
         };
         let node = crate::SessionNodeRecord {

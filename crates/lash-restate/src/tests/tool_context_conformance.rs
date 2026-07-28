@@ -255,17 +255,13 @@ async fn every_registered_first_party_tool_succeeds_and_replays_in_every_context
 
         let inline_cell =
             ProductionToolCell::new(EffectReplayOwnership::Runtime, &manifest.name).await;
-        let inline_incarnation = inline_cell
+        inline_cell
             .runtime_store
-            .ensure_session_incarnation(&inline_cell.session_id, &inline_cell.policy)
+            .ensure_session_bound(&inline_cell.session_id, &inline_cell.policy)
             .await
-            .expect("realize inline session incarnation");
+            .expect("bind inline session");
         let inline = lash_sqlite_store::SqliteRuntimeEffectController::memory(
-            ExecutionScope::turn_incarnation(
-                &inline_cell.session_id,
-                inline_incarnation,
-                &inline_cell.turn_id,
-            ),
+            ExecutionScope::turn(&inline_cell.session_id, &inline_cell.turn_id),
         )
         .await
         .expect("in-process production replay controller");

@@ -495,7 +495,7 @@ impl SessionStoreFactory for RuntimePerfStoreFactory {
     async fn create_store(
         &self,
         request: &SessionStoreCreateRequest,
-    ) -> Result<Arc<dyn RuntimePersistence>, String> {
+    ) -> Result<Arc<dyn RuntimePersistence>, StoreError> {
         if request.parent_session_id().is_none() {
             return Ok(Arc::clone(&self.store) as Arc<dyn RuntimePersistence>);
         }
@@ -518,11 +518,11 @@ lash_core::impl_noop_attachment_manifest!(RuntimePerfStore);
 
 #[async_trait::async_trait]
 impl SessionCommitStore for RuntimePerfStore {
-    async fn ensure_session_incarnation(
+    async fn ensure_session_bound(
         &self,
         session_id: &str,
         policy: &lash_core::SessionPolicy,
-    ) -> Result<lash_core::IncarnationId, store::StoreError> {
+    ) -> Result<(), store::StoreError> {
         let mut meta = self.session_meta.lock().expect("lock perf session meta");
         if let Some(meta) = meta.as_ref() {
             if meta.session_id != session_id {
@@ -531,19 +531,17 @@ impl SessionCommitStore for RuntimePerfStore {
                     attempted_session_id: session_id.to_string(),
                 });
             }
-            return Ok(meta.incarnation_id.clone());
+            return Ok(());
         }
-        let incarnation_id = lash_core::IncarnationId::mint_for_store();
         *meta = Some(store::SessionMeta {
             session_id: session_id.to_string(),
-            incarnation_id: incarnation_id.clone(),
             session_name: session_id.to_string(),
             created_at: "test".to_string(),
             model: policy.model.id.clone(),
             cwd: None,
             relation: lash_core::SessionRelation::Root,
         });
-        Ok(incarnation_id)
+        Ok(())
     }
 
     async fn load_session(&self) -> Result<Option<PersistedSessionRead>, store::StoreError> {
@@ -603,7 +601,6 @@ impl SessionCommitStore for RuntimePerfStore {
             .collect();
         let RuntimeCommit {
             session_id,
-            session_lifetime: _,
             expected_head_revision,
             config,
             current_frame_node_id,

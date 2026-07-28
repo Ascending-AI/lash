@@ -93,7 +93,7 @@ const SCHEMA_COMPONENT: &str = "lash-postgres-store";
 // joins live heads as both a graph-node root and checkpoint-blob root.
 // Bumped to 22 so each anchor binds one continuation checkpoint and source
 // session snapshot.
-// Bumped to 23 so reusable session names carry durable per-lifetime
+// Bumped to 23 so the then-reusable session names carried durable per-lifetime
 // incarnation identity in session metadata.
 // Bumped to 24 so PostgreSQL checkpoints use the shared manifest plus
 // content-addressed component blobs. Pre-24 checkpoint blobs contain the
@@ -104,7 +104,9 @@ const SCHEMA_COMPONENT: &str = "lash-postgres-store";
 // now derives liveness from parent edges, session heads, and anchors.
 // Bumped to 27 for canonical typed effect-journal identity and indexed
 // session/incarnation lifecycle joins. Pre-27 databases are rejected.
-const SCHEMA_VERSION: i32 = 27;
+// Bumped to 28 for permanent session-id reuse rejection and removal of
+// incarnation identity from session metadata and effect journals.
+const SCHEMA_VERSION: i32 = 28;
 const PROCESS_LEASE_SCHEMA_VERSION: u32 = lash_core::PROCESS_LEASE_SCHEMA_VERSION;
 
 #[derive(Clone)]
@@ -724,14 +726,6 @@ mod tests {
             .expect("create stale store");
         let mut state = lash_core::RuntimeSessionState {
             session_id: session_id.clone(),
-            session_lifetime: lash_core::SessionLifetime::durable(
-                stale_store
-                    .load_session_meta()
-                    .await
-                    .expect("load stale session metadata")
-                    .expect("stale session metadata")
-                    .incarnation_id,
-            ),
             ..Default::default()
         };
         state.ensure_agent_frame_initialized();
@@ -757,14 +751,6 @@ mod tests {
             .expect("explicitly recreate deleted store");
         let mut state = lash_core::RuntimeSessionState {
             session_id: session_id.clone(),
-            session_lifetime: lash_core::SessionLifetime::durable(
-                recreated
-                    .load_session_meta()
-                    .await
-                    .expect("load recreated session metadata")
-                    .expect("recreated session metadata")
-                    .incarnation_id,
-            ),
             ..Default::default()
         };
         state.ensure_agent_frame_initialized();

@@ -34,15 +34,8 @@ async fn create_state(
         .create_store(&request(session_id))
         .await
         .expect("create benchmark store");
-    let incarnation_id = store
-        .load_session_meta()
-        .await
-        .expect("load benchmark session metadata")
-        .expect("benchmark session metadata exists")
-        .incarnation_id;
     let state = RuntimeSessionState {
         session_id: session_id.to_string(),
-        session_lifetime: lash_core::SessionLifetime::durable(incarnation_id),
         ..Default::default()
     };
     (store, state)

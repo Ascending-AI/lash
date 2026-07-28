@@ -97,7 +97,7 @@ async fn bind_session_store(
             crate::PluginError::Session(child_store_factory_error(
                 &plan.session_id,
                 plan.parent_session_id.as_deref(),
-                message,
+                message.to_string(),
             ))
         })?;
     validate_child_store_binding(

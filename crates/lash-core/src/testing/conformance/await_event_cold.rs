@@ -415,14 +415,7 @@ where
     };
     let after_key = make()
         .await_event_key(
-            &ExecutionScope::turn_incarnation(
-                &after.session_id,
-                after
-                    .incarnation_id
-                    .clone()
-                    .expect("conformance address incarnation"),
-                &after.turn_id,
-            ),
+            &ExecutionScope::turn(&after.session_id, &after.turn_id),
             AwaitEventWaitIdentity::TurnTerminal,
         )
         .await
@@ -463,14 +456,7 @@ where
     });
     let before_key = make()
         .await_event_key(
-            &ExecutionScope::turn_incarnation(
-                &before.session_id,
-                before
-                    .incarnation_id
-                    .clone()
-                    .expect("conformance address incarnation"),
-                &before.turn_id,
-            ),
+            &ExecutionScope::turn(&before.session_id, &before.turn_id),
             AwaitEventWaitIdentity::TurnTerminal,
         )
         .await

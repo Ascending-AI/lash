@@ -324,9 +324,6 @@ impl SessionCommitStore for PostgresSessionStore {
         commit.validate_operation_session()?;
         let turn_commit_hash = commit.turn_commit_hash()?;
         self.bind_session_id(&commit.session_id)?;
-        let commit_incarnation_id = commit
-            .durable_incarnation_id("Postgres runtime commit")?
-            .clone();
         let realized_node_timestamps = commit
             .graph
             .appended_nodes()
@@ -355,7 +352,6 @@ impl SessionCommitStore for PostgresSessionStore {
         }
         let direct_meta = SessionMeta {
             session_id: commit.session_id.clone(),
-            incarnation_id: commit_incarnation_id,
             session_name: commit.session_id.clone(),
             created_at: self.clock.timestamp_rfc3339(),
             model: commit.config.model.id.clone(),
@@ -372,21 +368,7 @@ impl SessionCommitStore for PostgresSessionStore {
         .execute(&mut *tx)
         .await
         .map_err(store_sqlx_error)?;
-        let durable_meta_json = sqlx::query_scalar::<_, String>(
-            "SELECT meta_json FROM lash_session_meta WHERE session_id = $1",
-        )
-        .bind(&commit.session_id)
-        .fetch_optional(&mut *tx)
-        .await
-        .map_err(store_sqlx_error)?
-        .ok_or_else(|| {
-            StoreError::Backend(format!(
-                "session `{}` has no durable session metadata",
-                commit.session_id
-            ))
-        })?;
-        let durable_meta: SessionMeta = store_decode_json(&durable_meta_json, "session meta")?;
-        commit.validate_node_derivation(&durable_meta.incarnation_id)?;
+        commit.validate_node_derivation()?;
         {
             let completed = &commit.turn_commit;
             let operation_key = completed.operation.storage_key()?;
@@ -788,15 +770,14 @@ impl SessionCommitStore for PostgresSessionStore {
         Ok(result)
     }
 
-    async fn ensure_session_incarnation(
+    async fn ensure_session_bound(
         &self,
         session_id: &str,
         policy: &lash_core::SessionPolicy,
-    ) -> Result<lash_core::IncarnationId, StoreError> {
+    ) -> Result<(), StoreError> {
         self.bind_session_id(session_id)?;
         let meta = SessionMeta {
             session_id: session_id.to_string(),
-            incarnation_id: lash_core::IncarnationId::mint_for_store(),
             session_name: session_id.to_string(),
             created_at: self.clock.timestamp_rfc3339(),
             model: policy.model.id.clone(),
@@ -817,55 +798,25 @@ impl SessionCommitStore for PostgresSessionStore {
         .execute(&mut *tx)
         .await
         .map_err(store_sqlx_error)?;
-        let durable_meta_json = sqlx::query_scalar::<_, String>(
-            "SELECT meta_json FROM lash_session_meta WHERE session_id = $1",
-        )
-        .bind(session_id)
-        .fetch_one(&mut *tx)
-        .await
-        .map_err(store_sqlx_error)?;
         tx.commit().await.map_err(store_sqlx_error)?;
-        let durable_meta: SessionMeta = store_decode_json(&durable_meta_json, "session meta")?;
-        Ok(durable_meta.incarnation_id)
+        Ok(())
     }
 
     async fn save_session_meta(&self, meta: SessionMeta) -> Result<(), StoreError> {
         self.bind_session_id(&meta.session_id)?;
         let mut tx = self.pool.begin().await.map_err(store_sqlx_error)?;
         lock_live_session_history_mutation_tx(&mut tx, &meta.session_id).await?;
-        let updated = sqlx::query(
+        sqlx::query(
             "INSERT INTO lash_session_meta (session_id, meta_json)
              VALUES ($1, $2)
-             ON CONFLICT (session_id) DO UPDATE SET meta_json = EXCLUDED.meta_json
-             WHERE lash_session_meta.meta_json::jsonb ->> 'incarnation_id' = $3",
+             ON CONFLICT (session_id) DO UPDATE SET meta_json = EXCLUDED.meta_json",
         )
         .bind(&meta.session_id)
         .bind(encode_json(&meta))
-        .bind(meta.incarnation_id.as_str())
         .execute(&mut *tx)
         .await
         .map_err(store_sqlx_error)?;
-        if updated.rows_affected() == 0 {
-            let existing = sqlx::query_scalar::<_, String>(
-                "SELECT meta_json FROM lash_session_meta WHERE session_id = $1",
-            )
-            .bind(&meta.session_id)
-            .fetch_optional(&mut *tx)
-            .await
-            .map_err(store_sqlx_error)?
-            .map(|json| store_decode_json::<SessionMeta>(&json, "session meta"))
-            .transpose()?;
-            return Err(StoreError::SessionIncarnationMismatch {
-                session_id: meta.session_id,
-                expected_incarnation_id: existing.map_or_else(
-                    || "<missing>".to_string(),
-                    |existing| existing.incarnation_id.to_string(),
-                ),
-                actual_incarnation_id: meta.incarnation_id.to_string(),
-            });
-        }
-        tx.commit().await.map_err(store_sqlx_error)?;
-        Ok(())
+        tx.commit().await.map_err(store_sqlx_error)
     }
 
     async fn load_session_meta(&self) -> Result<Option<SessionMeta>, StoreError> {
@@ -2095,6 +2046,8 @@ impl TurnInputStore for PostgresSessionStore {
 #[async_trait::async_trait]
 impl StoreMaintenance for PostgresSessionStore {
     async fn vacuum(&self) -> Result<VacuumReport, StoreError> {
+        // `lash_deleted_sessions` is deliberately exempt: it is permanent
+        // identity evidence and must survive every retention-pruning pass.
         let removed_node_count = if let Some(session_id) = &self.session_id {
             sqlx::query("DELETE FROM lash_graph_nodes WHERE session_id = $1 AND tombstoned = TRUE")
                 .bind(session_id)

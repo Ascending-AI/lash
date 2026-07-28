@@ -162,7 +162,7 @@ fn catalog_names(runtime: &LashRuntime) -> Vec<String> {
 }
 
 #[tokio::test]
-async fn parked_resume_keeps_the_store_realized_session_lifetime() {
+async fn parked_resume_keeps_the_store_bound_session_id() {
     let plugin_host = dynamic_plugin_host(Arc::new(DynamicToolSurface::default()));
     let env = runtime_environment(plugin_host);
     let store = Arc::new(RecordingStore::default());
@@ -178,14 +178,10 @@ async fn parked_resume_keeps_the_store_realized_session_lifetime() {
         .load_session_meta()
         .await
         .expect("load realized metadata")
-        .expect("realized metadata")
-        .incarnation_id;
+        .expect("realized metadata");
     assert_eq!(
-        runtime
-            .export_persistence_state()
-            .session_lifetime
-            .as_durable(),
-        Some(&expected)
+        runtime.export_persistence_state().session_id,
+        expected.session_id
     );
 
     let parked = runtime.park().await.expect("park runtime");
@@ -193,13 +189,13 @@ async fn parked_resume_keeps_the_store_realized_session_lifetime() {
         .await
         .expect("resume runtime");
     let state = resumed.export_persistence_state();
-    assert_eq!(state.session_lifetime.as_durable(), Some(&expected));
+    assert_eq!(state.session_id, expected.session_id);
     assert!(matches!(
         state.turn_scope("resumed-turn"),
         crate::ExecutionScope::Turn {
-            incarnation_id: Some(ref actual),
-            ..
-        } if actual == &expected
+            ref session_id,
+            ref turn_id,
+        } if session_id == "parked-incarnation" && turn_id == "resumed-turn"
     ));
 }
 

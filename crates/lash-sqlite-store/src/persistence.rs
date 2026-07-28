@@ -265,9 +265,6 @@ impl SessionCommitStore for Store {
         commit.validate_budget()?;
         commit.validate_operation_session()?;
         let turn_commit_hash = commit.turn_commit_hash()?;
-        let commit_incarnation_id = commit
-            .durable_incarnation_id("SQLite runtime commit")?
-            .clone();
         self.bind_session(&commit.session_id)?;
         let realized_node_timestamps = commit
             .graph
@@ -302,11 +299,10 @@ impl SessionCommitStore for Store {
                     }
                     tx.execute(
                         "INSERT OR IGNORE INTO session_meta
-                         (session_id, incarnation_id, session_name, created_at, model, cwd, relation_json)
-                         VALUES (?1, ?2, ?1, ?3, ?4, NULL, ?5)",
+                         (session_id, session_name, created_at, model, cwd, relation_json)
+                         VALUES (?1, ?1, ?2, ?3, NULL, ?4)",
                         params![
                             commit.session_id,
-                            commit_incarnation_id.as_str(),
                             created_at,
                             commit.config.model.id,
                             serde_json::to_string(&lash_core::SessionRelation::Root)
@@ -314,22 +310,7 @@ impl SessionCommitStore for Store {
                         ],
                     )
                     .map_err(sqlite_error)?;
-                    let durable_incarnation_id = tx
-                        .query_row(
-                            "SELECT incarnation_id FROM session_meta WHERE session_id = ?1",
-                            params![commit.session_id],
-                            |row| row.get::<_, String>(0),
-                        )
-                        .optional()
-                        .map_err(sqlite_error)?
-                        .map(lash_core::IncarnationId::decode_from_store)
-                        .ok_or_else(|| {
-                            StoreError::Backend(format!(
-                                "session `{}` has no durable session metadata",
-                                commit.session_id
-                            ))
-                        })?;
-                    commit.validate_node_derivation(&durable_incarnation_id)?;
+                    commit.validate_node_derivation()?;
                     { let completed = &commit.turn_commit;
                         let operation_key = completed.operation.storage_key()?;
                         let prior: Option<(String, String)> = tx
@@ -766,16 +747,13 @@ impl SessionCommitStore for Store {
         Ok(result)
     }
 
-    async fn ensure_session_incarnation(
+    async fn ensure_session_bound(
         &self,
         session_id: &str,
         policy: &lash_core::SessionPolicy,
-    ) -> Result<lash_core::IncarnationId, StoreError> {
+    ) -> Result<(), StoreError> {
         self.bind_session(session_id)?;
         let session_id = session_id.to_string();
-        let candidate_value = lash_core::IncarnationId::mint_for_store()
-            .as_str()
-            .to_string();
         let created_at = self.clock.timestamp_rfc3339();
         let model = policy.model.id.clone();
         let cwd = std::env::current_dir()
@@ -783,40 +761,27 @@ impl SessionCommitStore for Store {
             .and_then(|path| path.to_str().map(str::to_string));
         let relation_json = serde_json::to_string(&lash_core::SessionRelation::Root)
             .map_err(|error| StoreError::Backend(error.to_string()))?;
-        let durable = self
-            .conn
+        self.conn
             .write_flow(move |tx| {
-                let outcome: Result<String, StoreError> = (|| {
+                let outcome: Result<(), StoreError> = (|| {
                     ensure_session_not_deleted_conn(tx, &session_id)?;
                     tx.execute(
                         "INSERT OR IGNORE INTO session_meta
-                         (session_id, incarnation_id, session_name, created_at, model, cwd, relation_json)
-                         VALUES (?1, ?2, ?1, ?3, ?4, ?5, ?6)",
-                        params![
-                            session_id,
-                            candidate_value,
-                            created_at,
-                            model,
-                            cwd,
-                            relation_json,
-                        ],
+                     (session_id, session_name, created_at, model, cwd, relation_json)
+                     VALUES (?1, ?1, ?2, ?3, ?4, ?5)",
+                        params![session_id, created_at, model, cwd, relation_json,],
                     )
                     .map_err(sqlite_error)?;
-                    tx.query_row(
-                        "SELECT incarnation_id FROM session_meta WHERE session_id = ?1",
-                        params![session_id],
-                        |row| row.get::<_, String>(0),
-                    )
-                    .map_err(sqlite_error)
+                    Ok(())
                 })();
-                match outcome {
-                    Ok(value) => Ok(TxOutcome::Commit(Ok(value))),
-                    Err(error) => Ok(TxOutcome::Rollback(Err(error))),
-                }
+                Ok(match outcome {
+                    Ok(()) => TxOutcome::Commit(Ok(())),
+                    Err(err) => TxOutcome::Rollback(Err(err)),
+                })
             })
             .await
             .map_err(sqlite_error)??;
-        Ok(lash_core::IncarnationId::decode_from_store(durable))
+        Ok(())
     }
 
     async fn save_session_meta(&self, meta: SessionMeta) -> Result<(), StoreError> {
@@ -2267,6 +2232,8 @@ impl TurnInputStore for Store {
 #[async_trait::async_trait]
 impl StoreMaintenance for Store {
     async fn vacuum(&self) -> Result<VacuumReport, StoreError> {
+        // `deleted_sessions` is deliberately exempt: it is permanent identity
+        // evidence and must survive every retention-pruning pass.
         let session_id = self.session_id.get().cloned();
         let (removed_node_count, removed_pending_turn_input_tombstone_count) = self
             .conn

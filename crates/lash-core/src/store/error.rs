@@ -26,23 +26,10 @@ pub enum StoreError {
         bound_session_id: String,
         attempted_session_id: String,
     },
-    #[error("session `{session_id}` was deleted; recreate it through the session-store factory")]
+    #[error(
+        "session `{session_id}` was used and deleted; session ids cannot be reused in this store"
+    )]
     SessionDeleted { session_id: String },
-    #[error(
-        "session `{session_id}` commit used incarnation `{actual_incarnation_id}`, expected durable incarnation `{expected_incarnation_id}`"
-    )]
-    SessionIncarnationMismatch {
-        session_id: String,
-        expected_incarnation_id: String,
-        actual_incarnation_id: String,
-    },
-    #[error(
-        "ephemeral session `{session_id}` cannot cross durable boundary `{boundary}` before a store realizes its incarnation"
-    )]
-    EphemeralSessionAtDurableBoundary {
-        session_id: String,
-        boundary: &'static str,
-    },
     #[error("store does not support `{operation}`")]
     UnsupportedStoreOperation { operation: &'static str },
     #[error("store head revision conflict: expected {expected}, actual {actual}")]

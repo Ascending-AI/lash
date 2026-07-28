@@ -23,11 +23,7 @@ use endpoint_protocol::invoke_process_workflow_endpoint;
 
 fn durable_turn_scope(session_id: impl Into<String>, turn_id: impl Into<String>) -> ExecutionScope {
     let session_id = session_id.into();
-    ExecutionScope::turn_incarnation(
-        &session_id,
-        lash_core::IncarnationId::decode_from_store(format!("restate-test:{session_id}")),
-        turn_id,
-    )
+    ExecutionScope::turn(&session_id, turn_id)
 }
 
 struct PanicsWhenPolledAfterReady {
@@ -703,14 +699,12 @@ lash_core::impl_noop_attachment_manifest!(CommitRetryStore);
 // segment delegates to `inner`.
 #[async_trait::async_trait]
 impl lash_core::SessionCommitStore for CommitRetryStore {
-    async fn ensure_session_incarnation(
+    async fn ensure_session_bound(
         &self,
         session_id: &str,
         policy: &lash_core::SessionPolicy,
-    ) -> Result<lash_core::IncarnationId, lash_core::StoreError> {
-        self.inner
-            .ensure_session_incarnation(session_id, policy)
-            .await
+    ) -> Result<(), lash_core::StoreError> {
+        self.inner.ensure_session_bound(session_id, policy).await
     }
 
     async fn load_session(
@@ -2291,15 +2285,8 @@ async fn restate_routes_every_execution_scope_to_an_exact_durable_wait_address()
     let scopes = [
         durable_turn_scope("session", "turn"),
         ExecutionScope::process("process"),
-        ExecutionScope::queue_drain_incarnation(
-            "session",
-            lash_core::IncarnationId::decode_from_store("scope-incarnation".to_string()),
-            "drain",
-        ),
-        ExecutionScope::session_delete_incarnation(
-            "session",
-            lash_core::IncarnationId::decode_from_store("scope-incarnation".to_string()),
-        ),
+        ExecutionScope::queue_drain("session", "drain"),
+        ExecutionScope::session_delete("session"),
         ExecutionScope::runtime_operation("operation"),
     ];
     let mut addresses = HashSet::new();
@@ -2420,11 +2407,7 @@ async fn restate_deadline_durably_terminalizes_timeout() {
 async fn restate_session_cancel_cancels_current_waits_but_allows_new_waits() {
     let context = Arc::new(RecordingContext::default());
     let first_key = restate_await_event_key(
-        &ExecutionScope::queue_drain_incarnation(
-            "cancel-session",
-            lash_core::IncarnationId::decode_from_store("cancel-incarnation".to_string()),
-            "drain-one",
-        ),
+        &ExecutionScope::queue_drain("cancel-session", "drain-one"),
         AwaitEventWaitIdentity::Custom {
             key: "first".to_string(),
         },
@@ -2474,10 +2457,7 @@ async fn restate_session_delete_revokes_current_and_future_waits() {
     let context = Arc::new(RecordingContext::default());
     let host = RestateRuntimeEffectController::new(context.clone());
     let key = restate_await_event_key(
-        &ExecutionScope::session_delete_incarnation(
-            "deleted-session",
-            lash_core::IncarnationId::decode_from_store("deleted-incarnation".to_string()),
-        ),
+        &ExecutionScope::session_delete("deleted-session"),
         AwaitEventWaitIdentity::Custom {
             key: "delete".to_string(),
         },

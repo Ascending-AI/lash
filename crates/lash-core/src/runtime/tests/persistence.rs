@@ -183,15 +183,14 @@ async fn in_memory_claim_validation_serializes_takeover_before_mutation() {
     assert_eq!(live_claim.batches[0].batch_id, batch.batch_id);
     assert!(live_claim.fencing_token > stale_claim.fencing_token);
 
-    let mut state = crate::RuntimeSessionState {
+    let state = crate::RuntimeSessionState {
         session_id: session_id.to_string(),
         ..crate::RuntimeSessionState::default()
     };
-    let incarnation_id = store
-        .ensure_session_incarnation(&state.session_id, &state.policy)
+    store
+        .ensure_session_bound(&state.session_id, &state.policy)
         .await
-        .expect("realize contention-test session lifetime");
-    state.bind_durable_incarnation(incarnation_id);
+        .expect("bind contention-test session");
     let err = store
         .commit_runtime_state(
             crate::RuntimeCommit::persisted_state_for_test(&state, &[])

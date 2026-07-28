@@ -499,8 +499,7 @@ async fn drive_first_party_cancel_before_start(
         lash::runtime::ExecutionScope::Turn {
             session_id,
             turn_id,
-            incarnation_id: Some(incarnation_id),
-        } => lash::TurnAddress::new_incarnation(session_id, incarnation_id, turn_id),
+        } => lash::TurnAddress::new(session_id, turn_id),
         scope => panic!("expected durable turn scope, got {scope:?}"),
     };
     let driver = core.turn_work_driver();
@@ -605,8 +604,7 @@ async fn sqlite_reopen_preserves_cancelled_turn_commit_and_allows_next_turn() {
                 lash::runtime::ExecutionScope::Turn {
                     session_id,
                     turn_id,
-                    incarnation_id: Some(incarnation_id),
-                } => lash::TurnAddress::new_incarnation(session_id, incarnation_id, turn_id),
+                } => lash::TurnAddress::new(session_id, turn_id),
                 scope => panic!("expected durable turn scope, got {scope:?}"),
             },
             "sqlite-replay-cancel",

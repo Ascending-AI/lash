@@ -239,19 +239,15 @@ async fn completed_turns_are_persisted_for_custom_runtime_store() {
     )
     .await
     .expect("runtime");
-    let realized_incarnation = store
+    let realized_meta = store
         .load_session_meta()
         .await
         .expect("load realized metadata")
-        .expect("persistent constructor realizes metadata")
-        .incarnation_id;
+        .expect("persistent constructor realizes metadata");
     assert_eq!(
-        runtime
-            .export_persistence_state()
-            .session_lifetime
-            .as_durable(),
-        Some(&realized_incarnation),
-        "a new persistent runtime must bind the identity read back from its store"
+        runtime.export_persistence_state().session_id,
+        realized_meta.session_id,
+        "a new persistent runtime must bind its host-provided id to the store"
     );
     set_runtime_provider(&mut runtime, transport.clone().into_handle());
 
@@ -287,13 +283,13 @@ async fn completed_turns_are_persisted_for_custom_runtime_store() {
 }
 
 #[tokio::test]
-async fn preopened_store_identity_rebinds_initial_frame_before_runtime_effects() {
+async fn preopened_store_binds_without_remapping_initial_frame() {
     let store = Arc::new(RecordingStore::default());
     let policy = standard_test_policy();
-    let expected = store
-        .ensure_session_incarnation("preopened-session", &policy)
+    store
+        .ensure_session_bound("preopened-session", &policy)
         .await
-        .expect("preopen store identity");
+        .expect("preopen store binding");
     let mut state = RuntimeSessionState {
         session_id: "preopened-session".to_string(),
         policy: policy.clone(),
@@ -316,7 +312,6 @@ async fn preopened_store_identity_rebinds_initial_frame_before_runtime_effects()
     .await
     .expect("preopened persistent runtime");
     let bound = runtime.export_persistence_state();
-    assert_eq!(bound.session_lifetime.as_durable(), Some(&expected));
     let frame = bound.current_agent_frame().expect("bound initial frame");
     let crate::SessionNodePayload::FrameOpen { frame_key, .. } = &bound
         .session_graph
@@ -326,18 +321,18 @@ async fn preopened_store_identity_rebinds_initial_frame_before_runtime_effects()
     else {
         panic!("current agent frame must resolve to FrameOpen");
     };
-    assert_ne!(frame.frame_node_id, provisional_frame);
+    assert_eq!(frame.frame_node_id, provisional_frame);
     assert_eq!(
         frame.frame_node_id,
-        crate::frame_node_id("preopened-session", &expected, frame_key),
-        "an unpersisted frame opened before assembly must be rebound before effects can capture it"
+        crate::frame_node_id("preopened-session", frame_key),
+        "frame identity is stable before and after store binding"
     );
     assert!(matches!(
         bound.turn_scope("first-turn"),
         crate::ExecutionScope::Turn {
-            incarnation_id: Some(ref actual),
-            ..
-        } if actual == &expected
+            ref session_id,
+            ref turn_id,
+        } if session_id == "preopened-session" && turn_id == "first-turn"
     ));
 }
 

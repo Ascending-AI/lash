@@ -307,11 +307,10 @@ impl SessionStoreFactory for RecordingSessionStoreFactory {
     async fn create_store(
         &self,
         request: &SessionStoreCreateRequest,
-    ) -> Result<Arc<dyn crate::store::RuntimePersistence>, String> {
+    ) -> Result<Arc<dyn crate::store::RuntimePersistence>, crate::StoreError> {
         let store = Arc::new(RecordingStore::default());
         *store.session_meta.lock().expect("lock session meta") = Some(crate::SessionMeta {
             session_id: request.session_id.clone(),
-            incarnation_id: crate::IncarnationId::mint_for_store(),
             session_name: request.session_id.clone(),
             created_at: "2026-04-06T00:00:00Z".to_string(),
             model: request.policy.model.id.clone(),

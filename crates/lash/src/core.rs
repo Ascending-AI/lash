@@ -270,7 +270,9 @@ impl QueuedWorkRunHandle for InlineQueuedWorkRunHandle {
             })
             .await
             .map_err(|error| {
-                lash_core::QueuedWorkRunError::terminal(lash_core::PluginError::Session(error))
+                lash_core::QueuedWorkRunError::terminal(lash_core::PluginError::Session(
+                    error.to_string(),
+                ))
             })?;
         let state = crate::session::load_state_from_store(&session_id, &policy, store.as_ref())
             .await
@@ -390,10 +392,7 @@ impl LashCore {
         }
     }
 
-    async fn current_session_incarnation(
-        &self,
-        session_id: &str,
-    ) -> Result<Option<lash_core::IncarnationId>> {
+    async fn current_session_exists(&self, session_id: &str) -> Result<bool> {
         let Some(store_factory) = self.store_factory.as_ref() else {
             return Err(EmbedError::MissingSessionStoreFactory);
         };
@@ -410,32 +409,24 @@ impl LashCore {
                 message,
             })?
         else {
-            return Ok(None);
+            return Ok(false);
         };
-        Ok(store
-            .load_session_meta()
-            .await?
-            .map(|meta| meta.incarnation_id))
+        Ok(store.load_session_meta().await?.is_some())
     }
 
-    /// Build the lifetime-qualified effect scope required to delete the
-    /// currently stored incarnation of `session_id`.
+    /// Build the effect scope required to delete the stored session.
     pub async fn session_delete_scope(
         &self,
         session_id: impl AsRef<str>,
     ) -> Result<lash_core::ExecutionScope> {
         let session_id = session_id.as_ref();
-        let incarnation_id = self
-            .current_session_incarnation(session_id)
-            .await?
-            .ok_or_else(|| EmbedError::StoreFactory {
+        if !self.current_session_exists(session_id).await? {
+            return Err(EmbedError::StoreFactory {
                 session_id: session_id.to_string(),
                 message: "session does not exist".to_string(),
-            })?;
-        Ok(lash_core::ExecutionScope::session_delete_incarnation(
-            session_id,
-            incarnation_id,
-        ))
+            });
+        }
+        Ok(lash_core::ExecutionScope::session_delete(session_id))
     }
 
     /// Rebuild a live session from a [`ParkedSession`](crate::ParkedSession)
@@ -554,10 +545,7 @@ impl LashCore {
                 policy,
             })
             .await
-            .map_err(|message| EmbedError::StoreFactory {
-                session_id: session_id.clone(),
-                message,
-            })?;
+            .map_err(EmbedError::Store)?;
         let is_next_turn = matches!(ingress, lash_core::TurnInputIngress::NextTurn);
         let mut draft = lash_core::PendingTurnInputDraft::new(session_id, ingress, input);
         draft.source_key = id.map(|id| format!("host:{id}"));
@@ -721,29 +709,17 @@ impl LashCore {
         let Some(store_factory) = self.store_factory.as_ref() else {
             return Err(EmbedError::MissingSessionStoreFactory);
         };
-        let requested_incarnation = match scoped_effect_controller.execution_scope() {
+        match scoped_effect_controller.execution_scope() {
             lash_core::ExecutionScope::SessionDelete {
                 session_id: scoped_session_id,
-                incarnation_id: Some(incarnation_id),
-            } if scoped_session_id == &session_id => incarnation_id.clone(),
+            } if scoped_session_id == &session_id => {}
             _ => {
                 return Err(lash_core::RuntimeError::new(
                     "session_delete_scope_mismatch",
-                    "session deletion requires a matching lifetime-qualified SessionDelete scope",
+                    "session deletion requires a matching SessionDelete scope",
                 )
                 .into());
             }
-        };
-        if let Some(current_incarnation) = self.current_session_incarnation(&session_id).await?
-            && current_incarnation != requested_incarnation
-        {
-            return Err(lash_core::RuntimeError::new(
-                "session_delete_incarnation_mismatch",
-                format!(
-                    "session `{session_id}` is incarnation `{current_incarnation}`, not requested incarnation `{requested_incarnation}`"
-                ),
-            )
-            .into());
         }
         let process = if let Some(process_registry) = self.env.process_registry.as_ref() {
             let invocation = RuntimeInvocation::effect(
@@ -818,10 +794,7 @@ impl LashCore {
             .core
             .control
             .effect_host
-            .retire_effect_journal(lash_core::EffectJournalRetirement::session(
-                &session_id,
-                requested_incarnation,
-            ))
+            .retire_effect_journal(lash_core::EffectJournalRetirement::session(&session_id))
             .await
             .map_err(|err| EmbedError::SessionDeleteProcess {
                 session_id: session_id.clone(),

@@ -57,15 +57,9 @@ fn lease_owner(owner_id: &str) -> LeaseOwnerIdentity {
     LeaseOwnerIdentity::opaque(owner_id, format!("{owner_id}:incarnation"))
 }
 
-fn commit_at(
-    session_id: &str,
-    incarnation_id: &lash_core::IncarnationId,
-    expected_head_revision: u64,
-    writer_id: &str,
-) -> RuntimeCommit {
+fn commit_at(session_id: &str, expected_head_revision: u64, writer_id: &str) -> RuntimeCommit {
     let state = RuntimeSessionState {
         session_id: session_id.to_string(),
-        session_lifetime: lash_core::SessionLifetime::durable(incarnation_id.clone()),
         ..RuntimeSessionState::default()
     };
     let commit = RuntimeCommit {
@@ -96,30 +90,22 @@ fn commit_at(
 #[test]
 fn head_revision_cas_holds_across_two_connections() {
     let path = unique_db_path("cas");
-    let incarnation_id = lash_core::IncarnationId::mint_for_store();
     let barrier = Arc::new(std::sync::Barrier::new(2));
-    let run = |path: std::path::PathBuf,
-               incarnation_id: lash_core::IncarnationId,
-               barrier: Arc<std::sync::Barrier>,
-               writer_id: &'static str| {
-        std::thread::spawn(move || {
-            block_on(async move {
-                let store = Store::open(&path).await.expect("open store");
-                barrier.wait();
-                store
-                    .commit_runtime_state(commit_at("root", &incarnation_id, 0, writer_id))
-                    .await
+    let run =
+        |path: std::path::PathBuf, barrier: Arc<std::sync::Barrier>, writer_id: &'static str| {
+            std::thread::spawn(move || {
+                block_on(async move {
+                    let store = Store::open(&path).await.expect("open store");
+                    barrier.wait();
+                    store
+                        .commit_runtime_state(commit_at("root", 0, writer_id))
+                        .await
+                })
             })
-        })
-    };
+        };
 
-    let handle_a = run(
-        path.clone(),
-        incarnation_id.clone(),
-        Arc::clone(&barrier),
-        "a",
-    );
-    let handle_b = run(path.clone(), incarnation_id, Arc::clone(&barrier), "b");
+    let handle_a = run(path.clone(), Arc::clone(&barrier), "a");
+    let handle_b = run(path.clone(), Arc::clone(&barrier), "b");
     let result_a = handle_a.join().expect("thread a");
     let result_b = handle_b.join().expect("thread b");
 
@@ -164,7 +150,7 @@ async fn gc_keeps_live_committed_checkpoint_blobs() {
         )
         .await;
 
-    let mut state = RuntimeSessionState {
+    let state = RuntimeSessionState {
         session_id: "root".to_string(),
         tool_state_snapshot: Some(persisted_tool_state_at_generation(3)),
         plugin_snapshot: Some(PluginSessionSnapshot {
@@ -174,11 +160,10 @@ async fn gc_keeps_live_committed_checkpoint_blobs() {
         execution_state_snapshot: Some(vec![0xDE, 0xAD, 0xBE, 0xEF]),
         ..RuntimeSessionState::default()
     };
-    let incarnation_id = store
-        .ensure_session_incarnation(&state.session_id, &state.policy)
+    store
+        .ensure_session_bound(&state.session_id, &state.policy)
         .await
-        .expect("realize session incarnation");
-    state.session_lifetime = lash_core::SessionLifetime::durable(incarnation_id);
+        .expect("bind session to store");
     let owner = lease_owner("gc-test");
     let session_lease = store
         .try_claim_session_execution_lease("root", &owner, 60_000)

@@ -354,15 +354,8 @@ async fn fork_inherits_process_grants_without_inheriting_wake_subscription() -> 
         })
         .await
         .expect("create fork grant source");
-    let source_incarnation_id = source_store
-        .load_session_meta()
-        .await
-        .expect("load source metadata")
-        .expect("source metadata exists")
-        .incarnation_id;
     let mut source_state = lash_core::RuntimeSessionState {
         session_id: "fork-grant-source".to_string(),
-        session_lifetime: lash_core::SessionLifetime::durable(source_incarnation_id),
         policy,
         ..Default::default()
     };

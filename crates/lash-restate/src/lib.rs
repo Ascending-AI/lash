@@ -14,7 +14,6 @@
 //! # #[derive(serde::Serialize, serde::Deserialize)]
 //! # struct TurnRequest {
 //! #     turn_id: String,
-//! #     incarnation_id: lash_core::IncarnationId,
 //! # }
 //! # #[derive(serde::Serialize, serde::Deserialize)]
 //! # struct TurnResponse;
@@ -40,11 +39,7 @@
 //!         let effect_controller = RestateRuntimeEffectController::new(ctx);
 //!         let turn_id = req.turn_id.clone();
 //!         let scoped_effect_controller = effect_controller
-//!             .scoped_effect_controller(lash_core::ExecutionScope::turn_incarnation(
-//!                 "session",
-//!                 req.incarnation_id.clone(),
-//!                 &turn_id,
-//!             ))
+//!             .scoped_effect_controller(lash_core::ExecutionScope::turn("session", &turn_id))
 //!             .map_err(TerminalError::from_error)?;
 //!         let response = run_lash_turn(scoped_effect_controller, req)
 //!             .await

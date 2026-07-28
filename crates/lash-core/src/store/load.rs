@@ -1,10 +1,7 @@
 use super::*;
 
-fn persisted_session_state_from_read(
-    read: PersistedSessionRead,
-    incarnation_id: IncarnationId,
-) -> crate::RuntimeSessionState {
-    let mut state = persisted_session_state_from_head(
+fn persisted_session_state_from_read(read: PersistedSessionRead) -> crate::RuntimeSessionState {
+    persisted_session_state_from_head(
         SessionHead {
             session_id: read.session_id,
             head_revision: read.head_revision,
@@ -15,9 +12,7 @@ fn persisted_session_state_from_read(
             token_ledger: read.token_ledger,
         },
         read.checkpoint,
-    );
-    state.bind_durable_incarnation(incarnation_id);
-    state
+    )
 }
 
 pub async fn load_persisted_session_state(
@@ -27,16 +22,13 @@ pub async fn load_persisted_session_state(
     let Some(read) = read else {
         return Ok(None);
     };
-    let meta = store.load_session_meta().await?.ok_or_else(|| {
+    store.load_session_meta().await?.ok_or_else(|| {
         StoreError::Backend(format!(
             "session `{}` has durable head state but no session metadata",
             read.session_id
         ))
     })?;
-    Ok(Some(persisted_session_state_from_read(
-        read,
-        meta.incarnation_id,
-    )))
+    Ok(Some(persisted_session_state_from_read(read)))
 }
 
 pub async fn refresh_persisted_session_state(

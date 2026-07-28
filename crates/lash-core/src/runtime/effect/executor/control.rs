@@ -26,8 +26,6 @@ pub enum ExecutionScope {
     Turn {
         session_id: String,
         turn_id: String,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        incarnation_id: Option<crate::IncarnationId>,
     },
     Process {
         process_id: String,
@@ -35,13 +33,9 @@ pub enum ExecutionScope {
     QueueDrain {
         session_id: String,
         drain_id: String,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        incarnation_id: Option<crate::IncarnationId>,
     },
     SessionDelete {
         session_id: String,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        incarnation_id: Option<crate::IncarnationId>,
     },
     RuntimeOperation {
         operation_id: String,
@@ -53,19 +47,6 @@ impl ExecutionScope {
         Self::Turn {
             session_id: session_id.into(),
             turn_id: turn_id.into(),
-            incarnation_id: None,
-        }
-    }
-
-    pub fn turn_incarnation(
-        session_id: impl Into<String>,
-        incarnation_id: crate::IncarnationId,
-        turn_id: impl Into<String>,
-    ) -> Self {
-        Self::Turn {
-            session_id: session_id.into(),
-            turn_id: turn_id.into(),
-            incarnation_id: Some(incarnation_id),
         }
     }
 
@@ -79,36 +60,12 @@ impl ExecutionScope {
         Self::QueueDrain {
             session_id: session_id.into(),
             drain_id: drain_id.into(),
-            incarnation_id: None,
-        }
-    }
-
-    pub fn queue_drain_incarnation(
-        session_id: impl Into<String>,
-        incarnation_id: crate::IncarnationId,
-        drain_id: impl Into<String>,
-    ) -> Self {
-        Self::QueueDrain {
-            session_id: session_id.into(),
-            drain_id: drain_id.into(),
-            incarnation_id: Some(incarnation_id),
         }
     }
 
     pub fn session_delete(session_id: impl Into<String>) -> Self {
         Self::SessionDelete {
             session_id: session_id.into(),
-            incarnation_id: None,
-        }
-    }
-
-    pub fn session_delete_incarnation(
-        session_id: impl Into<String>,
-        incarnation_id: crate::IncarnationId,
-    ) -> Self {
-        Self::SessionDelete {
-            session_id: session_id.into(),
-            incarnation_id: Some(incarnation_id),
         }
     }
 
@@ -134,40 +91,8 @@ impl ExecutionScope {
         EffectJournalIdentity::from_scope(self)
     }
 
-    pub fn incarnation_id(&self) -> Option<&crate::IncarnationId> {
-        match self {
-            Self::Turn { incarnation_id, .. }
-            | Self::QueueDrain { incarnation_id, .. }
-            | Self::SessionDelete { incarnation_id, .. } => incarnation_id.as_ref(),
-            Self::Process { .. } | Self::RuntimeOperation { .. } => None,
-        }
-    }
-
-    /// Reject a session-lifetime scope that lacks the store-minted identity
-    /// required by a durable host.
     pub fn validate_for_durable_host(&self) -> Result<(), RuntimeError> {
-        self.validate()?;
-        match self {
-            Self::Turn {
-                incarnation_id: None,
-                ..
-            } => Err(RuntimeError::new(
-                "durable_turn_scope_missing_incarnation",
-                "durable effect hosts require a store-realized session incarnation for turn scopes",
-            )),
-            Self::QueueDrain {
-                incarnation_id: None,
-                ..
-            }
-            | Self::SessionDelete {
-                incarnation_id: None,
-                ..
-            } => Err(RuntimeError::new(
-                "durable_session_scope_missing_incarnation",
-                "durable effect hosts require a store-realized session incarnation for session-lifetime scopes",
-            )),
-            _ => Ok(()),
-        }
+        self.validate()
     }
 
     pub fn session_id(&self) -> Option<&str> {
@@ -221,7 +146,6 @@ impl ExecutionScope {
 pub struct EffectJournalIdentity {
     key: String,
     session_id: Option<String>,
-    incarnation_id: Option<crate::IncarnationId>,
 }
 
 impl EffectJournalIdentity {
@@ -233,77 +157,36 @@ impl EffectJournalIdentity {
             #[serde(skip_serializing_if = "Option::is_none")]
             session_id: Option<&'a str>,
             #[serde(skip_serializing_if = "Option::is_none")]
-            incarnation_id: Option<&'a str>,
-            #[serde(skip_serializing_if = "Option::is_none")]
             execution_id: Option<&'a str>,
         }
 
-        let (kind, session_id, incarnation_id, execution_id) = match scope {
+        let (kind, session_id, execution_id) = match scope {
             ExecutionScope::Turn {
                 session_id,
                 turn_id,
-                incarnation_id: Some(incarnation_id),
-            } => (
-                "turn",
-                Some(session_id.as_str()),
-                Some(incarnation_id.as_str()),
-                Some(turn_id.as_str()),
-            ),
+            } => ("turn", Some(session_id.as_str()), Some(turn_id.as_str())),
             ExecutionScope::QueueDrain {
                 session_id,
                 drain_id,
-                incarnation_id: Some(incarnation_id),
-            } => (
-                "drain",
-                Some(session_id.as_str()),
-                Some(incarnation_id.as_str()),
-                Some(drain_id.as_str()),
-            ),
-            ExecutionScope::SessionDelete {
-                session_id,
-                incarnation_id: Some(incarnation_id),
-            } => (
-                "delete",
-                Some(session_id.as_str()),
-                Some(incarnation_id.as_str()),
-                None,
-            ),
-            ExecutionScope::Process { process_id } => {
-                ("process", None, None, Some(process_id.as_str()))
+            } => ("drain", Some(session_id.as_str()), Some(drain_id.as_str())),
+            ExecutionScope::SessionDelete { session_id } => {
+                ("delete", Some(session_id.as_str()), None)
             }
+            ExecutionScope::Process { process_id } => ("process", None, Some(process_id.as_str())),
             ExecutionScope::RuntimeOperation { operation_id } => {
-                ("op", None, None, Some(operation_id.as_str()))
-            }
-            ExecutionScope::Turn {
-                incarnation_id: None,
-                ..
-            }
-            | ExecutionScope::QueueDrain {
-                incarnation_id: None,
-                ..
-            }
-            | ExecutionScope::SessionDelete {
-                incarnation_id: None,
-                ..
-            } => {
-                return Err(RuntimeError::new(
-                    "durable_session_scope_missing_incarnation",
-                    "durable effect-journal identities require a store-realized session incarnation",
-                ));
+                ("op", None, Some(operation_id.as_str()))
             }
         };
         let key = serde_json::to_string(&Wire {
-            version: 1,
+            version: 2,
             kind,
             session_id,
-            incarnation_id,
             execution_id,
         })
         .expect("effect journal identity contains only infallible string fields");
         Ok(Self {
             key,
             session_id: session_id.map(str::to_string),
-            incarnation_id: scope.incarnation_id().cloned(),
         })
     }
 
@@ -314,28 +197,18 @@ impl EffectJournalIdentity {
     pub fn session_id(&self) -> Option<&str> {
         self.session_id.as_deref()
     }
-
-    pub fn incarnation_id(&self) -> Option<&crate::IncarnationId> {
-        self.incarnation_id.as_ref()
-    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum EffectJournalRetirement {
-    Session {
-        session_id: String,
-        incarnation_id: crate::IncarnationId,
-    },
-    Process {
-        process_id: String,
-    },
+    Session { session_id: String },
+    Process { process_id: String },
 }
 
 impl EffectJournalRetirement {
-    pub fn session(session_id: impl Into<String>, incarnation_id: crate::IncarnationId) -> Self {
+    pub fn session(session_id: impl Into<String>) -> Self {
         Self::Session {
             session_id: session_id.into(),
-            incarnation_id,
         }
     }
 
@@ -1040,16 +913,12 @@ impl<'run> RuntimeEffectControllerHandle<'run> {
 mod tests {
     use super::*;
 
-    fn incarnation(value: &str) -> crate::IncarnationId {
-        crate::IncarnationId::decode_from_store(value.to_string())
-    }
-
     #[test]
-    fn journal_identity_is_typed_and_lifetime_qualified() {
+    fn journal_identity_is_typed_and_session_qualified() {
         let scopes = [
-            ExecutionScope::turn_incarnation("session", incarnation("inc-1"), "shared"),
-            ExecutionScope::queue_drain_incarnation("session", incarnation("inc-1"), "shared"),
-            ExecutionScope::session_delete_incarnation("session", incarnation("inc-1")),
+            ExecutionScope::turn("session", "shared"),
+            ExecutionScope::queue_drain("session", "shared"),
+            ExecutionScope::session_delete("session"),
             ExecutionScope::process("shared"),
             ExecutionScope::runtime_operation("shared"),
         ];
@@ -1064,37 +933,9 @@ mod tests {
         assert_eq!(keys.len(), scopes.len());
         for identity in &identities[..3] {
             assert_eq!(identity.session_id(), Some("session"));
-            assert_eq!(
-                identity.incarnation_id().map(crate::IncarnationId::as_str),
-                Some("inc-1")
-            );
         }
         for identity in &identities[3..] {
             assert_eq!(identity.session_id(), None);
-            assert_eq!(identity.incarnation_id(), None);
         }
-    }
-
-    #[test]
-    fn durable_session_scopes_reject_missing_incarnations() {
-        for scope in [
-            ExecutionScope::queue_drain("session", "drain"),
-            ExecutionScope::session_delete("session"),
-        ] {
-            let error = scope
-                .journal_identity()
-                .expect_err("bare session scope must not form a durable journal key");
-            assert_eq!(
-                error.code.as_str(),
-                "durable_session_scope_missing_incarnation"
-            );
-        }
-        let turn_error = ExecutionScope::turn("session", "turn")
-            .journal_identity()
-            .expect_err("bare turn scope must not form a durable journal key");
-        assert_eq!(
-            turn_error.code.as_str(),
-            "durable_turn_scope_missing_incarnation"
-        );
     }
 }

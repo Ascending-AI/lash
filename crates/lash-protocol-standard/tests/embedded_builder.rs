@@ -35,7 +35,7 @@ fn text_message(id: &str, role: MessageRole, content: &str) -> Message {
 #[tokio::test]
 async fn embedded_runtime_builder_loads_state_from_store() {
     let store = Arc::new(Store::memory().await.expect("store"));
-    let mut state = RuntimeSessionState {
+    let state = RuntimeSessionState {
         session_id: "stored-session".to_string(),
         policy: SessionPolicy {
             provider_id: "openai-compatible".into(),
@@ -53,11 +53,10 @@ async fn embedded_runtime_builder_loads_state_from_store() {
         ..RuntimeSessionState::default()
     };
     state.ensure_agent_frame_initialized();
-    let incarnation = store
-        .ensure_session_incarnation(&state.session_id, &state.policy)
+    store
+        .ensure_session_bound(&state.session_id, &state.policy)
         .await
-        .expect("realize session incarnation");
-    state.bind_durable_incarnation(incarnation);
+        .expect("bind session to store");
     state.append_active_read_delta(&[text_message("u0", MessageRole::User, "stored question")]);
     store
         .commit_runtime_state(RuntimeCommit::persisted_state_for_test(&state, &[]))
@@ -95,11 +94,10 @@ async fn embedded_runtime_builder_rejects_store_bound_to_different_session_id() 
         },
         ..RuntimeSessionState::default()
     };
-    let incarnation = store
-        .ensure_session_incarnation(&state.session_id, &state.policy)
+    store
+        .ensure_session_bound(&state.session_id, &state.policy)
         .await
-        .expect("realize session incarnation");
-    state.bind_durable_incarnation(incarnation);
+        .expect("bind session to store");
     store
         .commit_runtime_state(RuntimeCommit::persisted_state_for_test(&state, &[]))
         .await

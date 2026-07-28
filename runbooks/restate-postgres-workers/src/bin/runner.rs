@@ -2,10 +2,9 @@ use anyhow::{Context, Result};
 use lash::triggers::{TriggerOccurrenceRequest, empty_trigger_source_key};
 use lash_core::AwaitEventResolver as _;
 use lash_core::{
-    AwaitEventKey, AwaitEventWaitIdentity, ExecutionScope, IncarnationId,
-    InlineRuntimeEffectController, Resolution, ScopedEffectController, SessionCommitStore,
-    TurnAddress, TurnCancelOutcome, TurnCancelRequest, TurnOutcome, TurnStop, TurnTerminal,
-    TurnWorkDriver,
+    AwaitEventKey, AwaitEventWaitIdentity, ExecutionScope, InlineRuntimeEffectController,
+    Resolution, ScopedEffectController, SessionCommitStore, TurnAddress, TurnCancelOutcome,
+    TurnCancelRequest, TurnOutcome, TurnStop, TurnTerminal, TurnWorkDriver,
 };
 use lash_postgres_store::PostgresStorage;
 use lash_restate::{
@@ -2334,22 +2333,9 @@ fn turn_control_request(workflow_id: &str, fail_once: bool) -> TurnRequest {
     }
 }
 
-async fn turn_address(storage: &PostgresStorage, request: &TurnRequest) -> Result<TurnAddress> {
+async fn turn_address(_storage: &PostgresStorage, request: &TurnRequest) -> Result<TurnAddress> {
     let session_id = turn_session_id(&request.workflow_id);
-    let incarnation_id: String = sqlx::query_scalar(
-        "SELECT meta_json::jsonb ->> 'incarnation_id'
-         FROM lash_session_meta
-         WHERE session_id = $1",
-    )
-    .bind(session_id)
-    .fetch_one(storage.pool())
-    .await
-    .with_context(|| format!("load durable incarnation for session `{session_id}`"))?;
-    Ok(TurnAddress::new_incarnation(
-        session_id,
-        IncarnationId::decode_from_store(incarnation_id),
-        request.workflow_id.clone(),
-    ))
+    Ok(TurnAddress::new(session_id, request.workflow_id.clone()))
 }
 
 fn cancel_request(address: TurnAddress, request_id: &str) -> TurnCancelRequest {
@@ -2532,18 +2518,11 @@ async fn wait_for_invocation_suspended(
 /// empty-body ingress encoding in `update_restate_session_waits_via_ingress`.
 async fn drive_durable_wait_index_scenarios(ingress_url: &str, admin_url: &str) -> Result<()> {
     let host = RestateEffectHost::new(ingress_url.to_string());
-    let fixture_incarnation =
-        IncarnationId::decode_from_store(format!("workers-e2e-fixture:{DEFAULT_SESSION_ID}"));
-
     // 1) A controller-owned wait registers in the real Restate session index
     //    and observes cancel_all as a terminal cancellation.
     let cancel_key = host
         .await_event_key(
-            &ExecutionScope::turn_incarnation(
-                DEFAULT_SESSION_ID,
-                fixture_incarnation.clone(),
-                "e2e-wait-cancel",
-            ),
+            &ExecutionScope::turn(DEFAULT_SESSION_ID, "e2e-wait-cancel"),
             AwaitEventWaitIdentity::Custom {
                 key: "controller-wait".to_string(),
             },
@@ -2586,11 +2565,7 @@ async fn drive_durable_wait_index_scenarios(ingress_url: &str, admin_url: &str) 
     //    proving cancellation did not permanently revoke the index.
     let reregister_key = host
         .await_event_key(
-            &ExecutionScope::turn_incarnation(
-                DEFAULT_SESSION_ID,
-                fixture_incarnation.clone(),
-                "e2e-wait-reregister",
-            ),
+            &ExecutionScope::turn(DEFAULT_SESSION_ID, "e2e-wait-reregister"),
             AwaitEventWaitIdentity::Custom {
                 key: "controller-wait".to_string(),
             },
@@ -2631,11 +2606,7 @@ async fn drive_durable_wait_index_scenarios(ingress_url: &str, admin_url: &str) 
     // been deleted, so the old post-revoke turn-result assertion no longer
     // applies.
     let control_driver = TurnWorkDriver::new(Arc::new(host.clone()));
-    let control_address = TurnAddress::new_incarnation(
-        DEFAULT_SESSION_ID,
-        fixture_incarnation,
-        "e2e-control-revoke",
-    );
+    let control_address = TurnAddress::new(DEFAULT_SESSION_ID, "e2e-control-revoke");
     let initial = control_driver
         .request_cancel(TurnCancelRequest::new(
             control_address.clone(),

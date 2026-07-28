@@ -1320,7 +1320,7 @@ async fn core_delete_session_removes_factory_backed_session_state() -> Result<()
 }
 
 #[tokio::test]
-async fn core_delete_session_retires_the_deleted_lifetime_effect_journal() -> Result<()> {
+async fn core_delete_session_retires_the_deleted_session_effect_journal() -> Result<()> {
     let factory = Arc::new(DeletingStoreFactory::default());
     let effect_host = Arc::new(lash_core::testing::conformance::RecordingEffectHost::default());
     let core = explicit_ephemeral_facets(LashCore::standard_builder())
@@ -1332,10 +1332,6 @@ async fn core_delete_session_retires_the_deleted_lifetime_effect_journal() -> Re
     drop(core.session("retire-delete-session").open().await?);
 
     let execution_scope = core.session_delete_scope("retire-delete-session").await?;
-    let incarnation_id = execution_scope
-        .incarnation_id()
-        .expect("session delete scope incarnation")
-        .clone();
     let scoped = effect_host
         .scoped_static(execution_scope)?
         .expect("recording host static scope");
@@ -1344,8 +1340,7 @@ async fn core_delete_session_retires_the_deleted_lifetime_effect_journal() -> Re
     assert_eq!(
         effect_host.retirements(),
         vec![lash_core::EffectJournalRetirement::session(
-            "retire-delete-session",
-            incarnation_id,
+            "retire-delete-session"
         )]
     );
     Ok(())

@@ -13,7 +13,7 @@ impl SessionStoreFactory for ParentBoundSessionStoreFactory {
     async fn create_store(
         &self,
         _request: &crate::SessionStoreCreateRequest,
-    ) -> Result<Arc<dyn crate::RuntimePersistence>, String> {
+    ) -> Result<Arc<dyn crate::RuntimePersistence>, crate::StoreError> {
         Ok(self.store.clone())
     }
 
@@ -32,16 +32,15 @@ async fn parent_bound_session_store(policy: crate::SessionPolicy) -> Arc<InMemor
         .expect("claim parent session lease")
         .acquired()
         .expect("parent session lease acquired");
-    let mut state = crate::RuntimeSessionState {
+    let state = crate::RuntimeSessionState {
         session_id: PARENT_SESSION_ID.to_string(),
         policy,
         ..crate::RuntimeSessionState::default()
     };
-    let incarnation_id = store
-        .ensure_session_incarnation(&state.session_id, &state.policy)
+    store
+        .ensure_session_bound(&state.session_id, &state.policy)
         .await
-        .expect("realize parent session lifetime");
-    state.bind_durable_incarnation(incarnation_id);
+        .expect("bind parent session");
     store
         .commit_runtime_state(crate::RuntimeCommit::persisted_state_for_test(&state, &[]))
         .await

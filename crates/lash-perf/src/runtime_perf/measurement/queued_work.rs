@@ -900,15 +900,12 @@ async fn runtime_perf_commit_state(
     store: &RuntimePerfStore,
     session_id: &str,
 ) -> anyhow::Result<RuntimeSessionState> {
-    let mut state = RuntimeSessionState {
+    let state = RuntimeSessionState {
         session_id: session_id.to_string(),
         ..RuntimeSessionState::default()
     };
     let policy = state.policy.clone();
-    let incarnation_id = store
-        .ensure_session_incarnation(session_id, &policy)
-        .await?;
-    state.bind_durable_incarnation(incarnation_id);
+    store.ensure_session_bound(session_id, &policy).await?;
     Ok(state)
 }
 
