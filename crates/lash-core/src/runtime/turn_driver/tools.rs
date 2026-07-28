@@ -105,7 +105,7 @@ impl RuntimeTurnDriver<'_> {
                     } => {
                         let resolution = self
                             .await_pending_tool_completion(
-                                machine, id, &call_id, key, &pending, event_tx, cancel,
+                                machine, id, &call_id, *key, &pending, event_tx, cancel,
                             )
                             .await?;
                         let dispatch_outcome = prepare_context

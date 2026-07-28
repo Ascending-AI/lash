@@ -297,7 +297,7 @@ pub(crate) async fn execute_prepared_tool_attempt_effect<'run>(
             }
         }
         ToolCallLaunch::Pending(pending) => crate::ToolAttemptLaunch::Pending {
-            key: pending.key,
+            key: Box::new(pending.key),
             pending: pending.pending,
             duration_ms: pending.duration_ms,
         },

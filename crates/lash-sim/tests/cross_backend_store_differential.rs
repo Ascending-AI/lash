@@ -520,6 +520,9 @@ fn materialize_graph(
     }
 }
 
+// A commit is genuinely this many independent parts; bundling them into a
+// params struct here would only move the same fields behind another name.
+#[allow(clippy::too_many_arguments)]
 fn runtime_commit(
     session_id: &str,
     expected_head_revision: u64,
@@ -655,6 +658,26 @@ fn differential_usage_delta() -> TokenLedgerEntry {
 fn differential_attachment_id() -> AttachmentId {
     AttachmentId::new("differential-attachment")
 }
+
+// Row shapes for the SQL observation queries. Named because the tuples are wide
+// enough that clippy flags them inline, and a name reads better at the use site.
+type AttachmentRow = (
+    String,
+    String,
+    i64,
+    Option<i64>,
+    Option<String>,
+    Option<String>,
+);
+type LeaseRow = (
+    Option<String>,
+    Option<String>,
+    Option<String>,
+    Option<String>,
+    i64,
+    i64,
+    i64,
+);
 
 #[derive(Clone, PartialEq, Eq)]
 struct DurableNode {
@@ -1005,14 +1028,7 @@ impl RawDurableReader {
                         }
                     })
                     .collect();
-                let attachment_rows: Vec<(
-                    String,
-                    String,
-                    i64,
-                    Option<i64>,
-                    Option<String>,
-                    Option<String>,
-                )> = sqlx::query_as(
+                let attachment_rows: Vec<AttachmentRow> = sqlx::query_as(
                     "SELECT attachment_id, canonical_uri, intent_at_ms, committed_at_ms,
                             owner_kind, owner_id
                      FROM lash_attachment_manifest
@@ -1082,15 +1098,7 @@ impl RawDurableReader {
                     })
                     .collect();
                 let session_meta = read_session_meta_observation(store).await;
-                let lease_rows: Vec<(
-                    Option<String>,
-                    Option<String>,
-                    Option<String>,
-                    Option<String>,
-                    i64,
-                    i64,
-                    i64,
-                )> = sqlx::query_as(
+                let lease_rows: Vec<LeaseRow> = sqlx::query_as(
                     "SELECT lease_owner_id, lease_owner_incarnation_id,
                             lease_owner_liveness_json, lease_token,
                             lease_fencing_token, lease_claimed_at_ms, lease_expires_at_ms

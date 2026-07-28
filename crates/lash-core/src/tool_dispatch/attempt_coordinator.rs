@@ -188,7 +188,7 @@ pub(crate) async fn coordinate_tool_invocation<'run>(
                     launch: ToolCallLaunch::Pending(PendingToolDispatchOutcome {
                         tool_name: call.tool_name,
                         args: call.args,
-                        key,
+                        key: *key,
                         pending,
                         duration_ms,
                     }),
