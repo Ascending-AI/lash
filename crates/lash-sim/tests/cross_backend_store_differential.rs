@@ -38,6 +38,7 @@ enum CaseName {
     DuplicateWithinAppend,
     DuplicateAcrossCommits,
     AppendDuplicateAfterAppendSeed,
+    NodelessLeafMove,
     StaleExpectedHeadRevision,
     IdenticalAndMutatedTurnCommitReplay,
     SettleClaimAfterLeaseGenerationSuperseded,
@@ -49,6 +50,7 @@ impl CaseName {
             Self::DuplicateWithinAppend => "duplicate_node_id_within_one_append",
             Self::DuplicateAcrossCommits => "duplicate_node_id_across_two_commits",
             Self::AppendDuplicateAfterAppendSeed => "append_duplicate_node_id_after_append_seed",
+            Self::NodelessLeafMove => "nodeless_commit_cannot_move_leaf",
             Self::StaleExpectedHeadRevision => "stale_expected_head_revision",
             Self::IdenticalAndMutatedTurnCommitReplay => "identical_and_mutated_turn_commit_replay",
             Self::SettleClaimAfterLeaseGenerationSuperseded => {
@@ -144,7 +146,7 @@ impl NodeSpec {
                 .parent_node_id
                 .map(|node_id| scoped_node_id(session_id, incarnation_id, node_id)),
             timestamp: "2026-07-26T00:00:00Z".to_string(),
-            payload: if self.parent_node_id.is_none() {
+            payload: if is_frame_alias(self.node_id) {
                 SessionNodePayload::FrameOpen {
                     frame_key,
                     reason: lash_core::AgentFrameReason::initial(),
@@ -177,7 +179,10 @@ fn differential_frame_key(node_id: &str) -> String {
 }
 
 fn is_frame_alias(node_id: &str) -> bool {
-    matches!(node_id, "collision" | "root" | "stale-claim-node")
+    matches!(
+        node_id,
+        "active-frame" | "collision" | "root" | "stale-claim-node"
+    )
 }
 
 fn scoped_node_id(session_id: &str, incarnation_id: &IncarnationId, node_id: &str) -> String {
@@ -272,6 +277,31 @@ fn generated_cases() -> Vec<GeneratedCase> {
                         Some("active-leaf"),
                     ),
                 ),
+            ],
+        },
+        GeneratedCase {
+            name: CaseName::NodelessLeafMove,
+            operations: vec![
+                commit(
+                    "seed_graph",
+                    0,
+                    append(
+                        vec![
+                            NodeSpec::new("root", None, "root"),
+                            NodeSpec::new("active-frame", Some("root"), "active"),
+                        ],
+                        Some("active-frame"),
+                    ),
+                ),
+                StoreOperation::Commit {
+                    label: "move_leaf_without_appending_nodes",
+                    expected_head_revision: 1,
+                    graph: append(Vec::new(), Some("root")),
+                    turn_commit: Some(TurnCommitSpec {
+                        turn_id: "nodeless-leaf-move",
+                        hash: "nodeless-leaf-move",
+                    }),
+                },
             ],
         },
         GeneratedCase {
@@ -1032,7 +1062,7 @@ fn render_divergence(
 #[test]
 fn generated_catalog_covers_required_adversarial_shapes() {
     let cases = generated_cases();
-    assert_eq!(cases.len(), 6);
+    assert_eq!(cases.len(), 7);
     assert!(cases.iter().all(|case| !case.operations.is_empty()));
     assert_eq!(
         cases
@@ -1043,6 +1073,7 @@ fn generated_catalog_covers_required_adversarial_shapes() {
             "duplicate_node_id_within_one_append",
             "duplicate_node_id_across_two_commits",
             "append_duplicate_node_id_after_append_seed",
+            "nodeless_commit_cannot_move_leaf",
             "stale_expected_head_revision",
             "identical_and_mutated_turn_commit_replay",
             "settle_claim_after_session_lease_generation_superseded_before_reclaim",
