@@ -2150,6 +2150,103 @@ async fn durable_process_worker_config_uses_core_process_registry() -> Result<()
 }
 
 #[tokio::test]
+async fn fork_distinguishes_collected_point_from_retained_orphaned_source() -> Result<()> {
+    use lash_core::SessionStoreFactory as _;
+
+    let factory = Arc::new(lash_core::InMemorySessionStoreFactory::new());
+    let core = explicit_ephemeral_facets(LashCore::standard_builder())
+        .provider(mock_provider())
+        .model(mock_model_spec())
+        .store_factory(Arc::clone(&factory) as Arc<dyn lash_core::SessionStoreFactory>)
+        .build()?;
+
+    let collected_error = core
+        .fork_at("collected-fork-point", "collected-fork-branch")
+        .await
+        .expect_err("a collected point must remain classified as not retained");
+    assert!(matches!(
+        collected_error,
+        EmbedError::Store(lash_core::StoreError::ForkPointNotRetained { node_id })
+            if node_id == "collected-fork-point"
+    ));
+
+    let mut source_model = mock_model_spec();
+    source_model.id = "orphaned-source-model".to_string();
+    let source_policy = lash_core::SessionPolicy {
+        provider_id: "orphaned-source-provider".to_string(),
+        model: source_model,
+        session_id: Some("orphaned-fork-source".to_string()),
+        ..Default::default()
+    };
+    let source_request = lash_core::SessionStoreCreateRequest {
+        session_id: "orphaned-fork-source".to_string(),
+        relation: lash_core::SessionRelation::Root,
+        policy: source_policy.clone(),
+    };
+    let source = factory
+        .create_store(&source_request)
+        .await
+        .expect("create source that will be deleted");
+    let source_incarnation_id = source
+        .load_session_meta()
+        .await
+        .expect("load source metadata")
+        .expect("source metadata exists")
+        .incarnation_id;
+    let mut source_state = lash_core::RuntimeSessionState {
+        session_id: source_request.session_id.clone(),
+        session_lifetime: lash_core::SessionLifetime::durable(source_incarnation_id),
+        policy: source_policy,
+        ..Default::default()
+    };
+    source_state.ensure_agent_frame_initialized();
+    source
+        .commit_runtime_state(lash_core::RuntimeCommit::persisted_state_for_test(
+            &source_state,
+            &[],
+        ))
+        .await
+        .expect("commit orphaned source frame");
+    let retained_node_id = source_state
+        .session_graph
+        .leaf_node_id
+        .clone()
+        .expect("orphaned source leaf");
+    core.pin(&retained_node_id).await?;
+    factory
+        .delete_session(&source_request.session_id)
+        .await
+        .expect("delete pinned source session");
+
+    core.fork_at(&retained_node_id, "orphaned-fork-branch")
+        .await
+        .expect("retained graph frame must resolve policy after source deletion");
+    let branch = factory
+        .open_existing_store(&lash_core::SessionStoreCreateRequest {
+            session_id: "orphaned-fork-branch".to_string(),
+            relation: lash_core::SessionRelation::Root,
+            policy: lash_core::SessionPolicy::default(),
+        })
+        .await
+        .expect("open orphaned-source fork")
+        .expect("orphaned-source fork exists");
+    let branch_config = branch
+        .load_session()
+        .await?
+        .expect("orphaned-source fork head")
+        .config;
+    assert_eq!(
+        branch_config.provider_id, "orphaned-source-provider",
+        "the retained frame carries provider identity after source deletion"
+    );
+    assert_eq!(
+        branch_config.model.id, "orphaned-source-model",
+        "the retained frame carries model identity after source deletion"
+    );
+    Ok(())
+}
+
+#[tokio::test]
 async fn fork_inherits_process_grants_without_inheriting_wake_subscription() -> Result<()> {
     use lash_core::{ProcessRegistry as _, SessionStoreFactory as _};
 

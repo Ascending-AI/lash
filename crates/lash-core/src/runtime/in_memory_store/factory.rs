@@ -1,5 +1,24 @@
 use super::*;
 
+fn retained_fork_config(
+    graph: &crate::SessionGraph,
+    node_id: &str,
+) -> Result<crate::PersistedSessionConfig, crate::StoreError> {
+    let frame_node_id = graph.nearest_frame_node_id(Some(node_id)).ok_or_else(|| {
+        crate::StoreError::MissingFrameOpenAncestor {
+            leaf_node_id: node_id.to_string(),
+        }
+    })?;
+    graph
+        .find_node(frame_node_id)
+        .and_then(crate::SessionNodeRecord::frame_config)
+        .ok_or_else(|| {
+            crate::StoreError::Backend(format!(
+                "retained frame node `{frame_node_id}` has no frame assignment"
+            ))
+        })
+}
+
 impl Default for InMemorySessionStoreFactory {
     fn default() -> Self {
         Self::new()
@@ -119,10 +138,12 @@ impl SessionStoreFactory for InMemorySessionStoreFactory {
             .get(node_id)
             .cloned()
         {
+            let graph = self.global_session_graph.lock().expect("lock global graph");
             return Ok(crate::ForkPoint {
                 node_id: node_id.to_string(),
                 checkpoint_ref,
                 source_session_id,
+                config: retained_fork_config(&graph, node_id)?,
                 pinned: true,
             });
         }
@@ -147,7 +168,11 @@ impl SessionStoreFactory for InMemorySessionStoreFactory {
                 node_id: node_id.to_string(),
             });
         };
-        let graph = self.global_session_graph.lock().expect("lock global graph");
+        let graph = self
+            .global_session_graph
+            .lock()
+            .expect("lock global graph")
+            .clone();
         let tombstoned = self
             .tombstoned_node_ids
             .lock()
@@ -157,6 +182,7 @@ impl SessionStoreFactory for InMemorySessionStoreFactory {
                 node_id: node_id.to_string(),
             });
         }
+        let config = retained_fork_config(&graph, node_id)?;
         drop(tombstoned);
         drop(graph);
         self.node_anchors.lock().expect("lock node anchors").insert(
@@ -171,6 +197,7 @@ impl SessionStoreFactory for InMemorySessionStoreFactory {
             node_id: node_id.to_string(),
             checkpoint_ref,
             source_session_id,
+            config,
             pinned: true,
         })
     }
@@ -219,21 +246,25 @@ impl SessionStoreFactory for InMemorySessionStoreFactory {
             .write_transaction
             .lock()
             .expect("lock in-memory read transaction");
+        let graph = self
+            .global_session_graph
+            .lock()
+            .expect("lock global graph")
+            .clone();
         let anchors = self.node_anchors.lock().expect("lock node anchors");
-        let mut points = anchors
-            .iter()
-            .map(|(node_id, (checkpoint_ref, _, source_session_id))| {
-                (
-                    node_id.clone(),
-                    crate::ForkPoint {
-                        node_id: node_id.clone(),
-                        checkpoint_ref: checkpoint_ref.clone(),
-                        source_session_id: source_session_id.clone(),
-                        pinned: true,
-                    },
-                )
-            })
-            .collect::<std::collections::BTreeMap<_, _>>();
+        let mut points = std::collections::BTreeMap::new();
+        for (node_id, (checkpoint_ref, _, source_session_id)) in anchors.iter() {
+            points.insert(
+                node_id.clone(),
+                crate::ForkPoint {
+                    node_id: node_id.clone(),
+                    checkpoint_ref: checkpoint_ref.clone(),
+                    source_session_id: source_session_id.clone(),
+                    config: retained_fork_config(&graph, node_id)?,
+                    pinned: true,
+                },
+            );
+        }
         let stores = self.stores.lock().expect("in-memory store factory");
         for store in stores.values() {
             let head = store.session_head_meta.lock().expect("lock session head");
@@ -249,6 +280,7 @@ impl SessionStoreFactory for InMemorySessionStoreFactory {
                 node_id: node_id.clone(),
                 checkpoint_ref: checkpoint_ref.clone(),
                 source_session_id: head.session_id.clone(),
+                config: retained_fork_config(&graph, node_id)?,
                 pinned: false,
             };
             match points.entry(node_id.clone()) {

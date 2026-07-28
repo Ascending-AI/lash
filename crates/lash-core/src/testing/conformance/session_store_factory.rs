@@ -690,6 +690,11 @@ async fn session_store_factory_fork_semantics(factory: Arc<dyn crate::SessionSto
     let pinned = factory.pin(&root_node_id).await.expect("pin fork root");
     assert_eq!(pinned.node_id, root_node_id);
     assert_eq!(pinned.source_session_id, source_request.session_id);
+    assert_eq!(
+        pinned.config.provider_id,
+        state.policy.recorded_provider_id()
+    );
+    assert_eq!(pinned.config.model, state.policy.model);
     assert!(pinned.pinned);
 
     append_fork_conformance_message(&mut state, "reuse-proof-old", "old incarnation");
@@ -874,6 +879,18 @@ async fn session_store_factory_fork_semantics(factory: Arc<dyn crate::SessionSto
         .delete_session(&source_request.session_id)
         .await
         .expect("delete superseded source");
+    let orphaned_source_point = factory
+        .fork_points()
+        .await
+        .expect("enumerate retained point after source deletion")
+        .into_iter()
+        .find(|point| point.node_id == root_node_id)
+        .expect("pin must outlive its deleted source session");
+    assert_eq!(
+        orphaned_source_point.config.provider_id,
+        state.policy.recorded_provider_id()
+    );
+    assert_eq!(orphaned_source_point.config.model, state.policy.model);
     assert!(
         branch
             .load_node(&root_node_id)

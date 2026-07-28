@@ -1,5 +1,45 @@
 use crate::*;
 
+async fn retained_fork_config_tx(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    node_id: &str,
+) -> Result<lash_core::PersistedSessionConfig, StoreError> {
+    let frame_node_id = crate::runtime_persistence::nearest_frame_node_id_tx(tx, node_id)
+        .await?
+        .ok_or_else(|| StoreError::MissingFrameOpenAncestor {
+            leaf_node_id: node_id.to_string(),
+        })?;
+    let row = sqlx::query(
+        "SELECT parent_node_id, node_json FROM lash_graph_nodes
+         WHERE node_id = $1 AND tombstoned = FALSE",
+    )
+    .bind(&frame_node_id)
+    .fetch_optional(&mut **tx)
+    .await
+    .map_err(store_sqlx_error)?
+    .ok_or_else(|| {
+        StoreError::Backend(format!("retained frame node `{frame_node_id}` is missing"))
+    })?;
+    let parent_node_id = row.get(0);
+    let node_json: String = row.get(1);
+    lash_core::SessionNodeRecord::decode_storage_body(
+        frame_node_id.clone(),
+        parent_node_id,
+        &node_json,
+    )
+    .map_err(|error| {
+        StoreError::Backend(format!(
+            "failed to decode retained frame node `{frame_node_id}`: {error}"
+        ))
+    })?
+    .frame_config()
+    .ok_or_else(|| {
+        StoreError::Backend(format!(
+            "retained frame node `{frame_node_id}` has no frame assignment"
+        ))
+    })
+}
+
 #[async_trait::async_trait]
 impl SessionStoreFactory for PostgresSessionStoreFactory {
     async fn create_store(
@@ -109,11 +149,13 @@ impl SessionStoreFactory for PostgresSessionStoreFactory {
         .await
         .map_err(store_sqlx_error)?
         {
+            let config = retained_fork_config_tx(&mut tx, node_id).await?;
             tx.commit().await.map_err(store_sqlx_error)?;
             return Ok(lash_core::ForkPoint {
                 node_id: node_id.to_string(),
                 checkpoint_ref: checkpoint_ref.into(),
                 source_session_id,
+                config,
                 pinned: true,
             });
         }
@@ -141,11 +183,13 @@ impl SessionStoreFactory for PostgresSessionStoreFactory {
         .execute(&mut *tx)
         .await
         .map_err(store_sqlx_error)?;
+        let config = retained_fork_config_tx(&mut tx, node_id).await?;
         tx.commit().await.map_err(store_sqlx_error)?;
         Ok(lash_core::ForkPoint {
             node_id: node_id.to_string(),
             checkpoint_ref: checkpoint_ref.into(),
             source_session_id,
+            config,
             pinned: true,
         })
     }
@@ -174,6 +218,11 @@ impl SessionStoreFactory for PostgresSessionStoreFactory {
     }
 
     async fn fork_points(&self) -> Result<Vec<lash_core::ForkPoint>, StoreError> {
+        let mut tx = self.pool.begin().await.map_err(store_sqlx_error)?;
+        sqlx::query("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ")
+            .execute(&mut *tx)
+            .await
+            .map_err(store_sqlx_error)?;
         let rows = sqlx::query(
             "SELECT node_id, checkpoint_ref, source_session_id, pinned
              FROM (
@@ -193,18 +242,22 @@ impl SessionStoreFactory for PostgresSessionStoreFactory {
              ) retained
              ORDER BY node_id",
         )
-        .fetch_all(&self.pool)
+        .fetch_all(&mut *tx)
         .await
         .map_err(store_sqlx_error)?;
-        Ok(rows
-            .into_iter()
-            .map(|row| lash_core::ForkPoint {
-                node_id: row.get(0),
+        let mut points = Vec::with_capacity(rows.len());
+        for row in rows {
+            let node_id: String = row.get(0);
+            points.push(lash_core::ForkPoint {
+                config: retained_fork_config_tx(&mut tx, &node_id).await?,
+                node_id,
                 checkpoint_ref: BlobRef(row.get(1)),
                 source_session_id: row.get(2),
                 pinned: row.get(3),
-            })
-            .collect())
+            });
+        }
+        tx.commit().await.map_err(store_sqlx_error)?;
+        Ok(points)
     }
 
     async fn fork_at(

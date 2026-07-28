@@ -1086,6 +1086,8 @@ pub struct ForkPoint {
     pub node_id: String,
     pub checkpoint_ref: crate::BlobRef,
     pub source_session_id: String,
+    /// Provider and model captured by the nearest retained frame boundary.
+    pub config: crate::PersistedSessionConfig,
     pub pinned: bool,
 }
 
