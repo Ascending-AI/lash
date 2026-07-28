@@ -28,8 +28,8 @@ The ruling is that `vacuum`, receipt pruning, effect-journal pruning, and
 attachment/blob reclamation will all take an explicit host-supplied
 `RetentionBound`; none will infer a horizon or run as an internal background
 policy. This is not shipped behavior: `vacuum()` currently takes no bound, and
-the receipt- and effect-journal-pruning surfaces do not exist. The L7 retention
-layer of the FIG-636 durable-core cutover owns that implementation.
+the receipt- and effect-journal-pruning surfaces do not exist. The FIG-653 L7
+retention work owns that implementation.
 
 Once implemented, age is a bound only after the owning scope is terminal and
 after the relevant revision, epoch, or change-sequence watermark.

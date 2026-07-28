@@ -158,8 +158,8 @@ factory-wide blob store is an existence oracle for a caller that can obtain or
 compute a content hash.
 
 The deletion and its replacement are not shipped. `holds_ref` currently gates
-attachment reads, and the attachment-edge relations below do not exist. The L7
-retention layer of the FIG-636 durable-core cutover owns both changes.
+attachment reads, and the attachment-edge relations below do not exist. The
+FIG-653 L7 retention work owns both changes.
 
 The ruling makes attachment liveness an explicit stored edge. History-node
 attachments, checkpoint attachments, process/artifact roots, and host roots

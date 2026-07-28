@@ -154,9 +154,9 @@ for effect-replay rows and commit receipts.
 
 This is not shipped behavior: replay rows still use the lossy
 `(scope_id, replay_key)` primary key, and substrates expose neither pruning
-surface. The L7 retention layer of the FIG-636 durable-core cutover owns the
-canonical-key and pruning implementation. When it lands, the Host Application
-will supply the `RetentionBound` and schedule the work under ADR 0023.
+surface. The FIG-653 L7 retention work owns the canonical-key and pruning
+implementation. When it lands, the Host Application will supply the
+`RetentionBound` and schedule the work under ADR 0023.
 
 Age alone never proves that an operation cannot be re-driven after an outage,
 so the future pruning surface must be terminal-gated. The controller remains

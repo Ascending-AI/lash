@@ -93,9 +93,9 @@ stored history-node counts.
 
 The same ruling applies to attachment/blob liveness, but its implementation is
 pending. Explicit attachment-edge relations, canonical replay keys, bounded
-reclaim surfaces, and the `holds_ref` deletion belong to the L7 retention layer
-of the FIG-636 durable-core cutover. Current attachment liveness still uses
-manifest rows and commit-receipt predicates.
+reclaim surfaces, and the `holds_ref` deletion belong to the FIG-653 L7
+retention work. Current attachment liveness still uses manifest rows and
+commit-receipt predicates.
 
 ## ADR-0024 is re-applied at deletion
 
@@ -139,7 +139,7 @@ process truth on demand, exactly as ADR-0024 originally required.
 - Reclamation remains host-scheduled. The accepted but unbuilt L7 ruling makes
   every reclaim primitive take a watermark, terminal-gates receipt and journal
   cleanup, and replaces inferred attachment liveness with explicit stored
-  edges; FIG-636 owns that implementation.
+  edges; FIG-653 owns that implementation.
 - Lash owns the effect-journal contract while the configured substrate owns the
   journal. The session commit and effect journal remain separate transactions
   joined by stable operation identity.

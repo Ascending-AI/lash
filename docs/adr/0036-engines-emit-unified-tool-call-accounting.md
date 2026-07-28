@@ -65,9 +65,8 @@ drop references eagerly; normal attachment GC then reclaims unrooted bytes.
 
 The receipt-based GC oracle and eager per-session reference deletion above
 describe the current implementation. ADR 0028 and ADR 0047 supersede those
-mechanics as a ruling, not as shipped fact. The L7 retention layer of the
-FIG-636 durable-core cutover owns the explicit attachment-edge relations and
-read-guard deletion.
+mechanics as a ruling, not as shipped fact. The FIG-653 L7 retention work owns
+the explicit attachment-edge relations and read-guard deletion.
 
 When that layer lands, attachment liveness will derive from stored edges rather
 than durable supersession proof plus receipt retention. Session deletion will
