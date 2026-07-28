@@ -13,6 +13,7 @@ where
     committed_mutation_receipt_survives_later_revision(make()).await;
     conflicting_mutation_receipt_survives_later_revision(make()).await;
     list_operations_are_not_receipted(make()).await;
+    mutation_receipts_follow_retention_cutoff(make()).await;
     reservations_execute_the_reserved_revision(make()).await;
     disable_preserves_reserved_work_and_requires_explicit_enable(make()).await;
     delete_tombstones_preserves_history_and_revive_changes_incarnation(make()).await;
@@ -365,6 +366,27 @@ async fn list_operations_are_not_receipted(store: Arc<dyn crate::TriggerStore>) 
         listed_disabled,
         crate::TriggerCommandOutcome::List { records } if records.len() == 1
     ));
+}
+
+async fn mutation_receipts_follow_retention_cutoff(store: Arc<dyn crate::TriggerStore>) {
+    let key = "receipt-retention-key";
+    let command = register_command("session-a", sample_draft("session-a", key, "v1", "worker"));
+    let created = mutate(&store, "receipt-retention-register", command.clone()).await;
+    assert_eq!(
+        created.disposition,
+        crate::TriggerMutationDisposition::Created
+    );
+    assert_eq!(
+        store.prune_mutation_receipts(u64::MAX).await.unwrap(),
+        1,
+        "the retention cutoff removes the aged mutation receipt"
+    );
+    let reevaluated = mutate(&store, "receipt-retention-register", command).await;
+    assert_eq!(
+        reevaluated.disposition,
+        crate::TriggerMutationDisposition::Unchanged,
+        "after retention, the operation is evaluated against current state"
+    );
 }
 
 async fn explicit_prune_is_journaled_and_owner_scoped(store: Arc<dyn crate::TriggerStore>) {

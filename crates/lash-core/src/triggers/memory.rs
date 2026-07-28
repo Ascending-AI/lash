@@ -311,6 +311,18 @@ impl TriggerStore for InMemoryTriggerStore {
     async fn list_deliveries(&self) -> Result<Vec<TriggerDeliveryReservation>, PluginError> {
         self.list_deliveries_matching(|_| true)
     }
+
+    async fn prune_mutation_receipts(&self, cutoff_epoch_ms: u64) -> Result<usize, PluginError> {
+        let mut state = self
+            .state
+            .lock()
+            .map_err(|_| PluginError::Session("trigger store lock poisoned".to_string()))?;
+        let before = state.mutation_receipts.len();
+        state
+            .mutation_receipts
+            .retain(|_, (_, _, created_at_ms)| *created_at_ms >= cutoff_epoch_ms);
+        Ok(before.saturating_sub(state.mutation_receipts.len()))
+    }
 }
 
 fn execute_in_memory_trigger_command(

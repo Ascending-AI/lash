@@ -605,6 +605,22 @@ impl lash_core::TriggerStore for SqliteTriggerStore {
     ) -> Result<Vec<lash_core::TriggerDeliveryReservation>, lash_core::PluginError> {
         self.list_deliveries_where("1 = 1", Vec::new()).await
     }
+
+    async fn prune_mutation_receipts(
+        &self,
+        cutoff_epoch_ms: u64,
+    ) -> Result<usize, lash_core::PluginError> {
+        let cutoff_epoch_ms = i64::try_from(cutoff_epoch_ms).unwrap_or(i64::MAX);
+        self.conn
+            .call(move |conn| {
+                conn.execute(
+                    "DELETE FROM trigger_mutation_receipts WHERE created_at_ms < ?1",
+                    params![cutoff_epoch_ms],
+                )
+            })
+            .await
+            .map_err(process_sqlite_error)
+    }
 }
 
 fn reserve_sqlite_deliveries(
