@@ -254,7 +254,7 @@ mod tests {
             let delete_factory = Arc::clone(&factory);
             let delete_barrier = Arc::clone(&barrier);
             let deleted_session_id = request.session_id.clone();
-            let delete = tokio::spawn(async move {
+            let delete = crate::task::spawn(async move {
                 delete_barrier.wait().await;
                 delete_factory.delete_session(&deleted_session_id).await
             });
@@ -263,7 +263,7 @@ mod tests {
                 let create_factory = Arc::clone(&factory);
                 let create_barrier = Arc::clone(&barrier);
                 let create_request = request.clone();
-                creates.push(tokio::spawn(async move {
+                creates.push(crate::task::spawn(async move {
                     create_barrier.wait().await;
                     create_factory.create_store(&create_request).await
                 }));
