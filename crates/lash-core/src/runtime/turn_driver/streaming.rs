@@ -33,34 +33,65 @@ async fn emit_plugin_runtime_events_runtime(
     }
 }
 
-fn validate_generation_options(
+/// Reduce a requested output-token cap to what the model can produce, and say
+/// whether it had to.
+///
+/// The cap is a bound, not a demand: a session asking for at most 32k against
+/// a model that tops out at 8k is satisfied by 8k. Failing instead made the
+/// one fail-closed option in an otherwise fail-silent struct — and because the
+/// options are durable session policy, a `set_model` to a smaller model would
+/// have failed every remaining turn of the session, non-retryably, forever.
+/// The reduction is reported like every other divergence between what was
+/// asked for and what was sent.
+fn clamp_generation_options(
     model: &crate::ModelSpec,
-    generation: &crate::GenerationOptions,
-) -> Result<(), LlmCallError> {
-    let Some(requested) = generation.output_token_cap else {
-        return Ok(());
-    };
-    let Some(capacity) = model.limits.output_token_capacity else {
-        return Ok(());
+    generation: &mut crate::GenerationOptions,
+) -> bool {
+    let (Some(requested), Some(capacity)) = (
+        generation.output_token_cap,
+        model.limits.output_token_capacity,
+    ) else {
+        return false;
     };
     if requested <= capacity {
-        return Ok(());
+        return false;
     }
-    Err(LlmCallError {
-        message: format!(
-            "requested output_token_cap {} exceeds model `{}` output_token_capacity {}",
-            requested.get(),
-            model.id,
-            capacity.get()
-        ),
-        retryable: false,
-        kind: crate::ProviderFailureKind::Validation,
-        raw: None,
-        code: Some("output_token_cap_exceeds_model_capacity".to_string()),
-        terminal_reason: crate::LlmTerminalReason::ProviderError,
-        request_body: None,
-        partial_response: None,
-    })
+    tracing::debug!(
+        model = %model.id,
+        requested = requested.get(),
+        capacity = capacity.get(),
+        "clamping requested output_token_cap to the model's output_token_capacity"
+    );
+    generation.output_token_cap = Some(capacity);
+    true
+}
+
+/// Report the clamp on every disposition the call produced.
+///
+/// The adapter knows only that it put the cap it was handed on the wire, so it
+/// reports `Applied`; the runtime is the only layer that saw the larger number
+/// the caller asked for. This narrows that report on the response and on each
+/// attempt of the ledger alike, so no carrier of the fate of this request
+/// disagrees with another. An adapter that reports nothing keeps reporting
+/// nothing: `None` means unreported, not "nothing happened".
+fn record_clamped_output_token_cap(
+    response: Option<&mut LlmResponse>,
+    call_record: Option<&mut crate::LlmCallRecord>,
+) {
+    fn narrow(disposition: Option<&mut crate::GenerationDisposition>) {
+        if let Some(disposition) = disposition
+            && disposition.output_token_cap == crate::GenerationOptionDisposition::Applied
+        {
+            disposition.output_token_cap = crate::GenerationOptionDisposition::ClampedToCapacity;
+        }
+    }
+
+    narrow(response.and_then(|response| response.generation_disposition.as_mut()));
+    if let Some(call_record) = call_record {
+        for attempt in &mut call_record.attempts {
+            narrow(attempt.generation_disposition.as_mut());
+        }
+    }
 }
 
 impl RuntimeTurnDriver<'_> {
@@ -185,10 +216,9 @@ impl RuntimeTurnDriver<'_> {
         event_tx: &mpsc::Sender<RuntimeStreamEvent>,
         cancel: &CancellationToken,
     ) -> RuntimeLlmCallOutcome {
-        let request = (*request).clone();
-        if let Err(err) = validate_generation_options(&self.policy.model, &request.generation) {
-            return (Err(err), false, None);
-        }
+        let mut request = (*request).clone();
+        let clamped_output_token_cap =
+            clamp_generation_options(&self.policy.model, &mut request.generation);
         let request = match crate::attachments::resolve_llm_request_attachments(
             request,
             self.host.core.durability.attachment_store.as_ref(),
@@ -421,6 +451,11 @@ impl RuntimeTurnDriver<'_> {
                 }
             }
         };
+
+        let mut result = result;
+        if clamped_output_token_cap {
+            record_clamped_output_token_cap(result.as_mut().ok(), call_record.as_mut());
+        }
 
         self.finish_assistant_stream_hooks(assistant_stream_finish_reason(
             &result,

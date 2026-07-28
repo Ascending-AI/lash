@@ -51,6 +51,18 @@ sent. It rides the response, the per-attempt ledger of ADR 0032, the durable eff
 the trace record, and the remote mirror, so a host asserts "nothing was dropped" instead of
 trusting that one temperature survived every model a run touched.
 
+`output_token_cap` **clamps rather than fails**, for the same reason. It is the one option
+a model can refuse arithmetically, and it was validated hard: a cap above the model's
+`output_token_capacity` failed the call non-retryably. As per-turn intent that was a loud,
+local error; as durable session policy it is a session that fails *every remaining turn*
+after a `set_model` to a smaller model, and the only fail-closed field in an otherwise
+fail-silent struct. The cap is a bound, not a demand — a request for at most 32k is
+satisfied by a model that can only produce 8k — so the turn sends the capacity and reports
+`ClampedToCapacity`. The runtime is the only layer that saw both numbers, so it narrows the
+adapter's `Applied` on the response and on every attempt of the ledger together, and
+`nothing_omitted()` (nothing was dropped) is joined by `fully_honored()` (nothing was
+dropped *or* reduced) for a host that needs the number it named.
+
 The disposition is deliberately *not* part of `ExecutionEvidence`. ADR 0031 binds that type
 to facts the provider reported about the execution; this is a fact about the request lash
 built, and folding request-side bookkeeping into provider-reported evidence would dissolve

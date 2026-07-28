@@ -414,6 +414,7 @@ impl From<core_llm::GenerationOptionDisposition> for RemoteGenerationOptionDispo
             core_llm::GenerationOptionDisposition::OmittedSamplingPinned => {
                 Self::OmittedSamplingPinned
             }
+            core_llm::GenerationOptionDisposition::ClampedToCapacity => Self::ClampedToCapacity,
         }
     }
 }
@@ -427,6 +428,7 @@ impl From<RemoteGenerationOptionDisposition> for core_llm::GenerationOptionDispo
             RemoteGenerationOptionDisposition::OmittedSamplingPinned => {
                 Self::OmittedSamplingPinned
             }
+            RemoteGenerationOptionDisposition::ClampedToCapacity => Self::ClampedToCapacity,
         }
     }
 }

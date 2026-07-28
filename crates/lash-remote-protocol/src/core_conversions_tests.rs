@@ -1528,3 +1528,23 @@ fn remote_generation_options_are_omitted_from_the_wire_when_unset() {
         serde_json::json!({})
     );
 }
+
+#[test]
+fn every_generation_option_disposition_crosses_the_boundary_in_both_directions() {
+    for core in [
+        core_llm::GenerationOptionDisposition::NotRequested,
+        core_llm::GenerationOptionDisposition::Applied,
+        core_llm::GenerationOptionDisposition::OmittedUnsupported,
+        core_llm::GenerationOptionDisposition::OmittedSamplingPinned,
+        core_llm::GenerationOptionDisposition::ClampedToCapacity,
+    ] {
+        let remote = RemoteGenerationOptionDisposition::from(core);
+        assert_eq!(core_llm::GenerationOptionDisposition::from(remote), core);
+    }
+
+    assert_eq!(
+        serde_json::to_value(RemoteGenerationOptionDisposition::ClampedToCapacity)
+            .expect("serialize"),
+        serde_json::json!("clamped_to_capacity")
+    );
+}

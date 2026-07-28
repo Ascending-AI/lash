@@ -5359,3 +5359,119 @@ async fn omitted_generation_options_are_reported_on_the_turn_llm_call_record() {
         "a host asserting repeatability must be able to see the omission"
     );
 }
+
+#[tokio::test]
+async fn an_output_token_cap_above_the_model_clamps_and_says_so() {
+    use std::num::NonZeroUsize;
+    use std::sync::{Arc, Mutex};
+
+    // The cap is a bound, not a demand, and it is durable session policy: a
+    // `set_model` to a smaller model must not leave the session failing every
+    // remaining turn. The turn sends what the model can produce and the
+    // disposition says the number was reduced.
+    let captured: Arc<Mutex<Vec<crate::GenerationOptions>>> = Arc::new(Mutex::new(Vec::new()));
+    let captured_for_provider = Arc::clone(&captured);
+    let provider = TestProvider::builder()
+        .kind("clamping-capture")
+        .complete(move |req| {
+            let captured = Arc::clone(&captured_for_provider);
+            async move {
+                captured
+                    .lock()
+                    .expect("capture lock")
+                    .push(req.generation.clone());
+                Ok(LlmResponse {
+                    full_text: "ok".to_string(),
+                    parts: vec![LlmOutputPart::Text {
+                        text: "ok".to_string(),
+                        response_meta: None,
+                    }],
+                    // The adapter reports the cap it was handed as applied; it
+                    // has no idea a larger one was asked for.
+                    generation_disposition: Some(crate::GenerationDisposition {
+                        output_token_cap: crate::GenerationOptionDisposition::Applied,
+                        temperature: crate::GenerationOptionDisposition::Applied,
+                        seed: crate::GenerationOptionDisposition::NotRequested,
+                    }),
+                    ..LlmResponse::default()
+                })
+            }
+        })
+        .build()
+        .into_handle();
+
+    let mut runtime = runtime_with_plugins(Vec::new(), mock_provider(Vec::new())).await;
+    runtime
+        .update_session_config(
+            Some(provider),
+            Some(
+                crate::ModelSpec::from_token_limits(
+                    "small-output-model",
+                    Default::default(),
+                    200_000,
+                    Some(2_048),
+                )
+                .expect("valid test model"),
+            ),
+            None,
+            Some(crate::GenerationOptions {
+                output_token_cap: NonZeroUsize::new(32_000),
+                temperature: Some(
+                    crate::NonNegativeFiniteF64::new(0.0).expect("finite temperature"),
+                ),
+                seed: None,
+            }),
+        )
+        .await;
+
+    let turn = runtime
+        .run_turn_assembled(
+            TurnInput {
+                items: vec![InputItem::Text {
+                    text: "hello".to_string(),
+                }],
+                protocol_turn_options: None,
+                trace_turn_id: None,
+                protocol_extension: None,
+                turn_context: crate::TurnContext::default(),
+            },
+            CancellationToken::new(),
+            named_turn_scope("root", "clamped-cap-turn"),
+        )
+        .await
+        .expect("a cap above the model's capacity must not fail the turn");
+
+    let seen = captured.lock().expect("capture lock").clone();
+    assert_eq!(
+        seen.first().expect("one provider call").output_token_cap,
+        NonZeroUsize::new(2_048),
+        "the request carries the model's capacity, not the larger cap asked for"
+    );
+    assert_eq!(
+        runtime.session_policy().generation.output_token_cap,
+        NonZeroUsize::new(32_000),
+        "clamping is per request against the current model; the session's intent is unchanged"
+    );
+
+    let reported = turn
+        .llm_calls
+        .first()
+        .expect("one provider call")
+        .attempts
+        .first()
+        .expect("one attempt")
+        .generation_disposition
+        .expect("the adapter reported what it sent");
+    assert_eq!(
+        reported.output_token_cap,
+        crate::GenerationOptionDisposition::ClampedToCapacity
+    );
+    assert!(
+        reported.nothing_omitted(),
+        "a clamped cap reached the wire; it was not dropped"
+    );
+    assert!(
+        !reported.fully_honored(),
+        "a host that needs the number it asked for must be able to see the reduction"
+    );
+}

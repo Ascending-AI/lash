@@ -180,6 +180,7 @@ pub enum RemoteGenerationOptionDisposition {
     Applied,
     OmittedUnsupported,
     OmittedSamplingPinned,
+    ClampedToCapacity,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]

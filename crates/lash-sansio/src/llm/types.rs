@@ -614,6 +614,11 @@ pub enum GenerationOptionDisposition {
     /// The caller asked for it and sampling is pinned for this request, by the
     /// model's declared capability or by the thinking configuration in use.
     OmittedSamplingPinned,
+    /// The caller asked for an output-token cap above what this model can
+    /// produce, and the request carries the model's capacity instead. The
+    /// bound the caller asked for still holds; the number on the wire is
+    /// smaller than the one they named.
+    ClampedToCapacity,
 }
 
 impl GenerationOptionDisposition {
@@ -648,6 +653,12 @@ impl GenerationOptionDisposition {
     pub fn is_omitted(self) -> bool {
         matches!(self, Self::OmittedUnsupported | Self::OmittedSamplingPinned)
     }
+
+    /// Whether the request carries exactly what the caller asked for, if
+    /// anything. False for a dropped option and for a clamped one.
+    pub fn is_honored(self) -> bool {
+        matches!(self, Self::NotRequested | Self::Applied)
+    }
 }
 
 /// Adapter-reported fate of a request's [`GenerationOptions`].
@@ -668,11 +679,20 @@ pub struct GenerationDisposition {
 }
 
 impl GenerationDisposition {
-    /// Every option the caller asked for reached the wire.
+    /// Every option the caller asked for reached the wire, though an
+    /// output-token cap may have reached it reduced to the model's capacity.
+    /// Use [`fully_honored`](Self::fully_honored) to reject that too.
     pub fn nothing_omitted(&self) -> bool {
         !self.output_token_cap.is_omitted()
             && !self.temperature.is_omitted()
             && !self.seed.is_omitted()
+    }
+
+    /// Every option the caller asked for reached the wire unchanged.
+    pub fn fully_honored(&self) -> bool {
+        self.output_token_cap.is_honored()
+            && self.temperature.is_honored()
+            && self.seed.is_honored()
     }
 }
 
