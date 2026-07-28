@@ -68,8 +68,8 @@ use lash_core::store::{
 };
 use lash_core::{
     AbandonRequest, AttachmentId, AttachmentIntent, AttachmentManifest, AttachmentManifestEntry,
-    AttachmentOwnerKind, BlobRef, DeliveryPolicy, GcReport, LeaseOwnerIdentity, LeaseOwnerLiveness,
-    MergeKey, PROCESS_LEASE_SCHEMA_VERSION, PersistedSegmentHandover, ProcessAwaitOutput,
+    AttachmentOwnerKind, BlobRef, DeliveryPolicy, GcReport, LeaseOwnerIdentity, MergeKey,
+    PROCESS_LEASE_SCHEMA_VERSION, PersistedSegmentHandover, ProcessAwaitOutput,
     ProcessChangeCursor, ProcessEvent, ProcessEventAppendRequest, ProcessEventAppendResult,
     ProcessExecutionWriteAuthority, ProcessExternalRef, ProcessHandleDescriptor,
     ProcessHandleGrant, ProcessLease, ProcessLeaseClaimOutcome, ProcessLeaseCompletion,

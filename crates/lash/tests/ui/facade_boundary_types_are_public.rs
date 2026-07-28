@@ -113,25 +113,6 @@ impl SessionExecutionLeaseStore for FacadeStore {
         ))
     }
 
-    async fn reclaim_session_execution_lease(
-        &self,
-        session_id: &str,
-        owner: &LeaseOwnerIdentity,
-        _observed_holder: &SessionExecutionLeaseFence,
-        lease_ttl_ms: u64,
-    ) -> Result<SessionExecutionLeaseClaimOutcome, StoreError> {
-        Ok(SessionExecutionLeaseClaimOutcome::Acquired(
-            SessionExecutionLease {
-                session_id: session_id.to_string(),
-                owner: owner.clone(),
-                lease_token: "facade-token".to_string(),
-                fencing_token: 1,
-                claimed_at_epoch_ms: 0,
-                expires_at_epoch_ms: lease_ttl_ms,
-            },
-        ))
-    }
-
     async fn renew_session_execution_lease(
         &self,
         fence: &SessionExecutionLeaseFence,

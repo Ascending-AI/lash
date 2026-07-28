@@ -1266,7 +1266,7 @@ async fn live_restate_ingress_owner_restart_for_store(backend: &'static str) {
     .await;
     assert!(
         restart_started.elapsed() < Duration::from_secs(10),
-        "replacement waited for the session lease TTL instead of fencing the dead owner"
+        "replacement exceeded the configured session-lease recovery budget"
     );
     assert_eq!(
         session_lease_generation(&data_dir, backend, &session_id).await,
@@ -1434,6 +1434,11 @@ async fn live_restate_recovery_child() {
         .expect("open child active-turn routing");
     let session_ids = WorkbenchSessionIds::persistent(data_dir.join("session-id"))
         .expect("open child session id");
+    let lease_timings = lash::durability::LeaseTimings::new(
+        Duration::from_millis(300),
+        Duration::from_millis(100),
+    )
+    .expect("valid recovery E2E lease timings");
     let harness = live_workbench_restate_state_with_provider_and_database(
         &data_dir,
         ingress_url,
@@ -1441,6 +1446,7 @@ async fn live_restate_recovery_child() {
         session_ids,
         active_turns,
         database_url.as_deref(),
+        lease_timings,
     )
     .await;
     restate::spawn_restate_endpoint(

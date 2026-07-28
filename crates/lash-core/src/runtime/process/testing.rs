@@ -1131,25 +1131,7 @@ impl ProcessRegistry for TestLocalProcessRegistry {
             leases.insert(process_id.to_string(), lease.clone());
             return Ok(ProcessLeaseClaimOutcome::Acquired(lease));
         }
-        // Fenced CAS on the observed holder: identity, token, and fencing token
-        // must all still match, and the holder must be definitely dead for this
-        // claimant, else the live lease stays untouched.
-        if observed_holder.process_id == process_id
-            && current.owner.same_incarnation(&observed_holder.owner)
-            && current.lease_token == observed_holder.lease_token
-            && current.fencing_token == observed_holder.fencing_token
-            && current.owner.is_definitely_dead_for_claimant(owner)
-        {
-            let lease = acquire_test_lease(
-                process_id,
-                owner,
-                current.fencing_token.saturating_add(1),
-                now,
-                lease_ttl_ms,
-            );
-            leases.insert(process_id.to_string(), lease.clone());
-            return Ok(ProcessLeaseClaimOutcome::Acquired(lease));
-        }
+        let _ = (owner, observed_holder, lease_ttl_ms);
         Ok(ProcessLeaseClaimOutcome::Busy {
             holder: current.clone(),
         })

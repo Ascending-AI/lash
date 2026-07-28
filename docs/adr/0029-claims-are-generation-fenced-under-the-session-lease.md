@@ -37,7 +37,7 @@ are live exactly while that generation still holds the session lease. The
 generation is the lease's `fencing_token`, which is generation-stable in exactly
 the right way: renewal preserves it (renewal only extends expiry),
 same-incarnation extension of a live lease preserves it, and every fresh
-acquisition or dead-owner takeover bumps it (`previous + 1`).
+acquisition after TTL expiry bumps it (`previous + 1`).
 
 **Core rule: a claim is live iff the session-lease generation it pins is the
 currently-live lease generation.** Concretely:

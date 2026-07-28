@@ -132,27 +132,19 @@ async fn async_main() -> anyhow_like::Result<()> {
 
     // Worker identity for durable session-execution leases. WORKER_ID is stable
     // across restarts (set one per replica in a fleet); the incarnation is
-    // bumped every boot. Failover consequence: if this process crashes and a new
-    // boot (or a same-host peer) reopens a session whose lease this boot still
-    // holds, the local-process liveness metadata proves the dead pid gone and
-    // reclaims the lease before its TTL instead of waiting the full window. A
-    // machine reboot changes the kernel boot id, so that path falls back to the
-    // TTL backstop. The identity is stable within a boot, so keep at most one
+    // bumped every boot. If this process crashes, the lease remains busy until
+    // its TTL expires. The identity is stable within a boot, so keep at most one
     // in-flight turn per chat; the fenced head commit is the last-resort
     // single-writer backstop.
     let worker_id = std::env::var("WORKER_ID").unwrap_or_else(|_| "agent-service-1".to_string());
-    let worker_host = std::env::var("HOSTNAME").unwrap_or_else(|_| worker_id.clone());
     let worker_incarnation = std::env::var("AGENT_SERVICE_INCARNATION").unwrap_or_else(|_| {
         std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map(|since| since.as_millis().to_string())
             .unwrap_or_else(|_| "0".to_string())
     });
-    let session_owner = lash::persistence::LeaseOwnerIdentity::local_process(
-        worker_id,
-        worker_incarnation,
-        worker_host,
-    );
+    let session_owner =
+        lash::persistence::LeaseOwnerIdentity::opaque(worker_id, worker_incarnation);
     let process_registry_path = data_dir.join("processes.db");
     let session_store_root = data_dir.join("lash-sessions");
     let store_factory = Arc::new(

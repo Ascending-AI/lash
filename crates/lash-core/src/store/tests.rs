@@ -487,15 +487,6 @@ fn append_leaf_must_be_the_terminal_appended_node() {
     ));
 }
 
-fn local_liveness(
-    host_id: &str,
-    boot_id: &str,
-    pid: u32,
-    process_start: &str,
-) -> LeaseOwnerLiveness {
-    LeaseOwnerLiveness::local_process_for_test(host_id, boot_id, pid, process_start)
-}
-
 #[test]
 fn lease_owner_identity_requires_same_incarnation() {
     let first = LeaseOwnerIdentity::opaque("owner", "incarnation-a");
@@ -504,23 +495,4 @@ fn lease_owner_identity_requires_same_incarnation() {
 
     assert!(first.same_incarnation(&same));
     assert!(!first.same_incarnation(&next));
-}
-
-#[test]
-fn local_liveness_only_proves_same_host_boot_dead_processes() {
-    let holder = local_liveness(
-        "host-a",
-        "boot-a",
-        std::process::id(),
-        "not-the-current-process-start",
-    );
-    let same_host_boot = local_liveness("host-a", "boot-a", std::process::id(), "claimant");
-    let other_host = local_liveness("host-b", "boot-a", std::process::id(), "claimant");
-    let other_boot = local_liveness("host-a", "boot-b", std::process::id(), "claimant");
-
-    assert!(holder.is_definitely_dead_for_claimant(&same_host_boot));
-    assert!(!holder.is_definitely_dead_for_claimant(&other_host));
-    assert!(!holder.is_definitely_dead_for_claimant(&other_boot));
-    assert!(!holder.is_definitely_dead_for_claimant(&LeaseOwnerLiveness::Opaque));
-    assert!(!LeaseOwnerLiveness::Opaque.is_definitely_dead_for_claimant(&same_host_boot));
 }

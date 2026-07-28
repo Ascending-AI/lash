@@ -1344,14 +1344,11 @@ fn is_started_owner_bound(process: &Value) -> bool {
         && process_field_bool(process, "started") == Some(true)
 }
 
-/// An Abandoned terminal is licensed only by the ADR 0019 evidence classes: a
-/// provably-dead holder (`sweep`), a live owner's inline drain (`owner_drain`),
-/// or an operator-authorized request reconciled after the lease lapsed
-/// (`reconciled_request`). Elapsed time or a missing/unknown writer is never
-/// licensing evidence.
+/// An Abandoned terminal is licensed by a live owner's inline drain or an
+/// operator-authorized request reconciled after the lease lapsed. Elapsed time
+/// or a missing/unknown writer is never licensing evidence.
 fn abandoned_evidence_is_licensed(process: &Value) -> bool {
     match process_field_str(process, "abandon_writer") {
-        Some("sweep") => process_field_bool(process, "provably_dead_holder") == Some(true),
         Some("owner_drain") => process_field_str(process, "abandon_evidence_owner").is_some(),
         Some("reconciled_request") => {
             process_field_bool(process, "abandon_requested") == Some(true)
@@ -1362,9 +1359,9 @@ fn abandoned_evidence_is_licensed(process: &Value) -> bool {
 }
 
 /// ADR 0019: a started OwnerBound process is NEVER re-executed by recovery —
-/// abandonment is its only recovery, so it must reach the Abandoned terminal and
-/// never a run terminal (detected through the recovery execution journal: a
-/// re-run would land a `completed`/`failed` terminal instead). The contrast row
+/// it remains non-terminal until explicitly abandoned and never reaches a run
+/// terminal (detected through the recovery execution journal: a re-run would
+/// land a `completed`/`failed` terminal instead). The contrast row
 /// proves the sweep is capable of re-execution: a Rerunnable sibling IS re-run.
 /// Without both, an all-abandoned outcome could pass vacuously.
 pub fn process_never_double_started(events: &[DeliveredBoundary]) -> OracleVerdict {
@@ -1374,10 +1371,9 @@ pub fn process_never_double_started(events: &[DeliveredBoundary]) -> OracleVerdi
         .copied()
         .filter(|process| is_started_owner_bound(process))
         .collect();
-    let owner_bound_never_reran = started_owner_bound.iter().all(|process| {
-        process_field_bool(process, "reran") == Some(false)
-            && process_field_str(process, "terminal_status") == Some("abandoned")
-    });
+    let owner_bound_never_reran = started_owner_bound
+        .iter()
+        .all(|process| process_field_bool(process, "reran") == Some(false));
     let rerunnable_reran = processes.iter().any(|process| {
         process_field_str(process, "disposition") == Some("rerunnable")
             && process_field_bool(process, "reran") == Some(true)
@@ -1388,13 +1384,13 @@ pub fn process_never_double_started(events: &[DeliveredBoundary]) -> OracleVerdi
         "no started OwnerBound process was recovered",
         owner_bound_never_reran && rerunnable_reran,
         "a started OwnerBound process reached a run terminal (double-started), or no Rerunnable sibling was re-run to prove the sweep can re-execute",
-        "every started OwnerBound process was abandoned rather than re-run, while a Rerunnable sibling was re-run — the sweep can re-execute but never re-runs started OwnerBound work",
+        "every started OwnerBound process stayed non-rerun while a Rerunnable sibling was re-run — the sweep can re-execute but never re-runs started OwnerBound work",
     )
 }
 
 /// ADR 0019: every Abandoned terminal carries the evidence that licensed it — a
-/// provably-dead holder, a live owner drain, or a reconciled request with a
-/// lapsed lease. Elapsed time alone never terminalizes.
+/// live owner drain or a reconciled request with a lapsed lease. Elapsed time
+/// alone never terminalizes.
 pub fn abandoned_requires_evidence(events: &[DeliveredBoundary]) -> OracleVerdict {
     let processes = lifecycle_processes(events);
     let abandoned: Vec<&Value> = processes
@@ -1409,20 +1405,20 @@ pub fn abandoned_requires_evidence(events: &[DeliveredBoundary]) -> OracleVerdic
         abandoned
             .iter()
             .all(|process| abandoned_evidence_is_licensed(process)),
-        "an Abandoned terminal lacked licensing evidence (a provably-dead holder, a live owner drain, or a reconciled request with a lapsed lease) — elapsed time alone never terminalizes",
-        "every Abandoned terminal carried its licensing evidence (provably-dead holder, owner drain, or reconciled request with a lapsed lease)",
+        "an Abandoned terminal lacked licensing evidence (owner drain or reconciled request with a lapsed lease) — elapsed time alone never terminalizes",
+        "every Abandoned terminal carried its licensing evidence (owner drain or reconciled request with a lapsed lease)",
     )
 }
 
-/// Composite tolerance of the new Abandoned terminal for the state-machine
-/// oracle: when a recovery scenario is present, a started OwnerBound row is
-/// abandoned (never re-run) and every Abandoned terminal is licensed. Absent a
-/// recovery scenario this holds vacuously.
-fn started_owner_bound_recovery_is_abandonment(events: &[DeliveredBoundary]) -> bool {
+/// Composite OwnerBound recovery invariant for the state-machine oracle: a
+/// started row is never re-run; without licensed abandonment it stays running.
+/// Absent a recovery scenario this holds vacuously.
+fn started_owner_bound_recovery_is_safe(events: &[DeliveredBoundary]) -> bool {
     lifecycle_processes(events).iter().all(|process| {
+        let running = process_field_str(process, "terminal_status") == Some("running");
         let abandoned = process_field_str(process, "terminal_status") == Some("abandoned");
         let owner_bound_ok = !is_started_owner_bound(process)
-            || (process_field_bool(process, "reran") == Some(false) && abandoned);
+            || (process_field_bool(process, "reran") == Some(false) && (running || abandoned));
         let abandoned_ok = !abandoned || abandoned_evidence_is_licensed(process);
         owner_bound_ok && abandoned_ok
     })
@@ -1832,8 +1828,10 @@ pub fn state_machine_semantic_invariants(
     if !protocol_terminal_state_semantics(events, summary) {
         missing.push("provider/protocol terminal state semantics");
     }
-    if !started_owner_bound_recovery_is_abandonment(events) {
-        missing.push("started OwnerBound recovery abandons (never re-runs) with licensed evidence");
+    if !started_owner_bound_recovery_is_safe(events) {
+        missing.push(
+            "started OwnerBound recovery never re-runs and only abandons with licensed evidence",
+        );
     }
 
     if missing.is_empty() {
@@ -2828,13 +2826,13 @@ fn runtime_contract_semantics(
                     .any(|worker| worker.stale_completion_rejections > 0),
             "the stale worker completion was rejected by durable commit fencing",
         ),
-        // A new incarnation reclaims the dead lease and the fence strictly advances.
-        "runtime.dead_lease_reclaim_rejects_stale" => assert_semantic(
+        // A new incarnation waits for TTL expiry and the fence strictly advances.
+        "runtime.stale_lease_ttl" => assert_semantic(
             worker_runtime_lease_dto_observed(events)
                 && summary.workers.iter().any(|worker| {
                     worker.lease_owner_changes > 0 && worker.active_fencing_token > 1
                 }),
-            "a second incarnation reclaimed the dead lease at a strictly higher fence",
+            "a second incarnation acquired the stale lease after TTL at a strictly higher fence",
         ),
         "runtime.checkpoint_redrive_cancel" => assert_semantic(
             queued_inputs_have_cancel_targets(events) && observer_convergence(summary).is_passed(),
@@ -7924,29 +7922,28 @@ mod tests {
             )
         };
         // The correct disposition-driven recovery outcome.
-        let ob_sweep = json!({
+        let ob_waiting = json!({
             "process_id": "ob-crashed", "disposition": "owner_bound", "started": true,
-            "terminal_status": "abandoned", "reran": false, "abandon_writer": "sweep",
-            "abandon_evidence_owner": "sim-dead-owner", "provably_dead_holder": true,
-            "lease_lapsed": true, "abandon_requested": false,
+            "terminal_status": "running", "reran": false,
+            "lease_lapsed": false, "abandon_requested": false,
         });
         let rerun = json!({
             "process_id": "rerun-crashed", "disposition": "rerunnable", "started": true,
-            "terminal_status": "failed", "reran": true, "provably_dead_holder": true,
+            "terminal_status": "failed", "reran": true,
             "lease_lapsed": true, "abandon_requested": false,
         });
         let ob_reconciled = json!({
             "process_id": "ob-abandon-req", "disposition": "owner_bound", "started": true,
             "terminal_status": "abandoned", "reran": false, "abandon_writer": "reconciled_request",
-            "abandon_evidence_owner": "sim-silent-owner", "provably_dead_holder": false,
+            "abandon_evidence_owner": "sim-silent-owner",
             "lease_lapsed": true, "abandon_requested": true,
         });
-        let full = vec![lifecycle(json!([ob_sweep, rerun, ob_reconciled]))];
+        let full = vec![lifecycle(json!([ob_waiting, rerun, ob_reconciled]))];
         assert!(process_never_double_started(&full).is_passed());
         assert!(abandoned_requires_evidence(&full).is_passed());
-        assert!(started_owner_bound_recovery_is_abandonment(&full));
+        assert!(started_owner_bound_recovery_is_safe(&full));
         // Vacuous absence tolerates the new terminal.
-        assert!(started_owner_bound_recovery_is_abandonment(&[]));
+        assert!(started_owner_bound_recovery_is_safe(&[]));
 
         // Negative: a started OwnerBound row reached a run terminal (double-start).
         let double_started = json!({
@@ -7958,28 +7955,19 @@ mod tests {
             !process_never_double_started(&events).is_passed(),
             "a re-run started OwnerBound row must fail the double-start oracle"
         );
-        assert!(!started_owner_bound_recovery_is_abandonment(&events));
+        assert!(!started_owner_bound_recovery_is_safe(&events));
 
-        // Negative: all abandoned but no Rerunnable sibling re-run — refuses to
-        // pass on presence alone.
-        let events = vec![lifecycle(json!([ob_sweep.clone()]))];
+        // Negative: no Rerunnable sibling re-run — refuses to pass on presence
+        // alone.
+        let events = vec![lifecycle(json!([ob_waiting.clone()]))];
         assert!(
             !process_never_double_started(&events).is_passed(),
-            "an all-abandoned outcome without a re-run contrast must not pass vacuously"
+            "an OwnerBound-only outcome without a re-run contrast must not pass vacuously"
         );
 
         // Negative: no lifecycle boundary at all — nothing recovered to verify.
         assert!(!process_never_double_started(&[]).is_passed());
         assert!(!abandoned_requires_evidence(&[]).is_passed());
-
-        // Negative: Abandoned{Sweep} without a provably-dead holder.
-        let mut sweep_no_death = ob_sweep.clone();
-        sweep_no_death["provably_dead_holder"] = json!(false);
-        let events = vec![lifecycle(json!([sweep_no_death, rerun.clone()]))];
-        assert!(
-            !abandoned_requires_evidence(&events).is_passed(),
-            "Abandoned{{Sweep}} without a provably-dead holder must fail the evidence oracle"
-        );
 
         // Negative: a reconciled request whose lease had not lapsed.
         let mut reconciled_live = ob_reconciled.clone();
@@ -7994,7 +7982,7 @@ mod tests {
         let no_writer = json!({
             "process_id": "ob-x", "disposition": "owner_bound", "started": true,
             "terminal_status": "abandoned", "reran": false,
-            "provably_dead_holder": false, "lease_lapsed": true, "abandon_requested": false,
+            "lease_lapsed": true, "abandon_requested": false,
         });
         let events = vec![lifecycle(json!([no_writer]))];
         assert!(

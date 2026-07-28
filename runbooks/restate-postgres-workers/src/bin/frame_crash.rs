@@ -1,9 +1,9 @@
-use std::sync::Arc;
+use std::{sync::Arc, time::Duration};
 
 use anyhow::{Context, Result};
 use lash::TurnInput;
 use lash_core::runtime::{RuntimeTurnPhase, RuntimeTurnPhaseProbe};
-use lash_core::{LeaseOwnerIdentity, ProcessRegistry};
+use lash_core::{LeaseOwnerIdentity, LeaseTimings, ProcessRegistry};
 use lash_postgres_store::PostgresStorage;
 use lash_provider_openai::OpenAiCompatibleProvider;
 use serde_json::json;
@@ -14,6 +14,9 @@ use lash_restate_postgres_workers_e2e::{
 
 const WORKFLOW_ID: &str = "e2e-frame-switch-crash";
 const SESSION_ID: &str = "restate-postgres-workers-frame-crash-e2e";
+const RECOVERY_LEASE_TTL: Duration = Duration::from_millis(300);
+const RECOVERY_LEASE_RENEW_INTERVAL: Duration = Duration::from_millis(100);
+const RECOVERY_DEADLINE: Duration = Duration::from_secs(10);
 
 #[derive(Clone, Copy)]
 enum KillPoint {
@@ -69,6 +72,8 @@ async fn run(mode: &str) -> Result<()> {
         lash_protocol_rlm::RlmProtocolPluginConfig::default(),
         Arc::new(storage.lashlang_artifact_store()),
     );
+    let lease_timings = LeaseTimings::new(RECOVERY_LEASE_TTL, RECOVERY_LEASE_RENEW_INTERVAL)
+        .context("validate frame-crash recovery lease timings")?;
     let core = lash::LashCore::rlm_builder(factory)
         .provider(provider)
         .model(
@@ -82,12 +87,12 @@ async fn run(mode: &str) -> Result<()> {
         .trigger_store(Arc::new(storage.trigger_store()))
         .effect_host(Arc::new(lash::durability::InlineEffectHost::default()))
         .disable_queued_work_driver()
+        .lease_timings(lease_timings)
         .build()
         .context("build frame-crash core")?;
-    let owner = LeaseOwnerIdentity::local_process(
+    let owner = LeaseOwnerIdentity::opaque(
         "frame-crash-worker",
         format!("frame-crash-worker:{}", std::process::id()),
-        "e2e-runner-container",
     );
     let session_builder = core.session(SESSION_ID).session_execution_owner(owner);
     let session = session_builder.open().await?;
@@ -111,15 +116,42 @@ async fn run(mode: &str) -> Result<()> {
             session
                 .set_turn_phase_probe(Arc::new(ExitProbe(KillPoint::FollowOnEffectLoop)))
                 .await;
-            let _ = session.queued_turn().run().await?;
-            anyhow::bail!("mid-follow crash probe did not terminate the process")
+            let deadline = tokio::time::Instant::now() + RECOVERY_DEADLINE;
+            loop {
+                match session.queued_turn().run().await? {
+                    None if tokio::time::Instant::now() < deadline => {
+                        tokio::time::sleep(Duration::from_millis(100)).await;
+                    }
+                    None => {
+                        anyhow::bail!(
+                            "mid-follow worker did not acquire the expired session lease within \
+                             {RECOVERY_DEADLINE:?}"
+                        );
+                    }
+                    Some(_) => {
+                        anyhow::bail!(
+                            "mid-follow reached a terminal result before the effect-loop crash probe"
+                        );
+                    }
+                }
+            }
         }
         "recover" => {
-            let recovered = session
-                .queued_turn()
-                .run()
-                .await?
-                .context("recovery process found no durable follow-on")?;
+            let deadline = tokio::time::Instant::now() + RECOVERY_DEADLINE;
+            let recovered = loop {
+                match session.queued_turn().run().await? {
+                    Some(recovered) => break recovered,
+                    None if tokio::time::Instant::now() < deadline => {
+                        tokio::time::sleep(Duration::from_millis(100)).await;
+                    }
+                    None => {
+                        anyhow::bail!(
+                            "recovery worker did not acquire the expired session lease within \
+                             {RECOVERY_DEADLINE:?}"
+                        );
+                    }
+                }
+            };
             let value = recovered
                 .final_value()
                 .cloned()

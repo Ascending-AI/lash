@@ -38,19 +38,18 @@ The terminal fact has exactly one legitimate writer per path:
 
 - **Graceful drain**: the owner abandons its own OwnerBound work inline at
   close, under its own live lease — the ordinary completion path.
-- **Crash**: the next host-triggered recovery sweep writes Abandoned for an
-  OwnerBound, started row whose holder is provably dead
-  (`is_definitely_dead_for_claimant`), instead of re-running it.
+- **Crash**: a started OwnerBound row remains non-terminal after its lease
+  expires; a replacement worker never infers a terminal from process liveness.
 - **Third party**: a non-owner cannot write a terminal at all. The facade lever
   writes a durable **Abandon Request** marker (who, when, why); the sweep
   reconciles it into Abandoned only once the row's lease has lapsed. The marker
   is the operator's recorded authorization to accept uncertainty; the sweep
   stays the single system writer.
 
-Elapsed time alone never produces a terminal state. Lease expiry without death
-evidence is exposed read-side (lease owner identity and expiry on
-`ObservedProcess`) so hosts classify staleness themselves; only provable death
-or an explicit human authorization converts uncertainty into a terminal fact.
+Elapsed time alone never produces a terminal state. Lease expiry is exposed
+read-side (lease owner identity and expiry on `ObservedProcess`) so hosts
+classify staleness themselves; only owner drain or an explicit human
+authorization converts uncertainty into a terminal fact.
 
 The registry's role does not change: it records facts and holds monitors, never
 links. Lash never kills, revives, or supervises anything. OS resources remain
@@ -118,14 +117,15 @@ work the only sound policy is to never start the replacement.
   conformance suite, and the model-visible `processes.list` status vocabulary.
   That ripple is the migration checklist working as designed.
 - The recovery sweep becomes disposition-driven end to end: Rerunnable rows
-  recover exactly as today; OwnerBound started rows with provably dead holders
-  are terminalized as Abandoned; ExternallyOwned rows are never claimed. The
+  recover exactly as today; OwnerBound started rows remain non-terminal unless
+  owner drain or a lapsed-lease Abandon Request authorizes Abandoned;
+  ExternallyOwned rows are never claimed. The
   fabricated-success path for External inputs is deleted.
 - `ObservedProcess` exposes lease holder identity, expiry, and the declared
   disposition. A pending Abandon Request is visible to observers. Stuck
   detection is a host-built read-side classification, not a lash daemon.
 - Conformance gains cases pinning: sweep obeys disposition, Abandoned requires
-  death evidence or a lapsed-lease reconciled request, a revenant's
+  owner drain or a lapsed-lease reconciled request, a revenant's
   lease-fenced writes are rejected after abandonment, and owner drain
   terminalizes inline.
 - Hosts that drain gracefully see their OwnerBound work reach Abandoned at

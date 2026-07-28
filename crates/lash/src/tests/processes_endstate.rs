@@ -1051,25 +1051,12 @@ async fn inline_process_await_sink_and_prune_end_to_end() -> Result<()> {
 // those verdicts, and a foreign worker's later sweep never resurrecting a
 // terminalized row.
 
-/// A local-process lease owner with a stable incarnation, mirroring the
-/// `process_worker::recovery_tests` fabrication: same host/boot as the sweep
-/// claimant, so `is_definitely_dead_for_claimant` keys purely off the recorded
-/// `process_start` vs. this live process's actual start.
 fn recovery_local_owner(
     owner_id: &str,
-    host_id: &str,
-    process_start: &str,
+    _host_id: &str,
+    _process_start: &str,
 ) -> lash_core::LeaseOwnerIdentity {
-    lash_core::LeaseOwnerIdentity {
-        owner_id: owner_id.to_string(),
-        incarnation_id: format!("{owner_id}:incarnation"),
-        liveness: lash_core::LeaseOwnerLiveness::local_process_for_test(
-            host_id,
-            "boot-a",
-            std::process::id(),
-            process_start,
-        ),
-    }
+    lash_core::LeaseOwnerIdentity::opaque(owner_id, format!("{owner_id}:incarnation"))
 }
 
 /// A bare recovery worker over `registry` with a known lease owner. It runs no
@@ -1214,7 +1201,7 @@ async fn owner_bound_graceful_drain_resolves_awaiter_and_prunes_end_to_end() -> 
 }
 
 /// Silent-owner classification + abandon-request reconciliation end to end (ADR
-/// 0019): a started OwnerBound row whose holder is expired-but-not-provably-dead
+/// 0019): a started OwnerBound row whose holder lease expired
 /// (a different host) survives a sweep non-terminal; the facade read exposes the
 /// lease facts so a host can classify staleness; an operator's `request_abandon`
 /// is visible read-side while pending; and once the stale lease lapses the next
@@ -1237,7 +1224,7 @@ async fn silent_owner_stays_running_then_abandon_request_reconciles_end_to_end()
     )?;
 
     // The sweep runs on host-a; the started owner is on host-b, so it is never
-    // provably dead for this claimant — a silent, foreign, expired holder.
+    // available for a claimant — a silent, foreign, expired holder.
     let sweep_owner = recovery_local_owner("recovery-host", "host-a", "claimant-start");
     let worker = recovery_process_worker(Arc::clone(&registry), sweep_owner);
     let silent_owner = recovery_local_owner("silent-owner", "host-b", "silent-start");
@@ -1263,7 +1250,7 @@ async fn silent_owner_stays_running_then_abandon_request_reconciles_end_to_end()
         .acquired()
         .expect("silent holder claims its lease");
 
-    // A sweep leaves the silent (not-provably-dead) holder's row non-terminal:
+    // A sweep leaves the silent holder's row non-terminal:
     // elapsed time / silence alone never terminalizes.
     worker.drive_pending_processes().await?;
     let observed = core
@@ -1274,7 +1261,7 @@ async fn silent_owner_stays_running_then_abandon_request_reconciles_end_to_end()
     assert_eq!(
         observed.lifecycle,
         lash_core::ProcessLifecycleStatus::Running,
-        "a silent, not-provably-dead holder is left non-terminal by the sweep"
+        "a silent holder is left non-terminal by the sweep"
     );
     // The read exposes the lease facts a host classifies staleness from.
     assert_eq!(

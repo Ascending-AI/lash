@@ -3,67 +3,64 @@ use super::*;
 impl RuntimeScenarioContext {
     pub(super) async fn lease_phase(&mut self, phase: RuntimeLeasePhase) {
         match phase {
-            RuntimeLeasePhase::ReclaimDeadHolder {
-                assert_stale_observed_holder_busy,
-            } => {
-                self.reclaim_dead_holder(assert_stale_observed_holder_busy)
-                    .await
-            }
+            RuntimeLeasePhase::ExpireStaleHolder {
+                assert_successor_busy,
+            } => self.expire_stale_holder(assert_successor_busy).await,
         }
     }
 
-    async fn reclaim_dead_holder(&mut self, assert_stale_observed_holder_busy: bool) {
+    async fn expire_stale_holder(&mut self, assert_successor_busy: bool) {
         if self.lease.is_some() {
             panic!(
-                "{} dead-holder reclaim must run before any other session lease claim",
+                "{} stale-holder expiry must run before any other session lease claim",
                 self.name
             );
         }
-        let dead_owner = dead_local_lease_owner("runtime-scenario-dead-holder");
+        let stale_owner = lease_owner("runtime-scenario-stale-holder");
         let holder = self
             .store()
-            .try_claim_session_execution_lease(self.session_id, &dead_owner, 60_000)
+            .try_claim_session_execution_lease(self.session_id, &stale_owner, 50)
             .await
-            .expect("claim dead-holder session execution lease")
+            .expect("claim stale-holder session execution lease")
             .acquired()
-            .expect("dead-holder session execution lease");
+            .expect("stale-holder session execution lease");
         let claimant = local_lease_owner(self.host_behavior.lease_owner_id, "claimant-start");
         let busy = self
             .store()
             .try_claim_session_execution_lease(self.session_id, &claimant, 60_000)
             .await
-            .expect("claimant observes busy dead-holder lease");
+            .expect("claimant observes busy stale-holder lease");
         assert!(
             matches!(busy, SessionExecutionLeaseClaimOutcome::Busy { .. }),
-            "{} expected the dead-holder lease to be observed as busy before reclaim",
+            "{} expected the stale-holder lease to remain busy before TTL",
             self.name
         );
+        tokio::time::sleep(std::time::Duration::from_millis(75)).await;
         let reclaimed = self
             .store()
-            .reclaim_session_execution_lease(self.session_id, &claimant, &holder.fence(), 60_000)
+            .try_claim_session_execution_lease(self.session_id, &claimant, 60_000)
             .await
-            .expect("reclaim dead-holder session execution lease")
+            .expect("claim session execution lease after stale-holder TTL")
             .acquired()
-            .expect("dead-holder session execution lease should be reclaimable");
+            .expect("stale-holder session execution lease should expire by TTL");
         assert!(
             reclaimed.fencing_token > holder.fencing_token,
-            "{} reclaimed session lease should advance the fencing token",
+            "{} TTL successor session lease should advance the fencing token",
             self.name
         );
-        if assert_stale_observed_holder_busy {
+        if assert_successor_busy {
             let stale = self
                 .store()
-                .reclaim_session_execution_lease(
+                .try_claim_session_execution_lease(
                     self.session_id,
                     &local_lease_owner("runtime-scenario-late-claimant", "late-claimant-start"),
-                    &holder.fence(),
                     60_000,
                 )
                 .await
-                .expect("stale observed-holder reclaim");
+                .expect("late claimant observes successor");
             assert!(
                 matches!(stale, SessionExecutionLeaseClaimOutcome::Busy { .. }),
-                "{} stale observed-holder reclaim should not clear the newer lease",
+                "{} late claimant should not clear the newer lease",
                 self.name
             );
         }

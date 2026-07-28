@@ -46,19 +46,13 @@ fn configure_lease_timings(
 
 async fn open_with_stable_owner(core: &LashCore, chat_id: &str) -> lash::Result<LashSession> {
     // docs:start:worker-identity
-    // A stable owner id per replica plus a per-boot incarnation. `local_process`
-    // attaches this host's kernel boot id and pid, so a same-host peer can prove
-    // a crashed holder dead and reclaim its lease before the TTL. On a non-Linux
-    // host, or across a machine reboot (the boot id changes), it degrades to
-    // opaque, TTL-only reclaim.
-    let owner = LeaseOwnerIdentity::local_process(
+    // A stable owner id per replica plus a per-boot incarnation. A crashed
+    // holder remains busy until the lease TTL expires.
+    let owner = LeaseOwnerIdentity::opaque(
         std::env::var("WORKER_ID").unwrap_or_else(|_| "worker-1".to_string()),
         std::env::var("AGENT_SERVICE_INCARNATION").unwrap_or_else(|_| boot_incarnation()),
-        std::env::var("HOSTNAME").unwrap_or_else(|_| "host-1".to_string()),
     );
 
-    // Cross-host / opaque holders (the common distributed case) get TTL-only
-    // reclaim; build them with `LeaseOwnerIdentity::opaque(owner_id, incarnation)`.
     let session = core
         .session(chat_id)
         .session_execution_owner(owner)

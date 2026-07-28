@@ -41,25 +41,6 @@ impl SessionExecutionLeaseGuard {
             .await?
         {
             SessionExecutionLeaseClaimOutcome::Acquired(lease) => lease,
-            SessionExecutionLeaseClaimOutcome::Busy { holder }
-                if holder.owner.is_definitely_dead_for_claimant(owner) =>
-            {
-                match store
-                    .reclaim_session_execution_lease(
-                        session_id,
-                        owner,
-                        &holder.fence(),
-                        timings.ttl_ms(),
-                    )
-                    .await?
-                {
-                    SessionExecutionLeaseClaimOutcome::Acquired(lease) => lease,
-                    SessionExecutionLeaseClaimOutcome::Busy { holder } => {
-                        trace_busy(session_id, owner, &holder);
-                        return Ok(None);
-                    }
-                }
-            }
             SessionExecutionLeaseClaimOutcome::Busy { holder } => {
                 trace_busy(session_id, owner, &holder);
                 return Ok(None);

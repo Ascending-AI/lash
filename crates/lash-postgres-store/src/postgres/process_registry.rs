@@ -1075,7 +1075,7 @@ impl ProcessRegistry for PostgresProcessRegistry {
         &self,
         process_id: &str,
         owner: &LeaseOwnerIdentity,
-        observed_holder: &ProcessLease,
+        _observed_holder: &ProcessLease,
         lease_ttl_ms: u64,
     ) -> Result<lash_core::ProcessLeaseClaimOutcome, PluginError> {
         let mut tx = self.pool.begin().await.map_err(plugin_sqlx_error)?;
@@ -1115,80 +1115,6 @@ impl ProcessRegistry for PostgresProcessRegistry {
             .await?;
             tx.commit().await.map_err(plugin_sqlx_error)?;
             return Ok(lash_core::ProcessLeaseClaimOutcome::Acquired(lease));
-        }
-        // Fenced CAS on the observed holder: identity, token, and fencing token
-        // must all still match, and the holder must be definitely dead for this
-        // claimant.
-        if observed_holder.process_id == process_id
-            && current.owner.same_incarnation(&observed_holder.owner)
-            && current.lease_token == observed_holder.lease_token
-            && current.fencing_token == observed_holder.fencing_token
-            && current.owner.is_definitely_dead_for_claimant(owner)
-        {
-            let fencing_token = current.fencing_token.saturating_add(1);
-            let lease_token = format!(
-                "{:x}",
-                Sha256::digest(
-                    format!(
-                        "{process_id}:{}:{}:{now}:{fencing_token}",
-                        owner.owner_id, owner.incarnation_id
-                    )
-                    .as_bytes()
-                )
-            );
-            let expires_at = now.saturating_add(lease_ttl_ms);
-            let changed = sqlx::query(
-                "UPDATE lash_process_leases
-                 SET lease_owner_id = $1,
-                     lease_owner_incarnation_id = $2,
-                     lease_owner_liveness_json = $3,
-                     lease_token = $4,
-                     lease_fencing_token = $5,
-                     lease_claimed_at_ms = $6,
-                     lease_expires_at_ms = $7
-                 WHERE process_id = $8
-                   AND lease_owner_id = $9
-                   AND lease_owner_incarnation_id = $10
-                   AND lease_token = $11
-                   AND lease_fencing_token = $12",
-            )
-            .bind(&owner.owner_id)
-            .bind(&owner.incarnation_id)
-            .bind(encode_process_lease_liveness(&owner.liveness)?)
-            .bind(&lease_token)
-            .bind(fencing_token as i64)
-            .bind(now as i64)
-            .bind(expires_at as i64)
-            .bind(process_id)
-            .bind(&observed_holder.owner.owner_id)
-            .bind(&observed_holder.owner.incarnation_id)
-            .bind(&observed_holder.lease_token)
-            .bind(observed_holder.fencing_token as i64)
-            .execute(&mut *tx)
-            .await
-            .map_err(plugin_sqlx_error)?
-            .rows_affected();
-            if changed == 1 {
-                let lease = ProcessLease {
-                    schema_version: PROCESS_LEASE_SCHEMA_VERSION,
-                    process_id: process_id.to_string(),
-                    owner: owner.clone(),
-                    lease_token,
-                    fencing_token,
-                    claimed_at_epoch_ms: now,
-                    expires_at_epoch_ms: expires_at,
-                };
-                tx.commit().await.map_err(plugin_sqlx_error)?;
-                return Ok(lash_core::ProcessLeaseClaimOutcome::Acquired(lease));
-            }
-            // Lost the CAS race: re-read and report the winner.
-            if let Some(current) = load_process_lease_tx(&mut tx, process_id).await?
-                && current.expires_at_epoch_ms > now
-            {
-                tx.commit().await.map_err(plugin_sqlx_error)?;
-                return Ok(lash_core::ProcessLeaseClaimOutcome::Busy { holder: current });
-            }
-            return Err(process_lease_expired(process_id));
         }
         tx.commit().await.map_err(plugin_sqlx_error)?;
         Ok(lash_core::ProcessLeaseClaimOutcome::Busy { holder: current })

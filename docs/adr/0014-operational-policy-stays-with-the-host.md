@@ -41,8 +41,8 @@ trace buffers) lives inside lash. The capability set:
   out the claim TTL, and `revoke_durable_waits` resolves a session's
   outstanding Durable Waits as `Cancelled` without deleting the session.
 - **Failover parity**: process leases carry `LeaseOwnerIdentity` and support
-  fenced, liveness-gated reclaim exactly like session execution leases, so
-  provably-dead co-located holders are recoverable before TTL on every lane.
+  the same fenced, TTL-gated acquisition as session execution leases. Neither
+  lane infers holder liveness from the local process table.
 
 ## Why
 
@@ -50,8 +50,8 @@ A capability audit showed the machinery (fencing, per-turn leases, cancellation,
 observation cursors) was first-class while the host-facing lever layer was not:
 TTLs were compile-time `pub(crate)` constants, the park/resume quiesce primitive
 existed only inside `lash-core`, `close()` silently did less than its name, and
-sub-TTL takeover was impossible for the opaque identities every distributed
-deployment uses. The tempting fix — a `LashCore::shutdown()` drain loop — would
+TTL-gated takeover is the only portable rule for the opaque identities every
+distributed deployment uses. The tempting fix — a `LashCore::shutdown()` drain loop — would
 have moved host policy into the runtime and set the precedent for `health()`,
 `readiness()`, and the rest of framework-hood. Lash's thesis is the opposite:
 the app owns the outer boundaries; lash owns the turn. Lash owns the

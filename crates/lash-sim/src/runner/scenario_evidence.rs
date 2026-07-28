@@ -479,7 +479,7 @@ fn operational_cases_for_semantic(semantic_oracle: &str) -> &'static [&'static s
         "runtime.queued_work_keeps_pending_input" | "runtime.queued_turn_input_completion" => {
             &["queueing-inputs", "active-turn-input-queueing"]
         }
-        "runtime.advisory_lease_head_cas" | "runtime.dead_lease_reclaim_rejects_stale" => {
+        "runtime.advisory_lease_head_cas" | "runtime.stale_lease_ttl" => {
             &["lease-fencing", "worker-failover", "stale-completion"]
         }
         "standard.empty_provider_response_error" | "standard.provider_error_without_checkpoint" => {
@@ -541,9 +541,7 @@ pub(super) fn scenario_generated_shape(
 fn scenario_transition_kind(contract: &ScenarioContractSpec) -> &'static str {
     match contract.semantic_oracle {
         "runtime.advisory_lease_head_cas" => "runtime.advisory-lease-head-cas-transition",
-        "runtime.dead_lease_reclaim_rejects_stale" => {
-            "runtime.dead-lease-reclaim-stale-completion-transition"
-        }
+        "runtime.stale_lease_ttl" => "runtime.stale-lease-ttl-stale-completion-transition",
         "runtime.checkpoint_redrive_cancel" => "runtime.checkpoint-redrive-cancellation-transition",
         "runtime.queued_work_keeps_pending_input" => {
             "runtime.live-turn-keeps-queued-input-hidden-transition"
@@ -970,7 +968,7 @@ fn select_scenario_contract_fact_trace(
 
 fn semantic_scenario_evidence(semantic_oracle: &str) -> Vec<&'static str> {
     match semantic_oracle {
-        "runtime.advisory_lease_head_cas" | "runtime.dead_lease_reclaim_rejects_stale" => {
+        "runtime.advisory_lease_head_cas" | "runtime.stale_lease_ttl" => {
             vec!["worker_stale_completion"]
         }
         "runtime.checkpoint_redrive_cancel" => vec!["queued_ingress", "cancellation"],

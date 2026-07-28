@@ -1069,10 +1069,9 @@ fn workbench_turn_session_execution_owner(
     turn_id: &str,
 ) -> lash::persistence::LeaseOwnerIdentity {
     let owner_id = format!("{workflow_name}/{turn_id}/run");
-    lash::persistence::LeaseOwnerIdentity::local_process(
+    lash::persistence::LeaseOwnerIdentity::opaque(
         owner_id.clone(),
         format!("{owner_id}/{}", process_incarnation_id()),
-        local_host_id(),
     )
 }
 
@@ -1081,27 +1080,6 @@ fn process_incarnation_id() -> &'static str {
     PROCESS_INCARNATION
         .get_or_init(|| uuid::Uuid::new_v4().to_string())
         .as_str()
-}
-
-/// Select a host id that must be unique to this process's PID namespace among
-/// all workbench instances sharing the session store. Container deployments
-/// should set `AGENT_WORKBENCH_LEASE_HOST_ID` to a pod/container identity when
-/// `/etc/machine-id` may be image-baked; hostname is the next fallback when no
-/// machine id is present.
-fn local_host_id() -> String {
-    std::env::var("AGENT_WORKBENCH_LEASE_HOST_ID")
-        .ok()
-        .filter(|value| !value.trim().is_empty())
-        .or_else(|| read_nonempty("/etc/machine-id"))
-        .or_else(|| read_nonempty("/etc/hostname"))
-        .unwrap_or_else(|| "agent-workbench-local-host".to_string())
-}
-
-fn read_nonempty(path: &str) -> Option<String> {
-    std::fs::read_to_string(path)
-        .ok()
-        .map(|value| value.trim().to_string())
-        .filter(|value| !value.is_empty())
 }
 
 fn panic_payload_message(payload: Box<dyn std::any::Any + Send>) -> String {

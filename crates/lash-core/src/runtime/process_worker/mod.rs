@@ -81,13 +81,8 @@ pub struct DurableProcessWorkerConfig {
     /// Each recovery attempt claims with a unique `(owner_id, incarnation_id)`
     /// derived from this identity — a live lease held by an earlier attempt
     /// must fence a later sweep pass rather than be re-entered as the same
-    /// incarnation — while the liveness metadata is inherited as-is. Defaults
-    /// to a fresh opaque identity per config. Hosts that run one worker per OS
-    /// process should wire a
-    /// [`LeaseOwnerIdentity::local_process`](crate::LeaseOwnerIdentity::local_process)
-    /// identity so peers on the same host can prove a crashed worker dead and
-    /// reclaim its process leases before the TTL — mirroring the session
-    /// execution lane's runtime lease owner.
+    /// incarnation. Defaults to a fresh identity per config; recovery waits for
+    /// an earlier owner's lease TTL before taking over.
     pub lease_owner: crate::LeaseOwnerIdentity,
 }
 
@@ -562,12 +557,9 @@ impl DurableProcessWorker {
     ///
     /// 1. lists every non-terminal process ([`ProcessRegistry::list_non_terminal`]);
     /// 2. claims the durable single-owner [`ProcessLease`] over each — a process
-    ///    already leased live by *another* owner is skipped (it is being run by
-    ///    that owner right now) unless persisted liveness metadata proves that
-    ///    owner definitely dead, in which case the lease is reclaimed with the
-    ///    fenced CAS discipline of
-    ///    [`ProcessRegistry::reclaim_process_lease`]; either way a non-terminal
-    ///    process is re-run by exactly one owner (lease fencing);
+    ///    already leased live by *another* owner is skipped until its TTL
+    ///    expires; a non-terminal process is re-run by exactly one owner (lease
+    ///    fencing);
     /// 3. queues the full worklist in a worker-scoped scheduler whose shared
     ///    execution budget spans repeated host-driven passes, then runs claimed
     ///    processes on this worker's wired controller while renewing
@@ -853,14 +845,12 @@ impl DurableProcessWorker {
     /// Derived from [`DurableProcessWorkerConfig::lease_owner`]: a fresh
     /// `(owner_id, incarnation_id)` per attempt keeps sweeps idempotent (a
     /// still-running attempt's live lease fences later passes instead of being
-    /// re-entered as "own lease"), while the configured liveness metadata is
-    /// inherited so peers can prove a crashed worker dead and reclaim.
+    /// re-entered as "own lease").
     fn recovery_lease_owner(&self) -> crate::LeaseOwnerIdentity {
         let attempt = uuid::Uuid::new_v4();
         crate::LeaseOwnerIdentity {
             owner_id: format!("{}:recovery:{attempt}", self.config.lease_owner.owner_id),
             incarnation_id: attempt.to_string(),
-            liveness: self.config.lease_owner.liveness.clone(),
         }
     }
 
@@ -872,11 +862,10 @@ impl DurableProcessWorker {
     /// - **Rerunnable**: exactly today's behavior — claim, (re-)run, complete.
     /// - **OwnerBound, never started**: any worker may run it (first execution is
     ///   not re-execution); the runner records `first_started` before executing.
-    /// - **OwnerBound, started**: never re-run. A provably-dead holder yields
-    ///   `Abandoned{sweep}`; a merely silent/expired holder is left non-terminal
-    ///   unless an Abandon Request is present and the lease has lapsed, which
-    ///   yields `Abandoned{reconciled_request}`. Elapsed time alone never
-    ///   terminalizes.
+    /// - **OwnerBound, started**: never re-run. A silent or expired holder is
+    ///   left non-terminal unless an Abandon Request is present and the lease
+    ///   has lapsed, which yields `Abandoned{reconciled_request}`. Elapsed time
+    ///   alone never terminalizes.
     ///
     /// Every Abandoned write goes through `complete_process_with_lease`, which
     /// atomically validates this sweep's fence, appends the terminal, and clears
@@ -895,11 +884,9 @@ impl DurableProcessWorker {
 
         let lease_ttl_ms = self.lease_timings().ttl_ms();
         let owner = self.recovery_lease_owner();
-        // Claim the single-owner lease, distinguishing a fenced reclaim of a
-        // provably-dead holder (death evidence) from acquiring a free/expired
-        // lease (no death evidence). A live, not-provably-dead holder or a claim
-        // error leaves the row to its owner.
-        let Some((lease, dead_holder)) = self
+        // Claim the single-owner lease. A live holder or a claim error leaves
+        // the row to its owner until the lease TTL expires.
+        let Some(lease) = self
             .claim_for_recovery(&process_id, &owner, lease_ttl_ms)
             .await
         else {
@@ -954,15 +941,8 @@ impl DurableProcessWorker {
                     .first_started
                     .as_ref()
                     .map(|started| started.owner.clone());
-                let evidence = if let Some(dead_holder) = dead_holder {
-                    // Holder provably dead ⇒ Abandoned{sweep}.
-                    Some(AbandonEvidence {
-                        writer: AbandonWriter::Sweep,
-                        owner: Some(dead_holder.owner),
-                        epoch_ms: self.now_ms(),
-                    })
-                } else if record.abandon_request.is_some() {
-                    // Silent/expired holder without death evidence, but an
+                let evidence = if record.abandon_request.is_some() {
+                    // Silent/expired holder, with an
                     // operator authorized abandonment and the lease has lapsed
                     // (we acquired a free/expired lease) ⇒ Abandoned{reconciled}.
                     Some(AbandonEvidence {
@@ -971,8 +951,8 @@ impl DurableProcessWorker {
                         epoch_ms: self.now_ms(),
                     })
                 } else {
-                    // No death evidence and no authorization: elapsed time alone
-                    // never terminalizes. Leave the row non-terminal.
+                    // No authorization: elapsed time alone never terminalizes.
+                    // Leave the row non-terminal.
                     None
                 };
                 match evidence {
@@ -1003,38 +983,22 @@ impl DurableProcessWorker {
         self.config.runtime_host.clock.timestamp_ms()
     }
 
-    /// Claim the recovery lease. Returns the acquired lease plus, when the claim
-    /// fenced out a provably-dead holder, that holder as death evidence. Returns
-    /// `None` when the row is held by a live (not provably-dead) owner or the
-    /// claim fails — either way this pass leaves the row to its owner.
+    /// Claim the recovery lease. Returns `None` while another owner still holds
+    /// the row or when the claim fails; either way this pass leaves the row to
+    /// its owner until the lease TTL expires.
     async fn claim_for_recovery(
         &self,
         process_id: &str,
         owner: &crate::LeaseOwnerIdentity,
         lease_ttl_ms: u64,
-    ) -> Option<(ProcessLease, Option<ProcessLease>)> {
+    ) -> Option<ProcessLease> {
         match self
             .config
             .process_registry
             .claim_process_lease(process_id, owner, lease_ttl_ms)
             .await
         {
-            Ok(crate::ProcessLeaseClaimOutcome::Acquired(lease)) => Some((lease, None)),
-            Ok(crate::ProcessLeaseClaimOutcome::Busy { holder })
-                if holder.owner.is_definitely_dead_for_claimant(owner) =>
-            {
-                match self
-                    .config
-                    .process_registry
-                    .reclaim_process_lease(process_id, owner, &holder, lease_ttl_ms)
-                    .await
-                {
-                    Ok(crate::ProcessLeaseClaimOutcome::Acquired(lease)) => {
-                        Some((lease, Some(holder)))
-                    }
-                    Ok(crate::ProcessLeaseClaimOutcome::Busy { .. }) | Err(_) => None,
-                }
-            }
+            Ok(crate::ProcessLeaseClaimOutcome::Acquired(lease)) => Some(lease),
             Ok(crate::ProcessLeaseClaimOutcome::Busy { .. }) | Err(_) => None,
         }
     }

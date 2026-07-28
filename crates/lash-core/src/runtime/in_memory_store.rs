@@ -1420,55 +1420,6 @@ impl crate::store::SessionExecutionLeaseStore for InMemorySessionStore {
         ))
     }
 
-    async fn reclaim_session_execution_lease(
-        &self,
-        session_id: &str,
-        owner: &crate::LeaseOwnerIdentity,
-        observed_holder: &crate::SessionExecutionLeaseFence,
-        lease_ttl_ms: u64,
-    ) -> Result<crate::SessionExecutionLeaseClaimOutcome, crate::store::StoreError> {
-        let _transaction = self
-            .write_transaction
-            .lock()
-            .expect("lock in-memory write transaction");
-        self.ensure_session_not_deleted(session_id)?;
-        let now = self.clock.timestamp_ms();
-        let mut leases = self
-            .session_execution_leases
-            .lock()
-            .expect("lock session execution leases");
-        let current = leases.entry(session_id.to_string()).or_default();
-        if !current.is_live(now) {
-            return Ok(crate::SessionExecutionLeaseClaimOutcome::Acquired(
-                Self::acquire_session_execution_lease_in_memory(
-                    session_id,
-                    owner,
-                    current,
-                    now,
-                    lease_ttl_ms,
-                ),
-            ));
-        }
-        let holder = Self::in_memory_session_execution_lease(session_id, current);
-        if observed_holder.session_id == session_id
-            && holder.owner.same_incarnation(&observed_holder.owner)
-            && holder.lease_token == observed_holder.lease_token
-            && holder.fencing_token == observed_holder.fencing_token
-            && holder.owner.is_definitely_dead_for_claimant(owner)
-        {
-            return Ok(crate::SessionExecutionLeaseClaimOutcome::Acquired(
-                Self::acquire_session_execution_lease_in_memory(
-                    session_id,
-                    owner,
-                    current,
-                    now,
-                    lease_ttl_ms,
-                ),
-            ));
-        }
-        Ok(crate::SessionExecutionLeaseClaimOutcome::Busy { holder })
-    }
-
     async fn renew_session_execution_lease(
         &self,
         fence: &crate::SessionExecutionLeaseFence,

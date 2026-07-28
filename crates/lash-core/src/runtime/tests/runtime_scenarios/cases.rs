@@ -61,10 +61,10 @@ const SESSION_LEASE_RELEASE_FAULT: RuntimeScenarioCoverage = runtime_scenario_co
     "advisory session lease release",
     "A released advisory lease permits a current-head commit while the head CAS rejects stale state."
 );
-const DEAD_LEASE_RECLAIM: RuntimeScenarioCoverage = runtime_scenario_coverage!(
-    runtime_scenario_reclaims_dead_session_lease_and_rejects_stale_observation,
-    "dead session lease reclaim",
-    "Dead local holder lease reclaim advances the fence and stale observed-holder reclaim stays busy."
+const STALE_LEASE_EXPIRY: RuntimeScenarioCoverage = runtime_scenario_coverage!(
+    runtime_scenario_waits_for_stale_session_lease_ttl,
+    "stale session lease expiry",
+    "An unexpired stale holder stays busy; TTL expiry advances the fence and the successor stays protected."
 );
 
 pub(crate) const RUNTIME_SCENARIO_COVERAGE: &[RuntimeScenarioCoverage] = &[
@@ -76,7 +76,7 @@ pub(crate) const RUNTIME_SCENARIO_COVERAGE: &[RuntimeScenarioCoverage] = &[
     OBSERVATION_REPLAY,
     CHECKPOINT_REDRIVE_CANCEL,
     SESSION_LEASE_RELEASE_FAULT,
-    DEAD_LEASE_RECLAIM,
+    STALE_LEASE_EXPIRY,
 ];
 
 #[test]
@@ -116,7 +116,7 @@ enum RuntimeStateMachinePhaseSymbol {
     TurnWorkClaim,
     NextTurnInputClaim,
     MisalignedNextTurnInputClaim,
-    DeadLeaseReclaim,
+    StaleLeaseExpiry,
     StaleQueueCompletionFault,
     ReleasedLeaseCommitFault,
     Commit,
@@ -135,7 +135,7 @@ impl RuntimeStateMachinePhaseSymbol {
             Self::MisalignedNextTurnInputClaim => RuntimeNextTurnInputClaimPhase::new()
                 .expect_inputs(vec!["one"], Vec::new())
                 .into(),
-            Self::DeadLeaseReclaim => RuntimeLeasePhase::reclaim_dead_holder().into(),
+            Self::StaleLeaseExpiry => RuntimeLeasePhase::expire_stale_holder().into(),
             Self::StaleQueueCompletionFault => RuntimeFaultPhase::StaleQueueCompletion.into(),
             Self::ReleasedLeaseCommitFault => {
                 RuntimeFaultPhase::CommitAfterAdvisoryLeaseRelease.into()
@@ -171,7 +171,7 @@ fn runtime_state_machine_phase_symbol_strategy()
         Just(RuntimeStateMachinePhaseSymbol::TurnWorkClaim),
         Just(RuntimeStateMachinePhaseSymbol::NextTurnInputClaim),
         Just(RuntimeStateMachinePhaseSymbol::MisalignedNextTurnInputClaim),
-        Just(RuntimeStateMachinePhaseSymbol::DeadLeaseReclaim),
+        Just(RuntimeStateMachinePhaseSymbol::StaleLeaseExpiry),
         Just(RuntimeStateMachinePhaseSymbol::StaleQueueCompletionFault),
         Just(RuntimeStateMachinePhaseSymbol::ReleasedLeaseCommitFault),
         Just(RuntimeStateMachinePhaseSymbol::Commit),
@@ -189,10 +189,10 @@ fn runtime_state_machine_phase_order_oracle(symbols: &[RuntimeStateMachinePhaseS
             saw_live_lease_claim = true;
         }
         match symbol {
-            RuntimeStateMachinePhaseSymbol::DeadLeaseReclaim if saw_live_lease_claim => {
+            RuntimeStateMachinePhaseSymbol::StaleLeaseExpiry if saw_live_lease_claim => {
                 return false;
             }
-            RuntimeStateMachinePhaseSymbol::DeadLeaseReclaim => {
+            RuntimeStateMachinePhaseSymbol::StaleLeaseExpiry => {
                 saw_live_lease_claim = true;
             }
             RuntimeStateMachinePhaseSymbol::TurnWorkClaim => {
@@ -469,13 +469,13 @@ async fn runtime_scenario_commits_after_advisory_session_lease_release() {
 }
 
 #[tokio::test]
-async fn runtime_scenario_reclaims_dead_session_lease_and_rejects_stale_observation() {
-    RuntimeScenario::new(DEAD_LEASE_RECLAIM.display_name)
-        .session_id("runtime-scenario-dead-lease-reclaim")
+async fn runtime_scenario_waits_for_stale_session_lease_ttl() {
+    RuntimeScenario::new(STALE_LEASE_EXPIRY.display_name)
+        .session_id("runtime-scenario-stale-lease-expiry")
         .host_behavior(RuntimeHostBehavior {
             lease_owner_id: "runtime-scenario-reclaim-owner",
         })
-        .phase(RuntimeLeasePhase::reclaim_dead_holder())
+        .phase(RuntimeLeasePhase::expire_stale_holder())
         .run()
         .await;
 }

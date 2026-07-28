@@ -145,9 +145,9 @@ It:
 - on startup / deploy / lease expiry, **sweeps the registry for non-terminal,
   unleased processes and recovers each by its declared disposition**
   (`docs/adr/0019-process-recovery-obeys-declared-disposition.md`): it re-runs a
-  `Rerunnable` row, terminalizes a provably-dead started `OwnerBound` row as
-  `Abandoned` instead of re-running it, and never claims an `ExternallyOwned`
-  row. It is no longer a re-run-everything loop.
+  `Rerunnable` row, leaves a started `OwnerBound` row non-terminal unless an
+  Abandon Request authorizes terminalization, and never claims an
+  `ExternallyOwned` row. It is no longer a re-run-everything loop.
 
 **3. Host supplies the backend; lash owns the durability logic** — exactly as
 with turns. The host wires a durable registry (`SqliteProcessRegistry` for
@@ -211,9 +211,9 @@ A generalization of code that already existed for turns — not a new subsystem:
   re-execution — is run on the worker's wired controller while renewing the lease
   across the execution, then atomically validates the current fence, writes its
   terminal outcome, and releases the lease via
-  `complete_process_with_lease`. A started `OwnerBound` row whose holder is provably dead is
-  terminalized `Abandoned{Sweep}` rather than re-run; a merely silent one is left
-  non-terminal. An `ExternallyOwned` row is never claimed. Idempotent by
+  `complete_process_with_lease`. A started `OwnerBound` row is left
+  non-terminal unless a lapsed-lease Abandon Request authorizes terminalization.
+  An `ExternallyOwned` row is never claimed. Idempotent by
   `process_id`: terminal processes are never on the worklist, and a process that
   became terminal between the list and the claim is detected and skipped.
   Engine infrastructure failures do not become producer `Failed` terminals:
@@ -307,7 +307,7 @@ wire mirror bumps `REMOTE_PROTOCOL_VERSION` 6→7.
 arm. It records that the owner stopped executing without recording an outcome: the
 true result is unknowable and no cleanup is assumed to have run. The terminal
 carries an `AbandonEvidence` payload — the `AbandonWriter` that wrote it, the
-dead-or-lapsed owner identity it was established against, and the timestamp — and
+owner identity it was established against, and the timestamp — and
 it is immutable: an owner that reappears is fenced by its stale lease token, never
 healed back to running.
 
@@ -315,15 +315,13 @@ There is exactly one legitimate writer per path:
 
 - **`OwnerDrain`** — the owner abandons its own started `OwnerBound` work inline at
   graceful drain, under its own live lease (`DurableProcessWorker::drain_owner_bound_work`).
-- **`Sweep`** — the next host-triggered recovery sweep writes it for a started
-  `OwnerBound` row whose holder is provably dead (`is_definitely_dead_for_claimant`).
 - **`ReconciledRequest`** — the sweep reconciles a durable **Abandon Request** into
   `Abandoned` once the row's lease has lapsed.
 
 **Elapsed time alone never produces a terminal state.** Lease expiry without death
-evidence is exposed read-side, not terminalized: a started `OwnerBound` holder that
-is silent but not provably dead stays non-terminal until real death evidence
-appears or an operator authorizes abandonment. `Abandoned` rides `await_terminal`
+evidence is exposed read-side, not terminalized: a started `OwnerBound` holder
+stays non-terminal until its owner drains it or an operator authorizes abandonment.
+`Abandoned` rides `await_terminal`
 and reconcile like any terminal, and — unchanged by ADR 0017 — it does not ride
 the best-effort event sink.
 
@@ -370,8 +368,8 @@ is thin grant-scoped sugar returning `ObservedProcess`, and the old
 `SessionProcessAdmin::await_all` misnomer — a session-graph refresh, never a wait —
 is renamed `LashSession::refresh_background_graph`. `ProcessDrainReport` lives in
 `lash::durability`; the Restate tier skips `ExternallyOwned` submission at ingress,
-reconciles abandon requests, and completes a re-invoked started `OwnerBound` row as
-`Abandoned{Sweep}` instead of re-running it. The operations runbook renders the full
+reconciles abandon requests, and completes a re-invoked started `OwnerBound`
+row as `Abandoned{Sweep}` instead of re-running it. The operations runbook renders the full
 recovery verdict table and the drain / crash / stuck-detection paths:
 `docs/operations.html`.
 
@@ -482,7 +480,7 @@ terminal are carried as request config / tool-access, not lost.
   `sqlite_process_recovery_reopens_registry_worker_grants_wakes_and_cancel`.
 - `crates/lash-core/src/testing/conformance/` — process-lease single-owner /
   fencing conformance suite (`process_registry.rs`), plus the ADR 0019 cases:
-  sweep obeys disposition, Abandoned requires death evidence or a lapsed-lease
+  sweep obeys disposition, Abandoned requires owner drain or a lapsed-lease
   reconciled request, a revenant's lease-fenced writes are rejected, and owner
   drain terminalizes inline.
 - `docs/adr/0019-process-recovery-obeys-declared-disposition.md` — the ratified
@@ -492,7 +490,7 @@ terminal are carried as request config / tool-access, not lost.
   durable `first_started` fact, and `AbandonRequest`.
 - `crates/lash-core/src/runtime/process/events.rs` —
   `ProcessTerminalState::Abandoned`, `AbandonWriter`
-  (`OwnerDrain | Sweep | ReconciledRequest`), and `AbandonEvidence`.
+  (`OwnerDrain | Sweep | ReconciledRequest | EngineGaveUp`), and `AbandonEvidence`.
 - `crates/lash-core/src/runtime/process/observation.rs` — `ObservedProcess`
   exposing `disposition`, `first_started`, `lease_holder`, `lease_expires_at_ms`,
   and `abandon_request`.

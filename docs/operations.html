@@ -60,31 +60,16 @@
     <div class="section" id="worker-identity">
       <div class="section-header">
         <h2>Worker Identity</h2>
-        <p>By default every opened session gets a fresh owner id and incarnation id, so two workers on the same session resolve at the lease boundary. A host that wants sub-TTL reclaim of a crashed owner sets an explicit identity with <code>SessionBuilder::session_execution_owner</code>.</p>
+        <p>By default every opened session gets a fresh owner id and incarnation id, so two workers on the same session resolve at the lease boundary. A host that needs a stable logical execution lane sets an explicit identity with <code>SessionBuilder::session_execution_owner</code>.</p>
       </div>
-      <p>An identity is a stable <code>owner_id</code> (one per replica, stable across restarts) plus an <code>incarnation_id</code> the process bumps each boot. Reentry requires the same owner id <em>and</em> the same incarnation; a new incarnation must claim or reclaim through the fenced lease path rather than clearing the old owner. What differs between deployments is the liveness metadata that identity carries.</p>
-      <div class="table">
-        <table>
-          <thead><tr><th>Liveness</th><th>Construct with</th><th>What it buys</th></tr></thead>
-          <tbody>
-            <tr><td><code>LocalProcess</code></td><td><code>LeaseOwnerIdentity::local_process(owner_id, incarnation, host_id)</code></td><td>Attaches this host's kernel boot id, pid, and process-start time. A same-host peer can prove a crashed holder <em>definitely dead</em> and reclaim its lease before the TTL. Requires a matching host id and kernel boot id; a machine reboot changes the boot id and falls back to TTL. Reads <code>/proc</code>, so it degrades to opaque off Linux.</td></tr>
-            <tr><td><code>Opaque</code></td><td><code>LeaseOwnerIdentity::opaque(owner_id, incarnation)</code></td><td>No liveness proof. A crashed holder's lease is recovered only when its TTL expires. This is the correct choice for cross-host and distributed holders, where no peer can inspect another's process table.</td></tr>
-          </tbody>
-        </table>
-      </div>
-      <pre data-lang="rust" data-snippet="operations#worker-identity"><code>// A stable owner id per replica plus a per-boot incarnation. `local_process`
-// attaches this host's kernel boot id and pid, so a same-host peer can prove
-// a crashed holder dead and reclaim its lease before the TTL. On a non-Linux
-// host, or across a machine reboot (the boot id changes), it degrades to
-// opaque, TTL-only reclaim.
-let owner = LeaseOwnerIdentity::local_process(
+      <p>An identity is a stable <code>owner_id</code> (one per replica, stable across restarts) plus an <code>incarnation_id</code> the process bumps each boot. Reentry requires the same owner id <em>and</em> the same incarnation; a new incarnation waits until the old lease's TTL expires before it can acquire a new fenced lease. Lease ownership is platform-neutral and never inspects the holder's process table.</p>
+      <pre data-lang="rust" data-snippet="operations#worker-identity"><code>// A stable owner id per replica plus a per-boot incarnation. A crashed
+// holder remains busy until the lease TTL expires.
+let owner = LeaseOwnerIdentity::opaque(
     std::env::var("WORKER_ID").unwrap_or_else(|_| "worker-1".to_string()),
     std::env::var("AGENT_SERVICE_INCARNATION").unwrap_or_else(|_| boot_incarnation()),
-    std::env::var("HOSTNAME").unwrap_or_else(|_| "host-1".to_string()),
 );
 
-// Cross-host / opaque holders (the common distributed case) get TTL-only
-// reclaim; build them with `LeaseOwnerIdentity::opaque(owner_id, incarnation)`.
 let session = core
     .session(chat_id)
     .session_execution_owner(owner)
@@ -208,7 +193,7 @@ Ok(())</code></pre>
         <h2>Background Process Recovery</h2>
         <p>When a host crashes instead of draining, its non-terminal background processes are recovered by the next durable-process-worker sweep any peer drives — on session open, after a start, or on lease expiry. The sweep is not a re-run-everything loop. It obeys each row's declared <strong>Recovery Disposition</strong> (<code>docs/adr/0019-process-recovery-obeys-declared-disposition.md</code>): the required contract, with no default, that a producer stamps at registration — <code>shell.start</code> declares <code>OwnerBound</code>, the lashlang engine and subagent turns declare <code>Rerunnable</code>, and external placeholders declare <code>ExternallyOwned</code>.</p>
       </div>
-      <p>The pivotal distinction the sweep draws is <em>provably dead</em> vs. merely <em>lease-expired</em>. Claiming a row's lease, it separates a fenced reclaim of a holder proven dead (<code>is_definitely_dead_for_claimant</code> — the same-host liveness proof <code>LocalProcess</code> identity carries, described under <a href="#worker-identity">worker identity</a>) from simply acquiring a free or TTL-expired lease with no death evidence. Elapsed time alone never terminalizes anything: a slow-but-alive owner whose lease lapsed is <em>silent, not dead</em>, and the sweep leaves its started work exactly where it is. Only a positive death proof — or an operator's explicit authorization (below) — converts that uncertainty into a terminal fact.</p>
+      <p>The sweep may acquire a free or TTL-expired process lease. Elapsed time alone never terminalizes anything: a started <code>OwnerBound</code> row remains non-terminal even after its holder's lease expires, because lease expiry does not prove whether its external side effects completed. Only the original owner's graceful drain or an operator's explicit authorization converts that uncertainty into a terminal fact.</p>
       <p>The verdict each disposition yields after owner loss:</p>
       <div class="table">
         <table>
@@ -216,13 +201,12 @@ Ok(())</code></pre>
           <tbody>
             <tr><td><code>Rerunnable</code></td><td>Claimed and re-executed under a fresh lease, exactly as before this contract existed. The right policy for journaled, idempotent inputs (engine rows, session-turn rows).</td></tr>
             <tr><td><code>OwnerBound</code>, never started</td><td>Any peer may claim and run it: first execution is not re-execution. The runner records the durable <code>first_started</code> fact under its lease immediately before executing.</td></tr>
-            <tr><td><code>OwnerBound</code>, started, holder provably dead</td><td>Terminalized <code>Abandoned{Sweep}</code>, never re-run. A replacement execution could duplicate non-idempotent side effects, so the only sound recovery is to stop.</td></tr>
-            <tr><td><code>OwnerBound</code>, started, holder silent (lease lapsed, no death evidence)</td><td>Left non-terminal. Lease expiry is not death. The row waits until a death proof appears or an Abandon Request is reconciled — see <a href="#stuck-process">detecting a stuck process</a>.</td></tr>
+            <tr><td><code>OwnerBound</code>, started</td><td>Left non-terminal. Lease expiry is not proof of completion or failure. The row waits until the original owner drains it or an Abandon Request is reconciled — see <a href="#stuck-process">detecting a stuck process</a>.</td></tr>
             <tr><td><code>ExternallyOwned</code></td><td>Never claimed, never executed. Closes only through an external <code>complete_process</code> call or a reconciled Abandon Request. Detached commands (<code>shell.start</code> with <code>detach: true</code>) are born here, already terminal.</td></tr>
           </tbody>
         </table>
       </div>
-      <p>Every <code>Abandoned</code> write — at drain, at the sweep, or from a reconciled request — goes through the sweep's own fenced lease, so the terminal has exactly one legitimate writer and a revenant owner that reappears is rejected by its stale lease token rather than healed back to running. <code>Abandoned</code> is a fourth terminal state peer to <code>Completed | Failed | Cancelled</code>; it rides <code>await_output</code> and reconcile like any terminal, and (per <code>docs/adr/0017-process-observation-is-best-effort-push-over-state-truth.md</code>) it does not ride the best-effort event sink. On a Restate deployment the same rules hold at the engine seam: ingress skips <code>ExternallyOwned</code> submission, the run handler completes a re-invoked started <code>OwnerBound</code> row as <code>Abandoned{Sweep}</code> instead of re-running it, and pending abandon requests are reconciled there too.</p>
+      <p>Every <code>Abandoned</code> write goes through a fenced lease or a validated workflow-key authority, so the terminal has exactly one legitimate writer and a revenant owner that reappears is rejected rather than healed back to running. <code>Abandoned</code> is a fourth terminal state peer to <code>Completed | Failed | Cancelled</code>; it rides <code>await_output</code> and reconcile like any terminal, and (per <code>docs/adr/0017-process-observation-is-best-effort-push-over-state-truth.md</code>) it does not ride the best-effort event sink. On a Restate deployment, ingress skips <code>ExternallyOwned</code> submission, the workflow-key recovery path completes a re-invoked started <code>OwnerBound</code> row as <code>Abandoned{Sweep}</code> rather than re-running it, and pending abandon requests are reconciled after lease expiry.</p>
     </div>
 
     <div class="section" id="stuck-process">
@@ -249,8 +233,8 @@ for p in live {
         // it; a lapsed lease here is just work awaiting a peer.
         (RecoveryDisposition::Rerunnable, _, false) => {}
         (RecoveryDisposition::OwnerBound, false, false) => {}
-        // Started OwnerBound, lease lapsed: silent, not dead. The sweep will
-        // NOT terminalize it without death evidence. This is the stuck case
+        // Started OwnerBound, lease lapsed. The sweep will NOT infer a
+        // terminal. This is the stuck case
         // a host classifies from `lease_holder` + your own timeout budget.
         (RecoveryDisposition::OwnerBound, true, false) => {
             let _ = (&p.lease_holder, p.abandon_request.as_ref());
@@ -267,7 +251,7 @@ for p in live {
         </div>
         <div class="listing__row">
           <div class="listing__label">silent, not dead</div>
-          <div class="listing__body"><p>An expired lease on a started <code>OwnerBound</code> row with no death evidence is the one truly ambiguous state: the work may have succeeded a millisecond before the owner went silent. The sweep refuses to guess, so the row stays non-terminal indefinitely unless a host acts. That is the deliberate cost of never fabricating an outcome.</p></div>
+          <div class="listing__body"><p>An expired lease on a started <code>OwnerBound</code> row is the one truly ambiguous state: the work may have succeeded a millisecond before the owner went silent. The sweep refuses to guess, so the row stays non-terminal indefinitely unless a host acts. That is the deliberate cost of never fabricating an outcome.</p></div>
         </div>
         <div class="listing__row">
           <div class="listing__label">the escape hatch</div>

@@ -24,8 +24,8 @@ use lash_core::store::{
 use lash_core::{
     AbandonRequest, AttachmentId, AttachmentIntent, AttachmentManifest, AttachmentManifestEntry,
     AttachmentOwnerKind, AwaitEventResolver, BlobRef, CanonicalRuntimeEffectEnvelope,
-    DeliveryPolicy, EffectHost, ExecutionScope, GcReport, LeaseOwnerIdentity, LeaseOwnerLiveness,
-    MergeKey, PersistedSegmentHandover, ProcessAwaitOutput, ProcessChangeCursor, ProcessEvent,
+    DeliveryPolicy, EffectHost, ExecutionScope, GcReport, LeaseOwnerIdentity, MergeKey,
+    PersistedSegmentHandover, ProcessAwaitOutput, ProcessChangeCursor, ProcessEvent,
     ProcessEventAppendRequest, ProcessEventAppendResult, ProcessExecutionWriteAuthority,
     ProcessExternalRef, ProcessHandleDescriptor, ProcessHandleGrant, ProcessLease,
     ProcessLeaseCompletion, ProcessLiveReferenceSummary, ProcessPruneReport, ProcessRecord,

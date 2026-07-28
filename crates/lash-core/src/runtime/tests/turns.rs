@@ -3730,6 +3730,67 @@ async fn idle_queued_work_noops_without_claiming_when_session_lane_is_held() {
 }
 
 #[tokio::test]
+async fn session_command_waits_in_durable_queue_until_session_lease_ttl_expires() {
+    let clock = Arc::new(ManualClock::new(1_000));
+    let store_clock: Arc<dyn crate::Clock> = clock.clone();
+    let (mut runtime, store) = standard_runtime_with_transport_and_queue_store_clock(
+        mock_provider(Vec::new()),
+        store_clock,
+    )
+    .await;
+    let command = enqueue_session_command(store.as_ref(), "root", "wait for stale lease").await;
+    let owner = lease_owner("stale-session-command-owner");
+    crate::store::SessionExecutionLeaseStore::try_claim_session_execution_lease(
+        store.as_ref(),
+        "root",
+        &owner,
+        50,
+    )
+    .await
+    .expect("claim stale session execution lease")
+    .acquired()
+    .expect("session execution lease");
+
+    let busy_result = runtime
+        .stream_next_queued_work(TurnOptions::new(
+            CancellationToken::new(),
+            named_turn_scope("root", "command-before-lease-ttl"),
+        ))
+        .await
+        .expect("busy command drain should not error");
+
+    assert!(busy_result.is_none());
+    assert_eq!(
+        crate::store::QueuedWorkStore::list_queued_work(store.as_ref(), "root")
+            .await
+            .expect("list command while lease is live")
+            .iter()
+            .map(|batch| batch.batch_id.as_str())
+            .collect::<Vec<_>>(),
+        vec![command.batch_id.as_str()],
+        "the command must remain durable while another owner holds the live lease"
+    );
+
+    clock.advance_ms(51);
+    let after_ttl = runtime
+        .stream_next_queued_work(TurnOptions::new(
+            CancellationToken::new(),
+            named_turn_scope("root", "command-after-lease-ttl"),
+        ))
+        .await
+        .expect("command drain after TTL should succeed");
+
+    assert!(after_ttl.is_none(), "a command-only drain returns no turn");
+    assert!(
+        crate::store::QueuedWorkStore::list_queued_work(store.as_ref(), "root")
+            .await
+            .expect("list command after TTL drain")
+            .is_empty(),
+        "the durable command should drain after the stale lease expires"
+    );
+}
+
+#[tokio::test]
 async fn session_command_claim_lease_expiry_surfaces_session_execution_lease_lost() {
     let clock = Arc::new(StepExpiryClock::new(1_000));
     let store_clock: Arc<dyn crate::Clock> = clock.clone();

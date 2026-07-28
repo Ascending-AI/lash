@@ -1,30 +1,12 @@
 use std::sync::Arc;
 
 use lash_core::{
-    LeaseOwnerIdentity, LeaseOwnerLiveness, ProcessAwaitOutput, ProcessRegistry,
-    RecoveryDisposition, TestProcessRegistryWriteExt,
+    LeaseOwnerIdentity, ProcessAwaitOutput, ProcessRegistry, RecoveryDisposition,
+    TestProcessRegistryWriteExt,
 };
 use serde_json::{Value, json};
 
 use super::RuntimeBoundaryError;
-
-pub(super) fn local_process_owner(
-    host: &str,
-    boot: &str,
-    owner_id: &str,
-    process_start: &str,
-) -> LeaseOwnerIdentity {
-    LeaseOwnerIdentity {
-        owner_id: owner_id.to_string(),
-        incarnation_id: format!("{owner_id}:incarnation"),
-        liveness: LeaseOwnerLiveness::local_process_for_test(
-            host,
-            boot,
-            std::process::id(),
-            process_start,
-        ),
-    }
-}
 
 pub(super) struct LifecycleSuccessEngine;
 
@@ -136,36 +118,44 @@ pub(super) async fn record_lifecycle_started(
 
 /// Await a swept row's terminal and record its verdict facts. Death and
 /// authorization are observed INDEPENDENTLY of the abandon writer (a real
-/// liveness check and a registry read), so the evidence oracle cross-checks the
-/// writer against ground truth rather than trusting it.
+/// lease and registry reads), so the evidence oracle cross-checks the writer
+/// against ground truth rather than trusting it.
 pub(super) async fn lifecycle_process_fact(
     registry: &Arc<dyn ProcessRegistry>,
     awaiter: &lash_core::ProcessAwaiter,
     id: &str,
     disposition: RecoveryDisposition,
     expected_holder: Option<&LeaseOwnerIdentity>,
-    sweep_owner: &LeaseOwnerIdentity,
+    _sweep_owner: &LeaseOwnerIdentity,
 ) -> Result<Value, RuntimeBoundaryError> {
-    let output = match tokio::time::timeout(
-        std::time::Duration::from_secs(5),
-        awaiter.await_terminal(id),
-    )
-    .await
-    {
-        Ok(result) => result.map_err(|err| {
-            RuntimeBoundaryError::new(format!("await terminal for `{id}` failed: {err}"))
-        })?,
-        Err(_) => {
-            let record = registry.get_process(id).await;
-            let lease = registry.get_process_lease(id).await.map_err(|err| {
-                RuntimeBoundaryError::new(format!(
-                    "read timed-out lifecycle lease for `{id}` failed: {err}"
-                ))
-            })?;
-            return Err(RuntimeBoundaryError::new(format!(
-                "timed out awaiting lifecycle terminal for `{id}`: record={record:?}, lease={lease:?}"
-            )));
-        }
+    let should_remain_non_terminal =
+        disposition == RecoveryDisposition::OwnerBound && expected_holder.is_some();
+    let output = if should_remain_non_terminal {
+        None
+    } else {
+        Some(
+            match tokio::time::timeout(
+                std::time::Duration::from_secs(5),
+                awaiter.await_terminal(id),
+            )
+            .await
+            {
+                Ok(result) => result.map_err(|err| {
+                    RuntimeBoundaryError::new(format!("await terminal for `{id}` failed: {err}"))
+                })?,
+                Err(_) => {
+                    let record = registry.get_process(id).await;
+                    let lease = registry.get_process_lease(id).await.map_err(|err| {
+                        RuntimeBoundaryError::new(format!(
+                            "read timed-out lifecycle lease for `{id}` failed: {err}"
+                        ))
+                    })?;
+                    return Err(RuntimeBoundaryError::new(format!(
+                        "timed out awaiting lifecycle terminal for `{id}`: record={record:?}, lease={lease:?}"
+                    )));
+                }
+            },
+        )
     };
     let record = registry.get_process(id).await.ok_or_else(|| {
         RuntimeBoundaryError::new(format!("process `{id}` vanished after terminal"))
@@ -176,8 +166,6 @@ pub(super) async fn lifecycle_process_fact(
             | lash_core::ProcessStatus::Failed { .. }
             | lash_core::ProcessStatus::Cancelled { .. }
     );
-    let provably_dead_holder =
-        expected_holder.is_some_and(|holder| holder.is_definitely_dead_for_claimant(sweep_owner));
     let lease_lapsed = registry
         .get_process_lease(id)
         .await
@@ -189,7 +177,6 @@ pub(super) async fn lifecycle_process_fact(
         "started": record.first_started.is_some(),
         "terminal_status": record.status.label(),
         "reran": reran,
-        "provably_dead_holder": provably_dead_holder,
         "lease_lapsed": lease_lapsed,
         "abandon_requested": record.abandon_request.is_some(),
         "first_started_owner": record
@@ -197,7 +184,7 @@ pub(super) async fn lifecycle_process_fact(
             .as_ref()
             .map(|started| started.owner.owner_id.clone()),
     });
-    if let ProcessAwaitOutput::Abandoned { evidence, .. } = &output {
+    if let Some(ProcessAwaitOutput::Abandoned { evidence, .. }) = &output {
         let obj = fact.as_object_mut().expect("lifecycle fact is an object");
         obj.insert(
             "abandon_writer".to_string(),

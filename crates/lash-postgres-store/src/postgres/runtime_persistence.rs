@@ -971,128 +971,6 @@ impl SessionExecutionLeaseStore for PostgresSessionStore {
         Ok(SessionExecutionLeaseClaimOutcome::Acquired(lease))
     }
 
-    async fn reclaim_session_execution_lease(
-        &self,
-        session_id: &str,
-        owner: &LeaseOwnerIdentity,
-        observed_holder: &SessionExecutionLeaseFence,
-        lease_ttl_ms: u64,
-    ) -> Result<SessionExecutionLeaseClaimOutcome, StoreError> {
-        let mut tx = self.pool.begin().await.map_err(store_sqlx_error)?;
-        ensure_session_not_deleted_tx(&mut tx, session_id).await?;
-        lock_session_execution_lease_tx(&mut tx, session_id).await?;
-        let now = postgres_transaction_epoch_ms(&mut tx).await?;
-        let current = load_session_execution_lease_tx(&mut tx, session_id).await?;
-        let Some(current) = current else {
-            let lease = acquire_session_execution_lease_tx(
-                &mut tx,
-                session_id,
-                owner,
-                0,
-                now,
-                lease_ttl_ms,
-            )
-            .await?;
-            tx.commit().await.map_err(store_sqlx_error)?;
-            return Ok(SessionExecutionLeaseClaimOutcome::Acquired(lease));
-        };
-        if current.lease_token.is_none() || current.expires_at_ms <= now {
-            let lease = acquire_session_execution_lease_tx(
-                &mut tx,
-                session_id,
-                owner,
-                current.fencing_token,
-                now,
-                lease_ttl_ms,
-            )
-            .await?;
-            tx.commit().await.map_err(store_sqlx_error)?;
-            return Ok(SessionExecutionLeaseClaimOutcome::Acquired(lease));
-        }
-        let holder = row_to_session_execution_lease(session_id, current)?;
-        if observed_holder.session_id == session_id
-            && holder.owner.same_incarnation(&observed_holder.owner)
-            && holder.lease_token == observed_holder.lease_token
-            && holder.fencing_token == observed_holder.fencing_token
-            && holder.owner.is_definitely_dead_for_claimant(owner)
-        {
-            let fencing_token = holder.fencing_token.saturating_add(1);
-            let lease_token = format!(
-                "{}:{}:{}:{now}:{fencing_token}",
-                session_id, owner.owner_id, owner.incarnation_id
-            );
-            let expires_at = now.saturating_add(lease_ttl_ms);
-            let liveness_json = encode_liveness(&owner.liveness)?;
-            let changed = sqlx::query(
-                "UPDATE lash_session_execution_leases
-                 SET lease_owner_id = $1,
-                     lease_owner_incarnation_id = $2,
-                     lease_owner_liveness_json = $3,
-                     lease_token = $4,
-                     lease_fencing_token = $5,
-                     lease_claimed_at_ms = $6,
-                     lease_expires_at_ms = $7
-                 WHERE session_id = $8
-                   AND lease_owner_id = $9
-                   AND lease_owner_incarnation_id = $10
-                   AND lease_token = $11
-                   AND lease_fencing_token = $12",
-            )
-            .bind(&owner.owner_id)
-            .bind(&owner.incarnation_id)
-            .bind(&liveness_json)
-            .bind(&lease_token)
-            .bind(fencing_token as i64)
-            .bind(now as i64)
-            .bind(expires_at as i64)
-            .bind(session_id)
-            .bind(&observed_holder.owner.owner_id)
-            .bind(&observed_holder.owner.incarnation_id)
-            .bind(&observed_holder.lease_token)
-            .bind(observed_holder.fencing_token as i64)
-            .execute(&mut *tx)
-            .await
-            .map_err(store_sqlx_error)?
-            .rows_affected();
-            if changed == 1 {
-                let lease = SessionExecutionLease {
-                    session_id: session_id.to_string(),
-                    owner: owner.clone(),
-                    lease_token,
-                    fencing_token,
-                    claimed_at_epoch_ms: now,
-                    expires_at_epoch_ms: expires_at,
-                };
-                tx.commit().await.map_err(store_sqlx_error)?;
-                return Ok(SessionExecutionLeaseClaimOutcome::Acquired(lease));
-            }
-            let current = load_session_execution_lease_tx(&mut tx, session_id).await?;
-            if current
-                .as_ref()
-                .is_some_and(|lease| lease.lease_token.is_some() && lease.expires_at_ms > now)
-            {
-                let current = current.expect("checked current lease is present");
-                let holder = row_to_session_execution_lease(session_id, current)?;
-                tx.commit().await.map_err(store_sqlx_error)?;
-                return Ok(SessionExecutionLeaseClaimOutcome::Busy { holder });
-            }
-            let previous_fencing_token = current.as_ref().map_or(0, |lease| lease.fencing_token);
-            let lease = acquire_session_execution_lease_tx(
-                &mut tx,
-                session_id,
-                owner,
-                previous_fencing_token,
-                now,
-                lease_ttl_ms,
-            )
-            .await?;
-            tx.commit().await.map_err(store_sqlx_error)?;
-            return Ok(SessionExecutionLeaseClaimOutcome::Acquired(lease));
-        }
-        tx.commit().await.map_err(store_sqlx_error)?;
-        Ok(SessionExecutionLeaseClaimOutcome::Busy { holder })
-    }
-
     async fn renew_session_execution_lease(
         &self,
         fence: &SessionExecutionLeaseFence,
@@ -1233,7 +1111,7 @@ impl QueuedWorkStore for PostgresSessionStore {
         selected_batches.truncate(selected_len);
         let lease =
             QueuedWorkClaimLease::derive(&candidates[0], session_id, owner, now, generation);
-        let liveness_json = encode_liveness(&owner.liveness)?;
+        let liveness_json: Option<&str> = None;
         for row in &selected {
             let changed = sqlx::query(
                 "UPDATE lash_queued_work_batches
@@ -1256,7 +1134,7 @@ impl QueuedWorkStore for PostgresSessionStore {
             .bind(&lease.claim_id)
             .bind(&owner.owner_id)
             .bind(&owner.incarnation_id)
-            .bind(&liveness_json)
+            .bind(liveness_json)
             .bind(&lease.lease_token)
             .bind(lease.session_lease_generation as i64)
             .execute(&mut *tx)
@@ -1341,7 +1219,7 @@ impl QueuedWorkStore for PostgresSessionStore {
         selected_batches.truncate(selected_len);
         let lease =
             QueuedWorkClaimLease::derive(&candidates[0], session_id, owner, now, generation);
-        let liveness_json = encode_liveness(&owner.liveness)?;
+        let liveness_json: Option<&str> = None;
         for row in &selected {
             let changed = sqlx::query(
                 "UPDATE lash_queued_work_batches
@@ -1364,7 +1242,7 @@ impl QueuedWorkStore for PostgresSessionStore {
             .bind(&lease.claim_id)
             .bind(&owner.owner_id)
             .bind(&owner.incarnation_id)
-            .bind(&liveness_json)
+            .bind(liveness_json)
             .bind(&lease.lease_token)
             .bind(lease.session_lease_generation as i64)
             .execute(&mut *tx)
@@ -1527,7 +1405,7 @@ impl QueuedWorkStore for PostgresSessionStore {
         }
         let lease =
             QueuedWorkClaimLease::derive(&candidates[0], session_id, owner, now, generation);
-        let liveness_json = encode_liveness(&owner.liveness)?;
+        let liveness_json: Option<&str> = None;
         for row in &selected {
             let changed = sqlx::query(
                 "UPDATE lash_queued_work_batches
@@ -1543,7 +1421,7 @@ impl QueuedWorkStore for PostgresSessionStore {
             .bind(&lease.claim_id)
             .bind(&owner.owner_id)
             .bind(&owner.incarnation_id)
-            .bind(&liveness_json)
+            .bind(liveness_json)
             .bind(&lease.lease_token)
             .bind(generation as i64)
             .execute(&mut *tx)
@@ -2330,7 +2208,7 @@ async fn claim_ready_queued_work_postgres_tx(
     selected.truncate(selected_len);
     selected_batches.truncate(selected_len);
     let lease = QueuedWorkClaimLease::derive(&candidates[0], session_id, owner, now, generation);
-    let liveness_json = encode_liveness(&owner.liveness)?;
+    let liveness_json: Option<&str> = None;
     for row in &selected {
         let changed = sqlx::query(
             "UPDATE lash_queued_work_batches
@@ -2353,7 +2231,7 @@ async fn claim_ready_queued_work_postgres_tx(
         .bind(&lease.claim_id)
         .bind(&owner.owner_id)
         .bind(&owner.incarnation_id)
-        .bind(&liveness_json)
+        .bind(liveness_json)
         .bind(&lease.lease_token)
         .bind(lease.session_lease_generation as i64)
         .execute(&mut **tx)
@@ -2451,7 +2329,7 @@ async fn claim_pending_turn_inputs_postgres_tx(
         return Ok(ClaimTransactionOutcome::Commit(None));
     };
     let lease = TurnInputClaimLease::derive(head, session_id, owner, now, generation);
-    let liveness_json = encode_liveness(&owner.liveness)?;
+    let liveness_json: Option<&str> = None;
     let state_after_claim = match &mode {
         lash_core::TurnInputClaimMode::ActiveTurn { .. } => lash_core::TurnInputState::Accepted,
         lash_core::TurnInputClaimMode::NextTurn => lash_core::TurnInputState::DeferredNextTurn,
@@ -2481,7 +2359,7 @@ async fn claim_pending_turn_inputs_postgres_tx(
         .bind(&lease.claim_id)
         .bind(&owner.owner_id)
         .bind(&owner.incarnation_id)
-        .bind(&liveness_json)
+        .bind(liveness_json)
         .bind(&lease.lease_token)
         .bind(lease.session_lease_generation as i64)
         .execute(&mut **tx)
@@ -2587,7 +2465,7 @@ async fn claim_pending_turn_inputs_postgres(
         return Ok(None);
     };
     let lease = TurnInputClaimLease::derive(head, session_id, owner, now, generation);
-    let liveness_json = encode_liveness(&owner.liveness)?;
+    let liveness_json: Option<&str> = None;
     let state_after_claim = match &mode {
         lash_core::TurnInputClaimMode::ActiveTurn { .. } => lash_core::TurnInputState::Accepted,
         lash_core::TurnInputClaimMode::NextTurn => lash_core::TurnInputState::DeferredNextTurn,
@@ -2617,7 +2495,7 @@ async fn claim_pending_turn_inputs_postgres(
         .bind(&lease.claim_id)
         .bind(&owner.owner_id)
         .bind(&owner.incarnation_id)
-        .bind(&liveness_json)
+        .bind(liveness_json)
         .bind(&lease.lease_token)
         .bind(lease.session_lease_generation as i64)
         .execute(&mut *tx)
@@ -2681,21 +2559,12 @@ pub(crate) async fn load_session_execution_lease_tx(
 pub(crate) fn lease_owner_from_columns(
     owner_id: Option<String>,
     incarnation_id: Option<String>,
-    liveness_json: Option<String>,
+    _liveness_json: Option<String>,
 ) -> Option<LeaseOwnerIdentity> {
     owner_id.map(|owner_id| LeaseOwnerIdentity {
         incarnation_id: incarnation_id.unwrap_or_else(|| owner_id.clone()),
         owner_id,
-        liveness: liveness_json
-            .as_deref()
-            .and_then(|json| serde_json::from_str(json).ok())
-            .unwrap_or(LeaseOwnerLiveness::Opaque),
     })
-}
-
-fn encode_liveness(liveness: &LeaseOwnerLiveness) -> Result<String, StoreError> {
-    serde_json::to_string(liveness)
-        .map_err(|err| StoreError::Backend(format!("failed to encode lease liveness: {err}")))
 }
 
 fn row_to_session_execution_lease(
@@ -2752,7 +2621,6 @@ async fn acquire_session_execution_lease_tx(
         session_id, owner.owner_id, owner.incarnation_id
     );
     let expires_at = now.saturating_add(lease_ttl_ms);
-    let liveness_json = encode_liveness(&owner.liveness)?;
     sqlx::query(
         "INSERT INTO lash_session_execution_leases (
             session_id, lease_owner_id, lease_owner_incarnation_id, lease_owner_liveness_json,
@@ -2771,7 +2639,7 @@ async fn acquire_session_execution_lease_tx(
     .bind(session_id)
     .bind(&owner.owner_id)
     .bind(&owner.incarnation_id)
-    .bind(&liveness_json)
+    .bind(Option::<&str>::None)
     .bind(&lease_token)
     .bind(fencing_token as i64)
     .bind(now as i64)
