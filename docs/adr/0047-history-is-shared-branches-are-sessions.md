@@ -47,21 +47,18 @@ allowlisted `lash-intent/v1` projection. Topology and semantic payload enter the
 projection. Transport authority, fencing tokens, store-assigned facts, snapshot
 bytes, and clock observations do not.
 
-The intent hash detects divergence of **intent, not observation**. Excluding a
-clock-derived value is insufficient by itself: a retry could otherwise keep its
-new in-memory timestamp while adopting an older durable receipt. Excluded clock
-values are therefore store-realized, returned on the receipt, and rehydrated
-into the runtime so resident and durable state converge.
+The intent hash detects divergence of **intent, not observation**. Each store
+derives that hash from the typed commit content it receives; callers supply
+only the operation identity and cannot stamp a hash over a different proposal.
+On a receipt hit, the store compares its newly derived hash with the persisted
+hash before returning the stored result. On the write path it also re-derives
+operation-derived node ids, then writes nodes, head, and receipt atomically.
+The former caller-supplied hash and redundant `realization_digest` echo are
+removed.
 
-Two different guards close the retry boundary. On the write path the store
-re-derives operation-derived node ids before mutation. On every path the runtime
-compares its proposed graph realization with the receipt's
-`realization_digest`. That digest is **store-recorded, not store-computed from
-rows**: before writing, the store records a digest of attempt A's proposal in
-the same transaction as the rows and receipt. Transaction atomicity proves that
-the rows exist. The digest proves, on a later receipt hit where no write-time
-validation runs, that attempt B proposed the same topology attempt A durably
-claimed.
+Clock-derived values remain outside intent. Stores realize those observations,
+return them on the receipt, and the runtime rehydrates them so resident and
+durable state converge.
 
 The graph mutation algebra is append-only. `GraphCommitDelta::Append` is the
 only graph-changing variant; `Unchanged` represents a commit whose history head
@@ -83,63 +80,56 @@ SQLite uses one factory-wide durable-core database so a new session head and
 its references to shared history can change atomically. Because that topology
 widens the blast radius of a writer lock, commits are rejected before opening a
 transaction when they exceed the measured 512-node or 1 MiB logical-payload
-budget.
+budget. A realistic fully captured session checkpoint measures 2.3–4.4 KiB and
+stays flat across 100 turns: it is a replacement snapshot at each boundary and
+can shrink, not an accumulator. Reaching the 1 MiB cap requires roughly 1 MB of
+live globals in one turn. The cap is a live-state capacity limit, not a
+time-dependent failure.
 
 Reachability is defined by stored edges. Session heads, child nodes, and retained
 continuation anchors keep history alive. Forking adds a new session root and
 shares the prefix. Ownership is therefore reachability, not producer-session
 exclusivity. Processes remain independent durable objects and stay outside
-stored history-node counts.
+stored history-node reachability.
 
-The same ruling applies to attachment/blob liveness, but its implementation is
-pending. Explicit attachment-edge relations, canonical replay keys, bounded
-reclaim surfaces, and the `holds_ref` deletion belong to the FIG-653 L7
-retention work. Current attachment liveness still uses manifest rows and
-commit-receipt predicates.
+Effect-journal identity and lifecycle retirement are implemented as recorded by
+ADR 0025. The attachment/blob part remains pending: explicit attachment-edge
+relations, bounded reclaim surfaces, and the `holds_ref` deletion belong to the
+FIG-653 L7 retention work. Current attachment liveness still uses manifest rows
+and commit-receipt predicates.
 
-## ADR-0024 is re-applied at deletion
+## ADR 0024 applies directly at deletion
 
-_This contradicts ADR-0024 (drainage reads over artifact refcounts), worth
-reopening because history now uses store-maintained node reference counts._
-The resolution is to re-apply ADR-0024's safety rule at the destructive decision
-point, not to reverse it.
+History retirement is the plain agreement required by
+`docs/adr/0024-drainage-reads-over-artifact-refcounts.md`, not an exception to
+it. Parent edges, live session heads, and continuation anchors are the only
+reachability truth. There is no `incoming_refs` cache, drift error, or scrub
+API.
 
-ADR-0024 had two objections. Its coupling objection does not transfer: artifact
-truth lived in a physically separate store, so a counter and its truth could
-not share a transaction. The factory-wide durable-core database keeps history
-edges and their cached counts together, and every mutation is
-co-transactional. Its drift objection does transfer: atomicity cannot prevent a
-missed mutation site.
+Every destructive decision derives live children, heads, and anchors in the
+same transaction. Deleting a session removes its head, then reclaims only its
+producer nodes that no child, head, or anchor can still reach; the ancestry
+walk stops at a shared prefix. PostgreSQL locks affected node rows so commits,
+forks, pin changes, and deletion serialize their root and edge mutations.
 
-Edges are truth; counts are a cache. A count that is too high leaks storage and
-is recoverable. A count that is too low can delete a reachable shared prefix,
-and `vacuum` can make that loss permanent. Consequently every decrement to zero
-must re-derive the node's incoming references from indexed parent and
-session-root rows in the same transaction. A mismatch aborts with typed
-`NodeRefcountDrift`; a catalog-wide `verify_node_refcounts` scrub detects the
-drift in either direction. It is the only detector for the non-destructive
-high-count case, which no destructive step visits. The cost is paid only when a
-node is about to become reclaimable, where ADR-0024's concern is load-bearing
-and the query is bounded to that node's indexed incoming edges.
-
-Process roots are deliberately excluded from stored node counts. They live in a
-different store family, so their liveness continues to be recomputed from
-process truth on demand, exactly as ADR-0024 originally required.
+Process roots are deliberately excluded from stored history reachability. They
+live in a different store family, so their liveness continues to be recomputed
+from process truth on demand, exactly as ADR 0024 requires.
 
 ## Consequences
 
 - Forking does not copy nodes, usage, claims, queues, waits, effect-journal
   entries, or mutable Agent Frame state. The new session gets an independent
   execution identity and ledger over a shared historical prefix.
-- A receipt match is not permission to trust the retry's resident proposal.
-  The runtime adopts store-realized observations only after the realization
-  digest matches.
+- A receipt match is permission to adopt only the store-recorded result. The
+  store derives the retry's intent hash from the received commit and rejects a
+  different proposal under the same operation identity.
 - A missing leaf, parent, or frame ancestor is corruption, not a repair
   invitation. Append conflicts are typed and never become upserts.
-- Reclamation remains host-scheduled. The accepted but unbuilt L7 ruling makes
-  every reclaim primitive take a watermark, terminal-gates receipt and journal
-  cleanup, and replaces inferred attachment liveness with explicit stored
-  edges; FIG-653 owns that implementation.
+- Reclamation remains host-scheduled. Effect-journal retirement is shipped and
+  lifecycle-gated. The remaining L7 ruling gives `vacuum`, receipt pruning, and
+  attachment reclamation explicit bounds and replaces inferred attachment
+  liveness with stored edges; FIG-653 owns that implementation.
 - Lash owns the effect-journal contract while the configured substrate owns the
   journal. The session commit and effect journal remain separate transactions
   joined by stable operation identity.
@@ -151,5 +141,5 @@ process truth on demand, exactly as ADR-0024 originally required.
   store enforcement.
 - [ADR-0046](0046-process-transitions-are-events-record-is-a-fold.md) needs no
   amendment. Process event folding and weak observation are orthogonal to
-  immutable session history, and processes remain outside stored history-node
-  refcounts.
+  immutable session history, and processes remain outside stored history
+  reachability.

@@ -17,22 +17,28 @@ watermark bound is what makes host projection safe: without it, a host that proj
 history can silently destroy unprojected evidence, and the failure only surfaces as
 "unknown process" much later.
 
-## Durable-core ruling (implementation pending)
+## Durable-core ruling (partially implemented)
 
 ADR 0047 extends the same rule from terminal processes to every reclaim
 primitive. The delayed failure above generalizes: reclaiming retry, idempotency,
 or projection evidence without the host's watermark can silently destroy
 unconsumed proof and surface much later as a different error.
 
-The ruling is that `vacuum`, receipt pruning, effect-journal pruning, and
-attachment/blob reclamation will all take an explicit host-supplied
-`RetentionBound`; none will infer a horizon or run as an internal background
-policy. This is not shipped behavior: `vacuum()` currently takes no bound, and
-the receipt- and effect-journal-pruning surfaces do not exist. The FIG-653 L7
+The remaining ruling is that `vacuum`, receipt pruning, and attachment/blob
+reclamation will all take an explicit host-supplied `RetentionBound`; none will
+infer a horizon or run as an internal background policy. This is not fully
+shipped behavior: `vacuum()` currently takes no bound, runtime commit receipts
+have no pruning surface, and attachment liveness still depends on manifest
+rows and receipt predicates rather than explicit stored edges. The FIG-653 L7
 retention work owns that implementation.
 
-Once implemented, age is a bound only after the owning scope is terminal and
-after the relevant revision, epoch, or change-sequence watermark.
+Effect-journal retention is implemented in the lifecycle form recorded by ADR
+0025. It does not take a second horizon: deleting a session retires that exact
+session incarnation, while host-scheduled terminal-process retention retires
+the exact canonical process scope before pruning its row. Restate retains its
+native invocation journal under its native policy and creates no SQL replay
+rows. Age remains a bound only after the owning scope is terminal and after
+the relevant revision, epoch, or change-sequence watermark.
 
 The producer still does not declare a retention class. Lash defines eligibility
 and the Host Application chooses how much eligible evidence to retain.
