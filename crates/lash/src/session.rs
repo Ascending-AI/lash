@@ -308,6 +308,21 @@ pub(crate) async fn load_state_from_store(
     Ok(state)
 }
 
+/// Stamp the host's freshly resolved policy over the loaded one.
+///
+/// ADR 0030's single resolution point: the host supplies the session's
+/// configuration when it constructs *or reopens* a session, and that value is
+/// reconciled into every live and stored copy before the runtime starts. So
+/// this is deliberately wholesale — model, prompt, turn budget and generation
+/// options all come from the host, and a mid-run
+/// [`LashRuntime::update_session_config`](lash_core::LashRuntime::update_session_config)
+/// change lasts until the host reopens with a spec that says otherwise, for
+/// every one of them alike. Persisted policy is the record of what the session
+/// last executed with; a host that wants it back reads it and supplies it.
+///
+/// `provider_id` is the exception, and stays the recorded one: it names which
+/// provider produced the history in the store rather than which one the host
+/// is configured with now.
 fn reconcile_loaded_state_policy(state: &mut RuntimeSessionState, policy: &SessionPolicy) {
     let recorded_provider_id = state.policy.recorded_provider_id().to_string();
     state.policy = policy.clone();
@@ -1235,5 +1250,51 @@ impl<'a> std::future::IntoFuture for EnqueueTurnBuilder<'a> {
 
     fn into_future(self) -> Self::IntoFuture {
         Box::pin(self.send())
+    }
+}
+
+#[cfg(test)]
+mod reconcile_tests {
+    use super::*;
+
+    fn model(id: &str) -> lash_core::ModelSpec {
+        lash_core::ModelSpec::from_token_limits(id, Default::default(), 200_000, None)
+            .expect("valid test model")
+    }
+
+    /// The host's policy wins for every configured field alike, including
+    /// generation options: ADR 0030 resolves the whole session model at open,
+    /// so a reopen cannot pair the host's new model with the store's old
+    /// sampling. Only the recorded provider id survives from the store.
+    #[test]
+    fn host_policy_wins_over_loaded_state_including_generation() {
+        let mut state = RuntimeSessionState {
+            session_id: "session".to_string(),
+            policy: SessionPolicy {
+                provider_id: "recorded-provider".to_string(),
+                model: model("recorded-model"),
+                generation: lash_core::GenerationOptions {
+                    seed: Some(7),
+                    ..Default::default()
+                },
+                ..SessionPolicy::default()
+            },
+            ..RuntimeSessionState::default()
+        };
+        let host = SessionPolicy {
+            provider_id: "host-provider".to_string(),
+            model: model("host-model"),
+            generation: lash_core::GenerationOptions {
+                seed: Some(11),
+                ..Default::default()
+            },
+            ..SessionPolicy::default()
+        };
+
+        reconcile_loaded_state_policy(&mut state, &host);
+
+        assert_eq!(state.policy.provider_id, "recorded-provider");
+        assert_eq!(state.policy.model.id, "host-model");
+        assert_eq!(state.policy.generation, host.generation);
     }
 }

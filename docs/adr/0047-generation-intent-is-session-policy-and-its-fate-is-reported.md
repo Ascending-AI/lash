@@ -8,15 +8,35 @@ seed: None` no matter what the caller wanted. A host benchmarking agent behavior
 make a turn repeatable and had no way to learn that from lash.
 
 We decided that **generation intent belongs to the session policy**. `SessionSpec.generation`
-is the public overlay — inherit when absent, replace when present — and it resolves into
-`SessionPolicy.generation`, the durable value every LLM call in the session carries. The
-policy is the right home rather than the spec alone, because subagent specs resolve against
-the parent's live policy and resume stamps live policy over loaded state: a spec-only seam
-would leak uncontrolled sampling into child sessions and lose the options on recovery.
-Provider configuration keeps its own layer underneath the request, applied once, by the
-per-adapter resolver that already knows which wire has a seed field and which model pins
-sampling. There is no per-turn override: no caller in this workspace expresses sampling per
-turn, and true per-call intent is already served by a direct request.
+is the public overlay and it resolves into `SessionPolicy.generation`, the value every LLM
+call in the session carries. The policy is the right home rather than the spec alone,
+because subagent specs resolve against the parent's *live* policy, and because every
+carrier of a whole session policy — the current agent frame's assignment, the persisted
+state, `RemoteProcessExecutionPolicy` on the wire — then carries the sampling intent with
+it instead of silently dropping it at each boundary. Provider configuration keeps its own
+layer underneath the request, applied once, by the per-adapter resolver that already knows
+which wire has a seed field and which model pins sampling. There is no per-turn override:
+no caller in this workspace expresses sampling per turn, and true per-call intent is
+already served by a direct request.
+
+The overlay **merges per option**, and discarding what is inherited has to be asked for
+(`GenerationOverlay::Replace`, spelled `.replace_generation(...)` / `.clear_generation()`).
+`GenerationOptions` is three independently optional options rather than one value, so
+wholesale replacement would let a subagent spec that sets only an output-token cap drop a
+parent's pinned temperature and seed — and the disposition below could not report that,
+because the child never *requested* a temperature. Per-option layering is also what the
+layer directly underneath already does: `resolve_generation_policy` resolves a request's
+cap against provider configuration with `.or(...)`.
+
+Reopen follows ADR 0030 rather than inventing its own authority: **the host's configuration
+wins, for generation exactly as for the model and the prompt.** The facade reconciles the
+policy it resolves from the host's spec over loaded state, so a mid-run
+`update_session_config` change lasts until the host reopens with a spec that says otherwise
+— the same lifetime a mid-run `set_model` has. Pairing the host's new model with the
+store's old temperature would be the anomaly. The persisted copy is what a session resumes
+with wherever no live host reconciles it: the process/remote path, and core embedders that
+hand `LashRuntime` a loaded state directly. A facade host that wants the recorded options
+back reads them from the store and supplies them, as it does for any other policy field.
 
 Session-wide defaults make the adapter's silent omissions matter. Anthropic drops a
 caller-set temperature when the model's host-declared capability pins sampling or extended

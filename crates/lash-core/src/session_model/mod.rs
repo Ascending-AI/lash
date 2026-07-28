@@ -124,7 +124,16 @@ pub struct SessionPolicy {
     /// Caller-owned generation intent applied to every LLM call this session
     /// makes. It lives on the policy rather than on a single turn because it
     /// is session-wide truth: child sessions resolve their spec against this
-    /// policy, and a resumed session restores it with the rest of the policy.
+    /// policy, and every carrier of a whole session policy carries it too.
+    ///
+    /// It travels with the rest of the policy on reopen, which per ADR 0030
+    /// means the host's configuration is the authority wherever a host is
+    /// there to supply one: a facade reopen resolves the host's current spec
+    /// and reconciles it over loaded state, exactly as it does for the model
+    /// and the prompt. The persisted copy is what a session resumes with when
+    /// no live host reconciles it — the process/remote path, where
+    /// `RemoteProcessExecutionPolicy` mirrors this field, and core embedders
+    /// that hand [`crate::LashRuntime`] a loaded state directly.
     pub generation: crate::GenerationOptions,
 }
 
