@@ -166,6 +166,14 @@ async fn parked_resume_keeps_the_store_bound_session_id() {
     let plugin_host = dynamic_plugin_host(Arc::new(DynamicToolSurface::default()));
     let env = runtime_environment(plugin_host);
     let store = Arc::new(RecordingStore::default());
+    *store.session_meta.lock().expect("lock parked session meta") = Some(crate::SessionMeta {
+        session_id: "parked-session".to_string(),
+        session_name: "parked-session".to_string(),
+        created_at: "2026-07-29T00:00:00Z".to_string(),
+        model: "mock-model".to_string(),
+        cwd: None,
+        relation: crate::SessionRelation::Root,
+    });
     let runtime = LashRuntime::from_environment(
         &env,
         standard_test_policy(),
