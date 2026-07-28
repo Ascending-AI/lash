@@ -37,7 +37,6 @@ pub use crate::plugin_binding::PluginBinding;
 pub use crate::prompt_layer::PromptLayerSink;
 pub use crate::session::{
     EnqueueTurnBuilder, LashSession, ObservableSession, ParkedSession, SessionBuilder,
-    SessionConfigPatch,
 };
 pub use crate::turn::{
     QueuedTurnBuilder, TurnActivityFanout, TurnBuilder, TurnOutput, TurnResult, TurnStream,
@@ -48,12 +47,12 @@ pub use lash_core::{
     ExternalCompletionError, GenerationOverlay, InputItem, LlmCallRecord, ModelLimits, ModelSpec,
     PendingTurnInput, PendingTurnInputCancelOutcome, PendingTurnInputCancelResult,
     PendingTurnInputCancelTarget, PendingTurnInputSuffixCancelOutcome, PluginStack, Resolution,
-    ResolveOutcome, SessionCommand, SessionCommandReceipt, SessionCreateRequest, SessionSpec,
-    SessionStartPoint, TurnActivity, TurnActivityId, TurnActivitySink, TurnAddress, TurnAttach,
-    TurnCancelOriginHint, TurnCancelOutcome, TurnCancelReceipt, TurnCancelRequest,
-    TurnCancellationEvidence, TurnCause, TurnEvent, TurnFinish, TurnInput,
-    TurnInputAcceptanceReceipt, TurnInputApplication, TurnOutcome, TurnStop, TurnTerminal,
-    TurnWorkDriver,
+    ResolveOutcome, SessionCommand, SessionCommandReceipt, SessionConfigPatch,
+    SessionCreateRequest, SessionSpec, SessionStartPoint, TurnActivity, TurnActivityId,
+    TurnActivitySink, TurnAddress, TurnAttach, TurnCancelOriginHint, TurnCancelOutcome,
+    TurnCancelReceipt, TurnCancelRequest, TurnCancellationEvidence, TurnCause, TurnEvent,
+    TurnFinish, TurnInput, TurnInputAcceptanceReceipt, TurnInputApplication, TurnOutcome, TurnStop,
+    TurnTerminal, TurnWorkDriver,
 };
 /// Cooperative cancellation handle accepted by
 /// [`TurnBuilder::cancel`](crate::TurnBuilder::cancel); re-exported so

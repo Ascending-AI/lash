@@ -8,8 +8,8 @@ pub(crate) use lash_core::runtime::{
 };
 pub(crate) use lash_core::{
     DurableProcessWorker, DurableProcessWorkerConfig, EffectReplayOwnership,
-    InMemoryLiveReplayStore, LashRuntime, LiveReplayStore, MessageRole, ModelSpec, PluginHost,
-    PluginSpec, PluginStack, ProcessExecutionEnvStore, ProcessHandleSummary, ProcessWorkDriver,
+    InMemoryLiveReplayStore, LashRuntime, LiveReplayStore, MessageRole, PluginHost, PluginSpec,
+    PluginStack, ProcessExecutionEnvStore, ProcessHandleSummary, ProcessWorkDriver,
     QueuedWorkDriver, QueuedWorkRunHandle, QueuedWorkRunRequest, RuntimeEnvironment, RuntimeHandle,
     RuntimeHostConfig, RuntimeObservation, SessionPolicy, SessionRelation, SessionSpec,
     SessionStoreCreateRequest,

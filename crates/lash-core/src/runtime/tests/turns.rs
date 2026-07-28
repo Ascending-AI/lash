@@ -701,12 +701,11 @@ async fn session_config_change_hook_receives_context_window_updates() {
         crate::ModelSpec::from_token_limits("alt-model", Default::default(), 123_456, None)
             .expect("valid model spec");
     runtime
-        .update_session_config(
-            Some(alt_provider.into_handle()),
-            Some(alt_model.clone()),
-            None,
-            None,
-        )
+        .update_session_config(crate::SessionConfigPatch {
+            provider: Some(alt_provider.into_handle()),
+            model: Some(alt_model.clone()),
+            ..Default::default()
+        })
         .await;
 
     let changes = observed.lock().await;
@@ -5083,7 +5082,11 @@ async fn turn_driver_normalizes_alias_effort_into_outgoing_request() {
 
     let mut runtime = runtime_with_plugins(Vec::new(), mock_provider(Vec::new())).await;
     runtime
-        .update_session_config(Some(provider), Some(model), None, None)
+        .update_session_config(crate::SessionConfigPatch {
+            provider: Some(provider),
+            model: Some(model),
+            ..Default::default()
+        })
         .await;
 
     let turn = runtime
@@ -5158,7 +5161,11 @@ async fn turn_driver_rejects_unsupported_effort_before_provider_call() {
 
     let mut runtime = runtime_with_plugins(Vec::new(), mock_provider(Vec::new())).await;
     runtime
-        .update_session_config(Some(provider), Some(model), None, None)
+        .update_session_config(crate::SessionConfigPatch {
+            provider: Some(provider),
+            model: Some(model),
+            ..Default::default()
+        })
         .await;
 
     let turn = runtime
@@ -5229,7 +5236,10 @@ async fn session_generation_options_reach_every_provider_request() {
 
     let mut runtime = runtime_with_plugins(Vec::new(), mock_provider(Vec::new())).await;
     runtime
-        .update_session_config(Some(provider), None, None, None)
+        .update_session_config(crate::SessionConfigPatch {
+            provider: Some(provider),
+            ..Default::default()
+        })
         .await;
 
     let run_turn = async |runtime: &mut LashRuntime, turn_id: &'static str| {
@@ -5259,7 +5269,10 @@ async fn session_generation_options_reach_every_provider_request() {
         seed: Some(1234),
     };
     runtime
-        .update_session_config(None, None, None, Some(requested.clone()))
+        .update_session_config(crate::SessionConfigPatch {
+            generation: Some(crate::GenerationOverlay::Replace(requested.clone())),
+            ..Default::default()
+        })
         .await;
     run_turn(&mut runtime, "generation-requested-turn").await;
 
@@ -5312,18 +5325,19 @@ async fn omitted_generation_options_are_reported_on_the_turn_llm_call_record() {
 
     let mut runtime = runtime_with_plugins(Vec::new(), mock_provider(Vec::new())).await;
     runtime
-        .update_session_config(
-            Some(provider),
-            None,
-            None,
-            Some(crate::GenerationOptions {
-                output_token_cap: NonZeroUsize::new(128),
-                temperature: Some(
-                    crate::NonNegativeFiniteF64::new(0.2).expect("finite temperature"),
-                ),
-                seed: Some(99),
-            }),
-        )
+        .update_session_config(crate::SessionConfigPatch {
+            provider: Some(provider),
+            generation: Some(crate::GenerationOverlay::Replace(
+                crate::GenerationOptions {
+                    output_token_cap: NonZeroUsize::new(128),
+                    temperature: Some(
+                        crate::NonNegativeFiniteF64::new(0.2).expect("finite temperature"),
+                    ),
+                    seed: Some(99),
+                },
+            )),
+            ..Default::default()
+        })
         .await;
 
     let turn = runtime
@@ -5402,9 +5416,9 @@ async fn an_output_token_cap_above_the_model_clamps_and_says_so() {
 
     let mut runtime = runtime_with_plugins(Vec::new(), mock_provider(Vec::new())).await;
     runtime
-        .update_session_config(
-            Some(provider),
-            Some(
+        .update_session_config(crate::SessionConfigPatch {
+            provider: Some(provider),
+            model: Some(
                 crate::ModelSpec::from_token_limits(
                     "small-output-model",
                     Default::default(),
@@ -5413,15 +5427,17 @@ async fn an_output_token_cap_above_the_model_clamps_and_says_so() {
                 )
                 .expect("valid test model"),
             ),
-            None,
-            Some(crate::GenerationOptions {
-                output_token_cap: NonZeroUsize::new(32_000),
-                temperature: Some(
-                    crate::NonNegativeFiniteF64::new(0.0).expect("finite temperature"),
-                ),
-                seed: None,
-            }),
-        )
+            generation: Some(crate::GenerationOverlay::Replace(
+                crate::GenerationOptions {
+                    output_token_cap: NonZeroUsize::new(32_000),
+                    temperature: Some(
+                        crate::NonNegativeFiniteF64::new(0.0).expect("finite temperature"),
+                    ),
+                    seed: None,
+                },
+            )),
+            ..Default::default()
+        })
         .await;
 
     let turn = runtime
@@ -5473,5 +5489,60 @@ async fn an_output_token_cap_above_the_model_clamps_and_says_so() {
     assert!(
         !reported.fully_honored(),
         "a host that needs the number it asked for must be able to see the reduction"
+    );
+}
+
+#[tokio::test]
+async fn a_mid_run_generation_patch_merges_like_the_spec_overlay_does() {
+    use std::num::NonZeroUsize;
+
+    // Both surfaces that set generation options speak one vocabulary. A patch
+    // naming only a cap must not drop a temperature and seed the session
+    // pinned — the loss `SessionSpec`'s overlay exists to prevent, one API
+    // over — and replacing stays available for a host that means it.
+    let mut runtime = runtime_with_plugins(Vec::new(), mock_provider(Vec::new())).await;
+    let pinned = crate::GenerationOptions {
+        output_token_cap: None,
+        temperature: Some(crate::NonNegativeFiniteF64::new(0.0).expect("finite temperature")),
+        seed: Some(42),
+    };
+    runtime
+        .update_session_config(crate::SessionConfigPatch {
+            generation: Some(crate::GenerationOverlay::Replace(pinned.clone())),
+            ..Default::default()
+        })
+        .await;
+
+    runtime
+        .update_session_config(crate::SessionConfigPatch {
+            generation: Some(crate::GenerationOverlay::Merge(crate::GenerationOptions {
+                output_token_cap: NonZeroUsize::new(4_096),
+                ..Default::default()
+            })),
+            ..Default::default()
+        })
+        .await;
+    assert_eq!(
+        runtime.session_policy().generation,
+        crate::GenerationOptions {
+            output_token_cap: NonZeroUsize::new(4_096),
+            temperature: pinned.temperature.clone(),
+            seed: Some(42),
+        },
+        "a patch that names only a cap keeps the sampling the session pinned"
+    );
+
+    runtime
+        .update_session_config(crate::SessionConfigPatch {
+            generation: Some(crate::GenerationOverlay::Replace(
+                crate::GenerationOptions::default(),
+            )),
+            ..Default::default()
+        })
+        .await;
+    assert_eq!(
+        runtime.session_policy().generation,
+        crate::GenerationOptions::default(),
+        "an explicit replace still clears every option"
     );
 }

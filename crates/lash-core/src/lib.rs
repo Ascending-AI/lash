@@ -464,6 +464,7 @@ pub use session_model::{
 // Effect / process-control types consumed by external effect hosts (e.g.
 // lash-restate's workflows) and their integration tests. Kept on the public
 // surface; the rest of the runtime block above stays crate-internal.
+pub use runtime::SessionConfigPatch;
 pub use runtime::{
     CanonicalRuntimeEffectEnvelope, LlmRequestSpec, ProcessCommand, ProcessEffectOutcome,
     ProcessEventSemanticsSpec, RuntimeAwaitEventOptions, RuntimeEffectCommand,

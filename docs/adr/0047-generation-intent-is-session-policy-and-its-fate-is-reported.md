@@ -30,7 +30,20 @@ wholesale replacement would let a subagent spec that sets only an output-token c
 parent's pinned temperature and seed — and the disposition below could not report that,
 because the child never *requested* a temperature. Per-option layering is also what the
 layer directly underneath already does: `resolve_generation_policy` resolves a request's
-cap against provider configuration with `.or(...)`.
+cap against provider configuration with `.or(...)`. `GenerationOverlay` is the vocabulary
+for *every* surface that layers these options, not just the spec: `SessionConfigPatch`
+carries one too, so a mid-run patch naming only a cap cannot drop a pinned temperature that
+the spec's overlay would have kept. Two surfaces for one field, disagreeing about whether
+naming one option discards the others, is the trap dressed as an API.
+
+We considered a per-option clear — a `GenerationOverlay` of three `Option<Option<_>>`
+fields, able to drop an inherited seed while keeping an inherited temperature — and
+accepted the coarser gesture. No caller expresses that, none of the references offer it
+(pydantic-ai, the Agents SDK and flue all merge with no per-field clear at all), and the
+cost of being wrong is one additive field change on a type whose two variants would become
+three. What could not be added later is the *default*: merge-by-default is the behavior
+callers write against, and flipping it after release breaks silently rather than at compile
+time.
 
 Reopen follows ADR 0030 rather than inventing its own authority: **the host's configuration
 wins, for generation exactly as for the model and the prompt.** The facade reconciles the
