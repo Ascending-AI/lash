@@ -480,6 +480,10 @@ impl SessionStoreFactory for SqliteSessionStoreFactory {
             .conn
             .write(move |tx| {
                 tx.execute(
+                    "DELETE FROM deleted_sessions WHERE session_id = ?1",
+                    params![&meta.session_id],
+                )?;
+                tx.execute(
                     "INSERT OR IGNORE INTO session_meta
                      (session_id, incarnation_id, session_name, created_at, model, cwd, relation_json)
                      VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
@@ -622,6 +626,11 @@ async fn delete_session_from_catalog(root: &Path, session_id: &str) -> Result<()
     ensure_schema(&conn).await.map_err(|err| err.to_string())?;
     conn.write_flow(move |tx| {
         let outcome: Result<(), lash_core::StoreError> = (|| {
+            tx.execute(
+                "INSERT OR IGNORE INTO deleted_sessions (session_id) VALUES (?1)",
+                params![session_id],
+            )
+            .map_err(sqlite_error)?;
             let leaf_node_id = tx
                 .query_row(
                     "SELECT leaf_node_id FROM session_head WHERE session_id = ?1",

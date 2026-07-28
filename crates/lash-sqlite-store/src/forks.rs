@@ -9,6 +9,48 @@ async fn open_factory_catalog(root: &Path) -> Result<SqliteConnection, lash_core
     Ok(conn)
 }
 
+fn retained_fork_config_conn(
+    conn: &rusqlite::Connection,
+    node_id: &str,
+) -> Result<lash_core::PersistedSessionConfig, lash_core::StoreError> {
+    let frame_node_id =
+        persistence::nearest_frame_node_id_conn(conn, node_id)?.ok_or_else(|| {
+            lash_core::StoreError::MissingFrameOpenAncestor {
+                leaf_node_id: node_id.to_string(),
+            }
+        })?;
+    let (parent_node_id, node_json) = conn
+        .query_row(
+            "SELECT parent_node_id, node_json FROM graph_nodes
+             WHERE node_id = ?1 AND tombstoned = 0",
+            params![frame_node_id],
+            |row| Ok((row.get::<_, Option<String>>(0)?, row.get::<_, String>(1)?)),
+        )
+        .optional()
+        .map_err(sqlite_error)?
+        .ok_or_else(|| {
+            lash_core::StoreError::Backend(format!(
+                "retained frame node `{frame_node_id}` is missing"
+            ))
+        })?;
+    lash_core::SessionNodeRecord::decode_storage_body(
+        frame_node_id.clone(),
+        parent_node_id,
+        &node_json,
+    )
+    .map_err(|error| {
+        lash_core::StoreError::Backend(format!(
+            "failed to decode retained frame node `{frame_node_id}`: {error}"
+        ))
+    })?
+    .frame_config()
+    .ok_or_else(|| {
+        lash_core::StoreError::Backend(format!(
+            "retained frame node `{frame_node_id}` has no frame assignment"
+        ))
+    })
+}
+
 pub(super) async fn pin_in_catalog(
     root: &Path,
     node_id: &str,
@@ -27,10 +69,12 @@ pub(super) async fn pin_in_catalog(
                 .optional()
                 .map_err(sqlite_error)?
             {
+                let config = retained_fork_config_conn(tx, &node_id)?;
                 return Ok(lash_core::ForkPoint {
                     node_id,
                     checkpoint_ref: checkpoint_ref.into(),
                     source_session_id,
+                    config,
                     pinned: true,
                 });
             }
@@ -69,10 +113,12 @@ pub(super) async fn pin_in_catalog(
                 params![node_id, checkpoint_ref, source_session_id],
             )
             .map_err(sqlite_error)?;
+            let config = retained_fork_config_conn(tx, &node_id)?;
             Ok(lash_core::ForkPoint {
                 node_id,
                 checkpoint_ref: checkpoint_ref.into(),
                 source_session_id,
+                config,
                 pinned: true,
             })
         })();
@@ -118,8 +164,11 @@ pub(super) async fn fork_points_in_catalog(
 ) -> Result<Vec<lash_core::ForkPoint>, lash_core::StoreError> {
     let conn = open_factory_catalog(root).await?;
     conn.call(|conn| {
-        let mut stmt = conn.prepare(
-            "SELECT node_id, checkpoint_ref, source_session_id, pinned
+        let tx = conn.transaction()?;
+        let outcome: Result<Vec<lash_core::ForkPoint>, lash_core::StoreError> = (|| {
+            let mut stmt = tx
+                .prepare(
+                    "SELECT node_id, checkpoint_ref, source_session_id, pinned
              FROM (
                  SELECT node_id, checkpoint_ref, source_session_id, pinned,
                         ROW_NUMBER() OVER (
@@ -138,19 +187,42 @@ pub(super) async fn fork_points_in_catalog(
              )
              WHERE ordinal = 1
              ORDER BY node_id",
-        )?;
-        let rows = stmt.query_map([], |row| {
-            Ok(lash_core::ForkPoint {
-                node_id: row.get(0)?,
-                checkpoint_ref: lash_core::BlobRef(row.get(1)?),
-                source_session_id: row.get(2)?,
-                pinned: row.get::<_, i64>(3)? != 0,
-            })
-        })?;
-        rows.collect::<Result<Vec<_>, _>>()
+                )
+                .map_err(sqlite_error)?;
+            let rows = stmt
+                .query_map([], |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, String>(2)?,
+                        row.get::<_, i64>(3)? != 0,
+                    ))
+                })
+                .map_err(sqlite_error)?
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(sqlite_error)?;
+            rows.into_iter()
+                .map(|(node_id, checkpoint_ref, source_session_id, pinned)| {
+                    Ok(lash_core::ForkPoint {
+                        config: retained_fork_config_conn(&tx, &node_id)?,
+                        node_id,
+                        checkpoint_ref: lash_core::BlobRef(checkpoint_ref),
+                        source_session_id,
+                        pinned,
+                    })
+                })
+                .collect()
+        })();
+        match outcome {
+            Ok(points) => {
+                tx.commit()?;
+                Ok(Ok(points))
+            }
+            Err(error) => Ok(Err(error)),
+        }
     })
     .await
-    .map_err(sqlite_error)
+    .map_err(sqlite_error)?
 }
 
 pub(super) async fn fork_at_in_catalog(
@@ -278,6 +350,11 @@ pub(super) async fn fork_at_in_catalog(
                     session_meta.cwd,
                     encode_json(&session_meta.relation)
                 ],
+            )
+            .map_err(sqlite_error)?;
+            tx.execute(
+                "DELETE FROM deleted_sessions WHERE session_id = ?1",
+                params![request.session_id],
             )
             .map_err(sqlite_error)?;
             Ok(lash_core::ForkSessionResult {

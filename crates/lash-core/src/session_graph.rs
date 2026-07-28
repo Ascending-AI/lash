@@ -613,6 +613,15 @@ impl SessionNodeRecord {
         }
     }
 
+    /// Provider and model captured by this frame boundary.
+    pub fn frame_config(&self) -> Option<PersistedSessionConfig> {
+        let (_, assignment, _) = self.frame_open()?;
+        Some(PersistedSessionConfig {
+            provider_id: assignment.policy.recorded_provider_id().to_string(),
+            model: assignment.policy.model.clone(),
+        })
+    }
+
     pub fn plugin_body<T>(&self) -> Option<T>
     where
         T: for<'de> serde::Deserialize<'de>,

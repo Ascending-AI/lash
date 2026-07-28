@@ -636,27 +636,6 @@ impl LashCore {
             .ok_or_else(|| lash_core::StoreError::ForkPointNotRetained {
                 node_id: node_id.clone(),
             })?;
-        let source_store = store_factory
-            .open_existing_store(&lash_core::SessionStoreCreateRequest {
-                session_id: point.source_session_id.clone(),
-                relation: lash_core::SessionRelation::Root,
-                policy: self.policy.clone(),
-            })
-            .await
-            .map_err(|message| EmbedError::StoreFactory {
-                session_id: point.source_session_id.clone(),
-                message,
-            })?
-            .ok_or_else(|| lash_core::StoreError::ForkPointNotRetained {
-                node_id: node_id.clone(),
-            })?;
-        let source_config = source_store
-            .load_session()
-            .await?
-            .ok_or_else(|| lash_core::StoreError::ForkPointNotRetained {
-                node_id: node_id.clone(),
-            })?
-            .config;
         let inherited = if let Some(process_registry) = self.process_registry() {
             process_registry
                 .list_handle_grants(&lash_core::SessionScope::new(
@@ -670,8 +649,8 @@ impl LashCore {
             Vec::new()
         };
         let mut fork_policy = self.policy.clone();
-        fork_policy.provider_id = source_config.provider_id;
-        fork_policy.model = source_config.model;
+        fork_policy.provider_id = point.config.provider_id;
+        fork_policy.model = point.config.model;
         let request = lash_core::ForkSessionRequest {
             session_id,
             node_id,
