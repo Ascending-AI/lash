@@ -116,11 +116,19 @@ Process roots are deliberately excluded from stored history reachability. They
 live in a different store family, so their liveness continues to be recomputed
 from process truth on demand, exactly as ADR 0024 requires.
 
+## Session identity amendment
+
+[ADR-0049](0049-session-ids-are-used-once.md) supersedes the lifetime
+discriminator used by the first implementation of this decision. A session id
+cannot be reused after deletion, so history-node preimages, frame identity,
+fork admission, and session-owned lifecycle state use the host-provided session
+id directly. The shared-history and branch-as-session rulings are unchanged.
+
 ## Consequences
 
 - Forking does not copy nodes, usage, claims, queues, waits, effect-journal
   entries, or mutable Agent Frame state. The new session gets an independent
-  execution identity and ledger over a shared historical prefix.
+  host-provided id and ledger over a shared historical prefix.
 - A receipt match is permission to adopt only the store-recorded result. The
   store derives the retry's intent hash from the received commit and rejects a
   different proposal under the same operation identity.
