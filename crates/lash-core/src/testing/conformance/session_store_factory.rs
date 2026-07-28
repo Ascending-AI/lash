@@ -509,18 +509,10 @@ async fn session_store_factory_rejects_cross_session_graph_parents(
         1,
         "cross-session parent rejection must be atomic"
     );
-    assert_eq!(
-        first
-            .verify_node_refcounts()
-            .await
-            .expect("foreign parent refcount remains exact")
-            .checked_node_count,
-        2
-    );
 }
 
 /// First-class fork contract shared by in-memory, SQLite, and PostgreSQL:
-/// pins are counted roots, past unpinned checkpoints are normally unavailable,
+/// pins are roots, past unpinned checkpoints are normally unavailable,
 /// forks write no graph nodes, and deleting either sibling cannot reclaim the
 /// prefix still reachable from the other.
 async fn session_store_factory_fork_semantics(factory: Arc<dyn crate::SessionStoreFactory>) {
@@ -576,10 +568,6 @@ async fn session_store_factory_fork_semantics(factory: Arc<dyn crate::SessionSto
     assert_eq!(pinned.node_id, root_node_id);
     assert_eq!(pinned.source_session_id, source_request.session_id);
     assert!(pinned.pinned);
-    source
-        .verify_node_refcounts()
-        .await
-        .expect("pin participates in refcount scrub");
 
     append_fork_conformance_message(&mut state, "reuse-proof-old", "old incarnation");
     let reuse_operation =
@@ -674,10 +662,6 @@ async fn session_store_factory_fork_semantics(factory: Arc<dyn crate::SessionSto
             .is_some(),
         "deleting a branch first must not reclaim its live source sibling"
     );
-    source
-        .verify_node_refcounts()
-        .await
-        .expect("branch-first delete preserves exact refcounts");
 
     let unretained_error = factory
         .fork_at(&crate::ForkSessionRequest {
@@ -694,11 +678,6 @@ async fn session_store_factory_fork_semantics(factory: Arc<dyn crate::SessionSto
             if node_id == unpinned_past_node_id
     ));
 
-    let node_count_before_fork = source
-        .verify_node_refcounts()
-        .await
-        .expect("scrub before zero-node fork")
-        .checked_node_count;
     let fork_request = crate::ForkSessionRequest {
         session_id: "fork-branch".to_string(),
         node_id: root_node_id.clone(),
@@ -742,16 +721,6 @@ async fn session_store_factory_fork_semantics(factory: Arc<dyn crate::SessionSto
         branch_read.token_ledger.is_empty(),
         "usage is execution-scoped and must not cross a fork"
     );
-    assert_eq!(
-        branch
-            .verify_node_refcounts()
-            .await
-            .expect("fork participates in refcount scrub")
-            .checked_node_count,
-        node_count_before_fork,
-        "a fork adds a root reference but writes no graph node"
-    );
-
     let mut branch_state = crate::store::load_persisted_session_state(branch.as_ref())
         .await
         .expect("load fork state")
@@ -790,19 +759,10 @@ async fn session_store_factory_fork_semantics(factory: Arc<dyn crate::SessionSto
             .is_some(),
         "deleting one branch must stop at the first still-referenced node"
     );
-    branch
-        .verify_node_refcounts()
-        .await
-        .expect("delete participates in shared-prefix refcount scrub");
-
     factory
         .unpin(&root_node_id)
         .await
         .expect("release rewind pin");
-    branch
-        .verify_node_refcounts()
-        .await
-        .expect("unpin participates in refcount scrub");
     assert!(
         branch
             .load_node(&root_node_id)

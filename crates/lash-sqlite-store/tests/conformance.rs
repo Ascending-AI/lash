@@ -397,11 +397,11 @@ async fn sqlite_trigger_store_rejects_pre_keyed_schema_before_serving() {
 }
 
 #[tokio::test]
-async fn sqlite_effect_controller_rejects_pre_incarnation_journal_schema_before_serving() {
+async fn sqlite_effect_controller_rejects_pre_retirement_journal_schema_before_serving() {
     let dir = tempfile::tempdir().expect("tempdir");
     let path = dir.path().join("pre-canonical-envelope-effects.db");
     let conn = rusqlite::Connection::open(&path).expect("open legacy effect db");
-    conn.pragma_update(None, "user_version", 3)
+    conn.pragma_update(None, "user_version", 4)
         .expect("stamp legacy effect schema");
     drop(conn);
 
@@ -409,12 +409,12 @@ async fn sqlite_effect_controller_rejects_pre_incarnation_journal_schema_before_
         match SqliteRuntimeEffectController::open(&path, durable_turn_scope("session", "turn"))
             .await
         {
-            Ok(_) => panic!("pre-canonical-envelope effect stores must be recreated"),
+            Ok(_) => panic!("pre-retirement effect stores must be recreated"),
             Err(error) => error,
         };
     let message = error.to_string();
     assert!(message.contains("Unsupported lash effect replay schema"));
-    assert!(message.contains("supports schema version 4"));
+    assert!(message.contains("supports schema version 5"));
     assert!(message.contains("delete the effect replay database and start fresh"));
 }
 
@@ -619,7 +619,7 @@ async fn sqlite_effect_host_satisfies_cold_instance_await_event_conformance() {
 }
 
 #[tokio::test]
-async fn sqlite_durable_effect_boundaries_reject_unincarnated_turn_scopes() {
+async fn sqlite_durable_effect_boundaries_reject_unincarnated_session_scopes() {
     let dir = tempfile::tempdir().expect("tempdir");
     let host = SqliteEffectHost::open(&dir.path().join("bare-scope-host.db"))
         .await
@@ -632,6 +632,19 @@ async fn sqlite_durable_effect_boundaries_reject_unincarnated_turn_scopes() {
         host_error.code.as_str(),
         "durable_turn_scope_missing_incarnation"
     );
+    for scope in [
+        ExecutionScope::queue_drain("session", "drain"),
+        ExecutionScope::session_delete("session"),
+    ] {
+        let error = match host.scoped(scope) {
+            Ok(_) => panic!("durable host must reject a bare session-lifetime scope"),
+            Err(error) => error,
+        };
+        assert_eq!(
+            error.code.as_str(),
+            "durable_session_scope_missing_incarnation"
+        );
+    }
 
     let controller = SqliteRuntimeEffectController::open(
         &dir.path().join("bare-scope-controller.db"),
@@ -858,6 +871,47 @@ async fn sqlite_effect_controller_isolates_recreated_session_incarnations() {
         &first, &second,
     )
     .await;
+}
+
+#[tokio::test]
+async fn sqlite_effect_host_isolates_all_session_scope_journals() {
+    let dir = tempfile::tempdir().expect("effect replay tempdir");
+    let host = SqliteEffectHost::open(&dir.path().join("effect-replay.db"))
+        .await
+        .expect("open SQLite effect host");
+
+    lash_core::testing::conformance::effect_host_session_scope_journals_are_isolated(&host).await;
+}
+
+#[tokio::test]
+async fn sqlite_effect_host_retires_session_journal_rows() {
+    let dir = tempfile::tempdir().expect("effect replay tempdir");
+    let path = dir.path().join("effect-replay.db");
+    let host = SqliteEffectHost::open(&path)
+        .await
+        .expect("open SQLite effect host");
+
+    lash_core::testing::conformance::effect_host_retires_session_journal(&host).await;
+    lash_core::testing::conformance::effect_host_retires_process_journal(&host).await;
+
+    let conn = rusqlite::Connection::open(path).expect("open effect journal for row count");
+    let retained: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM runtime_effect_replay
+             WHERE session_id = ?1 AND incarnation_id = ?2",
+            ["retired-journal-session", "retired-journal-incarnation"],
+            |row| row.get(0),
+        )
+        .expect("count retained session journal rows");
+    assert_eq!(retained, 0);
+    let process_retained: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM runtime_effect_replay WHERE session_id IS NULL",
+            [],
+            |row| row.get(0),
+        )
+        .expect("count retained process journal rows");
+    assert_eq!(process_retained, 0);
 }
 
 #[tokio::test]

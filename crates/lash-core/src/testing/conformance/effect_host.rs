@@ -64,6 +64,7 @@ impl RuntimeEffectController for RecordingEffectHostController {
 pub struct RecordingEffectHost {
     selected_scopes: Arc<Mutex<Vec<ExecutionScope>>>,
     records: Arc<Mutex<Vec<RecordingEffectHostRecord>>>,
+    retirements: Arc<Mutex<Vec<crate::EffectJournalRetirement>>>,
 }
 
 impl RecordingEffectHost {
@@ -76,6 +77,13 @@ impl RecordingEffectHost {
 
     pub fn records(&self) -> Vec<RecordingEffectHostRecord> {
         self.records.lock().expect("effect host records").clone()
+    }
+
+    pub fn retirements(&self) -> Vec<crate::EffectJournalRetirement> {
+        self.retirements
+            .lock()
+            .expect("effect host retirements")
+            .clone()
     }
 
     fn scoped_for<'run>(
@@ -96,8 +104,24 @@ impl RecordingEffectHost {
     }
 }
 
-impl crate::AwaitEventResolver for RecordingEffectHost {}
+#[async_trait::async_trait]
+impl crate::AwaitEventResolver for RecordingEffectHost {
+    async fn revoke_await_events_for_session(
+        &self,
+        _session_id: &str,
+    ) -> Result<(), crate::RuntimeError> {
+        Ok(())
+    }
 
+    async fn cancel_await_events_for_session(
+        &self,
+        _session_id: &str,
+    ) -> Result<(), crate::RuntimeError> {
+        Ok(())
+    }
+}
+
+#[async_trait::async_trait]
 impl EffectHost for RecordingEffectHost {
     fn scoped<'run>(
         &'run self,
@@ -111,6 +135,17 @@ impl EffectHost for RecordingEffectHost {
         scope: ExecutionScope,
     ) -> Result<Option<ScopedEffectController<'static>>, crate::RuntimeError> {
         Ok(Some(self.scoped_for(scope)?))
+    }
+
+    async fn retire_effect_journal(
+        &self,
+        retirement: crate::EffectJournalRetirement,
+    ) -> Result<usize, crate::RuntimeError> {
+        self.retirements
+            .lock()
+            .expect("effect host retirements")
+            .push(retirement);
+        Ok(0)
     }
 }
 
@@ -532,6 +567,181 @@ pub async fn effect_controller_session_incarnations_are_isolated(
     assert_replay_conformance_exec_marker(second_outcome, "second-incarnation");
 }
 
+/// Prove that session-scoped journals do not alias across session lifetimes.
+///
+/// This covers every session-scoped execution kind whose effects survive a
+/// worker retry: turns, queue drains, and session deletion.
+#[cfg(any(test, feature = "testing"))]
+pub async fn effect_host_session_scope_journals_are_isolated(host: &dyn EffectHost) {
+    fn incarnation(value: &str) -> crate::IncarnationId {
+        crate::IncarnationId::decode_from_store(value.to_string())
+    }
+
+    async fn assert_isolated(
+        first: ScopedEffectController<'_>,
+        second: ScopedEffectController<'_>,
+        scope_kind: &str,
+    ) {
+        let envelope = exec_code_conformance_envelope(
+            &format!("{scope_kind}-incarnation-reuse"),
+            "same-envelope",
+        );
+        let first_outcome = first
+            .controller()
+            .execute_effect(
+                envelope.clone(),
+                RuntimeEffectLocalExecutor::testing(|_| async {
+                    Ok(replay_conformance_exec_outcome("first-incarnation"))
+                }),
+            )
+            .await
+            .unwrap_or_else(|error| panic!("execute first {scope_kind} effect: {error}"));
+        assert_replay_conformance_exec_marker(first_outcome, "first-incarnation");
+
+        let second_outcome = second
+            .controller()
+            .execute_effect(
+                envelope,
+                RuntimeEffectLocalExecutor::testing(|_| async {
+                    Ok(replay_conformance_exec_outcome("second-incarnation"))
+                }),
+            )
+            .await
+            .unwrap_or_else(|error| panic!("execute second {scope_kind} effect: {error}"));
+        assert_replay_conformance_exec_marker(second_outcome, "second-incarnation");
+    }
+
+    assert_isolated(
+        host.scoped(ExecutionScope::turn_incarnation(
+            "reused-turn-session",
+            incarnation("first-turn-incarnation"),
+            "reused-turn",
+        ))
+        .expect("first turn scope"),
+        host.scoped(ExecutionScope::turn_incarnation(
+            "reused-turn-session",
+            incarnation("second-turn-incarnation"),
+            "reused-turn",
+        ))
+        .expect("second turn scope"),
+        "turn",
+    )
+    .await;
+
+    assert_isolated(
+        host.scoped(ExecutionScope::session_delete_incarnation(
+            "reused-session",
+            incarnation("first-delete-incarnation"),
+        ))
+        .expect("first session-delete scope"),
+        host.scoped(ExecutionScope::session_delete_incarnation(
+            "reused-session",
+            incarnation("second-delete-incarnation"),
+        ))
+        .expect("second session-delete scope"),
+        "session-delete",
+    )
+    .await;
+
+    assert_isolated(
+        host.scoped(ExecutionScope::queue_drain_incarnation(
+            "reused-drain-session",
+            incarnation("first-drain-incarnation"),
+            "reused-drain",
+        ))
+        .expect("first queue-drain scope"),
+        host.scoped(ExecutionScope::queue_drain_incarnation(
+            "reused-drain-session",
+            incarnation("second-drain-incarnation"),
+            "reused-drain",
+        ))
+        .expect("second queue-drain scope"),
+        "queue-drain",
+    )
+    .await;
+}
+
+/// Prove that retiring one session lifetime removes every journal scope owned
+/// by that lifetime.
+#[cfg(any(test, feature = "testing"))]
+pub async fn effect_host_retires_session_journal(host: &dyn EffectHost) {
+    let session_id = "retired-journal-session";
+    let incarnation_id =
+        crate::IncarnationId::decode_from_store("retired-journal-incarnation".to_string());
+    let scopes = [
+        ExecutionScope::turn_incarnation(session_id, incarnation_id.clone(), "retired-turn"),
+        ExecutionScope::queue_drain_incarnation(
+            session_id,
+            incarnation_id.clone(),
+            "retired-drain",
+        ),
+        ExecutionScope::session_delete_incarnation(session_id, incarnation_id.clone()),
+    ];
+
+    for (ordinal, scope) in scopes.into_iter().enumerate() {
+        let controller = host.scoped(scope).expect("retired journal scope");
+        let envelope = exec_code_conformance_envelope(
+            &format!("retired-journal-{ordinal}"),
+            "retired-journal-envelope",
+        );
+        controller
+            .controller()
+            .execute_effect(
+                envelope,
+                RuntimeEffectLocalExecutor::testing(|_| async {
+                    Ok(replay_conformance_exec_outcome(
+                        "recorded-before-retirement",
+                    ))
+                }),
+            )
+            .await
+            .expect("record journal row before retirement");
+    }
+
+    let deleted = host
+        .retire_effect_journal(crate::EffectJournalRetirement::session(
+            session_id,
+            incarnation_id,
+        ))
+        .await
+        .expect("retire session effect journal");
+    assert_eq!(
+        deleted, 3,
+        "retirement must delete every effect row for the exact session lifetime"
+    );
+}
+
+/// Prove that terminal-process retention can retire the exact process journal
+/// without parsing or prefix-matching its canonical key.
+#[cfg(any(test, feature = "testing"))]
+pub async fn effect_host_retires_process_journal(host: &dyn EffectHost) {
+    let process_id = "retired-journal-process";
+    let controller = host
+        .scoped(ExecutionScope::process(process_id))
+        .expect("retired process scope");
+    controller
+        .controller()
+        .execute_effect(
+            exec_code_conformance_envelope("retired-process-journal", "retired-process-envelope"),
+            RuntimeEffectLocalExecutor::testing(|_| async {
+                Ok(replay_conformance_exec_outcome(
+                    "recorded-before-retirement",
+                ))
+            }),
+        )
+        .await
+        .expect("record process journal row before retirement");
+
+    let deleted = host
+        .retire_effect_journal(crate::EffectJournalRetirement::process(process_id))
+        .await
+        .expect("retire process effect journal");
+    assert_eq!(
+        deleted, 1,
+        "process retirement must delete the exact canonical process scope"
+    );
+}
+
 /// Assert that a durable effect controller surfaces the same structural replay
 /// mismatch detail as the shared canonical-envelope validator.
 #[cfg(any(test, feature = "testing"))]
@@ -581,7 +791,11 @@ pub async fn effect_controller_replay_mismatch_diagnostics(
 }
 
 async fn effect_host_preserves_scope_metadata(host: Arc<dyn EffectHost>) {
-    let scope = ExecutionScope::queue_drain("session-1", "drain-1");
+    let scope = ExecutionScope::queue_drain_incarnation(
+        "session-1",
+        crate::IncarnationId::decode_from_store("session-1-incarnation".to_string()),
+        "drain-1",
+    );
     let scoped = host.scoped(scope.clone()).expect("queue drain scope");
     assert_eq!(
         scoped.execution_scope(),

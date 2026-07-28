@@ -513,12 +513,8 @@ async fn final_turn_commit(
     };
     let mut commit = crate::RuntimeCommit::persisted_state_for_test(&state, &[])
         .with_committed_attachments(adopted_attachment_ids);
-    let hash = commit.turn_commit_hash().expect("turn commit hash");
-    commit.turn_commit = crate::RuntimeTurnCommitStamp::new(
-        session_id,
-        crate::OperationId::turn(session_id, turn_id, "final"),
-        hash,
-    );
+    commit.turn_commit =
+        crate::RuntimeTurnCommitStamp::new(crate::OperationId::turn(session_id, turn_id, "final"));
     commit
 }
 

@@ -188,6 +188,8 @@ impl lash_core::SessionCommitStore for SnapshotStore {
         commit: lash_core::store::RuntimeCommit,
     ) -> std::result::Result<lash_core::store::RuntimeCommitResult, lash_core::store::StoreError>
     {
+        let turn_commit_hash = commit.turn_commit_hash()?;
+        let session_id = commit.session_id.clone();
         {
             let mut session_meta = self.session_meta.lock().expect("session metadata lock");
             if session_meta.is_none() {
@@ -205,7 +207,6 @@ impl lash_core::SessionCommitStore for SnapshotStore {
             }
         }
         let mut read = self.read.lock().expect("snapshot store lock");
-        let realization_digest = lash_core::store::graph_realization_digest(&commit.graph);
         let realized_node_timestamps = commit
             .graph
             .appended_nodes()
@@ -216,16 +217,7 @@ impl lash_core::SessionCommitStore for SnapshotStore {
             .collect();
         let completed = &commit.turn_commit;
         let operation_key = completed.operation.storage_key()?;
-        if completed.session_id != commit.session_id {
-            return Err(lash_core::store::StoreError::RuntimeTurnCommitConflict {
-                session_id: completed.session_id.clone(),
-                turn_id: operation_key,
-            });
-        }
-        let key = (
-            completed.session_id.clone(),
-            completed.operation.storage_key()?,
-        );
+        let key = (session_id.clone(), operation_key.clone());
         if let Some((stored_hash, result)) = self
             .runtime_turn_commits
             .lock()
@@ -233,12 +225,12 @@ impl lash_core::SessionCommitStore for SnapshotStore {
             .get(&key)
             .cloned()
         {
-            if stored_hash == completed.turn_commit_hash {
+            if stored_hash == turn_commit_hash {
                 return Ok(result);
             }
             return Err(lash_core::store::StoreError::RuntimeTurnCommitConflict {
-                session_id: completed.session_id.clone(),
-                turn_id: completed.operation.storage_key()?,
+                session_id,
+                turn_id: operation_key,
             });
         }
         let existing_graph = read
@@ -262,7 +254,6 @@ impl lash_core::SessionCommitStore for SnapshotStore {
             head_revision: 8,
             checkpoint_ref: lash_core::BlobRef("checkpoint".to_string()),
             manifest: lash_core::store::SessionCheckpoint::default(),
-            realization_digest,
             realized_node_timestamps,
             enqueued_queue_batches: Vec::new(),
             turn_input_applications: Vec::new(),
@@ -271,11 +262,8 @@ impl lash_core::SessionCommitStore for SnapshotStore {
             .lock()
             .expect("runtime turn commits lock")
             .insert(
-                (
-                    completed.session_id.clone(),
-                    completed.operation.storage_key()?,
-                ),
-                (completed.turn_commit_hash.clone(), result.clone()),
+                (session_id, completed.operation.storage_key()?),
+                (turn_commit_hash, result.clone()),
             );
         if let Some(completion) = &commit.release_session_execution_lease {
             let mut leases = self
@@ -628,13 +616,6 @@ impl lash_core::StoreMaintenance for SnapshotStore {
     ) -> std::result::Result<lash_core::GcReport, lash_core::store::StoreError> {
         Ok(lash_core::GcReport::default())
     }
-
-    async fn verify_node_refcounts(
-        &self,
-    ) -> std::result::Result<lash_core::NodeRefcountVerification, lash_core::store::StoreError>
-    {
-        Ok(lash_core::NodeRefcountVerification::default())
-    }
 }
 
 #[derive(Clone)]
@@ -968,13 +949,6 @@ impl lash_core::StoreMaintenance for BoundSessionStore {
     ) -> std::result::Result<lash_core::GcReport, lash_core::store::StoreError> {
         Ok(lash_core::GcReport::default())
     }
-
-    async fn verify_node_refcounts(
-        &self,
-    ) -> std::result::Result<lash_core::NodeRefcountVerification, lash_core::store::StoreError>
-    {
-        Ok(lash_core::NodeRefcountVerification::default())
-    }
 }
 
 #[derive(Default)]
@@ -1030,6 +1004,19 @@ impl lash_core::SessionStoreFactory for DeletingStoreFactory {
             .or_insert_with(|| Arc::new(SnapshotStore::default()))
             .clone();
         Ok(store as Arc<dyn lash_core::RuntimePersistence>)
+    }
+
+    async fn open_existing_store(
+        &self,
+        request: &lash_core::SessionStoreCreateRequest,
+    ) -> std::result::Result<Option<Arc<dyn lash_core::RuntimePersistence>>, String> {
+        Ok(self
+            .stores
+            .lock()
+            .expect("deleting factory lock")
+            .get(&request.session_id)
+            .cloned()
+            .map(|store| store as Arc<dyn lash_core::RuntimePersistence>))
     }
 
     async fn delete_session(&self, session_id: &str) -> std::result::Result<(), String> {
@@ -1882,8 +1869,15 @@ fn runtime_operation_scope(
         .expect("effect host supplies an owned runtime operation scope")
 }
 
-fn session_delete_scope(session_id: &str) -> lash_core::ScopedEffectController<'static> {
-    inline_scope(lash_core::ExecutionScope::session_delete(session_id))
+async fn session_delete_scope(
+    core: &LashCore,
+    session_id: &str,
+) -> lash_core::ScopedEffectController<'static> {
+    inline_scope(
+        core.session_delete_scope(session_id)
+            .await
+            .expect("session delete execution scope"),
+    )
 }
 
 fn explicit_ephemeral_facets(

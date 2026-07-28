@@ -74,28 +74,6 @@ pub enum StoreError {
         "session leaf `{leaf_node_id}` has no FrameOpen ancestor; every root graph must begin with a frame"
     )]
     MissingFrameOpenAncestor { leaf_node_id: String },
-    /// A high cached count leaks recoverable storage. A low cached count can
-    /// cascade through shared history and let vacuum make the loss permanent,
-    /// so every destructive zero transition must re-derive this value.
-    #[error(
-        "node `{node_id}` cached incoming reference count drifted: cached {cached}, derived {derived}"
-    )]
-    NodeRefcountDrift {
-        node_id: String,
-        cached: i64,
-        derived: i64,
-    },
-    #[error(
-        "runtime commit realization differs from stored receipt: proposed {proposed}, stored {stored}"
-    )]
-    CommitRealizationMismatch { proposed: String, stored: String },
-    #[error(
-        "runtime commit node realization differs from stored receipt: expected {expected:?}, stored {stored:?}"
-    )]
-    CommitNodeRealizationMismatch {
-        expected: Vec<String>,
-        stored: Vec<String>,
-    },
     #[error(
         "queued work claim `{claim_id}` for session `{session_id}` is superseded by a newer session-lease generation"
     )]

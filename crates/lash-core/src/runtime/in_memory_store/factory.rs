@@ -28,7 +28,6 @@ impl SessionStoreFactory for InMemorySessionStoreFactory {
                     Arc::clone(&self.global_session_heads),
                     Arc::clone(&self.node_anchors),
                     Arc::clone(&self.tombstoned_node_ids),
-                    Arc::clone(&self.incoming_node_refs),
                 ));
                 *store.session_meta.lock().expect("lock session meta") = Some(crate::SessionMeta {
                     session_id: request.session_id.clone(),
@@ -129,12 +128,6 @@ impl SessionStoreFactory for InMemorySessionStoreFactory {
         }
         drop(tombstoned);
         drop(graph);
-        *self
-            .incoming_node_refs
-            .lock()
-            .expect("lock incoming node refs")
-            .entry(node_id.to_string())
-            .or_default() += 1;
         self.node_anchors.lock().expect("lock node anchors").insert(
             node_id.to_string(),
             (
@@ -161,11 +154,6 @@ impl SessionStoreFactory for InMemorySessionStoreFactory {
             return Ok(());
         }
         let graph = self.global_session_graph.lock().expect("lock global graph");
-        let mut counts = self
-            .incoming_node_refs
-            .lock()
-            .expect("lock incoming node refs")
-            .clone();
         let mut tombstoned = self
             .tombstoned_node_ids
             .lock()
@@ -176,21 +164,18 @@ impl SessionStoreFactory for InMemorySessionStoreFactory {
             .lock()
             .expect("lock global session heads");
         let anchored_node_ids = anchors.keys().cloned().collect();
-        InMemorySessionStore::decrement_node_reference(
+        let mut live_child_counts = InMemorySessionStore::live_child_counts(&graph, &tombstoned);
+        InMemorySessionStore::reclaim_unreachable_ancestry(
             &graph,
-            &mut counts,
+            &mut live_child_counts,
             &mut tombstoned,
             node_id,
             &heads,
             &anchored_node_ids,
-        )?;
+        );
         drop(heads);
         drop(graph);
         *self.node_anchors.lock().expect("lock node anchors") = anchors;
-        *self
-            .incoming_node_refs
-            .lock()
-            .expect("lock incoming node refs") = counts;
         *self
             .tombstoned_node_ids
             .lock()
@@ -331,12 +316,6 @@ impl SessionStoreFactory for InMemorySessionStoreFactory {
         resident_graph = resident_graph.trim_to_active_path();
         drop(tombstoned);
         drop(graph);
-        *self
-            .incoming_node_refs
-            .lock()
-            .expect("lock incoming node refs")
-            .entry(request.node_id.clone())
-            .or_default() += 1;
         self.global_session_heads
             .lock()
             .expect("lock global session heads")
@@ -349,7 +328,6 @@ impl SessionStoreFactory for InMemorySessionStoreFactory {
             Arc::clone(&self.global_session_heads),
             Arc::clone(&self.node_anchors),
             Arc::clone(&self.tombstoned_node_ids),
-            Arc::clone(&self.incoming_node_refs),
         ));
         *store.session_graph.lock().expect("lock graph") = resident_graph.clone();
         *store.checkpoint.lock().expect("lock checkpoint") = Some(checkpoint);

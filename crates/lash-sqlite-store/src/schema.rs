@@ -53,7 +53,6 @@ CREATE TABLE IF NOT EXISTS graph_nodes (
     node_id        TEXT NOT NULL UNIQUE,
     parent_node_id TEXT,
     node_json      TEXT NOT NULL,
-    incoming_refs  INTEGER NOT NULL DEFAULT 0 CHECK (incoming_refs >= 0),
     tombstoned     INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS idx_graph_nodes_session_seq
@@ -234,7 +233,13 @@ CREATE INDEX IF NOT EXISTS idx_attachment_manifest_owner
 ///
 /// Bumped to 17 so a reusable session name has a durable per-lifetime
 /// incarnation for node and effect-replay identity.
-pub(crate) const SCHEMA_VERSION: i32 = 17;
+///
+/// Bumped to 18 because runtime commit receipts no longer persist the removed
+/// realization digest; stores derive their lookup hash from commit content.
+///
+/// Bumped to 19 to remove cached graph-node reference counts. Node retirement
+/// now derives liveness from parent edges, session heads, and anchors.
+pub(crate) const SCHEMA_VERSION: i32 = 19;
 
 pub(crate) const PROCESS_SCHEMA: &str = "
 CREATE TABLE IF NOT EXISTS processes (
@@ -409,6 +414,8 @@ pub(crate) const TRIGGER_SCHEMA_VERSION: i32 = 2;
 pub(crate) const EFFECT_SCHEMA: &str = "
 CREATE TABLE IF NOT EXISTS runtime_effect_replay (
     scope_id             TEXT NOT NULL,
+    session_id           TEXT,
+    incarnation_id       TEXT,
     replay_key           TEXT NOT NULL,
     envelope_hash        TEXT NOT NULL,
     envelope_json        TEXT NOT NULL,
@@ -426,6 +433,9 @@ CREATE TABLE IF NOT EXISTS runtime_effect_replay (
 
 CREATE INDEX IF NOT EXISTS idx_runtime_effect_replay_lease
     ON runtime_effect_replay(status, lease_expires_at_ms);
+
+CREATE INDEX IF NOT EXISTS idx_runtime_effect_replay_session_lifetime
+    ON runtime_effect_replay(session_id, incarnation_id);
 
 CREATE TABLE IF NOT EXISTS await_event_meta (
     singleton       INTEGER PRIMARY KEY CHECK (singleton = 1),
@@ -456,10 +466,11 @@ CREATE TABLE IF NOT EXISTS await_event_revoked_sessions (
 );
 ";
 
-// FIG-579 persists canonical runtime-effect envelopes for structural replay
-// diagnostics. Effect databases follow the crate's alpha reject-and-recreate
+// Version 5 replaces lossy effect scope ids with canonical typed identities
+// and adds indexed session-lifetime join columns for controller-owned
+// retirement. Effect databases follow the crate's alpha reject-and-recreate
 // convention rather than carrying a migration chain.
-pub(crate) const EFFECT_SCHEMA_VERSION: i32 = 4;
+pub(crate) const EFFECT_SCHEMA_VERSION: i32 = 5;
 
 pub(crate) async fn apply_pragmas(
     conn: &SqliteConnection,

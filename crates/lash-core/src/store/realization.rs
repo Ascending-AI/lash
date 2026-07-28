@@ -1,6 +1,4 @@
-use super::{
-    RuntimeCommit, RuntimeCommitResult, SessionCommitStore, StoreError, graph_realization_digest,
-};
+use super::{RuntimeCommit, RuntimeCommitResult, SessionCommitStore, StoreError};
 
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct RealizedNodeTimestamp {
@@ -9,40 +7,12 @@ pub struct RealizedNodeTimestamp {
 }
 
 /// Commit through the production realization boundary.
-///
-/// Every runtime path that can adopt a commit result calls this function. The
-/// graph digest compares the current proposal with the receipt recorded by the
-/// first successful attempt.
 pub async fn commit_runtime_state_verified(
     store: &(dyn SessionCommitStore + '_),
     commit: RuntimeCommit,
 ) -> Result<RuntimeCommitResult, StoreError> {
     commit.validate_budget()?;
-    let proposed = graph_realization_digest(&commit.graph);
-    let expected_node_ids = commit
-        .graph
-        .appended_nodes()
-        .map(|node| node.node_id.clone())
-        .collect::<Vec<_>>();
-    let result = store.commit_runtime_state(commit).await?;
-    if proposed != result.realization_digest {
-        return Err(StoreError::CommitRealizationMismatch {
-            proposed,
-            stored: result.realization_digest.clone(),
-        });
-    }
-    let stored_node_ids = result
-        .realized_node_timestamps
-        .iter()
-        .map(|node| node.node_id.clone())
-        .collect::<Vec<_>>();
-    if expected_node_ids != stored_node_ids {
-        return Err(StoreError::CommitNodeRealizationMismatch {
-            expected: expected_node_ids,
-            stored: stored_node_ids,
-        });
-    }
-    Ok(result)
+    store.commit_runtime_state(commit).await
 }
 
 #[cfg(test)]
@@ -77,7 +47,6 @@ mod tests {
             commit: RuntimeCommit,
         ) -> Result<RuntimeCommitResult, StoreError> {
             self.commit_attempts.fetch_add(1, Ordering::SeqCst);
-            let realization_digest = graph_realization_digest(&commit.graph);
             let realized_node_timestamps = commit
                 .graph
                 .appended_nodes()
@@ -97,7 +66,6 @@ mod tests {
                 head_revision: commit.expected_head_revision + 1,
                 checkpoint_ref: "empty-frame-facade".to_string().into(),
                 manifest,
-                realization_digest,
                 realized_node_timestamps,
                 enqueued_queue_batches: Vec::new(),
                 turn_input_applications: Vec::new(),

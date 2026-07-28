@@ -620,8 +620,11 @@ impl QueuedTurnBuilder {
         effect_host: &dyn EffectHost,
     ) -> Result<Option<TurnResult>> {
         let drain_id = self.resolved_drain_id();
-        let scope =
-            lash_core::ExecutionScope::queue_drain(self.runtime.observe().session_id(), drain_id);
+        let scope = self
+            .runtime
+            .observe()
+            .persisted_state
+            .queue_drain_scope(drain_id);
         let scoped_effect_controller = effect_host.scoped(scope)?;
         self.stream_to_with_scope(events, scoped_effect_controller)
             .await
@@ -633,8 +636,11 @@ impl QueuedTurnBuilder {
         controller: &dyn RuntimeEffectController,
     ) -> Result<Option<TurnResult>> {
         let drain_id = self.resolved_drain_id();
-        let scope =
-            lash_core::ExecutionScope::queue_drain(self.runtime.observe().session_id(), drain_id);
+        let scope = self
+            .runtime
+            .observe()
+            .persisted_state
+            .queue_drain_scope(drain_id);
         let scoped_effect_controller = ScopedEffectController::borrowed(controller, scope)?;
         self.stream_to_with_scope(events, scoped_effect_controller)
             .await

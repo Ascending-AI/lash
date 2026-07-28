@@ -60,99 +60,47 @@ fn postgres_queued_work_claim_candidates_sql(boundary: QueuedWorkClaimBoundary) 
     )
 }
 
-pub(crate) async fn derived_node_refcount_tx(
-    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
-    node_id: &str,
-) -> Result<i64, StoreError> {
-    derived_node_refcount_for_head_move_tx(tx, node_id, None, None).await
-}
-
-async fn derived_node_refcount_for_head_move_tx(
-    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
-    node_id: &str,
-    removed_head_root: Option<&str>,
-    added_head_root: Option<&str>,
-) -> Result<i64, StoreError> {
-    let stored = sqlx::query_scalar::<_, i64>(
-        "SELECT
-            (SELECT COUNT(*) FROM lash_graph_nodes
-             WHERE parent_node_id = $1 AND tombstoned = FALSE)
-          + (SELECT COUNT(*) FROM lash_sessions WHERE leaf_node_id = $1)
-          + (SELECT COUNT(*) FROM lash_node_anchors WHERE node_id = $1)",
-    )
-    .bind(node_id)
-    .fetch_one(&mut **tx)
-    .await
-    .map_err(store_sqlx_error)?;
-    Ok(stored - i64::from(removed_head_root == Some(node_id))
-        + i64::from(added_head_root == Some(node_id)))
-}
-
-/// Remove one counted reference and reclaim a zero-count ancestry prefix.
-///
-/// High cached counts only leak recoverable storage. Low cached counts can
-/// cascade through a prefix still shared by another head, after which vacuum
-/// makes the loss permanent. Every destructive zero transition therefore
-/// re-derives liveness from indexed edge/root rows in this transaction. A head
-/// move applies its pending old-root removal and new-root addition to that
-/// query, yielding the post-commit root set before the CAS row is published.
-pub(crate) async fn decrement_node_ref_tx(
+/// Reclaim the ancestry prefix with no live child, session-head root, or
+/// explicit anchor. Every writer that adds an edge or root locks the target
+/// node first, so the reachability query runs from a fresh snapshot after
+/// concurrent additions have either committed or failed.
+pub(crate) async fn retire_unreachable_ancestry_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     first_node_id: &str,
-) -> Result<(), StoreError> {
-    decrement_node_ref_for_head_move_tx(tx, first_node_id, None, None).await
-}
-
-async fn decrement_node_ref_for_head_move_tx(
-    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
-    first_node_id: &str,
-    removed_head_root: Option<&str>,
-    added_head_root: Option<&str>,
 ) -> Result<(), StoreError> {
     let mut node_id = first_node_id.to_string();
     loop {
-        let row = sqlx::query(
-            "UPDATE lash_graph_nodes
-             SET incoming_refs = incoming_refs - 1
-             WHERE node_id = $1 AND tombstoned = FALSE AND incoming_refs > 0
-             RETURNING incoming_refs, parent_node_id",
+        let parent_node_id = sqlx::query_scalar::<_, Option<String>>(
+            "SELECT parent_node_id FROM lash_graph_nodes
+             WHERE node_id = $1 AND tombstoned = FALSE
+             FOR UPDATE",
         )
         .bind(&node_id)
         .fetch_optional(&mut **tx)
         .await
         .map_err(store_sqlx_error)?;
-        let Some(row) = row else {
-            let derived = derived_node_refcount_for_head_move_tx(
-                tx,
-                &node_id,
-                removed_head_root,
-                added_head_root,
-            )
-            .await?;
-            return Err(StoreError::NodeRefcountDrift {
-                node_id,
-                cached: 0,
-                derived,
-            });
-        };
-        let cached: i64 = row.get(0);
-        let parent_node_id: Option<String> = row.get(1);
-        if cached > 0 {
+        let Some(parent_node_id) = parent_node_id else {
             return Ok(());
-        }
-        let derived = derived_node_refcount_for_head_move_tx(
-            tx,
-            &node_id,
-            removed_head_root,
-            added_head_root,
+        };
+        let reachable = sqlx::query_scalar::<_, bool>(
+            "SELECT
+                EXISTS(
+                    SELECT 1 FROM lash_graph_nodes
+                    WHERE parent_node_id = $1 AND tombstoned = FALSE
+                )
+                OR EXISTS(
+                    SELECT 1 FROM lash_sessions WHERE leaf_node_id = $1
+                )
+                OR EXISTS(
+                    SELECT 1 FROM lash_node_anchors WHERE node_id = $1
+                )",
         )
-        .await?;
-        if derived != 0 {
-            return Err(StoreError::NodeRefcountDrift {
-                node_id,
-                cached,
-                derived,
-            });
+        .bind(&node_id)
+        .fetch_one(&mut **tx)
+        .await
+        .map_err(store_sqlx_error)?;
+        if reachable {
+            return Ok(());
         }
         sqlx::query("UPDATE lash_graph_nodes SET tombstoned = TRUE WHERE node_id = $1")
             .bind(&node_id)
@@ -352,11 +300,11 @@ impl SessionCommitStore for PostgresSessionStore {
     ) -> Result<RuntimeCommitResult, StoreError> {
         commit.validate_budget()?;
         commit.validate_operation_session()?;
+        let turn_commit_hash = commit.turn_commit_hash()?;
         self.bind_session_id(&commit.session_id)?;
         let commit_incarnation_id = commit
             .durable_incarnation_id("Postgres runtime commit")?
             .clone();
-        let realization_digest = lash_core::store::graph_realization_digest(&commit.graph);
         let realized_node_timestamps = commit
             .graph
             .appended_nodes()
@@ -439,7 +387,7 @@ impl SessionCommitStore for PostgresSessionStore {
                  FROM lash_runtime_turn_commits
                  WHERE session_id = $1 AND turn_id = $2",
             )
-            .bind(&completed.session_id)
+            .bind(&commit.session_id)
             .bind(&operation_key)
             .fetch_optional(&mut *tx)
             .await
@@ -447,7 +395,7 @@ impl SessionCommitStore for PostgresSessionStore {
             if let Some(row) = prior {
                 let hash: String = row.get(0);
                 let result_json: String = row.get(1);
-                if hash == completed.turn_commit_hash {
+                if hash == turn_commit_hash {
                     let result = store_decode_json(&result_json, "runtime turn commit result")?;
                     if let Some(completion) = commit.release_session_execution_lease.as_ref() {
                         release_session_execution_lease_tx(&mut tx, completion).await?;
@@ -456,7 +404,7 @@ impl SessionCommitStore for PostgresSessionStore {
                     return Ok(result);
                 }
                 return Err(StoreError::RuntimeTurnCommitConflict {
-                    session_id: completed.session_id.clone(),
+                    session_id: commit.session_id.clone(),
                     turn_id: operation_key,
                 });
             }
@@ -599,6 +547,22 @@ impl SessionCommitStore for PostgresSessionStore {
             }
             _ => {}
         }
+        if let Some(old_leaf_node_id) = &old_leaf_node_id {
+            let live = sqlx::query_scalar::<_, bool>(
+                "SELECT TRUE FROM lash_graph_nodes
+                 WHERE node_id = $1 AND tombstoned = FALSE
+                 FOR UPDATE",
+            )
+            .bind(old_leaf_node_id)
+            .fetch_optional(&mut *tx)
+            .await
+            .map_err(store_sqlx_error)?;
+            if live.is_none() {
+                return Err(StoreError::InvalidGraphLeaf {
+                    leaf_node_id: Some(old_leaf_node_id.clone()),
+                });
+            }
+        }
         let leaf_node_id = {
             for node in &commit.graph.nodes {
                 let node_json = node.encode_storage_body().map_err(|err| {
@@ -606,8 +570,8 @@ impl SessionCommitStore for PostgresSessionStore {
                 })?;
                 sqlx::query(
                     "INSERT INTO lash_graph_nodes
-                         (session_id, node_id, parent_node_id, node_json, incoming_refs)
-                         VALUES ($1, $2, $3, $4, 0)",
+                         (session_id, node_id, parent_node_id, node_json)
+                         VALUES ($1, $2, $3, $4)",
                 )
                 .bind(&commit.session_id)
                 .bind(&node.node_id)
@@ -616,56 +580,10 @@ impl SessionCommitStore for PostgresSessionStore {
                 .execute(&mut *tx)
                 .await
                 .map_err(store_sqlx_error)?;
-                if let Some(parent_node_id) = &node.parent_node_id {
-                    let changed = sqlx::query(
-                        "UPDATE lash_graph_nodes
-                             SET incoming_refs = incoming_refs + 1
-                             WHERE node_id = $1 AND tombstoned = FALSE",
-                    )
-                    .bind(parent_node_id)
-                    .execute(&mut *tx)
-                    .await
-                    .map_err(store_sqlx_error)?
-                    .rows_affected();
-                    if changed != 1 {
-                        return Err(StoreError::InvalidGraphParent {
-                            node_id: node.node_id.clone(),
-                            expected: node.parent_node_id.clone(),
-                            actual: None,
-                        });
-                    }
-                }
             }
             commit.graph.leaf_node_id.clone()
         };
-        if old_leaf_node_id != leaf_node_id {
-            if let Some(new_leaf_node_id) = &leaf_node_id {
-                let changed = sqlx::query(
-                    "UPDATE lash_graph_nodes
-                     SET incoming_refs = incoming_refs + 1
-                     WHERE node_id = $1 AND tombstoned = FALSE",
-                )
-                .bind(new_leaf_node_id)
-                .execute(&mut *tx)
-                .await
-                .map_err(store_sqlx_error)?
-                .rows_affected();
-                if changed != 1 {
-                    return Err(StoreError::InvalidGraphLeaf {
-                        leaf_node_id: leaf_node_id.clone(),
-                    });
-                }
-            }
-            if let Some(old_leaf_node_id) = &old_leaf_node_id {
-                decrement_node_ref_for_head_move_tx(
-                    &mut tx,
-                    old_leaf_node_id,
-                    Some(old_leaf_node_id),
-                    leaf_node_id.as_deref(),
-                )
-                .await?;
-            }
-        }
+        let head_changed = old_leaf_node_id != leaf_node_id;
         let derived_frame_node_id = match leaf_node_id.as_deref() {
             Some(leaf_node_id) => Some(
                 nearest_frame_node_id_tx(&mut tx, leaf_node_id)
@@ -742,6 +660,9 @@ impl SessionCommitStore for PostgresSessionStore {
                 expected: commit.expected_head_revision,
                 actual: actual_now,
             });
+        }
+        if head_changed && let Some(old_leaf_node_id) = &old_leaf_node_id {
+            retire_unreachable_ancestry_tx(&mut tx, old_leaf_node_id).await?;
         }
         complete_queued_work_claims_tx(&mut tx, &commit.completed_queue_claims).await?;
         complete_turn_input_claims_tx(&mut tx, &commit.completed_turn_input_claims).await?;
@@ -830,7 +751,6 @@ impl SessionCommitStore for PostgresSessionStore {
             head_revision: next_revision,
             checkpoint_ref,
             manifest,
-            realization_digest,
             realized_node_timestamps,
             enqueued_queue_batches,
             turn_input_applications: commit.turn_input_applications(),
@@ -844,9 +764,9 @@ impl SessionCommitStore for PostgresSessionStore {
                  )
                  VALUES ($1, $2, $3, $4, $5)",
             )
-            .bind(&completed.session_id)
+            .bind(&commit.session_id)
             .bind(operation_key)
-            .bind(&completed.turn_commit_hash)
+            .bind(&turn_commit_hash)
             .bind(encode_json(&result))
             .bind(now as i64)
             .execute(&mut *tx)
@@ -2285,39 +2205,6 @@ impl StoreMaintenance for PostgresSessionStore {
             root_count,
             retained_blob_count: retained.len(),
             deleted_blob_count,
-        })
-    }
-
-    async fn verify_node_refcounts(&self) -> Result<NodeRefcountVerification, StoreError> {
-        let mut tx = self.pool.begin().await.map_err(store_sqlx_error)?;
-        sqlx::query("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ")
-            .execute(&mut *tx)
-            .await
-            .map_err(store_sqlx_error)?;
-        let rows = sqlx::query(
-            "SELECT node_id, incoming_refs
-             FROM lash_graph_nodes
-             WHERE tombstoned = FALSE
-             ORDER BY node_id",
-        )
-        .fetch_all(&mut *tx)
-        .await
-        .map_err(store_sqlx_error)?;
-        for row in &rows {
-            let node_id: String = row.get(0);
-            let cached: i64 = row.get(1);
-            let derived = derived_node_refcount_tx(&mut tx, &node_id).await?;
-            if cached != derived {
-                return Err(StoreError::NodeRefcountDrift {
-                    node_id,
-                    cached,
-                    derived,
-                });
-            }
-        }
-        tx.commit().await.map_err(store_sqlx_error)?;
-        Ok(NodeRefcountVerification {
-            checked_node_count: rows.len(),
         })
     }
 }

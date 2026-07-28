@@ -19,10 +19,14 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use lash_core::store::{GraphAppend, RuntimeCommitResult};
 use lash_core::{
-    InMemorySessionStore, IncarnationId, LeaseOwnerIdentity, PendingTurnInputDraft, ProtocolEvent,
-    RuntimeCommit, RuntimePersistence, RuntimeSessionState, RuntimeTurnCommitStamp,
-    SessionHistoryRecord, SessionNodePayload, SessionNodeRecord, StoreError, TurnInput,
-    TurnInputApplication, TurnInputClaim, TurnInputIngress, TurnInputState,
+    AttachmentId, AttachmentIntent, AttachmentOwnerKind, BlobRef, Clock, ForkSessionRequest,
+    HydratedSessionCheckpoint, InMemorySessionStore, InMemorySessionStoreFactory, IncarnationId,
+    LeaseOwnerIdentity, LeaseOwnerLiveness, PendingTurnInputDraft, PluginSessionSnapshot,
+    PluginSnapshotArtifact, PluginSnapshotEntry, PluginSnapshotMeta, ProtocolEvent, RuntimeCommit,
+    RuntimePersistence, RuntimeSessionState, RuntimeTurnCommitStamp, SessionCommitStore,
+    SessionHistoryRecord, SessionMeta, SessionNodePayload, SessionNodeRecord, SessionRelation,
+    SessionStoreCreateRequest, SessionStoreFactory, StoreError, TokenLedgerEntry, TokenUsage,
+    ToolState, TurnInput, TurnInputApplication, TurnInputClaim, TurnInputIngress, TurnInputState,
 };
 use lash_postgres_store::PostgresStorage;
 use rusqlite::OptionalExtension;
@@ -42,6 +46,10 @@ enum CaseName {
     StaleExpectedHeadRevision,
     IdenticalAndMutatedTurnCommitReplay,
     SettleClaimAfterLeaseGenerationSuperseded,
+    CheckpointBodiesThenRefOnly,
+    MissingCheckpointComponentRef,
+    PinForkUnpin,
+    AttachmentAdoption,
 }
 
 impl CaseName {
@@ -56,6 +64,10 @@ impl CaseName {
             Self::SettleClaimAfterLeaseGenerationSuperseded => {
                 "settle_claim_after_session_lease_generation_superseded_before_reclaim"
             }
+            Self::CheckpointBodiesThenRefOnly => "checkpoint_bodies_then_ref_only",
+            Self::MissingCheckpointComponentRef => "missing_checkpoint_component_ref",
+            Self::PinForkUnpin => "pin_fork_unpin_moves_node_anchor",
+            Self::AttachmentAdoption => "attachment_intent_adopted_by_commit",
         }
     }
 }
@@ -73,7 +85,14 @@ enum StoreOperation {
         expected_head_revision: u64,
         graph: GraphSpec,
         turn_commit: Option<TurnCommitSpec>,
+        checkpoint: CheckpointSpec,
+        usage: bool,
+        adopt_attachment: bool,
     },
+    RecordAttachmentIntent,
+    PinLeaf,
+    ForkAtLeaf,
+    UnpinLeaf,
     EnqueueNextTurnInput,
     AcquireSessionLease {
         slot: LeaseSlot,
@@ -94,6 +113,10 @@ impl StoreOperation {
     fn label(&self) -> &'static str {
         match self {
             Self::Commit { label, .. } => label,
+            Self::RecordAttachmentIntent => "record_attachment_intent",
+            Self::PinLeaf => "pin_leaf",
+            Self::ForkAtLeaf => "fork_at_leaf",
+            Self::UnpinLeaf => "unpin_leaf",
             Self::EnqueueNextTurnInput => "enqueue_next_turn_input",
             Self::AcquireSessionLease {
                 slot: LeaseSlot::First,
@@ -196,7 +219,14 @@ fn scoped_node_id(session_id: &str, incarnation_id: &IncarnationId, node_id: &st
 #[derive(Clone, Copy, Debug)]
 struct TurnCommitSpec {
     turn_id: &'static str,
-    hash: &'static str,
+}
+
+#[derive(Clone, Copy, Debug)]
+enum CheckpointSpec {
+    Empty,
+    Bodies,
+    PriorRefs,
+    MissingExecutionStateRef,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -218,6 +248,9 @@ fn commit(label: &'static str, expected_head_revision: u64, graph: GraphSpec) ->
         expected_head_revision,
         graph,
         turn_commit: None,
+        checkpoint: CheckpointSpec::Empty,
+        usage: false,
+        adopt_attachment: false,
     }
 }
 
@@ -299,8 +332,10 @@ fn generated_cases() -> Vec<GeneratedCase> {
                     graph: append(Vec::new(), Some("root")),
                     turn_commit: Some(TurnCommitSpec {
                         turn_id: "nodeless-leaf-move",
-                        hash: "nodeless-leaf-move",
                     }),
+                    checkpoint: CheckpointSpec::Empty,
+                    usage: false,
+                    adopt_attachment: false,
                 },
             ],
         },
@@ -329,28 +364,28 @@ fn generated_cases() -> Vec<GeneratedCase> {
                     label: "first_turn_commit",
                     expected_head_revision: 0,
                     graph: append(vec![original()], Some("collision")),
-                    turn_commit: Some(TurnCommitSpec {
-                        turn_id: "turn-1",
-                        hash: "identical-hash",
-                    }),
+                    turn_commit: Some(TurnCommitSpec { turn_id: "turn-1" }),
+                    checkpoint: CheckpointSpec::Empty,
+                    usage: false,
+                    adopt_attachment: false,
                 },
                 StoreOperation::Commit {
                     label: "resubmit_identical_turn_commit_hash",
                     expected_head_revision: 0,
                     graph: append(vec![original()], Some("collision")),
-                    turn_commit: Some(TurnCommitSpec {
-                        turn_id: "turn-1",
-                        hash: "identical-hash",
-                    }),
+                    turn_commit: Some(TurnCommitSpec { turn_id: "turn-1" }),
+                    checkpoint: CheckpointSpec::Empty,
+                    usage: false,
+                    adopt_attachment: false,
                 },
                 StoreOperation::Commit {
                     label: "resubmit_mutated_turn_commit_hash",
                     expected_head_revision: 1,
                     graph: append(vec![mutated()], Some("collision")),
-                    turn_commit: Some(TurnCommitSpec {
-                        turn_id: "turn-1",
-                        hash: "mutated-hash",
-                    }),
+                    turn_commit: Some(TurnCommitSpec { turn_id: "turn-1" }),
+                    checkpoint: CheckpointSpec::Empty,
+                    usage: false,
+                    adopt_attachment: false,
                 },
             ],
         },
@@ -381,6 +416,89 @@ fn generated_cases() -> Vec<GeneratedCase> {
                 },
             ],
         },
+        GeneratedCase {
+            name: CaseName::CheckpointBodiesThenRefOnly,
+            operations: vec![
+                StoreOperation::Commit {
+                    label: "commit_checkpoint_component_bodies",
+                    expected_head_revision: 0,
+                    graph: append(
+                        vec![NodeSpec::new("active-frame", None, "checkpoint")],
+                        Some("active-frame"),
+                    ),
+                    turn_commit: Some(TurnCommitSpec {
+                        turn_id: "checkpoint-bodies",
+                    }),
+                    checkpoint: CheckpointSpec::Bodies,
+                    usage: true,
+                    adopt_attachment: false,
+                },
+                StoreOperation::Commit {
+                    label: "commit_checkpoint_refs_with_clean_source",
+                    expected_head_revision: 1,
+                    graph: append(Vec::new(), Some("active-frame")),
+                    turn_commit: Some(TurnCommitSpec {
+                        turn_id: "checkpoint-refs",
+                    }),
+                    checkpoint: CheckpointSpec::PriorRefs,
+                    usage: false,
+                    adopt_attachment: false,
+                },
+            ],
+        },
+        GeneratedCase {
+            name: CaseName::MissingCheckpointComponentRef,
+            operations: vec![StoreOperation::Commit {
+                label: "commit_ref_for_never_stored_execution_state",
+                expected_head_revision: 0,
+                graph: append(Vec::new(), None),
+                turn_commit: Some(TurnCommitSpec {
+                    turn_id: "missing-component",
+                }),
+                checkpoint: CheckpointSpec::MissingExecutionStateRef,
+                usage: false,
+                adopt_attachment: false,
+            }],
+        },
+        GeneratedCase {
+            name: CaseName::PinForkUnpin,
+            operations: vec![
+                StoreOperation::Commit {
+                    label: "commit_forkable_leaf",
+                    expected_head_revision: 0,
+                    graph: append(
+                        vec![NodeSpec::new("active-frame", None, "forkable")],
+                        Some("active-frame"),
+                    ),
+                    turn_commit: Some(TurnCommitSpec {
+                        turn_id: "forkable-leaf",
+                    }),
+                    checkpoint: CheckpointSpec::Empty,
+                    usage: false,
+                    adopt_attachment: false,
+                },
+                StoreOperation::PinLeaf,
+                StoreOperation::ForkAtLeaf,
+                StoreOperation::UnpinLeaf,
+            ],
+        },
+        GeneratedCase {
+            name: CaseName::AttachmentAdoption,
+            operations: vec![
+                StoreOperation::RecordAttachmentIntent,
+                StoreOperation::Commit {
+                    label: "adopt_attachment_in_runtime_commit",
+                    expected_head_revision: 0,
+                    graph: append(Vec::new(), None),
+                    turn_commit: Some(TurnCommitSpec {
+                        turn_id: "attachment-adoption",
+                    }),
+                    checkpoint: CheckpointSpec::Empty,
+                    usage: false,
+                    adopt_attachment: true,
+                },
+            ],
+        },
     ]
 }
 
@@ -402,12 +520,18 @@ fn materialize_graph(
     }
 }
 
+// A commit is genuinely this many independent parts; bundling them into a
+// params struct here would only move the same fields behind another name.
+#[allow(clippy::too_many_arguments)]
 fn runtime_commit(
     session_id: &str,
     expected_head_revision: u64,
     graph: &GraphSpec,
     turn_commit: Option<TurnCommitSpec>,
     current_frame_node_id: Option<String>,
+    checkpoint: HydratedSessionCheckpoint,
+    usage_deltas: Vec<TokenLedgerEntry>,
+    committed_attachment_ids: Vec<AttachmentId>,
 ) -> RuntimeCommit {
     let incarnation_id = differential_incarnation_id(session_id);
     let state = RuntimeSessionState {
@@ -426,14 +550,134 @@ fn runtime_commit(
         .map(|node| node.node_id.clone())
         .or(current_frame_node_id);
     if let Some(turn_commit) = turn_commit {
-        commit.turn_commit = RuntimeTurnCommitStamp::new(
+        commit.turn_commit = RuntimeTurnCommitStamp::new(lash_core::store::OperationId::turn(
             session_id,
-            lash_core::store::OperationId::turn(session_id, turn_commit.turn_id, "differential"),
-            turn_commit.hash,
-        );
+            turn_commit.turn_id,
+            "differential",
+        ));
     }
+    commit.checkpoint = checkpoint;
+    commit.usage_deltas = usage_deltas;
+    commit.committed_attachment_ids = committed_attachment_ids;
     commit
 }
+
+#[derive(Clone, Debug)]
+struct CheckpointComponentRefs {
+    tool_state: Option<BlobRef>,
+    plugin_snapshot: Option<BlobRef>,
+    execution_state: Option<BlobRef>,
+}
+
+fn checkpoint_bodies() -> HydratedSessionCheckpoint {
+    let tool_state = serde_json::from_value::<ToolState>(serde_json::json!({
+        "generation": 7,
+        "tools": {}
+    }))
+    .expect("build differential tool state");
+    let plugin_snapshot = PluginSessionSnapshot {
+        plugins: [(
+            "differential-plugin".to_string(),
+            PluginSnapshotEntry {
+                meta: PluginSnapshotMeta {
+                    plugin_id: "differential-plugin".to_string(),
+                    plugin_version: "1.2.3".to_string(),
+                    revision: 11,
+                    state: Some(serde_json::json!({"mode": "durable"})),
+                },
+                artifacts: vec![PluginSnapshotArtifact {
+                    name: "snapshot.bin".to_string(),
+                    data: vec![4, 2, 4, 2],
+                }],
+            },
+        )]
+        .into_iter()
+        .collect(),
+    };
+    HydratedSessionCheckpoint {
+        turn_state: lash_core::PersistedTurnState {
+            turn_index: 37,
+            token_usage: TokenUsage {
+                input_tokens: 13,
+                output_tokens: 8,
+                cache_read_input_tokens: 5,
+                cache_write_input_tokens: 3,
+                reasoning_output_tokens: 2,
+            },
+            ..Default::default()
+        },
+        tool_state: Some(tool_state),
+        plugin_snapshot: Some(plugin_snapshot),
+        plugin_snapshot_revision: Some(11),
+        execution_state: Some(vec![9, 8, 7, 6]),
+        ..Default::default()
+    }
+}
+
+fn checkpoint_from_spec(
+    spec: CheckpointSpec,
+    prior_refs: Option<&CheckpointComponentRefs>,
+) -> HydratedSessionCheckpoint {
+    match spec {
+        CheckpointSpec::Empty => HydratedSessionCheckpoint::default(),
+        CheckpointSpec::Bodies => checkpoint_bodies(),
+        CheckpointSpec::PriorRefs => {
+            let refs = prior_refs.expect("body commit recorded component refs");
+            HydratedSessionCheckpoint {
+                turn_state: checkpoint_bodies().turn_state,
+                tool_state_ref: refs.tool_state.clone(),
+                plugin_snapshot_ref: refs.plugin_snapshot.clone(),
+                plugin_snapshot_revision: Some(11),
+                execution_state_ref: refs.execution_state.clone(),
+                ..Default::default()
+            }
+        }
+        CheckpointSpec::MissingExecutionStateRef => HydratedSessionCheckpoint {
+            execution_state_ref: Some(BlobRef(
+                "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff".to_string(),
+            )),
+            ..Default::default()
+        },
+    }
+}
+
+fn differential_usage_delta() -> TokenLedgerEntry {
+    TokenLedgerEntry {
+        source: "differential".to_string(),
+        model: "test/model".to_string(),
+        usage: TokenUsage {
+            input_tokens: 21,
+            output_tokens: 12,
+            cache_read_input_tokens: 4,
+            cache_write_input_tokens: 3,
+            reasoning_output_tokens: 2,
+        },
+    }
+}
+
+fn differential_attachment_id() -> AttachmentId {
+    AttachmentId::new("differential-attachment")
+}
+
+// Row shapes for the SQL observation queries. Named because the tuples are wide
+// enough that clippy flags them inline, and a name reads better at the use site.
+type AttachmentRow = (
+    String,
+    String,
+    i64,
+    Option<i64>,
+    Option<String>,
+    Option<String>,
+);
+type LeaseRow = (
+    Option<String>,
+    Option<String>,
+    Option<String>,
+    Option<String>,
+    i64,
+    i64,
+    i64,
+);
 
 #[derive(Clone, PartialEq, Eq)]
 struct DurableNode {
@@ -473,6 +717,77 @@ struct PendingTurnInputObservation {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
+struct CheckpointObservation {
+    checkpoint_ref: BlobRef,
+    turn_state: serde_json::Value,
+    tool_state_ref: Option<BlobRef>,
+    tool_state: Option<serde_json::Value>,
+    plugin_snapshot_ref: Option<BlobRef>,
+    plugin_snapshot: Option<serde_json::Value>,
+    plugin_snapshot_revision: Option<u64>,
+    execution_state_ref: Option<BlobRef>,
+    execution_state: Option<Vec<u8>>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct RuntimeTurnCommitObservation {
+    operation: String,
+    turn_commit_hash: String,
+    result: serde_json::Value,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct AttachmentManifestObservation {
+    attachment_id: AttachmentId,
+    canonical_uri: String,
+    intent_at_epoch_ms: u64,
+    // Commit time is store-authoritative (database time in PostgreSQL, injected
+    // host time locally). The logical lifecycle fact is compared explicitly.
+    committed: bool,
+    owner_kind: Option<AttachmentOwnerKind>,
+    owner_id: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct NodeAnchorObservation {
+    node_id: String,
+    checkpoint_ref: BlobRef,
+    source_session_id: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct UsageDeltaObservation {
+    source: String,
+    model: String,
+    usage: TokenUsage,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct SessionMetaObservation {
+    incarnation_id: IncarnationId,
+    session_name: String,
+    created_at: String,
+    model: String,
+    cwd: Option<String>,
+    relation: SessionRelation,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct SessionExecutionLeaseObservation {
+    owner: Option<LeaseOwnerIdentity>,
+    // Lease tokens are backend-generated CAS capabilities. Their bytes are a
+    // physical implementation detail; token presence is the logical row state
+    // and is compared explicitly alongside owner, generation, and times.
+    lease_token_present: bool,
+    fencing_token: u64,
+    // PostgreSQL uses database-authoritative wall time while local stores use
+    // the injected clock. Compare the durable temporal contract (claimed and
+    // TTL) rather than incomparable clock-domain epoch values.
+    claimed: bool,
+    ttl_ms: Option<u64>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
 struct ComparableRuntimeCommitResult {
     head_revision: u64,
     turn_input_applications: Vec<TurnInputApplication>,
@@ -491,8 +806,19 @@ impl From<RuntimeCommitResult> for ComparableRuntimeCommitResult {
 struct RawDurableState {
     head_revision: Option<u64>,
     leaf_node_id: Option<String>,
+    checkpoint: Option<CheckpointObservation>,
     durable_nodes: Vec<DurableNode>,
+    runtime_turn_commits: Vec<RuntimeTurnCommitObservation>,
+    attachment_manifest: Vec<AttachmentManifestObservation>,
+    node_anchors: Vec<NodeAnchorObservation>,
+    usage_deltas: Vec<UsageDeltaObservation>,
+    session_meta: Option<SessionMetaObservation>,
+    session_execution_leases: Vec<SessionExecutionLeaseObservation>,
     pending_turn_inputs: Vec<PendingTurnInputObservation>,
+    // `process_*` and `trigger_*` are deliberately excluded: they are separate
+    // subsystems with dedicated conformance suites, while this harness and its
+    // operation vocabulary are scoped to one runtime session. Effect/await
+    // state is likewise owned by the separate EffectHost contract.
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -503,15 +829,26 @@ struct StepObservation {
 }
 
 enum RawDurableReader {
-    InMemory(Arc<InMemorySessionStore>),
-    Sqlite { path: PathBuf, session_id: String },
-    Postgres { pool: PgPool, session_id: String },
+    InMemory {
+        store: Arc<InMemorySessionStore>,
+        factory: Arc<InMemorySessionStoreFactory>,
+    },
+    Sqlite {
+        path: PathBuf,
+        session_id: String,
+        store: Arc<dyn RuntimePersistence>,
+    },
+    Postgres {
+        pool: PgPool,
+        session_id: String,
+        store: Arc<dyn RuntimePersistence>,
+    },
 }
 
 impl RawDurableReader {
     async fn observe(&self) -> RawDurableState {
         match self {
-            Self::InMemory(store) => {
+            Self::InMemory { store, factory } => {
                 let durable_nodes = store
                     .raw_graph_nodes_for_testing()
                     .into_iter()
@@ -534,17 +871,102 @@ impl RawDurableReader {
                         }
                     })
                     .collect();
+                let checkpoint = match store.raw_checkpoint_for_testing() {
+                    Some(checkpoint) => {
+                        let checkpoint_ref = store
+                            .load_session()
+                            .await
+                            .expect("load in-memory session")
+                            .expect("checkpoint implies in-memory session")
+                            .checkpoint_ref
+                            .expect("checkpoint implies checkpoint ref");
+                        Some(checkpoint_observation(checkpoint_ref, checkpoint))
+                    }
+                    None => None,
+                };
+                let runtime_turn_commits = store
+                    .raw_runtime_turn_commits_for_testing()
+                    .into_iter()
+                    .map(
+                        |(operation, turn_commit_hash, result)| RuntimeTurnCommitObservation {
+                            operation,
+                            turn_commit_hash,
+                            result: serde_json::to_value(result)
+                                .expect("encode in-memory turn-commit result"),
+                        },
+                    )
+                    .collect();
+                let attachment_manifest = store
+                    .raw_attachment_manifest_for_testing()
+                    .into_iter()
+                    .map(attachment_manifest_observation)
+                    .collect();
+                let node_anchors = factory
+                    .raw_node_anchors_for_testing()
+                    .into_iter()
+                    .map(
+                        |(node_id, checkpoint_ref, source_session_id)| NodeAnchorObservation {
+                            node_id,
+                            checkpoint_ref,
+                            source_session_id,
+                        },
+                    )
+                    .collect();
+                let usage_deltas = store
+                    .raw_usage_deltas_for_testing()
+                    .into_iter()
+                    .map(usage_delta_observation)
+                    .collect();
+                let session_meta = store
+                    .raw_session_meta_for_testing()
+                    .map(session_meta_observation);
+                let session_execution_leases = store
+                    .raw_session_execution_leases_for_testing()
+                    .into_iter()
+                    .map(
+                        |(
+                            _session_id,
+                            owner,
+                            lease_token_present,
+                            fencing_token,
+                            claimed_at_epoch_ms,
+                            expires_at_epoch_ms,
+                        )| SessionExecutionLeaseObservation {
+                            owner,
+                            lease_token_present,
+                            fencing_token,
+                            claimed: claimed_at_epoch_ms != 0,
+                            ttl_ms: (claimed_at_epoch_ms != 0)
+                                .then_some(expires_at_epoch_ms - claimed_at_epoch_ms),
+                        },
+                    )
+                    .collect();
                 RawDurableState {
                     head_revision: store.raw_head_revision_for_testing(),
                     leaf_node_id: store.raw_leaf_node_id_for_testing(),
+                    checkpoint,
                     durable_nodes,
+                    runtime_turn_commits,
+                    attachment_manifest,
+                    node_anchors,
+                    usage_deltas,
+                    session_meta,
+                    session_execution_leases,
                     pending_turn_inputs,
                 }
             }
-            Self::Sqlite { path, session_id } => read_sqlite_durable_state(path, session_id),
-            Self::Postgres { pool, session_id } => {
-                let head: Option<(i64, Option<String>)> = sqlx::query_as(
-                    "SELECT head_revision, leaf_node_id
+            Self::Sqlite {
+                path,
+                session_id,
+                store,
+            } => read_sqlite_durable_state(path, session_id, store).await,
+            Self::Postgres {
+                pool,
+                session_id,
+                store,
+            } => {
+                let head: Option<(i64, Option<String>, Option<String>)> = sqlx::query_as(
+                    "SELECT head_revision, leaf_node_id, checkpoint_ref
                      FROM lash_sessions
                      WHERE session_id = $1",
                 )
@@ -552,10 +974,17 @@ impl RawDurableReader {
                 .fetch_optional(pool)
                 .await
                 .expect("read Postgres durable head");
-                let (head_revision, leaf_node_id) = head
-                    .map_or((None, None), |(revision, leaf_node_id)| {
-                        (Some(revision as u64), leaf_node_id)
-                    });
+                let (head_revision, leaf_node_id, checkpoint_ref) = head.map_or(
+                    (None, None, None),
+                    |(revision, leaf_node_id, checkpoint_ref)| {
+                        (
+                            Some(revision as u64),
+                            leaf_node_id,
+                            checkpoint_ref.map(BlobRef),
+                        )
+                    },
+                );
+                let checkpoint = read_checkpoint_observation(store, checkpoint_ref).await;
                 let rows: Vec<(i64, String, Option<String>, String)> = sqlx::query_as(
                     "SELECT seq, node_id, parent_node_id, node_json
                      FROM lash_graph_nodes
@@ -575,6 +1004,129 @@ impl RawDurableReader {
                             node_id,
                             parent_node_id,
                             bytes: normalized_sql_node_json(&node_json),
+                        },
+                    )
+                    .collect();
+                let receipt_rows: Vec<(String, String, String)> = sqlx::query_as(
+                    "SELECT turn_id, turn_commit_hash, result_json
+                     FROM lash_runtime_turn_commits
+                     WHERE session_id = $1
+                     ORDER BY turn_id ASC",
+                )
+                .bind(session_id)
+                .fetch_all(pool)
+                .await
+                .expect("read Postgres turn-commit receipts");
+                let runtime_turn_commits = receipt_rows
+                    .into_iter()
+                    .map(|(operation, turn_commit_hash, result_json)| {
+                        RuntimeTurnCommitObservation {
+                            operation,
+                            turn_commit_hash,
+                            result: serde_json::from_str(&result_json)
+                                .expect("decode Postgres turn-commit result"),
+                        }
+                    })
+                    .collect();
+                let attachment_rows: Vec<AttachmentRow> = sqlx::query_as(
+                    "SELECT attachment_id, canonical_uri, intent_at_ms, committed_at_ms,
+                            owner_kind, owner_id
+                     FROM lash_attachment_manifest
+                     WHERE session_id = $1
+                     ORDER BY attachment_id ASC",
+                )
+                .bind(session_id)
+                .fetch_all(pool)
+                .await
+                .expect("read Postgres attachment manifest");
+                let attachment_manifest = attachment_rows
+                    .into_iter()
+                    .map(
+                        |(
+                            attachment_id,
+                            canonical_uri,
+                            intent_at_epoch_ms,
+                            committed_at_epoch_ms,
+                            owner_kind,
+                            owner_id,
+                        )| AttachmentManifestObservation {
+                            attachment_id: AttachmentId::new(attachment_id),
+                            canonical_uri,
+                            intent_at_epoch_ms: intent_at_epoch_ms as u64,
+                            committed: committed_at_epoch_ms.is_some(),
+                            owner_kind: decode_attachment_owner_kind(owner_kind.as_deref()),
+                            owner_id,
+                        },
+                    )
+                    .collect();
+                let anchor_rows: Vec<(String, String, String)> = sqlx::query_as(
+                    "SELECT node_id, checkpoint_ref, source_session_id
+                     FROM lash_node_anchors
+                     WHERE source_session_id = $1
+                     ORDER BY node_id ASC",
+                )
+                .bind(session_id)
+                .fetch_all(pool)
+                .await
+                .expect("read Postgres node anchors");
+                let node_anchors = anchor_rows
+                    .into_iter()
+                    .map(
+                        |(node_id, checkpoint_ref, source_session_id)| NodeAnchorObservation {
+                            node_id,
+                            checkpoint_ref: BlobRef(checkpoint_ref),
+                            source_session_id,
+                        },
+                    )
+                    .collect();
+                let usage_rows: Vec<String> = sqlx::query_scalar(
+                    "SELECT entry_json
+                     FROM lash_usage_deltas
+                     WHERE session_id = $1
+                     ORDER BY seq ASC",
+                )
+                .bind(session_id)
+                .fetch_all(pool)
+                .await
+                .expect("read Postgres usage deltas");
+                let usage_deltas = usage_rows
+                    .into_iter()
+                    .map(|entry_json| {
+                        usage_delta_observation(
+                            serde_json::from_str(&entry_json).expect("decode Postgres usage delta"),
+                        )
+                    })
+                    .collect();
+                let session_meta = read_session_meta_observation(store).await;
+                let lease_rows: Vec<LeaseRow> = sqlx::query_as(
+                    "SELECT lease_owner_id, lease_owner_incarnation_id,
+                            lease_owner_liveness_json, lease_token,
+                            lease_fencing_token, lease_claimed_at_ms, lease_expires_at_ms
+                     FROM lash_session_execution_leases
+                     WHERE session_id = $1",
+                )
+                .bind(session_id)
+                .fetch_all(pool)
+                .await
+                .expect("read Postgres session-execution lease");
+                let session_execution_leases = lease_rows
+                    .into_iter()
+                    .map(
+                        |(
+                            owner_id,
+                            incarnation_id,
+                            liveness_json,
+                            lease_token,
+                            fencing_token,
+                            claimed_at_epoch_ms,
+                            expires_at_epoch_ms,
+                        )| SessionExecutionLeaseObservation {
+                            owner: decode_lease_owner(owner_id, incarnation_id, liveness_json),
+                            lease_token_present: lease_token.is_some(),
+                            fencing_token: fencing_token as u64,
+                            claimed: claimed_at_epoch_ms != 0,
+                            ttl_ms: (claimed_at_epoch_ms != 0)
+                                .then_some((expires_at_epoch_ms - claimed_at_epoch_ms) as u64),
                         },
                     )
                     .collect();
@@ -607,11 +1159,128 @@ impl RawDurableReader {
                 RawDurableState {
                     head_revision,
                     leaf_node_id,
+                    checkpoint,
                     durable_nodes,
+                    runtime_turn_commits,
+                    attachment_manifest,
+                    node_anchors,
+                    usage_deltas,
+                    session_meta,
+                    session_execution_leases,
                     pending_turn_inputs,
                 }
             }
         }
+    }
+}
+
+fn checkpoint_observation(
+    checkpoint_ref: BlobRef,
+    checkpoint: HydratedSessionCheckpoint,
+) -> CheckpointObservation {
+    CheckpointObservation {
+        checkpoint_ref,
+        turn_state: serde_json::to_value(checkpoint.turn_state)
+            .expect("encode checkpoint turn state"),
+        tool_state_ref: checkpoint.tool_state_ref,
+        tool_state: checkpoint
+            .tool_state
+            .map(|body| serde_json::to_value(body).expect("encode checkpoint tool state")),
+        plugin_snapshot_ref: checkpoint.plugin_snapshot_ref,
+        plugin_snapshot: checkpoint
+            .plugin_snapshot
+            .map(|body| serde_json::to_value(body).expect("encode checkpoint plugin snapshot")),
+        plugin_snapshot_revision: checkpoint.plugin_snapshot_revision,
+        execution_state_ref: checkpoint.execution_state_ref,
+        execution_state: checkpoint.execution_state,
+    }
+}
+
+async fn read_checkpoint_observation(
+    store: &Arc<dyn RuntimePersistence>,
+    raw_checkpoint_ref: Option<BlobRef>,
+) -> Option<CheckpointObservation> {
+    let raw_checkpoint_ref = raw_checkpoint_ref?;
+    let read = store
+        .load_session()
+        .await
+        .expect("hydrate durable checkpoint")
+        .expect("checkpoint ref implies session head");
+    assert_eq!(
+        read.checkpoint_ref.as_ref(),
+        Some(&raw_checkpoint_ref),
+        "typed load must preserve the raw checkpoint ref"
+    );
+    Some(checkpoint_observation(
+        raw_checkpoint_ref,
+        read.checkpoint.expect("checkpoint ref must hydrate"),
+    ))
+}
+
+fn attachment_manifest_observation(
+    entry: lash_core::AttachmentManifestEntry,
+) -> AttachmentManifestObservation {
+    AttachmentManifestObservation {
+        attachment_id: entry.attachment_id,
+        canonical_uri: entry.canonical_uri,
+        intent_at_epoch_ms: entry.intent_at_epoch_ms,
+        committed: entry.committed_at_epoch_ms.is_some(),
+        owner_kind: entry.owner_kind,
+        owner_id: entry.owner_id,
+    }
+}
+
+fn decode_attachment_owner_kind(value: Option<&str>) -> Option<AttachmentOwnerKind> {
+    value.map(|value| match value {
+        "turn" => AttachmentOwnerKind::Turn,
+        "process" => AttachmentOwnerKind::Process,
+        other => panic!("unknown attachment owner kind `{other}`"),
+    })
+}
+
+fn usage_delta_observation(entry: TokenLedgerEntry) -> UsageDeltaObservation {
+    UsageDeltaObservation {
+        source: entry.source,
+        model: entry.model,
+        usage: entry.usage,
+    }
+}
+
+fn session_meta_observation(meta: SessionMeta) -> SessionMetaObservation {
+    SessionMetaObservation {
+        incarnation_id: meta.incarnation_id,
+        session_name: meta.session_name,
+        created_at: meta.created_at,
+        model: meta.model,
+        cwd: meta.cwd,
+        relation: meta.relation,
+    }
+}
+
+async fn read_session_meta_observation(
+    store: &Arc<dyn RuntimePersistence>,
+) -> Option<SessionMetaObservation> {
+    store
+        .load_session_meta()
+        .await
+        .expect("load session metadata")
+        .map(session_meta_observation)
+}
+
+fn decode_lease_owner(
+    owner_id: Option<String>,
+    incarnation_id: Option<String>,
+    liveness_json: Option<String>,
+) -> Option<LeaseOwnerIdentity> {
+    match (owner_id, incarnation_id, liveness_json) {
+        (None, None, None) => None,
+        (Some(owner_id), Some(incarnation_id), Some(liveness_json)) => Some(LeaseOwnerIdentity {
+            owner_id,
+            incarnation_id,
+            liveness: serde_json::from_str::<LeaseOwnerLiveness>(&liveness_json)
+                .expect("decode lease-owner liveness"),
+        }),
+        fields => panic!("partial lease-owner identity in durable row: {fields:?}"),
     }
 }
 
@@ -638,7 +1307,11 @@ fn normalized_node_json(value: serde_json::Value) -> Vec<u8> {
     serde_json::to_vec(&value).expect("encode normalized durable node")
 }
 
-fn read_sqlite_durable_state(path: &Path, session_id: &str) -> RawDurableState {
+async fn read_sqlite_durable_state(
+    path: &Path,
+    session_id: &str,
+    store: &Arc<dyn RuntimePersistence>,
+) -> RawDurableState {
     let connection = rusqlite::Connection::open(path).expect("open SQLite durable reader");
     connection
         .busy_timeout(Duration::from_secs(15))
@@ -650,19 +1323,27 @@ fn read_sqlite_durable_state(path: &Path, session_id: &str) -> RawDurableState {
         .execute_batch("PRAGMA synchronous=NORMAL; PRAGMA foreign_keys=ON;")
         .expect("configure SQLite durable reader pragmas");
 
-    let head: Option<(i64, Option<String>)> = connection
+    let head: Option<(i64, Option<String>, Option<String>)> = connection
         .query_row(
-            "SELECT head_revision, leaf_node_id
+            "SELECT head_revision, leaf_node_id, checkpoint_ref
              FROM session_head
              WHERE session_id = ?1",
             [session_id],
-            |row| Ok((row.get(0)?, row.get(1)?)),
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
         )
         .optional()
         .expect("read SQLite durable head");
-    let (head_revision, leaf_node_id) = head.map_or((None, None), |(revision, leaf_node_id)| {
-        (Some(revision as u64), leaf_node_id)
-    });
+    let (head_revision, leaf_node_id, checkpoint_ref) = head.map_or(
+        (None, None, None),
+        |(revision, leaf_node_id, checkpoint_ref)| {
+            (
+                Some(revision as u64),
+                leaf_node_id,
+                checkpoint_ref.map(BlobRef),
+            )
+        },
+    );
+    let checkpoint = read_checkpoint_observation(store, checkpoint_ref).await;
     let durable_nodes = {
         let mut statement = connection
             .prepare(
@@ -695,6 +1376,163 @@ fn read_sqlite_durable_state(path: &Path, session_id: &str) -> RawDurableState {
                 },
             )
             .collect()
+    };
+    let runtime_turn_commits = {
+        let mut statement = connection
+            .prepare(
+                "SELECT turn_id, turn_commit_hash, result_json
+                 FROM runtime_turn_commits
+                 WHERE session_id = ?1
+                 ORDER BY turn_id ASC",
+            )
+            .expect("prepare SQLite turn-commit receipt read");
+        statement
+            .query_map([session_id], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                ))
+            })
+            .expect("read SQLite turn-commit receipts")
+            .collect::<Result<Vec<_>, _>>()
+            .expect("decode SQLite turn-commit receipts")
+            .into_iter()
+            .map(
+                |(operation, turn_commit_hash, result_json)| RuntimeTurnCommitObservation {
+                    operation,
+                    turn_commit_hash,
+                    result: serde_json::from_str(&result_json)
+                        .expect("decode SQLite turn-commit result"),
+                },
+            )
+            .collect()
+    };
+    let attachment_manifest = {
+        let mut statement = connection
+            .prepare(
+                "SELECT attachment_id, canonical_uri, intent_at_ms, committed_at_ms,
+                        owner_kind, owner_id
+                 FROM attachment_manifest
+                 WHERE session_id = ?1
+                 ORDER BY attachment_id ASC",
+            )
+            .expect("prepare SQLite attachment-manifest read");
+        statement
+            .query_map([session_id], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, i64>(2)?,
+                    row.get::<_, Option<i64>>(3)?,
+                    row.get::<_, Option<String>>(4)?,
+                    row.get::<_, Option<String>>(5)?,
+                ))
+            })
+            .expect("read SQLite attachment manifest")
+            .collect::<Result<Vec<_>, _>>()
+            .expect("decode SQLite attachment manifest")
+            .into_iter()
+            .map(
+                |(
+                    attachment_id,
+                    canonical_uri,
+                    intent_at_epoch_ms,
+                    committed_at_epoch_ms,
+                    owner_kind,
+                    owner_id,
+                )| AttachmentManifestObservation {
+                    attachment_id: AttachmentId::new(attachment_id),
+                    canonical_uri,
+                    intent_at_epoch_ms: intent_at_epoch_ms as u64,
+                    committed: committed_at_epoch_ms.is_some(),
+                    owner_kind: decode_attachment_owner_kind(owner_kind.as_deref()),
+                    owner_id,
+                },
+            )
+            .collect()
+    };
+    let node_anchors = {
+        let mut statement = connection
+            .prepare(
+                "SELECT node_id, checkpoint_ref, source_session_id
+                 FROM node_anchors
+                 WHERE source_session_id = ?1
+                 ORDER BY node_id ASC",
+            )
+            .expect("prepare SQLite node-anchor read");
+        statement
+            .query_map([session_id], |row| {
+                Ok(NodeAnchorObservation {
+                    node_id: row.get(0)?,
+                    checkpoint_ref: BlobRef(row.get(1)?),
+                    source_session_id: row.get(2)?,
+                })
+            })
+            .expect("read SQLite node anchors")
+            .collect::<Result<Vec<_>, _>>()
+            .expect("decode SQLite node anchors")
+    };
+    let usage_deltas = {
+        let mut statement = connection
+            .prepare(
+                "SELECT source, model, input_tokens, output_tokens,
+                        cache_read_input_tokens, cache_write_input_tokens,
+                        reasoning_output_tokens
+                 FROM usage_deltas
+                 WHERE session_id = ?1
+                 ORDER BY seq ASC",
+            )
+            .expect("prepare SQLite usage-delta read");
+        statement
+            .query_map([session_id], |row| {
+                Ok(UsageDeltaObservation {
+                    source: row.get(0)?,
+                    model: row.get(1)?,
+                    usage: TokenUsage {
+                        input_tokens: row.get(2)?,
+                        output_tokens: row.get(3)?,
+                        cache_read_input_tokens: row.get(4)?,
+                        cache_write_input_tokens: row.get(5)?,
+                        reasoning_output_tokens: row.get(6)?,
+                    },
+                })
+            })
+            .expect("read SQLite usage deltas")
+            .collect::<Result<Vec<_>, _>>()
+            .expect("decode SQLite usage deltas")
+    };
+    let session_meta = read_session_meta_observation(store).await;
+    let session_execution_leases = {
+        let mut statement = connection
+            .prepare(
+                "SELECT lease_owner_id, lease_owner_incarnation_id,
+                        lease_owner_liveness_json, lease_token,
+                        lease_fencing_token, lease_claimed_at_ms, lease_expires_at_ms
+                 FROM session_execution_leases
+                 WHERE session_id = ?1",
+            )
+            .expect("prepare SQLite session-execution-lease read");
+        statement
+            .query_map([session_id], |row| {
+                let owner_id = row.get::<_, Option<String>>(0)?;
+                let incarnation_id = row.get::<_, Option<String>>(1)?;
+                let liveness_json = row.get::<_, Option<String>>(2)?;
+                Ok(SessionExecutionLeaseObservation {
+                    owner: decode_lease_owner(owner_id, incarnation_id, liveness_json),
+                    lease_token_present: row.get::<_, Option<String>>(3)?.is_some(),
+                    fencing_token: row.get::<_, i64>(4)? as u64,
+                    claimed: row.get::<_, i64>(5)? != 0,
+                    ttl_ms: {
+                        let claimed_at_ms = row.get::<_, i64>(5)?;
+                        let expires_at_ms = row.get::<_, i64>(6)?;
+                        (claimed_at_ms != 0).then_some((expires_at_ms - claimed_at_ms) as u64)
+                    },
+                })
+            })
+            .expect("read SQLite session-execution lease")
+            .collect::<Result<Vec<_>, _>>()
+            .expect("decode SQLite session-execution lease")
     };
     let pending_turn_inputs = {
         let mut statement = connection
@@ -736,7 +1574,14 @@ fn read_sqlite_durable_state(path: &Path, session_id: &str) -> RawDurableState {
     RawDurableState {
         head_revision,
         leaf_node_id,
+        checkpoint,
         durable_nodes,
+        runtime_turn_commits,
+        attachment_manifest,
+        node_anchors,
+        usage_deltas,
+        session_meta,
+        session_execution_leases,
         pending_turn_inputs,
     }
 }
@@ -745,11 +1590,14 @@ struct BackendRunner {
     name: &'static str,
     session_id: String,
     store: Arc<dyn RuntimePersistence>,
+    factory: Arc<dyn SessionStoreFactory>,
     raw_reader: RawDurableReader,
     first_lease: Option<lash_core::SessionExecutionLease>,
     successor_lease: Option<lash_core::SessionExecutionLease>,
     stale_turn_input_claim: Option<TurnInputClaim>,
     current_frame_node_id: Option<String>,
+    current_leaf_node_id: Option<String>,
+    checkpoint_component_refs: Option<CheckpointComponentRefs>,
 }
 
 impl BackendRunner {
@@ -777,6 +1625,9 @@ impl BackendRunner {
                 expected_head_revision,
                 graph,
                 turn_commit,
+                checkpoint,
+                usage,
+                adopt_attachment,
                 ..
             } => {
                 let commit = runtime_commit(
@@ -785,13 +1636,90 @@ impl BackendRunner {
                     graph,
                     *turn_commit,
                     self.current_frame_node_id.clone(),
+                    checkpoint_from_spec(*checkpoint, self.checkpoint_component_refs.as_ref()),
+                    (*usage)
+                        .then(differential_usage_delta)
+                        .into_iter()
+                        .collect(),
+                    (*adopt_attachment)
+                        .then(differential_attachment_id)
+                        .into_iter()
+                        .collect(),
                 );
                 let next_frame_node_id = commit.current_frame_node_id.clone();
+                let next_leaf_node_id = commit.graph.leaf_node_id.clone();
                 let result = self.store.commit_runtime_state(commit).await;
-                if result.is_ok() {
-                    self.current_frame_node_id = next_frame_node_id;
+                match result {
+                    Ok(result) => {
+                        self.current_frame_node_id = next_frame_node_id;
+                        self.current_leaf_node_id = next_leaf_node_id;
+                        if matches!(*checkpoint, CheckpointSpec::Bodies) {
+                            self.checkpoint_component_refs = Some(CheckpointComponentRefs {
+                                tool_state: result.manifest.tool_state_ref.clone(),
+                                plugin_snapshot: result.manifest.plugin_snapshot_ref.clone(),
+                                execution_state: result.manifest.execution_state_ref.clone(),
+                            });
+                        }
+                        Ok(Some(result.into()))
+                    }
+                    Err(error) => Err(error),
                 }
-                result.map(|result| Some(result.into()))
+            }
+            StoreOperation::RecordAttachmentIntent => {
+                let operation = lash_core::store::OperationId::turn(
+                    &self.session_id,
+                    "attachment-adoption",
+                    "differential",
+                )
+                .storage_key()?;
+                self.store.record_intent(AttachmentIntent {
+                    attachment_id: differential_attachment_id(),
+                    session_id: self.session_id.clone(),
+                    canonical_uri: "lash-attachment://sha256/differential-attachment".to_string(),
+                    intent_at_epoch_ms: 1_000,
+                    owner_kind: Some(AttachmentOwnerKind::Turn),
+                    owner_id: Some(operation),
+                })?;
+                Ok(None)
+            }
+            StoreOperation::PinLeaf => {
+                self.factory
+                    .pin(
+                        self.current_leaf_node_id
+                            .as_deref()
+                            .expect("generated sequence committed a leaf before pin"),
+                    )
+                    .await?;
+                Ok(None)
+            }
+            StoreOperation::ForkAtLeaf => {
+                let node_id = self
+                    .current_leaf_node_id
+                    .clone()
+                    .expect("generated sequence committed a leaf before fork");
+                self.factory
+                    .fork_at(&ForkSessionRequest {
+                        session_id: format!("{}:fork", self.session_id),
+                        node_id: node_id.clone(),
+                        relation: SessionRelation::Fork {
+                            source_session_id: self.session_id.clone(),
+                            source_node_id: node_id,
+                            process_grants: Vec::new(),
+                        },
+                        policy: lash_core::SessionPolicy::default(),
+                    })
+                    .await?;
+                Ok(None)
+            }
+            StoreOperation::UnpinLeaf => {
+                self.factory
+                    .unpin(
+                        self.current_leaf_node_id
+                            .as_deref()
+                            .expect("generated sequence committed a leaf before unpin"),
+                    )
+                    .await?;
+                Ok(None)
             }
             StoreOperation::EnqueueNextTurnInput => self
                 .store
@@ -875,6 +1803,9 @@ impl BackendRunner {
                             &graph,
                             None,
                             self.current_frame_node_id.clone(),
+                            HydratedSessionCheckpoint::default(),
+                            Vec::new(),
+                            Vec::new(),
                         )
                         .completing_turn_input_claim(claim.completion()),
                     )
@@ -943,15 +1874,6 @@ fn normalized_store_error(backend: &str, error: &StoreError) -> String {
         StoreError::ForkSessionAlreadyExists { .. } => "ForkSessionAlreadyExists".to_string(),
         StoreError::InvalidGraphParent { .. } => "InvalidGraphParent".to_string(),
         StoreError::MissingFrameOpenAncestor { .. } => "MissingFrameOpenAncestor".to_string(),
-        StoreError::NodeRefcountDrift {
-            node_id,
-            cached,
-            derived,
-        } => format!("NodeRefcountDrift({node_id},{cached},{derived})"),
-        StoreError::CommitRealizationMismatch { .. } => "CommitRealizationMismatch".to_string(),
-        StoreError::CommitNodeRealizationMismatch { .. } => {
-            "CommitNodeRealizationMismatch".to_string()
-        }
         StoreError::Backend(message) => normalized_backend_error(backend, message),
     }
 }
@@ -971,6 +1893,38 @@ fn normalized_backend_error(backend: &str, message: &str) -> String {
     }
 }
 
+#[derive(Debug)]
+struct DifferentialClock;
+
+#[async_trait::async_trait]
+impl Clock for DifferentialClock {
+    fn now(&self) -> std::time::Instant {
+        std::time::Instant::now()
+    }
+
+    fn timestamp_ms(&self) -> u64 {
+        1_000
+    }
+
+    fn timestamp_rfc3339(&self) -> String {
+        "2026-07-26T00:00:00+00:00".to_string()
+    }
+
+    fn timestamp_datetime(&self) -> chrono::DateTime<chrono::Utc> {
+        chrono::DateTime::parse_from_rfc3339("2026-07-26T00:00:00+00:00")
+            .expect("valid differential timestamp")
+            .with_timezone(&chrono::Utc)
+    }
+
+    async fn sleep(&self, duration: Duration) {
+        tokio::time::sleep(duration).await;
+    }
+
+    async fn sleep_until(&self, deadline: std::time::Instant) {
+        tokio::time::sleep_until(tokio::time::Instant::from_std(deadline)).await;
+    }
+}
+
 async fn runners_for_case(
     case: CaseName,
     sqlite_root: &Path,
@@ -978,57 +1932,137 @@ async fn runners_for_case(
     run_nonce: &str,
 ) -> Vec<BackendRunner> {
     let session_id = format!("fig-643-{run_nonce}-{}", case.as_str());
+    let clock = Arc::new(DifferentialClock) as Arc<dyn Clock>;
+    let create_request = SessionStoreCreateRequest {
+        session_id: session_id.clone(),
+        relation: SessionRelation::Root,
+        policy: lash_core::SessionPolicy::default(),
+    };
+    let expected_meta = SessionMeta {
+        session_id: session_id.clone(),
+        incarnation_id: differential_incarnation_id(&session_id),
+        session_name: format!("differential:{}", case.as_str()),
+        created_at: clock.timestamp_rfc3339(),
+        model: create_request.policy.model.id.clone(),
+        cwd: None,
+        relation: SessionRelation::Root,
+    };
 
-    let memory = Arc::new(InMemorySessionStore::new());
-    let memory_store = Arc::clone(&memory) as Arc<dyn RuntimePersistence>;
+    let memory_factory = Arc::new(InMemorySessionStoreFactory::with_clock(Arc::clone(&clock)));
+    let memory_store = memory_factory
+        .create_store(&create_request)
+        .await
+        .expect("create in-memory differential store");
+    let memory = memory_factory
+        .raw_store_for_testing(&session_id)
+        .expect("factory retains concrete in-memory store");
+    memory.replace_session_meta_for_testing(expected_meta.clone());
+    let memory_factory_dyn = Arc::clone(&memory_factory) as Arc<dyn SessionStoreFactory>;
 
-    let sqlite_path = sqlite_root.join(format!("{}.db", case.as_str()));
-    let sqlite = Arc::new(
-        lash_sqlite_store::Store::open(&sqlite_path)
-            .await
-            .expect("open SQLite differential store"),
+    let sqlite_factory = Arc::new(
+        lash_sqlite_store::SqliteSessionStoreFactory::new(sqlite_root.join(case.as_str()))
+            .with_clock(Arc::clone(&clock)),
     );
-    let sqlite_store = Arc::clone(&sqlite) as Arc<dyn RuntimePersistence>;
+    let sqlite_path = sqlite_factory.catalog_path();
+    let sqlite_store = sqlite_factory
+        .create_store(&create_request)
+        .await
+        .expect("create SQLite differential store");
+    {
+        let connection =
+            rusqlite::Connection::open(&sqlite_path).expect("open SQLite metadata fixture");
+        connection
+            .execute(
+                "UPDATE session_meta
+                 SET incarnation_id = ?2, session_name = ?3, created_at = ?4,
+                     model = ?5, cwd = ?6, relation_json = ?7
+                WHERE session_id = ?1",
+                rusqlite::params![
+                    &expected_meta.session_id,
+                    expected_meta.incarnation_id.as_str(),
+                    &expected_meta.session_name,
+                    &expected_meta.created_at,
+                    &expected_meta.model,
+                    &expected_meta.cwd,
+                    serde_json::to_string(&expected_meta.relation)
+                        .expect("encode SQLite session relation"),
+                ],
+            )
+            .expect("install deterministic SQLite session metadata");
+    }
+    let sqlite_factory_dyn = Arc::clone(&sqlite_factory) as Arc<dyn SessionStoreFactory>;
 
-    let postgres_store =
-        Arc::new(postgres.session_store(&session_id)) as Arc<dyn RuntimePersistence>;
+    let postgres_factory = Arc::new(
+        postgres
+            .session_store_factory()
+            .with_clock(Arc::clone(&clock)),
+    );
+    let postgres_store = postgres_factory
+        .create_store(&create_request)
+        .await
+        .expect("create Postgres differential store");
+    sqlx::query(
+        "UPDATE lash_session_meta
+         SET meta_json = $2
+         WHERE session_id = $1",
+    )
+    .bind(&session_id)
+    .bind(serde_json::to_string(&expected_meta).expect("encode Postgres session metadata"))
+    .execute(postgres.pool())
+    .await
+    .expect("install deterministic Postgres session metadata");
+    let postgres_factory_dyn = Arc::clone(&postgres_factory) as Arc<dyn SessionStoreFactory>;
 
     vec![
         BackendRunner {
             name: "in-memory",
             session_id: session_id.clone(),
             store: memory_store,
-            raw_reader: RawDurableReader::InMemory(memory),
+            factory: memory_factory_dyn,
+            raw_reader: RawDurableReader::InMemory {
+                store: memory,
+                factory: memory_factory,
+            },
             first_lease: None,
             successor_lease: None,
             stale_turn_input_claim: None,
             current_frame_node_id: None,
+            current_leaf_node_id: None,
+            checkpoint_component_refs: None,
         },
         BackendRunner {
             name: "sqlite",
             session_id: session_id.clone(),
-            store: sqlite_store,
+            store: Arc::clone(&sqlite_store),
+            factory: sqlite_factory_dyn,
             raw_reader: RawDurableReader::Sqlite {
                 path: sqlite_path,
                 session_id: session_id.clone(),
+                store: sqlite_store,
             },
             first_lease: None,
             successor_lease: None,
             stale_turn_input_claim: None,
             current_frame_node_id: None,
+            current_leaf_node_id: None,
+            checkpoint_component_refs: None,
         },
         BackendRunner {
             name: "postgres",
             session_id: session_id.clone(),
-            store: postgres_store,
+            store: Arc::clone(&postgres_store),
+            factory: postgres_factory_dyn,
             raw_reader: RawDurableReader::Postgres {
                 pool: postgres.pool().clone(),
                 session_id,
+                store: postgres_store,
             },
             first_lease: None,
             successor_lease: None,
             stale_turn_input_claim: None,
             current_frame_node_id: None,
+            current_leaf_node_id: None,
+            checkpoint_component_refs: None,
         },
     ]
 }
@@ -1063,7 +2097,7 @@ fn render_divergence(
 #[test]
 fn generated_catalog_covers_required_adversarial_shapes() {
     let cases = generated_cases();
-    assert_eq!(cases.len(), 7);
+    assert_eq!(cases.len(), 11);
     assert!(cases.iter().all(|case| !case.operations.is_empty()));
     assert_eq!(
         cases
@@ -1078,6 +2112,10 @@ fn generated_catalog_covers_required_adversarial_shapes() {
             "stale_expected_head_revision",
             "identical_and_mutated_turn_commit_replay",
             "settle_claim_after_session_lease_generation_superseded_before_reclaim",
+            "checkpoint_bodies_then_ref_only",
+            "missing_checkpoint_component_ref",
+            "pin_fork_unpin_moves_node_anchor",
+            "attachment_intent_adopted_by_commit",
         ]
     );
 }
@@ -1093,8 +2131,9 @@ async fn cross_backend_store_differential_agrees() {
                 "LASH_POSTGRES_DATABASE_URL must be non-empty when LASH_REQUIRE_POSTGRES=1"
             );
             eprintln!(
-                "skipping cross-backend store differential: \
-                 LASH_POSTGRES_DATABASE_URL is not set"
+                "SKIPPED cross-backend store differential; compared_backends=[]; \
+                 required_backends=[in-memory,sqlite,postgres]; \
+                 reason=LASH_POSTGRES_DATABASE_URL is not set"
             );
             return;
         }
@@ -1105,8 +2144,9 @@ async fn cross_backend_store_differential_agrees() {
                 "LASH_POSTGRES_DATABASE_URL must be set when LASH_REQUIRE_POSTGRES=1: {error}"
             );
             eprintln!(
-                "skipping cross-backend store differential: \
-                 LASH_POSTGRES_DATABASE_URL is not set"
+                "SKIPPED cross-backend store differential; compared_backends=[]; \
+                 required_backends=[in-memory,sqlite,postgres]; \
+                 reason=LASH_POSTGRES_DATABASE_URL is not set"
             );
             return;
         }
@@ -1129,6 +2169,11 @@ async fn cross_backend_store_differential_agrees() {
     let sqlite_root = tempfile::tempdir().expect("create SQLite differential root");
     let run_nonce = run_nonce();
     let mut divergences = String::new();
+    eprintln!(
+        "RUNNING cross-backend store differential; \
+         compared_backends=[in-memory,sqlite,postgres]; cases={}",
+        generated_cases().len()
+    );
 
     for case in generated_cases() {
         let mut runners =
@@ -1159,5 +2204,9 @@ async fn cross_backend_store_differential_agrees() {
     assert!(
         divergences.is_empty(),
         "cross-backend durable state diverged:{divergences}"
+    );
+    eprintln!(
+        "PASSED cross-backend store differential; \
+         compared_backends=[in-memory,sqlite,postgres]"
     );
 }

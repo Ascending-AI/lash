@@ -559,10 +559,7 @@ impl LashRuntime {
             .as_ref()
             .and_then(|completion| completion.batch_ids.first())
             .map(|batch_id| {
-                crate::OperationId::new(
-                    crate::ExecutionScope::queue_drain(&self.state.session_id, batch_id),
-                    "session-command",
-                )
+                crate::OperationId::new(self.state.queue_drain_scope(batch_id), "session-command")
             })
             .ok_or_else(|| {
                 RuntimeError::new(

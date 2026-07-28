@@ -772,7 +772,7 @@ async fn process_outlives_deleted_session_and_resumes_from_host_signal() -> Resu
     drop(session);
 
     let report = core
-        .delete_session(session_id, session_delete_scope(session_id))
+        .delete_session(session_id, session_delete_scope(&core, session_id).await)
         .await?;
     let process_report = report.process.expect("process delete report");
     assert_eq!(
@@ -1010,8 +1010,9 @@ async fn inline_process_await_sink_and_prune_end_to_end() -> Result<()> {
     // Retention: prune the terminal registry rows. The registry forgets the
     // process, but the host's projected copies (the sink log) remain intact.
     let projected_before_prune = sink.collected();
-    let report = registry
-        .prune_terminal_processes(i64::MAX as u64, None, None)
+    let report = core
+        .processes()
+        .prune(i64::MAX as u64)
         .await
         .expect("prune terminal process");
     assert_eq!(

@@ -466,7 +466,6 @@ impl TurnBoundary {
             .validate_claim_settlement(&originating_queue_claims, &originating_turn_input_claims)?;
         commit.enqueued_queue_batches = enqueued_queue_batches;
         commit.interrupted_turn_input_turn_id = interrupted_turn_input_turn_id;
-        commit.turn_commit.turn_commit_hash = commit.turn_commit_hash()?;
         let result = crate::store::commit_runtime_state_verified(store, commit).await?;
         let enqueued_queue_batches = result.enqueued_queue_batches.clone();
         state.apply_persisted_commit_result(result);

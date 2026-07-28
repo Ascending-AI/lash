@@ -2,23 +2,6 @@ use super::*;
 use lash_core::runtime::{DeliveryPolicy, QueuedWorkPayload, RuntimeSessionState, SlotPolicy};
 
 #[tokio::test]
-async fn refcount_scrub_refuses_to_report_false_success() {
-    let store = RuntimePerfStore::default();
-
-    let error = store
-        .verify_node_refcounts()
-        .await
-        .expect_err("perf store does not maintain node refcounts");
-
-    assert!(matches!(
-        error,
-        StoreError::UnsupportedStoreOperation {
-            operation: "verify_node_refcounts"
-        }
-    ));
-}
-
-#[tokio::test]
 async fn runtime_commit_rejects_cross_session_queue_batches_atomically() {
     let store = RuntimePerfStore::default();
     let state = RuntimeSessionState {

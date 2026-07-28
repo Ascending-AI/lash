@@ -560,7 +560,9 @@ pub enum ToolCallLaunch {
         result: Box<CompletedToolCall>,
     },
     Pending {
-        key: crate::AwaitEventKey,
+        // Boxed for the same reason `Done` boxes its payload: the canonical
+        // `ExecutionScope` inside the key dominates this enum's size.
+        key: Box<crate::AwaitEventKey>,
         pending: crate::PendingCompletion,
         duration_ms: u64,
     },
@@ -573,7 +575,8 @@ pub enum ToolAttemptLaunch {
         record: Box<crate::ToolCallRecord>,
     },
     Pending {
-        key: crate::AwaitEventKey,
+        // See `ToolCallLaunch::Pending`.
+        key: Box<crate::AwaitEventKey>,
         pending: crate::PendingCompletion,
         duration_ms: u64,
     },

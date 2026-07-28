@@ -25,15 +25,14 @@ use lash_core::{
     AbandonRequest, AttachmentId, AttachmentIntent, AttachmentManifest, AttachmentManifestEntry,
     AttachmentOwnerKind, AwaitEventResolver, BlobRef, CanonicalRuntimeEffectEnvelope,
     DeliveryPolicy, EffectHost, ExecutionScope, GcReport, LeaseOwnerIdentity, LeaseOwnerLiveness,
-    MergeKey, NodeRefcountVerification, PersistedSegmentHandover, ProcessAwaitOutput,
-    ProcessChangeCursor, ProcessEvent, ProcessEventAppendRequest, ProcessEventAppendResult,
-    ProcessExecutionWriteAuthority, ProcessExternalRef, ProcessHandleDescriptor,
-    ProcessHandleGrant, ProcessLease, ProcessLeaseCompletion, ProcessLiveReferenceSummary,
-    ProcessPruneReport, ProcessRecord, ProcessRegistration, ProcessRegistry, ProcessStartOutcome,
-    ProcessStartPlan, ProcessStarted, QueuedWorkStore, RuntimeEffectCommand,
-    RuntimeEffectController, RuntimeEffectControllerError, RuntimeEffectEnvelope,
-    RuntimeEffectLocalExecutor, RuntimeEffectOutcome, RuntimeError, RuntimePersistence,
-    ScopedEffectController, SessionCommitStore, SessionExecutionLease,
+    MergeKey, PersistedSegmentHandover, ProcessAwaitOutput, ProcessChangeCursor, ProcessEvent,
+    ProcessEventAppendRequest, ProcessEventAppendResult, ProcessExecutionWriteAuthority,
+    ProcessExternalRef, ProcessHandleDescriptor, ProcessHandleGrant, ProcessLease,
+    ProcessLeaseCompletion, ProcessLiveReferenceSummary, ProcessPruneReport, ProcessRecord,
+    ProcessRegistration, ProcessRegistry, ProcessStartOutcome, ProcessStartPlan, ProcessStarted,
+    QueuedWorkStore, RuntimeEffectCommand, RuntimeEffectController, RuntimeEffectControllerError,
+    RuntimeEffectEnvelope, RuntimeEffectLocalExecutor, RuntimeEffectOutcome, RuntimeError,
+    RuntimePersistence, ScopedEffectController, SessionCommitStore, SessionExecutionLease,
     SessionExecutionLeaseClaimOutcome, SessionExecutionLeaseCompletion, SessionExecutionLeaseFence,
     SessionExecutionLeaseStore, SessionMeta, SessionNodeRecord, SessionScope,
     SessionStoreCreateRequest, SessionStoreFactory, SlotPolicy, StoreError, StoreMaintenance,
@@ -99,7 +98,13 @@ const SCHEMA_COMPONENT: &str = "lash-postgres-store";
 // Bumped to 24 so PostgreSQL checkpoints use the shared manifest plus
 // content-addressed component blobs. Pre-24 checkpoint blobs contain the
 // removed backend-only envelope and are rejected at open.
-const SCHEMA_VERSION: i32 = 24;
+// Bumped to 25 because runtime commit receipts no longer persist the removed
+// realization digest; stores derive their lookup hash from commit content.
+// Bumped to 26 to remove cached graph-node reference counts. Node retirement
+// now derives liveness from parent edges, session heads, and anchors.
+// Bumped to 27 for canonical typed effect-journal identity and indexed
+// session/incarnation lifecycle joins. Pre-27 databases are rejected.
+const SCHEMA_VERSION: i32 = 27;
 const PROCESS_LEASE_SCHEMA_VERSION: u32 = lash_core::PROCESS_LEASE_SCHEMA_VERSION;
 
 #[derive(Clone)]
@@ -693,154 +698,6 @@ mod tests {
             .execute(storage.pool())
             .await
             .expect("clean claim-fence head");
-    }
-
-    #[tokio::test]
-    async fn postgres_zero_confirmation_aborts_a_corrupt_low_count_transaction() {
-        let Some(database_url) = postgres_test_support::database_url() else {
-            eprintln!("skipping Postgres refcount drift proof: database URL is not set");
-            return;
-        };
-        let _database_lock =
-            postgres_test_support::SharedDatabaseLock::acquire(&database_url).await;
-        let storage = PostgresStorage::connect(&database_url)
-            .await
-            .expect("connect refcount drift storage");
-        let session_id = format!("postgres-refcount-drift:{}", uuid::Uuid::new_v4());
-        let store = storage.session_store(session_id.clone());
-        let mut state = lash_core::RuntimeSessionState {
-            session_id: session_id.clone(),
-            ..Default::default()
-        };
-        let incarnation_id = store
-            .ensure_session_incarnation(&session_id, &state.policy)
-            .await
-            .expect("realize Postgres test session lifetime");
-        state.bind_durable_incarnation(incarnation_id);
-        state.ensure_agent_frame_initialized();
-        store
-            .commit_runtime_state(RuntimeCommit::persisted_state_for_test(&state, &[]))
-            .await
-            .expect("commit root frame");
-        let frame_node_id = state.current_frame_node_id.clone().expect("frame node");
-        sqlx::query("UPDATE lash_graph_nodes SET incoming_refs = 0 WHERE node_id = $1")
-            .bind(&frame_node_id)
-            .execute(storage.pool())
-            .await
-            .expect("corrupt cached count");
-        let child = lash_core::SessionNodeRecord {
-            node_id: "postgres-refcount-child".to_string(),
-            parent_node_id: Some(frame_node_id.clone()),
-            timestamp: "2026-07-27T00:00:00Z".to_string(),
-            payload: lash_core::SessionNodePayload::Event {
-                event: lash_core::SessionHistoryRecord::Protocol(
-                    lash_core::ProtocolEvent::typed("refcount-drift", serde_json::Value::Null)
-                        .expect("protocol event"),
-                ),
-            },
-        };
-        let mut commit = RuntimeCommit::persisted_state_for_test(&state, &[]);
-        commit.expected_head_revision = 1;
-        commit.graph = GraphAppend {
-            nodes: vec![child],
-            leaf_node_id: Some("postgres-refcount-child".to_string()),
-        };
-        let (commit, _) = commit
-            .with_operation(lash_core::OperationId::new(
-                lash_core::ExecutionScope::runtime_operation(format!(
-                    "postgres-refcount-drift:{session_id}"
-                )),
-                "commit",
-            ))
-            .expect("derive refcount-drift child identity");
-        let child_node_id = commit.graph.nodes[0].node_id.clone();
-
-        let error = store
-            .commit_runtime_state(commit)
-            .await
-            .expect_err("zero-confirmation must abort");
-
-        assert!(matches!(
-            error,
-            StoreError::NodeRefcountDrift {
-                ref node_id,
-                cached: 0,
-                derived: 1,
-            } if node_id == &frame_node_id
-        ));
-        let revision: i64 =
-            sqlx::query_scalar("SELECT head_revision FROM lash_sessions WHERE session_id = $1")
-                .bind(&session_id)
-                .fetch_one(storage.pool())
-                .await
-                .expect("load unchanged head");
-        assert_eq!(revision, 1);
-        let child_exists: bool =
-            sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM lash_graph_nodes WHERE node_id = $1)")
-                .bind(&child_node_id)
-                .fetch_one(storage.pool())
-                .await
-                .expect("check rolled-back child");
-        assert!(!child_exists);
-    }
-
-    #[tokio::test]
-    async fn postgres_refcount_scrub_counts_anchor_roots_when_detecting_drift() {
-        let Some(database_url) = postgres_test_support::database_url() else {
-            eprintln!("skipping Postgres refcount scrub proof: database URL is not set");
-            return;
-        };
-        let _database_lock =
-            postgres_test_support::SharedDatabaseLock::acquire(&database_url).await;
-        let storage = PostgresStorage::connect(&database_url)
-            .await
-            .expect("connect refcount scrub storage");
-        let session_id = format!("postgres-refcount-scrub:{}", uuid::Uuid::new_v4());
-        let store = storage.session_store(session_id.clone());
-        let mut state = lash_core::RuntimeSessionState {
-            session_id: session_id.clone(),
-            ..Default::default()
-        };
-        let incarnation_id = store
-            .ensure_session_incarnation(&session_id, &state.policy)
-            .await
-            .expect("realize Postgres test session lifetime");
-        state.bind_durable_incarnation(incarnation_id);
-        state.ensure_agent_frame_initialized();
-        store
-            .commit_runtime_state(RuntimeCommit::persisted_state_for_test(&state, &[]))
-            .await
-            .expect("commit root frame");
-        let frame_node_id = state.current_frame_node_id.expect("frame node");
-        sqlx::query(
-            "INSERT INTO lash_node_anchors
-             (node_id, checkpoint_ref, source_session_id)
-             VALUES ($1, 'anchor-checkpoint', $2)",
-        )
-        .bind(&frame_node_id)
-        .bind(&state.session_id)
-        .execute(storage.pool())
-        .await
-        .expect("insert anchor root");
-        sqlx::query("UPDATE lash_graph_nodes SET incoming_refs = 3 WHERE node_id = $1")
-            .bind(&frame_node_id)
-            .execute(storage.pool())
-            .await
-            .expect("corrupt cached count");
-
-        let error = store
-            .verify_node_refcounts()
-            .await
-            .expect_err("scrub must detect cached count drift");
-
-        assert!(matches!(
-            error,
-            StoreError::NodeRefcountDrift {
-                node_id,
-                cached: 3,
-                derived: 2,
-            } if node_id == frame_node_id
-        ));
     }
 
     #[tokio::test]

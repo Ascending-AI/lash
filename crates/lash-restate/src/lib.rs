@@ -1383,6 +1383,7 @@ impl AwaitEventResolver for RestateEffectHost {
     }
 }
 
+#[async_trait::async_trait]
 impl EffectHost for RestateEffectHost {
     fn scoped<'run>(
         &'run self,
@@ -1401,6 +1402,15 @@ impl EffectHost for RestateEffectHost {
             self.controller.clone(),
             scope,
         )?))
+    }
+
+    async fn retire_effect_journal(
+        &self,
+        _retirement: lash_core::EffectJournalRetirement,
+    ) -> Result<usize, RuntimeError> {
+        // Restate owns invocation-journal retention natively. There is no
+        // Lash-side replay ledger to delete at this lifecycle boundary.
+        Ok(0)
     }
 }
 

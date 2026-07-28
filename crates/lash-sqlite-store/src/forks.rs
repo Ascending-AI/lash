@@ -48,15 +48,17 @@ pub(super) async fn pin_in_catalog(
                 retained.ok_or_else(|| lash_core::StoreError::ForkPointNotRetained {
                     node_id: node_id.clone(),
                 })?;
-            let changed = tx
-                .execute(
-                    "UPDATE graph_nodes
-                     SET incoming_refs = incoming_refs + 1
+            let live = tx
+                .query_row(
+                    "SELECT 1 FROM graph_nodes
                      WHERE node_id = ?1 AND tombstoned = 0",
                     params![node_id],
+                    |_| Ok(()),
                 )
-                .map_err(sqlite_error)?;
-            if changed != 1 {
+                .optional()
+                .map_err(sqlite_error)?
+                .is_some();
+            if !live {
                 return Err(lash_core::StoreError::ForkPointNotRetained {
                     node_id: node_id.clone(),
                 });
@@ -98,7 +100,7 @@ pub(super) async fn unpin_in_catalog(
                 )
                 .map_err(sqlite_error)?;
             if removed == 1 {
-                persistence::decrement_node_ref_conn(tx, &node_id)?;
+                persistence::retire_unreachable_ancestry_conn(tx, &node_id)?;
             }
             Ok(())
         })();
@@ -212,14 +214,17 @@ pub(super) async fn fork_at_in_catalog(
                         leaf_node_id: request.node_id.clone(),
                     },
                 )?;
-            let changed = tx
-                .execute(
-                    "UPDATE graph_nodes SET incoming_refs = incoming_refs + 1
+            let live = tx
+                .query_row(
+                    "SELECT 1 FROM graph_nodes
                      WHERE node_id = ?1 AND tombstoned = 0",
                     params![request.node_id],
+                    |_| Ok(()),
                 )
-                .map_err(sqlite_error)?;
-            if changed != 1 {
+                .optional()
+                .map_err(sqlite_error)?
+                .is_some();
+            if !live {
                 return Err(lash_core::StoreError::ForkPointNotRetained {
                     node_id: request.node_id.clone(),
                 });

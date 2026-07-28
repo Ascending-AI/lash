@@ -1204,7 +1204,7 @@ impl RuntimeExecutionContext<'_> {
                                     crate::tool_dispatch::PendingToolDispatchOutcome {
                                         tool_name: prepared.tool_name.clone(),
                                         args: prepared.args.clone(),
-                                        key,
+                                        key: *key,
                                         pending,
                                         duration_ms,
                                     },

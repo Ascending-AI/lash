@@ -18,22 +18,26 @@ a count.
 ## History-node amendment
 
 History nodes use a different retention boundary. Their parent edges and session-head roots live
-in the session store, so each backend maintains an `incoming_refs` cache beside an indexed
-`parent_node_id`. A transition to zero is never trusted by itself: before tombstoning, the same
-transaction re-derives the count from edge and root rows and aborts with `NodeRefcountDrift` on
-disagreement. Hosts can run `verify_node_refcounts` to scrub the entire catalog from one
-consistent transaction view and detect forgotten refcount mutation sites.
+in the session store. As established by
+`docs/adr/0024-drainage-reads-over-artifact-refcounts.md`, store-maintained reference counts create
+a second copy of liveness whose drift can corrupt retirement decisions. History retirement now
+applies that ruling directly: every destructive decision derives reachability from indexed parent
+edges, live session heads, and explicit anchors in the same transaction. There is no
+`incoming_refs` cache, drift error, or scrub API.
 
 History ownership is shared reachability, not producer-session exclusivity. Child edges, live
-session heads, and explicit continuation pins are all counted roots. Deleting a session removes
-its head, then reclaims only producer rows whose derived count is zero; the decrement cascade
-stops at the first shared prefix node. PostgreSQL history commits, forks, pin changes, and
-deletion use transaction locks that make those root mutations serializable.
+session heads, and explicit continuation pins are all roots. Deleting a session removes its head,
+then reclaims only producer rows for which no live child, head, or anchor exists; the ancestry walk
+stops at the first shared prefix node. PostgreSQL history commits, forks, pin changes, and deletion
+lock the affected node rows so those root and edge mutations serialize.
 
 `pin` now captures a live head's node, checkpoint, and source session as one immutable anchor.
-`unpin` releases that counted root, and `fork_at` adds a new head root without copying graph
-nodes. Refcount verification and checkpoint-blob GC derive both live heads and anchors on every
-backend.
+`unpin` releases that root, and `fork_at` adds a new head root without copying graph nodes.
+Checkpoint-blob GC derives both live heads and anchors on every backend.
+
+This is the plain agreement the original ruling called for: edges and roots are the only truth,
+not truth reconciled against a maintained count. Removing the count also removes the conservative
+high-drift leak mode and the low-drift operational failure mode.
 
 This does not move non-terminal process roots into stored history counts. Processes remain in a
 different store family, and their definition/env liveness continues to be computed on demand by
