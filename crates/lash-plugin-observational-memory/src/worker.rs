@@ -81,7 +81,7 @@ async fn run_worker_turn(
                 attachments: Vec::new(),
                 output: DirectOutputSpec::Text,
                 stream_events: None,
-                generation: lash_core::GenerationOptions::default(),
+                generation: policy.generation,
                 session_id: Some(format!("{}-om-{worker_kind}", om_host.session_id())),
                 caused_by: None,
                 replay: None,

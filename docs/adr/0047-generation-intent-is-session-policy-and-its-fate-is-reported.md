@@ -13,7 +13,11 @@ call in the session carries. The policy is the right home rather than the spec a
 because subagent specs resolve against the parent's *live* policy, and because every
 carrier of a whole session policy — the current agent frame's assignment, the persisted
 state, `RemoteProcessExecutionPolicy` on the wire — then carries the sampling intent with
-it instead of silently dropping it at each boundary. Provider configuration keeps its own
+it instead of silently dropping it at each boundary. Session-wide means session-wide: the
+direct requests plugins issue on the session's behalf (the observational-memory workers,
+the `llm_query` tool) read it from the policy they already read their model from, rather
+than passing `GenerationOptions::default()` and running at provider defaults inside a
+session that asked for repeatability. Provider configuration keeps its own
 layer underneath the request, applied once, by the per-adapter resolver that already knows
 which wire has a seed field and which model pins sampling. There is no per-turn override:
 no caller in this workspace expresses sampling per turn, and true per-call intent is

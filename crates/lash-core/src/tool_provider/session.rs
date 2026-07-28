@@ -9,6 +9,10 @@ pub struct ToolSessionModel {
     pub model: String,
     pub model_variant: crate::ReasoningSelection,
     pub model_capability: crate::provider::ModelCapability,
+    /// The session's generation options, so a tool making its own LLM call on
+    /// the session's behalf runs under the same sampling intent as the turn
+    /// that invoked it rather than at provider defaults.
+    pub generation: crate::GenerationOptions,
 }
 
 #[derive(Clone)]
@@ -26,6 +30,7 @@ impl<'run> ToolSessionAdmin<'run> {
             model: snapshot.policy.model.id,
             model_variant: snapshot.policy.model.variant,
             model_capability: snapshot.policy.model.capability,
+            generation: snapshot.policy.generation,
         })
     }
 
