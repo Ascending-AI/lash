@@ -218,7 +218,7 @@ pub async fn checkpoint_component_refs_preserve_clean_state(store: Arc<dyn Runti
         tool_state_snapshot: Some(ToolState::default().with_generation(91)),
         plugin_snapshot_revision: Some(37),
         plugin_snapshot: Some(PluginSessionSnapshot::default()),
-        execution_state_snapshot: Some(b"rlm-globals-before-clean-commit".to_vec()),
+        execution_state_snapshot: Some(b"opaque-execution-state-before-clean-commit".to_vec()),
         ..RuntimeSessionState::default()
     };
 
@@ -273,7 +273,7 @@ pub async fn checkpoint_component_refs_preserve_clean_state(store: Arc<dyn Runti
     assert_eq!(checkpoint.plugin_snapshot_revision, Some(37));
     assert_eq!(
         checkpoint.execution_state.as_deref(),
-        Some(&b"rlm-globals-before-clean-commit"[..]),
+        Some(&b"opaque-execution-state-before-clean-commit"[..]),
         "refs-only commit must preserve execution state across a cold load"
     );
 }
