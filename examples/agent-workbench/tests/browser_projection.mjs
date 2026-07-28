@@ -141,6 +141,46 @@ test("trigger registration controls use the payload subscription key", () => {
   assert.match(html, /dataset\.triggerSubscriptionKey/);
 });
 
+test("settled transcript rendering consumes durable reasoning and code disclosure", () => {
+  const rendered = [];
+  const renderContext = {
+    renderMessage(message) {
+      rendered.push(["message", message.id]);
+    },
+    appendReasoning(text, id, turnId) {
+      rendered.push(["reasoning", id, text, turnId]);
+    },
+    appendCodeBlock(row) {
+      rendered.push(["code_block", row.id, row.code, row.output]);
+    },
+  };
+  vm.runInNewContext(
+    `${markedSource("WORKBENCH_SETTLED_TRANSCRIPT", "WORKBENCH_SETTLED_TRANSCRIPT")}
+     renderStateTranscript({
+       transcript: [
+         { type: "message", message: { id: "committed-user" } },
+         { type: "reasoning", id: "reasoning-1", text: "durable thought" },
+         {
+           type: "code_block",
+           id: "code-1",
+           code: "print(\\"durable\\")",
+           output: "durable"
+         }
+       ]
+     });`,
+    renderContext,
+  );
+
+  assert.deepEqual(
+    rendered,
+    [
+      ["message", "committed-user"],
+      ["reasoning", "reasoning-1", "durable thought", null],
+      ["code_block", "code-1", 'print("durable")', "durable"],
+    ],
+  );
+});
+
 test("a Done product event behaviorally retracts the provisional draft", () => {
   let draftRemoved = false;
   let busy = true;

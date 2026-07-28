@@ -125,6 +125,70 @@ fn session_event_registry_isolates_channels_and_recreates_after_removal() {
     ));
 }
 
+#[test]
+fn settled_product_reconciliation_keeps_the_cursor_monotonic() {
+    let registry = SessionEventRegistry::new(4);
+    let session_id = "reconciled-session";
+    let committed_id = "m_turn_reconciled-turn_input";
+    registry.publish_identified(
+        session_id,
+        "provisional-message",
+        StreamItem::Message {
+            message: ChatMessage {
+                id: committed_id.to_string(),
+                role: "user".to_string(),
+                text: "settled prompt".to_string(),
+                at: String::new(),
+            },
+        },
+    );
+    registry.publish_identified(
+        session_id,
+        "turn-done",
+        StreamItem::Done {
+            turn_id: Some("reconciled-turn".to_string()),
+        },
+    );
+
+    registry.reconcile_settled(
+        session_id,
+        &BTreeSet::new(),
+        &BTreeSet::new(),
+    );
+    let reconciled = registry.snapshot(session_id);
+    assert_eq!(reconciled.cursor, 2);
+    assert!(reconciled.events.is_empty());
+    assert!(
+        !registry.publish_identified(
+            session_id,
+            "turn-done",
+            StreamItem::Done {
+                turn_id: Some("reconciled-turn".to_string()),
+            },
+        ),
+        "compaction must retain event identity for idempotent workflow replay"
+    );
+    assert_eq!(registry.snapshot(session_id).cursor, 2);
+
+    registry.publish_identified(
+        session_id,
+        "host-only-event",
+        StreamItem::Message {
+            message: ChatMessage {
+                id: "host-only".to_string(),
+                role: "event".to_string(),
+                text: "host event".to_string(),
+                at: String::new(),
+            },
+        },
+    );
+    assert_eq!(
+        registry.snapshot(session_id).events[0].sequence,
+        3,
+        "compaction must not reuse a cursor already observed by a client"
+    );
+}
+
 #[tokio::test]
 async fn product_event_route_lag_emits_durable_ordered_resync() {
     let data_dir = tempfile::tempdir().expect("workbench lag tempdir");
@@ -248,7 +312,7 @@ async fn workbench_state_snapshot_merges_canonical_history_with_partial_product_
 }
 
 #[tokio::test]
-async fn send_turn_state_projection_stays_readable_while_turn_runs() {
+async fn send_turn_state_projection_stays_readable_and_settles_to_durable_truth() {
     let data_dir = tempfile::tempdir().expect("send turn projection tempdir");
     let (provider_entered_tx, mut provider_entered_rx) = mpsc::unbounded_channel();
     let provider_release = Arc::new(tokio::sync::Notify::new());
@@ -268,9 +332,19 @@ async fn send_turn_state_projection_stays_readable_while_turn_runs() {
                     provider_release.notified().await;
                 }
                 Ok(match call {
-                    0 => text_response(
-                        "<lashlang>\nprint(\"durable execution disclosure\")\n</lashlang>",
-                    ),
+                    0 => {
+                        let mut response = text_response(
+                            "<lashlang>\nprint(\"durable execution disclosure\")\n</lashlang>",
+                        );
+                        response.parts.insert(
+                            0,
+                            lash_core::LlmOutputPart::Reasoning {
+                                text: "durable reasoning disclosure".to_string(),
+                                replay: None,
+                            },
+                        );
+                        response
+                    }
                     1 => text_response("<lashlang>\nfinish \"settled answer\"\n</lashlang>"),
                     other => panic!("unexpected provider call {other}"),
                 })
@@ -358,6 +432,65 @@ async fn send_turn_state_projection_stays_readable_while_turn_runs() {
         provider_entered_rx.recv().await,
         Some(1),
         "the turn must execute the terminal provider iteration"
+    );
+
+    let Json(settled) = app_state(State(state), Query(SessionQuery::default()))
+        .await
+        .expect("materialize settled state");
+    assert_eq!(
+        settled
+            .messages
+            .iter()
+            .map(|message| (message.role.as_str(), message.text.as_str()))
+            .collect::<Vec<_>>(),
+        vec![("user", turn_text), ("assistant", "settled answer")],
+        "settlement must contain exactly the committed transcript rows"
+    );
+    assert_eq!(
+        settled
+            .transcript
+            .iter()
+            .filter_map(|row| match row {
+                TranscriptRow::Message { message } => {
+                    Some((message.role.as_str(), message.text.as_str()))
+                }
+                TranscriptRow::Reasoning { .. } | TranscriptRow::CodeBlock { .. } => None,
+            })
+            .collect::<Vec<_>>(),
+        vec![("user", turn_text), ("assistant", "settled answer")],
+        "the browser transcript projection must contain the committed message set once"
+    );
+    assert!(
+        settled.transcript.iter().any(|row| matches!(
+            row,
+            TranscriptRow::Reasoning { text, .. }
+                if text == "durable reasoning disclosure"
+        )),
+        "settled state must reconstruct reasoning disclosure from durable history"
+    );
+    assert!(
+        settled.transcript.iter().any(|row| matches!(
+            row,
+            TranscriptRow::CodeBlock { code, output, .. }
+                if code.contains("durable execution disclosure")
+                    && output.contains("durable execution disclosure")
+        )),
+        "settled state must reconstruct code execution and output from durable history"
+    );
+    assert!(
+        settled.product_events.events.iter().all(|event| {
+            !matches!(
+                &event.item,
+                StreamItem::Message { message }
+                    if settled.messages.iter().any(|committed| committed.id == message.id)
+            ) && !matches!(
+                &event.item,
+                StreamItem::Done {
+                    turn_id: Some(done_turn_id)
+                } if done_turn_id == &turn_id
+            )
+        }),
+        "settled message and Done rows must leave the product-event lane"
     );
 }
 

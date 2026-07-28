@@ -2675,9 +2675,13 @@
       const el = document.createElement("details");
       el.className = "code-block" + (event.success === false ? " fail" : "");
       el.open = false;
-      el.innerHTML = "<summary></summary><pre></pre>";
+      el.innerHTML = '<summary></summary><pre class="code-source"></pre><pre class="code-output" hidden></pre>';
       renderCodeBlockSummary(el, event, linkedTools);
-      el.querySelector("pre").textContent = event.code || "";
+      el.querySelector(".code-source").textContent = event.code || "";
+      const output = [event.output, event.error].filter(Boolean).join("\n");
+      const outputNode = el.querySelector(".code-output");
+      outputNode.hidden = !output;
+      outputNode.textContent = output;
       for (const tool of linkedTools) appendTool(tool, el);
       return el;
     }
@@ -2701,8 +2705,12 @@
     function updateCodeBlock(el, event, linkedTools = []) {
       el.classList.toggle("fail", event.success === false);
       renderCodeBlockSummary(el, event, linkedTools);
-      const pre = el.querySelector("pre");
+      const pre = el.querySelector(".code-source");
       pre.textContent = event.code || pre.textContent || "";
+      const output = [event.output, event.error].filter(Boolean).join("\n");
+      const outputNode = el.querySelector(".code-output");
+      outputNode.hidden = !output;
+      outputNode.textContent = output;
       for (const tool of linkedTools) appendTool(tool, el);
     }
 
@@ -3113,6 +3121,18 @@
       empty.textContent = "no turns yet. ask the agent something below, or click red or blue to fire a trigger occurrence.";
       timeline.appendChild(empty);
     }
+
+    // BEGIN WORKBENCH_SETTLED_TRANSCRIPT
+    function renderStateTranscript(state) {
+      const transcript = state.transcript ||
+        (state.messages || []).map(message => ({ type: "message", message }));
+      for (const row of transcript) {
+        if (row.type === "message") renderMessage(row.message);
+        if (row.type === "reasoning") appendReasoning(row.text, row.id, null);
+        if (row.type === "code_block") appendCodeBlock(row);
+      }
+    }
+    // END WORKBENCH_SETTLED_TRANSCRIPT
 
     async function doReset() {
       if (resetInFlight) return;
@@ -3719,7 +3739,7 @@
       webState.textContent = state.settings.web_configured ? "ready" : "not configured";
       sessionId.textContent = state.settings.session_id;
       renderUsage(state.usage);
-      for (const message of state.messages) renderMessage(message);
+      renderStateTranscript(state);
       for (const pending of state.pending_turn_inputs || []) {
         const textItem = (pending.input?.items || []).find(item => item.Text?.text);
         renderIngressReceipt({
