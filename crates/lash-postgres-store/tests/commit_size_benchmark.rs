@@ -62,9 +62,6 @@ fn realistic_commit(
         .collect::<Vec<_>>();
     let state = RuntimeSessionState {
         session_id: session_id.to_string(),
-        session_lifetime: lash_core::SessionLifetime::durable(
-            lash_core::IncarnationId::mint_for_store(),
-        ),
         policy: SessionPolicy {
             model: lash_core::ModelSpec::from_token_limits(
                 "benchmark-model",
@@ -90,6 +87,14 @@ fn realistic_commit(
     commit.checkpoint.execution_state = Some(vec![sample as u8; checkpoint_payload_bytes]);
     commit.committed_attachment_ids = attachment_ids;
     commit
+        .with_operation(lash_core::store::OperationId::new(
+            lash_core::ExecutionScope::runtime_operation(format!(
+                "commit-size-benchmark:{session_id}"
+            )),
+            "commit",
+        ))
+        .expect("derive benchmark graph node ids")
+        .0
 }
 
 fn measured_budget_bytes(commit: &RuntimeCommit) -> (usize, usize, usize, usize) {
@@ -209,12 +214,6 @@ async fn measured_commit_size_curve() {
                 for sample in 0..SAMPLES {
                     let session_id =
                         format!("bench-{backend}-{node_count}-{checkpoint_payload_bytes}-{sample}");
-                    let commit =
-                        realistic_commit(&session_id, node_count, checkpoint_payload_bytes, sample);
-                    measured_bytes = measured_budget_bytes(&commit);
-                    commit
-                        .validate_budget()
-                        .expect("benchmark case must fit the production commit budget");
                     let store = match backend {
                         "sqlite" => sqlite_factory
                             .create_store(&SessionStoreCreateRequest {
@@ -228,6 +227,12 @@ async fn measured_commit_size_curve() {
                             as Arc<dyn RuntimePersistence>,
                         _ => unreachable!(),
                     };
+                    let commit =
+                        realistic_commit(&session_id, node_count, checkpoint_payload_bytes, sample);
+                    measured_bytes = measured_budget_bytes(&commit);
+                    commit
+                        .validate_budget()
+                        .expect("benchmark case must fit the production commit budget");
                     elapsed.push(time_commit(store, commit).await);
                 }
                 let median = percentile(&mut elapsed, 0.5);
