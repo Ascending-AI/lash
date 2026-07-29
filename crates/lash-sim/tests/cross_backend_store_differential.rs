@@ -12,6 +12,7 @@
 //! Nodes are never observed through `load_session`: that constructs a
 //! `SessionGraph` read model whose id indexes can hide duplicate durable rows.
 
+use std::collections::BTreeMap;
 use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -32,6 +33,9 @@ use lash_postgres_store::PostgresStorage;
 use rusqlite::OptionalExtension;
 use sqlx::{Connection, PgConnection, PgPool};
 
+#[path = "cross_backend_store_differential/raw_durable_reader.rs"]
+mod raw_durable_reader;
+
 const SESSION_LEASE_TTL_MS: u64 = 60_000;
 // "LASH_PGT" encoded as a positive i64. This must match the shared-database
 // advisory lock used by lash-postgres-store's integration-test harness.
@@ -50,6 +54,8 @@ enum CaseName {
     MissingCheckpointComponentRef,
     PinForkUnpin,
     AttachmentAdoption,
+    DeleteThenAttemptAdmission,
+    StaleHandleAfterDelete,
 }
 
 impl CaseName {
@@ -68,6 +74,8 @@ impl CaseName {
             Self::MissingCheckpointComponentRef => "missing_checkpoint_component_ref",
             Self::PinForkUnpin => "pin_fork_unpin_moves_node_anchor",
             Self::AttachmentAdoption => "attachment_intent_adopted_by_commit",
+            Self::DeleteThenAttemptAdmission => "delete_then_attempt_admission",
+            Self::StaleHandleAfterDelete => "stale_handle_after_delete",
         }
     }
 }
@@ -107,6 +115,31 @@ enum StoreOperation {
     CommitStaleTurnInputClaim {
         expected_head_revision: u64,
     },
+    /// SQLite and PostgreSQL discard the live store/factory and reopen through
+    /// an independent connection. In-memory has no independent durable
+    /// instance, so its leg can only reopen the same object through the
+    /// retained factory and does not prove cold-instance reconstruction.
+    ColdReopenSession,
+    /// Enter deletion through `LashCore::delete_session` to exercise the store
+    /// tombstone and subsequent admission refusal. This fixture deliberately
+    /// wires neither a process registry nor a trigger store, so it does not
+    /// cover the process-deletion or trigger-subscription deletion legs.
+    DeleteSession,
+    AttemptAdmission,
+    CreateHandle {
+        handle_alias: &'static str,
+    },
+    DeleteSessionThroughFactory,
+    AdmitOnHandle {
+        handle_alias: &'static str,
+    },
+    SaveMetaOnHandle {
+        handle_alias: &'static str,
+    },
+    CommitOnHandle {
+        handle_alias: &'static str,
+    },
+    ObserveSessionAbsent,
 }
 
 impl StoreOperation {
@@ -131,6 +164,15 @@ impl StoreOperation {
             Self::CommitStaleTurnInputClaim { .. } => {
                 "commit_stale_claim_before_successor_reclaims_row"
             }
+            Self::ColdReopenSession => "cold_reopen_session",
+            Self::DeleteSession => "delete_session",
+            Self::AttemptAdmission => "attempt_admission",
+            Self::CreateHandle { .. } => "create_handle",
+            Self::DeleteSessionThroughFactory => "delete_session_through_factory",
+            Self::AdmitOnHandle { .. } => "admit_on_handle",
+            Self::SaveMetaOnHandle { .. } => "save_meta_on_handle",
+            Self::CommitOnHandle { .. } => "commit_on_handle",
+            Self::ObserveSessionAbsent { .. } => "observe_session_absent",
         }
     }
 }
@@ -440,6 +482,7 @@ fn generated_cases() -> Vec<GeneratedCase> {
                     usage: false,
                     adopt_attachment: false,
                 },
+                StoreOperation::ColdReopenSession,
             ],
         },
         GeneratedCase {
@@ -493,6 +536,32 @@ fn generated_cases() -> Vec<GeneratedCase> {
                     usage: false,
                     adopt_attachment: true,
                 },
+            ],
+        },
+        GeneratedCase {
+            name: CaseName::DeleteThenAttemptAdmission,
+            operations: vec![
+                StoreOperation::DeleteSession,
+                StoreOperation::AttemptAdmission,
+            ],
+        },
+        GeneratedCase {
+            name: CaseName::StaleHandleAfterDelete,
+            operations: vec![
+                StoreOperation::CreateHandle {
+                    handle_alias: "handle-1",
+                },
+                StoreOperation::DeleteSessionThroughFactory,
+                StoreOperation::AdmitOnHandle {
+                    handle_alias: "handle-1",
+                },
+                StoreOperation::SaveMetaOnHandle {
+                    handle_alias: "handle-1",
+                },
+                StoreOperation::CommitOnHandle {
+                    handle_alias: "handle-1",
+                },
+                StoreOperation::ObserveSessionAbsent,
             ],
         },
     ]
@@ -708,7 +777,7 @@ struct PendingTurnInputObservation {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct CheckpointObservation {
-    checkpoint_ref: BlobRef,
+    checkpoint_ref: Option<BlobRef>,
     turn_state: serde_json::Value,
     tool_state_ref: Option<BlobRef>,
     tool_state: Option<serde_json::Value>,
@@ -825,346 +894,17 @@ enum RawDurableReader {
     Sqlite {
         path: PathBuf,
         session_id: String,
-        store: Arc<dyn RuntimePersistence>,
+        store: Option<Arc<dyn RuntimePersistence>>,
     },
     Postgres {
         pool: PgPool,
         session_id: String,
-        store: Arc<dyn RuntimePersistence>,
+        store: Option<Arc<dyn RuntimePersistence>>,
     },
 }
 
-impl RawDurableReader {
-    async fn observe(&self) -> RawDurableState {
-        match self {
-            Self::InMemory { store, factory } => {
-                let durable_nodes = store
-                    .raw_graph_nodes_for_testing()
-                    .into_iter()
-                    .enumerate()
-                    .map(|(ordinal, node)| DurableNode {
-                        ordinal,
-                        node_id: node.node_id.clone(),
-                        parent_node_id: node.parent_node_id.clone(),
-                        bytes: normalized_in_memory_node_json(&node),
-                    })
-                    .collect();
-                let pending_turn_inputs = store
-                    .raw_pending_turn_inputs_for_testing()
-                    .into_iter()
-                    .map(|(input_id, state, claim_session_lease_generation)| {
-                        PendingTurnInputObservation {
-                            input_id,
-                            state,
-                            claim_session_lease_generation,
-                        }
-                    })
-                    .collect();
-                let checkpoint = match store.raw_checkpoint_for_testing() {
-                    Some(checkpoint) => {
-                        let checkpoint_ref = store
-                            .load_session()
-                            .await
-                            .expect("load in-memory session")
-                            .expect("checkpoint implies in-memory session")
-                            .checkpoint_ref
-                            .expect("checkpoint implies checkpoint ref");
-                        Some(checkpoint_observation(checkpoint_ref, checkpoint))
-                    }
-                    None => None,
-                };
-                let runtime_turn_commits = store
-                    .raw_runtime_turn_commits_for_testing()
-                    .into_iter()
-                    .map(
-                        |(operation, turn_commit_hash, result)| RuntimeTurnCommitObservation {
-                            operation,
-                            turn_commit_hash,
-                            result: serde_json::to_value(result)
-                                .expect("encode in-memory turn-commit result"),
-                        },
-                    )
-                    .collect();
-                let attachment_manifest = store
-                    .raw_attachment_manifest_for_testing()
-                    .into_iter()
-                    .map(attachment_manifest_observation)
-                    .collect();
-                let node_anchors = factory
-                    .raw_node_anchors_for_testing()
-                    .into_iter()
-                    .map(
-                        |(node_id, checkpoint_ref, source_session_id)| NodeAnchorObservation {
-                            node_id,
-                            checkpoint_ref,
-                            source_session_id,
-                        },
-                    )
-                    .collect();
-                let usage_deltas = store
-                    .raw_usage_deltas_for_testing()
-                    .into_iter()
-                    .map(usage_delta_observation)
-                    .collect();
-                let session_meta = store
-                    .raw_session_meta_for_testing()
-                    .map(session_meta_observation);
-                let session_execution_leases = store
-                    .raw_session_execution_leases_for_testing()
-                    .into_iter()
-                    .map(
-                        |(
-                            _session_id,
-                            owner,
-                            lease_token_present,
-                            fencing_token,
-                            claimed_at_epoch_ms,
-                            expires_at_epoch_ms,
-                        )| SessionExecutionLeaseObservation {
-                            owner,
-                            lease_token_present,
-                            fencing_token,
-                            claimed: claimed_at_epoch_ms != 0,
-                            ttl_ms: (claimed_at_epoch_ms != 0)
-                                .then_some(expires_at_epoch_ms - claimed_at_epoch_ms),
-                        },
-                    )
-                    .collect();
-                RawDurableState {
-                    head_revision: store.raw_head_revision_for_testing(),
-                    leaf_node_id: store.raw_leaf_node_id_for_testing(),
-                    checkpoint,
-                    durable_nodes,
-                    runtime_turn_commits,
-                    attachment_manifest,
-                    node_anchors,
-                    usage_deltas,
-                    session_meta,
-                    session_execution_leases,
-                    pending_turn_inputs,
-                }
-            }
-            Self::Sqlite {
-                path,
-                session_id,
-                store,
-            } => read_sqlite_durable_state(path, session_id, store).await,
-            Self::Postgres {
-                pool,
-                session_id,
-                store,
-            } => {
-                let head: Option<(i64, Option<String>, Option<String>)> = sqlx::query_as(
-                    "SELECT head_revision, leaf_node_id, checkpoint_ref
-                     FROM lash_sessions
-                     WHERE session_id = $1",
-                )
-                .bind(session_id)
-                .fetch_optional(pool)
-                .await
-                .expect("read Postgres durable head");
-                let (head_revision, leaf_node_id, checkpoint_ref) = head.map_or(
-                    (None, None, None),
-                    |(revision, leaf_node_id, checkpoint_ref)| {
-                        (
-                            Some(revision as u64),
-                            leaf_node_id,
-                            checkpoint_ref.map(BlobRef),
-                        )
-                    },
-                );
-                let checkpoint = read_checkpoint_observation(store, checkpoint_ref).await;
-                let rows: Vec<(i64, String, Option<String>, String)> = sqlx::query_as(
-                    "SELECT seq, node_id, parent_node_id, node_json
-                     FROM lash_graph_nodes
-                     WHERE session_id = $1 AND tombstoned = FALSE
-                     ORDER BY seq ASC",
-                )
-                .bind(session_id)
-                .fetch_all(pool)
-                .await
-                .expect("read Postgres durable nodes");
-                let durable_nodes = rows
-                    .into_iter()
-                    .enumerate()
-                    .map(
-                        |(ordinal, (_seq, node_id, parent_node_id, node_json))| DurableNode {
-                            ordinal,
-                            node_id,
-                            parent_node_id,
-                            bytes: normalized_sql_node_json(&node_json),
-                        },
-                    )
-                    .collect();
-                let receipt_rows: Vec<(String, String, String)> = sqlx::query_as(
-                    "SELECT turn_id, turn_commit_hash, result_json
-                     FROM lash_runtime_turn_commits
-                     WHERE session_id = $1
-                     ORDER BY turn_id ASC",
-                )
-                .bind(session_id)
-                .fetch_all(pool)
-                .await
-                .expect("read Postgres turn-commit receipts");
-                let runtime_turn_commits = receipt_rows
-                    .into_iter()
-                    .map(|(operation, turn_commit_hash, result_json)| {
-                        RuntimeTurnCommitObservation {
-                            operation,
-                            turn_commit_hash,
-                            result: serde_json::from_str(&result_json)
-                                .expect("decode Postgres turn-commit result"),
-                        }
-                    })
-                    .collect();
-                let attachment_rows: Vec<AttachmentRow> = sqlx::query_as(
-                    "SELECT attachment_id, canonical_uri, intent_at_ms, committed_at_ms,
-                            owner_kind, owner_id
-                     FROM lash_attachment_manifest
-                     WHERE session_id = $1
-                     ORDER BY attachment_id ASC",
-                )
-                .bind(session_id)
-                .fetch_all(pool)
-                .await
-                .expect("read Postgres attachment manifest");
-                let attachment_manifest = attachment_rows
-                    .into_iter()
-                    .map(
-                        |(
-                            attachment_id,
-                            canonical_uri,
-                            intent_at_epoch_ms,
-                            committed_at_epoch_ms,
-                            owner_kind,
-                            owner_id,
-                        )| AttachmentManifestObservation {
-                            attachment_id: AttachmentId::new(attachment_id),
-                            canonical_uri,
-                            intent_at_epoch_ms: intent_at_epoch_ms as u64,
-                            committed: committed_at_epoch_ms.is_some(),
-                            owner_kind: decode_attachment_owner_kind(owner_kind.as_deref()),
-                            owner_id,
-                        },
-                    )
-                    .collect();
-                let anchor_rows: Vec<(String, String, String)> = sqlx::query_as(
-                    "SELECT node_id, checkpoint_ref, source_session_id
-                     FROM lash_node_anchors
-                     WHERE source_session_id = $1
-                     ORDER BY node_id ASC",
-                )
-                .bind(session_id)
-                .fetch_all(pool)
-                .await
-                .expect("read Postgres node anchors");
-                let node_anchors = anchor_rows
-                    .into_iter()
-                    .map(
-                        |(node_id, checkpoint_ref, source_session_id)| NodeAnchorObservation {
-                            node_id,
-                            checkpoint_ref: BlobRef(checkpoint_ref),
-                            source_session_id,
-                        },
-                    )
-                    .collect();
-                let usage_rows: Vec<String> = sqlx::query_scalar(
-                    "SELECT entry_json
-                     FROM lash_usage_deltas
-                     WHERE session_id = $1
-                     ORDER BY seq ASC",
-                )
-                .bind(session_id)
-                .fetch_all(pool)
-                .await
-                .expect("read Postgres usage deltas");
-                let usage_deltas = usage_rows
-                    .into_iter()
-                    .map(|entry_json| {
-                        usage_delta_observation(
-                            serde_json::from_str(&entry_json).expect("decode Postgres usage delta"),
-                        )
-                    })
-                    .collect();
-                let session_meta = read_session_meta_observation(store).await;
-                let lease_rows: Vec<LeaseRow> = sqlx::query_as(
-                    "SELECT lease_owner_id, lease_owner_incarnation_id,
-                            lease_owner_liveness_json, lease_token,
-                            lease_fencing_token, lease_claimed_at_ms, lease_expires_at_ms
-                     FROM lash_session_execution_leases
-                     WHERE session_id = $1",
-                )
-                .bind(session_id)
-                .fetch_all(pool)
-                .await
-                .expect("read Postgres session-execution lease");
-                let session_execution_leases = lease_rows
-                    .into_iter()
-                    .map(
-                        |(
-                            owner_id,
-                            incarnation_id,
-                            liveness_json,
-                            lease_token,
-                            fencing_token,
-                            claimed_at_epoch_ms,
-                            expires_at_epoch_ms,
-                        )| SessionExecutionLeaseObservation {
-                            owner: decode_lease_owner(owner_id, incarnation_id, liveness_json),
-                            lease_token_present: lease_token.is_some(),
-                            fencing_token: fencing_token as u64,
-                            claimed: claimed_at_epoch_ms != 0,
-                            ttl_ms: (claimed_at_epoch_ms != 0)
-                                .then_some((expires_at_epoch_ms - claimed_at_epoch_ms) as u64),
-                        },
-                    )
-                    .collect();
-                let pending_rows: Vec<(String, String, Option<i64>)> = sqlx::query_as(
-                    "SELECT input_id, state,
-                            CASE WHEN claim_token IS NULL
-                                 THEN NULL
-                                 ELSE claim_session_lease_generation
-                            END
-                     FROM lash_pending_turn_inputs
-                     WHERE session_id = $1
-                     ORDER BY enqueue_seq ASC",
-                )
-                .bind(session_id)
-                .fetch_all(pool)
-                .await
-                .expect("read Postgres pending turn inputs");
-                let pending_turn_inputs = pending_rows
-                    .into_iter()
-                    .map(|(input_id, state, claim_session_lease_generation)| {
-                        PendingTurnInputObservation {
-                            input_id,
-                            state: TurnInputState::from_wire_str(&state)
-                                .expect("decode Postgres pending-input state"),
-                            claim_session_lease_generation: claim_session_lease_generation
-                                .map(|generation| generation as u64),
-                        }
-                    })
-                    .collect();
-                RawDurableState {
-                    head_revision,
-                    leaf_node_id,
-                    checkpoint,
-                    durable_nodes,
-                    runtime_turn_commits,
-                    attachment_manifest,
-                    node_anchors,
-                    usage_deltas,
-                    session_meta,
-                    session_execution_leases,
-                    pending_turn_inputs,
-                }
-            }
-        }
-    }
-}
-
 fn checkpoint_observation(
-    checkpoint_ref: BlobRef,
+    checkpoint_ref: Option<BlobRef>,
     checkpoint: HydratedSessionCheckpoint,
 ) -> CheckpointObservation {
     CheckpointObservation {
@@ -1201,7 +941,7 @@ async fn read_checkpoint_observation(
         "typed load must preserve the raw checkpoint ref"
     );
     Some(checkpoint_observation(
-        raw_checkpoint_ref,
+        Some(raw_checkpoint_ref),
         read.checkpoint.expect("checkpoint ref must hydrate"),
     ))
 }
@@ -1571,12 +1311,35 @@ async fn read_sqlite_durable_state(
     }
 }
 
+#[derive(Clone)]
+enum BackendReopen {
+    /// Retained-factory, same-object reopen only; this cannot establish
+    /// independent cold-instance reconstruction for the in-memory backend.
+    InMemory,
+    Sqlite {
+        root: PathBuf,
+    },
+    Postgres {
+        database_url: String,
+    },
+}
+
+struct NamedHandle {
+    store: Arc<dyn RuntimePersistence>,
+    meta: SessionMeta,
+}
+
 struct BackendRunner {
     name: &'static str,
     session_id: String,
-    store: Arc<dyn RuntimePersistence>,
-    factory: Arc<dyn SessionStoreFactory>,
+    store: Option<Arc<dyn RuntimePersistence>>,
+    factory: Option<Arc<dyn SessionStoreFactory>>,
     raw_reader: RawDurableReader,
+    reopen: BackendReopen,
+    clock: Arc<dyn Clock>,
+    handles: BTreeMap<&'static str, NamedHandle>,
+    lifecycle_core: Option<lash::LashCore>,
+    reopened_postgres_pool: Option<PgPool>,
     first_lease: Option<lash_core::SessionExecutionLease>,
     successor_lease: Option<lash_core::SessionExecutionLease>,
     stale_turn_input_claim: Option<TurnInputClaim>,
@@ -1586,6 +1349,69 @@ struct BackendRunner {
 }
 
 impl BackendRunner {
+    fn store(&self) -> Arc<dyn RuntimePersistence> {
+        Arc::clone(
+            self.store
+                .as_ref()
+                .expect("backend runner is attached to a store"),
+        )
+    }
+
+    fn factory(&self) -> Arc<dyn SessionStoreFactory> {
+        Arc::clone(
+            self.factory
+                .as_ref()
+                .expect("backend runner is attached to a factory"),
+        )
+    }
+
+    fn create_request(&self) -> SessionStoreCreateRequest {
+        SessionStoreCreateRequest {
+            session_id: self.session_id.clone(),
+            relation: SessionRelation::Root,
+            policy: lash_core::SessionPolicy::default(),
+        }
+    }
+
+    fn assert_session_deleted(&self, error: &StoreError, operation: &str) {
+        assert!(
+            matches!(
+                error,
+                StoreError::SessionDeleted { session_id } if session_id == &self.session_id
+            ),
+            "{} {operation} must return typed SessionDeleted for `{}`, got: {error}",
+            self.name,
+            self.session_id
+        );
+    }
+
+    fn build_lifecycle_core(&self) -> lash::LashCore {
+        let transport = Arc::new(lash_sim::ScriptedLlmHttpTransport::from_scripts([]));
+        let (provider, model, _) = lash_sim::runtime_providers::runtime_provider_components(
+            lash_sim::runtime_providers::OPENAI_COMPATIBLE,
+            &transport,
+        )
+        .expect("build differential lifecycle provider");
+        lash::LashCore::standard_builder()
+            .effect_host(Arc::new(lash::durability::InlineEffectHost::default()))
+            .attachment_store(Arc::new(lash::persistence::InMemoryAttachmentStore::new()))
+            .process_env_store(Arc::new(
+                lash::persistence::InMemoryProcessExecutionEnvStore::new(),
+            ))
+            .store_factory(self.factory())
+            .provider(provider)
+            .model(model)
+            .clock(Arc::clone(&self.clock))
+            .build()
+            .expect("build differential lifecycle core")
+    }
+
+    async fn close_reopened_postgres_pool(&mut self) {
+        if let Some(pool) = self.reopened_postgres_pool.take() {
+            pool.close().await;
+        }
+    }
+
     fn lease(&self, slot: LeaseSlot) -> &lash_core::SessionExecutionLease {
         match slot {
             LeaseSlot::First => self.first_lease.as_ref(),
@@ -1633,7 +1459,7 @@ impl BackendRunner {
                 );
                 let next_frame_node_id = commit.current_frame_node_id.clone();
                 let next_leaf_node_id = commit.graph.leaf_node_id.clone();
-                let result = self.store.commit_runtime_state(commit).await;
+                let result = self.store().commit_runtime_state(commit).await;
                 match result {
                     Ok(result) => {
                         self.current_frame_node_id = next_frame_node_id;
@@ -1657,7 +1483,7 @@ impl BackendRunner {
                     "differential",
                 )
                 .storage_key()?;
-                self.store.record_intent(AttachmentIntent {
+                self.store().record_intent(AttachmentIntent {
                     attachment_id: differential_attachment_id(),
                     session_id: self.session_id.clone(),
                     canonical_uri: "lash-attachment://sha256/differential-attachment".to_string(),
@@ -1668,7 +1494,7 @@ impl BackendRunner {
                 Ok(None)
             }
             StoreOperation::PinLeaf => {
-                self.factory
+                self.factory()
                     .pin(
                         self.current_leaf_node_id
                             .as_deref()
@@ -1682,7 +1508,7 @@ impl BackendRunner {
                     .current_leaf_node_id
                     .clone()
                     .expect("generated sequence committed a leaf before fork");
-                self.factory
+                self.factory()
                     .fork_at(&ForkSessionRequest {
                         session_id: format!("{}:fork", self.session_id),
                         node_id: node_id.clone(),
@@ -1697,7 +1523,7 @@ impl BackendRunner {
                 Ok(None)
             }
             StoreOperation::UnpinLeaf => {
-                self.factory
+                self.factory()
                     .unpin(
                         self.current_leaf_node_id
                             .as_deref()
@@ -1707,7 +1533,7 @@ impl BackendRunner {
                 Ok(None)
             }
             StoreOperation::EnqueueNextTurnInput => self
-                .store
+                .store()
                 .enqueue_pending_turn_input(
                     PendingTurnInputDraft::new(
                         &self.session_id,
@@ -1721,7 +1547,7 @@ impl BackendRunner {
             StoreOperation::AcquireSessionLease { slot, owner } => {
                 let owner = LeaseOwnerIdentity::opaque(*owner, format!("{owner}:incarnation"));
                 let lease = self
-                    .store
+                    .store()
                     .try_claim_session_execution_lease(
                         &self.session_id,
                         &owner,
@@ -1750,8 +1576,8 @@ impl BackendRunner {
             StoreOperation::ClaimNextTurnInput { lease } => {
                 let lease = self.lease(*lease);
                 let owner = lease.owner.clone();
-                let mut claim = self
-                    .store
+                let store = self.store();
+                let mut claim = store
                     .claim_next_turn_inputs(&self.session_id, &lease.fence(), &owner, 1)
                     .await?
                     .ok_or_else(|| {
@@ -1765,7 +1591,7 @@ impl BackendRunner {
                 Ok(None)
             }
             StoreOperation::ReleaseSessionLease { lease } => self
-                .store
+                .store()
                 .release_session_execution_lease(&self.lease(*lease).completion())
                 .await
                 .map(|_| None),
@@ -1780,7 +1606,7 @@ impl BackendRunner {
                     nodes: vec![NodeSpec::new("stale-claim-node", None, "stale-claim")],
                     leaf_node_id: Some("stale-claim-node"),
                 };
-                self.store
+                self.store()
                     .commit_runtime_state(
                         runtime_commit(
                             &self.session_id,
@@ -1796,6 +1622,245 @@ impl BackendRunner {
                     )
                     .await
                     .map(|result| Some(result.into()))
+            }
+            StoreOperation::ColdReopenSession => {
+                let request = self.create_request();
+                let reopened = match self.reopen.clone() {
+                    // This is intentionally a retained-factory, same-object
+                    // reopen. Only the SQL legs prove independent cold-instance
+                    // reconstruction.
+                    BackendReopen::InMemory => self
+                        .factory()
+                        .open_existing_store(&request)
+                        .await
+                        .map_err(StoreError::Backend)?
+                        .expect("in-memory retained factory must still expose the live session"),
+                    BackendReopen::Sqlite { root } => {
+                        self.store.take();
+                        self.factory.take();
+                        self.raw_reader.detach_store();
+
+                        let concrete_factory = Arc::new(
+                            lash_sqlite_store::SqliteSessionStoreFactory::new(root.clone())
+                                .with_clock(Arc::clone(&self.clock)),
+                        );
+                        let reopened = concrete_factory
+                            .open_existing_store(&request)
+                            .await
+                            .map_err(StoreError::Backend)?
+                            .expect("SQLite session must survive an independent reopen");
+                        let path = concrete_factory.catalog_path();
+                        self.factory = Some(concrete_factory as Arc<dyn SessionStoreFactory>);
+                        self.raw_reader = RawDurableReader::Sqlite {
+                            path,
+                            session_id: self.session_id.clone(),
+                            store: Some(Arc::clone(&reopened)),
+                        };
+                        reopened
+                    }
+                    BackendReopen::Postgres { database_url } => {
+                        self.store.take();
+                        self.factory.take();
+                        self.raw_reader.detach_store();
+
+                        let storage = PostgresStorage::connect(&database_url)
+                            .await
+                            .expect("connect independent Postgres storage");
+                        let pool = storage.pool().clone();
+                        let concrete_factory = Arc::new(
+                            storage
+                                .session_store_factory()
+                                .with_clock(Arc::clone(&self.clock)),
+                        );
+                        let reopened = concrete_factory
+                            .open_existing_store(&request)
+                            .await
+                            .map_err(StoreError::Backend)?
+                            .expect("Postgres session must survive an independent reopen");
+                        self.factory = Some(concrete_factory as Arc<dyn SessionStoreFactory>);
+                        self.raw_reader = RawDurableReader::Postgres {
+                            pool: pool.clone(),
+                            session_id: self.session_id.clone(),
+                            store: Some(Arc::clone(&reopened)),
+                        };
+                        self.reopened_postgres_pool = Some(pool);
+                        reopened
+                    }
+                };
+                self.store = Some(Arc::clone(&reopened));
+
+                let loaded = reopened
+                    .load_session()
+                    .await?
+                    .expect("cold-reopened session must have durable state");
+                let checkpoint = loaded
+                    .checkpoint
+                    .expect("cold-reopened session must hydrate its checkpoint");
+                let expected = checkpoint_bodies();
+                assert_eq!(
+                    checkpoint.tool_state.as_ref().map(ToolState::generation),
+                    expected.tool_state.as_ref().map(ToolState::generation),
+                    "{} cold reopen must rehydrate the tool-state body",
+                    self.name
+                );
+                assert_eq!(
+                    checkpoint
+                        .plugin_snapshot
+                        .as_ref()
+                        .map(|snapshot| serde_json::to_value(snapshot).expect("encode snapshot")),
+                    expected
+                        .plugin_snapshot
+                        .as_ref()
+                        .map(|snapshot| serde_json::to_value(snapshot).expect("encode snapshot")),
+                    "{} cold reopen must rehydrate the plugin-snapshot body",
+                    self.name
+                );
+                assert_eq!(
+                    checkpoint.execution_state, expected.execution_state,
+                    "{} cold reopen must rehydrate the execution-state body",
+                    self.name
+                );
+                Ok(None)
+            }
+            StoreOperation::DeleteSession => {
+                let core = self.build_lifecycle_core();
+                let scope = core
+                    .session_delete_scope(&self.session_id)
+                    .await
+                    .expect("materialized session must produce a delete scope");
+                let effect_host = core.effect_host();
+                let scoped = effect_host
+                    .scoped_static(scope)
+                    .expect("scope the differential delete")
+                    .expect("inline effect host must provide a static delete scope");
+                core.delete_session(&self.session_id, scoped)
+                    .await
+                    .expect("delete the materialized session through LashCore");
+                self.lifecycle_core = Some(core);
+                Ok(None)
+            }
+            StoreOperation::AttemptAdmission => {
+                let core = self
+                    .lifecycle_core
+                    .as_ref()
+                    .expect("generated sequence deletes before attempting admission");
+                let error = match core.session(&self.session_id).open().await {
+                    Ok(_) => panic!(
+                        "{} admitted deleted session `{}`",
+                        self.name, self.session_id
+                    ),
+                    Err(lash::EmbedError::Store(error)) => error,
+                    Err(error) => panic!(
+                        "{} admission returned an untyped error for deleted session `{}`: {error}",
+                        self.name, self.session_id
+                    ),
+                };
+                self.assert_session_deleted(&error, "admission");
+                assert!(
+                    self.store()
+                        .list_turn_input_applications(&self.session_id)
+                        .await?
+                        .is_empty(),
+                    "{} persisted a runtime turn commit while refusing deleted-session admission",
+                    self.name
+                );
+                assert!(
+                    self.store()
+                        .list_pending_turn_inputs(&self.session_id)
+                        .await?
+                        .is_empty(),
+                    "{} enqueued pending turn input while refusing deleted-session admission",
+                    self.name
+                );
+                Err(error)
+            }
+            StoreOperation::CreateHandle { handle_alias } => {
+                let request = self.create_request();
+                let store = self
+                    .factory()
+                    .open_existing_store(&request)
+                    .await
+                    .map_err(StoreError::Backend)?
+                    .expect("create handle requires a live materialized session");
+                let meta = store
+                    .load_session_meta()
+                    .await?
+                    .expect("live handle must retain session metadata");
+                assert!(
+                    self.handles
+                        .insert(*handle_alias, NamedHandle { store, meta })
+                        .is_none(),
+                    "{} reused handle alias `{handle_alias}`",
+                    self.name
+                );
+                Ok(None)
+            }
+            StoreOperation::DeleteSessionThroughFactory => {
+                self.factory()
+                    .delete_session(&self.session_id)
+                    .await
+                    .map_err(StoreError::Backend)?;
+                Ok(None)
+            }
+            StoreOperation::AdmitOnHandle { handle_alias } => {
+                let request = self.create_request();
+                let handle = self
+                    .handles
+                    .get(handle_alias)
+                    .expect("generated sequence creates handle before admission");
+                let error = handle
+                    .store
+                    .admit_and_bind_session(&lash_core::SessionBinding::from_create_request(
+                        &request,
+                    ))
+                    .await
+                    .expect_err("stale handle admission must be fenced");
+                self.assert_session_deleted(&error, "stale-handle admission");
+                Err(error)
+            }
+            StoreOperation::SaveMetaOnHandle { handle_alias } => {
+                let handle = self
+                    .handles
+                    .get(handle_alias)
+                    .expect("generated sequence creates handle before metadata save");
+                let error = handle
+                    .store
+                    .save_session_meta(handle.meta.clone())
+                    .await
+                    .expect_err("stale handle metadata save must be fenced");
+                self.assert_session_deleted(&error, "stale-handle metadata save");
+                Err(error)
+            }
+            StoreOperation::CommitOnHandle { handle_alias } => {
+                let handle = self
+                    .handles
+                    .get(handle_alias)
+                    .expect("generated sequence creates handle before commit");
+                let state = RuntimeSessionState {
+                    session_id: self.session_id.clone(),
+                    ..RuntimeSessionState::default()
+                };
+                let error = handle
+                    .store
+                    .commit_runtime_state(RuntimeCommit::persisted_state_for_test(&state, &[]))
+                    .await
+                    .expect_err("stale handle commit must be fenced");
+                self.assert_session_deleted(&error, "stale-handle commit");
+                Err(error)
+            }
+            StoreOperation::ObserveSessionAbsent => {
+                let request = self.create_request();
+                assert!(
+                    self.factory()
+                        .open_existing_store(&request)
+                        .await
+                        .map_err(StoreError::Backend)?
+                        .is_none(),
+                    "{} stale writes resurrected deleted session `{}`",
+                    self.name,
+                    self.session_id
+                );
+                Ok(None)
             }
         }
     }
@@ -1908,9 +1973,10 @@ async fn runners_for_case(
     case: CaseName,
     sqlite_root: &Path,
     postgres: &PostgresStorage,
+    postgres_database_url: &str,
     run_nonce: &str,
 ) -> Vec<BackendRunner> {
-    let session_id = format!("fig-643-{run_nonce}-{}", case.as_str());
+    let session_id = format!("fig-778-{run_nonce}-{}", case.as_str());
     let clock = Arc::new(DifferentialClock) as Arc<dyn Clock>;
     let create_request = SessionStoreCreateRequest {
         session_id: session_id.clone(),
@@ -1937,8 +2003,9 @@ async fn runners_for_case(
     memory.replace_session_meta_for_testing(expected_meta.clone());
     let memory_factory_dyn = Arc::clone(&memory_factory) as Arc<dyn SessionStoreFactory>;
 
+    let sqlite_case_root = sqlite_root.join(case.as_str());
     let sqlite_factory = Arc::new(
-        lash_sqlite_store::SqliteSessionStoreFactory::new(sqlite_root.join(case.as_str()))
+        lash_sqlite_store::SqliteSessionStoreFactory::new(sqlite_case_root.clone())
             .with_clock(Arc::clone(&clock)),
     );
     let sqlite_path = sqlite_factory.catalog_path();
@@ -1994,12 +2061,17 @@ async fn runners_for_case(
         BackendRunner {
             name: "in-memory",
             session_id: session_id.clone(),
-            store: memory_store,
-            factory: memory_factory_dyn,
+            store: Some(memory_store),
+            factory: Some(memory_factory_dyn),
             raw_reader: RawDurableReader::InMemory {
                 store: memory,
                 factory: memory_factory,
             },
+            reopen: BackendReopen::InMemory,
+            clock: Arc::clone(&clock),
+            handles: BTreeMap::new(),
+            lifecycle_core: None,
+            reopened_postgres_pool: None,
             first_lease: None,
             successor_lease: None,
             stale_turn_input_claim: None,
@@ -2010,13 +2082,20 @@ async fn runners_for_case(
         BackendRunner {
             name: "sqlite",
             session_id: session_id.clone(),
-            store: Arc::clone(&sqlite_store),
-            factory: sqlite_factory_dyn,
+            store: Some(Arc::clone(&sqlite_store)),
+            factory: Some(sqlite_factory_dyn),
             raw_reader: RawDurableReader::Sqlite {
                 path: sqlite_path,
                 session_id: session_id.clone(),
-                store: sqlite_store,
+                store: Some(sqlite_store),
             },
+            reopen: BackendReopen::Sqlite {
+                root: sqlite_case_root,
+            },
+            clock: Arc::clone(&clock),
+            handles: BTreeMap::new(),
+            lifecycle_core: None,
+            reopened_postgres_pool: None,
             first_lease: None,
             successor_lease: None,
             stale_turn_input_claim: None,
@@ -2027,13 +2106,20 @@ async fn runners_for_case(
         BackendRunner {
             name: "postgres",
             session_id: session_id.clone(),
-            store: Arc::clone(&postgres_store),
-            factory: postgres_factory_dyn,
+            store: Some(Arc::clone(&postgres_store)),
+            factory: Some(postgres_factory_dyn),
             raw_reader: RawDurableReader::Postgres {
                 pool: postgres.pool().clone(),
                 session_id,
-                store: postgres_store,
+                store: Some(postgres_store),
             },
+            reopen: BackendReopen::Postgres {
+                database_url: postgres_database_url.to_string(),
+            },
+            clock,
+            handles: BTreeMap::new(),
+            lifecycle_core: None,
+            reopened_postgres_pool: None,
             first_lease: None,
             successor_lease: None,
             stale_turn_input_claim: None,
@@ -2074,7 +2160,7 @@ fn render_divergence(
 #[test]
 fn generated_catalog_covers_required_adversarial_shapes() {
     let cases = generated_cases();
-    assert_eq!(cases.len(), 11);
+    assert_eq!(cases.len(), 13);
     assert!(cases.iter().all(|case| !case.operations.is_empty()));
     assert_eq!(
         cases
@@ -2093,6 +2179,8 @@ fn generated_catalog_covers_required_adversarial_shapes() {
             "missing_checkpoint_component_ref",
             "pin_fork_unpin_moves_node_anchor",
             "attachment_intent_adopted_by_commit",
+            "delete_then_attempt_admission",
+            "stale_handle_after_delete",
         ]
     );
 }
@@ -2153,8 +2241,14 @@ async fn cross_backend_store_differential_agrees() {
     );
 
     for case in generated_cases() {
-        let mut runners =
-            runners_for_case(case.name, sqlite_root.path(), &postgres, &run_nonce).await;
+        let mut runners = runners_for_case(
+            case.name,
+            sqlite_root.path(),
+            &postgres,
+            &database_url,
+            &run_nonce,
+        )
+        .await;
         for (step_index, operation) in case.operations.iter().enumerate() {
             let mut observations = Vec::with_capacity(runners.len());
             for runner in &mut runners {
@@ -2175,6 +2269,9 @@ async fn cross_backend_store_differential_agrees() {
                 // consequences of the first one, not independent signals.
                 break;
             }
+        }
+        for runner in &mut runners {
+            runner.close_reopened_postgres_pool().await;
         }
     }
 
