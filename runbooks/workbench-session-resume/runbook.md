@@ -50,8 +50,18 @@ committed row counts, request history, and cross-surface agreement—not on pros
   `lash`/`lash`, database `lash`); filter by the rendered session id and the active
   non-tombstoned path, then save the same normalized JSON rows required below. Do not
   look for SQLite files in this variant.
+
+  **Wrong-database trap:** the helper derives `postgres_port` as 15432 plus the
+  workbench port's 10-port stride offset, then runs the container with `--network host`
+  and `postgres -p "$postgres_port"`. When using `docker exec ... psql -h 127.0.0.1`,
+  always pass `-p "$postgres_port"` from the run metadata. Omitting it uses psql's
+  default port 5432 and can silently return plausible data from an unrelated host
+  Postgres.
 - Browser affordances: chat composer, transcript, idle/running pill, rendered session id.
-- Backend truth: `GET /api/state`; `POST /api/turn`.
+- Backend truth: `GET /api/state`; `POST /api/turn`. The state endpoint returns a
+  flattened `StateReadSnapshot`: `.messages`, `.settings.session_id`, and `.transcript`
+  are top-level fields. Use `.messages` for committed chat rows and `.transcript` for
+  execution-disclosure rows such as settled reasoning and code blocks.
 - Durable truth: `<data-dir>/session-id`, `<data-dir>/trace.jsonl`, and either the SQLite
   `graph_nodes` table in `<data-dir>/lash-sessions/*.db` or Postgres
   `lash_graph_nodes` (`node_json`, excluding tombstoned rows), selected by the boot mode.

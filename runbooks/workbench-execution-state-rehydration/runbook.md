@@ -35,9 +35,10 @@ the post-restart code ran — never on the assistant's ability to recall.
    makes the reference-only shape unproven, so retry once with a simpler prompt; a second
    mutation is a scenario-promptability finding → Abort/RCA.
 3. **Do not use timeline code-block absence as evidence.** Settled code-block rows are
-   currently dropped by the app, so their absence cannot discriminate a reference-only
-   commit from a dirty executor. The browser and `/api/state` prove the turn settled;
-   `trace.jsonl` proves what Lashlang executed.
+   expected to render; when using one as UI evidence, assert its presence positively.
+   Its absence cannot discriminate a reference-only commit from a dirty executor. The
+   browser and `/api/state` prove the turn settled; `trace.jsonl` proves what Lashlang
+   executed.
 4. **Replace only the web process.** Invoke `agent-workbench-restart` with the same data
    directory and backend environment as boot. The helper preserves the Restate container
    and (in the PostgreSQL pass) the managed Postgres container. Reloading the page,
@@ -71,7 +72,10 @@ the post-restart code ran — never on the assistant's ability to recall.
 - Durable truth: `<data-dir>/session-id` and `<data-dir>/trace.jsonl`. Trace records use
   serde-flattened payloads, so `type` and `request` sit at the record's top level and
   request messages have the shape `{ "role": ..., "blocks": [{ "kind": ..., "text": ... }] }`.
-  An `exec_code_started` diagnostic carries the exact executed source in its `code` field.
+  `llm_call_started` is a top-level record type. `exec_code_started` is not: select a
+  record with `type == "protocol_step"` and
+  `payload.diagnostic.phase == "exec_code_started"`; its exact executed source is at
+  `payload.diagnostic.payload.code`.
 - The bound-variable preamble the runtime builds from live execution state opens with the
   literal sentence `These variables are already bound in lashlang.` Its presence, plus the
   variable name and marker in the same request, is the hydration witness used below.
