@@ -98,6 +98,7 @@ Gate merges on the local battery (`just push-gate`, plus the confidence-gate lan
 ### Expect tests versus conformance assertions
 
 Use an inline expect test when the review artifact is a short, deterministic behavior transcript and a changed ordering or rendered state should be judged as one coherent diff. Keep conformance suites assertion-based: they prove backend-independent invariants across implementations, where pinning one example interleaving would narrow the contract instead of strengthening it. Never bless an expect diff until its durable-write lines still distinguish the defect the test is meant to catch.
+When those durable-semantics lines change, follow the named transcript-justification rule in [pr-style.md](pr-style.md).
 
 ## Team and session norms
 

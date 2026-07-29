@@ -33,7 +33,8 @@ configure_bindgen_headers() {
 }
 
 run_release_script_tests() {
-  step "Release automation script tests"
+  step "Repository script tests"
+  python3 scripts/test_check_transcript_diff.py
   python3 scripts/test_release_version.py
   python3 scripts/test_publish_workspace.py
   python3 scripts/test_release_notes.py

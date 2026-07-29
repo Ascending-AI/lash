@@ -73,8 +73,9 @@ jobs:
       - name: Check test quarantine metadata
         run: python3 scripts/check_test_quarantines.py
 
-      - name: Test release automation scripts
+      - name: Test repository scripts
         run: |
+          python3 scripts/test_check_transcript_diff.py
           python3 scripts/test_release_version.py
           python3 scripts/test_publish_workspace.py
           python3 scripts/test_confidence_gate_ci_contract.py
@@ -239,6 +240,9 @@ jobs:
         run: |
           # shellcheck disable=SC2086
           cargo clippy --workspace --all-targets --locked ${LASH_CI_FEATURES} -- -D warnings
+
+      - name: Surface durable transcript changes
+        run: python3 scripts/check-transcript-diff.py
 
       # Functional only: exercise every runtime and Lashlang measurement path
       # cheaply on each push/PR. Full budget enforcement belongs to release.yml.
