@@ -61,6 +61,29 @@ impl InMemorySessionStore {
             .collect()
     }
 
+    /// Return raw queued-work batches and their claim state for differential
+    /// tests. The sequence is backend-local, so callers normalize ordering.
+    pub fn raw_queued_work_for_testing(&self) -> Vec<super::RawQueuedWorkForTesting> {
+        self.queued_work
+            .lock()
+            .expect("lock queued work")
+            .iter()
+            .map(|entry| {
+                (
+                    entry.batch.clone(),
+                    entry.claim_id.is_some(),
+                    entry.claim_owner.clone(),
+                    entry.claim_token.is_some(),
+                    entry.claim_fencing_token,
+                    entry
+                        .claim_token
+                        .as_ref()
+                        .map(|_| entry.claim_session_lease_generation),
+                )
+            })
+            .collect()
+    }
+
     /// Return the current checkpoint exactly as held by the in-memory durable
     /// implementation, including both content refs and resolved bodies.
     pub fn raw_checkpoint_for_testing(&self) -> Option<crate::HydratedSessionCheckpoint> {

@@ -35,6 +35,34 @@ impl RawDurableReader {
                         }
                     })
                     .collect();
+                let queued_work = store
+                    .raw_queued_work_for_testing()
+                    .into_iter()
+                    .enumerate()
+                    .map(
+                        |(
+                            ordinal,
+                            (
+                                batch,
+                                claim_id_present,
+                                claim_owner,
+                                claim_token_present,
+                                claim_fencing_token,
+                                claim_session_lease_generation,
+                            ),
+                        )| {
+                            queued_work_observation(
+                                ordinal,
+                                batch,
+                                claim_id_present,
+                                claim_owner,
+                                claim_token_present,
+                                claim_fencing_token,
+                                claim_session_lease_generation,
+                            )
+                        },
+                    )
+                    .collect();
                 let checkpoint = match store.raw_checkpoint_for_testing() {
                     Some(checkpoint) => {
                         let checkpoint_ref = store
@@ -116,6 +144,7 @@ impl RawDurableReader {
                     session_meta,
                     session_execution_leases,
                     pending_turn_inputs,
+                    queued_work,
                 }
             }
             Self::Sqlite {
@@ -331,6 +360,33 @@ impl RawDurableReader {
                         }
                     })
                     .collect();
+                let queued_work_batches: Vec<QueuedWorkBatchRow> = sqlx::query_as(
+                    "SELECT enqueue_seq, batch_id, source_key, delivery_policy, slot_policy,
+                            merge_key_json, available_at_ms, claim_id, claim_owner_id,
+                            claim_owner_incarnation_id, claim_owner_liveness_json, claim_token,
+                            claim_fencing_token, claim_session_lease_generation
+                     FROM lash_queued_work_batches
+                     WHERE session_id = $1
+                     ORDER BY enqueue_seq ASC",
+                )
+                .bind(session_id)
+                .fetch_all(pool)
+                .await
+                .expect("read Postgres queued-work batches");
+                let queued_work_items: Vec<QueuedWorkItemRow> = sqlx::query_as(
+                    "SELECT item.batch_id, item.item_index::BIGINT, item.payload_json
+                     FROM lash_queued_work_items AS item
+                     JOIN lash_queued_work_batches AS batch
+                       ON batch.batch_id = item.batch_id
+                     WHERE batch.session_id = $1
+                     ORDER BY batch.enqueue_seq ASC, item.item_index ASC",
+                )
+                .bind(session_id)
+                .fetch_all(pool)
+                .await
+                .expect("read Postgres queued-work items");
+                let queued_work =
+                    queued_work_observations_from_sql_rows(queued_work_batches, queued_work_items);
                 RawDurableState {
                     head_revision,
                     leaf_node_id,
@@ -343,6 +399,7 @@ impl RawDurableReader {
                     session_meta,
                     session_execution_leases,
                     pending_turn_inputs,
+                    queued_work,
                 }
             }
         }

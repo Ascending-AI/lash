@@ -18,16 +18,18 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
+use lash_core::runtime::{QueuedWorkBatch, QueuedWorkBatchDraft, QueuedWorkPayload};
 use lash_core::store::{GraphAppend, RuntimeCommitResult};
 use lash_core::{
-    AttachmentId, AttachmentIntent, AttachmentOwnerKind, BlobRef, Clock, ForkSessionRequest,
-    HydratedSessionCheckpoint, InMemorySessionStore, InMemorySessionStoreFactory,
-    LeaseOwnerIdentity, PendingTurnInputDraft, PluginSessionSnapshot, PluginSnapshotArtifact,
-    PluginSnapshotEntry, PluginSnapshotMeta, ProtocolEvent, RuntimeCommit, RuntimePersistence,
-    RuntimeSessionState, RuntimeTurnCommitStamp, SessionCommitStore, SessionHistoryRecord,
-    SessionMeta, SessionNodePayload, SessionNodeRecord, SessionRelation, SessionStoreCreateRequest,
-    SessionStoreFactory, StoreError, TokenLedgerEntry, TokenUsage, ToolState, TurnInput,
-    TurnInputApplication, TurnInputClaim, TurnInputIngress, TurnInputState,
+    AttachmentId, AttachmentIntent, AttachmentOwnerKind, BlobRef, Clock, DeliveryPolicy,
+    ForkSessionRequest, HydratedSessionCheckpoint, InMemorySessionStore,
+    InMemorySessionStoreFactory, LeaseOwnerIdentity, MergeKey, PendingTurnInputDraft,
+    PluginSessionSnapshot, PluginSnapshotArtifact, PluginSnapshotEntry, PluginSnapshotMeta,
+    ProtocolEvent, RuntimeCommit, RuntimePersistence, RuntimeSessionState, RuntimeTurnCommitStamp,
+    SessionCommitStore, SessionHistoryRecord, SessionMeta, SessionNodePayload, SessionNodeRecord,
+    SessionRelation, SessionStoreCreateRequest, SessionStoreFactory, SlotPolicy, StoreError,
+    TokenLedgerEntry, TokenUsage, ToolState, TurnInput, TurnInputApplication, TurnInputClaim,
+    TurnInputIngress, TurnInputState,
 };
 use lash_postgres_store::PostgresStorage;
 use rusqlite::OptionalExtension;
@@ -102,6 +104,7 @@ enum StoreOperation {
     ForkAtLeaf,
     UnpinLeaf,
     EnqueueNextTurnInput,
+    EnqueueQueuedWork,
     AcquireSessionLease {
         slot: LeaseSlot,
         owner: &'static str,
@@ -151,6 +154,7 @@ impl StoreOperation {
             Self::ForkAtLeaf => "fork_at_leaf",
             Self::UnpinLeaf => "unpin_leaf",
             Self::EnqueueNextTurnInput => "enqueue_next_turn_input",
+            Self::EnqueueQueuedWork => "enqueue_queued_work",
             Self::AcquireSessionLease {
                 slot: LeaseSlot::First,
                 ..
@@ -548,6 +552,7 @@ fn generated_cases() -> Vec<GeneratedCase> {
         GeneratedCase {
             name: CaseName::StaleHandleAfterDelete,
             operations: vec![
+                StoreOperation::EnqueueQueuedWork,
                 StoreOperation::CreateHandle {
                     handle_alias: "handle-1",
                 },
@@ -737,6 +742,23 @@ type LeaseRow = (
     i64,
     i64,
 );
+type QueuedWorkBatchRow = (
+    i64,
+    String,
+    Option<String>,
+    String,
+    String,
+    String,
+    i64,
+    Option<String>,
+    Option<String>,
+    Option<String>,
+    Option<String>,
+    Option<String>,
+    i64,
+    i64,
+);
+type QueuedWorkItemRow = (String, i64, String);
 
 #[derive(Clone, PartialEq, Eq)]
 struct DurableNode {
@@ -773,6 +795,119 @@ struct PendingTurnInputObservation {
     input_id: String,
     state: TurnInputState,
     claim_session_lease_generation: Option<u64>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct QueuedWorkObservation {
+    ordinal: usize,
+    source_key: Option<String>,
+    delivery_policy: DeliveryPolicy,
+    slot_policy: SlotPolicy,
+    merge_key: MergeKey,
+    available_at_ms: u64,
+    payloads: Vec<serde_json::Value>,
+    claim_id_present: bool,
+    claim_owner: Option<LeaseOwnerIdentity>,
+    claim_token_present: bool,
+    claim_fencing_token: u64,
+    claim_session_lease_generation: Option<u64>,
+}
+
+fn queued_work_observation(
+    ordinal: usize,
+    batch: QueuedWorkBatch,
+    claim_id_present: bool,
+    claim_owner: Option<LeaseOwnerIdentity>,
+    claim_token_present: bool,
+    claim_fencing_token: u64,
+    claim_session_lease_generation: Option<u64>,
+) -> QueuedWorkObservation {
+    QueuedWorkObservation {
+        ordinal,
+        source_key: batch.source_key,
+        delivery_policy: batch.delivery_policy,
+        slot_policy: batch.slot_policy,
+        merge_key: batch.merge_key,
+        available_at_ms: batch.available_at_ms,
+        payloads: batch
+            .items
+            .into_iter()
+            .map(|item| serde_json::to_value(item.payload).expect("encode queued-work payload"))
+            .collect(),
+        claim_id_present,
+        claim_owner,
+        claim_token_present,
+        claim_fencing_token,
+        claim_session_lease_generation,
+    }
+}
+
+fn queued_work_observations_from_sql_rows(
+    batches: Vec<QueuedWorkBatchRow>,
+    items: Vec<QueuedWorkItemRow>,
+) -> Vec<QueuedWorkObservation> {
+    let mut payloads_by_batch = BTreeMap::<String, Vec<(i64, serde_json::Value)>>::new();
+    for (batch_id, item_index, payload_json) in items {
+        payloads_by_batch.entry(batch_id).or_default().push((
+            item_index,
+            serde_json::from_str(&payload_json).expect("decode queued-work payload"),
+        ));
+    }
+
+    batches
+        .into_iter()
+        .enumerate()
+        .map(
+            |(
+                ordinal,
+                (
+                    _enqueue_seq,
+                    batch_id,
+                    source_key,
+                    delivery_policy,
+                    slot_policy,
+                    merge_key_json,
+                    available_at_ms,
+                    claim_id,
+                    claim_owner_id,
+                    claim_owner_incarnation_id,
+                    claim_owner_liveness_json,
+                    claim_token,
+                    claim_fencing_token,
+                    claim_session_lease_generation,
+                ),
+            )| {
+                let mut payloads = payloads_by_batch.remove(&batch_id).unwrap_or_default();
+                payloads.sort_by_key(|(item_index, _)| *item_index);
+                QueuedWorkObservation {
+                    ordinal,
+                    source_key,
+                    delivery_policy: DeliveryPolicy::from_wire_str(&delivery_policy)
+                        .expect("decode queued-work delivery policy"),
+                    slot_policy: SlotPolicy::from_wire_str(&slot_policy)
+                        .expect("decode queued-work slot policy"),
+                    merge_key: serde_json::from_str(&merge_key_json)
+                        .expect("decode queued-work merge key"),
+                    available_at_ms: available_at_ms as u64,
+                    payloads: payloads
+                        .into_iter()
+                        .map(|(_item_index, payload)| payload)
+                        .collect(),
+                    claim_id_present: claim_id.is_some(),
+                    claim_owner: decode_lease_owner(
+                        claim_owner_id,
+                        claim_owner_incarnation_id,
+                        claim_owner_liveness_json,
+                    ),
+                    claim_token_present: claim_token.is_some(),
+                    claim_fencing_token: claim_fencing_token as u64,
+                    claim_session_lease_generation: claim_token
+                        .as_ref()
+                        .map(|_| claim_session_lease_generation as u64),
+                }
+            },
+        )
+        .collect()
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -873,6 +1008,7 @@ struct RawDurableState {
     session_meta: Option<SessionMetaObservation>,
     session_execution_leases: Vec<SessionExecutionLeaseObservation>,
     pending_turn_inputs: Vec<PendingTurnInputObservation>,
+    queued_work: Vec<QueuedWorkObservation>,
     // `process_*` and `trigger_*` are deliberately excluded: they are separate
     // subsystems with dedicated conformance suites, while this harness and its
     // operation vocabulary are scoped to one runtime session. Effect/await
@@ -1295,6 +1431,61 @@ async fn read_sqlite_durable_state(
             )
             .collect()
     };
+    let queued_work_batches = {
+        let mut statement = connection
+            .prepare(
+                "SELECT enqueue_seq, batch_id, source_key, delivery_policy, slot_policy,
+                        merge_key_json, available_at_ms, claim_id, claim_owner_id,
+                        claim_owner_incarnation_id, claim_owner_liveness_json, claim_token,
+                        claim_fencing_token, claim_session_lease_generation
+                 FROM queued_work_batches
+                 WHERE session_id = ?1
+                 ORDER BY enqueue_seq ASC",
+            )
+            .expect("prepare SQLite queued-work batch read");
+        statement
+            .query_map([session_id], |row| {
+                Ok((
+                    row.get(0)?,
+                    row.get(1)?,
+                    row.get(2)?,
+                    row.get(3)?,
+                    row.get(4)?,
+                    row.get(5)?,
+                    row.get(6)?,
+                    row.get(7)?,
+                    row.get(8)?,
+                    row.get(9)?,
+                    row.get(10)?,
+                    row.get(11)?,
+                    row.get(12)?,
+                    row.get(13)?,
+                ))
+            })
+            .expect("read SQLite queued-work batches")
+            .collect::<Result<Vec<_>, _>>()
+            .expect("decode SQLite queued-work batches")
+    };
+    let queued_work_items = {
+        let mut statement = connection
+            .prepare(
+                "SELECT item.batch_id, item.item_index, item.payload_json
+                 FROM queued_work_items AS item
+                 JOIN queued_work_batches AS batch ON batch.batch_id = item.batch_id
+                 WHERE batch.session_id = ?1
+                 ORDER BY batch.enqueue_seq ASC, item.item_index ASC",
+            )
+            .expect("prepare SQLite queued-work item read");
+        statement
+            .query_map([session_id], |row| {
+                Ok((row.get(0)?, row.get(1)?, row.get(2)?))
+            })
+            .expect("read SQLite queued-work items")
+            .collect::<Result<Vec<_>, _>>()
+            .expect("decode SQLite queued-work items")
+    };
+    let queued_work =
+        queued_work_observations_from_sql_rows(queued_work_batches, queued_work_items);
 
     RawDurableState {
         head_revision,
@@ -1308,6 +1499,7 @@ async fn read_sqlite_durable_state(
         session_meta,
         session_execution_leases,
         pending_turn_inputs,
+        queued_work,
     }
 }
 
@@ -1541,6 +1733,23 @@ impl BackendRunner {
                         TurnInput::text("generation-fenced input"),
                     )
                     .with_input_id(format!("{}:input", self.session_id)),
+                )
+                .await
+                .map(|_| None),
+            StoreOperation::EnqueueQueuedWork => self
+                .store()
+                .enqueue_queued_work(
+                    QueuedWorkBatchDraft::new(
+                        &self.session_id,
+                        DeliveryPolicy::EarliestSafeBoundary,
+                        SlotPolicy::Exclusive,
+                        vec![QueuedWorkPayload::session_command(
+                            lash_core::SessionCommand::RefreshToolCatalog {
+                                reason: "cross-backend delete observability".to_string(),
+                            },
+                        )],
+                    )
+                    .with_source_key("cross-backend-delete-observability"),
                 )
                 .await
                 .map(|_| None),
