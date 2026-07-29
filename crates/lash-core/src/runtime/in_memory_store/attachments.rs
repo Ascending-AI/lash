@@ -8,6 +8,24 @@
 use super::InMemorySessionStore;
 
 impl InMemorySessionStore {
+    pub(super) fn commit_attachment_refs_in_memory(
+        &self,
+        session_id: &str,
+        attachment_ids: &[crate::AttachmentId],
+    ) {
+        let now = self.clock.timestamp_ms();
+        let mut manifest = self
+            .attachment_manifest
+            .lock()
+            .expect("lock attachment manifest");
+        for attachment_id in attachment_ids {
+            if let Some(entry) = manifest.get_mut(&(session_id.to_string(), attachment_id.clone()))
+            {
+                entry.committed_at_epoch_ms.get_or_insert(now);
+            }
+        }
+    }
+
     pub(super) fn commit_turn_attachment_intents(
         &self,
         session_id: &str,
@@ -47,6 +65,11 @@ impl crate::AttachmentManifest for InMemorySessionStore {
         &self,
         intent: crate::AttachmentIntent,
     ) -> Result<(), crate::store::StoreError> {
+        let _transaction = self
+            .write_transaction
+            .lock()
+            .expect("lock in-memory write transaction");
+        self.ensure_session_not_deleted(&intent.session_id)?;
         let key = (intent.session_id.clone(), intent.attachment_id.clone());
         let mut manifest = self
             .attachment_manifest
@@ -84,17 +107,12 @@ impl crate::AttachmentManifest for InMemorySessionStore {
         session_id: &str,
         attachment_ids: &[crate::AttachmentId],
     ) -> Result<(), crate::store::StoreError> {
-        let now = self.clock.timestamp_ms();
-        let mut manifest = self
-            .attachment_manifest
+        let _transaction = self
+            .write_transaction
             .lock()
-            .expect("lock attachment manifest");
-        for attachment_id in attachment_ids {
-            if let Some(entry) = manifest.get_mut(&(session_id.to_string(), attachment_id.clone()))
-            {
-                entry.committed_at_epoch_ms.get_or_insert(now);
-            }
-        }
+            .expect("lock in-memory write transaction");
+        self.ensure_session_not_deleted(session_id)?;
+        self.commit_attachment_refs_in_memory(session_id, attachment_ids);
         Ok(())
     }
 

@@ -169,7 +169,7 @@ core.unpin(&amp;turn_node_id).await?;</code></pre>
       </aside>
       <p>The fork inherits the retained checkpoint and AgentFrame lineage. It starts with an empty usage ledger and no execution-scoped queue, lease, receipt, or wake-subscription state. Process handle grants are snapshotted in the durable fork relation and copied so the fork can observe already-granted work; session open reconciles that snapshot after a crash. Wake delivery remains addressed only to the subscribed source session.</p>
       <p>History ownership is reachability, not the session id that first wrote a node. Child edges, live session heads, and explicit pins are counted references. Deleting one sibling stops reclamation at the first shared node still referenced by another head or pin.</p>
-      <p>A host-level rewind is explicit composition: pin the target, fork there, switch the product UI to the new session id, then delete the superseded session. The <code>agent-service</code> example also snapshots its app-owned messages and board when the user pins a turn; Lash does not copy host tables.</p>
+      <p>A host-level rewind is explicit composition: pin the target, fork there under a new id, switch the product UI to that id, then delete the superseded session. The superseded host-facing id is permanently retired and cannot be reopened in that store. The <code>agent-service</code> example also snapshots its app-owned messages and board when the user pins a turn; Lash does not copy host tables.</p>
     </div>
 
     <div class="section" id="delete-sessions">
@@ -185,6 +185,8 @@ if let Some(process_report) = report.process {
     audit_process_cleanup(process_report)?;
 }</code></pre>
       <p>Deletion requires a core-level <code>SessionStoreFactory</code>; per-session stores cannot be rediscovered from a bare id. If a <code>ProcessRegistry</code> is installed, Lash revokes that session's process handle grants, deletes wake bookkeeping addressed to it, deletes its trigger subscriptions, and reports any still-running zero-grant processes as orphans for host policy. It does not cancel processes automatically.</p>
+      <p>A materialized host-facing session id is single-use: deletion writes a permanent tombstone, and later create, fork, queue, attachment, lease, metadata, or commit writes fail with <code>StoreError::SessionDeleted</code>. Deleting an id that was never materialized is a no-op. A reset must rotate to a new id. Lash-minted runtime-internal process session ids are reclaimed during process pruning without tombstones.</p>
+      <p>The tombstone, await-event revocation ledger, effect journal, and Restate state form one trust domain and must be reset together. SQLite deployments must not wipe the catalog and effect databases independently. The v2 await-event promise-key cutover also requires draining in-flight Restate invocations or purging Restate state before upgrade; old promises cannot resume under the new key epoch.</p>
       <aside class="gotcha">
         <strong>Gotcha</strong>
         <p>Deleting runtime state is separate from deleting app rows such as chats, accounts, permissions, or UI attachments. Keep the app transaction and the Lash runtime deletion coordinated at the host layer.</p>

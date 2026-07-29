@@ -24,6 +24,7 @@ pub(in crate::runtime::session_manager) async fn materialize_session_create_plan
         crate::runtime::lifecycle::RuntimePersistenceBindings::new(store_binding.clone()),
         current.host.process_registry.clone(),
         plan.initial_runtime_state.clone(),
+        plan.relation.clone(),
     )
     .await
     .map_err(|err| crate::PluginError::Session(err.to_string()))?;
@@ -97,7 +98,7 @@ async fn bind_session_store(
             crate::PluginError::Session(child_store_factory_error(
                 &plan.session_id,
                 plan.parent_session_id.as_deref(),
-                message,
+                message.to_string(),
             ))
         })?;
     validate_child_store_binding(

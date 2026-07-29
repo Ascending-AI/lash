@@ -279,8 +279,19 @@ async fn durable_managed_child_writes_to_its_own_attachment_namespace() {
             }),
         },
     ]);
-    let child_factory = RecordingSessionStoreFactory::default();
+    let child_factory = RecordingSessionStoreFactory::default().deferring_metadata_to_admission();
     let root_store = Arc::new(RecordingStore::default());
+    *root_store
+        .session_meta
+        .lock()
+        .expect("lock root session meta") = Some(crate::SessionMeta {
+        session_id: "root".to_string(),
+        session_name: "root".to_string(),
+        created_at: "2026-07-29T00:00:00Z".to_string(),
+        model: "mock-model".to_string(),
+        cwd: None,
+        relation: crate::SessionRelation::Root,
+    });
     let bytes = Arc::new(crate::InMemoryAttachmentStore::new());
     let mut host_config = crate::RuntimeHostConfig::in_memory();
     host_config.durability.attachment_store =
@@ -392,7 +403,7 @@ async fn process_registered_during_first_durable_child_turn_remains_listable_aft
             }),
         },
     ]);
-    let child_factory = RecordingSessionStoreFactory::default();
+    let child_factory = RecordingSessionStoreFactory::default().deferring_metadata_to_admission();
     let root_store = Arc::new(RecordingStore::default());
     let registry = Arc::new(crate::TestLocalProcessRegistry::default());
     let embedded = crate::EmbeddedRuntimeHost::new(crate::RuntimeHostConfig::in_memory())
@@ -429,23 +440,19 @@ async fn process_registered_during_first_durable_child_turn_remains_listable_aft
         )
         .await
         .expect("durable child session");
-    let child_incarnation = child_factory
-        .stores()
-        .into_iter()
-        .find_map(|store| {
-            store
-                .session_meta
-                .lock()
-                .expect("lock child metadata")
-                .as_ref()
-                .filter(|meta| meta.session_id == child.session_id)
-                .map(|meta| meta.incarnation_id.clone())
-        })
-        .expect("child store incarnation");
+    let child_is_bound = child_factory.stores().into_iter().any(|store| {
+        store
+            .session_meta
+            .lock()
+            .expect("lock child metadata")
+            .as_ref()
+            .is_some_and(|meta| meta.session_id == child.session_id)
+    });
+    assert!(child_is_bound, "managed child must bind its store");
     let turn_id = "process-child-first-turn";
     let controller = crate::ScopedEffectController::shared(
         Arc::new(crate::InlineRuntimeEffectController::default()),
-        crate::ExecutionScope::turn_incarnation(&child.session_id, child_incarnation, turn_id),
+        crate::ExecutionScope::turn(&child.session_id, turn_id),
     )
     .expect("child effect controller");
     lifecycle

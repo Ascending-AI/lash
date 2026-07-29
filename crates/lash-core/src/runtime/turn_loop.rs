@@ -125,14 +125,7 @@ fn scoped_child_turn_controller<'run>(
     session_id: &str,
     turn_id: &str,
 ) -> Result<ScopedEffectController<'run>, RuntimeError> {
-    let scope = scoped_effect_controller
-        .execution_scope()
-        .incarnation_id()
-        .cloned()
-        .map_or_else(
-            || ExecutionScope::turn(session_id, turn_id),
-            |incarnation_id| ExecutionScope::turn_incarnation(session_id, incarnation_id, turn_id),
-        );
+    let scope = ExecutionScope::turn(session_id, turn_id);
     scoped_effect_controller.rescope(scope)
 }
 
@@ -772,11 +765,7 @@ impl LashRuntime {
         let turn_control = Arc::new(
             ActiveTurnControl::new(
                 turn_control_resolver,
-                TurnAddress::new_for_lifetime(
-                    &self.state.session_id,
-                    &self.state.session_lifetime,
-                    &trace_turn_id,
-                ),
+                TurnAddress::new(&self.state.session_id, &trace_turn_id),
             )
             .await?,
         );
@@ -1373,11 +1362,7 @@ impl LashRuntime {
                     turn_control_resolver(turn_control_host.as_ref(), &scoped_effect_controller);
                 let turn_control = ActiveTurnControl::new(
                     turn_control_resolver,
-                    TurnAddress::new_for_lifetime(
-                        &self.state.session_id,
-                        &self.state.session_lifetime,
-                        &trace_turn_id,
-                    ),
+                    TurnAddress::new(&self.state.session_id, &trace_turn_id),
                 )
                 .await?
                 .with_local_cancel_origin(input.turn_context.local_cancel_origin_hint());
@@ -1879,11 +1864,7 @@ impl LashRuntime {
         let turn_control = Arc::new(
             ActiveTurnControl::new(
                 turn_control_resolver,
-                TurnAddress::new_for_lifetime(
-                    &self.state.session_id,
-                    &self.state.session_lifetime,
-                    &trace_turn_id,
-                ),
+                TurnAddress::new(&self.state.session_id, &trace_turn_id),
             )
             .await?
             .with_local_cancel_origin(turn_context.local_cancel_origin_hint()),

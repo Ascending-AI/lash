@@ -4,6 +4,9 @@ impl AttachmentManifest for PostgresSessionStore {
     fn record_intent(&self, intent: AttachmentIntent) -> Result<(), StoreError> {
         let pool = self.pool.clone();
         block_on_detached(async move {
+            let mut tx = pool.begin().await.map_err(store_sqlx_error)?;
+            crate::runtime_persistence::ensure_session_not_deleted_tx(&mut tx, &intent.session_id)
+                .await?;
             // Re-recording refreshes the timestamp and durable owner together.
             // The GC statement later composes this age with owner-death proof.
             sqlx::query(
@@ -24,10 +27,10 @@ impl AttachmentManifest for PostgresSessionStore {
             .bind(intent.intent_at_epoch_ms as i64)
             .bind(intent.owner_kind.map(AttachmentOwnerKind::as_str))
             .bind(intent.owner_id)
-            .execute(&pool)
+            .execute(&mut *tx)
             .await
-            .map(|_| ())
-            .map_err(store_sqlx_error)
+            .map_err(store_sqlx_error)?;
+            tx.commit().await.map_err(store_sqlx_error)
         })
     }
 
@@ -41,6 +44,7 @@ impl AttachmentManifest for PostgresSessionStore {
         let attachment_ids = attachment_ids.to_vec();
         block_on_detached(async move {
             let mut tx = pool.begin().await.map_err(store_sqlx_error)?;
+            crate::runtime_persistence::ensure_session_not_deleted_tx(&mut tx, &session_id).await?;
             commit_attachment_refs_tx(&mut tx, &session_id, &attachment_ids).await?;
             tx.commit().await.map_err(store_sqlx_error)
         })

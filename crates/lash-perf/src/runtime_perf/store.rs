@@ -495,7 +495,7 @@ impl SessionStoreFactory for RuntimePerfStoreFactory {
     async fn create_store(
         &self,
         request: &SessionStoreCreateRequest,
-    ) -> Result<Arc<dyn RuntimePersistence>, String> {
+    ) -> Result<Arc<dyn RuntimePersistence>, StoreError> {
         if request.parent_session_id().is_none() {
             return Ok(Arc::clone(&self.store) as Arc<dyn RuntimePersistence>);
         }
@@ -518,32 +518,30 @@ lash_core::impl_noop_attachment_manifest!(RuntimePerfStore);
 
 #[async_trait::async_trait]
 impl SessionCommitStore for RuntimePerfStore {
-    async fn ensure_session_incarnation(
+    async fn admit_and_bind_session(
         &self,
-        session_id: &str,
-        policy: &lash_core::SessionPolicy,
-    ) -> Result<lash_core::IncarnationId, store::StoreError> {
+        binding: &lash_core::SessionBinding,
+    ) -> Result<lash_core::SessionAdmission, store::StoreError> {
+        binding.validate()?;
         let mut meta = self.session_meta.lock().expect("lock perf session meta");
         if let Some(meta) = meta.as_ref() {
-            if meta.session_id != session_id {
+            if meta.session_id != binding.session_id {
                 return Err(StoreError::SessionBindingMismatch {
                     bound_session_id: meta.session_id.clone(),
-                    attempted_session_id: session_id.to_string(),
+                    attempted_session_id: binding.session_id.clone(),
                 });
             }
-            return Ok(meta.incarnation_id.clone());
+            return Ok(lash_core::SessionAdmission::Rebound);
         }
-        let incarnation_id = lash_core::IncarnationId::mint_for_store();
         *meta = Some(store::SessionMeta {
-            session_id: session_id.to_string(),
-            incarnation_id: incarnation_id.clone(),
-            session_name: session_id.to_string(),
+            session_id: binding.session_id.clone(),
+            session_name: binding.session_id.clone(),
             created_at: "test".to_string(),
-            model: policy.model.id.clone(),
-            cwd: None,
-            relation: lash_core::SessionRelation::Root,
+            model: binding.model_id.clone(),
+            cwd: binding.cwd.clone(),
+            relation: binding.relation.clone(),
         });
-        Ok(incarnation_id)
+        Ok(lash_core::SessionAdmission::Created)
     }
 
     async fn load_session(&self) -> Result<Option<PersistedSessionRead>, store::StoreError> {
@@ -603,7 +601,6 @@ impl SessionCommitStore for RuntimePerfStore {
             .collect();
         let RuntimeCommit {
             session_id,
-            session_lifetime: _,
             expected_head_revision,
             config,
             current_frame_node_id,

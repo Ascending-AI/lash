@@ -12,6 +12,17 @@ pub async fn commit_runtime_state_verified(
     commit: RuntimeCommit,
 ) -> Result<RuntimeCommitResult, StoreError> {
     commit.validate_budget()?;
+    let meta = store.load_session_meta().await?.ok_or_else(|| {
+        StoreError::SessionBindingNotMaterialized {
+            session_id: commit.session_id.clone(),
+        }
+    })?;
+    if meta.session_id != commit.session_id {
+        return Err(StoreError::SessionBindingMismatch {
+            bound_session_id: meta.session_id,
+            attempted_session_id: commit.session_id,
+        });
+    }
     store.commit_runtime_state(commit).await
 }
 
@@ -72,12 +83,11 @@ mod tests {
             })
         }
 
-        async fn ensure_session_incarnation(
+        async fn admit_and_bind_session(
             &self,
-            _session_id: &str,
-            _policy: &crate::SessionPolicy,
-        ) -> Result<crate::IncarnationId, StoreError> {
-            Ok(crate::IncarnationId::mint_for_store())
+            _binding: &crate::SessionBinding,
+        ) -> Result<crate::SessionAdmission, StoreError> {
+            Ok(crate::SessionAdmission::Created)
         }
 
         async fn save_session_meta(
@@ -93,13 +103,46 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn verified_commit_rejects_a_store_that_lies_about_materializing_admission() {
+        let store = NonValidatingFacadeStore::default();
+        let mut state = crate::RuntimeSessionState {
+            session_id: "loose-store-session".to_string(),
+            ..crate::RuntimeSessionState::default()
+        };
+        state.ensure_agent_frame_initialized();
+        let binding = crate::SessionBinding::root(state.session_id.clone(), &state.policy);
+        assert_eq!(
+            store
+                .admit_and_bind_session(&binding)
+                .await
+                .expect("loose admission response"),
+            crate::SessionAdmission::Created
+        );
+
+        let err = commit_runtime_state_verified(
+            &store,
+            RuntimeCommit::persisted_state_for_test(&state, &[]),
+        )
+        .await
+        .expect_err("a loose store must fail before its first commit");
+
+        assert!(matches!(
+            err,
+            StoreError::SessionBindingNotMaterialized { session_id }
+                if session_id == state.session_id
+        ));
+        assert_eq!(
+            store.commit_attempts.load(Ordering::SeqCst),
+            0,
+            "the loose store must not receive the commit"
+        );
+    }
+
+    #[tokio::test]
     async fn verified_commit_rejects_node_budget_before_calling_a_non_validating_store() {
         let store = NonValidatingFacadeStore::default();
         let state = crate::RuntimeSessionState {
             session_id: "boundary-budget".to_string(),
-            session_lifetime: crate::SessionLifetime::durable(
-                crate::IncarnationId::mint_for_store(),
-            ),
             ..crate::RuntimeSessionState::default()
         };
         let node = crate::SessionNodeRecord {

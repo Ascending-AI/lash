@@ -56,7 +56,7 @@ impl SessionStoreFactory for TestSessionStoreFactory {
     async fn create_store(
         &self,
         _request: &crate::SessionStoreCreateRequest,
-    ) -> Result<Arc<dyn crate::RuntimePersistence>, String> {
+    ) -> Result<Arc<dyn crate::RuntimePersistence>, crate::StoreError> {
         Ok(Arc::new(InMemorySessionStore::default()))
     }
 
@@ -231,7 +231,7 @@ fn inline_worker_with_trigger_store(
         async fn create_store(
             &self,
             _request: &crate::SessionStoreCreateRequest,
-        ) -> Result<Arc<dyn crate::RuntimePersistence>, String> {
+        ) -> Result<Arc<dyn crate::RuntimePersistence>, crate::StoreError> {
             Ok(Arc::new(InMemorySessionStore::default()))
         }
 
@@ -1037,7 +1037,7 @@ async fn segment_boundary_reenters_in_memory_without_premature_terminal() {
         async fn create_store(
             &self,
             _request: &crate::SessionStoreCreateRequest,
-        ) -> Result<Arc<dyn crate::RuntimePersistence>, String> {
+        ) -> Result<Arc<dyn crate::RuntimePersistence>, crate::StoreError> {
             Ok(Arc::new(InMemorySessionStore::default()))
         }
 

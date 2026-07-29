@@ -162,14 +162,22 @@ fn catalog_names(runtime: &LashRuntime) -> Vec<String> {
 }
 
 #[tokio::test]
-async fn parked_resume_keeps_the_store_realized_session_lifetime() {
+async fn parked_resume_keeps_the_store_bound_session_id() {
     let plugin_host = dynamic_plugin_host(Arc::new(DynamicToolSurface::default()));
     let env = runtime_environment(plugin_host);
     let store = Arc::new(RecordingStore::default());
+    *store.session_meta.lock().expect("lock parked session meta") = Some(crate::SessionMeta {
+        session_id: "parked-session".to_string(),
+        session_name: "parked-session".to_string(),
+        created_at: "2026-07-29T00:00:00Z".to_string(),
+        model: "mock-model".to_string(),
+        cwd: None,
+        relation: crate::SessionRelation::Root,
+    });
     let runtime = LashRuntime::from_environment(
         &env,
         standard_test_policy(),
-        root_state("parked-incarnation"),
+        root_state("parked-session"),
         Some(store.clone() as Arc<dyn crate::RuntimePersistence>),
     )
     .await
@@ -178,28 +186,34 @@ async fn parked_resume_keeps_the_store_realized_session_lifetime() {
         .load_session_meta()
         .await
         .expect("load realized metadata")
-        .expect("realized metadata")
-        .incarnation_id;
+        .expect("realized metadata");
     assert_eq!(
-        runtime
-            .export_persistence_state()
-            .session_lifetime
-            .as_durable(),
-        Some(&expected)
+        runtime.export_persistence_state().session_id,
+        expected.session_id
     );
 
+    let admissions_before_resume = store
+        .session_admission_count
+        .load(std::sync::atomic::Ordering::SeqCst);
     let parked = runtime.park().await.expect("park runtime");
     let resumed = LashRuntime::resume(parked, &env)
         .await
         .expect("resume runtime");
+    assert_eq!(
+        store
+            .session_admission_count
+            .load(std::sync::atomic::Ordering::SeqCst),
+        admissions_before_resume + 1,
+        "resume must pass through durable admission"
+    );
     let state = resumed.export_persistence_state();
-    assert_eq!(state.session_lifetime.as_durable(), Some(&expected));
+    assert_eq!(state.session_id, expected.session_id);
     assert!(matches!(
         state.turn_scope("resumed-turn"),
         crate::ExecutionScope::Turn {
-            incarnation_id: Some(ref actual),
-            ..
-        } if actual == &expected
+            ref session_id,
+            ref turn_id,
+        } if session_id == "parked-session" && turn_id == "resumed-turn"
     ));
 }
 

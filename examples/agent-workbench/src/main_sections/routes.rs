@@ -21,7 +21,7 @@ async fn app_state(
         .session(session_id.clone())
         .open()
         .await
-        .map_err(AppError::internal)?;
+        .map_err(AppError::session_open)?;
     let observation_snapshot = session.observe().recoverable_chat_snapshot();
     let active_turns = state.active_turns.for_session(&session_id);
     let active_turn_ids = active_turns
@@ -887,17 +887,12 @@ async fn reset_chat(
     )
     .await?;
     state.event_tx.remove(&old_session_id);
-    let new_session_id = if query.is_explicit() {
-        old_session_id.clone()
-    } else {
-        let (rotated_old, new_session_id) = state.session_ids.rotate();
-        if rotated_old != old_session_id {
-            eprintln!(
-                "warning: workbench session changed during reset; deleted {old_session_id}, rotated {rotated_old}"
-            );
-        }
-        new_session_id
-    };
+    let (rotated_old, new_session_id) = state.session_ids.rotate();
+    if rotated_old != old_session_id {
+        eprintln!(
+            "warning: workbench session changed during reset; deleted {old_session_id}, rotated {rotated_old}"
+        );
+    }
     state.trace_for_session(
         &old_session_id,
         "api.reset",
@@ -911,7 +906,7 @@ async fn reset_chat(
         .session(new_session_id.clone())
         .open()
         .await
-        .map_err(AppError::internal)?;
+        .map_err(AppError::session_open)?;
     let selected_model = model_spec_from_selection(state.selected_model());
     session
         .configure(lash::SessionConfigPatch {
@@ -920,11 +915,9 @@ async fn reset_chat(
         })
         .await
         .map_err(AppError::internal)?;
-    if !query.is_explicit() {
-        state.messages.lock().expect("messages lock").clear();
-        state.lashlang_execution.clear();
-        state.mail_world.clear();
-    }
+    state.messages.lock().expect("messages lock").clear();
+    state.lashlang_execution.clear();
+    state.mail_world.clear();
     Ok(Json(StateSnapshot {
         settings: state.settings_for_session(new_session_id),
         messages: Vec::new(),

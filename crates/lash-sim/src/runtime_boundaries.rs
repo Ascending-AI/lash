@@ -1081,22 +1081,6 @@ impl RuntimeBoundaryHarness {
         );
         let stale_state = RuntimeSessionState {
             session_id: session.to_string(),
-            session_lifetime: lash_core::SessionLifetime::durable(
-                store
-                    .load_session_meta()
-                    .await
-                    .map_err(|err| {
-                        RuntimeBoundaryError::new(format!(
-                            "load session metadata before stale claim completion: {err}"
-                        ))
-                    })?
-                    .ok_or_else(|| {
-                        RuntimeBoundaryError::new(format!(
-                            "session `{session}` has no metadata before stale claim completion"
-                        ))
-                    })?
-                    .incarnation_id,
-            ),
             session_graph,
             persisted_node_ids,
             head_revision,

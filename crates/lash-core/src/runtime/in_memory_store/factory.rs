@@ -30,15 +30,23 @@ impl SessionStoreFactory for InMemorySessionStoreFactory {
     async fn create_store(
         &self,
         request: &SessionStoreCreateRequest,
-    ) -> Result<Arc<dyn RuntimePersistence>, String> {
+    ) -> Result<Arc<dyn RuntimePersistence>, crate::StoreError> {
+        let binding = crate::SessionBinding::from_create_request(request);
+        binding.validate()?;
         let _transaction = self
             .write_transaction
             .lock()
             .expect("lock in-memory write transaction");
-        self.deleted_sessions
+        if self
+            .deleted_session_ids
             .lock()
-            .expect("lock deleted sessions")
-            .remove(&request.session_id);
+            .expect("lock deleted session ids")
+            .contains(&request.session_id)
+        {
+            return Err(crate::StoreError::SessionDeleted {
+                session_id: request.session_id.clone(),
+            });
+        }
         let mut stores = self.stores.lock().expect("in-memory store factory");
         let store = stores
             .entry(request.session_id.clone())
@@ -51,34 +59,19 @@ impl SessionStoreFactory for InMemorySessionStoreFactory {
                     Arc::clone(&self.global_session_heads),
                     Arc::clone(&self.node_anchors),
                     Arc::clone(&self.tombstoned_node_ids),
-                    Arc::clone(&self.deleted_sessions),
-                    Arc::clone(&self.session_incarnations),
+                    Arc::clone(&self.deleted_session_ids),
                 ));
                 *store.session_meta.lock().expect("lock session meta") = Some(crate::SessionMeta {
                     session_id: request.session_id.clone(),
-                    incarnation_id: crate::IncarnationId::mint_for_store(),
                     session_name: request.session_id.clone(),
                     created_at: self.clock.timestamp_rfc3339(),
-                    model: request.policy.model.id.clone(),
-                    cwd: None,
-                    relation: request.relation.clone(),
+                    model: binding.model_id.clone(),
+                    cwd: binding.cwd.clone(),
+                    relation: binding.relation.clone(),
                 });
                 store
             })
             .clone();
-        let incarnation_id = store
-            .session_meta
-            .lock()
-            .expect("lock session meta")
-            .as_ref()
-            .expect("factory-created store has session metadata")
-            .incarnation_id
-            .clone();
-        self.session_incarnations
-            .lock()
-            .expect("lock session incarnations")
-            .entry(request.session_id.clone())
-            .or_insert(incarnation_id);
         Ok(store as Arc<dyn RuntimePersistence>)
     }
 
@@ -100,14 +93,6 @@ impl SessionStoreFactory for InMemorySessionStoreFactory {
             .write_transaction
             .lock()
             .expect("lock in-memory write transaction");
-        self.deleted_sessions
-            .lock()
-            .expect("lock deleted sessions")
-            .insert(session_id.to_string());
-        self.session_incarnations
-            .lock()
-            .expect("lock session incarnations")
-            .remove(session_id);
         let store = self
             .stores
             .lock()
@@ -115,6 +100,10 @@ impl SessionStoreFactory for InMemorySessionStoreFactory {
             .get(session_id)
             .cloned();
         if let Some(store) = store {
+            self.deleted_session_ids
+                .lock()
+                .expect("lock deleted session ids")
+                .insert(session_id.to_string());
             store
                 .reclaim_history_for_delete(session_id)
                 .map_err(|error| error.to_string())?;
@@ -317,6 +306,16 @@ impl SessionStoreFactory for InMemorySessionStoreFactory {
                 session_id: request.session_id.clone(),
             });
         }
+        if self
+            .deleted_session_ids
+            .lock()
+            .expect("lock deleted session ids")
+            .contains(&request.session_id)
+        {
+            return Err(crate::StoreError::SessionDeleted {
+                session_id: request.session_id.clone(),
+            });
+        }
         let retained = self
             .node_anchors
             .lock()
@@ -391,8 +390,7 @@ impl SessionStoreFactory for InMemorySessionStoreFactory {
             Arc::clone(&self.global_session_heads),
             Arc::clone(&self.node_anchors),
             Arc::clone(&self.tombstoned_node_ids),
-            Arc::clone(&self.deleted_sessions),
-            Arc::clone(&self.session_incarnations),
+            Arc::clone(&self.deleted_session_ids),
         ));
         *store.session_graph.lock().expect("lock graph") = resident_graph.clone();
         *store.checkpoint.lock().expect("lock checkpoint") = Some(checkpoint);
@@ -409,24 +407,14 @@ impl SessionStoreFactory for InMemorySessionStoreFactory {
                 checkpoint_ref: Some(checkpoint_ref),
                 leaf_node_id: Some(request.node_id.clone()),
             });
-        let incarnation_id = crate::IncarnationId::mint_for_store();
         *store.session_meta.lock().expect("lock session meta") = Some(crate::SessionMeta {
             session_id: request.session_id.clone(),
-            incarnation_id: incarnation_id.clone(),
             session_name: request.session_id.clone(),
             created_at: self.clock.timestamp_rfc3339(),
             model: request.policy.model.id.clone(),
             cwd: None,
             relation: request.relation.clone(),
         });
-        self.deleted_sessions
-            .lock()
-            .expect("lock deleted sessions")
-            .remove(&request.session_id);
-        self.session_incarnations
-            .lock()
-            .expect("lock session incarnations")
-            .insert(request.session_id.clone(), incarnation_id);
         self.stores
             .lock()
             .expect("in-memory store factory")

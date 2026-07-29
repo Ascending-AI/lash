@@ -170,14 +170,13 @@ impl RuntimeScenarioContext {
     }
 
     async fn execute(&mut self, phase: RuntimeScenarioPhase) {
-        if self.state.session_lifetime.as_durable().is_none() {
-            let incarnation_id = self
-                .store
-                .ensure_session_incarnation(self.session_id, &self.state.policy)
-                .await
-                .expect("realize runtime scenario session lifetime");
-            self.state.bind_durable_incarnation(incarnation_id);
-        }
+        self.store
+            .admit_and_bind_session(&crate::SessionBinding::root(
+                self.session_id,
+                &self.state.policy,
+            ))
+            .await
+            .expect("bind runtime scenario session");
         match phase {
             RuntimeScenarioPhase::Ingress(phase) => self.ingress(phase).await,
             RuntimeScenarioPhase::Checkpoint(phase) => self.checkpoint(phase).await,

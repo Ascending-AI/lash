@@ -35,3 +35,8 @@ the complete resumable-state snapshot, while component refs let an unchanged
 body be reused without recapturing or rewriting it. Backend storage mechanics
 such as compression remain private only after this identity and hydration
 contract is satisfied.
+
+[ADR-0049](0049-session-ids-are-used-once.md) removes the separate session
+lifetime discriminator. That does not alter content-addressed component
+identity: component refs still identify bytes, while the host-provided,
+single-use session id identifies the checkpoint owner and binding.

@@ -616,6 +616,15 @@ impl AppError {
         }
     }
 
+    fn session_open(error: lash::EmbedError) -> Self {
+        match &error {
+            lash::EmbedError::Store(lash::persistence::StoreError::SessionDeleted { .. }) => {
+                Self::conflict(error.to_string())
+            }
+            _ => Self::internal(error),
+        }
+    }
+
     #[allow(dead_code, reason = "production authorizers use this denial constructor")]
     fn forbidden(message: impl Into<String>) -> Self {
         Self {
@@ -660,5 +669,22 @@ impl IntoResponse for AppError {
             })),
         )
             .into_response()
+    }
+}
+
+#[cfg(test)]
+mod app_error_tests {
+    use super::*;
+
+    #[test]
+    fn deleted_session_open_is_a_comprehensible_conflict() {
+        let error = AppError::session_open(lash::EmbedError::Store(
+            lash::persistence::StoreError::SessionDeleted {
+                session_id: "retired-session".to_string(),
+            },
+        ));
+        assert_eq!(error.status, StatusCode::CONFLICT);
+        assert!(error.message.contains("retired-session"));
+        assert!(error.message.contains("was used and deleted"));
     }
 }

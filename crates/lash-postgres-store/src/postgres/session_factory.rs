@@ -45,7 +45,8 @@ impl SessionStoreFactory for PostgresSessionStoreFactory {
     async fn create_store(
         &self,
         request: &SessionStoreCreateRequest,
-    ) -> Result<Arc<dyn RuntimePersistence>, String> {
+    ) -> Result<Arc<dyn RuntimePersistence>, StoreError> {
+        lash_core::store::validate_session_id(&request.session_id)?;
         let store = PostgresSessionStore {
             pool: self.pool.clone(),
             clock: Arc::clone(&self.clock),
@@ -58,7 +59,6 @@ impl SessionStoreFactory for PostgresSessionStoreFactory {
         };
         let meta = SessionMeta {
             session_id: request.session_id.clone(),
-            incarnation_id: lash_core::IncarnationId::mint_for_store(),
             session_name: request.session_id.clone(),
             created_at: current_timestamp_string(),
             model: request.policy.model.id.clone(),
@@ -67,15 +67,23 @@ impl SessionStoreFactory for PostgresSessionStoreFactory {
                 .and_then(|path| path.to_str().map(str::to_string)),
             relation: request.relation.clone(),
         };
-        let mut tx = self.pool.begin().await.map_err(|err| err.to_string())?;
+        let mut tx = self.pool.begin().await.map_err(store_sqlx_error)?;
         crate::runtime_persistence::lock_session_history_mutation_tx(&mut tx, &request.session_id)
-            .await
-            .map_err(|err| err.to_string())?;
-        sqlx::query("DELETE FROM lash_deleted_sessions WHERE session_id = $1")
-            .bind(&request.session_id)
-            .execute(&mut *tx)
-            .await
-            .map_err(|err| err.to_string())?;
+            .await?;
+        let deleted = sqlx::query_scalar::<_, bool>(
+            "SELECT EXISTS(
+                SELECT 1 FROM lash_deleted_sessions WHERE session_id = $1
+             )",
+        )
+        .bind(&request.session_id)
+        .fetch_one(&mut *tx)
+        .await
+        .map_err(store_sqlx_error)?;
+        if deleted {
+            return Err(StoreError::SessionDeleted {
+                session_id: request.session_id.clone(),
+            });
+        }
         sqlx::query(
             "INSERT INTO lash_session_meta (session_id, meta_json)
              VALUES ($1, $2)
@@ -85,8 +93,8 @@ impl SessionStoreFactory for PostgresSessionStoreFactory {
         .bind(encode_json(&meta))
         .execute(&mut *tx)
         .await
-        .map_err(|err| err.to_string())?;
-        tx.commit().await.map_err(|err| err.to_string())?;
+        .map_err(store_sqlx_error)?;
+        tx.commit().await.map_err(store_sqlx_error)?;
         Ok(Arc::new(store))
     }
 
@@ -118,7 +126,7 @@ impl SessionStoreFactory for PostgresSessionStoreFactory {
 
     async fn delete_session(&self, session_id: &str) -> Result<(), String> {
         let mut tx = self.pool.begin().await.map_err(|err| err.to_string())?;
-        delete_session_tx(&mut tx, session_id)
+        delete_session_tx(&mut tx, session_id, true)
             .await
             .map_err(|err| err.to_string())?;
         tx.commit().await.map_err(|err| err.to_string())
@@ -267,6 +275,20 @@ impl SessionStoreFactory for PostgresSessionStoreFactory {
         let mut tx = self.pool.begin().await.map_err(store_sqlx_error)?;
         crate::runtime_persistence::lock_session_history_mutation_tx(&mut tx, &request.session_id)
             .await?;
+        let deleted = sqlx::query_scalar::<_, bool>(
+            "SELECT EXISTS(
+                SELECT 1 FROM lash_deleted_sessions WHERE session_id = $1
+             )",
+        )
+        .bind(&request.session_id)
+        .fetch_one(&mut *tx)
+        .await
+        .map_err(store_sqlx_error)?;
+        if deleted {
+            return Err(StoreError::SessionDeleted {
+                session_id: request.session_id.clone(),
+            });
+        }
         let exists = sqlx::query_scalar::<_, bool>(
             "SELECT EXISTS(
                  SELECT 1 FROM lash_sessions WHERE session_id = $1
@@ -358,7 +380,6 @@ impl SessionStoreFactory for PostgresSessionStoreFactory {
         .map_err(store_sqlx_error)?;
         let meta = SessionMeta {
             session_id: request.session_id.clone(),
-            incarnation_id: lash_core::IncarnationId::mint_for_store(),
             session_name: request.session_id.clone(),
             created_at: current_timestamp_string(),
             model: request.policy.model.id.clone(),
@@ -370,11 +391,6 @@ impl SessionStoreFactory for PostgresSessionStoreFactory {
         sqlx::query("INSERT INTO lash_session_meta (session_id, meta_json) VALUES ($1, $2)")
             .bind(&request.session_id)
             .bind(encode_json(&meta))
-            .execute(&mut *tx)
-            .await
-            .map_err(store_sqlx_error)?;
-        sqlx::query("DELETE FROM lash_deleted_sessions WHERE session_id = $1")
-            .bind(&request.session_id)
             .execute(&mut *tx)
             .await
             .map_err(store_sqlx_error)?;
@@ -496,17 +512,33 @@ impl SessionStoreFactory for PostgresSessionStoreFactory {
 pub(crate) async fn delete_session_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     session_id: &str,
+    tombstone_host_facing_id: bool,
 ) -> Result<(), StoreError> {
     crate::runtime_persistence::lock_session_history_mutation_tx(tx, session_id).await?;
-    sqlx::query(
-        "INSERT INTO lash_deleted_sessions (session_id)
-         VALUES ($1)
-         ON CONFLICT (session_id) DO NOTHING",
+    let materialized = sqlx::query_scalar::<_, bool>(
+        "SELECT EXISTS(
+             SELECT 1 FROM lash_session_meta WHERE session_id = $1
+             UNION ALL
+             SELECT 1 FROM lash_sessions WHERE session_id = $1
+         )",
     )
     .bind(session_id)
-    .execute(&mut **tx)
+    .fetch_one(&mut **tx)
     .await
     .map_err(store_sqlx_error)?;
+    if tombstone_host_facing_id && materialized {
+        // Permanent identity evidence for host-facing ids only. Runtime-internal
+        // process session ids are lash-minted and reclaimed without a tombstone.
+        sqlx::query(
+            "INSERT INTO lash_deleted_sessions (session_id)
+             VALUES ($1)
+             ON CONFLICT (session_id) DO NOTHING",
+        )
+        .bind(session_id)
+        .execute(&mut **tx)
+        .await
+        .map_err(store_sqlx_error)?;
+    }
     // Attachment intents are released before the rest of the process-owned
     // store. Process pruning calls this while its terminal row is still locked
     // and deletes that row last, so any failure leaves a process leak instead

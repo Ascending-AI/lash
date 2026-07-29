@@ -149,20 +149,21 @@ Simulation and fault-matrix coverage before hosts may run unbounded loops on an 
 ADR 0047 applies the bounded-journal obligation to the substrate-owned replay
 table as well as to one engine invocation. The effect-host/controller contract
 now retires journals through typed `EffectJournalRetirement` targets:
-`Session { session_id, incarnation_id }` and `Process { process_id }`.
+`Session { session_id }` and `Process { process_id }`.
 
 Engine-less SQL controllers persist a versioned canonical identity for the
 complete `ExecutionScope`. The human-facing `ExecutionScope::id()` remains a
-display value, not a durable key. Session-owned rows also carry indexed
-`session_id` and `incarnation_id` join columns. Session deletion removes the
-exact retired incarnation; terminal-process retention removes the exact
-canonical process scope. Cleanup neither parses `scope_id` nor prefix-matches
-it.
+display value, not a durable key. Session-owned rows also carry an indexed
+`session_id` join column. Under [ADR-0049](0049-session-ids-are-used-once.md),
+that id names exactly one lifetime and is never reused after deletion. Session
+deletion removes the exact session journal; terminal-process retention removes
+the exact canonical process scope. Cleanup neither parses `scope_id` nor
+prefix-matches it.
 
 This keeps the inline SQL table as the engine-less tier's replay source without
-making it append-only. Session journals live until that incarnation is deleted,
-and process journals live until host-scheduled terminal-process retention
-prunes the process. SQLite effect schema 5 and PostgreSQL store schema 27 are
+making it append-only. Session journals live until that session is deleted, and
+process journals live until host-scheduled terminal-process retention prunes
+the process. SQLite effect schema 6 and PostgreSQL store schema 28 are
 reject-and-recreate cutovers with no compatibility path.
 
 Restate keeps its native invocation journal and native retention. Its effect

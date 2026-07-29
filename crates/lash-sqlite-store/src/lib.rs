@@ -450,8 +450,9 @@ impl SessionStoreFactory for SqliteSessionStoreFactory {
     async fn create_store(
         &self,
         request: &SessionStoreCreateRequest,
-    ) -> Result<Arc<dyn RuntimePersistence>, String> {
-        std::fs::create_dir_all(&self.root).map_err(|err| err.to_string())?;
+    ) -> Result<Arc<dyn RuntimePersistence>, StoreError> {
+        lash_core::store::validate_session_id(&request.session_id)?;
+        std::fs::create_dir_all(&self.root).map_err(|err| StoreError::Backend(err.to_string()))?;
         let path = self.catalog_path();
         let store = Arc::new(
             Store::open_bound_with_options_clock_and_process_registry(
@@ -462,11 +463,10 @@ impl SessionStoreFactory for SqliteSessionStoreFactory {
                 None,
             )
             .await
-            .map_err(|err| err.to_string())?,
+            .map_err(|err| StoreError::Backend(err.to_string()))?,
         );
         let meta = SessionMeta {
             session_id: request.session_id.clone(),
-            incarnation_id: lash_core::IncarnationId::mint_for_store(),
             session_name: request.session_id.clone(),
             created_at: self.clock.timestamp_rfc3339(),
             model: request.policy.model.id.clone(),
@@ -478,18 +478,28 @@ impl SessionStoreFactory for SqliteSessionStoreFactory {
         let relation_json = encode_json(&meta.relation);
         store
             .conn
-            .write(move |tx| {
-                tx.execute(
-                    "DELETE FROM deleted_sessions WHERE session_id = ?1",
-                    params![&meta.session_id],
-                )?;
+            .write_flow(move |tx| {
+                let deleted = tx
+                    .query_row(
+                        "SELECT 1 FROM deleted_sessions WHERE session_id = ?1",
+                        params![meta.session_id],
+                        |_| Ok(()),
+                    )
+                    .optional()?
+                    .is_some();
+                if deleted {
+                    return Ok(TxOutcome::Rollback(Err(
+                        lash_core::StoreError::SessionDeleted {
+                            session_id: meta.session_id,
+                        },
+                    )));
+                }
                 tx.execute(
                     "INSERT OR IGNORE INTO session_meta
-                     (session_id, incarnation_id, session_name, created_at, model, cwd, relation_json)
-                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                     (session_id, session_name, created_at, model, cwd, relation_json)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
                     params![
                         meta.session_id,
-                        meta.incarnation_id.as_str(),
                         meta.session_name,
                         meta.created_at,
                         meta.model,
@@ -497,10 +507,10 @@ impl SessionStoreFactory for SqliteSessionStoreFactory {
                         relation_json
                     ],
                 )?;
-                Ok(())
+                Ok(TxOutcome::Commit(Ok(())))
             })
             .await
-            .map_err(|err| err.to_string())?;
+            .map_err(sqlite_error)??;
         Ok(store as Arc<dyn RuntimePersistence>)
     }
 
@@ -530,7 +540,7 @@ impl SessionStoreFactory for SqliteSessionStoreFactory {
     }
 
     async fn delete_session(&self, session_id: &str) -> Result<(), String> {
-        delete_session_from_catalog(&self.root, session_id).await
+        delete_session_from_catalog(&self.root, session_id, true).await
     }
 
     async fn pin(&self, node_id: &str) -> Result<lash_core::ForkPoint, lash_core::StoreError> {
@@ -614,7 +624,11 @@ fn warn_process_registry_not_wired() {
     );
 }
 
-async fn delete_session_from_catalog(root: &Path, session_id: &str) -> Result<(), String> {
+async fn delete_session_from_catalog(
+    root: &Path,
+    session_id: &str,
+    tombstone_host_facing_id: bool,
+) -> Result<(), String> {
     let path = root.join("durable-core.db");
     if !path.exists() {
         return Ok(());
@@ -626,11 +640,28 @@ async fn delete_session_from_catalog(root: &Path, session_id: &str) -> Result<()
     ensure_schema(&conn).await.map_err(|err| err.to_string())?;
     conn.write_flow(move |tx| {
         let outcome: Result<(), lash_core::StoreError> = (|| {
-            tx.execute(
-                "INSERT OR IGNORE INTO deleted_sessions (session_id) VALUES (?1)",
-                params![session_id],
-            )
-            .map_err(sqlite_error)?;
+            let existed = tx
+                .query_row(
+                    "SELECT 1 FROM session_meta WHERE session_id = ?1
+                     UNION ALL
+                     SELECT 1 FROM session_head WHERE session_id = ?1
+                     LIMIT 1",
+                    params![session_id],
+                    |_| Ok(()),
+                )
+                .optional()
+                .map_err(sqlite_error)?
+                .is_some();
+            if tombstone_host_facing_id && existed {
+                // Permanent identity evidence for host-facing ids only.
+                // Runtime-internal process session ids are lash-minted and
+                // reclaimed without a tombstone.
+                tx.execute(
+                    "INSERT OR IGNORE INTO deleted_sessions (session_id) VALUES (?1)",
+                    params![session_id],
+                )
+                .map_err(sqlite_error)?;
+            }
             let leaf_node_id = tx
                 .query_row(
                     "SELECT leaf_node_id FROM session_head WHERE session_id = ?1",
@@ -856,23 +887,20 @@ fn load_session_head_meta_from_conn(
 
 fn load_session_meta_from_conn(conn: &Connection, session_id: &str) -> Option<SessionMeta> {
     conn.query_row(
-        "SELECT session_id, incarnation_id, session_name, created_at, model, cwd, relation_json
+        "SELECT session_id, session_name, created_at, model, cwd, relation_json
          FROM session_meta WHERE session_id = ?1",
         params![session_id],
         |row| {
-            let relation_json: Option<String> = row.get(6)?;
+            let relation_json: Option<String> = row.get(5)?;
             let relation = relation_json
                 .and_then(|json| serde_json::from_str(&json).ok())
                 .unwrap_or_default();
             Ok(SessionMeta {
                 session_id: row.get(0)?,
-                incarnation_id: lash_core::IncarnationId::decode_from_store(
-                    row.get::<_, String>(1)?,
-                ),
-                session_name: row.get(2)?,
-                created_at: row.get(3)?,
-                model: row.get(4)?,
-                cwd: row.get(5)?,
+                session_name: row.get(1)?,
+                created_at: row.get(2)?,
+                model: row.get(3)?,
+                cwd: row.get(4)?,
                 relation,
             })
         },
@@ -937,15 +965,14 @@ mod tests {
     use lashlang::LashlangArtifactStore;
 
     async fn durable_state(store: &Store, session_id: &str) -> lash_core::RuntimeSessionState {
-        let mut state = lash_core::RuntimeSessionState {
+        let state = lash_core::RuntimeSessionState {
             session_id: session_id.to_string(),
             ..Default::default()
         };
-        let incarnation_id = store
-            .ensure_session_incarnation(session_id, &state.policy)
+        store
+            .admit_and_bind_session(&lash_core::SessionBinding::root(session_id, &state.policy))
             .await
-            .expect("realize SQLite test session lifetime");
-        state.bind_durable_incarnation(incarnation_id);
+            .expect("bind SQLite test session");
         state
     }
 

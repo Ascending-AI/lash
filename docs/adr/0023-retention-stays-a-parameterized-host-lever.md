@@ -34,7 +34,7 @@ retention work owns that implementation.
 
 Effect-journal retention is implemented in the lifecycle form recorded by ADR
 0025. It does not take a second horizon: deleting a session retires that exact
-session incarnation, while host-scheduled terminal-process retention retires
+single-use session id, while host-scheduled terminal-process retention retires
 the exact canonical process scope before pruning its row. Restate retains its
 native invocation journal under its native policy and creates no SQL replay
 rows. Age remains a bound only after the owning scope is terminal and after

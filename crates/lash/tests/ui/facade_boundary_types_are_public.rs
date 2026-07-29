@@ -9,13 +9,13 @@ use lash::direct::{
 use lash::durability::RuntimeHostConfig;
 use lash::messages::MessageRole;
 use lash::persistence::{
-    CheckpointKind, GcReport, GraphAppend, IncarnationId, LeaseOwnerIdentity, OperationId,
+    CheckpointKind, GcReport, GraphAppend, LeaseOwnerIdentity, OperationId,
     PersistedSessionRead, PendingTurnInputDraft, QueuedWorkBatch, QueuedWorkBatchDraft,
     QueuedWorkClaim, QueuedWorkClaimBoundary, QueuedWorkStore, RealizedNodeTimestamp, RuntimeCommit,
     RuntimeCommitResult, RuntimePersistence, RuntimeSessionState, RuntimeTurnCommitStamp,
     SessionCheckpoint, SessionCommitStore, SessionExecutionLease,
     SessionExecutionLeaseClaimOutcome, SessionExecutionLeaseCompletion, SessionExecutionLeaseFence,
-    SessionExecutionLeaseStore, SessionLifetime, SessionMeta, SessionNodeRecord, StoreError,
+    SessionExecutionLeaseStore, SessionMeta, SessionNodeRecord, StoreError,
     StoreMaintenance, TurnInputClaim, TurnInputCheckpointBoundary, TurnInputIngress,
     TurnInputState, TurnInputStore, VacuumReport, commit_runtime_state_verified,
     load_persisted_session_state,
@@ -40,12 +40,11 @@ lash_core::impl_noop_attachment_manifest!(FacadeStore);
 
 #[async_trait]
 impl SessionCommitStore for FacadeStore {
-    async fn ensure_session_incarnation(
+    async fn admit_and_bind_session(
         &self,
-        _session_id: &str,
-        _policy: &lash::runtime::SessionPolicy,
-    ) -> Result<IncarnationId, StoreError> {
-        Ok(IncarnationId::mint_for_store())
+        _binding: &lash::persistence::SessionBinding,
+    ) -> Result<lash::persistence::SessionAdmission, StoreError> {
+        Ok(lash::persistence::SessionAdmission::Created)
     }
 
     async fn load_session(&self) -> Result<Option<PersistedSessionRead>, StoreError> {
@@ -311,7 +310,6 @@ fn persistence_types_are_nameable(
 ) -> RuntimeCommit {
     RuntimeCommit {
         session_id: "facade".to_string(),
-        session_lifetime: SessionLifetime::durable(IncarnationId::mint_for_store()),
         expected_head_revision: 0,
         release_session_execution_lease: None,
         config: Default::default(),

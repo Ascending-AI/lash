@@ -500,15 +500,13 @@ async fn final_turn_commit(
     turn_id: &str,
     adopted_attachment_ids: Vec<crate::AttachmentId>,
 ) -> crate::RuntimeCommit {
-    let incarnation_id = store
+    store
         .load_session_meta()
         .await
         .expect("load commit session metadata")
-        .expect("commit session metadata exists")
-        .incarnation_id;
+        .expect("commit session metadata exists");
     let state = crate::RuntimeSessionState {
         session_id: session_id.to_string(),
-        session_lifetime: crate::SessionLifetime::durable(incarnation_id),
         ..crate::RuntimeSessionState::default()
     };
     let mut commit = crate::RuntimeCommit::persisted_state_for_test(&state, &[])

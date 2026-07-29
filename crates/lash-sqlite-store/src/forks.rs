@@ -250,6 +250,20 @@ pub(super) async fn fork_at_in_catalog(
                     session_id: request.session_id.clone(),
                 });
             }
+            let deleted = tx
+                .query_row(
+                    "SELECT 1 FROM deleted_sessions WHERE session_id = ?1",
+                    params![request.session_id],
+                    |_| Ok(()),
+                )
+                .optional()
+                .map_err(sqlite_error)?
+                .is_some();
+            if deleted {
+                return Err(lash_core::StoreError::SessionDeleted {
+                    session_id: request.session_id.clone(),
+                });
+            }
             let retained = tx
                 .query_row(
                     "SELECT source_session_id, checkpoint_ref FROM (
@@ -328,7 +342,6 @@ pub(super) async fn fork_at_in_catalog(
             .map_err(sqlite_error)?;
             let session_meta = lash_core::SessionMeta {
                 session_id: request.session_id.clone(),
-                incarnation_id: lash_core::IncarnationId::mint_for_store(),
                 session_name: request.session_id.clone(),
                 created_at: lash_core::Clock::timestamp_rfc3339(&lash_core::SystemClock),
                 model: request.policy.model.id.clone(),
@@ -339,22 +352,16 @@ pub(super) async fn fork_at_in_catalog(
             };
             tx.execute(
                 "INSERT INTO session_meta
-                 (session_id, incarnation_id, session_name, created_at, model, cwd, relation_json)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                 (session_id, session_name, created_at, model, cwd, relation_json)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
                 params![
                     session_meta.session_id,
-                    session_meta.incarnation_id.as_str(),
                     session_meta.session_name,
                     session_meta.created_at,
                     session_meta.model,
                     session_meta.cwd,
                     encode_json(&session_meta.relation)
                 ],
-            )
-            .map_err(sqlite_error)?;
-            tx.execute(
-                "DELETE FROM deleted_sessions WHERE session_id = ?1",
-                params![request.session_id],
             )
             .map_err(sqlite_error)?;
             Ok(lash_core::ForkSessionResult {

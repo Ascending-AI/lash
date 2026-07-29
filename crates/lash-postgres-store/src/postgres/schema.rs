@@ -230,7 +230,6 @@ pub(crate) async fn ensure_schema(pool: &PgPool) -> Result<Vec<u8>, StoreError> 
         CREATE TABLE IF NOT EXISTS lash_runtime_effect_replay (
             scope_id TEXT NOT NULL,
             session_id TEXT,
-            incarnation_id TEXT,
             replay_key TEXT NOT NULL,
             envelope_hash TEXT NOT NULL,
             envelope_json TEXT NOT NULL,
@@ -247,8 +246,8 @@ pub(crate) async fn ensure_schema(pool: &PgPool) -> Result<Vec<u8>, StoreError> 
         );
         CREATE INDEX IF NOT EXISTS idx_lash_runtime_effect_replay_lease
             ON lash_runtime_effect_replay(status, lease_expires_at_ms);
-        CREATE INDEX IF NOT EXISTS idx_lash_runtime_effect_replay_session_lifetime
-            ON lash_runtime_effect_replay(session_id, incarnation_id);
+        CREATE INDEX IF NOT EXISTS idx_lash_runtime_effect_replay_session
+            ON lash_runtime_effect_replay(session_id);
 
         CREATE TABLE IF NOT EXISTS lash_await_event_meta (
             singleton BOOLEAN PRIMARY KEY DEFAULT TRUE,
@@ -269,6 +268,8 @@ pub(crate) async fn ensure_schema(pool: &PgPool) -> Result<Vec<u8>, StoreError> 
         CREATE INDEX IF NOT EXISTS idx_lash_await_event_waits_session
             ON lash_await_event_waits(session_id);
 
+        -- Permanent by design: session ids cannot be reused, so revocation
+        -- evidence must remain after every retention-pruning pass.
         CREATE TABLE IF NOT EXISTS lash_await_event_revoked_sessions (
             session_id TEXT PRIMARY KEY,
             revoked_at_ms BIGINT NOT NULL

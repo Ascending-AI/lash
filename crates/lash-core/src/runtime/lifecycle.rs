@@ -6,11 +6,7 @@ fn initial_park_preview(
     let operation =
         super::state::boundary_operation(&state.session_id, "initial-park-preview", "preview");
     let mut graph = state.pending_graph_commit();
-    graph.derive_node_ids(
-        &state.session_id,
-        state.durable_incarnation_id("initial park preview")?,
-        &operation,
-    )?;
+    graph.derive_node_ids(&state.session_id, &operation)?;
     crate::store::RuntimeCommit::persisted_state_with_graph_commit_and_operation(
         state,
         graph,
@@ -34,20 +30,51 @@ async fn bind_state_to_store(
     policy: &SessionPolicy,
     store: &(dyn crate::store::RuntimePersistence + '_),
     state: &mut RuntimeSessionState,
+    relation: crate::SessionRelation,
 ) -> Result<(), SessionError> {
-    if state.session_id.is_empty() {
-        state.session_id = uuid::Uuid::new_v4().to_string();
-    }
-    let incarnation_id = store
-        .ensure_session_incarnation(&state.session_id, policy)
+    let binding = crate::SessionBinding {
+        session_id: state.session_id.clone(),
+        relation,
+        model_id: policy.model.id.clone(),
+        cwd: std::env::current_dir()
+            .ok()
+            .and_then(|path| path.to_str().map(str::to_string)),
+    };
+    store
+        .admit_and_bind_session(&binding)
         .await
         .map_err(|err| {
             SessionError::Protocol(format!(
-                "failed to bind durable incarnation for session `{}`: {err}",
+                "failed to bind session `{}` to its store: {err}",
                 state.session_id
             ))
         })?;
-    state.bind_durable_incarnation(incarnation_id);
+    let meta = store
+        .load_session_meta()
+        .await
+        .map_err(|err| {
+            SessionError::Protocol(format!(
+                "failed to verify session `{}` store binding: {err}",
+                state.session_id
+            ))
+        })?
+        .ok_or_else(|| {
+            SessionError::Protocol(
+                crate::StoreError::SessionBindingNotMaterialized {
+                    session_id: state.session_id.clone(),
+                }
+                .to_string(),
+            )
+        })?;
+    if meta.session_id != state.session_id {
+        return Err(SessionError::Protocol(
+            crate::StoreError::SessionBindingMismatch {
+                bound_session_id: meta.session_id,
+                attempted_session_id: state.session_id.clone(),
+            }
+            .to_string(),
+        ));
+    }
     Ok(())
 }
 
@@ -103,9 +130,6 @@ impl LashRuntime {
         services: RuntimeServices,
         mut state: RuntimeSessionState,
     ) -> Result<Self, SessionError> {
-        if state.session_id.is_empty() {
-            state.session_id = uuid::Uuid::new_v4().to_string();
-        }
         // Defaulted state (e.g. `RuntimeSessionState::default()` used
         // by fresh-session constructors) carries an empty policy.
         // Fill it in from the caller's policy so tests and hosts that
@@ -252,7 +276,13 @@ impl LashRuntime {
         services: PersistentRuntimeServices,
         mut state: RuntimeSessionState,
     ) -> Result<Self, SessionError> {
-        bind_state_to_store(&policy, services.store().as_ref(), &mut state).await?;
+        bind_state_to_store(
+            &policy,
+            services.store().as_ref(),
+            &mut state,
+            crate::SessionRelation::Root,
+        )
+        .await?;
         Self::from_host_state(policy, host.into(), services.into_runtime_services(), state).await
     }
 
@@ -263,7 +293,13 @@ impl LashRuntime {
         services: PersistentRuntimeServices,
         mut state: RuntimeSessionState,
     ) -> Result<Self, SessionError> {
-        bind_state_to_store(&policy, services.store().as_ref(), &mut state).await?;
+        bind_state_to_store(
+            &policy,
+            services.store().as_ref(),
+            &mut state,
+            crate::SessionRelation::Root,
+        )
+        .await?;
         Self::from_host_state(policy, host.into(), services.into_runtime_services(), state).await
     }
 
@@ -274,7 +310,7 @@ impl LashRuntime {
     /// rebuild (`EmbeddedRuntimeBuilder::build`), and child-session
     /// materialization — routes through here so the store/registry wiring cannot
     /// drift between them. Persistent paths bind the supplied state to the
-    /// store's durable session incarnation before constructing the runtime.
+    /// store's durable session id before constructing the runtime.
     pub(in crate::runtime) async fn assemble_runtime(
         policy: SessionPolicy,
         embedded_host: EmbeddedRuntimeHost,
@@ -282,13 +318,14 @@ impl LashRuntime {
         persistence: RuntimePersistenceBindings,
         process_registry: Option<Arc<dyn ProcessRegistry>>,
         mut state: RuntimeSessionState,
+        relation: crate::SessionRelation,
     ) -> Result<Self, SessionError> {
         let RuntimePersistenceBindings {
             runtime_store: store,
             attachment_manifest_store,
         } = persistence;
         if let Some(store) = store.as_deref() {
-            bind_state_to_store(&policy, store, &mut state).await?;
+            bind_state_to_store(&policy, store, &mut state, relation).await?;
         }
         let runtime = match (store, process_registry) {
             (Some(store), Some(registry)) => {
@@ -369,6 +406,7 @@ impl LashRuntime {
             RuntimePersistenceBindings::new(store),
             env.process_registry.as_ref().cloned(),
             state,
+            crate::SessionRelation::Root,
         )
         .await?;
         // Thread the host-owned work drivers onto this session's host so
@@ -484,9 +522,6 @@ mod tests {
     fn initial_park_identity_is_stable_for_replay_and_distinguishes_content() {
         let mut state = crate::RuntimeSessionState {
             session_id: "park-identity".to_string(),
-            session_lifetime: crate::SessionLifetime::durable(
-                crate::IncarnationId::mint_for_store(),
-            ),
             ..crate::RuntimeSessionState::default()
         };
         state.ensure_agent_frame_initialized();

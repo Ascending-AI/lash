@@ -29,14 +29,9 @@ impl From<RemoteTurnCancellationEvidence> for lash_core::TurnCancellationEvidenc
 }
 
 impl RemoteTurnCancelRequest {
-    /// Resolve a routing-only remote request against trusted session state.
-    ///
-    /// The remote envelope deliberately does not carry `IncarnationId`.
-    /// Durable hosts must claim the current store-bound lifetime before
-    /// constructing the core cancellation address.
-    pub fn try_into_core_for_lifetime(
+    /// Resolve a routing-only remote request into the core request.
+    pub fn try_into_core(
         self,
-        lifetime: &lash_core::SessionLifetime,
     ) -> Result<lash_core::TurnCancelRequest, RemoteProtocolError> {
         self.validate()?;
         let Self {
@@ -48,7 +43,7 @@ impl RemoteTurnCancelRequest {
             reason,
         } = self;
         Ok(lash_core::TurnCancelRequest {
-            address: lash_core::TurnAddress::new_for_lifetime(session_id, lifetime, turn_id),
+            address: lash_core::TurnAddress::new(session_id, turn_id),
             request_id,
             origin,
             reason,

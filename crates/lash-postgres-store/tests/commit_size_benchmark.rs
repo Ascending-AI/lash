@@ -12,9 +12,15 @@ use lash_postgres_store::PostgresStorage;
 use lash_sqlite_store::SqliteSessionStoreFactory;
 
 const NODE_COUNTS: &[usize] = &[8, 32, 128, 512];
+const CHECKPOINT_PAYLOAD_BYTES: &[usize] = &[0, 64 * 1024, 256 * 1024];
 const SAMPLES: usize = 7;
 
-fn realistic_commit(session_id: &str, node_count: usize, sample: usize) -> RuntimeCommit {
+fn realistic_commit(
+    session_id: &str,
+    node_count: usize,
+    checkpoint_payload_bytes: usize,
+    sample: usize,
+) -> RuntimeCommit {
     let payload = "turn-tail-token ".repeat(48);
     let nodes = (0..node_count)
         .map(|index| {
@@ -78,9 +84,43 @@ fn realistic_commit(session_id: &str, node_count: usize, sample: usize) -> Runti
         leaf_node_id: nodes.last().map(|node| node.node_id.clone()),
         nodes,
     };
-    commit.checkpoint.execution_state = Some(vec![sample as u8; 64 * 1024]);
+    commit.checkpoint.execution_state = Some(vec![sample as u8; checkpoint_payload_bytes]);
     commit.committed_attachment_ids = attachment_ids;
     commit
+        .with_operation(lash_core::store::OperationId::new(
+            lash_core::ExecutionScope::runtime_operation(format!(
+                "commit-size-benchmark:{session_id}"
+            )),
+            "commit",
+        ))
+        .expect("derive benchmark graph node ids")
+        .0
+}
+
+fn measured_budget_bytes(commit: &RuntimeCommit) -> (usize, usize, usize, usize) {
+    let graph_delta_bytes = commit.graph.nodes.iter().fold(0usize, |total, node| {
+        total.saturating_add(
+            serde_json::to_vec(node)
+                .expect("serialize graph node")
+                .len(),
+        )
+    });
+    let checkpoint_bytes = rmp_serde::to_vec_named(&commit.checkpoint)
+        .expect("serialize hydrated checkpoint")
+        .len();
+    let attachment_manifest_bytes = commit
+        .committed_attachment_ids
+        .iter()
+        .fold(0usize, |total, id| total.saturating_add(id.as_str().len()));
+    let total_bytes = graph_delta_bytes
+        .saturating_add(checkpoint_bytes)
+        .saturating_add(attachment_manifest_bytes);
+    (
+        graph_delta_bytes,
+        checkpoint_bytes,
+        attachment_manifest_bytes,
+        total_bytes,
+    )
 }
 
 fn record_attachment_intents(store: &dyn RuntimePersistence, commit: &RuntimeCommit) {
@@ -98,12 +138,14 @@ fn record_attachment_intents(store: &dyn RuntimePersistence, commit: &RuntimeCom
     }
 }
 
-async fn time_commit(store: Arc<dyn RuntimePersistence>, mut commit: RuntimeCommit) -> Duration {
-    let incarnation_id = store
-        .ensure_session_incarnation(&commit.session_id, &SessionPolicy::default())
+async fn time_commit(store: Arc<dyn RuntimePersistence>, commit: RuntimeCommit) -> Duration {
+    store
+        .admit_and_bind_session(&lash_core::SessionBinding::root(
+            commit.session_id.clone(),
+            &SessionPolicy::default(),
+        ))
         .await
-        .expect("realize benchmark session lifetime");
-    commit.session_lifetime = lash_core::SessionLifetime::durable(incarnation_id);
+        .expect("bind benchmark session to store");
     record_attachment_intents(store.as_ref(), &commit);
     let started = Instant::now();
     store
@@ -119,6 +161,37 @@ fn percentile(samples: &mut [Duration], percentile: f64) -> Duration {
     samples[index]
 }
 
+#[test]
+fn measured_bytes_match_validate_budget_components() {
+    let commit = realistic_commit(
+        "benchmark-budget-accounting",
+        8,
+        RuntimeCommit::MAX_COMMIT_BUDGET_BYTES + 1,
+        0,
+    );
+    let (
+        expected_graph_delta_bytes,
+        expected_checkpoint_bytes,
+        expected_attachment_manifest_bytes,
+        expected_total_bytes,
+    ) = measured_budget_bytes(&commit);
+
+    assert!(matches!(
+        commit.validate_budget(),
+        Err(lash_core::StoreError::CommitByteBudgetExceeded {
+            graph_delta_bytes,
+            checkpoint_bytes,
+            attachment_manifest_bytes,
+            total_bytes,
+            max_bytes,
+        }) if graph_delta_bytes == expected_graph_delta_bytes
+            && checkpoint_bytes == expected_checkpoint_bytes
+            && attachment_manifest_bytes == expected_attachment_manifest_bytes
+            && total_bytes == expected_total_bytes
+            && max_bytes == RuntimeCommit::MAX_COMMIT_BUDGET_BYTES
+    ));
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 #[ignore = "measurement benchmark; requires LASH_POSTGRES_DATABASE_URL"]
 async fn measured_commit_size_curve() {
@@ -130,46 +203,48 @@ async fn measured_commit_size_curve() {
     let sqlite_dir = tempfile::tempdir().expect("SQLite benchmark directory");
     let sqlite_factory = SqliteSessionStoreFactory::new(sqlite_dir.path());
 
-    println!("backend,node_count,budget_bytes,median_ms,p95_ms,samples");
+    println!(
+        "backend,node_count,checkpoint_payload_bytes,graph_delta_bytes,checkpoint_bytes,attachment_manifest_bytes,budget_bytes,median_ms,p95_ms,samples"
+    );
     for &node_count in NODE_COUNTS {
-        for backend in ["sqlite", "postgres"] {
-            let mut elapsed = Vec::with_capacity(SAMPLES);
-            let mut budget_bytes = 0;
-            for sample in 0..SAMPLES {
-                let session_id = format!("bench-{backend}-{node_count}-{sample}");
-                let commit = realistic_commit(&session_id, node_count, sample);
-                budget_bytes = serde_json::to_vec(&commit.graph)
-                    .expect("serialize graph delta")
-                    .len()
-                    + serde_json::to_vec(&commit.checkpoint)
-                        .expect("serialize checkpoint")
-                        .len()
-                    + serde_json::to_vec(&commit.committed_attachment_ids)
-                        .expect("serialize attachment manifest work")
-                        .len();
-                let store = match backend {
-                    "sqlite" => sqlite_factory
-                        .create_store(&SessionStoreCreateRequest {
-                            session_id: session_id.clone(),
-                            relation: SessionRelation::Root,
-                            policy: SessionPolicy::default(),
-                        })
-                        .await
-                        .expect("create SQLite benchmark store"),
-                    "postgres" => {
-                        Arc::new(postgres.session_store(&session_id)) as Arc<dyn RuntimePersistence>
-                    }
-                    _ => unreachable!(),
-                };
-                elapsed.push(time_commit(store, commit).await);
+        for &checkpoint_payload_bytes in CHECKPOINT_PAYLOAD_BYTES {
+            for backend in ["sqlite", "postgres"] {
+                let mut elapsed = Vec::with_capacity(SAMPLES);
+                let mut measured_bytes = (0, 0, 0, 0);
+                for sample in 0..SAMPLES {
+                    let session_id =
+                        format!("bench-{backend}-{node_count}-{checkpoint_payload_bytes}-{sample}");
+                    let store = match backend {
+                        "sqlite" => sqlite_factory
+                            .create_store(&SessionStoreCreateRequest {
+                                session_id: session_id.clone(),
+                                relation: SessionRelation::Root,
+                                policy: SessionPolicy::default(),
+                            })
+                            .await
+                            .expect("create SQLite benchmark store"),
+                        "postgres" => Arc::new(postgres.session_store(&session_id))
+                            as Arc<dyn RuntimePersistence>,
+                        _ => unreachable!(),
+                    };
+                    let commit =
+                        realistic_commit(&session_id, node_count, checkpoint_payload_bytes, sample);
+                    measured_bytes = measured_budget_bytes(&commit);
+                    commit
+                        .validate_budget()
+                        .expect("benchmark case must fit the production commit budget");
+                    elapsed.push(time_commit(store, commit).await);
+                }
+                let median = percentile(&mut elapsed, 0.5);
+                let p95 = percentile(&mut elapsed, 0.95);
+                let (graph_delta_bytes, checkpoint_bytes, attachment_manifest_bytes, budget_bytes) =
+                    measured_bytes;
+                println!(
+                    "{backend},{node_count},{checkpoint_payload_bytes},{graph_delta_bytes},{checkpoint_bytes},{attachment_manifest_bytes},{budget_bytes},{:.3},{:.3},{SAMPLES}",
+                    median.as_secs_f64() * 1_000.0,
+                    p95.as_secs_f64() * 1_000.0,
+                );
             }
-            let median = percentile(&mut elapsed, 0.5);
-            let p95 = percentile(&mut elapsed, 0.95);
-            println!(
-                "{backend},{node_count},{budget_bytes},{:.3},{:.3},{SAMPLES}",
-                median.as_secs_f64() * 1_000.0,
-                p95.as_secs_f64() * 1_000.0,
-            );
         }
     }
 }

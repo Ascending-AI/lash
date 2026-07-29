@@ -758,7 +758,7 @@ finish "started lifecycle gates"
         .core
         .session_delete_scope(&deleted_session_id)
         .await
-        .expect("resolve deleted session incarnation");
+        .expect("resolve deleted session scope");
     let delete_invocation_id = restate::submit_session_delete(
         &harness.state,
         restate::WorkbenchSessionDeleteWorkflowRequest {
@@ -1282,11 +1282,7 @@ async fn live_restate_ingress_owner_restart_for_store(backend: &'static str) {
         "retryable resume failures must not permanently clear the durable turn address"
     );
 
-    let address = lash::TurnAddress::new_incarnation(
-        &session_id,
-        session_incarnation(&data_dir, backend, &session_id).await,
-        &turn_id,
-    );
+    let address = lash::TurnAddress::new(&session_id, &turn_id);
     let driver = lash_restate::RestateTurnDeployment::new(ingress_url).turn_work_driver();
     let receipt = driver
         .request_cancel(
@@ -1562,50 +1558,6 @@ async fn session_lease_generation(
         }
         other => panic!("unsupported recovery E2E backend `{other}`"),
     }
-}
-
-async fn session_incarnation(
-    data_dir: &std::path::Path,
-    backend: &str,
-    session_id: &str,
-) -> lash::persistence::IncarnationId {
-    let raw = match backend {
-        "sqlite" => {
-            let sessions_dir = data_dir.join("lash-sessions");
-            let database_path = std::fs::read_dir(&sessions_dir)
-                .expect("read recovery E2E session store directory")
-                .filter_map(Result::ok)
-                .map(|entry| entry.path())
-                .find(|path| path.extension().is_some_and(|extension| extension == "db"))
-                .expect("locate recovery E2E SQLite session store");
-            rusqlite::Connection::open(database_path)
-                .expect("open recovery E2E SQLite session store")
-                .query_row(
-                    "SELECT incarnation_id FROM session_meta WHERE session_id = ?1",
-                    [session_id],
-                    |row| row.get(0),
-                )
-                .expect("read recovery E2E SQLite session incarnation")
-        }
-        "postgres" => {
-            let database_url = std::env::var("AGENT_WORKBENCH_E2E_DATABASE_URL")
-                .expect("Postgres recovery E2E database URL");
-            let pool = sqlx::PgPool::connect(&database_url)
-                .await
-                .expect("connect to recovery E2E Postgres");
-            sqlx::query_scalar(
-                "SELECT meta_json::jsonb ->> 'incarnation_id'
-                 FROM lash_session_meta
-                 WHERE session_id = $1",
-            )
-            .bind(session_id)
-            .fetch_one(&pool)
-            .await
-            .expect("read recovery E2E Postgres session incarnation")
-        }
-        other => panic!("unsupported recovery E2E backend `{other}`"),
-    };
-    lash::persistence::IncarnationId::decode_from_store(raw)
 }
 
 async fn wait_for_session_lease_generation(

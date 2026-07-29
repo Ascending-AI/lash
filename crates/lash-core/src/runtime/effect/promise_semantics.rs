@@ -12,9 +12,22 @@ pub fn derive_key_id(
     scope: &ExecutionScope,
     wait: &AwaitEventWaitIdentity,
 ) -> Result<String, RuntimeError> {
+    #[derive(serde::Serialize)]
+    struct PromiseKeyWire<'a> {
+        version: u8,
+        scope: &'a ExecutionScope,
+        wait: &'a AwaitEventWaitIdentity,
+    }
+
     scope.validate()?;
     wait.validate()?;
-    crate::stable_hash::stable_json_sha256_hex(&(scope, wait)).map_err(|err| {
+    crate::stable_hash::stable_json_sha256_hex(&PromiseKeyWire {
+        version: 2,
+        scope,
+        wait,
+    })
+    .map(|digest| format!("v2:{digest}"))
+    .map_err(|err| {
         RuntimeError::new(
             "await_event_key_hash",
             format!("failed to hash await-event identity: {err}"),
@@ -220,6 +233,17 @@ mod tests {
         assert_eq!(
             sign_material(&scope, &wait, &key_id),
             serde_json::to_vec(&(scope, wait, key_id)).expect("serialize tuple")
+        );
+    }
+
+    #[test]
+    fn promise_key_wire_epoch_is_explicit_and_stable() {
+        let scope = ExecutionScope::turn("session", "turn");
+        let wait = AwaitEventWaitIdentity::tool_completion("call");
+
+        assert_eq!(
+            derive_key_id(&scope, &wait).expect("derive versioned key"),
+            "v2:bec06c764e9e73f476e273330ac61b9510cba5b51555db23f7b142b3aeeac586"
         );
     }
 }

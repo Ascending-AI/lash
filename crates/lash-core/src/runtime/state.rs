@@ -18,13 +18,6 @@ use super::usage::TokenLedgerEntry;
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct RuntimeSessionState {
     pub session_id: String,
-    /// Lifetime identity for this runtime state.
-    ///
-    /// Defaulted and snapshot-derived states are explicitly ephemeral. A
-    /// persistent runtime replaces this value with the identity realized and
-    /// read back by its store before any frame or effect scope is opened.
-    #[serde(skip)]
-    pub session_lifetime: crate::SessionLifetime,
     #[serde(default)]
     pub policy: SessionPolicy,
     /// Derived cache of FrameOpen nodes; never serialized or persisted.
@@ -86,7 +79,6 @@ impl RuntimeSessionState {
             .agent_frame_records(&snapshot.session_id);
         let mut state = Self {
             session_id: snapshot.session_id,
-            session_lifetime: crate::SessionLifetime::default(),
             policy: snapshot.policy,
             agent_frames,
             current_frame_node_id: snapshot.current_frame_node_id,
@@ -336,68 +328,12 @@ pub(crate) fn store_plugin_snapshot(
 }
 
 impl RuntimeSessionState {
-    pub fn bind_durable_incarnation(&mut self, incarnation_id: crate::IncarnationId) {
-        let frame_mapping = self
-            .session_graph
-            .nodes
-            .iter()
-            .filter(|node| !self.persisted_node_ids.contains(&node.node_id))
-            .filter_map(|node| {
-                let crate::SessionNodePayload::FrameOpen { frame_key, .. } = &node.payload else {
-                    return None;
-                };
-                let durable_node_id =
-                    crate::frame_node_id(&self.session_id, &incarnation_id, frame_key);
-                (durable_node_id != node.node_id).then(|| (node.node_id.clone(), durable_node_id))
-            })
-            .collect::<Vec<_>>();
-        self.session_lifetime = crate::SessionLifetime::durable(incarnation_id);
-        self.session_graph
-            .remap_node_ids(&self.session_id, &frame_mapping);
-        if let Some(current) = self.current_frame_node_id.as_mut()
-            && let Some((_, durable)) = frame_mapping
-                .iter()
-                .find(|(provisional, _)| provisional == current)
-        {
-            *current = durable.clone();
-        }
-        self.agent_frames = self.session_graph.agent_frame_records(&self.session_id);
-    }
-
-    pub fn durable_incarnation_id(
-        &self,
-        boundary: &'static str,
-    ) -> Result<&crate::IncarnationId, crate::StoreError> {
-        self.session_lifetime.as_durable().ok_or_else(|| {
-            crate::StoreError::EphemeralSessionAtDurableBoundary {
-                session_id: self.session_id.clone(),
-                boundary,
-            }
-        })
-    }
-
     pub fn turn_scope(&self, turn_id: impl Into<String>) -> crate::ExecutionScope {
-        let turn_id = turn_id.into();
-        match self.session_lifetime.as_durable() {
-            Some(incarnation_id) => crate::ExecutionScope::turn_incarnation(
-                &self.session_id,
-                incarnation_id.clone(),
-                turn_id,
-            ),
-            None => crate::ExecutionScope::turn(&self.session_id, turn_id),
-        }
+        crate::ExecutionScope::turn(&self.session_id, turn_id)
     }
 
     pub fn queue_drain_scope(&self, drain_id: impl Into<String>) -> crate::ExecutionScope {
-        let drain_id = drain_id.into();
-        match self.session_lifetime.as_durable() {
-            Some(incarnation_id) => crate::ExecutionScope::queue_drain_incarnation(
-                &self.session_id,
-                incarnation_id.clone(),
-                drain_id,
-            ),
-            None => crate::ExecutionScope::queue_drain(&self.session_id, drain_id),
-        }
+        crate::ExecutionScope::queue_drain(&self.session_id, drain_id)
     }
 
     pub(crate) fn refresh_current_frame_projection(&mut self) {
@@ -461,11 +397,7 @@ impl RuntimeSessionState {
         }
         let assignment = crate::AgentFrameAssignment::from_policy(self.policy.clone());
         let frame_key = "initial-frame";
-        let frame_node_id = crate::session_graph::frame_node_id_for_lifetime(
-            &self.session_id,
-            &self.session_lifetime,
-            frame_key,
-        );
+        let frame_node_id = crate::session_graph::frame_node_id(&self.session_id, frame_key);
         self.session_graph.append_frame_open_with_id_at(
             frame_node_id.clone(),
             frame_key.to_string(),
@@ -499,11 +431,7 @@ impl RuntimeSessionState {
         self.policy = assignment.policy.clone();
         self.protocol_turn_options = protocol_turn_options.clone();
         let frame_key = "initial-frame";
-        let frame_node_id = crate::session_graph::frame_node_id_for_lifetime(
-            &self.session_id,
-            &self.session_lifetime,
-            frame_key,
-        );
+        let frame_node_id = crate::session_graph::frame_node_id(&self.session_id, frame_key);
         self.session_graph.append_frame_open_with_id_at(
             frame_node_id.clone(),
             frame_key.to_string(),
@@ -521,7 +449,6 @@ impl Default for RuntimeSessionState {
     fn default() -> Self {
         Self {
             session_id: "root".to_string(),
-            session_lifetime: crate::SessionLifetime::default(),
             policy: SessionPolicy::default(),
             agent_frames: Vec::new(),
             current_frame_node_id: None,
@@ -798,11 +725,7 @@ pub(super) fn derive_graph_commit_node_ids(
     graph: &mut crate::GraphAppend,
     operation: &crate::OperationId,
 ) -> Result<Vec<String>, crate::StoreError> {
-    let mapping = graph.derive_node_ids(
-        &state.session_id,
-        state.durable_incarnation_id("history node derivation")?,
-        operation,
-    )?;
+    let mapping = graph.derive_node_ids(&state.session_id, operation)?;
     state
         .session_graph
         .remap_node_ids(&state.session_id, &mapping);
@@ -836,11 +759,7 @@ pub(super) fn open_agent_frame_in_state_with_clock(
         .unwrap_or_else(|| crate::AgentFrameAssignment::from_policy(state.policy.clone()));
     assignment.policy = state.policy.clone();
     let protocol_turn_options = state.protocol_turn_options.clone();
-    let frame_node_id = crate::session_graph::frame_node_id_for_lifetime(
-        &state.session_id,
-        &state.session_lifetime,
-        &request.frame_id,
-    );
+    let frame_node_id = crate::session_graph::frame_node_id(&state.session_id, &request.frame_id);
     let opened = state.session_graph.append_frame_open_with_id_at(
         frame_node_id.clone(),
         request.frame_id.clone(),

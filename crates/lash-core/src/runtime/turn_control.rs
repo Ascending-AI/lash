@@ -37,8 +37,6 @@ impl TurnCancelPeekIdentity {
 pub struct TurnAddress {
     pub session_id: String,
     pub turn_id: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub incarnation_id: Option<crate::IncarnationId>,
 }
 
 impl TurnAddress {
@@ -46,44 +44,11 @@ impl TurnAddress {
         Self {
             session_id: session_id.into(),
             turn_id: turn_id.into(),
-            incarnation_id: None,
-        }
-    }
-
-    pub fn new_incarnation(
-        session_id: impl Into<String>,
-        incarnation_id: crate::IncarnationId,
-        turn_id: impl Into<String>,
-    ) -> Self {
-        Self {
-            session_id: session_id.into(),
-            turn_id: turn_id.into(),
-            incarnation_id: Some(incarnation_id),
-        }
-    }
-
-    pub fn new_for_lifetime(
-        session_id: impl Into<String>,
-        lifetime: &crate::SessionLifetime,
-        turn_id: impl Into<String>,
-    ) -> Self {
-        match lifetime.as_durable() {
-            Some(incarnation_id) => {
-                Self::new_incarnation(session_id, incarnation_id.clone(), turn_id)
-            }
-            None => Self::new(session_id, turn_id),
         }
     }
 
     pub fn execution_scope(&self) -> ExecutionScope {
-        match self.incarnation_id.as_ref() {
-            Some(incarnation_id) => ExecutionScope::turn_incarnation(
-                &self.session_id,
-                incarnation_id.clone(),
-                &self.turn_id,
-            ),
-            None => ExecutionScope::turn(&self.session_id, &self.turn_id),
-        }
+        ExecutionScope::turn(&self.session_id, &self.turn_id)
     }
 
     fn validate(&self) -> Result<(), RuntimeError> {

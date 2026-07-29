@@ -1,9 +1,5 @@
 use super::*;
 
-fn incarnation(value: &str) -> IncarnationId {
-    IncarnationId::decode_from_store(value.to_string())
-}
-
 fn legacy_turn_commit_hash(commit: &RuntimeCommit) -> String {
     fn scrub(value: &mut serde_json::Value) {
         match value {
@@ -36,21 +32,14 @@ fn legacy_turn_commit_hash(commit: &RuntimeCommit) -> String {
 fn intent_fixture() -> RuntimeCommit {
     let mut state = crate::RuntimeSessionState {
         session_id: "golden-session".to_string(),
-        session_lifetime: SessionLifetime::durable(incarnation("golden-session")),
         turn_index: 7,
         ..crate::RuntimeSessionState::default()
     };
     state.ensure_agent_frame_initialized();
     state.session_graph.data_mut().nodes[0].timestamp = "2026-07-26T10:00:00Z".to_string();
     let operation = OperationId::turn("golden-session", "turn-42", "final");
-    let node_id = derive_history_node_id(
-        state
-            .durable_incarnation_id("test history derivation")
-            .expect("durable fixture"),
-        &operation,
-        0,
-    )
-    .expect("derive golden node");
+    let node_id =
+        derive_history_node_id(&state.session_id, &operation, 0).expect("derive golden node");
     let message = crate::Message {
         id: "payload-message-id".to_string(),
         role: crate::MessageRole::User,
@@ -104,19 +93,12 @@ fn first_persisted_state_commit_derives_and_installs_node_ids() {
         ),
         ..crate::RuntimeSessionState::default()
     };
-    state.bind_durable_incarnation(incarnation("first-commit"));
     let operation = OperationId::new(
         crate::ExecutionScope::runtime_operation("first-commit"),
         "initial",
     );
-    let expected = derive_history_node_id(
-        state
-            .durable_incarnation_id("test history derivation")
-            .expect("durable fixture"),
-        &operation,
-        0,
-    )
-    .expect("derive expected first node id");
+    let expected = derive_history_node_id(&state.session_id, &operation, 0)
+        .expect("derive expected first node id");
 
     let (commit, persisted_node_ids) =
         RuntimeCommit::persisted_state_with_operation(&mut state, &[], operation)
@@ -138,14 +120,8 @@ fn with_operation_returns_the_append_id_mapping() {
     let GraphAppend { nodes, .. } = &commit.graph;
     let old_node_id = nodes[0].node_id.clone();
     let operation = OperationId::turn("golden-session", "turn-43", "final");
-    let expected_node_id = derive_history_node_id(
-        commit
-            .durable_incarnation_id("test history derivation")
-            .expect("durable fixture"),
-        &operation,
-        0,
-    )
-    .expect("derive replacement node id");
+    let expected_node_id = derive_history_node_id(&commit.session_id, &operation, 0)
+        .expect("derive replacement node id");
 
     let (commit, mapping) = commit
         .with_operation(operation)
@@ -203,7 +179,7 @@ fn legacy_hash_reproduces_random_committed_message_id_conflict() {
 fn intent_hash_golden_vector() {
     assert_eq!(
         intent_fixture().turn_commit_hash().expect("golden intent"),
-        "c13c70e117af50268f93ae199db1146b93d79e96356f9c8e7fe2289cc3fe6791"
+        "2c20265fafb2dac582ccba071cf210647dfd4fc15a90f679067fed8ca77d5030"
     );
 }
 
@@ -246,8 +222,16 @@ fn operation_conflict_diagnostic_explains_identity_reuse() {
 fn node_id_golden_vector() {
     let operation = OperationId::turn("golden-session", "turn-42", "final");
     assert_eq!(
-        derive_history_node_id(&incarnation("golden-session"), &operation, 3).expect("golden node"),
-        "n_1310484e23970c0e27cbb0934ec9615f021e546b3631f99541142ddea30d13c2"
+        derive_history_node_id("golden-session", &operation, 3).expect("golden node"),
+        "n_38b8d1d55ece31f85383dbdbba3e0d2dfa134bc6f9c9b7ada0847479edf63280"
+    );
+}
+
+#[test]
+fn frame_node_id_golden_vector() {
+    assert_eq!(
+        crate::frame_node_id("golden-session", "frame-42"),
+        "frame-node/v2/dea90a18d10331ef6adf1493fb73edb50b45b8e51d375e4d524524928cfa18bc"
     );
 }
 
@@ -338,27 +322,25 @@ fn intent_projection_keeps_payload_timestamp_but_excludes_node_timestamp() {
 }
 
 #[test]
-fn derived_node_ids_are_incarnation_operation_and_ordinal_scoped() {
+fn derived_node_ids_are_session_operation_and_ordinal_scoped() {
     let first = OperationId::turn("session-a", "turn", "final");
     let other = OperationId::turn("session-a", "other-turn", "final");
-    let first_incarnation = incarnation("incarnation-a");
-    let other_incarnation = incarnation("incarnation-b");
-    let id = derive_history_node_id(&first_incarnation, &first, 0).expect("derive");
+    let id = derive_history_node_id("session-a", &first, 0).expect("derive");
     assert_eq!(
         id,
-        derive_history_node_id(&first_incarnation, &first, 0).expect("rederive")
+        derive_history_node_id("session-a", &first, 0).expect("rederive")
     );
     assert_ne!(
         id,
-        derive_history_node_id(&other_incarnation, &first, 0).expect("other incarnation")
+        derive_history_node_id("session-b", &first, 0).expect("other session")
     );
     assert_ne!(
         id,
-        derive_history_node_id(&first_incarnation, &other, 0).expect("other operation")
+        derive_history_node_id("session-a", &other, 0).expect("other operation")
     );
     assert_ne!(
         id,
-        derive_history_node_id(&first_incarnation, &first, 1).expect("other ordinal")
+        derive_history_node_id("session-a", &first, 1).expect("other ordinal")
     );
 }
 
@@ -367,19 +349,13 @@ fn node_derivation_guard_rejects_rogue_ids() {
     let mut commit = intent_fixture();
     let operation = OperationId::turn("golden-session", "turn-42", "final");
     commit.turn_commit = RuntimeTurnCommitStamp::new(operation);
-    let incarnation_id = commit
-        .durable_incarnation_id("test validation")
-        .expect("durable fixture")
-        .clone();
-    commit
-        .validate_node_derivation(&incarnation_id)
-        .expect("derived proposal");
+    commit.validate_node_derivation().expect("derived proposal");
 
     let mut rogue = commit.clone();
     let GraphAppend { nodes, .. } = &mut rogue.graph;
     nodes[0].node_id = "rogue".to_string();
     assert!(matches!(
-        rogue.validate_node_derivation(&incarnation_id),
+        rogue.validate_node_derivation(),
         Err(StoreError::NodeIdDerivationMismatch { .. })
     ));
 }
@@ -411,7 +387,7 @@ fn node_derivation_remaps_in_batch_parent_edges() {
         leaf_node_id: Some("draft-b".to_string()),
     };
     graph
-        .derive_node_ids("session", &incarnation("session"), &operation)
+        .derive_node_ids("session", &operation)
         .expect("derive node ids");
     let GraphAppend { nodes, .. } = graph;
     assert_eq!(
@@ -423,9 +399,7 @@ fn node_derivation_remaps_in_batch_parent_edges() {
 #[test]
 fn frame_node_identity_is_stable_across_operation_realization() {
     let operation = OperationId::turn("session", "turn", "final");
-    let incarnation_id = incarnation("session");
-    let frame_node_id =
-        crate::session_graph::frame_node_id("session", &incarnation_id, "initial-frame");
+    let frame_node_id = crate::session_graph::frame_node_id("session", "initial-frame");
     let mut graph = GraphAppend {
         nodes: vec![crate::SessionNodeRecord {
             node_id: frame_node_id.clone(),
@@ -444,7 +418,7 @@ fn frame_node_identity_is_stable_across_operation_realization() {
     };
 
     graph
-        .derive_node_ids("session", &incarnation_id, &operation)
+        .derive_node_ids("session", &operation)
         .expect("realize frame node");
 
     let GraphAppend {

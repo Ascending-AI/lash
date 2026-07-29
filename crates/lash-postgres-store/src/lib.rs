@@ -93,7 +93,7 @@ const SCHEMA_COMPONENT: &str = "lash-postgres-store";
 // joins live heads as both a graph-node root and checkpoint-blob root.
 // Bumped to 22 so each anchor binds one continuation checkpoint and source
 // session snapshot.
-// Bumped to 23 so reusable session names carry durable per-lifetime
+// Bumped to 23 so the then-reusable session names carried durable per-lifetime
 // incarnation identity in session metadata.
 // Bumped to 24 so PostgreSQL checkpoints use the shared manifest plus
 // content-addressed component blobs. Pre-24 checkpoint blobs contain the
@@ -104,7 +104,9 @@ const SCHEMA_COMPONENT: &str = "lash-postgres-store";
 // now derives liveness from parent edges, session heads, and anchors.
 // Bumped to 27 for canonical typed effect-journal identity and indexed
 // session/incarnation lifecycle joins. Pre-27 databases are rejected.
-const SCHEMA_VERSION: i32 = 27;
+// Bumped to 28 for permanent session-id reuse rejection and removal of
+// incarnation identity from session metadata and effect journals.
+const SCHEMA_VERSION: i32 = 28;
 const PROCESS_LEASE_SCHEMA_VERSION: u32 = lash_core::PROCESS_LEASE_SCHEMA_VERSION;
 
 #[derive(Clone)]
@@ -701,7 +703,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn postgres_delete_fences_a_stale_first_commit_until_explicit_recreate() {
+    async fn postgres_delete_permanently_fences_stale_handles_and_session_id_reuse() {
         let Some(database_url) = postgres_test_support::database_url() else {
             eprintln!("skipping Postgres delete fence proof: database URL is not set");
             return;
@@ -724,14 +726,6 @@ mod tests {
             .expect("create stale store");
         let mut state = lash_core::RuntimeSessionState {
             session_id: session_id.clone(),
-            session_lifetime: lash_core::SessionLifetime::durable(
-                stale_store
-                    .load_session_meta()
-                    .await
-                    .expect("load stale session metadata")
-                    .expect("stale session metadata")
-                    .incarnation_id,
-            ),
             ..Default::default()
         };
         state.ensure_agent_frame_initialized();
@@ -751,27 +745,16 @@ mod tests {
             } if session_id == &request.session_id
         ));
 
-        let recreated = factory
-            .create_store(&request)
-            .await
-            .expect("explicitly recreate deleted store");
-        let mut state = lash_core::RuntimeSessionState {
-            session_id: session_id.clone(),
-            session_lifetime: lash_core::SessionLifetime::durable(
-                recreated
-                    .load_session_meta()
-                    .await
-                    .expect("load recreated session metadata")
-                    .expect("recreated session metadata")
-                    .incarnation_id,
-            ),
-            ..Default::default()
+        let reuse_error = match factory.create_store(&request).await {
+            Ok(_) => panic!("deleted session id must never be reused"),
+            Err(error) => error,
         };
-        state.ensure_agent_frame_initialized();
-        recreated
-            .commit_runtime_state(RuntimeCommit::persisted_state_for_test(&state, &[]))
-            .await
-            .expect("recreated store accepts first commit");
+        assert!(matches!(
+            reuse_error,
+            StoreError::SessionDeleted {
+                ref session_id
+            } if session_id == &request.session_id
+        ));
     }
 
     #[tokio::test]

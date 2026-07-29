@@ -890,7 +890,7 @@ impl WorkbenchQueuedWorkSubmitter {
                 policy: lash::runtime::SessionPolicy::default(),
             })
             .await
-            .map_err(PluginError::Session)?;
+            .map_err(|error| PluginError::Session(error.to_string()))?;
         let queued = store
             .list_queued_work(session_id)
             .await

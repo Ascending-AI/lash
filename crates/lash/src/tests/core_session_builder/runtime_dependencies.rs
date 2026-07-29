@@ -267,15 +267,8 @@ async fn fork_distinguishes_collected_point_from_retained_orphaned_source() -> R
         .create_store(&source_request)
         .await
         .expect("create source that will be deleted");
-    let source_incarnation_id = source
-        .load_session_meta()
-        .await
-        .expect("load source metadata")
-        .expect("source metadata exists")
-        .incarnation_id;
     let mut source_state = lash_core::RuntimeSessionState {
         session_id: source_request.session_id.clone(),
-        session_lifetime: lash_core::SessionLifetime::durable(source_incarnation_id),
         policy: source_policy,
         ..Default::default()
     };
@@ -354,15 +347,8 @@ async fn fork_inherits_process_grants_without_inheriting_wake_subscription() -> 
         })
         .await
         .expect("create fork grant source");
-    let source_incarnation_id = source_store
-        .load_session_meta()
-        .await
-        .expect("load source metadata")
-        .expect("source metadata exists")
-        .incarnation_id;
     let mut source_state = lash_core::RuntimeSessionState {
         session_id: "fork-grant-source".to_string(),
-        session_lifetime: lash_core::SessionLifetime::durable(source_incarnation_id),
         policy,
         ..Default::default()
     };
@@ -596,15 +582,8 @@ async fn a_fork_runs_under_the_hosts_generation_intent_not_the_branch_points() -
         })
         .await
         .expect("create fork source");
-    let source_incarnation_id = source_store
-        .load_session_meta()
-        .await
-        .expect("load source metadata")
-        .expect("source metadata exists")
-        .incarnation_id;
     let mut source_state = lash_core::RuntimeSessionState {
         session_id: "generation-fork-source".to_string(),
-        session_lifetime: lash_core::SessionLifetime::durable(source_incarnation_id),
         policy: source_policy,
         ..Default::default()
     };

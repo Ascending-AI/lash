@@ -3758,7 +3758,14 @@
 
     async function fetchStateSnapshot() {
       const response = await fetch("/api/state");
-      if (!response.ok) throw new Error("state request failed (" + response.status + ")");
+      if (!response.ok) {
+        let message = "state request failed (" + response.status + ")";
+        try {
+          const body = await response.json();
+          if (typeof body?.error === "string" && body.error.trim()) message = body.error;
+        } catch (_) { /* retain the status-bearing fallback */ }
+        throw new Error(message);
+      }
       return await response.json();
     }
 
@@ -3793,11 +3800,11 @@
     async function loadState() {
       try {
         applyStateSnapshot(await fetchStateSnapshot());
-      } catch (_) {
+      } catch (error) {
         webState.textContent = "unavailable";
         sessionId.textContent = "—";
         streamState.textContent = "could not load session";
-        renderError("the workbench session could not be loaded; check the server, then reload");
+        renderError(error?.message || "the workbench session could not be loaded; check the server, then reload");
         throw new Error("state unavailable");
       }
     }

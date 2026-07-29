@@ -2339,6 +2339,7 @@ async fn cancel_running_turns_does_not_cross_separately_opened_handles() -> Resu
     let core = explicit_ephemeral_facets(LashCore::standard_builder())
         .provider(provider)
         .model(mock_model_spec())
+        .store_factory(Arc::new(lash_core::InMemorySessionStoreFactory::new()))
         .build()
         .expect("core");
     let handle_a = core.session("cancel-scope").open().await?;

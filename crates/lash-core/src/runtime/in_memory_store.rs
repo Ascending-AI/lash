@@ -16,11 +16,11 @@ use crate::store::RuntimePersistence;
 mod attachments;
 mod checkpoints;
 mod factory;
-mod incarnation;
 mod maintenance;
 mod queued_work;
 mod reachability;
 mod reads;
+mod session_binding;
 #[cfg(test)]
 mod test_support;
 #[cfg(any(test, feature = "testing"))]
@@ -143,8 +143,6 @@ enum InMemoryQueuedWorkClaimKind {
 
 type InMemoryNodeAnchorRecord = (crate::BlobRef, crate::HydratedSessionCheckpoint, String);
 type InMemoryNodeAnchors = Arc<Mutex<HashMap<String, InMemoryNodeAnchorRecord>>>;
-type InMemoryDeletedSessions = Arc<Mutex<HashSet<String>>>;
-type InMemorySessionIncarnations = Arc<Mutex<HashMap<String, crate::IncarnationId>>>;
 
 pub struct InMemorySessionStore {
     clock: Arc<dyn crate::Clock>,
@@ -161,8 +159,9 @@ pub struct InMemorySessionStore {
     global_session_heads: Arc<Mutex<HashMap<String, Option<String>>>>,
     node_anchors: InMemoryNodeAnchors,
     tombstoned_node_ids: Arc<Mutex<HashSet<String>>>,
-    deleted_sessions: InMemoryDeletedSessions,
-    session_incarnations: InMemorySessionIncarnations,
+    /// Permanent per-factory deletion ledger. Maintenance never prunes this:
+    /// an id, once used and deleted in this store, must never be reused.
+    deleted_session_ids: Arc<Mutex<HashSet<String>>>,
     pub(crate) checkpoint: Mutex<Option<crate::HydratedSessionCheckpoint>>,
     tool_state_blobs: Mutex<HashMap<crate::BlobRef, crate::ToolState>>,
     plugin_snapshot_blobs: Mutex<HashMap<crate::BlobRef, crate::PluginSessionSnapshot>>,
@@ -197,6 +196,8 @@ pub struct InMemorySessionStore {
     abandoned_queued_work_claim_count: std::sync::atomic::AtomicUsize,
     #[cfg(test)]
     abandoned_turn_input_claim_count: std::sync::atomic::AtomicUsize,
+    #[cfg(test)]
+    pub(crate) session_admission_count: std::sync::atomic::AtomicUsize,
 }
 
 type RuntimeTurnCommitRecord = (String, crate::store::RuntimeCommitResult, u64);
@@ -224,7 +225,6 @@ impl InMemorySessionStore {
             Arc::new(Mutex::new(HashMap::new())),
             Arc::new(Mutex::new(HashSet::new())),
             Arc::new(Mutex::new(HashSet::new())),
-            Arc::new(Mutex::new(HashMap::new())),
         )
     }
 
@@ -237,8 +237,7 @@ impl InMemorySessionStore {
         global_session_heads: Arc<Mutex<HashMap<String, Option<String>>>>,
         node_anchors: InMemoryNodeAnchors,
         tombstoned_node_ids: Arc<Mutex<HashSet<String>>>,
-        deleted_sessions: InMemoryDeletedSessions,
-        session_incarnations: InMemorySessionIncarnations,
+        deleted_session_ids: Arc<Mutex<HashSet<String>>>,
     ) -> Self {
         Self {
             clock,
@@ -251,8 +250,7 @@ impl InMemorySessionStore {
             global_session_heads,
             node_anchors,
             tombstoned_node_ids,
-            deleted_sessions,
-            session_incarnations,
+            deleted_session_ids,
             checkpoint: Mutex::new(None),
             tool_state_blobs: Mutex::new(HashMap::new()),
             plugin_snapshot_blobs: Mutex::new(HashMap::new()),
@@ -286,6 +284,8 @@ impl InMemorySessionStore {
             abandoned_queued_work_claim_count: std::sync::atomic::AtomicUsize::new(0),
             #[cfg(test)]
             abandoned_turn_input_claim_count: std::sync::atomic::AtomicUsize::new(0),
+            #[cfg(test)]
+            session_admission_count: std::sync::atomic::AtomicUsize::new(0),
         }
     }
 
@@ -874,16 +874,6 @@ impl crate::store::SessionCommitStore for InMemorySessionStore {
             .write_transaction
             .lock()
             .expect("lock in-memory write transaction");
-        if self
-            .deleted_sessions
-            .lock()
-            .expect("lock deleted sessions")
-            .contains(&commit.session_id)
-        {
-            return Err(crate::store::StoreError::SessionDeleted {
-                session_id: commit.session_id,
-            });
-        }
         #[cfg(test)]
         self.commit_write_transaction_count
             .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
@@ -907,8 +897,8 @@ impl crate::store::SessionCommitStore for InMemorySessionStore {
                 attempted_session_id: batch.session_id.clone(),
             });
         }
-        let durable_incarnation_id = self.durable_incarnation_for_commit(&commit)?;
-        commit.validate_node_derivation(&durable_incarnation_id)?;
+        self.ensure_session_metadata_for_commit(&commit)?;
+        commit.validate_node_derivation()?;
         let completed = &commit.turn_commit;
         let operation_key = completed.operation.storage_key()?;
         let key = (session_id.clone(), operation_key.clone());
@@ -1282,11 +1272,7 @@ impl crate::store::SessionCommitStore for InMemorySessionStore {
                 .insert(blob_ref, body);
         }
         *self.checkpoint.lock().expect("lock checkpoint") = Some(hydrated_checkpoint);
-        crate::AttachmentManifest::commit_refs(
-            self,
-            &commit.session_id,
-            &commit.committed_attachment_ids,
-        )?;
+        self.commit_attachment_refs_in_memory(&commit.session_id, &commit.committed_attachment_ids);
         self.commit_turn_attachment_intents(&commit.session_id, &commit.turn_commit);
         let head_revision = actual + 1;
         *meta = Some(crate::SessionHeadMeta {
@@ -1328,19 +1314,58 @@ impl crate::store::SessionCommitStore for InMemorySessionStore {
         Ok(result)
     }
 
-    async fn ensure_session_incarnation(
+    async fn admit_and_bind_session(
         &self,
-        session_id: &str,
-        policy: &crate::SessionPolicy,
-    ) -> Result<crate::IncarnationId, crate::StoreError> {
-        self.ensure_session_incarnation_in_memory(session_id, policy)
+        binding: &crate::SessionBinding,
+    ) -> Result<crate::SessionAdmission, crate::StoreError> {
+        #[cfg(test)]
+        self.session_admission_count
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        binding.validate()?;
+        let _transaction = self
+            .write_transaction
+            .lock()
+            .expect("lock in-memory write transaction");
+        if self
+            .deleted_session_ids
+            .lock()
+            .expect("lock deleted session ids")
+            .contains(&binding.session_id)
+        {
+            return Err(crate::StoreError::SessionDeleted {
+                session_id: binding.session_id.clone(),
+            });
+        }
+        let mut durable = self.session_meta.lock().expect("lock session meta");
+        if let Some(meta) = durable.as_ref() {
+            if meta.session_id != binding.session_id {
+                return Err(crate::StoreError::SessionBindingMismatch {
+                    bound_session_id: meta.session_id.clone(),
+                    attempted_session_id: binding.session_id.clone(),
+                });
+            }
+            return Ok(crate::SessionAdmission::Rebound);
+        }
+        *durable = Some(crate::SessionMeta {
+            session_id: binding.session_id.clone(),
+            session_name: binding.session_id.clone(),
+            created_at: self.clock.timestamp_rfc3339(),
+            model: binding.model_id.clone(),
+            cwd: binding.cwd.clone(),
+            relation: binding.relation.clone(),
+        });
+        Ok(crate::SessionAdmission::Created)
     }
 
     async fn save_session_meta(
         &self,
         meta: crate::store::SessionMeta,
     ) -> Result<(), crate::store::StoreError> {
-        self.save_session_meta_in_memory(meta)
+        let _transaction = self
+            .write_transaction
+            .lock()
+            .expect("lock in-memory write transaction");
+        self.replace_session_meta(meta)
     }
 
     async fn load_session_meta(
@@ -1362,6 +1387,7 @@ impl crate::store::SessionExecutionLeaseStore for InMemorySessionStore {
             .write_transaction
             .lock()
             .expect("lock in-memory write transaction");
+        self.ensure_session_not_deleted(session_id)?;
         let now = self.clock.timestamp_ms();
         let mut leases = self
             .session_execution_leases
@@ -1405,6 +1431,7 @@ impl crate::store::SessionExecutionLeaseStore for InMemorySessionStore {
             .write_transaction
             .lock()
             .expect("lock in-memory write transaction");
+        self.ensure_session_not_deleted(session_id)?;
         let now = self.clock.timestamp_ms();
         let mut leases = self
             .session_execution_leases
@@ -1523,8 +1550,7 @@ pub struct InMemorySessionStoreFactory {
     global_session_heads: Arc<Mutex<HashMap<String, Option<String>>>>,
     node_anchors: InMemoryNodeAnchors,
     tombstoned_node_ids: Arc<Mutex<HashSet<String>>>,
-    deleted_sessions: InMemoryDeletedSessions,
-    session_incarnations: InMemorySessionIncarnations,
+    deleted_session_ids: Arc<Mutex<HashSet<String>>>,
 }
 
 impl InMemorySessionStoreFactory {
@@ -1542,8 +1568,7 @@ impl InMemorySessionStoreFactory {
             global_session_heads: Arc::new(Mutex::new(HashMap::new())),
             node_anchors: Arc::new(Mutex::new(HashMap::new())),
             tombstoned_node_ids: Arc::new(Mutex::new(HashSet::new())),
-            deleted_sessions: Arc::new(Mutex::new(HashSet::new())),
-            session_incarnations: Arc::new(Mutex::new(HashMap::new())),
+            deleted_session_ids: Arc::new(Mutex::new(HashSet::new())),
         }
     }
 }

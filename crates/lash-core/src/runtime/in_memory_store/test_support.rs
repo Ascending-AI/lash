@@ -46,6 +46,8 @@ impl InMemorySessionStore {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+
     use crate::store::{GraphAppend, SessionCommitStore};
     use crate::{
         DeliveryPolicy, MergeKey, QueuedWorkBatch, QueuedWorkCompletion, RuntimeCommit,
@@ -78,14 +80,6 @@ mod tests {
             .expect("second concrete store");
         let mut second_state = RuntimeSessionState {
             session_id: "second".to_string(),
-            session_lifetime: crate::SessionLifetime::durable(
-                second
-                    .load_session_meta()
-                    .await
-                    .expect("load second metadata")
-                    .expect("second metadata")
-                    .incarnation_id,
-            ),
             ..Default::default()
         };
         second_state.ensure_agent_frame_initialized();
@@ -136,9 +130,6 @@ mod tests {
         let store = super::InMemorySessionStore::new();
         let state = RuntimeSessionState {
             session_id: "budget-before-backend".to_string(),
-            session_lifetime: crate::SessionLifetime::durable(
-                crate::IncarnationId::mint_for_store(),
-            ),
             ..Default::default()
         };
         let node = crate::SessionNodeRecord {
@@ -200,15 +191,17 @@ mod tests {
                 claim_session_lease_generation: 1,
             },
         );
-        let mut state = RuntimeSessionState {
+        let state = RuntimeSessionState {
             session_id: "session".to_string(),
             ..Default::default()
         };
-        let incarnation_id = store
-            .ensure_session_incarnation(&state.session_id, &state.policy)
+        store
+            .admit_and_bind_session(&crate::SessionBinding::root(
+                state.session_id.clone(),
+                &state.policy,
+            ))
             .await
-            .expect("realize stale-claim session lifetime");
-        state.bind_durable_incarnation(incarnation_id);
+            .expect("bind stale-claim session");
         let mut commit = RuntimeCommit::persisted_state_for_test(&state, &[]);
         commit.completed_queue_claims = vec![QueuedWorkCompletion {
             session_id: "session".to_string(),
@@ -239,5 +232,64 @@ mod tests {
             store.load_session().await.expect("load session").is_none(),
             "the failed commit must not create a session head"
         );
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn delete_racing_four_creates_never_resurrects_a_session_in_5000_rounds() {
+        const ROUNDS: usize = 5_000;
+
+        for round in 0..ROUNDS {
+            let factory = Arc::new(super::super::InMemorySessionStoreFactory::new());
+            let request = SessionStoreCreateRequest {
+                session_id: format!("delete-create-race-{round}"),
+                relation: crate::SessionRelation::Root,
+                policy: crate::SessionPolicy::default(),
+            };
+            factory
+                .create_store(&request)
+                .await
+                .expect("materialize session before the race");
+
+            let barrier = Arc::new(tokio::sync::Barrier::new(5));
+            let delete_factory = Arc::clone(&factory);
+            let delete_barrier = Arc::clone(&barrier);
+            let deleted_session_id = request.session_id.clone();
+            let delete = crate::task::spawn(async move {
+                delete_barrier.wait().await;
+                delete_factory.delete_session(&deleted_session_id).await
+            });
+            let mut creates = Vec::with_capacity(4);
+            for _ in 0..4 {
+                let create_factory = Arc::clone(&factory);
+                let create_barrier = Arc::clone(&barrier);
+                let create_request = request.clone();
+                creates.push(crate::task::spawn(async move {
+                    create_barrier.wait().await;
+                    create_factory.create_store(&create_request).await
+                }));
+            }
+
+            delete
+                .await
+                .expect("delete task joined")
+                .expect("delete completed");
+            for create in creates {
+                let _ = create.await.expect("create task joined");
+            }
+
+            assert!(
+                factory
+                    .open_existing_store(&request)
+                    .await
+                    .expect("inspect factory")
+                    .is_none(),
+                "round {round} left a stale store reachable"
+            );
+            assert!(matches!(
+                factory.create_store(&request).await,
+                Err(StoreError::SessionDeleted { session_id })
+                    if session_id == request.session_id
+            ));
+        }
     }
 }

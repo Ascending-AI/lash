@@ -1116,7 +1116,7 @@ pub trait SessionStoreFactory: Send + Sync {
     async fn create_store(
         &self,
         request: &SessionStoreCreateRequest,
-    ) -> Result<Arc<dyn crate::store::RuntimePersistence>, String>;
+    ) -> Result<Arc<dyn crate::store::RuntimePersistence>, crate::StoreError>;
 
     async fn open_existing_store(
         &self,

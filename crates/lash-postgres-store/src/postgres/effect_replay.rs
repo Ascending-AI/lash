@@ -108,7 +108,7 @@ impl AwaitEventResolver for PostgresEffectHost {
         scope: &ExecutionScope,
         wait: lash_core::AwaitEventWaitIdentity,
     ) -> Result<lash_core::AwaitEventKey, RuntimeError> {
-        scope.validate_for_durable_host()?;
+        scope.validate()?;
         self.inner.await_events.key_for(scope, wait).await
     }
 
@@ -154,7 +154,7 @@ impl EffectHost for PostgresEffectHost {
         &'run self,
         scope: ExecutionScope,
     ) -> Result<ScopedEffectController<'run>, RuntimeError> {
-        scope.validate_for_durable_host()?;
+        scope.validate()?;
         let controller = PostgresRuntimeEffectController {
             inner: Arc::clone(&self.inner),
             scope: scope.clone(),
@@ -166,7 +166,7 @@ impl EffectHost for PostgresEffectHost {
         &self,
         scope: ExecutionScope,
     ) -> Result<Option<ScopedEffectController<'static>>, RuntimeError> {
-        scope.validate_for_durable_host()?;
+        scope.validate()?;
         let controller = PostgresRuntimeEffectController {
             inner: Arc::clone(&self.inner),
             scope: scope.clone(),
@@ -182,18 +182,11 @@ impl EffectHost for PostgresEffectHost {
         retirement: lash_core::EffectJournalRetirement,
     ) -> Result<usize, RuntimeError> {
         let result = match retirement {
-            lash_core::EffectJournalRetirement::Session {
-                session_id,
-                incarnation_id,
-            } => {
-                sqlx::query(
-                    "DELETE FROM lash_runtime_effect_replay
-                 WHERE session_id = $1 AND incarnation_id = $2",
-                )
-                .bind(session_id)
-                .bind(incarnation_id.as_str())
-                .execute(&self.inner.pool)
-                .await
+            lash_core::EffectJournalRetirement::Session { session_id } => {
+                sqlx::query("DELETE FROM lash_runtime_effect_replay WHERE session_id = $1")
+                    .bind(session_id)
+                    .execute(&self.inner.pool)
+                    .await
             }
             lash_core::EffectJournalRetirement::Process { process_id } => {
                 let identity = ExecutionScope::process(process_id)
@@ -260,9 +253,6 @@ impl PostgresRuntimeEffectController {
             .map_err(RuntimeEffectControllerError::from)?;
         let scope_id = journal_identity.key().to_string();
         let session_id = journal_identity.session_id().map(str::to_string);
-        let incarnation_id = journal_identity
-            .incarnation_id()
-            .map(|value| value.as_str().to_string());
         let lease_token = self.inner.next_lease_token();
         let replay_mode = self.inner.replay_mode.load(Ordering::SeqCst);
         let owner_id = self.inner.owner_id.clone();
@@ -307,16 +297,15 @@ impl PostgresRuntimeEffectController {
                 let due_at_param = due_at_ms.map(|value| value as i64);
                 let inserted = sqlx::query(
                     "INSERT INTO lash_runtime_effect_replay (
-                        scope_id, session_id, incarnation_id, replay_key, envelope_hash,
+                        scope_id, session_id, replay_key, envelope_hash,
                         envelope_json, status, outcome_json, error_json, lease_owner_id,
                         lease_token, lease_expires_at_ms, due_at_ms, created_at_ms, updated_at_ms
                      )
-                     VALUES ($1, $2, $3, $4, $5, $6, $7, NULL, NULL, $8, $9, $10, $11, $12, $13)
+                     VALUES ($1, $2, $3, $4, $5, $6, NULL, NULL, $7, $8, $9, $10, $11, $12)
                      ON CONFLICT (scope_id, replay_key) DO NOTHING",
                 )
                 .bind(&scope_id)
                 .bind(session_id)
-                .bind(incarnation_id)
                 .bind(&replay_key)
                 .bind(&envelope_hash)
                 .bind(&envelope_json)
@@ -636,7 +625,7 @@ impl AwaitEventResolver for PostgresRuntimeEffectController {
         scope: &ExecutionScope,
         wait: lash_core::AwaitEventWaitIdentity,
     ) -> Result<lash_core::AwaitEventKey, RuntimeError> {
-        scope.validate_for_durable_host()?;
+        scope.validate()?;
         self.inner.await_events.key_for(scope, wait).await
     }
 
@@ -684,7 +673,7 @@ impl RuntimeEffectController for PostgresRuntimeEffectController {
         local_executor: RuntimeEffectLocalExecutor<'_>,
     ) -> Result<RuntimeEffectOutcome, RuntimeEffectControllerError> {
         self.scope
-            .validate_for_durable_host()
+            .validate()
             .map_err(RuntimeEffectControllerError::from)?;
         let reconstructed_envelope = envelope.canonical_form()?;
         let replay_trace = local_executor.replay_validation_trace().cloned();

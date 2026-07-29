@@ -80,7 +80,6 @@ CREATE INDEX IF NOT EXISTS idx_usage_deltas_session_seq
 
 CREATE TABLE IF NOT EXISTS session_meta (
     session_id    TEXT PRIMARY KEY,
-    incarnation_id TEXT NOT NULL,
     session_name  TEXT NOT NULL,
     created_at    TEXT NOT NULL,
     model         TEXT NOT NULL,
@@ -244,9 +243,8 @@ CREATE INDEX IF NOT EXISTS idx_attachment_manifest_owner
 /// Bumped to 19 to remove cached graph-node reference counts. Node retirement
 /// now derives liveness from parent edges, session heads, and anchors.
 ///
-/// Bumped to 20 so deletion tombstones fence commits through stale session
-/// handles. Tombstones intentionally have the same unbounded lifetime as the
-/// PostgreSQL backend and are lifted only by explicit session recreation.
+/// Bumped to 20 for permanent session-id tombstones and the removal of
+/// per-lifetime incarnation identity. Pre-20 stores are rejected and recreated.
 pub(crate) const SCHEMA_VERSION: i32 = 20;
 
 pub(crate) const PROCESS_SCHEMA: &str = "
@@ -423,7 +421,6 @@ pub(crate) const EFFECT_SCHEMA: &str = "
 CREATE TABLE IF NOT EXISTS runtime_effect_replay (
     scope_id             TEXT NOT NULL,
     session_id           TEXT,
-    incarnation_id       TEXT,
     replay_key           TEXT NOT NULL,
     envelope_hash        TEXT NOT NULL,
     envelope_json        TEXT NOT NULL,
@@ -442,8 +439,8 @@ CREATE TABLE IF NOT EXISTS runtime_effect_replay (
 CREATE INDEX IF NOT EXISTS idx_runtime_effect_replay_lease
     ON runtime_effect_replay(status, lease_expires_at_ms);
 
-CREATE INDEX IF NOT EXISTS idx_runtime_effect_replay_session_lifetime
-    ON runtime_effect_replay(session_id, incarnation_id);
+CREATE INDEX IF NOT EXISTS idx_runtime_effect_replay_session
+    ON runtime_effect_replay(session_id);
 
 CREATE TABLE IF NOT EXISTS await_event_meta (
     singleton       INTEGER PRIMARY KEY CHECK (singleton = 1),
@@ -468,17 +465,18 @@ CREATE TABLE IF NOT EXISTS await_event_waits (
 CREATE INDEX IF NOT EXISTS idx_await_event_waits_session
     ON await_event_waits(session_id);
 
+-- Permanent by design: session ids cannot be reused, so revocation evidence
+-- must remain after every retention-pruning pass.
 CREATE TABLE IF NOT EXISTS await_event_revoked_sessions (
     session_id      TEXT PRIMARY KEY,
     revoked_at_ms   INTEGER NOT NULL
 );
 ";
 
-// Version 5 replaces lossy effect scope ids with canonical typed identities
-// and adds indexed session-lifetime join columns for controller-owned
-// retirement. Effect databases follow the crate's alpha reject-and-recreate
-// convention rather than carrying a migration chain.
-pub(crate) const EFFECT_SCHEMA_VERSION: i32 = 5;
+// Version 6 keys session-owned effects by the permanent session id and removes
+// the incarnation join column. Effect databases follow the crate's alpha
+// reject-and-recreate convention rather than carrying a migration chain.
+pub(crate) const EFFECT_SCHEMA_VERSION: i32 = 6;
 
 pub(crate) async fn apply_pragmas(
     conn: &SqliteConnection,

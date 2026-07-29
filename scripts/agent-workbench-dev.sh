@@ -33,8 +33,8 @@ Defaults:
   AGENT_WORKBENCH_POSTGRES=1 starts a port-isolated managed Postgres container
   unless AGENT_WORKBENCH_DATABASE_URL points at an existing database.
   --port PORT binds 127.0.0.1:PORT.
-  Restate ports use the same offset from their defaults as the workbench port
-  uses from 3030, unless their environment variables override them.
+  Managed-service ports use a 10-port stride for each workbench-port step from
+  3030, unless their environment variables override them.
   Without --port/--addr, AGENT_WORKBENCH_ADDR is used, then 127.0.0.1:3030.
 USAGE
 }
@@ -398,22 +398,22 @@ start_detached() {
   # Launch the binary cargo just built: honor CARGO_TARGET_DIR, or a stale
   # binary in the repo-local target/ boots instead of the fresh build.
   local workbench_bin="${CARGO_TARGET_DIR:-$repo_root/target}/debug/agent-workbench"
+  local -a workbench_env=(
+    "AGENT_WORKBENCH_ADDR=$workbench_addr"
+    "AGENT_WORKBENCH_RESTATE_ADDR=$restate_endpoint_addr"
+    "AGENT_WORKBENCH_DATABASE_URL=$agent_workbench_database_url"
+    "RESTATE_INGRESS_URL=$restate_ingress_url"
+    "RESTATE_ADMIN_URL=$restate_admin_url"
+  )
+  if [[ -n "${AGENT_WORKBENCH_DATA_DIR:-}" ]]; then
+    workbench_env+=("AGENT_WORKBENCH_DATA_DIR=$AGENT_WORKBENCH_DATA_DIR")
+  fi
   printf '\n[%s] starting agent-workbench at %s\n' "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" "$workbench_url" >> "$log_file"
   if command -v setsid >/dev/null 2>&1; then
-    setsid env \
-      AGENT_WORKBENCH_ADDR="$workbench_addr" \
-      AGENT_WORKBENCH_RESTATE_ADDR="$restate_endpoint_addr" \
-      AGENT_WORKBENCH_DATABASE_URL="$agent_workbench_database_url" \
-      RESTATE_INGRESS_URL="$restate_ingress_url" \
-      RESTATE_ADMIN_URL="$restate_admin_url" \
+    setsid env "${workbench_env[@]}" \
       "$workbench_bin" >> "$log_file" 2>&1 < /dev/null &
   else
-    nohup env \
-      AGENT_WORKBENCH_ADDR="$workbench_addr" \
-      AGENT_WORKBENCH_RESTATE_ADDR="$restate_endpoint_addr" \
-      AGENT_WORKBENCH_DATABASE_URL="$agent_workbench_database_url" \
-      RESTATE_INGRESS_URL="$restate_ingress_url" \
-      RESTATE_ADMIN_URL="$restate_admin_url" \
+    nohup env "${workbench_env[@]}" \
       "$workbench_bin" >> "$log_file" 2>&1 < /dev/null &
   fi
   local pid="$!"
@@ -493,12 +493,17 @@ run_foreground() {
   trap cleanup_foreground EXIT INT TERM
 
   log "starting workbench at $workbench_url"
-  AGENT_WORKBENCH_ADDR="$workbench_addr" \
-  AGENT_WORKBENCH_RESTATE_ADDR="$restate_endpoint_addr" \
-  AGENT_WORKBENCH_DATABASE_URL="$agent_workbench_database_url" \
-  RESTATE_INGRESS_URL="$restate_ingress_url" \
-  RESTATE_ADMIN_URL="$restate_admin_url" \
-  cargo run -p agent-workbench &
+  local -a workbench_env=(
+    "AGENT_WORKBENCH_ADDR=$workbench_addr"
+    "AGENT_WORKBENCH_RESTATE_ADDR=$restate_endpoint_addr"
+    "AGENT_WORKBENCH_DATABASE_URL=$agent_workbench_database_url"
+    "RESTATE_INGRESS_URL=$restate_ingress_url"
+    "RESTATE_ADMIN_URL=$restate_admin_url"
+  )
+  if [[ -n "${AGENT_WORKBENCH_DATA_DIR:-}" ]]; then
+    workbench_env+=("AGENT_WORKBENCH_DATA_DIR=$AGENT_WORKBENCH_DATA_DIR")
+  fi
+  env "${workbench_env[@]}" cargo run -p agent-workbench &
   started_pid="$!"
   printf '%s\n' "$started_pid" > "$pid_file"
   write_meta
@@ -641,7 +646,8 @@ fi
 read -r workbench_host workbench_port < <(addr_host_port "$workbench_addr")
 validate_port "workbench" "$workbench_port"
 workbench_port_number=$((10#$workbench_port))
-port_offset=$((workbench_port_number - 3030))
+managed_service_port_stride=10
+port_offset=$(((workbench_port_number - 3030) * managed_service_port_stride))
 default_restate_endpoint_port=$((9081 + port_offset))
 default_restate_ingress_port=$((8080 + port_offset))
 default_restate_admin_port=$((19070 + port_offset))

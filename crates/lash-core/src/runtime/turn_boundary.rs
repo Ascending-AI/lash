@@ -420,11 +420,7 @@ impl TurnBoundary {
         session_execution_lease_completion: Option<crate::SessionExecutionLeaseCompletion>,
     ) -> Result<Vec<crate::QueuedWorkBatch>, StoreError> {
         let session_id = self.state().session_id.clone();
-        let incarnation_id = self
-            .state()
-            .durable_incarnation_id("history node derivation")?
-            .clone();
-        let node_id_mapping = graph.derive_node_ids(&session_id, &incarnation_id, &operation)?;
+        let node_id_mapping = graph.derive_node_ids(&session_id, &operation)?;
         match &mut self.stage {
             TurnCommitStage::Drafting(draft) => draft.remap_node_ids(&session_id, &node_id_mapping),
             TurnCommitStage::Finalized(finalized) => {
@@ -667,7 +663,6 @@ mod tests {
             session_id: "session-1".to_string(),
             ..RuntimeSessionState::default()
         };
-        state.bind_durable_incarnation(crate::IncarnationId::mint_for_store());
         state.ensure_agent_frame_initialized();
         if !graph.nodes.is_empty() {
             let frame_node_id = state.current_frame_node_id.clone().expect("initial frame");
@@ -688,6 +683,12 @@ mod tests {
         store: &RecordingStore,
         state: RuntimeSessionState,
     ) -> (TurnBoundary, crate::SessionExecutionLease) {
+        crate::SessionCommitStore::admit_and_bind_session(
+            store,
+            &crate::SessionBinding::root(state.session_id.clone(), &state.policy),
+        )
+        .await
+        .expect("admit turn-boundary test session");
         let owner = lease_owner("turn-boundary-test");
         let lease = store
             .try_claim_session_execution_lease(&state.session_id, &owner, 60_000)
@@ -722,11 +723,8 @@ mod tests {
             },
             &crate::SystemClock,
         );
-        let expected_frame_node_id = crate::session_graph::frame_node_id_for_lifetime(
-            &state.session_id,
-            &state.session_lifetime,
-            &frame_id,
-        );
+        let expected_frame_node_id =
+            crate::session_graph::frame_node_id(&state.session_id, &frame_id);
 
         assert_eq!(state.session_id, "session-1");
         assert_eq!(

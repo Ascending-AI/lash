@@ -39,11 +39,12 @@ pub(crate) fn ensure_session_not_deleted_conn(
         .map_err(sqlite_error)?
         .is_some();
     if deleted {
-        return Err(StoreError::SessionDeleted {
+        Err(StoreError::SessionDeleted {
             session_id: session_id.to_string(),
-        });
+        })
+    } else {
+        Ok(())
     }
-    Ok(())
 }
 
 const SQLITE_QUEUED_WORK_HEAD_CANDIDATE_PREDICATE: &str = "session_id = ?1
@@ -265,9 +266,6 @@ impl SessionCommitStore for Store {
         commit.validate_budget()?;
         commit.validate_operation_session()?;
         let turn_commit_hash = commit.turn_commit_hash()?;
-        let commit_incarnation_id = commit
-            .durable_incarnation_id("SQLite runtime commit")?
-            .clone();
         self.bind_session(&commit.session_id)?;
         let realized_node_timestamps = commit
             .graph
@@ -302,11 +300,10 @@ impl SessionCommitStore for Store {
                     }
                     tx.execute(
                         "INSERT OR IGNORE INTO session_meta
-                         (session_id, incarnation_id, session_name, created_at, model, cwd, relation_json)
-                         VALUES (?1, ?2, ?1, ?3, ?4, NULL, ?5)",
+                         (session_id, session_name, created_at, model, cwd, relation_json)
+                         VALUES (?1, ?1, ?2, ?3, NULL, ?4)",
                         params![
                             commit.session_id,
-                            commit_incarnation_id.as_str(),
                             created_at,
                             commit.config.model.id,
                             serde_json::to_string(&lash_core::SessionRelation::Root)
@@ -314,22 +311,7 @@ impl SessionCommitStore for Store {
                         ],
                     )
                     .map_err(sqlite_error)?;
-                    let durable_incarnation_id = tx
-                        .query_row(
-                            "SELECT incarnation_id FROM session_meta WHERE session_id = ?1",
-                            params![commit.session_id],
-                            |row| row.get::<_, String>(0),
-                        )
-                        .optional()
-                        .map_err(sqlite_error)?
-                        .map(lash_core::IncarnationId::decode_from_store)
-                        .ok_or_else(|| {
-                            StoreError::Backend(format!(
-                                "session `{}` has no durable session metadata",
-                                commit.session_id
-                            ))
-                        })?;
-                    commit.validate_node_derivation(&durable_incarnation_id)?;
+                    commit.validate_node_derivation()?;
                     { let completed = &commit.turn_commit;
                         let operation_key = completed.operation.storage_key()?;
                         let prior: Option<(String, String)> = tx
@@ -766,57 +748,43 @@ impl SessionCommitStore for Store {
         Ok(result)
     }
 
-    async fn ensure_session_incarnation(
+    async fn admit_and_bind_session(
         &self,
-        session_id: &str,
-        policy: &lash_core::SessionPolicy,
-    ) -> Result<lash_core::IncarnationId, StoreError> {
-        self.bind_session(session_id)?;
-        let session_id = session_id.to_string();
-        let candidate_value = lash_core::IncarnationId::mint_for_store()
-            .as_str()
-            .to_string();
+        binding: &lash_core::SessionBinding,
+    ) -> Result<lash_core::SessionAdmission, StoreError> {
+        binding.validate()?;
+        self.bind_session(&binding.session_id)?;
+        let session_id = binding.session_id.clone();
         let created_at = self.clock.timestamp_rfc3339();
-        let model = policy.model.id.clone();
-        let cwd = std::env::current_dir()
-            .ok()
-            .and_then(|path| path.to_str().map(str::to_string));
-        let relation_json = serde_json::to_string(&lash_core::SessionRelation::Root)
+        let model = binding.model_id.clone();
+        let cwd = binding.cwd.clone();
+        let relation_json = serde_json::to_string(&binding.relation)
             .map_err(|error| StoreError::Backend(error.to_string()))?;
-        let durable = self
-            .conn
+        self.conn
             .write_flow(move |tx| {
-                let outcome: Result<String, StoreError> = (|| {
+                let outcome: Result<lash_core::SessionAdmission, StoreError> = (|| {
                     ensure_session_not_deleted_conn(tx, &session_id)?;
-                    tx.execute(
-                        "INSERT OR IGNORE INTO session_meta
-                         (session_id, incarnation_id, session_name, created_at, model, cwd, relation_json)
-                         VALUES (?1, ?2, ?1, ?3, ?4, ?5, ?6)",
-                        params![
-                            session_id,
-                            candidate_value,
-                            created_at,
-                            model,
-                            cwd,
-                            relation_json,
-                        ],
-                    )
-                    .map_err(sqlite_error)?;
-                    tx.query_row(
-                        "SELECT incarnation_id FROM session_meta WHERE session_id = ?1",
-                        params![session_id],
-                        |row| row.get::<_, String>(0),
-                    )
-                    .map_err(sqlite_error)
+                    let inserted = tx
+                        .execute(
+                            "INSERT OR IGNORE INTO session_meta
+                     (session_id, session_name, created_at, model, cwd, relation_json)
+                     VALUES (?1, ?1, ?2, ?3, ?4, ?5)",
+                            params![session_id, created_at, model, cwd, relation_json,],
+                        )
+                        .map_err(sqlite_error)?;
+                    Ok(if inserted == 1 {
+                        lash_core::SessionAdmission::Created
+                    } else {
+                        lash_core::SessionAdmission::Rebound
+                    })
                 })();
-                match outcome {
-                    Ok(value) => Ok(TxOutcome::Commit(Ok(value))),
-                    Err(error) => Ok(TxOutcome::Rollback(Err(error))),
-                }
+                Ok(match outcome {
+                    Ok(admission) => TxOutcome::Commit(Ok(admission)),
+                    Err(err) => TxOutcome::Rollback(Err(err)),
+                })
             })
             .await
-            .map_err(sqlite_error)??;
-        Ok(lash_core::IncarnationId::decode_from_store(durable))
+            .map_err(sqlite_error)?
     }
 
     async fn save_session_meta(&self, meta: SessionMeta) -> Result<(), StoreError> {
@@ -842,6 +810,7 @@ impl SessionExecutionLeaseStore for Store {
         self.conn
             .write_flow(move |tx| {
                 let outcome: Result<SessionExecutionLeaseClaimOutcome, StoreError> = (|| {
+                    ensure_session_not_deleted_conn(tx, &session_id)?;
                     let current = load_session_execution_lease_row_conn(tx, &session_id)?;
                     if current.as_ref().is_some_and(|lease| {
                         lease.lease_token.is_some() && lease.expires_at_ms > now
@@ -910,6 +879,7 @@ impl SessionExecutionLeaseStore for Store {
         self.conn
             .write_flow(move |tx| {
                 let outcome: Result<SessionExecutionLeaseClaimOutcome, StoreError> = (|| {
+                    ensure_session_not_deleted_conn(tx, &session_id)?;
                     let current = load_session_execution_lease_row_conn(tx, &session_id)?;
                     let Some(current) = current else {
                         return Ok(SessionExecutionLeaseClaimOutcome::Acquired(
@@ -1119,7 +1089,8 @@ impl QueuedWorkStore for Store {
         let now = self.clock.timestamp_ms();
         self.conn
             .write_flow(move |tx| {
-                let outcome = enqueue_queued_work_conn(tx, &batch, now, nonce);
+                let outcome = ensure_session_not_deleted_conn(tx, &batch.session_id)
+                    .and_then(|()| enqueue_queued_work_conn(tx, &batch, now, nonce));
                 // Roll back the partially-inserted batch/items on a
                 // `StoreError` while still returning the typed error.
                 match outcome {
@@ -1861,6 +1832,7 @@ impl TurnInputStore for Store {
         self.conn
             .write_flow(move |tx| {
                 let outcome: Result<lash_core::PendingTurnInput, StoreError> = (|| {
+                    ensure_session_not_deleted_conn(tx, &draft.session_id)?;
                     if let Some(source_key) = draft.source_key.as_deref() {
                         let existing_id: Option<String> = tx
                             .query_row(
@@ -2267,6 +2239,8 @@ impl TurnInputStore for Store {
 #[async_trait::async_trait]
 impl StoreMaintenance for Store {
     async fn vacuum(&self) -> Result<VacuumReport, StoreError> {
+        // `deleted_sessions` is deliberately exempt: it is permanent identity
+        // evidence and must survive every retention-pruning pass.
         let session_id = self.session_id.get().cloned();
         let (removed_node_count, removed_pending_turn_input_tombstone_count) = self
             .conn

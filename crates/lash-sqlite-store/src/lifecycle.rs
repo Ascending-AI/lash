@@ -293,68 +293,36 @@ impl Store {
     pub async fn save_session_meta(&self, meta: SessionMeta) -> Result<(), StoreError> {
         self.bind_session(&meta.session_id)?;
         let relation_json = serde_json::to_string(&meta.relation).ok();
-        self
-            .conn
+        self.conn
             .write_flow(move |tx| {
                 let outcome: Result<(), StoreError> = (|| {
                     crate::persistence::ensure_session_not_deleted_conn(tx, &meta.session_id)?;
-                    let updated = tx
-                        .execute(
-                            "UPDATE session_meta
-                             SET session_name = ?3, created_at = ?4, model = ?5, cwd = ?6, relation_json = ?7
-                             WHERE session_id = ?1 AND incarnation_id = ?2",
-                            params![
-                                meta.session_id,
-                                meta.incarnation_id.as_str(),
-                                meta.session_name,
-                                meta.created_at,
-                                meta.model,
-                                meta.cwd,
-                                relation_json,
-                            ],
-                        )
-                        .map_err(sqlite_error)?;
-                    if updated == 1 {
-                        return Ok(());
-                    }
-                    let inserted = tx
-                        .execute(
-                            "INSERT OR IGNORE INTO session_meta
-                             (session_id, incarnation_id, session_name, created_at, model, cwd, relation_json)
-                             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
-                            params![
-                                meta.session_id,
-                                meta.incarnation_id.as_str(),
-                                meta.session_name,
-                                meta.created_at,
-                                meta.model,
-                                meta.cwd,
-                                relation_json,
-                            ],
-                        )
-                        .map_err(sqlite_error)?;
-                    if inserted == 1 {
-                        return Ok(());
-                    }
-                    let expected_incarnation_id = tx
-                        .query_row(
-                            "SELECT incarnation_id FROM session_meta WHERE session_id = ?1",
-                            params![meta.session_id],
-                            |row| row.get::<_, String>(0),
-                        )
-                        .optional()
-                        .map_err(sqlite_error)?
-                        .unwrap_or_else(|| "<missing>".to_string());
-                    Err(StoreError::SessionIncarnationMismatch {
-                        session_id: meta.session_id,
-                        expected_incarnation_id,
-                        actual_incarnation_id: meta.incarnation_id.to_string(),
-                    })
+                    tx.execute(
+                        "INSERT INTO session_meta
+                     (session_id, session_name, created_at, model, cwd, relation_json)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+                     ON CONFLICT(session_id) DO UPDATE SET
+                         session_name = excluded.session_name,
+                         created_at = excluded.created_at,
+                         model = excluded.model,
+                         cwd = excluded.cwd,
+                         relation_json = excluded.relation_json",
+                        params![
+                            meta.session_id,
+                            meta.session_name,
+                            meta.created_at,
+                            meta.model,
+                            meta.cwd,
+                            relation_json,
+                        ],
+                    )
+                    .map_err(sqlite_error)?;
+                    Ok(())
                 })();
-                match outcome {
-                    Ok(()) => Ok(TxOutcome::Commit(Ok(()))),
-                    Err(error) => Ok(TxOutcome::Rollback(Err(error))),
-                }
+                Ok(match outcome {
+                    Ok(()) => TxOutcome::Commit(Ok(())),
+                    Err(err) => TxOutcome::Rollback(Err(err)),
+                })
             })
             .await
             .map_err(sqlite_error)??;

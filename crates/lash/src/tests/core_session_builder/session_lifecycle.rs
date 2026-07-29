@@ -2,6 +2,27 @@ use super::*;
 use crate::rlm::{RlmFinalAnswerFormat, RlmSessionBuilderExt as _, RlmTurnBuilderExt as _};
 use lash_lashlang_runtime::LashlangArtifactStore as _;
 
+#[tokio::test]
+async fn store_less_session_ids_are_single_use_per_core_process() {
+    let core = standard_core();
+    let first = core
+        .session("store-less-single-use")
+        .open()
+        .await
+        .expect("first store-less session");
+    drop(first);
+
+    let error = match core.session("store-less-single-use").open().await {
+        Ok(_) => panic!("store-less session id reuse must fail"),
+        Err(error) => error,
+    };
+    assert!(matches!(
+        error,
+        EmbedError::EphemeralSessionIdReused { session_id }
+            if session_id == "store-less-single-use"
+    ));
+}
+
 fn persisted_tool_state_at_generation(
     state: lash_core::ToolState,
     generation: u64,
@@ -1320,7 +1341,7 @@ async fn core_delete_session_removes_factory_backed_session_state() -> Result<()
 }
 
 #[tokio::test]
-async fn core_delete_session_retires_the_deleted_lifetime_effect_journal() -> Result<()> {
+async fn core_delete_session_retires_the_deleted_session_effect_journal() -> Result<()> {
     let factory = Arc::new(DeletingStoreFactory::default());
     let effect_host = Arc::new(lash_core::testing::conformance::RecordingEffectHost::default());
     let core = explicit_ephemeral_facets(LashCore::standard_builder())
@@ -1332,10 +1353,6 @@ async fn core_delete_session_retires_the_deleted_lifetime_effect_journal() -> Re
     drop(core.session("retire-delete-session").open().await?);
 
     let execution_scope = core.session_delete_scope("retire-delete-session").await?;
-    let incarnation_id = execution_scope
-        .incarnation_id()
-        .expect("session delete scope incarnation")
-        .clone();
     let scoped = effect_host
         .scoped_static(execution_scope)?
         .expect("recording host static scope");
@@ -1344,8 +1361,7 @@ async fn core_delete_session_retires_the_deleted_lifetime_effect_journal() -> Re
     assert_eq!(
         effect_host.retirements(),
         vec![lash_core::EffectJournalRetirement::session(
-            "retire-delete-session",
-            incarnation_id,
+            "retire-delete-session"
         )]
     );
     Ok(())

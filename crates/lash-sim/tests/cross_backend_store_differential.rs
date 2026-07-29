@@ -20,7 +20,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use lash_core::store::{GraphAppend, RuntimeCommitResult};
 use lash_core::{
     AttachmentId, AttachmentIntent, AttachmentOwnerKind, BlobRef, Clock, ForkSessionRequest,
-    HydratedSessionCheckpoint, InMemorySessionStore, InMemorySessionStoreFactory, IncarnationId,
+    HydratedSessionCheckpoint, InMemorySessionStore, InMemorySessionStoreFactory,
     LeaseOwnerIdentity, LeaseOwnerLiveness, PendingTurnInputDraft, PluginSessionSnapshot,
     PluginSnapshotArtifact, PluginSnapshotEntry, PluginSnapshotMeta, ProtocolEvent, RuntimeCommit,
     RuntimePersistence, RuntimeSessionState, RuntimeTurnCommitStamp, SessionCommitStore,
@@ -161,13 +161,13 @@ impl NodeSpec {
         }
     }
 
-    fn materialize(self, session_id: &str, incarnation_id: &IncarnationId) -> SessionNodeRecord {
+    fn materialize(self, session_id: &str) -> SessionNodeRecord {
         let frame_key = differential_frame_key(self.node_id);
         SessionNodeRecord {
-            node_id: scoped_node_id(session_id, incarnation_id, self.node_id),
+            node_id: scoped_node_id(session_id, self.node_id),
             parent_node_id: self
                 .parent_node_id
-                .map(|node_id| scoped_node_id(session_id, incarnation_id, node_id)),
+                .map(|node_id| scoped_node_id(session_id, node_id)),
             timestamp: "2026-07-26T00:00:00Z".to_string(),
             payload: if is_frame_alias(self.node_id) {
                 SessionNodePayload::FrameOpen {
@@ -193,10 +193,6 @@ impl NodeSpec {
     }
 }
 
-fn differential_incarnation_id(session_id: &str) -> IncarnationId {
-    IncarnationId::decode_from_store(format!("differential:{session_id}"))
-}
-
 fn differential_frame_key(node_id: &str) -> String {
     format!("differential-frame:{node_id}")
 }
@@ -208,9 +204,9 @@ fn is_frame_alias(node_id: &str) -> bool {
     )
 }
 
-fn scoped_node_id(session_id: &str, incarnation_id: &IncarnationId, node_id: &str) -> String {
+fn scoped_node_id(session_id: &str, node_id: &str) -> String {
     if is_frame_alias(node_id) {
-        lash_core::frame_node_id(session_id, incarnation_id, &differential_frame_key(node_id))
+        lash_core::frame_node_id(session_id, &differential_frame_key(node_id))
     } else {
         format!("{session_id}:{node_id}")
     }
@@ -502,21 +498,17 @@ fn generated_cases() -> Vec<GeneratedCase> {
     ]
 }
 
-fn materialize_graph(
-    session_id: &str,
-    incarnation_id: &IncarnationId,
-    spec: &GraphSpec,
-) -> GraphAppend {
+fn materialize_graph(session_id: &str, spec: &GraphSpec) -> GraphAppend {
     GraphAppend {
         nodes: spec
             .nodes
             .iter()
             .copied()
-            .map(|node| node.materialize(session_id, incarnation_id))
+            .map(|node| node.materialize(session_id))
             .collect(),
         leaf_node_id: spec
             .leaf_node_id
-            .map(|node_id| scoped_node_id(session_id, incarnation_id, node_id)),
+            .map(|node_id| scoped_node_id(session_id, node_id)),
     }
 }
 
@@ -533,15 +525,13 @@ fn runtime_commit(
     usage_deltas: Vec<TokenLedgerEntry>,
     committed_attachment_ids: Vec<AttachmentId>,
 ) -> RuntimeCommit {
-    let incarnation_id = differential_incarnation_id(session_id);
     let state = RuntimeSessionState {
         session_id: session_id.to_string(),
-        session_lifetime: lash_core::SessionLifetime::durable(incarnation_id.clone()),
         ..RuntimeSessionState::default()
     };
     let mut commit = RuntimeCommit::persisted_state_for_test(&state, &[]);
     commit.expected_head_revision = expected_head_revision;
-    commit.graph = materialize_graph(session_id, &incarnation_id, graph);
+    commit.graph = materialize_graph(session_id, graph);
     commit.current_frame_node_id = commit
         .graph
         .appended_nodes()
@@ -764,7 +754,6 @@ struct UsageDeltaObservation {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct SessionMetaObservation {
-    incarnation_id: IncarnationId,
     session_name: String,
     created_at: String,
     model: String,
@@ -1248,7 +1237,6 @@ fn usage_delta_observation(entry: TokenLedgerEntry) -> UsageDeltaObservation {
 
 fn session_meta_observation(meta: SessionMeta) -> SessionMetaObservation {
     SessionMetaObservation {
-        incarnation_id: meta.incarnation_id,
         session_name: meta.session_name,
         created_at: meta.created_at,
         model: meta.model,
@@ -1837,17 +1825,11 @@ fn normalized_store_error(backend: &str, error: &StoreError) -> String {
         StoreError::CommitNodeBudgetExceeded { .. } => "CommitNodeBudgetExceeded".to_string(),
         StoreError::CommitByteBudgetExceeded { .. } => "CommitByteBudgetExceeded".to_string(),
         StoreError::SessionBindingMismatch { .. } => "SessionBindingMismatch".to_string(),
-        StoreError::EphemeralSessionAtDurableBoundary { .. } => {
-            "EphemeralSessionAtDurableBoundary".to_string()
+        StoreError::SessionBindingNotMaterialized { .. } => {
+            "SessionBindingNotMaterialized".to_string()
         }
+        StoreError::InvalidSessionId { .. } => "InvalidSessionId".to_string(),
         StoreError::SessionDeleted { .. } => "SessionDeleted".to_string(),
-        StoreError::SessionIncarnationMismatch {
-            session_id,
-            expected_incarnation_id,
-            actual_incarnation_id,
-        } => format!(
-            "SessionIncarnationMismatch({session_id},{expected_incarnation_id},{actual_incarnation_id})"
-        ),
         StoreError::UnsupportedStoreOperation { .. } => "UnsupportedStoreOperation".to_string(),
         StoreError::HeadRevisionConflict { .. } => "HeadRevisionConflict".to_string(),
         StoreError::RuntimeTurnCommitConflict { .. } => "RuntimeTurnCommitConflict".to_string(),
@@ -1940,7 +1922,6 @@ async fn runners_for_case(
     };
     let expected_meta = SessionMeta {
         session_id: session_id.clone(),
-        incarnation_id: differential_incarnation_id(&session_id),
         session_name: format!("differential:{}", case.as_str()),
         created_at: clock.timestamp_rfc3339(),
         model: create_request.policy.model.id.clone(),
@@ -1974,12 +1955,11 @@ async fn runners_for_case(
         connection
             .execute(
                 "UPDATE session_meta
-                 SET incarnation_id = ?2, session_name = ?3, created_at = ?4,
-                     model = ?5, cwd = ?6, relation_json = ?7
+                 SET session_name = ?2, created_at = ?3,
+                     model = ?4, cwd = ?5, relation_json = ?6
                 WHERE session_id = ?1",
                 rusqlite::params![
                     &expected_meta.session_id,
-                    expected_meta.incarnation_id.as_str(),
                     &expected_meta.session_name,
                     &expected_meta.created_at,
                     &expected_meta.model,
