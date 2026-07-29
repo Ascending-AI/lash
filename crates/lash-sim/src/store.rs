@@ -1,6 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use lash_core::StoreError;
+use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
 use crate::runtime_contracts::{RuntimeTurnObservation, runtime_turn_contract};
@@ -13,9 +14,84 @@ use crate::trace::{
 mod durable_writes;
 
 pub use durable_writes::{
-    DURABLE_WRITE_EVENT_SCHEMA, DurableComponentWrite, DurableComponentWriteKind,
-    DurableWriteCollector, DurableWriteEvent, ObservedSessionStoreFactory,
+    CHECKPOINT_WRITE_EVENT_SCHEMA, CheckpointComponent, CheckpointComponentWrite,
+    CheckpointComponentWriteKind, CheckpointWriteCollector, CheckpointWriteEvent,
+    ObservedSessionStoreFactory,
 };
+
+/// Honest checkpoint-evidence split for a static backend replay.
+///
+/// `recorded_runtime` is the generation-time expectation for session turns the
+/// backend lane really re-executes. `observed_runtime` is what the replayed
+/// backend actually committed and must equal that expectation. `carried` covers
+/// projector-owned boundaries (contract proofs and suspend fixtures) that the
+/// static backend lane does not execute.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct BackendCheckpointReplayEvidence {
+    pub semantic: String,
+    pub recorded_runtime: Vec<CheckpointWriteEvent>,
+    pub observed_runtime: Vec<CheckpointWriteEvent>,
+    pub carried: Vec<CheckpointWriteEvent>,
+}
+
+impl BackendCheckpointReplayEvidence {
+    pub fn for_trace(
+        trace: &crate::trace::SimulationTrace,
+        observed_runtime: Vec<CheckpointWriteEvent>,
+    ) -> Result<Self, String> {
+        // Additive compatibility for promoted v1 traces recorded before
+        // checkpoint evidence existed: observe and report backend commits, but
+        // do not compare/project them into an old summary that has no baseline.
+        if trace.durable_writes.is_empty() {
+            return Ok(Self {
+                semantic: "observe_runtime_uncompared_legacy_trace".to_string(),
+                recorded_runtime: Vec::new(),
+                observed_runtime,
+                carried: Vec::new(),
+            });
+        }
+        let replayed_sessions = trace
+            .events
+            .iter()
+            .filter(|event| {
+                event.kind == BoundaryKind::Ingress && event.payload.get("suspend_kind").is_none()
+            })
+            .map(|event| event.actor_alias.as_str())
+            .collect::<BTreeSet<_>>();
+        let (recorded_runtime, carried): (Vec<_>, Vec<_>) =
+            trace.durable_writes.iter().cloned().partition(|write| {
+                write.cause_boundary_id.is_none()
+                    && replayed_sessions.contains(write.attributed_session())
+            });
+        if recorded_runtime != observed_runtime {
+            return Err(format!(
+                "backend checkpoint writes diverged; recorded={}; observed={}",
+                serde_json::to_string(&recorded_runtime)
+                    .unwrap_or_else(|_| "<unserializable>".to_string()),
+                serde_json::to_string(&observed_runtime)
+                    .unwrap_or_else(|_| "<unserializable>".to_string())
+            ));
+        }
+        Ok(Self {
+            semantic: "observe_runtime_turn_commits_compare_to_recorded_carry_projector_owned"
+                .to_string(),
+            recorded_runtime,
+            observed_runtime,
+            carried,
+        })
+    }
+
+    pub fn summary_writes(&self) -> Vec<CheckpointWriteEvent> {
+        if self.semantic == "observe_runtime_uncompared_legacy_trace" {
+            return Vec::new();
+        }
+        self.observed_runtime
+            .iter()
+            .chain(&self.carried)
+            .cloned()
+            .collect()
+    }
+}
 
 pub fn backend_fault_observation(
     session: Value,
@@ -310,25 +386,79 @@ impl ModelStore {
         )
     }
 
-    pub fn apply_durable_writes(&mut self, writes: &[DurableWriteEvent]) {
+    fn apply_checkpoint_writes(&mut self, writes: &[CheckpointWriteEvent]) -> Result<(), String> {
         for write in writes {
-            let Some(session) = self.sessions.get_mut(&write.session_id) else {
-                continue;
-            };
+            let session_id = write.attributed_session();
+            let session = self.sessions.get_mut(session_id).ok_or_else(|| {
+                format!(
+                    "checkpoint write for unknown session `{session_id}` (store session `{}`)",
+                    write.session_id
+                )
+            })?;
             session.checkpoint_commit_count += 1;
             session.checkpoint_head_revision =
                 session.checkpoint_head_revision.max(write.revision_after);
             for component in &write.components {
                 match component.kind {
-                    DurableComponentWriteKind::Stored { .. } => {
+                    CheckpointComponentWriteKind::Stored { .. } => {
                         session.checkpoint_component_stored_count += 1;
                     }
-                    DurableComponentWriteKind::UnchangedRef => {
+                    CheckpointComponentWriteKind::UnchangedRef => {
                         session.checkpoint_component_ref_count += 1;
                     }
                 }
             }
         }
+        Ok(())
+    }
+
+    /// Apply checkpoint evidence and produce the final abstract summary in one
+    /// owned step. Model replay/minimization deliberately pass recorded
+    /// evidence; backend replay passes commits observed from the replayed store.
+    pub fn summarize_with_checkpoint_writes(
+        mut self,
+        writes: &[CheckpointWriteEvent],
+    ) -> Result<AbstractWorldSummary, String> {
+        self.apply_checkpoint_writes(writes)?;
+        Ok(self.summary())
+    }
+
+    /// Summarize checkpoint evidence using the same session-model boundary as
+    /// `apply_observed_boundary`: generated suspend fixtures are real runtime
+    /// turns but intentionally not abstract sessions. Writes for those known
+    /// fixtures are excluded; every other unknown session is an error.
+    pub fn summarize_with_trace_checkpoint_writes(
+        self,
+        events: &[crate::scheduler::DeliveredBoundary],
+        writes: &[CheckpointWriteEvent],
+    ) -> Result<AbstractWorldSummary, String> {
+        let modeled_sessions = events
+            .iter()
+            .filter(|event| {
+                event.kind == BoundaryKind::Ingress && !is_suspend_boundary(&event.as_event())
+            })
+            .map(|event| event.actor_alias.as_str())
+            .collect::<BTreeSet<_>>();
+        let suspend_sessions = events
+            .iter()
+            .filter(|event| {
+                event.kind == BoundaryKind::Ingress && is_suspend_boundary(&event.as_event())
+            })
+            .map(|event| event.actor_alias.as_str())
+            .collect::<BTreeSet<_>>();
+        let mut projected = Vec::new();
+        for write in writes {
+            let session_id = write.attributed_session();
+            if modeled_sessions.contains(session_id) {
+                projected.push(write.clone());
+            } else if !suspend_sessions.contains(session_id) {
+                return Err(format!(
+                    "checkpoint write for unknown session `{session_id}` (store session `{}`)",
+                    write.session_id
+                ));
+            }
+        }
+        self.summarize_with_checkpoint_writes(&projected)
     }
 
     pub fn project_boundary_observation(&mut self, event: &BoundaryEvent) -> Value {

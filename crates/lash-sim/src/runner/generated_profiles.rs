@@ -240,9 +240,10 @@ async fn run_generated_evidence_profile(
         }
         write_trace(&trace_path, &trace)?;
         let transcript_path = trace_path.with_extension("txt");
-        std::fs::write(&transcript_path, trace.render_transcript())?;
+        let transcript = trace.render_transcript();
+        let transcript_artifact =
+            write_generated_transcript_best_effort(artifact_root, &transcript_path, &transcript);
         let trace_sha256 = file_sha256(&trace_path)?;
-        let transcript_sha256 = file_sha256(&transcript_path)?;
         let replay = replay_trace(&trace_path, &trace)?;
         oracle_verdicts.push(replay.terminal_verdict.clone());
         let replay_report_path = replay_dir.join(format!("seed-{seed:016x}.replay.json"));
@@ -323,8 +324,10 @@ async fn run_generated_evidence_profile(
             seed,
             trace_path: relative_path(artifact_root, &trace_path),
             trace_sha256,
-            transcript_path: relative_path(artifact_root, &transcript_path),
-            transcript_sha256,
+            transcript_path: transcript_artifact
+                .as_ref()
+                .map(|artifact| artifact.0.clone()),
+            transcript_sha256: transcript_artifact.map(|artifact| artifact.1),
             replay_report_path: relative_path(artifact_root, &replay_report_path),
             replay_report_sha256,
             minimized_trace_path: relative_path(artifact_root, &minimize.minimized_trace_path),
@@ -594,7 +597,13 @@ async fn run_generated_search_profile(
         // fail the run with the exact replay command.
         std::fs::create_dir_all(&seed_dir)?;
         write_trace(&trace_path, &trace)?;
-        std::fs::write(seed_dir.join("transcript.txt"), trace.render_transcript())?;
+        let transcript_path = seed_dir.join("transcript.txt");
+        if let Err(err) = std::fs::write(&transcript_path, trace.render_transcript()) {
+            eprintln!(
+                "warning: generated transcript `{}` was not written: {err}",
+                transcript_path.display()
+            );
+        }
         match &replay_outcome {
             Ok(replay) => {
                 write_replay_report(&seed_dir.join("replay.json"), replay)?;
@@ -737,6 +746,30 @@ async fn run_generated_search_profile(
     };
     std::fs::write(&summary_path, serde_json::to_vec_pretty(&report)?)?;
     Ok(report)
+}
+
+pub(super) fn write_generated_transcript_best_effort(
+    artifact_root: &Path,
+    transcript_path: &Path,
+    transcript: &str,
+) -> Option<(String, String)> {
+    if let Err(err) = std::fs::write(transcript_path, transcript) {
+        eprintln!(
+            "warning: generated transcript `{}` was not written: {err}",
+            transcript_path.display()
+        );
+        return None;
+    }
+    match file_sha256(transcript_path) {
+        Ok(sha256) => Some((relative_path(artifact_root, transcript_path), sha256)),
+        Err(err) => {
+            eprintln!(
+                "warning: generated transcript `{}` was written but not hashed: {err}",
+                transcript_path.display()
+            );
+            None
+        }
+    }
 }
 
 fn write_provider_script_manifest(

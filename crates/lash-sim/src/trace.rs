@@ -195,7 +195,7 @@ pub struct SimulationTrace {
     pub aliases: BTreeMap<String, String>,
     pub events: Vec<DeliveredBoundary>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub durable_writes: Vec<crate::store::DurableWriteEvent>,
+    pub durable_writes: Vec<crate::store::CheckpointWriteEvent>,
     pub oracle: OracleVerdict,
     pub oracles: Vec<OracleVerdict>,
     pub final_summary: AbstractWorldSummary,
@@ -214,7 +214,7 @@ impl SimulationTrace {
         script_bundle_hash: impl Into<String>,
         aliases: BTreeMap<String, String>,
         events: Vec<DeliveredBoundary>,
-        durable_writes: Vec<crate::store::DurableWriteEvent>,
+        durable_writes: Vec<crate::store::CheckpointWriteEvent>,
         oracle: OracleVerdict,
         oracles: Vec<OracleVerdict>,
         final_summary: AbstractWorldSummary,

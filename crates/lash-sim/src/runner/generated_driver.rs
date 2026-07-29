@@ -133,9 +133,19 @@ pub(super) async fn drive_generated_workload(
         )));
     }
     let mut events = log.into_vec();
-    append_contract_execution_boundaries(&mut events, &mut store, workload.seed).await?;
-    store.apply_durable_writes(&world.durable_write_events());
-    let final_summary = store.summary();
+    append_contract_execution_boundaries(
+        &mut events,
+        &mut store,
+        workload.seed,
+        world.checkpoint_write_collector(),
+    )
+    .await?;
+    // The generated lane owns both runtime-turn and attributed contract-proof
+    // checkpoint observations; summarize them through the single projection
+    // owner so no lane can forget the evidence.
+    let final_summary = store
+        .summarize_with_trace_checkpoint_writes(&events, &world.checkpoint_write_events())
+        .map_err(FixedScriptRunnerError::Assertion)?;
     Ok((events, final_summary))
 }
 
@@ -252,7 +262,8 @@ pub async fn replay_workload_on_postgres(
         std::fs::remove_dir_all(&attachment_root)?;
     }
     std::fs::create_dir_all(&attachment_root)?;
-    let store_factory: Arc<dyn SessionStoreFactory> = Arc::new(storage.session_store_factory());
+    let store_factory: Arc<dyn SessionStoreFactory> =
+        Arc::new(storage.session_store_factory().with_clock(clock.clone()));
     let effect_replay_store = RuntimeEffectReplayStore::postgres(Arc::clone(&storage));
     let attachment_store: Arc<dyn lash::persistence::AttachmentStore> =
         Arc::new(lash::persistence::FileAttachmentStore::new(attachment_root));
@@ -392,7 +403,7 @@ pub(super) async fn run_generated_workload(
 ) -> Result<SimulationTrace, FixedScriptRunnerError> {
     let mut world = GeneratedRuntimeWorld::new();
     let (events, final_summary) = drive_generated_workload(&mut world, &workload).await?;
-    let durable_writes = world.durable_write_events();
+    let durable_writes = world.checkpoint_write_events();
     // Per-seed live provider FAILURE turns: real `session.turn().run()`s that
     // stream valid prose then a non-retryable malformed chunk, released through a
     // real BoundaryScheduler, across >1 provider kind and >1 fault position.

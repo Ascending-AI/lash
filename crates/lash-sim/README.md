@@ -12,16 +12,17 @@ Every generated run is deterministic by seed and generator version and runs
 the full oracle set. The `run` command has two modes:
 
 - `--mode evidence` (default): every seed writes trace/replay/minimize
-  artifacts and re-runs through a serialized in-memory reference and the real
-  `lash-sqlite-store` backend for cross-backend equivalence. Roughly minutes
-  per seed; this is the bounded evidence lane.
+  artifacts plus a best-effort review transcript (`.trace.txt`, with path and
+  SHA-256 recorded when present), and re-runs through a serialized in-memory
+  reference and the real `lash-sqlite-store` backend for cross-backend
+  equivalence. Roughly minutes per seed; this is the bounded evidence lane.
 - `--mode search`: every seed runs live with the full oracle set plus an
   in-memory determinism replay; nothing is persisted per passing seed. A
   failing seed writes a complete reproducibility package under
-  `failures/seed-<hex>/` (trace, replay report, failing oracle, final summary,
-  minimized regression package) and fails the run with the exact replay
-  command. Roughly a second per seed, which is what makes plan-scale seed
-  budgets real.
+  `failures/seed-<hex>/` (trace, best-effort `transcript.txt`, replay report,
+  failing oracle, final summary, minimized regression package) and fails the
+  run with the exact replay command. Roughly a second per seed, which is what
+  makes plan-scale seed budgets real.
 
 Count-based runs partition deterministically with `--shard <i>/<n>`: shard
 `i/n` owns every seed index where `index % n == i - 1`, so the union of all

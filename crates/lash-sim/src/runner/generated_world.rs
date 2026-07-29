@@ -9,7 +9,7 @@ pub(super) struct GeneratedRuntimeWorld {
     provider_mutations: SimProviderMutationHarness,
     trigger_harness: SimTriggerHarness,
     store_factory: Arc<dyn SessionStoreFactory>,
-    durable_writes: DurableWriteCollector,
+    durable_writes: CheckpointWriteCollector,
     attachment_store: Arc<dyn lash::persistence::AttachmentStore>,
     process_env_store: Arc<dyn lash::persistence::ProcessExecutionEnvStore>,
     runtime_boundaries: RuntimeBoundaryHarness,
@@ -95,7 +95,7 @@ impl GeneratedRuntimeWorld {
         serialize_provider_turns: bool,
         clock: Arc<SimClock>,
     ) -> Self {
-        let durable_writes = DurableWriteCollector::default();
+        let durable_writes = CheckpointWriteCollector::default();
         let store_factory: Arc<dyn SessionStoreFactory> = Arc::new(
             ObservedSessionStoreFactory::new(store_factory, durable_writes.clone()),
         );
@@ -121,8 +121,12 @@ impl GeneratedRuntimeWorld {
         }
     }
 
-    pub(super) fn durable_write_events(&self) -> Vec<DurableWriteEvent> {
+    pub(super) fn checkpoint_write_events(&self) -> Vec<CheckpointWriteEvent> {
         self.durable_writes.events()
+    }
+
+    pub(super) fn checkpoint_write_collector(&self) -> CheckpointWriteCollector {
+        self.durable_writes.clone()
     }
 
     pub(super) async fn advance_time_for_boundary(&self, event: &BoundaryEvent) {

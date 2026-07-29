@@ -7,7 +7,6 @@ use lash_core::SessionStoreFactory;
 use lash_postgres_store::PostgresStorage;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
-use sqlx::Executor;
 
 use crate::oracles::replay_determinism;
 use crate::provider::{ProviderWireScript, ScriptedLlmHttpTransport, ScriptedTransportSchedule};
@@ -22,12 +21,15 @@ use crate::runtime_providers::{
     runtime_provider_components, runtime_scripts_for_texts as runtime_provider_scripts_for_texts,
 };
 use crate::scheduler::{BoundaryEvent, BoundaryKind};
-use crate::store::ModelStore;
+use crate::store::{
+    BackendCheckpointReplayEvidence, CheckpointWriteCollector, CheckpointWriteEvent, ModelStore,
+    ObservedSessionStoreFactory,
+};
 use crate::trace::{
     AbstractWorldSummary, OracleVerdict, SimulationTrace, TraceIoError, read_trace,
 };
 
-pub const POSTGRES_REPLAY_REPORT_SCHEMA: &str = "lash.sim.postgres-runtime-replay-report.v4";
+pub const POSTGRES_REPLAY_REPORT_SCHEMA: &str = "lash.sim.postgres-runtime-replay-report.v5";
 pub const POSTGRES_DIVERGENCE_SCHEMA: &str = "lash.sim.postgres-runtime-divergence.v1";
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -40,6 +42,7 @@ pub struct PostgresReplayReport {
     pub runtime_replayed_boundary_count: usize,
     pub replayed_boundary_families: Vec<String>,
     pub carried_forward_boundary_count: usize,
+    pub checkpoint_replay: BackendCheckpointReplayEvidence,
     pub effect_history_replay: PostgresEffectHistoryReplayEvidence,
     pub reopened_sessions: Vec<PostgresReopenedSessionEvidence>,
     pub final_summary: AbstractWorldSummary,
@@ -220,8 +223,37 @@ pub async fn replay_trace_to_postgres(
         store.apply_observed_boundary(&event, &observed);
     }
 
-    store.apply_durable_writes(&trace.durable_writes);
-    let final_summary = store.summary();
+    let checkpoint_replay =
+        match BackendCheckpointReplayEvidence::for_trace(trace, world.checkpoint_write_events()) {
+            Ok(evidence) => evidence,
+            Err(message) => {
+                let actual_summary = store
+                    .summarize_with_trace_checkpoint_writes(
+                        &trace.events,
+                        &world.checkpoint_write_events(),
+                    )
+                    .map_err(PostgresReplayError::Divergence)?;
+                let verdict =
+                    OracleVerdict::failed("sim.oracle.postgres-checkpoint-replay.v1", &message);
+                write_divergence_artifact(
+                    trace_path,
+                    database_url,
+                    report_path,
+                    verdict,
+                    &trace.final_summary,
+                    &actual_summary,
+                    None,
+                )?;
+                return Err(PostgresReplayError::Divergence(message));
+            }
+        };
+    // Runtime-turn checkpoint facts are observed from Postgres and compared
+    // above. Only contract-proof and suspend-fixture facts, whose boundaries are
+    // projector-owned in this static lane, are carried into the whole-trace
+    // summary.
+    let final_summary = store
+        .summarize_with_trace_checkpoint_writes(&trace.events, &checkpoint_replay.summary_writes())
+        .map_err(PostgresReplayError::Divergence)?;
     let terminal_verdict = replay_determinism(&trace.final_summary, &final_summary);
     if !terminal_verdict.is_passed() {
         write_divergence_artifact(
@@ -266,6 +298,7 @@ pub async fn replay_trace_to_postgres(
         runtime_replayed_boundary_count,
         replayed_boundary_families: replayed_boundary_families.into_iter().collect(),
         carried_forward_boundary_count: 0,
+        checkpoint_replay,
         effect_history_replay: postgres_effect_history_replay_evidence(),
         reopened_sessions,
         final_summary,
@@ -310,6 +343,7 @@ struct PostgresRuntimeReplayWorld {
     provider_completion_events: BTreeMap<String, BoundaryEvent>,
     queued_inputs: BTreeMap<String, String>,
     store_factory: Arc<dyn SessionStoreFactory>,
+    checkpoint_writes: CheckpointWriteCollector,
     runtime_boundaries: RuntimeBoundaryHarness,
 }
 
@@ -334,7 +368,12 @@ impl PostgresRuntimeReplayWorld {
         trace: &SimulationTrace,
     ) -> Self {
         let clock = crate::clock::SimClock::new();
-        let store_factory: Arc<dyn SessionStoreFactory> = Arc::new(storage.session_store_factory());
+        let checkpoint_writes = CheckpointWriteCollector::default();
+        let backend_factory: Arc<dyn SessionStoreFactory> =
+            Arc::new(storage.session_store_factory().with_clock(clock.clone()));
+        let store_factory: Arc<dyn SessionStoreFactory> = Arc::new(
+            ObservedSessionStoreFactory::new(backend_factory, checkpoint_writes.clone()),
+        );
         let provider_completion_events = trace
             .events
             .iter()
@@ -352,8 +391,13 @@ impl PostgresRuntimeReplayWorld {
             sessions: BTreeMap::new(),
             provider_completion_events,
             queued_inputs: BTreeMap::new(),
+            checkpoint_writes,
             store_factory,
         }
+    }
+
+    fn checkpoint_write_events(&self) -> Vec<CheckpointWriteEvent> {
+        self.checkpoint_writes.events()
     }
 
     async fn deliver_boundary(
@@ -1028,11 +1072,6 @@ pub(crate) async fn reset_postgres_for_replay(
     .execute(storage.pool())
     .await
     .map_err(|err| PostgresReplayError::Runtime(err.to_string()))?;
-    storage
-        .pool()
-        .execute("ALTER SEQUENCE lash_trigger_subscription_seq RESTART WITH 1")
-        .await
-        .map_err(|err| PostgresReplayError::Runtime(err.to_string()))?;
     Ok(())
 }
 
@@ -1184,6 +1223,8 @@ pub(crate) fn redact_database_url(database_url: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::generator::generate_workload;
+    use crate::runner::run_generated_workload_for_fixture;
 
     #[test]
     fn postgres_effect_history_evidence_claims_native_controller() {
@@ -1226,5 +1267,51 @@ mod tests {
         );
         assert_eq!(normalized["runtime_effect"]["kind"], "tool_attempt");
         assert_eq!(normalized["tool_output"], "same");
+    }
+
+    #[tokio::test]
+    async fn postgres_replay_observes_checkpoint_writes_when_configured() {
+        let database_url = match std::env::var("LASH_POSTGRES_DATABASE_URL") {
+            Ok(database_url) if !database_url.is_empty() => database_url,
+            _ if std::env::var("LASH_REQUIRE_POSTGRES").as_deref() == Ok("1") => {
+                panic!("LASH_POSTGRES_DATABASE_URL must be set when LASH_REQUIRE_POSTGRES=1")
+            }
+            _ => return,
+        };
+        let workload = generate_workload(7, "fast-random", 24).expect("workload");
+        let mut trace = run_generated_workload_for_fixture(workload, "postgres-observer")
+            .await
+            .expect("trace");
+        // Postgres session leases use transaction time by contract. Remove only
+        // the simulator's instant clock-advance Worker proof; all runtime turns
+        // and their checkpoint commits still execute against Postgres below.
+        trace
+            .events
+            .retain(|event| event.kind != BoundaryKind::Worker);
+        let mut model = ModelStore::default();
+        for event in &trace.events {
+            model.apply_observed_boundary(&event.as_event(), &event.observed);
+        }
+        trace.final_summary = model
+            .summarize_with_trace_checkpoint_writes(&trace.events, &trace.durable_writes)
+            .expect("summary");
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let report_path = tmp.path().join("postgres-replay.json");
+
+        let report = replay_trace_to_postgres(
+            Path::new("trace.json"),
+            &trace,
+            &database_url,
+            Some(&report_path),
+        )
+        .await
+        .expect("Postgres replay");
+
+        assert!(!report.checkpoint_replay.recorded_runtime.is_empty());
+        assert_eq!(
+            report.checkpoint_replay.recorded_runtime,
+            report.checkpoint_replay.observed_runtime
+        );
+        assert!(report_path.exists());
     }
 }

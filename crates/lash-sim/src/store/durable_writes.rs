@@ -1,3 +1,4 @@
+use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
 
 use lash_core::runtime::{
@@ -18,19 +19,46 @@ use lash_core::{
 };
 use serde::{Deserialize, Serialize};
 
-pub const DURABLE_WRITE_EVENT_SCHEMA: &str = "lash.sim.durable-write-event.v1";
+pub const CHECKPOINT_WRITE_EVENT_SCHEMA: &str = "lash.sim.checkpoint-write-event.v1";
 
 /// One checkpoint component observed at the successful store-commit seam.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
-pub struct DurableComponentWrite {
-    pub component: String,
-    pub kind: DurableComponentWriteKind,
+pub struct CheckpointComponentWrite {
+    pub component: CheckpointComponent,
+    pub kind: CheckpointComponentWriteKind,
+}
+
+/// Closed vocabulary of runtime-checkpoint components.
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CheckpointComponent {
+    TurnState,
+    ToolState,
+    PluginSnapshot,
+    ExecutionState,
+}
+
+impl CheckpointComponent {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::TurnState => "turn_state",
+            Self::ToolState => "tool_state",
+            Self::PluginSnapshot => "plugin_snapshot",
+            Self::ExecutionState => "execution_state",
+        }
+    }
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case", tag = "kind")]
-pub enum DurableComponentWriteKind {
-    Stored { bytes: usize },
+pub enum CheckpointComponentWriteKind {
+    /// Body present at the commit seam. `logical_bytes` is the size of the
+    /// encoding-independent JSON projection used only for human comparison;
+    /// it is not a backend's MessagePack/compressed byte count.
+    Stored {
+        #[serde(default, alias = "bytes", skip_serializing_if = "Option::is_none")]
+        logical_bytes: Option<usize>,
+    },
     UnchangedRef,
 }
 
@@ -38,45 +66,74 @@ pub enum DurableComponentWriteKind {
 /// wrapper. Component bodies are inspected before delegation, while the
 /// resulting head revision is recorded only after the backend accepts them.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
-pub struct DurableWriteEvent {
+pub struct CheckpointWriteEvent {
     pub schema: String,
+    /// The real session id passed to the store commit.
     pub session_id: String,
+    /// Optional generated-trace attribution for a separately executed contract
+    /// proof. Ordinary generated runtime commits use `session_id` directly.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub attributed_session_id: Option<String>,
+    /// Boundary that caused a separately executed contract proof. Runtime-turn
+    /// writes are linked by session plus turn instead.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cause_boundary_id: Option<String>,
     pub commit_index: usize,
     pub turn_index: usize,
     pub revision_before: u64,
     pub revision_after: u64,
-    pub components: Vec<DurableComponentWrite>,
+    pub components: Vec<CheckpointComponentWrite>,
 }
 
-impl DurableWriteEvent {
+impl CheckpointWriteEvent {
     pub fn has_unchanged_ref(&self) -> bool {
         self.components
             .iter()
-            .any(|component| component.kind == DurableComponentWriteKind::UnchangedRef)
+            .any(|component| component.kind == CheckpointComponentWriteKind::UnchangedRef)
+    }
+
+    pub fn attributed_session(&self) -> &str {
+        self.attributed_session_id
+            .as_deref()
+            .unwrap_or(&self.session_id)
     }
 }
 
 /// Shared sink used by every store handle created during one generated run.
+///
+/// This observes commits made through decorated `SessionStoreFactory` handles.
+/// `DurableProcessWorker` task bodies currently construct a bare
+/// `InMemorySessionStore` inside lash-core and are therefore explicitly outside
+/// this collector's coverage; transcript consumers are warned at the renderer
+/// boundary too.
 #[derive(Clone, Debug, Default)]
-pub struct DurableWriteCollector {
-    events: Arc<Mutex<Vec<DurableWriteEvent>>>,
+pub struct CheckpointWriteCollector {
+    state: Arc<Mutex<CheckpointWriteCollectorState>>,
+    #[cfg(test)]
     ref_only_mutation: Option<RefOnlyCommitMutation>,
 }
 
+#[derive(Debug, Default)]
+struct CheckpointWriteCollectorState {
+    events: Vec<CheckpointWriteEvent>,
+    next_commit_by_session: BTreeMap<String, usize>,
+}
+
+#[cfg(test)]
 #[derive(Clone, Debug)]
 struct RefOnlyCommitMutation {
     session_id: String,
     revision_before: u64,
 }
 
-impl DurableWriteCollector {
+impl CheckpointWriteCollector {
     /// Configure the regression-test mutation that reproduces the missing-body
     /// defect: when an updated component also carries its prior ref, drop the
     /// body before the backend sees the commit.
     #[cfg(test)]
     pub fn with_ref_only_mutation(session_id: impl Into<String>, revision_before: u64) -> Self {
         Self {
-            events: Arc::default(),
+            state: Arc::default(),
             ref_only_mutation: Some(RefOnlyCommitMutation {
                 session_id: session_id.into(),
                 revision_before,
@@ -84,21 +141,22 @@ impl DurableWriteCollector {
         }
     }
 
-    pub fn events(&self) -> Vec<DurableWriteEvent> {
+    pub fn events(&self) -> Vec<CheckpointWriteEvent> {
         let mut events = self
-            .events
+            .state
             .lock()
-            .expect("durable-write collector lock")
+            .expect("checkpoint-write collector lock")
+            .events
             .clone();
         events.sort_by(|left, right| {
             (
-                left.session_id.as_str(),
+                left.attributed_session(),
                 left.revision_before,
                 left.revision_after,
                 left.commit_index,
             )
                 .cmp(&(
-                    right.session_id.as_str(),
+                    right.attributed_session(),
                     right.revision_before,
                     right.revision_after,
                     right.commit_index,
@@ -107,16 +165,16 @@ impl DurableWriteCollector {
         events
     }
 
-    fn push(&self, mut event: DurableWriteEvent) {
-        let mut events = self.events.lock().expect("durable-write collector lock");
-        event.commit_index = events
-            .iter()
-            .filter(|recorded| recorded.session_id == event.session_id)
-            .count()
-            + 1;
-        events.push(event);
+    pub(crate) fn push(&self, mut event: CheckpointWriteEvent) {
+        let mut state = self.state.lock().expect("checkpoint-write collector lock");
+        let session_id = event.attributed_session().to_string();
+        let next = state.next_commit_by_session.entry(session_id).or_insert(0);
+        *next += 1;
+        event.commit_index = *next;
+        state.events.push(event);
     }
 
+    #[cfg(test)]
     fn apply_mutation(&self, commit: &mut RuntimeCommit) {
         let Some(mutation) = &self.ref_only_mutation else {
             return;
@@ -142,11 +200,11 @@ impl DurableWriteCollector {
 /// exactly and adds observation only after a real commit succeeds.
 pub struct ObservedSessionStoreFactory {
     inner: Arc<dyn SessionStoreFactory>,
-    collector: DurableWriteCollector,
+    collector: CheckpointWriteCollector,
 }
 
 impl ObservedSessionStoreFactory {
-    pub fn new(inner: Arc<dyn SessionStoreFactory>, collector: DurableWriteCollector) -> Self {
+    pub fn new(inner: Arc<dyn SessionStoreFactory>, collector: CheckpointWriteCollector) -> Self {
         Self { inner, collector }
     }
 
@@ -220,7 +278,7 @@ impl SessionStoreFactory for ObservedSessionStoreFactory {
 
 struct ObservedSessionStore {
     inner: Arc<dyn RuntimePersistence>,
-    collector: DurableWriteCollector,
+    collector: CheckpointWriteCollector,
 }
 
 impl AttachmentManifest for ObservedSessionStore {
@@ -290,14 +348,16 @@ impl SessionCommitStore for ObservedSessionStore {
         self.inner.load_node(node_id).await
     }
 
+    #[allow(unused_mut)]
     async fn commit_runtime_state(
         &self,
         mut commit: RuntimeCommit,
     ) -> Result<RuntimeCommitResult, StoreError> {
+        #[cfg(test)]
         self.collector.apply_mutation(&mut commit);
-        let event = durable_write_event(&commit);
+        let event = checkpoint_write_event(&commit);
         let result = self.inner.commit_runtime_state(commit).await?;
-        self.collector.push(DurableWriteEvent {
+        self.collector.push(CheckpointWriteEvent {
             revision_after: result.head_revision,
             ..event
         });
@@ -320,35 +380,37 @@ impl SessionCommitStore for ObservedSessionStore {
     }
 }
 
-fn durable_write_event(commit: &RuntimeCommit) -> DurableWriteEvent {
+fn checkpoint_write_event(commit: &RuntimeCommit) -> CheckpointWriteEvent {
     let checkpoint = &commit.checkpoint;
-    let mut components = vec![DurableComponentWrite {
-        component: "turn_state".to_string(),
-        kind: DurableComponentWriteKind::Stored {
-            bytes: encoded_len(&checkpoint.turn_state),
+    let mut components = vec![CheckpointComponentWrite {
+        component: CheckpointComponent::TurnState,
+        kind: CheckpointComponentWriteKind::Stored {
+            logical_bytes: logical_encoded_len(&checkpoint.turn_state).ok(),
         },
     }];
     record_component(
         &mut components,
-        "tool_state",
+        CheckpointComponent::ToolState,
         checkpoint.tool_state_ref.as_ref(),
-        checkpoint.tool_state.as_ref().map(encoded_len),
+        checkpoint.tool_state.as_ref().map(logical_encoded_len),
     );
     record_component(
         &mut components,
-        "plugin_snapshot",
+        CheckpointComponent::PluginSnapshot,
         checkpoint.plugin_snapshot_ref.as_ref(),
-        checkpoint.plugin_snapshot.as_ref().map(encoded_len),
+        checkpoint.plugin_snapshot.as_ref().map(logical_encoded_len),
     );
     record_component(
         &mut components,
-        "execution_state",
+        CheckpointComponent::ExecutionState,
         checkpoint.execution_state_ref.as_ref(),
-        checkpoint.execution_state.as_ref().map(Vec::len),
+        checkpoint.execution_state.as_ref().map(logical_encoded_len),
     );
-    DurableWriteEvent {
-        schema: DURABLE_WRITE_EVENT_SCHEMA.to_string(),
+    CheckpointWriteEvent {
+        schema: CHECKPOINT_WRITE_EVENT_SCHEMA.to_string(),
         session_id: commit.session_id.clone(),
+        attributed_session_id: None,
+        cause_boundary_id: None,
         commit_index: 0,
         turn_index: commit.checkpoint.turn_state.turn_index,
         revision_before: commit.expected_head_revision,
@@ -357,30 +419,27 @@ fn durable_write_event(commit: &RuntimeCommit) -> DurableWriteEvent {
     }
 }
 
-fn encoded_len(value: &impl Serialize) -> usize {
-    serde_json::to_vec(value)
-        .expect("checkpoint components serialize before store commit")
-        .len()
+fn logical_encoded_len(value: &impl Serialize) -> Result<usize, serde_json::Error> {
+    serde_json::to_vec(value).map(|bytes| bytes.len())
 }
 
 fn record_component(
-    components: &mut Vec<DurableComponentWrite>,
-    name: &str,
+    components: &mut Vec<CheckpointComponentWrite>,
+    component: CheckpointComponent,
     component_ref: Option<&BlobRef>,
-    body_bytes: Option<usize>,
+    logical_bytes: Option<Result<usize, serde_json::Error>>,
 ) {
-    let kind = if let Some(bytes) = body_bytes {
-        Some(DurableComponentWriteKind::Stored { bytes })
+    let kind = if let Some(logical_bytes) = logical_bytes {
+        Some(CheckpointComponentWriteKind::Stored {
+            logical_bytes: logical_bytes.ok(),
+        })
     } else if component_ref.is_some() {
-        Some(DurableComponentWriteKind::UnchangedRef)
+        Some(CheckpointComponentWriteKind::UnchangedRef)
     } else {
         None
     };
     if let Some(kind) = kind {
-        components.push(DurableComponentWrite {
-            component: name.to_string(),
-            kind,
-        });
+        components.push(CheckpointComponentWrite { component, kind });
     }
 }
 
@@ -632,5 +691,36 @@ impl StoreMaintenance for ObservedSessionStore {
 
     async fn gc_unreachable(&self) -> Result<GcReport, StoreError> {
         self.inner.gc_unreachable().await
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::BTreeMap;
+
+    use super::*;
+
+    #[test]
+    fn logical_size_failure_degrades_to_unknown_stored_size() {
+        let unsupported_json_key = BTreeMap::from([((1_u8, 2_u8), 3_u8)]);
+        let size = logical_encoded_len(&unsupported_json_key);
+        assert!(size.is_err(), "fixture must be invalid JSON");
+
+        let mut components = Vec::new();
+        record_component(
+            &mut components,
+            CheckpointComponent::ToolState,
+            None,
+            Some(size),
+        );
+        assert_eq!(
+            components,
+            vec![CheckpointComponentWrite {
+                component: CheckpointComponent::ToolState,
+                kind: CheckpointComponentWriteKind::Stored {
+                    logical_bytes: None,
+                },
+            }]
+        );
     }
 }

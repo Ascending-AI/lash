@@ -2,22 +2,31 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write as _;
 
 use crate::scheduler::{BoundaryKind, DeliveredBoundary};
-use crate::store::{DurableComponentWriteKind, DurableWriteEvent};
-use crate::trace::{SimulationTrace, StableAliases};
+use crate::store::{CheckpointComponentWriteKind, CheckpointWriteEvent};
+use crate::trace::SimulationTrace;
 
 impl SimulationTrace {
     /// Render the completed run as deterministic, review-oriented text.
+    ///
+    /// The compact projection intentionally omits provider-wire `ProviderEvent`
+    /// fragments; those remain in `SimulationTrace::events`. Checkpoint lines
+    /// cover commits made through observed session-store factories. Lash-core's
+    /// `DurableProcessWorker` task body uses a bare in-memory store, so its
+    /// internal checkpoint commits are not represented here.
     pub fn render_transcript(&self) -> String {
         render(self, None)
     }
 
-    /// Render one raw simulator session using a stable `session-NNN` alias.
+    /// Render one raw simulator session with the same stable alias used by the
+    /// whole-run transcript. The provider-wire and process-worker exclusions
+    /// documented on [`SimulationTrace::render_transcript`] also apply.
     pub fn render_session_transcript(&self, session_id: &str) -> String {
         render(self, Some(session_id))
     }
 }
 
 fn render(trace: &SimulationTrace, session_filter: Option<&str>) -> String {
+    let show_session_column = session_filter.is_none();
     let boundaries = trace
         .events
         .iter()
@@ -29,23 +38,33 @@ fn render(trace: &SimulationTrace, session_filter: Option<&str>) -> String {
     let writes = trace
         .durable_writes
         .iter()
-        .filter(|write| session_filter.is_none_or(|session_id| write.session_id == session_id))
+        .filter(|write| {
+            session_filter.is_none_or(|session_id| write.attributed_session() == session_id)
+        })
         .collect::<Vec<_>>();
 
-    let mut aliases = StableAliases::default();
+    let mut aliases = TranscriptAliases::new(trace);
     for boundary in &boundaries {
-        aliases.alias("session", boundary.actor_alias.clone());
+        aliases.alias(&boundary.actor_alias);
     }
     for write in &writes {
-        aliases.alias("session", write.session_id.clone());
+        aliases.alias(write.attributed_session());
     }
 
-    let mut writes_by_turn = BTreeMap::<(&str, usize), Vec<&DurableWriteEvent>>::new();
+    let mut writes_by_turn = BTreeMap::<(&str, usize), Vec<&CheckpointWriteEvent>>::new();
+    let mut writes_by_boundary = BTreeMap::<&str, Vec<&CheckpointWriteEvent>>::new();
     for write in writes {
-        writes_by_turn
-            .entry((&write.session_id, write.turn_index))
-            .or_default()
-            .push(write);
+        if let Some(boundary_id) = write.cause_boundary_id.as_deref() {
+            writes_by_boundary
+                .entry(boundary_id)
+                .or_default()
+                .push(write);
+        } else {
+            writes_by_turn
+                .entry((write.attributed_session(), write.turn_index))
+                .or_default()
+                .push(write);
+        }
     }
     let mut rendered_writes = BTreeSet::<(&str, usize)>::new();
     let mut output = String::new();
@@ -53,16 +72,16 @@ fn render(trace: &SimulationTrace, session_filter: Option<&str>) -> String {
     let mut current_turn = BTreeMap::<&str, usize>::new();
 
     for boundary in boundaries {
-        let alias = aliases.alias("session", boundary.actor_alias.clone());
+        let alias = aliases.alias(&boundary.actor_alias);
         let turn_index = boundary_turn_index(boundary);
         if boundary.kind == BoundaryKind::Ingress {
             current_turn.insert(&boundary.actor_alias, 1);
-            writeln!(output, "turn 1  {alias}").expect("write transcript");
+            write_turn_header(&mut output, 1, &alias, show_session_column);
         } else if boundary.kind == BoundaryKind::Provider
             && current_turn.get(boundary.actor_alias.as_str()) != Some(&turn_index)
         {
             current_turn.insert(&boundary.actor_alias, turn_index);
-            writeln!(output, "turn {turn_index}  {alias}").expect("write transcript");
+            write_turn_header(&mut output, turn_index, &alias, show_session_column);
         }
 
         let is_resume = boundary
@@ -71,16 +90,16 @@ fn render(trace: &SimulationTrace, session_filter: Option<&str>) -> String {
             .and_then(serde_json::Value::as_bool)
             .unwrap_or(false);
         if is_resume {
-            writeln!(output, "resume {alias}").expect("write transcript");
+            write_session_marker(&mut output, "resume", &alias, show_session_column);
         }
 
         sequence += 1;
-        write_boundary_line(&mut output, sequence, boundary);
+        write_boundary_line(&mut output, sequence, boundary, &alias, show_session_column);
 
         if boundary.kind == BoundaryKind::Ingress
             && boundary.observed.get("runtime_suspend").is_some()
         {
-            writeln!(output, "park   {alias}").expect("write transcript");
+            write_session_marker(&mut output, "park", &alias, show_session_column);
         }
 
         if (boundary.kind == BoundaryKind::Provider || is_resume)
@@ -88,26 +107,89 @@ fn render(trace: &SimulationTrace, session_filter: Option<&str>) -> String {
                 writes_by_turn.get(&(boundary.actor_alias.as_str(), turn_index))
         {
             for write in turn_writes {
+                if rendered_writes.contains(&(write.attributed_session(), write.commit_index)) {
+                    continue;
+                }
                 sequence += 1;
-                write_checkpoint(&mut output, sequence, write);
-                rendered_writes.insert((write.session_id.as_str(), write.commit_index));
+                write_checkpoint(&mut output, sequence, write, &alias, show_session_column);
+                rendered_writes.insert((write.attributed_session(), write.commit_index));
+            }
+        }
+        if let Some(boundary_writes) = writes_by_boundary.get(boundary.boundary_id.as_str()) {
+            for write in boundary_writes {
+                if rendered_writes.contains(&(write.attributed_session(), write.commit_index)) {
+                    continue;
+                }
+                sequence += 1;
+                write_checkpoint(&mut output, sequence, write, &alias, show_session_column);
+                rendered_writes.insert((write.attributed_session(), write.commit_index));
             }
         }
     }
 
-    for turn_writes in writes_by_turn.values() {
-        for write in turn_writes {
-            if rendered_writes.contains(&(write.session_id.as_str(), write.commit_index)) {
+    for pending_writes in writes_by_turn.values().chain(writes_by_boundary.values()) {
+        for write in pending_writes {
+            if rendered_writes.contains(&(write.attributed_session(), write.commit_index)) {
                 continue;
             }
-            let alias = aliases.alias("session", write.session_id.clone());
-            writeln!(output, "turn {}  {alias}", write.turn_index).expect("write transcript");
+            let alias = aliases.alias(write.attributed_session());
+            write_turn_header(&mut output, write.turn_index, &alias, show_session_column);
             sequence += 1;
-            write_checkpoint(&mut output, sequence, write);
+            write_checkpoint(&mut output, sequence, write, &alias, show_session_column);
         }
     }
 
     output.trim_end().to_string()
+}
+
+struct TranscriptAliases {
+    aliases: BTreeMap<String, String>,
+    next: usize,
+}
+
+impl TranscriptAliases {
+    fn new(trace: &SimulationTrace) -> Self {
+        let next = trace
+            .aliases
+            .values()
+            .filter_map(|alias| alias.strip_prefix("session-"))
+            .filter_map(|suffix| suffix.parse::<usize>().ok())
+            .max()
+            .unwrap_or(0);
+        Self {
+            aliases: trace.aliases.clone(),
+            next,
+        }
+    }
+
+    fn alias(&mut self, session_id: &str) -> String {
+        if let Some(alias) = self.aliases.get(session_id) {
+            return alias.clone();
+        }
+        if self.aliases.values().any(|alias| alias == session_id) {
+            return session_id.to_string();
+        }
+        self.next += 1;
+        let alias = format!("session-{:03}", self.next);
+        self.aliases.insert(session_id.to_string(), alias.clone());
+        alias
+    }
+}
+
+fn write_turn_header(output: &mut String, turn_index: usize, alias: &str, show_session: bool) {
+    if show_session {
+        writeln!(output, "{alias:<11} turn {turn_index}").expect("write transcript");
+    } else {
+        writeln!(output, "turn {turn_index}  {alias}").expect("write transcript");
+    }
+}
+
+fn write_session_marker(output: &mut String, marker: &str, alias: &str, show_session: bool) {
+    if show_session {
+        writeln!(output, "{alias:<11} {marker}").expect("write transcript");
+    } else {
+        writeln!(output, "{marker:<6} {alias}").expect("write transcript");
+    }
 }
 
 fn boundary_turn_index(event: &DeliveredBoundary) -> usize {
@@ -119,10 +201,20 @@ fn boundary_turn_index(event: &DeliveredBoundary) -> usize {
         .unwrap_or(1) as usize
 }
 
-fn write_boundary_line(output: &mut String, sequence: usize, event: &DeliveredBoundary) {
+fn write_boundary_line(
+    output: &mut String,
+    sequence: usize,
+    event: &DeliveredBoundary,
+    alias: &str,
+    show_session: bool,
+) {
     let class = boundary_class(event.kind);
     let label = boundary_label(event);
-    write!(output, "  {sequence:04}  {class:<18} {label}").expect("write transcript");
+    if show_session {
+        write!(output, "{alias:<11} {sequence:04}  {class:<18} {label}").expect("write transcript");
+    } else {
+        write!(output, "  {sequence:04}  {class:<18} {label}").expect("write transcript");
+    }
     match event.kind {
         BoundaryKind::Provider => {
             if let Some(provider) = event
@@ -193,33 +285,180 @@ fn boundary_label(event: &DeliveredBoundary) -> &str {
     }
 }
 
-fn write_checkpoint(output: &mut String, sequence: usize, write: &DurableWriteEvent) {
-    writeln!(
-        output,
-        "  {sequence:04}  {:<18} checkpoint.commit  rev={}->{}",
-        "Checkpoint", write.revision_before, write.revision_after
-    )
-    .expect("write transcript");
+fn write_checkpoint(
+    output: &mut String,
+    sequence: usize,
+    write: &CheckpointWriteEvent,
+    alias: &str,
+    show_session: bool,
+) {
+    if show_session {
+        writeln!(
+            output,
+            "{alias:<11} {sequence:04}  {:<18} checkpoint.commit  rev={}->{}",
+            "Checkpoint", write.revision_before, write.revision_after
+        )
+        .expect("write transcript");
+    } else {
+        writeln!(
+            output,
+            "  {sequence:04}  {:<18} checkpoint.commit  rev={}->{}",
+            "Checkpoint", write.revision_before, write.revision_after
+        )
+        .expect("write transcript");
+    }
     for component in &write.components {
-        match component.kind {
-            DurableComponentWriteKind::Stored { bytes } => {
-                writeln!(
-                    output,
-                    "                         {:<17} stored {}",
-                    component.component,
-                    format_bytes(bytes)
-                )
+        let detail = match component_write_detail(&component.kind) {
+            Some(detail) => detail,
+            None => "ref (unchanged)".to_string(),
+        };
+        let component = component.component.as_str();
+        if show_session {
+            writeln!(
+                output,
+                "{alias:<11}                       {component:<17} {detail}"
+            )
+            .expect("write transcript");
+        } else {
+            writeln!(output, "                         {component:<17} {detail}")
                 .expect("write transcript");
-            }
-            DurableComponentWriteKind::UnchangedRef => {
-                writeln!(
-                    output,
-                    "                         {:<17} ref (unchanged)",
-                    component.component
-                )
-                .expect("write transcript");
+        }
+    }
+}
+
+fn component_write_detail(kind: &CheckpointComponentWriteKind) -> Option<String> {
+    match kind {
+        CheckpointComponentWriteKind::Stored { logical_bytes } => {
+            if let Some(bytes) = logical_bytes {
+                Some(format!("stored logical={}", format_bytes(*bytes)))
+            } else {
+                Some("stored logical=unknown".to_string())
             }
         }
+        CheckpointComponentWriteKind::UnchangedRef => None,
+    }
+}
+
+#[cfg(test)]
+fn test_boundary(
+    sequence: usize,
+    actor_alias: &str,
+    kind: BoundaryKind,
+    turn_index: usize,
+) -> DeliveredBoundary {
+    DeliveredBoundary {
+        schema: crate::scheduler::BOUNDARY_EVENT_SCHEMA.to_string(),
+        sequence,
+        scheduler: Default::default(),
+        boundary_id: format!("{actor_alias}:{sequence}"),
+        actor_alias: actor_alias.to_string(),
+        kind,
+        at: sequence as u64,
+        label: format!("{kind:?}"),
+        payload: serde_json::json!({"turn_index": turn_index}),
+        observed: serde_json::json!({"turn_index": turn_index}),
+    }
+}
+
+#[cfg(test)]
+fn test_write(session_id: &str, turn_index: usize) -> CheckpointWriteEvent {
+    CheckpointWriteEvent {
+        schema: crate::store::CHECKPOINT_WRITE_EVENT_SCHEMA.to_string(),
+        session_id: session_id.to_string(),
+        attributed_session_id: None,
+        cause_boundary_id: None,
+        commit_index: turn_index,
+        turn_index,
+        revision_before: (turn_index - 1) as u64,
+        revision_after: turn_index as u64,
+        components: Vec::new(),
+    }
+}
+
+#[cfg(test)]
+fn trace_with_events(
+    events: Vec<DeliveredBoundary>,
+    writes: Vec<CheckpointWriteEvent>,
+) -> SimulationTrace {
+    SimulationTrace::new(
+        1,
+        "test-generator",
+        "test",
+        "1/1",
+        "transcript-attribution",
+        "test-workload",
+        "test-script-bundle",
+        BTreeMap::new(),
+        events,
+        writes,
+        crate::trace::OracleVerdict::passed("test", "passed"),
+        Vec::new(),
+        crate::trace::AbstractWorldSummary::with_digest(0, 0, Vec::new(), Vec::new(), Vec::new()),
+        std::path::Path::new("trace.json"),
+    )
+}
+
+#[cfg(test)]
+fn lines_for_sequence(transcript: &str, sequence: usize) -> Vec<&str> {
+    let needle = format!("{sequence:04}");
+    transcript
+        .lines()
+        .filter(|line| line.contains(&needle))
+        .collect()
+}
+
+#[cfg(test)]
+mod attribution_tests {
+    use super::*;
+
+    #[test]
+    fn interleaved_whole_run_labels_every_boundary_and_checkpoint() {
+        let trace = trace_with_events(
+            vec![
+                test_boundary(1, "alpha", BoundaryKind::Ingress, 1),
+                test_boundary(2, "beta", BoundaryKind::Ingress, 1),
+                test_boundary(3, "alpha", BoundaryKind::Provider, 1),
+                test_boundary(4, "beta", BoundaryKind::Provider, 1),
+            ],
+            vec![test_write("alpha", 1), test_write("beta", 1)],
+        );
+
+        let transcript = trace.render_transcript();
+        for sequence in 1..=6 {
+            let lines = lines_for_sequence(&transcript, sequence);
+            assert_eq!(lines.len(), 1, "sequence {sequence}: {transcript}");
+            let expected = if matches!(sequence, 1 | 3 | 4) {
+                "session-001"
+            } else {
+                "session-002"
+            };
+            assert!(
+                lines[0].starts_with(expected),
+                "sequence {sequence} was not attributed to {expected}: {transcript}"
+            );
+        }
+    }
+
+    #[test]
+    fn contract_checkpoint_renders_after_its_causal_trigger() {
+        let mut write = test_write("contract-store-session", 1);
+        write.attributed_session_id = Some("alpha".to_string());
+        write.cause_boundary_id = Some("alpha:2".to_string());
+        let trace = trace_with_events(
+            vec![
+                test_boundary(1, "alpha", BoundaryKind::Ingress, 1),
+                test_boundary(2, "alpha", BoundaryKind::Trigger, 1),
+            ],
+            vec![write],
+        );
+
+        let transcript = trace.render_transcript();
+        let trigger = transcript.find("Trigger").expect("trigger line");
+        let checkpoint = transcript.find("Checkpoint").expect("checkpoint line");
+        assert!(
+            checkpoint > trigger,
+            "contract checkpoint rendered before its cause:\n{transcript}"
+        );
     }
 }
 
@@ -243,13 +482,13 @@ mod tests {
     };
 
     use super::*;
-    use crate::store::{DurableWriteCollector, ObservedSessionStoreFactory};
+    use crate::store::{CheckpointWriteCollector, ObservedSessionStoreFactory};
     use crate::trace::{AbstractWorldSummary, OracleVerdict};
 
     #[tokio::test]
     async fn transcript_discriminates_missing_checkpoint_component_bodies() {
-        let correct = changed_component_commit(DurableWriteCollector::default()).await;
-        let defect = changed_component_commit(DurableWriteCollector::with_ref_only_mutation(
+        let correct = changed_component_commit(CheckpointWriteCollector::default()).await;
+        let defect = changed_component_commit(CheckpointWriteCollector::with_ref_only_mutation(
             "mutation-session",
             1,
         ))
@@ -272,7 +511,7 @@ mod tests {
         );
     }
 
-    async fn changed_component_commit(collector: DurableWriteCollector) -> DurableWriteEvent {
+    async fn changed_component_commit(collector: CheckpointWriteCollector) -> CheckpointWriteEvent {
         let factory = ObservedSessionStoreFactory::new(
             Arc::new(InMemorySessionStoreFactory::new()),
             collector.clone(),
@@ -326,7 +565,7 @@ mod tests {
         .expect("construct tool state")
     }
 
-    fn trace_with_write(write: DurableWriteEvent) -> SimulationTrace {
+    fn trace_with_write(write: CheckpointWriteEvent) -> SimulationTrace {
         SimulationTrace::new(
             1,
             "test-generator",

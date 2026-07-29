@@ -338,7 +338,7 @@ async fn runtime_completion_serialization_mutation_guard() {
 }
 
 #[tokio::test]
-async fn generated_park_resume_transcript_is_readable_and_ref_aware() {
+async fn generated_park_resume_transcript_is_readable_and_logical_size_labeled() {
     let workload = generate_workload(1, "fast", 72).expect("workload");
     let trace = run_generated_workload_for_fixture(workload, "park-resume-transcript")
         .await
@@ -347,7 +347,7 @@ async fn generated_park_resume_transcript_is_readable_and_ref_aware() {
         trace
             .durable_writes
             .iter()
-            .any(DurableWriteEvent::has_unchanged_ref),
+            .any(CheckpointWriteEvent::has_unchanged_ref),
         "generated multi-turn sessions must naturally produce a ref-only checkpoint component: {:#?}",
         trace.durable_writes
     );
@@ -358,6 +358,35 @@ async fn generated_park_resume_transcript_is_readable_and_ref_aware() {
             .any(|write| write.session_id.starts_with("suspend-")),
         "generated park/resume must commit durable state after resolution: {:#?}",
         trace.durable_writes
+    );
+    let contract_writes = trace
+        .durable_writes
+        .iter()
+        .filter(|write| write.cause_boundary_id.is_some())
+        .collect::<Vec<_>>();
+    assert!(
+        !contract_writes.is_empty(),
+        "real Agent façade contract executions must emit checkpoint observations"
+    );
+    assert!(contract_writes.iter().all(|write| {
+        trace.events.iter().any(|event| {
+            Some(event.boundary_id.as_str()) == write.cause_boundary_id.as_deref()
+                && event.kind == BoundaryKind::Trigger
+                && event.actor_alias == write.attributed_session()
+        })
+    }));
+    assert!(
+        contract_writes
+            .iter()
+            .flat_map(|write| &write.components)
+            .all(|component| {
+                !matches!(
+                    component.kind,
+                    CheckpointComponentWriteKind::Stored {
+                        logical_bytes: Some(_)
+                    }
+                )
+            })
     );
     let transcript = trace.render_session_transcript("suspend-tool");
     for seed in [2, 3] {
@@ -372,15 +401,15 @@ async fn generated_park_resume_transcript_is_readable_and_ref_aware() {
         );
     }
     insta::assert_snapshot!(transcript, @r"
-    turn 1  session-001
+    turn 1  session-005
       0001  Ingress            session.open.suspend
-    park   session-001
-    resume session-001
+    park   session-005
+    resume session-005
       0002  Tool               suspend.tool.resume  name=await_tool
       0003  Checkpoint         checkpoint.commit  rev=0->1
-                             turn_state        stored 210B
-                             tool_state        stored 2.2KB
-                             plugin_snapshot   stored 443B
+                             turn_state        stored logical=210B
+                             tool_state        stored logical=2.2KB
+                             plugin_snapshot   stored logical=443B
     ");
 }
 
@@ -1078,6 +1107,27 @@ fn generated_sim_profile_writes_trace_replay_and_provider_artifacts() {
     assert_eq!(report.counts.generated_seeds, 2);
     assert_eq!(report.counts.replay_reports, 2);
     assert_eq!(report.counts.minimized_replays, 2);
+    for replay in &report.replay_reports {
+        let transcript_path = replay
+            .transcript_path
+            .as_ref()
+            .expect("generated transcript path");
+        let transcript_sha256 = replay
+            .transcript_sha256
+            .as_ref()
+            .expect("generated transcript hash");
+        let absolute_path = tmp.path().join(transcript_path);
+        assert!(absolute_path.exists(), "{}", absolute_path.display());
+        let content = std::fs::read_to_string(&absolute_path).expect("generated transcript");
+        assert!(
+            !content.is_empty(),
+            "generated transcript must be non-empty"
+        );
+        assert_eq!(
+            &file_sha256(&absolute_path).expect("hash generated transcript"),
+            transcript_sha256
+        );
+    }
     assert!(report.counts.boundary_events >= 4);
     assert_eq!(report.counts.oracle_failures, 0);
     assert!(
@@ -1501,6 +1551,18 @@ fn generated_sim_profile_writes_trace_replay_and_provider_artifacts() {
             .unwrap()
             .iter()
             .any(|review| review["boundary_kind"] == "worker")
+    );
+}
+
+#[test]
+fn generated_transcript_write_failure_is_best_effort() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let transcript_path = tmp.path().join("transcript.txt");
+    std::fs::create_dir(&transcript_path).expect("directory at transcript path");
+
+    assert_eq!(
+        write_generated_transcript_best_effort(tmp.path(), &transcript_path, "review evidence"),
+        None
     );
 }
 

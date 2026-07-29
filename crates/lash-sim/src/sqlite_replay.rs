@@ -20,12 +20,15 @@ use crate::runtime_providers::{
     runtime_provider_components, runtime_scripts_for_texts as runtime_provider_scripts_for_texts,
 };
 use crate::scheduler::{BoundaryEvent, BoundaryKind};
-use crate::store::ModelStore;
+use crate::store::{
+    BackendCheckpointReplayEvidence, CheckpointWriteCollector, CheckpointWriteEvent, ModelStore,
+    ObservedSessionStoreFactory,
+};
 use crate::trace::{
     AbstractWorldSummary, OracleVerdict, SimulationTrace, TraceIoError, read_trace,
 };
 
-pub const SQLITE_REPLAY_REPORT_SCHEMA: &str = "lash.sim.sqlite-runtime-replay-report.v3";
+pub const SQLITE_REPLAY_REPORT_SCHEMA: &str = "lash.sim.sqlite-runtime-replay-report.v4";
 pub const SQLITE_DIVERGENCE_SCHEMA: &str = "lash.sim.sqlite-runtime-divergence.v1";
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -38,6 +41,7 @@ pub struct SqliteReplayReport {
     pub runtime_replayed_boundary_count: usize,
     pub replayed_boundary_families: Vec<String>,
     pub carried_forward_boundary_count: usize,
+    pub checkpoint_replay: BackendCheckpointReplayEvidence,
     pub reopened_sessions: Vec<SqliteReopenedSessionEvidence>,
     pub final_summary: AbstractWorldSummary,
 }
@@ -201,8 +205,37 @@ pub async fn replay_trace_to_sqlite(
         store.apply_observed_boundary(&event, &observed);
     }
 
-    store.apply_durable_writes(&trace.durable_writes);
-    let final_summary = store.summary();
+    let checkpoint_replay =
+        match BackendCheckpointReplayEvidence::for_trace(trace, world.checkpoint_write_events()) {
+            Ok(evidence) => evidence,
+            Err(message) => {
+                let actual_summary = store
+                    .summarize_with_trace_checkpoint_writes(
+                        &trace.events,
+                        &world.checkpoint_write_events(),
+                    )
+                    .map_err(SqliteReplayError::Divergence)?;
+                let verdict =
+                    OracleVerdict::failed("sim.oracle.sqlite-checkpoint-replay.v1", &message);
+                write_divergence_artifact(
+                    trace_path,
+                    db_path,
+                    report_path,
+                    verdict,
+                    &trace.final_summary,
+                    &actual_summary,
+                    None,
+                )?;
+                return Err(SqliteReplayError::Divergence(message));
+            }
+        };
+    // Runtime-turn checkpoint facts are observed from SQLite and compared above.
+    // Contract-proof and suspend-fixture facts belong to projector-owned
+    // boundaries this static lane does not execute, so only that explicit subset
+    // is carried to keep the whole-trace summary comparable.
+    let final_summary = store
+        .summarize_with_trace_checkpoint_writes(&trace.events, &checkpoint_replay.summary_writes())
+        .map_err(SqliteReplayError::Divergence)?;
     let terminal_verdict = replay_determinism(&trace.final_summary, &final_summary);
     if !terminal_verdict.is_passed() {
         write_divergence_artifact(
@@ -247,6 +280,7 @@ pub async fn replay_trace_to_sqlite(
         runtime_replayed_boundary_count,
         replayed_boundary_families: replayed_boundary_families.into_iter().collect(),
         carried_forward_boundary_count: 0,
+        checkpoint_replay,
         reopened_sessions,
         final_summary,
     };
@@ -265,6 +299,7 @@ struct SqliteRuntimeReplayWorld {
     provider_completion_events: BTreeMap<String, BoundaryEvent>,
     queued_inputs: BTreeMap<String, String>,
     store_factory: Arc<dyn SessionStoreFactory>,
+    checkpoint_writes: CheckpointWriteCollector,
     runtime_boundaries: RuntimeBoundaryHarness,
 }
 
@@ -287,12 +322,16 @@ impl SqliteRuntimeReplayWorld {
         let clock = crate::clock::SimClock::new();
         let effect_replay_path = database_root.join("runtime-effects.sqlite");
         let process_registry_path = effect_replay_path.with_extension("process-registry.sqlite");
-        let store_factory: Arc<dyn SessionStoreFactory> = Arc::new(
+        let checkpoint_writes = CheckpointWriteCollector::default();
+        let backend_factory: Arc<dyn SessionStoreFactory> = Arc::new(
             lash_sqlite_store::SqliteSessionStoreFactory::new_with_process_registry(
                 database_root.clone(),
                 process_registry_path,
             )
             .with_clock(clock.clone()),
+        );
+        let store_factory: Arc<dyn SessionStoreFactory> = Arc::new(
+            ObservedSessionStoreFactory::new(backend_factory, checkpoint_writes.clone()),
         );
         let provider_completion_events = trace
             .events
@@ -305,6 +344,7 @@ impl SqliteRuntimeReplayWorld {
             sessions: BTreeMap::new(),
             provider_completion_events,
             queued_inputs: BTreeMap::new(),
+            checkpoint_writes,
             runtime_boundaries: RuntimeBoundaryHarness::new(
                 Arc::clone(&store_factory),
                 RuntimeEffectReplayStore::sqlite_file(effect_replay_path),
@@ -312,6 +352,10 @@ impl SqliteRuntimeReplayWorld {
             ),
             store_factory,
         }
+    }
+
+    fn checkpoint_write_events(&self) -> Vec<CheckpointWriteEvent> {
+        self.checkpoint_writes.events()
     }
 
     async fn deliver_boundary(
@@ -1136,6 +1180,15 @@ mod tests {
         assert_eq!(report.delivered_event_count, trace.events.len());
         assert_eq!(report.runtime_replayed_boundary_count, trace.events.len());
         assert_eq!(report.carried_forward_boundary_count, 0);
+        assert!(!report.checkpoint_replay.recorded_runtime.is_empty());
+        assert_eq!(
+            report.checkpoint_replay.recorded_runtime,
+            report.checkpoint_replay.observed_runtime
+        );
+        assert!(
+            !report.checkpoint_replay.carried.is_empty(),
+            "contract and suspend fixture writes must be explicitly carried"
+        );
         let families = report
             .replayed_boundary_families
             .iter()

@@ -1,5 +1,40 @@
 use super::*;
 
+thread_local! {
+    static CONTRACT_CHECKPOINT_COLLECTOR:
+        std::cell::RefCell<Option<CheckpointWriteCollector>> = const {
+            std::cell::RefCell::new(None)
+        };
+}
+
+pub(super) struct AgentContractExecution {
+    pub(super) payload: Value,
+    pub(super) checkpoint_writes: Vec<CheckpointWriteEvent>,
+}
+
+fn contract_store_factory() -> Arc<dyn SessionStoreFactory> {
+    let inner: Arc<dyn SessionStoreFactory> =
+        Arc::new(lash::persistence::InMemorySessionStoreFactory::new());
+    CONTRACT_CHECKPOINT_COLLECTOR.with(|slot| {
+        slot.borrow().as_ref().map_or(inner.clone(), |collector| {
+            Arc::new(ObservedSessionStoreFactory::new(inner, collector.clone()))
+                as Arc<dyn SessionStoreFactory>
+        })
+    })
+}
+
+fn observe_contract_checkpoints<T>(
+    collector: CheckpointWriteCollector,
+    run: impl FnOnce() -> T,
+) -> T {
+    CONTRACT_CHECKPOINT_COLLECTOR.with(|slot| {
+        let previous = slot.replace(Some(collector));
+        let result = run();
+        slot.replace(previous);
+        result
+    })
+}
+
 async fn agent_tuple_json_array_execution() -> Result<Value, FixedScriptRunnerError> {
     let expected = json!({
         "first": "left",
@@ -38,7 +73,8 @@ finish {
     )
 }
 
-pub(super) async fn agent_contract_executions() -> Result<Vec<Value>, FixedScriptRunnerError> {
+pub(super) async fn agent_contract_executions()
+-> Result<Vec<AgentContractExecution>, FixedScriptRunnerError> {
     // Aggregating every fixed Agent execution is simulation-harness work used by
     // generated proof/minimizer packages. It may use the bounded harness stack;
     // individual product facade executions are separately probed at 2 MiB.
@@ -53,7 +89,12 @@ pub(super) async fn agent_contract_executions() -> Result<Vec<Value>, FixedScrip
             let mut executions = Vec::new();
             for contract in FIXED_AGENT_PRODUCT_CONTRACTS {
                 let runner = agent_contract_runner(contract)?;
-                executions.push(runner(&runtime)?);
+                let collector = CheckpointWriteCollector::default();
+                let payload = observe_contract_checkpoints(collector.clone(), || runner(&runtime))?;
+                executions.push(AgentContractExecution {
+                    payload,
+                    checkpoint_writes: collector.events(),
+                });
             }
             Ok(executions)
         },
@@ -603,9 +644,7 @@ async fn facade_final_value_execution_inner(
         .process_env_store(Arc::new(
             lash::persistence::InMemoryProcessExecutionEnvStore::new(),
         ))
-        .store_factory(Arc::new(
-            lash::persistence::InMemorySessionStoreFactory::new(),
-        ))
+        .store_factory(contract_store_factory())
         .process_registry(Arc::new(lash_core::TestLocalProcessRegistry::default())
             as Arc<dyn lash_core::ProcessRegistry>)
         .provider(fixed_texts_provider(provider_kind, provider_responses))
@@ -925,9 +964,7 @@ fn agent_process_contract_core_with_options_and_effect_host(
         .process_env_store(Arc::new(
             lash::persistence::InMemoryProcessExecutionEnvStore::new(),
         ))
-        .store_factory(Arc::new(
-            lash::persistence::InMemorySessionStoreFactory::new(),
-        ))
+        .store_factory(contract_store_factory())
         .process_registry(Arc::new(lash_core::TestLocalProcessRegistry::default())
             as Arc<dyn lash_core::ProcessRegistry>)
         .provider(fixed_texts_provider(provider_kind, provider_responses))

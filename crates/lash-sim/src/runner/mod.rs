@@ -88,8 +88,8 @@ use crate::stack_policy::{
     SIM_HARNESS_STACK_LIMIT_BYTES, run_on_product_stack, run_on_sim_harness_stack,
 };
 use crate::store::{
-    DurableWriteCollector, DurableWriteEvent, ModelStore, ObservedSessionStoreFactory,
-    backend_fault_observation,
+    CheckpointComponentWriteKind, CheckpointWriteCollector, CheckpointWriteEvent, ModelStore,
+    ObservedSessionStoreFactory, backend_fault_observation,
 };
 use crate::trace::{
     AbstractWorldSummary, OracleStatus, OracleVerdict, SimulationTrace, TraceEventLine,
