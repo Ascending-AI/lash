@@ -69,6 +69,19 @@ pub async fn session_store_factory_delete_fences_stale_handles(
         )
         .await
         .expect("seed a pending turn input on the handle that will go stale");
+    stale
+        .enqueue_queued_work(crate::QueuedWorkBatchDraft::new(
+            &request.session_id,
+            crate::DeliveryPolicy::EarliestSafeBoundary,
+            crate::SlotPolicy::Exclusive,
+            vec![crate::QueuedWorkPayload::session_command(
+                crate::SessionCommand::RefreshToolCatalog {
+                    reason: "queued work on the handle that will go stale".to_string(),
+                },
+            )],
+        ))
+        .await
+        .expect("seed queued work on the handle that will go stale");
 
     factory
         .delete_session(&request.session_id)
@@ -98,6 +111,14 @@ pub async fn session_store_factory_delete_fences_stale_handles(
             .expect("list pending inputs through the stale handle")
             .is_empty(),
         "a stale handle must observe deleted pending turn inputs as absent"
+    );
+    assert!(
+        stale
+            .list_queued_work(&request.session_id)
+            .await
+            .expect("list queued work through the stale handle")
+            .is_empty(),
+        "a stale handle must observe deleted queued work as absent"
     );
 
     let ensure_error = stale

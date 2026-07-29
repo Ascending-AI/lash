@@ -144,6 +144,16 @@ enum InMemoryQueuedWorkClaimKind {
 type InMemoryNodeAnchorRecord = (crate::BlobRef, crate::HydratedSessionCheckpoint, String);
 type InMemoryNodeAnchors = Arc<Mutex<HashMap<String, InMemoryNodeAnchorRecord>>>;
 
+#[cfg(any(test, feature = "testing"))]
+pub type RawQueuedWorkForTesting = (
+    crate::QueuedWorkBatch,
+    bool,
+    Option<crate::LeaseOwnerIdentity>,
+    bool,
+    u64,
+    Option<u64>,
+);
+
 pub struct InMemorySessionStore {
     clock: Arc<dyn crate::Clock>,
     /// Serializes every operation whose correctness depends on observing the

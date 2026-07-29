@@ -166,6 +166,7 @@ impl InMemorySessionStore {
             .lock()
             .expect("lock runtime turn commits")
             .clear();
+        self.queued_work.lock().expect("lock queued work").clear();
         self.pending_turn_inputs
             .lock()
             .expect("lock pending turn input")
