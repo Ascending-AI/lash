@@ -19,7 +19,10 @@ use std::task::{Context, Poll, Waker};
 mod endpoint_protocol;
 mod process_tool_replay;
 mod tool_context_conformance;
-use endpoint_protocol::invoke_process_workflow_endpoint;
+use endpoint_protocol::{
+    encode_completed_sleep_replay, invoke_endpoint, invoke_endpoint_body,
+    invoke_process_workflow_endpoint, restate_message_types,
+};
 
 fn durable_turn_scope(session_id: impl Into<String>, turn_id: impl Into<String>) -> ExecutionScope {
     let session_id = session_id.into();
@@ -84,6 +87,140 @@ async fn restate_context_future_sdk_error_wake_fails_attempt_instead_of_parking(
     assert!(
         matches!(outcome, Ok(Err(ref error)) if error.is_panic()),
         "an SDK error wake must fail the handler attempt instead of parking it: {outcome:?}"
+    );
+}
+
+/// Restate service-protocol message types used by the FIG-779 gates.
+/// `restate_sdk_shared_core::service_protocol::header` keeps these private, so
+/// they are restated here (`SleepCommand = 0x040C`, `Suspension = 0x0001`).
+const RESTATE_SLEEP_COMMAND_MESSAGE_TYPE: u16 = 0x040C;
+const RESTATE_SUSPENSION_MESSAGE_TYPE: u16 = 0x0001;
+
+#[derive(Debug, Serialize, serde::Deserialize)]
+struct Fig779TimerGuardReproInput {
+    duration_ms: u64,
+}
+
+/// FIG-779 repro fixture: a workflow that sleeps on a durable timer through the
+/// two paths that matter — the guarded Lash driver path and the bare SDK path.
+#[restate_sdk::workflow]
+trait Fig779TimerGuardRepro {
+    async fn run(input: Json<Fig779TimerGuardReproInput>) -> HandlerResult<Json<()>>;
+
+    async fn raw_sleep(input: Json<Fig779TimerGuardReproInput>) -> HandlerResult<Json<()>>;
+}
+
+struct Fig779TimerGuardReproImpl;
+
+impl Fig779TimerGuardRepro for Fig779TimerGuardReproImpl {
+    /// The production geometry that panics: `turn_cancel == None`, which is what
+    /// every sleep inside a process body uses (process runners call
+    /// `without_turn_cancel_observation`). That branch guards `ctx.sleep()` with
+    /// `RestateContextFuture` inside a `tokio::select!`.
+    async fn run(
+        &self,
+        ctx: WorkflowContext<'_>,
+        Json(input): Json<Fig779TimerGuardReproInput>,
+    ) -> HandlerResult<Json<()>> {
+        let outcome = RestateControllerContext::sleep_or_turn_cancel(
+            &ctx,
+            Duration::from_millis(input.duration_ms),
+            None,
+            tokio_util::sync::CancellationToken::new(),
+        )
+        .await?;
+        assert!(matches!(outcome, RestateSleepRaceOutcome::Slept));
+        Ok(Json(()))
+    }
+
+    /// The same durable timer without the Lash guard, as an SDK control.
+    async fn raw_sleep(
+        &self,
+        ctx: WorkflowContext<'_>,
+        Json(input): Json<Fig779TimerGuardReproInput>,
+    ) -> HandlerResult<Json<()>> {
+        restate_sdk::context::ContextTimers::sleep(&ctx, Duration::from_millis(input.duration_ms))
+            .await?;
+        Ok(Json(()))
+    }
+}
+
+/// FIG-779 repro. A not-yet-completed durable timer is an SDK-legitimate
+/// synchronous-wake-then-Pending state — it is exactly how the SDK signals a
+/// durable suspension — but `RestateContextFuture` panics on it
+/// (`crates/lash-restate/src/lib.rs:148`).
+///
+/// This drives the real Restate endpoint, context, VM, and `ctx.sleep()`
+/// future. The invocation body is complete (no further frames), so the VM's
+/// input is closed; `DoProgress` then hits its suspension condition, the sleep
+/// resolves as `Err(Suspended)`, `DurableFutureImpl` records the state, wakes
+/// synchronously and returns `Pending`, and the Lash guard panics instead of
+/// yielding. Restate closes the request stream the same way whenever it parks
+/// an invocation on a pending timer.
+///
+/// Ignored because it necessarily panics until the guard is fixed; drop the
+/// `#[ignore]` with the fix.
+#[tokio::test]
+#[ignore = "FIG-779 repro: panics at crates/lash-restate/src/lib.rs:148 until the guard is fixed"]
+async fn fig779_pending_durable_timer_suspension_panics_in_guard() {
+    let endpoint = Endpoint::builder()
+        .bind(Fig779TimerGuardReproImpl.serve())
+        .build();
+
+    invoke_endpoint(
+        &endpoint,
+        "Fig779TimerGuardRepro",
+        "run",
+        "fig779-timer",
+        &Fig779TimerGuardReproInput { duration_ms: 2_000 },
+    )
+    .await
+    .expect("pending durable timer invocation should suspend without panicking");
+}
+
+/// FIG-779 contrast: an already-completed timer replays straight to `Ready`, so
+/// the guard never sees a synchronous wake. This is why the panic is only
+/// reachable on the attempt that first parks on the timer, not on the resume.
+#[tokio::test]
+async fn fig779_completed_durable_timer_replay_does_not_enter_guard_panic() {
+    let endpoint = Endpoint::builder()
+        .bind(Fig779TimerGuardReproImpl.serve())
+        .build();
+    let input = Fig779TimerGuardReproInput { duration_ms: 2_000 };
+    let body = encode_completed_sleep_replay("fig779-timer", &input)
+        .expect("encode completed durable timer replay");
+
+    invoke_endpoint_body(&endpoint, "Fig779TimerGuardRepro", "run", body)
+        .await
+        .expect("completed durable timer replay should finish without panicking");
+}
+
+/// FIG-779 control: the identical input against the bare SDK timer is handled
+/// correctly — the endpoint writes a `SleepCommand` followed by a `Suspension`
+/// frame. The synchronous-wake-then-Pending shape is therefore the SDK's normal
+/// suspension protocol, not a driver-invariant violation.
+#[tokio::test]
+async fn fig779_sdk_pending_durable_timer_suspends_cleanly_without_guard() {
+    let endpoint = Endpoint::builder()
+        .bind(Fig779TimerGuardReproImpl.serve())
+        .build();
+
+    let output = invoke_endpoint(
+        &endpoint,
+        "Fig779TimerGuardRepro",
+        "raw_sleep",
+        "fig779-raw-timer",
+        &Fig779TimerGuardReproInput { duration_ms: 2_000 },
+    )
+    .await
+    .expect("the SDK must encode a pending timer suspension without panicking");
+    let message_types = restate_message_types(&output).expect("decode Restate response frames");
+    assert_eq!(
+        message_types,
+        vec![
+            RESTATE_SLEEP_COMMAND_MESSAGE_TYPE,
+            RESTATE_SUSPENSION_MESSAGE_TYPE
+        ]
     );
 }
 
