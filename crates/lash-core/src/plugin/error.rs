@@ -9,6 +9,8 @@ pub enum PluginError {
     Invoke(String),
     #[error("plugin session error: {0}")]
     Session(String),
+    #[error(transparent)]
+    RuntimeEffectController(#[from] crate::RuntimeEffectControllerError),
     #[error("process `{process_id}` execution was already started by {by:?}")]
     ProcessAlreadyStarted {
         process_id: String,
@@ -27,10 +29,4 @@ pub enum PluginError {
         delivery_id: String,
         state: crate::WakeDeliveryState,
     },
-}
-
-impl From<crate::RuntimeEffectControllerError> for PluginError {
-    fn from(err: crate::RuntimeEffectControllerError) -> Self {
-        PluginError::Session(err.to_string())
-    }
 }

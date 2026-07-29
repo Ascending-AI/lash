@@ -30,6 +30,32 @@ struct RecordingProcessEffectController {
     release_first_await: Arc<Semaphore>,
 }
 
+struct DeletedSessionProcessEffectController;
+
+impl crate::AwaitEventResolver for DeletedSessionProcessEffectController {}
+
+#[async_trait::async_trait]
+impl crate::RuntimeEffectController for DeletedSessionProcessEffectController {
+    async fn execute_effect(
+        &self,
+        envelope: crate::RuntimeEffectEnvelope,
+        _local_executor: crate::RuntimeEffectLocalExecutor<'_>,
+    ) -> Result<crate::RuntimeEffectOutcome, crate::RuntimeEffectControllerError> {
+        assert!(
+            matches!(
+                envelope.command,
+                crate::RuntimeEffectCommand::Process { .. }
+            ),
+            "deleted-session fixture only accepts process commands"
+        );
+        Err(crate::RuntimeEffectControllerError::from(
+            crate::StoreError::SessionDeleted {
+                session_id: "fig790-session".to_string(),
+            },
+        ))
+    }
+}
+
 impl Default for RecordingProcessEffectController {
     fn default() -> Self {
         Self {
@@ -75,8 +101,8 @@ impl crate::RuntimeEffectController for RecordingProcessEffectController {
                         state_changed: Arc::clone(&self.first_await_state_changed),
                     };
                     self.first_await_started.add_permits(1);
-                    if execution.observe_turn_cancel {
-                        execution.cancellation.cancelled().await;
+                    if let Some(turn_cancellation) = execution.turn_cancellation {
+                        turn_cancellation.cancellation.cancelled().await;
                         self.first_await_state_changed.add_permits(1);
                     }
                     self.release_first_await
@@ -133,11 +159,9 @@ impl EffectBackedProcessService {
         command: crate::ProcessCommand,
     ) -> Result<crate::ProcessEffectOutcome, crate::PluginError> {
         let mut local_executor =
-            crate::RuntimeEffectLocalExecutor::processes(Arc::clone(&self.registry), None)
-                .with_process_cancellation(scope.cancellation.clone())
-                .with_turn_cancel_observation(scope.observe_turn_cancel);
-        if let Some(turn_cancel_scope) = scope.turn_cancel_scope.clone() {
-            local_executor = local_executor.with_turn_cancel_scope(turn_cancel_scope);
+            crate::RuntimeEffectLocalExecutor::processes(Arc::clone(&self.registry), None);
+        if let Some(turn_cancellation) = scope.turn_cancellation.clone() {
+            local_executor = local_executor.with_process_turn_cancellation(turn_cancellation);
         }
         let effect_id = command.effect_id();
         let envelope = crate::RuntimeEffectEnvelope::new(
@@ -279,7 +303,7 @@ impl crate::ToolProvider for NoopTools {
 }
 
 fn fig790_process_await_context(
-    controller: Arc<RecordingProcessEffectController>,
+    controller: Arc<dyn crate::RuntimeEffectController>,
 ) -> RuntimeExecutionContext<'static> {
     let host = Arc::new(crate::testing::MockSessionManager::default());
     let registry: Arc<dyn crate::ProcessRegistry> = host.process_registry.clone();
@@ -332,7 +356,7 @@ fn fig790_process_await_context(
 
 async fn assert_cancelled_process_await_emits_one_await(already_cancelled: bool) {
     let controller = Arc::new(RecordingProcessEffectController::default());
-    let context = fig790_process_await_context(Arc::clone(&controller));
+    let context = fig790_process_await_context(controller.clone());
     let cancellation = CancellationToken::new();
     if already_cancelled {
         cancellation.cancel();
@@ -382,4 +406,28 @@ async fn already_cancelled_process_await_emits_exactly_one_await_effect() {
 #[tokio::test]
 async fn mid_await_process_cancellation_emits_exactly_one_await_effect() {
     assert_cancelled_process_await_emits_one_await(false).await;
+}
+
+#[tokio::test]
+async fn deleted_session_process_await_latches_typed_enclosing_effect_abort() {
+    let context = fig790_process_await_context(Arc::new(DeletedSessionProcessEffectController));
+    context.record_started_process("fig790-process");
+
+    let reply = context
+        .await_process_handle(
+            "await-deleted-session-process".to_string(),
+            RuntimeExecutionContext::process_handle_json("fig790-process"),
+        )
+        .await;
+
+    assert!(!reply.output.is_success());
+    let error = context
+        .take_nested_effect_error()
+        .expect("controller error must escape the fixed language-host reply boundary");
+    assert_eq!(
+        error.cause,
+        Some(crate::RuntimeErrorCause::SessionDeleted {
+            session_id: "fig790-session".to_string(),
+        })
+    );
 }

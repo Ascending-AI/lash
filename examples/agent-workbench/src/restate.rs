@@ -10,6 +10,7 @@ use croner::parser::{CronParser, Seconds};
 use futures_util::FutureExt as _;
 use lash::TurnInput;
 use lash::rlm::RlmTurnBuilderExt as _;
+use lash_core::AwaitEventResolver as _;
 use lash_restate::{
     LashDurableWaitIndex, LashDurableWaitIndexImpl, LashDurableWaitWorkflow,
     LashDurableWaitWorkflowImpl, LashProcessWorkflow,
@@ -843,6 +844,30 @@ async fn run_session_delete(
     request: WorkbenchSessionDeleteWorkflowRequest,
     controller: &lash_restate::RestateRuntimeEffectController<'_, WorkflowContext<'_>>,
 ) -> Result<(), AppError> {
+    let active_turns = state.active_turns.for_session(&request.session_id);
+    controller
+        .revoke_await_events_for_session(&request.session_id)
+        .await
+        .map_err(AppError::internal)?;
+    if !active_turns.is_empty() {
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(20);
+        loop {
+            let still_active = state.active_turns.for_session(&request.session_id);
+            if active_turns
+                .iter()
+                .all(|address| !still_active.contains(address))
+            {
+                break;
+            }
+            if tokio::time::Instant::now() >= deadline {
+                return Err(AppError::internal(format!(
+                    "timed out waiting for revoked turns to settle before deleting session `{}`",
+                    request.session_id
+                )));
+            }
+            tokio::time::sleep(Duration::from_millis(25)).await;
+        }
+    }
     let scoped_effect_controller = controller
         .scoped_effect_controller(request.execution_scope)
         .map_err(AppError::internal)?;
@@ -1033,7 +1058,6 @@ pub(crate) async fn settle_workbench_turn(
     session_id: &str,
     turn_id: &str,
 ) -> Result<(), AppError> {
-    state.active_turns.remove(session_id, turn_id);
     let session = state
         .core
         .session(session_id.to_string())
@@ -1049,6 +1073,7 @@ pub(crate) async fn settle_workbench_turn(
         .map(|input| lash::PendingTurnInputCancelTarget::input_id(input.input_id))
         .collect::<Vec<_>>();
     if targets.is_empty() {
+        state.active_turns.remove(session_id, turn_id);
         return Ok(());
     }
     let cancellations = session
@@ -1064,6 +1089,7 @@ pub(crate) async fn settle_workbench_turn(
             "cancellations": cancellations,
         }),
     );
+    state.active_turns.remove(session_id, turn_id);
     Ok(())
 }
 

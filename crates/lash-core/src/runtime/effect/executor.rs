@@ -79,12 +79,30 @@ pub(crate) trait ProcessRunner: Send + Sync {
     ) -> Result<crate::ProcessRunOutcome, crate::ProcessInfraError>;
 }
 
+/// Valid turn-cancellation controls for a process operation.
+///
+/// Presence means the process operation observes the exact turn gate; absence
+/// means it does not. Keeping token and scope together makes an enabled
+/// observation without a durable scope unrepresentable.
+#[derive(Clone)]
+pub struct ProcessTurnCancellation {
+    pub cancellation: CancellationToken,
+    pub scope: crate::ExecutionScope,
+}
+
+impl ProcessTurnCancellation {
+    pub fn new(cancellation: CancellationToken, scope: crate::ExecutionScope) -> Self {
+        Self {
+            cancellation,
+            scope,
+        }
+    }
+}
+
 pub struct ProcessLocalExecution {
     pub registry: Arc<dyn ProcessRegistry>,
     pub process_work_driver: Option<crate::ProcessWorkDriver>,
-    pub cancellation: CancellationToken,
-    pub observe_turn_cancel: bool,
-    pub turn_cancel_scope: Option<crate::ExecutionScope>,
+    pub turn_cancellation: Option<ProcessTurnCancellation>,
 }
 
 impl ProcessLocalExecution {
@@ -95,9 +113,7 @@ impl ProcessLocalExecution {
         let Self {
             registry,
             process_work_driver,
-            cancellation,
-            observe_turn_cancel,
-            turn_cancel_scope: _,
+            turn_cancellation,
         } = self;
         match command {
             ProcessCommand::Start {
@@ -153,11 +169,11 @@ impl ProcessLocalExecution {
                             .await
                     }
                 };
-                let output = if observe_turn_cancel {
+                let output = if let Some(turn_cancellation) = turn_cancellation {
                     tokio::select! {
                         biased;
                         output = await_terminal() => output?,
-                        _ = cancellation.cancelled() => {
+                        _ = turn_cancellation.cancellation.cancelled() => {
                             InlineRuntimeEffectController::request_process_cancel(
                                 Arc::clone(&registry),
                                 &process_id,
@@ -378,10 +394,6 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
                 observe_turn_cancel: current,
                 ..
             } => *current = observe_turn_cancel,
-            RuntimeEffectLocalExecutorState::Process(ProcessLocalExecution {
-                observe_turn_cancel: current,
-                ..
-            }) => *current = observe_turn_cancel,
             _ => {}
         }
         self
@@ -395,23 +407,22 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
             | RuntimeEffectLocalExecutorState::ExternalWaitOptions {
                 turn_cancel_scope, ..
             } => *turn_cancel_scope = Some(scope),
-            RuntimeEffectLocalExecutorState::Process(ProcessLocalExecution {
-                turn_cancel_scope,
-                ..
-            }) => *turn_cancel_scope = Some(scope),
             _ => {}
         }
         self
     }
 
     #[doc(hidden)]
-    pub fn with_process_cancellation(mut self, cancellation: CancellationToken) -> Self {
+    pub fn with_process_turn_cancellation(
+        mut self,
+        turn_cancellation: ProcessTurnCancellation,
+    ) -> Self {
         if let RuntimeEffectLocalExecutorState::Process(ProcessLocalExecution {
-            cancellation: current,
+            turn_cancellation: current,
             ..
         }) = &mut self.state
         {
-            *current = cancellation;
+            *current = Some(turn_cancellation);
         }
         self
     }
@@ -424,9 +435,7 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
             state: RuntimeEffectLocalExecutorState::Process(ProcessLocalExecution {
                 registry,
                 process_work_driver,
-                cancellation: CancellationToken::new(),
-                observe_turn_cancel: false,
-                turn_cancel_scope: None,
+                turn_cancellation: None,
             }),
             replay_trace: None,
         }
@@ -1050,21 +1059,20 @@ impl RuntimeEffectLocalRunner for LocalTurnEffectRunner {
                     triggers: outcome.triggers,
                 }),
             RuntimeEffectCommand::ExecCode { language, code } => {
+                let result = runner
+                    .driver
+                    .run_exec_code(
+                        language,
+                        &code,
+                        runner.messages.clone(),
+                        runner.protocol_iteration,
+                        envelope.invocation,
+                        &runner.event_tx,
+                        &runner.cancellation,
+                    )
+                    .await?;
                 Ok(RuntimeEffectOutcome::ExecCode {
-                    result: Box::new(
-                        runner
-                            .driver
-                            .run_exec_code(
-                                language,
-                                &code,
-                                runner.messages.clone(),
-                                runner.protocol_iteration,
-                                envelope.invocation,
-                                &runner.event_tx,
-                                &runner.cancellation,
-                            )
-                            .await,
-                    ),
+                    result: Box::new(result),
                 })
             }
             RuntimeEffectCommand::Checkpoint { checkpoint } => {

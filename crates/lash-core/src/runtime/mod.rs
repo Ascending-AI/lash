@@ -160,17 +160,17 @@ pub use effect::{
     CanonicalRuntimeEffectEnvelope, CausalRef, EffectHost, EffectJournalIdentity,
     EffectJournalRetirement, ExecutionScope, ExternalCompletionError, InlineEffectHost,
     InlineRuntimeEffectController, LlmAttachmentSpec, LlmRequestSpec, ProcessCommand,
-    ProcessEffectOutcome, Resolution, ResolveOutcome, RuntimeAwaitEventOptions,
-    RuntimeDirectLlmOutcome, RuntimeEffectCommand, RuntimeEffectController,
-    RuntimeEffectControllerError, RuntimeEffectEnvelope, RuntimeEffectKind,
-    RuntimeEffectLocalExecutor, RuntimeEffectOutcome, RuntimeEffectReplayMismatchSummary,
-    RuntimeEffectReplayTrace, RuntimeInvocation, RuntimeLlmCallOutcome, RuntimeReplay,
-    RuntimeScope, RuntimeSleepOptions, RuntimeSubject, ScopedEffectController, SegmentProgress,
-    ToolAttemptEffectOutcome, ToolAttemptLaunch, ToolBatchEffectOutcome, ToolCallLaunch,
-    validate_replayed_effect_envelope,
+    ProcessEffectOutcome, ProcessTurnCancellation, Resolution, ResolveOutcome,
+    RuntimeAwaitEventOptions, RuntimeDirectLlmOutcome, RuntimeEffectCommand,
+    RuntimeEffectController, RuntimeEffectControllerError, RuntimeEffectEnvelope,
+    RuntimeEffectKind, RuntimeEffectLocalExecutor, RuntimeEffectOutcome,
+    RuntimeEffectReplayMismatchSummary, RuntimeEffectReplayTrace, RuntimeInvocation,
+    RuntimeLlmCallOutcome, RuntimeReplay, RuntimeScope, RuntimeSleepOptions, RuntimeSubject,
+    ScopedEffectController, SegmentProgress, ToolAttemptEffectOutcome, ToolAttemptLaunch,
+    ToolBatchEffectOutcome, ToolCallLaunch, validate_replayed_effect_envelope,
 };
 pub use environment::{ParkedSession, RuntimeEnvironment, RuntimeEnvironmentBuilder};
-pub use error::{RuntimeError, RuntimeErrorCode};
+pub use error::{RuntimeError, RuntimeErrorCause, RuntimeErrorCode};
 #[doc(hidden)]
 pub use event_pump::drive_with_event_pump;
 pub use host::{EmbeddedRuntimeHost, ProcessRuntimeHost, RuntimeHostConfig};

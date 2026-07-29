@@ -3,9 +3,7 @@ pub struct ProcessOpScope<'scope> {
     pub(crate) parent_invocation: Option<crate::RuntimeInvocation>,
     pub(crate) effect_controller: crate::runtime::RuntimeEffectControllerHandle<'scope>,
     pub(crate) agent_frame_id: Option<crate::AgentFrameId>,
-    pub(crate) cancellation: tokio_util::sync::CancellationToken,
-    pub(crate) observe_turn_cancel: bool,
-    pub(crate) turn_cancel_scope: Option<crate::ExecutionScope>,
+    pub(crate) turn_cancellation: Option<crate::ProcessTurnCancellation>,
 }
 
 impl<'scope> ProcessOpScope<'scope> {
@@ -16,9 +14,7 @@ impl<'scope> ProcessOpScope<'scope> {
                 scoped_effect_controller,
             ),
             agent_frame_id: None,
-            cancellation: tokio_util::sync::CancellationToken::new(),
-            observe_turn_cancel: false,
-            turn_cancel_scope: None,
+            turn_cancellation: None,
         }
     }
 
@@ -35,15 +31,12 @@ impl<'scope> ProcessOpScope<'scope> {
         self
     }
 
-    pub(crate) fn with_turn_cancel_options(
+    pub(crate) fn with_turn_cancellation(
         mut self,
         cancellation: tokio_util::sync::CancellationToken,
-        observe_turn_cancel: bool,
         scope: crate::ExecutionScope,
     ) -> Self {
-        self.cancellation = cancellation;
-        self.observe_turn_cancel = observe_turn_cancel;
-        self.turn_cancel_scope = Some(scope);
+        self.turn_cancellation = Some(crate::ProcessTurnCancellation::new(cancellation, scope));
         self
     }
 

@@ -49,6 +49,10 @@ pub struct RuntimeExecutionContext<'run> {
     /// run-local children are not session handle grants (the ephemeral
     /// execution scope must never appear in durable grant state).
     started_process_ids: Arc<std::sync::Mutex<std::collections::HashSet<String>>>,
+    /// Nested durable-controller failure captured while a language runtime
+    /// owns the stack. Its fixed host-reply API must unwind before the
+    /// enclosing code-execution effect can abort.
+    nested_effect_error: Arc<std::sync::Mutex<Option<crate::RuntimeEffectControllerError>>>,
 }
 
 #[derive(Clone)]
@@ -142,6 +146,7 @@ impl<'run> RuntimeExecutionContext<'run> {
             runtime_process_id: None,
             process_event_context: None,
             started_process_ids: Arc::default(),
+            nested_effect_error: Arc::default(),
             process_env_ref: None,
             process_wake_target: None,
             parent_invocation: None,
@@ -185,7 +190,23 @@ impl<'run> RuntimeExecutionContext<'run> {
             batch_parent_call_id: self.batch_parent_call_id.clone(),
             process_work_driver: self.process_work_driver.clone(),
             started_process_ids: Arc::clone(&self.started_process_ids),
+            nested_effect_error: Arc::clone(&self.nested_effect_error),
         })
+    }
+
+    pub(crate) fn record_nested_effect_error(&self, error: crate::RuntimeEffectControllerError) {
+        let mut pending = self
+            .nested_effect_error
+            .lock()
+            .expect("nested runtime effect error lock poisoned");
+        pending.get_or_insert(error);
+    }
+
+    pub(crate) fn take_nested_effect_error(&self) -> Option<crate::RuntimeEffectControllerError> {
+        self.nested_effect_error
+            .lock()
+            .expect("nested runtime effect error lock poisoned")
+            .take()
     }
 
     pub fn execution_scope_id(&self) -> String {

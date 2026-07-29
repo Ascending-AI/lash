@@ -229,6 +229,12 @@ pub(super) fn restate_output_json<T: serde::de::DeserializeOwned>(input: &[u8]) 
     serde_json::from_slice(json).ok()
 }
 
+pub(super) fn restate_output_failure_message(input: &[u8]) -> Option<String> {
+    let frame = restate_message_frame(input, 0x0401)?;
+    let failure = protobuf_len_field(frame.get(8..)?, 15)?;
+    String::from_utf8(protobuf_len_field(failure, 2)?.to_vec()).ok()
+}
+
 /// FIG-779: redrive an invocation whose journal already contains the exact
 /// `SleepCommand` emitted by its suspended attempt, but no timer completion.
 pub(super) fn encode_pending_sleep_replay<T: serde::Serialize>(
@@ -544,24 +550,6 @@ pub(super) async fn invoke_endpoint_body_with_json_call_responses(
     )
     .await
     .map_err(|_| TerminalError::new("scripted-call endpoint test timed out"))?
-}
-
-pub(super) async fn invoke_endpoint_with_json_call_responses<T: serde::Serialize>(
-    endpoint: &Endpoint,
-    service: &str,
-    handler: &str,
-    key: &str,
-    input: &T,
-    responses: Vec<serde_json::Value>,
-) -> Result<Bytes, TerminalError> {
-    invoke_endpoint_body_with_json_call_responses(
-        endpoint,
-        service,
-        handler,
-        encode_invocation_body(key, input)?,
-        responses,
-    )
-    .await
 }
 
 async fn invoke_endpoint_body_with_json_call_responses_unbounded(

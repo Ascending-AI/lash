@@ -29,10 +29,14 @@ where
             output = future.as_mut() => return output,
             maybe_event = event_rx.recv() => {
                 if let Some(event) = maybe_event {
+                    let ready_at_start = event_rx.len();
                     on_event(state, event).await;
-                }
-                while let Ok(event) = event_rx.try_recv() {
-                    on_event(state, event).await;
+                    for _ in 0..ready_at_start {
+                        let Ok(event) = event_rx.try_recv() else {
+                            break;
+                        };
+                        on_event(state, event).await;
+                    }
                 }
                 tokio::task::yield_now().await;
             }
@@ -80,5 +84,81 @@ mod tests {
         let mut context = Context::from_waker(waker);
 
         assert_eq!(pump.as_mut().poll(&mut context), Poll::Pending);
+    }
+
+    struct CompletesOnSecondPoll {
+        polls: usize,
+    }
+
+    impl Future for CompletesOnSecondPoll {
+        type Output = &'static str;
+
+        fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+            self.polls += 1;
+            if self.polls == 1 {
+                cx.waker().wake_by_ref();
+                Poll::Pending
+            } else {
+                Poll::Ready("completed")
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn always_ready_event_channel_cannot_starve_the_driven_future() {
+        let (event_tx, mut event_rx) = tokio::sync::mpsc::channel(1);
+        event_tx.try_send(()).expect("pre-queue pump event");
+        let mut driven = Box::pin(CompletesOnSecondPoll { polls: 0 });
+        let mut handled = 0_usize;
+
+        let output = super::drive_with_event_pump(
+            driven.as_mut(),
+            &mut event_rx,
+            &mut handled,
+            move |handled, ()| {
+                let event_tx = event_tx.clone();
+                Box::pin(async move {
+                    *handled += 1;
+                    assert!(
+                        *handled <= 16,
+                        "an always-ready producer starved the driven future"
+                    );
+                    event_tx
+                        .send(())
+                        .await
+                        .expect("keep the event channel continuously ready");
+                })
+            },
+        )
+        .await;
+
+        assert_eq!(output, "completed");
+        assert_eq!(handled, 1);
+    }
+
+    #[tokio::test]
+    async fn drains_the_burst_that_was_ready_when_the_pass_began() {
+        let (event_tx, mut event_rx) = tokio::sync::mpsc::channel(4);
+        for event in 1..=3 {
+            event_tx.try_send(event).expect("pre-queue burst event");
+        }
+        drop(event_tx);
+        let mut driven = Box::pin(CompletesOnSecondPoll { polls: 0 });
+        let mut handled = Vec::new();
+
+        let output = super::drive_with_event_pump(
+            driven.as_mut(),
+            &mut event_rx,
+            &mut handled,
+            |handled, event| {
+                Box::pin(async move {
+                    handled.push(event);
+                })
+            },
+        )
+        .await;
+
+        assert_eq!(output, "completed");
+        assert_eq!(handled, vec![1, 2, 3]);
     }
 }

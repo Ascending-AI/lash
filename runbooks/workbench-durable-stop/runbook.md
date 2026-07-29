@@ -1,4 +1,4 @@
-# E2E Scenario: Workbench Durable Stop — Exact Turn Cancellation Across Restart
+# E2E Scenario: Workbench Durable Stop — Exact Turn and Process-Await Cancellation
 
 > **Read [../RULES.md](../RULES.md) first** — especially "The browser surface (example
 > apps)": browser tooling, objective gate order, screenshots, real-token designation,
@@ -7,8 +7,10 @@
 **Purpose.** Prove the Agent Workbench Stop control uses Lash's exact-turn,
 keyed-promise cancellation primitive end to end. Stop one live turn normally, then start
 another, restart only the workbench web process while Restate owns the turn, and Stop it
-from the reconstructed UI. In both cases the rendered state and HTTP receipt must agree
-on an authoritative `Cancelled` terminal and its cancellation evidence.
+from the reconstructed UI. Finally, exercise Stop while a foreground turn awaits an
+independent process and distinguish that cooperative cancellation from session
+revocation. Stop must commit `Cancelled` for both the turn and awaited process; deleting
+the session must unwind the dead turn as `SessionDeleted` without cancelling the process.
 
 **Why this matters.** A web-process-local token or tracked Restate invocation id cannot
 survive this scenario. The workbench persists only the routing address, Restate owns the
@@ -37,6 +39,10 @@ quality. This runbook is authored for a deliberate token-spending browser run.
 5. **Break-glass is not success.** Never use Restate Admin cancel/kill to pass a gate. If
    cleanup requires it after an Abort, record that separately; it must not be reported as
    a Lash `Cancelled` terminal.
+6. **Revocation is not Stop.** `DELETE /api/session` revokes the old turn's cancellation
+   registration because the session no longer exists. It must not emit
+   `process.cancel_requested`; the independent process remains visible in `/api/work`
+   until its own terminal.
 
 ## Working material
 
@@ -106,7 +112,43 @@ Phase 1. Additionally require the terminal evidence request id to be new and the
 show the recovered request against the pre-restart turn id. Screenshot
 `03-restored-cancelled.png`; save `03-cancel-receipt.json`.
 
-## Phase 3 — Teardown and score
+## Phase 3 — Stop over process await, then prove process-survives revocation
+
+Submit a prompt that makes the agent declare and start a process with a long sleep, then
+foreground-await its handle. This phase is valid only if `/api/state` shows one active
+turn and `/api/work` shows that named process as non-terminal before Stop. If the model
+does not produce that shape, retry the phase; ordinary model or tool work is not
+process-await evidence.
+
+Press **stop turn** and repeat the Phase 1 receipt gates. Additionally require:
+
+1. the turn terminal is committed `Cancelled`, with the Stop request evidence;
+2. the named process reaches terminal `Cancelled` in `/api/work`;
+3. that process's events include `process.cancel_requested`;
+4. neither terminal waits for the process's original sleep deadline.
+
+Save the pre-Stop and terminal `/api/work` responses as
+`04-process-await-running.json` and `05-process-await-cancelled.json`. Screenshot the
+committed turn terminal as `05-process-await-cancelled.png`.
+
+Start a second process-await whose process can complete soon enough to observe, but leave
+the foreground turn suspended. Record the old session id and process id, then call
+`DELETE /api/session?session_id=<old-session-id>` instead of Stop. Gate the semantic
+split:
+
+- the old Restate turn completes with the typed deleted-session refusal, not a successful
+  or `Cancelled` turn terminal;
+- the process remains non-terminal immediately after deletion and stays globally visible
+  in `/api/work`;
+- its events contain no `process.cancel_requested`;
+- it later reaches its own successful terminal with the expected value.
+
+Save the work snapshots as `06-revoked-process-running.json` and
+`07-revoked-process-survived.json`, and retain the trace lines containing the
+deleted-session refusal. A cancelled process, a missing process, or a stranded old turn
+is Abort/RCA.
+
+## Phase 4 — Teardown and score
 
 Run `just agent-workbench-down <port>` and confirm both the workbench process and its
 Restate container are gone.
@@ -118,12 +160,16 @@ Restate container are gone.
 | Routing persistence | same session/turn address before and after restart | | `02-restored-running.png`, state files/API |
 | Restored Stop affordance | running pill + Stop restored from `/api/state.active_turns` | | `02-restored-running.png` |
 | Post-restart Stop | committed Cancelled terminal + evidence for original address | | `03-restored-cancelled.png`, `03-cancel-receipt.json` |
+| Stop over process await | turn and awaited process both commit Cancelled before the original deadline | | `04-process-await-running.json`, `05-process-await-cancelled.json`, screenshot |
+| Revoked turn settlement | old turn completes with typed `SessionDeleted` refusal | | reset response + trace |
+| Process survives revocation | process stays globally visible, has no cancel event, and reaches its own terminal | | `06-revoked-process-running.json`, `07-revoked-process-survived.json` |
 | UI/API agreement | rendered request ids equal terminal evidence ids; active addresses clear | | screenshots + receipts + `/api/state` |
 | No break-glass substitution | no Admin cancel/kill used as a passing action | | command log |
 
 **Aggregate:** did exact cooperative cancellation produce authoritative evidence both
-normally and after reconstructing the entire web process, with UI, API, disk routing
-state, and trace in agreement?
+normally and after reconstructing the entire web process, did Stop propagate through a
+foreground process await, and did session revocation unwind only the dead turn while the
+independent process survived?
 
 ---
 

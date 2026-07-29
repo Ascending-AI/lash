@@ -234,7 +234,7 @@ impl RuntimeTurnDriver<'_> {
         invocation: crate::RuntimeInvocation,
         event_tx: &mpsc::Sender<RuntimeStreamEvent>,
         cancellation: &CancellationToken,
-    ) -> Result<crate::ExecResponse, String> {
+    ) -> Result<Result<crate::ExecResponse, String>, crate::RuntimeEffectControllerError> {
         let (session_event_tx, mut session_event_rx) = mpsc::channel::<SessionStreamEvent>(100);
         let (turn_event_tx, mut turn_event_rx) = mpsc::channel::<TurnActivity>(100);
         let (msg_tx, mut msg_rx) = tokio::sync::mpsc::unbounded_channel::<SandboxMessage>();
@@ -284,7 +284,7 @@ impl RuntimeTurnDriver<'_> {
         let code_block_graph_key = foreground_exec_graph_key(&invocation);
         let context = self
             .execution_context(session_event_tx.clone(), chronological_projection)
-            .map_err(|err| err.to_string())?
+            .map_err(crate::RuntimeEffectControllerError::from)?
             .with_turn_event_sender(turn_event_tx.clone())
             .with_tracing(self.execution_tracing(protocol_iteration))
             .with_code_block_graph_key(code_block_graph_key);
@@ -293,7 +293,7 @@ impl RuntimeTurnDriver<'_> {
         let result = match code_executor {
             Some(code_executor) => code_executor
                 .execute_code(
-                    context,
+                    context.clone(),
                     crate::ExecRequest {
                         language,
                         code: code.to_string(),
@@ -302,16 +302,18 @@ impl RuntimeTurnDriver<'_> {
                 )
                 .await
                 .map_err(|e| e.to_string()),
-            None => {
-                drop(context);
-                Err(crate::SessionError::CodeExecutionUnavailable.to_string())
-            }
+            None => Err(crate::SessionError::CodeExecutionUnavailable.to_string()),
         };
+        let nested_effect_error = context.take_nested_effect_error();
+        drop(context);
         drop(session_event_tx);
         drop(turn_event_tx);
         self.session.clear_message_sender();
         let _ = relay_handle.await;
-        result
+        match nested_effect_error {
+            Some(error) => Err(error),
+            None => Ok(result),
+        }
     }
 }
 

@@ -736,9 +736,10 @@ impl RuntimeExecutionContext<'_> {
             .scoped()
             .execution_scope()
             .clone();
-        let process_scope = self
-            .process_scope(parent_invocation)
-            .with_turn_cancel_options(cancellation, self.observe_turn_cancel, turn_cancel_scope);
+        let mut process_scope = self.process_scope(parent_invocation);
+        if self.observe_turn_cancel {
+            process_scope = process_scope.with_turn_cancellation(cancellation, turn_cancel_scope);
+        }
         // FIG-790: whether a journaled command is emitted must be
         // replay-deterministic. Emit one Process::Await unconditionally and
         // let the effect controller observe turn cancellation only afterward.

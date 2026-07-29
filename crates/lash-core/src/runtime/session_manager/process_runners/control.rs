@@ -7,9 +7,7 @@ struct ProcessCommandRunner<'scope> {
     registry: Arc<dyn crate::ProcessRegistry>,
     parent_invocation: Option<crate::RuntimeInvocation>,
     effect_controller: &'scope dyn crate::RuntimeEffectController,
-    cancellation: tokio_util::sync::CancellationToken,
-    observe_turn_cancel: bool,
-    turn_cancel_scope: Option<crate::ExecutionScope>,
+    turn_cancellation: Option<crate::ProcessTurnCancellation>,
 }
 
 impl<'scope> ProcessCommandRunner<'scope> {
@@ -27,9 +25,7 @@ impl<'scope> ProcessCommandRunner<'scope> {
             registry: Arc::clone(registry),
             parent_invocation: scope.parent_invocation.clone(),
             effect_controller,
-            cancellation: scope.cancellation.clone(),
-            observe_turn_cancel: scope.observe_turn_cancel,
-            turn_cancel_scope: scope.turn_cancel_scope.clone(),
+            turn_cancellation: scope.turn_cancellation.clone(),
         })
     }
 
@@ -208,11 +204,9 @@ impl<'scope> ProcessCommandRunner<'scope> {
         let mut local_executor = crate::RuntimeEffectLocalExecutor::processes(
             Arc::clone(&self.registry),
             self.current.host.process_work_driver.clone(),
-        )
-        .with_process_cancellation(self.cancellation.clone())
-        .with_turn_cancel_observation(self.observe_turn_cancel);
-        if let Some(scope) = self.turn_cancel_scope.clone() {
-            local_executor = local_executor.with_turn_cancel_scope(scope);
+        );
+        if let Some(turn_cancellation) = self.turn_cancellation.clone() {
+            local_executor = local_executor.with_process_turn_cancellation(turn_cancellation);
         }
         let outcome = self
             .effect_controller

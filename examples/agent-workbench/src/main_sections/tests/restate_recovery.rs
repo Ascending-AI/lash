@@ -110,13 +110,13 @@ fn live_restate_ingress_owner_restart_resumes_and_remains_cancellable() {
 
 #[test]
 #[ignore = "requires a running Restate server; use `just agent-workbench-restate-e2e`"]
-fn live_restate_suspended_sleep_cancel_wakes_and_streams_evidence() {
-    run_async_test_on_stack_budget_multi_thread("workbench-suspended-sleep-cancel", 4, || {
-        live_restate_suspended_sleep_cancel_wakes_and_streams_evidence_inner()
+fn live_restate_stop_over_process_await_commits_cancelled_and_streams_evidence() {
+    run_async_test_on_stack_budget_multi_thread("workbench-stop-over-process-await", 4, || {
+        live_restate_stop_over_process_await_commits_cancelled_and_streams_evidence_inner()
     });
 }
 
-async fn live_restate_suspended_sleep_cancel_wakes_and_streams_evidence_inner() {
+async fn live_restate_stop_over_process_await_commits_cancelled_and_streams_evidence_inner() {
     let ingress_url = std::env::var("RESTATE_INGRESS_URL")
         .expect("RESTATE_INGRESS_URL must be set by the workbench Restate E2E recipe");
     let admin_url =
@@ -128,15 +128,26 @@ async fn live_restate_suspended_sleep_cancel_wakes_and_streams_evidence_inner() 
     let endpoint_url = std::env::var("AGENT_WORKBENCH_E2E_ENDPOINT_URL")
         .unwrap_or_else(|_| format!("http://{endpoint_bind}"));
     let data_dir = std::env::temp_dir().join(format!(
-        "agent-workbench-suspended-sleep-cancel-e2e-{}",
+        "agent-workbench-stop-over-process-await-e2e-{}",
         uuid::Uuid::new_v4()
     ));
-    std::fs::create_dir_all(&data_dir).expect("create suspended sleep E2E data dir");
+    std::fs::create_dir_all(&data_dir).expect("create Stop-over-process E2E data dir");
     let provider = lash::testing::TestProvider::builder()
-        .kind("workbench-suspended-sleep-cancel-e2e")
+        .kind("workbench-stop-over-process-await-e2e")
         .complete(|_| async {
             Ok(text_response(
-                "<lashlang>\nsleep for \"300s\"\nfinish \"unreachable\"\n</lashlang>",
+                r#"<lashlang>
+process hold_for_stop() {
+  elapsed_seconds = 0
+  while elapsed_seconds < 300 {
+    sleep for "1s"
+    elapsed_seconds = elapsed_seconds + 1
+  }
+  finish "unreachable"
+}
+handle = start hold_for_stop()
+finish (await handle)?
+</lashlang>"#,
             ))
         })
         .build()
@@ -158,14 +169,19 @@ async fn live_restate_suspended_sleep_cancel_wakes_and_streams_evidence_inner() 
     wait_for_endpoint_socket(endpoint_bind).await;
     register_restate_deployment(&admin_url, &endpoint_url).await;
 
-    let invocation_id =
-        run_workbench_turn_via_restate(&harness.state, "cancel this suspended durable sleep").await;
+    let invocation_id = run_workbench_turn_via_restate(
+        &harness.state,
+        "start and await the held process, then accept Stop",
+    )
+    .await;
     wait_for_workbench_restate_invocation_suspended(
         &harness.state,
         &invocation_id,
         Duration::from_secs(90),
     )
     .await;
+    let process_id =
+        wait_for_running_process(&harness.state, "hold_for_stop", Duration::from_secs(20)).await;
     let session_id = harness.state.current_session_id();
     let active_turns = harness.state.active_turns.for_session(&session_id);
     let [routed_address] = active_turns.as_slice() else {
@@ -196,13 +212,6 @@ async fn live_restate_suspended_sleep_cancel_wakes_and_streams_evidence_inner() 
         | lash::TurnCancelOutcome::AlreadyRequested(evidence) => evidence.clone(),
         other => panic!("suspended-turn cancellation did not win: {other:?}"),
     };
-    if receipt.terminal.is_none() {
-        assert_eq!(
-            harness.state.active_turns.for_session(&session_id),
-            vec![routed_address],
-            "a still-live timed-out turn must retain routing"
-        );
-    }
     let terminal = tokio::time::timeout(
         Duration::from_secs(10),
         harness
@@ -212,8 +221,8 @@ async fn live_restate_suspended_sleep_cancel_wakes_and_streams_evidence_inner() 
             .await_terminal(&address),
     )
     .await
-    .expect("suspended sleep cancellation must not wait for the 300-second timer")
-    .expect("attach suspended sleep terminal");
+    .expect("Stop-over-process cancellation must not wait for the 300-second process budget")
+    .expect("attach Stop-over-process turn terminal");
     assert!(matches!(
         terminal,
         lash::TurnTerminal::Committed {
@@ -240,8 +249,27 @@ async fn live_restate_suspended_sleep_cancel_wakes_and_streams_evidence_inner() 
     })
     .await
     .expect("late cancellation evidence must arrive on the SSE product stream");
+    let process_terminal = tokio::time::timeout(
+        Duration::from_secs(10),
+        harness
+            .state
+            .process_work_driver
+            .await_terminal(&process_id),
+    )
+    .await
+    .expect("Stop-over-process must terminate the awaited process")
+    .expect("attach awaited process terminal");
+    assert!(
+        matches!(
+            process_terminal,
+            lash::process::ProcessAwaitOutput::Cancelled { .. }
+        ),
+        "Stop-over-process settled the process incorrectly: {process_terminal:#?}"
+    );
     wait_for_active_turns_empty(&harness.state, &session_id, Duration::from_secs(10)).await;
-    println!("workbench suspended-sleep gate passed: post-suspension-cancel; late-SSE-evidence");
+    println!(
+        "workbench Stop-over-process gate passed: committed-Cancelled; process-Cancelled; late-SSE-evidence"
+    );
     let _ = std::fs::remove_dir_all(data_dir);
 }
 
@@ -258,6 +286,14 @@ fn live_restate_turn_input_ingress_delivers_once_and_queues_after_settle() {
 fn live_restate_processes_outlive_session_delete_and_cancel_globally() {
     run_async_test_on_stack_budget_multi_thread("workbench-process-lifecycle-e2e", 4, || {
         live_restate_processes_outlive_session_delete_and_cancel_globally_inner()
+    });
+}
+
+#[test]
+#[ignore = "requires a running Restate server; use `just agent-workbench-restate-e2e`"]
+fn live_restate_session_delete_revokes_process_await_without_cancelling_process() {
+    run_async_test_on_stack_budget_multi_thread("workbench-revoked-process-await", 4, || {
+        live_restate_session_delete_revokes_process_await_without_cancelling_process_inner()
     });
 }
 
@@ -682,6 +718,182 @@ struct LiveFailurePathHarness {
     state: AppState,
 }
 
+async fn live_restate_session_delete_revokes_process_await_without_cancelling_process_inner() {
+    let ingress_url = std::env::var("RESTATE_INGRESS_URL")
+        .expect("RESTATE_INGRESS_URL must be set by the workbench Restate E2E recipe");
+    let admin_url =
+        std::env::var("RESTATE_ADMIN_URL").unwrap_or_else(|_| "http://127.0.0.1:19071".to_string());
+    let endpoint_bind: SocketAddr = std::env::var("AGENT_WORKBENCH_E2E_ENDPOINT_BIND")
+        .unwrap_or_else(|_| "127.0.0.1:19081".to_string())
+        .parse()
+        .expect("valid workbench E2E endpoint bind");
+    let endpoint_url = std::env::var("AGENT_WORKBENCH_E2E_ENDPOINT_URL")
+        .unwrap_or_else(|_| format!("http://{endpoint_bind}"));
+    let data_dir = std::env::temp_dir().join(format!(
+        "agent-workbench-revoked-process-await-e2e-{}",
+        uuid::Uuid::new_v4()
+    ));
+    std::fs::create_dir_all(&data_dir).expect("create revoked process-await E2E data dir");
+
+    let provider = lash::testing::TestProvider::builder()
+        .kind("workbench-revoked-process-await-e2e")
+        .complete(|_| async {
+            Ok(text_response(
+                r#"<lashlang>
+process survive_revocation() {
+  sleep for "90s"
+  finish "survived session deletion"
+}
+handle = start survive_revocation()
+finish (await handle)?
+</lashlang>"#,
+            ))
+        })
+        .build()
+        .into_handle();
+    let harness = live_workbench_restate_state_with_provider(
+        &data_dir,
+        ingress_url,
+        provider,
+        WorkbenchSessionIds::fresh(),
+        ActiveTurns::default(),
+    )
+    .await;
+    restate::spawn_restate_endpoint(
+        endpoint_bind,
+        harness.state.clone(),
+        harness.process_deployment,
+        harness.process_worker,
+    );
+    wait_for_endpoint_socket(endpoint_bind).await;
+    register_restate_deployment(&admin_url, &endpoint_url).await;
+
+    let deleted_session_id = harness.state.current_session_id();
+    let turn_invocation_id = run_workbench_turn_via_restate(
+        &harness.state,
+        "await a process while this session is deleted",
+    )
+    .await;
+    wait_for_workbench_restate_invocation_suspended(
+        &harness.state,
+        &turn_invocation_id,
+        Duration::from_secs(90),
+    )
+    .await;
+    let process_id = wait_for_running_process(
+        &harness.state,
+        "survive_revocation",
+        Duration::from_secs(20),
+    )
+    .await;
+
+    let execution_scope = harness
+        .state
+        .core
+        .session_delete_scope(&deleted_session_id)
+        .await
+        .expect("resolve deleted session scope");
+    let delete_invocation_id = restate::submit_session_delete(
+        &harness.state,
+        restate::WorkbenchSessionDeleteWorkflowRequest {
+            operation_id: format!("workbench-delete-{}", uuid::Uuid::new_v4()),
+            session_id: deleted_session_id.clone(),
+            execution_scope,
+        },
+    )
+    .await
+    .expect("submit deletion while the foreground turn awaits a process");
+    wait_for_restate_invocation_success(
+        &harness.state,
+        &delete_invocation_id,
+        Duration::from_secs(20),
+    )
+    .await;
+    let immediately_after_delete = harness
+        .state
+        .process_work_driver
+        .process_registry()
+        .get_process(&process_id)
+        .await
+        .expect("read process immediately after session revocation");
+    assert!(
+        !immediately_after_delete.is_terminal(),
+        "session revocation must leave the independently sleeping process live"
+    );
+    let immediate_events = harness
+        .state
+        .process_observer
+        .events_after(&process_id, 0)
+        .await
+        .expect("read process events immediately after session revocation");
+    assert!(
+        !immediate_events
+            .iter()
+            .any(|event| event.event_type == "process.cancel_requested"),
+        "session revocation immediately emitted a process cancel: {immediate_events:#?}"
+    );
+
+    let turn_status = wait_for_restate_invocation_completion(
+        &harness.state,
+        &turn_invocation_id,
+        Duration::from_secs(20),
+    )
+    .await;
+    assert!(
+        !turn_status.completed_successfully(),
+        "a tombstoned session turn must not report successful completion"
+    );
+    assert!(
+        turn_status
+            .completion_failure
+            .as_deref()
+            .is_some_and(|failure| failure.contains("used and deleted")),
+        "revoked turn must terminalize as the typed deleted-session refusal: {turn_status:#?}"
+    );
+    let process_terminal = tokio::time::timeout(
+        Duration::from_secs(45),
+        harness
+            .state
+            .process_work_driver
+            .await_terminal(&process_id),
+    )
+    .await
+    .expect("revoked session must not stop the independent process")
+    .expect("attach surviving process terminal");
+    assert!(
+        matches!(
+            &process_terminal,
+            lash::process::ProcessAwaitOutput::Success { value, .. }
+                if value == &json!("survived session deletion")
+        ),
+        "session revocation changed the process terminal: {process_terminal:#?}"
+    );
+    let events = harness
+        .state
+        .process_observer
+        .events_after(&process_id, 0)
+        .await
+        .expect("read surviving process events");
+    assert!(
+        !events
+            .iter()
+            .any(|event| event.event_type == "process.cancel_requested"),
+        "session revocation emitted a process cancel: {events:#?}"
+    );
+    assert!(
+        harness
+            .state
+            .active_turns
+            .for_session(&deleted_session_id)
+            .is_empty(),
+        "deleted-session settlement left a routed foreground turn"
+    );
+    println!(
+        "workbench revoked-process-await gate passed: typed-SessionDeleted; no-process-cancel; process-survived"
+    );
+    let _ = std::fs::remove_dir_all(data_dir);
+}
+
 async fn live_restate_processes_outlive_session_delete_and_cancel_globally_inner() {
     let ingress_url = std::env::var("RESTATE_INGRESS_URL")
         .expect("RESTATE_INGRESS_URL must be set by the workbench Restate E2E recipe");
@@ -862,6 +1074,35 @@ finish "started lifecycle gates"
                 .any(|event| event.event_type == "process.cancel_requested")
     }));
     let _ = std::fs::remove_dir_all(data_dir);
+}
+
+async fn wait_for_running_process(
+    state: &AppState,
+    label: &str,
+    timeout: Duration,
+) -> String {
+    let deadline = tokio::time::Instant::now() + timeout;
+    loop {
+        let processes = state
+            .process_observer
+            .list(&lash::process::ProcessListFilter {
+                status: lash::process::ProcessStatusFilter::Running,
+                ..lash::process::ProcessListFilter::default()
+            })
+            .await
+            .expect("list running processes");
+        if let Some(process) = processes
+            .iter()
+            .find(|process| process.identity.label.as_deref() == Some(label))
+        {
+            return process.process_id.clone();
+        }
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "timed out waiting for running process {label:?}; observed={processes:#?}"
+        );
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
 }
 
 async fn wait_for_named_running_processes(

@@ -201,6 +201,10 @@ impl RuntimeExecutionContext<'_> {
             .await;
         let output = match output {
             Ok(output) => output.into_tool_output(),
+            Err(crate::PluginError::RuntimeEffectController(err)) => {
+                self.record_nested_effect_error(err.clone());
+                ToolInvocationReply::error(json!(err.to_string())).output
+            }
             Err(err) => ToolInvocationReply::error(json!(err.to_string())).output,
         };
         Self::recorded_process_reply(

@@ -368,6 +368,32 @@ pub struct RestateDurableWaitSettleRequest {
 pub struct RestateDurableWaitAwakeableRequest {
     pub address: RestateDurableWaitAddress,
     pub awakeable_id: String,
+    #[serde(
+        default,
+        skip_serializing_if = "RestateDurableWaitAwakeableKind::is_resolution"
+    )]
+    kind: RestateDurableWaitAwakeableKind,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum RestateDurableWaitAwakeableKind {
+    #[default]
+    Resolution,
+    ProcessAwait,
+}
+
+impl RestateDurableWaitAwakeableKind {
+    fn is_resolution(&self) -> bool {
+        *self == Self::Resolution
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum RestateProcessAwaitWake {
+    TurnCancelled,
+    SessionRevoked,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, serde::Deserialize)]
@@ -390,6 +416,41 @@ struct RestateDurableWaitIndexMetadata {
     revoked: bool,
     #[serde(default)]
     awakeables: Vec<RestateDurableWaitAwakeableRequest>,
+}
+
+fn resolve_durable_wait_awakeable(
+    ctx: &ObjectContext<'_>,
+    request: &RestateDurableWaitAwakeableRequest,
+    resolution: Resolution,
+) {
+    match request.kind {
+        RestateDurableWaitAwakeableKind::Resolution => {
+            ctx.resolve_awakeable(&request.awakeable_id, Json(resolution));
+        }
+        RestateDurableWaitAwakeableKind::ProcessAwait => {
+            ctx.resolve_awakeable(
+                &request.awakeable_id,
+                Json(RestateProcessAwaitWake::TurnCancelled),
+            );
+        }
+    }
+}
+
+fn revoke_durable_wait_awakeable(
+    ctx: &ObjectContext<'_>,
+    request: &RestateDurableWaitAwakeableRequest,
+) {
+    match request.kind {
+        RestateDurableWaitAwakeableKind::Resolution => {
+            ctx.resolve_awakeable(&request.awakeable_id, Json(Resolution::Cancelled));
+        }
+        RestateDurableWaitAwakeableKind::ProcessAwait => {
+            ctx.resolve_awakeable(
+                &request.awakeable_id,
+                Json(RestateProcessAwaitWake::SessionRevoked),
+            );
+        }
+    }
 }
 
 fn restate_process_terminal_await_key(process_id: &str) -> Result<AwaitEventKey, RuntimeError> {
@@ -3163,7 +3224,7 @@ impl LashDurableWaitIndex for LashDurableWaitIndexImpl {
             .get::<Json<Resolution>>(&durable_wait_index_resolution_key(&request.address))
             .await?
         {
-            ctx.resolve_awakeable(&request.awakeable_id, Json(resolution));
+            resolve_durable_wait_awakeable(&ctx, &request, resolution);
             return Ok(Json(RestateDurableWaitRegistration::Registered));
         }
         let peek: restate_sdk::context::Request<'_, (), Json<Option<Resolution>>> =
@@ -3178,7 +3239,7 @@ impl LashDurableWaitIndex for LashDurableWaitIndexImpl {
             );
         let Json(resolution) = peek.call().await?;
         if let Some(resolution) = resolution {
-            ctx.resolve_awakeable(&request.awakeable_id, Json(resolution));
+            resolve_durable_wait_awakeable(&ctx, &request, resolution);
         } else if !metadata
             .awakeables
             .iter()
@@ -3240,7 +3301,7 @@ impl LashDurableWaitIndex for LashDurableWaitIndexImpl {
         let mut retained = Vec::with_capacity(metadata.awakeables.len());
         for entry in std::mem::take(&mut metadata.awakeables) {
             if entry.address == request.address {
-                ctx.resolve_awakeable(&entry.awakeable_id, Json(terminal.clone()));
+                resolve_durable_wait_awakeable(&ctx, &entry, terminal.clone());
             } else {
                 retained.push(entry);
             }
@@ -3272,7 +3333,7 @@ impl LashDurableWaitIndex for LashDurableWaitIndexImpl {
         ctx.clear_all();
         ctx.set(DURABLE_WAIT_INDEX_METADATA_KEY, Json(metadata));
         for entry in awakeables {
-            ctx.resolve_awakeable(&entry.awakeable_id, Json(Resolution::Cancelled));
+            revoke_durable_wait_awakeable(&ctx, &entry);
         }
         resolve_indexed_waits(&ctx, waits).await?;
         Ok(Json(()))
@@ -3454,6 +3515,7 @@ pub enum RestateAwaitEventRaceOutcome {
 pub enum RestateProcessAwaitRaceOutcome {
     Terminal(Box<ProcessAwaitOutput>),
     TurnCancelled,
+    SessionRevoked { session_id: String },
 }
 
 #[doc(hidden)]
@@ -3728,6 +3790,7 @@ macro_rules! impl_restate_controller_context {
                         let registration_request = RestateDurableWaitAwakeableRequest {
                             address: turn_cancel.address,
                             awakeable_id,
+                            kind: RestateDurableWaitAwakeableKind::default(),
                         };
                         let register: restate_sdk::context::Request<
                             '_,
@@ -4040,10 +4103,32 @@ macro_rules! impl_restate_controller_context {
                                 "turn cancellation gate is missing its session id",
                             ));
                         };
-                        let (awakeable_id, awakeable) = self.awakeable::<Json<Resolution>>();
+                        // `Request::call()` emits its CallCommand synchronously in
+                        // Restate SDK 0.10. Construct this call first so a suspended
+                        // pre-FIG-790 journal remains the exact prefix of every
+                        // redrive after the cancellation adjudicator was added.
+                        let process: restate_sdk::context::Request<
+                            '_,
+                            Json<RestateProcessAwaitRequest>,
+                            Json<ProcessAwaitOutput>,
+                        > = ContextClient::request(
+                            self,
+                            RequestTarget::workflow(
+                                "LashProcessWorkflow",
+                                process_id.clone(),
+                                "await_terminal",
+                            ),
+                            Json(RestateProcessAwaitRequest {
+                                process_id: process_id.clone(),
+                            }),
+                        );
+                        let process = process.call();
+                        let (awakeable_id, awakeable) =
+                            self.awakeable::<Json<RestateProcessAwaitWake>>();
                         let registration_request = RestateDurableWaitAwakeableRequest {
                             address: turn_cancel.address,
                             awakeable_id,
+                            kind: RestateDurableWaitAwakeableKind::ProcessAwait,
                         };
                         let register: restate_sdk::context::Request<
                             '_,
@@ -4060,24 +4145,21 @@ macro_rules! impl_restate_controller_context {
                         );
                         let Json(registration) = register.call().await?;
                         if registration == RestateDurableWaitRegistration::Revoked {
-                            return Ok(RestateProcessAwaitRaceOutcome::TurnCancelled);
+                            tracing::info!(
+                                target: "lash::restate",
+                                event = "restate.process_await_adjudicated",
+                                process_id = %process_id,
+                                registration_state = "revoked",
+                                winning_branch = "session_revoked",
+                                "Restate process-await adjudication"
+                            );
+                            return Ok(RestateProcessAwaitRaceOutcome::SessionRevoked {
+                                session_id,
+                            });
                         }
 
-                        let process: restate_sdk::context::Request<
-                            '_,
-                            Json<RestateProcessAwaitRequest>,
-                            Json<ProcessAwaitOutput>,
-                        > = ContextClient::request(
-                            self,
-                            RequestTarget::workflow(
-                                "LashProcessWorkflow",
-                                process_id.clone(),
-                                "await_terminal",
-                            ),
-                            Json(RestateProcessAwaitRequest { process_id }),
-                        );
                         restate_sdk::select! {
-                            result = process.call() => {
+                            result = process => {
                                 let Json(output) = result?;
                                 let unregister: restate_sdk::context::Request<
                                     '_,
@@ -4093,11 +4175,44 @@ macro_rules! impl_restate_controller_context {
                                     Json(registration_request),
                                 );
                                 let Json(()) = unregister.call().await?;
+                                tracing::info!(
+                                    target: "lash::restate",
+                                    event = "restate.process_await_adjudicated",
+                                    process_id = %process_id,
+                                    registration_state = "registered",
+                                    winning_branch = "process_terminal",
+                                    "Restate process-await adjudication"
+                                );
                                 Ok(RestateProcessAwaitRaceOutcome::Terminal(Box::new(output)))
                             },
                             result = awakeable => {
-                                let _ = result?;
-                                Ok(RestateProcessAwaitRaceOutcome::TurnCancelled)
+                                let Json(wake) = result?;
+                                match wake {
+                                    RestateProcessAwaitWake::TurnCancelled => {
+                                        tracing::info!(
+                                            target: "lash::restate",
+                                            event = "restate.process_await_adjudicated",
+                                            process_id = %process_id,
+                                            registration_state = "registered",
+                                            winning_branch = "turn_cancelled",
+                                            "Restate process-await adjudication"
+                                        );
+                                        Ok(RestateProcessAwaitRaceOutcome::TurnCancelled)
+                                    }
+                                    RestateProcessAwaitWake::SessionRevoked => {
+                                        tracing::info!(
+                                            target: "lash::restate",
+                                            event = "restate.process_await_adjudicated",
+                                            process_id = %process_id,
+                                            registration_state = "registered_then_revoked",
+                                            winning_branch = "session_revoked",
+                                            "Restate process-await adjudication"
+                                        );
+                                        Ok(RestateProcessAwaitRaceOutcome::SessionRevoked {
+                                            session_id,
+                                        })
+                                    }
+                                }
                             }
                         }
                     })
@@ -4590,9 +4705,7 @@ where
 {
     let execution = local_executor.into_process()?;
     let registry = execution.registry;
-    let cancellation = execution.cancellation;
-    let observe_turn_cancel = execution.observe_turn_cancel;
-    let turn_cancel_scope = execution.turn_cancel_scope;
+    let turn_cancellation = execution.turn_cancellation;
     match command {
         ProcessCommand::Start {
             registration,
@@ -4640,13 +4753,19 @@ where
             Ok(ProcessEffectOutcome::DeleteSession { report })
         }
         ProcessCommand::Await { process_id } => {
+            // FIG-788/FIG-793 class inventory: this guard is replay-safe only
+            // within the host's `prune_terminal_processes` retention window.
+            // The retention qualification is tracked there; do not turn this
+            // registry state into a new journal-shape branch in FIG-790.
             if registry.get_process(&process_id).await.is_none() {
                 return Err(PluginError::Session(format!("unknown process `{process_id}`")).into());
             }
             let turn_cancel = restate_process_turn_cancel_wait_request(
                 invocation,
-                observe_turn_cancel,
-                turn_cancel_scope.as_ref(),
+                turn_cancellation.is_some(),
+                turn_cancellation
+                    .as_ref()
+                    .map(|turn_cancellation| &turn_cancellation.scope),
             )?;
             let output = match context
                 .await_process_terminal_or_turn_cancel(process_id.clone(), turn_cancel)
@@ -4656,7 +4775,13 @@ where
                 })? {
                 RestateProcessAwaitRaceOutcome::Terminal(output) => *output,
                 RestateProcessAwaitRaceOutcome::TurnCancelled => {
-                    cancellation.cancel();
+                    let Some(turn_cancellation) = turn_cancellation.as_ref() else {
+                        return Err(RuntimeEffectControllerError::new(
+                            "restate_process_turn_cancel_context_missing",
+                            "process-await cancellation won without turn-cancellation context",
+                        ));
+                    };
+                    turn_cancellation.cancellation.cancel();
                     context
                         .request_process_workflow_cancel(RestateProcessCancelRequest {
                             process_id: process_id.clone(),
@@ -4676,6 +4801,9 @@ where
                                 err.to_string(),
                             )
                         })?
+                }
+                RestateProcessAwaitRaceOutcome::SessionRevoked { session_id } => {
+                    return Err(lash_core::StoreError::SessionDeleted { session_id }.into());
                 }
             };
             Ok(ProcessEffectOutcome::Await {
