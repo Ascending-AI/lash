@@ -20,7 +20,8 @@ mod endpoint_protocol;
 mod process_tool_replay;
 mod tool_context_conformance;
 use endpoint_protocol::{
-    encode_completed_sleep_replay, invoke_endpoint, invoke_endpoint_body,
+    encode_completed_sleep_replay, encode_pending_sleep_replay, invoke_endpoint,
+    invoke_endpoint_body, invoke_endpoint_body_open, invoke_endpoint_open,
     invoke_process_workflow_endpoint, restate_message_types,
 };
 
@@ -43,23 +44,44 @@ impl Future for PanicsWhenPolledAfterReady {
     }
 }
 
-struct PanicsWhenPolledAfterErrorWake {
-    polled: bool,
+struct CancelOnWake {
+    parent: Waker,
+    cancellation: tokio_util::sync::CancellationToken,
 }
 
-impl Future for PanicsWhenPolledAfterErrorWake {
-    type Output = ();
+impl std::task::Wake for CancelOnWake {
+    fn wake(self: Arc<Self>) {
+        self.cancellation.cancel();
+        self.parent.wake_by_ref();
+    }
 
-    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        assert!(!self.polled, "error-signalling future was re-polled");
-        self.polled = true;
-        cx.waker().wake_by_ref();
-        Poll::Pending
+    fn wake_by_ref(self: &Arc<Self>) {
+        self.cancellation.cancel();
+        self.parent.wake_by_ref();
     }
 }
 
+struct CancelOnWakeFuture<F> {
+    future: Pin<Box<F>>,
+    cancellation: tokio_util::sync::CancellationToken,
+}
+
+impl<F: Future> Future for CancelOnWakeFuture<F> {
+    type Output = F::Output;
+
+    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        let waker = Waker::from(Arc::new(CancelOnWake {
+            parent: cx.waker().clone(),
+            cancellation: self.cancellation.clone(),
+        }));
+        self.future.as_mut().poll(&mut Context::from_waker(&waker))
+    }
+}
+
+#[cfg(debug_assertions)]
 #[test]
-fn restate_context_futures_are_structurally_safe_after_ready() {
+#[should_panic(expected = "Restate context future was polled after it was fused")]
+fn restate_context_future_repoll_after_ready_trips_debug_assertion() {
     let mut future = Box::pin(guard_restate_context_future(PanicsWhenPolledAfterReady {
         completed: false,
     }));
@@ -70,31 +92,28 @@ fn restate_context_futures_are_structurally_safe_after_ready() {
     assert_eq!(future.as_mut().poll(&mut context), Poll::Pending);
 }
 
-#[tokio::test]
-async fn restate_context_future_sdk_error_wake_fails_attempt_instead_of_parking() {
-    let guarded = guard_restate_context_future(PanicsWhenPolledAfterErrorWake { polled: false });
-    let mut attempt = tokio::spawn(async move {
-        tokio::select! {
-            _ = guarded => {}
-            _ = std::future::pending::<()>() => {}
-        }
-    });
+#[cfg(not(debug_assertions))]
+#[test]
+fn restate_context_future_repoll_after_ready_stays_pending_in_release() {
+    let mut future = Box::pin(guard_restate_context_future(PanicsWhenPolledAfterReady {
+        completed: false,
+    }));
+    let waker = Waker::noop();
+    let mut context = Context::from_waker(waker);
 
-    let outcome = tokio::time::timeout(Duration::from_millis(100), &mut attempt).await;
-    if outcome.is_err() {
-        attempt.abort();
-    }
-    assert!(
-        matches!(outcome, Ok(Err(ref error)) if error.is_panic()),
-        "an SDK error wake must fail the handler attempt instead of parking it: {outcome:?}"
-    );
+    assert_eq!(future.as_mut().poll(&mut context), Poll::Ready(()));
+    assert_eq!(future.as_mut().poll(&mut context), Poll::Pending);
 }
 
 /// Restate service-protocol message types used by the FIG-779 gates.
 /// `restate_sdk_shared_core::service_protocol::header` keeps these private, so
-/// they are restated here (`SleepCommand = 0x040C`, `Suspension = 0x0001`).
+/// they are restated here (`SleepCommand = 0x040C`, `Suspension = 0x0001`,
+/// `CompletePromiseCommand = 0x040B`, `OutputCommand = 0x0401`, `End = 0x0003`).
 const RESTATE_SLEEP_COMMAND_MESSAGE_TYPE: u16 = 0x040C;
 const RESTATE_SUSPENSION_MESSAGE_TYPE: u16 = 0x0001;
+const RESTATE_COMPLETE_PROMISE_COMMAND_MESSAGE_TYPE: u16 = 0x040B;
+const RESTATE_OUTPUT_COMMAND_MESSAGE_TYPE: u16 = 0x0401;
+const RESTATE_END_MESSAGE_TYPE: u16 = 0x0003;
 
 #[derive(Debug, Serialize, serde::Deserialize)]
 struct Fig779TimerGuardReproInput {
@@ -108,15 +127,26 @@ trait Fig779TimerGuardRepro {
     async fn run(input: Json<Fig779TimerGuardReproInput>) -> HandlerResult<Json<()>>;
 
     async fn raw_sleep(input: Json<Fig779TimerGuardReproInput>) -> HandlerResult<Json<()>>;
+
+    async fn cancel_on_suspend_wake(
+        input: Json<Fig779TimerGuardReproInput>,
+    ) -> HandlerResult<Json<()>>;
+
+    async fn cancel_before_sleep(
+        input: Json<Fig779TimerGuardReproInput>,
+    ) -> HandlerResult<Json<()>>;
+
+    async fn repoll_fused_timer(input: Json<Fig779TimerGuardReproInput>)
+    -> HandlerResult<Json<()>>;
 }
 
 struct Fig779TimerGuardReproImpl;
 
 impl Fig779TimerGuardRepro for Fig779TimerGuardReproImpl {
-    /// The production geometry that panics: `turn_cancel == None`, which is what
-    /// every sleep inside a process body uses (process runners call
-    /// `without_turn_cancel_observation`). That branch guards `ctx.sleep()` with
-    /// `RestateContextFuture` inside a `tokio::select!`.
+    /// The production geometry repaired by FIG-779: `turn_cancel == None`,
+    /// which is what every sleep inside a process body uses (process runners
+    /// call `without_turn_cancel_observation`). That branch guards `ctx.sleep()`
+    /// with `RestateContextFuture` inside the timer/cancellation race.
     async fn run(
         &self,
         ctx: WorkflowContext<'_>,
@@ -143,31 +173,178 @@ impl Fig779TimerGuardRepro for Fig779TimerGuardReproImpl {
             .await?;
         Ok(Json(()))
     }
+
+    async fn cancel_on_suspend_wake(
+        &self,
+        ctx: WorkflowContext<'_>,
+        Json(input): Json<Fig779TimerGuardReproInput>,
+    ) -> HandlerResult<Json<()>> {
+        let cancellation = tokio_util::sync::CancellationToken::new();
+        let race = RestateControllerContext::sleep_or_turn_cancel(
+            &ctx,
+            Duration::from_millis(input.duration_ms),
+            None,
+            cancellation.clone(),
+        );
+        CancelOnWakeFuture {
+            future: Box::pin(race),
+            cancellation,
+        }
+        .await?;
+        Ok(Json(()))
+    }
+
+    async fn cancel_before_sleep(
+        &self,
+        ctx: WorkflowContext<'_>,
+        Json(input): Json<Fig779TimerGuardReproInput>,
+    ) -> HandlerResult<Json<()>> {
+        let cancellation = tokio_util::sync::CancellationToken::new();
+        cancellation.cancel();
+        let outcome = RestateControllerContext::sleep_or_turn_cancel(
+            &ctx,
+            Duration::from_millis(input.duration_ms),
+            None,
+            cancellation,
+        )
+        .await?;
+        assert!(matches!(outcome, RestateSleepRaceOutcome::Cancelled));
+        Ok(Json(()))
+    }
+
+    async fn repoll_fused_timer(
+        &self,
+        ctx: WorkflowContext<'_>,
+        Json(input): Json<Fig779TimerGuardReproInput>,
+    ) -> HandlerResult<Json<()>> {
+        let timer = guard_restate_context_future(restate_sdk::context::ContextTimers::sleep(
+            &ctx,
+            Duration::from_millis(input.duration_ms),
+        ));
+        tokio::pin!(timer);
+        std::future::poll_fn(|cx| {
+            assert!(matches!(timer.as_mut().poll(cx), Poll::Pending));
+            let _ = timer.as_mut().poll(cx);
+            Poll::Ready(())
+        })
+        .await;
+        Ok(Json(()))
+    }
+}
+
+struct Fig779DurableCancelTransport {
+    registry: Arc<dyn ProcessRegistry>,
+    process_id: String,
+}
+
+impl std::fmt::Debug for Fig779DurableCancelTransport {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("Fig779DurableCancelTransport")
+            .field("process_id", &self.process_id)
+            .finish_non_exhaustive()
+    }
+}
+
+#[async_trait::async_trait]
+impl HttpTransport for Fig779DurableCancelTransport {
+    async fn send(
+        &self,
+        _request: HttpRequest,
+        _timeout: Option<Duration>,
+    ) -> Result<HttpResponse, HttpTransportError> {
+        let cancellation_is_durable = self
+            .registry
+            .events_after(&self.process_id, 0)
+            .await
+            .map_err(|error| HttpTransportError::new(error.to_string()))?
+            .iter()
+            .any(|event| event.event_type == "process.cancel_requested");
+        if !cancellation_is_durable {
+            return std::future::pending().await;
+        }
+        Ok(HttpResponse {
+            status: 200,
+            headers: vec![("content-type".to_string(), "application/json".to_string())],
+            body: HttpResponseBody::buffered(r#""cancel_requested""#),
+        })
+    }
+}
+
+#[derive(Debug)]
+struct Fig779SuspendingProcessRunner;
+
+#[async_trait::async_trait]
+impl RestateProcessRunner for Fig779SuspendingProcessRunner {
+    async fn run_process_segment(
+        &self,
+        registration: ProcessRegistration,
+        _execution_context: ProcessExecutionContext,
+        scoped_effect_controller: ScopedEffectController<'_>,
+        _handover: Option<lash_core::SegmentHandover>,
+        cancellation: tokio_util::sync::CancellationToken,
+    ) -> Result<lash_core::ProcessRunOutcome, PluginError> {
+        let outcome = scoped_effect_controller
+            .controller()
+            .execute_effect(
+                RuntimeEffectEnvelope::new(
+                    runtime_invocation(RuntimeEffectKind::Sleep, "fig779-redrive-sleep"),
+                    RuntimeEffectCommand::Sleep {
+                        duration_ms: 60_000,
+                    },
+                ),
+                RuntimeEffectLocalExecutor::sleep(cancellation.clone())
+                    .with_turn_cancel_observation(false),
+            )
+            .await;
+        match outcome {
+            Ok(RuntimeEffectOutcome::Sleep) => Ok(ProcessAwaitOutput::Success {
+                value: serde_json::Value::Null,
+                control: None,
+            }
+            .into()),
+            Err(_) if cancellation.is_cancelled() => Ok(ProcessAwaitOutput::Cancelled {
+                message: format!(
+                    "process `{}` observed durable cancellation",
+                    registration.id
+                ),
+                raw: None,
+                control: None,
+            }
+            .into()),
+            Err(error) => Err(PluginError::Session(error.to_string())),
+            Ok(other) => Err(PluginError::Session(format!(
+                "unexpected sleep outcome: {other:?}"
+            ))),
+        }
+    }
+
+    async fn request_process_cancel(
+        &self,
+        _request: RestateProcessCancelRequest,
+    ) -> Result<(), PluginError> {
+        Ok(())
+    }
 }
 
 /// FIG-779 repro. A not-yet-completed durable timer is an SDK-legitimate
 /// synchronous-wake-then-Pending state — it is exactly how the SDK signals a
-/// durable suspension — but `RestateContextFuture` panics on it
-/// (`crates/lash-restate/src/lib.rs:148`).
+/// durable suspension. `RestateContextFuture` must fuse that resolved inner
+/// future and yield so the SDK's handler-state wrapper writes the suspension.
 ///
 /// This drives the real Restate endpoint, context, VM, and `ctx.sleep()`
 /// future. The invocation body is complete (no further frames), so the VM's
 /// input is closed; `DoProgress` then hits its suspension condition, the sleep
 /// resolves as `Err(Suspended)`, `DurableFutureImpl` records the state, wakes
-/// synchronously and returns `Pending`, and the Lash guard panics instead of
-/// yielding. Restate closes the request stream the same way whenever it parks
-/// an invocation on a pending timer.
-///
-/// Ignored because it necessarily panics until the guard is fixed; drop the
-/// `#[ignore]` with the fix.
+/// synchronously and returns `Pending`. Restate closes the request stream the
+/// same way whenever it parks an invocation on a pending timer.
 #[tokio::test]
-#[ignore = "FIG-779 repro: panics at crates/lash-restate/src/lib.rs:148 until the guard is fixed"]
-async fn fig779_pending_durable_timer_suspension_panics_in_guard() {
+async fn fig779_pending_durable_timer_suspends_through_guard() {
     let endpoint = Endpoint::builder()
         .bind(Fig779TimerGuardReproImpl.serve())
         .build();
 
-    invoke_endpoint(
+    let output = invoke_endpoint(
         &endpoint,
         "Fig779TimerGuardRepro",
         "run",
@@ -176,6 +353,179 @@ async fn fig779_pending_durable_timer_suspension_panics_in_guard() {
     )
     .await
     .expect("pending durable timer invocation should suspend without panicking");
+    let message_types = restate_message_types(&output).expect("decode Restate response frames");
+    assert_eq!(
+        message_types,
+        vec![
+            RESTATE_SLEEP_COMMAND_MESSAGE_TYPE,
+            RESTATE_SUSPENSION_MESSAGE_TYPE
+        ],
+        "the attempt must end as a suspension, not a failed-attempt conversion"
+    );
+}
+
+/// Once the SDK records suspension, its one-shot handler state is terminal for
+/// the attempt. A cancellation made ready by that same synchronous wake must
+/// not let the sibling race return `Cancelled` before the SDK consumes the
+/// suspension. Conversely, cancellation observed while the timer is genuinely
+/// pending and unfused wins after the timer command has been journaled.
+#[tokio::test]
+async fn fig779_sleep_suspension_and_cancellation_preserve_recorded_precedence() {
+    let endpoint = Endpoint::builder()
+        .bind(Fig779TimerGuardReproImpl.serve())
+        .build();
+    let input = Fig779TimerGuardReproInput { duration_ms: 2_000 };
+
+    let suspended = invoke_endpoint(
+        &endpoint,
+        "Fig779TimerGuardRepro",
+        "cancel_on_suspend_wake",
+        "fig779-cancel-on-suspend",
+        &input,
+    )
+    .await
+    .expect("same-poll cancellation must preserve the recorded suspension");
+    assert_eq!(
+        restate_message_types(&suspended).expect("decode suspended race frames"),
+        vec![
+            RESTATE_SLEEP_COMMAND_MESSAGE_TYPE,
+            RESTATE_SUSPENSION_MESSAGE_TYPE
+        ]
+    );
+
+    let cancelled = invoke_endpoint_open(
+        &endpoint,
+        "Fig779TimerGuardRepro",
+        "cancel_before_sleep",
+        "fig779-cancel-before-sleep",
+        &input,
+    )
+    .await
+    .expect("pre-existing cancellation should complete after journaling the timer");
+    assert_eq!(
+        restate_message_types(&cancelled).expect("decode cancelled race frames"),
+        vec![
+            RESTATE_SLEEP_COMMAND_MESSAGE_TYPE,
+            RESTATE_OUTPUT_COMMAND_MESSAGE_TYPE,
+            RESTATE_END_MESSAGE_TYPE
+        ]
+    );
+}
+
+#[tokio::test]
+async fn fig779_suspended_process_redrive_observes_durable_cancellation() {
+    let process_id = "fig779-durable-cancel-redrive";
+    let registry = process_registry();
+    let registration = rerunnable_registration(process_id);
+    registry
+        .register_process(registration.clone())
+        .await
+        .expect("register redrive process");
+    let cancel_ingress = RestateIngressClient::new(RestateConnection::with_transport(
+        "https://restate.invalid",
+        Arc::new(Fig779DurableCancelTransport {
+            registry: Arc::clone(&registry),
+            process_id: process_id.to_string(),
+        }),
+    ));
+    let endpoint = Endpoint::builder()
+        .bind(
+            LashProcessWorkflowImpl::new(
+                Arc::new(Fig779SuspendingProcessRunner),
+                Arc::clone(&registry),
+                cancel_ingress,
+            )
+            .serve(),
+        )
+        .build();
+    let input = RestateProcessWorkflowInput {
+        registration,
+        execution_context: ProcessExecutionContext::default(),
+        segment_ordinal: 0,
+        execution_id: None,
+    };
+
+    let suspended = invoke_endpoint(&endpoint, "LashProcessWorkflow", "run", process_id, &input)
+        .await
+        .expect("first process attempt should suspend on its durable timer");
+    assert_eq!(
+        restate_message_types(&suspended).expect("decode suspended process frames"),
+        vec![
+            RESTATE_SLEEP_COMMAND_MESSAGE_TYPE,
+            RESTATE_SUSPENSION_MESSAGE_TYPE
+        ]
+    );
+
+    registry
+        .append_event(
+            process_id,
+            lash_core::ProcessEventAppendRequest::cancel_requested(
+                process_id,
+                Some("cancel while suspended".to_string()),
+            ),
+        )
+        .await
+        .expect("record durable process cancellation");
+    let replay = encode_pending_sleep_replay(process_id, &input, &suspended)
+        .expect("encode suspended process redrive");
+    let cancelled = invoke_endpoint_body_open(&endpoint, "LashProcessWorkflow", "run", replay)
+        .await
+        .expect("redrive should replay the timer command before observing cancellation");
+    assert_eq!(
+        restate_message_types(&cancelled).expect("decode cancelled redrive frames"),
+        vec![
+            RESTATE_COMPLETE_PROMISE_COMMAND_MESSAGE_TYPE,
+            RESTATE_COMPLETE_PROMISE_COMMAND_MESSAGE_TYPE,
+            RESTATE_OUTPUT_COMMAND_MESSAGE_TYPE,
+            RESTATE_END_MESSAGE_TYPE
+        ]
+    );
+    assert!(matches!(
+        registry
+            .get_process(process_id)
+            .await
+            .expect("read redriven process")
+            .status
+            .await_output(),
+        Some(ProcessAwaitOutput::Cancelled { .. })
+    ));
+}
+
+/// PR #78's synthetic re-poll defense is re-scoped to the fused-state boundary.
+/// In debug builds a manual second poll trips the assertion before reaching the
+/// SDK future; release builds return `Pending` so an SDK reordering cannot turn
+/// this guard back into a production outage.
+#[cfg(debug_assertions)]
+#[tokio::test]
+async fn fig779_real_restate_timer_repoll_hits_debug_assertion() {
+    let endpoint = Endpoint::builder()
+        .bind(Fig779TimerGuardReproImpl.serve())
+        .build();
+    let attempt = tokio::spawn(async move {
+        invoke_endpoint(
+            &endpoint,
+            "Fig779TimerGuardRepro",
+            "repoll_fused_timer",
+            "fig779-repoll-fused-timer",
+            &Fig779TimerGuardReproInput { duration_ms: 2_000 },
+        )
+        .await
+    });
+
+    let error = attempt
+        .await
+        .expect_err("re-polling the real fused wrapper must trip the debug assertion");
+    assert!(error.is_panic(), "expected a panic join error: {error:?}");
+    let payload = error.into_panic();
+    let message = payload
+        .downcast_ref::<&str>()
+        .copied()
+        .or_else(|| payload.downcast_ref::<String>().map(String::as_str))
+        .expect("debug assertion panic payload should be text");
+    assert!(
+        message.contains("Restate context future was polled after it was fused"),
+        "the guard assertion must be the panic source: {message}"
+    );
 }
 
 /// FIG-779 contrast: an already-completed timer replays straight to `Ready`, so
@@ -4904,7 +5254,7 @@ async fn persisted_handover_is_change_feed_and_event_invariant() {
 }
 
 #[tokio::test]
-async fn segment_program_hash_mismatch_is_typed_and_cancel_skips_successor_engine() {
+async fn segment_program_hash_mismatch_is_typed_and_cancel_redrives_successor_engine() {
     let mismatch = validate_segment_program_hash(
         "hash-bound",
         lash_core::PersistedSegmentHandover {
@@ -4960,7 +5310,7 @@ async fn segment_program_hash_mismatch_is_typed_and_cancel_skips_successor_engin
                 program_hash: Some("program-v1".to_string()),
                 engine_state: vec![1],
             }),
-            pending_process_cancel_signal(),
+            async { Ok(()) },
         )
         .await
         .expect("cancelled successor");
@@ -4969,7 +5319,11 @@ async fn segment_program_hash_mismatch_is_typed_and_cancel_skips_successor_engin
         lash_core::ProcessRunOutcome::Terminal(output)
             if matches!(*output, ProcessAwaitOutput::Cancelled { .. })
     ));
-    assert_eq!(runner.runs.load(Ordering::SeqCst), 0);
+    assert_eq!(
+        runner.runs.load(Ordering::SeqCst),
+        1,
+        "the cancelled successor must still be driven for replay-consistent command emission"
+    );
 }
 
 #[test]

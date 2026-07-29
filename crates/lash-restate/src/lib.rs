@@ -110,15 +110,20 @@ pub use restate_sdk;
 
 /// Fuse a Restate context future across both of its terminal poll shapes.
 ///
-/// `DurableFutureImpl` returns `Ready` on success, but after an internal error
-/// it marks the handler failed, synchronously wakes the task, and returns
-/// `Pending`. Its inner `Map` is already complete in that second shape and
-/// panics if select teardown polls it again, so an ordinary `FutureExt::fuse`
-/// cannot guard it. Stop polling after `Ready`; if the future synchronously
-/// wakes and returns `Pending`, fail the handler attempt immediately so an
-/// entry-scoped SDK error cannot be left recorded behind a parked outer future.
+/// `DurableFutureImpl` returns `Ready` on success. When the SDK records a
+/// terminal handler state (including a genuine suspension), it synchronously
+/// wakes the task and returns `Pending`; the SDK's outer
+/// `HandlerStateAwareFuture` consumes that state on the next poll. In both
+/// shapes the SDK future has produced its terminal outcome for this attempt and
+/// must never be polled again.
 struct RestateContextFuture<F> {
     future: Option<Pin<Box<F>>>,
+}
+
+impl<F> RestateContextFuture<F> {
+    fn is_fused(&self) -> bool {
+        self.future.is_none()
+    }
 }
 
 impl<F> Future for RestateContextFuture<F>
@@ -129,6 +134,10 @@ where
 
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let Some(future) = self.future.as_mut() else {
+            debug_assert!(
+                self.future.is_some(),
+                "Restate context future was polled after it was fused"
+            );
             return Poll::Pending;
         };
         let tracker = Arc::new(SynchronousWakeTracker {
@@ -142,12 +151,8 @@ where
         let result = future.as_mut().poll(&mut tracked_context);
         tracker.polling.store(false, Ordering::Release);
 
-        if result.is_ready() {
+        if result.is_ready() || tracker.woke_during_poll.load(Ordering::Acquire) {
             self.future = None;
-        } else if tracker.woke_during_poll.load(Ordering::Acquire) {
-            panic!(
-                "Restate context future returned Pending after a synchronous wake; failing the handler attempt"
-            );
         }
         result
     }
@@ -2155,22 +2160,6 @@ where
                 "process `{process_id}` segment {segment_ordinal} omitted its validated handover"
             ))));
         }
-        if self
-            .process_cancel_requested(&process_id)
-            .await
-            .map_err(retryable_registry_error)?
-        {
-            let output = ProcessAwaitOutput::Cancelled {
-                message: format!("process `{process_id}` was cancelled"),
-                raw: None,
-                control: None,
-            };
-            let output = self
-                .complete_with_stored_outcome(&process_id, output)
-                .await
-                .map_err(retryable_registry_error)?;
-            return Ok(output.into());
-        }
         let cancellation = tokio_util::sync::CancellationToken::new();
         let runner = self.runner.run_process_segment(
             registration,
@@ -3470,6 +3459,13 @@ pub trait RestateControllerContext<'ctx>: Send + Sync + 'ctx {
     where
         'ctx: 'run;
 
+    /// Race a sleep against cancellation.
+    ///
+    /// Implementations backed by a real Restate SDK context MUST override this
+    /// method and obey the SDK suspension protocol: journal the timer
+    /// deterministically, fuse terminal wake-then-`Pending` futures, and poll
+    /// the timer before cancellation. The default is only suitable for
+    /// non-SDK test contexts.
     fn sleep_or_turn_cancel<'run>(
         &'run self,
         duration: Duration,
@@ -3636,16 +3632,43 @@ macro_rules! impl_restate_controller_context {
                 {
                     Box::pin(async move {
                         let Some(turn_cancel) = turn_cancel else {
+                            // `sleep()` journals `sys_sleep` synchronously at
+                            // construction. Construct it unconditionally so
+                            // every replay emits the same command.
                             let timer = guard_restate_context_future(
                                 restate_sdk::context::ContextTimers::sleep(self, duration),
                             );
+                            let cancelled = cancellation.cancelled();
                             tokio::pin!(timer);
-                            return tokio::select! {
-                                result = &mut timer => {
-                                    result.map(|()| RestateSleepRaceOutcome::Slept)
+                            tokio::pin!(cancelled);
+                            return std::future::poll_fn(|cx| {
+                                // Poll the timer first on every cycle. A
+                                // recorded suspension fuses the timer and wins
+                                // immediately; HandlerStateAwareFuture must
+                                // consume it before cancellation is polled.
+                                match timer.as_mut().poll(cx) {
+                                    Poll::Ready(result) => Poll::Ready(
+                                        result.map(|()| RestateSleepRaceOutcome::Slept),
+                                    ),
+                                    Poll::Pending if timer.as_ref().get_ref().is_fused() => {
+                                        Poll::Pending
+                                    }
+                                    Poll::Pending => match cancelled.as_mut().poll(cx) {
+                                        Poll::Ready(()) => {
+                                            // The sleep is already journaled,
+                                            // but OutputCommand + End makes
+                                            // this attempt terminal, so no
+                                            // replay can observe the stray
+                                            // timer command.
+                                            Poll::Ready(Ok(
+                                                RestateSleepRaceOutcome::Cancelled,
+                                            ))
+                                        }
+                                        Poll::Pending => Poll::Pending,
+                                    },
                                 }
-                                _ = cancellation.cancelled() => Ok(RestateSleepRaceOutcome::Cancelled),
-                            };
+                            })
+                            .await;
                         };
 
                         let Some(session_id) = turn_cancel.address.session_id.clone() else {

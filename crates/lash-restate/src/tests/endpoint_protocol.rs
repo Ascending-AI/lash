@@ -68,6 +68,39 @@ fn encode_invocation_body<T: serde::Serialize>(
     Ok(body.freeze())
 }
 
+fn restate_message_frame(input: &[u8], expected_type: u16) -> Option<&[u8]> {
+    let mut cursor = 0;
+    while cursor < input.len() {
+        let header = u64::from_be_bytes(input.get(cursor..cursor + 8)?.try_into().ok()?);
+        let message_type = (header >> 48) as u16;
+        let payload_len = usize::try_from(header & 0x0000_FFFF_FFFF_FFFF).ok()?;
+        let frame_end = cursor.checked_add(8 + payload_len)?;
+        let frame = input.get(cursor..frame_end)?;
+        if message_type == expected_type {
+            return Some(frame);
+        }
+        cursor = frame_end;
+    }
+    None
+}
+
+/// FIG-779: redrive an invocation whose journal already contains the exact
+/// `SleepCommand` emitted by its suspended attempt, but no timer completion.
+pub(super) fn encode_pending_sleep_replay<T: serde::Serialize>(
+    workflow_key: &str,
+    input: &T,
+    suspended_output: &[u8],
+) -> Result<Bytes, TerminalError> {
+    let input = serde_json::to_vec(input).map_err(TerminalError::from_error)?;
+    let sleep_command = restate_message_frame(suspended_output, 0x040C)
+        .ok_or_else(|| TerminalError::new("suspended attempt omitted its SleepCommand"))?;
+    let mut body = BytesMut::new();
+    body.extend_from_slice(&encode_start_message(workflow_key, 2));
+    body.extend_from_slice(&encode_input_command(&input));
+    body.extend_from_slice(sleep_command);
+    Ok(body.freeze())
+}
+
 /// FIG-779: `SleepCommand` (0x040C) carrying only `wake_up_time` and its
 /// completion id, as the SDK writes it for `ctx.sleep()`.
 fn encode_sleep_command(completion_id: u32) -> Bytes {
@@ -168,7 +201,30 @@ fn encode_run_completion(completion_id: u32, value: &[u8]) -> Bytes {
     encode_restate_message(0x8011, notification.to_vec())
 }
 
+const ENDPOINT_TEST_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(2);
+
 pub(super) async fn invoke_process_workflow_endpoint<T: serde::Serialize>(
+    endpoint: &Endpoint,
+    handler: &str,
+    workflow_key: &str,
+    input: &T,
+    complete_runs: bool,
+) -> Result<Bytes, TerminalError> {
+    tokio::time::timeout(
+        ENDPOINT_TEST_TIMEOUT,
+        invoke_process_workflow_endpoint_unbounded(
+            endpoint,
+            handler,
+            workflow_key,
+            input,
+            complete_runs,
+        ),
+    )
+    .await
+    .map_err(|_| TerminalError::new("workflow endpoint test timed out"))?
+}
+
+async fn invoke_process_workflow_endpoint_unbounded<T: serde::Serialize>(
     endpoint: &Endpoint,
     handler: &str,
     workflow_key: &str,
@@ -285,6 +341,109 @@ pub(super) async fn invoke_endpoint<T: serde::Serialize>(
 }
 
 pub(super) async fn invoke_endpoint_body(
+    endpoint: &Endpoint,
+    service: &str,
+    handler: &str,
+    body: Bytes,
+) -> Result<Bytes, TerminalError> {
+    tokio::time::timeout(
+        ENDPOINT_TEST_TIMEOUT,
+        invoke_endpoint_body_unbounded(endpoint, service, handler, body),
+    )
+    .await
+    .map_err(|_| TerminalError::new("endpoint test timed out"))?
+}
+
+pub(super) async fn invoke_endpoint_open<T: serde::Serialize>(
+    endpoint: &Endpoint,
+    service: &str,
+    handler: &str,
+    key: &str,
+    input: &T,
+) -> Result<Bytes, TerminalError> {
+    invoke_endpoint_body_open(
+        endpoint,
+        service,
+        handler,
+        encode_invocation_body(key, input)?,
+    )
+    .await
+}
+
+pub(super) async fn invoke_endpoint_body_open(
+    endpoint: &Endpoint,
+    service: &str,
+    handler: &str,
+    body: Bytes,
+) -> Result<Bytes, TerminalError> {
+    tokio::time::timeout(
+        ENDPOINT_TEST_TIMEOUT,
+        invoke_endpoint_body_open_unbounded(endpoint, service, handler, body),
+    )
+    .await
+    .map_err(|_| TerminalError::new("open-input endpoint test timed out"))?
+}
+
+async fn invoke_endpoint_body_open_unbounded(
+    endpoint: &Endpoint,
+    service: &str,
+    handler: &str,
+    invocation_body: Bytes,
+) -> Result<Bytes, TerminalError> {
+    let (mut input_sender, body) = Channel::<Bytes, Infallible>::new(4);
+    input_sender
+        .send_data(invocation_body)
+        .await
+        .map_err(|err| TerminalError::new(format!("endpoint input failed: {err}")))?;
+    let mut input_sender = Some(input_sender);
+    let response = endpoint.handle(
+        http::Request::builder()
+            .uri(format!("/invoke/{service}/{handler}"))
+            .header(http::header::CONTENT_TYPE, RESTATE_INVOCATION_CONTENT_TYPE)
+            .body(body)
+            .expect("endpoint invocation request"),
+    );
+    let status = response.status();
+    if !status.is_success() {
+        return Err(TerminalError::new_with_code(
+            status.as_u16(),
+            format!("endpoint invocation returned status {status}"),
+        ));
+    }
+    let mut response = response.into_body();
+    let mut output = BytesMut::new();
+    let mut decoded = 0;
+    while let Some(frame) = response.frame().await {
+        let frame =
+            frame.map_err(|err| TerminalError::new(format!("endpoint body failed: {err}")))?;
+        let Ok(data) = frame.into_data() else {
+            continue;
+        };
+        output.extend_from_slice(&data);
+        while output.len().saturating_sub(decoded) >= 8 {
+            let header = u64::from_be_bytes(
+                output[decoded..decoded + 8]
+                    .try_into()
+                    .expect("restate frame header"),
+            );
+            let message_type = (header >> 48) as u16;
+            let payload_len = usize::try_from(header & 0x0000_FFFF_FFFF_FFFF)
+                .expect("restate frame payload length");
+            let frame_end = decoded + 8 + payload_len;
+            if output.len() < frame_end {
+                break;
+            }
+            if matches!(message_type, 0x0002 | 0x0003) {
+                drop(input_sender.take());
+            }
+            decoded = frame_end;
+        }
+    }
+    drop(input_sender);
+    Ok(output.freeze())
+}
+
+async fn invoke_endpoint_body_unbounded(
     endpoint: &Endpoint,
     service: &str,
     handler: &str,
