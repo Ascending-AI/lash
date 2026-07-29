@@ -179,7 +179,11 @@ below the receiver's high-water mark. Enqueue checks that structural
 `(process_id, sequence)` tuple, then the live source-key row, under the same
 source advisory lock as completion; it never parses correctness data from the
 source-key string. PostgreSQL bounds that lock wait and reports timeout as
-retryable contention. There is no evidence cleanup or compensation lane. The
+retryable contention. There is no evidence cleanup or compensation lane. Because the receiver mark
+survives sender-side pruning while event sequences restart per registration,
+process ids must not be reused across prune horizons: a re-registered pruned
+id would emit wakes at or below the retained mark and have them absorbed as
+duplicates. Hosts mint fresh process ids instead. The
 mark survives sender-process pruning and is deleted only with its target
 session.
 

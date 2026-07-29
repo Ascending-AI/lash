@@ -178,6 +178,13 @@ pub trait ProcessRegistry: Send + Sync {
         None
     }
 
+    /// Process ids must be unique across prune horizons. A receiver's consumed
+    /// wake high-water mark deliberately survives sender-side pruning, and event
+    /// sequences restart for a re-registered id, so re-registering a previously
+    /// pruned process id would have its wakes silently absorbed below the
+    /// retained mark. Hosts mint fresh process ids rather than reusing pruned
+    /// ones (the ADR 0049 single-use rule for sessions applies to process ids
+    /// at the prune horizon).
     async fn register_process(
         &self,
         registration: ProcessRegistration,
