@@ -208,9 +208,9 @@
 
     .trigger-registry-head,
     .trigger-registration {
-      display: flex;
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
       align-items: center;
-      justify-content: space-between;
       gap: var(--space-xs);
     }
 
@@ -232,8 +232,25 @@
     }
 
     .trigger-registration[data-enabled="false"] { opacity: 0.58; }
-    .trigger-registration-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
-    .trigger-registration-actions { display: flex; gap: var(--space-3xs); flex: none; }
+    .trigger-registration-name,
+    .trigger-registration-detail {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .trigger-registration-name { min-width: 0; }
+    .trigger-registration-detail {
+      grid-column: 1 / -1;
+      grid-row: 2;
+      color: var(--ash-text);
+      font-size: 0.64rem;
+    }
+    .trigger-registration-actions {
+      display: flex;
+      grid-column: 2;
+      grid-row: 1;
+      gap: var(--space-3xs);
+    }
     .trigger-registration-actions button {
       border: 1px solid var(--line);
       border-radius: 5px;
@@ -3375,6 +3392,119 @@
       } catch (_) { /* polling retries */ }
     }
 
+    // BEGIN WORKBENCH_TRIGGER_REGISTRATION_PROJECTION
+    function triggerRegistrationSourceConfig(registration) {
+      const source = registration.source;
+      if (!source || typeof source !== "object" || Array.isArray(source)) return null;
+      const descriptorValue = source.$lash_host_descriptor_value;
+      if (descriptorValue && typeof descriptorValue === "object" && !Array.isArray(descriptorValue)) {
+        return descriptorValue;
+      }
+      return source;
+    }
+
+    function triggerRegistrationSourceSummary(registration) {
+      const config = triggerRegistrationSourceConfig(registration);
+      if (!config) return "";
+      if (typeof config.expr === "string") {
+        if (registration.source_type === "cron.Schedule") {
+          const everySeconds = config.expr.match(/^\*\/(\d+) \* \* \* \* \*$/);
+          if (everySeconds) return "every " + everySeconds[1] + "s";
+        }
+        return typeof config.tz === "string" && config.tz
+          ? config.expr + " · " + config.tz
+          : config.expr;
+      }
+      const entries = Object.entries(config)
+        .filter(([key, value]) => !key.startsWith("$") && ["string", "number", "boolean"].includes(typeof value));
+      const summary = entries
+        .slice(0, 2)
+        .map(([key, value]) => key + " " + String(value))
+        .join(" · ");
+      return summary + (entries.length > 2 ? " · …" : "");
+    }
+
+    function truncateTriggerDetail(value, length) {
+      if (!value) return "unknown";
+      return value.length <= length ? value : value.slice(0, length) + "…";
+    }
+
+    // Tail truncation keeps the distinguishing suffix of namespaced values
+    // (session:<id>, derived/v1/<digest>, vN:<digest>); head truncation of
+    // those renders the constant prefix and makes every row look identical.
+    function truncateTriggerDetailTail(value, length) {
+      if (!value) return "unknown";
+      return value.length <= length ? value : "…" + value.slice(-length);
+    }
+
+    function truncateSubscriptionId(value) {
+      const prefix = "trigger-subscription:v1:sha256:";
+      if (!value) return "unknown";
+      if (value.startsWith(prefix)) {
+        return "sha256:" + truncateTriggerDetail(value.slice(prefix.length), 10);
+      }
+      return truncateTriggerDetailTail(value, 12);
+    }
+
+    function truncateSubscriptionKey(value) {
+      const derivedPrefix = "derived/v1/";
+      if (!value) return "unknown";
+      if (value.startsWith(derivedPrefix)) {
+        return "v1/" + truncateTriggerDetail(value.slice(derivedPrefix.length), 10);
+      }
+      // Author-supplied keys are human names whose head is the distinct part.
+      return truncateTriggerDetail(value, 12);
+    }
+
+    function truncateTriggerScope(value) {
+      if (!value) return "unknown";
+      const split = value.indexOf(":");
+      if (split < 0) return truncateTriggerDetail(value, 18);
+      const namespace = value.slice(0, split + 1);
+      const rest = value.slice(split + 1);
+      return namespace + (rest.length <= 10 ? rest : "…" + rest.slice(-8));
+    }
+
+    function triggerRegistrationScope(registration) {
+      const scope = registration.registrant_scope || "";
+      return scope
+        || (registration.registrant?.scope?.session_id
+          ? "session:" + registration.registrant.scope.session_id
+          : "")
+        || "unknown";
+    }
+
+    function triggerRegistrationRowModel(registration) {
+      const processName = registration.target?.label
+        || registration.target?.identity?.label
+        || "process";
+      const sourceType = registration.source_type || "trigger source";
+      const sourceSummary = triggerRegistrationSourceSummary(registration);
+      const subscriptionId = registration.subscription_id || "unknown";
+      const subscriptionKey = registration.subscription_key || "unknown";
+      const scope = triggerRegistrationScope(registration);
+      const details = [
+        ["id", truncateSubscriptionId(subscriptionId)],
+        ["trigger key", truncateSubscriptionKey(subscriptionKey)],
+        ["scope", truncateTriggerScope(scope)],
+        ["incarnation", truncateTriggerDetail(registration.incarnation, 12)]
+      ];
+      const titleDetails = [
+        ["id", subscriptionId],
+        ["trigger key", subscriptionKey],
+        ["scope", scope]
+      ];
+      if (registration.name) titleDetails.push(["alias", registration.name]);
+      titleDetails.push(["incarnation", registration.incarnation || "unknown"]);
+      return {
+        name: processName + " ← " + sourceType + (sourceSummary ? " (" + sourceSummary + ")" : ""),
+        detail: details.map(([label, value]) => label + " " + value).join(" · "),
+        title: titleDetails.map(([label, value]) => label + " " + value).join(" · ")
+      };
+    }
+    // END WORKBENCH_TRIGGER_REGISTRATION_PROJECTION
+
+    // BEGIN WORKBENCH_TRIGGER_REGISTRATION_RENDERING
     function renderTriggers(registrations) {
       triggerCount.textContent = String(registrations.length);
       triggerRegistrations.innerHTML = "";
@@ -3387,14 +3517,18 @@
       }
       for (const registration of registrations) {
         const subscriptionKey = registration.subscription_key;
+        const model = triggerRegistrationRowModel(registration);
         const row = document.createElement("div");
         row.className = "trigger-registration";
         row.dataset.enabled = String(registration.enabled);
         row.dataset.triggerSubscriptionKey = subscriptionKey;
         const name = document.createElement("span");
         name.className = "trigger-registration-name";
-        name.textContent = registration.name || registration.source_type || subscriptionKey;
-        name.title = subscriptionKey + " · " + registration.source_type;
+        name.textContent = model.name;
+        const detail = document.createElement("span");
+        detail.className = "trigger-registration-detail";
+        detail.textContent = model.detail;
+        detail.title = model.title;
         const actions = document.createElement("span");
         actions.className = "trigger-registration-actions";
         const toggle = document.createElement("button");
@@ -3406,10 +3540,11 @@
         remove.textContent = "delete";
         remove.addEventListener("click", () => deleteTrigger(subscriptionKey));
         actions.append(toggle, remove);
-        row.append(name, actions);
+        row.append(name, detail, actions);
         triggerRegistrations.appendChild(row);
       }
     }
+    // END WORKBENCH_TRIGGER_REGISTRATION_RENDERING
 
     async function setTriggerEnabled(subscriptionKey, enabled) {
       const response = await fetch("/api/triggers/" + encodeURIComponent(subscriptionKey) + "/enabled", {

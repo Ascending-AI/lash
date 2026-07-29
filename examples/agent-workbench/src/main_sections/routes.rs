@@ -594,7 +594,7 @@ async fn list_accounts(State(state): State<AppState>) -> Json<Vec<mail::AccountS
 async fn list_triggers(
     State(state): State<AppState>,
     Query(query): Query<SessionQuery>,
-) -> Result<Json<Vec<lash::triggers::TriggerRegistration>>, AppError> {
+) -> Result<Json<Vec<WorkbenchTriggerRegistration>>, AppError> {
     let session_id = query.resolve(&state)?;
     let records = state
         .trigger_store
@@ -606,19 +606,19 @@ async fn list_triggers(
     Ok(Json(
         records
             .iter()
-            .map(lash::triggers::TriggerRegistration::from)
+            .map(WorkbenchTriggerRegistration::from)
             .collect(),
     ))
 }
 
 async fn set_trigger_enabled(
-    AxumPath(handle): AxumPath<String>,
+    AxumPath(subscription_key): AxumPath<String>,
     State(state): State<AppState>,
     Query(query): Query<SessionQuery>,
     Json(request): Json<TriggerEnabledRequest>,
 ) -> Result<Json<TriggerMutationResponse>, AppError> {
     let session_id = query.resolve(&state)?;
-    let record = trigger_record_for_session(&state, &session_id, &handle).await?;
+    let record = trigger_record_for_session(&state, &session_id, &subscription_key).await?;
     let changed = record.enabled != request.enabled;
     let command = if request.enabled {
         lash::triggers::TriggerCommand::Enable {
@@ -652,7 +652,7 @@ async fn set_trigger_enabled(
         &session_id,
         "api.triggers.enabled",
         json!({
-            "handle": handle,
+            "subscription_key": subscription_key,
             "enabled": request.enabled,
             "changed": changed,
         }),
@@ -664,12 +664,12 @@ async fn set_trigger_enabled(
 }
 
 async fn delete_trigger(
-    AxumPath(handle): AxumPath<String>,
+    AxumPath(subscription_key): AxumPath<String>,
     State(state): State<AppState>,
     Query(query): Query<SessionQuery>,
 ) -> Result<Json<TriggerMutationResponse>, AppError> {
     let session_id = query.resolve(&state)?;
-    let record = trigger_record_for_session(&state, &session_id, &handle).await?;
+    let record = trigger_record_for_session(&state, &session_id, &subscription_key).await?;
     state
         .trigger_store
         .execute_command(
@@ -688,7 +688,7 @@ async fn delete_trigger(
     state.trace_for_session(
         &session_id,
         "api.triggers.delete",
-        json!({ "handle": handle, "changed": changed }),
+        json!({ "subscription_key": subscription_key, "changed": changed }),
     );
     Ok(Json(TriggerMutationResponse {
         changed,
@@ -699,10 +699,10 @@ async fn delete_trigger(
 async fn trigger_record_for_session(
     state: &AppState,
     session_id: &str,
-    handle: &str,
+    subscription_key: &str,
 ) -> Result<lash::triggers::TriggerSubscriptionRecord, AppError> {
     let mut filter = lash::triggers::TriggerSubscriptionFilter::for_session(session_id);
-    filter.subscription_key = Some(handle.to_string());
+    filter.subscription_key = Some(subscription_key.to_string());
     state
         .trigger_store
         .list_subscriptions(filter)
@@ -710,7 +710,7 @@ async fn trigger_record_for_session(
         .map_err(AppError::internal)?
         .into_iter()
         .next()
-        .ok_or_else(|| AppError::not_found(format!("unknown trigger `{handle}`")))
+        .ok_or_else(|| AppError::not_found(format!("unknown trigger `{subscription_key}`")))
 }
 
 async fn add_account(

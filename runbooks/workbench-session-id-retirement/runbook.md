@@ -80,8 +80,8 @@ receipts, the rotated id, and the typed retirement response — never on model p
   retired id has a `deleted_sessions` row and no live session metadata. Save query
   results as JSON artifacts rather than treating terminal output as the record.
 - Trigger truth: `/api/triggers?session_id=<S>` records expose
-  `subscription_key`, `incarnation`, `revision`, and registrant scope. Save complete
-  records.
+  `subscription_id`, `subscription_key`, `incarnation`, `revision`, and registrant
+  scope. Save complete records.
 - The browser's scoped fetch wrapper captures `session_id` when the page loads. After
   deletion, navigate to a new page at `/?session_id=<rotated-id>`; changing only the
   rendered label does not retarget the old page's API calls.
@@ -191,7 +191,10 @@ Then prove the rotated id is alive:
    marker, and the turn must settle.
 2. Register `retirement-watch` for the same Blue source and `retirement_job` target.
    Require exactly one enabled registration whose registrant is scoped to
-   `<rotated-id>` and whose registration incarnation differs from registration A.
+   `<rotated-id>`. Its derived display name and `subscription_key` must equal
+   registration A's, while its `subscription_id` must differ. Same-name, same-key
+   registration is correct across the retired and rotated owner scopes; the distinct
+   global id is the isolation gate.
 3. Activate Blue. Require exactly one new `retirement_job` process from
    `GET /api/work?session_id=<rotated-id>`, require its id to differ from the retired
    session's process id, and await it to terminal.

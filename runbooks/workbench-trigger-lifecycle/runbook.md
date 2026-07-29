@@ -28,9 +28,9 @@ and work registry are.
 
 ## Scenario-specific golden rules
 
-1. **Capture the registration handle.** After registration, save `GET /api/triggers`.
-   Every lifecycle mutation must affect that same handle; a replacement registration is
-   not evidence of re-enable.
+1. **Capture the registration reference key.** After registration, save
+   `GET /api/triggers`. Every lifecycle mutation must affect that same
+   `subscription_key`; a replacement registration is not evidence of re-enable.
 2. **Silence means no delivery and no work.** For disabled and deleted probes, require
    both no personal-inbox copy and no new process id. Use the completed causal-fence turn
    described below; never use a blind sleep as evidence of absence.
@@ -42,8 +42,8 @@ and work registry are.
    original turn address must remain the only entry in `active_turns` while `/api/work`
    gains the trigger process. A second active address is an ingress-seam violation.
 5. **UI and API lifecycle state must agree.** The registration rail's action and enabled
-   styling must match `GET /api/triggers`. After deletion, the handle must be absent from
-   both surfaces.
+   styling must match `GET /api/triggers`. After deletion, the subscription key must be
+   absent from both surfaces.
 
 ## Working material
 
@@ -55,9 +55,9 @@ and work registry are.
   running/idle pill, right-hand work rail, and left-hand **registrations** rail with
   **disable**, **re-enable**, and **delete**.
 - Backend truth: `GET /api/state`, `GET /api/triggers`,
-  `PUT /api/triggers/{handle}/enabled` with `{ "enabled": false|true }`,
-  `DELETE /api/triggers/{handle}`, `GET /api/accounts/{slug}/inbox`, `GET /api/work`,
-  and `GET /api/work/{process_id}/await`.
+  `PUT /api/triggers/{subscription_key}/enabled` with `{ "enabled": false|true }`,
+  `DELETE /api/triggers/{subscription_key}`, `GET /api/accounts/{slug}/inbox`,
+  `GET /api/work`, and `GET /api/work/{process_id}/await`.
 - Before judged execution, the deterministic companion should be green:
   `cargo test -p agent-workbench button_trigger_lifecycle_stays_visible_and_queues_wakes_during_active_turn`.
 
@@ -79,9 +79,9 @@ In chat, ask for the outcome, not Lashlang: register one trigger named
 an account filter so the personal emission is a no-op. Wait for the turn to settle.
 
 Poll `GET /api/triggers` until it returns exactly one enabled registration named
-`lifecycle-forwarder`. Save `02-registration.json`, record its handle, source type, and
-source configuration, and require the registrations rail to show the same name with a
-**disable** action. Screenshot `02-registered.png`.
+`lifecycle-forwarder`. Save `02-registration.json`, record its `subscription_key`,
+`subscription_id`, source type, and source configuration, and require the registrations
+rail to show the same name with a **disable** action. Screenshot `02-registered.png`.
 
 ## Phase 2 — Fire repeatedly and gate the loop-breaker
 
@@ -105,7 +105,7 @@ Save `03-repeat-work.json` and both inbox responses. Screenshot both inbox cards
 ## Phase 3 — Disable, provoke, and prove silence
 
 Click **disable** on the captured registration. Poll until `GET /api/triggers` shows the
-same handle with `enabled: false` and the rail changes to **re-enable**. Save
+same subscription key with `enabled: false` and the rail changes to **re-enable**. Save
 `05-disabled-registration.json` and screenshot `05-disabled.png`.
 
 Record the process-id set, then deliver `FIG425-LIFE-DISABLED-<run-id>` into `work`.
@@ -118,8 +118,8 @@ response; screenshot `06-disabled-silent.png` with the original visible and no c
 
 ## Phase 4 — Re-enable the same registration and fire again
 
-Click **re-enable**. Poll until the same captured handle is `enabled: true`; no new handle
-may appear. Save `07-reenabled-registration.json`.
+Click **re-enable**. Poll until the same captured subscription key is `enabled: true`; no
+new subscription key may appear. Save `07-reenabled-registration.json`.
 
 Deliver `FIG425-LIFE-REENABLED-<run-id>` into `work`. Poll for exactly one copy in
 `personal`, await the new process run(s), and require the work rail/API to agree. Save
@@ -151,8 +151,8 @@ gate; the deterministic companion remains the authoritative scheduler gate.
 
 ## Phase 6 — Delete, provoke, and prove permanent silence
 
-Click **delete**, accept the confirmation, and poll until the captured handle is absent
-from `GET /api/triggers` and the rail reads `none in this session`. Save
+Click **delete**, accept the confirmation, and poll until the captured subscription key
+is absent from `GET /api/triggers` and the rail reads `none in this session`. Save
 `10-deleted-registration.json`; screenshot `10-deleted.png`.
 
 Record the process-id set and deliver `FIG425-LIFE-DELETED-<run-id>` into `work`. Use a
@@ -168,12 +168,12 @@ Restate container are gone.
 | Item | Objective gate | Verdict | Evidence |
 |------|----------------|---------|----------|
 | Boot/world | `/healthz` 200; `work` and `personal` agree in UI/API | | `00-fresh.png`, `01-inbox-world.png` |
-| Registration identity | one enabled handle agrees in rail and `/api/triggers` | | `02-registered.png`, `02-registration.json` |
+| Registration identity | one enabled registration has the same `subscription_id` in the rail and `/api/triggers` | | `02-registered.png`, `02-registration.json` |
 | Repeated fires | two originals yield exactly two copies; bounded terminal runs | | `03-repeat-inboxes.png`, `04-repeat-work-rail.png` |
-| Disable silence | same handle disabled; fenced probe creates no copy or process | | `05-disabled.png`, `06-disabled-silent.png` |
-| Re-enable | same handle enabled and next probe forwards exactly once | | `07-reenabled-fired.png`, API artifacts |
+| Disable silence | same reference key disabled; fenced probe creates no copy or process | | `05-disabled.png`, `06-disabled-silent.png` |
+| Re-enable | same reference key enabled and next probe forwards exactly once | | `07-reenabled-fired.png`, API artifacts |
 | Mid-turn ingress | process observed with the one original active address; queued wake drains after settle | | `08-midturn-overlap.png`, `09-midturn-settled.png`, state JSON |
-| Delete silence | handle absent; fenced probe creates no copy or process | | `10-deleted.png`, `11-deleted-silent.png` |
+| Delete silence | reference key absent; fenced probe creates no copy or process | | `10-deleted.png`, `11-deleted-silent.png` |
 | UI/API agreement | registration, inbox, active-turn, and work surfaces agree throughout | | screenshots + saved API responses |
 
 **Aggregate:** did one durable concierge survive repeated fires, stop atomically when
