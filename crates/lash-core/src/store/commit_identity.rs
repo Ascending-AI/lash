@@ -219,7 +219,6 @@ enum QueuedPayloadIntent<'a> {
         event_type: &'a str,
         event_invocation: &'a crate::RuntimeInvocation,
         process_caused_by: &'a Option<crate::CausalRef>,
-        dedupe_key: &'a str,
         input: &'a str,
     },
     AgentFrameTask {
@@ -244,7 +243,6 @@ impl<'a> From<&'a crate::QueuedWorkPayload> for QueuedPayloadIntent<'a> {
                 event_type: &wake.event_type,
                 event_invocation: &wake.event_invocation,
                 process_caused_by: &wake.process_caused_by,
-                dedupe_key: &wake.dedupe_key,
                 input: &wake.input,
             },
             crate::QueuedWorkPayload::AgentFrameTask {

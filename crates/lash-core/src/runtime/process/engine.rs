@@ -160,9 +160,11 @@ pub struct ProcessEngineProcessContext {
     store: Option<Arc<dyn crate::RuntimePersistence>>,
     session_store_factory: Option<Arc<dyn crate::SessionStoreFactory>>,
     queued_work_driver: Option<crate::QueuedWorkDriver>,
+    clock: Arc<dyn crate::Clock>,
 }
 
 impl ProcessEngineProcessContext {
+    #[allow(clippy::too_many_arguments)]
     fn new(
         process_id: String,
         registry: Arc<dyn ProcessRegistry>,
@@ -171,6 +173,7 @@ impl ProcessEngineProcessContext {
         store: Option<Arc<dyn crate::RuntimePersistence>>,
         session_store_factory: Option<Arc<dyn crate::SessionStoreFactory>>,
         queued_work_driver: Option<crate::QueuedWorkDriver>,
+        clock: Arc<dyn crate::Clock>,
     ) -> Self {
         Self {
             process_id,
@@ -180,6 +183,7 @@ impl ProcessEngineProcessContext {
             store,
             session_store_factory,
             queued_work_driver,
+            clock,
         }
     }
 
@@ -209,11 +213,13 @@ impl ProcessEngineProcessContext {
             .append_event_with_authority(&self.process_id, request, &self.execution_write_authority)
             .await?;
         crate::tool_provider::process_events::enqueue_wake_delivery(
+            Arc::clone(&self.registry),
             self.store.clone(),
             self.session_store_factory.as_ref(),
             result.wake_delivery,
             None,
             self.queued_work_driver.as_ref(),
+            Arc::clone(&self.clock),
         )
         .await?;
         Ok(result.event)
@@ -275,6 +281,7 @@ impl<'run> ProcessEngineRunContext<'run> {
         store: Option<Arc<dyn crate::RuntimePersistence>>,
         session_store_factory: Option<Arc<dyn crate::SessionStoreFactory>>,
         queued_work_driver: Option<crate::QueuedWorkDriver>,
+        clock: Arc<dyn crate::Clock>,
         process_registry_available: bool,
         cancellation: CancellationToken,
         turn_phase_probe: Option<Arc<dyn crate::runtime::RuntimeTurnPhaseProbe>>,
@@ -294,6 +301,7 @@ impl<'run> ProcessEngineRunContext<'run> {
             store.clone(),
             session_store_factory.clone(),
             queued_work_driver.clone(),
+            clock,
         );
         Self {
             registration,

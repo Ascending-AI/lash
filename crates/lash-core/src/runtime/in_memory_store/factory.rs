@@ -1,5 +1,41 @@
 use super::*;
 
+/// Session-id-keyed factory: the same in-memory store is returned for a given
+/// session across opens (so a worker rebuild sees the session's state), and a
+/// fresh store is created on first use.
+#[derive(Clone)]
+pub struct InMemorySessionStoreFactory {
+    pub(super) clock: Arc<dyn crate::Clock>,
+    pub(super) stores: Arc<Mutex<HashMap<String, Arc<InMemorySessionStore>>>>,
+    pub(super) write_transaction: Arc<Mutex<()>>,
+    pub(super) global_session_graph: Arc<Mutex<crate::SessionGraph>>,
+    pub(super) global_node_owners: Arc<Mutex<HashMap<String, String>>>,
+    pub(super) global_session_heads: Arc<Mutex<HashMap<String, Option<String>>>>,
+    pub(super) node_anchors: InMemoryNodeAnchors,
+    pub(super) tombstoned_node_ids: Arc<Mutex<HashSet<String>>>,
+    pub(super) deleted_session_ids: Arc<Mutex<HashSet<String>>>,
+}
+
+impl InMemorySessionStoreFactory {
+    pub fn new() -> Self {
+        Self::with_clock(Arc::new(crate::SystemClock))
+    }
+
+    pub fn with_clock(clock: Arc<dyn crate::Clock>) -> Self {
+        Self {
+            clock,
+            stores: Arc::new(Mutex::new(HashMap::new())),
+            write_transaction: Arc::new(Mutex::new(())),
+            global_session_graph: Arc::new(Mutex::new(crate::SessionGraph::default())),
+            global_node_owners: Arc::new(Mutex::new(HashMap::new())),
+            global_session_heads: Arc::new(Mutex::new(HashMap::new())),
+            node_anchors: Arc::new(Mutex::new(HashMap::new())),
+            tombstoned_node_ids: Arc::new(Mutex::new(HashSet::new())),
+            deleted_session_ids: Arc::new(Mutex::new(HashSet::new())),
+        }
+    }
+}
+
 fn retained_fork_config(
     graph: &crate::SessionGraph,
     node_id: &str,
@@ -86,6 +122,14 @@ impl SessionStoreFactory for InMemorySessionStoreFactory {
             .get(&request.session_id)
             .cloned()
             .map(|store| store as Arc<dyn RuntimePersistence>))
+    }
+
+    async fn session_was_deleted(&self, session_id: &str) -> Result<bool, String> {
+        Ok(self
+            .deleted_session_ids
+            .lock()
+            .expect("lock deleted session ids")
+            .contains(session_id))
     }
 
     async fn delete_session(&self, session_id: &str) -> Result<(), String> {

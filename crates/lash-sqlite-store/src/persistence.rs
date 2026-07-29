@@ -565,6 +565,34 @@ impl SessionCommitStore for Store {
                     for completed in &commit.completed_queue_claims {
                         for batch_id in &completed.batch_ids {
                             tx.execute(
+                                "INSERT INTO consumed_wake_high_water (
+                                    session_id, process_id, high_sequence
+                                 )
+                                 SELECT batch.session_id,
+                                        json_extract(item.payload_json, '$.wake.process_id'),
+                                        json_extract(item.payload_json, '$.wake.sequence')
+                                 FROM queued_work_batches AS batch
+                                 JOIN queued_work_items AS item
+                                   ON item.batch_id = batch.batch_id
+                                 WHERE batch.session_id = ?1
+                                   AND batch.batch_id = ?2
+                                   AND batch.claim_id = ?3
+                                   AND batch.claim_token = ?4
+                                   AND json_extract(item.payload_json, '$.type') = 'process_wake'
+                                 ON CONFLICT(session_id, process_id) DO UPDATE SET
+                                   high_sequence = MAX(
+                                       consumed_wake_high_water.high_sequence,
+                                       excluded.high_sequence
+                                   )",
+                                params![
+                                    completed.session_id,
+                                    batch_id,
+                                    completed.claim_id,
+                                    completed.lease_token
+                                ],
+                            )
+                            .map_err(sqlite_error)?;
+                            tx.execute(
                                 "DELETE FROM queued_work_batches
                                  WHERE session_id = ?1
                                    AND batch_id = ?2

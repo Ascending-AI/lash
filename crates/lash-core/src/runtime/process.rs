@@ -30,10 +30,9 @@ pub use events::{
     AbandonEvidence, AbandonWriter, ProcessAwaitOutput, ProcessCompletionAuthority, ProcessEvent,
     ProcessEventAppendRequest, ProcessEventAppendResult, ProcessEventSemantics,
     ProcessEventSemanticsSpec, ProcessEventType, ProcessTerminalSemantics, ProcessTerminalSpec,
-    ProcessTerminalState, ProcessValueSelector, ProcessWake, ProcessWakeDedupeKey,
-    ProcessWakeDelivery, ProcessWakeSpec, process_signal_event_type,
-    process_signal_name_from_event_type, process_signal_wait_key, terminal_append_request,
-    terminal_event_type_name, validate_process_signal_name,
+    ProcessTerminalState, ProcessValueSelector, ProcessWake, ProcessWakeDelivery, ProcessWakeSpec,
+    process_signal_event_type, process_signal_name_from_event_type, process_signal_wait_key,
+    terminal_append_request, terminal_event_type_name, validate_process_signal_name,
 };
 pub use materialization::materialize_process_event_semantics;
 pub use model::{
@@ -55,7 +54,10 @@ pub use observation::{
     ProcessWorkSnapshot,
 };
 pub use references::ProcessLiveReferenceSummary;
-pub use registry::{ProcessPruneReport, ProcessRegistry};
+pub use registry::{
+    DEFAULT_WAKE_DELIVERY_EXPIRY_MS, ProcessPruneReport, ProcessRegistry, WakeDelivery,
+    WakeDeliveryConfig, WakeDeliveryReport, WakeDeliveryState, WakeDiscardReason,
+};
 pub use service::{
     DefaultProcessCancelAbility, ProcessCancelAbility, ProcessCancelAllRequest,
     ProcessCancelRequest, ProcessCancelSource, ProcessService, UnavailableProcessService,

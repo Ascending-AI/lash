@@ -2,8 +2,6 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex, Weak};
 use std::time::Duration;
 
-use tokio::sync::watch;
-
 use super::events::{
     ProcessAwaitOutput, ProcessCompletionAuthority, ProcessEvent, ProcessEventAppendRequest,
     ProcessEventAppendResult,
@@ -18,58 +16,11 @@ use super::model::{
 use super::registry::{ProcessPruneReport, ProcessRegistry};
 use crate::PluginError;
 
+mod change_hub;
+pub use change_hub::ProcessChangeHub;
+
 const AWAIT_BACKOFF_MIN: Duration = Duration::from_millis(25);
 const AWAIT_BACKOFF_MAX: Duration = Duration::from_secs(1);
-
-#[derive(Clone, Default)]
-pub struct ProcessChangeHub {
-    inner: Arc<Mutex<HashMap<String, watch::Sender<u64>>>>,
-}
-
-impl ProcessChangeHub {
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    /// Subscribe before reading a process row. The receiver carries only a
-    /// version counter; waiters always re-read the registry after a bump.
-    pub fn subscribe(&self, process_id: &str) -> watch::Receiver<u64> {
-        let mut guard = self.inner.lock().expect("process change hub lock poisoned");
-        guard
-            .entry(process_id.to_string())
-            .or_insert_with(|| {
-                let (tx, _rx) = watch::channel(0);
-                tx
-            })
-            .subscribe()
-    }
-
-    pub fn notify(&self, process_id: &str) {
-        let mut guard = self.inner.lock().expect("process change hub lock poisoned");
-        let mut remove = false;
-        if let Some(tx) = guard.get(process_id) {
-            if tx.receiver_count() == 0 {
-                remove = true;
-            } else {
-                let next = (*tx.borrow()).wrapping_add(1);
-                if tx.send(next).is_err() {
-                    remove = true;
-                }
-            }
-        }
-        if remove {
-            guard.remove(process_id);
-        }
-    }
-
-    #[cfg(test)]
-    fn tracked_processes(&self) -> usize {
-        self.inner
-            .lock()
-            .expect("process change hub lock poisoned")
-            .len()
-    }
-}
 
 /// Host-facing, best-effort push of each appended process event.
 ///
@@ -404,6 +355,21 @@ pub trait ProcessAttach: Send + Sync {
 
 #[async_trait::async_trait]
 impl ProcessRegistry for WatchedProcessRegistry {
+    fn wake_delivery_config(&self) -> super::WakeDeliveryConfig {
+        self.inner.wake_delivery_config()
+    }
+
+    fn with_runtime_clock(&self, clock: Arc<dyn crate::Clock>) -> Option<Arc<dyn ProcessRegistry>> {
+        self.inner.with_runtime_clock(clock).map(|inner| {
+            Arc::new(Self {
+                inner,
+                hub: self.hub.clone(),
+                sink: self.sink.clone(),
+                event_paths: Mutex::new(HashMap::new()),
+            }) as Arc<dyn ProcessRegistry>
+        })
+    }
+
     async fn register_process(
         &self,
         registration: ProcessRegistration,
@@ -585,16 +551,6 @@ impl ProcessRegistry for WatchedProcessRegistry {
         self.inner.recent_events(process_id, limit).await
     }
 
-    async fn wake_events_after(
-        &self,
-        process_id: &str,
-        after_sequence: u64,
-    ) -> Result<Vec<ProcessEvent>, PluginError> {
-        self.inner
-            .wake_events_after(process_id, after_sequence)
-            .await
-    }
-
     async fn complete_process(
         &self,
         process_id: &str,
@@ -726,10 +682,48 @@ impl ProcessRegistry for WatchedProcessRegistry {
         self.inner.processes_changed_since(cursor, limit).await
     }
 
-    async fn ack_wake(&self, process_id: &str, sequence: u64) -> Result<(), PluginError> {
-        self.inner.ack_wake(process_id, sequence).await?;
-        self.hub.notify(process_id);
-        Ok(())
+    async fn pending_wake_deliveries(
+        &self,
+        limit: usize,
+    ) -> Result<Vec<super::WakeDelivery>, PluginError> {
+        self.inner.pending_wake_deliveries(limit).await
+    }
+
+    async fn list_wake_deliveries(
+        &self,
+        state: Option<super::WakeDeliveryState>,
+    ) -> Result<Vec<super::WakeDelivery>, PluginError> {
+        self.inner.list_wake_deliveries(state).await
+    }
+
+    async fn wake_delivery_report(&self) -> Result<super::WakeDeliveryReport, PluginError> {
+        self.inner.wake_delivery_report().await
+    }
+
+    async fn mark_wake_enqueued(&self, delivery_id: &str) -> Result<(), PluginError> {
+        self.inner.mark_wake_enqueued(delivery_id).await
+    }
+
+    async fn discard_wake_delivery(
+        &self,
+        delivery_id: &str,
+        reason: super::WakeDiscardReason,
+    ) -> Result<(), PluginError> {
+        self.inner.discard_wake_delivery(delivery_id, reason).await
+    }
+
+    async fn redrive_wake_delivery(&self, delivery_id: &str) -> Result<(), PluginError> {
+        self.inner.redrive_wake_delivery(delivery_id).await
+    }
+
+    async fn defer_wake_delivery(
+        &self,
+        delivery_id: &str,
+        next_attempt_at_ms: u64,
+    ) -> Result<(), PluginError> {
+        self.inner
+            .defer_wake_delivery(delivery_id, next_attempt_at_ms)
+            .await
     }
 
     async fn list_non_terminal(&self) -> Result<Vec<ProcessRecord>, PluginError> {

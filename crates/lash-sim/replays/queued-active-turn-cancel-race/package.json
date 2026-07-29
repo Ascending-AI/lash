@@ -4,8 +4,8 @@
   "status": "promoted_deterministic_regression_guard",
   "trace": "trace.json",
   "generator_version": "lash-sim.generated-workload.v9",
-  "source": "generated fast-random (seed 7313380382653661636, seed_index 0) DST trace, migrated to structural FrameOpen history against generator lash-sim.generated-workload.v9 on 2026-07-27",
-  "source_trace_sha256": "f046a84b7c67f8464cc2305a382364b0730db473566aa66c76ace2f99abbbea7",
+  "source": "generated fast-random (seed 7313380382653661636, seed_index 0) DST trace, regenerated with structural process/event wake identity against generator lash-sim.generated-workload.v9 on 2026-07-29",
+  "source_trace_sha256": "a90c2314bdd0c3449e6966c6da135cca8eb1fe375cf67a885cc643e387fe0b54",
   "historical_production_regression": false,
   "regression_contract": "active-turn queued input stays hidden, then cancellation terminalizes the pending row before any later idle claim can surface it",
   "required_boundary_kinds": [

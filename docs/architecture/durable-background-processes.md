@@ -52,7 +52,7 @@ in-process under normal operation, but the spawn held **no lease**, so a recover
 sweep on another node or after a restart could re-run a process already running
 (the off-lease/double-exec window), and on crash the in-memory task was gone with
 **no prompt re-execution** — only the next restart's startup sweep would re-run
-it. Registry rows — record, events, grants, wake inbox — survived a restart; the
+it. Registry rows — record, events, grants, and wake outbox — survived a restart; the
 *execution* was either off-lease or merely eventually-recovered.
 
 The fix removes that silent fallback **and** the off-lease spawn. Process admin
@@ -159,6 +159,53 @@ per deployment.
 This deletes the asymmetry: a trigger-started process is identically durable to a
 turn-started one, because both are just registered intent that the durable worker
 executes. "How it was started" leaves the durability story entirely.
+
+### Process wakes use one sender-outbox/receiver-high-water driver
+
+A wake event and its `process_wake_deliveries` row commit in the same process
+registry transaction. `WakeDeliveryDriver` is the only delivery path for local,
+PostgreSQL, and Restate-backed deployments: it scans on startup, polls with
+bounded backoff, and is nudged after an append. Delivery enqueues queued work by
+the deterministic `process:{process_id}:event:{sequence}:wake` source key and
+then marks the sender row enqueued. A crash between those writes is safe.
+
+Queue completion advances `consumed_wake_high_water.high_sequence` with
+`MAX(current, consumed_sequence)` in the same session-store transaction that
+removes the claimed batch. The mark is one monotone integer per
+`(session_id, process_id)`, not one row per message. F7's sender ordering
+guarantees that enqueue is contiguous within each target/process group, so a
+stale driver, crash retry, or host redrive can only reproduce a sequence at or
+below the receiver's high-water mark. Enqueue checks that structural
+`(process_id, sequence)` tuple, then the live source-key row, under the same
+source advisory lock as completion; it never parses correctness data from the
+source-key string. PostgreSQL bounds that lock wait and reports timeout as
+retryable contention. There is no evidence cleanup or compensation lane. Because the receiver mark
+survives sender-side pruning while event sequences restart per registration,
+process ids must not be reused across prune horizons: a re-registered pruned
+id would emit wakes at or below the retained mark and have them absorbed as
+duplicates. Hosts mint fresh process ids instead. The
+mark survives sender-process pruning and is deleted only with its target
+session.
+
+Pending scans select only a due group head whose lower sequences are all
+enqueued. A discarded head blocks only its own group until a host explicitly
+redrives it; later sequences therefore cannot create a gap in the receiver's
+consumed prefix. This includes an expired head: after the configured expiry
+horizon, its group remains stopped and visible until a host redrives that head.
+Retryable non-delivery advances `next_attempt_at_ms` with bounded exponential
+backoff, so a missing target stalls its own group without monopolizing the scan
+or producing a write storm. The facade rebinds first-party SQLite and PostgreSQL
+registries to the runtime clock at build time, so expiry minting, retry
+scheduling, and driver comparison share one injected clock. Missing or deleted
+targets and expired deliveries remain visible as typed `TargetGone` or
+`Expired` discards. Hosts inspect them through `wake_deliveries` /
+`wake_delivery_report`, redrive one explicitly with `redrive_wake_delivery`,
+and can force a bounded scan with `drive_wake_deliveries`.
+
+Restate does not implement a second wake route. Its process execution still
+runs under Restate, while wake handoff uses this same durable driver and
+PostgreSQL tables. The operations runbook reset consequently clears
+`lash_process_wake_deliveries` and `lash_consumed_wake_high_water`.
 
 Process waiting follows the same split. `ProcessRegistry` exposes state only;
 terminal and event waits live in `ProcessWorkDriver` / `ProcessAwaiter` (see

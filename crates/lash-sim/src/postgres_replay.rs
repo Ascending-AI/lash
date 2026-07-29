@@ -1048,7 +1048,7 @@ pub(crate) async fn reset_postgres_for_replay(
             lash_trigger_deliveries,
             lash_trigger_occurrences,
             lash_trigger_subscriptions,
-            lash_process_wake_acks,
+            lash_process_wake_deliveries,
             lash_process_handle_grants,
             lash_process_leases,
             lash_runtime_effect_replay,

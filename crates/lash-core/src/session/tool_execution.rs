@@ -698,6 +698,7 @@ impl RuntimeExecutionContext<'_> {
                 process_events.store.clone(),
                 process_events.session_store_factory.clone(),
                 process_events.queued_work_driver.clone(),
+                std::sync::Arc::clone(&process_events.clock),
             );
         }
         let tool_context = tool_context.build();

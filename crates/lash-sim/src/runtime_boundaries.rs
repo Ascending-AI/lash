@@ -5,16 +5,15 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use lash_core::runtime::{
-    QueuedWorkBatchDraft, QueuedWorkClaim, QueuedWorkClaimBoundary, QueuedWorkPayload,
-    RuntimeReplay, RuntimeScope, RuntimeSubject,
+    QueuedWorkClaim, QueuedWorkClaimBoundary, RuntimeReplay, RuntimeScope, RuntimeSubject,
 };
 use lash_core::{
-    DeliveryPolicy, ExecResponse, ExecutionScope, LeaseOwnerIdentity, MergeKey, PreparedToolCall,
+    ExecResponse, ExecutionScope, LeaseOwnerIdentity, MergeKey, PreparedToolCall,
     ProcessAwaitOutput, ProcessInput, ProcessProvenance, ProcessRegistration, ProcessRegistry,
     RecoveryDisposition, RuntimeCommit, RuntimeEffectCommand, RuntimeEffectController,
     RuntimeEffectEnvelope, RuntimeEffectKind, RuntimeEffectLocalExecutor, RuntimeEffectOutcome,
     RuntimeInvocation, RuntimePersistence, RuntimeSessionState, SessionExecutionLeaseClaimOutcome,
-    SessionRelation, SessionScope, SessionStoreCreateRequest, SessionStoreFactory, SlotPolicy,
+    SessionRelation, SessionScope, SessionStoreCreateRequest, SessionStoreFactory,
     ToolAttemptLaunch, ToolCallOutput, ToolCallRecord, ToolId,
 };
 use serde_json::{Value, json};
@@ -100,7 +99,7 @@ pub struct RuntimeBoundaryHarness {
     effect_replay_store: RuntimeEffectReplayStore,
     effect_controller: Option<Arc<dyn RuntimeEffectController>>,
     durable_entries: BTreeMap<String, DurableEntry>,
-    process_wake_delivered_dedupe_keys: BTreeSet<String>,
+    delivered_process_wake_source_keys: BTreeSet<String>,
     worker_process_registry: Option<Arc<dyn ProcessRegistry>>,
     clock: Arc<SimClock>,
 }
@@ -116,7 +115,7 @@ impl RuntimeBoundaryHarness {
             effect_replay_store,
             effect_controller: None,
             durable_entries: BTreeMap::new(),
-            process_wake_delivered_dedupe_keys: BTreeSet::new(),
+            delivered_process_wake_source_keys: BTreeSet::new(),
             worker_process_registry: None,
             clock,
         }
@@ -471,34 +470,44 @@ impl RuntimeBoundaryHarness {
         event: &BoundaryEvent,
     ) -> Result<Value, RuntimeBoundaryError> {
         let session = boundary_session_alias(event);
-        let process_id = format!("sim-process-{}", event.boundary_id.replace(':', "-"));
-        let dedupe_key = event
+        let process_id = event
             .payload
-            .get("dedupe_key")
+            .get("process_id")
             .and_then(Value::as_str)
-            .unwrap_or(&event.boundary_id)
+            .map_or_else(
+                || format!("sim-process-{}", event.boundary_id.replace(':', "-")),
+                ToString::to_string,
+            );
+        let sequence = event
+            .payload
+            .get("sequence")
+            .and_then(Value::as_u64)
+            .unwrap_or(1);
+        let source_key = lash_core::process_wake_source_key(&process_id, sequence);
+        let replay_key = event
+            .payload
+            .get("replay_key")
+            .and_then(Value::as_str)
+            .unwrap_or(&source_key)
             .to_string();
         let wake = lash_core::process_wake_delivery(lash_core::ProcessWakeDeliveryRequest {
             target_scope: SessionScope::new(session.clone()),
             process_id: process_id.clone(),
-            sequence: 1,
+            sequence,
             event_type: "process.wake".to_string(),
             event_invocation: RuntimeInvocation {
                 scope: RuntimeScope::new(session.clone()),
                 subject: RuntimeSubject::ProcessEvent {
                     process_id: process_id.clone(),
-                    sequence: 1,
+                    sequence,
                     event_type: "process.wake".to_string(),
                 },
                 caused_by: None,
-                replay: Some(RuntimeReplay {
-                    key: format!("process:{process_id}:wake:{dedupe_key}"),
-                }),
+                replay: Some(RuntimeReplay { key: replay_key }),
             },
             process_caused_by: None,
             wake: lash_core::ProcessWake {
                 input: format!("wake for {session}"),
-                dedupe_key: dedupe_key.clone(),
             },
             occurred_at: std::time::UNIX_EPOCH + std::time::Duration::from_millis(event.at),
         })
@@ -522,13 +531,12 @@ impl RuntimeBoundaryHarness {
                     "process_id": process_id,
                     "sequence": wake.sequence,
                     "wake_id": wake.wake_id,
-                    "dedupe_key": wake.dedupe_key,
                     "claimed_once": false,
                     "lease_busy": true,
                     "busy_holder": owner_json(&holder.owner),
                     "runtime_process_wake": wake,
                     "runtime_queued_work": {
-                        "source_key": dedupe_key,
+                        "source_key": source_key,
                         "work_class": "ProcessWake",
                         "enqueued": false,
                         "claimed": false,
@@ -537,27 +545,18 @@ impl RuntimeBoundaryHarness {
                 }));
             }
         };
-        // A wake redelivered with the same dedupe_key must be claimed exactly
-        // once. Under the old model the first claim stayed live for its TTL and
-        // blocked the duplicate; generation fencing makes a claim non-live once
-        // its owner releases the session lease, so a later delivery under a fresh
-        // generation could re-claim a released-but-uncompleted batch. This driver
-        // dedups redeliveries the way the process wake-ack layer does, and it
+        // A wake redelivered with the same structural process/event source key
+        // must be claimed exactly once. This driver models the durable
+        // receiver-evidence dedupe contract, and it
         // settles the claimed wake below so it never lingers as reclaimable
         // queued work that a subsequent runtime turn would double-claim.
         let duplicate = self
-            .process_wake_delivered_dedupe_keys
-            .contains(&dedupe_key);
+            .delivered_process_wake_source_keys
+            .contains(&source_key);
         let batch = store
             .enqueue_queued_work(
-                QueuedWorkBatchDraft::new(
-                    session.clone(),
-                    DeliveryPolicy::EarliestSafeBoundary,
-                    SlotPolicy::Exclusive,
-                    vec![QueuedWorkPayload::process_wake(wake.clone())],
-                )
-                .with_source_key(dedupe_key.clone())
-                .with_merge_key(MergeKey::Never),
+                lash_core::runtime::process_wake_batch_draft(wake.clone())
+                    .with_merge_key(MergeKey::Never),
             )
             .await
             .map_err(|err| RuntimeBoundaryError::new(format!("enqueue wake failed: {err}")))?;
@@ -620,8 +619,7 @@ impl RuntimeBoundaryHarness {
             )));
         }
         if claimed_once {
-            self.process_wake_delivered_dedupe_keys
-                .insert(dedupe_key.clone());
+            self.delivered_process_wake_source_keys.insert(source_key);
         }
         Ok(json!({
             "session": session,
@@ -629,7 +627,6 @@ impl RuntimeBoundaryHarness {
             "process_id": process_id,
             "sequence": wake.sequence,
             "wake_id": wake.wake_id,
-            "dedupe_key": wake.dedupe_key,
             "claimed_once": claimed_once,
             "runtime_process_wake": wake,
             "runtime_queued_work": {
@@ -971,18 +968,11 @@ impl RuntimeBoundaryHarness {
         lease: &lash_core::SessionExecutionLease,
         occurred_at_ms: u64,
     ) -> Result<WorkerOwnedWork, RuntimeBoundaryError> {
-        let source_key = format!("worker-failover/{session}/work");
         let wake = worker_failover_work(session, occurred_at_ms)?;
+        let source_key = lash_core::process_wake_source_key(&wake.process_id, wake.sequence);
         let batch = store
             .enqueue_queued_work(
-                QueuedWorkBatchDraft::new(
-                    session.to_string(),
-                    DeliveryPolicy::EarliestSafeBoundary,
-                    SlotPolicy::Exclusive,
-                    vec![QueuedWorkPayload::process_wake(wake)],
-                )
-                .with_source_key(source_key.clone())
-                .with_merge_key(MergeKey::Never),
+                lash_core::runtime::process_wake_batch_draft(wake).with_merge_key(MergeKey::Never),
             )
             .await
             .map_err(|err| {
@@ -1385,7 +1375,6 @@ fn worker_failover_work(
     occurred_at_ms: u64,
 ) -> Result<lash_core::ProcessWakeDelivery, RuntimeBoundaryError> {
     let process_id = format!("sim-worker-{session}");
-    let dedupe_key = format!("worker-failover/{session}/work");
     lash_core::process_wake_delivery(lash_core::ProcessWakeDeliveryRequest {
         target_scope: SessionScope::new(session.to_string()),
         process_id: process_id.clone(),
@@ -1406,7 +1395,6 @@ fn worker_failover_work(
         process_caused_by: None,
         wake: lash_core::ProcessWake {
             input: format!("worker-owned work for {session}"),
-            dedupe_key,
         },
         occurred_at: std::time::UNIX_EPOCH + std::time::Duration::from_millis(occurred_at_ms),
     })

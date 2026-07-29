@@ -58,6 +58,16 @@ pub(crate) enum ProcessWorkSource {
 }
 
 impl ProcessWorkSource {
+    fn with_runtime_clock(self, clock: Arc<dyn lash_core::Clock>) -> Self {
+        match self {
+            Self::Inline { registry, hub } => Self::Inline {
+                registry: registry.with_runtime_clock(clock).unwrap_or(registry),
+                hub,
+            },
+            other => other,
+        }
+    }
+
     fn process_registry(&self) -> Option<Arc<dyn ProcessRegistry>> {
         match self {
             Self::None => None,
@@ -108,15 +118,23 @@ pub(crate) enum QueuedWorkDriverSetup {
     },
 }
 
+pub(crate) struct WakeDeliveryDriverSetup {
+    registry: Arc<dyn ProcessRegistry>,
+    factory: Arc<dyn SessionStoreFactory>,
+    clock: Arc<dyn lash_core::Clock>,
+}
+
 pub(crate) struct InlineWorkDriverSetup {
     process: ProcessWorkDriverSetup,
     queued: QueuedWorkDriverSetup,
+    wake: Option<WakeDeliveryDriverSetup>,
 }
 
 #[derive(Clone, Default)]
 pub(crate) struct ResolvedWorkDrivers {
     pub(crate) process: Option<ProcessWorkDriver>,
     pub(crate) queued: Option<QueuedWorkDriver>,
+    pub(crate) _wake: Option<lash_core::WakeDeliveryDriver>,
     pub(crate) drive_process_on_open: bool,
 }
 
@@ -181,9 +199,18 @@ impl InlineWorkDriverSlot {
                         (Some(driver), true)
                     }
                 };
+                let wake = self.setup.wake.as_ref().map(|setup| {
+                    lash_core::WakeDeliveryDriver::new(
+                        Arc::clone(&setup.registry),
+                        Arc::clone(&setup.factory),
+                        queued.clone(),
+                        Arc::clone(&setup.clock),
+                    )
+                });
                 ResolvedWorkDrivers {
                     process,
                     queued,
+                    _wake: wake,
                     drive_process_on_open,
                 }
             })
@@ -206,6 +233,16 @@ impl InlineWorkDriverSlot {
         match &self.setup.queued {
             QueuedWorkDriverSetup::External { driver } => Some(driver.clone()),
             QueuedWorkDriverSetup::None | QueuedWorkDriverSetup::LazyDefault { .. } => None,
+        }
+    }
+}
+
+impl Drop for InlineWorkDriverSlot {
+    fn drop(&mut self) {
+        if let Some(drivers) = self.drivers.get()
+            && let Some(wake) = drivers._wake.as_ref()
+        {
+            wake.request_shutdown();
         }
     }
 }
@@ -1174,12 +1211,12 @@ impl LashCoreBuilder {
         };
         let policy = self.session_spec.resolve_against(&base_policy);
 
+        let mut core = self.resolve_runtime_host_config()?;
         let process_work_source = self
             .process_work_source
             .clone()
+            .with_runtime_clock(Arc::clone(&core.clock))
             .watched(self.process_event_sink.clone());
-
-        let mut core = self.resolve_runtime_host_config()?;
         if let Some(provider) = self.provider.clone() {
             core.providers.provider_resolver =
                 Arc::new(lash_core::SingleProviderResolver::new(provider));
@@ -1272,6 +1309,19 @@ impl LashCoreBuilder {
         let work_driver = InlineWorkDriverSetup {
             process: process_work_driver,
             queued: queued_work_driver,
+            wake: process_registry
+                .clone()
+                .zip(
+                    self.child_store_factory
+                        .as_ref()
+                        .or(self.store_factory.as_ref())
+                        .cloned(),
+                )
+                .map(|(registry, factory)| WakeDeliveryDriverSetup {
+                    registry,
+                    factory,
+                    clock: Arc::clone(&env.core.clock),
+                }),
         };
 
         Ok(LashCore {

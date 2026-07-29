@@ -6,12 +6,16 @@ impl crate::store::QueuedWorkStore for InMemorySessionStore {
         &self,
         batch: crate::QueuedWorkBatchDraft,
     ) -> Result<crate::QueuedWorkBatch, crate::store::StoreError> {
+        // This is the in-memory counterpart of the SQL transaction/advisory
+        // source lock: evidence lookup, live-row lookup, and insertion all run
+        // while the single write-transaction mutex is held. Queue completion
+        // takes the same mutex before inserting evidence and deleting the row.
         let _transaction = self
             .write_transaction
             .lock()
             .expect("lock in-memory write transaction");
         self.ensure_session_not_deleted(&batch.session_id)?;
-        Ok(self.enqueue_queued_work_in_memory(batch))
+        self.enqueue_queued_work_in_memory(batch)
     }
 
     async fn claim_leading_ready_session_command(

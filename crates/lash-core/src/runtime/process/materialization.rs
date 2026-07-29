@@ -3,7 +3,7 @@ use crate::plugin::PluginError;
 use super::events::{
     AbandonEvidence, AbandonWriter, ProcessAwaitOutput, ProcessEventSemantics,
     ProcessEventSemanticsSpec, ProcessTerminalSemantics, ProcessTerminalSpec, ProcessTerminalState,
-    ProcessValueSelector, ProcessWake, ProcessWakeDedupeKey, ProcessWakeSpec,
+    ProcessValueSelector, ProcessWake, ProcessWakeSpec,
 };
 
 pub fn materialize_process_event_semantics(
@@ -111,14 +111,8 @@ fn materialize_wake(
         }
     }
     let input = selector_value_to_string(&select_value(payload, &wake.input)?);
-    let dedupe_key = match &wake.dedupe_key {
-        ProcessWakeDedupeKey::EventIdentity => format!("{process_id}:{sequence}"),
-        ProcessWakeDedupeKey::Selector(selector) => {
-            selector_value_to_string(&select_value(payload, selector)?)
-        }
-        ProcessWakeDedupeKey::Const(value) => value.clone(),
-    };
-    Ok(Some(ProcessWake { input, dedupe_key }))
+    let _ = (process_id, sequence);
+    Ok(Some(ProcessWake { input }))
 }
 
 pub(super) fn select_value(

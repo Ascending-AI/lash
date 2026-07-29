@@ -4,7 +4,7 @@ use super::ProcessCompletionOutcome;
 use super::engine::PersistedSegmentHandover;
 use super::events::{
     ProcessAwaitOutput, ProcessCompletionAuthority, ProcessEvent, ProcessEventAppendRequest,
-    ProcessEventAppendResult,
+    ProcessEventAppendResult, ProcessWakeDelivery,
 };
 use super::model::{
     AbandonRequest, ProcessChangeCursor, ProcessExecutionWriteAuthority, ProcessExternalRef,
@@ -25,6 +25,136 @@ pub struct ProcessPruneReport {
     pub pruned_events: usize,
 }
 
+pub const DEFAULT_WAKE_DELIVERY_EXPIRY_MS: u64 = 7 * 24 * 60 * 60 * 1_000;
+
+/// Host-owned bound for process-wake redelivery.
+///
+/// Exactly-once delivery does not depend on comparing clocks across the
+/// process registry and target session store. Receiver completion advances one
+/// monotone consumed high-water mark per `(session_id, process_id)`. F7
+/// guarantees in-sequence enqueue within each target/process group, so every
+/// consumed sequence is a contiguous prefix: stale drivers, retries, and host
+/// redrives can only reproduce a sequence at or below that prefix and dedupe
+/// forever. `delivery_expiry_ms` is only a pending-delivery liveness bound,
+/// evaluated with the runtime's injected clock.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct WakeDeliveryConfig {
+    pub delivery_expiry_ms: u64,
+}
+
+impl Default for WakeDeliveryConfig {
+    fn default() -> Self {
+        Self {
+            delivery_expiry_ms: DEFAULT_WAKE_DELIVERY_EXPIRY_MS,
+        }
+    }
+}
+
+impl WakeDeliveryConfig {
+    pub fn new(delivery_expiry_ms: u64) -> Result<Self, PluginError> {
+        if delivery_expiry_ms == 0 {
+            return Err(PluginError::Session(
+                "process wake delivery expiry must be greater than zero".to_string(),
+            ));
+        }
+        Ok(Self { delivery_expiry_ms })
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum WakeDeliveryState {
+    Pending,
+    Enqueued,
+    Discarded,
+}
+
+impl WakeDeliveryState {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Pending => "pending",
+            Self::Enqueued => "enqueued",
+            Self::Discarded => "discarded",
+        }
+    }
+}
+
+/// Durable terminal outcome for an undeliverable wake.
+///
+/// This is non-exhaustive because subscription retargeting will add its typed
+/// discard in the wave that introduces the retarget verb.
+#[non_exhaustive]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum WakeDiscardReason {
+    Expired,
+    TargetGone,
+}
+
+impl WakeDiscardReason {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Expired => "expired",
+            Self::TargetGone => "target_gone",
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct WakeDelivery {
+    pub delivery_id: String,
+    pub wake: ProcessWakeDelivery,
+    pub state: WakeDeliveryState,
+    pub attempts: u64,
+    pub first_attempt_ms: Option<u64>,
+    pub next_attempt_at_ms: u64,
+    pub expires_at_ms: u64,
+    pub discard_reason: Option<WakeDiscardReason>,
+}
+
+impl WakeDelivery {
+    pub fn pending(
+        wake: ProcessWakeDelivery,
+        config: WakeDeliveryConfig,
+    ) -> Result<Self, PluginError> {
+        let next_attempt_at_ms = wake.created_at_ms;
+        let hash = crate::stable_hash::stable_json_sha256_hex(&(
+            wake.target_session_id.as_str(),
+            wake.process_id.as_str(),
+            wake.sequence,
+        ))
+        .map_err(|error| {
+            PluginError::Session(format!(
+                "failed to derive wake delivery id for process `{}`: {error}",
+                wake.process_id
+            ))
+        })?;
+        Ok(Self {
+            delivery_id: format!("wake-delivery:{hash}"),
+            expires_at_ms: wake.created_at_ms.saturating_add(config.delivery_expiry_ms),
+            wake,
+            state: WakeDeliveryState::Pending,
+            attempts: 0,
+            first_attempt_ms: None,
+            next_attempt_at_ms,
+            discard_reason: None,
+        })
+    }
+
+    pub fn source_key(&self) -> String {
+        crate::process_wake_source_key(&self.wake.process_id, self.wake.sequence)
+    }
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct WakeDeliveryReport {
+    pub pending: usize,
+    pub enqueued: usize,
+    pub discarded: usize,
+    pub expired: usize,
+    pub target_gone: usize,
+}
+
 /// Durability-neutral process registry.
 ///
 /// Process waits are coordination behavior and live on
@@ -34,6 +164,27 @@ pub struct ProcessPruneReport {
 /// `docs/adr/0016-process-waits-live-on-the-work-driver-seam.md`.
 #[async_trait::async_trait]
 pub trait ProcessRegistry: Send + Sync {
+    fn wake_delivery_config(&self) -> WakeDeliveryConfig;
+
+    /// Return the same registry backend bound to the runtime's clock.
+    ///
+    /// First-party persistent registries override this so facade construction
+    /// cannot mint wake expiry with a different clock than the driver uses.
+    /// Host-owned registries that already own their clock may keep the default.
+    fn with_runtime_clock(
+        &self,
+        _clock: std::sync::Arc<dyn crate::Clock>,
+    ) -> Option<std::sync::Arc<dyn ProcessRegistry>> {
+        None
+    }
+
+    /// Process ids must be unique across prune horizons. A receiver's consumed
+    /// wake high-water mark deliberately survives sender-side pruning, and event
+    /// sequences restart for a re-registered id, so re-registering a previously
+    /// pruned process id would have its wakes silently absorbed below the
+    /// retained mark. Hosts mint fresh process ids rather than reusing pruned
+    /// ones (the ADR 0049 single-use rule for sessions applies to process ids
+    /// at the prune horizon).
     async fn register_process(
         &self,
         registration: ProcessRegistration,
@@ -199,12 +350,6 @@ pub trait ProcessRegistry: Send + Sync {
         Ok(events)
     }
 
-    async fn wake_events_after(
-        &self,
-        process_id: &str,
-        after_sequence: u64,
-    ) -> Result<Vec<ProcessEvent>, PluginError>;
-
     /// Complete a process without a Lash process lease, under an explicit,
     /// auditable completion authority.
     ///
@@ -311,7 +456,37 @@ pub trait ProcessRegistry: Send + Sync {
         limit: usize,
     ) -> Result<(Vec<ProcessRecord>, ProcessChangeCursor), PluginError>;
 
-    async fn ack_wake(&self, process_id: &str, sequence: u64) -> Result<(), PluginError>;
+    /// Return due group heads and record one delivery attempt for each.
+    ///
+    /// Implementations must preserve sequence order inside a
+    /// `(target_session_id, process_id)` group while selecting fairly across
+    /// distinct groups by `next_attempt_at_ms`.
+    async fn pending_wake_deliveries(&self, limit: usize)
+    -> Result<Vec<WakeDelivery>, PluginError>;
+
+    async fn list_wake_deliveries(
+        &self,
+        state: Option<WakeDeliveryState>,
+    ) -> Result<Vec<WakeDelivery>, PluginError>;
+
+    async fn wake_delivery_report(&self) -> Result<WakeDeliveryReport, PluginError>;
+
+    async fn mark_wake_enqueued(&self, delivery_id: &str) -> Result<(), PluginError>;
+
+    async fn discard_wake_delivery(
+        &self,
+        delivery_id: &str,
+        reason: WakeDiscardReason,
+    ) -> Result<(), PluginError>;
+
+    async fn redrive_wake_delivery(&self, delivery_id: &str) -> Result<(), PluginError>;
+
+    /// Defer a retryable non-delivery until the supplied runtime-clock time.
+    async fn defer_wake_delivery(
+        &self,
+        delivery_id: &str,
+        next_attempt_at_ms: u64,
+    ) -> Result<(), PluginError>;
 
     /// All non-terminal process records, in stable `process_id` order.
     ///
@@ -411,7 +586,7 @@ pub trait ProcessRegistry: Send + Sync {
     /// Physically delete terminal process rows whose `updated_at_ms` is older
     /// than `cutoff_epoch_ms`, match `filter` when one is supplied, and have a
     /// process change sequence no later than `up_to_change_seq` when supplied,
-    /// together with their events, wake acks, handle grants, lease rows, and
+    /// together with their events, handle grants, lease rows, and
     /// trigger-delivery reservations whose deterministic process id points at a
     /// pruned row. The same cutoff also prunes trigger-mutation idempotency
     /// receipts, bounding receipt retention under the host's existing cleanup

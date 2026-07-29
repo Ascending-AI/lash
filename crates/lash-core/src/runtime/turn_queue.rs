@@ -178,11 +178,52 @@ impl QueuedWorkBatch {
     }
 }
 
+#[doc(hidden)]
+pub fn consumed_queued_work_batch(draft: &QueuedWorkBatchDraft) -> QueuedWorkBatch {
+    let source_key = draft
+        .source_key
+        .as_deref()
+        .expect("consumed queued-work receipt requires a source key");
+    let batch_id = format!(
+        "consumed:{}",
+        crate::stable_hash::sha256_hex(format!("{}:{source_key}", draft.session_id).as_bytes())
+    );
+    QueuedWorkBatch {
+        batch_id: batch_id.clone(),
+        session_id: draft.session_id.clone(),
+        enqueue_seq: 0,
+        source_key: draft.source_key.clone(),
+        delivery_policy: draft.delivery_policy,
+        slot_policy: draft.slot_policy,
+        merge_key: draft.merge_key.clone(),
+        available_at_ms: draft.available_at_ms,
+        // This is a synthetic idempotency receipt, not a live queue row.
+        enqueued_at_ms: 0,
+        items: draft
+            .payloads
+            .iter()
+            .cloned()
+            .enumerate()
+            .map(|(index, payload)| QueuedWorkItem {
+                item_id: format!("{batch_id}:item:{index}"),
+                payload,
+            })
+            .collect(),
+    }
+}
+
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct QueuedWorkBatchDraft {
     pub session_id: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub source_key: Option<String>,
+    /// Structural producer identity for a process wake.
+    ///
+    /// Stores use this tuple for consumed high-water dedupe. It deliberately
+    /// duplicates the human-readable source key so correctness never depends
+    /// on parsing that string.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub process_wake_source: Option<ProcessWakeSource>,
     pub delivery_policy: DeliveryPolicy,
     pub slot_policy: SlotPolicy,
     pub merge_key: MergeKey,
@@ -200,6 +241,7 @@ impl QueuedWorkBatchDraft {
         Self {
             session_id: session_id.into(),
             source_key: None,
+            process_wake_source: None,
             delivery_policy,
             slot_policy,
             merge_key: MergeKey::Never,
@@ -210,6 +252,18 @@ impl QueuedWorkBatchDraft {
 
     pub fn with_source_key(mut self, source_key: impl Into<String>) -> Self {
         self.source_key = Some(source_key.into());
+        self
+    }
+
+    pub fn with_process_wake_source(
+        mut self,
+        process_id: impl Into<String>,
+        sequence: u64,
+    ) -> Self {
+        self.process_wake_source = Some(ProcessWakeSource {
+            process_id: process_id.into(),
+            sequence,
+        });
         self
     }
 
@@ -226,6 +280,44 @@ impl QueuedWorkBatchDraft {
     pub fn work_class(&self) -> Option<QueuedWorkClass> {
         work_class_for_payloads(self.payloads.iter())
     }
+
+    #[doc(hidden)]
+    pub fn validate_process_wake_source(&self) -> Result<(), String> {
+        match (
+            self.process_wake_source.as_ref(),
+            self.payloads.as_slice(),
+        ) {
+            (
+                Some(source),
+                [QueuedWorkPayload::ProcessWake { wake }],
+            ) if wake.target_session_id == self.session_id
+                && wake.process_id == source.process_id
+                && wake.sequence == source.sequence
+                && source.sequence <= i64::MAX as u64
+                && self.source_key.as_deref()
+                    == Some(process_wake_source_key(&source.process_id, source.sequence).as_str()) =>
+            {
+                Ok(())
+            }
+            (None, payloads)
+                if !payloads
+                    .iter()
+                    .any(|payload| matches!(payload, QueuedWorkPayload::ProcessWake { .. })) =>
+            {
+                Ok(())
+            }
+            _ => Err(
+                "process-wake queued work requires one matching payload, structural source tuple, signed-64-bit sequence, target session, and source key"
+                    .to_string(),
+            ),
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct ProcessWakeSource {
+    pub process_id: String,
+    pub sequence: u64,
 }
 
 fn work_class_for_payloads<'a>(
@@ -386,7 +478,9 @@ pub struct QueuedTurnWork {
 }
 
 pub fn process_wake_batch_draft(wake: ProcessWakeDelivery) -> QueuedWorkBatchDraft {
-    let source_key = format!("process:{}:event:{}:wake", wake.process_id, wake.sequence);
+    let source_key = process_wake_source_key(&wake.process_id, wake.sequence);
+    let process_id = wake.process_id.clone();
+    let sequence = wake.sequence;
     QueuedWorkBatchDraft::new(
         wake.target_session_id.clone(),
         DeliveryPolicy::EarliestSafeBoundary,
@@ -394,4 +488,9 @@ pub fn process_wake_batch_draft(wake: ProcessWakeDelivery) -> QueuedWorkBatchDra
         vec![QueuedWorkPayload::process_wake(wake)],
     )
     .with_source_key(source_key)
+    .with_process_wake_source(process_id, sequence)
+}
+
+pub fn process_wake_source_key(process_id: &str, sequence: u64) -> String {
+    format!("process:{process_id}:event:{sequence}:wake")
 }

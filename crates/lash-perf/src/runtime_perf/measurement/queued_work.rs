@@ -389,37 +389,25 @@ async fn enqueue_queued_work_stress_turn(
         .await?;
 
     for batch_index in 0..QUEUED_WORK_JOIN_BATCHES_PER_TURN {
+        let wake = queued_work_stress_wake(
+            session_id,
+            &format!("queued work stress turn {turn_index} batch {batch_index}"),
+            (turn_index * QUEUED_WORK_JOIN_BATCHES_PER_TURN + batch_index + 1) as u64,
+        );
+        let mut draft = lash_core::runtime::process_wake_batch_draft(wake);
+        draft.slot_policy = SlotPolicy::Join;
         store
-            .enqueue_queued_work(
-                QueuedWorkBatchDraft::new(
-                    session_id,
-                    DeliveryPolicy::EarliestSafeBoundary,
-                    SlotPolicy::Join,
-                    vec![QueuedWorkPayload::process_wake(queued_work_stress_wake(
-                        session_id,
-                        &format!("queued work stress turn {turn_index} batch {batch_index}"),
-                        (turn_index * QUEUED_WORK_JOIN_BATCHES_PER_TURN + batch_index + 1) as u64,
-                    ))],
-                )
-                .with_source_key(format!("turn:{turn_index}:join:{batch_index}")),
-            )
+            .enqueue_queued_work(draft)
             .await?;
     }
 
+    let wake = queued_work_stress_wake(
+        session_id,
+        &format!("queued work stress exclusive {turn_index}"),
+        ((turn_index + 1) * 10_000) as u64,
+    );
     store
-        .enqueue_queued_work(
-            QueuedWorkBatchDraft::new(
-                session_id,
-                DeliveryPolicy::EarliestSafeBoundary,
-                SlotPolicy::Exclusive,
-                vec![QueuedWorkPayload::process_wake(queued_work_stress_wake(
-                    session_id,
-                    &format!("queued work stress exclusive {turn_index}"),
-                    ((turn_index + 1) * 10_000) as u64,
-                ))],
-            )
-            .with_source_key(format!("turn:{turn_index}:exclusive")),
-        )
+        .enqueue_queued_work(lash_core::runtime::process_wake_batch_draft(wake))
         .await?;
     Ok(())
 }
@@ -448,7 +436,6 @@ fn queued_work_stress_wake(
             replay: None,
         },
         process_caused_by: None,
-        dedupe_key: format!("wake:{session_id}:{process_id}:{sequence}"),
         input: input.to_string(),
         created_at_ms: sequence,
     }

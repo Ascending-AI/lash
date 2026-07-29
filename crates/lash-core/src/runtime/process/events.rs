@@ -33,17 +33,6 @@ pub struct ProcessWakeSpec {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub when: Option<ProcessValueSelector>,
     pub input: ProcessValueSelector,
-    #[serde(default)]
-    pub dedupe_key: ProcessWakeDedupeKey,
-}
-
-#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum ProcessWakeDedupeKey {
-    #[default]
-    EventIdentity,
-    Selector(ProcessValueSelector),
-    Const(String),
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -409,7 +398,6 @@ impl ProcessAwaitOutput {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ProcessWake {
     pub input: String,
-    pub dedupe_key: String,
 }
 
 pub fn process_signal_event_type(signal_name: &str) -> Result<String, crate::PluginError> {
@@ -577,7 +565,6 @@ pub struct ProcessWakeDelivery {
     pub event_invocation: crate::RuntimeInvocation,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub process_caused_by: Option<crate::CausalRef>,
-    pub dedupe_key: String,
     pub input: String,
     pub created_at_ms: u64,
 }

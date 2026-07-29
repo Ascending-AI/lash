@@ -714,8 +714,6 @@ pub struct RemoteProcessWakeSpec {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub when: Option<RemoteProcessValueSelector>,
     pub input: RemoteProcessValueSelector,
-    #[serde(default)]
-    pub dedupe_key: RemoteProcessWakeDedupeKey,
 }
 
 impl RemoteProcessWakeSpec {
@@ -723,8 +721,7 @@ impl RemoteProcessWakeSpec {
         if let Some(when) = &self.when {
             when.validate(type_name)?;
         }
-        self.input.validate(type_name)?;
-        self.dedupe_key.validate(type_name)
+        self.input.validate(type_name)
     }
 }
 
@@ -821,32 +818,11 @@ pub struct RemoteProcessTerminalSemantics {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct RemoteProcessWake {
     pub input: String,
-    pub dedupe_key: String,
 }
 
 impl RemoteProcessWake {
     pub fn validate(&self, type_name: &'static str) -> Result<(), RemoteProtocolError> {
-        require_non_empty(type_name, "wake.input", &self.input)?;
-        require_non_empty(type_name, "wake.dedupe_key", &self.dedupe_key)
-    }
-}
-
-#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
-#[serde(rename_all = "snake_case")]
-pub enum RemoteProcessWakeDedupeKey {
-    #[default]
-    EventIdentity,
-    Selector(RemoteProcessValueSelector),
-    Const(String),
-}
-
-impl RemoteProcessWakeDedupeKey {
-    pub fn validate(&self, type_name: &'static str) -> Result<(), RemoteProtocolError> {
-        match self {
-            Self::EventIdentity => Ok(()),
-            Self::Selector(selector) => selector.validate(type_name),
-            Self::Const(value) => require_non_empty(type_name, "wake.dedupe_key.const", value),
-        }
+        require_non_empty(type_name, "wake.input", &self.input)
     }
 }
 

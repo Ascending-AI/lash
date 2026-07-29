@@ -15,12 +15,30 @@ use super::*;
 
 mod segment_handover;
 mod support;
+mod wake_delivery;
 
 use support::process_status_label;
 pub(crate) use support::tx_outcome;
+use wake_delivery::{load_wake_delivery_conn, update_wake_delivery_state, wake_delivery_report};
 
 #[async_trait::async_trait]
 impl ProcessRegistry for SqliteProcessRegistry {
+    fn wake_delivery_config(&self) -> lash_core::WakeDeliveryConfig {
+        self.wake_delivery_config
+    }
+
+    fn with_runtime_clock(
+        &self,
+        clock: Arc<dyn lash_core::Clock>,
+    ) -> Option<Arc<dyn ProcessRegistry>> {
+        Some(Arc::new(Self {
+            conn: self.conn.clone(),
+            clock,
+            process_session_store_root: self.process_session_store_root.clone(),
+            wake_delivery_config: self.wake_delivery_config,
+        }))
+    }
+
     async fn register_process(
         &self,
         registration: ProcessRegistration,
@@ -111,6 +129,7 @@ impl ProcessRegistry for SqliteProcessRegistry {
     ) -> Result<ProcessRecord, lash_core::PluginError> {
         let process_id = process_id.to_string();
         let now = self.clock.timestamp_ms();
+        let wake_delivery_config = self.wake_delivery_config;
         let (record, _changed) = self
             .conn
             .write_flow(move |tx| {
@@ -133,7 +152,7 @@ impl ProcessRegistry for SqliteProcessRegistry {
                     }
                     let request =
                         ProcessEventAppendRequest::external_ref_set(&process_id, &external_ref);
-                    Self::append_event_conn(tx, &mut record, request, now)?;
+                    Self::append_event_conn(tx, &mut record, request, now, wake_delivery_config)?;
                     Ok((record, true))
                 })()))
             })
@@ -368,7 +387,7 @@ impl ProcessRegistry for SqliteProcessRegistry {
         let session_id_owned = session_id.to_string();
         let (
             revoked_handle_count,
-            deleted_wake_count,
+            discarded_wake_delivery_count,
             mut orphaned_process_ids,
             mut preserved_process_ids,
         ) = self
@@ -401,11 +420,14 @@ impl ProcessRegistry for SqliteProcessRegistry {
                         removed
                     };
 
-                    // Wake acknowledgements are process-scoped consumed-event markers.
-                    // Session deletion removes materialized session-addressed deliveries
-                    // through the session store; clearing these rows would re-expose
-                    // already-consumed wakes to surviving grants or future host readers.
-                    let deleted_wake_count = 0;
+                    let discarded_wake_delivery_count = tx
+                        .execute(
+                            "UPDATE process_wake_deliveries
+                             SET state = 'discarded', discard_reason = 'target_gone'
+                             WHERE target_session_id = ?1 AND state = 'pending'",
+                            params![session_id],
+                        )
+                        .map_err(process_sqlite_error)?;
                     let revoked_handle_count = tx
                         .execute(
                             "DELETE FROM process_handle_grants WHERE session_id = ?1",
@@ -456,7 +478,7 @@ impl ProcessRegistry for SqliteProcessRegistry {
                     }
                     Ok((
                         revoked_handle_count,
-                        deleted_wake_count,
+                        discarded_wake_delivery_count,
                         orphaned_process_ids,
                         preserved_process_ids,
                     ))
@@ -471,7 +493,7 @@ impl ProcessRegistry for SqliteProcessRegistry {
         Ok(lash_core::ProcessSessionDeleteReport {
             session_id: session_id.to_string(),
             revoked_handle_count,
-            deleted_wake_count,
+            discarded_wake_delivery_count,
             orphaned_process_ids,
             preserved_process_ids,
         })
@@ -484,6 +506,7 @@ impl ProcessRegistry for SqliteProcessRegistry {
     ) -> Result<ProcessEventAppendResult, lash_core::PluginError> {
         let process_id = process_id.to_string();
         let occurred_at_ms = self.clock.timestamp_ms();
+        let wake_delivery_config = self.wake_delivery_config;
         let (result, _appended) = self
             .conn
             .write_flow(move |tx| {
@@ -494,7 +517,13 @@ impl ProcessRegistry for SqliteProcessRegistry {
                                 "unknown process `{process_id}`"
                             ))
                         })?;
-                    Self::append_event_conn(tx, &mut record, request, occurred_at_ms)
+                    Self::append_event_conn(
+                        tx,
+                        &mut record,
+                        request,
+                        occurred_at_ms,
+                        wake_delivery_config,
+                    )
                 })()))
             })
             .await
@@ -511,6 +540,7 @@ impl ProcessRegistry for SqliteProcessRegistry {
         let process_id = process_id.to_string();
         let authority = authority.clone();
         let occurred_at_ms = self.clock.timestamp_ms();
+        let wake_delivery_config = self.wake_delivery_config;
         let (result, _appended) = self
             .conn
             .write_flow(move |tx| {
@@ -529,7 +559,13 @@ impl ProcessRegistry for SqliteProcessRegistry {
                         None,
                         occurred_at_ms,
                     )?;
-                    Self::append_event_conn(tx, &mut record, request, occurred_at_ms)
+                    Self::append_event_conn(
+                        tx,
+                        &mut record,
+                        request,
+                        occurred_at_ms,
+                        wake_delivery_config,
+                    )
                 })()))
             })
             .await
@@ -649,44 +685,6 @@ impl ProcessRegistry for SqliteProcessRegistry {
             .map_err(process_sqlite_error)?
     }
 
-    async fn wake_events_after(
-        &self,
-        process_id: &str,
-        after_sequence: u64,
-    ) -> Result<Vec<ProcessEvent>, lash_core::PluginError> {
-        let acked: std::collections::HashSet<u64> = {
-            let process_id = process_id.to_string();
-            self.conn
-                .call(move |conn| {
-                    Ok(
-                        (|| -> Result<std::collections::HashSet<u64>, lash_core::PluginError> {
-                            let mut stmt = conn
-                                .prepare(
-                                    "SELECT sequence FROM process_wake_acks WHERE process_id = ?1",
-                                )
-                                .map_err(process_sqlite_error)?;
-                            let rows = stmt
-                                .query_map(params![process_id], |row| row.get::<_, i64>(0))
-                                .map_err(process_sqlite_error)?;
-                            let mut set = std::collections::HashSet::new();
-                            for row in rows {
-                                set.insert(row.map_err(process_sqlite_error)? as u64);
-                            }
-                            Ok(set)
-                        })(),
-                    )
-                })
-                .await
-                .map_err(process_sqlite_error)??
-        };
-        Ok(self
-            .events_after(process_id, after_sequence)
-            .await?
-            .into_iter()
-            .filter(|event| event.semantics.wake.is_some() && !acked.contains(&event.sequence))
-            .collect())
-    }
-
     async fn complete_process(
         &self,
         process_id: &str,
@@ -724,6 +722,7 @@ impl ProcessRegistry for SqliteProcessRegistry {
         let process_id = process_id.to_string();
         let authority = authority.clone();
         let now = self.clock.timestamp_ms();
+        let wake_delivery_config = self.wake_delivery_config;
         self.conn
             .write_flow(move |tx| {
                 Ok(tx_outcome((|| {
@@ -773,7 +772,7 @@ impl ProcessRegistry for SqliteProcessRegistry {
                         &started,
                         resumed_from_handover,
                     );
-                    Self::append_event_conn(tx, &mut record, request, now)?;
+                    Self::append_event_conn(tx, &mut record, request, now, wake_delivery_config)?;
                     Ok(ProcessStartOutcome::Started(record))
                 })()))
             })
@@ -788,6 +787,7 @@ impl ProcessRegistry for SqliteProcessRegistry {
     ) -> Result<ProcessRecord, lash_core::PluginError> {
         let process_id = process_id.to_string();
         let now = self.clock.timestamp_ms();
+        let wake_delivery_config = self.wake_delivery_config;
         self.conn
             .write_flow(move |tx| {
                 Ok(tx_outcome((|| {
@@ -807,7 +807,7 @@ impl ProcessRegistry for SqliteProcessRegistry {
                     }
                     let append =
                         ProcessEventAppendRequest::abandon_requested(&process_id, &request);
-                    Self::append_event_conn(tx, &mut record, append, now)?;
+                    Self::append_event_conn(tx, &mut record, append, now, wake_delivery_config)?;
                     Ok(record)
                 })()))
             })
@@ -824,6 +824,7 @@ impl ProcessRegistry for SqliteProcessRegistry {
         let process_id = process_id.to_string();
         let authority = authority.clone();
         let now = self.clock.timestamp_ms();
+        let wake_delivery_config = self.wake_delivery_config;
         self.conn
             .write_flow(move |tx| {
                 Ok(tx_outcome((|| {
@@ -850,7 +851,7 @@ impl ProcessRegistry for SqliteProcessRegistry {
                         return Ok(record);
                     }
                     let request = ProcessEventAppendRequest::wait_entered(&process_id, &wait);
-                    Self::append_event_conn(tx, &mut record, request, now)?;
+                    Self::append_event_conn(tx, &mut record, request, now, wake_delivery_config)?;
                     Ok(record)
                 })()))
             })
@@ -866,6 +867,7 @@ impl ProcessRegistry for SqliteProcessRegistry {
         let process_id = process_id.to_string();
         let authority = authority.clone();
         let now = self.clock.timestamp_ms();
+        let wake_delivery_config = self.wake_delivery_config;
         self.conn
             .write_flow(move |tx| {
                 Ok(tx_outcome((|| {
@@ -887,7 +889,7 @@ impl ProcessRegistry for SqliteProcessRegistry {
                         return Ok(record);
                     };
                     let request = ProcessEventAppendRequest::wait_cleared(&process_id, &wait);
-                    Self::append_event_conn(tx, &mut record, request, now)?;
+                    Self::append_event_conn(tx, &mut record, request, now, wake_delivery_config)?;
                     Ok(record)
                 })()))
             })
@@ -968,27 +970,188 @@ impl ProcessRegistry for SqliteProcessRegistry {
             .map_err(process_sqlite_error)?
     }
 
-    async fn ack_wake(
+    async fn pending_wake_deliveries(
         &self,
-        process_id: &str,
-        sequence: u64,
-    ) -> Result<(), lash_core::PluginError> {
-        let process_id = process_id.to_string();
+        limit: usize,
+    ) -> Result<Vec<lash_core::WakeDelivery>, lash_core::PluginError> {
+        if limit == 0 {
+            return Ok(Vec::new());
+        }
+        let now = self.clock.timestamp_ms();
+        self.conn
+            .write_flow(move |tx| {
+                Ok(tx_outcome((|| {
+                    let ids = {
+                        let mut stmt = tx
+                            .prepare(
+                                "SELECT candidate.delivery_id
+                                 FROM process_wake_deliveries AS candidate
+                                 WHERE candidate.state = 'pending'
+                                   AND candidate.next_attempt_at_ms <= ?2
+                                   AND NOT EXISTS (
+                                       SELECT 1
+                                       FROM process_wake_deliveries AS earlier
+                                       WHERE earlier.state <> 'enqueued'
+                                         AND earlier.target_session_id =
+                                             candidate.target_session_id
+                                         AND earlier.process_id = candidate.process_id
+                                         AND earlier.sequence < candidate.sequence
+                                   )
+                                 ORDER BY candidate.next_attempt_at_ms ASC,
+                                          candidate.target_session_id ASC,
+                                          candidate.process_id ASC,
+                                          candidate.sequence ASC
+                                 LIMIT ?1",
+                            )
+                            .map_err(process_sqlite_error)?;
+                        stmt.query_map(params![limit as i64, now as i64], |row| {
+                            row.get::<_, String>(0)
+                        })
+                        .map_err(process_sqlite_error)?
+                        .collect::<Result<Vec<_>, _>>()
+                        .map_err(process_sqlite_error)?
+                    };
+                    for id in &ids {
+                        tx.execute(
+                            "UPDATE process_wake_deliveries
+                             SET attempts = attempts + 1,
+                                 first_attempt_ms = COALESCE(first_attempt_ms, ?2)
+                             WHERE delivery_id = ?1 AND state = 'pending'",
+                            params![id, now as i64],
+                        )
+                        .map_err(process_sqlite_error)?;
+                    }
+                    ids.iter()
+                        .map(|id| load_wake_delivery_conn(tx, id))
+                        .collect()
+                })()))
+            })
+            .await
+            .map_err(process_sqlite_error)?
+    }
+
+    async fn list_wake_deliveries(
+        &self,
+        state: Option<lash_core::WakeDeliveryState>,
+    ) -> Result<Vec<lash_core::WakeDelivery>, lash_core::PluginError> {
         self.conn
             .call(move |conn| {
                 Ok((|| {
-                    if Self::load_process_conn(conn, &process_id)?.is_none() {
+                    let mut sql = "SELECT delivery_id FROM process_wake_deliveries".to_string();
+                    if state.is_some() {
+                        sql.push_str(" WHERE state = ?1");
+                    }
+                    sql.push_str(" ORDER BY delivery_id ASC");
+                    let mut stmt = conn.prepare(&sql).map_err(process_sqlite_error)?;
+                    let ids = if let Some(state) = state {
+                        stmt.query_map(params![state.as_str()], |row| row.get::<_, String>(0))
+                            .map_err(process_sqlite_error)?
+                            .collect::<Result<Vec<_>, _>>()
+                            .map_err(process_sqlite_error)?
+                    } else {
+                        stmt.query_map([], |row| row.get::<_, String>(0))
+                            .map_err(process_sqlite_error)?
+                            .collect::<Result<Vec<_>, _>>()
+                            .map_err(process_sqlite_error)?
+                    };
+                    ids.iter()
+                        .map(|id| load_wake_delivery_conn(conn, id))
+                        .collect()
+                })())
+            })
+            .await
+            .map_err(process_sqlite_error)?
+    }
+
+    async fn wake_delivery_report(
+        &self,
+    ) -> Result<lash_core::WakeDeliveryReport, lash_core::PluginError> {
+        let deliveries = self.list_wake_deliveries(None).await?;
+        Ok(wake_delivery_report(deliveries.iter()))
+    }
+
+    async fn mark_wake_enqueued(&self, delivery_id: &str) -> Result<(), lash_core::PluginError> {
+        update_wake_delivery_state(
+            &self.conn,
+            delivery_id,
+            lash_core::WakeDeliveryState::Enqueued,
+            None,
+        )
+        .await
+    }
+
+    async fn discard_wake_delivery(
+        &self,
+        delivery_id: &str,
+        reason: lash_core::WakeDiscardReason,
+    ) -> Result<(), lash_core::PluginError> {
+        update_wake_delivery_state(
+            &self.conn,
+            delivery_id,
+            lash_core::WakeDeliveryState::Discarded,
+            Some(reason),
+        )
+        .await
+    }
+
+    async fn redrive_wake_delivery(&self, delivery_id: &str) -> Result<(), lash_core::PluginError> {
+        let delivery_id = delivery_id.to_string();
+        let expires_at_ms = self
+            .clock
+            .timestamp_ms()
+            .saturating_add(self.wake_delivery_config.delivery_expiry_ms);
+        let next_attempt_at_ms = self.clock.timestamp_ms();
+        self.conn
+            .write_flow(move |tx| {
+                Ok(tx_outcome((|| {
+                    let changed = tx
+                        .execute(
+                            "UPDATE process_wake_deliveries
+                             SET state = 'pending', attempts = 0, first_attempt_ms = NULL,
+                                 next_attempt_at_ms = ?3, expires_at_ms = ?2,
+                                 discard_reason = NULL
+                             WHERE delivery_id = ?1 AND state = 'discarded'",
+                            params![delivery_id, expires_at_ms as i64, next_attempt_at_ms as i64],
+                        )
+                        .map_err(process_sqlite_error)?;
+                    if changed == 0 {
                         return Err(lash_core::PluginError::Session(format!(
-                            "unknown process `{process_id}`"
+                            "wake delivery `{delivery_id}` is not discarded or does not exist"
                         )));
                     }
-                    conn.execute(
-                        "INSERT OR IGNORE INTO process_wake_acks (process_id, sequence) VALUES (?1, ?2)",
-                        params![process_id, sequence as i64],
-                    )
-                    .map_err(process_sqlite_error)?;
                     Ok(())
-                })())
+                })()))
+            })
+            .await
+            .map_err(process_sqlite_error)?
+    }
+
+    async fn defer_wake_delivery(
+        &self,
+        delivery_id: &str,
+        next_attempt_at_ms: u64,
+    ) -> Result<(), lash_core::PluginError> {
+        let delivery_id = delivery_id.to_string();
+        self.conn
+            .write_flow(move |tx| {
+                Ok(tx_outcome((|| {
+                    let changed = tx
+                        .execute(
+                            "UPDATE process_wake_deliveries
+                             SET next_attempt_at_ms = MAX(next_attempt_at_ms, ?2)
+                             WHERE delivery_id = ?1 AND state = 'pending'",
+                            params![delivery_id, next_attempt_at_ms as i64],
+                        )
+                        .map_err(process_sqlite_error)?;
+                    if changed == 0 {
+                        let delivery = load_wake_delivery_conn(tx, &delivery_id)?;
+                        return Err(lash_core::PluginError::WakeDeliveryNotPending {
+                            delivery_id,
+                            state: delivery.state,
+                        });
+                    }
+                    Ok(())
+                })()))
             })
             .await
             .map_err(process_sqlite_error)?

@@ -185,6 +185,23 @@ pub(crate) fn enqueue_queued_work_conn(
     now: u64,
     nonce: u64,
 ) -> Result<QueuedWorkBatch, StoreError> {
+    batch
+        .validate_process_wake_source()
+        .map_err(StoreError::Backend)?;
+    if let Some(wake_source) = batch.process_wake_source.as_ref() {
+        let high_sequence = conn
+            .query_row(
+                "SELECT high_sequence FROM consumed_wake_high_water
+                 WHERE session_id = ?1 AND process_id = ?2",
+                params![batch.session_id, wake_source.process_id],
+                |row| row.get::<_, i64>(0),
+            )
+            .optional()
+            .map_err(sqlite_error)?;
+        if high_sequence.is_some_and(|high| wake_source.sequence <= high as u64) {
+            return Ok(lash_core::runtime::consumed_queued_work_batch(batch));
+        }
+    }
     if let Some(source_key) = batch.source_key.as_deref() {
         let existing_id: Option<String> = conn
             .query_row(

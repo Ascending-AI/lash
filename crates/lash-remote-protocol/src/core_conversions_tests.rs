@@ -1321,7 +1321,6 @@ fn process_event_type() -> lash_core::ProcessEventType {
             wake: Some(lash_core::ProcessWakeSpec {
                 when: None,
                 input: lash_core::ProcessValueSelector::Pointer("/text".to_string()),
-                dedupe_key: lash_core::ProcessWakeDedupeKey::Const("done".to_string()),
             }),
         },
     }
@@ -1388,7 +1387,6 @@ fn process_event(process_id: &str) -> lash_core::ProcessEvent {
             }),
             wake: Some(lash_core::ProcessWake {
                 input: "wake".to_string(),
-                dedupe_key: "dedupe".to_string(),
             }),
         },
         occurred_at: lash_core::system_time_from_epoch_ms(12),

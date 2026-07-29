@@ -167,6 +167,26 @@ async fn enqueue_queued_work_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     batch: &QueuedWorkBatchDraft,
 ) -> Result<QueuedWorkBatch, StoreError> {
+    batch
+        .validate_process_wake_source()
+        .map_err(StoreError::Backend)?;
+    if let Some(wake_source) = batch.process_wake_source.as_ref() {
+        if let Some(source_key) = batch.source_key.as_deref() {
+            lock_process_wake_source_tx(tx, &batch.session_id, source_key).await?;
+        }
+        let high_sequence = sqlx::query_scalar::<_, i64>(
+            "SELECT high_sequence FROM lash_consumed_wake_high_water
+             WHERE session_id = $1 AND process_id = $2",
+        )
+        .bind(&batch.session_id)
+        .bind(&wake_source.process_id)
+        .fetch_optional(&mut **tx)
+        .await
+        .map_err(store_sqlx_error)?;
+        if high_sequence.is_some_and(|high| wake_source.sequence <= high as u64) {
+            return Ok(lash_core::runtime::consumed_queued_work_batch(batch));
+        }
+    }
     if let Some(source_key) = batch.source_key.as_deref() {
         let existing_id: Option<String> = sqlx::query_scalar(
             "SELECT batch_id FROM lash_queued_work_batches
@@ -237,6 +257,51 @@ async fn enqueue_queued_work_tx(
         .ok_or_else(|| StoreError::Backend("queued work insert disappeared".to_string()))?;
     debug_assert_eq!(queued.enqueue_seq, enqueue_seq as u64);
     Ok(queued)
+}
+
+/// Serialize queue insertion and queue consumption for one process-wake source
+/// across their otherwise separate live-row and evidence relations.
+///
+/// The 64-bit hash may collide, which only adds harmless serialization; it
+/// cannot permit two equal `(session_id, source_key)` pairs to use different
+/// locks.
+async fn lock_process_wake_source_tx(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    session_id: &str,
+    source_key: &str,
+) -> Result<(), StoreError> {
+    // `PostgresStorage::from_pool` accepts externally configured pools, so
+    // bound this correctness lock locally even when no connection-wide
+    // `lock_timeout` was installed. SQLSTATE 55P03 maps to `Contended`.
+    sqlx::query(
+        "SELECT set_config(
+             'lock_timeout',
+             CASE
+                 WHEN current_setting('lock_timeout') = '0'
+                   OR current_setting('lock_timeout')::interval > INTERVAL '10 seconds'
+                 THEN '10s'
+                 ELSE current_setting('lock_timeout')
+             END,
+             TRUE
+         )",
+    )
+    .execute(&mut **tx)
+    .await
+    .map_err(store_sqlx_error)?;
+    sqlx::query(
+        "SELECT pg_advisory_xact_lock(
+             hashtextextended(
+                 length($1)::TEXT || ':' || $1 || length($2)::TEXT || ':' || $2,
+                 0
+             )
+         )",
+    )
+    .bind(session_id)
+    .bind(source_key)
+    .execute(&mut **tx)
+    .await
+    .map_err(store_sqlx_error)?;
+    Ok(())
 }
 
 #[async_trait::async_trait]
@@ -851,6 +916,76 @@ async fn complete_queued_work_claims_tx(
 ) -> Result<(), StoreError> {
     for completed in completed_claims {
         for batch_id in &completed.batch_ids {
+            let source_key: Option<String> = sqlx::query_scalar(
+                "SELECT source_key
+                 FROM lash_queued_work_batches
+                 WHERE session_id = $1
+                   AND batch_id = $2
+                   AND claim_id = $3
+                   AND claim_token = $4",
+            )
+            .bind(&completed.session_id)
+            .bind(batch_id)
+            .bind(&completed.claim_id)
+            .bind(&completed.lease_token)
+            .fetch_optional(&mut **tx)
+            .await
+            .map_err(store_sqlx_error)?
+            .flatten();
+            let payload_json: Option<String> = sqlx::query_scalar(
+                "SELECT item.payload_json
+                 FROM lash_queued_work_batches AS batch
+                 JOIN lash_queued_work_items AS item ON item.batch_id = batch.batch_id
+                 WHERE batch.session_id = $1
+                   AND batch.batch_id = $2
+                   AND batch.claim_id = $3
+                   AND batch.claim_token = $4
+                 ORDER BY item.item_index ASC
+                 LIMIT 1",
+            )
+            .bind(&completed.session_id)
+            .bind(batch_id)
+            .bind(&completed.claim_id)
+            .bind(&completed.lease_token)
+            .fetch_optional(&mut **tx)
+            .await
+            .map_err(store_sqlx_error)?;
+            let wake_source = payload_json
+                .as_deref()
+                .map(|json| {
+                    store_decode_json::<lash_core::runtime::QueuedWorkPayload>(
+                        json,
+                        "queued work payload",
+                    )
+                })
+                .transpose()?
+                .and_then(|payload| match payload {
+                    lash_core::runtime::QueuedWorkPayload::ProcessWake { wake } => {
+                        Some((wake.process_id, wake.sequence))
+                    }
+                    _ => None,
+                });
+            if let (Some(source_key), Some(_)) = (source_key.as_deref(), wake_source.as_ref()) {
+                lock_process_wake_source_tx(tx, &completed.session_id, source_key).await?;
+            }
+            if let Some((process_id, sequence)) = wake_source {
+                sqlx::query(
+                    "INSERT INTO lash_consumed_wake_high_water (
+                        session_id, process_id, high_sequence
+                     ) VALUES ($1, $2, $3)
+                     ON CONFLICT (session_id, process_id) DO UPDATE
+                     SET high_sequence = GREATEST(
+                         lash_consumed_wake_high_water.high_sequence,
+                         EXCLUDED.high_sequence
+                     )",
+                )
+                .bind(&completed.session_id)
+                .bind(process_id)
+                .bind(sequence as i64)
+                .execute(&mut **tx)
+                .await
+                .map_err(store_sqlx_error)?;
+            }
             let completion = sqlx::query(
                 "DELETE FROM lash_queued_work_batches
                  WHERE session_id = $1 AND batch_id = $2 AND claim_id = $3 AND claim_token = $4",

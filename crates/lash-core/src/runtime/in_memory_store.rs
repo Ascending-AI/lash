@@ -16,6 +16,7 @@ use crate::store::RuntimePersistence;
 mod attachments;
 mod checkpoints;
 mod factory;
+pub use factory::InMemorySessionStoreFactory;
 mod maintenance;
 mod queued_work;
 mod reachability;
@@ -182,6 +183,7 @@ pub struct InMemorySessionStore {
     session_execution_leases: Mutex<HashMap<String, InMemorySessionExecutionLease>>,
     queued_work: Mutex<Vec<InMemoryQueuedBatch>>,
     queued_work_next_seq: Mutex<u64>,
+    consumed_wake_high_water: Mutex<HashMap<(String, String), u64>>,
     pending_turn_inputs: Mutex<Vec<InMemoryPendingTurnInput>>,
     pending_turn_input_next_seq: Mutex<u64>,
     attachment_manifest:
@@ -271,6 +273,7 @@ impl InMemorySessionStore {
             session_execution_leases: Mutex::new(HashMap::new()),
             queued_work: Mutex::new(Vec::new()),
             queued_work_next_seq: Mutex::new(0),
+            consumed_wake_high_water: Mutex::new(HashMap::new()),
             pending_turn_inputs: Mutex::new(Vec::new()),
             pending_turn_input_next_seq: Mutex::new(0),
             attachment_manifest: Mutex::new(HashMap::new()),
@@ -445,7 +448,20 @@ impl InMemorySessionStore {
     fn enqueue_queued_work_in_memory(
         &self,
         batch: crate::QueuedWorkBatchDraft,
-    ) -> crate::QueuedWorkBatch {
+    ) -> Result<crate::QueuedWorkBatch, crate::store::StoreError> {
+        batch
+            .validate_process_wake_source()
+            .map_err(crate::store::StoreError::Backend)?;
+        if let Some(wake_source) = batch.process_wake_source.as_ref()
+            && self
+                .consumed_wake_high_water
+                .lock()
+                .expect("lock consumed wake high water")
+                .get(&(batch.session_id.clone(), wake_source.process_id.clone()))
+                .is_some_and(|high_sequence| wake_source.sequence <= *high_sequence)
+        {
+            return Ok(crate::runtime::consumed_queued_work_batch(&batch));
+        }
         let mut queued = self.queued_work.lock().expect("lock queued work");
         if let Some(source_key) = batch.source_key.as_deref()
             && let Some(existing) = queued.iter().find(|entry| {
@@ -453,7 +469,7 @@ impl InMemorySessionStore {
                     && entry.batch.source_key.as_deref() == Some(source_key)
             })
         {
-            return existing.batch.clone();
+            return Ok(existing.batch.clone());
         }
         let mut next_seq = self
             .queued_work_next_seq
@@ -490,7 +506,7 @@ impl InMemorySessionStore {
             claim_session_lease_generation: 0,
         });
         queued.sort_by_key(|entry| entry.batch.enqueue_seq);
-        stored
+        Ok(stored)
     }
 
     fn claim_ready_queued_work_in_memory(
@@ -907,6 +923,11 @@ impl crate::store::SessionCommitStore for InMemorySessionStore {
                 attempted_session_id: batch.session_id.clone(),
             });
         }
+        for batch in &commit.enqueued_queue_batches {
+            batch
+                .validate_process_wake_source()
+                .map_err(crate::store::StoreError::Backend)?;
+        }
         self.ensure_session_metadata_for_commit(&commit)?;
         commit.validate_node_derivation()?;
         let completed = &commit.turn_commit;
@@ -1167,7 +1188,37 @@ impl crate::store::SessionCommitStore for InMemorySessionStore {
         }
         {
             let mut queued = self.queued_work.lock().expect("lock queued work");
+            let mut consumed = self
+                .consumed_wake_high_water
+                .lock()
+                .expect("lock consumed wake high water");
             for completed in &commit.completed_queue_claims {
+                for entry in queued.iter().filter(|entry| {
+                    entry.batch.session_id == completed.session_id
+                        && entry.claim_id.as_deref() == Some(completed.claim_id.as_str())
+                        && entry.claim_token.as_deref() == Some(completed.lease_token.as_str())
+                        && completed.batch_ids.contains(&entry.batch.batch_id)
+                }) {
+                    if let Some((process_id, sequence)) =
+                        entry
+                            .batch
+                            .items
+                            .iter()
+                            .find_map(|item| match &item.payload {
+                                crate::QueuedWorkPayload::ProcessWake { wake } => {
+                                    Some((wake.process_id.clone(), wake.sequence))
+                                }
+                                _ => None,
+                            })
+                    {
+                        consumed
+                            .entry((entry.batch.session_id.clone(), process_id))
+                            .and_modify(|high_sequence| {
+                                *high_sequence = (*high_sequence).max(sequence);
+                            })
+                            .or_insert(sequence);
+                    }
+                }
                 queued.retain(|entry| {
                     !(entry.batch.session_id == completed.session_id
                         && entry.claim_id.as_deref() == Some(completed.claim_id.as_str())
@@ -1309,7 +1360,7 @@ impl crate::store::SessionCommitStore for InMemorySessionStore {
                 .enqueued_queue_batches
                 .into_iter()
                 .map(|batch| self.enqueue_queued_work_in_memory(batch))
-                .collect(),
+                .collect::<Result<_, _>>()?,
             turn_input_applications,
         };
         let operation_key = commit.turn_commit.operation.storage_key()?;
@@ -1497,41 +1548,5 @@ impl crate::store::SessionExecutionLeaseStore for InMemorySessionStore {
             .expect("lock in-memory write transaction");
         self.release_session_execution_lease_in_memory(completion);
         Ok(())
-    }
-}
-
-/// Session-id-keyed factory: the same in-memory store is returned for a given
-/// session across opens (so a worker rebuild sees the session's state), and a
-/// fresh store is created on first use.
-#[derive(Clone)]
-pub struct InMemorySessionStoreFactory {
-    clock: Arc<dyn crate::Clock>,
-    stores: Arc<Mutex<HashMap<String, Arc<InMemorySessionStore>>>>,
-    write_transaction: Arc<Mutex<()>>,
-    global_session_graph: Arc<Mutex<crate::SessionGraph>>,
-    global_node_owners: Arc<Mutex<HashMap<String, String>>>,
-    global_session_heads: Arc<Mutex<HashMap<String, Option<String>>>>,
-    node_anchors: InMemoryNodeAnchors,
-    tombstoned_node_ids: Arc<Mutex<HashSet<String>>>,
-    deleted_session_ids: Arc<Mutex<HashSet<String>>>,
-}
-
-impl InMemorySessionStoreFactory {
-    pub fn new() -> Self {
-        Self::with_clock(Arc::new(crate::SystemClock))
-    }
-
-    pub fn with_clock(clock: Arc<dyn crate::Clock>) -> Self {
-        Self {
-            clock,
-            stores: Arc::new(Mutex::new(HashMap::new())),
-            write_transaction: Arc::new(Mutex::new(())),
-            global_session_graph: Arc::new(Mutex::new(crate::SessionGraph::default())),
-            global_node_owners: Arc::new(Mutex::new(HashMap::new())),
-            global_session_heads: Arc::new(Mutex::new(HashMap::new())),
-            node_anchors: Arc::new(Mutex::new(HashMap::new())),
-            tombstoned_node_ids: Arc::new(Mutex::new(HashSet::new())),
-            deleted_session_ids: Arc::new(Mutex::new(HashSet::new())),
-        }
     }
 }

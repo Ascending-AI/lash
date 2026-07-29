@@ -135,6 +135,7 @@ pub(crate) struct ToolProcessEventContext {
     session_store_factory: Option<Arc<dyn crate::SessionStoreFactory>>,
     session_graph: Arc<dyn SessionGraphService>,
     queued_work_driver: Option<crate::QueuedWorkDriver>,
+    clock: Arc<dyn crate::Clock>,
 }
 
 pub(crate) struct ToolContextBuilder<'run> {
@@ -253,6 +254,7 @@ impl<'run> ToolContextBuilder<'run> {
         store: Option<Arc<dyn crate::RuntimePersistence>>,
         session_store_factory: Option<Arc<dyn crate::SessionStoreFactory>>,
         queued_work_driver: Option<crate::QueuedWorkDriver>,
+        clock: Arc<dyn crate::Clock>,
     ) -> Self {
         self.process_events = Some(ToolProcessEventContext {
             process_id: process_id.into(),
@@ -263,6 +265,7 @@ impl<'run> ToolContextBuilder<'run> {
             session_store_factory,
             session_graph: Arc::clone(&self.session_graph),
             queued_work_driver,
+            clock,
         });
         self
     }
@@ -617,6 +620,7 @@ impl<'run> ToolContext<'run> {
             session_store_factory: None,
             session_graph: Arc::new(crate::plugin::NoopSessionManager),
             queued_work_driver: None,
+            clock: Arc::new(crate::SystemClock),
         });
         self
     }

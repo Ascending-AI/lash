@@ -254,6 +254,7 @@ pub struct VacuumReport {
     pub removed_pending_turn_input_tombstone_count: usize,
 }
 
+/// Result of explicitly pruning settled process-wake idempotency evidence.
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct SessionCheckpoint {
     pub schema_version: u32,

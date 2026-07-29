@@ -1777,15 +1777,7 @@ pub fn operational_coverage(
                 .unwrap_or(0)
                 > 1
     });
-    let duplicate_wake_rejected = events.iter().any(|event| {
-        event.kind == BoundaryKind::ProcessWake
-            && !event
-                .observed
-                .get("claimed_once")
-                .and_then(serde_json::Value::as_bool)
-                .unwrap_or(true)
-    });
-    if !backend_retry_attempt || !duplicate_wake_rejected {
+    if !backend_retry_attempt || !structural_process_wake_identity_semantics(events) {
         missing.push("retries/duplicates");
     }
 
@@ -1988,21 +1980,16 @@ fn mini_runtime_cancellation_prevents_idle_claim(events: &[DeliveredBoundary]) -
 }
 
 fn mini_runtime_process_wake_duplicate_rejected(events: &[DeliveredBoundary]) -> OracleVerdict {
-    let mut dedupe_events: BTreeMap<String, Vec<&DeliveredBoundary>> = BTreeMap::new();
+    let mut source_events: BTreeMap<String, Vec<&DeliveredBoundary>> = BTreeMap::new();
     for event in events
         .iter()
         .filter(|event| event.kind == BoundaryKind::ProcessWake)
     {
-        let key = event
-            .observed
-            .get("dedupe_key")
-            .or_else(|| event.payload.get("dedupe_key"))
-            .and_then(Value::as_str)
-            .unwrap_or("")
-            .to_string();
-        dedupe_events.entry(key).or_default().push(event);
+        if let Some(source_key) = process_wake_source_key(event) {
+            source_events.entry(source_key).or_default().push(event);
+        }
     }
-    if dedupe_events.values().any(|events| {
+    if source_events.values().any(|events| {
         let claims = events
             .iter()
             .filter_map(|event| event.observed.get("claimed_once").and_then(Value::as_bool))
@@ -2025,12 +2012,12 @@ fn mini_runtime_process_wake_duplicate_rejected(events: &[DeliveredBoundary]) ->
     }) {
         OracleVerdict::passed(
             SCENARIO_MINI_RUNTIME_PROCESS_WAKE_DEDUPE_ORACLE,
-            "duplicate process wake used the same dedupe key and was rejected by runtime queued-work claims or by an in-flight session lease",
+            "duplicate process wake used the same structural process/event source key and was claimed at most once",
         )
     } else {
         OracleVerdict::failed(
             SCENARIO_MINI_RUNTIME_PROCESS_WAKE_DEDUPE_ORACLE,
-            "no process wake dedupe key showed a claim/rejection pair or in-flight lease rejection",
+            "no structural process/event source key showed a claim/rejection pair or in-flight lease rejection",
         )
     }
 }
@@ -5493,21 +5480,16 @@ fn process_wake_fact(
     events: &[DeliveredBoundary],
     fact: &'static str,
 ) -> Result<ScenarioContractGeneratedFact, String> {
-    let mut by_dedupe: BTreeMap<String, Vec<&DeliveredBoundary>> = BTreeMap::new();
+    let mut by_source_key: BTreeMap<String, Vec<&DeliveredBoundary>> = BTreeMap::new();
     for event in events
         .iter()
         .filter(|event| event.kind == BoundaryKind::ProcessWake)
     {
-        if let Some(key) = event
-            .observed
-            .get("dedupe_key")
-            .or_else(|| event.payload.get("dedupe_key"))
-            .and_then(Value::as_str)
-        {
-            by_dedupe.entry(key.to_string()).or_default().push(event);
+        if let Some(source_key) = process_wake_source_key(event) {
+            by_source_key.entry(source_key).or_default().push(event);
         }
     }
-    let Some((dedupe_key, mut wake_events)) = by_dedupe.into_iter().find(|(_key, events)| {
+    let Some((source_key, mut wake_events)) = by_source_key.into_iter().find(|(_key, events)| {
         events.iter().any(|event| {
             event
                 .observed
@@ -5526,7 +5508,7 @@ fn process_wake_fact(
             .contains(&false)
     }) else {
         return Err(format!(
-            "process wake semantic fact `{fact}` did not find duplicate wake DTO evidence with a rejected duplicate"
+            "process wake semantic fact `{fact}` did not find structural source-key evidence with a rejected duplicate"
         ));
     };
     wake_events.sort_by_key(|event| event.sequence);
@@ -5540,10 +5522,10 @@ fn process_wake_fact(
         .collect::<Vec<_>>();
     generated_fact(
         fact,
-        "process wake carries runtime DTO process id, session, dedupe key, and duplicate rejection evidence",
+        "process wake carries runtime DTO process id, session, structural source key, and at-most-once claim evidence",
         wake_events,
         json!({
-            "dedupe_key": dedupe_key,
+            "source_key": source_key,
             "sessions": sessions,
             "claimed_once_values": claimed_once_values,
         }),
@@ -5960,30 +5942,21 @@ fn duplicate_delivery_semantics(
     events: &[DeliveredBoundary],
     summary: &AbstractWorldSummary,
 ) -> bool {
-    duplicate_process_wake_claim_semantics(events)
+    structural_process_wake_identity_semantics(events)
         && durable_effect_replay_semantics(events, summary)
 }
 
-fn duplicate_process_wake_claim_semantics(events: &[DeliveredBoundary]) -> bool {
-    let mut by_dedupe: BTreeMap<String, Vec<&DeliveredBoundary>> = BTreeMap::new();
+fn structural_process_wake_identity_semantics(events: &[DeliveredBoundary]) -> bool {
+    let mut by_source_key: BTreeMap<String, Vec<&DeliveredBoundary>> = BTreeMap::new();
     for event in events
         .iter()
         .filter(|event| event.kind == BoundaryKind::ProcessWake)
     {
-        let Some(dedupe_key) = event
-            .observed
-            .get("dedupe_key")
-            .or_else(|| event.payload.get("dedupe_key"))
-            .and_then(Value::as_str)
-        else {
-            continue;
-        };
-        by_dedupe
-            .entry(dedupe_key.to_string())
-            .or_default()
-            .push(event);
+        if let Some(source_key) = process_wake_source_key(event) {
+            by_source_key.entry(source_key).or_default().push(event);
+        }
     }
-    by_dedupe.values().any(|events| {
+    by_source_key.values().any(|events| {
         let claims = events
             .iter()
             .filter_map(|event| event.observed.get("claimed_once").and_then(Value::as_bool))
@@ -6021,6 +5994,25 @@ fn duplicate_process_wake_claim_semantics(events: &[DeliveredBoundary]) -> bool 
             && claims.contains(&false);
         strict_claim_dedupe || in_flight_rejection
     })
+}
+
+fn process_wake_source_key(event: &DeliveredBoundary) -> Option<String> {
+    if let Some(source_key) = event
+        .observed
+        .pointer("/runtime_queued_work/source_key")
+        .and_then(Value::as_str)
+    {
+        return Some(source_key.to_string());
+    }
+    let process_id = event
+        .observed
+        .pointer("/runtime_process_wake/process_id")
+        .and_then(Value::as_str)?;
+    let sequence = event
+        .observed
+        .pointer("/runtime_process_wake/sequence")
+        .and_then(Value::as_u64)?;
+    Some(lash_core::process_wake_source_key(process_id, sequence))
 }
 
 fn durable_effect_replay_semantics(
@@ -7496,7 +7488,7 @@ mod tests {
             boundary_id,
             "session-001",
             BoundaryKind::ProcessWake,
-            json!({"dedupe_key": source_key}),
+            json!({}),
             json!({
                 "runtime_queued_work": {
                     "enqueued": true,
@@ -7534,7 +7526,7 @@ mod tests {
             "wake:missing-turn",
             "session-001",
             BoundaryKind::ProcessWake,
-            json!({"dedupe_key": source_key}),
+            json!({}),
             json!({
                 "runtime_queued_work": {
                     "enqueued": true,
@@ -8752,11 +8744,12 @@ mod tests {
                 "session-001:process-wake:001",
                 "session-001",
                 BoundaryKind::ProcessWake,
-                json!({"dedupe_key": "process/wake/session-001/001"}),
+                json!({"process_id": "process-001", "sequence": 1}),
                 json!({
                     "claimed_once": true,
-                    "dedupe_key": "process/wake/session-001/001",
                     "runtime_process_wake": {
+                        "process_id": "process-001",
+                        "sequence": 1,
                         "event_invocation": {
                             "subject": {
                                 "process_id": "process-001"
@@ -8765,7 +8758,7 @@ mod tests {
                     },
                     "runtime_queued_work": {
                         "claimed": true,
-                        "source_key": "process/wake/session-001/001"
+                        "source_key": "process:process-001:event:1:wake"
                     },
                     "session": "session-001",
                     "wake_id": "wake:duplicate"
@@ -8776,11 +8769,12 @@ mod tests {
                 "session-001:process-wake:002",
                 "session-001",
                 BoundaryKind::ProcessWake,
-                json!({"dedupe_key": "process/wake/session-001/001"}),
+                json!({"process_id": "process-001", "sequence": 1}),
                 json!({
                     "claimed_once": false,
-                    "dedupe_key": "process/wake/session-001/001",
                     "runtime_process_wake": {
+                        "process_id": "process-001",
+                        "sequence": 1,
                         "event_invocation": {
                             "subject": {
                                 "process_id": "process-001"
@@ -8789,7 +8783,7 @@ mod tests {
                     },
                     "runtime_queued_work": {
                         "claimed": false,
-                        "source_key": "process/wake/session-001/001"
+                        "source_key": "process:process-001:event:1:wake"
                     },
                     "session": "session-001",
                     "wake_id": "wake:duplicate"

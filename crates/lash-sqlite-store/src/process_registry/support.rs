@@ -36,6 +36,7 @@ impl SqliteProcessRegistry {
             conn,
             clock,
             process_session_store_root: Some(process_session_store_root),
+            wake_delivery_config: lash_core::WakeDeliveryConfig::default(),
         })
     }
 
@@ -53,7 +54,13 @@ impl SqliteProcessRegistry {
             conn,
             clock,
             process_session_store_root: None,
+            wake_delivery_config: lash_core::WakeDeliveryConfig::default(),
         })
+    }
+
+    pub fn with_wake_delivery_config(mut self, config: lash_core::WakeDeliveryConfig) -> Self {
+        self.wake_delivery_config = config;
+        self
     }
 
     pub(crate) fn load_process_conn(
@@ -138,6 +145,7 @@ impl SqliteProcessRegistry {
         record: &mut ProcessRecord,
         request: ProcessEventAppendRequest,
         occurred_at_ms: u64,
+        wake_delivery_config: lash_core::WakeDeliveryConfig,
     ) -> Result<(ProcessEventAppendResult, bool), lash_core::PluginError> {
         let process_id = record.id.clone();
         let replay_lookup =
@@ -156,6 +164,11 @@ impl SqliteProcessRegistry {
                 wake_delivery,
                 ..
             } => {
+                Self::insert_wake_delivery_conn(
+                    conn,
+                    wake_delivery.as_ref(),
+                    wake_delivery_config,
+                )?;
                 let repaired = if let Some(repaired) = repair_record {
                     *record = repaired;
                     Self::save_process_conn(conn, record)?;
@@ -197,6 +210,11 @@ impl SqliteProcessRegistry {
                 .map_err(process_sqlite_error)?;
                 *record = projected_record;
                 Self::save_process_conn(conn, record)?;
+                Self::insert_wake_delivery_conn(
+                    conn,
+                    wake_delivery.as_ref(),
+                    wake_delivery_config,
+                )?;
                 Ok((
                     ProcessEventAppendResult {
                         event,
@@ -206,6 +224,35 @@ impl SqliteProcessRegistry {
                 ))
             }
         }
+    }
+
+    pub(crate) fn insert_wake_delivery_conn(
+        conn: &Connection,
+        wake: Option<&lash_core::ProcessWakeDelivery>,
+        config: lash_core::WakeDeliveryConfig,
+    ) -> Result<(), lash_core::PluginError> {
+        let Some(wake) = wake else {
+            return Ok(());
+        };
+        let delivery = lash_core::WakeDelivery::pending(wake.clone(), config)?;
+        conn.execute(
+            "INSERT OR IGNORE INTO process_wake_deliveries (
+                delivery_id, process_id, target_session_id, sequence, state,
+                attempts, first_attempt_ms, next_attempt_at_ms, expires_at_ms,
+                discard_reason, delivery_json
+             ) VALUES (?1, ?2, ?3, ?4, 'pending', 0, NULL, ?5, ?6, NULL, ?7)",
+            params![
+                delivery.delivery_id,
+                delivery.wake.process_id,
+                delivery.wake.target_session_id,
+                delivery.wake.sequence as i64,
+                delivery.next_attempt_at_ms as i64,
+                delivery.expires_at_ms as i64,
+                process_encode_json(&delivery.wake)?,
+            ],
+        )
+        .map_err(process_sqlite_error)?;
+        Ok(())
     }
 
     pub(crate) fn next_event_sequence_conn(

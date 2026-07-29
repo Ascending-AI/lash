@@ -85,7 +85,7 @@ rather than silently inheriting a no-op.
   the sink.
 - `prune_terminal_processes` is a required `ProcessRegistry` method. New and
   downstream registry implementations must implement physical deletion across
-  the process/event/wake-ack/grant/lease rows in one transaction. The
+  the process/event/wake-delivery/grant/lease rows in one transaction. The
   `WatchedProcessRegistry` decorator delegates it without a hub bump, since
   pruned rows are terminal and their waiters resolved long ago.
 - Callers of `prune_terminal_processes` own correctness of the retention window:

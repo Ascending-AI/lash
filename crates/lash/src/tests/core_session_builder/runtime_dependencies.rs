@@ -70,6 +70,82 @@ async fn durable_trigger_store(dir: &std::path::Path) -> Arc<dyn lash_core::Trig
 }
 
 #[tokio::test]
+async fn builder_rebinds_first_party_process_registry_to_runtime_clock() {
+    const NOW_MS: u64 = 4_200_000;
+    let clock =
+        Arc::new(lash_core::testing::conformance::AttachmentOwnerConformanceClock::new(NOW_MS));
+    let registry = lash_sqlite_store::SqliteProcessRegistry::memory()
+        .await
+        .expect("open SQLite process registry with its default clock");
+    let store_factory = Arc::new(lash_core::InMemorySessionStoreFactory::with_clock(
+        clock.clone(),
+    )) as Arc<dyn lash_core::SessionStoreFactory>;
+    let core = LashCore::standard_builder()
+        .model(
+            lash_core::ModelSpec::from_token_limits(
+                "clock-wiring-model",
+                Default::default(),
+                4_096,
+                None,
+            )
+            .expect("valid test model"),
+        )
+        .store_factory(store_factory)
+        .process_registry(Arc::new(registry))
+        .advanced()
+        .runtime_host_config(lash_core::RuntimeHostConfig::in_memory().with_clock(clock))
+        .build()
+        .expect("build core with SQLite process registry");
+    let registry = core.process_registry().expect("built process registry");
+    let delivery_expiry_ms = registry.wake_delivery_config().delivery_expiry_ms;
+    registry
+        .register_process(
+            lash_core::ProcessRegistration::new(
+                "builder-clock-process",
+                lash_core::ProcessInput::External {
+                    metadata: serde_json::Value::Null,
+                },
+                lash_core::RecoveryDisposition::ExternallyOwned,
+                lash_core::ProcessProvenance::host(),
+            )
+            .with_extra_event_types([lash_core::ProcessEventType {
+                name: "builder.clock.wake".to_string(),
+                payload_schema: lash_core::LashSchema::any(),
+                semantics: lash_core::ProcessEventSemanticsSpec {
+                    wake: Some(lash_core::ProcessWakeSpec {
+                        when: None,
+                        input: lash_core::ProcessValueSelector::Pointer("/wake_input".to_string()),
+                    }),
+                    ..lash_core::ProcessEventSemanticsSpec::default()
+                },
+            }]),
+        )
+        .await
+        .expect("register clock-wiring process");
+    registry
+        .append_event(
+            "builder-clock-process",
+            lash_core::ProcessEventAppendRequest::new(
+                "builder.clock.wake",
+                serde_json::json!({"wake_input": "wake"}),
+            )
+            .with_wake_target_scope(lash_core::SessionScope::new("builder-clock-target")),
+        )
+        .await
+        .expect("append clock-wiring wake");
+    let delivery = registry
+        .pending_wake_deliveries(1)
+        .await
+        .expect("scan clock-wiring wake")
+        .into_iter()
+        .next()
+        .expect("clock-wiring delivery");
+
+    assert_eq!(delivery.wake.created_at_ms, NOW_MS);
+    assert_eq!(delivery.expires_at_ms, NOW_MS + delivery_expiry_ms);
+}
+
+#[tokio::test]
 async fn builder_requires_explicit_process_env_store_at_build() {
     let result = peer_coherence_builder(inline_artifact_store())
         .effect_host(Arc::new(lash_core::InlineEffectHost::default()))

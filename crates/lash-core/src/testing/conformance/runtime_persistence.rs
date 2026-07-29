@@ -634,7 +634,6 @@ pub fn queued_process_wake_draft(
             replay: None,
         },
         process_caused_by: None,
-        dedupe_key: format!("wake:{session_id}:{text}:1"),
         input: text.to_string(),
         created_at_ms: 1,
     };
@@ -644,6 +643,11 @@ pub fn queued_process_wake_draft(
         slot_policy,
         vec![QueuedWorkPayload::process_wake(wake)],
     )
+    .with_source_key(crate::process_wake_source_key(
+        &format!("process:{text}"),
+        1,
+    ))
+    .with_process_wake_source(format!("process:{text}"), 1)
 }
 
 fn queued_draft(
@@ -652,7 +656,16 @@ fn queued_draft(
     delivery_policy: DeliveryPolicy,
     slot_policy: SlotPolicy,
 ) -> QueuedWorkBatchDraft {
-    queued_process_wake_draft(session_id, text, delivery_policy, slot_policy)
+    QueuedWorkBatchDraft::new(
+        session_id,
+        delivery_policy,
+        slot_policy,
+        vec![QueuedWorkPayload::agent_frame_task(
+            format!("frame:{text}"),
+            text,
+            None,
+        )],
+    )
 }
 
 fn queued_session_command_draft(session_id: &str, reason: &str) -> QueuedWorkBatchDraft {
@@ -4326,16 +4339,30 @@ async fn queued_wake_delivery_is_source_key_idempotent_and_claimed_once(
             replay: None,
         },
         process_caused_by: None,
-        dedupe_key: "wake-dedupe-1".to_string(),
         input: "wake payload".to_string(),
         created_at_ms: 1,
     };
+    let malformed = QueuedWorkBatchDraft::new(
+        wake.target_session_id.clone(),
+        DeliveryPolicy::EarliestSafeBoundary,
+        SlotPolicy::Exclusive,
+        vec![QueuedWorkPayload::process_wake(wake.clone())],
+    )
+    .with_source_key(crate::process_wake_source_key(
+        &wake.process_id,
+        wake.sequence,
+    ));
+    store
+        .enqueue_queued_work(malformed)
+        .await
+        .expect_err("process-wake enqueue must require structural producer identity");
+
     let first = store
         .enqueue_queued_work(crate::process_wake_batch_draft(wake.clone()))
         .await
         .expect("enqueue wake");
     let replay = store
-        .enqueue_queued_work(crate::process_wake_batch_draft(wake))
+        .enqueue_queued_work(crate::process_wake_batch_draft(wake.clone()))
         .await
         .expect("replay wake enqueue");
     assert_eq!(
@@ -4389,6 +4416,19 @@ async fn queued_wake_delivery_is_source_key_idempotent_and_claimed_once(
             .expect("list after wake completion")
             .is_empty(),
         "completed wake delivery must be removed exactly once"
+    );
+    let consumed_replay = store
+        .enqueue_queued_work(crate::process_wake_batch_draft(wake))
+        .await
+        .expect("late wake redelivery resolves against consumed high water");
+    assert_eq!(consumed_replay.enqueue_seq, 0);
+    assert!(
+        store
+            .list_queued_work("root")
+            .await
+            .expect("list after consumed wake redelivery")
+            .is_empty(),
+        "receiver evidence must prevent a late redelivery from recreating queued work"
     );
 }
 

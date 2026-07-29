@@ -780,7 +780,7 @@ async fn process_outlives_deleted_session_and_resumes_from_host_signal() -> Resu
         vec![process_id.to_string()]
     );
     assert!(process_report.preserved_process_ids.is_empty());
-    assert_eq!(process_report.deleted_wake_count, 0);
+    assert_eq!(process_report.discarded_wake_delivery_count, 0);
     assert!(
         core.processes()
             .session_snapshot(session_id)
