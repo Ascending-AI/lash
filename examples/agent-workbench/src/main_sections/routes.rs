@@ -580,7 +580,7 @@ async fn list_accounts(State(state): State<AppState>) -> Json<Vec<mail::AccountS
 async fn list_triggers(
     State(state): State<AppState>,
     Query(query): Query<SessionQuery>,
-) -> Result<Json<Vec<lash::triggers::TriggerRegistration>>, AppError> {
+) -> Result<Json<Vec<WorkbenchTriggerRegistration>>, AppError> {
     let session_id = query.resolve(&state)?;
     let records = state
         .trigger_store
@@ -592,7 +592,7 @@ async fn list_triggers(
     Ok(Json(
         records
             .iter()
-            .map(lash::triggers::TriggerRegistration::from)
+            .map(WorkbenchTriggerRegistration::from)
             .collect(),
     ))
 }

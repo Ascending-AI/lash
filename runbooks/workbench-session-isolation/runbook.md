@@ -20,13 +20,13 @@ state, never exact assistant prose.
 2. **Scope every session API read.** Query `/api/state`, `/api/triggers`, and `/api/work`
    with that tab's `?session_id=...`. An unscoped `/api/work` response is runtime-wide
    and is not isolation evidence.
-3. **Use confusable fixtures.** Both registrations must have the same name, button color,
-   source type/configuration, and process label. Only durable handles, process ids, and
-   session ownership distinguish them.
+3. **Use confusable fixtures.** Both registrations must have the same derived display
+   name, `subscription_key`, button color, source type/configuration, and process label.
+   Only `subscription_id`, process ids, and session ownership distinguish them.
 4. **Prove non-membership.** Presence in the expected session is only half a gate. Every
-   marker, trigger handle, and process id must also be absent from the other session's
-   rendered/API surface.
-5. **Isolation-void rule.** Any foreign transcript marker, foreign registration handle,
+   marker, registration `subscription_id`, and process id must also be absent from the
+   other session's rendered/API surface.
+5. **Isolation-void rule.** Any foreign transcript marker, foreign registration id,
    foreign process id, UI/API disagreement, missing session query, or collapse of both
    tabs onto one rendered session id voids the run immediately → Abort/RCA. Do not
    continue collecting later evidence from contaminated state.
@@ -71,12 +71,16 @@ process label is `mirror_job`). Submit the two registration turns concurrently.
 
 Poll both tabs until idle. Save `GET /api/triggers?session_id=A` and the B equivalent as
 `01-triggers-a.json` and `01-triggers-b.json`. Require exactly one enabled registration
-per session, with identical name, source type, and source configuration, but distinct
-handles. Require each registrations rail to render only its own handle/name. Screenshot
+per session. Require identical derived display names, `subscription_key` values, source
+types, and source configurations, but distinct `subscription_id` values. Same-name,
+same-key registrations across the two tabs are correct: the owner scope participates in
+`subscription_id`, so neither equality is evidence of a leak. Require each registrations
+rail to render the common name and trigger key with only its own truncated id. Screenshot
 `01-trigger-a.png` and `01-trigger-b.png`.
 
-Perform the first leak hunt now: A's handle must be absent from B's API/DOM, and B's
-handle absent from A's. Any leak invokes the isolation-void rule.
+Perform the first leak hunt now: A's `subscription_id` must be absent from B's API/DOM,
+and B's `subscription_id` absent from A's. Do not use the shared name or
+`subscription_key` for this check. Any id leak invokes the isolation-void rule.
 
 ## Phase 2 — Run two turns concurrently and hunt transcript leaks
 
@@ -128,7 +132,7 @@ cell; a single failed non-membership check invokes the isolation-void rule.
 | Surface | Tab A must contain | Tab A must exclude | Tab B must contain | Tab B must exclude |
 |---------|--------------------|--------------------|--------------------|--------------------|
 | Transcript | marker A | marker B | marker B | marker A |
-| Triggers | handle A | handle B | handle B | handle A |
+| Triggers | subscription id A | subscription id B | subscription id B | subscription id A |
 | Work | process A | process B | process B | process A |
 
 Screenshot the complete A surface as `04-final-a.png` and B as `04-final-b.png`. Save the
@@ -142,7 +146,7 @@ port-derived Restate container are gone.
 | Item | Objective gate | Verdict | Evidence |
 |------|----------------|---------|----------|
 | Two sessions/one process | distinct URL/rendered/API ids on one origin | | `00-sessions.json`, `00-tab-*.png` |
-| Trigger ownership | confusable registrations have distinct handles and no cross-listing | | `01-triggers-*.json`, `01-trigger-*.png` |
+| Trigger ownership | same-name, same-key registrations have distinct ids and no cross-listing | | `01-triggers-*.json`, `01-trigger-*.png` |
 | Concurrent turns | both scoped states were active at once with distinct addresses | | `02-active-*.json` |
 | Transcript isolation | each marker present locally and absent remotely in UI/API | | `02-settled-*.json`, `02-transcript-*.png` |
 | Trigger delivery isolation | simultaneous same-source fires start one local process each | | `03-work-*.json` |

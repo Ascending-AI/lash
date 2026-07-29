@@ -601,6 +601,24 @@ struct TriggerEnabledRequest {
 }
 
 #[derive(Clone, Debug, Serialize)]
+struct WorkbenchTriggerRegistration {
+    #[serde(flatten)]
+    registration: lash::triggers::TriggerRegistration,
+    subscription_id: String,
+    registrant_scope: String,
+}
+
+impl From<&lash::triggers::TriggerSubscriptionRecord> for WorkbenchTriggerRegistration {
+    fn from(record: &lash::triggers::TriggerSubscriptionRecord) -> Self {
+        Self {
+            registration: lash::triggers::TriggerRegistration::from(record),
+            subscription_id: record.subscription_id.clone(),
+            registrant_scope: record.registrant_scope_id(),
+        }
+    }
+}
+
+#[derive(Clone, Debug, Serialize)]
 struct TriggerMutationResponse {
     changed: bool,
     registration: Option<lash::triggers::TriggerRegistration>,

@@ -141,6 +141,41 @@ test("trigger registration controls use the payload subscription key", () => {
   assert.match(html, /dataset\.triggerSubscriptionKey/);
 });
 
+test("trigger registration rows separate display name, identity, and trigger key", () => {
+  const rowContext = {};
+  vm.runInNewContext(
+    `${markedSource(
+      "WORKBENCH_TRIGGER_REGISTRATION_PROJECTION",
+      "WORKBENCH_TRIGGER_REGISTRATION_PROJECTION",
+    )}
+     this.row = triggerRegistrationRowModel({
+       name: "shared-blue-watch",
+       source_type: "cron.Schedule",
+       source: {
+         $lash_host_descriptor_type: "cron.Schedule",
+         $lash_host_descriptor_value: { expr: "*/2 * * * * *", tz: "UTC" }
+       },
+       target: { label: "mirror_job", identity: { label: "ignored-fallback" } },
+       subscription_id: "subscription-identity-for-session-a",
+       subscription_key: "derived/v1/content-address",
+       registrant_scope: "session:session-a",
+       incarnation: "incarnation-a"
+     });`,
+    rowContext,
+  );
+
+  assert.equal(rowContext.row.name, "mirror_job ← cron.Schedule (every 2s)");
+  assert.equal(
+    rowContext.row.detail,
+    "session session-a · incarnation incarnation-a · id subscription… · trigger key derived/v1/content-address",
+  );
+  assert.equal(
+    rowContext.row.title,
+    "session session-a · incarnation incarnation-a · id subscription-identity-for-session-a · trigger key derived/v1/content-address",
+  );
+  assert.doesNotMatch(rowContext.row.name, /shared-blue-watch/);
+});
+
 test("settled transcript rendering consumes durable reasoning and code disclosure", () => {
   const rendered = [];
   const renderContext = {

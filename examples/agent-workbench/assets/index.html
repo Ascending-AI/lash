@@ -232,7 +232,21 @@
     }
 
     .trigger-registration[data-enabled="false"] { opacity: 0.58; }
-    .trigger-registration-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+    .trigger-registration-copy {
+      display: grid;
+      gap: 0.12rem;
+      min-width: 0;
+    }
+    .trigger-registration-name,
+    .trigger-registration-detail {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .trigger-registration-detail {
+      color: var(--ash-text);
+      font-size: 0.64rem;
+    }
     .trigger-registration-actions { display: flex; gap: var(--space-3xs); flex: none; }
     .trigger-registration-actions button {
       border: 1px solid var(--line);
@@ -3375,6 +3389,74 @@
       } catch (_) { /* polling retries */ }
     }
 
+    // BEGIN WORKBENCH_TRIGGER_REGISTRATION_PROJECTION
+    function triggerRegistrationSourceConfig(registration) {
+      const source = registration.source;
+      if (!source || typeof source !== "object" || Array.isArray(source)) return null;
+      const descriptorValue = source.$lash_host_descriptor_value;
+      if (descriptorValue && typeof descriptorValue === "object" && !Array.isArray(descriptorValue)) {
+        return descriptorValue;
+      }
+      return source;
+    }
+
+    function triggerRegistrationSourceSummary(registration) {
+      const config = triggerRegistrationSourceConfig(registration);
+      if (!config) return "";
+      if (typeof config.expr === "string") {
+        const everySeconds = config.expr.match(/^\*\/(\d+) \* \* \* \* \*$/);
+        if (everySeconds) return "every " + everySeconds[1] + "s";
+        return typeof config.tz === "string" && config.tz
+          ? config.expr + " · " + config.tz
+          : config.expr;
+      }
+      return Object.entries(config)
+        .filter(([key, value]) => !key.startsWith("$") && ["string", "number", "boolean"].includes(typeof value))
+        .slice(0, 2)
+        .map(([key, value]) => key + " " + String(value))
+        .join(" · ");
+    }
+
+    function triggerRegistrationIdentity(value) {
+      if (!value || value.length <= 14) return value || "unknown";
+      return value.slice(0, 12) + "…";
+    }
+
+    function triggerRegistrationSession(registration) {
+      const scope = registration.registrant_scope || "";
+      if (scope.startsWith("session:")) return scope.slice("session:".length);
+      return scope
+        || registration.registrant?.scope?.session_id
+        || "unknown";
+    }
+
+    function triggerRegistrationRowModel(registration) {
+      const processName = registration.target?.label
+        || registration.target?.identity?.label
+        || "process";
+      const sourceType = registration.source_type || "trigger source";
+      const sourceSummary = triggerRegistrationSourceSummary(registration);
+      const subscriptionId = registration.subscription_id || "unknown";
+      const subscriptionKey = registration.subscription_key || "unknown";
+      const details = [
+        ["session", triggerRegistrationSession(registration)],
+        ["incarnation", registration.incarnation || "unknown"],
+        ["id", triggerRegistrationIdentity(subscriptionId)],
+        ["trigger key", subscriptionKey]
+      ];
+      return {
+        name: processName + " ← " + sourceType + (sourceSummary ? " (" + sourceSummary + ")" : ""),
+        detail: details.map(([label, value]) => label + " " + value).join(" · "),
+        title: [
+          ["session", triggerRegistrationSession(registration)],
+          ["incarnation", registration.incarnation || "unknown"],
+          ["id", subscriptionId],
+          ["trigger key", subscriptionKey]
+        ].map(([label, value]) => label + " " + value).join(" · ")
+      };
+    }
+    // END WORKBENCH_TRIGGER_REGISTRATION_PROJECTION
+
     function renderTriggers(registrations) {
       triggerCount.textContent = String(registrations.length);
       triggerRegistrations.innerHTML = "";
@@ -3387,14 +3469,21 @@
       }
       for (const registration of registrations) {
         const subscriptionKey = registration.subscription_key;
+        const model = triggerRegistrationRowModel(registration);
         const row = document.createElement("div");
         row.className = "trigger-registration";
         row.dataset.enabled = String(registration.enabled);
         row.dataset.triggerSubscriptionKey = subscriptionKey;
+        const copy = document.createElement("span");
+        copy.className = "trigger-registration-copy";
         const name = document.createElement("span");
         name.className = "trigger-registration-name";
-        name.textContent = registration.name || registration.source_type || subscriptionKey;
-        name.title = subscriptionKey + " · " + registration.source_type;
+        name.textContent = model.name;
+        const detail = document.createElement("span");
+        detail.className = "trigger-registration-detail";
+        detail.textContent = model.detail;
+        detail.title = model.title;
+        copy.append(name, detail);
         const actions = document.createElement("span");
         actions.className = "trigger-registration-actions";
         const toggle = document.createElement("button");
@@ -3406,7 +3495,7 @@
         remove.textContent = "delete";
         remove.addEventListener("click", () => deleteTrigger(subscriptionKey));
         actions.append(toggle, remove);
-        row.append(name, actions);
+        row.append(copy, actions);
         triggerRegistrations.appendChild(row);
       }
     }
