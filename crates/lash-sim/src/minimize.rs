@@ -433,6 +433,7 @@ fn summary_for_trace(trace: &SimulationTrace) -> AbstractWorldSummary {
     for event in &trace.events {
         store.apply_observed_boundary(&event.as_event(), &event.observed);
     }
+    store.apply_durable_writes(&trace.durable_writes);
     store.summary()
 }
 

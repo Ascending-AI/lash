@@ -337,6 +337,41 @@ async fn runtime_completion_serialization_mutation_guard() {
     );
 }
 
+#[tokio::test]
+async fn generated_park_resume_transcript_is_readable_and_ref_aware() {
+    let workload = generate_workload(1, "fast", 72).expect("workload");
+    let trace = run_generated_workload_for_fixture(workload, "park-resume-transcript")
+        .await
+        .expect("generated workload");
+    assert!(
+        trace
+            .durable_writes
+            .iter()
+            .any(DurableWriteEvent::has_unchanged_ref),
+        "generated multi-turn sessions must naturally produce a ref-only checkpoint component: {:#?}",
+        trace.durable_writes
+    );
+    assert!(
+        trace
+            .durable_writes
+            .iter()
+            .any(|write| write.session_id.starts_with("suspend-")),
+        "generated park/resume must commit durable state after resolution: {:#?}",
+        trace.durable_writes
+    );
+    insta::assert_snapshot!(trace.render_session_transcript("suspend-tool"), @r"
+    turn 1  session-001
+      0001  Ingress            session.open.suspend
+    park   session-001
+    resume session-001
+      0002  Tool               suspend.tool.resume  name=await_tool
+      0003  Checkpoint         checkpoint.commit  rev=0->1
+                             turn_state        stored 210B
+                             tool_state        stored 2.2KB
+                             plugin_snapshot   stored 443B
+    ");
+}
+
 #[test]
 fn standard_protocol_full_text_mutation_guard() {
     let result = run_standard_protocol_contract(

@@ -107,6 +107,7 @@ pub fn replay_trace(
         )));
     }
 
+    store.apply_durable_writes(&trace.durable_writes);
     let final_summary = store.summary();
     let terminal_verdict = replay_determinism(&trace.final_summary, &final_summary);
     if !terminal_verdict.is_passed() {

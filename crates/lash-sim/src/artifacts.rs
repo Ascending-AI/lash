@@ -327,6 +327,8 @@ pub struct GeneratedReplayArtifact {
     pub seed: u64,
     pub trace_path: String,
     pub trace_sha256: String,
+    pub transcript_path: String,
+    pub transcript_sha256: String,
     pub replay_report_path: String,
     pub replay_report_sha256: String,
     pub minimized_trace_path: String,

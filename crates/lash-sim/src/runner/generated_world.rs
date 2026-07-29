@@ -9,6 +9,7 @@ pub(super) struct GeneratedRuntimeWorld {
     provider_mutations: SimProviderMutationHarness,
     trigger_harness: SimTriggerHarness,
     store_factory: Arc<dyn SessionStoreFactory>,
+    durable_writes: DurableWriteCollector,
     attachment_store: Arc<dyn lash::persistence::AttachmentStore>,
     process_env_store: Arc<dyn lash::persistence::ProcessExecutionEnvStore>,
     runtime_boundaries: RuntimeBoundaryHarness,
@@ -94,6 +95,10 @@ impl GeneratedRuntimeWorld {
         serialize_provider_turns: bool,
         clock: Arc<SimClock>,
     ) -> Self {
+        let durable_writes = DurableWriteCollector::default();
+        let store_factory: Arc<dyn SessionStoreFactory> = Arc::new(
+            ObservedSessionStoreFactory::new(store_factory, durable_writes.clone()),
+        );
         Self {
             clock: Arc::clone(&clock),
             sessions: BTreeMap::new(),
@@ -108,11 +113,16 @@ impl GeneratedRuntimeWorld {
                 clock,
             ),
             store_factory,
+            durable_writes,
             attachment_store,
             process_env_store,
             suspending_turns: BTreeMap::new(),
             serialize_provider_turns,
         }
+    }
+
+    pub(super) fn durable_write_events(&self) -> Vec<DurableWriteEvent> {
+        self.durable_writes.events()
     }
 
     pub(super) async fn advance_time_for_boundary(&self, event: &BoundaryEvent) {
@@ -811,9 +821,12 @@ impl GeneratedRuntimeWorld {
             .process_env_store(Arc::new(
                 lash::persistence::InMemoryProcessExecutionEnvStore::new(),
             ))
-            .store_factory(Arc::new(
-                lash::persistence::InMemorySessionStoreFactory::with_clock(self.clock.clone()),
-            ))
+            .store_factory(Arc::new(ObservedSessionStoreFactory::new(
+                Arc::new(lash::persistence::InMemorySessionStoreFactory::with_clock(
+                    self.clock.clone(),
+                )),
+                self.durable_writes.clone(),
+            )))
             .clock(self.clock.clone())
             .lease_timings(crate::lease::sim_runtime_lease_timings())
             .process_registry(Arc::new(lash_core::TestLocalProcessRegistry::default())

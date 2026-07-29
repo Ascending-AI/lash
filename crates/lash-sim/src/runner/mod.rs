@@ -87,7 +87,10 @@ use crate::sqlite_replay::SqliteReplayError;
 use crate::stack_policy::{
     SIM_HARNESS_STACK_LIMIT_BYTES, run_on_product_stack, run_on_sim_harness_stack,
 };
-use crate::store::{ModelStore, backend_fault_observation};
+use crate::store::{
+    DurableWriteCollector, DurableWriteEvent, ModelStore, ObservedSessionStoreFactory,
+    backend_fault_observation,
+};
 use crate::trace::{
     AbstractWorldSummary, OracleStatus, OracleVerdict, SimulationTrace, TraceEventLine,
     TraceIoError, write_event_lines, write_replay_report, write_trace,

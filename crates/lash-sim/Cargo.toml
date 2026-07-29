@@ -40,6 +40,7 @@ sqlx = { workspace = true, default-features = false, features = ["postgres"] }
 tokio = { workspace = true, features = ["macros", "rt", "rt-multi-thread", "sync", "time"] }
 
 [dev-dependencies]
+insta = "1"
 lash-provider-auth = { workspace = true }
 rusqlite = { version = "0.37", features = ["bundled"] }
 tempfile = { workspace = true }

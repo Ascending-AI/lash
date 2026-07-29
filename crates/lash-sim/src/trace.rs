@@ -62,9 +62,21 @@ pub struct SessionAbstractSummary {
     pub process_lifecycle_count: usize,
     pub durable_effect_keys: Vec<String>,
     pub lease_time_ticks: Vec<u64>,
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub checkpoint_commit_count: usize,
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub checkpoint_component_stored_count: usize,
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub checkpoint_component_ref_count: usize,
+    #[serde(default, skip_serializing_if = "is_zero_u64")]
+    pub checkpoint_head_revision: u64,
 }
 
 fn is_zero(value: &usize) -> bool {
+    *value == 0
+}
+
+fn is_zero_u64(value: &u64) -> bool {
     *value == 0
 }
 
@@ -182,6 +194,8 @@ pub struct SimulationTrace {
     pub script_bundle_hash: String,
     pub aliases: BTreeMap<String, String>,
     pub events: Vec<DeliveredBoundary>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub durable_writes: Vec<crate::store::DurableWriteEvent>,
     pub oracle: OracleVerdict,
     pub oracles: Vec<OracleVerdict>,
     pub final_summary: AbstractWorldSummary,
@@ -200,6 +214,7 @@ impl SimulationTrace {
         script_bundle_hash: impl Into<String>,
         aliases: BTreeMap<String, String>,
         events: Vec<DeliveredBoundary>,
+        durable_writes: Vec<crate::store::DurableWriteEvent>,
         oracle: OracleVerdict,
         oracles: Vec<OracleVerdict>,
         final_summary: AbstractWorldSummary,
@@ -220,6 +235,7 @@ impl SimulationTrace {
             script_bundle_hash: script_bundle_hash.into(),
             aliases,
             events,
+            durable_writes,
             oracle,
             oracles,
             final_summary,

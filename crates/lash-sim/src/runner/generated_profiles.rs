@@ -239,7 +239,10 @@ async fn run_generated_evidence_profile(
             ));
         }
         write_trace(&trace_path, &trace)?;
+        let transcript_path = trace_path.with_extension("txt");
+        std::fs::write(&transcript_path, trace.render_transcript())?;
         let trace_sha256 = file_sha256(&trace_path)?;
+        let transcript_sha256 = file_sha256(&transcript_path)?;
         let replay = replay_trace(&trace_path, &trace)?;
         oracle_verdicts.push(replay.terminal_verdict.clone());
         let replay_report_path = replay_dir.join(format!("seed-{seed:016x}.replay.json"));
@@ -320,6 +323,8 @@ async fn run_generated_evidence_profile(
             seed,
             trace_path: relative_path(artifact_root, &trace_path),
             trace_sha256,
+            transcript_path: relative_path(artifact_root, &transcript_path),
+            transcript_sha256,
             replay_report_path: relative_path(artifact_root, &replay_report_path),
             replay_report_sha256,
             minimized_trace_path: relative_path(artifact_root, &minimize.minimized_trace_path),
@@ -589,6 +594,7 @@ async fn run_generated_search_profile(
         // fail the run with the exact replay command.
         std::fs::create_dir_all(&seed_dir)?;
         write_trace(&trace_path, &trace)?;
+        std::fs::write(seed_dir.join("transcript.txt"), trace.render_transcript())?;
         match &replay_outcome {
             Ok(replay) => {
                 write_replay_report(&seed_dir.join("replay.json"), replay)?;

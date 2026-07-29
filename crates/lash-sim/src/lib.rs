@@ -27,6 +27,7 @@ pub mod sqlite_replay;
 pub mod stack_policy;
 pub mod store;
 pub mod trace;
+mod transcript;
 
 pub use artifacts::{
     FixedScriptManifest, FixedScriptProof, FixedScriptSummary, GeneratedPostgresReplayReport,

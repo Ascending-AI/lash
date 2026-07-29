@@ -134,6 +134,7 @@ pub(super) async fn drive_generated_workload(
     }
     let mut events = log.into_vec();
     append_contract_execution_boundaries(&mut events, &mut store, workload.seed).await?;
+    store.apply_durable_writes(&world.durable_write_events());
     let final_summary = store.summary();
     Ok((events, final_summary))
 }
@@ -391,6 +392,7 @@ pub(super) async fn run_generated_workload(
 ) -> Result<SimulationTrace, FixedScriptRunnerError> {
     let mut world = GeneratedRuntimeWorld::new();
     let (events, final_summary) = drive_generated_workload(&mut world, &workload).await?;
+    let durable_writes = world.durable_write_events();
     // Per-seed live provider FAILURE turns: real `session.turn().run()`s that
     // stream valid prose then a non-retryable malformed chunk, released through a
     // real BoundaryScheduler, across >1 provider kind and >1 fault position.
@@ -447,6 +449,7 @@ pub(super) async fn run_generated_workload(
         script_bundle_hash,
         workload.aliases.into_map(),
         events,
+        durable_writes,
         oracle,
         oracles,
         final_summary,

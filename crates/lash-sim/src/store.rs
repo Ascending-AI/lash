@@ -10,6 +10,13 @@ use crate::trace::{
     WorkerAbstractSummary, value_digest,
 };
 
+mod durable_writes;
+
+pub use durable_writes::{
+    DURABLE_WRITE_EVENT_SCHEMA, DurableComponentWrite, DurableComponentWriteKind,
+    DurableWriteCollector, DurableWriteEvent, ObservedSessionStoreFactory,
+};
+
 pub fn backend_fault_observation(
     session: Value,
     operation: String,
@@ -301,6 +308,27 @@ impl ModelStore {
             durable_effects,
             workers,
         )
+    }
+
+    pub fn apply_durable_writes(&mut self, writes: &[DurableWriteEvent]) {
+        for write in writes {
+            let Some(session) = self.sessions.get_mut(&write.session_id) else {
+                continue;
+            };
+            session.checkpoint_commit_count += 1;
+            session.checkpoint_head_revision =
+                session.checkpoint_head_revision.max(write.revision_after);
+            for component in &write.components {
+                match component.kind {
+                    DurableComponentWriteKind::Stored { .. } => {
+                        session.checkpoint_component_stored_count += 1;
+                    }
+                    DurableComponentWriteKind::UnchangedRef => {
+                        session.checkpoint_component_ref_count += 1;
+                    }
+                }
+            }
+        }
     }
 
     pub fn project_boundary_observation(&mut self, event: &BoundaryEvent) -> Value {
@@ -872,6 +900,10 @@ struct ModelSession {
     process_lifecycle_count: usize,
     durable_effect_keys: Vec<String>,
     lease_time_ticks: Vec<u64>,
+    checkpoint_commit_count: usize,
+    checkpoint_component_stored_count: usize,
+    checkpoint_component_ref_count: usize,
+    checkpoint_head_revision: u64,
 }
 
 impl ModelSession {
@@ -897,6 +929,10 @@ impl ModelSession {
             process_lifecycle_count: 0,
             durable_effect_keys: Vec::new(),
             lease_time_ticks: Vec::new(),
+            checkpoint_commit_count: 0,
+            checkpoint_component_stored_count: 0,
+            checkpoint_component_ref_count: 0,
+            checkpoint_head_revision: 0,
         }
     }
 
@@ -922,6 +958,10 @@ impl ModelSession {
             process_lifecycle_count: self.process_lifecycle_count,
             durable_effect_keys: self.durable_effect_keys.clone(),
             lease_time_ticks: self.lease_time_ticks.clone(),
+            checkpoint_commit_count: self.checkpoint_commit_count,
+            checkpoint_component_stored_count: self.checkpoint_component_stored_count,
+            checkpoint_component_ref_count: self.checkpoint_component_ref_count,
+            checkpoint_head_revision: self.checkpoint_head_revision,
         }
     }
 }
