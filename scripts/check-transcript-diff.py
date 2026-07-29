@@ -17,18 +17,11 @@ SNAPSHOT_OPEN = re.compile(r'@r(?P<hashes>#+)?"')
 REV_TRANSITION = re.compile(r"\brev=\S+->\S+")
 DURABLE_MARKERS = ("Checkpoint", "DurableEffect", "stored logical=", "ref (unchanged)")
 HUNK_HEADER = re.compile(r"^@@ -(?P<old>\d+)(?:,\d+)? \+(?P<new>\d+)(?:,\d+)? @@")
-RUST_TEST_PATHS = (
-    "tests.rs",
-    "test.rs",
-    "*_tests.rs",
-    ":(glob)**/tests.rs",
-    ":(glob)**/test.rs",
-    ":(glob)**/*_tests.rs",
-    ":(glob)**/tests/**/*.rs",
-    ":(glob)**/test/**/*.rs",
-    ":(glob)**/testing/**/*.rs",
-    ":(glob)**/language/support.rs",
-)
+# All Rust files: the `@r` snapshot-body requirement already suppresses noise,
+# and any path allowlist is a silent-decay surface — a snapshot added in an
+# excluded file (inline `#[cfg(test)]` modules live throughout src/) would be
+# invisible forever and indistinguishable from "nothing to report".
+RUST_TEST_PATHS = ("*.rs", ":(glob)**/*.rs")
 
 
 class ChangedLine(NamedTuple):

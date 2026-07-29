@@ -61,6 +61,47 @@ class TranscriptDiffTests(unittest.TestCase):
             "No durable transcript snapshot lines changed.",
         )
 
+    def test_each_marker_fires_alone(self) -> None:
+        # One fixture per marker, each carrying ONLY that marker: losing any
+        # single marker from DURABLE_MARKERS / REV_TRANSITION must fail here.
+        # (The original fixture carried Checkpoint AND rev=, so the regex
+        # covered for a deleted marker tuple — proven by mutation in review.)
+        marker_lines = {
+            "Checkpoint": "      0004  Checkpoint         label.only",
+            "DurableEffect": "      0005  DurableEffect      effect.park",
+            "stored logical=": "                 tool_state        stored logical=27 B",
+            "ref (unchanged)": "                 tool_state        ref (unchanged)",
+            "rev=": "      0006  Commit             commit rev=1->2",
+        }
+        for marker, line in marker_lines.items():
+            with self.subTest(marker=marker):
+                diff = (
+                    "diff --git a/crates/demo/src/lib.rs b/crates/demo/src/lib.rs\n"
+                    "--- a/crates/demo/src/lib.rs\n"
+                    "+++ b/crates/demo/src/lib.rs\n"
+                    "@@ -1,5 +1,5 @@\n"
+                    " fn transcript() {\n"
+                    '     insta::assert_snapshot!(render(), @r"\n'
+                    f"-{line}\n"
+                    f"+{line} changed\n"
+                    '     ");\n'
+                    " }\n"
+                )
+                findings = MODULE.classify_patch(diff)
+                self.assertEqual(
+                    len(findings), 1, f"marker {marker!r} must fire on its own"
+                )
+
+    def test_snapshot_outside_dedicated_test_file_is_seen(self) -> None:
+        # Inline #[cfg(test)] modules live throughout src/; a path allowlist
+        # that misses them is a silent-decay surface. The marker fixture above
+        # already uses src/lib.rs, but pin the property by name too.
+        diff = DURABLE_DIFF.replace(
+            "crates/demo/tests/transcript.rs", "crates/demo/src/renderer.rs"
+        )
+        findings = MODULE.classify_patch(diff)
+        self.assertEqual(len(findings), 1)
+
 
 if __name__ == "__main__":
     unittest.main()
