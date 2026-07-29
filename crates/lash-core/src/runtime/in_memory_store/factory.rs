@@ -395,18 +395,20 @@ impl SessionStoreFactory for InMemorySessionStoreFactory {
         *store.session_graph.lock().expect("lock graph") = resident_graph.clone();
         *store.checkpoint.lock().expect("lock checkpoint") = Some(checkpoint);
         *store.session_head_meta.lock().expect("lock session head") =
-            Some(crate::store::SessionHeadMeta {
-                schema_version: crate::store::SESSION_HEAD_META_SCHEMA_VERSION,
-                session_id: request.session_id.clone(),
-                head_revision: 0,
-                config: crate::PersistedSessionConfig {
-                    provider_id: request.policy.recorded_provider_id().to_string(),
-                    model: request.policy.model.clone(),
+            Some(crate::store::SessionHeadMeta::assemble(
+                crate::store::SessionHeadPayload {
+                    schema_version: crate::store::SESSION_HEAD_META_SCHEMA_VERSION,
+                    session_id: request.session_id.clone(),
+                    config: crate::PersistedSessionConfig {
+                        provider_id: request.policy.recorded_provider_id().to_string(),
+                        model: request.policy.model.clone(),
+                    },
+                    current_frame_node_id: Some(current_frame_node_id),
                 },
-                current_frame_node_id: Some(current_frame_node_id),
-                checkpoint_ref: Some(checkpoint_ref),
-                leaf_node_id: Some(request.node_id.clone()),
-            });
+                0,
+                Some(checkpoint_ref),
+                Some(request.node_id.clone()),
+            ));
         *store.session_meta.lock().expect("lock session meta") = Some(crate::SessionMeta {
             session_id: request.session_id.clone(),
             session_name: request.session_id.clone(),

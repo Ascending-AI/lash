@@ -184,8 +184,25 @@ fn intent_hash_golden_vector() {
 }
 
 #[test]
-fn session_head_meta_json_omits_column_owned_fields() {
-    let encoded = serde_json::to_value(SessionHeadMeta {
+fn session_head_payload_bytes_match_the_legacy_meta_format() {
+    #[allow(dead_code)]
+    #[derive(serde::Serialize)]
+    struct LegacySessionHeadMeta {
+        schema_version: u32,
+        #[serde(default = "super::default_root_session_id")]
+        session_id: String,
+        #[serde(skip)]
+        head_revision: u64,
+        config: crate::PersistedSessionConfig,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        current_frame_node_id: Option<String>,
+        #[serde(skip)]
+        checkpoint_ref: Option<BlobRef>,
+        #[serde(skip)]
+        leaf_node_id: Option<String>,
+    }
+
+    let legacy = LegacySessionHeadMeta {
         schema_version: SESSION_HEAD_META_SCHEMA_VERSION,
         session_id: "column-owned-head".to_string(),
         head_revision: 41,
@@ -193,16 +210,25 @@ fn session_head_meta_json_omits_column_owned_fields() {
         current_frame_node_id: None,
         checkpoint_ref: Some(BlobRef("checkpoint".to_string())),
         leaf_node_id: Some("leaf".to_string()),
-    })
-    .expect("serialize session head metadata");
+    };
+    let assembled = SessionHeadMeta::assemble(
+        SessionHeadPayload {
+            schema_version: SESSION_HEAD_META_SCHEMA_VERSION,
+            session_id: "column-owned-head".to_string(),
+            config: crate::PersistedSessionConfig::default(),
+            current_frame_node_id: None,
+        },
+        41,
+        Some(BlobRef("checkpoint".to_string())),
+        Some("leaf".to_string()),
+    );
+    let before = serde_json::to_vec(&legacy).expect("serialize legacy session head metadata");
+    let after = serde_json::to_vec(&assembled.payload()).expect("serialize session head payload");
 
-    let object = encoded.as_object().expect("session head metadata object");
-    for column_owned in ["head_revision", "checkpoint_ref", "leaf_node_id"] {
-        assert!(
-            !object.contains_key(column_owned),
-            "{column_owned} must be stored only in its dedicated column"
-        );
-    }
+    assert_eq!(
+        after, before,
+        "the head_json payload must remain byte-identical"
+    );
 }
 
 #[test]
@@ -487,15 +513,6 @@ fn append_leaf_must_be_the_terminal_appended_node() {
     ));
 }
 
-fn local_liveness(
-    host_id: &str,
-    boot_id: &str,
-    pid: u32,
-    process_start: &str,
-) -> LeaseOwnerLiveness {
-    LeaseOwnerLiveness::local_process_for_test(host_id, boot_id, pid, process_start)
-}
-
 #[test]
 fn lease_owner_identity_requires_same_incarnation() {
     let first = LeaseOwnerIdentity::opaque("owner", "incarnation-a");
@@ -504,23 +521,4 @@ fn lease_owner_identity_requires_same_incarnation() {
 
     assert!(first.same_incarnation(&same));
     assert!(!first.same_incarnation(&next));
-}
-
-#[test]
-fn local_liveness_only_proves_same_host_boot_dead_processes() {
-    let holder = local_liveness(
-        "host-a",
-        "boot-a",
-        std::process::id(),
-        "not-the-current-process-start",
-    );
-    let same_host_boot = local_liveness("host-a", "boot-a", std::process::id(), "claimant");
-    let other_host = local_liveness("host-b", "boot-a", std::process::id(), "claimant");
-    let other_boot = local_liveness("host-a", "boot-b", std::process::id(), "claimant");
-
-    assert!(holder.is_definitely_dead_for_claimant(&same_host_boot));
-    assert!(!holder.is_definitely_dead_for_claimant(&other_host));
-    assert!(!holder.is_definitely_dead_for_claimant(&other_boot));
-    assert!(!holder.is_definitely_dead_for_claimant(&LeaseOwnerLiveness::Opaque));
-    assert!(!LeaseOwnerLiveness::Opaque.is_definitely_dead_for_claimant(&same_host_boot));
 }

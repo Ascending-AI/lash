@@ -63,11 +63,12 @@ impl crate::plugin::ProtocolSessionPlugin for AppendRollbackProtocolSession {
     ) -> Result<(), crate::SessionError> {
         self.protocol_dirty.store(true, Ordering::SeqCst);
         self.store
-            .save_session_head_meta(crate::SessionHeadMeta {
-                session_id: "root".to_string(),
-                head_revision: 1,
-                ..crate::SessionHeadMeta::default()
-            })
+            .save_session_head_meta(crate::SessionHeadMeta::assemble(
+                crate::SessionHeadPayload::default(),
+                1,
+                None,
+                None,
+            ))
             .await;
         Ok(())
     }
@@ -340,10 +341,15 @@ async fn preopened_store_binds_without_remapping_initial_frame() {
 async fn park_returns_error_when_final_commit_fails() {
     let store = Arc::new(RecordingStore::default());
     store
-        .save_session_head_meta(crate::SessionHeadMeta {
-            session_id: "other-session".to_string(),
-            ..crate::SessionHeadMeta::default()
-        })
+        .save_session_head_meta(crate::SessionHeadMeta::assemble(
+            crate::SessionHeadPayload {
+                session_id: "other-session".to_string(),
+                ..crate::SessionHeadPayload::default()
+            },
+            0,
+            None,
+            None,
+        ))
         .await;
     let plugins = plugin_session_with_tools("park-session", Arc::new(EmptyTools));
     let runtime = LashRuntime::from_persistent_embedded_state(

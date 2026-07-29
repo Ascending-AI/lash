@@ -5,9 +5,9 @@ use std::time::Duration;
 use super::*;
 use crate::TestProcessRegistryWriteExt;
 use crate::{
-    AbandonRequest, AttachmentStore, LeaseOwnerIdentity, LeaseOwnerLiveness,
-    ProcessExecutionEnvRef, ProcessInput, ProcessListFilter, ProcessRegistration, ProcessStarted,
-    ProcessStatus, TestLocalProcessRegistry, TriggerStore,
+    AbandonRequest, AttachmentStore, LeaseOwnerIdentity, ProcessExecutionEnvRef, ProcessInput,
+    ProcessListFilter, ProcessRegistration, ProcessStarted, ProcessStatus,
+    TestLocalProcessRegistry, TriggerStore,
 };
 
 mod attachment_owner_tests;
@@ -286,17 +286,8 @@ async fn abandoned_evidence(
     }
 }
 
-fn local_owner(owner_id: &str, host_id: &str, process_start: &str) -> LeaseOwnerIdentity {
-    LeaseOwnerIdentity {
-        owner_id: owner_id.to_string(),
-        incarnation_id: format!("{owner_id}:incarnation"),
-        liveness: LeaseOwnerLiveness::local_process_for_test(
-            host_id,
-            "boot-a",
-            std::process::id(),
-            process_start,
-        ),
-    }
+fn local_owner(owner_id: &str, _host_id: &str, _process_start: &str) -> LeaseOwnerIdentity {
+    LeaseOwnerIdentity::opaque(owner_id, format!("{owner_id}:incarnation"))
 }
 
 async fn seed_reserved_trigger_delivery(
@@ -1541,76 +1532,8 @@ async fn sweep_reconciles_externally_owned_abandon_request() {
     );
 }
 
-/// A started OwnerBound row whose holder is provably dead is terminalized as
-/// `Abandoned{sweep}`, never re-run — replacing a re-execution would repeat
-/// non-idempotent side effects.
-#[tokio::test]
-async fn sweep_abandons_started_owner_bound_with_provably_dead_holder() {
-    let registry: Arc<dyn ProcessRegistry> = Arc::new(TestLocalProcessRegistry::default());
-    registry
-        .register_process(registration_with_disposition(
-            "proc-ob-dead",
-            RecoveryDisposition::OwnerBound,
-        ))
-        .await
-        .expect("register");
-    let dead_holder = local_owner("dead-worker", "host-a", "not-the-current-process-start");
-    registry
-        .record_first_started(
-            "proc-ob-dead",
-            ProcessStarted {
-                owner: dead_holder.clone(),
-                fencing_token: 0,
-                attempt: 1,
-                started_at_ms: 1,
-            },
-        )
-        .await
-        .expect("record started");
-    registry
-        .claim_process_lease("proc-ob-dead", &dead_holder, 60_000)
-        .await
-        .expect("dead holder claims")
-        .acquired()
-        .expect("dead holder lease acquired");
-
-    let worker = inline_worker(
-        Arc::clone(&registry),
-        local_owner("live-worker", "host-a", "claimant-start"),
-    );
-    worker
-        .drive_pending_processes()
-        .await
-        .expect("sweep dispatches");
-    await_terminal(&registry, "proc-ob-dead").await;
-
-    let evidence = abandoned_evidence(&registry, "proc-ob-dead").await;
-    assert_eq!(evidence.writer, AbandonWriter::Sweep);
-    assert_eq!(
-        evidence.owner.as_ref().map(|owner| owner.owner_id.as_str()),
-        Some("dead-worker"),
-        "the sweep names the provably-dead holder as the abandoned owner"
-    );
-
-    // Revenant: the dead owner reappears and tries to complete the row. The
-    // terminal append adopts the stored outcome rather than overwriting it.
-    let replayed = registry
-        .complete_process(
-            "proc-ob-dead",
-            ProcessAwaitOutput::Success {
-                value: serde_json::json!("revenant"),
-                control: None,
-            },
-            crate::ProcessCompletionAuthority::workflow_key("proc-ob-dead"),
-        )
-        .await
-        .expect("terminal retry adopts stored outcome");
-    assert!(matches!(replayed.status, ProcessStatus::Abandoned { .. }));
-}
-
-/// A started OwnerBound row whose holder is merely silent (no death evidence)
-/// and carries no Abandon Request is left non-terminal — elapsed time alone
-/// never terminalizes.
+/// A started OwnerBound row with no Abandon Request is left non-terminal —
+/// elapsed time alone never terminalizes.
 #[tokio::test]
 async fn sweep_skips_started_owner_bound_with_silent_holder() {
     let registry: Arc<dyn ProcessRegistry> = Arc::new(TestLocalProcessRegistry::default());
@@ -1633,7 +1556,7 @@ async fn sweep_skips_started_owner_bound_with_silent_holder() {
         )
         .await
         .expect("record started");
-    // Opaque live holder: no liveness proof, so it is never provably dead.
+    // A live holder keeps the row unavailable until its TTL expires.
     registry
         .claim_process_lease(
             "proc-ob-silent",
@@ -1661,7 +1584,7 @@ async fn sweep_skips_started_owner_bound_with_silent_holder() {
         .expect("process");
     assert!(
         !record.is_terminal(),
-        "a silent, not-provably-dead holder with no abandon request stays non-terminal"
+        "a holder with no abandon request stays non-terminal"
     );
 }
 

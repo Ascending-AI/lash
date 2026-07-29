@@ -9,13 +9,13 @@ use lash_core::runtime::{
     RuntimeReplay, RuntimeScope, RuntimeSubject,
 };
 use lash_core::{
-    DeliveryPolicy, ExecResponse, ExecutionScope, LeaseOwnerIdentity, LeaseOwnerLiveness, MergeKey,
-    PreparedToolCall, ProcessAwaitOutput, ProcessInput, ProcessProvenance, ProcessRegistration,
-    ProcessRegistry, RecoveryDisposition, RuntimeCommit, RuntimeEffectCommand,
-    RuntimeEffectController, RuntimeEffectEnvelope, RuntimeEffectKind, RuntimeEffectLocalExecutor,
-    RuntimeEffectOutcome, RuntimeInvocation, RuntimePersistence, RuntimeSessionState,
-    SessionExecutionLeaseClaimOutcome, SessionRelation, SessionScope, SessionStoreCreateRequest,
-    SessionStoreFactory, SlotPolicy, ToolAttemptLaunch, ToolCallOutput, ToolCallRecord, ToolId,
+    DeliveryPolicy, ExecResponse, ExecutionScope, LeaseOwnerIdentity, MergeKey, PreparedToolCall,
+    ProcessAwaitOutput, ProcessInput, ProcessProvenance, ProcessRegistration, ProcessRegistry,
+    RecoveryDisposition, RuntimeCommit, RuntimeEffectCommand, RuntimeEffectController,
+    RuntimeEffectEnvelope, RuntimeEffectKind, RuntimeEffectLocalExecutor, RuntimeEffectOutcome,
+    RuntimeInvocation, RuntimePersistence, RuntimeSessionState, SessionExecutionLeaseClaimOutcome,
+    SessionRelation, SessionScope, SessionStoreCreateRequest, SessionStoreFactory, SlotPolicy,
+    ToolAttemptLaunch, ToolCallOutput, ToolCallRecord, ToolId,
 };
 use serde_json::{Value, json};
 
@@ -26,8 +26,8 @@ use crate::trace::value_digest;
 mod process_lifecycle;
 
 use process_lifecycle::{
-    LifecycleSuccessEngine, lifecycle_process_fact, lifecycle_worker, local_process_owner,
-    record_lifecycle_started, register_lifecycle_row, register_rerunnable_lifecycle_row,
+    LifecycleSuccessEngine, lifecycle_process_fact, lifecycle_worker, record_lifecycle_started,
+    register_lifecycle_row, register_rerunnable_lifecycle_row,
 };
 
 const EFFECT_SCOPE_ID: &str = "lash-sim-runtime-boundaries";
@@ -652,26 +652,14 @@ impl RuntimeBoundaryHarness {
     ) -> Result<Value, RuntimeBoundaryError> {
         let session = boundary_session_alias(event);
         let store = self.store_for_session(&session).await?;
-        let stale_owner = LeaseOwnerIdentity {
-            owner_id: event.actor_alias.clone(),
-            incarnation_id: format!("{}:incarnation-001", event.actor_alias),
-            liveness: LeaseOwnerLiveness::local_process_for_test(
-                "lash-sim-host",
-                "lash-sim-boot",
-                u32::MAX,
-                "dead-process",
-            ),
-        };
-        let live_owner = LeaseOwnerIdentity {
-            owner_id: event.actor_alias.clone(),
-            incarnation_id: format!("{}:incarnation-002", event.actor_alias),
-            liveness: LeaseOwnerLiveness::local_process_for_test(
-                "lash-sim-host",
-                "lash-sim-boot",
-                std::process::id(),
-                "live-process",
-            ),
-        };
+        let stale_owner = LeaseOwnerIdentity::opaque(
+            event.actor_alias.clone(),
+            format!("{}:incarnation-001", event.actor_alias),
+        );
+        let live_owner = LeaseOwnerIdentity::opaque(
+            event.actor_alias.clone(),
+            format!("{}:incarnation-002", event.actor_alias),
+        );
         // Worker one (the doomed incarnation) acquires the session execution lease
         // and starts a real unit of worker-owned queued work.
         let stale_lease = match store
@@ -689,7 +677,7 @@ impl RuntimeBoundaryHarness {
                     "stale_completion_rejected": false,
                     "lease_busy": true,
                     "runtime_worker_store": {
-                        "session_execution_lease_reclaimed": false,
+                        "session_execution_lease_acquired_after_ttl": false,
                         "stale_completion_left_live_lease_renewable": false,
                         "busy_during_in_flight_turn": true,
                     },
@@ -708,7 +696,7 @@ impl RuntimeBoundaryHarness {
 
         // Worker one crashes mid-flight. The scheduled world advances beyond
         // the real TTL before worker two takes over; no host wall clock or
-        // dead-process shortcut establishes expiry.
+        // process-liveness shortcut establishes expiry.
         self.clock.advance_by(LEASE_TTL_MS + 1).await;
         let live_lease = match store
             .try_claim_session_execution_lease(&session, &live_owner, LEASE_TTL_MS)
@@ -788,7 +776,7 @@ impl RuntimeBoundaryHarness {
                 "lease_token_present": !renewed_live.lease_token.is_empty(),
             },
             "runtime_worker_store": {
-                "session_execution_lease_reclaimed": true,
+                "session_execution_lease_acquired_after_ttl": true,
                 "takeover_after_ttl_expiry": true,
                 "stale_completion_left_live_lease_renewable": true,
                 "process_completion": {
@@ -824,14 +812,14 @@ impl RuntimeBoundaryHarness {
     ///
     /// - (a) **spawn-with-disposition**: register a started OwnerBound row, a
     ///   Rerunnable sibling, and an OwnerBound row carrying an Abandon Request.
-    /// - (b) **worker-crash**: the OwnerBound/Rerunnable rows' starter is a
-    ///   provably-dead holder (same host/boot as the claimant, a dead pid).
+    /// - (b) **worker-crash**: the OwnerBound/Rerunnable rows' starter stops
+    ///   renewing; its unexpired lease keeps the OwnerBound row non-terminal.
     /// - (c) **drive-sweep**: a fresh worker runs the disposition-driven recovery.
     /// - (d) **abandon-request**: the operator-authorized OwnerBound row reconciles
     ///   once its lease has lapsed.
     ///
     /// The recorded facts (terminal, writer, evidence, independently-observed
-    /// death/authorization) are the ground truth the `process_never_double_started`
+    /// lease/authorization) are the ground truth the `process_never_double_started`
     /// and `abandoned_requires_evidence` oracles verify. The registry is in-memory
     /// (independent of the session-store backend), so the recorded observation is
     /// identical across the cross-backend replay lanes.
@@ -843,12 +831,11 @@ impl RuntimeBoundaryHarness {
         let registry: Arc<dyn lash_core::ProcessRegistry> =
             Arc::new(lash_core::TestLocalProcessRegistry::default());
 
-        // A same-host/same-boot sweep claimant and a dead holder differing only in
-        // process_start: the holder is provably dead for the claimant.
-        let host = format!("sim-recovery-host:{session}");
-        let boot = format!("sim-recovery-boot:{session}");
-        let sweep_owner = local_process_owner(&host, &boot, "sim-recovery", "recovery-claimant");
-        let dead_holder = local_process_owner(&host, &boot, "sim-dead-owner", "before-the-crash");
+        // A sweep claimant and a crashed holder with distinct incarnations.
+        let sweep_owner =
+            LeaseOwnerIdentity::opaque("sim-recovery", format!("recovery-claimant:{session}"));
+        let dead_holder =
+            LeaseOwnerIdentity::opaque("sim-dead-owner", format!("before-the-crash:{session}"));
         let silent_owner =
             LeaseOwnerIdentity::opaque("sim-silent-owner", format!("sim-silent-owner:{session}"));
         let mut runtime_host = lash_core::RuntimeHostConfig::in_memory();
@@ -875,8 +862,8 @@ impl RuntimeBoundaryHarness {
         .await
         .map_err(|err| RuntimeBoundaryError::new(err.to_string()))?;
 
-        // (a)+(b): a started OwnerBound row whose holder crashed (still holding a
-        // live lease), and a Rerunnable sibling the crash also left mid-flight.
+        // (a)+(b): a started OwnerBound row whose holder crashed while still
+        // holding a live lease, and a Rerunnable sibling left mid-flight.
         register_lifecycle_row(
             registry.as_ref(),
             "ob-crashed",

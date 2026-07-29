@@ -172,8 +172,8 @@ pub mod persistence {
     pub use lash_core::store::{
         GraphAppend, HydratedSessionCheckpoint, OperationId, PersistedSessionRead,
         RealizedNodeTimestamp, RuntimeCommit, RuntimeCommitResult, RuntimeTurnCommitStamp,
-        SessionCheckpoint, SessionHead, SessionHeadMeta, commit_runtime_state_verified,
-        load_persisted_session_state,
+        SessionCheckpoint, SessionHead, SessionHeadMeta, SessionHeadPayload,
+        commit_runtime_state_verified, load_persisted_session_state,
     };
     pub use lash_core::{
         AttachmentReclamationReport, AttachmentRootSet, AttachmentStore, InMemoryAttachmentStore,
@@ -181,13 +181,12 @@ pub mod persistence {
         StoredBlobRef, reclaim_unreferenced_attachments,
     };
     pub use lash_core::{
-        BlobRef, GcReport, LeaseOwnerIdentity, LeaseOwnerLiveness, PersistedSessionConfig,
-        PersistedTurnState, ProtocolEvent, QueuedWorkStore, RuntimePersistence, SessionAdmission,
-        SessionBinding, SessionCommitStore, SessionExecutionLease,
-        SessionExecutionLeaseClaimOutcome, SessionExecutionLeaseCompletion,
-        SessionExecutionLeaseFence, SessionExecutionLeaseStore, SessionGraph, SessionHistoryRecord,
-        SessionMeta, SessionNodeRecord, SessionReadView, SessionRelation, StoreError,
-        StoreMaintenance, TurnInputStore, VacuumReport,
+        BlobRef, GcReport, LeaseOwnerIdentity, PersistedSessionConfig, PersistedTurnState,
+        ProtocolEvent, QueuedWorkStore, RuntimePersistence, SessionAdmission, SessionBinding,
+        SessionCommitStore, SessionExecutionLease, SessionExecutionLeaseClaimOutcome,
+        SessionExecutionLeaseCompletion, SessionExecutionLeaseFence, SessionExecutionLeaseStore,
+        SessionGraph, SessionHistoryRecord, SessionMeta, SessionNodeRecord, SessionReadView,
+        SessionRelation, StoreError, StoreMaintenance, TurnInputStore, VacuumReport,
     };
     #[cfg(feature = "rlm")]
     pub use lash_lashlang_runtime::{InMemoryLashlangArtifactStore, LashlangArtifactStore};

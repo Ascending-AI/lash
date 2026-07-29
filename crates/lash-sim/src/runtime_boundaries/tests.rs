@@ -213,13 +213,12 @@ async fn process_lifecycle_boundary_drives_real_disposition_recovery() {
             .unwrap_or_else(|| panic!("missing process `{id}`: {observed}"))
             .clone()
     };
-    // Started OwnerBound + provably-dead holder -> Abandoned{Sweep}, not re-run.
+    // Started OwnerBound + unexpired stale holder remains non-terminal and is
+    // never re-run.
     let ob = by_id("ob-crashed");
-    assert_eq!(ob["terminal_status"], "abandoned");
-    assert_eq!(ob["abandon_writer"], "sweep");
-    assert_eq!(ob["provably_dead_holder"], true);
+    assert_eq!(ob["terminal_status"], "running");
+    assert_eq!(ob["lease_lapsed"], false);
     assert_eq!(ob["reran"], false);
-    assert_eq!(ob["abandon_evidence_owner"], "sim-dead-owner");
     // Rerunnable IS re-run to a run terminal.
     let rerun = by_id("rerun-crashed");
     assert_eq!(rerun["reran"], true);
@@ -328,7 +327,7 @@ async fn worker_stale_completion_uses_runtime_session_lease_store() {
     assert_eq!(observed["process_terminal_writer"], "successor");
     assert_eq!(observed["process_terminal_event_count"], 1);
     assert_eq!(
-        observed["runtime_worker_store"]["session_execution_lease_reclaimed"],
+        observed["runtime_worker_store"]["session_execution_lease_acquired_after_ttl"],
         true
     );
     assert!(observed["runtime_active_lease"].is_object());

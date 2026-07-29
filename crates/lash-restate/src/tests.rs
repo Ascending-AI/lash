@@ -754,18 +754,6 @@ impl lash_core::SessionExecutionLeaseStore for CommitRetryStore {
             .await
     }
 
-    async fn reclaim_session_execution_lease(
-        &self,
-        session_id: &str,
-        owner: &lash_core::LeaseOwnerIdentity,
-        observed_holder: &lash_core::SessionExecutionLeaseFence,
-        lease_ttl_ms: u64,
-    ) -> Result<lash_core::SessionExecutionLeaseClaimOutcome, lash_core::StoreError> {
-        self.inner
-            .reclaim_session_execution_lease(session_id, owner, observed_holder, lease_ttl_ms)
-            .await
-    }
-
     async fn renew_session_execution_lease(
         &self,
         fence: &lash_core::SessionExecutionLeaseFence,
@@ -5765,10 +5753,7 @@ async fn sqlite_trigger_started_process_recovered_after_worker_registry_reopen()
     );
 }
 
-/// A process tool that counts executions in a shared atomic. Its execution is
-/// the observable side effect the crash-recovery e2e keys off: a started
-/// OwnerBound row that is (correctly) NOT re-run leaves the counter untouched,
-/// while a Rerunnable sibling that IS re-run bumps it exactly once.
+/// A process tool that counts executions in a shared atomic.
 struct CountingProcessTool {
     executions: Arc<AtomicUsize>,
 }
@@ -5820,38 +5805,6 @@ fn counting_tool_plugin(executions: Arc<AtomicUsize>) -> Arc<dyn lash_core::Plug
     ))
 }
 
-/// A recovery worker whose lease owner is a real same-host/same-boot local
-/// process (not the default opaque owner) so `is_definitely_dead_for_claimant`
-/// can render a provably-dead verdict against a fabricated dead holder.
-fn recovery_worker_local_owner(
-    registry: Arc<dyn ProcessRegistry>,
-    store_factory: Arc<dyn lash_core::SessionStoreFactory>,
-    owner: lash_core::LeaseOwnerIdentity,
-    extra_plugins: Vec<Arc<dyn lash_core::PluginFactory>>,
-) -> DurableProcessWorker {
-    let base = recovery_worker_with_plugins(registry, store_factory, extra_plugins);
-    DurableProcessWorker::from_shared_config(Arc::new(
-        base.config().clone().with_lease_owner(owner),
-    ))
-}
-
-/// A same-host/same-boot local-process lease owner. When `process_start` does
-/// not match this live process's real start time, the holder is provably dead
-/// for a claimant fabricated the same way — exactly the recovery-sweep death
-/// evidence path (`process_worker::recovery_tests`).
-fn local_process_owner(owner_id: &str, process_start: &str) -> lash_core::LeaseOwnerIdentity {
-    lash_core::LeaseOwnerIdentity {
-        owner_id: owner_id.to_string(),
-        incarnation_id: format!("{owner_id}:incarnation"),
-        liveness: lash_core::LeaseOwnerLiveness::local_process_for_test(
-            "restate-recovery-host",
-            "restate-recovery-boot",
-            std::process::id(),
-            process_start,
-        ),
-    }
-}
-
 fn counting_tool_registration(
     id: &str,
     disposition: lash_core::RecoveryDisposition,
@@ -5873,139 +5826,6 @@ fn counting_tool_registration(
         lash_core::ProcessProvenance::host(),
     )
     .with_execution_env_ref(Some(env_ref))
-}
-
-/// The Harbor reproducer at the process layer, over a REOPENED sqlite registry
-/// (ADR 0019): a host crashed mid-flight leaving a started OwnerBound row whose
-/// holder is provably dead. A fresh worker's recovery sweep must terminalize it
-/// `Abandoned{Sweep}` — never re-execute it (double side effects) — while a
-/// Rerunnable sibling in the same sweep IS re-run. The shared execution counter
-/// proves exactly one execution happened: the Rerunnable one.
-#[tokio::test]
-async fn sqlite_sweep_abandons_started_owner_bound_without_rerunning_but_reruns_sibling() {
-    let temp = tempfile::tempdir().expect("tempdir");
-    let process_db = temp.path().join("processes.db");
-    let store_factory = Arc::new(lash_sqlite_store::SqliteSessionStoreFactory::new(
-        temp.path().join("sessions"),
-    )) as Arc<dyn lash_core::SessionStoreFactory>;
-    let env_ref = persist_recovery_env_ref().await;
-
-    // The crashed host: it started an OwnerBound row and a Rerunnable row, then
-    // died. We register that mid-flight state directly on the durable registry.
-    let registry_a = Arc::new(
-        lash_sqlite_store::SqliteProcessRegistry::open(
-            &process_db,
-            process_db.with_extension("sessions"),
-        )
-        .await
-        .expect("open registry"),
-    ) as Arc<dyn ProcessRegistry>;
-    let dead_holder = local_process_owner("crashed-host", "before-the-crash");
-    registry_a
-        .register_process(counting_tool_registration(
-            "ob-crashed",
-            lash_core::RecoveryDisposition::OwnerBound,
-            env_ref.clone(),
-        ))
-        .await
-        .expect("register OwnerBound crashed row");
-    registry_a
-        .record_first_started(
-            "ob-crashed",
-            lash_core::ProcessStarted {
-                owner: dead_holder.clone(),
-                fencing_token: 0,
-                attempt: 1,
-                started_at_ms: 1,
-            },
-        )
-        .await
-        .expect("record OwnerBound first_started");
-    registry_a
-        .claim_process_lease("ob-crashed", &dead_holder, 60_000)
-        .await
-        .expect("dead holder claims OwnerBound lease")
-        .acquired()
-        .expect("dead holder lease acquired");
-    // A Rerunnable sibling the same crashed host had started (no live lease held).
-    registry_a
-        .register_process(counting_tool_registration(
-            "rerun-crashed",
-            lash_core::RecoveryDisposition::Rerunnable,
-            env_ref.clone(),
-        ))
-        .await
-        .expect("register Rerunnable crashed row");
-    registry_a
-        .record_first_started(
-            "rerun-crashed",
-            lash_core::ProcessStarted {
-                owner: dead_holder.clone(),
-                fencing_token: 0,
-                attempt: 1,
-                started_at_ms: 1,
-            },
-        )
-        .await
-        .expect("record Rerunnable first_started");
-    drop(registry_a);
-
-    // The recovery counterpart: reopen the registry, stand up a fresh worker
-    // whose lease owner can render the provably-dead verdict, and sweep.
-    let registry_b = Arc::new(
-        lash_sqlite_store::SqliteProcessRegistry::open(
-            &process_db,
-            process_db.with_extension("sessions"),
-        )
-        .await
-        .expect("reopen registry"),
-    ) as Arc<dyn ProcessRegistry>;
-    let executions = Arc::new(AtomicUsize::new(0));
-    let worker = recovery_worker_local_owner(
-        Arc::clone(&registry_b),
-        Arc::clone(&store_factory),
-        local_process_owner("recovery-host", "recovery-claimant"),
-        vec![counting_tool_plugin(Arc::clone(&executions))],
-    );
-    worker
-        .drive_pending_processes()
-        .await
-        .expect("recovery sweep dispatches");
-
-    // The OwnerBound crashed row reaches Abandoned{Sweep}, naming the dead holder
-    // — never a run terminal.
-    let ob_output = lash_core::ProcessAwaiter::polling(Arc::clone(&registry_b))
-        .await_terminal("ob-crashed")
-        .await
-        .expect("OwnerBound crashed row reaches terminal");
-    let ProcessAwaitOutput::Abandoned { evidence, .. } = &ob_output else {
-        panic!("expected Abandoned terminal for the started OwnerBound row, got {ob_output:?}");
-    };
-    assert_eq!(evidence.writer, AbandonWriter::Sweep);
-    assert_eq!(
-        evidence.owner.as_ref().map(|owner| owner.owner_id.as_str()),
-        Some("crashed-host"),
-        "the sweep names the provably-dead holder as the abandoned owner"
-    );
-
-    // The Rerunnable sibling IS re-run to a run terminal in the same sweep.
-    let rerun_output = lash_core::ProcessAwaiter::polling(Arc::clone(&registry_b))
-        .await_terminal("rerun-crashed")
-        .await
-        .expect("Rerunnable crashed row reaches terminal");
-    assert!(
-        matches!(rerun_output, ProcessAwaitOutput::Success { .. }),
-        "the Rerunnable sibling is re-run to a run terminal, got {rerun_output:?}"
-    );
-
-    // The counter is the execution journal: exactly one execution happened — the
-    // Rerunnable one. The started OwnerBound row's non-idempotent side effect was
-    // NEVER repeated.
-    assert_eq!(
-        executions.load(Ordering::SeqCst),
-        1,
-        "exactly one execution: the Rerunnable sibling; the abandoned OwnerBound row was never re-run"
-    );
 }
 
 fn discover_service<S: Discoverable>(_: &S) -> restate_sdk::discovery::Service {
@@ -6674,11 +6494,10 @@ async fn owner_bound_segment_continuation_reuses_root_invocation_identity() {
 
 #[tokio::test]
 async fn run_registration_abandons_restarted_owner_bound_without_running() {
-    // ADR 0019: when the engine re-invokes the workflow for an OwnerBound row
-    // whose prior incarnation already recorded `first_started` but left no
-    // outcome, the run handler must NOT re-execute it. It completes the row as
-    // Abandoned{Sweep} — the controller-owned crash-recovery verdict — and returns
-    // that output so the durable promise still resolves for awaiters.
+    // When the engine re-invokes the workflow for an OwnerBound row whose prior
+    // incarnation already recorded `first_started` but left no outcome, the run
+    // handler must not re-execute it. The workflow-key recovery path records an
+    // Abandoned{Sweep} terminal so durable awaiters resolve.
     let started_owner = lash_core::LeaseOwnerIdentity::opaque("owner-a", "incarnation-1");
     let runner = Arc::new(AlreadyStartedRunner {
         calls: Mutex::new(0),
@@ -6722,11 +6541,8 @@ async fn run_registration_abandons_restarted_owner_bound_without_running() {
         .expect("run_registration");
 
     // The real runner rejects this before user-code execution when its atomic
-    // start write observes the prior OwnerBound attempt. This fake returns the
-    // same typed verdict so the controller-owned terminal decision is exercised.
+    // start write observes the prior OwnerBound attempt.
     assert_eq!(*runner.calls.lock().expect("runner calls lock"), 1);
-    // Both the returned output and the persisted terminal are Abandoned{Sweep},
-    // naming the incarnation that began the work as the evidence owner.
     let lash_core::ProcessRunOutcome::Terminal(output) = &output else {
         panic!("expected terminal output, got {output:?}");
     };

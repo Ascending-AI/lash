@@ -15,7 +15,8 @@ use lash::persistence::{
     RuntimeCommitResult, RuntimePersistence, RuntimeSessionState, RuntimeTurnCommitStamp,
     SessionCheckpoint, SessionCommitStore, SessionExecutionLease,
     SessionExecutionLeaseClaimOutcome, SessionExecutionLeaseCompletion, SessionExecutionLeaseFence,
-    SessionExecutionLeaseStore, SessionMeta, SessionNodeRecord, StoreError,
+    SessionExecutionLeaseStore, SessionHeadMeta, SessionHeadPayload, SessionMeta,
+    SessionNodeRecord, StoreError,
     StoreMaintenance, TurnInputClaim, TurnInputCheckpointBoundary, TurnInputIngress,
     TurnInputState, TurnInputStore, VacuumReport, commit_runtime_state_verified,
     load_persisted_session_state,
@@ -99,25 +100,6 @@ impl SessionExecutionLeaseStore for FacadeStore {
         &self,
         session_id: &str,
         owner: &LeaseOwnerIdentity,
-        lease_ttl_ms: u64,
-    ) -> Result<SessionExecutionLeaseClaimOutcome, StoreError> {
-        Ok(SessionExecutionLeaseClaimOutcome::Acquired(
-            SessionExecutionLease {
-                session_id: session_id.to_string(),
-                owner: owner.clone(),
-                lease_token: "facade-token".to_string(),
-                fencing_token: 1,
-                claimed_at_epoch_ms: 0,
-                expires_at_epoch_ms: lease_ttl_ms,
-            },
-        ))
-    }
-
-    async fn reclaim_session_execution_lease(
-        &self,
-        session_id: &str,
-        owner: &LeaseOwnerIdentity,
-        _observed_holder: &SessionExecutionLeaseFence,
         lease_ttl_ms: u64,
     ) -> Result<SessionExecutionLeaseClaimOutcome, StoreError> {
         Ok(SessionExecutionLeaseClaimOutcome::Acquired(
@@ -545,6 +527,7 @@ fn assert_store_object(_: Arc<dyn RuntimePersistence>) {}
 
 fn main() {
     assert_store_object(Arc::new(FacadeStore));
+    let _ = SessionHeadMeta::assemble(SessionHeadPayload::default(), 0, None, None);
     let _ = persistence_types_are_nameable(
         GraphAppend { nodes: Vec::new(), leaf_node_id: None },
         Vec::new(),

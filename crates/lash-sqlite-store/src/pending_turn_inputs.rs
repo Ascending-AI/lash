@@ -3,15 +3,11 @@ use super::*;
 fn lease_owner_from_columns(
     owner_id: Option<String>,
     incarnation_id: Option<String>,
-    liveness_json: Option<String>,
+    _liveness_json: Option<String>,
 ) -> Option<LeaseOwnerIdentity> {
     owner_id.map(|owner_id| LeaseOwnerIdentity {
         incarnation_id: incarnation_id.unwrap_or_else(|| owner_id.clone()),
         owner_id,
-        liveness: liveness_json
-            .as_deref()
-            .and_then(|json| serde_json::from_str(json).ok())
-            .unwrap_or(LeaseOwnerLiveness::Opaque),
     })
 }
 

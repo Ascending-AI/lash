@@ -101,11 +101,11 @@ const DURABLE_FAULT_MATRIX: &[DurableFaultMatrixRow] = &[
         },
     },
     DurableFaultMatrixRow {
-        id: "dead-lease-reclaim",
+        id: "stale-lease-ttl",
         kind: DurableFaultKind::LeaseLoss,
-        contract: "Dead local lease holders are reclaimable while stale observed-holder reclaim cannot clear a newer fence.",
+        contract: "An unexpired stale lease stays busy until TTL, then a successor advances the fence.",
         evidence: FaultEvidence::RuntimeScenario {
-            test_name: "runtime_scenario_reclaims_dead_session_lease_and_rejects_stale_observation",
+            test_name: "runtime_scenario_waits_for_stale_session_lease_ttl",
         },
     },
     DurableFaultMatrixRow {

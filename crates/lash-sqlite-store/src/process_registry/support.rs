@@ -236,18 +236,13 @@ impl SqliteProcessRegistry {
                 let owner_id: Option<String> = row.get(0)?;
                 let lease_token: Option<String> = row.get(1)?;
                 let incarnation_id: Option<String> = row.get(5)?;
-                let liveness_json: Option<String> = row.get(6)?;
                 let (Some(owner_id), Some(lease_token)) = (owner_id, lease_token) else {
                     return Ok(None);
                 };
                 Ok(Some(ProcessLease {
                     schema_version: PROCESS_LEASE_SCHEMA_VERSION,
                     process_id: process_id.to_string(),
-                    owner: process_lease_owner_from_columns(
-                        owner_id,
-                        incarnation_id,
-                        liveness_json,
-                    ),
+                    owner: process_lease_owner_from_columns(owner_id, incarnation_id),
                     lease_token,
                     fencing_token: row.get::<_, i64>(2)? as u64,
                     claimed_at_epoch_ms: row.get::<_, i64>(3)? as u64,
@@ -307,7 +302,7 @@ impl SqliteProcessRegistry {
                 lease.process_id.as_str(),
                 lease.owner.owner_id.as_str(),
                 lease.owner.incarnation_id.as_str(),
-                encode_process_lease_liveness(&lease.owner.liveness)?,
+                Option::<&str>::None,
                 lease.lease_token.as_str(),
                 lease.fencing_token as i64,
                 lease.claimed_at_epoch_ms as i64,

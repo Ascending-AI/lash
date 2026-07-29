@@ -177,7 +177,7 @@ where
     commit_rejects_leaf_without_frame_open_ancestor(make()).await;
     // [`SessionExecutionLeaseStore`]: single-writer lane fencing.
     session_execution_lease_contract(make()).await;
-    session_execution_lease_reclaim_contract(make()).await;
+    session_execution_lease_expires_by_ttl_contract(make()).await;
     // [`QueuedWorkStore`]: durable queued-work ingress, ordering, and claim
     // leases, plus the commit-side completion atomicity it shares with
     // [`SessionCommitStore`].
@@ -727,26 +727,6 @@ fn lease_owner(owner_id: &str) -> crate::LeaseOwnerIdentity {
     crate::LeaseOwnerIdentity::opaque(owner_id, format!("{owner_id}:incarnation"))
 }
 
-fn local_lease_owner(
-    owner_id: &str,
-    incarnation_id: &str,
-    host_id: &str,
-    boot_id: &str,
-    pid: u32,
-    process_start: &str,
-) -> crate::LeaseOwnerIdentity {
-    crate::LeaseOwnerIdentity {
-        owner_id: owner_id.to_string(),
-        incarnation_id: incarnation_id.to_string(),
-        liveness: crate::LeaseOwnerLiveness::local_process_for_test(
-            host_id,
-            boot_id,
-            pid,
-            process_start,
-        ),
-    }
-}
-
 async fn claim_session_execution_lease_for_test(
     store: &Arc<dyn RuntimePersistence>,
     session_id: &str,
@@ -1229,271 +1209,43 @@ async fn session_execution_lease_contract(store: Arc<dyn RuntimePersistence>) {
     release_session_execution_lease_for_test(&store, &queue_lease).await;
 }
 
-async fn session_execution_lease_reclaim_contract(store: Arc<dyn RuntimePersistence>) {
-    let pid = std::process::id();
-    let dead_holder = local_lease_owner(
-        "dead-holder",
-        "dead-holder:incarnation",
-        "host-a",
-        "boot-a",
-        pid,
-        "not-the-current-process-start",
-    );
-    let claimant = local_lease_owner(
-        "claimant",
-        "claimant:incarnation",
-        "host-a",
-        "boot-a",
-        pid,
-        "claimant-start",
-    );
+async fn session_execution_lease_expires_by_ttl_contract(store: Arc<dyn RuntimePersistence>) {
+    let holder_owner = lease_owner("stale-holder");
+    let claimant = lease_owner("ttl-claimant");
     let holder = store
-        .try_claim_session_execution_lease("reclaim-dead", &dead_holder, 60_000)
+        .try_claim_session_execution_lease("ttl-expiry", &holder_owner, 50)
         .await
-        .expect("claim dead-holder lease")
+        .expect("claim stale-holder lease")
         .acquired()
-        .expect("dead-holder lease acquired");
+        .expect("stale-holder lease acquired");
+
+    let busy = store
+        .try_claim_session_execution_lease("ttl-expiry", &claimant, 60_000)
+        .await
+        .expect("claimant observes unexpired stale-holder lease");
     assert!(
         matches!(
-            store
-                .try_claim_session_execution_lease("reclaim-dead", &claimant, 60_000)
-                .await
-                .expect("try claimant against dead holder"),
-            crate::SessionExecutionLeaseClaimOutcome::Busy { .. }
+            busy,
+            crate::SessionExecutionLeaseClaimOutcome::Busy {
+                holder: ref busy_holder
+            }
+                if busy_holder.lease_token == holder.lease_token
         ),
-        "plain claim must report busy before the caller performs fenced reclaim"
+        "an unexpired stale lease must remain busy rather than being reclaimed"
     );
-    let reclaimed = store
-        .reclaim_session_execution_lease("reclaim-dead", &claimant, &holder.fence(), 60_000)
-        .await
-        .expect("reclaim dead holder")
-        .acquired()
-        .expect("dead holder is reclaimable before ttl");
-    assert!(
-        reclaimed.fencing_token > holder.fencing_token,
-        "fenced reclaim must advance the fencing token"
-    );
-    let stale_reclaim = store
-        .reclaim_session_execution_lease(
-            "reclaim-dead",
-            &local_lease_owner(
-                "late-claimant",
-                "late-claimant:incarnation",
-                "host-a",
-                "boot-a",
-                pid,
-                "late-claimant-start",
-            ),
-            &holder.fence(),
-            60_000,
-        )
-        .await
-        .expect("stale observed-holder reclaim");
-    assert!(
-        matches!(
-            stale_reclaim,
-            crate::SessionExecutionLeaseClaimOutcome::Busy { .. }
-        ),
-        "a stale observed holder must not clear the newer lease"
-    );
-    release_session_execution_lease_for_test(&store, &reclaimed).await;
 
-    let race_holder = store
-        .try_claim_session_execution_lease("reclaim-race", &dead_holder, 60_000)
+    tokio::time::sleep(std::time::Duration::from_millis(75)).await;
+    let acquired = store
+        .try_claim_session_execution_lease("ttl-expiry", &claimant, 60_000)
         .await
-        .expect("claim race holder")
+        .expect("claim after stale-holder TTL")
         .acquired()
-        .expect("race holder acquired");
-    let race_fence = race_holder.fence();
-    let barrier = Arc::new(tokio::sync::Barrier::new(3));
-    let left_store = Arc::clone(&store);
-    let right_store = Arc::clone(&store);
-    let left_barrier = Arc::clone(&barrier);
-    let right_barrier = Arc::clone(&barrier);
-    let left_fence = race_fence.clone();
-    let right_fence = race_fence.clone();
-    let left_claimant = local_lease_owner(
-        "race-left",
-        "race-left:incarnation",
-        "host-a",
-        "boot-a",
-        pid,
-        "race-left-start",
-    );
-    let right_claimant = local_lease_owner(
-        "race-right",
-        "race-right:incarnation",
-        "host-a",
-        "boot-a",
-        pid,
-        "race-right-start",
-    );
-    let left = crate::task::spawn(async move {
-        left_barrier.wait().await;
-        left_store
-            .reclaim_session_execution_lease("reclaim-race", &left_claimant, &left_fence, 60_000)
-            .await
-    });
-    let right = crate::task::spawn(async move {
-        right_barrier.wait().await;
-        right_store
-            .reclaim_session_execution_lease("reclaim-race", &right_claimant, &right_fence, 60_000)
-            .await
-    });
-    barrier.wait().await;
-    let left = left
-        .await
-        .expect("join left reclaim race")
-        .expect("left reclaim race");
-    let right = right
-        .await
-        .expect("join right reclaim race")
-        .expect("right reclaim race");
-    let mut race_winners = [left, right]
-        .into_iter()
-        .filter_map(crate::SessionExecutionLeaseClaimOutcome::acquired)
-        .collect::<Vec<_>>();
-    assert_eq!(
-        race_winners.len(),
-        1,
-        "exactly one claimant may win a fenced reclaim race"
-    );
-    let race_winner = race_winners.pop().expect("race winner");
-    assert!(race_winner.fencing_token > race_holder.fencing_token);
-    release_session_execution_lease_for_test(&store, &race_winner).await;
-
-    let cross_host_holder = store
-        .try_claim_session_execution_lease("reclaim-cross-host", &dead_holder, 60_000)
-        .await
-        .expect("claim cross-host holder")
-        .acquired()
-        .expect("cross-host holder acquired");
-    let cross_host_result = store
-        .reclaim_session_execution_lease(
-            "reclaim-cross-host",
-            &local_lease_owner(
-                "cross-host-claimant",
-                "cross-host-claimant:incarnation",
-                "host-b",
-                "boot-a",
-                pid,
-                "claimant-start",
-            ),
-            &cross_host_holder.fence(),
-            60_000,
-        )
-        .await
-        .expect("cross-host reclaim");
+        .expect("stale lease must become claimable after TTL");
     assert!(
-        matches!(
-            cross_host_result,
-            crate::SessionExecutionLeaseClaimOutcome::Busy { .. }
-        ),
-        "dead-looking local-process holders are reclaimable only on the same host"
+        acquired.fencing_token > holder.fencing_token,
+        "TTL takeover must advance the fencing token"
     );
-    release_session_execution_lease_for_test(&store, &cross_host_holder).await;
-
-    let different_boot_holder = store
-        .try_claim_session_execution_lease("reclaim-different-boot", &dead_holder, 60_000)
-        .await
-        .expect("claim different-boot holder")
-        .acquired()
-        .expect("different-boot holder acquired");
-    let different_boot_result = store
-        .reclaim_session_execution_lease(
-            "reclaim-different-boot",
-            &local_lease_owner(
-                "different-boot-claimant",
-                "different-boot-claimant:incarnation",
-                "host-a",
-                "boot-b",
-                pid,
-                "claimant-start",
-            ),
-            &different_boot_holder.fence(),
-            60_000,
-        )
-        .await
-        .expect("different-boot reclaim");
-    assert!(
-        matches!(
-            different_boot_result,
-            crate::SessionExecutionLeaseClaimOutcome::Busy { .. }
-        ),
-        "same-host process metadata from a different boot is not proof of death"
-    );
-    release_session_execution_lease_for_test(&store, &different_boot_holder).await;
-
-    let opaque_holder = store
-        .try_claim_session_execution_lease("reclaim-opaque", &lease_owner("opaque-holder"), 60_000)
-        .await
-        .expect("claim opaque holder")
-        .acquired()
-        .expect("opaque holder acquired");
-    let opaque_result = store
-        .reclaim_session_execution_lease(
-            "reclaim-opaque",
-            &claimant,
-            &opaque_holder.fence(),
-            60_000,
-        )
-        .await
-        .expect("opaque reclaim");
-    assert!(
-        matches!(
-            opaque_result,
-            crate::SessionExecutionLeaseClaimOutcome::Busy { .. }
-        ),
-        "opaque holders fall back to ttl rather than fast reclaim"
-    );
-    release_session_execution_lease_for_test(&store, &opaque_holder).await;
-
-    if let Some(liveness) = crate::LeaseOwnerLiveness::current_local_process("live-host") {
-        let crate::LeaseOwnerLiveness::LocalProcess {
-            host_id, boot_id, ..
-        } = &liveness
-        else {
-            unreachable!("current local-process liveness is either local or absent");
-        };
-        let host_id = host_id.clone();
-        let boot_id = boot_id.clone();
-        let live_holder_owner = crate::LeaseOwnerIdentity {
-            owner_id: "live-holder".to_string(),
-            incarnation_id: "live-holder:incarnation".to_string(),
-            liveness,
-        };
-        let live_claimant = local_lease_owner(
-            "live-claimant",
-            "live-claimant:incarnation",
-            &host_id,
-            &boot_id,
-            pid,
-            "live-claimant-start",
-        );
-        let live_holder = store
-            .try_claim_session_execution_lease("reclaim-live", &live_holder_owner, 60_000)
-            .await
-            .expect("claim live holder")
-            .acquired()
-            .expect("live holder acquired");
-        let live_result = store
-            .reclaim_session_execution_lease(
-                "reclaim-live",
-                &live_claimant,
-                &live_holder.fence(),
-                60_000,
-            )
-            .await
-            .expect("live reclaim");
-        assert!(
-            matches!(
-                live_result,
-                crate::SessionExecutionLeaseClaimOutcome::Busy { .. }
-            ),
-            "a live local process holder remains busy before ttl"
-        );
-        release_session_execution_lease_for_test(&store, &live_holder).await;
-    }
+    release_session_execution_lease_for_test(&store, &acquired).await;
 }
 
 async fn session_read_loads_persisted_history(store: Arc<dyn RuntimePersistence>) {
@@ -2412,19 +2164,11 @@ pub async fn queued_work_claims_supersede_across_session_lease_generations(
     ));
     release_session_execution_lease_for_test(&store, &lease_b).await;
 
-    // (c) A dead-owner takeover mints a new generation without any release, so
+    // (c) A TTL takeover mints a new generation without any release, so
     // the pre-takeover claim is superseded the same way.
-    let pid = std::process::id();
-    let dead_owner = local_lease_owner(
-        "gen-dead",
-        "gen-dead:incarnation",
-        "host-a",
-        "boot-a",
-        pid,
-        "not-the-current-process-start",
-    );
+    let dead_owner = lease_owner("gen-stale");
     let dead_lease = store
-        .try_claim_session_execution_lease("root", &dead_owner, 60_000)
+        .try_claim_session_execution_lease("root", &dead_owner, 50)
         .await
         .expect("claim dead-owner lease")
         .acquired()
@@ -2440,20 +2184,14 @@ pub async fn queued_work_claims_supersede_across_session_lease_generations(
         .await
         .expect("dead-owner claim")
         .expect("dead-owner claim exists");
-    let taker = local_lease_owner(
-        "gen-taker",
-        "gen-taker:incarnation",
-        "host-a",
-        "boot-a",
-        pid,
-        "gen-taker-start",
-    );
+    tokio::time::sleep(std::time::Duration::from_millis(75)).await;
+    let taker = lease_owner("gen-taker");
     let taker_lease = store
-        .reclaim_session_execution_lease("root", &taker, &dead_lease.fence(), 60_000)
+        .try_claim_session_execution_lease("root", &taker, 60_000)
         .await
-        .expect("reclaim dead owner")
+        .expect("claim after stale owner TTL")
         .acquired()
-        .expect("dead owner is reclaimable");
+        .expect("stale owner is claimable after TTL");
     assert!(taker_lease.fencing_token > dead_lease.fencing_token);
     let claim_taker = store
         .claim_ready_queued_work(
@@ -2608,35 +2346,19 @@ async fn claim_liveness_for_lease_less_paths_tracks_session_generations(
     )
     .await;
 
-    // Dead-owner takeover: the lease stays live but advances to a different
-    // generation. Claims retained from the dead generation are no longer live
-    // for lease-less callers even before a successor reclaims the rows.
-    let pid = std::process::id();
-    let dead_owner = local_lease_owner(
-        "lease-less-dead",
-        "lease-less-dead:incarnation",
-        "host-a",
-        "boot-a",
-        pid,
-        "not-the-current-process-start",
-    );
-    let (batch, input, dead_lease, _queue_claim, _input_claim) =
-        claim_both_generation_fenced_lanes(&store, "lease-less-takeover", &dead_owner, 60_000)
-            .await;
-    let taker = local_lease_owner(
-        "lease-less-taker",
-        "lease-less-taker:incarnation",
-        "host-a",
-        "boot-a",
-        pid,
-        "lease-less-taker-start",
-    );
+    // TTL takeover advances to a different generation. Claims retained from
+    // the expired generation are no longer live for lease-less callers.
+    let dead_owner = lease_owner("lease-less-stale");
+    let (batch, input, _dead_lease, _queue_claim, _input_claim) =
+        claim_both_generation_fenced_lanes(&store, "lease-less-takeover", &dead_owner, 50).await;
+    tokio::time::sleep(std::time::Duration::from_millis(75)).await;
+    let taker = lease_owner("lease-less-taker");
     let taker_lease = store
-        .reclaim_session_execution_lease("lease-less-takeover", &taker, &dead_lease.fence(), 60_000)
+        .try_claim_session_execution_lease("lease-less-takeover", &taker, 60_000)
         .await
-        .expect("take over lease for lease-less liveness checks")
+        .expect("take over expired lease for lease-less liveness checks")
         .acquired()
-        .expect("dead owner is reclaimable for lease-less liveness checks");
+        .expect("expired owner is claimable for lease-less liveness checks");
     assert_both_retained_claims_are_visible_and_cancellable(
         &store,
         "lease-less-takeover",
@@ -3874,18 +3596,10 @@ pub async fn turn_input_claims_supersede_across_session_lease_generations(
     ));
     release_session_execution_lease_for_test(&store, &lease_b).await;
 
-    // (c) Dead-owner takeover mints a new generation without a release.
-    let pid = std::process::id();
-    let dead_owner = local_lease_owner(
-        "tin-dead",
-        "tin-dead:incarnation",
-        "host-a",
-        "boot-a",
-        pid,
-        "not-the-current-process-start",
-    );
+    // (c) TTL takeover mints a new generation without a release.
+    let dead_owner = lease_owner("tin-stale");
     let dead_lease = store
-        .try_claim_session_execution_lease("root", &dead_owner, 60_000)
+        .try_claim_session_execution_lease("root", &dead_owner, 50)
         .await
         .expect("claim dead-owner lease")
         .acquired()
@@ -3895,20 +3609,14 @@ pub async fn turn_input_claims_supersede_across_session_lease_generations(
         .await
         .expect("dead-owner next-turn claim")
         .expect("dead-owner next-turn claim exists");
-    let taker = local_lease_owner(
-        "tin-taker",
-        "tin-taker:incarnation",
-        "host-a",
-        "boot-a",
-        pid,
-        "tin-taker-start",
-    );
+    tokio::time::sleep(std::time::Duration::from_millis(75)).await;
+    let taker = lease_owner("tin-taker");
     let taker_lease = store
-        .reclaim_session_execution_lease("root", &taker, &dead_lease.fence(), 60_000)
+        .try_claim_session_execution_lease("root", &taker, 60_000)
         .await
-        .expect("reclaim dead owner")
+        .expect("claim after stale owner TTL")
         .acquired()
-        .expect("dead owner is reclaimable");
+        .expect("stale owner is claimable after TTL");
     let claim_taker = store
         .claim_next_turn_inputs("root", &taker_lease.fence(), &taker, 10)
         .await

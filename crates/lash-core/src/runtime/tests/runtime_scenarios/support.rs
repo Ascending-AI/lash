@@ -5,7 +5,7 @@ pub(crate) use crate::store::{
     QueuedWorkStore, SessionCommitStore, SessionExecutionLeaseStore, TurnInputStore,
 };
 pub(crate) use crate::{
-    LeaseOwnerIdentity, LeaseOwnerLiveness, PendingTurnInput, PendingTurnInputDraft, RuntimeCommit,
+    LeaseOwnerIdentity, PendingTurnInput, PendingTurnInputDraft, RuntimeCommit,
     SessionExecutionLease, SessionExecutionLeaseClaimOutcome, StoreError, TurnInput,
     TurnInputCheckpointBoundary, TurnInputClaim, TurnInputIngress, TurnInputState,
 };
@@ -85,11 +85,11 @@ impl RuntimeScenario {
                 saw_live_lease_claim = true;
             }
             match phase {
-                RuntimeScenarioPhase::Lease(RuntimeLeasePhase::ReclaimDeadHolder { .. })
+                RuntimeScenarioPhase::Lease(RuntimeLeasePhase::ExpireStaleHolder { .. })
                     if saw_live_lease_claim =>
                 {
                     panic!(
-                        "{} dead-holder reclaim must be declared before lease-claiming phases",
+                        "{} stale-holder expiry must be declared before lease-claiming phases",
                         self.name
                     );
                 }
@@ -97,7 +97,7 @@ impl RuntimeScenario {
                     saw_live_lease_claim = true;
                     saw_turn_work_claim = true;
                 }
-                RuntimeScenarioPhase::Lease(RuntimeLeasePhase::ReclaimDeadHolder { .. }) => {
+                RuntimeScenarioPhase::Lease(RuntimeLeasePhase::ExpireStaleHolder { .. }) => {
                     saw_live_lease_claim = true;
                 }
                 RuntimeScenarioPhase::Fault(RuntimeFaultPhase::StaleQueueCompletion)
@@ -466,15 +466,13 @@ impl From<RuntimeNextTurnInputClaimPhase> for RuntimeScenarioPhase {
 
 #[derive(Clone, Debug)]
 pub(crate) enum RuntimeLeasePhase {
-    ReclaimDeadHolder {
-        assert_stale_observed_holder_busy: bool,
-    },
+    ExpireStaleHolder { assert_successor_busy: bool },
 }
 
 impl RuntimeLeasePhase {
-    pub(crate) fn reclaim_dead_holder() -> Self {
-        Self::ReclaimDeadHolder {
-            assert_stale_observed_holder_busy: true,
+    pub(crate) fn expire_stale_holder() -> Self {
+        Self::ExpireStaleHolder {
+            assert_successor_busy: true,
         }
     }
 }
@@ -622,22 +620,8 @@ pub(crate) fn lease_owner(owner_id: &str) -> LeaseOwnerIdentity {
     LeaseOwnerIdentity::opaque(owner_id, format!("{owner_id}:incarnation"))
 }
 
-pub(crate) fn local_lease_owner(owner_id: &str, process_start: &str) -> LeaseOwnerIdentity {
-    let pid = std::process::id();
-    LeaseOwnerIdentity {
-        owner_id: owner_id.to_string(),
-        incarnation_id: format!("{owner_id}:incarnation"),
-        liveness: LeaseOwnerLiveness::local_process_for_test(
-            "runtime-scenario-host",
-            "runtime-scenario-boot",
-            pid,
-            process_start,
-        ),
-    }
-}
-
-pub(crate) fn dead_local_lease_owner(owner_id: &str) -> LeaseOwnerIdentity {
-    local_lease_owner(owner_id, "not-the-current-process-start")
+pub(crate) fn local_lease_owner(owner_id: &str, _process_start: &str) -> LeaseOwnerIdentity {
+    lease_owner(owner_id)
 }
 
 pub(crate) fn pending_next_turn_input_draft(session_id: &str, text: &str) -> PendingTurnInputDraft {

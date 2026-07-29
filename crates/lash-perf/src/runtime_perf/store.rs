@@ -9,6 +9,7 @@ use lash_core::runtime::{
 use lash_core::store;
 use lash_core::store::{
     PersistedSessionRead, RuntimeCommitResult, SessionCheckpoint, SessionHeadMeta,
+    SessionHeadPayload,
 };
 use lash_core::{
     BlobRef, GcReport, LeaseOwnerIdentity, QueuedWorkStore, RuntimeCommit, RuntimePersistence,
@@ -125,16 +126,6 @@ enum RuntimePerfQueuedWorkClaimKind {
         boundary: QueuedWorkClaimBoundary,
         max_batches: usize,
     },
-}
-
-fn session_fence_equivalent(
-    left: &SessionExecutionLeaseFence,
-    right: &SessionExecutionLeaseFence,
-) -> bool {
-    left.session_id == right.session_id
-        && left.owner == right.owner
-        && left.lease_token == right.lease_token
-        && left.fencing_token == right.fencing_token
 }
 
 #[derive(Default)]
@@ -773,15 +764,17 @@ impl SessionCommitStore for RuntimePerfStore {
         let id = self.next_blob_id.fetch_add(1, Ordering::Relaxed);
         let checkpoint_ref = BlobRef(format!("perf-checkpoint-{id}"));
         let head_revision = actual + 1;
-        *meta_guard = Some(SessionHeadMeta {
-            schema_version: lash_core::store::SESSION_HEAD_META_SCHEMA_VERSION,
-            session_id: session_id.clone(),
+        *meta_guard = Some(SessionHeadMeta::assemble(
+            SessionHeadPayload {
+                schema_version: lash_core::store::SESSION_HEAD_META_SCHEMA_VERSION,
+                session_id: session_id.clone(),
+                config,
+                current_frame_node_id,
+            },
             head_revision,
-            config,
-            current_frame_node_id,
-            checkpoint_ref: Some(checkpoint_ref.clone()),
+            Some(checkpoint_ref.clone()),
             leaf_node_id,
-        });
+        ));
         let turn_input_applications = completed_turn_input_claims
             .iter()
             .flat_map(|completion| completion.applications.iter().cloned())
@@ -866,54 +859,6 @@ impl SessionExecutionLeaseStore for RuntimePerfStore {
                     expires_at_epoch_ms: current.expires_at_epoch_ms,
                 },
             });
-        }
-        current.fencing_token = current.fencing_token.saturating_add(1);
-        current.owner = Some(owner.clone());
-        current.lease_token = Some(format!(
-            "{session_id}:{}:{}:{now}:{}",
-            owner.owner_id, owner.incarnation_id, current.fencing_token
-        ));
-        current.claimed_at_epoch_ms = now;
-        current.expires_at_epoch_ms = now.saturating_add(lease_ttl_ms);
-        Ok(SessionExecutionLeaseClaimOutcome::Acquired(
-            SessionExecutionLease {
-                session_id: session_id.to_string(),
-                owner: owner.clone(),
-                lease_token: current.lease_token.clone().expect("lease token set"),
-                fencing_token: current.fencing_token,
-                claimed_at_epoch_ms: current.claimed_at_epoch_ms,
-                expires_at_epoch_ms: current.expires_at_epoch_ms,
-            },
-        ))
-    }
-
-    async fn reclaim_session_execution_lease(
-        &self,
-        session_id: &str,
-        owner: &LeaseOwnerIdentity,
-        observed_holder: &SessionExecutionLeaseFence,
-        lease_ttl_ms: u64,
-    ) -> Result<SessionExecutionLeaseClaimOutcome, StoreError> {
-        let now = current_epoch_ms();
-        let mut leases = self
-            .session_execution_leases
-            .lock()
-            .expect("lock perf session execution leases");
-        let current = leases.entry(session_id.to_string()).or_default();
-        if current.lease_token.is_some() && current.expires_at_epoch_ms > now {
-            let holder = SessionExecutionLease {
-                session_id: session_id.to_string(),
-                owner: current.owner.clone().expect("live lease owner set"),
-                lease_token: current.lease_token.clone().expect("live lease token set"),
-                fencing_token: current.fencing_token,
-                claimed_at_epoch_ms: current.claimed_at_epoch_ms,
-                expires_at_epoch_ms: current.expires_at_epoch_ms,
-            };
-            if !session_fence_equivalent(&holder.fence(), observed_holder)
-                || !holder.owner.is_definitely_dead_for_claimant(owner)
-            {
-                return Ok(SessionExecutionLeaseClaimOutcome::Busy { holder });
-            }
         }
         current.fencing_token = current.fencing_token.saturating_add(1);
         current.owner = Some(owner.clone());

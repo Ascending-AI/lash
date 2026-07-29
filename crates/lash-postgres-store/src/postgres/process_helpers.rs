@@ -206,7 +206,6 @@ pub(crate) async fn load_process_lease_tx(
     let owner_id: Option<String> = row.get(0);
     let lease_token: Option<String> = row.get(1);
     let incarnation_id: Option<String> = row.get(5);
-    let liveness_json: Option<String> = row.get(6);
     let (Some(owner_id), Some(lease_token)) = (owner_id, lease_token) else {
         return Ok(None);
     };
@@ -216,10 +215,6 @@ pub(crate) async fn load_process_lease_tx(
         owner: LeaseOwnerIdentity {
             incarnation_id: incarnation_id.unwrap_or_else(|| owner_id.clone()),
             owner_id,
-            liveness: liveness_json
-                .as_deref()
-                .and_then(|json| serde_json::from_str(json).ok())
-                .unwrap_or(LeaseOwnerLiveness::Opaque),
         },
         lease_token,
         fencing_token: row.get::<i64, _>(2) as u64,
@@ -289,7 +284,7 @@ pub(crate) async fn acquire_process_lease_tx(
     .bind(&lease.process_id)
     .bind(&lease.owner.owner_id)
     .bind(&lease.owner.incarnation_id)
-    .bind(encode_process_lease_liveness(&lease.owner.liveness)?)
+    .bind(Option::<&str>::None)
     .bind(&lease.lease_token)
     .bind(lease.fencing_token as i64)
     .bind(lease.claimed_at_epoch_ms as i64)
@@ -312,14 +307,6 @@ pub(crate) async fn retained_process_lease_fencing_token(
     .await
     .map_err(plugin_sqlx_error)?;
     Ok(existing_fence.unwrap_or(0) as u64)
-}
-
-pub(crate) fn encode_process_lease_liveness(
-    liveness: &LeaseOwnerLiveness,
-) -> Result<String, PluginError> {
-    serde_json::to_string(liveness).map_err(|err| {
-        PluginError::Session(format!("failed to encode process lease liveness: {err}"))
-    })
 }
 
 pub(crate) fn process_lease_expired(process_id: &str) -> PluginError {

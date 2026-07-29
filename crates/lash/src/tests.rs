@@ -330,48 +330,6 @@ impl lash_core::SessionExecutionLeaseStore for SnapshotStore {
         ))
     }
 
-    async fn reclaim_session_execution_lease(
-        &self,
-        session_id: &str,
-        owner: &lash_core::LeaseOwnerIdentity,
-        observed_holder: &lash_core::SessionExecutionLeaseFence,
-        lease_ttl_ms: u64,
-    ) -> std::result::Result<
-        lash_core::SessionExecutionLeaseClaimOutcome,
-        lash_core::store::StoreError,
-    > {
-        let mut leases = self
-            .session_execution_leases
-            .lock()
-            .expect("session execution leases lock");
-        if let Some(existing) = leases.get(session_id)
-            && existing.expires_at_epoch_ms > now_epoch_ms()
-            && !session_fence_matches(existing, observed_holder)
-        {
-            return Ok(lash_core::SessionExecutionLeaseClaimOutcome::Busy {
-                holder: existing.clone(),
-            });
-        }
-        if let Some(existing) = leases.get(session_id)
-            && existing.expires_at_epoch_ms > now_epoch_ms()
-            && !existing.owner.is_definitely_dead_for_claimant(owner)
-        {
-            return Ok(lash_core::SessionExecutionLeaseClaimOutcome::Busy {
-                holder: existing.clone(),
-            });
-        }
-        let next_fencing_token = leases
-            .get(session_id)
-            .map(|lease| lease.fencing_token.saturating_add(1))
-            .unwrap_or(1);
-        let lease =
-            test_session_execution_lease(session_id, owner, lease_ttl_ms, next_fencing_token);
-        leases.insert(session_id.to_string(), lease.clone());
-        Ok(lash_core::SessionExecutionLeaseClaimOutcome::Acquired(
-            lease,
-        ))
-    }
-
     async fn renew_session_execution_lease(
         &self,
         fence: &lash_core::SessionExecutionLeaseFence,
@@ -703,21 +661,6 @@ impl lash_core::SessionExecutionLeaseStore for BoundSessionStore {
         &self,
         session_id: &str,
         owner: &lash_core::LeaseOwnerIdentity,
-        lease_ttl_ms: u64,
-    ) -> std::result::Result<
-        lash_core::SessionExecutionLeaseClaimOutcome,
-        lash_core::store::StoreError,
-    > {
-        Ok(lash_core::SessionExecutionLeaseClaimOutcome::Acquired(
-            test_session_execution_lease(session_id, owner, lease_ttl_ms, 1),
-        ))
-    }
-
-    async fn reclaim_session_execution_lease(
-        &self,
-        session_id: &str,
-        owner: &lash_core::LeaseOwnerIdentity,
-        _observed_holder: &lash_core::SessionExecutionLeaseFence,
         lease_ttl_ms: u64,
     ) -> std::result::Result<
         lash_core::SessionExecutionLeaseClaimOutcome,

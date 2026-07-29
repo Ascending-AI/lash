@@ -2,7 +2,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use lash_core::{
-    LeaseOwnerIdentity, LeaseOwnerLiveness, RuntimeCommit, RuntimePersistence, RuntimeSessionState,
+    LeaseOwnerIdentity, RuntimeCommit, RuntimePersistence, RuntimeSessionState,
     SessionExecutionLease, SessionExecutionLeaseClaimOutcome, SessionPolicy, SessionRelation,
     SessionStoreCreateRequest, SessionStoreFactory, StoreError,
 };
@@ -126,8 +126,8 @@ pub async fn run_backend_contention_report(
             passed,
             skipped,
             failed,
-            production_api: "SessionExecutionLeaseStore claim/reclaim/renew/release and SessionCommitStore::commit_runtime_state through SessionStoreFactory handles",
-            semantics: "Competing store handles must admit one lease owner, reject stale completion tokens, survive reopen handles, preserve idempotent retry, reject stale head revisions and stale write conflicts, and allow dead-owner reclaim without clearing the live successor.",
+            production_api: "SessionExecutionLeaseStore claim/renew/release and SessionCommitStore::commit_runtime_state through SessionStoreFactory handles",
+            semantics: "Competing store handles must admit one lease owner, reject stale completion tokens, survive reopen handles, preserve idempotent retry, reject stale head revisions and stale write conflicts, and wait for stale-owner TTL without clearing the live successor.",
         },
         report_path: report_path.clone(),
     };
@@ -159,7 +159,7 @@ async fn run_factory_contention_scenario(
     operations.push(reopen_handle_preserves_live_lease(&session_id, store, reopened).await?);
 
     let store = open_store(Arc::clone(&factory), &session_id).await?;
-    operations.push(dead_owner_reclaim_preserves_live_successor(&session_id, store).await?);
+    operations.push(stale_owner_ttl_preserves_live_successor(&session_id, store).await?);
 
     let store = open_store(Arc::clone(&factory), &session_id).await?;
     operations.push(final_commit_retry_and_conflict_are_fenced(&session_id, store).await?);
@@ -380,46 +380,31 @@ async fn reopen_handle_preserves_live_lease(
     })
 }
 
-async fn dead_owner_reclaim_preserves_live_successor(
+async fn stale_owner_ttl_preserves_live_successor(
     session_id: &str,
     store: Arc<dyn RuntimePersistence>,
 ) -> Result<BackendContentionOperation, String> {
-    let stale_owner = LeaseOwnerIdentity {
-        owner_id: "dead-worker-owner".to_string(),
-        incarnation_id: "dead-worker-owner:001".to_string(),
-        liveness: LeaseOwnerLiveness::local_process_for_test(
-            "lash-sim-contention-host",
-            "lash-sim-contention-boot",
-            u32::MAX,
-            "dead-process",
-        ),
-    };
-    let live_owner = LeaseOwnerIdentity {
-        owner_id: "live-worker-owner".to_string(),
-        incarnation_id: "live-worker-owner:001".to_string(),
-        liveness: LeaseOwnerLiveness::local_process_for_test(
-            "lash-sim-contention-host",
-            "lash-sim-contention-boot",
-            std::process::id(),
-            "live-process",
-        ),
-    };
+    let stale_owner = LeaseOwnerIdentity::opaque("stale-worker-owner", "stale-worker-owner:001");
+    let live_owner = LeaseOwnerIdentity::opaque("live-worker-owner", "live-worker-owner:001");
     let stale_lease = acquired(
         store
-            .try_claim_session_execution_lease(session_id, &stale_owner, LEASE_TTL_MS)
+            .try_claim_session_execution_lease(session_id, &stale_owner, 50)
             .await
-            .map_err(|err| format!("claim dead-owner setup: {err}"))?,
+            .map_err(|err| format!("claim stale-owner setup: {err}"))?,
     )?;
+    let busy = store
+        .try_claim_session_execution_lease(session_id, &live_owner, LEASE_TTL_MS)
+        .await
+        .map_err(|err| format!("observe stale owner before TTL: {err}"))?;
+    if !matches!(busy, SessionExecutionLeaseClaimOutcome::Busy { .. }) {
+        return Err("stale owner was replaced before its lease TTL".to_string());
+    }
+    tokio::time::sleep(std::time::Duration::from_millis(75)).await;
     let live_lease = acquired(
         store
-            .reclaim_session_execution_lease(
-                session_id,
-                &live_owner,
-                &stale_lease.fence(),
-                LEASE_TTL_MS,
-            )
+            .try_claim_session_execution_lease(session_id, &live_owner, LEASE_TTL_MS)
             .await
-            .map_err(|err| format!("reclaim dead-owner lease: {err}"))?,
+            .map_err(|err| format!("claim stale-owner lease after TTL: {err}"))?,
     )?;
     store
         .release_session_execution_lease(&stale_lease.completion())
@@ -434,10 +419,10 @@ async fn dead_owner_reclaim_preserves_live_successor(
         .await
         .map_err(|err| format!("release renewed live successor: {err}"))?;
     Ok(BackendContentionOperation {
-        operation_id: "runtime-persistence.dead-owner-reclaim",
+        operation_id: "runtime-persistence.stale-owner-ttl",
         status: "passed",
-        production_api: "SessionExecutionLeaseStore::reclaim_session_execution_lease + renew_session_execution_lease",
-        assertion: "dead-owner reclaim advances the lease and stale predecessor completion cannot clear the live successor",
+        production_api: "SessionExecutionLeaseStore::try_claim_session_execution_lease + renew_session_execution_lease",
+        assertion: "an unexpired stale owner stays busy, TTL takeover advances the lease, and stale predecessor completion cannot clear the live successor",
         evidence: json!({
             "stale_lease": lease_summary(&stale_lease),
             "live_lease": lease_summary(&live_lease),
@@ -641,7 +626,7 @@ mod tests {
         assert!(report.report_path.exists());
         let body = std::fs::read_to_string(report.report_path).expect("report body");
         assert!(body.contains("runtime-persistence.competing-first-claim"));
-        assert!(body.contains("runtime-persistence.dead-owner-reclaim"));
+        assert!(body.contains("runtime-persistence.stale-owner-ttl"));
         assert!(body.contains("runtime-persistence.stale-head-transaction-rejected"));
         assert!(body.contains("runtime-persistence.idempotent-retry-and-stale-write-conflict"));
     }

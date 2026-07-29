@@ -88,8 +88,8 @@ pub enum AbandonWriter {
     /// The owner abandoned its own OwnerBound work inline at graceful drain,
     /// under its own live lease.
     OwnerDrain,
-    /// The recovery sweep abandoned an OwnerBound, started row whose holder is
-    /// provably dead.
+    /// The recovery substrate abandoned an OwnerBound, started row after
+    /// detecting that a different execution had already started it.
     Sweep,
     /// The sweep reconciled a durable Abandon Request into Abandoned once the
     /// row's lease had lapsed.
@@ -100,7 +100,7 @@ pub enum AbandonWriter {
 }
 
 /// Evidence attached to an [`ProcessTerminalState::Abandoned`] terminal: which
-/// path wrote it, the dead-or-lapsed owner identity it was established against
+/// path wrote it, the owner identity it was established against
 /// (absent for an externally-owned row lash never executed), and when.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AbandonEvidence {
@@ -381,7 +381,8 @@ impl ProcessAwaitOutput {
                         "process abandoned: owner drained without recording an outcome".to_string()
                     }
                     AbandonWriter::Sweep => {
-                        "process abandoned: recovery observed the owner provably dead".to_string()
+                        "process abandoned: recovery observed a prior owner-bound execution"
+                            .to_string()
                     }
                     AbandonWriter::ReconciledRequest => {
                         "process abandoned: reconciled abandon request after the lease lapsed"

@@ -489,16 +489,16 @@ pub use session_model::{ConversationRecord, ProtocolEvent, SessionHistoryRecord}
 pub use session_model::{GenerationOverlay, RuntimeSessionPolicy, SessionPolicy, SessionSpec};
 pub use store::{
     AttachmentIntent, AttachmentManifest, AttachmentManifestEntry, BlobRef, GcReport,
-    LeaseOwnerIdentity, LeaseOwnerLiveness, LeaseTimings, LeaseTimingsError, QueuedWorkStore,
-    RuntimePersistence, SessionAdmission, SessionBinding, SessionCommitStore,
-    SessionExecutionLease, SessionExecutionLeaseClaimOutcome, SessionExecutionLeaseCompletion,
-    SessionExecutionLeaseFence, SessionExecutionLeaseStore, SessionMeta, SessionPickerInfo,
-    StoreError, StoreMaintenance, TurnInputStore, VacuumReport,
+    LeaseOwnerIdentity, LeaseTimings, LeaseTimingsError, QueuedWorkStore, RuntimePersistence,
+    SessionAdmission, SessionBinding, SessionCommitStore, SessionExecutionLease,
+    SessionExecutionLeaseClaimOutcome, SessionExecutionLeaseCompletion, SessionExecutionLeaseFence,
+    SessionExecutionLeaseStore, SessionMeta, SessionPickerInfo, StoreError, StoreMaintenance,
+    TurnInputStore, VacuumReport,
 };
 #[allow(unused_imports)]
 pub(crate) use store::{
     GraphAppend, PersistedSessionRead, RuntimeCommitResult, SessionCheckpoint, SessionHeadMeta,
-    ensure_supported_schema_version, load_persisted_session_state,
+    SessionHeadPayload, ensure_supported_schema_version, load_persisted_session_state,
 };
 pub use store::{
     HydratedSessionCheckpoint, OperationId, RuntimeCommit, RuntimeTurnCommitStamp, SessionHead,

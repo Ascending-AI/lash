@@ -360,15 +360,10 @@ pub trait ProcessRegistry: Send + Sync {
         lease_ttl_ms: u64,
     ) -> Result<ProcessLeaseClaimOutcome, PluginError>;
 
-    /// Reclaim an unexpired process lease whose observed holder is definitely
-    /// dead according to persisted local-process liveness metadata.
+    /// Retry a process lease claim after observing `observed_holder`.
     ///
-    /// Mirrors
-    /// [`RuntimePersistence::reclaim_session_execution_lease`](crate::RuntimePersistence::reclaim_session_execution_lease):
-    /// backends must CAS on `observed_holder` (owner identity, lease token,
-    /// and fencing token) so a stale claimant cannot clear a newer live lease
-    /// that won the race after the busy observation, and a successful reclaim
-    /// must advance the fencing token monotonically.
+    /// An unexpired lease remains busy. Once its TTL expires, the caller may
+    /// acquire it with a monotonically advanced fencing token.
     async fn reclaim_process_lease(
         &self,
         process_id: &str,

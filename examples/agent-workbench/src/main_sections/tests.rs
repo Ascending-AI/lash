@@ -1751,14 +1751,12 @@ finish initial
             tokio::time::sleep(Duration::from_millis(250)).await;
         }
     }
-
     struct LiveWorkbenchRestateHarness {
         state: AppState,
         process_worker: lash::durability::DurableProcessWorker,
         process_deployment: lash_restate::RestateProcessDeployment,
         trace_path: PathBuf,
     }
-
     async fn live_workbench_restate_state_with_provider(
         data_dir: &std::path::Path,
         restate_ingress_url: String,
@@ -1773,6 +1771,7 @@ finish initial
             session_ids,
             active_turns,
             None,
+            lash::durability::LeaseTimings::default(),
         )
         .await
     }
@@ -1784,6 +1783,7 @@ finish initial
         session_ids: WorkbenchSessionIds,
         active_turns: ActiveTurns,
         database_url: Option<&str>,
+        lease_timings: lash::durability::LeaseTimings,
     ) -> LiveWorkbenchRestateHarness {
         let stores = WorkbenchStores::open(data_dir, database_url)
             .await
@@ -1853,6 +1853,7 @@ finish initial
             .effect_host(turn_deployment.effect_host())
             .process_work_driver(process_deployment.process_work_driver())
             .queued_work_driver(queued_work_driver.clone())
+            .lease_timings(lease_timings)
             .build()
             .expect("build core");
         let process_worker = lash::durability::DurableProcessWorker::new(

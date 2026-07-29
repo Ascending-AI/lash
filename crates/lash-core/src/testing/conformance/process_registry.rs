@@ -77,7 +77,7 @@ where
     stale_process_lease_cannot_complete_or_disturb_current_owner(make()).await;
     expired_process_lease_cannot_complete(make()).await;
     execution_fencing::leased_terminal_replay_returns_stored_record(make()).await;
-    lease_reclaim::process_lease_reclaim_contract(make()).await;
+    lease_reclaim::process_lease_ttl_contract(make()).await;
     prune_removes_terminal_processes_older_than_cutoff(make()).await;
     awaiter_cross_task_completion_resolves_promptly(make()).await;
     awaiter_await_event_never_returns_events_at_or_before_cursor(make()).await;
@@ -117,25 +117,6 @@ async fn claim_process_lease_after_expiry(
                 panic!("lease was not claimable before the expiry deadline; holder: {holder:?}");
             }
         }
-    }
-}
-
-fn local_process_lease_owner(
-    owner_id: &str,
-    host_id: &str,
-    boot_id: &str,
-    pid: u32,
-    process_start: &str,
-) -> crate::LeaseOwnerIdentity {
-    crate::LeaseOwnerIdentity {
-        owner_id: owner_id.to_string(),
-        incarnation_id: format!("{owner_id}:incarnation"),
-        liveness: crate::LeaseOwnerLiveness::local_process_for_test(
-            host_id,
-            boot_id,
-            pid,
-            process_start,
-        ),
     }
 }
 

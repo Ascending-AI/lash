@@ -61,8 +61,8 @@ pub(super) fn scenario_transition_facts(
                 selected_events,
             )?);
         }
-        "runtime.dead_lease_reclaim_rejects_stale" => {
-            facts.push(worker_dead_lease_reclaim_fact(contract, selected_events)?);
+        "runtime.stale_lease_ttl" => {
+            facts.push(worker_stale_lease_ttl_fact(contract, selected_events)?);
         }
         "runtime.observation_replay_preserves_input" => {
             facts.push(observer_reconnect_transition_fact(
@@ -133,7 +133,7 @@ pub(super) fn scenario_backend_regression_reference(
             "trigger-wakeup-routes-process",
             "trigger occurrence records a stable source key, reserves a matching delivery, and starts process wake routing without live external input",
         ),
-        "runtime.advisory_lease_head_cas" | "runtime.dead_lease_reclaim_rejects_stale" => (
+        "runtime.advisory_lease_head_cas" | "runtime.stale_lease_ttl" => (
             "worker-stale-completion-fenced",
             "stale worker completion is rejected by durable commit fencing while the live incarnation remains active",
         ),
@@ -585,7 +585,7 @@ fn worker_stale_completion_rejection_fact(
     )
 }
 
-fn worker_dead_lease_reclaim_fact(
+fn worker_stale_lease_ttl_fact(
     contract: &ScenarioContractSpec,
     selected_events: &[TraceEventLine],
 ) -> Result<ScenarioTransitionFact, FixedScriptRunnerError> {
@@ -602,7 +602,7 @@ fn worker_dead_lease_reclaim_fact(
                 && line
                     .event
                     .observed
-                    .pointer("/runtime_worker_store/session_execution_lease_reclaimed")
+                    .pointer("/runtime_worker_store/session_execution_lease_acquired_after_ttl")
                     .and_then(Value::as_bool)
                     == Some(true)
                 && line
@@ -620,7 +620,7 @@ fn worker_dead_lease_reclaim_fact(
         })
         .collect::<Vec<_>>();
     let observed = json!({
-        "dead_lease_reclaims": events.iter().map(|line| json!({
+        "stale_lease_takeovers": events.iter().map(|line| json!({
             "boundary_id": line.event.boundary_id,
             "initial_owner": line.event.observed.get("initial_owner").cloned().unwrap_or(Value::Null),
             "active_owner": line.event.observed.get("active_owner").cloned().unwrap_or(Value::Null),
@@ -631,8 +631,8 @@ fn worker_dead_lease_reclaim_fact(
     });
     require_transition_fact(
         contract,
-        "dead_lease_reclaim_resumes_worker_owned_work",
-        "successor worker owner reclaims the dead lease, outranks the first fence, and resumes the owned work",
+        "stale_lease_ttl_takeover_resumes_worker_owned_work",
+        "successor worker waits for the stale lease TTL, acquires a higher fence, and resumes the owned work",
         events,
         observed,
     )

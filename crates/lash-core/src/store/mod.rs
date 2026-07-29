@@ -19,8 +19,6 @@ pub use lease_timings::{LeaseTimings, LeaseTimingsError};
 pub use load::{load_persisted_session_state, refresh_persisted_session_state};
 pub use realization::{RealizedNodeTimestamp, commit_runtime_state_verified};
 
-const PROC_BOOT_ID_PATH: &str = "/proc/sys/kernel/random/boot_id";
-
 fn default_root_session_id() -> String {
     "root".to_string()
 }
@@ -57,7 +55,7 @@ mod persisted_state_tests {
 
     #[test]
     fn versioned_json_record_rejects_missing_schema_version() {
-        let err = decode_versioned_json_record::<SessionHeadMeta>(
+        let err = decode_versioned_json_record::<SessionHeadPayload>(
             "{}",
             "SessionHeadMeta",
             SESSION_HEAD_META_SCHEMA_VERSION,
@@ -75,7 +73,7 @@ mod persisted_state_tests {
 
     #[test]
     fn versioned_json_record_rejects_invalid_schema_version() {
-        let err = decode_versioned_json_record::<SessionHeadMeta>(
+        let err = decode_versioned_json_record::<SessionHeadPayload>(
             r#"{"schema_version":"1"}"#,
             "SessionHeadMeta",
             SESSION_HEAD_META_SCHEMA_VERSION,
@@ -95,7 +93,7 @@ mod persisted_state_tests {
     #[test]
     fn versioned_json_record_rejects_unsupported_schema_version() {
         let unsupported = SESSION_HEAD_META_SCHEMA_VERSION + 1;
-        let err = decode_versioned_json_record::<SessionHeadMeta>(
+        let err = decode_versioned_json_record::<SessionHeadPayload>(
             &format!(r#"{{"schema_version":{unsupported}}}"#),
             "SessionHeadMeta",
             SESSION_HEAD_META_SCHEMA_VERSION,
@@ -330,20 +328,64 @@ pub struct SessionHead {
     pub token_ledger: Vec<crate::TokenLedgerEntry>,
 }
 
+/// JSON-owned fields persisted in a session head's `head_json` column.
+///
+/// Revision and graph/checkpoint references live in dedicated columns and are
+/// deliberately absent from this serializable payload.
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
-pub struct SessionHeadMeta {
+pub struct SessionHeadPayload {
     pub schema_version: u32,
     #[serde(default = "default_root_session_id")]
     pub session_id: String,
-    #[serde(skip)]
-    pub head_revision: u64,
     pub config: crate::PersistedSessionConfig,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub current_frame_node_id: Option<String>,
-    #[serde(skip)]
+}
+
+/// Fully assembled session-head metadata returned by a store.
+///
+/// This type is intentionally not serializable. Store implementations decode a
+/// [`SessionHeadPayload`] and must supply the three column-owned values through
+/// [`Self::assemble`].
+#[derive(Clone, Debug)]
+pub struct SessionHeadMeta {
+    pub schema_version: u32,
+    pub session_id: String,
+    pub head_revision: u64,
+    pub config: crate::PersistedSessionConfig,
+    pub current_frame_node_id: Option<String>,
     pub checkpoint_ref: Option<BlobRef>,
-    #[serde(skip)]
     pub leaf_node_id: Option<String>,
+}
+
+impl SessionHeadMeta {
+    /// Combine the JSON payload with all dedicated-column values.
+    pub fn assemble(
+        payload: SessionHeadPayload,
+        head_revision: u64,
+        checkpoint_ref: Option<BlobRef>,
+        leaf_node_id: Option<String>,
+    ) -> Self {
+        Self {
+            schema_version: payload.schema_version,
+            session_id: payload.session_id,
+            head_revision,
+            config: payload.config,
+            current_frame_node_id: payload.current_frame_node_id,
+            checkpoint_ref,
+            leaf_node_id,
+        }
+    }
+
+    /// Project the exact value that may be serialized into `head_json`.
+    pub fn payload(&self) -> SessionHeadPayload {
+        SessionHeadPayload {
+            schema_version: self.schema_version,
+            session_id: self.session_id.clone(),
+            config: self.config.clone(),
+            current_frame_node_id: self.current_frame_node_id.clone(),
+        }
+    }
 }
 
 fn persisted_session_config_from_state(
@@ -427,18 +469,11 @@ pub struct RuntimeCommitResult {
     pub turn_input_applications: Vec<crate::TurnInputApplication>,
 }
 
-/// Stable identity for the holder of a session-execution lease.
-///
-/// Callers using [`Self::local_process`] must choose a `host_id` that uniquely
-/// identifies one PID namespace among all lease contenders sharing a store.
-/// Reusing an image-baked machine id across containers can make a peer inspect
-/// its own PID namespace and falsely fence a live owner as definitely dead.
+/// Stable identity for a lease holder.
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct LeaseOwnerIdentity {
     pub owner_id: String,
     pub incarnation_id: String,
-    #[serde(default)]
-    pub liveness: LeaseOwnerLiveness,
 }
 
 impl LeaseOwnerIdentity {
@@ -449,7 +484,6 @@ impl LeaseOwnerIdentity {
         LeaseOwnerIdentity {
             owner_id: owner_id.into(),
             incarnation_id: incarnation_id.into(),
-            liveness: LeaseOwnerLiveness::Opaque,
         }
     }
 
@@ -472,113 +506,9 @@ impl LeaseOwnerIdentity {
             .then_some(self.incarnation_id.as_str())
     }
 
-    pub fn local_process(
-        owner_id: impl Into<String>,
-        incarnation_id: impl Into<String>,
-        host_id: impl Into<String>,
-    ) -> LeaseOwnerIdentity {
-        let liveness = LeaseOwnerLiveness::current_local_process(host_id.into())
-            .unwrap_or(LeaseOwnerLiveness::Opaque);
-        LeaseOwnerIdentity {
-            owner_id: owner_id.into(),
-            incarnation_id: incarnation_id.into(),
-            liveness,
-        }
-    }
-
     pub fn same_incarnation(&self, other: &LeaseOwnerIdentity) -> bool {
         self.owner_id == other.owner_id && self.incarnation_id == other.incarnation_id
     }
-
-    pub fn is_definitely_dead_for_claimant(&self, claimant: &LeaseOwnerIdentity) -> bool {
-        self.liveness
-            .is_definitely_dead_for_claimant(&claimant.liveness)
-    }
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize, Default)]
-#[serde(tag = "kind", rename_all = "snake_case")]
-pub enum LeaseOwnerLiveness {
-    LocalProcess {
-        host_id: String,
-        boot_id: String,
-        pid: u32,
-        process_start: String,
-    },
-    #[default]
-    Opaque,
-}
-
-impl LeaseOwnerLiveness {
-    pub fn current_local_process(host_id: impl Into<String>) -> Option<LeaseOwnerLiveness> {
-        let boot_id = std::fs::read_to_string(PROC_BOOT_ID_PATH)
-            .ok()
-            .map(|value| value.trim().to_string())
-            .filter(|value| !value.is_empty())?;
-        let pid = std::process::id();
-        let process_start = read_linux_process_start(pid)?;
-        Some(LeaseOwnerLiveness::LocalProcess {
-            host_id: host_id.into(),
-            boot_id,
-            pid,
-            process_start,
-        })
-    }
-
-    pub fn local_process_for_test(
-        host_id: impl Into<String>,
-        boot_id: impl Into<String>,
-        pid: u32,
-        process_start: impl Into<String>,
-    ) -> LeaseOwnerLiveness {
-        LeaseOwnerLiveness::LocalProcess {
-            host_id: host_id.into(),
-            boot_id: boot_id.into(),
-            pid,
-            process_start: process_start.into(),
-        }
-    }
-
-    pub fn is_definitely_dead_for_claimant(&self, claimant: &LeaseOwnerLiveness) -> bool {
-        let (
-            LeaseOwnerLiveness::LocalProcess {
-                host_id,
-                boot_id,
-                pid,
-                process_start,
-            },
-            LeaseOwnerLiveness::LocalProcess {
-                host_id: claimant_host_id,
-                boot_id: claimant_boot_id,
-                ..
-            },
-        ) = (self, claimant)
-        else {
-            return false;
-        };
-        if host_id != claimant_host_id || boot_id != claimant_boot_id {
-            return false;
-        }
-        matches!(linux_process_is_live(*pid, process_start), Some(false))
-    }
-}
-
-fn read_linux_process_start(pid: u32) -> Option<String> {
-    let stat = std::fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
-    parse_linux_process_start(&stat)
-}
-
-fn linux_process_is_live(pid: u32, expected_process_start: &str) -> Option<bool> {
-    match std::fs::read_to_string(format!("/proc/{pid}/stat")) {
-        Ok(stat) => parse_linux_process_start(&stat).map(|start| start == expected_process_start),
-        Err(err) if err.kind() == std::io::ErrorKind::NotFound => Some(false),
-        Err(_) => None,
-    }
-}
-
-fn parse_linux_process_start(stat: &str) -> Option<String> {
-    let after_comm = stat.rsplit_once(") ")?.1;
-    after_comm.split_whitespace().nth(19).map(ToOwned::to_owned)
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -1098,16 +1028,13 @@ impl Default for SessionHead {
     }
 }
 
-impl Default for SessionHeadMeta {
+impl Default for SessionHeadPayload {
     fn default() -> Self {
         Self {
             schema_version: SESSION_HEAD_META_SCHEMA_VERSION,
             session_id: default_root_session_id(),
-            head_revision: 0,
             config: crate::PersistedSessionConfig::default(),
             current_frame_node_id: None,
-            checkpoint_ref: None,
-            leaf_node_id: None,
         }
     }
 }
@@ -1305,19 +1232,6 @@ pub trait SessionExecutionLeaseStore: Send + Sync {
         &self,
         session_id: &str,
         owner: &LeaseOwnerIdentity,
-        lease_ttl_ms: u64,
-    ) -> Result<SessionExecutionLeaseClaimOutcome, StoreError>;
-
-    /// Reclaim an unexpired session execution lease whose observed holder is
-    /// definitely dead according to persisted local-process liveness metadata.
-    ///
-    /// Backends must CAS on `observed_holder` so a stale claimant cannot clear
-    /// a newer live lease that won the race after the busy observation.
-    async fn reclaim_session_execution_lease(
-        &self,
-        session_id: &str,
-        owner: &LeaseOwnerIdentity,
-        observed_holder: &SessionExecutionLeaseFence,
         lease_ttl_ms: u64,
     ) -> Result<SessionExecutionLeaseClaimOutcome, StoreError>;
 

@@ -21,12 +21,12 @@ use lash_core::store::{GraphAppend, RuntimeCommitResult};
 use lash_core::{
     AttachmentId, AttachmentIntent, AttachmentOwnerKind, BlobRef, Clock, ForkSessionRequest,
     HydratedSessionCheckpoint, InMemorySessionStore, InMemorySessionStoreFactory,
-    LeaseOwnerIdentity, LeaseOwnerLiveness, PendingTurnInputDraft, PluginSessionSnapshot,
-    PluginSnapshotArtifact, PluginSnapshotEntry, PluginSnapshotMeta, ProtocolEvent, RuntimeCommit,
-    RuntimePersistence, RuntimeSessionState, RuntimeTurnCommitStamp, SessionCommitStore,
-    SessionHistoryRecord, SessionMeta, SessionNodePayload, SessionNodeRecord, SessionRelation,
-    SessionStoreCreateRequest, SessionStoreFactory, StoreError, TokenLedgerEntry, TokenUsage,
-    ToolState, TurnInput, TurnInputApplication, TurnInputClaim, TurnInputIngress, TurnInputState,
+    LeaseOwnerIdentity, PendingTurnInputDraft, PluginSessionSnapshot, PluginSnapshotArtifact,
+    PluginSnapshotEntry, PluginSnapshotMeta, ProtocolEvent, RuntimeCommit, RuntimePersistence,
+    RuntimeSessionState, RuntimeTurnCommitStamp, SessionCommitStore, SessionHistoryRecord,
+    SessionMeta, SessionNodePayload, SessionNodeRecord, SessionRelation, SessionStoreCreateRequest,
+    SessionStoreFactory, StoreError, TokenLedgerEntry, TokenUsage, ToolState, TurnInput,
+    TurnInputApplication, TurnInputClaim, TurnInputIngress, TurnInputState,
 };
 use lash_postgres_store::PostgresStorage;
 use rusqlite::OptionalExtension;
@@ -1262,12 +1262,9 @@ fn decode_lease_owner(
 ) -> Option<LeaseOwnerIdentity> {
     match (owner_id, incarnation_id, liveness_json) {
         (None, None, None) => None,
-        (Some(owner_id), Some(incarnation_id), Some(liveness_json)) => Some(LeaseOwnerIdentity {
-            owner_id,
-            incarnation_id,
-            liveness: serde_json::from_str::<LeaseOwnerLiveness>(&liveness_json)
-                .expect("decode lease-owner liveness"),
-        }),
+        (Some(owner_id), Some(incarnation_id), _) => {
+            Some(LeaseOwnerIdentity::opaque(owner_id, incarnation_id))
+        }
         fields => panic!("partial lease-owner identity in durable row: {fields:?}"),
     }
 }
