@@ -5,7 +5,6 @@
 //! store, Lashlang artifact store, process execution environment store, and
 //! attachment manifest.
 
-use std::collections::HashSet;
 use std::sync::{Arc, OnceLock};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -106,7 +105,9 @@ const SCHEMA_COMPONENT: &str = "lash-postgres-store";
 // session/incarnation lifecycle joins. Pre-27 databases are rejected.
 // Bumped to 28 for permanent session-id reuse rejection and removal of
 // incarnation identity from session metadata and effect journals.
-const SCHEMA_VERSION: i32 = 28;
+// Bumped to 29 for the process-wake outbox and receiver-side consumed-wake
+// evidence. Pre-29 components are rejected and recreated.
+const SCHEMA_VERSION: i32 = 29;
 const PROCESS_LEASE_SCHEMA_VERSION: u32 = lash_core::PROCESS_LEASE_SCHEMA_VERSION;
 
 #[derive(Clone)]
@@ -143,6 +144,7 @@ pub struct PostgresSessionStore {
 #[derive(Clone)]
 pub struct PostgresProcessRegistry {
     pool: PgPool,
+    wake_delivery_config: lash_core::WakeDeliveryConfig,
 }
 
 #[derive(Clone)]
@@ -315,6 +317,17 @@ impl PostgresStorage {
     pub fn process_registry(&self) -> PostgresProcessRegistry {
         PostgresProcessRegistry {
             pool: self.pool.clone(),
+            wake_delivery_config: lash_core::WakeDeliveryConfig::default(),
+        }
+    }
+
+    pub fn process_registry_with_wake_delivery_config(
+        &self,
+        wake_delivery_config: lash_core::WakeDeliveryConfig,
+    ) -> PostgresProcessRegistry {
+        PostgresProcessRegistry {
+            pool: self.pool.clone(),
+            wake_delivery_config,
         }
     }
 

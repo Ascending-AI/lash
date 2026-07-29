@@ -417,7 +417,7 @@ enum PlannedOperation {
     ProcessWake {
         session: usize,
         wake_index: usize,
-        dedupe_index: usize,
+        process_index: usize,
     },
     ProcessLifecycle {
         session: usize,
@@ -713,7 +713,7 @@ impl StateMachinePlanner {
         self.operations.push(PlannedOperation::ProcessWake {
             session,
             wake_index,
-            dedupe_index: wake_index,
+            process_index: wake_index,
         });
         wake_index
     }
@@ -726,12 +726,12 @@ impl StateMachinePlanner {
         });
     }
 
-    fn plan_duplicate_process_wake(&mut self, session: usize, dedupe_index: usize) {
+    fn plan_duplicate_process_wake(&mut self, session: usize, process_index: usize) {
         let wake_index = self.sessions[session].next_process_wake();
         self.operations.push(PlannedOperation::ProcessWake {
             session,
             wake_index,
-            dedupe_index,
+            process_index,
         });
     }
 
@@ -1119,7 +1119,7 @@ impl StateMachinePlanner {
             PlannedOperation::ProcessWake {
                 session,
                 wake_index,
-                dedupe_index,
+                process_index,
             } => {
                 let session = &self.sessions[session];
                 BoundaryEvent::new(
@@ -1130,7 +1130,8 @@ impl StateMachinePlanner {
                     "process.wake.delivery",
                     json!({
                         "session": session.alias.clone(),
-                        "dedupe_key": format!("process/wake/{}/{dedupe_index:03}", session.alias),
+                        "process_id": format!("sim-process-{}-{process_index:03}", session.alias),
+                        "sequence": 1,
                     }),
                 )
             }

@@ -72,38 +72,41 @@ pub(super) fn trace_has_trigger_wakeup_route(lines: &[&TraceEventLine]) -> bool 
 }
 
 pub(super) fn trace_has_duplicate_process_wake_idempotency(lines: &[&TraceEventLine]) -> bool {
-    let mut by_dedupe_key: BTreeMap<String, Vec<&TraceEventLine>> = BTreeMap::new();
+    let mut by_source_key: BTreeMap<String, Vec<&TraceEventLine>> = BTreeMap::new();
     for line in lines
         .iter()
         .filter(|line| line.event.kind == BoundaryKind::ProcessWake)
     {
-        let Some(dedupe_key) = line
-            .event
-            .observed
-            .get("dedupe_key")
-            .and_then(Value::as_str)
-        else {
+        let Some(source_key) = process_wake_source_key(line) else {
             continue;
         };
-        by_dedupe_key
-            .entry(dedupe_key.to_string())
-            .or_default()
-            .push(*line);
+        by_source_key.entry(source_key).or_default().push(*line);
     }
-    by_dedupe_key.values().any(|events| {
+    by_source_key.values().any(|events| {
         let strict_claim_dedupe = events.len() >= 2
+            && events
+                .iter()
+                .filter(|line| {
+                    line.event
+                        .observed
+                        .get("claimed_once")
+                        .and_then(Value::as_bool)
+                        == Some(true)
+                        && line
+                            .event
+                            .observed
+                            .pointer("/runtime_queued_work/claimed")
+                            .and_then(Value::as_bool)
+                            == Some(true)
+                })
+                .count()
+                == 1
             && events.iter().any(|line| {
                 line.event
                     .observed
                     .get("claimed_once")
                     .and_then(Value::as_bool)
-                    == Some(true)
-                    && line
-                        .event
-                        .observed
-                        .pointer("/runtime_queued_work/claimed")
-                        .and_then(Value::as_bool)
-                        == Some(true)
+                    == Some(false)
             })
             && events.iter().all(|line| {
                 line.event.observed.get("runtime_process_wake").is_some()
@@ -127,6 +130,28 @@ pub(super) fn trace_has_duplicate_process_wake_idempotency(lines: &[&TraceEventL
             });
         strict_claim_dedupe || in_flight_rejection
     })
+}
+
+fn process_wake_source_key(line: &TraceEventLine) -> Option<String> {
+    if let Some(source_key) = line
+        .event
+        .observed
+        .pointer("/runtime_queued_work/source_key")
+        .and_then(Value::as_str)
+    {
+        return Some(source_key.to_string());
+    }
+    let process_id = line
+        .event
+        .observed
+        .pointer("/runtime_process_wake/process_id")
+        .and_then(Value::as_str)?;
+    let sequence = line
+        .event
+        .observed
+        .pointer("/runtime_process_wake/sequence")
+        .and_then(Value::as_u64)?;
+    Some(lash_core::process_wake_source_key(process_id, sequence))
 }
 
 pub(super) fn trace_has_worker_stale_completion(lines: &[&TraceEventLine]) -> bool {
@@ -633,7 +658,9 @@ fn scenario_evidence_assertion(evidence: &str) -> &'static str {
     match evidence {
         "queued_ingress" => "queued input has stable source key and remains explicit work",
         "cancellation" => "cancellation targets an existing generated boundary",
-        "process_wake" => "process wake crosses runtime queued-work claim/dedupe DTOs",
+        "process_wake" => {
+            "process wake crosses runtime queued-work with structural process/event source identity"
+        }
         "worker_stale_completion" => {
             "worker failover advances lease fencing and rejects stale completion"
         }
@@ -1048,27 +1075,19 @@ fn select_queued_turn_followup_provider_evidence(
 }
 
 fn select_process_wake_evidence(event_lines: &[TraceEventLine]) -> Vec<&TraceEventLine> {
-    let mut by_dedupe_key = BTreeMap::<String, Vec<&TraceEventLine>>::new();
+    let mut by_source_key = BTreeMap::<String, Vec<&TraceEventLine>>::new();
     for line in event_lines
         .iter()
         .filter(|line| event_satisfies_scenario_evidence(&line.event, "process_wake"))
     {
-        let Some(dedupe_key) = line
-            .event
-            .observed
-            .get("dedupe_key")
-            .and_then(Value::as_str)
-        else {
+        let Some(source_key) = process_wake_source_key(line) else {
             continue;
         };
-        by_dedupe_key
-            .entry(dedupe_key.to_string())
-            .or_default()
-            .push(line);
+        by_source_key.entry(source_key).or_default().push(line);
     }
-    if let Some((_dedupe_key, events)) = by_dedupe_key
+    if let Some((_source_key, events)) = by_source_key
         .iter()
-        .find(|(_dedupe_key, events)| events.len() >= 2)
+        .find(|(_source_key, events)| events.len() >= 2)
     {
         return events.iter().copied().take(2).collect();
     }

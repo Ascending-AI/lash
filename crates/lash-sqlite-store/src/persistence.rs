@@ -565,6 +565,26 @@ impl SessionCommitStore for Store {
                     for completed in &commit.completed_queue_claims {
                         for batch_id in &completed.batch_ids {
                             tx.execute(
+                                "INSERT OR IGNORE INTO consumed_wake_source_keys (
+                                    session_id, source_key, consumed_at_ms
+                                 )
+                                 SELECT session_id, source_key, ?5
+                                 FROM queued_work_batches
+                                 WHERE session_id = ?1
+                                   AND batch_id = ?2
+                                   AND claim_id = ?3
+                                   AND claim_token = ?4
+                                   AND source_key LIKE 'process:%:event:%:wake'",
+                                params![
+                                    completed.session_id,
+                                    batch_id,
+                                    completed.claim_id,
+                                    completed.lease_token,
+                                    now as i64
+                                ],
+                            )
+                            .map_err(sqlite_error)?;
+                            tx.execute(
                                 "DELETE FROM queued_work_batches
                                  WHERE session_id = ?1
                                    AND batch_id = ?2
@@ -2161,6 +2181,31 @@ impl StoreMaintenance for Store {
 
     async fn gc_unreachable(&self) -> Result<GcReport, StoreError> {
         Ok(Store::gc_unreachable(self).await)
+    }
+
+    async fn prune_consumed_wake_source_keys(
+        &self,
+        cutoff_epoch_ms: u64,
+        up_to_consumed_at_ms: Option<u64>,
+    ) -> Result<lash_core::ConsumedWakePruneReport, StoreError> {
+        let removed_source_key_count = self
+            .conn
+            .write(move |tx| {
+                tx.execute(
+                    "DELETE FROM consumed_wake_source_keys
+                     WHERE consumed_at_ms < ?1
+                       AND (?2 IS NULL OR consumed_at_ms <= ?2)",
+                    params![
+                        cutoff_epoch_ms as i64,
+                        up_to_consumed_at_ms.map(|value| value as i64)
+                    ],
+                )
+            })
+            .await
+            .map_err(sqlite_error)?;
+        Ok(lash_core::ConsumedWakePruneReport {
+            removed_source_key_count,
+        })
     }
 }
 

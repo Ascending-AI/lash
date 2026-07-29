@@ -1485,7 +1485,7 @@ pub struct ProcessStartGrant {
 pub struct ProcessSessionDeleteReport {
     pub session_id: String,
     pub revoked_handle_count: usize,
-    pub deleted_wake_count: usize,
+    pub discarded_wake_delivery_count: usize,
     pub orphaned_process_ids: Vec<String>,
     pub preserved_process_ids: Vec<String>,
 }

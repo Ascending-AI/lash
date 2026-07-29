@@ -37,6 +37,8 @@ pub struct TestLocalProcessRegistry {
     handovers: Arc<Mutex<HashMap<(String, u64), crate::PersistedSegmentHandover>>>,
     trigger_store: Option<Arc<crate::InMemoryTriggerStore>>,
     execution_write_pause: Arc<std::sync::Mutex<Option<ExecutionWritePause>>>,
+    wake_delivery_config: super::WakeDeliveryConfig,
+    wake_deliveries: Arc<Mutex<HashMap<String, super::WakeDelivery>>>,
 }
 
 impl Default for TestLocalProcessRegistry {
@@ -50,6 +52,8 @@ impl Default for TestLocalProcessRegistry {
             handovers: Arc::new(Mutex::new(HashMap::new())),
             trigger_store: None,
             execution_write_pause: Arc::new(std::sync::Mutex::new(None)),
+            wake_delivery_config: super::WakeDeliveryConfig::default(),
+            wake_deliveries: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 }
@@ -173,10 +177,14 @@ struct ManagedProcessRecord {
     change_seq: u64,
     events: Vec<ProcessEvent>,
     keyed_events: HashMap<String, (String, ProcessEvent)>,
-    acked_wakes: HashSet<u64>,
 }
 
 impl TestLocalProcessRegistry {
+    pub fn with_wake_delivery_config(mut self, config: super::WakeDeliveryConfig) -> Self {
+        self.wake_delivery_config = config;
+        self
+    }
+
     #[doc(hidden)]
     pub fn pause_next_execution_write_after_validation(&self) -> ExecutionWritePauseHandle {
         let pause = ExecutionWritePause {
@@ -249,7 +257,6 @@ impl TestLocalProcessRegistry {
                 change_seq,
                 events: Vec::new(),
                 keyed_events: HashMap::new(),
-                acked_wakes: HashSet::new(),
             },
         );
         Ok(record)
@@ -280,6 +287,14 @@ impl TestLocalProcessRegistry {
                 wake_delivery,
                 ..
             } => {
+                if let Some(wake) = wake_delivery.clone() {
+                    let delivery = super::WakeDelivery::pending(wake, self.wake_delivery_config)?;
+                    self.wake_deliveries
+                        .lock()
+                        .await
+                        .entry(delivery.delivery_id.clone())
+                        .or_insert(delivery);
+                }
                 if let Some(repaired) = repair_record {
                     record.record = repaired;
                     record.change_seq = self.next_change_seq().await;
@@ -296,6 +311,14 @@ impl TestLocalProcessRegistry {
                 wake_delivery,
                 ..
             } => {
+                if let Some(wake) = wake_delivery.clone() {
+                    let delivery = super::WakeDelivery::pending(wake, self.wake_delivery_config)?;
+                    self.wake_deliveries
+                        .lock()
+                        .await
+                        .entry(delivery.delivery_id.clone())
+                        .or_insert(delivery);
+                }
                 record.record = projected_record;
                 record.change_seq = self.next_change_seq().await;
                 record.events.push(event.clone());
@@ -315,6 +338,10 @@ impl TestLocalProcessRegistry {
 
 #[async_trait::async_trait]
 impl ProcessRegistry for TestLocalProcessRegistry {
+    fn wake_delivery_config(&self) -> super::WakeDeliveryConfig {
+        self.wake_delivery_config
+    }
+
     async fn register_process(
         &self,
         registration: ProcessRegistration,
@@ -610,6 +637,16 @@ impl ProcessRegistry for TestLocalProcessRegistry {
                 record.change_seq = self.next_change_seq().await;
             }
         }
+        let mut discarded_wake_delivery_count = 0;
+        for delivery in self.wake_deliveries.lock().await.values_mut() {
+            if delivery.state == super::WakeDeliveryState::Pending
+                && delivery.wake.target_session_id == session_id
+            {
+                delivery.state = super::WakeDeliveryState::Discarded;
+                delivery.discard_reason = Some(super::WakeDiscardReason::TargetGone);
+                discarded_wake_delivery_count += 1;
+            }
+        }
         orphaned_process_ids.sort();
         orphaned_process_ids.dedup();
         preserved_process_ids.sort();
@@ -617,7 +654,7 @@ impl ProcessRegistry for TestLocalProcessRegistry {
         Ok(ProcessSessionDeleteReport {
             session_id: session_id.to_string(),
             revoked_handle_count: removed.len(),
-            deleted_wake_count: 0,
+            discarded_wake_delivery_count,
             orphaned_process_ids,
             preserved_process_ids,
         })
@@ -679,27 +716,6 @@ impl ProcessRegistry for TestLocalProcessRegistry {
             .events
             .iter()
             .filter(|event| event.sequence > after_sequence)
-            .cloned()
-            .collect())
-    }
-
-    async fn wake_events_after(
-        &self,
-        process_id: &str,
-        after_sequence: u64,
-    ) -> Result<Vec<ProcessEvent>, PluginError> {
-        let managed = self.managed.lock().await;
-        let Some(record) = managed.get(process_id) else {
-            return Err(PluginError::Session(format!(
-                "unknown process `{process_id}`"
-            )));
-        };
-        Ok(record
-            .events
-            .iter()
-            .filter(|event| event.sequence > after_sequence)
-            .filter(|event| event.semantics.wake.is_some())
-            .filter(|event| !record.acked_wakes.contains(&event.sequence))
             .cloned()
             .collect())
     }
@@ -1041,14 +1057,107 @@ impl ProcessRegistry for TestLocalProcessRegistry {
         ))
     }
 
-    async fn ack_wake(&self, process_id: &str, sequence: u64) -> Result<(), PluginError> {
-        let mut managed = self.managed.lock().await;
-        let Some(record) = managed.get_mut(process_id) else {
-            return Err(PluginError::Session(format!(
-                "unknown process `{process_id}`"
-            )));
-        };
-        record.acked_wakes.insert(sequence);
+    async fn pending_wake_deliveries(
+        &self,
+        limit: usize,
+    ) -> Result<Vec<super::WakeDelivery>, PluginError> {
+        if limit == 0 {
+            return Ok(Vec::new());
+        }
+        let now = current_epoch_ms();
+        let mut deliveries = self.wake_deliveries.lock().await;
+        let mut ids = deliveries
+            .values()
+            .filter(|delivery| delivery.state == super::WakeDeliveryState::Pending)
+            .map(|delivery| (delivery.expires_at_ms, delivery.delivery_id.clone()))
+            .collect::<Vec<_>>();
+        ids.sort();
+        ids.truncate(limit);
+        Ok(ids
+            .into_iter()
+            .filter_map(|(_, id)| {
+                let delivery = deliveries.get_mut(&id)?;
+                delivery.attempts = delivery.attempts.saturating_add(1);
+                delivery.first_attempt_ms.get_or_insert(now);
+                Some(delivery.clone())
+            })
+            .collect())
+    }
+
+    async fn list_wake_deliveries(
+        &self,
+        state: Option<super::WakeDeliveryState>,
+    ) -> Result<Vec<super::WakeDelivery>, PluginError> {
+        let mut deliveries = self
+            .wake_deliveries
+            .lock()
+            .await
+            .values()
+            .filter(|delivery| state.is_none_or(|state| delivery.state == state))
+            .cloned()
+            .collect::<Vec<_>>();
+        deliveries.sort_by(|left, right| left.delivery_id.cmp(&right.delivery_id));
+        Ok(deliveries)
+    }
+
+    async fn wake_delivery_report(&self) -> Result<super::WakeDeliveryReport, PluginError> {
+        let mut report = super::WakeDeliveryReport::default();
+        for delivery in self.wake_deliveries.lock().await.values() {
+            match delivery.state {
+                super::WakeDeliveryState::Pending => report.pending += 1,
+                super::WakeDeliveryState::Enqueued => report.enqueued += 1,
+                super::WakeDeliveryState::Discarded => {
+                    report.discarded += 1;
+                    match delivery.discard_reason {
+                        Some(super::WakeDiscardReason::Expired) => report.expired += 1,
+                        Some(super::WakeDiscardReason::TargetGone) => report.target_gone += 1,
+                        None => {}
+                    }
+                }
+            }
+        }
+        Ok(report)
+    }
+
+    async fn mark_wake_enqueued(&self, delivery_id: &str) -> Result<(), PluginError> {
+        let mut deliveries = self.wake_deliveries.lock().await;
+        let delivery = deliveries.get_mut(delivery_id).ok_or_else(|| {
+            PluginError::Session(format!("unknown wake delivery `{delivery_id}`"))
+        })?;
+        if delivery.state == super::WakeDeliveryState::Pending {
+            delivery.state = super::WakeDeliveryState::Enqueued;
+            delivery.discard_reason = None;
+        }
+        Ok(())
+    }
+
+    async fn discard_wake_delivery(
+        &self,
+        delivery_id: &str,
+        reason: super::WakeDiscardReason,
+    ) -> Result<(), PluginError> {
+        let mut deliveries = self.wake_deliveries.lock().await;
+        let delivery = deliveries.get_mut(delivery_id).ok_or_else(|| {
+            PluginError::Session(format!("unknown wake delivery `{delivery_id}`"))
+        })?;
+        if delivery.state == super::WakeDeliveryState::Pending {
+            delivery.state = super::WakeDeliveryState::Discarded;
+            delivery.discard_reason = Some(reason);
+        }
+        Ok(())
+    }
+
+    async fn redrive_wake_delivery(&self, delivery_id: &str) -> Result<(), PluginError> {
+        let mut deliveries = self.wake_deliveries.lock().await;
+        let delivery = deliveries.get_mut(delivery_id).ok_or_else(|| {
+            PluginError::Session(format!("unknown wake delivery `{delivery_id}`"))
+        })?;
+        delivery.state = super::WakeDeliveryState::Pending;
+        delivery.attempts = 0;
+        delivery.first_attempt_ms = None;
+        delivery.expires_at_ms =
+            current_epoch_ms().saturating_add(self.wake_delivery_config.delivery_expiry_ms);
+        delivery.discard_reason = None;
         Ok(())
     }
 
@@ -1201,6 +1310,14 @@ impl ProcessRegistry for TestLocalProcessRegistry {
         up_to_change_seq: Option<ProcessChangeCursor>,
     ) -> Result<ProcessPruneReport, PluginError> {
         let max_change_seq = up_to_change_seq.map(ProcessChangeCursor::store_sequence);
+        let processes_with_pending_deliveries = self
+            .wake_deliveries
+            .lock()
+            .await
+            .values()
+            .filter(|delivery| delivery.state == super::WakeDeliveryState::Pending)
+            .map(|delivery| delivery.wake.process_id.clone())
+            .collect::<HashSet<_>>();
         let mut pruned_events = 0;
         let prunable: HashSet<String> = {
             let mut managed = self.managed.lock().await;
@@ -1215,6 +1332,7 @@ impl ProcessRegistry for TestLocalProcessRegistry {
                         .is_none_or(|filter| filter.matches_record(&record.record))
                 })
                 .filter(|(_, record)| max_change_seq.is_none_or(|max| record.change_seq <= max))
+                .filter(|(id, _)| !processes_with_pending_deliveries.contains(*id))
                 .map(|(id, _)| id.clone())
                 .collect();
             for id in &prunable {

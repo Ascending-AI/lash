@@ -564,7 +564,6 @@ impl RuntimeQueueIngress {
                         replay: None,
                     },
                     process_caused_by: None,
-                    dedupe_key: format!("wake:{session_id}:{text}:1"),
                     input: (*text).to_string(),
                     created_at_ms: 1,
                 })],

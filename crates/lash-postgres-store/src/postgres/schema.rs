@@ -111,6 +111,13 @@ pub(crate) async fn ensure_schema(pool: &PgPool) -> Result<Vec<u8>, StoreError> 
             PRIMARY KEY (batch_id, item_index)
         );
 
+        CREATE TABLE IF NOT EXISTS lash_consumed_wake_source_keys (
+            session_id TEXT NOT NULL,
+            source_key TEXT NOT NULL,
+            consumed_at_ms BIGINT NOT NULL,
+            PRIMARY KEY (session_id, source_key)
+        );
+
         CREATE TABLE IF NOT EXISTS lash_pending_turn_inputs (
             enqueue_seq BIGSERIAL PRIMARY KEY,
             input_id TEXT NOT NULL UNIQUE,
@@ -191,11 +198,21 @@ pub(crate) async fn ensure_schema(pool: &PgPool) -> Result<Vec<u8>, StoreError> 
             ON lash_process_events(process_id, idempotency_key)
             WHERE idempotency_key IS NOT NULL;
 
-        CREATE TABLE IF NOT EXISTS lash_process_wake_acks (
+        CREATE TABLE IF NOT EXISTS lash_process_wake_deliveries (
+            delivery_id TEXT PRIMARY KEY,
             process_id TEXT NOT NULL REFERENCES lash_processes(process_id) ON DELETE CASCADE,
+            target_session_id TEXT NOT NULL,
             sequence BIGINT NOT NULL,
-            PRIMARY KEY (process_id, sequence)
+            state TEXT NOT NULL,
+            attempts BIGINT NOT NULL DEFAULT 0,
+            first_attempt_ms BIGINT,
+            expires_at_ms BIGINT NOT NULL,
+            discard_reason TEXT,
+            delivery_json TEXT NOT NULL
         );
+        CREATE INDEX IF NOT EXISTS idx_lash_wake_deliveries_pending
+            ON lash_process_wake_deliveries(expires_at_ms)
+            WHERE state = 'pending';
 
         CREATE TABLE IF NOT EXISTS lash_process_handle_grants (
             session_id TEXT NOT NULL,

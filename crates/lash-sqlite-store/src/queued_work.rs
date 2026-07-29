@@ -186,6 +186,22 @@ pub(crate) fn enqueue_queued_work_conn(
     nonce: u64,
 ) -> Result<QueuedWorkBatch, StoreError> {
     if let Some(source_key) = batch.source_key.as_deref() {
+        if lash_core::is_process_wake_source_key(source_key)
+            && let Some(consumed_at_ms) = conn
+                .query_row(
+                    "SELECT consumed_at_ms FROM consumed_wake_source_keys
+                     WHERE session_id = ?1 AND source_key = ?2",
+                    params![batch.session_id, source_key],
+                    |row| row.get::<_, i64>(0),
+                )
+                .optional()
+                .map_err(sqlite_error)?
+        {
+            return Ok(lash_core::runtime::consumed_queued_work_batch(
+                batch,
+                consumed_at_ms as u64,
+            ));
+        }
         let existing_id: Option<String> = conn
             .query_row(
                 "SELECT batch_id FROM queued_work_batches

@@ -381,7 +381,7 @@ async fn async_main() -> anyhow_like::Result<()> {
 }
 
 /// Host-scheduled retention for terminal process rows (ADR 0017). The process
-/// registry keeps a row — plus its events, wake acks, handle grants, and leases
+/// registry keeps a row — plus its events, wake deliveries, handle grants, and leases
 /// — for every process this service ever started; once a run is terminal and
 /// its outcome has been consumed, those rows have no remaining reader and would
 /// grow without bound. `prune_terminal_processes` drops terminal rows older than

@@ -118,6 +118,7 @@ pub(crate) async fn append_process_event_tx(
     record: &mut ProcessRecord,
     request: ProcessEventAppendRequest,
     occurred_at_ms: u64,
+    wake_delivery_config: lash_core::WakeDeliveryConfig,
 ) -> Result<ProcessEventAppendResult, PluginError> {
     let process_id = record.id.clone();
     let replay_lookup =
@@ -141,6 +142,7 @@ pub(crate) async fn append_process_event_tx(
             wake_delivery,
             ..
         } => {
+            insert_wake_delivery_tx(tx, wake_delivery.as_ref(), wake_delivery_config).await?;
             if let Some(repaired) = repair_record {
                 *record = repaired;
                 save_process_tx(tx, record).await?;
@@ -176,12 +178,41 @@ pub(crate) async fn append_process_event_tx(
             .map_err(plugin_sqlx_error)?;
             *record = projected_record;
             save_process_tx(tx, record).await?;
+            insert_wake_delivery_tx(tx, wake_delivery.as_ref(), wake_delivery_config).await?;
             Ok(ProcessEventAppendResult {
                 event,
                 wake_delivery,
             })
         }
     }
+}
+
+async fn insert_wake_delivery_tx(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    wake: Option<&lash_core::ProcessWakeDelivery>,
+    config: lash_core::WakeDeliveryConfig,
+) -> Result<(), PluginError> {
+    let Some(wake) = wake else {
+        return Ok(());
+    };
+    let delivery = lash_core::WakeDelivery::pending(wake.clone(), config)?;
+    sqlx::query(
+        "INSERT INTO lash_process_wake_deliveries (
+            delivery_id, process_id, target_session_id, sequence, state,
+            attempts, first_attempt_ms, expires_at_ms, discard_reason, delivery_json
+         ) VALUES ($1, $2, $3, $4, 'pending', 0, NULL, $5, NULL, $6)
+         ON CONFLICT (delivery_id) DO NOTHING",
+    )
+    .bind(&delivery.delivery_id)
+    .bind(&delivery.wake.process_id)
+    .bind(&delivery.wake.target_session_id)
+    .bind(delivery.wake.sequence as i64)
+    .bind(delivery.expires_at_ms as i64)
+    .bind(serde_json::to_string(&delivery.wake).map_err(process_decode_error)?)
+    .execute(&mut **tx)
+    .await
+    .map_err(plugin_sqlx_error)?;
+    Ok(())
 }
 
 pub(crate) async fn load_process_lease_tx(

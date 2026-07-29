@@ -353,6 +353,44 @@ impl Processes {
             .map_err(Into::into)
     }
 
+    /// List durable process-wake delivery rows, optionally filtered by state.
+    pub async fn wake_deliveries(
+        &self,
+        state: Option<lash_core::WakeDeliveryState>,
+    ) -> Result<Vec<lash_core::WakeDelivery>> {
+        self.registry()?
+            .list_wake_deliveries(state)
+            .await
+            .map_err(Into::into)
+    }
+
+    /// Summarize pending, delivered, and typed-discard wake outcomes.
+    pub async fn wake_delivery_report(&self) -> Result<lash_core::WakeDeliveryReport> {
+        self.registry()?
+            .wake_delivery_report()
+            .await
+            .map_err(Into::into)
+    }
+
+    /// Explicitly return an enqueued or discarded delivery to the pending lane.
+    pub async fn redrive_wake_delivery(&self, delivery_id: &str) -> Result<()> {
+        self.registry()?
+            .redrive_wake_delivery(delivery_id)
+            .await
+            .map_err(Into::into)
+    }
+
+    /// Run one bounded wake-delivery pass immediately.
+    pub async fn drive_wake_deliveries(&self) -> Result<lash_core::WakeDeliveryDriveReport> {
+        let drivers = self.core.work_driver.drivers().await;
+        let Some(driver) = drivers._wake else {
+            return Err(EmbedError::Plugin(lash_core::PluginError::Session(
+                "wake delivery driver is unavailable in this runtime".to_string(),
+            )));
+        };
+        driver.drive_pending().await.map_err(Into::into)
+    }
+
     /// Record a durable, non-terminal **Abandon Request** on a process (ADR
     /// 0019): a third party's authorization to accept uncertainty about an
     /// owner. This never terminalizes anything itself — the recovery sweep

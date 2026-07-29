@@ -588,7 +588,6 @@ fn process_wake_event_type() -> crate::ProcessEventType {
             wake: Some(crate::ProcessWakeSpec {
                 when: None,
                 input: crate::ProcessValueSelector::Pointer("/text".to_string()),
-                dedupe_key: crate::ProcessWakeDedupeKey::EventIdentity,
             }),
             ..crate::ProcessEventSemanticsSpec::default()
         },

@@ -275,11 +275,13 @@ pub(super) async fn watched_decorator_preserves_registry_semantics(
 }
 
 /// ADR 0017's prune contract across the full retention surface: pruning an old
-/// terminal process physically deletes its events, wake acks, handle grants, and
+/// terminal process physically deletes its events, wake deliveries, handle grants, and
 /// lease rows, leaving a fresher terminal and every live process untouched. A
 /// pruned id reads as unknown everywhere, list surfaces behave as if it never
 /// existed, and prune is idempotent.
-pub(super) async fn prune_respects_leases_grants_and_wake_acks(registry: Arc<dyn ProcessRegistry>) {
+pub(super) async fn prune_respects_leases_grants_and_wake_deliveries(
+    registry: Arc<dyn ProcessRegistry>,
+) {
     let scope = SessionScope::new("prune-retention-owner");
     for id in ["proc-old", "proc-recent"] {
         registry
@@ -302,9 +304,9 @@ pub(super) async fn prune_respects_leases_grants_and_wake_acks(registry: Arc<dyn
         .await
         .expect("register live");
 
-    // proc-old accumulates two wake events (one acked → a wake-ack row), a handle
-    // grant, and a held lease before completing: one of every retention row type.
-    let old_wake_one = registry
+    // proc-old accumulates two settled wake deliveries, a handle grant, and a
+    // held lease before completing: one of every retention row type.
+    registry
         .append_event(
             "proc-old",
             ProcessEventAppendRequest::new(
@@ -326,10 +328,18 @@ pub(super) async fn prune_respects_leases_grants_and_wake_acks(registry: Arc<dyn
         )
         .await
         .expect("append old wake two");
-    registry
-        .ack_wake("proc-old", old_wake_one.event.sequence)
+    for delivery in registry
+        .list_wake_deliveries(Some(crate::WakeDeliveryState::Pending))
         .await
-        .expect("ack old wake one");
+        .expect("old pending wakes")
+        .into_iter()
+        .filter(|delivery| delivery.wake.process_id == "proc-old")
+    {
+        registry
+            .mark_wake_enqueued(&delivery.delivery_id)
+            .await
+            .expect("settle old wake delivery");
+    }
     let pre_prune_fencing = registry
         .claim_process_lease(
             "proc-old",
@@ -398,15 +408,17 @@ pub(super) async fn prune_respects_leases_grants_and_wake_acks(registry: Arc<dyn
         "terminal timestamps must be distinct for a meaningful cutoff (old {old_updated}, recent {recent_updated})"
     );
 
-    // Before pruning, proc-old still exposes its one unacked wake.
+    // Before pruning, proc-old retains its two settled delivery rows.
     assert_eq!(
         registry
-            .wake_events_after("proc-old", 0)
+            .list_wake_deliveries(Some(crate::WakeDeliveryState::Enqueued))
             .await
-            .expect("old wakes before prune")
-            .len(),
-        1,
-        "one of proc-old's two wake events remains unacked before prune"
+            .expect("old deliveries before prune")
+            .into_iter()
+            .filter(|delivery| delivery.wake.process_id == "proc-old")
+            .count(),
+        2,
+        "both proc-old wake deliveries are durably settled before prune"
     );
 
     let report = registry
@@ -428,8 +440,8 @@ pub(super) async fn prune_respects_leases_grants_and_wake_acks(registry: Arc<dyn
         "a pruned process is unknown"
     );
     assert!(
-        registry.wake_events_after("proc-old", 0).await.is_err(),
-        "wake reads for a pruned process are unknown, not empty"
+        registry.events_after("proc-old", 0).await.is_err(),
+        "event reads for a pruned process are unknown, not empty"
     );
     assert_eq!(
         registry
@@ -457,12 +469,14 @@ pub(super) async fn prune_respects_leases_grants_and_wake_acks(registry: Arc<dyn
     // The fresher terminal keeps its wake bookkeeping intact.
     assert_eq!(
         registry
-            .wake_events_after("proc-recent", 0)
+            .list_wake_deliveries(Some(crate::WakeDeliveryState::Pending))
             .await
             .expect("recent wakes survive")
-            .len(),
+            .into_iter()
+            .filter(|delivery| delivery.wake.process_id == "proc-recent")
+            .count(),
         1,
-        "proc-recent's unacked wake survives a prune bounded to older terminals"
+        "proc-recent's pending wake survives a prune bounded to older terminals"
     );
 
     // Prune is idempotent: a second call over the same cutoff removes nothing.
@@ -683,7 +697,7 @@ pub(super) async fn prune_never_touches_non_terminal_rows(registry: Arc<dyn Proc
 }
 
 /// Host-scheduled retention: `prune_terminal_processes` physically deletes
-/// terminal rows (and their events, wake acks, grants, leases) older than a
+/// terminal rows (and their events, wake deliveries, grants, leases) older than a
 /// cutoff, leaving fresher terminals and every live process untouched.
 pub(super) async fn prune_removes_terminal_processes_older_than_cutoff(
     registry: Arc<dyn ProcessRegistry>,

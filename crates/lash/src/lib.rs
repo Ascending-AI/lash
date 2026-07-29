@@ -278,11 +278,10 @@ pub mod remote {
             RemoteProcessStarted, RemoteProcessStatus, RemoteProcessStatusFilter,
             RemoteProcessSummary, RemoteProcessTerminalSemantics, RemoteProcessTerminalSpec,
             RemoteProcessTerminalState, RemoteProcessValueSelector, RemoteProcessWaitKind,
-            RemoteProcessWaitState, RemoteProcessWake, RemoteProcessWakeDedupeKey,
-            RemoteProcessWakeSpec, RemoteProcessWorkItem, RemoteProcessWorkSnapshot,
-            RemoteRecoveryDisposition, RemoteRuntimeEffectKind, RemoteRuntimeInvocation,
-            RemoteRuntimeReplay, RemoteRuntimeScope, RemoteRuntimeSubject, RemoteSessionScope,
-            RemoteToolFailureClass,
+            RemoteProcessWaitState, RemoteProcessWake, RemoteProcessWakeSpec,
+            RemoteProcessWorkItem, RemoteProcessWorkSnapshot, RemoteRecoveryDisposition,
+            RemoteRuntimeEffectKind, RemoteRuntimeInvocation, RemoteRuntimeReplay,
+            RemoteRuntimeScope, RemoteRuntimeSubject, RemoteSessionScope, RemoteToolFailureClass,
         };
     }
 
@@ -372,10 +371,9 @@ pub mod process {
         ProcessRecord, ProcessRegistration, ProcessRegistry, ProcessRunHandle, ProcessRuntimeHost,
         ProcessService, ProcessSessionDeleteReport, ProcessStartOptions, ProcessStartRequest,
         ProcessStarted, ProcessStatus, ProcessStatusFilter, ProcessTerminalState, ProcessWake,
-        ProcessWakeDedupeKey, ProcessWakeDelivery, ProcessWakeSpec, ProcessWorkDriver,
-        ProcessWorkObserver, ProcessWorkSnapshot, RecoveryDisposition, SessionScope,
-        SessionScopeId, ToolSessionProcessAdmin, watch_process_registry,
-        watch_process_registry_with_sink,
+        ProcessWakeDelivery, ProcessWakeSpec, ProcessWorkDriver, ProcessWorkObserver,
+        ProcessWorkSnapshot, RecoveryDisposition, SessionScope, SessionScopeId,
+        ToolSessionProcessAdmin, watch_process_registry, watch_process_registry_with_sink,
     };
     #[cfg(feature = "rlm")]
     pub use lash_lashlang_runtime::{

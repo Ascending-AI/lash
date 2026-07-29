@@ -147,6 +147,7 @@ pub struct SqliteProcessRegistry {
     conn: SqliteConnection,
     clock: Arc<dyn lash_core::Clock>,
     process_session_store_root: Option<PathBuf>,
+    wake_delivery_config: lash_core::WakeDeliveryConfig,
 }
 
 fn sqlite_error(err: rusqlite::Error) -> StoreError {
@@ -539,6 +540,29 @@ impl SessionStoreFactory for SqliteSessionStoreFactory {
         Ok(Some(store as Arc<dyn RuntimePersistence>))
     }
 
+    async fn session_was_deleted(&self, session_id: &str) -> Result<bool, String> {
+        let path = self.catalog_path();
+        if !path.exists() {
+            return Ok(false);
+        }
+        let conn = SqliteConnection::open(&path)
+            .await
+            .map_err(|err| err.to_string())?;
+        ensure_schema(&conn).await.map_err(|err| err.to_string())?;
+        let session_id = session_id.to_string();
+        conn.call(move |conn| {
+            conn.query_row(
+                "SELECT 1 FROM deleted_sessions WHERE session_id = ?1",
+                params![session_id],
+                |_| Ok(()),
+            )
+            .optional()
+            .map(|row| row.is_some())
+        })
+        .await
+        .map_err(|err| err.to_string())
+    }
+
     async fn delete_session(&self, session_id: &str) -> Result<(), String> {
         delete_session_from_catalog(&self.root, session_id, true).await
     }
@@ -712,6 +736,11 @@ async fn delete_session_from_catalog(
                 .map_err(sqlite_error)?;
             tx.execute(
                 "DELETE FROM queued_work_batches WHERE session_id = ?1",
+                params![session_id],
+            )
+            .map_err(sqlite_error)?;
+            tx.execute(
+                "DELETE FROM consumed_wake_source_keys WHERE session_id = ?1",
                 params![session_id],
             )
             .map_err(sqlite_error)?;

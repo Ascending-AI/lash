@@ -5703,9 +5703,6 @@ fn process_wake_event_type() -> lash_core::ProcessEventType {
                     "/wake_input".to_string(),
                 )),
                 input: lash_core::ProcessValueSelector::Pointer("/wake_input".to_string()),
-                dedupe_key: lash_core::ProcessWakeDedupeKey::Selector(
-                    lash_core::ProcessValueSelector::Pointer("/message".to_string()),
-                ),
             }),
             ..lash_core::ProcessEventSemanticsSpec::default()
         },

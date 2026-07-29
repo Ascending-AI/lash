@@ -831,6 +831,7 @@ impl<'run> RuntimeExecutionContext<'run> {
             )
             .await?;
         crate::tool_provider::process_events::enqueue_wake_delivery(
+            std::sync::Arc::clone(&context.registry),
             context.store.clone(),
             context.session_store_factory.as_ref(),
             result.wake_delivery,

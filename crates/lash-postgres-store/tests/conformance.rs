@@ -167,6 +167,22 @@ async fn postgres_session_store_factory_satisfies_conformance_when_configured() 
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn postgres_wake_delivery_crash_matrix_when_configured() {
+    let Some((_database_lock, storage)) = storage().await else {
+        eprintln!(
+            "skipping Postgres wake-delivery crash matrix: LASH_POSTGRES_DATABASE_URL is not set"
+        );
+        return;
+    };
+    reset(&storage).await;
+    let factory = Arc::new(storage.session_store_factory()) as Arc<dyn SessionStoreFactory>;
+    let registry = Arc::new(storage.process_registry_with_wake_delivery_config(
+        lash_core::WakeDeliveryConfig::new(250, 10_000).expect("valid short test retention"),
+    )) as Arc<dyn ProcessRegistry>;
+    lash_core::testing::conformance::wake_delivery_crash_matrix(factory, registry).await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn postgres_attachment_owner_cold_replay_conformance_when_configured() {
     let Some((_database_lock, storage)) = storage().await else {
         eprintln!(

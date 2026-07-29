@@ -36,6 +36,7 @@ mod turn_input_ingress;
 mod turn_loop;
 mod turn_queue;
 mod usage;
+mod wake_delivery_driver;
 
 use std::any::Any;
 use std::collections::HashMap;
@@ -181,13 +182,13 @@ pub use observation::{
     SessionRevision,
 };
 pub use process::{
-    AbandonEvidence, AbandonRequest, AbandonWriter, DefaultProcessCancelAbility,
-    InMemoryProcessExecutionEnvStore, ObservedProcess, ObservedProcessEvent, ObservedWorkItem,
-    PROCESS_LEASE_SCHEMA_VERSION, PersistedSegmentHandover, ProcessAttach, ProcessAwaitOutput,
-    ProcessAwaiter, ProcessCancelAbility, ProcessCancelAllRequest, ProcessCancelRequest,
-    ProcessCancelSource, ProcessCancelSummary, ProcessChangeCursor, ProcessChangeHub,
-    ProcessCompletionAuthority, ProcessCompletionOutcome, ProcessEngine,
-    ProcessEngineProcessContext, ProcessEngineRegistry, ProcessEngineRunContext,
+    AbandonEvidence, AbandonRequest, AbandonWriter, DEFAULT_WAKE_EVIDENCE_RETENTION_MS,
+    DefaultProcessCancelAbility, InMemoryProcessExecutionEnvStore, ObservedProcess,
+    ObservedProcessEvent, ObservedWorkItem, PROCESS_LEASE_SCHEMA_VERSION, PersistedSegmentHandover,
+    ProcessAttach, ProcessAwaitOutput, ProcessAwaiter, ProcessCancelAbility,
+    ProcessCancelAllRequest, ProcessCancelRequest, ProcessCancelSource, ProcessCancelSummary,
+    ProcessChangeCursor, ProcessChangeHub, ProcessCompletionAuthority, ProcessCompletionOutcome,
+    ProcessEngine, ProcessEngineProcessContext, ProcessEngineRegistry, ProcessEngineRunContext,
     ProcessEngineRunGuard, ProcessEngineRuntimeContext, ProcessEngineValidationContext,
     ProcessEvent, ProcessEventAppendPlan, ProcessEventAppendRequest, ProcessEventAppendResult,
     ProcessEventSemantics, ProcessEventSemanticsSpec, ProcessEventSink, ProcessEventType,
@@ -202,9 +203,10 @@ pub use process::{
     ProcessStartGrant, ProcessStartOptions, ProcessStartOutcome, ProcessStartPlan,
     ProcessStartRequest, ProcessStarted, ProcessStatus, ProcessStatusFilter,
     ProcessTerminalSemantics, ProcessTerminalSpec, ProcessTerminalState, ProcessValueSelector,
-    ProcessWake, ProcessWakeDedupeKey, ProcessWakeDelivery, ProcessWakeDeliveryRequest,
-    ProcessWakeSpec, ProcessWorkObserver, ProcessWorkSnapshot, RecoveryDisposition,
-    SegmentHandover, SessionScope, SessionScopeId, UnavailableProcessService, WaitKind, WaitState,
+    ProcessWake, ProcessWakeDelivery, ProcessWakeDeliveryRequest, ProcessWakeSpec,
+    ProcessWorkObserver, ProcessWorkSnapshot, RecoveryDisposition, SegmentHandover, SessionScope,
+    SessionScopeId, UnavailableProcessService, WaitKind, WaitState, WakeDelivery,
+    WakeDeliveryConfig, WakeDeliveryReport, WakeDeliveryState, WakeDiscardReason,
     apply_process_event_projection, apply_process_status_projection, current_epoch_ms,
     epoch_ms_from_system_time, fold_process_record, load_process_execution_env,
     materialize_process_event_semantics, persist_process_execution_env,
@@ -251,13 +253,15 @@ pub use turn_queue::{
     DeliveryPolicy, MergeKey, QueuedCheckpointWork, QueuedTurnWork, QueuedWorkBatch,
     QueuedWorkBatchDraft, QueuedWorkClaim, QueuedWorkClaimBoundary, QueuedWorkClass,
     QueuedWorkCompletion, QueuedWorkItem, QueuedWorkPayload, SessionCommand, SessionCommandReceipt,
-    SlotPolicy, process_wake_batch_draft,
+    SlotPolicy, consumed_queued_work_batch, is_process_wake_source_key, process_wake_batch_draft,
+    process_wake_source_key,
 };
 pub use usage::{
     SessionUsageReport, TokenLedgerEntry, UsageReportRow, UsageTotals, diff_token_ledger,
     diff_usage_reports,
 };
 use usage::{merge_ledger_entry, merge_usage_delta_entries, normalize_prompt_usage};
+pub use wake_delivery_driver::{WakeDeliveryDriveReport, WakeDeliveryDriver};
 
 #[doc(hidden)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -1123,6 +1127,11 @@ pub trait SessionStoreFactory: Send + Sync {
         _request: &SessionStoreCreateRequest,
     ) -> Result<Option<Arc<dyn crate::store::RuntimePersistence>>, String> {
         Ok(None)
+    }
+
+    /// Report whether the permanent host-facing session tombstone exists.
+    async fn session_was_deleted(&self, _session_id: &str) -> Result<bool, String> {
+        Ok(false)
     }
 
     async fn delete_session(&self, session_id: &str) -> Result<(), String>;

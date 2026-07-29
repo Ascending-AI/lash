@@ -16,6 +16,7 @@ use crate::store::RuntimePersistence;
 mod attachments;
 mod checkpoints;
 mod factory;
+pub use factory::InMemorySessionStoreFactory;
 mod maintenance;
 mod queued_work;
 mod reachability;
@@ -182,6 +183,7 @@ pub struct InMemorySessionStore {
     session_execution_leases: Mutex<HashMap<String, InMemorySessionExecutionLease>>,
     queued_work: Mutex<Vec<InMemoryQueuedBatch>>,
     queued_work_next_seq: Mutex<u64>,
+    consumed_wake_source_keys: Mutex<HashMap<(String, String), u64>>,
     pending_turn_inputs: Mutex<Vec<InMemoryPendingTurnInput>>,
     pending_turn_input_next_seq: Mutex<u64>,
     attachment_manifest:
@@ -271,6 +273,7 @@ impl InMemorySessionStore {
             session_execution_leases: Mutex::new(HashMap::new()),
             queued_work: Mutex::new(Vec::new()),
             queued_work_next_seq: Mutex::new(0),
+            consumed_wake_source_keys: Mutex::new(HashMap::new()),
             pending_turn_inputs: Mutex::new(Vec::new()),
             pending_turn_input_next_seq: Mutex::new(0),
             attachment_manifest: Mutex::new(HashMap::new()),
@@ -446,6 +449,17 @@ impl InMemorySessionStore {
         &self,
         batch: crate::QueuedWorkBatchDraft,
     ) -> crate::QueuedWorkBatch {
+        if let Some(source_key) = batch.source_key.as_deref()
+            && crate::is_process_wake_source_key(source_key)
+            && let Some(consumed_at_ms) = self
+                .consumed_wake_source_keys
+                .lock()
+                .expect("lock consumed wake source keys")
+                .get(&(batch.session_id.clone(), source_key.to_string()))
+                .copied()
+        {
+            return crate::runtime::consumed_queued_work_batch(&batch, consumed_at_ms);
+        }
         let mut queued = self.queued_work.lock().expect("lock queued work");
         if let Some(source_key) = batch.source_key.as_deref()
             && let Some(existing) = queued.iter().find(|entry| {
@@ -1167,7 +1181,27 @@ impl crate::store::SessionCommitStore for InMemorySessionStore {
         }
         {
             let mut queued = self.queued_work.lock().expect("lock queued work");
+            let consumed_at_ms = self.clock.timestamp_ms();
+            let mut consumed = self
+                .consumed_wake_source_keys
+                .lock()
+                .expect("lock consumed wake source keys");
             for completed in &commit.completed_queue_claims {
+                for entry in queued.iter().filter(|entry| {
+                    entry.batch.session_id == completed.session_id
+                        && entry.claim_id.as_deref() == Some(completed.claim_id.as_str())
+                        && entry.claim_token.as_deref() == Some(completed.lease_token.as_str())
+                        && completed.batch_ids.contains(&entry.batch.batch_id)
+                }) {
+                    if let Some(source_key) = entry.batch.source_key.as_deref()
+                        && crate::is_process_wake_source_key(source_key)
+                    {
+                        consumed.insert(
+                            (entry.batch.session_id.clone(), source_key.to_string()),
+                            consumed_at_ms,
+                        );
+                    }
+                }
                 queued.retain(|entry| {
                     !(entry.batch.session_id == completed.session_id
                         && entry.claim_id.as_deref() == Some(completed.claim_id.as_str())
@@ -1497,41 +1531,5 @@ impl crate::store::SessionExecutionLeaseStore for InMemorySessionStore {
             .expect("lock in-memory write transaction");
         self.release_session_execution_lease_in_memory(completion);
         Ok(())
-    }
-}
-
-/// Session-id-keyed factory: the same in-memory store is returned for a given
-/// session across opens (so a worker rebuild sees the session's state), and a
-/// fresh store is created on first use.
-#[derive(Clone)]
-pub struct InMemorySessionStoreFactory {
-    clock: Arc<dyn crate::Clock>,
-    stores: Arc<Mutex<HashMap<String, Arc<InMemorySessionStore>>>>,
-    write_transaction: Arc<Mutex<()>>,
-    global_session_graph: Arc<Mutex<crate::SessionGraph>>,
-    global_node_owners: Arc<Mutex<HashMap<String, String>>>,
-    global_session_heads: Arc<Mutex<HashMap<String, Option<String>>>>,
-    node_anchors: InMemoryNodeAnchors,
-    tombstoned_node_ids: Arc<Mutex<HashSet<String>>>,
-    deleted_session_ids: Arc<Mutex<HashSet<String>>>,
-}
-
-impl InMemorySessionStoreFactory {
-    pub fn new() -> Self {
-        Self::with_clock(Arc::new(crate::SystemClock))
-    }
-
-    pub fn with_clock(clock: Arc<dyn crate::Clock>) -> Self {
-        Self {
-            clock,
-            stores: Arc::new(Mutex::new(HashMap::new())),
-            write_transaction: Arc::new(Mutex::new(())),
-            global_session_graph: Arc::new(Mutex::new(crate::SessionGraph::default())),
-            global_node_owners: Arc::new(Mutex::new(HashMap::new())),
-            global_session_heads: Arc::new(Mutex::new(HashMap::new())),
-            node_anchors: Arc::new(Mutex::new(HashMap::new())),
-            tombstoned_node_ids: Arc::new(Mutex::new(HashSet::new())),
-            deleted_session_ids: Arc::new(Mutex::new(HashSet::new())),
-        }
     }
 }

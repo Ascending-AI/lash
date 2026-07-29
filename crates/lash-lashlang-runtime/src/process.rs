@@ -1310,7 +1310,6 @@ pub fn lashlang_process_event_types() -> Vec<lash_core::ProcessEventType> {
                 wake: Some(lash_core::ProcessWakeSpec {
                     when: None,
                     input: lash_core::ProcessValueSelector::Pointer("/text".to_string()),
-                    dedupe_key: lash_core::ProcessWakeDedupeKey::EventIdentity,
                 }),
                 ..lash_core::ProcessEventSemanticsSpec::default()
             },

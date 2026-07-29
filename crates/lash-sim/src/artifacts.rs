@@ -595,7 +595,7 @@ pub(crate) fn model_only_boundary_reviews() -> Vec<ModelOnlyBoundaryReview> {
             production_abstraction_used: "process_wake_delivery, QueuedWorkBatchDraft, QueuedWorkPayload::process_wake, QueuedWorkStore::enqueue_queued_work, and claim_ready_queued_work_by_batch_ids",
             model_only_scope: "the eventual process body that consumes the wake remains excluded; generated memory runs, generated SQLite dynamic reruns, and Postgres backend contention enqueue or claim wake-adjacent queued work through real queued-work/session-lease backend paths",
             oracle_id: "sim.oracle.process-wake-observed.v1",
-            artifact_evidence: "process wake events include runtime_process_wake, runtime_queued_work claim evidence, claimed_once=true, and duplicate claimed_once=false dedupe evidence from real queued-work claims",
+            artifact_evidence: "process wake events include runtime_process_wake, structural runtime_queued_work source identity, claimed_once=true, and duplicate claimed_once=false receiver evidence from real queued-work claims",
         },
     ]
 }

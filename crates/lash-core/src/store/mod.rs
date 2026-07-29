@@ -254,6 +254,12 @@ pub struct VacuumReport {
     pub removed_pending_turn_input_tombstone_count: usize,
 }
 
+/// Result of explicitly pruning settled process-wake idempotency evidence.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct ConsumedWakePruneReport {
+    pub removed_source_key_count: usize,
+}
+
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct SessionCheckpoint {
     pub schema_version: u32,
@@ -1401,6 +1407,20 @@ pub trait StoreMaintenance: Send + Sync {
 
     /// Delete blobs no longer reachable from any retained root.
     async fn gc_unreachable(&self) -> Result<GcReport, StoreError>;
+
+    /// Delete consumed process-wake source keys older than the caller's
+    /// retention cutoff. Hosts must retain this evidence longer than process
+    /// wake delivery rows can remain eligible for delivery.
+    async fn prune_consumed_wake_source_keys(
+        &self,
+        cutoff_epoch_ms: u64,
+        up_to_consumed_at_ms: Option<u64>,
+    ) -> Result<ConsumedWakePruneReport, StoreError> {
+        let _ = (cutoff_epoch_ms, up_to_consumed_at_ms);
+        Err(StoreError::UnsupportedStoreOperation {
+            operation: "prune_consumed_wake_source_keys",
+        })
+    }
 }
 
 /// Exact settled-session persistence protocol required by the runtime.

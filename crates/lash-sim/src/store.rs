@@ -724,50 +724,64 @@ impl ModelStore {
             }
             BoundaryKind::ProcessWake => {
                 let session = boundary_session_alias(event);
-                let process_id = format!("sim-process-{}", event.boundary_id.replace(':', "-"));
-                let dedupe_key = event
+                let process_id = event
                     .payload
-                    .get("dedupe_key")
+                    .get("process_id")
                     .and_then(Value::as_str)
-                    .unwrap_or(&event.boundary_id)
+                    .map_or_else(
+                        || format!("sim-process-{}", event.boundary_id.replace(':', "-")),
+                        ToString::to_string,
+                    );
+                let sequence = event
+                    .payload
+                    .get("sequence")
+                    .and_then(Value::as_u64)
+                    .unwrap_or(1);
+                let replay_key = event
+                    .payload
+                    .get("replay_key")
+                    .and_then(Value::as_str)
+                    .map_or_else(
+                        || lash_core::process_wake_source_key(&process_id, sequence),
+                        ToString::to_string,
+                    )
                     .to_string();
                 let wake =
                     lash_core::process_wake_delivery(lash_core::ProcessWakeDeliveryRequest {
                         target_scope: lash_core::SessionScope::new(session.clone()),
                         process_id: process_id.clone(),
-                        sequence: 1,
+                        sequence,
                         event_type: "process.wake".to_string(),
                         event_invocation: lash_core::RuntimeInvocation {
                             scope: lash_core::runtime::RuntimeScope::new(session.clone()),
                             subject: lash_core::runtime::RuntimeSubject::ProcessEvent {
                                 process_id: process_id.clone(),
-                                sequence: 1,
+                                sequence,
                                 event_type: "process.wake".to_string(),
                             },
                             caused_by: None,
-                            replay: Some(lash_core::runtime::RuntimeReplay {
-                                key: format!("process:{process_id}:wake:{dedupe_key}"),
-                            }),
+                            replay: Some(lash_core::runtime::RuntimeReplay { key: replay_key }),
                         },
                         process_caused_by: None,
                         wake: lash_core::ProcessWake {
                             input: format!("wake for {session}"),
-                            dedupe_key: dedupe_key.clone(),
                         },
                         occurred_at: std::time::UNIX_EPOCH
                             + std::time::Duration::from_millis(event.at),
                     })
                     .expect("sim process wake delivery request is deterministic and valid");
                 let wake_id = wake.wake_id.clone();
-                let claimed_once = self
-                    .delivered_process_wake_ids
-                    .insert(wake.dedupe_key.clone());
+                let claimed_once =
+                    self.delivered_process_wake_ids
+                        .insert(lash_core::process_wake_source_key(
+                            &wake.process_id,
+                            wake.sequence,
+                        ));
                 let mut observed = json!({
                     "process_wake": true,
                     "process_id": process_id,
-                    "sequence": 1,
+                    "sequence": sequence,
                     "wake_id": wake_id,
-                    "dedupe_key": dedupe_key,
                     "claimed_once": claimed_once,
                     "runtime_process_wake": wake,
                 });

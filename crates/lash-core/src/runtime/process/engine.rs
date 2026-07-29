@@ -209,6 +209,7 @@ impl ProcessEngineProcessContext {
             .append_event_with_authority(&self.process_id, request, &self.execution_write_authority)
             .await?;
         crate::tool_provider::process_events::enqueue_wake_delivery(
+            Arc::clone(&self.registry),
             self.store.clone(),
             self.session_store_factory.as_ref(),
             result.wake_delivery,

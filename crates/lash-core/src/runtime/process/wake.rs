@@ -66,7 +66,8 @@ pub fn process_wake_delivery(
     let target_scope_id = target_scope.id();
     let wake_id = crate::stable_hash::stable_json_sha256_hex(&(
         target_scope_id.as_str(),
-        wake.dedupe_key.as_str(),
+        process_id.as_str(),
+        sequence,
     ))
     .map_err(|err| {
         PluginError::Session(format!(
@@ -82,7 +83,6 @@ pub fn process_wake_delivery(
         event_type,
         event_invocation,
         process_caused_by,
-        dedupe_key: wake.dedupe_key,
         input: wake.input,
         created_at_ms: epoch_ms_from_system_time(occurred_at),
     })

@@ -69,11 +69,6 @@ pub(crate) fn prune_terminal_processes_conn(
             )
             .map_err(process_sqlite_error)?;
         conn.execute(
-            "DELETE FROM process_wake_acks WHERE process_id = ?1",
-            params![process_id],
-        )
-        .map_err(process_sqlite_error)?;
-        conn.execute(
             "DELETE FROM process_handle_grants WHERE process_id = ?1",
             params![process_id],
         )
@@ -123,6 +118,11 @@ pub(crate) fn prunable_terminal_process_ids_conn(
              WHERE status != 'running'
                AND updated_at_ms < ?1
                AND (?2 IS NULL OR change_seq <= ?2)
+               AND NOT EXISTS (
+                   SELECT 1 FROM process_wake_deliveries AS delivery
+                   WHERE delivery.process_id = processes.process_id
+                     AND delivery.state = 'pending'
+               )
              ORDER BY process_id ASC",
         )
         .map_err(process_sqlite_error)?;

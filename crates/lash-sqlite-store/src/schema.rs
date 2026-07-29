@@ -137,6 +137,13 @@ CREATE TABLE IF NOT EXISTS queued_work_items (
     FOREIGN KEY (batch_id) REFERENCES queued_work_batches(batch_id) ON DELETE CASCADE
 );
 
+CREATE TABLE IF NOT EXISTS consumed_wake_source_keys (
+    session_id     TEXT NOT NULL,
+    source_key     TEXT NOT NULL,
+    consumed_at_ms INTEGER NOT NULL,
+    PRIMARY KEY (session_id, source_key)
+);
+
 CREATE INDEX IF NOT EXISTS idx_queued_work_ready
     ON queued_work_batches(session_id, available_at_ms, enqueue_seq);
 
@@ -245,7 +252,10 @@ CREATE INDEX IF NOT EXISTS idx_attachment_manifest_owner
 ///
 /// Bumped to 20 for permanent session-id tombstones and the removal of
 /// per-lifetime incarnation identity. Pre-20 stores are rejected and recreated.
-pub(crate) const SCHEMA_VERSION: i32 = 20;
+///
+/// Bumped to 21 for consumed process-wake source-key evidence that survives
+/// queue drain. Pre-21 durable-core catalogs are rejected and recreated.
+pub(crate) const SCHEMA_VERSION: i32 = 21;
 
 pub(crate) const PROCESS_SCHEMA: &str = "
 CREATE TABLE IF NOT EXISTS processes (
@@ -289,12 +299,23 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_process_events_key
     ON process_events(process_id, idempotency_key)
     WHERE idempotency_key IS NOT NULL;
 
-CREATE TABLE IF NOT EXISTS process_wake_acks (
-    process_id  TEXT NOT NULL,
-    sequence    INTEGER NOT NULL,
-    PRIMARY KEY (process_id, sequence),
+CREATE TABLE IF NOT EXISTS process_wake_deliveries (
+    delivery_id       TEXT PRIMARY KEY,
+    process_id        TEXT NOT NULL,
+    target_session_id TEXT NOT NULL,
+    sequence          INTEGER NOT NULL,
+    state             TEXT NOT NULL,
+    attempts          INTEGER NOT NULL DEFAULT 0,
+    first_attempt_ms  INTEGER,
+    expires_at_ms     INTEGER NOT NULL,
+    discard_reason    TEXT,
+    delivery_json     TEXT NOT NULL,
     FOREIGN KEY (process_id) REFERENCES processes(process_id) ON DELETE CASCADE
 );
+
+CREATE INDEX IF NOT EXISTS idx_wake_deliveries_pending
+    ON process_wake_deliveries(expires_at_ms)
+    WHERE state = 'pending';
 
 CREATE TABLE IF NOT EXISTS process_handle_grants (
     session_id       TEXT NOT NULL,
@@ -347,7 +368,10 @@ CREATE TABLE IF NOT EXISTS process_segment_handovers (
 // `ExternalOwner` no longer carries the unverified `granted_to` field, changing
 // the replay-key payload hash again. Pre-13 process databases are rejected and
 // recreated so retries cannot compare terminal events across payload formats.
-pub(crate) const PROCESS_SCHEMA_VERSION: i32 = 13;
+//
+// Bumped to 14 for the durable process-wake outbox and removal of the wake-ack
+// lane. Pre-14 process registries are rejected and recreated.
+pub(crate) const PROCESS_SCHEMA_VERSION: i32 = 14;
 
 pub(crate) const TRIGGER_SCHEMA: &str = "
 CREATE TABLE IF NOT EXISTS trigger_subscriptions (

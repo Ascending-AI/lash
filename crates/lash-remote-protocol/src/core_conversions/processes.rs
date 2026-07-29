@@ -575,30 +575,20 @@ impl From<RemoteProcessTerminalSpec> for lash_core::ProcessTerminalSpec {
 
 impl From<lash_core::ProcessWakeSpec> for RemoteProcessWakeSpec {
     fn from(value: lash_core::ProcessWakeSpec) -> Self {
-        let lash_core::ProcessWakeSpec {
-            when,
-            input,
-            dedupe_key,
-        } = value;
+        let lash_core::ProcessWakeSpec { when, input } = value;
         Self {
             when: when.map(Into::into),
             input: input.into(),
-            dedupe_key: dedupe_key.into(),
         }
     }
 }
 
 impl From<RemoteProcessWakeSpec> for lash_core::ProcessWakeSpec {
     fn from(value: RemoteProcessWakeSpec) -> Self {
-        let RemoteProcessWakeSpec {
-            when,
-            input,
-            dedupe_key,
-        } = value;
+        let RemoteProcessWakeSpec { when, input } = value;
         Self {
             when: when.map(Into::into),
             input: input.into(),
-            dedupe_key: dedupe_key.into(),
         }
     }
 }
@@ -821,35 +811,15 @@ impl TryFrom<RemoteProcessTerminalSemantics> for lash_core::ProcessTerminalSeman
 
 impl From<lash_core::ProcessWake> for RemoteProcessWake {
     fn from(value: lash_core::ProcessWake) -> Self {
-        let lash_core::ProcessWake { input, dedupe_key } = value;
-        Self { input, dedupe_key }
+        let lash_core::ProcessWake { input } = value;
+        Self { input }
     }
 }
 
 impl From<RemoteProcessWake> for lash_core::ProcessWake {
     fn from(value: RemoteProcessWake) -> Self {
-        let RemoteProcessWake { input, dedupe_key } = value;
-        Self { input, dedupe_key }
-    }
-}
-
-impl From<lash_core::ProcessWakeDedupeKey> for RemoteProcessWakeDedupeKey {
-    fn from(value: lash_core::ProcessWakeDedupeKey) -> Self {
-        match value {
-            lash_core::ProcessWakeDedupeKey::EventIdentity => Self::EventIdentity,
-            lash_core::ProcessWakeDedupeKey::Selector(selector) => Self::Selector(selector.into()),
-            lash_core::ProcessWakeDedupeKey::Const(value) => Self::Const(value),
-        }
-    }
-}
-
-impl From<RemoteProcessWakeDedupeKey> for lash_core::ProcessWakeDedupeKey {
-    fn from(value: RemoteProcessWakeDedupeKey) -> Self {
-        match value {
-            RemoteProcessWakeDedupeKey::EventIdentity => Self::EventIdentity,
-            RemoteProcessWakeDedupeKey::Selector(selector) => Self::Selector(selector.into()),
-            RemoteProcessWakeDedupeKey::Const(value) => Self::Const(value),
-        }
+        let RemoteProcessWake { input } = value;
+        Self { input }
     }
 }
 

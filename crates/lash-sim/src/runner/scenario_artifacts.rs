@@ -282,7 +282,7 @@ pub(super) fn write_generated_backend_regression_fixtures(
                 "sim.oracle.state-machine-semantic-invariants.v1",
                 "sim.oracle.process-wake-observed.v1",
             ],
-            regression_contract: "duplicate process wake deliveries share a dedupe key, claim queued work once, and keep replay/idempotency evidence backed by generated dynamic replay",
+            regression_contract: "duplicate process wake deliveries share structural process/event identity, claim queued work once, and keep receiver idempotency evidence backed by generated dynamic replay",
             predicate: trace_has_duplicate_process_wake_idempotency,
         },
         BackendRegressionSpec {

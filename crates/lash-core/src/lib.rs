@@ -419,8 +419,8 @@ pub use runtime::{
     ProcessSpawnProvenance, ProcessStartGrant, ProcessStartOptions, ProcessStartOutcome,
     ProcessStartPlan, ProcessStartRequest, ProcessStarted, ProcessStatus, ProcessStatusFilter,
     ProcessTerminalSemantics, ProcessTerminalSpec, ProcessTerminalState, ProcessValueSelector,
-    ProcessWake, ProcessWakeDedupeKey, ProcessWakeDelivery, ProcessWakeDeliveryRequest,
-    ProcessWakeSpec, ProcessWorkDriver, ProcessWorkObserver, ProcessWorkSnapshot, PromptUsage,
+    ProcessWake, ProcessWakeDelivery, ProcessWakeDeliveryRequest, ProcessWakeSpec,
+    ProcessWorkDriver, ProcessWorkObserver, ProcessWorkSnapshot, PromptUsage,
     ProtocolSessionExtension, ProtocolSessionExtensionHandle, ProtocolTurnExtension,
     ProtocolTurnExtensionHandle, QueuedWorkDriver, QueuedWorkRunError, QueuedWorkRunErrorClass,
     QueuedWorkRunHandle, QueuedWorkRunRequest, QueuedWorkWakeDisposition, QueuedWorkWakeFailure,
@@ -437,13 +437,15 @@ pub use runtime::{
     TurnInput, TurnInputAcceptanceReceipt, TurnInputApplication, TurnInputCheckpointBoundary,
     TurnInputClaim, TurnInputClaimMode, TurnInputCompletion, TurnInputIngress, TurnInputState,
     TurnIssue, TurnOptions, TurnTerminal, TurnWorkDriver, UnavailableProcessService,
-    UsageReportRow, UsageTotals, WaitKind, WaitState, apply_process_event_projection,
-    apply_process_status_projection, current_epoch_ms, diff_token_ledger, diff_usage_reports,
-    ensure_durable_effect_input, epoch_ms_from_system_time, fold_process_record,
+    UsageReportRow, UsageTotals, WaitKind, WaitState, WakeDelivery, WakeDeliveryConfig,
+    WakeDeliveryDriveReport, WakeDeliveryDriver, WakeDeliveryReport, WakeDeliveryState,
+    WakeDiscardReason, apply_process_event_projection, apply_process_status_projection,
+    current_epoch_ms, diff_token_ledger, diff_usage_reports, ensure_durable_effect_input,
+    epoch_ms_from_system_time, fold_process_record, is_process_wake_source_key,
     process_runtime_session_ids, process_signal_event_type, process_signal_name_from_event_type,
-    process_signal_wait_key, process_wake_delivery, system_time_from_epoch_ms,
-    terminal_append_request, terminal_event_type_name, validate_process_signal_name,
-    watch_process_registry, watch_process_registry_with_sink,
+    process_signal_wait_key, process_wake_delivery, process_wake_source_key,
+    system_time_from_epoch_ms, terminal_append_request, terminal_event_type_name,
+    validate_process_signal_name, watch_process_registry, watch_process_registry_with_sink,
 };
 pub use runtime::{DEFAULT_PROCESS_EXECUTION_CONCURRENCY, ProcessExecutionConcurrencyError};
 #[allow(unused_imports)]
@@ -488,12 +490,12 @@ pub use session_model::context::PreparedContext;
 pub use session_model::{ConversationRecord, ProtocolEvent, SessionHistoryRecord};
 pub use session_model::{GenerationOverlay, RuntimeSessionPolicy, SessionPolicy, SessionSpec};
 pub use store::{
-    AttachmentIntent, AttachmentManifest, AttachmentManifestEntry, BlobRef, GcReport,
-    LeaseOwnerIdentity, LeaseTimings, LeaseTimingsError, QueuedWorkStore, RuntimePersistence,
-    SessionAdmission, SessionBinding, SessionCommitStore, SessionExecutionLease,
-    SessionExecutionLeaseClaimOutcome, SessionExecutionLeaseCompletion, SessionExecutionLeaseFence,
-    SessionExecutionLeaseStore, SessionMeta, SessionPickerInfo, StoreError, StoreMaintenance,
-    TurnInputStore, VacuumReport,
+    AttachmentIntent, AttachmentManifest, AttachmentManifestEntry, BlobRef,
+    ConsumedWakePruneReport, GcReport, LeaseOwnerIdentity, LeaseTimings, LeaseTimingsError,
+    QueuedWorkStore, RuntimePersistence, SessionAdmission, SessionBinding, SessionCommitStore,
+    SessionExecutionLease, SessionExecutionLeaseClaimOutcome, SessionExecutionLeaseCompletion,
+    SessionExecutionLeaseFence, SessionExecutionLeaseStore, SessionMeta, SessionPickerInfo,
+    StoreError, StoreMaintenance, TurnInputStore, VacuumReport,
 };
 #[allow(unused_imports)]
 pub(crate) use store::{

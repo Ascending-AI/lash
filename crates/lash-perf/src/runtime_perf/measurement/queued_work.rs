@@ -448,7 +448,6 @@ fn queued_work_stress_wake(
             replay: None,
         },
         process_caused_by: None,
-        dedupe_key: format!("wake:{session_id}:{process_id}:{sequence}"),
         input: input.to_string(),
         created_at_ms: sequence,
     }

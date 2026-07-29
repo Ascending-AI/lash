@@ -129,11 +129,12 @@ async fn durable_effect_replays_through_runtime_effect_controller() {
 }
 
 #[tokio::test]
-async fn process_wake_uses_runtime_queued_work_claim_and_dedupe() {
+async fn process_wake_uses_structural_source_identity_for_queued_work_claims() {
     let mut harness = harness();
     let payload = json!({
         "session": "session-001",
-        "dedupe_key": "wake/session-001/001",
+        "process_id": "sim-process-session-001-001",
+        "sequence": 1,
     });
     let first = harness
         .deliver_process_wake(&event(
@@ -158,7 +159,10 @@ async fn process_wake_uses_runtime_queued_work_claim_and_dedupe() {
             kind: BoundaryKind::ProcessWake,
             at: 1,
             label: "test".to_string(),
-            payload: json!({"dedupe_key": "wake/session-001/001"}),
+            payload: json!({
+                "process_id": "sim-process-session-001-001",
+                "sequence": 1,
+            }),
             observed: first.clone(),
         },
         crate::scheduler::DeliveredBoundary {
@@ -170,7 +174,10 @@ async fn process_wake_uses_runtime_queued_work_claim_and_dedupe() {
             kind: BoundaryKind::ProcessWake,
             at: 2,
             label: "test".to_string(),
-            payload: json!({"dedupe_key": "wake/session-001/001"}),
+            payload: json!({
+                "process_id": "sim-process-session-001-001",
+                "sequence": 1,
+            }),
             observed: duplicate.clone(),
         },
     ];

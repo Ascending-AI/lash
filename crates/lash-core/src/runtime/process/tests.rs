@@ -143,7 +143,6 @@ fn wake_delivery(
             replay: None,
         },
         process_caused_by,
-        dedupe_key: "process-1:7".to_string(),
         input: "line one\nline two".to_string(),
         created_at_ms: 123,
     }

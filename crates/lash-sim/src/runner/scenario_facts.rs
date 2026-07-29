@@ -410,24 +410,44 @@ fn process_wake_duplicate_fact(
     contract: &ScenarioContractSpec,
     selected_events: &[TraceEventLine],
 ) -> Result<ScenarioTransitionFact, FixedScriptRunnerError> {
-    let mut by_dedupe_key: BTreeMap<String, Vec<&TraceEventLine>> = BTreeMap::new();
+    let mut by_source_key: BTreeMap<String, Vec<&TraceEventLine>> = BTreeMap::new();
     for line in selected_events
         .iter()
         .filter(|line| line.event.kind == BoundaryKind::ProcessWake)
     {
-        if let Some(dedupe_key) = line
+        if let (Some(process_id), Some(sequence)) = (
+            line.event
+                .observed
+                .pointer("/runtime_process_wake/process_id")
+                .and_then(Value::as_str),
+            line.event
+                .observed
+                .pointer("/runtime_process_wake/sequence")
+                .and_then(Value::as_u64),
+        ) {
+            let source_key = line
+                .event
+                .observed
+                .pointer("/runtime_queued_work/source_key")
+                .and_then(Value::as_str)
+                .map_or_else(
+                    || lash_core::process_wake_source_key(process_id, sequence),
+                    ToString::to_string,
+                );
+            by_source_key.entry(source_key).or_default().push(line);
+        } else if let Some(source_key) = line
             .event
             .observed
-            .get("dedupe_key")
+            .pointer("/runtime_queued_work/source_key")
             .and_then(Value::as_str)
         {
-            by_dedupe_key
-                .entry(dedupe_key.to_string())
+            by_source_key
+                .entry(source_key.to_string())
                 .or_default()
                 .push(line);
         }
     }
-    let events = by_dedupe_key
+    let events = by_source_key
         .values()
         .find(|events| {
             let strict_claim_dedupe = events.len() >= 2
@@ -457,8 +477,8 @@ fn process_wake_duplicate_fact(
         .cloned()
         .unwrap_or_default();
     let observed = json!({
-        "dedupe_keys": by_dedupe_key.iter().map(|(dedupe_key, events)| json!({
-            "dedupe_key": dedupe_key,
+        "source_keys": by_source_key.iter().map(|(source_key, events)| json!({
+            "source_key": source_key,
             "delivery_count": events.len(),
             "claimed_once": events.iter().any(|line| line.event.observed.get("claimed_once").and_then(Value::as_bool) == Some(true)),
             "lease_busy_rejected": events.iter().any(|line| {
@@ -471,7 +491,7 @@ fn process_wake_duplicate_fact(
     require_transition_fact(
         contract,
         "duplicate_process_wake_idempotent",
-        "duplicate process wake deliveries share a dedupe key and are terminalized by queued-work claim dedupe or in-flight lease rejection",
+        "duplicate process wake deliveries share structural process/event identity and are terminalized by receiver evidence or in-flight lease rejection",
         events,
         observed,
     )

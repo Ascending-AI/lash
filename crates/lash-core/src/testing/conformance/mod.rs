@@ -26,6 +26,7 @@ mod runtime_persistence;
 mod session_store_factory;
 mod trigger_store;
 mod turn_control;
+mod wake_delivery;
 
 pub use artifact_store::*;
 pub use attachment_owner::*;
@@ -39,6 +40,7 @@ pub use runtime_persistence::*;
 pub use session_store_factory::*;
 pub use trigger_store::*;
 pub use turn_control::*;
+pub use wake_delivery::*;
 
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
@@ -52,8 +54,8 @@ use crate::{
     ProcessInput, ProcessLeaseCompletion, ProcessListFilter, ProcessLiveReferenceSummary,
     ProcessProvenance, ProcessRecord, ProcessRegistration, ProcessRegistry, ProcessStartOutcome,
     ProcessStarted, ProcessStatus, ProcessStatusFilter, ProcessTerminalState, ProcessValueSelector,
-    ProcessWakeDedupeKey, ProcessWakeDelivery, ProcessWakeSpec, RecoveryDisposition, SessionScope,
-    SessionScopeId, WaitKind, WaitState,
+    ProcessWakeDelivery, ProcessWakeSpec, RecoveryDisposition, SessionScope, SessionScopeId,
+    WaitKind, WaitState,
 };
 use crate::{
     AgentFrameReason, AttachmentId, AttachmentIntent, AwaitEventWaitIdentity, CausalRef,

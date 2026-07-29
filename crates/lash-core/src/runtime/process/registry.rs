@@ -4,7 +4,7 @@ use super::ProcessCompletionOutcome;
 use super::engine::PersistedSegmentHandover;
 use super::events::{
     ProcessAwaitOutput, ProcessCompletionAuthority, ProcessEvent, ProcessEventAppendRequest,
-    ProcessEventAppendResult,
+    ProcessEventAppendResult, ProcessWakeDelivery,
 };
 use super::model::{
     AbandonRequest, ProcessChangeCursor, ProcessExecutionWriteAuthority, ProcessExternalRef,
@@ -25,6 +25,141 @@ pub struct ProcessPruneReport {
     pub pruned_events: usize,
 }
 
+pub const DEFAULT_WAKE_EVIDENCE_RETENTION_MS: u64 = 7 * 24 * 60 * 60 * 1_000;
+
+/// Host-owned bounds for process-wake redelivery and receiver dedupe evidence.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct WakeDeliveryConfig {
+    pub delivery_expiry_ms: u64,
+    pub evidence_retention_ms: u64,
+}
+
+impl Default for WakeDeliveryConfig {
+    fn default() -> Self {
+        Self::from_evidence_retention_ms(DEFAULT_WAKE_EVIDENCE_RETENTION_MS)
+            .expect("default wake evidence retention is valid")
+    }
+}
+
+impl WakeDeliveryConfig {
+    /// Derive the longest valid sender window from the receiver evidence floor.
+    pub fn from_evidence_retention_ms(evidence_retention_ms: u64) -> Result<Self, PluginError> {
+        if evidence_retention_ms < 2 {
+            return Err(PluginError::Session(
+                "process wake evidence retention must be at least 2ms".to_string(),
+            ));
+        }
+        Ok(Self {
+            delivery_expiry_ms: evidence_retention_ms - 1,
+            evidence_retention_ms,
+        })
+    }
+
+    pub fn new(delivery_expiry_ms: u64, evidence_retention_ms: u64) -> Result<Self, PluginError> {
+        if delivery_expiry_ms >= evidence_retention_ms {
+            return Err(PluginError::Session(format!(
+                "process wake delivery expiry ({delivery_expiry_ms}ms) must be strictly shorter \
+                 than consumed-wake evidence retention ({evidence_retention_ms}ms)"
+            )));
+        }
+        Ok(Self {
+            delivery_expiry_ms,
+            evidence_retention_ms,
+        })
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum WakeDeliveryState {
+    Pending,
+    Enqueued,
+    Discarded,
+}
+
+impl WakeDeliveryState {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Pending => "pending",
+            Self::Enqueued => "enqueued",
+            Self::Discarded => "discarded",
+        }
+    }
+}
+
+/// Durable terminal outcome for an undeliverable wake.
+///
+/// This is non-exhaustive because subscription retargeting will add its typed
+/// discard in the wave that introduces the retarget verb.
+#[non_exhaustive]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum WakeDiscardReason {
+    Expired,
+    TargetGone,
+}
+
+impl WakeDiscardReason {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Expired => "expired",
+            Self::TargetGone => "target_gone",
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct WakeDelivery {
+    pub delivery_id: String,
+    pub wake: ProcessWakeDelivery,
+    pub state: WakeDeliveryState,
+    pub attempts: u64,
+    pub first_attempt_ms: Option<u64>,
+    pub expires_at_ms: u64,
+    pub discard_reason: Option<WakeDiscardReason>,
+}
+
+impl WakeDelivery {
+    pub fn pending(
+        wake: ProcessWakeDelivery,
+        config: WakeDeliveryConfig,
+    ) -> Result<Self, PluginError> {
+        let hash = crate::stable_hash::stable_json_sha256_hex(&(
+            wake.target_session_id.as_str(),
+            wake.process_id.as_str(),
+            wake.sequence,
+        ))
+        .map_err(|error| {
+            PluginError::Session(format!(
+                "failed to derive wake delivery id for process `{}`: {error}",
+                wake.process_id
+            ))
+        })?;
+        Ok(Self {
+            delivery_id: format!("wake-delivery:{hash}"),
+            expires_at_ms: wake.created_at_ms.saturating_add(config.delivery_expiry_ms),
+            wake,
+            state: WakeDeliveryState::Pending,
+            attempts: 0,
+            first_attempt_ms: None,
+            discard_reason: None,
+        })
+    }
+
+    pub fn source_key(&self) -> String {
+        crate::process_wake_source_key(&self.wake.process_id, self.wake.sequence)
+    }
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct WakeDeliveryReport {
+    pub pending: usize,
+    pub enqueued: usize,
+    pub discarded: usize,
+    pub expired: usize,
+    pub target_gone: usize,
+}
+
 /// Durability-neutral process registry.
 ///
 /// Process waits are coordination behavior and live on
@@ -34,6 +169,8 @@ pub struct ProcessPruneReport {
 /// `docs/adr/0016-process-waits-live-on-the-work-driver-seam.md`.
 #[async_trait::async_trait]
 pub trait ProcessRegistry: Send + Sync {
+    fn wake_delivery_config(&self) -> WakeDeliveryConfig;
+
     async fn register_process(
         &self,
         registration: ProcessRegistration,
@@ -199,12 +336,6 @@ pub trait ProcessRegistry: Send + Sync {
         Ok(events)
     }
 
-    async fn wake_events_after(
-        &self,
-        process_id: &str,
-        after_sequence: u64,
-    ) -> Result<Vec<ProcessEvent>, PluginError>;
-
     /// Complete a process without a Lash process lease, under an explicit,
     /// auditable completion authority.
     ///
@@ -311,7 +442,26 @@ pub trait ProcessRegistry: Send + Sync {
         limit: usize,
     ) -> Result<(Vec<ProcessRecord>, ProcessChangeCursor), PluginError>;
 
-    async fn ack_wake(&self, process_id: &str, sequence: u64) -> Result<(), PluginError>;
+    /// Return the oldest pending rows and record one delivery attempt for each.
+    async fn pending_wake_deliveries(&self, limit: usize)
+    -> Result<Vec<WakeDelivery>, PluginError>;
+
+    async fn list_wake_deliveries(
+        &self,
+        state: Option<WakeDeliveryState>,
+    ) -> Result<Vec<WakeDelivery>, PluginError>;
+
+    async fn wake_delivery_report(&self) -> Result<WakeDeliveryReport, PluginError>;
+
+    async fn mark_wake_enqueued(&self, delivery_id: &str) -> Result<(), PluginError>;
+
+    async fn discard_wake_delivery(
+        &self,
+        delivery_id: &str,
+        reason: WakeDiscardReason,
+    ) -> Result<(), PluginError>;
+
+    async fn redrive_wake_delivery(&self, delivery_id: &str) -> Result<(), PluginError>;
 
     /// All non-terminal process records, in stable `process_id` order.
     ///
@@ -411,7 +561,7 @@ pub trait ProcessRegistry: Send + Sync {
     /// Physically delete terminal process rows whose `updated_at_ms` is older
     /// than `cutoff_epoch_ms`, match `filter` when one is supplied, and have a
     /// process change sequence no later than `up_to_change_seq` when supplied,
-    /// together with their events, wake acks, handle grants, lease rows, and
+    /// together with their events, handle grants, lease rows, and
     /// trigger-delivery reservations whose deterministic process id points at a
     /// pruned row. The same cutoff also prunes trigger-mutation idempotency
     /// receipts, bounding receipt retention under the host's existing cleanup

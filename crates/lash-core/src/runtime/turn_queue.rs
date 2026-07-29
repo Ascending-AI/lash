@@ -178,6 +178,42 @@ impl QueuedWorkBatch {
     }
 }
 
+#[doc(hidden)]
+pub fn consumed_queued_work_batch(
+    draft: &QueuedWorkBatchDraft,
+    consumed_at_ms: u64,
+) -> QueuedWorkBatch {
+    let source_key = draft
+        .source_key
+        .as_deref()
+        .expect("consumed queued-work evidence requires a source key");
+    let batch_id = format!(
+        "consumed:{}",
+        crate::stable_hash::sha256_hex(format!("{}:{source_key}", draft.session_id).as_bytes())
+    );
+    QueuedWorkBatch {
+        batch_id: batch_id.clone(),
+        session_id: draft.session_id.clone(),
+        enqueue_seq: 0,
+        source_key: draft.source_key.clone(),
+        delivery_policy: draft.delivery_policy,
+        slot_policy: draft.slot_policy,
+        merge_key: draft.merge_key.clone(),
+        available_at_ms: draft.available_at_ms,
+        enqueued_at_ms: consumed_at_ms,
+        items: draft
+            .payloads
+            .iter()
+            .cloned()
+            .enumerate()
+            .map(|(index, payload)| QueuedWorkItem {
+                item_id: format!("{batch_id}:item:{index}"),
+                payload,
+            })
+            .collect(),
+    }
+}
+
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct QueuedWorkBatchDraft {
     pub session_id: String,
@@ -386,7 +422,7 @@ pub struct QueuedTurnWork {
 }
 
 pub fn process_wake_batch_draft(wake: ProcessWakeDelivery) -> QueuedWorkBatchDraft {
-    let source_key = format!("process:{}:event:{}:wake", wake.process_id, wake.sequence);
+    let source_key = process_wake_source_key(&wake.process_id, wake.sequence);
     QueuedWorkBatchDraft::new(
         wake.target_session_id.clone(),
         DeliveryPolicy::EarliestSafeBoundary,
@@ -394,4 +430,23 @@ pub fn process_wake_batch_draft(wake: ProcessWakeDelivery) -> QueuedWorkBatchDra
         vec![QueuedWorkPayload::process_wake(wake)],
     )
     .with_source_key(source_key)
+}
+
+pub fn process_wake_source_key(process_id: &str, sequence: u64) -> String {
+    format!("process:{process_id}:event:{sequence}:wake")
+}
+
+pub fn is_process_wake_source_key(source_key: &str) -> bool {
+    let Some(rest) = source_key.strip_prefix("process:") else {
+        return false;
+    };
+    let Some((process_id, sequence_and_suffix)) = rest.rsplit_once(":event:") else {
+        return false;
+    };
+    let Some(sequence) = sequence_and_suffix.strip_suffix(":wake") else {
+        return false;
+    };
+    !process_id.is_empty()
+        && !sequence.is_empty()
+        && sequence.bytes().all(|byte| byte.is_ascii_digit())
 }

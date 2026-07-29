@@ -6,7 +6,7 @@ use super::process_coordination::{
     awaiter_await_event_never_returns_events_at_or_before_cursor,
     awaiter_cross_task_completion_resolves_promptly, prune_never_touches_non_terminal_rows,
     prune_removes_terminal_processes_older_than_cutoff, prune_respects_filter,
-    prune_respects_leases_grants_and_wake_acks, prune_respects_watermark,
+    prune_respects_leases_grants_and_wake_deliveries, prune_respects_watermark,
     watched_decorator_preserves_registry_semantics,
 };
 use super::process_filters::list_processes_filters_by_enriched_fields;
@@ -82,7 +82,7 @@ where
     awaiter_cross_task_completion_resolves_promptly(make()).await;
     awaiter_await_event_never_returns_events_at_or_before_cursor(make()).await;
     watched_decorator_preserves_registry_semantics(make()).await;
-    prune_respects_leases_grants_and_wake_acks(make()).await;
+    prune_respects_leases_grants_and_wake_deliveries(make()).await;
     prune_respects_filter(make()).await;
     prune_respects_watermark(make()).await;
     prune_never_touches_non_terminal_rows(make()).await;
@@ -161,7 +161,6 @@ pub(super) fn wake_event_type(name: &str) -> ProcessEventType {
             wake: Some(ProcessWakeSpec {
                 when: Some(ProcessValueSelector::Present("/wake_input".to_string())),
                 input: ProcessValueSelector::Pointer("/wake_input".to_string()),
-                dedupe_key: ProcessWakeDedupeKey::EventIdentity,
             }),
             ..ProcessEventSemanticsSpec::default()
         },
@@ -344,7 +343,6 @@ async fn validates_custom_events_and_materializes_wakes(registry: Arc<dyn Proces
             wake: Some(ProcessWakeSpec {
                 when: Some(ProcessValueSelector::Present("/wake_input".to_string())),
                 input: ProcessValueSelector::Pointer("/wake_input".to_string()),
-                dedupe_key: ProcessWakeDedupeKey::EventIdentity,
             }),
             ..ProcessEventSemanticsSpec::default()
         },
@@ -380,25 +378,23 @@ async fn validates_custom_events_and_materializes_wakes(registry: Arc<dyn Proces
         Some("Process event: deploy failed"),
         "wake input materialized from the declared selector"
     );
-    assert_eq!(
-        registry
-            .wake_events_after("proc-1", 0)
-            .await
-            .expect("wake events")
-            .len(),
-        1
-    );
-    registry
-        .ack_wake("proc-1", event.event.sequence)
+    let pending = registry
+        .pending_wake_deliveries(10)
         .await
-        .expect("ack wake");
+        .expect("pending wake deliveries");
+    assert_eq!(pending.len(), 1);
+    assert_eq!(pending[0].wake.sequence, event.event.sequence);
+    registry
+        .mark_wake_enqueued(&pending[0].delivery_id)
+        .await
+        .expect("mark wake enqueued");
     assert!(
         registry
-            .wake_events_after("proc-1", 0)
+            .list_wake_deliveries(Some(crate::WakeDeliveryState::Pending))
             .await
-            .expect("wake events")
+            .expect("pending wake deliveries")
             .is_empty(),
-        "ack_wake must suppress the acked wake from wake_events_after"
+        "mark_wake_enqueued must remove the delivery from the pending scan"
     );
     assert!(
         registry
@@ -429,7 +425,6 @@ async fn custom_wake_events_preserve_typed_provenance_and_replay(
         ProcessWakeSpec {
             when: Some(ProcessValueSelector::Present("/wake_input".to_string())),
             input: ProcessValueSelector::Pointer("/wake_input".to_string()),
-            dedupe_key: ProcessWakeDedupeKey::EventIdentity,
         },
     );
     registry
@@ -506,7 +501,6 @@ async fn custom_wake_events_preserve_typed_provenance_and_replay(
     assert_eq!(wake.target_scope_id, target_scope_id);
     assert_eq!(wake.process_id, "proc-provenance");
     assert_eq!(wake.sequence, first.event.sequence);
-    assert_eq!(wake.dedupe_key, "proc-provenance:1");
     assert_eq!(wake.input, "custom wake: build failed");
     assert_eq!(
         replay
@@ -577,25 +571,15 @@ async fn event_streams_filter_order_and_wait_without_leaking_old_events(
             .is_empty(),
         "events_after must not leak events at or before the cursor"
     );
-    let wake_after_one = registry
-        .wake_events_after("proc-stream", 1)
+    let pending_wakes = registry
+        .list_wake_deliveries(Some(crate::WakeDeliveryState::Pending))
         .await
-        .expect("wake events after one");
-    assert_eq!(
-        wake_after_one
-            .iter()
-            .map(|event| (event.sequence, event.event_type.as_str()))
-            .collect::<Vec<_>>(),
-        vec![(2, "producer.wake")],
-        "wake_events_after must filter to unacked wake events after the cursor"
-    );
+        .expect("pending wake deliveries");
     assert!(
-        registry
-            .wake_events_after("proc-stream", 2)
-            .await
-            .expect("wake events after wake")
-            .is_empty(),
-        "wake_events_after must not return the cursor event itself"
+        pending_wakes.iter().any(
+            |delivery| delivery.wake.process_id == "proc-stream" && delivery.wake.sequence == 2
+        ),
+        "the wake event must have a durable pending delivery"
     );
     let immediate = awaiter
         .await_event("proc-stream", "producer.line", 1)
@@ -637,7 +621,6 @@ async fn wake_semantics_matrix_materializes_declared_wakes(registry: Arc<dyn Pro
                     ProcessWakeSpec {
                         when: Some(ProcessValueSelector::Const(serde_json::json!(false))),
                         input: ProcessValueSelector::Const(serde_json::json!("must not wake")),
-                        dedupe_key: ProcessWakeDedupeKey::EventIdentity,
                     },
                 ),
                 wake_event_type_with(
@@ -645,7 +628,6 @@ async fn wake_semantics_matrix_materializes_declared_wakes(registry: Arc<dyn Pro
                     ProcessWakeSpec {
                         when: None,
                         input: ProcessValueSelector::Payload,
-                        dedupe_key: ProcessWakeDedupeKey::EventIdentity,
                     },
                 ),
                 wake_event_type_with(
@@ -655,7 +637,6 @@ async fn wake_semantics_matrix_materializes_declared_wakes(registry: Arc<dyn Pro
                         input: ProcessValueSelector::Const(serde_json::json!(
                             "constant wake input"
                         )),
-                        dedupe_key: ProcessWakeDedupeKey::EventIdentity,
                     },
                 ),
                 wake_event_type_with(
@@ -677,25 +658,6 @@ async fn wake_semantics_matrix_materializes_declared_wakes(registry: Arc<dyn Pro
                             .into_iter()
                             .collect(),
                         },
-                        dedupe_key: ProcessWakeDedupeKey::EventIdentity,
-                    },
-                ),
-                wake_event_type_with(
-                    "matrix.selector_dedupe",
-                    ProcessWakeSpec {
-                        when: None,
-                        input: ProcessValueSelector::Pointer("/wake_input".to_string()),
-                        dedupe_key: ProcessWakeDedupeKey::Selector(ProcessValueSelector::Pointer(
-                            "/dedupe".to_string(),
-                        )),
-                    },
-                ),
-                wake_event_type_with(
-                    "matrix.const_dedupe",
-                    ProcessWakeSpec {
-                        when: None,
-                        input: ProcessValueSelector::Pointer("/wake_input".to_string()),
-                        dedupe_key: ProcessWakeDedupeKey::Const("constant-dedupe".to_string()),
                     },
                 ),
             ]),
@@ -727,7 +689,6 @@ async fn wake_semantics_matrix_materializes_declared_wakes(registry: Arc<dyn Pro
         .wake_delivery
         .expect("payload wake");
     assert_eq!(payload.input, "payload wake");
-    assert_eq!(payload.dedupe_key, "proc-wake-matrix:2");
     let const_input = registry
         .append_event(
             "proc-wake-matrix",
@@ -753,79 +714,19 @@ async fn wake_semantics_matrix_materializes_declared_wakes(registry: Arc<dyn Pro
         .wake_delivery
         .expect("template wake");
     assert_eq!(template.input, "line done #7");
-    let selector_first = registry
-        .append_event(
-            "proc-wake-matrix",
-            ProcessEventAppendRequest::new(
-                "matrix.selector_dedupe",
-                serde_json::json!({"wake_input": "selector one", "dedupe": "group-a"}),
-            )
-            .with_wake_target_scope(target.clone()),
-        )
+    let mut wake_sequences = registry
+        .list_wake_deliveries(Some(crate::WakeDeliveryState::Pending))
         .await
-        .expect("append selector wake one")
-        .wake_delivery
-        .expect("selector wake one");
-    let selector_second = registry
-        .append_event(
-            "proc-wake-matrix",
-            ProcessEventAppendRequest::new(
-                "matrix.selector_dedupe",
-                serde_json::json!({"wake_input": "selector two", "dedupe": "group-a"}),
-            )
-            .with_wake_target_scope(target.clone()),
-        )
-        .await
-        .expect("append selector wake two")
-        .wake_delivery
-        .expect("selector wake two");
-    assert_eq!(selector_first.dedupe_key, "group-a");
-    assert_eq!(
-        selector_first.wake_id, selector_second.wake_id,
-        "selector dedupe must produce a stable wake id for the same target and selector value"
-    );
-    let const_dedupe_first = registry
-        .append_event(
-            "proc-wake-matrix",
-            ProcessEventAppendRequest::new(
-                "matrix.const_dedupe",
-                serde_json::json!({"wake_input": "const one"}),
-            )
-            .with_wake_target_scope(target.clone()),
-        )
-        .await
-        .expect("append const dedupe one")
-        .wake_delivery
-        .expect("const dedupe one");
-    let const_dedupe_second = registry
-        .append_event(
-            "proc-wake-matrix",
-            ProcessEventAppendRequest::new(
-                "matrix.const_dedupe",
-                serde_json::json!({"wake_input": "const two"}),
-            )
-            .with_wake_target_scope(target),
-        )
-        .await
-        .expect("append const dedupe two")
-        .wake_delivery
-        .expect("const dedupe two");
-    assert_eq!(const_dedupe_first.dedupe_key, "constant-dedupe");
-    assert_eq!(
-        const_dedupe_first.wake_id, const_dedupe_second.wake_id,
-        "const dedupe must produce a stable wake id for the same target"
-    );
-    let wake_sequences = registry
-        .wake_events_after("proc-wake-matrix", 0)
-        .await
-        .expect("wake events")
+        .expect("wake deliveries")
         .into_iter()
-        .map(|event| event.sequence)
+        .filter(|delivery| delivery.wake.process_id == "proc-wake-matrix")
+        .map(|delivery| delivery.wake.sequence)
         .collect::<Vec<_>>();
+    wake_sequences.sort_unstable();
     assert_eq!(
         wake_sequences,
-        vec![2, 3, 4, 5, 6, 7, 8],
-        "wake_events_after must include only events whose wake semantics materialized"
+        vec![2, 3, 4],
+        "the outbox must include only events whose wake semantics materialized"
     );
 }
 
@@ -1984,17 +1885,28 @@ async fn delete_session_revokes_handles_by_session(registry: Arc<dyn ProcessRegi
         )
         .await
         .expect("append shared wake");
-    registry
-        .ack_wake("shared", shared_wake.event.sequence)
+    let shared_delivery = registry
+        .list_wake_deliveries(Some(crate::WakeDeliveryState::Pending))
         .await
-        .expect("ack shared wake");
+        .expect("pending shared wake")
+        .into_iter()
+        .find(|delivery| {
+            delivery.wake.process_id == "shared"
+                && delivery.wake.sequence == shared_wake.event.sequence
+        })
+        .expect("shared wake delivery");
+    registry
+        .mark_wake_enqueued(&shared_delivery.delivery_id)
+        .await
+        .expect("mark shared wake enqueued");
     assert!(
         registry
-            .wake_events_after("shared", 0)
+            .list_wake_deliveries(Some(crate::WakeDeliveryState::Pending))
             .await
-            .expect("shared wake events before delete")
-            .is_empty(),
-        "acked shared wake should be suppressed before session deletion"
+            .expect("pending wake deliveries before delete")
+            .into_iter()
+            .all(|delivery| delivery.wake.process_id != "shared"),
+        "enqueued shared wake should be absent from pending delivery scans"
     );
 
     let report = registry
@@ -2003,7 +1915,7 @@ async fn delete_session_revokes_handles_by_session(registry: Arc<dyn ProcessRegi
         .expect("delete session process state");
 
     assert_eq!(report.revoked_handle_count, 3);
-    assert_eq!(report.deleted_wake_count, 0);
+    assert_eq!(report.discarded_wake_delivery_count, 1);
     assert_eq!(report.orphaned_process_ids, vec!["sole".to_string()]);
     assert_eq!(report.preserved_process_ids, vec!["shared".to_string()]);
     for process_id in ["sole", "shared", "terminal"] {
@@ -2034,12 +1946,21 @@ async fn delete_session_revokes_handles_by_session(registry: Arc<dyn ProcessRegi
     );
     assert!(
         registry
-            .wake_events_after("shared", 0)
+            .list_wake_deliveries(Some(crate::WakeDeliveryState::Enqueued))
             .await
-            .expect("shared wake events after delete")
-            .is_empty(),
-        "session deletion must preserve process-scoped wake acknowledgements"
+            .expect("shared wake deliveries after delete")
+            .into_iter()
+            .any(|delivery| delivery.delivery_id == shared_delivery.delivery_id),
+        "session deletion must preserve already-enqueued deliveries for other targets"
     );
+    let discarded = registry
+        .list_wake_deliveries(Some(crate::WakeDeliveryState::Discarded))
+        .await
+        .expect("discarded wake deliveries");
+    assert!(discarded.iter().any(|delivery| {
+        delivery.wake.process_id == "sole"
+            && delivery.discard_reason == Some(crate::WakeDiscardReason::TargetGone)
+    }));
 }
 
 async fn list_non_terminal_excludes_terminal_processes(registry: Arc<dyn ProcessRegistry>) {

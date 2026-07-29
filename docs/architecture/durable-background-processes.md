@@ -52,7 +52,7 @@ in-process under normal operation, but the spawn held **no lease**, so a recover
 sweep on another node or after a restart could re-run a process already running
 (the off-lease/double-exec window), and on crash the in-memory task was gone with
 **no prompt re-execution** — only the next restart's startup sweep would re-run
-it. Registry rows — record, events, grants, wake inbox — survived a restart; the
+it. Registry rows — record, events, grants, and wake outbox — survived a restart; the
 *execution* was either off-lease or merely eventually-recovered.
 
 The fix removes that silent fallback **and** the off-lease spawn. Process admin
@@ -159,6 +159,30 @@ per deployment.
 This deletes the asymmetry: a trigger-started process is identically durable to a
 turn-started one, because both are just registered intent that the durable worker
 executes. "How it was started" leaves the durability story entirely.
+
+### Process wakes use one sender-outbox/receiver-evidence driver
+
+A wake event and its `process_wake_deliveries` row commit in the same process
+registry transaction. `WakeDeliveryDriver` is the only delivery path for local,
+PostgreSQL, and Restate-backed deployments: it scans on startup, polls with
+bounded backoff, and is nudged after an append. Delivery enqueues queued work by
+the deterministic `process:{process_id}:event:{sequence}:wake` source key and
+then marks the sender row enqueued. A crash between those writes is safe.
+
+Queue completion writes `consumed_wake_source_keys` in the same session-store
+transaction that removes the claimed batch. A late sender retry therefore sees
+either the live queue row or settled receiver evidence and never recreates the
+turn. Delivery expiry must be strictly shorter than consumed-evidence retention;
+evidence pruning is an explicit `StoreMaintenance` operation. Missing or
+deleted targets and expired deliveries remain visible as typed `TargetGone` or
+`Expired` discards. Hosts inspect them through `wake_deliveries` /
+`wake_delivery_report`, redrive one explicitly with `redrive_wake_delivery`,
+and can force a bounded scan with `drive_wake_deliveries`.
+
+Restate does not implement a second wake route. Its process execution still
+runs under Restate, while wake handoff uses this same durable driver and
+PostgreSQL tables. The operations runbook reset consequently clears
+`lash_process_wake_deliveries` and `lash_consumed_wake_source_keys`.
 
 Process waiting follows the same split. `ProcessRegistry` exposes state only;
 terminal and event waits live in `ProcessWorkDriver` / `ProcessAwaiter` (see
