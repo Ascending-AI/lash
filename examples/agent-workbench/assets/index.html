@@ -208,9 +208,9 @@
 
     .trigger-registry-head,
     .trigger-registration {
-      display: flex;
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
       align-items: center;
-      justify-content: space-between;
       gap: var(--space-xs);
     }
 
@@ -232,22 +232,25 @@
     }
 
     .trigger-registration[data-enabled="false"] { opacity: 0.58; }
-    .trigger-registration-copy {
-      display: grid;
-      gap: 0.12rem;
-      min-width: 0;
-    }
     .trigger-registration-name,
     .trigger-registration-detail {
       overflow: hidden;
       text-overflow: ellipsis;
       white-space: nowrap;
     }
+    .trigger-registration-name { min-width: 0; }
     .trigger-registration-detail {
+      grid-column: 1 / -1;
+      grid-row: 2;
       color: var(--ash-text);
       font-size: 0.64rem;
     }
-    .trigger-registration-actions { display: flex; gap: var(--space-3xs); flex: none; }
+    .trigger-registration-actions {
+      display: flex;
+      grid-column: 2;
+      grid-row: 1;
+      gap: var(--space-3xs);
+    }
     .trigger-registration-actions button {
       border: 1px solid var(--line);
       border-radius: 5px;
@@ -3404,29 +3407,43 @@
       const config = triggerRegistrationSourceConfig(registration);
       if (!config) return "";
       if (typeof config.expr === "string") {
-        const everySeconds = config.expr.match(/^\*\/(\d+) \* \* \* \* \*$/);
-        if (everySeconds) return "every " + everySeconds[1] + "s";
+        if (registration.source_type === "cron.Schedule") {
+          const everySeconds = config.expr.match(/^\*\/(\d+) \* \* \* \* \*$/);
+          if (everySeconds) return "every " + everySeconds[1] + "s";
+        }
         return typeof config.tz === "string" && config.tz
           ? config.expr + " · " + config.tz
           : config.expr;
       }
-      return Object.entries(config)
-        .filter(([key, value]) => !key.startsWith("$") && ["string", "number", "boolean"].includes(typeof value))
+      const entries = Object.entries(config)
+        .filter(([key, value]) => !key.startsWith("$") && ["string", "number", "boolean"].includes(typeof value));
+      const summary = entries
         .slice(0, 2)
         .map(([key, value]) => key + " " + String(value))
         .join(" · ");
+      return summary + (entries.length > 2 ? " · …" : "");
     }
 
-    function triggerRegistrationIdentity(value) {
-      if (!value || value.length <= 14) return value || "unknown";
-      return value.slice(0, 12) + "…";
+    function truncateTriggerDetail(value, length) {
+      if (!value) return "unknown";
+      return value.length <= length ? value : value.slice(0, length) + "…";
     }
 
-    function triggerRegistrationSession(registration) {
+    function truncateSubscriptionId(value) {
+      const prefix = "trigger-subscription:v1:sha256:";
+      if (!value) return "unknown";
+      if (value.startsWith(prefix)) {
+        return "sha256:" + truncateTriggerDetail(value.slice(prefix.length), 10);
+      }
+      return truncateTriggerDetail(value, 18);
+    }
+
+    function triggerRegistrationScope(registration) {
       const scope = registration.registrant_scope || "";
-      if (scope.startsWith("session:")) return scope.slice("session:".length);
       return scope
-        || registration.registrant?.scope?.session_id
+        || (registration.registrant?.scope?.session_id
+          ? "session:" + registration.registrant.scope.session_id
+          : "")
         || "unknown";
     }
 
@@ -3438,25 +3455,29 @@
       const sourceSummary = triggerRegistrationSourceSummary(registration);
       const subscriptionId = registration.subscription_id || "unknown";
       const subscriptionKey = registration.subscription_key || "unknown";
+      const scope = triggerRegistrationScope(registration);
       const details = [
-        ["session", triggerRegistrationSession(registration)],
-        ["incarnation", registration.incarnation || "unknown"],
-        ["id", triggerRegistrationIdentity(subscriptionId)],
-        ["trigger key", subscriptionKey]
+        ["id", truncateSubscriptionId(subscriptionId)],
+        ["trigger key", truncateTriggerDetail(subscriptionKey, 12)],
+        ["scope", truncateTriggerDetail(scope, 18)],
+        ["incarnation", truncateTriggerDetail(registration.incarnation, 12)]
       ];
+      const titleDetails = [
+        ["id", subscriptionId],
+        ["trigger key", subscriptionKey],
+        ["scope", scope]
+      ];
+      if (registration.name) titleDetails.push(["alias", registration.name]);
+      titleDetails.push(["incarnation", registration.incarnation || "unknown"]);
       return {
         name: processName + " ← " + sourceType + (sourceSummary ? " (" + sourceSummary + ")" : ""),
         detail: details.map(([label, value]) => label + " " + value).join(" · "),
-        title: [
-          ["session", triggerRegistrationSession(registration)],
-          ["incarnation", registration.incarnation || "unknown"],
-          ["id", subscriptionId],
-          ["trigger key", subscriptionKey]
-        ].map(([label, value]) => label + " " + value).join(" · ")
+        title: titleDetails.map(([label, value]) => label + " " + value).join(" · ")
       };
     }
     // END WORKBENCH_TRIGGER_REGISTRATION_PROJECTION
 
+    // BEGIN WORKBENCH_TRIGGER_REGISTRATION_RENDERING
     function renderTriggers(registrations) {
       triggerCount.textContent = String(registrations.length);
       triggerRegistrations.innerHTML = "";
@@ -3474,8 +3495,6 @@
         row.className = "trigger-registration";
         row.dataset.enabled = String(registration.enabled);
         row.dataset.triggerSubscriptionKey = subscriptionKey;
-        const copy = document.createElement("span");
-        copy.className = "trigger-registration-copy";
         const name = document.createElement("span");
         name.className = "trigger-registration-name";
         name.textContent = model.name;
@@ -3483,7 +3502,6 @@
         detail.className = "trigger-registration-detail";
         detail.textContent = model.detail;
         detail.title = model.title;
-        copy.append(name, detail);
         const actions = document.createElement("span");
         actions.className = "trigger-registration-actions";
         const toggle = document.createElement("button");
@@ -3495,10 +3513,11 @@
         remove.textContent = "delete";
         remove.addEventListener("click", () => deleteTrigger(subscriptionKey));
         actions.append(toggle, remove);
-        row.append(copy, actions);
+        row.append(name, detail, actions);
         triggerRegistrations.appendChild(row);
       }
     }
+    // END WORKBENCH_TRIGGER_REGISTRATION_RENDERING
 
     async function setTriggerEnabled(subscriptionKey, enabled) {
       const response = await fetch("/api/triggers/" + encodeURIComponent(subscriptionKey) + "/enabled", {

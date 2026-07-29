@@ -267,10 +267,13 @@ async fn async_main() -> AnyhowResult<()> {
         .route("/api/button-trigger", post(button_trigger))
         .route("/api/triggers", get(list_triggers))
         .route(
-            "/api/triggers/{handle}/enabled",
+            "/api/triggers/{subscription_key}/enabled",
             put(set_trigger_enabled),
         )
-        .route("/api/triggers/{handle}", delete(delete_trigger))
+        .route(
+            "/api/triggers/{subscription_key}",
+            delete(delete_trigger),
+        )
         .route("/api/accounts", get(list_accounts).post(add_account))
         .route("/api/accounts/{slug}", delete(delete_account))
         .route("/api/accounts/{slug}/messages", post(inject_message))

@@ -142,13 +142,17 @@ test("trigger registration controls use the payload subscription key", () => {
 });
 
 test("trigger registration rows separate display name, identity, and trigger key", () => {
+  const subscriptionIdA =
+    "trigger-subscription:v1:sha256:1bab983f42000000000000000000000000000000000000000000000000000000";
+  const subscriptionIdB =
+    "trigger-subscription:v1:sha256:9c4d0a71ee000000000000000000000000000000000000000000000000000000";
   const rowContext = {};
   vm.runInNewContext(
     `${markedSource(
       "WORKBENCH_TRIGGER_REGISTRATION_PROJECTION",
       "WORKBENCH_TRIGGER_REGISTRATION_PROJECTION",
     )}
-     this.row = triggerRegistrationRowModel({
+     const shared = {
        name: "shared-blue-watch",
        source_type: "cron.Schedule",
        source: {
@@ -156,24 +160,143 @@ test("trigger registration rows separate display name, identity, and trigger key
          $lash_host_descriptor_value: { expr: "*/2 * * * * *", tz: "UTC" }
        },
        target: { label: "mirror_job", identity: { label: "ignored-fallback" } },
-       subscription_id: "subscription-identity-for-session-a",
        subscription_key: "derived/v1/content-address",
-       registrant_scope: "session:session-a",
        incarnation: "incarnation-a"
-     });`,
+     };
+     this.rows = [
+       triggerRegistrationRowModel({
+         ...shared,
+         subscription_id: ${JSON.stringify(subscriptionIdA)},
+         registrant_scope: "session:session-a"
+       }),
+       triggerRegistrationRowModel({
+         ...shared,
+         subscription_id: ${JSON.stringify(subscriptionIdB)},
+         registrant_scope: "session:session-b"
+       })
+     ];`,
     rowContext,
   );
 
-  assert.equal(rowContext.row.name, "mirror_job ← cron.Schedule (every 2s)");
+  assert.match(subscriptionIdA, /^trigger-subscription:v1:sha256:[0-9a-f]{64}$/);
+  assert.match(subscriptionIdB, /^trigger-subscription:v1:sha256:[0-9a-f]{64}$/);
+  assert.equal(rowContext.rows[0].name, "mirror_job ← cron.Schedule (every 2s)");
+  assert.equal(rowContext.rows[1].name, rowContext.rows[0].name);
   assert.equal(
-    rowContext.row.detail,
-    "session session-a · incarnation incarnation-a · id subscription… · trigger key derived/v1/content-address",
+    rowContext.rows[0].detail,
+    "id sha256:1bab983f42… · trigger key derived/v1/c… · scope session:session-a · incarnation incarnation-…",
   );
   assert.equal(
-    rowContext.row.title,
-    "session session-a · incarnation incarnation-a · id subscription-identity-for-session-a · trigger key derived/v1/content-address",
+    rowContext.rows[0].title,
+    `id ${subscriptionIdA} · trigger key derived/v1/content-address · scope session:session-a · alias shared-blue-watch · incarnation incarnation-a`,
   );
-  assert.doesNotMatch(rowContext.row.name, /shared-blue-watch/);
+  assert.doesNotMatch(rowContext.rows[0].name, /shared-blue-watch/);
+  assert.notEqual(
+    rowContext.rows[0].detail.match(/^id ([^·]+)/)?.[1],
+    rowContext.rows[1].detail.match(/^id ([^·]+)/)?.[1],
+    "same-name, same-key registrations must render visibly distinct ids",
+  );
+});
+
+test("trigger registration names preserve raw fallbacks and omit empty summaries", () => {
+  const fallbackContext = {};
+  vm.runInNewContext(
+    `${markedSource(
+      "WORKBENCH_TRIGGER_REGISTRATION_PROJECTION",
+      "WORKBENCH_TRIGGER_REGISTRATION_PROJECTION",
+    )}
+     const base = {
+       subscription_id: "trigger-subscription:v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+       subscription_key: "literal-key",
+       registrant_scope: "host:calendar",
+       incarnation: "9f2a5950-7fe8-4b51-b1d4-c47e43697b89"
+     };
+     this.raw = triggerRegistrationRowModel({
+       ...base,
+       source_type: "future.Schedule",
+       source: { $lash_host_descriptor_value: { expr: "rate(5m)" } },
+       target: { identity: { label: "fallback_job" } }
+     });
+     this.empty = triggerRegistrationRowModel({
+       ...base,
+       source_type: "ui.button.pressed",
+       source: {},
+       target: {}
+     });
+     this.generic = triggerRegistrationRowModel({
+       ...base,
+       source_type: "future.Source",
+       source: { first: 1, second: true, third: "visible-truncation" },
+       target: { label: "generic_job" }
+     });`,
+    fallbackContext,
+  );
+
+  assert.equal(
+    fallbackContext.raw.name,
+    "fallback_job ← future.Schedule (rate(5m))",
+  );
+  assert.match(fallbackContext.raw.detail, /scope host:calendar/);
+  assert.equal(fallbackContext.empty.name, "process ← ui.button.pressed");
+  assert.doesNotMatch(fallbackContext.empty.name, /\(/);
+  assert.equal(
+    fallbackContext.generic.name,
+    "generic_job ← future.Source (first 1 · second true · …)",
+  );
+});
+
+test("renderTriggers wires the projected name and detail into the rail", () => {
+  function element(tagName) {
+    return {
+      tagName,
+      children: [],
+      dataset: {},
+      append(...children) {
+        this.children.push(...children);
+      },
+      appendChild(child) {
+        this.children.push(child);
+      },
+      addEventListener() {},
+    };
+  }
+
+  const triggerCount = element("span");
+  const triggerRegistrations = element("div");
+  const renderContext = {
+    document: { createElement: element },
+    triggerCount,
+    triggerRegistrations,
+    setTriggerEnabled() {},
+    deleteTrigger() {},
+  };
+  vm.runInNewContext(
+    `${markedSource(
+      "WORKBENCH_TRIGGER_REGISTRATION_PROJECTION",
+      "WORKBENCH_TRIGGER_REGISTRATION_PROJECTION",
+    )}
+     ${markedSource(
+       "WORKBENCH_TRIGGER_REGISTRATION_RENDERING",
+       "WORKBENCH_TRIGGER_REGISTRATION_RENDERING",
+     )}
+     renderTriggers([{
+       enabled: true,
+       source_type: "cron.Schedule",
+       source: { $lash_host_descriptor_value: { expr: "*/2 * * * * *" } },
+       target: { label: "wired_job" },
+       subscription_id: "trigger-subscription:v1:sha256:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
+       subscription_key: "wired-key",
+       registrant_scope: "session:wired-session",
+       incarnation: "wired-incarnation"
+     }]);`,
+    renderContext,
+  );
+
+  const row = triggerRegistrations.children[0];
+  assert.equal(triggerCount.textContent, "1");
+  assert.equal(row.children[0].textContent, "wired_job ← cron.Schedule (every 2s)");
+  assert.match(row.children[1].textContent, /^id sha256:1234567890…/);
+  assert.match(row.children[1].title, /trigger key wired-key/);
 });
 
 test("settled transcript rendering consumes durable reasoning and code disclosure", () => {

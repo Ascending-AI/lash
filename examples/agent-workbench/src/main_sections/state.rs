@@ -602,6 +602,8 @@ struct TriggerEnabledRequest {
 
 #[derive(Clone, Debug, Serialize)]
 struct WorkbenchTriggerRegistration {
+    // Keep these sibling names absent from the flattened core DTO: serde would
+    // otherwise emit duplicate JSON keys with order-dependent browser values.
     #[serde(flatten)]
     registration: lash::triggers::TriggerRegistration,
     subscription_id: String,
