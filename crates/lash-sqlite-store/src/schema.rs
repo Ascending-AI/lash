@@ -137,11 +137,11 @@ CREATE TABLE IF NOT EXISTS queued_work_items (
     FOREIGN KEY (batch_id) REFERENCES queued_work_batches(batch_id) ON DELETE CASCADE
 );
 
-CREATE TABLE IF NOT EXISTS consumed_wake_source_keys (
-    session_id     TEXT NOT NULL,
-    source_key     TEXT NOT NULL,
-    consumed_at_ms INTEGER NOT NULL,
-    PRIMARY KEY (session_id, source_key)
+CREATE TABLE IF NOT EXISTS consumed_wake_high_water (
+    session_id    TEXT NOT NULL,
+    process_id    TEXT NOT NULL,
+    high_sequence INTEGER NOT NULL,
+    PRIMARY KEY (session_id, process_id)
 );
 
 CREATE INDEX IF NOT EXISTS idx_queued_work_ready
@@ -255,7 +255,10 @@ CREATE INDEX IF NOT EXISTS idx_attachment_manifest_owner
 ///
 /// Bumped to 21 for consumed process-wake source-key evidence that survives
 /// queue drain. Pre-21 durable-core catalogs are rejected and recreated.
-pub(crate) const SCHEMA_VERSION: i32 = 21;
+///
+/// Bumped to 22 to replace per-message evidence with monotone consumed
+/// high-water marks. Pre-22 durable-core catalogs are rejected and recreated.
+pub(crate) const SCHEMA_VERSION: i32 = 22;
 
 pub(crate) const PROCESS_SCHEMA: &str = "
 CREATE TABLE IF NOT EXISTS processes (
@@ -307,16 +310,19 @@ CREATE TABLE IF NOT EXISTS process_wake_deliveries (
     state             TEXT NOT NULL,
     attempts          INTEGER NOT NULL DEFAULT 0,
     first_attempt_ms  INTEGER,
+    next_attempt_at_ms INTEGER NOT NULL,
     expires_at_ms     INTEGER NOT NULL,
     discard_reason    TEXT,
-    evidence_cleanup_pending INTEGER NOT NULL DEFAULT 0,
     delivery_json     TEXT NOT NULL,
     FOREIGN KEY (process_id) REFERENCES processes(process_id) ON DELETE CASCADE
 );
 
 CREATE INDEX IF NOT EXISTS idx_wake_deliveries_pending
-    ON process_wake_deliveries(expires_at_ms)
+    ON process_wake_deliveries(next_attempt_at_ms, target_session_id, process_id, sequence)
     WHERE state = 'pending';
+CREATE INDEX IF NOT EXISTS idx_wake_deliveries_group_sequence
+    ON process_wake_deliveries(target_session_id, process_id, sequence)
+    WHERE state <> 'enqueued';
 
 CREATE TABLE IF NOT EXISTS process_handle_grants (
     session_id       TEXT NOT NULL,
@@ -375,7 +381,10 @@ CREATE TABLE IF NOT EXISTS process_segment_handovers (
 //
 // Bumped to 15 so terminal wake deliveries retain a durable exact-evidence
 // cleanup reconciliation bit. Pre-15 registries are rejected and recreated.
-pub(crate) const PROCESS_SCHEMA_VERSION: i32 = 15;
+//
+// Bumped to 16 to remove that cleanup lane and add fair retry scheduling.
+// Pre-16 registries are rejected and recreated.
+pub(crate) const PROCESS_SCHEMA_VERSION: i32 = 16;
 
 pub(crate) const TRIGGER_SCHEMA: &str = "
 CREATE TABLE IF NOT EXISTS trigger_subscriptions (

@@ -66,26 +66,4 @@ impl crate::store::StoreMaintenance for InMemorySessionStore {
     async fn gc_unreachable(&self) -> Result<crate::store::GcReport, crate::store::StoreError> {
         Ok(crate::store::GcReport::default())
     }
-
-    async fn prune_consumed_wake_source_keys(
-        &self,
-        session_id: &str,
-        source_keys: &[String],
-    ) -> Result<crate::store::ConsumedWakePruneReport, crate::store::StoreError> {
-        let _transaction = self
-            .write_transaction
-            .lock()
-            .expect("lock in-memory write transaction");
-        let mut consumed = self
-            .consumed_wake_source_keys
-            .lock()
-            .expect("lock consumed wake source keys");
-        let before = consumed.len();
-        consumed.retain(|(stored_session_id, source_key), _| {
-            stored_session_id != session_id || !source_keys.contains(source_key)
-        });
-        Ok(crate::store::ConsumedWakePruneReport {
-            removed_source_key_count: before.saturating_sub(consumed.len()),
-        })
-    }
 }

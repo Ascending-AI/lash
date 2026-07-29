@@ -592,7 +592,6 @@ impl ProcessRegistry for TestLocalProcessRegistry {
             {
                 delivery.state = super::WakeDeliveryState::Discarded;
                 delivery.discard_reason = Some(super::WakeDiscardReason::TargetGone);
-                delivery.evidence_cleanup_pending = true;
                 discarded_wake_delivery_count += 1;
             }
         }
@@ -1034,9 +1033,10 @@ impl ProcessRegistry for TestLocalProcessRegistry {
         let mut ids = deliveries
             .values()
             .filter(|delivery| delivery.state == super::WakeDeliveryState::Pending)
+            .filter(|delivery| delivery.next_attempt_at_ms <= now)
             .filter(|candidate| {
                 !deliveries.values().any(|earlier| {
-                    earlier.state == super::WakeDeliveryState::Pending
+                    earlier.state != super::WakeDeliveryState::Enqueued
                         && earlier.wake.target_session_id == candidate.wake.target_session_id
                         && earlier.wake.process_id == candidate.wake.process_id
                         && earlier.wake.sequence < candidate.wake.sequence
@@ -1044,6 +1044,7 @@ impl ProcessRegistry for TestLocalProcessRegistry {
             })
             .map(|delivery| {
                 (
+                    delivery.next_attempt_at_ms,
                     delivery.wake.target_session_id.clone(),
                     delivery.wake.process_id.clone(),
                     delivery.wake.sequence,
@@ -1055,7 +1056,7 @@ impl ProcessRegistry for TestLocalProcessRegistry {
         ids.truncate(limit);
         Ok(ids
             .into_iter()
-            .filter_map(|(_, _, _, id)| {
+            .filter_map(|(_, _, _, _, id)| {
                 let delivery = deliveries.get_mut(&id)?;
                 delivery.attempts = delivery.attempts.saturating_add(1);
                 delivery.first_attempt_ms.get_or_insert(now);
@@ -1124,7 +1125,6 @@ impl ProcessRegistry for TestLocalProcessRegistry {
         }
         delivery.state = super::WakeDeliveryState::Enqueued;
         delivery.discard_reason = None;
-        delivery.evidence_cleanup_pending = true;
         Ok(())
     }
 
@@ -1146,7 +1146,6 @@ impl ProcessRegistry for TestLocalProcessRegistry {
         }
         delivery.state = super::WakeDeliveryState::Discarded;
         delivery.discard_reason = Some(reason);
-        delivery.evidence_cleanup_pending = true;
         Ok(())
     }
 
@@ -1164,52 +1163,32 @@ impl ProcessRegistry for TestLocalProcessRegistry {
         delivery.state = super::WakeDeliveryState::Pending;
         delivery.attempts = 0;
         delivery.first_attempt_ms = None;
+        delivery.next_attempt_at_ms = self.clock.timestamp_ms();
         delivery.expires_at_ms = self
             .clock
             .timestamp_ms()
             .saturating_add(self.wake_delivery_config.delivery_expiry_ms);
         delivery.discard_reason = None;
-        delivery.evidence_cleanup_pending = false;
         Ok(())
     }
 
-    async fn wake_evidence_cleanup_deliveries(
+    async fn defer_wake_delivery(
         &self,
-        limit: usize,
-    ) -> Result<Vec<super::WakeDelivery>, PluginError> {
-        let _transaction = self.transaction.lock().await;
-        let deliveries = self.wake_deliveries.lock().await;
-        let mut pending = deliveries
-            .values()
-            .filter(|delivery| {
-                delivery.state != super::WakeDeliveryState::Pending
-                    && delivery.evidence_cleanup_pending
-            })
-            .cloned()
-            .collect::<Vec<_>>();
-        pending.sort_by(|left, right| {
-            left.wake
-                .target_session_id
-                .cmp(&right.wake.target_session_id)
-                .then_with(|| left.wake.process_id.cmp(&right.wake.process_id))
-                .then_with(|| left.wake.sequence.cmp(&right.wake.sequence))
-        });
-        pending.truncate(limit);
-        Ok(pending)
-    }
-
-    async fn mark_wake_evidence_cleaned(&self, delivery_id: &str) -> Result<(), PluginError> {
+        delivery_id: &str,
+        next_attempt_at_ms: u64,
+    ) -> Result<(), PluginError> {
         let _transaction = self.transaction.lock().await;
         let mut deliveries = self.wake_deliveries.lock().await;
         let delivery = deliveries.get_mut(delivery_id).ok_or_else(|| {
             PluginError::Session(format!("unknown wake delivery `{delivery_id}`"))
         })?;
-        if delivery.state == super::WakeDeliveryState::Pending {
-            return Err(PluginError::Session(format!(
-                "wake delivery `{delivery_id}` is pending"
-            )));
+        if delivery.state != super::WakeDeliveryState::Pending {
+            return Err(PluginError::WakeDeliveryNotPending {
+                delivery_id: delivery_id.to_string(),
+                state: delivery.state,
+            });
         }
-        delivery.evidence_cleanup_pending = false;
+        delivery.next_attempt_at_ms = delivery.next_attempt_at_ms.max(next_attempt_at_ms);
         Ok(())
     }
 

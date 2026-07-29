@@ -6,11 +6,12 @@ use lash_core::testing::conformance::{
 };
 use lash_core::{
     AwaitEventKey, AwaitEventResolver, AwaitEventWaitIdentity, EffectHost, ExecutionScope,
-    ProcessExecutionEnvStore, ProcessRegistry, Resolution, ResolveOutcome, RuntimePersistence,
-    SessionStoreFactory, TriggerStore,
+    ProcessExecutionEnvStore, ProcessRegistry, QueuedWorkStore, Resolution, ResolveOutcome,
+    RuntimePersistence, SessionStoreFactory, TriggerStore,
 };
 use lash_postgres_store::{
     PostgresEffectReplayOptions, PostgresRuntimeEffectController, PostgresStorage,
+    PostgresStoreConfig,
 };
 
 mod support;
@@ -250,13 +251,57 @@ async fn postgres_wake_enqueue_serializes_with_consumption_when_configured() {
         .expect("claim source-lock wake")
         .expect("source-lock wake claim");
 
-    let pause = lash_postgres_store::pause_next_process_wake_enqueue_after_evidence_check();
+    let source_key = draft.source_key.as_deref().expect("wake source key");
+    let mut source_blocker = storage.pool().begin().await.expect("begin source blocker");
+    sqlx::query(
+        "SELECT pg_advisory_xact_lock(
+             hashtextextended(
+                 length($1)::TEXT || ':' || $1 || length($2)::TEXT || ':' || $2,
+                 0
+             )
+         )",
+    )
+    .bind(session_id)
+    .bind(source_key)
+    .execute(&mut *source_blocker)
+    .await
+    .expect("take source-only advisory lock");
     let redelivery_store = Arc::clone(&store);
     let redelivery_draft = draft.clone();
     let redelivery =
         tokio::spawn(async move { redelivery_store.enqueue_queued_work(redelivery_draft).await });
-    pause.wait_until_paused().await;
+    tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    assert!(
+        !redelivery.is_finished(),
+        "enqueue must block on the independently-held source lock"
+    );
+    source_blocker
+        .rollback()
+        .await
+        .expect("release source-only enqueue blocker");
+    redelivery
+        .await
+        .expect("join source-blocked redelivery")
+        .expect("redelivery returns the live batch");
 
+    let mut completion_source_blocker = storage
+        .pool()
+        .begin()
+        .await
+        .expect("begin completion source blocker");
+    sqlx::query(
+        "SELECT pg_advisory_xact_lock(
+             hashtextextended(
+                 length($1)::TEXT || ':' || $1 || length($2)::TEXT || ':' || $2,
+                 0
+             )
+         )",
+    )
+    .bind(session_id)
+    .bind(source_key)
+    .execute(&mut *completion_source_blocker)
+    .await
+    .expect("take completion source-only advisory lock");
     let completion_store = Arc::clone(&store);
     let completion = tokio::spawn(async move {
         let state = lash_core::RuntimeSessionState {
@@ -274,14 +319,12 @@ async fn postgres_wake_enqueue_serializes_with_consumption_when_configured() {
     tokio::time::sleep(std::time::Duration::from_millis(50)).await;
     assert!(
         !completion.is_finished(),
-        "consumption must block on the enqueue transaction's shared source lock"
+        "consumption must block on the independently-held source lock"
     );
-
-    pause.resume();
-    redelivery
+    completion_source_blocker
+        .rollback()
         .await
-        .expect("join paused redelivery")
-        .expect("paused redelivery returns the live batch");
+        .expect("release source-only completion blocker");
     completion
         .await
         .expect("join wake consumption")
@@ -298,7 +341,7 @@ async fn postgres_wake_enqueue_serializes_with_consumption_when_configured() {
     store
         .enqueue_queued_work(draft.clone())
         .await
-        .expect("late redelivery resolves against consumed evidence");
+        .expect("late redelivery resolves against consumed high water");
     assert!(
         store
             .list_queued_work(session_id)
@@ -306,6 +349,132 @@ async fn postgres_wake_enqueue_serializes_with_consumption_when_configured() {
             .expect("list queue after late redelivery")
             .iter()
             .all(|batch| batch.source_key.as_deref() != draft.source_key.as_deref())
+    );
+
+    let bounded_config = PostgresStoreConfig {
+        lock_timeout: Some(std::time::Duration::from_millis(50)),
+        ..PostgresStoreConfig::default()
+    };
+    let bounded_storage = PostgresStorage::connect_with(
+        &database_url().expect("configured Postgres URL"),
+        bounded_config,
+    )
+    .await
+    .expect("connect storage with short lock timeout");
+    let bounded_store = bounded_storage.unbound_session_store();
+    let mut timeout_wake = wake;
+    timeout_wake.wake_id = "wake:source-lock-timeout".to_string();
+    timeout_wake.sequence = 2;
+    timeout_wake.event_invocation.subject = lash_core::runtime::RuntimeSubject::ProcessEvent {
+        process_id: timeout_wake.process_id.clone(),
+        sequence: timeout_wake.sequence,
+        event_type: timeout_wake.event_type.clone(),
+    };
+    let timeout_draft = lash_core::runtime::process_wake_batch_draft(timeout_wake);
+    let timeout_retry_draft = timeout_draft.clone();
+    let timeout_source_key = timeout_draft
+        .source_key
+        .as_deref()
+        .expect("timeout wake source key");
+    let mut timeout_blocker = storage
+        .pool()
+        .begin()
+        .await
+        .expect("begin timeout source blocker");
+    sqlx::query(
+        "SELECT pg_advisory_xact_lock(
+             hashtextextended(
+                 length($1)::TEXT || ':' || $1 || length($2)::TEXT || ':' || $2,
+                 0
+             )
+         )",
+    )
+    .bind(session_id)
+    .bind(timeout_source_key)
+    .execute(&mut *timeout_blocker)
+    .await
+    .expect("take timeout source-only advisory lock");
+    let timeout_error = bounded_store
+        .enqueue_queued_work(timeout_draft)
+        .await
+        .expect_err("source lock wait must be bounded");
+    assert!(
+        matches!(timeout_error, lash_core::StoreError::Contended),
+        "source lock timeout must surface as retryable contention: {timeout_error}"
+    );
+    timeout_blocker
+        .rollback()
+        .await
+        .expect("release timeout source blocker");
+    let second = store
+        .enqueue_queued_work(timeout_retry_draft)
+        .await
+        .expect("enqueue second sequence after source lock release");
+    let second_owner = lash_core::LeaseOwnerIdentity::opaque("wake-source-lock-second", "test");
+    let second_lease = store
+        .try_claim_session_execution_lease(session_id, &second_owner, 60_000)
+        .await
+        .expect("claim target for second sequence")
+        .acquired()
+        .expect("second-sequence target lease");
+    let second_claim = store
+        .claim_ready_queued_work_by_batch_ids(
+            session_id,
+            &second_lease.fence(),
+            &second_owner,
+            lash_core::runtime::QueuedWorkClaimBoundary::Idle,
+            std::slice::from_ref(&second.batch_id),
+        )
+        .await
+        .expect("claim second wake sequence")
+        .expect("second wake sequence claim");
+    let state = lash_core::store::load_persisted_session_state(store.as_ref())
+        .await
+        .expect("load target state before second wake settlement")
+        .expect("persisted target state");
+    store
+        .commit_runtime_state(
+            lash_core::RuntimeCommit::persisted_state_for_test(&state, &[])
+                .completing_queue_claim(second_claim.completion())
+                .releasing_session_execution_lease(second_lease.completion()),
+        )
+        .await
+        .expect("consume second wake sequence");
+    let high_water_rows: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM lash_consumed_wake_high_water WHERE session_id = $1",
+    )
+    .bind(session_id)
+    .fetch_one(storage.pool())
+    .await
+    .expect("count receiver high-water rows");
+    assert_eq!(
+        high_water_rows, 1,
+        "two consumed sequences for one process must occupy one high-water row"
+    );
+    let high_sequence: i64 = sqlx::query_scalar(
+        "SELECT high_sequence FROM lash_consumed_wake_high_water
+         WHERE session_id = $1 AND process_id = $2",
+    )
+    .bind(session_id)
+    .bind("wake-source-lock-process")
+    .fetch_one(storage.pool())
+    .await
+    .expect("read receiver high-water sequence");
+    assert_eq!(high_sequence, 2);
+    factory
+        .delete_session(session_id)
+        .await
+        .expect("delete high-water target session");
+    let high_water_rows: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM lash_consumed_wake_high_water WHERE session_id = $1",
+    )
+    .bind(session_id)
+    .fetch_one(storage.pool())
+    .await
+    .expect("count receiver high-water rows after session delete");
+    assert_eq!(
+        high_water_rows, 0,
+        "session deletion must remove its receiver high-water rows"
     );
 }
 

@@ -199,15 +199,16 @@ pub(crate) async fn insert_wake_delivery_tx(
     sqlx::query(
         "INSERT INTO lash_process_wake_deliveries (
             delivery_id, process_id, target_session_id, sequence, state,
-            attempts, first_attempt_ms, expires_at_ms, discard_reason,
-            evidence_cleanup_pending, delivery_json
-         ) VALUES ($1, $2, $3, $4, 'pending', 0, NULL, $5, NULL, FALSE, $6)
+            attempts, first_attempt_ms, next_attempt_at_ms, expires_at_ms,
+            discard_reason, delivery_json
+         ) VALUES ($1, $2, $3, $4, 'pending', 0, NULL, $5, $6, NULL, $7)
          ON CONFLICT (delivery_id) DO NOTHING",
     )
     .bind(&delivery.delivery_id)
     .bind(&delivery.wake.process_id)
     .bind(&delivery.wake.target_session_id)
     .bind(delivery.wake.sequence as i64)
+    .bind(delivery.next_attempt_at_ms as i64)
     .bind(delivery.expires_at_ms as i64)
     .bind(serde_json::to_string(&delivery.wake).map_err(process_decode_error)?)
     .execute(&mut **tx)

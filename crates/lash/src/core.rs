@@ -58,6 +58,16 @@ pub(crate) enum ProcessWorkSource {
 }
 
 impl ProcessWorkSource {
+    fn with_runtime_clock(self, clock: Arc<dyn lash_core::Clock>) -> Self {
+        match self {
+            Self::Inline { registry, hub } => Self::Inline {
+                registry: registry.with_runtime_clock(clock).unwrap_or(registry),
+                hub,
+            },
+            other => other,
+        }
+    }
+
     fn process_registry(&self) -> Option<Arc<dyn ProcessRegistry>> {
         match self {
             Self::None => None,
@@ -1201,12 +1211,12 @@ impl LashCoreBuilder {
         };
         let policy = self.session_spec.resolve_against(&base_policy);
 
+        let mut core = self.resolve_runtime_host_config()?;
         let process_work_source = self
             .process_work_source
             .clone()
+            .with_runtime_clock(Arc::clone(&core.clock))
             .watched(self.process_event_sink.clone());
-
-        let mut core = self.resolve_runtime_host_config()?;
         if let Some(provider) = self.provider.clone() {
             core.providers.provider_resolver =
                 Arc::new(lash_core::SingleProviderResolver::new(provider));

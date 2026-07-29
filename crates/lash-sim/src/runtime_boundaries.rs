@@ -5,16 +5,15 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use lash_core::runtime::{
-    QueuedWorkBatchDraft, QueuedWorkClaim, QueuedWorkClaimBoundary, QueuedWorkPayload,
-    RuntimeReplay, RuntimeScope, RuntimeSubject,
+    QueuedWorkClaim, QueuedWorkClaimBoundary, RuntimeReplay, RuntimeScope, RuntimeSubject,
 };
 use lash_core::{
-    DeliveryPolicy, ExecResponse, ExecutionScope, LeaseOwnerIdentity, MergeKey, PreparedToolCall,
+    ExecResponse, ExecutionScope, LeaseOwnerIdentity, MergeKey, PreparedToolCall,
     ProcessAwaitOutput, ProcessInput, ProcessProvenance, ProcessRegistration, ProcessRegistry,
     RecoveryDisposition, RuntimeCommit, RuntimeEffectCommand, RuntimeEffectController,
     RuntimeEffectEnvelope, RuntimeEffectKind, RuntimeEffectLocalExecutor, RuntimeEffectOutcome,
     RuntimeInvocation, RuntimePersistence, RuntimeSessionState, SessionExecutionLeaseClaimOutcome,
-    SessionRelation, SessionScope, SessionStoreCreateRequest, SessionStoreFactory, SlotPolicy,
+    SessionRelation, SessionScope, SessionStoreCreateRequest, SessionStoreFactory,
     ToolAttemptLaunch, ToolCallOutput, ToolCallRecord, ToolId,
 };
 use serde_json::{Value, json};
@@ -556,14 +555,8 @@ impl RuntimeBoundaryHarness {
             .contains(&source_key);
         let batch = store
             .enqueue_queued_work(
-                QueuedWorkBatchDraft::new(
-                    session.clone(),
-                    DeliveryPolicy::EarliestSafeBoundary,
-                    SlotPolicy::Exclusive,
-                    vec![QueuedWorkPayload::process_wake(wake.clone())],
-                )
-                .with_source_key(source_key.clone())
-                .with_merge_key(MergeKey::Never),
+                lash_core::runtime::process_wake_batch_draft(wake.clone())
+                    .with_merge_key(MergeKey::Never),
             )
             .await
             .map_err(|err| RuntimeBoundaryError::new(format!("enqueue wake failed: {err}")))?;
@@ -975,18 +968,11 @@ impl RuntimeBoundaryHarness {
         lease: &lash_core::SessionExecutionLease,
         occurred_at_ms: u64,
     ) -> Result<WorkerOwnedWork, RuntimeBoundaryError> {
-        let source_key = format!("worker-failover/{session}/work");
         let wake = worker_failover_work(session, occurred_at_ms)?;
+        let source_key = lash_core::process_wake_source_key(&wake.process_id, wake.sequence);
         let batch = store
             .enqueue_queued_work(
-                QueuedWorkBatchDraft::new(
-                    session.to_string(),
-                    DeliveryPolicy::EarliestSafeBoundary,
-                    SlotPolicy::Exclusive,
-                    vec![QueuedWorkPayload::process_wake(wake)],
-                )
-                .with_source_key(source_key.clone())
-                .with_merge_key(MergeKey::Never),
+                lash_core::runtime::process_wake_batch_draft(wake).with_merge_key(MergeKey::Never),
             )
             .await
             .map_err(|err| {

@@ -565,22 +565,30 @@ impl SessionCommitStore for Store {
                     for completed in &commit.completed_queue_claims {
                         for batch_id in &completed.batch_ids {
                             tx.execute(
-                                "INSERT OR IGNORE INTO consumed_wake_source_keys (
-                                    session_id, source_key, consumed_at_ms
+                                "INSERT INTO consumed_wake_high_water (
+                                    session_id, process_id, high_sequence
                                  )
-                                 SELECT session_id, source_key, ?5
-                                 FROM queued_work_batches
-                                 WHERE session_id = ?1
-                                   AND batch_id = ?2
-                                   AND claim_id = ?3
-                                   AND claim_token = ?4
-                                   AND source_key LIKE 'process:%:event:%:wake'",
+                                 SELECT batch.session_id,
+                                        json_extract(item.payload_json, '$.wake.process_id'),
+                                        json_extract(item.payload_json, '$.wake.sequence')
+                                 FROM queued_work_batches AS batch
+                                 JOIN queued_work_items AS item
+                                   ON item.batch_id = batch.batch_id
+                                 WHERE batch.session_id = ?1
+                                   AND batch.batch_id = ?2
+                                   AND batch.claim_id = ?3
+                                   AND batch.claim_token = ?4
+                                   AND json_extract(item.payload_json, '$.type') = 'process_wake'
+                                 ON CONFLICT(session_id, process_id) DO UPDATE SET
+                                   high_sequence = MAX(
+                                       consumed_wake_high_water.high_sequence,
+                                       excluded.high_sequence
+                                   )",
                                 params![
                                     completed.session_id,
                                     batch_id,
                                     completed.claim_id,
-                                    completed.lease_token,
-                                    now as i64
+                                    completed.lease_token
                                 ],
                             )
                             .map_err(sqlite_error)?;
@@ -1632,26 +1640,6 @@ impl QueuedWorkStore for Store {
             .map_err(sqlite_error)?
     }
 
-    async fn compensate_queued_work_batch(
-        &self,
-        session_id: &str,
-        batch_id: &str,
-    ) -> Result<bool, StoreError> {
-        let session_id = session_id.to_string();
-        let batch_id = batch_id.to_string();
-        self.conn
-            .write(move |tx| {
-                tx.execute(
-                    "DELETE FROM queued_work_batches
-                     WHERE session_id = ?1 AND batch_id = ?2",
-                    params![session_id, batch_id],
-                )
-            })
-            .await
-            .map_err(sqlite_error)?;
-        Ok(true)
-    }
-
     async fn list_queued_work(&self, session_id: &str) -> Result<Vec<QueuedWorkBatch>, StoreError> {
         let session_id = session_id.to_string();
         self.conn
@@ -2201,33 +2189,6 @@ impl StoreMaintenance for Store {
 
     async fn gc_unreachable(&self) -> Result<GcReport, StoreError> {
         Ok(Store::gc_unreachable(self).await)
-    }
-
-    async fn prune_consumed_wake_source_keys(
-        &self,
-        session_id: &str,
-        source_keys: &[String],
-    ) -> Result<lash_core::ConsumedWakePruneReport, StoreError> {
-        let session_id = session_id.to_string();
-        let source_keys = source_keys.to_vec();
-        let removed_source_key_count = self
-            .conn
-            .write(move |tx| {
-                let mut removed = 0;
-                for source_key in source_keys {
-                    removed += tx.execute(
-                        "DELETE FROM consumed_wake_source_keys
-                         WHERE session_id = ?1 AND source_key = ?2",
-                        params![session_id, source_key],
-                    )?;
-                }
-                Ok(removed)
-            })
-            .await
-            .map_err(sqlite_error)?;
-        Ok(lash_core::ConsumedWakePruneReport {
-            removed_source_key_count,
-        })
     }
 }
 

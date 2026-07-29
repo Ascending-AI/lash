@@ -441,11 +441,11 @@ pub use runtime::{
     WakeDeliveryDriveReport, WakeDeliveryDriver, WakeDeliveryReport, WakeDeliveryState,
     WakeDiscardReason, apply_process_event_projection, apply_process_status_projection,
     current_epoch_ms, diff_token_ledger, diff_usage_reports, ensure_durable_effect_input,
-    epoch_ms_from_system_time, fold_process_record, is_process_wake_source_key,
-    process_runtime_session_ids, process_signal_event_type, process_signal_name_from_event_type,
-    process_signal_wait_key, process_wake_delivery, process_wake_source_key,
-    system_time_from_epoch_ms, terminal_append_request, terminal_event_type_name,
-    validate_process_signal_name, watch_process_registry, watch_process_registry_with_sink,
+    epoch_ms_from_system_time, fold_process_record, process_runtime_session_ids,
+    process_signal_event_type, process_signal_name_from_event_type, process_signal_wait_key,
+    process_wake_delivery, process_wake_source_key, system_time_from_epoch_ms,
+    terminal_append_request, terminal_event_type_name, validate_process_signal_name,
+    watch_process_registry, watch_process_registry_with_sink,
 };
 pub use runtime::{DEFAULT_PROCESS_EXECUTION_CONCURRENCY, ProcessExecutionConcurrencyError};
 #[allow(unused_imports)]
@@ -490,12 +490,12 @@ pub use session_model::context::PreparedContext;
 pub use session_model::{ConversationRecord, ProtocolEvent, SessionHistoryRecord};
 pub use session_model::{GenerationOverlay, RuntimeSessionPolicy, SessionPolicy, SessionSpec};
 pub use store::{
-    AttachmentIntent, AttachmentManifest, AttachmentManifestEntry, BlobRef,
-    ConsumedWakePruneReport, GcReport, LeaseOwnerIdentity, LeaseTimings, LeaseTimingsError,
-    QueuedWorkStore, RuntimePersistence, SessionAdmission, SessionBinding, SessionCommitStore,
-    SessionExecutionLease, SessionExecutionLeaseClaimOutcome, SessionExecutionLeaseCompletion,
-    SessionExecutionLeaseFence, SessionExecutionLeaseStore, SessionMeta, SessionPickerInfo,
-    StoreError, StoreMaintenance, TurnInputStore, VacuumReport,
+    AttachmentIntent, AttachmentManifest, AttachmentManifestEntry, BlobRef, GcReport,
+    LeaseOwnerIdentity, LeaseTimings, LeaseTimingsError, QueuedWorkStore, RuntimePersistence,
+    SessionAdmission, SessionBinding, SessionCommitStore, SessionExecutionLease,
+    SessionExecutionLeaseClaimOutcome, SessionExecutionLeaseCompletion, SessionExecutionLeaseFence,
+    SessionExecutionLeaseStore, SessionMeta, SessionPickerInfo, StoreError, StoreMaintenance,
+    TurnInputStore, VacuumReport,
 };
 #[allow(unused_imports)]
 pub(crate) use store::{

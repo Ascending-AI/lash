@@ -607,7 +607,7 @@ pub(crate) async fn delete_session_tx(
         "DELETE FROM lash_attachment_manifest WHERE session_id = $1",
         "DELETE FROM lash_queued_work_items WHERE batch_id IN (SELECT batch_id FROM lash_queued_work_batches WHERE session_id = $1)",
         "DELETE FROM lash_queued_work_batches WHERE session_id = $1",
-        "DELETE FROM lash_consumed_wake_source_keys WHERE session_id = $1",
+        "DELETE FROM lash_consumed_wake_high_water WHERE session_id = $1",
         "DELETE FROM lash_pending_turn_inputs WHERE session_id = $1",
         "DELETE FROM lash_session_execution_leases WHERE session_id = $1",
         "DELETE FROM lash_usage_deltas WHERE session_id = $1",

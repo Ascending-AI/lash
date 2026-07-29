@@ -15,7 +15,7 @@ impl crate::store::QueuedWorkStore for InMemorySessionStore {
             .lock()
             .expect("lock in-memory write transaction");
         self.ensure_session_not_deleted(&batch.session_id)?;
-        Ok(self.enqueue_queued_work_in_memory(batch))
+        self.enqueue_queued_work_in_memory(batch)
     }
 
     async fn claim_leading_ready_session_command(
@@ -255,25 +255,6 @@ impl crate::store::QueuedWorkStore for InMemorySessionStore {
             return Ok(None);
         }
         Ok(Some(queued.remove(index).batch))
-    }
-
-    async fn compensate_queued_work_batch(
-        &self,
-        session_id: &str,
-        batch_id: &str,
-    ) -> Result<bool, crate::store::StoreError> {
-        let _transaction = self
-            .write_transaction
-            .lock()
-            .expect("lock in-memory write transaction");
-        let mut queued = self.queued_work.lock().expect("lock queued work");
-        let Some(index) = queued.iter().position(|entry| {
-            entry.batch.session_id == session_id && entry.batch.batch_id == batch_id
-        }) else {
-            return Ok(true);
-        };
-        queued.remove(index);
-        Ok(true)
     }
 
     async fn list_queued_work(

@@ -542,32 +542,27 @@ impl RuntimeQueueIngress {
                     },
                 )],
             ),
-            Self::ProcessWake { text } => QueuedWorkBatchDraft::new(
-                session_id,
-                DeliveryPolicy::EarliestSafeBoundary,
-                SlotPolicy::Exclusive,
-                vec![QueuedWorkPayload::process_wake(ProcessWakeDelivery {
-                    wake_id: format!("wake:{session_id}:{text}"),
-                    target_session_id: session_id.to_string(),
-                    target_scope_id: SessionScopeId::new(format!("session:{session_id}")),
-                    process_id: format!("process:{text}"),
-                    sequence: 1,
-                    event_type: "process.wake".to_string(),
-                    event_invocation: RuntimeInvocation {
-                        scope: RuntimeScope::new(session_id),
-                        subject: RuntimeSubject::ProcessEvent {
-                            process_id: format!("process:{text}"),
-                            sequence: 1,
-                            event_type: "process.wake".to_string(),
-                        },
-                        caused_by: None,
-                        replay: None,
+            Self::ProcessWake { text } => crate::process_wake_batch_draft(ProcessWakeDelivery {
+                wake_id: format!("wake:{session_id}:{text}"),
+                target_session_id: session_id.to_string(),
+                target_scope_id: SessionScopeId::new(format!("session:{session_id}")),
+                process_id: format!("process:{text}"),
+                sequence: 1,
+                event_type: "process.wake".to_string(),
+                event_invocation: RuntimeInvocation {
+                    scope: RuntimeScope::new(session_id),
+                    subject: RuntimeSubject::ProcessEvent {
+                        process_id: format!("process:{text}"),
+                        sequence: 1,
+                        event_type: "process.wake".to_string(),
                     },
-                    process_caused_by: None,
-                    input: (*text).to_string(),
-                    created_at_ms: 1,
-                })],
-            ),
+                    caused_by: None,
+                    replay: None,
+                },
+                process_caused_by: None,
+                input: (*text).to_string(),
+                created_at_ms: 1,
+            }),
         }
     }
 }

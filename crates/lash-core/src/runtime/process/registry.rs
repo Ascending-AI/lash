@@ -30,11 +30,12 @@ pub const DEFAULT_WAKE_DELIVERY_EXPIRY_MS: u64 = 7 * 24 * 60 * 60 * 1_000;
 /// Host-owned bound for process-wake redelivery.
 ///
 /// Exactly-once delivery does not depend on comparing clocks across the
-/// process registry and target session store. Receiver-side consumed evidence
-/// is retained while the corresponding sender delivery is `pending`. Once the
-/// sender row is terminal (`enqueued` or `discarded`), it cannot redeliver and
-/// maintenance may prune that exact `(session_id, source_key)` evidence row.
-/// `delivery_expiry_ms` is therefore only a pending-delivery liveness bound,
+/// process registry and target session store. Receiver completion advances one
+/// monotone consumed high-water mark per `(session_id, process_id)`. F7
+/// guarantees in-sequence enqueue within each target/process group, so every
+/// consumed sequence is a contiguous prefix: stale drivers, retries, and host
+/// redrives can only reproduce a sequence at or below that prefix and dedupe
+/// forever. `delivery_expiry_ms` is only a pending-delivery liveness bound,
 /// evaluated with the runtime's injected clock.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct WakeDeliveryConfig {
@@ -106,11 +107,9 @@ pub struct WakeDelivery {
     pub state: WakeDeliveryState,
     pub attempts: u64,
     pub first_attempt_ms: Option<u64>,
+    pub next_attempt_at_ms: u64,
     pub expires_at_ms: u64,
     pub discard_reason: Option<WakeDiscardReason>,
-    /// Terminal sender rows remain in this reconciliation lane until the
-    /// receiver confirms exact source-key evidence cleanup.
-    pub evidence_cleanup_pending: bool,
 }
 
 impl WakeDelivery {
@@ -118,6 +117,7 @@ impl WakeDelivery {
         wake: ProcessWakeDelivery,
         config: WakeDeliveryConfig,
     ) -> Result<Self, PluginError> {
+        let next_attempt_at_ms = wake.created_at_ms;
         let hash = crate::stable_hash::stable_json_sha256_hex(&(
             wake.target_session_id.as_str(),
             wake.process_id.as_str(),
@@ -136,8 +136,8 @@ impl WakeDelivery {
             state: WakeDeliveryState::Pending,
             attempts: 0,
             first_attempt_ms: None,
+            next_attempt_at_ms,
             discard_reason: None,
-            evidence_cleanup_pending: false,
         })
     }
 
@@ -165,6 +165,18 @@ pub struct WakeDeliveryReport {
 #[async_trait::async_trait]
 pub trait ProcessRegistry: Send + Sync {
     fn wake_delivery_config(&self) -> WakeDeliveryConfig;
+
+    /// Return the same registry backend bound to the runtime's clock.
+    ///
+    /// First-party persistent registries override this so facade construction
+    /// cannot mint wake expiry with a different clock than the driver uses.
+    /// Host-owned registries that already own their clock may keep the default.
+    fn with_runtime_clock(
+        &self,
+        _clock: std::sync::Arc<dyn crate::Clock>,
+    ) -> Option<std::sync::Arc<dyn ProcessRegistry>> {
+        None
+    }
 
     async fn register_process(
         &self,
@@ -437,7 +449,11 @@ pub trait ProcessRegistry: Send + Sync {
         limit: usize,
     ) -> Result<(Vec<ProcessRecord>, ProcessChangeCursor), PluginError>;
 
-    /// Return the oldest pending rows and record one delivery attempt for each.
+    /// Return due group heads and record one delivery attempt for each.
+    ///
+    /// Implementations must preserve sequence order inside a
+    /// `(target_session_id, process_id)` group while selecting fairly across
+    /// distinct groups by `next_attempt_at_ms`.
     async fn pending_wake_deliveries(&self, limit: usize)
     -> Result<Vec<WakeDelivery>, PluginError>;
 
@@ -458,15 +474,12 @@ pub trait ProcessRegistry: Send + Sync {
 
     async fn redrive_wake_delivery(&self, delivery_id: &str) -> Result<(), PluginError>;
 
-    /// Return terminal deliveries whose exact receiver evidence still needs
-    /// reconciliation.
-    async fn wake_evidence_cleanup_deliveries(
+    /// Defer a retryable non-delivery until the supplied runtime-clock time.
+    async fn defer_wake_delivery(
         &self,
-        limit: usize,
-    ) -> Result<Vec<WakeDelivery>, PluginError>;
-
-    /// Confirm exact receiver evidence cleanup for a terminal delivery.
-    async fn mark_wake_evidence_cleaned(&self, delivery_id: &str) -> Result<(), PluginError>;
+        delivery_id: &str,
+        next_attempt_at_ms: u64,
+    ) -> Result<(), PluginError>;
 
     /// All non-terminal process records, in stable `process_id` order.
     ///

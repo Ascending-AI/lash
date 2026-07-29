@@ -255,11 +255,6 @@ pub struct VacuumReport {
 }
 
 /// Result of explicitly pruning settled process-wake idempotency evidence.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub struct ConsumedWakePruneReport {
-    pub removed_source_key_count: usize,
-}
-
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct SessionCheckpoint {
     pub schema_version: u32,
@@ -1372,34 +1367,6 @@ pub trait QueuedWorkStore: Send + Sync {
         batch_id: &str,
     ) -> Result<Option<crate::QueuedWorkBatch>, StoreError>;
 
-    /// Remove a queued-work batch as compensation for a process wake whose
-    /// sender became terminal while enqueueing.
-    ///
-    /// Unlike ordinary cancellation, this operation must also remove a batch
-    /// held by a live claim. A claim that later tries to commit the removed
-    /// batch is fenced by the missing durable queue row. Callers must reserve
-    /// this for converging the wake-delivery outbox with a terminal sender.
-    ///
-    /// Returns `true` when the batch was removed or was already absent.
-    async fn compensate_queued_work_batch(
-        &self,
-        session_id: &str,
-        batch_id: &str,
-    ) -> Result<bool, StoreError> {
-        if self
-            .cancel_queued_work_batch(session_id, batch_id)
-            .await?
-            .is_some()
-        {
-            return Ok(true);
-        }
-        Ok(!self
-            .list_queued_work(session_id)
-            .await?
-            .iter()
-            .any(|batch| batch.batch_id == batch_id))
-    }
-
     /// List all queued-work batches for a session, including batches held by a
     /// live claim.
     async fn list_queued_work(
@@ -1435,21 +1402,6 @@ pub trait StoreMaintenance: Send + Sync {
 
     /// Delete blobs no longer reachable from any retained root.
     async fn gc_unreachable(&self) -> Result<GcReport, StoreError>;
-
-    /// Delete exact consumed process-wake source keys after the corresponding
-    /// sender deliveries are terminal.
-    ///
-    /// Correctness must never be based on a wall-clock cutoff across stores.
-    async fn prune_consumed_wake_source_keys(
-        &self,
-        session_id: &str,
-        source_keys: &[String],
-    ) -> Result<ConsumedWakePruneReport, StoreError> {
-        let _ = (session_id, source_keys);
-        Err(StoreError::UnsupportedStoreOperation {
-            operation: "prune_consumed_wake_source_keys",
-        })
-    }
 }
 
 /// Exact settled-session persistence protocol required by the runtime.

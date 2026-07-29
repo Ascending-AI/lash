@@ -167,29 +167,27 @@ async fn enqueue_queued_work_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     batch: &QueuedWorkBatchDraft,
 ) -> Result<QueuedWorkBatch, StoreError> {
-    if let Some(source_key) = batch.source_key.as_deref() {
-        let process_wake = lash_core::is_process_wake_source_key(source_key);
-        if process_wake {
+    batch
+        .validate_process_wake_source()
+        .map_err(StoreError::Backend)?;
+    if let Some(wake_source) = batch.process_wake_source.as_ref() {
+        if let Some(source_key) = batch.source_key.as_deref() {
             lock_process_wake_source_tx(tx, &batch.session_id, source_key).await?;
         }
-        if process_wake {
-            let consumed_at_ms = sqlx::query_scalar::<_, i64>(
-                "SELECT consumed_at_ms FROM lash_consumed_wake_source_keys
-                 WHERE session_id = $1 AND source_key = $2",
-            )
-            .bind(&batch.session_id)
-            .bind(source_key)
-            .fetch_optional(&mut **tx)
-            .await
-            .map_err(store_sqlx_error)?;
-            if let Some(consumed_at_ms) = consumed_at_ms {
-                return Ok(lash_core::runtime::consumed_queued_work_batch(
-                    batch,
-                    consumed_at_ms as u64,
-                ));
-            }
-            crate::run_process_wake_enqueue_pause().await;
+        let high_sequence = sqlx::query_scalar::<_, i64>(
+            "SELECT high_sequence FROM lash_consumed_wake_high_water
+             WHERE session_id = $1 AND process_id = $2",
+        )
+        .bind(&batch.session_id)
+        .bind(&wake_source.process_id)
+        .fetch_optional(&mut **tx)
+        .await
+        .map_err(store_sqlx_error)?;
+        if high_sequence.is_some_and(|high| wake_source.sequence <= high as u64) {
+            return Ok(lash_core::runtime::consumed_queued_work_batch(batch));
         }
+    }
+    if let Some(source_key) = batch.source_key.as_deref() {
         let existing_id: Option<String> = sqlx::query_scalar(
             "SELECT batch_id FROM lash_queued_work_batches
              WHERE session_id = $1 AND source_key = $2",
@@ -272,6 +270,24 @@ async fn lock_process_wake_source_tx(
     session_id: &str,
     source_key: &str,
 ) -> Result<(), StoreError> {
+    // `PostgresStorage::from_pool` accepts externally configured pools, so
+    // bound this correctness lock locally even when no connection-wide
+    // `lock_timeout` was installed. SQLSTATE 55P03 maps to `Contended`.
+    sqlx::query(
+        "SELECT set_config(
+             'lock_timeout',
+             CASE
+                 WHEN current_setting('lock_timeout') = '0'
+                   OR current_setting('lock_timeout')::interval > INTERVAL '10 seconds'
+                 THEN '10s'
+                 ELSE current_setting('lock_timeout')
+             END,
+             TRUE
+         )",
+    )
+    .execute(&mut **tx)
+    .await
+    .map_err(store_sqlx_error)?;
     sqlx::query(
         "SELECT pg_advisory_xact_lock(
              hashtextextended(
@@ -916,32 +932,60 @@ async fn complete_queued_work_claims_tx(
             .await
             .map_err(store_sqlx_error)?
             .flatten();
-            if let Some(source_key) = source_key.as_deref()
-                && lash_core::is_process_wake_source_key(source_key)
-            {
-                lock_process_wake_source_tx(tx, &completed.session_id, source_key).await?;
-            }
-            sqlx::query(
-                "INSERT INTO lash_consumed_wake_source_keys (
-                    session_id, source_key, consumed_at_ms
-                 )
-                 SELECT session_id, source_key,
-                        FLOOR(EXTRACT(EPOCH FROM transaction_timestamp()) * 1000)::BIGINT
-                 FROM lash_queued_work_batches
-                 WHERE session_id = $1
-                   AND batch_id = $2
-                   AND claim_id = $3
-                   AND claim_token = $4
-                   AND source_key LIKE 'process:%:event:%:wake'
-                 ON CONFLICT (session_id, source_key) DO NOTHING",
+            let payload_json: Option<String> = sqlx::query_scalar(
+                "SELECT item.payload_json
+                 FROM lash_queued_work_batches AS batch
+                 JOIN lash_queued_work_items AS item ON item.batch_id = batch.batch_id
+                 WHERE batch.session_id = $1
+                   AND batch.batch_id = $2
+                   AND batch.claim_id = $3
+                   AND batch.claim_token = $4
+                 ORDER BY item.item_index ASC
+                 LIMIT 1",
             )
             .bind(&completed.session_id)
             .bind(batch_id)
             .bind(&completed.claim_id)
             .bind(&completed.lease_token)
-            .execute(&mut **tx)
+            .fetch_optional(&mut **tx)
             .await
             .map_err(store_sqlx_error)?;
+            let wake_source = payload_json
+                .as_deref()
+                .map(|json| {
+                    store_decode_json::<lash_core::runtime::QueuedWorkPayload>(
+                        json,
+                        "queued work payload",
+                    )
+                })
+                .transpose()?
+                .and_then(|payload| match payload {
+                    lash_core::runtime::QueuedWorkPayload::ProcessWake { wake } => {
+                        Some((wake.process_id, wake.sequence))
+                    }
+                    _ => None,
+                });
+            if let (Some(source_key), Some(_)) = (source_key.as_deref(), wake_source.as_ref()) {
+                lock_process_wake_source_tx(tx, &completed.session_id, source_key).await?;
+            }
+            if let Some((process_id, sequence)) = wake_source {
+                sqlx::query(
+                    "INSERT INTO lash_consumed_wake_high_water (
+                        session_id, process_id, high_sequence
+                     ) VALUES ($1, $2, $3)
+                     ON CONFLICT (session_id, process_id) DO UPDATE
+                     SET high_sequence = GREATEST(
+                         lash_consumed_wake_high_water.high_sequence,
+                         EXCLUDED.high_sequence
+                     )",
+                )
+                .bind(&completed.session_id)
+                .bind(process_id)
+                .bind(sequence as i64)
+                .execute(&mut **tx)
+                .await
+                .map_err(store_sqlx_error)?;
+            }
             let completion = sqlx::query(
                 "DELETE FROM lash_queued_work_batches
                  WHERE session_id = $1 AND batch_id = $2 AND claim_id = $3 AND claim_token = $4",
@@ -1633,23 +1677,6 @@ impl QueuedWorkStore for PostgresSessionStore {
         Ok(Some(batch))
     }
 
-    async fn compensate_queued_work_batch(
-        &self,
-        session_id: &str,
-        batch_id: &str,
-    ) -> Result<bool, StoreError> {
-        sqlx::query(
-            "DELETE FROM lash_queued_work_batches
-             WHERE session_id = $1 AND batch_id = $2",
-        )
-        .bind(session_id)
-        .bind(batch_id)
-        .execute(&self.pool)
-        .await
-        .map_err(store_sqlx_error)?;
-        Ok(true)
-    }
-
     async fn list_queued_work(&self, session_id: &str) -> Result<Vec<QueuedWorkBatch>, StoreError> {
         let mut tx = self.pool.begin().await.map_err(store_sqlx_error)?;
         let rows = sqlx::query(
@@ -2175,26 +2202,6 @@ impl StoreMaintenance for PostgresSessionStore {
             root_count,
             retained_blob_count: retained.len(),
             deleted_blob_count,
-        })
-    }
-
-    async fn prune_consumed_wake_source_keys(
-        &self,
-        session_id: &str,
-        source_keys: &[String],
-    ) -> Result<lash_core::ConsumedWakePruneReport, StoreError> {
-        let removed_source_key_count = sqlx::query(
-            "DELETE FROM lash_consumed_wake_source_keys
-             WHERE session_id = $1 AND source_key = ANY($2)",
-        )
-        .bind(session_id)
-        .bind(source_keys)
-        .execute(&self.pool)
-        .await
-        .map_err(store_sqlx_error)?
-        .rows_affected() as usize;
-        Ok(lash_core::ConsumedWakePruneReport {
-            removed_source_key_count,
         })
     }
 }

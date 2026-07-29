@@ -740,7 +740,7 @@ async fn delete_session_from_catalog(
             )
             .map_err(sqlite_error)?;
             tx.execute(
-                "DELETE FROM consumed_wake_source_keys WHERE session_id = ?1",
+                "DELETE FROM consumed_wake_high_water WHERE session_id = ?1",
                 params![session_id],
             )
             .map_err(sqlite_error)?;

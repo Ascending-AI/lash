@@ -50,6 +50,66 @@ async fn drive_once(
     .expect("drive pending wakes")
 }
 
+async fn consume_queued_batch(
+    store: &Arc<dyn crate::RuntimePersistence>,
+    session_id: &str,
+    batch_id: &str,
+    owner_tag: &str,
+) {
+    let owner = crate::LeaseOwnerIdentity::opaque(owner_tag, "wake-conformance");
+    let lease = match store
+        .try_claim_session_execution_lease(session_id, &owner, 60_000)
+        .await
+        .expect("claim wake target session")
+    {
+        crate::SessionExecutionLeaseClaimOutcome::Acquired(lease) => lease,
+        crate::SessionExecutionLeaseClaimOutcome::Busy { holder } => {
+            panic!("wake target lease must be available: {holder:?}")
+        }
+    };
+    let claim = store
+        .claim_ready_queued_work_by_batch_ids(
+            session_id,
+            &lease.fence(),
+            &owner,
+            crate::QueuedWorkClaimBoundary::Idle,
+            &[batch_id.to_string()],
+        )
+        .await
+        .expect("claim queued wake")
+        .expect("queued wake claim");
+    let state = crate::load_persisted_session_state(store.as_ref())
+        .await
+        .expect("load target state before queue settlement")
+        .unwrap_or_else(|| crate::RuntimeSessionState {
+            session_id: session_id.to_string(),
+            ..crate::RuntimeSessionState::default()
+        });
+    store
+        .commit_runtime_state(
+            crate::RuntimeCommit::persisted_state_for_test(&state, &[])
+                .completing_queue_claim(claim.completion())
+                .releasing_session_execution_lease(lease.completion()),
+        )
+        .await
+        .expect("settle queued wake and advance high water");
+}
+
+async fn wait_until_delivery_due(registry: &Arc<dyn crate::ProcessRegistry>, delivery_id: &str) {
+    let next_attempt_at_ms = registry
+        .list_wake_deliveries(Some(crate::WakeDeliveryState::Pending))
+        .await
+        .expect("list deferred wake")
+        .into_iter()
+        .find(|delivery| delivery.delivery_id == delivery_id)
+        .expect("deferred wake remains pending")
+        .next_attempt_at_ms;
+    let wait_ms = next_attempt_at_ms
+        .saturating_sub(crate::current_epoch_ms())
+        .saturating_add(5);
+    tokio::time::sleep(std::time::Duration::from_millis(wait_ms)).await;
+}
+
 /// Cross-backend process-wake crash matrix.
 ///
 /// The supplied process registry and session factory must share their normal
@@ -129,55 +189,87 @@ pub async fn wake_delivery_crash_matrix(
         "redrive must reject an already-enqueued delivery"
     );
 
-    // Terminal and wake semantics are independent: a producer-declared event
-    // carrying both must append its delivery row in the same transaction.
+    // Terminal completion must route its planned wake through the completion
+    // transaction, not only through generic append_event.
     let terminal_wake_type = crate::ProcessEventType {
-        name: "producer.terminal_wake".to_string(),
+        name: "process.completed".to_string(),
         payload_schema: crate::LashSchema::any(),
         semantics: crate::ProcessEventSemanticsSpec {
             terminal: Some(crate::ProcessTerminalSpec {
                 state: crate::ProcessTerminalState::Completed,
-                await_output: None,
+                await_output: Some(crate::ProcessValueSelector::Pointer(
+                    "/await_output".to_string(),
+                )),
             }),
             wake: Some(crate::ProcessWakeSpec {
                 when: None,
-                input: crate::ProcessValueSelector::Pointer("/wake_input".to_string()),
+                input: crate::ProcessValueSelector::Pointer(
+                    "/await_output/value/wake_input".to_string(),
+                ),
             }),
         },
     };
     registry
         .register_process(
             process_registry::registration("wake-terminal-event")
-                .with_extra_event_types([terminal_wake_type]),
+                .with_event_types([terminal_wake_type])
+                .with_wake_target(Some(crate::SessionScope::new(&target_request.session_id))),
         )
         .await
         .expect("register terminal wake producer");
-    let terminal_append = registry
-        .append_event(
+    registry
+        .complete_process(
             "wake-terminal-event",
-            crate::ProcessEventAppendRequest::new(
-                "producer.terminal_wake",
-                serde_json::json!({"wake_input": "terminal wake"}),
-            )
-            .with_replay_key("terminal-wake")
-            .with_wake_target_scope(crate::SessionScope::new(&target_request.session_id)),
+            crate::ProcessAwaitOutput::Success {
+                value: serde_json::json!({"wake_input": "terminal wake"}),
+                control: None,
+            },
+            crate::ProcessCompletionAuthority::external_owner(),
         )
         .await
-        .expect("append terminal wake event");
-    let terminal_delivery = terminal_append
-        .wake_delivery
-        .expect("terminal event materializes wake");
+        .expect("complete terminal wake producer");
+    let terminal_delivery = registry
+        .list_wake_deliveries(Some(crate::WakeDeliveryState::Pending))
+        .await
+        .expect("list terminal wake outbox")
+        .into_iter()
+        .find(|delivery| delivery.wake.process_id == "wake-terminal-event")
+        .expect("completion path commits terminal wake outbox row");
+    drive_once(Arc::clone(&registry), Arc::clone(&factory)).await;
+    let terminal_batch = target
+        .list_queued_work(&target_request.session_id)
+        .await
+        .expect("list completion-path wake")
+        .into_iter()
+        .find(|batch| batch.source_key.as_deref() == Some(terminal_delivery.source_key().as_str()))
+        .expect("completion-path wake is enqueued");
+    consume_queued_batch(
+        &target,
+        &target_request.session_id,
+        &terminal_batch.batch_id,
+        "wake-terminal-owner",
+    )
+    .await;
+    registry
+        .prune_terminal_processes(u64::MAX, None, None)
+        .await
+        .expect("prune terminal producer and cascaded delivery rows");
+    target
+        .enqueue_queued_work(crate::process_wake_batch_draft(
+            terminal_delivery.wake.clone(),
+        ))
+        .await
+        .expect("producer pruning cannot erase receiver high water");
     assert!(
-        registry
-            .list_wake_deliveries(Some(crate::WakeDeliveryState::Pending))
+        target
+            .list_queued_work(&target_request.session_id)
             .await
-            .expect("list terminal wake outbox")
+            .expect("queue after terminal producer prune")
             .iter()
-            .any(|delivery| {
-                delivery.wake.process_id == terminal_delivery.process_id
-                    && delivery.wake.sequence == terminal_delivery.sequence
+            .all(|batch| {
+                batch.source_key.as_deref() != Some(terminal_delivery.source_key().as_str())
             }),
-        "terminal wake event must commit its outbox row"
+        "receiver high water must survive sender process and delivery pruning"
     );
 
     registry
@@ -213,6 +305,140 @@ pub async fn wake_delivery_crash_matrix(
         vec![1],
         "later same-target/process sequence must remain blocked behind its pending predecessor"
     );
+    let mut ordered_deliveries = registry
+        .list_wake_deliveries(None)
+        .await
+        .expect("list ordered delivery rows")
+        .into_iter()
+        .filter(|delivery| delivery.wake.process_id == "wake-ordered")
+        .collect::<Vec<_>>();
+    ordered_deliveries.sort_by_key(|delivery| delivery.wake.sequence);
+    assert_eq!(ordered_deliveries.len(), 2);
+    for delivery in &ordered_deliveries {
+        let batch = target
+            .enqueue_queued_work(crate::process_wake_batch_draft(delivery.wake.clone()))
+            .await
+            .expect("enqueue ordered wake structurally");
+        consume_queued_batch(
+            &target,
+            &target_request.session_id,
+            &batch.batch_id,
+            &format!("wake-ordered-{}", delivery.wake.sequence),
+        )
+        .await;
+        registry
+            .mark_wake_enqueued(&delivery.delivery_id)
+            .await
+            .expect("settle ordered sender delivery");
+    }
+    for delivery in &ordered_deliveries {
+        target
+            .enqueue_queued_work(crate::process_wake_batch_draft(delivery.wake.clone()))
+            .await
+            .expect("one monotone high water absorbs the consumed prefix");
+    }
+    assert!(
+        target
+            .list_queued_work(&target_request.session_id)
+            .await
+            .expect("queue after ordered prefix redelivery")
+            .iter()
+            .all(
+                |batch| batch.source_key.as_deref().is_none_or(|source_key| {
+                    ordered_deliveries
+                        .iter()
+                        .all(|delivery| source_key != delivery.source_key())
+                })
+            ),
+        "one high-water row must absorb every sequence in the consumed prefix"
+    );
+
+    // A discarded lower sequence must block later delivery until the host
+    // redrives it. Otherwise a later consumption could advance high water
+    // across a gap and silently absorb the never-consumed lower wake.
+    registry
+        .register_process(
+            process_registry::registration("wake-discarded-head").with_extra_event_types([
+                process_registry::wake_event_type("producer.discarded_head"),
+            ]),
+        )
+        .await
+        .expect("register discarded-head wake producer");
+    for value in ["first", "second"] {
+        registry
+            .append_event(
+                "wake-discarded-head",
+                crate::ProcessEventAppendRequest::new(
+                    "producer.discarded_head",
+                    serde_json::json!({"wake_input": value}),
+                )
+                .with_wake_target_scope(crate::SessionScope::new(&target_request.session_id)),
+            )
+            .await
+            .expect("append discarded-head wake");
+    }
+    let mut discarded_head_deliveries = registry
+        .list_wake_deliveries(None)
+        .await
+        .expect("list discarded-head deliveries")
+        .into_iter()
+        .filter(|delivery| delivery.wake.process_id == "wake-discarded-head")
+        .collect::<Vec<_>>();
+    discarded_head_deliveries.sort_by_key(|delivery| delivery.wake.sequence);
+    let [first, second] = discarded_head_deliveries.as_slice() else {
+        panic!("discarded-head process must have exactly two deliveries");
+    };
+    registry
+        .discard_wake_delivery(&first.delivery_id, crate::WakeDiscardReason::Expired)
+        .await
+        .expect("discard lower group head");
+    assert!(
+        registry
+            .pending_wake_deliveries(64)
+            .await
+            .expect("scan behind discarded group head")
+            .iter()
+            .all(|delivery| delivery.wake.process_id != "wake-discarded-head"),
+        "a discarded lower sequence must block later sequences in its group"
+    );
+    registry
+        .redrive_wake_delivery(&first.delivery_id)
+        .await
+        .expect("redrive discarded group head");
+    drive_once(Arc::clone(&registry), Arc::clone(&factory)).await;
+    let first_batch = target
+        .list_queued_work(&target_request.session_id)
+        .await
+        .expect("list redriven lower sequence")
+        .into_iter()
+        .find(|batch| batch.source_key.as_deref() == Some(first.source_key().as_str()))
+        .expect("redriven lower sequence is delivered first");
+    assert!(
+        target
+            .list_queued_work(&target_request.session_id)
+            .await
+            .expect("list before lower sequence consumption")
+            .iter()
+            .all(|batch| batch.source_key.as_deref() != Some(second.source_key().as_str())),
+        "one scan must enqueue only the redriven group head"
+    );
+    consume_queued_batch(
+        &target,
+        &target_request.session_id,
+        &first_batch.batch_id,
+        "wake-discarded-head-first",
+    )
+    .await;
+    drive_once(Arc::clone(&registry), Arc::clone(&factory)).await;
+    assert!(
+        target
+            .list_queued_work(&target_request.session_id)
+            .await
+            .expect("list after discarded head redrive")
+            .iter()
+            .any(|batch| batch.source_key.as_deref() == Some(second.source_key().as_str())),
+        "later sequence may deliver after the redriven lower sequence"
+    );
 
     // Crash after enqueue, before sender mark: replay returns the live queue row.
     let before_mark = append_wake(&registry, "wake-before-mark", &target_request.session_id).await;
@@ -239,53 +465,37 @@ pub async fn wake_delivery_crash_matrix(
 
     // Settle the queued wake and then redrive the sender row. Receiver evidence
     // must absorb the late redelivery without recreating work.
-    let owner = crate::LeaseOwnerIdentity::opaque("wake-crash-owner", "wake-crash-incarnation");
-    let lease = match target
-        .try_claim_session_execution_lease(&target_request.session_id, &owner, 60_000)
-        .await
-        .expect("claim target session")
-    {
-        crate::SessionExecutionLeaseClaimOutcome::Acquired(lease) => lease,
-        crate::SessionExecutionLeaseClaimOutcome::Busy { .. } => {
-            panic!("fresh crash-matrix target lease must be available")
-        }
-    };
-    let claim = target
-        .claim_ready_queued_work_by_batch_ids(
-            &target_request.session_id,
-            &lease.fence(),
-            &owner,
-            crate::QueuedWorkClaimBoundary::Idle,
-            std::slice::from_ref(&before_mark_batch.batch_id),
-        )
-        .await
-        .expect("claim queued wakes")
-        .expect("queued wake claim");
-    let state = crate::RuntimeSessionState {
-        session_id: target_request.session_id.clone(),
-        ..crate::RuntimeSessionState::default()
-    };
-    target
-        .commit_runtime_state(
-            crate::RuntimeCommit::persisted_state_for_test(&state, &[])
-                .completing_queue_claim(claim.completion())
-                .releasing_session_execution_lease(lease.completion()),
-        )
-        .await
-        .expect("settle queued wakes and evidence atomically");
+    consume_queued_batch(
+        &target,
+        &target_request.session_id,
+        &before_mark_batch.batch_id,
+        "wake-crash-owner",
+    )
+    .await;
     let consumed_replay = target
         .enqueue_queued_work(crate::process_wake_batch_draft(before_mark.wake.clone()))
         .await
-        .expect("receiver evidence absorbs redelivery while sender remains pending");
+        .expect("receiver high water absorbs redelivery while sender remains pending");
     assert_ne!(consumed_replay.batch_id, before_mark_batch.batch_id);
     assert!(
         target
             .list_queued_work(&target_request.session_id)
             .await
-            .expect("queue while consumed evidence is retained")
+            .expect("queue while consumed high water is retained")
             .iter()
             .all(|batch| batch.source_key.as_deref() != Some(&before_mark.source_key()))
     );
+    registry
+        .discard_wake_delivery(
+            &before_mark.delivery_id,
+            crate::WakeDiscardReason::TargetGone,
+        )
+        .await
+        .expect("simulate a terminal sender after receiver consumption");
+    registry
+        .redrive_wake_delivery(&before_mark.delivery_id)
+        .await
+        .expect("host redrive consumed delivery");
     drive_once(Arc::clone(&registry), Arc::clone(&factory)).await;
     assert!(
         target
@@ -294,33 +504,21 @@ pub async fn wake_delivery_crash_matrix(
             .expect("queue after consumed redelivery")
             .iter()
             .all(|batch| batch.source_key.as_deref() != Some(&before_mark.source_key())),
-        "late sender redelivery must resolve against receiver evidence"
-    );
-    let reconciled = registry
-        .list_wake_deliveries(Some(crate::WakeDeliveryState::Enqueued))
-        .await
-        .expect("list reconciled sender rows")
-        .into_iter()
-        .find(|delivery| delivery.delivery_id == before_mark.delivery_id)
-        .expect("late redelivery sender row becomes terminal");
-    assert!(
-        !reconciled.evidence_cleanup_pending,
-        "terminal sender row must reconcile exact receiver evidence"
+        "late sender redelivery must resolve against receiver high water"
     );
     target
         .enqueue_queued_work(crate::process_wake_batch_draft(before_mark.wake.clone()))
         .await
-        .expect("exact evidence was pruned after sender terminality");
+        .expect("stale driver resolves against permanent high water");
     assert!(
         target
             .list_queued_work(&target_request.session_id)
             .await
-            .expect("queue after terminal evidence pruning")
+            .expect("queue after stale terminal snapshot")
             .iter()
-            .any(|batch| batch.source_key.as_deref() == Some(&before_mark.source_key())),
-        "evidence cleanup must occur only after the sender row is terminal"
+            .all(|batch| batch.source_key.as_deref() != Some(&before_mark.source_key())),
+        "a stale driver must never recreate consumed work after sender terminality"
     );
-
     // Competing drivers may both inspect a pending row, but queue and sender
     // transitions remain idempotent.
     let concurrent = append_wake(
@@ -329,9 +527,25 @@ pub async fn wake_delivery_crash_matrix(
         &target_request.session_id,
     )
     .await;
-    let (left, right) = tokio::join!(
-        drive_once(Arc::clone(&registry), Arc::clone(&factory)),
-        drive_once(Arc::clone(&registry), Arc::clone(&factory))
+    let barrier = Arc::new(tokio::sync::Barrier::new(3));
+    let left_registry = Arc::clone(&registry);
+    let left_factory = Arc::clone(&factory);
+    let left_barrier = Arc::clone(&barrier);
+    let left = crate::task::spawn(async move {
+        left_barrier.wait().await;
+        drive_once(left_registry, left_factory).await
+    });
+    let right_registry = Arc::clone(&registry);
+    let right_factory = Arc::clone(&factory);
+    let right_barrier = Arc::clone(&barrier);
+    let right = crate::task::spawn(async move {
+        right_barrier.wait().await;
+        drive_once(right_registry, right_factory).await
+    });
+    barrier.wait().await;
+    let (left, right) = (
+        left.await.expect("join left wake driver"),
+        right.await.expect("join right wake driver"),
     );
     assert!(
         left.enqueued + right.enqueued >= 1,
@@ -348,20 +562,45 @@ pub async fn wake_delivery_crash_matrix(
         1
     );
 
-    // A never-created receiver remains pending until it appears.
+    // A never-created receiver backs off without starving another group.
     let future_target_id = "future-wake-target";
     let future = append_wake(&registry, "wake-future-target", future_target_id).await;
+    let healthy = append_wake(
+        &registry,
+        "wake-healthy-beside-future",
+        &target_request.session_id,
+    )
+    .await;
     let report = drive_once(Arc::clone(&registry), Arc::clone(&factory)).await;
     assert_eq!(report.discarded_target_gone, 0);
     assert!(
-        registry
-            .list_wake_deliveries(Some(crate::WakeDeliveryState::Pending))
+        target
+            .list_queued_work(&target_request.session_id)
             .await
-            .expect("pending future-target deliveries")
+            .expect("healthy queue beside missing target")
             .iter()
-            .any(|delivery| delivery.delivery_id == future.delivery_id)
+            .any(|batch| batch.source_key.as_deref() == Some(&healthy.source_key())),
+        "a deferred group must not starve a healthy group in the same pass"
     );
-    factory
+    let deferred = registry
+        .list_wake_deliveries(Some(crate::WakeDeliveryState::Pending))
+        .await
+        .expect("pending future-target deliveries")
+        .into_iter()
+        .find(|delivery| delivery.delivery_id == future.delivery_id)
+        .expect("future-target delivery remains pending");
+    assert_eq!(
+        deferred.attempts, 1,
+        "the missing target is inspected once before entering backoff"
+    );
+    assert!(
+        deferred.next_attempt_at_ms
+            > deferred
+                .first_attempt_ms
+                .expect("the first failed attempt records its timestamp"),
+        "retry scheduling must move the delivery's due time forward"
+    );
+    let future_target = factory
         .create_store(&crate::SessionStoreCreateRequest {
             session_id: future_target_id.to_string(),
             relation: crate::SessionRelation::Root,
@@ -369,8 +608,30 @@ pub async fn wake_delivery_crash_matrix(
         })
         .await
         .expect("create future wake target");
+    wait_until_delivery_due(&registry, &future.delivery_id).await;
     let report = drive_once(Arc::clone(&registry), Arc::clone(&factory)).await;
-    assert_eq!(report.enqueued, 1);
+    assert!(report.enqueued >= 1);
+    assert_eq!(
+        registry
+            .list_wake_deliveries(None)
+            .await
+            .expect("list future-target delivery after target creation")
+            .into_iter()
+            .find(|delivery| delivery.delivery_id == future.delivery_id)
+            .expect("future-target delivery remains observable")
+            .state,
+        crate::WakeDeliveryState::Enqueued,
+        "the previously missing target's own delivery must become enqueued"
+    );
+    assert!(
+        future_target
+            .list_queued_work(future_target_id)
+            .await
+            .expect("list future target queue")
+            .iter()
+            .any(|batch| batch.source_key.as_deref() == Some(&future.source_key())),
+        "the previously missing target must receive its own queued wake"
+    );
 
     // A permanently tombstoned receiver is a typed terminal outcome; explicit
     // redrive is the only operation that returns it to the pending lane.
@@ -573,7 +834,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn discard_winning_after_enqueue_compensates_the_live_batch() {
+    async fn discard_race_converges_without_destructive_compensation() {
         let registry = Arc::new(crate::TestLocalProcessRegistry::default());
         let registry_dyn = registry.clone() as Arc<dyn crate::ProcessRegistry>;
         let factory = Arc::new(crate::InMemorySessionStoreFactory::new());
@@ -605,15 +866,34 @@ mod tests {
         drive
             .await
             .expect("join discard-race drive")
-            .expect("compensate stale enqueue");
+            .expect("settle stale enqueue against terminal sender");
+        let live = target
+            .list_queued_work(&request.session_id)
+            .await
+            .expect("list queue after discard race")
+            .into_iter()
+            .find(|batch| batch.source_key.as_deref() == Some(&delivery.source_key()))
+            .expect("the non-destructive race winner leaves its safe live batch");
+        consume_queued_batch(
+            &target,
+            &request.session_id,
+            &live.batch_id,
+            "wake-discard-race-owner",
+        )
+        .await;
+        registry
+            .redrive_wake_delivery(&delivery.delivery_id)
+            .await
+            .expect("redrive consumed discarded delivery");
+        drive_once(registry_dyn, factory.clone()).await;
         assert!(
             target
                 .list_queued_work(&request.session_id)
                 .await
-                .expect("list queue after discard compensation")
+                .expect("list queue after consumed redrive")
                 .iter()
                 .all(|batch| batch.source_key.as_deref() != Some(&delivery.source_key())),
-            "a discarded delivery must never leave a live queued batch"
+            "high water must absorb redrive without deleting an in-flight claim"
         );
     }
 

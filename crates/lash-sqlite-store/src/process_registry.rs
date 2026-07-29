@@ -27,6 +27,18 @@ impl ProcessRegistry for SqliteProcessRegistry {
         self.wake_delivery_config
     }
 
+    fn with_runtime_clock(
+        &self,
+        clock: Arc<dyn lash_core::Clock>,
+    ) -> Option<Arc<dyn ProcessRegistry>> {
+        Some(Arc::new(Self {
+            conn: self.conn.clone(),
+            clock,
+            process_session_store_root: self.process_session_store_root.clone(),
+            wake_delivery_config: self.wake_delivery_config,
+        }))
+    }
+
     async fn register_process(
         &self,
         registration: ProcessRegistration,
@@ -411,8 +423,7 @@ impl ProcessRegistry for SqliteProcessRegistry {
                     let discarded_wake_delivery_count = tx
                         .execute(
                             "UPDATE process_wake_deliveries
-                             SET state = 'discarded', discard_reason = 'target_gone',
-                                 evidence_cleanup_pending = 1
+                             SET state = 'discarded', discard_reason = 'target_gone'
                              WHERE target_session_id = ?1 AND state = 'pending'",
                             params![session_id],
                         )
@@ -976,25 +987,29 @@ impl ProcessRegistry for SqliteProcessRegistry {
                                 "SELECT candidate.delivery_id
                                  FROM process_wake_deliveries AS candidate
                                  WHERE candidate.state = 'pending'
+                                   AND candidate.next_attempt_at_ms <= ?2
                                    AND NOT EXISTS (
                                        SELECT 1
                                        FROM process_wake_deliveries AS earlier
-                                       WHERE earlier.state = 'pending'
+                                       WHERE earlier.state <> 'enqueued'
                                          AND earlier.target_session_id =
                                              candidate.target_session_id
                                          AND earlier.process_id = candidate.process_id
                                          AND earlier.sequence < candidate.sequence
                                    )
-                                 ORDER BY candidate.target_session_id ASC,
+                                 ORDER BY candidate.next_attempt_at_ms ASC,
+                                          candidate.target_session_id ASC,
                                           candidate.process_id ASC,
                                           candidate.sequence ASC
                                  LIMIT ?1",
                             )
                             .map_err(process_sqlite_error)?;
-                        stmt.query_map(params![limit as i64], |row| row.get::<_, String>(0))
-                            .map_err(process_sqlite_error)?
-                            .collect::<Result<Vec<_>, _>>()
-                            .map_err(process_sqlite_error)?
+                        stmt.query_map(params![limit as i64, now as i64], |row| {
+                            row.get::<_, String>(0)
+                        })
+                        .map_err(process_sqlite_error)?
+                        .collect::<Result<Vec<_>, _>>()
+                        .map_err(process_sqlite_error)?
                     };
                     for id in &ids {
                         tx.execute(
@@ -1085,6 +1100,7 @@ impl ProcessRegistry for SqliteProcessRegistry {
             .clock
             .timestamp_ms()
             .saturating_add(self.wake_delivery_config.delivery_expiry_ms);
+        let next_attempt_at_ms = self.clock.timestamp_ms();
         self.conn
             .write_flow(move |tx| {
                 Ok(tx_outcome((|| {
@@ -1092,10 +1108,10 @@ impl ProcessRegistry for SqliteProcessRegistry {
                         .execute(
                             "UPDATE process_wake_deliveries
                              SET state = 'pending', attempts = 0, first_attempt_ms = NULL,
-                                 expires_at_ms = ?2, discard_reason = NULL,
-                                 evidence_cleanup_pending = 0
+                                 next_attempt_at_ms = ?3, expires_at_ms = ?2,
+                                 discard_reason = NULL
                              WHERE delivery_id = ?1 AND state = 'discarded'",
-                            params![delivery_id, expires_at_ms as i64],
+                            params![delivery_id, expires_at_ms as i64, next_attempt_at_ms as i64],
                         )
                         .map_err(process_sqlite_error)?;
                     if changed == 0 {
@@ -1110,41 +1126,10 @@ impl ProcessRegistry for SqliteProcessRegistry {
             .map_err(process_sqlite_error)?
     }
 
-    async fn wake_evidence_cleanup_deliveries(
-        &self,
-        limit: usize,
-    ) -> Result<Vec<lash_core::WakeDelivery>, lash_core::PluginError> {
-        if limit == 0 {
-            return Ok(Vec::new());
-        }
-        self.conn
-            .call(move |conn| {
-                Ok((|| {
-                    let mut stmt = conn
-                        .prepare(
-                            "SELECT delivery_id FROM process_wake_deliveries
-                             WHERE state <> 'pending' AND evidence_cleanup_pending = 1
-                             ORDER BY target_session_id ASC, process_id ASC, sequence ASC
-                             LIMIT ?1",
-                        )
-                        .map_err(process_sqlite_error)?;
-                    let ids = stmt
-                        .query_map(params![limit as i64], |row| row.get::<_, String>(0))
-                        .map_err(process_sqlite_error)?
-                        .collect::<Result<Vec<_>, _>>()
-                        .map_err(process_sqlite_error)?;
-                    ids.iter()
-                        .map(|id| load_wake_delivery_conn(conn, id))
-                        .collect()
-                })())
-            })
-            .await
-            .map_err(process_sqlite_error)?
-    }
-
-    async fn mark_wake_evidence_cleaned(
+    async fn defer_wake_delivery(
         &self,
         delivery_id: &str,
+        next_attempt_at_ms: u64,
     ) -> Result<(), lash_core::PluginError> {
         let delivery_id = delivery_id.to_string();
         self.conn
@@ -1153,15 +1138,17 @@ impl ProcessRegistry for SqliteProcessRegistry {
                     let changed = tx
                         .execute(
                             "UPDATE process_wake_deliveries
-                             SET evidence_cleanup_pending = 0
-                             WHERE delivery_id = ?1 AND state <> 'pending'",
-                            params![delivery_id],
+                             SET next_attempt_at_ms = MAX(next_attempt_at_ms, ?2)
+                             WHERE delivery_id = ?1 AND state = 'pending'",
+                            params![delivery_id, next_attempt_at_ms as i64],
                         )
                         .map_err(process_sqlite_error)?;
                     if changed == 0 {
-                        return Err(lash_core::PluginError::Session(format!(
-                            "wake delivery `{delivery_id}` is pending or does not exist"
-                        )));
+                        let delivery = load_wake_delivery_conn(tx, &delivery_id)?;
+                        return Err(lash_core::PluginError::WakeDeliveryNotPending {
+                            delivery_id,
+                            state: delivery.state,
+                        });
                     }
                     Ok(())
                 })()))

@@ -14,13 +14,13 @@ use std::future::Future;
 use std::sync::Arc;
 
 use lash_core::runtime::{
-    ProcessWakeDelivery, QueuedWorkBatchDraft, QueuedWorkClaimBoundary, QueuedWorkPayload,
-    RuntimeScope, RuntimeSubject, SessionScopeId,
+    ProcessWakeDelivery, QueuedWorkBatchDraft, QueuedWorkClaimBoundary, RuntimeScope,
+    RuntimeSubject, SessionScopeId,
 };
 use lash_core::{
-    DeliveryPolicy, LeaseOwnerIdentity, PluginSessionSnapshot, QueuedWorkStore, RuntimeCommit,
-    RuntimeInvocation, RuntimeSessionState, SessionCommitStore, SessionExecutionLeaseStore,
-    SessionStoreFactory, SlotPolicy, StoreError, ToolState,
+    LeaseOwnerIdentity, PluginSessionSnapshot, QueuedWorkStore, RuntimeCommit, RuntimeInvocation,
+    RuntimeSessionState, SessionCommitStore, SessionExecutionLeaseStore, SessionStoreFactory,
+    StoreError, ToolState,
 };
 use lash_sqlite_store::{SqliteSessionStoreFactory, Store};
 
@@ -240,12 +240,7 @@ fn exclusive_draft(session_id: &str, text: &str) -> QueuedWorkBatchDraft {
         input: text.to_string(),
         created_at_ms: 0,
     };
-    QueuedWorkBatchDraft::new(
-        session_id,
-        DeliveryPolicy::EarliestSafeBoundary,
-        SlotPolicy::Exclusive,
-        vec![QueuedWorkPayload::process_wake(wake)],
-    )
+    lash_core::runtime::process_wake_batch_draft(wake)
 }
 
 // Finding 2 (sequential): when a batch is already held by a live claim, a
@@ -414,8 +409,8 @@ async fn unsupported_schema_error_reports_real_versions() {
         "error must report the found version 99: {message}"
     );
     assert!(
-        message.contains("schema version 21"),
-        "error must report the real expected version 21: {message}"
+        message.contains("schema version 22"),
+        "error must report the real expected version 22: {message}"
     );
     assert!(
         !message.contains("version 1 only"),
@@ -451,7 +446,7 @@ fn concurrent_first_open_never_observes_version_zero_schema() {
     let user_version: i32 = conn
         .query_row("PRAGMA user_version", [], |row| row.get(0))
         .expect("read user_version");
-    assert_eq!(user_version, 21);
+    assert_eq!(user_version, 22);
 }
 
 #[tokio::test]

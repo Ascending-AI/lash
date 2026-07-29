@@ -359,6 +359,17 @@ impl ProcessRegistry for WatchedProcessRegistry {
         self.inner.wake_delivery_config()
     }
 
+    fn with_runtime_clock(&self, clock: Arc<dyn crate::Clock>) -> Option<Arc<dyn ProcessRegistry>> {
+        self.inner.with_runtime_clock(clock).map(|inner| {
+            Arc::new(Self {
+                inner,
+                hub: self.hub.clone(),
+                sink: self.sink.clone(),
+                event_paths: Mutex::new(HashMap::new()),
+            }) as Arc<dyn ProcessRegistry>
+        })
+    }
+
     async fn register_process(
         &self,
         registration: ProcessRegistration,
@@ -705,15 +716,14 @@ impl ProcessRegistry for WatchedProcessRegistry {
         self.inner.redrive_wake_delivery(delivery_id).await
     }
 
-    async fn wake_evidence_cleanup_deliveries(
+    async fn defer_wake_delivery(
         &self,
-        limit: usize,
-    ) -> Result<Vec<super::WakeDelivery>, PluginError> {
-        self.inner.wake_evidence_cleanup_deliveries(limit).await
-    }
-
-    async fn mark_wake_evidence_cleaned(&self, delivery_id: &str) -> Result<(), PluginError> {
-        self.inner.mark_wake_evidence_cleaned(delivery_id).await
+        delivery_id: &str,
+        next_attempt_at_ms: u64,
+    ) -> Result<(), PluginError> {
+        self.inner
+            .defer_wake_delivery(delivery_id, next_attempt_at_ms)
+            .await
     }
 
     async fn list_non_terminal(&self) -> Result<Vec<ProcessRecord>, PluginError> {

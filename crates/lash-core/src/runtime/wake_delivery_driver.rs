@@ -13,6 +13,15 @@ use crate::{
 const DELIVERY_BATCH_SIZE: usize = 32;
 const POLL_INITIAL: Duration = Duration::from_millis(25);
 const POLL_MAX: Duration = Duration::from_secs(1);
+const RETRY_INITIAL_MS: u64 = 50;
+const RETRY_MAX_MS: u64 = 5 * 60 * 1_000;
+
+fn retry_delay_ms(attempts: u64) -> u64 {
+    let exponent = attempts.saturating_sub(1).min(63) as u32;
+    RETRY_INITIAL_MS
+        .saturating_mul(1_u64 << exponent)
+        .min(RETRY_MAX_MS)
+}
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct WakeDeliveryDriveReport {
@@ -21,7 +30,6 @@ pub struct WakeDeliveryDriveReport {
     pub discarded_expired: usize,
     pub discarded_target_gone: usize,
     pub retryable_failures: usize,
-    pub evidence_cleaned: usize,
 }
 
 #[derive(Clone)]
@@ -143,7 +151,15 @@ impl WakeDeliveryDriver {
                             "concurrent process wake transition won before expiry discard"
                         );
                     }
-                    Err(error) => return Err(error),
+                    Err(error) => {
+                        tracing::warn!(
+                            delivery_id = %delivery.delivery_id,
+                            error = %error,
+                            "process wake expiry transition failed; delivery deferred"
+                        );
+                        Self::defer_retry(registry.as_ref(), &delivery, clock.as_ref()).await?;
+                        report.retryable_failures += 1;
+                    }
                 }
                 continue;
             }
@@ -169,6 +185,7 @@ impl WakeDeliveryDriver {
                                 error = %error,
                                 "process wake target tombstone lookup failed; delivery remains pending"
                             );
+                            Self::defer_retry(registry.as_ref(), &delivery, clock.as_ref()).await?;
                             report.retryable_failures += 1;
                             continue;
                         }
@@ -197,7 +214,16 @@ impl WakeDeliveryDriver {
                                     "concurrent process wake transition won before target-gone discard"
                                 );
                             }
-                            Err(error) => return Err(error),
+                            Err(error) => {
+                                tracing::warn!(
+                                    delivery_id = %delivery.delivery_id,
+                                    error = %error,
+                                    "process wake target-gone transition failed; delivery deferred"
+                                );
+                                Self::defer_retry(registry.as_ref(), &delivery, clock.as_ref())
+                                    .await?;
+                                report.retryable_failures += 1;
+                            }
                         }
                     } else {
                         tracing::debug!(
@@ -205,6 +231,7 @@ impl WakeDeliveryDriver {
                             target_session_id = %target_session_id,
                             "process wake target has never existed; delivery remains pending"
                         );
+                        Self::defer_retry(registry.as_ref(), &delivery, clock.as_ref()).await?;
                         report.retryable_failures += 1;
                     }
                     continue;
@@ -216,6 +243,7 @@ impl WakeDeliveryDriver {
                         error = %error,
                         "process wake target lookup failed; delivery remains pending"
                     );
+                    Self::defer_retry(registry.as_ref(), &delivery, clock.as_ref()).await?;
                     report.retryable_failures += 1;
                     continue;
                 }
@@ -245,39 +273,22 @@ impl WakeDeliveryDriver {
                             }
                             report.enqueued += 1;
                         }
-                        Err(PluginError::WakeDeliveryNotPending {
-                            state: crate::WakeDeliveryState::Enqueued,
-                            ..
-                        }) => {
+                        Err(PluginError::WakeDeliveryNotPending { state, .. }) => {
                             tracing::debug!(
                                 delivery_id = %delivery.delivery_id,
-                                "concurrent process wake driver already marked delivery enqueued"
+                                ?state,
+                                "concurrent process wake transition already settled delivery"
                             );
                         }
-                        Err(PluginError::WakeDeliveryNotPending {
-                            state: crate::WakeDeliveryState::Discarded,
-                            ..
-                        }) => {
-                            let converged = store
-                                .compensate_queued_work_batch(
-                                    &target_session_id,
-                                    &enqueued.batch_id,
-                                )
-                                .await
-                                .map_err(|error| PluginError::Session(error.to_string()))?;
-                            if !converged {
-                                return Err(PluginError::Session(format!(
-                                    "discarded wake delivery `{}` could not remove queued batch `{}`",
-                                    delivery.delivery_id, enqueued.batch_id
-                                )));
-                            }
-                            tracing::info!(
+                        Err(error) => {
+                            tracing::warn!(
                                 delivery_id = %delivery.delivery_id,
-                                batch_id = %enqueued.batch_id,
-                                "compensated process wake enqueue after terminal discard"
+                                error = %error,
+                                "process wake terminal mark failed; delivery deferred"
                             );
+                            Self::defer_retry(registry.as_ref(), &delivery, clock.as_ref()).await?;
+                            report.retryable_failures += 1;
                         }
-                        Err(error) => return Err(error),
                     }
                 }
                 Err(error) => {
@@ -287,51 +298,31 @@ impl WakeDeliveryDriver {
                         error = %error,
                         "process wake enqueue failed; delivery remains pending"
                     );
+                    Self::defer_retry(registry.as_ref(), &delivery, clock.as_ref()).await?;
                     report.retryable_failures += 1;
                 }
             }
-        }
-        for delivery in registry.wake_evidence_cleanup_deliveries(limit).await? {
-            let target_session_id = delivery.wake.target_session_id.clone();
-            let request = SessionStoreCreateRequest {
-                session_id: target_session_id.clone(),
-                relation: SessionRelation::default(),
-                policy: SessionPolicy::default(),
-            };
-            match session_store_factory.open_existing_store(&request).await {
-                Ok(Some(store)) => {
-                    store
-                        .prune_consumed_wake_source_keys(
-                            &target_session_id,
-                            &[delivery.source_key()],
-                        )
-                        .await
-                        .map_err(|error| PluginError::Session(error.to_string()))?;
-                }
-                Ok(None) => {}
-                Err(error) => {
-                    tracing::warn!(
-                        delivery_id = %delivery.delivery_id,
-                        target_session_id = %target_session_id,
-                        error = %error,
-                        "process wake evidence cleanup target lookup failed"
-                    );
-                    report.retryable_failures += 1;
-                    continue;
-                }
-            }
-            registry
-                .mark_wake_evidence_cleaned(&delivery.delivery_id)
-                .await?;
-            tracing::info!(
-                delivery_id = %delivery.delivery_id,
-                target_session_id = %target_session_id,
-                source_key = %delivery.source_key(),
-                "process wake consumed evidence reconciled after terminal delivery"
-            );
-            report.evidence_cleaned += 1;
         }
         Ok(report)
+    }
+
+    async fn defer_retry(
+        registry: &dyn ProcessRegistry,
+        delivery: &crate::WakeDelivery,
+        clock: &dyn Clock,
+    ) -> Result<(), PluginError> {
+        match registry
+            .defer_wake_delivery(
+                &delivery.delivery_id,
+                clock
+                    .timestamp_ms()
+                    .saturating_add(retry_delay_ms(delivery.attempts)),
+            )
+            .await
+        {
+            Ok(()) | Err(PluginError::WakeDeliveryNotPending { .. }) => Ok(()),
+            Err(error) => Err(error),
+        }
     }
 
     async fn run_loop(inner: Arc<WakeDeliveryDriverInner>, shutdown: CancellationToken) {
@@ -355,11 +346,8 @@ impl WakeDeliveryDriver {
                     }
                 }
             };
-            let made_progress = report.enqueued
-                + report.discarded_expired
-                + report.discarded_target_gone
-                + report.evidence_cleaned
-                > 0;
+            let made_progress =
+                report.enqueued + report.discarded_expired + report.discarded_target_gone > 0;
             let delay = if made_progress
                 && report.retryable_failures == 0
                 && report.inspected >= DELIVERY_BATCH_SIZE
@@ -380,5 +368,20 @@ impl WakeDeliveryDriver {
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{RETRY_INITIAL_MS, RETRY_MAX_MS, retry_delay_ms};
+
+    #[test]
+    fn retry_delay_is_bounded_for_every_attempt_count() {
+        assert_eq!(retry_delay_ms(0), RETRY_INITIAL_MS);
+        assert_eq!(retry_delay_ms(1), RETRY_INITIAL_MS);
+        assert_eq!(retry_delay_ms(2), RETRY_INITIAL_MS * 2);
+        assert_eq!(retry_delay_ms(14), RETRY_MAX_MS);
+        assert_eq!(retry_delay_ms(64), RETRY_MAX_MS);
+        assert_eq!(retry_delay_ms(u64::MAX), RETRY_MAX_MS);
     }
 }

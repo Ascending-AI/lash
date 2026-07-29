@@ -5,8 +5,8 @@ pub(super) async fn load_wake_delivery_tx(
     delivery_id: &str,
 ) -> Result<lash_core::WakeDelivery, PluginError> {
     let row = sqlx::query(
-        "SELECT delivery_id, state, attempts, first_attempt_ms, expires_at_ms,
-                discard_reason, evidence_cleanup_pending, delivery_json
+        "SELECT delivery_id, state, attempts, first_attempt_ms, next_attempt_at_ms,
+                expires_at_ms, discard_reason, delivery_json
          FROM lash_process_wake_deliveries WHERE delivery_id = $1",
     )
     .bind(delivery_id)
@@ -32,7 +32,7 @@ pub(super) fn decode_wake_delivery_row(
             )));
         }
     };
-    let discard_value: Option<String> = row.get(5);
+    let discard_value: Option<String> = row.get(6);
     let discard_reason = match discard_value.as_deref() {
         None => None,
         Some("expired") => Some(lash_core::WakeDiscardReason::Expired),
@@ -43,7 +43,6 @@ pub(super) fn decode_wake_delivery_row(
             )));
         }
     };
-    let evidence_cleanup_pending: bool = row.get(6);
     let delivery_json: String = row.get(7);
     Ok(lash_core::WakeDelivery {
         delivery_id,
@@ -51,9 +50,9 @@ pub(super) fn decode_wake_delivery_row(
         state,
         attempts: row.get::<i64, _>(2) as u64,
         first_attempt_ms: row.get::<Option<i64>, _>(3).map(|value| value as u64),
-        expires_at_ms: row.get::<i64, _>(4) as u64,
+        next_attempt_at_ms: row.get::<i64, _>(4) as u64,
+        expires_at_ms: row.get::<i64, _>(5) as u64,
         discard_reason,
-        evidence_cleanup_pending,
     })
 }
 
@@ -86,7 +85,7 @@ pub(super) async fn update_wake_delivery_state(
 ) -> Result<(), PluginError> {
     let changed = sqlx::query(
         "UPDATE lash_process_wake_deliveries
-         SET state = $2, discard_reason = $3, evidence_cleanup_pending = TRUE
+         SET state = $2, discard_reason = $3
          WHERE delivery_id = $1 AND state = 'pending'",
     )
     .bind(delivery_id)
@@ -101,7 +100,7 @@ pub(super) async fn update_wake_delivery_state(
             "SELECT state FROM lash_process_wake_deliveries WHERE delivery_id = $1",
         )
         .bind(delivery_id)
-        .fetch_one(pool)
+        .fetch_optional(pool)
         .await
         .map_err(plugin_sqlx_error)?;
         let current = current.ok_or_else(|| {
