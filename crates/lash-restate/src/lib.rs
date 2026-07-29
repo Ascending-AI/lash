@@ -558,6 +558,17 @@ fn restate_timer_turn_cancel_wait_request(
     restate_turn_cancel_wait_request(invocation, turn_cancel_scope)
 }
 
+fn restate_process_turn_cancel_wait_request(
+    invocation: &RuntimeInvocation,
+    observe_turn_cancel: bool,
+    turn_cancel_scope: Option<&ExecutionScope>,
+) -> Result<Option<RestateDurableWaitAwaitRequest>, RuntimeEffectControllerError> {
+    if !observe_turn_cancel {
+        return Ok(None);
+    }
+    restate_turn_cancel_wait_request(invocation, turn_cancel_scope)
+}
+
 fn restate_await_event_turn_cancel_wait_request(
     invocation: &RuntimeInvocation,
     observe_turn_cancel: bool,
@@ -3440,6 +3451,13 @@ pub enum RestateAwaitEventRaceOutcome {
 
 #[doc(hidden)]
 #[derive(Clone, Debug, Serialize, serde::Deserialize)]
+pub enum RestateProcessAwaitRaceOutcome {
+    Terminal(Box<ProcessAwaitOutput>),
+    TurnCancelled,
+}
+
+#[doc(hidden)]
+#[derive(Clone, Debug, Serialize, serde::Deserialize)]
 pub struct RestateTurnSleepWaitRequest {
     duration_ms: u64,
 }
@@ -3579,6 +3597,34 @@ pub trait RestateControllerContext<'ctx>: Send + Sync + 'ctx {
     where
         'ctx: 'run;
 
+    /// Race a process terminal wait against durable turn cancellation.
+    ///
+    /// Implementations backed by a real Restate SDK context MUST override this
+    /// method and obey the SDK suspension protocol. The default is only
+    /// suitable for non-SDK test contexts.
+    fn await_process_terminal_or_turn_cancel<'run>(
+        &'run self,
+        process_id: String,
+        turn_cancel: Option<RestateDurableWaitAwaitRequest>,
+    ) -> Pin<
+        Box<
+            dyn Future<Output = Result<RestateProcessAwaitRaceOutcome, TerminalError>>
+                + Send
+                + 'run,
+        >,
+    >
+    where
+        'ctx: 'run,
+    {
+        let _ = turn_cancel;
+        Box::pin(async move {
+            self.await_process_terminal(process_id)
+                .await
+                .map(Box::new)
+                .map(RestateProcessAwaitRaceOutcome::Terminal)
+        })
+    }
+
     fn resolve_event<'run>(
         &'run self,
         request: RestateDurableWaitResolveRequest,
@@ -3655,11 +3701,13 @@ macro_rules! impl_restate_controller_context {
                                     }
                                     Poll::Pending => match cancelled.as_mut().poll(cx) {
                                         Poll::Ready(()) => {
-                                            // The sleep is already journaled,
-                                            // but OutputCommand + End makes
-                                            // this attempt terminal, so no
-                                            // replay can observe the stray
-                                            // timer command.
+                                            // The stray timer is harmless only
+                                            // because its emission is
+                                            // deterministic across attempts.
+                                            // OutputCommand + End hides it when
+                                            // reached, but a panic, crash, or
+                                            // engine kill before then exposes
+                                            // it to replay.
                                             Poll::Ready(Ok(
                                                 RestateSleepRaceOutcome::Cancelled,
                                             ))
@@ -3961,6 +4009,97 @@ macro_rules! impl_restate_controller_context {
                     Box::pin(async move {
                         let Json(output) = call.await?;
                         Ok(output)
+                    })
+                }
+
+                fn await_process_terminal_or_turn_cancel<'run>(
+                    &'run self,
+                    process_id: String,
+                    turn_cancel: Option<RestateDurableWaitAwaitRequest>,
+                ) -> Pin<
+                    Box<
+                        dyn Future<
+                                Output = Result<RestateProcessAwaitRaceOutcome, TerminalError>,
+                            > + Send
+                            + 'run,
+                    >,
+                >
+                where
+                    'ctx: 'run,
+                {
+                    Box::pin(async move {
+                        let Some(turn_cancel) = turn_cancel else {
+                            return self
+                                .await_process_terminal(process_id)
+                                .await
+                                .map(Box::new)
+                                .map(RestateProcessAwaitRaceOutcome::Terminal);
+                        };
+                        let Some(session_id) = turn_cancel.address.session_id.clone() else {
+                            return Err(TerminalError::new(
+                                "turn cancellation gate is missing its session id",
+                            ));
+                        };
+                        let (awakeable_id, awakeable) = self.awakeable::<Json<Resolution>>();
+                        let registration_request = RestateDurableWaitAwakeableRequest {
+                            address: turn_cancel.address,
+                            awakeable_id,
+                        };
+                        let register: restate_sdk::context::Request<
+                            '_,
+                            Json<RestateDurableWaitAwakeableRequest>,
+                            Json<RestateDurableWaitRegistration>,
+                        > = ContextClient::request(
+                            self,
+                            RequestTarget::object(
+                                "LashDurableWaitIndex",
+                                session_id.clone(),
+                                "register_awakeable",
+                            ),
+                            Json(registration_request.clone()),
+                        );
+                        let Json(registration) = register.call().await?;
+                        if registration == RestateDurableWaitRegistration::Revoked {
+                            return Ok(RestateProcessAwaitRaceOutcome::TurnCancelled);
+                        }
+
+                        let process: restate_sdk::context::Request<
+                            '_,
+                            Json<RestateProcessAwaitRequest>,
+                            Json<ProcessAwaitOutput>,
+                        > = ContextClient::request(
+                            self,
+                            RequestTarget::workflow(
+                                "LashProcessWorkflow",
+                                process_id.clone(),
+                                "await_terminal",
+                            ),
+                            Json(RestateProcessAwaitRequest { process_id }),
+                        );
+                        restate_sdk::select! {
+                            result = process.call() => {
+                                let Json(output) = result?;
+                                let unregister: restate_sdk::context::Request<
+                                    '_,
+                                    Json<RestateDurableWaitAwakeableRequest>,
+                                    Json<()>,
+                                > = ContextClient::request(
+                                    self,
+                                    RequestTarget::object(
+                                        "LashDurableWaitIndex",
+                                        session_id,
+                                        "unregister_awakeable",
+                                    ),
+                                    Json(registration_request),
+                                );
+                                let Json(()) = unregister.call().await?;
+                                Ok(RestateProcessAwaitRaceOutcome::Terminal(Box::new(output)))
+                            },
+                            result = awakeable => {
+                                let _ = result?;
+                                Ok(RestateProcessAwaitRaceOutcome::TurnCancelled)
+                            }
+                        }
                     })
                 }
 
@@ -4279,12 +4418,21 @@ where
     ) -> Result<RuntimeEffectOutcome, RuntimeEffectControllerError> {
         match restate_effect_execution(&envelope.command) {
             RestateEffectExecution::DirectProcess => {
-                let RuntimeEffectCommand::Process { command } = envelope.command else {
+                let RuntimeEffectEnvelope {
+                    invocation,
+                    command: RuntimeEffectCommand::Process { command },
+                } = envelope
+                else {
                     unreachable!("direct process execution is only selected for process effects");
                 };
-                execute_restate_process_command(&self.context, *command, local_executor)
-                    .await
-                    .map(|result| RuntimeEffectOutcome::Process { result })
+                execute_restate_process_command(
+                    &self.context,
+                    &invocation,
+                    *command,
+                    local_executor,
+                )
+                .await
+                .map(|result| RuntimeEffectOutcome::Process { result })
             }
             RestateEffectExecution::DirectLocal => local_executor.execute(envelope).await,
             RestateEffectExecution::Timer => {
@@ -4433,6 +4581,7 @@ async fn execute_restate_journaled_effect(
 
 async fn execute_restate_process_command<'ctx, C>(
     context: &C,
+    invocation: &RuntimeInvocation,
     command: ProcessCommand,
     local_executor: RuntimeEffectLocalExecutor<'_>,
 ) -> Result<ProcessEffectOutcome, RuntimeEffectControllerError>
@@ -4441,6 +4590,9 @@ where
 {
     let execution = local_executor.into_process()?;
     let registry = execution.registry;
+    let cancellation = execution.cancellation;
+    let observe_turn_cancel = execution.observe_turn_cancel;
+    let turn_cancel_scope = execution.turn_cancel_scope;
     match command {
         ProcessCommand::Start {
             registration,
@@ -4491,12 +4643,41 @@ where
             if registry.get_process(&process_id).await.is_none() {
                 return Err(PluginError::Session(format!("unknown process `{process_id}`")).into());
             }
-            let output = context
-                .await_process_terminal(process_id.clone())
+            let turn_cancel = restate_process_turn_cancel_wait_request(
+                invocation,
+                observe_turn_cancel,
+                turn_cancel_scope.as_ref(),
+            )?;
+            let output = match context
+                .await_process_terminal_or_turn_cancel(process_id.clone(), turn_cancel)
                 .await
                 .map_err(|err| {
                     RuntimeEffectControllerError::new("restate_process_await", err.to_string())
-                })?;
+                })? {
+                RestateProcessAwaitRaceOutcome::Terminal(output) => *output,
+                RestateProcessAwaitRaceOutcome::TurnCancelled => {
+                    cancellation.cancel();
+                    context
+                        .request_process_workflow_cancel(RestateProcessCancelRequest {
+                            process_id: process_id.clone(),
+                            reason: Some("turn cancelled while awaiting process".to_string()),
+                        })
+                        .await
+                        .map_err(|err| {
+                            RestateEffectError::BackgroundScheduler(err.to_string())
+                                .into_plugin_error()
+                        })?;
+                    context
+                        .await_process_terminal(process_id.clone())
+                        .await
+                        .map_err(|err| {
+                            RuntimeEffectControllerError::new(
+                                "restate_process_await_after_turn_cancel",
+                                err.to_string(),
+                            )
+                        })?
+                }
+            };
             Ok(ProcessEffectOutcome::Await {
                 output: Box::new(output),
             })
@@ -4618,6 +4799,25 @@ enum RestateEffectExecution {
     JournaledRun,
 }
 
+/// Selects the Restate journal-command mapping for a Lash runtime effect.
+///
+/// # RT0016 journal-mismatch label warning
+///
+/// Restate SDK 0.10.0 reports command-type mismatches with the two human
+/// labels swapped. `service_protocol/encoding.rs:96` constructs
+/// `CommandTypeMismatchError` with `actual` equal to the journal entry popped
+/// from `commands` and `expected` equal to the command the current execution
+/// wants. `vm/errors.rs:188-200` then displays `expected` as what the previous
+/// execution recorded and `actual` as what the current execution attempts.
+///
+/// Therefore, when reading RT0016, the line labelled "previous execution ran
+/// and recorded" is actually this attempt's intended command, while "current
+/// execution attempts" is actually the journal's recorded command. The
+/// trailing `Command: ...[command index N]` metadata is captured from
+/// `journal.last_command_metadata()` after `journal.transition(&expected)`, so
+/// it also names the command this attempt was trying to write, not the
+/// journal's contents. FIG-790 was the incident that exposed this SDK
+/// diagnostic inversion.
 fn restate_effect_execution(command: &RuntimeEffectCommand) -> RestateEffectExecution {
     match command {
         RuntimeEffectCommand::Process { .. } => RestateEffectExecution::DirectProcess,

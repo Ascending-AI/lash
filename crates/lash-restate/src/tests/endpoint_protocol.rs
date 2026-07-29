@@ -84,6 +84,151 @@ fn restate_message_frame(input: &[u8], expected_type: u16) -> Option<&[u8]> {
     None
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(super) struct RestateCallFrame {
+    pub frame: Bytes,
+    pub service: String,
+    pub handler: String,
+    pub key: String,
+    pub result_completion_id: u32,
+}
+
+fn protobuf_len_field(input: &[u8], target: u64) -> Option<&[u8]> {
+    let mut cursor = 0;
+    while cursor < input.len() {
+        let key = decode_varint(input, &mut cursor)?;
+        let field = key >> 3;
+        match key & 7 {
+            0 => {
+                let _ = decode_varint(input, &mut cursor)?;
+            }
+            2 => {
+                let len = usize::try_from(decode_varint(input, &mut cursor)?).ok()?;
+                let end = cursor.checked_add(len)?;
+                let value = input.get(cursor..end)?;
+                if field == target {
+                    return Some(value);
+                }
+                cursor = end;
+            }
+            _ => return None,
+        }
+    }
+    None
+}
+
+fn protobuf_varint_field(input: &[u8], target: u64) -> Option<u64> {
+    let mut cursor = 0;
+    while cursor < input.len() {
+        let key = decode_varint(input, &mut cursor)?;
+        let field = key >> 3;
+        match key & 7 {
+            0 => {
+                let value = decode_varint(input, &mut cursor)?;
+                if field == target {
+                    return Some(value);
+                }
+            }
+            2 => {
+                let len = usize::try_from(decode_varint(input, &mut cursor)?).ok()?;
+                cursor = cursor.checked_add(len)?;
+                if cursor > input.len() {
+                    return None;
+                }
+            }
+            _ => return None,
+        }
+    }
+    None
+}
+
+fn decode_call_frame(frame: &[u8]) -> Option<RestateCallFrame> {
+    let payload = frame.get(8..)?;
+    Some(RestateCallFrame {
+        frame: Bytes::copy_from_slice(frame),
+        service: String::from_utf8(protobuf_len_field(payload, 1)?.to_vec()).ok()?,
+        handler: String::from_utf8(protobuf_len_field(payload, 2)?.to_vec()).ok()?,
+        key: String::from_utf8(protobuf_len_field(payload, 5).unwrap_or_default().to_vec()).ok()?,
+        result_completion_id: u32::try_from(protobuf_varint_field(payload, 11)?).ok()?,
+    })
+}
+
+pub(super) fn restate_call_frames(input: &[u8]) -> Option<Vec<RestateCallFrame>> {
+    let mut cursor = 0;
+    let mut calls = Vec::new();
+    while cursor < input.len() {
+        let header = u64::from_be_bytes(input.get(cursor..cursor + 8)?.try_into().ok()?);
+        let message_type = (header >> 48) as u16;
+        let payload_len = usize::try_from(header & 0x0000_FFFF_FFFF_FFFF).ok()?;
+        let frame_end = cursor.checked_add(8 + payload_len)?;
+        let frame = input.get(cursor..frame_end)?;
+        if message_type == 0x040D {
+            calls.push(decode_call_frame(frame)?);
+        }
+        cursor = frame_end;
+    }
+    Some(calls)
+}
+
+fn encode_call_completion(completion_id: u32, value: &[u8]) -> Bytes {
+    let mut nested_value = BytesMut::new();
+    put_len_field(&mut nested_value, 1, value);
+    let mut notification = BytesMut::new();
+    put_varint_field(&mut notification, 1, u64::from(completion_id));
+    put_len_field(&mut notification, 5, &nested_value);
+    encode_restate_message(0x800D, notification.to_vec())
+}
+
+fn encode_signal_value(signal_id: u32, value: &[u8]) -> Bytes {
+    let mut nested_value = BytesMut::new();
+    put_len_field(&mut nested_value, 1, value);
+    let mut notification = BytesMut::new();
+    put_varint_field(&mut notification, 2, u64::from(signal_id));
+    put_len_field(&mut notification, 5, &nested_value);
+    encode_restate_message(0xFBFF, notification.to_vec())
+}
+
+/// FIG-790: replay exact call-command frames captured from a prior attempt,
+/// optionally completing each call and resolving the handler's first
+/// awakeable signal.
+pub(super) fn encode_call_replay<T: serde::Serialize>(
+    workflow_key: &str,
+    input: &T,
+    calls: &[(RestateCallFrame, Option<serde_json::Value>)],
+    signal: Option<(u32, serde_json::Value)>,
+) -> Result<Bytes, TerminalError> {
+    let input = serde_json::to_vec(input).map_err(TerminalError::from_error)?;
+    let known_entries = u32::try_from(1 + calls.len())
+        .map_err(|_| TerminalError::new("too many call commands in replay fixture"))?;
+    let mut body = BytesMut::new();
+    body.extend_from_slice(&encode_start_message(workflow_key, known_entries));
+    body.extend_from_slice(&encode_input_command(&input));
+    for (call, _) in calls {
+        body.extend_from_slice(&call.frame);
+    }
+    for (call, completion) in calls {
+        if let Some(completion) = completion {
+            let completion = serde_json::to_vec(completion).map_err(TerminalError::from_error)?;
+            body.extend_from_slice(&encode_call_completion(
+                call.result_completion_id,
+                &completion,
+            ));
+        }
+    }
+    if let Some((signal_id, resolution)) = signal {
+        let resolution = serde_json::to_vec(&resolution).map_err(TerminalError::from_error)?;
+        body.extend_from_slice(&encode_signal_value(signal_id, &resolution));
+    }
+    Ok(body.freeze())
+}
+
+pub(super) fn restate_output_json<T: serde::de::DeserializeOwned>(input: &[u8]) -> Option<T> {
+    let frame = restate_message_frame(input, 0x0401)?;
+    let value = protobuf_len_field(frame.get(8..)?, 14)?;
+    let json = protobuf_len_field(value, 1)?;
+    serde_json::from_slice(json).ok()
+}
+
 /// FIG-779: redrive an invocation whose journal already contains the exact
 /// `SleepCommand` emitted by its suspended attempt, but no timer completion.
 pub(super) fn encode_pending_sleep_replay<T: serde::Serialize>(
@@ -382,6 +527,120 @@ pub(super) async fn invoke_endpoint_body_open(
     )
     .await
     .map_err(|_| TerminalError::new("open-input endpoint test timed out"))?
+}
+
+pub(super) async fn invoke_endpoint_body_with_json_call_responses(
+    endpoint: &Endpoint,
+    service: &str,
+    handler: &str,
+    body: Bytes,
+    responses: Vec<serde_json::Value>,
+) -> Result<Bytes, TerminalError> {
+    tokio::time::timeout(
+        ENDPOINT_TEST_TIMEOUT,
+        invoke_endpoint_body_with_json_call_responses_unbounded(
+            endpoint, service, handler, body, responses,
+        ),
+    )
+    .await
+    .map_err(|_| TerminalError::new("scripted-call endpoint test timed out"))?
+}
+
+pub(super) async fn invoke_endpoint_with_json_call_responses<T: serde::Serialize>(
+    endpoint: &Endpoint,
+    service: &str,
+    handler: &str,
+    key: &str,
+    input: &T,
+    responses: Vec<serde_json::Value>,
+) -> Result<Bytes, TerminalError> {
+    invoke_endpoint_body_with_json_call_responses(
+        endpoint,
+        service,
+        handler,
+        encode_invocation_body(key, input)?,
+        responses,
+    )
+    .await
+}
+
+async fn invoke_endpoint_body_with_json_call_responses_unbounded(
+    endpoint: &Endpoint,
+    service: &str,
+    handler: &str,
+    invocation_body: Bytes,
+    responses: Vec<serde_json::Value>,
+) -> Result<Bytes, TerminalError> {
+    let (mut input_sender, body) = Channel::<Bytes, Infallible>::new(8);
+    input_sender
+        .send_data(invocation_body)
+        .await
+        .map_err(|err| TerminalError::new(format!("endpoint input failed: {err}")))?;
+    let mut input_sender = Some(input_sender);
+    let mut responses = responses.into_iter();
+    let response = endpoint.handle(
+        http::Request::builder()
+            .uri(format!("/invoke/{service}/{handler}"))
+            .header(http::header::CONTENT_TYPE, RESTATE_INVOCATION_CONTENT_TYPE)
+            .body(body)
+            .expect("endpoint invocation request"),
+    );
+    let status = response.status();
+    if !status.is_success() {
+        return Err(TerminalError::new_with_code(
+            status.as_u16(),
+            format!("endpoint invocation returned status {status}"),
+        ));
+    }
+    let mut response = response.into_body();
+    let mut output = BytesMut::new();
+    let mut decoded = 0;
+    while let Some(frame) = response.frame().await {
+        let frame =
+            frame.map_err(|err| TerminalError::new(format!("endpoint body failed: {err}")))?;
+        let Ok(data) = frame.into_data() else {
+            continue;
+        };
+        output.extend_from_slice(&data);
+        while output.len().saturating_sub(decoded) >= 8 {
+            let header = u64::from_be_bytes(
+                output[decoded..decoded + 8]
+                    .try_into()
+                    .expect("restate frame header"),
+            );
+            let message_type = (header >> 48) as u16;
+            let payload_len = usize::try_from(header & 0x0000_FFFF_FFFF_FFFF)
+                .expect("restate frame payload length");
+            let frame_end = decoded + 8 + payload_len;
+            if output.len() < frame_end {
+                break;
+            }
+            if message_type == 0x040D {
+                let call = decode_call_frame(&output[decoded..frame_end])
+                    .ok_or_else(|| TerminalError::new("invalid call command frame"))?;
+                if let Some(response) = responses.next() {
+                    let response =
+                        serde_json::to_vec(&response).map_err(TerminalError::from_error)?;
+                    input_sender
+                        .as_mut()
+                        .expect("endpoint input remains open for scripted calls")
+                        .send_data(encode_call_completion(call.result_completion_id, &response))
+                        .await
+                        .map_err(|err| {
+                            TerminalError::new(format!("call completion input failed: {err}"))
+                        })?;
+                } else {
+                    drop(input_sender.take());
+                }
+            }
+            if matches!(message_type, 0x0001..=0x0003) {
+                drop(input_sender.take());
+            }
+            decoded = frame_end;
+        }
+    }
+    drop(input_sender);
+    Ok(output.freeze())
 }
 
 async fn invoke_endpoint_body_open_unbounded(

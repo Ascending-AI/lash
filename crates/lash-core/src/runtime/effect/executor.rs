@@ -82,6 +82,9 @@ pub(crate) trait ProcessRunner: Send + Sync {
 pub struct ProcessLocalExecution {
     pub registry: Arc<dyn ProcessRegistry>,
     pub process_work_driver: Option<crate::ProcessWorkDriver>,
+    pub cancellation: CancellationToken,
+    pub observe_turn_cancel: bool,
+    pub turn_cancel_scope: Option<crate::ExecutionScope>,
 }
 
 impl ProcessLocalExecution {
@@ -92,6 +95,9 @@ impl ProcessLocalExecution {
         let Self {
             registry,
             process_work_driver,
+            cancellation,
+            observe_turn_cancel,
+            turn_cancel_scope: _,
         } = self;
         match command {
             ProcessCommand::Start {
@@ -138,12 +144,31 @@ impl ProcessLocalExecution {
                 Ok(ProcessEffectOutcome::DeleteSession { report })
             }
             ProcessCommand::Await { process_id } => {
-                let output = if let Some(driver) = process_work_driver.as_ref() {
-                    driver.await_terminal(&process_id).await?
+                let await_terminal = || async {
+                    if let Some(driver) = process_work_driver.as_ref() {
+                        driver.await_terminal(&process_id).await
+                    } else {
+                        crate::ProcessAwaiter::polling(Arc::clone(&registry))
+                            .await_terminal(&process_id)
+                            .await
+                    }
+                };
+                let output = if observe_turn_cancel {
+                    tokio::select! {
+                        biased;
+                        output = await_terminal() => output?,
+                        _ = cancellation.cancelled() => {
+                            InlineRuntimeEffectController::request_process_cancel(
+                                Arc::clone(&registry),
+                                &process_id,
+                                Some("turn cancelled while awaiting process".to_string()),
+                            )
+                            .await?;
+                            await_terminal().await?
+                        }
+                    }
                 } else {
-                    crate::ProcessAwaiter::polling(registry)
-                        .await_terminal(&process_id)
-                        .await?
+                    await_terminal().await?
                 };
                 Ok(ProcessEffectOutcome::Await {
                     output: Box::new(output),
@@ -353,6 +378,10 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
                 observe_turn_cancel: current,
                 ..
             } => *current = observe_turn_cancel,
+            RuntimeEffectLocalExecutorState::Process(ProcessLocalExecution {
+                observe_turn_cancel: current,
+                ..
+            }) => *current = observe_turn_cancel,
             _ => {}
         }
         self
@@ -366,7 +395,23 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
             | RuntimeEffectLocalExecutorState::ExternalWaitOptions {
                 turn_cancel_scope, ..
             } => *turn_cancel_scope = Some(scope),
+            RuntimeEffectLocalExecutorState::Process(ProcessLocalExecution {
+                turn_cancel_scope,
+                ..
+            }) => *turn_cancel_scope = Some(scope),
             _ => {}
+        }
+        self
+    }
+
+    #[doc(hidden)]
+    pub fn with_process_cancellation(mut self, cancellation: CancellationToken) -> Self {
+        if let RuntimeEffectLocalExecutorState::Process(ProcessLocalExecution {
+            cancellation: current,
+            ..
+        }) = &mut self.state
+        {
+            *current = cancellation;
         }
         self
     }
@@ -379,6 +424,9 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
             state: RuntimeEffectLocalExecutorState::Process(ProcessLocalExecution {
                 registry,
                 process_work_driver,
+                cancellation: CancellationToken::new(),
+                observe_turn_cancel: false,
+                turn_cancel_scope: None,
             }),
             replay_trace: None,
         }

@@ -25,7 +25,7 @@ pub struct RuntimeExecutionContext<'run> {
     turn_phase_probe: Option<Arc<dyn crate::runtime::RuntimeTurnPhaseProbe>>,
     pub(super) turn_event_tx: Option<Sender<TurnActivity>>,
     pub(super) cancellation_token: Option<CancellationToken>,
-    observe_turn_cancel: bool,
+    pub(super) observe_turn_cancel: bool,
     /// Per-tool trace emission handle for this execution. Present only when the
     /// host installed a trace sink; `None` keeps every trace call a no-op.
     tracing: Option<RuntimeExecutionTracing>,

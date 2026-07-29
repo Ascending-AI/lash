@@ -8,6 +8,7 @@ mod effect;
 pub use effect::promise_semantics;
 mod environment;
 mod error;
+mod event_pump;
 mod host;
 mod in_memory_store;
 mod io;
@@ -170,6 +171,8 @@ pub use effect::{
 };
 pub use environment::{ParkedSession, RuntimeEnvironment, RuntimeEnvironmentBuilder};
 pub use error::{RuntimeError, RuntimeErrorCode};
+#[doc(hidden)]
+pub use event_pump::drive_with_event_pump;
 pub use host::{EmbeddedRuntimeHost, ProcessRuntimeHost, RuntimeHostConfig};
 pub use in_memory_store::{InMemorySessionStore, InMemorySessionStoreFactory};
 use io::normalize_input_items;

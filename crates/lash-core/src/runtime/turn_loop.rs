@@ -1711,28 +1711,25 @@ impl LashRuntime {
         );
         let mut prepare_turn = Box::pin(prepare_turn);
 
-        loop {
-            tokio::select! {
-                prepared = prepare_turn.as_mut() => {
-                    let prepared = prepared.map_err(|err| {
-                        RuntimeError::new(RuntimeErrorCode::PluginPrepareTurn, err.to_string())
-                    })?;
-                    self.mark_phase_end(RuntimeTurnPhase::BeforeTurnHooks);
-                    return Ok(prepared);
-                }
-                maybe_event = event_rx.recv() => {
-                    if let Some(event) = maybe_event {
-                        emit_runtime_stream_event_to_sinks(
-                            events,
-                            turn_events,
-                            event,
-                            assembler,
-                        )
-                        .await;
-                    }
-                }
-            }
-        }
+        let mut event_pump = RuntimeStreamEventPump {
+            assembler,
+            events,
+            turn_events,
+        };
+        let prepared = drive_with_event_pump(
+            prepare_turn.as_mut(),
+            event_rx,
+            &mut event_pump,
+            |pump, event| {
+                Box::pin(async move {
+                    pump.emit(event).await;
+                })
+            },
+        )
+        .await
+        .map_err(|err| RuntimeError::new(RuntimeErrorCode::PluginPrepareTurn, err.to_string()))?;
+        self.mark_phase_end(RuntimeTurnPhase::BeforeTurnHooks);
+        Ok(prepared)
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -2359,36 +2356,40 @@ async fn drive_turn_to_completion<F>(
 where
     F: std::future::Future<Output = Result<(crate::MessageSequence, usize), RuntimeError>> + ?Sized,
 {
-    let run_result = {
-        loop {
-            tokio::select! {
-                // Some durable adapter futures are not fused. Once turn
-                // completion is ready, select it before another ready branch
-                // so the loop never polls the completed future again.
-                biased;
-
-                completed = run_future.as_mut() => {
-                    child_usage_event_relay.clear();
-                    break completed;
-                }
-                maybe_event = event_rx.recv() => {
-                    if let Some(event) = maybe_event {
-                        emit_runtime_stream_event_to_sinks(
-                            events,
-                            turn_events,
-                            event,
-                            assembler,
-                        )
-                        .await;
-                    }
-                }
-            }
-        }
+    let mut event_pump = RuntimeStreamEventPump {
+        assembler,
+        events,
+        turn_events,
     };
+    let run_result = drive_with_event_pump(
+        run_future.as_mut(),
+        event_rx,
+        &mut event_pump,
+        |pump, event| {
+            Box::pin(async move {
+                pump.emit(event).await;
+            })
+        },
+    )
+    .await;
+    child_usage_event_relay.clear();
     while let Some(event) = event_rx.recv().await {
         emit_runtime_stream_event_to_sinks(events, turn_events, event, assembler).await;
     }
     run_result
+}
+
+struct RuntimeStreamEventPump<'pump> {
+    assembler: &'pump mut TurnAssembler,
+    events: &'pump dyn EventSink,
+    turn_events: &'pump dyn TurnActivitySink,
+}
+
+impl RuntimeStreamEventPump<'_> {
+    async fn emit(&mut self, event: RuntimeStreamEvent) {
+        emit_runtime_stream_event_to_sinks(self.events, self.turn_events, event, self.assembler)
+            .await;
+    }
 }
 
 #[allow(clippy::too_many_arguments)]

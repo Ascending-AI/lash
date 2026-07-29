@@ -9,6 +9,10 @@ impl RuntimeTurnDriver<'_> {
         event_tx: &mpsc::Sender<RuntimeStreamEvent>,
         cancel: &CancellationToken,
     ) -> Result<(), RuntimeError> {
+        // FIG-790 invariant: a racy gate must never decide whether a journaled
+        // command is emitted. This gate is racy by construction and is safe
+        // only because the attempt terminalises immediately afterward.
+        // FIG-793 tracks replacing this out-of-scope LLM gate.
         if cancel.is_cancelled() {
             send_session_event(event_tx, SessionStreamEvent::Done).await;
             machine.finish_with_outcome(crate::TurnOutcome::Stopped(TurnStop::Cancelled));

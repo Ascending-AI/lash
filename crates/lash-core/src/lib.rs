@@ -384,6 +384,8 @@ pub use provider::{
 pub use runtime::TestLocalProcessRegistry;
 #[cfg(any(test, feature = "testing"))]
 pub use runtime::TestProcessRegistryWriteExt;
+#[doc(hidden)]
+pub use runtime::drive_with_event_pump;
 pub use runtime::promise_semantics;
 pub use runtime::{
     AbandonEvidence, AbandonRequest, AbandonWriter, AgentFrameRun, AssembledTurn, AssistantOutput,

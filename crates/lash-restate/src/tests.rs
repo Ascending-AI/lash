@@ -20,9 +20,11 @@ mod endpoint_protocol;
 mod process_tool_replay;
 mod tool_context_conformance;
 use endpoint_protocol::{
-    encode_completed_sleep_replay, encode_pending_sleep_replay, invoke_endpoint,
-    invoke_endpoint_body, invoke_endpoint_body_open, invoke_endpoint_open,
-    invoke_process_workflow_endpoint, restate_message_types,
+    encode_call_replay, encode_completed_sleep_replay, encode_pending_sleep_replay,
+    invoke_endpoint, invoke_endpoint_body, invoke_endpoint_body_open,
+    invoke_endpoint_body_with_json_call_responses, invoke_endpoint_open,
+    invoke_endpoint_with_json_call_responses, invoke_process_workflow_endpoint,
+    restate_call_frames, restate_message_types, restate_output_json,
 };
 
 fn durable_turn_scope(session_id: impl Into<String>, turn_id: impl Into<String>) -> ExecutionScope {
@@ -105,11 +107,13 @@ fn restate_context_future_repoll_after_ready_stays_pending_in_release() {
     assert_eq!(future.as_mut().poll(&mut context), Poll::Pending);
 }
 
-/// Restate service-protocol message types used by the FIG-779 gates.
+/// Restate service-protocol message types used by the FIG-779/FIG-790 gates.
 /// `restate_sdk_shared_core::service_protocol::header` keeps these private, so
 /// they are restated here (`SleepCommand = 0x040C`, `Suspension = 0x0001`,
-/// `CompletePromiseCommand = 0x040B`, `OutputCommand = 0x0401`, `End = 0x0003`).
+/// `CallCommand = 0x040D`, `CompletePromiseCommand = 0x040B`,
+/// `OutputCommand = 0x0401`, `End = 0x0003`).
 const RESTATE_SLEEP_COMMAND_MESSAGE_TYPE: u16 = 0x040C;
+const RESTATE_CALL_COMMAND_MESSAGE_TYPE: u16 = 0x040D;
 const RESTATE_SUSPENSION_MESSAGE_TYPE: u16 = 0x0001;
 const RESTATE_COMPLETE_PROMISE_COMMAND_MESSAGE_TYPE: u16 = 0x040B;
 const RESTATE_OUTPUT_COMMAND_MESSAGE_TYPE: u16 = 0x0401;
@@ -571,6 +575,372 @@ async fn fig779_sdk_pending_durable_timer_suspends_cleanly_without_guard() {
             RESTATE_SLEEP_COMMAND_MESSAGE_TYPE,
             RESTATE_SUSPENSION_MESSAGE_TYPE
         ]
+    );
+}
+
+#[derive(Debug, Serialize, serde::Deserialize)]
+struct Fig790TurnEventPumpInput {
+    process_id: String,
+    prequeue_event: bool,
+}
+
+#[restate_sdk::workflow]
+trait Fig790TurnEventPump {
+    async fn run(input: Json<Fig790TurnEventPumpInput>) -> HandlerResult<Json<()>>;
+}
+
+struct Fig790TurnEventPumpImpl;
+
+impl Fig790TurnEventPump for Fig790TurnEventPumpImpl {
+    async fn run(
+        &self,
+        ctx: WorkflowContext<'_>,
+        Json(input): Json<Fig790TurnEventPumpInput>,
+    ) -> HandlerResult<Json<()>> {
+        let request: restate_sdk::context::Request<
+            '_,
+            Json<RestateProcessAwaitRequest>,
+            Json<ProcessAwaitOutput>,
+        > = ContextClient::request(
+            &ctx,
+            RequestTarget::workflow(
+                "LashProcessWorkflow",
+                input.process_id.clone(),
+                "await_terminal",
+            ),
+            Json(RestateProcessAwaitRequest {
+                process_id: input.process_id,
+            }),
+        );
+        let mut run_future = Box::pin(async move {
+            let Json(_output) = request.call().await?;
+            Ok::<(), TerminalError>(())
+        });
+        let (event_tx, mut event_rx) = tokio::sync::mpsc::channel(1);
+        if input.prequeue_event {
+            event_tx
+                .send(())
+                .await
+                .expect("queue the event that makes the pump branch ready");
+        }
+        drop(event_tx);
+
+        let mut handler_state = ();
+        lash_core::drive_with_event_pump(
+            run_future.as_mut(),
+            &mut event_rx,
+            &mut handler_state,
+            |(), _| Box::pin(async {}),
+        )
+        .await?;
+        Ok(Json(()))
+    }
+}
+
+async fn assert_fig790_turn_event_pump_suspends_cleanly(invocation_id: &str, prequeue_event: bool) {
+    let endpoint = Endpoint::builder()
+        .bind(Fig790TurnEventPumpImpl.serve())
+        .build();
+    let output = invoke_endpoint(
+        &endpoint,
+        "Fig790TurnEventPump",
+        "run",
+        invocation_id,
+        &Fig790TurnEventPumpInput {
+            process_id: format!("{invocation_id}-process"),
+            prequeue_event,
+        },
+    )
+    .await
+    .expect("the event pump must let the substrate consume its suspension");
+    assert_eq!(
+        restate_message_types(&output).expect("decode process-await suspension frames"),
+        vec![
+            RESTATE_CALL_COMMAND_MESSAGE_TYPE,
+            RESTATE_SUSPENSION_MESSAGE_TYPE
+        ]
+    );
+}
+
+#[tokio::test]
+async fn fig790_turn_event_pump_does_not_repoll_a_suspending_durable_future() {
+    assert_fig790_turn_event_pump_suspends_cleanly("fig790-turn-event-pump", true).await;
+}
+
+#[tokio::test]
+async fn fig790_turn_event_pump_with_empty_channel_suspends_cleanly() {
+    assert_fig790_turn_event_pump_suspends_cleanly("fig790-turn-event-pump-empty", false).await;
+}
+
+#[allow(dead_code)]
+trait Fig790ProcessCancellationOption {
+    fn with_process_cancellation(self, cancellation: tokio_util::sync::CancellationToken) -> Self;
+}
+
+impl Fig790ProcessCancellationOption for RuntimeEffectLocalExecutor<'_> {
+    fn with_process_cancellation(self, _cancellation: tokio_util::sync::CancellationToken) -> Self {
+        // Compatibility fallback for running this regression unchanged
+        // against the pre-fix tree. The production inherent method shadows
+        // this no-op once FIG-790 threads cancellation into process effects.
+        self
+    }
+}
+
+#[derive(Clone, Debug, Serialize, serde::Deserialize)]
+struct Fig790ProcessAwaitRedriveInput {
+    process_id: String,
+    cancel_on_suspend_wake: bool,
+}
+
+#[restate_sdk::workflow]
+trait Fig790ProcessAwaitRedrive {
+    async fn run(
+        input: Json<Fig790ProcessAwaitRedriveInput>,
+    ) -> HandlerResult<Json<ProcessAwaitOutput>>;
+}
+
+struct Fig790ProcessAwaitRedriveImpl {
+    registry: Arc<dyn ProcessRegistry>,
+}
+
+impl Fig790ProcessAwaitRedrive for Fig790ProcessAwaitRedriveImpl {
+    async fn run(
+        &self,
+        ctx: WorkflowContext<'_>,
+        Json(input): Json<Fig790ProcessAwaitRedriveInput>,
+    ) -> HandlerResult<Json<ProcessAwaitOutput>> {
+        let controller = RestateRuntimeEffectController::new(ctx);
+        let cancellation = tokio_util::sync::CancellationToken::new();
+        let effect = controller.execute_effect(
+            RuntimeEffectEnvelope::new(
+                runtime_invocation(RuntimeEffectKind::Process, "fig790-process-await"),
+                RuntimeEffectCommand::process(ProcessCommand::Await {
+                    process_id: input.process_id,
+                }),
+            ),
+            RuntimeEffectLocalExecutor::processes(Arc::clone(&self.registry), None)
+                .with_process_cancellation(cancellation.clone())
+                .with_turn_cancel_observation(true)
+                .with_turn_cancel_scope(durable_turn_scope("session", "turn")),
+        );
+        let outcome = if input.cancel_on_suspend_wake {
+            CancelOnWakeFuture {
+                future: Box::pin(effect),
+                cancellation,
+            }
+            .await
+        } else {
+            effect.await
+        }
+        .map_err(TerminalError::from_error)?;
+        let ProcessEffectOutcome::Await { output } =
+            outcome.into_process().map_err(TerminalError::from_error)?
+        else {
+            return Err(TerminalError::new(
+                "process-await fixture returned the wrong process outcome",
+            )
+            .into());
+        };
+        Ok(Json(*output))
+    }
+}
+
+fn fig790_cancelled_process_output(process_id: &str) -> ProcessAwaitOutput {
+    ProcessAwaitOutput::Cancelled {
+        message: format!("process `{process_id}` observed durable turn cancellation"),
+        raw: None,
+        control: None,
+    }
+}
+
+async fn fig790_process_await_endpoint(process_id: &str) -> (Endpoint, Arc<dyn ProcessRegistry>) {
+    let registry = process_registry();
+    registry
+        .register_process(rerunnable_registration(process_id))
+        .await
+        .expect("register FIG-790 process");
+    let endpoint = Endpoint::builder()
+        .bind(
+            Fig790ProcessAwaitRedriveImpl {
+                registry: Arc::clone(&registry),
+            }
+            .serve(),
+        )
+        .build();
+    (endpoint, registry)
+}
+
+// See restate_effect_execution's FIG-790 warning: RT0016 swaps its previous/current labels.
+#[tokio::test]
+async fn fig790_cancelled_process_await_redrive_emits_the_same_journaled_commands() {
+    let process_id = "fig790-cancelled-await-redrive";
+    let (endpoint, _registry) = fig790_process_await_endpoint(process_id).await;
+    let input = Fig790ProcessAwaitRedriveInput {
+        process_id: process_id.to_string(),
+        cancel_on_suspend_wake: false,
+    };
+    let cancelled = fig790_cancelled_process_output(process_id);
+    let registration = serde_json::to_value(RestateDurableWaitRegistration::Revoked)
+        .expect("serialize revoked registration");
+    let cancel_ack = serde_json::Value::Null;
+    let terminal = serde_json::to_value(&cancelled).expect("serialize cancelled process output");
+
+    let first = invoke_endpoint_with_json_call_responses(
+        &endpoint,
+        "Fig790ProcessAwaitRedrive",
+        "run",
+        "fig790-cancelled-await-redrive",
+        &input,
+        vec![registration.clone(), cancel_ack.clone(), terminal.clone()],
+    )
+    .await
+    .expect("durably resolved turn cancellation should finish the process await");
+    let calls = restate_call_frames(&first).expect("decode first-attempt call frames");
+    assert_eq!(
+        calls
+            .iter()
+            .map(|call| call.handler.as_str())
+            .collect::<Vec<_>>(),
+        vec!["register_awakeable", "cancel", "await_terminal"],
+        "turn cancellation must not skip or reorder the deterministic process-await sequence"
+    );
+    assert_eq!(
+        restate_output_json::<ProcessAwaitOutput>(&first),
+        Some(cancelled.clone())
+    );
+
+    let replay = encode_call_replay(
+        "fig790-cancelled-await-redrive",
+        &input,
+        &[
+            (calls[0].clone(), Some(registration)),
+            (calls[1].clone(), Some(cancel_ack)),
+            (calls[2].clone(), Some(terminal)),
+        ],
+        None,
+    )
+    .expect("splice exact FIG-790 call journal");
+    let redriven = invoke_endpoint_body_open(&endpoint, "Fig790ProcessAwaitRedrive", "run", replay)
+        .await
+        .expect("redrive must accept the identical journaled command sequence");
+    assert_eq!(
+        restate_message_types(&redriven).expect("decode completed redrive frames"),
+        vec![
+            RESTATE_OUTPUT_COMMAND_MESSAGE_TYPE,
+            RESTATE_END_MESSAGE_TYPE
+        ]
+    );
+    assert_eq!(
+        restate_output_json::<ProcessAwaitOutput>(&redriven),
+        Some(cancelled)
+    );
+}
+
+#[tokio::test]
+async fn fig790_cancel_during_suspension_of_a_process_turn_composes_with_fig779() {
+    let process_id = "fig790-cancel-during-suspension";
+    let (endpoint, _registry) = fig790_process_await_endpoint(process_id).await;
+    let input = Fig790ProcessAwaitRedriveInput {
+        process_id: process_id.to_string(),
+        cancel_on_suspend_wake: false,
+    };
+    let registered = serde_json::to_value(RestateDurableWaitRegistration::Registered)
+        .expect("serialize registered turn-cancel wait");
+
+    let registering = invoke_endpoint(
+        &endpoint,
+        "Fig790ProcessAwaitRedrive",
+        "run",
+        "fig790-cancel-during-suspension",
+        &input,
+    )
+    .await
+    .expect("turn-cancel registration must suspend cleanly");
+    assert_eq!(
+        restate_message_types(&registering).expect("decode turn-cancel registration frames"),
+        vec![
+            RESTATE_CALL_COMMAND_MESSAGE_TYPE,
+            RESTATE_SUSPENSION_MESSAGE_TYPE
+        ]
+    );
+    let registration_calls =
+        restate_call_frames(&registering).expect("decode turn-cancel registration call");
+    assert_eq!(registration_calls[0].handler, "register_awakeable");
+
+    let registered_replay = encode_call_replay(
+        "fig790-cancel-during-suspension",
+        &input,
+        &[(registration_calls[0].clone(), Some(registered.clone()))],
+        None,
+    )
+    .expect("splice registered turn-cancel observation");
+    let process_suspended = invoke_endpoint_body(
+        &endpoint,
+        "Fig790ProcessAwaitRedrive",
+        "run",
+        registered_replay,
+    )
+    .await
+    .expect("process await must preserve suspension precedence");
+    assert_eq!(
+        restate_message_types(&process_suspended).expect("decode suspended process-await frames"),
+        vec![
+            RESTATE_CALL_COMMAND_MESSAGE_TYPE,
+            RESTATE_SUSPENSION_MESSAGE_TYPE
+        ],
+        "the durable process await must suspend before later cancellation is observed"
+    );
+    let process_calls =
+        restate_call_frames(&process_suspended).expect("decode suspended process-await call");
+    assert_eq!(process_calls[0].handler, "await_terminal");
+
+    let cancelled = fig790_cancelled_process_output(process_id);
+    let replay = encode_call_replay(
+        "fig790-cancel-during-suspension",
+        &input,
+        &[
+            (registration_calls[0].clone(), Some(registered)),
+            (process_calls[0].clone(), None),
+        ],
+        Some((
+            17,
+            serde_json::to_value(Resolution::Cancelled)
+                .expect("serialize durable turn cancellation"),
+        )),
+    )
+    .expect("splice suspended process-await journal and cancellation signal");
+    let redriven = invoke_endpoint_body_with_json_call_responses(
+        &endpoint,
+        "Fig790ProcessAwaitRedrive",
+        "run",
+        replay,
+        vec![
+            serde_json::Value::Null,
+            serde_json::to_value(&cancelled).expect("serialize cancelled process terminal"),
+        ],
+    )
+    .await
+    .expect("cancel-during-suspension redrive should finish deterministically");
+    assert_eq!(
+        restate_call_frames(&redriven)
+            .expect("decode post-cancellation calls")
+            .iter()
+            .map(|call| call.handler.as_str())
+            .collect::<Vec<_>>(),
+        vec!["cancel", "await_terminal"]
+    );
+    assert_eq!(
+        restate_message_types(&redriven).expect("decode cancellation redrive frames"),
+        vec![
+            RESTATE_CALL_COMMAND_MESSAGE_TYPE,
+            RESTATE_CALL_COMMAND_MESSAGE_TYPE,
+            RESTATE_OUTPUT_COMMAND_MESSAGE_TYPE,
+            RESTATE_END_MESSAGE_TYPE
+        ]
+    );
+    assert_eq!(
+        restate_output_json::<ProcessAwaitOutput>(&redriven),
+        Some(cancelled)
     );
 }
 
