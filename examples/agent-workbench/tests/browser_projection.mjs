@@ -184,7 +184,7 @@ test("trigger registration rows separate display name, identity, and trigger key
   assert.equal(rowContext.rows[1].name, rowContext.rows[0].name);
   assert.equal(
     rowContext.rows[0].detail,
-    "id sha256:1bab983f42… · trigger key derived/v1/c… · scope session:session-a · incarnation incarnation-…",
+    "id sha256:1bab983f42… · trigger key v1/content-ad… · scope session:session-a · incarnation incarnation-…",
   );
   assert.equal(
     rowContext.rows[0].title,
@@ -196,6 +196,40 @@ test("trigger registration rows separate display name, identity, and trigger key
     rowContext.rows[1].detail.match(/^id ([^·]+)/)?.[1],
     "same-name, same-key registrations must render visibly distinct ids",
   );
+});
+
+test("trigger detail truncation keeps the distinguishing suffix of namespaced values", () => {
+  const context = {};
+  vm.runInNewContext(
+    `${markedSource(
+      "WORKBENCH_TRIGGER_REGISTRATION_PROJECTION",
+      "WORKBENCH_TRIGGER_REGISTRATION_PROJECTION",
+    )}
+     this.scopeA = truncateTriggerScope("session:workbench-0f3a9d2c-aaaa-bbbb-cccc-111111111111");
+     this.scopeB = truncateTriggerScope("session:workbench-0f3a9d2c-aaaa-bbbb-cccc-222222222222");
+     this.hostScope = truncateTriggerScope("host");
+     this.futureId = truncateSubscriptionId(
+       "trigger-subscription:v2:sha256:9c4d0a71ee000000000000000000000000000000000000000000000000feedbeef"
+     );
+     this.rawCronElsewhere = triggerRegistrationSourceSummary({
+       source_type: "timer.Schedule",
+       source: {
+         $lash_host_descriptor_type: "timer.Schedule",
+         $lash_host_descriptor_value: { expr: "*/2 * * * * *" }
+       }
+     });`,
+    context,
+  );
+
+  // Same-prefix session scopes must stay visibly distinct after truncation.
+  assert.match(context.scopeA, /^session:…/);
+  assert.notEqual(context.scopeA, context.scopeB, "same-prefix scopes must render distinct tails");
+  assert.equal(context.hostScope, "host");
+  // An unrecognized (future-versioned) id keeps its distinguishing digest tail,
+  // never a constant head — the FIG-774 zero-bit truncation must not return.
+  assert.match(context.futureId, /feedbeef…?$|…feedbeef$/);
+  // The seconds-cron compaction is gated on cron.Schedule: other sources render raw.
+  assert.equal(context.rawCronElsewhere, "*/2 * * * * *");
 });
 
 test("trigger registration names preserve raw fallbacks and omit empty summaries", () => {

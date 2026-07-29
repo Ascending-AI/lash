@@ -3429,13 +3429,40 @@
       return value.length <= length ? value : value.slice(0, length) + "…";
     }
 
+    // Tail truncation keeps the distinguishing suffix of namespaced values
+    // (session:<id>, derived/v1/<digest>, vN:<digest>); head truncation of
+    // those renders the constant prefix and makes every row look identical.
+    function truncateTriggerDetailTail(value, length) {
+      if (!value) return "unknown";
+      return value.length <= length ? value : "…" + value.slice(-length);
+    }
+
     function truncateSubscriptionId(value) {
       const prefix = "trigger-subscription:v1:sha256:";
       if (!value) return "unknown";
       if (value.startsWith(prefix)) {
         return "sha256:" + truncateTriggerDetail(value.slice(prefix.length), 10);
       }
-      return truncateTriggerDetail(value, 18);
+      return truncateTriggerDetailTail(value, 12);
+    }
+
+    function truncateSubscriptionKey(value) {
+      const derivedPrefix = "derived/v1/";
+      if (!value) return "unknown";
+      if (value.startsWith(derivedPrefix)) {
+        return "v1/" + truncateTriggerDetail(value.slice(derivedPrefix.length), 10);
+      }
+      // Author-supplied keys are human names whose head is the distinct part.
+      return truncateTriggerDetail(value, 12);
+    }
+
+    function truncateTriggerScope(value) {
+      if (!value) return "unknown";
+      const split = value.indexOf(":");
+      if (split < 0) return truncateTriggerDetail(value, 18);
+      const namespace = value.slice(0, split + 1);
+      const rest = value.slice(split + 1);
+      return namespace + (rest.length <= 10 ? rest : "…" + rest.slice(-8));
     }
 
     function triggerRegistrationScope(registration) {
@@ -3458,8 +3485,8 @@
       const scope = triggerRegistrationScope(registration);
       const details = [
         ["id", truncateSubscriptionId(subscriptionId)],
-        ["trigger key", truncateTriggerDetail(subscriptionKey, 12)],
-        ["scope", truncateTriggerDetail(scope, 18)],
+        ["trigger key", truncateSubscriptionKey(subscriptionKey)],
+        ["scope", truncateTriggerScope(scope)],
         ["incarnation", truncateTriggerDetail(registration.incarnation, 12)]
       ];
       const titleDetails = [
