@@ -46,8 +46,9 @@ reports a missing browser build).
 
 When navigating either example app, use `wait_until="domcontentloaded"` and then an
 explicit waiting assertion such as `expect(locator)` or `wait_for_function` on a row
-count. Never use `wait_until="networkidle"`: the Workbench holds an SSE stream open and
-polls `/api/state`, so network idle is not a reachable readiness condition.
+count. Never use `wait_until="networkidle"`: the Workbench holds two NDJSON event streams
+open and runs periodic API polls, while runbook drivers also poll `/api/state`, so
+network idle is not a reachable readiness condition.
 
 Apply every rule below to the browser surface:
 
