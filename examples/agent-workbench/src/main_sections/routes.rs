@@ -991,6 +991,7 @@ async fn cancel_work(
         .process_observer
         .process(&process_id)
         .await
+        .map_err(AppError::internal)?
         .ok_or_else(|| AppError::not_found(format!("unknown process `{process_id}`")))?;
     if process.terminal {
         return Err(AppError::conflict(format!(
@@ -998,7 +999,7 @@ async fn cancel_work(
         )));
     }
     let session_id = match &process.originator {
-        lash_core::ProcessOriginator::Session { scope } => scope.session_id.clone(),
+        lash_core::ProcessOriginator::Session { session_id } => session_id.clone(),
         lash_core::ProcessOriginator::Host { .. } => state.current_session_id(),
     };
     let operation_id = format!("workbench-process-cancel-{}", uuid::Uuid::new_v4());

@@ -89,12 +89,8 @@ pub const ATTACHMENT_MIME: &str = "image/png";
 pub const E2E_PRODUCT_STACK_BUDGET_BYTES: usize = 8 * 1024 * 1024;
 pub const LASH_E2E_TOKIO_STACK_BYTES_ENV: &str = "LASH_E2E_TOKIO_STACK_BYTES";
 
-pub fn default_session_originator_scope_id() -> String {
-    format!("session:{DEFAULT_SESSION_ID}")
-}
-
-pub fn default_session_child_originator_scope_pattern() -> String {
-    format!("{}/%", default_session_originator_scope_id())
+pub fn default_session_originator_id() -> String {
+    DEFAULT_SESSION_ID.to_string()
 }
 
 pub fn env(name: &str, default: &str) -> String {

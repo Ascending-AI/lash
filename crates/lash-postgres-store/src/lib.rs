@@ -112,7 +112,8 @@ const SCHEMA_COMPONENT: &str = "lash-postgres-store";
 // Bumped to 31 to replace that lane with consumed high-water marks and add
 // fair per-group retry scheduling. Pre-31 components are rejected and recreated.
 // Bumped to 32 for the FIG-661 observer, indexed wake, and tombstone cutover.
-const SCHEMA_VERSION: i32 = 32;
+// Bumped to 33 for enqueuing wake claims and raw session originator ids.
+const SCHEMA_VERSION: i32 = 33;
 const PROCESS_LEASE_SCHEMA_VERSION: u32 = lash_core::PROCESS_LEASE_SCHEMA_VERSION;
 
 #[derive(Clone)]

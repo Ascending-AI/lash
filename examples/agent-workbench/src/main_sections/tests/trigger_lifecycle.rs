@@ -203,7 +203,7 @@
             active_turns: active_turns.clone(),
             authorization: WorkbenchAuthorization::allow_all(),
         };
-        let target_scope_id = format!("session:{}", state.current_session_id());
+        let target_session_id = state.current_session_id();
         let session_store =
             session_store_factory
                 .create_store(&lash::persistence::SessionStoreCreateRequest {
@@ -227,8 +227,8 @@
         assert!(wake.input.contains("button_pressed"));
         assert!(wake.input.contains("Red"));
         assert_eq!(
-            wake.target_scope_id.as_str(),
-            target_scope_id,
+            wake.target_session_id.as_str(),
+            target_session_id,
             "process wake should target the current session"
         );
 

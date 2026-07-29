@@ -78,10 +78,25 @@ application, and session open replays any uncleared intent before clearing it.
 This gives hosts customizable branch visibility without coupling observation
 to wake routing.
 
+Session deletion is the deliberate exception to per-edge observer audit events:
+it removes all observer rows and wake routing owned by that session without
+appending `observer_removed` or subscription-retarget events. The deletion is
+one bulk session-lifecycle fact; the audit lane records addressability changes
+while both endpoints remain addressable, rather than fan-out events for a
+session that no longer exists. Process pruning likewise removes its child edge
+rows with the process.
+
+Wake retargeting and session deletion discard only deliveries that have not
+entered the durable `enqueuing` claim state. A claimed delivery settles
+truthfully against its original target; retargeting bounds work not yet in
+flight. If a driver crashes after claiming, the bounded stale-claim recovery
+returns the delivery to pending and receiver high-water deduplication absorbs
+any retry.
+
 ## Shipped storage boundary
 
 The reject-and-recreate schema stores lifecycle JSON beside extracted,
-indexed query columns: originator session, wake session, identity kind and
+    indexed query columns: originator id, wake session, identity kind and
 label, waiting, timestamps, status, and change sequence. It adds
 `process_observers` with a composite session/process key and reverse index, and
 payload-free `process_tombstones` carrying the deletion change sequence.

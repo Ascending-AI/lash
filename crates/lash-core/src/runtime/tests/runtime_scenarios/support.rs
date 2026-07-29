@@ -545,7 +545,6 @@ impl RuntimeQueueIngress {
             Self::ProcessWake { text } => crate::process_wake_batch_draft(ProcessWakeDelivery {
                 wake_id: format!("wake:{session_id}:{text}"),
                 target_session_id: session_id.to_string(),
-                target_scope_id: SessionScopeId::new(format!("session:{session_id}")),
                 process_id: format!("process:{text}"),
                 sequence: 1,
                 event_type: "process.wake".to_string(),

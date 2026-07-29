@@ -386,7 +386,12 @@ impl<'a> GraphProjection<'a> {
         process_id: &str,
     ) -> Option<lash::process::ObservedProcess> {
         if !self.processes.contains_key(process_id) {
-            let process = self.process_observer.process(process_id).await;
+            let process = self
+                .process_observer
+                .process(process_id)
+                .await
+                .ok()
+                .flatten();
             self.processes.insert(process_id.to_string(), process);
         }
         self.processes.get(process_id).cloned().flatten()

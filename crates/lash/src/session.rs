@@ -14,6 +14,83 @@ use lash_remote_protocol::{
     RemoteSessionObservationEvent,
 };
 
+pub(crate) async fn apply_fork_observer_intent(
+    process_registry: &dyn lash_core::ProcessRegistry,
+    session_id: &str,
+    process_ids: &[lash_core::ProcessId],
+) -> Result<()> {
+    for process_id in process_ids {
+        match process_registry.get_process(process_id).await {
+            Ok(Some(_)) => {}
+            Ok(None) => {
+                tracing::info!(
+                    %session_id,
+                    %process_id,
+                    reason = "never_existed_or_tombstone_compacted",
+                    "skipping unavailable process in fork observer recovery intent"
+                );
+                continue;
+            }
+            Err(lash_core::PluginError::ProcessNoLongerRetained {
+                terminal_label,
+                pruned_at_ms,
+            }) => {
+                tracing::info!(
+                    %session_id,
+                    %process_id,
+                    %terminal_label,
+                    pruned_at_ms,
+                    reason = "no_longer_retained",
+                    "skipping pruned process in fork observer recovery intent"
+                );
+                continue;
+            }
+            Err(error) => return Err(error.into()),
+        }
+
+        match process_registry
+            .add_observer(
+                session_id,
+                process_id,
+                lash_core::ProcessObserverBy::ForkInheritance,
+            )
+            .await
+        {
+            Ok(()) => {}
+            Err(lash_core::PluginError::ProcessNoLongerRetained {
+                terminal_label,
+                pruned_at_ms,
+            }) => {
+                tracing::info!(
+                    %session_id,
+                    %process_id,
+                    %terminal_label,
+                    pruned_at_ms,
+                    reason = "pruned_during_observer_apply",
+                    "skipping concurrently pruned process in fork observer recovery intent"
+                );
+            }
+            Err(apply_error) => {
+                // A row may be pruned and its tombstone compacted between the
+                // point read and observer append. Re-read to classify that
+                // absence without swallowing an unrelated store failure.
+                match process_registry.get_process(process_id).await {
+                    Ok(None) | Err(lash_core::PluginError::ProcessNoLongerRetained { .. }) => {
+                        tracing::info!(
+                            %session_id,
+                            %process_id,
+                            reason = "removed_during_observer_apply",
+                            "skipping unavailable process in fork observer recovery intent"
+                        );
+                    }
+                    Ok(Some(_)) | Err(_) => return Err(apply_error.into()),
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
 /// Builder for one host-named session.
 ///
 /// Persistent stores enforce single-use ids durably. A store-less `LashCore`
@@ -133,15 +210,12 @@ impl SessionBuilder {
         else {
             return Ok(());
         };
-        for process_id in pending_observer_process_ids {
-            process_registry
-                .add_observer(
-                    &self.session_id,
-                    process_id,
-                    lash_core::ProcessObserverBy::ForkInheritance,
-                )
-                .await?;
-        }
+        apply_fork_observer_intent(
+            process_registry.as_ref(),
+            &self.session_id,
+            pending_observer_process_ids,
+        )
+        .await?;
         let lash_core::SessionRelation::Fork {
             pending_observer_process_ids,
             ..
@@ -162,6 +236,8 @@ impl SessionBuilder {
     pub async fn open_with_state(self, mut state: RuntimeSessionState) -> Result<LashSession> {
         let policy = self.session_policy();
         let store = self.create_store(&policy).await?;
+        self.reconcile_fork_process_observers(store.as_deref())
+            .await?;
         if state.session_id != self.session_id {
             return Err(EmbedError::StoreSessionMismatch {
                 loaded: state.session_id,

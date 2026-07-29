@@ -73,11 +73,11 @@ impl ProcessRegistry for SqliteProcessRegistry {
                         registration_hash,
                         now,
                     );
-                    let originator_scope_id = record.originator_scope_id();
+                    let originator_id = record.originator_id();
                     let change_seq = Self::next_change_seq_conn(tx)?;
                     tx.execute(
                         "INSERT INTO processes (
-                            process_id, registration_hash, originator_scope_id, wake_session_id,
+                            process_id, registration_hash, originator_id, wake_session_id,
                             identity_kind, identity_label, is_waiting,
                             created_at_ms, updated_at_ms, change_seq, status, record_json
                          )
@@ -85,7 +85,7 @@ impl ProcessRegistry for SqliteProcessRegistry {
                         params![
                             record.id.as_str(),
                             record.registration_hash.as_str(),
-                            originator_scope_id.as_str(),
+                            originator_id.as_str(),
                             wake_session_id,
                             record.identity.kind.as_str(),
                             record.identity.label.as_deref(),
@@ -274,6 +274,41 @@ impl ProcessRegistry for SqliteProcessRegistry {
             .map_err(process_sqlite_error)
     }
 
+    async fn is_observer(
+        &self,
+        session_id: &str,
+        process_id: &str,
+    ) -> Result<bool, lash_core::PluginError> {
+        let session_id = session_id.to_string();
+        let process_id = process_id.to_string();
+        let queried_process_id = process_id.clone();
+        let (retained, observer) = self
+            .conn
+            .call(move |conn| {
+                let retained = conn.query_row(
+                    "SELECT EXISTS(SELECT 1 FROM processes WHERE process_id = ?1)",
+                    params![queried_process_id],
+                    |row| row.get::<_, bool>(0),
+                )?;
+                let observer = conn.query_row(
+                    "SELECT EXISTS(
+                         SELECT 1 FROM process_observers
+                         WHERE session_id = ?1 AND process_id = ?2
+                     )",
+                    params![session_id, queried_process_id],
+                    |row| row.get::<_, bool>(0),
+                )?;
+                Ok((retained, observer))
+            })
+            .await
+            .map_err(process_sqlite_error)?;
+        if retained {
+            return Ok(observer);
+        }
+        self.get_process(&process_id).await?;
+        Ok(false)
+    }
+
     async fn observers_for_process(
         &self,
         process_id: &str,
@@ -360,6 +395,7 @@ impl ProcessRegistry for SqliteProcessRegistry {
         process_id: &str,
         request: ProcessEventAppendRequest,
     ) -> Result<ProcessEventAppendResult, lash_core::PluginError> {
+        lash_core::validate_generic_process_event_append(&request)?;
         let process_id = process_id.to_string();
         let occurred_at_ms = self.clock.timestamp_ms();
         let wake_delivery_config = self.wake_delivery_config;
@@ -748,6 +784,12 @@ impl ProcessRegistry for SqliteProcessRegistry {
         &self,
         filter: &lash_core::ProcessListFilter,
     ) -> Result<Vec<ProcessRecord>, lash_core::PluginError> {
+        if filter
+            .created_at_start_ms
+            .is_some_and(|value| value > i64::MAX as u64)
+        {
+            return Ok(Vec::new());
+        }
         let filter = filter.clone();
         let definition = filter
             .definition
@@ -764,11 +806,14 @@ impl ProcessRegistry for SqliteProcessRegistry {
                             "SELECT record_json FROM processes
                              WHERE (?1 IS NULL OR status = ?1)
                                AND (?2 IS NULL OR is_waiting = ?2)
-                               AND (?3 IS NULL OR originator_scope_id = ?3)
+                               AND (?3 IS NULL OR originator_id = ?3)
                                AND (?4 IS NULL OR identity_kind = ?4)
                                AND (?5 IS NULL OR identity_label = ?5)
                                AND (?6 IS NULL OR
-                                    json_extract(record_json, '$.identity.definition') = json(?6))
+                                    (json_type(record_json, '$.identity.definition') IS NOT NULL
+                                     AND json_extract(
+                                             record_json, '$.identity.definition'
+                                         ) IS json_extract(?6, '$')))
                                AND (?7 IS NULL OR
                                     json_extract(record_json, '$.provenance.caused_by.occurrence_id') = ?7)
                                AND (?8 IS NULL OR
@@ -783,14 +828,17 @@ impl ProcessRegistry for SqliteProcessRegistry {
                             params![
                                 status,
                                 filter.waiting.map(i64::from),
-                                filter.originator_scope_id,
+                                filter.originator_id,
                                 filter.identity_kind,
                                 filter.identity_label,
                                 definition,
                                 filter.caused_by_occurrence_id,
                                 filter.caused_by_subscription_id,
                                 filter.created_at_start_ms.map(|value| value as i64),
-                                filter.created_at_end_ms.map(|value| value as i64),
+                                filter
+                                    .created_at_end_ms
+                                    .filter(|value| *value <= i64::MAX as u64)
+                                    .map(|value| value as i64),
                             ],
                             |row| row.get::<_, String>(0),
                         )
@@ -832,19 +880,27 @@ impl ProcessRegistry for SqliteProcessRegistry {
     async fn compact_process_tombstones(
         &self,
         cutoff_epoch_ms: u64,
+        watermark: lash_core::ProjectionWatermark,
     ) -> Result<usize, lash_core::PluginError> {
+        let max_change_seq = match watermark {
+            lash_core::ProjectionWatermark::UpTo(cursor) => Some(cursor.store_sequence() as i64),
+            lash_core::ProjectionWatermark::NoProjector => None,
+        };
+        let cutoff_epoch_ms = i64::try_from(cutoff_epoch_ms).unwrap_or(i64::MAX);
         self.conn
             .call(move |conn| {
                 conn.execute(
-                    "DELETE FROM process_tombstones WHERE pruned_at_ms < ?1",
-                    params![cutoff_epoch_ms as i64],
+                    "DELETE FROM process_tombstones
+                     WHERE pruned_at_ms < ?1
+                       AND (?2 IS NULL OR pruned_change_seq <= ?2)",
+                    params![cutoff_epoch_ms, max_change_seq],
                 )
             })
             .await
             .map_err(process_sqlite_error)
     }
 
-    async fn pending_wake_deliveries(
+    async fn claim_pending_wake_deliveries(
         &self,
         limit: usize,
     ) -> Result<Vec<lash_core::WakeDelivery>, lash_core::PluginError> {
@@ -852,9 +908,17 @@ impl ProcessRegistry for SqliteProcessRegistry {
             return Ok(Vec::new());
         }
         let now = self.clock.timestamp_ms();
+        let enqueuing_stale_after_ms = self.wake_delivery_config.enqueuing_stale_after_ms;
         self.conn
             .write_flow(move |tx| {
                 Ok(tx_outcome((|| {
+                    tx.execute(
+                        "UPDATE process_wake_deliveries
+                         SET state = 'pending'
+                         WHERE state = 'enqueuing' AND next_attempt_at_ms <= ?1",
+                        params![now as i64],
+                    )
+                    .map_err(process_sqlite_error)?;
                     let ids = {
                         let mut stmt = tx
                             .prepare(
@@ -888,10 +952,16 @@ impl ProcessRegistry for SqliteProcessRegistry {
                     for id in &ids {
                         tx.execute(
                             "UPDATE process_wake_deliveries
-                             SET attempts = attempts + 1,
-                                 first_attempt_ms = COALESCE(first_attempt_ms, ?2)
+                             SET state = 'enqueuing',
+                                 attempts = attempts + 1,
+                                 first_attempt_ms = COALESCE(first_attempt_ms, ?2),
+                                 next_attempt_at_ms = ?3
                              WHERE delivery_id = ?1 AND state = 'pending'",
-                            params![id, now as i64],
+                            params![
+                                id,
+                                now as i64,
+                                now.saturating_add(enqueuing_stale_after_ms) as i64
+                            ],
                         )
                         .map_err(process_sqlite_error)?;
                     }
@@ -1012,8 +1082,8 @@ impl ProcessRegistry for SqliteProcessRegistry {
                     let changed = tx
                         .execute(
                             "UPDATE process_wake_deliveries
-                             SET next_attempt_at_ms = MAX(next_attempt_at_ms, ?2)
-                             WHERE delivery_id = ?1 AND state = 'pending'",
+                             SET state = 'pending', next_attempt_at_ms = ?2
+                             WHERE delivery_id = ?1 AND state = 'enqueuing'",
                             params![delivery_id, next_attempt_at_ms as i64],
                         )
                         .map_err(process_sqlite_error)?;
@@ -1038,7 +1108,7 @@ impl ProcessRegistry for SqliteProcessRegistry {
                     let mut stmt = conn
                         .prepare(
                             "SELECT record_json FROM processes
-                             WHERE status = 'running'
+                             WHERE status IN ('running', 'waiting')
                              ORDER BY process_id ASC",
                         )
                         .map_err(process_sqlite_error)?;
@@ -1305,7 +1375,8 @@ impl ProcessRegistry for SqliteProcessRegistry {
         filter: Option<ProcessListFilter>,
         watermark: lash_core::ProjectionWatermark,
     ) -> Result<ProcessPruneReport, lash_core::PluginError> {
-        let cutoff = cutoff_epoch_ms as i64;
+        let cutoff = i64::try_from(cutoff_epoch_ms).unwrap_or(i64::MAX);
+        let pruned_at_ms = self.clock.timestamp_ms() as i64;
         let max_change_seq = match watermark {
             lash_core::ProjectionWatermark::UpTo(cursor) => Some(cursor.store_sequence()),
             lash_core::ProjectionWatermark::NoProjector => None,
@@ -1347,6 +1418,7 @@ impl ProcessRegistry for SqliteProcessRegistry {
                     crate::process_registry_change::prune_terminal_processes_conn(
                         tx,
                         cutoff,
+                        pruned_at_ms,
                         filter,
                         max_change_seq,
                     ),

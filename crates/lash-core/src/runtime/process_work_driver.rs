@@ -112,11 +112,24 @@ impl ProcessWorkDriver {
         &self,
         process_id: &str,
     ) -> Result<ProcessAwaitOutput, PluginError> {
-        let record = self
-            .registry
-            .get_process(process_id)
-            .await?
-            .ok_or_else(|| PluginError::Session(format!("unknown process `{process_id}`")))?;
+        let record = match self.registry.get_process(process_id).await {
+            Ok(Some(record)) => record,
+            Ok(None) => {
+                return Err(PluginError::Session(format!(
+                    "unknown process `{process_id}`"
+                )));
+            }
+            Err(PluginError::ProcessNoLongerRetained {
+                terminal_label,
+                pruned_at_ms,
+            }) => {
+                return Ok(ProcessAwaitOutput::NoLongerRetained {
+                    terminal_label,
+                    pruned_at_ms,
+                });
+            }
+            Err(error) => return Err(error),
+        };
         if let Some(output) = record.outcome.as_ref() {
             return Ok(output.clone());
         }

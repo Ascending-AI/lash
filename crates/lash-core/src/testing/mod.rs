@@ -693,14 +693,18 @@ impl crate::ProcessService for MockSessionManager {
     ) -> Result<(), PluginError> {
         let _ = scope;
         for handle_id in handle_ids {
-            if !self
+            match self
                 .process_registry
                 .is_observer(session_id, handle_id)
-                .await?
+                .await
             {
-                return Err(PluginError::Session(format!(
-                    "process handle `{handle_id}` is not live or visible in this session"
-                )));
+                Ok(true) | Err(PluginError::ProcessNoLongerRetained { .. }) => {}
+                Ok(false) => {
+                    return Err(PluginError::Session(format!(
+                        "process handle `{handle_id}` is not live or visible in this session"
+                    )));
+                }
+                Err(error) => return Err(error),
             }
         }
         Ok(())

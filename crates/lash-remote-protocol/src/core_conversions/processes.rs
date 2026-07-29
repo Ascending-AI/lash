@@ -28,9 +28,7 @@ impl From<lash_core::ProcessOriginator> for RemoteProcessOriginator {
     fn from(value: lash_core::ProcessOriginator) -> Self {
         match value {
             lash_core::ProcessOriginator::Host { scope } => Self::Host { scope },
-            lash_core::ProcessOriginator::Session { scope } => Self::Session {
-                scope: scope.into(),
-            },
+            lash_core::ProcessOriginator::Session { session_id } => Self::Session { session_id },
         }
     }
 }
@@ -39,9 +37,7 @@ impl From<RemoteProcessOriginator> for lash_core::ProcessOriginator {
     fn from(value: RemoteProcessOriginator) -> Self {
         match value {
             RemoteProcessOriginator::Host { scope } => Self::Host { scope },
-            RemoteProcessOriginator::Session { scope } => Self::Session {
-                scope: scope.into(),
-            },
+            RemoteProcessOriginator::Session { session_id } => Self::Session { session_id },
         }
     }
 }
@@ -1689,7 +1685,7 @@ impl TryFrom<RemoteProcessListFilter> for lash_core::ProcessListFilter {
             definition,
             status,
             waiting,
-            originator_scope_id,
+            originator_id,
             identity_kind,
             identity_label,
             caused_by_occurrence_id,
@@ -1701,7 +1697,7 @@ impl TryFrom<RemoteProcessListFilter> for lash_core::ProcessListFilter {
             definition: definition.map(Into::into),
             status: status.into(),
             waiting,
-            originator_scope_id,
+            originator_id,
             identity_kind,
             identity_label,
             caused_by_occurrence_id,
@@ -1718,7 +1714,7 @@ impl From<lash_core::ProcessListFilter> for RemoteProcessListFilter {
             definition,
             status,
             waiting,
-            originator_scope_id,
+            originator_id,
             identity_kind,
             identity_label,
             caused_by_occurrence_id,
@@ -1731,7 +1727,7 @@ impl From<lash_core::ProcessListFilter> for RemoteProcessListFilter {
             definition: definition.map(Into::into),
             status: status.into(),
             waiting,
-            originator_scope_id,
+            originator_id,
             identity_kind,
             identity_label,
             caused_by_occurrence_id,

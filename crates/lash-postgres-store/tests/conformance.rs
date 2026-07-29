@@ -177,9 +177,14 @@ async fn postgres_wake_delivery_crash_matrix_when_configured() {
     };
     reset(&storage).await;
     let factory = Arc::new(storage.session_store_factory()) as Arc<dyn SessionStoreFactory>;
-    let registry = Arc::new(storage.process_registry_with_wake_delivery_config(
-        lash_core::WakeDeliveryConfig::new(250).expect("valid short test retention"),
-    )) as Arc<dyn ProcessRegistry>;
+    let registry = Arc::new(
+        storage.process_registry_with_wake_delivery_config(
+            lash_core::WakeDeliveryConfig::new(10_000)
+                .expect("valid test retention")
+                .with_enqueuing_stale_after_ms(25)
+                .expect("valid short stale-claim age"),
+        ),
+    ) as Arc<dyn ProcessRegistry>;
     Box::pin(lash_core::testing::conformance::wake_delivery_crash_matrix(
         factory, registry,
     ))
@@ -209,7 +214,6 @@ async fn postgres_wake_enqueue_serializes_with_consumption_when_configured() {
     let wake = lash_core::ProcessWakeDelivery {
         wake_id: "wake:source-lock".to_string(),
         target_session_id: session_id.to_string(),
-        target_scope_id: lash_core::SessionScope::new(session_id).id(),
         process_id: "wake-source-lock-process".to_string(),
         sequence: 1,
         event_type: "producer.wake".to_string(),
@@ -645,6 +649,7 @@ async fn postgres_from_pool_enforces_schema_version_gate_when_configured() {
     .fetch_one(&pool)
     .await
     .expect("read current schema version");
+    assert_eq!(current_version, 33, "Postgres component schema pin");
     let stale_version = current_version - 1;
     // Force the recorded component version to a stale value.
     sqlx::query(

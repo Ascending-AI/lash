@@ -1,5 +1,70 @@
 use super::*;
 
+pub(super) async fn claim_pending_wake_deliveries(
+    registry: &PostgresProcessRegistry,
+    limit: usize,
+) -> Result<Vec<lash_core::WakeDelivery>, PluginError> {
+    if limit == 0 {
+        return Ok(Vec::new());
+    }
+    let mut tx = registry.pool.begin().await.map_err(plugin_sqlx_error)?;
+    let now = registry.clock.timestamp_ms() as i64;
+    sqlx::query(
+        "UPDATE lash_process_wake_deliveries
+         SET state = 'pending'
+         WHERE state = 'enqueuing' AND next_attempt_at_ms <= $1",
+    )
+    .bind(now)
+    .execute(&mut *tx)
+    .await
+    .map_err(plugin_sqlx_error)?;
+    let ids = sqlx::query_scalar::<_, String>(
+        "SELECT candidate.delivery_id
+         FROM lash_process_wake_deliveries AS candidate
+         WHERE candidate.state = 'pending'
+           AND candidate.next_attempt_at_ms <= $2
+           AND NOT EXISTS (
+               SELECT 1
+               FROM lash_process_wake_deliveries AS earlier
+               WHERE earlier.state <> 'enqueued'
+                 AND earlier.target_session_id = candidate.target_session_id
+                 AND earlier.process_id = candidate.process_id
+                 AND earlier.sequence < candidate.sequence
+           )
+         ORDER BY candidate.next_attempt_at_ms ASC,
+                  candidate.target_session_id ASC,
+                  candidate.process_id ASC,
+                  candidate.sequence ASC
+         LIMIT $1
+         FOR UPDATE OF candidate SKIP LOCKED",
+    )
+    .bind(limit as i64)
+    .bind(now)
+    .fetch_all(&mut *tx)
+    .await
+    .map_err(plugin_sqlx_error)?;
+    let mut deliveries = Vec::with_capacity(ids.len());
+    for id in ids {
+        sqlx::query(
+            "UPDATE lash_process_wake_deliveries
+             SET state = 'enqueuing',
+                 attempts = attempts + 1,
+                 first_attempt_ms = COALESCE(first_attempt_ms, $2),
+                 next_attempt_at_ms = $3
+             WHERE delivery_id = $1 AND state = 'pending'",
+        )
+        .bind(&id)
+        .bind(now)
+        .bind(now.saturating_add(registry.wake_delivery_config.enqueuing_stale_after_ms as i64))
+        .execute(&mut *tx)
+        .await
+        .map_err(plugin_sqlx_error)?;
+        deliveries.push(load_wake_delivery_tx(&mut tx, &id).await?);
+    }
+    tx.commit().await.map_err(plugin_sqlx_error)?;
+    Ok(deliveries)
+}
+
 pub(super) async fn load_wake_delivery_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     delivery_id: &str,
@@ -24,6 +89,7 @@ pub(super) fn decode_wake_delivery_row(
     let state_value: String = row.get(1);
     let state = match state_value.as_str() {
         "pending" => lash_core::WakeDeliveryState::Pending,
+        "enqueuing" => lash_core::WakeDeliveryState::Enqueuing,
         "enqueued" => lash_core::WakeDeliveryState::Enqueued,
         "discarded" => lash_core::WakeDeliveryState::Discarded,
         state => {
@@ -64,6 +130,7 @@ pub(super) fn wake_delivery_report<'a>(
     for delivery in deliveries {
         match delivery.state {
             lash_core::WakeDeliveryState::Pending => report.pending += 1,
+            lash_core::WakeDeliveryState::Enqueuing => report.enqueuing += 1,
             lash_core::WakeDeliveryState::Enqueued => report.enqueued += 1,
             lash_core::WakeDeliveryState::Discarded => {
                 report.discarded += 1;
@@ -88,7 +155,7 @@ pub(super) async fn update_wake_delivery_state(
     let changed = sqlx::query(
         "UPDATE lash_process_wake_deliveries
          SET state = $2, discard_reason = $3
-         WHERE delivery_id = $1 AND state = 'pending'",
+         WHERE delivery_id = $1 AND state = 'enqueuing'",
     )
     .bind(delivery_id)
     .bind(state.as_str())
@@ -110,6 +177,7 @@ pub(super) async fn update_wake_delivery_state(
         })?;
         let state = match current.as_str() {
             "pending" => lash_core::WakeDeliveryState::Pending,
+            "enqueuing" => lash_core::WakeDeliveryState::Enqueuing,
             "enqueued" => lash_core::WakeDeliveryState::Enqueued,
             "discarded" => lash_core::WakeDeliveryState::Discarded,
             _ => {

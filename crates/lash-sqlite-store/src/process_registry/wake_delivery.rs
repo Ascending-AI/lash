@@ -29,6 +29,7 @@ pub(super) fn load_wake_delivery_conn(
         })?;
     let state = match row.0.as_str() {
         "pending" => lash_core::WakeDeliveryState::Pending,
+        "enqueuing" => lash_core::WakeDeliveryState::Enqueuing,
         "enqueued" => lash_core::WakeDeliveryState::Enqueued,
         "discarded" => lash_core::WakeDeliveryState::Discarded,
         state => {
@@ -67,6 +68,7 @@ pub(super) fn wake_delivery_report<'a>(
     for delivery in deliveries {
         match delivery.state {
             lash_core::WakeDeliveryState::Pending => report.pending += 1,
+            lash_core::WakeDeliveryState::Enqueuing => report.enqueuing += 1,
             lash_core::WakeDeliveryState::Enqueued => report.enqueued += 1,
             lash_core::WakeDeliveryState::Discarded => {
                 report.discarded += 1;
@@ -95,7 +97,7 @@ pub(super) async fn update_wake_delivery_state(
                 .execute(
                     "UPDATE process_wake_deliveries
                      SET state = ?2, discard_reason = ?3
-                     WHERE delivery_id = ?1 AND state = 'pending'",
+                     WHERE delivery_id = ?1 AND state = 'enqueuing'",
                     params![
                         delivery_id,
                         state.as_str(),
@@ -119,6 +121,7 @@ pub(super) async fn update_wake_delivery_state(
                     })?;
                 let state = match current.as_str() {
                     "pending" => lash_core::WakeDeliveryState::Pending,
+                    "enqueuing" => lash_core::WakeDeliveryState::Enqueuing,
                     "enqueued" => lash_core::WakeDeliveryState::Enqueued,
                     "discarded" => lash_core::WakeDeliveryState::Discarded,
                     _ => {

@@ -385,8 +385,6 @@ pub struct SessionCreateRequest {
     pub session_id: Option<String>,
     #[serde(default)]
     pub relation: SessionRelation,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub observed_processes: Vec<crate::ProcessId>,
     pub start: SessionStartPoint,
     #[serde(default)]
     pub policy: Option<SessionPolicy>,
@@ -422,7 +420,6 @@ impl SessionCreateRequest {
             plugin_source: SessionPluginSource::CurrentHostFresh,
             initial_nodes: Vec::new(),
             tool_access: SessionToolAccess::default(),
-            observed_processes: Vec::new(),
             subagent: None,
             context_overlay: SessionContextOverlay::default(),
             plugin_options,
@@ -457,7 +454,6 @@ impl SessionCreateRequest {
             plugin_source: SessionPluginSource::CurrentHostFresh,
             initial_nodes: Vec::new(),
             tool_access: SessionToolAccess::default(),
-            observed_processes: Vec::new(),
             subagent: None,
             context_overlay: SessionContextOverlay::default(),
             plugin_options,
@@ -529,7 +525,6 @@ impl SessionCreateRequest {
             plugin_source: SessionPluginSource::CurrentHostFresh,
             initial_nodes: Vec::new(),
             tool_access: SessionToolAccess::default(),
-            observed_processes: Vec::new(),
             subagent: None,
             context_overlay: SessionContextOverlay::default(),
             plugin_options,

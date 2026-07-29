@@ -68,7 +68,7 @@ use crate::{
     ProcessEventType, ProcessExecutionEnvRef, ProcessIdentity, ProcessInput, ProcessListFilter,
     ProcessLiveReferenceSummary, ProcessProvenance, ProcessRegistration, ProcessRegistry,
     ProcessStatus, ProcessStatusFilter, ProcessValueSelector, ProcessWakeDelivery, ProcessWakeSpec,
-    RecoveryDisposition, SessionScope, SessionScopeId, WaitKind, WaitState,
+    RecoveryDisposition, SessionScope, WaitKind, WaitState,
 };
 use lash_sansio::{AttachmentCreateMeta, AttachmentTypeMetadata, MediaType};
 

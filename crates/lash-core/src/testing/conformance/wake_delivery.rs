@@ -98,7 +98,7 @@ pub async fn wake_delivery_crash_matrix(
 
     let second = crate::WakeDeliveryDriver::drive_pending_once(
         Arc::clone(&registry),
-        factory,
+        Arc::clone(&factory),
         None,
         Arc::new(crate::SystemClock),
         32,
@@ -117,5 +117,119 @@ pub async fn wake_delivery_crash_matrix(
     assert_eq!(
         before, after,
         "wake outbox and delivery transitions changed lifecycle bytes"
+    );
+
+    let retarget_process_id = "wake-retarget-in-flight";
+    registry
+        .register_process(
+            process_registry::registration(retarget_process_id)
+                .with_extra_event_types([process_registry::wake_event_type("producer.wake")])
+                .with_wake_session_id(Some(target_session_id.to_string())),
+        )
+        .await
+        .expect("register retarget-race producer");
+    let retarget_wake = registry
+        .append_event(
+            retarget_process_id,
+            crate::ProcessEventAppendRequest::new(
+                "producer.wake",
+                serde_json::json!({"wake_input": "retarget-race"}),
+            ),
+        )
+        .await
+        .expect("append retarget-race wake")
+        .wake_delivery
+        .expect("retarget-race wake delivery");
+    let claimed = registry
+        .claim_pending_wake_deliveries(1)
+        .await
+        .expect("claim retarget-race wake");
+    assert_eq!(claimed.len(), 1);
+    assert_eq!(claimed[0].state, crate::WakeDeliveryState::Enqueuing);
+    registry
+        .retarget_subscription(retarget_process_id, Some("wake-new-target"))
+        .await
+        .expect("retarget while delivery is in flight");
+    target
+        .enqueue_queued_work(crate::process_wake_batch_draft(claimed[0].wake.clone()))
+        .await
+        .expect("enqueue claimed wake to original target");
+    registry
+        .mark_wake_enqueued(&claimed[0].delivery_id)
+        .await
+        .expect("settle claimed wake truthfully");
+    let retarget_delivery = registry
+        .list_wake_deliveries(None)
+        .await
+        .expect("read settled retarget-race wake")
+        .into_iter()
+        .find(|delivery| delivery.delivery_id == claimed[0].delivery_id)
+        .expect("settled retarget-race delivery");
+    assert_eq!(retarget_delivery.state, crate::WakeDeliveryState::Enqueued);
+    assert_eq!(retarget_delivery.wake.target_session_id, target_session_id);
+    assert_eq!(retarget_delivery.discard_reason, None);
+    let retarget_source =
+        crate::process_wake_source_key(&retarget_wake.process_id, retarget_wake.sequence);
+    assert_eq!(
+        target
+            .list_queued_work(target_session_id)
+            .await
+            .expect("read original target after retarget race")
+            .iter()
+            .filter(|batch| batch.source_key.as_deref() == Some(retarget_source.as_str()))
+            .count(),
+        1,
+        "an in-flight retarget race must leave one truthful queued turn"
+    );
+
+    let crash_process_id = "wake-crashed-enqueuing";
+    registry
+        .register_process(
+            process_registry::registration(crash_process_id)
+                .with_extra_event_types([process_registry::wake_event_type("producer.wake")])
+                .with_wake_session_id(Some(target_session_id.to_string())),
+        )
+        .await
+        .expect("register stale-claim producer");
+    let crash_wake = registry
+        .append_event(
+            crash_process_id,
+            crate::ProcessEventAppendRequest::new(
+                "producer.wake",
+                serde_json::json!({"wake_input": "recover-stale-claim"}),
+            ),
+        )
+        .await
+        .expect("append stale-claim wake")
+        .wake_delivery
+        .expect("stale-claim wake delivery");
+    let crashed_claim = registry
+        .claim_pending_wake_deliveries(1)
+        .await
+        .expect("claim wake before simulated crash");
+    assert_eq!(crashed_claim.len(), 1);
+    assert_eq!(crashed_claim[0].state, crate::WakeDeliveryState::Enqueuing);
+    tokio::time::sleep(std::time::Duration::from_millis(40)).await;
+    let recovered = crate::WakeDeliveryDriver::drive_pending_once(
+        Arc::clone(&registry),
+        Arc::clone(&factory),
+        None,
+        Arc::new(crate::SystemClock),
+        32,
+    )
+    .await
+    .expect("recover stale enqueuing claim");
+    assert_eq!(recovered.enqueued, 1);
+    let crash_source = crate::process_wake_source_key(&crash_wake.process_id, crash_wake.sequence);
+    assert_eq!(
+        target
+            .list_queued_work(target_session_id)
+            .await
+            .expect("read queue after stale-claim recovery")
+            .iter()
+            .filter(|batch| batch.source_key.as_deref() == Some(crash_source.as_str()))
+            .count(),
+        1,
+        "a stale enqueuing claim must recover to exactly one queued turn"
     );
 }

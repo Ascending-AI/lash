@@ -6634,7 +6634,6 @@ async fn sqlite_process_recovery_reopens_registry_worker_observers_wakes_and_can
     let context_a = Arc::new(RecordingContext::with_endpoint(endpoint_a));
     let host_a = RestateRuntimeEffectController::new(context_a);
     let creator_scope = lash_core::SessionScope::new("root");
-    let scope_id = creator_scope.id();
     let env_ref = persist_recovery_env_ref().await;
     let registration = ProcessRegistration::new(
         "recover-tool",
@@ -6724,7 +6723,7 @@ async fn sqlite_process_recovery_reopens_registry_worker_observers_wakes_and_can
         panic!("expected process wake queue payload");
     };
     assert_eq!(wake.input, "wake-after-rebuild");
-    assert_eq!(wake.target_scope_id, scope_id);
+    assert_eq!(wake.target_session_id, "root");
 
     let worker_b = recovery_worker(Arc::clone(&registry_b), store_factory);
     let endpoint_b = Endpoint::builder()

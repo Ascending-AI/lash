@@ -43,8 +43,10 @@ fn materialize_terminal_semantics(
     let await_output = match &terminal.await_output {
         Some(selector) => {
             let selected = select_value(payload, selector)?;
-            serde_json::from_value::<ProcessAwaitOutput>(selected.clone())
-                .unwrap_or_else(|_| selected_value_to_await_output(terminal.status, selected))
+            match serde_json::from_value::<ProcessAwaitOutput>(selected.clone()) {
+                Ok(output) => output,
+                Err(_) => selected_value_to_await_output(terminal.status, selected)?,
+            }
         }
         None if terminal.status == ProcessStatus::Completed => ProcessAwaitOutput::Success {
             value: payload.clone(),
@@ -65,8 +67,8 @@ fn materialize_terminal_semantics(
 fn selected_value_to_await_output(
     status: ProcessStatus,
     value: serde_json::Value,
-) -> ProcessAwaitOutput {
-    match status {
+) -> Result<ProcessAwaitOutput, PluginError> {
+    Ok(match status {
         ProcessStatus::Completed => ProcessAwaitOutput::Success {
             value,
             control: None,
@@ -97,9 +99,12 @@ fn selected_value_to_await_output(
             control: None,
         },
         ProcessStatus::Running | ProcessStatus::Waiting => {
-            unreachable!("non-terminal status cannot materialize a terminal outcome")
+            return Err(PluginError::Session(format!(
+                "terminal event semantics used non-terminal status `{}`",
+                status.label()
+            )));
         }
-    }
+    })
 }
 
 fn materialize_wake(

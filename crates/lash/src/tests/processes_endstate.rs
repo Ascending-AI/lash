@@ -687,8 +687,10 @@ async fn process_children_inherit_session_chain_provenance() -> Result<()> {
     assert_eq!(completed.len(), 2);
     for observed in &completed {
         match &observed.originator {
-            lash_core::ProcessOriginator::Session { scope } => {
-                assert_eq!(scope.session_id, session_id)
+            lash_core::ProcessOriginator::Session {
+                session_id: originator_session_id,
+            } => {
+                assert_eq!(originator_session_id, session_id)
             }
             other => panic!("expected session originator, got {other:?}"),
         }
@@ -1146,8 +1148,13 @@ async fn owner_bound_graceful_drain_resolves_awaiter_and_prunes_end_to_end() -> 
     let prune = core.processes().prune(i64::MAX as u64).await?;
     assert_eq!(prune.pruned_processes, 1);
     assert!(
-        core.processes().get(process_id).await?.is_none(),
-        "the pruned abandoned row is gone from the facade observer"
+        matches!(
+            core.processes().get(process_id).await,
+            Err(crate::EmbedError::Plugin(
+                lash_core::PluginError::ProcessNoLongerRetained { .. }
+            ))
+        ),
+        "the pruned abandoned row is a typed retained-history miss"
     );
 
     Ok(())

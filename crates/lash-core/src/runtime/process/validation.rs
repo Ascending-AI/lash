@@ -12,6 +12,20 @@ use super::model::{
     ProcessRecord, ProcessRegistration, ProcessStarted, ProcessStatus, RecoveryDisposition,
 };
 use super::time::{epoch_ms_from_system_time, system_time_from_epoch_ms};
+
+pub fn validate_generic_process_event_append(
+    request: &ProcessEventAppendRequest,
+) -> Result<(), PluginError> {
+    if matches!(
+        request.event_type.as_str(),
+        "process.observer_added" | "process.observer_removed" | "process.subscription_retargeted"
+    ) {
+        return Err(PluginError::ReservedProcessEvent {
+            event_type: request.event_type.clone(),
+        });
+    }
+    Ok(())
+}
 use super::wake::{ProcessWakeDeliveryRequest, process_wake_delivery};
 
 #[derive(Clone, Debug)]
@@ -451,7 +465,7 @@ fn prepare_wake_delivery(
         return Ok(None);
     };
     process_wake_delivery(ProcessWakeDeliveryRequest {
-        target_scope: super::model::SessionScope::new(target_session_id),
+        target_session_id: target_session_id.to_string(),
         process_id: process_id.to_string(),
         sequence,
         event_type,
@@ -628,14 +642,21 @@ pub(super) fn validate_process_registration(
                 registration.id, event_type.name
             )));
         }
-        if let Some(terminal) = &event_type.semantics.terminal
-            && terminal.status != ProcessStatus::Completed
-            && terminal.await_output.is_none()
-        {
-            return Err(PluginError::Session(format!(
-                "terminal event `{}` for process `{}` must declare await output",
-                event_type.name, registration.id
-            )));
+        if let Some(terminal) = &event_type.semantics.terminal {
+            if !terminal.status.is_terminal() {
+                return Err(PluginError::Session(format!(
+                    "terminal event `{}` for process `{}` must declare a terminal status, got `{}`",
+                    event_type.name,
+                    registration.id,
+                    terminal.status.label()
+                )));
+            }
+            if terminal.status != ProcessStatus::Completed && terminal.await_output.is_none() {
+                return Err(PluginError::Session(format!(
+                    "terminal event `{}` for process `{}` must declare await output",
+                    event_type.name, registration.id
+                )));
+            }
         }
     }
     Ok(())
@@ -686,6 +707,31 @@ mod tests {
             error
                 .to_string()
                 .contains("reserved runtime lifecycle event type `process.waiting`")
+        );
+    }
+
+    #[test]
+    fn terminal_semantics_reject_non_terminal_status() {
+        let registration =
+            fixture_registration("invalid-terminal-status").with_extra_event_types([
+                crate::ProcessEventType {
+                    name: "producer.invalid_terminal".to_string(),
+                    payload_schema: crate::LashSchema::any(),
+                    semantics: crate::ProcessEventSemanticsSpec {
+                        terminal: Some(crate::ProcessTerminalSpec {
+                            status: crate::ProcessStatus::Running,
+                            await_output: Some(crate::ProcessValueSelector::Payload),
+                        }),
+                        ..crate::ProcessEventSemanticsSpec::default()
+                    },
+                },
+            ]);
+        let error = prepare_process_registration(registration)
+            .expect_err("non-terminal status must be rejected at registration");
+        assert!(
+            error
+                .to_string()
+                .contains("must declare a terminal status, got `running`")
         );
     }
 

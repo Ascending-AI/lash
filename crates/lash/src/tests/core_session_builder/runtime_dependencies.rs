@@ -134,7 +134,7 @@ async fn builder_rebinds_first_party_process_registry_to_runtime_clock() {
         .await
         .expect("append clock-wiring wake");
     let delivery = registry
-        .pending_wake_deliveries(1)
+        .claim_pending_wake_deliveries(1)
         .await
         .expect("scan clock-wiring wake")
         .into_iter()
@@ -531,6 +531,37 @@ async fn fork_observer_inheritance_is_recoverable_selective_and_wake_independent
         unreachable!("relation was checked above");
     };
     pending_observer_process_ids.push("fork-visible-process".to_string());
+    registry
+        .register_process(lash_core::ProcessRegistration::new(
+            "fork-pruned-process",
+            lash_core::ProcessInput::External {
+                metadata: serde_json::Value::Null,
+            },
+            lash_core::RecoveryDisposition::ExternallyOwned,
+            lash_core::ProcessProvenance::host(),
+        ))
+        .await
+        .expect("register process that will be pruned during fork publication");
+    let pruned_terminal = registry
+        .complete_process(
+            "fork-pruned-process",
+            lash_core::ProcessAwaitOutput::Success {
+                value: serde_json::Value::Null,
+                control: None,
+            },
+            lash_core::ProcessCompletionAuthority::external_owner(),
+        )
+        .await
+        .expect("complete inherited process before recovery");
+    registry
+        .prune_terminal_processes(
+            pruned_terminal.updated_at_ms.saturating_add(1),
+            None,
+            lash_core::ProjectionWatermark::NoProjector,
+        )
+        .await
+        .expect("prune inherited process before recovery");
+    pending_observer_process_ids.push("fork-pruned-process".to_string());
     branch_store
         .save_session_meta(recovery_meta)
         .await
@@ -543,7 +574,12 @@ async fn fork_observer_inheritance_is_recoverable_selective_and_wake_independent
         )
         .await
         .expect("remove the partially published observer");
-    core.session("fork-observer-branch").open().await?;
+    core.session("fork-observer-branch")
+        .open_with_state(lash_core::RuntimeSessionState {
+            session_id: "fork-observer-branch".to_string(),
+            ..Default::default()
+        })
+        .await?;
     assert_eq!(
         registry
             .list_observed_by("fork-observer-branch")

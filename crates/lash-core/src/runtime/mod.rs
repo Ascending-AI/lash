@@ -207,17 +207,19 @@ pub use process::{
     ProcessValueSelector, ProcessWake, ProcessWakeDelivery, ProcessWakeDeliveryRequest,
     ProcessWakeSpec, ProcessWorkObserver, ProcessWorkSnapshot, ProjectionWatermark,
     RecoveryDisposition, SegmentHandover, SessionId, SessionScope, SessionScopeId,
-    UnavailableProcessService, WaitKind, WaitState, WakeDelivery, WakeDeliveryConfig,
-    WakeDeliveryReport, WakeDeliveryState, WakeDiscardReason, apply_process_event_projection,
-    apply_process_status_projection, current_epoch_ms, epoch_ms_from_system_time,
-    fold_process_record, load_process_execution_env, materialize_process_event_semantics,
-    persist_process_execution_env, prepare_process_event_append, prepare_process_registration,
-    prepare_process_start, process_event_payload_hash, process_registration_with_observers_hash,
+    UnavailableProcessService, WAKE_ENQUEUING_STALE_AFTER_MS, WaitKind, WaitState, WakeDelivery,
+    WakeDeliveryConfig, WakeDeliveryReport, WakeDeliveryState, WakeDiscardReason,
+    apply_process_event_projection, apply_process_status_projection, current_epoch_ms,
+    epoch_ms_from_system_time, fold_process_record, load_process_execution_env,
+    materialize_process_event_semantics, persist_process_execution_env,
+    prepare_process_event_append, prepare_process_registration, prepare_process_start,
+    process_event_payload_hash, process_registration_with_observers_hash,
     process_runtime_session_ids, process_signal_event_type, process_signal_name_from_event_type,
     process_signal_wait_key, process_wake_delivery, process_wake_input_from_event_payload,
     process_wake_turn_cause, process_wake_turn_text, require_event_replay,
     system_time_from_epoch_ms, terminal_append_request, terminal_event_type_name,
-    validate_process_signal_name, watch_process_registry, watch_process_registry_with_sink,
+    validate_generic_process_event_append, validate_process_signal_name, watch_process_registry,
+    watch_process_registry_with_sink,
 };
 #[cfg(any(test, feature = "testing"))]
 pub use process::{TestLocalProcessRegistry, TestProcessRegistryWriteExt};
@@ -1111,7 +1113,7 @@ pub struct ForkSessionRequest {
 pub struct ForkSessionResult {
     pub session_id: String,
     pub node_id: String,
-    /// Session that originally wrote `node_id`. This is process-grant
+    /// Session that originally wrote `node_id`. This is process-observer
     /// provenance, not a required source-session argument to the fork.
     pub source_session_id: String,
 }

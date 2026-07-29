@@ -700,6 +700,12 @@ impl LashCore {
                     .collect()
             }
         };
+        let resolved_observer_inheritance = match observer_inheritance {
+            lash_core::ObserverInheritance::Only(_) => {
+                lash_core::ObserverInheritance::Only(inherited.clone())
+            }
+            selector => selector,
+        };
         let mut fork_policy = self.policy.clone();
         fork_policy.provider_id = point.config.provider_id;
         fork_policy.model = point.config.model;
@@ -709,7 +715,7 @@ impl LashCore {
             relation: lash_core::SessionRelation::Fork {
                 source_session_id: point.source_session_id,
                 source_node_id: point.node_id,
-                observer_inheritance,
+                observer_inheritance: resolved_observer_inheritance,
                 pending_observer_process_ids: inherited.clone(),
             },
             policy: fork_policy,
@@ -718,15 +724,12 @@ impl LashCore {
         let Some(process_registry) = self.process_registry() else {
             return Ok(fork);
         };
-        for process_id in inherited {
-            process_registry
-                .add_observer(
-                    &fork.session_id,
-                    &process_id,
-                    lash_core::ProcessObserverBy::ForkInheritance,
-                )
-                .await?;
-        }
+        crate::session::apply_fork_observer_intent(
+            process_registry.as_ref(),
+            &fork.session_id,
+            &inherited,
+        )
+        .await?;
         let create_request = lash_core::SessionStoreCreateRequest {
             session_id: request.session_id,
             relation: request.relation,

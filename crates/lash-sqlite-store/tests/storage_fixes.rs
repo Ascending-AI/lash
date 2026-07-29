@@ -15,7 +15,7 @@ use std::sync::Arc;
 
 use lash_core::runtime::{
     ProcessWakeDelivery, QueuedWorkBatchDraft, QueuedWorkClaimBoundary, RuntimeScope,
-    RuntimeSubject, SessionScopeId,
+    RuntimeSubject,
 };
 use lash_core::{
     LeaseOwnerIdentity, PluginSessionSnapshot, QueuedWorkStore, RuntimeCommit, RuntimeInvocation,
@@ -222,7 +222,6 @@ fn exclusive_draft(session_id: &str, text: &str) -> QueuedWorkBatchDraft {
     let wake = ProcessWakeDelivery {
         wake_id: format!("wake:{text}"),
         target_session_id: session_id.to_string(),
-        target_scope_id: SessionScopeId::new("root"),
         process_id: process_id.clone(),
         sequence,
         event_type: "process.wake".to_string(),
@@ -410,7 +409,7 @@ async fn unsupported_schema_error_reports_real_versions() {
     );
     assert!(
         message.contains("schema version 23"),
-        "error must report the real expected version 22: {message}"
+        "error must report the real expected version 23: {message}"
     );
     assert!(
         !message.contains("version 1 only"),

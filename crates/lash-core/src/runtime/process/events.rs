@@ -3,9 +3,7 @@ use std::time::SystemTime;
 
 use serde::{Deserialize, Serialize};
 
-use super::model::{
-    ProcessId, ProcessObserverBy, ProcessStatus, RecoveryDisposition, SessionScopeId,
-};
+use super::model::{ProcessId, ProcessObserverBy, ProcessStatus, RecoveryDisposition};
 use super::validation::process_event_payload_hash;
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -588,7 +586,6 @@ impl ProcessEventAppendRequest {
 pub struct ProcessWakeDelivery {
     pub wake_id: String,
     pub target_session_id: String,
-    pub target_scope_id: SessionScopeId,
     pub process_id: ProcessId,
     pub sequence: u64,
     #[serde(default = "default_process_wake_event_type")]

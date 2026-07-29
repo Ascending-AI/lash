@@ -126,7 +126,6 @@ fn wake_delivery(
     ProcessWakeDelivery {
         wake_id: "wake:abc".to_string(),
         target_session_id: "target".to_string(),
-        target_scope_id: SessionScope::new("target").id(),
         process_id: "process-1".to_string(),
         sequence: 7,
         event_type: event_type.clone(),

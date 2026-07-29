@@ -115,7 +115,7 @@ pub enum RemoteProcessOriginator {
         scope: Option<String>,
     },
     Session {
-        scope: RemoteSessionScope,
+        session_id: String,
     },
 }
 
@@ -123,7 +123,7 @@ impl RemoteProcessOriginator {
     pub fn validate(&self, type_name: &'static str) -> Result<(), RemoteProtocolError> {
         match self {
             Self::Host { .. } => Ok(()),
-            Self::Session { scope } => scope.validate(type_name),
+            Self::Session { session_id } => require_non_empty(type_name, "session_id", session_id),
         }
     }
 }
@@ -285,6 +285,16 @@ pub enum RemoteProcessAwaitOutput {
 }
 
 impl RemoteProcessAwaitOutput {
+    fn terminal_status(&self) -> Option<RemoteProcessStatus> {
+        match self {
+            Self::Success { .. } => Some(RemoteProcessStatus::Completed),
+            Self::Failure { .. } => Some(RemoteProcessStatus::Failed),
+            Self::Cancelled { .. } => Some(RemoteProcessStatus::Cancelled),
+            Self::Abandoned { .. } => Some(RemoteProcessStatus::Abandoned),
+            Self::NoLongerRetained { .. } => None,
+        }
+    }
+
     pub fn validate(&self, type_name: &'static str) -> Result<(), RemoteProtocolError> {
         match self {
             Self::Success { .. } | Self::Abandoned { .. } | Self::NoLongerRetained { .. } => Ok(()),
@@ -444,6 +454,34 @@ impl RemoteProcessRecord {
         }
         if let Some(outcome) = &self.outcome {
             outcome.validate(type_name)?;
+        }
+        match (self.status.is_terminal(), self.outcome.as_ref()) {
+            (false, None) => {}
+            (false, Some(_)) => {
+                return Err(RemoteProtocolError::InvalidEnvelope {
+                    type_name,
+                    message: format!(
+                        "non-terminal process status `{:?}` must not carry an outcome",
+                        self.status
+                    ),
+                });
+            }
+            (true, None) => {
+                return Err(RemoteProtocolError::InvalidEnvelope {
+                    type_name,
+                    message: format!(
+                        "terminal process status `{:?}` must carry an outcome",
+                        self.status
+                    ),
+                });
+            }
+            (true, Some(outcome)) if outcome.terminal_status() != Some(self.status) => {
+                return Err(RemoteProtocolError::InvalidEnvelope {
+                    type_name,
+                    message: format!("process status `{:?}` contradicts its outcome", self.status),
+                });
+            }
+            (true, Some(_)) => {}
         }
         Ok(())
     }
@@ -644,8 +682,25 @@ pub struct RemoteProcessTerminalSpec {
 
 impl RemoteProcessTerminalSpec {
     pub fn validate(&self, type_name: &'static str) -> Result<(), RemoteProtocolError> {
+        if !self.status.is_terminal() {
+            return Err(RemoteProtocolError::InvalidEnvelope {
+                type_name,
+                message: format!(
+                    "terminal event semantics require a terminal status, got `{:?}`",
+                    self.status
+                ),
+            });
+        }
         if let Some(await_output) = &self.await_output {
             await_output.validate(type_name)?;
+        }
+        if self.status != RemoteProcessStatus::Completed && self.await_output.is_none() {
+            return Err(RemoteProtocolError::InvalidEnvelope {
+                type_name,
+                message:
+                    "failed, cancelled, and abandoned terminal events must declare await output"
+                        .to_string(),
+            });
         }
         Ok(())
     }
@@ -1203,7 +1258,7 @@ pub struct RemoteProcessListFilter {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub waiting: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub originator_scope_id: Option<String>,
+    pub originator_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub identity_kind: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1225,7 +1280,7 @@ impl Default for RemoteProcessListFilter {
             definition: None,
             status: RemoteProcessStatusFilter::Running,
             waiting: None,
-            originator_scope_id: None,
+            originator_id: None,
             identity_kind: None,
             identity_label: None,
             caused_by_occurrence_id: None,

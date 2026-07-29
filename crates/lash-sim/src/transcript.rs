@@ -593,6 +593,13 @@ mod tests {
                 delivery.discard_reason == Some(lash_core::WakeDiscardReason::Retargeted)
             })
             .expect("retargeted delivery");
+        let retarget_event = registry
+            .events_after(process_id, 0)
+            .await
+            .expect("read process audit events")
+            .into_iter()
+            .find(|event| event.event_type == "process.subscription_retargeted")
+            .expect("retarget audit event");
 
         let terminal = registry
             .complete_process(
@@ -624,48 +631,93 @@ mod tests {
             output,
             ProcessAwaitOutput::NoLongerRetained { .. }
         ));
-
-        let trace = trace_with_events(
-            vec![
-                DeliveredBoundary {
-                    schema: crate::scheduler::BOUNDARY_EVENT_SCHEMA.to_string(),
-                    sequence: 1,
-                    scheduler: Default::default(),
-                    boundary_id: "retarget".to_string(),
-                    actor_alias: "source-session".to_string(),
-                    kind: BoundaryKind::ProcessWake,
-                    at: 1,
-                    label: "process.subscription.retargeted".to_string(),
-                    payload: serde_json::json!({"turn_index": 1}),
-                    observed: serde_json::json!({
-                        "turn_index": 1,
-                        "discard_reason": retargeted
-                            .discard_reason
-                            .expect("discard reason")
-                            .as_str(),
-                    }),
-                },
-                DeliveredBoundary {
-                    schema: crate::scheduler::BOUNDARY_EVENT_SCHEMA.to_string(),
-                    sequence: 2,
-                    scheduler: Default::default(),
-                    boundary_id: "pruned-await".to_string(),
-                    actor_alias: "branch-session".to_string(),
-                    kind: BoundaryKind::ProcessLifecycle,
-                    at: 2,
-                    label: "process.await.information".to_string(),
-                    payload: serde_json::json!({"turn_index": 1}),
-                    observed: serde_json::json!({
-                        "turn_index": 1,
-                        "outcome": "no_longer_retained",
-                    }),
-                },
-            ],
-            Vec::new(),
+        let rendered_output = output.clone().into_tool_output();
+        let rendered_value = match rendered_output.outcome {
+            lash_core::ToolCallOutcome::Success(value) => value.to_json_value(),
+            other => panic!("pruned await must render as information success, got {other:?}"),
+        };
+        let rendered_type = rendered_value
+            .get("type")
+            .and_then(serde_json::Value::as_str)
+            .expect("rendered information type");
+        let rendered_code = rendered_value
+            .get("code")
+            .and_then(serde_json::Value::as_str)
+            .expect("rendered information code")
+            .strip_prefix("process_")
+            .expect("process information code");
+        let discard_reason = retargeted
+            .discard_reason
+            .expect("retargeted delivery reason")
+            .as_str();
+        let rendered_trace =
+            |retarget_label: &str, rendered_discard: &str, await_type: &str, await_code: &str| {
+                trace_with_events(
+                    vec![
+                        DeliveredBoundary {
+                            schema: crate::scheduler::BOUNDARY_EVENT_SCHEMA.to_string(),
+                            sequence: 1,
+                            scheduler: Default::default(),
+                            boundary_id: "retarget".to_string(),
+                            actor_alias: "source-session".to_string(),
+                            kind: BoundaryKind::ProcessWake,
+                            at: 1,
+                            label: retarget_label.to_string(),
+                            payload: serde_json::json!({"turn_index": 1}),
+                            observed: serde_json::json!({
+                                "turn_index": 1,
+                                "discard_reason": rendered_discard,
+                            }),
+                        },
+                        DeliveredBoundary {
+                            schema: crate::scheduler::BOUNDARY_EVENT_SCHEMA.to_string(),
+                            sequence: 2,
+                            scheduler: Default::default(),
+                            boundary_id: "pruned-await".to_string(),
+                            actor_alias: "branch-session".to_string(),
+                            kind: BoundaryKind::ProcessLifecycle,
+                            at: 2,
+                            label: format!("process.await.{await_type}"),
+                            payload: serde_json::json!({"turn_index": 1}),
+                            observed: serde_json::json!({
+                                "turn_index": 1,
+                                "outcome": await_code,
+                            }),
+                        },
+                    ],
+                    Vec::new(),
+                )
+                .render_transcript()
+            };
+        let transcript = rendered_trace(
+            &retarget_event.event_type,
+            discard_reason,
+            rendered_type,
+            rendered_code,
+        );
+        assert_ne!(
+            transcript,
+            rendered_trace(
+                &retarget_event.event_type,
+                "enqueued",
+                rendered_type,
+                rendered_code,
+            ),
+            "a broken retarget settlement must change the transcript"
+        );
+        assert_ne!(
+            transcript,
+            rendered_trace(
+                &retarget_event.event_type,
+                discard_reason,
+                "failure",
+                "process_no_longer_retained",
+            ),
+            "rendering a pruned await as failure must change the transcript"
         );
 
-        insta::assert_snapshot!(trace.render_transcript(), @r"
-session-001 0001  ProcessWake        process.subscription.retargeted  discard=retargeted
+        insta::assert_snapshot!(transcript, @r"
+session-001 0001  ProcessWake        process.subscription_retargeted  discard=retargeted
 session-002 0002  ProcessLifecycle   process.await.information  outcome=no_longer_retained
 ");
     }

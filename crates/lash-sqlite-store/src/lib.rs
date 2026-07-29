@@ -1287,7 +1287,7 @@ mod tests {
             .expect("read process")
             .expect("persisted process");
 
-        assert_eq!(record.originator_scope_id(), session_scope.id().as_str());
+        assert_eq!(record.originator_id(), session_scope.session_id);
         assert_eq!(
             record.provenance.originator,
             lash_core::ProcessOriginator::session(session_scope.clone())

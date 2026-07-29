@@ -258,13 +258,15 @@ CREATE INDEX IF NOT EXISTS idx_attachment_manifest_owner
 ///
 /// Bumped to 22 to replace per-message evidence with monotone consumed
 /// high-water marks. Pre-22 durable-core catalogs are rejected and recreated.
+///
+/// Bumped to 23 for the session-create and process-identity cutover.
 pub(crate) const SCHEMA_VERSION: i32 = 23;
 
 pub(crate) const PROCESS_SCHEMA: &str = "
 CREATE TABLE IF NOT EXISTS processes (
     process_id            TEXT PRIMARY KEY,
     registration_hash     TEXT NOT NULL,
-    originator_scope_id   TEXT NOT NULL,
+    originator_id         TEXT NOT NULL,
     wake_session_id       TEXT,
     identity_kind         TEXT NOT NULL,
     identity_label        TEXT,
@@ -282,7 +284,7 @@ CREATE INDEX IF NOT EXISTS idx_processes_status
 CREATE INDEX IF NOT EXISTS idx_processes_change_seq
     ON processes(change_seq);
 CREATE INDEX IF NOT EXISTS idx_processes_originator
-    ON processes(originator_scope_id);
+    ON processes(originator_id);
 CREATE INDEX IF NOT EXISTS idx_processes_identity
     ON processes(identity_kind, identity_label);
 CREATE INDEX IF NOT EXISTS idx_processes_waiting
@@ -333,7 +335,7 @@ CREATE TABLE IF NOT EXISTS process_wake_deliveries (
 
 CREATE INDEX IF NOT EXISTS idx_wake_deliveries_pending
     ON process_wake_deliveries(next_attempt_at_ms, target_session_id, process_id, sequence)
-    WHERE state = 'pending';
+    WHERE state IN ('pending', 'enqueuing');
 CREATE INDEX IF NOT EXISTS idx_wake_deliveries_group_sequence
     ON process_wake_deliveries(target_session_id, process_id, sequence)
     WHERE state <> 'enqueued';
@@ -403,7 +405,8 @@ CREATE TABLE IF NOT EXISTS process_segment_handovers (
 // Bumped to 17 for FIG-661: observer edges replace the former visibility table, wake targets
 // are indexed subscription state, filter columns are extracted, and pruning
 // leaves payload-free tombstones.
-pub(crate) const PROCESS_SCHEMA_VERSION: i32 = 17;
+/// Bumped to 18 for wake-delivery claims and raw session originator ids.
+pub(crate) const PROCESS_SCHEMA_VERSION: i32 = 18;
 
 pub(crate) const TRIGGER_SCHEMA: &str = "
 CREATE TABLE IF NOT EXISTS trigger_subscriptions (

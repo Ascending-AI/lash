@@ -66,15 +66,81 @@ async fn process_registry_conformance(registry: Arc<dyn ProcessRegistry>) {
     live_reference_summary_tracks_non_terminal_reference_counts(Arc::clone(&registry)).await;
     registration_and_observers_are_atomic(Arc::clone(&registry)).await;
     observer_events_are_auditable_and_transfer_is_atomic(Arc::clone(&registry)).await;
+    generic_append_rejects_reserved_edge_audit_events(Arc::clone(&registry)).await;
     wake_subscription_is_indexed_and_retargetable(Arc::clone(&registry)).await;
     lifecycle_status_and_outcome_fold(Arc::clone(&registry)).await;
     list_filters_match_extracted_and_json_fields(Arc::clone(&registry)).await;
+    waiting_processes_remain_in_the_recovery_worklist(Arc::clone(&registry)).await;
     tokio::time::sleep(std::time::Duration::from_millis(5)).await;
     list_processes_filters_by_enriched_fields(Arc::clone(&registry)).await;
     process_change_feed_never_misses_concurrent_terminal_writers(Arc::clone(&registry)).await;
     process_lease_fencing_contract(Arc::clone(&registry)).await;
     session_delete_preserves_process_bytes(Arc::clone(&registry)).await;
     tombstones_make_pruned_processes_distinguishable(registry).await;
+}
+
+async fn generic_append_rejects_reserved_edge_audit_events(registry: Arc<dyn ProcessRegistry>) {
+    let process_id = "reserved-edge-audit";
+    registry
+        .register_process(registration(process_id))
+        .await
+        .expect("register reserved-audit process");
+    let by = crate::ProcessObserverBy::host("generic-append");
+    let requests = [
+        ProcessEventAppendRequest::observer_added(process_id, "observer", &by),
+        ProcessEventAppendRequest::observer_removed(process_id, "observer", &by),
+        ProcessEventAppendRequest::subscription_retargeted(process_id, Some("target")),
+    ];
+    for request in requests {
+        let event_type = request.event_type.clone();
+        assert!(
+            matches!(
+                registry.append_event(process_id, request).await,
+                Err(crate::PluginError::ReservedProcessEvent {
+                    event_type: rejected
+                }) if rejected == event_type
+            ),
+            "generic append must reject reserved edge audit event `{event_type}`"
+        );
+    }
+    assert!(
+        !registry
+            .is_observer("observer", process_id)
+            .await
+            .expect("observer query remains available")
+    );
+}
+
+async fn waiting_processes_remain_in_the_recovery_worklist(registry: Arc<dyn ProcessRegistry>) {
+    let process_id = "waiting-recovery-worklist";
+    let record = registry
+        .register_process(registration(process_id))
+        .await
+        .expect("register waiting process");
+    registry
+        .set_process_wait(
+            process_id,
+            WaitState {
+                since_ms: record.created_at_ms,
+                kind: WaitKind::Signal {
+                    name: "resume".to_string(),
+                    event_type: "signal.resume".to_string(),
+                    key: format!("{process_id}:signal.resume:1"),
+                    ordinal: 1,
+                },
+            },
+        )
+        .await
+        .expect("park process");
+
+    let non_terminal = registry
+        .list_non_terminal()
+        .await
+        .expect("list recovery work");
+    assert!(
+        non_terminal.iter().any(|record| record.id == process_id),
+        "a waiting process must remain claimable by crash recovery"
+    );
 }
 
 fn process_lease_owner(owner_id: &str) -> crate::LeaseOwnerIdentity {
@@ -552,7 +618,7 @@ async fn list_filters_match_extracted_and_json_fields(registry: Arc<dyn ProcessR
             definition: Some(serde_json::json!({"definition": "target"})),
             status: ProcessStatusFilter::Waiting,
             waiting: Some(true),
-            originator_scope_id: Some(record.originator_scope_id()),
+            originator_id: Some(record.originator_id()),
             identity_kind: Some("indexed-filter-kind".to_string()),
             identity_label: Some("filter-label".to_string()),
             caused_by_occurrence_id: Some("indexed-occurrence-target".to_string()),
@@ -643,18 +709,28 @@ async fn tombstones_make_pruned_processes_distinguishable(registry: Arc<dyn Proc
         )
         .await
         .expect("create terminal process");
+    let (_, projection_cursor) = registry
+        .processes_changed_since(crate::ProcessChangeCursor::initial(), 100)
+        .await
+        .expect("project terminal row before pruning");
+    tokio::time::sleep(std::time::Duration::from_millis(2)).await;
+    let prune_cutoff = terminal.updated_at_ms.saturating_add(1);
     registry
         .prune_terminal_processes(
-            terminal.updated_at_ms.saturating_add(1),
+            prune_cutoff,
             None,
-            crate::ProjectionWatermark::NoProjector,
+            crate::ProjectionWatermark::UpTo(projection_cursor),
         )
         .await
         .expect("prune terminal process");
-    assert!(matches!(
-        registry.get_process(process_id).await,
-        Err(crate::PluginError::ProcessNoLongerRetained { .. })
-    ));
+    let pruned_at_ms = match registry.get_process(process_id).await {
+        Err(crate::PluginError::ProcessNoLongerRetained { pruned_at_ms, .. }) => pruned_at_ms,
+        other => panic!("expected typed tombstone read, got {other:?}"),
+    };
+    assert!(
+        pruned_at_ms >= prune_cutoff,
+        "tombstones must be stamped with prune time, not the retention cutoff"
+    );
     assert!(matches!(
         registry.events_after(process_id, 0).await,
         Err(crate::PluginError::ProcessNoLongerRetained { .. })
@@ -699,14 +775,43 @@ async fn tombstones_make_pruned_processes_distinguishable(registry: Arc<dyn Proc
             .await,
         Err(crate::PluginError::ProcessNoLongerRetained { .. })
     ));
-    let (changes, _) = registry
-        .processes_changed_since(crate::ProcessChangeCursor::initial(), 100)
+    assert_eq!(
+        registry
+            .compact_process_tombstones(
+                u64::MAX,
+                crate::ProjectionWatermark::UpTo(projection_cursor),
+            )
+            .await
+            .expect("compact behind projector"),
+        0,
+        "compaction must retain a deletion beyond the supplied projection watermark"
+    );
+    let (changes, deletion_cursor) = registry
+        .processes_changed_since(projection_cursor, 100)
         .await
         .expect("read change feed");
     assert!(changes.into_iter().any(|change| matches!(
         change,
         crate::ProcessChange::Deleted { tombstone } if tombstone.process_id == process_id
     )));
+    assert!(
+        registry
+            .compact_process_tombstones(
+                u64::MAX,
+                crate::ProjectionWatermark::UpTo(deletion_cursor),
+            )
+            .await
+            .expect("compact after projector catches up")
+            >= 1,
+        "compaction must remove the deletion after the projector catches up"
+    );
+    assert!(
+        registry
+            .get_process(process_id)
+            .await
+            .expect("compacted tombstone becomes ordinary absence")
+            .is_none()
+    );
 }
 
 async fn reopen_conformance(handles: ReopenableProcessRegistry) {

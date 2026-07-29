@@ -464,13 +464,11 @@ impl ProcessCapability {
     ) -> Result<crate::ProcessEvent, crate::PluginError> {
         let runner = self.command_runner(current, &scope)?;
         let session_scope = self.process_scope_for_op(session_id, scope.agent_frame_id());
-        let visible = runner
+        if !runner
             .registry()
-            .list_live_observed_by(&session_scope.session_id)
+            .is_observer(&session_scope.session_id, process_id)
             .await?
-            .into_iter()
-            .any(|record| record.id == process_id);
-        if !visible {
+        {
             return Err(crate::PluginError::Session(format!(
                 "process handle `{process_id}` is not live or visible in this session"
             )));
@@ -498,14 +496,18 @@ impl ProcessCapability {
         let runner = self.command_runner(current, &scope)?;
         let session_scope = self.process_scope_for_op(session_id, scope.agent_frame_id());
         for process_id in handle_ids {
-            if !runner
+            match runner
                 .registry()
                 .is_observer(&session_scope.session_id, process_id)
-                .await?
+                .await
             {
-                return Err(crate::PluginError::Session(format!(
-                    "process handle `{process_id}` is not live or visible in this session"
-                )));
+                Ok(true) | Err(crate::PluginError::ProcessNoLongerRetained { .. }) => {}
+                Ok(false) => {
+                    return Err(crate::PluginError::Session(format!(
+                        "process handle `{process_id}` is not live or visible in this session"
+                    )));
+                }
+                Err(error) => return Err(error),
             }
         }
         Ok(())

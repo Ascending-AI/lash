@@ -252,7 +252,10 @@ async fn sqlite_wake_delivery_crash_matrix() {
         .await
         .expect("open process registry")
         .with_wake_delivery_config(
-            lash_core::WakeDeliveryConfig::new(250).expect("valid short test retention"),
+            lash_core::WakeDeliveryConfig::new(10_000)
+                .expect("valid test retention")
+                .with_enqueuing_stale_after_ms(25)
+                .expect("valid short stale-claim age"),
         ),
     ) as Arc<dyn ProcessRegistry>;
     let factory =
@@ -278,7 +281,7 @@ async fn sqlite_process_registry_rejects_pre_unit_external_owner_schema_before_s
     };
     let message = error.to_string();
     assert!(message.contains("Unsupported lash process registry schema"));
-    assert!(message.contains("supports schema version 17"));
+    assert!(message.contains("supports schema version 18"));
     assert!(message.contains("delete the process registry database and start fresh"));
 }
 

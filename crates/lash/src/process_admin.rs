@@ -149,7 +149,10 @@ impl Processes {
     }
 
     pub async fn get(&self, process_id: &str) -> Result<Option<lash_core::ObservedProcess>> {
-        Ok(self.make_observer()?.process(process_id).await)
+        self.make_observer()?
+            .process(process_id)
+            .await
+            .map_err(Into::into)
     }
 
     pub async fn events(

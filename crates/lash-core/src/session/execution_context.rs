@@ -880,8 +880,8 @@ fn resolve_trigger_owner_scope(
             "bare host authority cannot own user trigger subscriptions; use an explicit host binding"
                 .to_string(),
         )),
-        Some(crate::ProcessOriginator::Session { scope }) => {
-            Ok(crate::TriggerOwnerScope::session(scope.session_id.clone()))
+        Some(crate::ProcessOriginator::Session { session_id }) => {
+            Ok(crate::TriggerOwnerScope::session(session_id.clone()))
         }
         None => Ok(crate::TriggerOwnerScope::session(root_session_id)),
     }

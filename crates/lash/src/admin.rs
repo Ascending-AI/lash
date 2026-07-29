@@ -374,6 +374,7 @@ impl SessionAdmin {
         self.process_observer()?
             .process(process_id)
             .await
+            .map_err(EmbedError::from)?
             .ok_or_else(|| {
                 EmbedError::Plugin(lash_core::PluginError::Session(format!(
                     "process `{process_id}` vanished after recording its abandon request"

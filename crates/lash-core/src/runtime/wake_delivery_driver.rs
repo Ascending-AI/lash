@@ -128,7 +128,7 @@ impl WakeDeliveryDriver {
         limit: usize,
     ) -> Result<WakeDeliveryDriveReport, PluginError> {
         let mut report = WakeDeliveryDriveReport::default();
-        for delivery in registry.pending_wake_deliveries(limit).await? {
+        for delivery in registry.claim_pending_wake_deliveries(limit).await? {
             report.inspected += 1;
             if clock.timestamp_ms() >= delivery.expires_at_ms {
                 match registry

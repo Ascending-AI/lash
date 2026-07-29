@@ -649,15 +649,21 @@ impl ProcessRegistry for WatchedProcessRegistry {
         self.inner.processes_changed_since(cursor, limit).await
     }
 
-    async fn compact_process_tombstones(&self, cutoff_epoch_ms: u64) -> Result<usize, PluginError> {
-        self.inner.compact_process_tombstones(cutoff_epoch_ms).await
+    async fn compact_process_tombstones(
+        &self,
+        cutoff_epoch_ms: u64,
+        watermark: ProjectionWatermark,
+    ) -> Result<usize, PluginError> {
+        self.inner
+            .compact_process_tombstones(cutoff_epoch_ms, watermark)
+            .await
     }
 
-    async fn pending_wake_deliveries(
+    async fn claim_pending_wake_deliveries(
         &self,
         limit: usize,
     ) -> Result<Vec<super::WakeDelivery>, PluginError> {
-        self.inner.pending_wake_deliveries(limit).await
+        self.inner.claim_pending_wake_deliveries(limit).await
     }
 
     async fn list_wake_deliveries(

@@ -633,6 +633,7 @@ impl ProcessRegistry for TestLocalProcessRegistry {
         process_id: &str,
         request: ProcessEventAppendRequest,
     ) -> Result<ProcessEventAppendResult, PluginError> {
+        super::validate_generic_process_event_append(&request)?;
         let _transaction = self.transaction.lock().await;
         let mut managed = self.managed.lock().await;
         let Some(record) = managed.get_mut(process_id) else {
@@ -1058,14 +1059,26 @@ impl ProcessRegistry for TestLocalProcessRegistry {
         ))
     }
 
-    async fn compact_process_tombstones(&self, cutoff_epoch_ms: u64) -> Result<usize, PluginError> {
+    async fn compact_process_tombstones(
+        &self,
+        cutoff_epoch_ms: u64,
+        watermark: ProjectionWatermark,
+    ) -> Result<usize, PluginError> {
+        let max_change_seq = match watermark {
+            ProjectionWatermark::UpTo(cursor) => Some(cursor.store_sequence()),
+            ProjectionWatermark::NoProjector => None,
+        };
         let mut tombstones = self.tombstones.lock().await;
         let before = tombstones.len();
-        tombstones.retain(|_, tombstone| tombstone.pruned_at_ms >= cutoff_epoch_ms);
+        tombstones.retain(|_, tombstone| {
+            tombstone.pruned_at_ms >= cutoff_epoch_ms
+                || max_change_seq
+                    .is_some_and(|max_change_seq| tombstone.pruned_change_seq > max_change_seq)
+        });
         Ok(before - tombstones.len())
     }
 
-    async fn pending_wake_deliveries(
+    async fn claim_pending_wake_deliveries(
         &self,
         limit: usize,
     ) -> Result<Vec<super::WakeDelivery>, PluginError> {
@@ -1075,6 +1088,13 @@ impl ProcessRegistry for TestLocalProcessRegistry {
         let _transaction = self.transaction.lock().await;
         let now = self.clock.timestamp_ms();
         let mut deliveries = self.wake_deliveries.lock().await;
+        for delivery in deliveries.values_mut() {
+            if delivery.state == super::WakeDeliveryState::Enqueuing
+                && delivery.next_attempt_at_ms <= now
+            {
+                delivery.state = super::WakeDeliveryState::Pending;
+            }
+        }
         let mut ids = deliveries
             .values()
             .filter(|delivery| delivery.state == super::WakeDeliveryState::Pending)
@@ -1103,8 +1123,11 @@ impl ProcessRegistry for TestLocalProcessRegistry {
             .into_iter()
             .filter_map(|(_, _, _, _, id)| {
                 let delivery = deliveries.get_mut(&id)?;
+                delivery.state = super::WakeDeliveryState::Enqueuing;
                 delivery.attempts = delivery.attempts.saturating_add(1);
                 delivery.first_attempt_ms.get_or_insert(now);
+                delivery.next_attempt_at_ms =
+                    now.saturating_add(self.wake_delivery_config.enqueuing_stale_after_ms);
                 Some(delivery.clone())
             })
             .collect())
@@ -1133,6 +1156,7 @@ impl ProcessRegistry for TestLocalProcessRegistry {
         for delivery in self.wake_deliveries.lock().await.values() {
             match delivery.state {
                 super::WakeDeliveryState::Pending => report.pending += 1,
+                super::WakeDeliveryState::Enqueuing => report.enqueuing += 1,
                 super::WakeDeliveryState::Enqueued => report.enqueued += 1,
                 super::WakeDeliveryState::Discarded => {
                     report.discarded += 1;
@@ -1163,7 +1187,7 @@ impl ProcessRegistry for TestLocalProcessRegistry {
         let delivery = deliveries.get_mut(delivery_id).ok_or_else(|| {
             PluginError::Session(format!("unknown wake delivery `{delivery_id}`"))
         })?;
-        if delivery.state != super::WakeDeliveryState::Pending {
+        if delivery.state != super::WakeDeliveryState::Enqueuing {
             return Err(PluginError::WakeDeliveryNotPending {
                 delivery_id: delivery_id.to_string(),
                 state: delivery.state,
@@ -1184,7 +1208,7 @@ impl ProcessRegistry for TestLocalProcessRegistry {
         let delivery = deliveries.get_mut(delivery_id).ok_or_else(|| {
             PluginError::Session(format!("unknown wake delivery `{delivery_id}`"))
         })?;
-        if delivery.state != super::WakeDeliveryState::Pending {
+        if delivery.state != super::WakeDeliveryState::Enqueuing {
             return Err(PluginError::WakeDeliveryNotPending {
                 delivery_id: delivery_id.to_string(),
                 state: delivery.state,
@@ -1228,13 +1252,14 @@ impl ProcessRegistry for TestLocalProcessRegistry {
         let delivery = deliveries.get_mut(delivery_id).ok_or_else(|| {
             PluginError::Session(format!("unknown wake delivery `{delivery_id}`"))
         })?;
-        if delivery.state != super::WakeDeliveryState::Pending {
+        if delivery.state != super::WakeDeliveryState::Enqueuing {
             return Err(PluginError::WakeDeliveryNotPending {
                 delivery_id: delivery_id.to_string(),
                 state: delivery.state,
             });
         }
-        delivery.next_attempt_at_ms = delivery.next_attempt_at_ms.max(next_attempt_at_ms);
+        delivery.state = super::WakeDeliveryState::Pending;
+        delivery.next_attempt_at_ms = next_attempt_at_ms;
         Ok(())
     }
 
@@ -1395,7 +1420,12 @@ impl ProcessRegistry for TestLocalProcessRegistry {
             .lock()
             .await
             .values()
-            .filter(|delivery| delivery.state == super::WakeDeliveryState::Pending)
+            .filter(|delivery| {
+                matches!(
+                    delivery.state,
+                    super::WakeDeliveryState::Pending | super::WakeDeliveryState::Enqueuing
+                )
+            })
             .map(|delivery| delivery.wake.process_id.clone())
             .collect::<HashSet<_>>();
         let mut pruned_events = 0;

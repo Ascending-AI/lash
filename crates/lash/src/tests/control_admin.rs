@@ -729,7 +729,6 @@ async fn session_control_manages_child_session_lifecycle() -> Result<()> {
             context_overlay: lash_core::SessionContextOverlay::default(),
             plugin_options: lash_core::PluginOptions::default(),
             usage_source: None,
-            observed_processes: Vec::new(),
         })
         .await?;
 

@@ -178,15 +178,12 @@ impl ProcessWorkObserver {
         })
     }
 
-    pub async fn process(&self, process_id: &str) -> Option<ObservedProcess> {
-        let record = self.registry.get_process(process_id).await.ok().flatten()?;
-        let lease = self
-            .registry
-            .get_process_lease(process_id)
-            .await
-            .ok()
-            .flatten();
-        Some(ObservedProcess::from_record(record, lease))
+    pub async fn process(&self, process_id: &str) -> Result<Option<ObservedProcess>, PluginError> {
+        let Some(record) = self.registry.get_process(process_id).await? else {
+            return Ok(None);
+        };
+        let lease = self.registry.get_process_lease(process_id).await?;
+        Ok(Some(ObservedProcess::from_record(record, lease)))
     }
 
     pub async fn list(
@@ -336,19 +333,11 @@ fn child_session_id(input: &ProcessInput) -> Option<String> {
     }
 }
 
-/// Whether `originator` names the session (or session+frame) identified by
-/// `scope`. Frame is matched only when `scope` names one, so a session-level
-/// provenance filter captures every frame the session originated.
+/// Whether `originator` names the session identified by `scope`.
 fn originator_matches(originator: &ProcessOriginator, scope: &SessionScope) -> bool {
     match originator {
         ProcessOriginator::Host { .. } => false,
-        ProcessOriginator::Session {
-            scope: origin_scope,
-        } => {
-            origin_scope.session_id == scope.session_id
-                && (scope.agent_frame_id.is_none()
-                    || origin_scope.agent_frame_id == scope.agent_frame_id)
-        }
+        ProcessOriginator::Session { session_id } => session_id == &scope.session_id,
     }
 }
 
@@ -556,10 +545,15 @@ mod tests {
             .expect("cancel process");
 
         let observer = observer(Arc::clone(&registry));
-        let failed = observer.process("failed").await.expect("failed process");
+        let failed = observer
+            .process("failed")
+            .await
+            .expect("read failed process")
+            .expect("failed process");
         let cancelled = observer
             .process("cancelled")
             .await
+            .expect("read cancelled process")
             .expect("cancelled process");
 
         assert_eq!(failed.status_label, "failed");
@@ -599,6 +593,7 @@ mod tests {
         let observed = observer
             .process("waiting-process")
             .await
+            .expect("read waiting process")
             .expect("waiting process");
         let snapshot = observer
             .snapshot_for_session("wait")
@@ -721,6 +716,12 @@ mod tests {
         let registry =
             Arc::new(super::super::TestLocalProcessRegistry::default()) as Arc<dyn ProcessRegistry>;
 
-        assert!(observer(registry).process("missing").await.is_none());
+        assert!(
+            observer(registry)
+                .process("missing")
+                .await
+                .expect("read missing process")
+                .is_none()
+        );
     }
 }

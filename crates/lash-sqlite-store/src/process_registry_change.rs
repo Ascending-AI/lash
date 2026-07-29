@@ -58,6 +58,7 @@ pub(crate) fn processes_changed_since_conn(
 pub(crate) fn prune_terminal_processes_conn(
     conn: &Connection,
     cutoff: i64,
+    pruned_at_ms: i64,
     filter: Option<ProcessListFilter>,
     max_change_seq: Option<u64>,
 ) -> Result<ProcessPruneReport, lash_core::PluginError> {
@@ -121,7 +122,12 @@ pub(crate) fn prune_terminal_processes_conn(
             "INSERT INTO process_tombstones (
                 process_id, terminal_label, pruned_at_ms, pruned_change_seq
              ) VALUES (?1, ?2, ?3, ?4)",
-            params![process_id, terminal_label, cutoff, pruned_change_seq as i64],
+            params![
+                process_id,
+                terminal_label,
+                pruned_at_ms,
+                pruned_change_seq as i64
+            ],
         )
         .map_err(process_sqlite_error)?;
         pruned_processes += conn
@@ -160,7 +166,7 @@ pub(crate) fn prunable_terminal_process_ids_conn(
                AND NOT EXISTS (
                    SELECT 1 FROM process_wake_deliveries AS delivery
                    WHERE delivery.process_id = processes.process_id
-                     AND delivery.state = 'pending'
+                     AND delivery.state IN ('pending', 'enqueuing')
                )
              ORDER BY process_id ASC",
         )

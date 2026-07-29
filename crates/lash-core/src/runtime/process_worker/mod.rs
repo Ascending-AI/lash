@@ -516,10 +516,10 @@ impl DurableProcessWorker {
                 .attachment_store
                 .bind_process_scoped(registration.id.clone())
         });
-        let originator_scope = if let crate::ProcessOriginator::Session { scope } =
+        let originator_scope = if let crate::ProcessOriginator::Session { session_id } =
             &registration.provenance.originator
         {
-            Some(scope)
+            Some(crate::SessionScope::new(session_id))
         } else {
             None
         };
@@ -527,7 +527,7 @@ impl DurableProcessWorker {
             .wake_session_id
             .as_ref()
             .map(crate::SessionScope::new);
-        let probe_scope = wake_scope.as_ref().or(originator_scope);
+        let probe_scope = wake_scope.as_ref().or(originator_scope.as_ref());
         if let Some(probe) =
             probe_scope.and_then(|scope| self.config.turn_phase_probe_slot.get_for_scope(scope))
         {

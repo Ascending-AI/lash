@@ -3,7 +3,7 @@ use std::time::SystemTime;
 use crate::plugin::PluginError;
 
 use super::events::{ProcessWake, ProcessWakeDelivery};
-use super::model::{ProcessId, SessionScope};
+use super::model::{ProcessId, SessionId};
 use super::time::epoch_ms_from_system_time;
 
 /// Extracts the model-facing wake input from a process wake event payload.
@@ -40,7 +40,7 @@ pub fn process_wake_turn_cause(wake: &ProcessWakeDelivery) -> crate::TurnCause {
 
 #[derive(Clone, Debug)]
 pub struct ProcessWakeDeliveryRequest {
-    pub target_scope: SessionScope,
+    pub target_session_id: SessionId,
     pub process_id: ProcessId,
     pub sequence: u64,
     pub event_type: String,
@@ -54,7 +54,7 @@ pub fn process_wake_delivery(
     request: ProcessWakeDeliveryRequest,
 ) -> Result<ProcessWakeDelivery, PluginError> {
     let ProcessWakeDeliveryRequest {
-        target_scope,
+        target_session_id,
         process_id,
         sequence,
         event_type,
@@ -63,9 +63,8 @@ pub fn process_wake_delivery(
         wake,
         occurred_at,
     } = request;
-    let target_scope_id = target_scope.id();
     let wake_id = crate::stable_hash::stable_json_sha256_hex(&(
-        target_scope_id.as_str(),
+        target_session_id.as_str(),
         process_id.as_str(),
         sequence,
     ))
@@ -76,8 +75,7 @@ pub fn process_wake_delivery(
     })?;
     Ok(ProcessWakeDelivery {
         wake_id: format!("wake:{wake_id}"),
-        target_session_id: target_scope.session_id,
-        target_scope_id,
+        target_session_id,
         process_id,
         sequence,
         event_type,

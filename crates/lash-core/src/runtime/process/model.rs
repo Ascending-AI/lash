@@ -547,7 +547,7 @@ pub enum ProcessOriginator {
         scope: Option<String>,
     },
     Session {
-        scope: SessionScope,
+        session_id: SessionId,
     },
 }
 
@@ -563,16 +563,18 @@ impl ProcessOriginator {
     }
 
     pub fn session(scope: SessionScope) -> Self {
-        Self::Session { scope }
+        Self::Session {
+            session_id: scope.session_id,
+        }
     }
 
-    pub fn scope_id(&self) -> String {
+    pub fn id(&self) -> String {
         match self {
             Self::Host { scope } => scope
                 .as_ref()
                 .map(|scope| format!("host:{scope}"))
                 .unwrap_or_else(|| "host".to_string()),
-            Self::Session { scope } => scope.id().to_string(),
+            Self::Session { session_id } => session_id.clone(),
         }
     }
 }
@@ -867,8 +869,8 @@ impl ProcessRecord {
         self.status.is_terminal()
     }
 
-    pub fn originator_scope_id(&self) -> String {
-        self.provenance.originator.scope_id()
+    pub fn originator_id(&self) -> String {
+        self.provenance.originator.id()
     }
 }
 
@@ -883,8 +885,21 @@ pub struct ProcessIdentity {
     pub kind: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub label: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "deserialize_present_json_value"
+    )]
     pub definition: Option<serde_json::Value>,
+}
+
+fn deserialize_present_json_value<'de, D>(
+    deserializer: D,
+) -> Result<Option<serde_json::Value>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    serde_json::Value::deserialize(deserializer).map(Some)
 }
 
 impl ProcessIdentity {
@@ -1148,7 +1163,7 @@ pub struct ProcessListFilter {
     pub definition: Option<serde_json::Value>,
     pub status: ProcessStatusFilter,
     pub waiting: Option<bool>,
-    pub originator_scope_id: Option<String>,
+    pub originator_id: Option<String>,
     pub identity_kind: Option<String>,
     pub identity_label: Option<String>,
     pub caused_by_occurrence_id: Option<String>,
@@ -1171,7 +1186,7 @@ impl ProcessListFilter {
                 "definition"
                 | "status"
                 | "waiting"
-                | "originator_scope_id"
+                | "originator_id"
                 | "identity_kind"
                 | "identity_label"
                 | "caused_by_occurrence_id"
@@ -1192,7 +1207,7 @@ impl ProcessListFilter {
                     .ok_or_else(|| "processes.list `waiting` filter must be a boolean".to_string())
             })
             .transpose()?;
-        let originator_scope_id = optional_string_filter(args, "originator_scope_id")?;
+        let originator_id = optional_string_filter(args, "originator_id")?;
         let identity_kind = optional_string_filter(args, "identity_kind")?;
         let identity_label = optional_string_filter(args, "identity_label")?;
         let caused_by_occurrence_id = optional_string_filter(args, "caused_by_occurrence_id")?;
@@ -1203,7 +1218,7 @@ impl ProcessListFilter {
             definition,
             status,
             waiting,
-            originator_scope_id,
+            originator_id,
             identity_kind,
             identity_label,
             caused_by_occurrence_id,
@@ -1227,9 +1242,9 @@ impl ProcessListFilter {
                 .waiting
                 .is_none_or(|waiting| record.wait.is_some() == waiting)
             && self
-                .originator_scope_id
+                .originator_id
                 .as_ref()
-                .is_none_or(|scope_id| record.originator_scope_id() == scope_id.as_str())
+                .is_none_or(|originator_id| record.originator_id() == originator_id.as_str())
             && self
                 .identity_kind
                 .as_ref()

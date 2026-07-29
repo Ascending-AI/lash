@@ -13,8 +13,8 @@ use lash_core::{
     RecoveryDisposition, RuntimeCommit, RuntimeEffectCommand, RuntimeEffectController,
     RuntimeEffectEnvelope, RuntimeEffectKind, RuntimeEffectLocalExecutor, RuntimeEffectOutcome,
     RuntimeInvocation, RuntimePersistence, RuntimeSessionState, SessionExecutionLeaseClaimOutcome,
-    SessionRelation, SessionScope, SessionStoreCreateRequest, SessionStoreFactory,
-    ToolAttemptLaunch, ToolCallOutput, ToolCallRecord, ToolId,
+    SessionRelation, SessionStoreCreateRequest, SessionStoreFactory, ToolAttemptLaunch,
+    ToolCallOutput, ToolCallRecord, ToolId,
 };
 use serde_json::{Value, json};
 
@@ -493,7 +493,7 @@ impl RuntimeBoundaryHarness {
             .unwrap_or(&source_key)
             .to_string();
         let wake = lash_core::process_wake_delivery(lash_core::ProcessWakeDeliveryRequest {
-            target_scope: SessionScope::new(session.clone()),
+            target_session_id: session.clone(),
             process_id: process_id.clone(),
             sequence,
             event_type: "process.wake".to_string(),
@@ -1398,7 +1398,7 @@ fn worker_failover_work(
 ) -> Result<lash_core::ProcessWakeDelivery, RuntimeBoundaryError> {
     let process_id = format!("sim-worker-{session}");
     lash_core::process_wake_delivery(lash_core::ProcessWakeDeliveryRequest {
-        target_scope: SessionScope::new(session.to_string()),
+        target_session_id: session.to_string(),
         process_id: process_id.clone(),
         sequence: 1,
         event_type: "process.wake".to_string(),

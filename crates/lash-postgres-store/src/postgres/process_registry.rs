@@ -3,8 +3,8 @@ use crate::*;
 mod wake_delivery;
 
 use wake_delivery::{
-    decode_wake_delivery_row, load_wake_delivery_tx, update_wake_delivery_state,
-    wake_delivery_report,
+    claim_pending_wake_deliveries, decode_wake_delivery_row, load_wake_delivery_tx,
+    update_wake_delivery_state, wake_delivery_report,
 };
 
 async fn require_process_tx(
@@ -79,7 +79,7 @@ impl ProcessRegistry for PostgresProcessRegistry {
         let change_seq = next_process_change_seq_tx(&mut tx).await?;
         sqlx::query(
             "INSERT INTO lash_processes (
-                process_id, registration_hash, originator_scope_id, wake_session_id,
+                process_id, registration_hash, originator_id, wake_session_id,
                 identity_kind, identity_label, is_waiting,
                 created_at_ms, updated_at_ms, change_seq, status, record_json
              )
@@ -87,7 +87,7 @@ impl ProcessRegistry for PostgresProcessRegistry {
         )
         .bind(&record.id)
         .bind(&record.registration_hash)
-        .bind(record.originator_scope_id().as_str())
+        .bind(record.originator_id().as_str())
         .bind(wake_session_id)
         .bind(&record.identity.kind)
         .bind(&record.identity.label)
@@ -293,6 +293,27 @@ impl ProcessRegistry for PostgresProcessRegistry {
             .collect()
     }
 
+    async fn is_observer(&self, session_id: &str, process_id: &str) -> Result<bool, PluginError> {
+        let (retained, observer): (bool, bool) = sqlx::query_as(
+            "SELECT
+                 EXISTS(SELECT 1 FROM lash_processes WHERE process_id = $2),
+                 EXISTS(
+                     SELECT 1 FROM lash_process_observers
+                     WHERE session_id = $1 AND process_id = $2
+                 )",
+        )
+        .bind(session_id)
+        .bind(process_id)
+        .fetch_one(&self.pool)
+        .await
+        .map_err(plugin_sqlx_error)?;
+        if retained {
+            return Ok(observer);
+        }
+        self.get_process(process_id).await?;
+        Ok(false)
+    }
+
     async fn observers_for_process(&self, process_id: &str) -> Result<Vec<String>, PluginError> {
         if self.get_process(process_id).await?.is_none() {
             return Err(PluginError::Session(format!(
@@ -399,6 +420,7 @@ impl ProcessRegistry for PostgresProcessRegistry {
         process_id: &str,
         request: ProcessEventAppendRequest,
     ) -> Result<ProcessEventAppendResult, PluginError> {
+        lash_core::validate_generic_process_event_append(&request)?;
         let mut tx = self.pool.begin().await.map_err(plugin_sqlx_error)?;
         let mut record = require_process_tx(&mut tx, process_id).await?;
         let occurred_at_ms = self.clock.timestamp_ms();
@@ -907,6 +929,12 @@ impl ProcessRegistry for PostgresProcessRegistry {
         &self,
         filter: &lash_core::ProcessListFilter,
     ) -> Result<Vec<ProcessRecord>, PluginError> {
+        if filter
+            .created_at_start_ms
+            .is_some_and(|value| value > i64::MAX as u64)
+        {
+            return Ok(Vec::new());
+        }
         let definition = filter
             .definition
             .as_ref()
@@ -917,7 +945,7 @@ impl ProcessRegistry for PostgresProcessRegistry {
             "SELECT record_json FROM lash_processes
              WHERE ($1::TEXT IS NULL OR status = $1)
                AND ($2::BOOLEAN IS NULL OR is_waiting = $2)
-               AND ($3::TEXT IS NULL OR originator_scope_id = $3)
+               AND ($3::TEXT IS NULL OR originator_id = $3)
                AND ($4::TEXT IS NULL OR identity_kind = $4)
                AND ($5::TEXT IS NULL OR identity_label = $5)
                AND ($6::JSONB IS NULL OR
@@ -932,14 +960,19 @@ impl ProcessRegistry for PostgresProcessRegistry {
         )
         .bind(filter.status.label())
         .bind(filter.waiting)
-        .bind(filter.originator_scope_id.as_deref())
+        .bind(filter.originator_id.as_deref())
         .bind(filter.identity_kind.as_deref())
         .bind(filter.identity_label.as_deref())
         .bind(definition)
         .bind(filter.caused_by_occurrence_id.as_deref())
         .bind(filter.caused_by_subscription_id.as_deref())
         .bind(filter.created_at_start_ms.map(|value| value as i64))
-        .bind(filter.created_at_end_ms.map(|value| value as i64))
+        .bind(
+            filter
+                .created_at_end_ms
+                .filter(|value| *value <= i64::MAX as u64)
+                .map(|value| value as i64),
+        )
         .fetch_all(&self.pool)
         .await
         .map_err(plugin_sqlx_error)?;
@@ -1003,68 +1036,34 @@ impl ProcessRegistry for PostgresProcessRegistry {
         Ok((records, next_cursor))
     }
 
-    async fn compact_process_tombstones(&self, cutoff_epoch_ms: u64) -> Result<usize, PluginError> {
-        Ok(
-            sqlx::query("DELETE FROM lash_process_tombstones WHERE pruned_at_ms < $1")
-                .bind(cutoff_epoch_ms as i64)
-                .execute(&self.pool)
-                .await
-                .map_err(plugin_sqlx_error)?
-                .rows_affected() as usize,
+    async fn compact_process_tombstones(
+        &self,
+        cutoff_epoch_ms: u64,
+        watermark: lash_core::ProjectionWatermark,
+    ) -> Result<usize, PluginError> {
+        let max_change_seq = match watermark {
+            lash_core::ProjectionWatermark::UpTo(cursor) => Some(cursor.store_sequence() as i64),
+            lash_core::ProjectionWatermark::NoProjector => None,
+        };
+        let cutoff_epoch_ms = i64::try_from(cutoff_epoch_ms).unwrap_or(i64::MAX);
+        Ok(sqlx::query(
+            "DELETE FROM lash_process_tombstones
+                 WHERE pruned_at_ms < $1
+                   AND ($2::BIGINT IS NULL OR pruned_change_seq <= $2)",
         )
+        .bind(cutoff_epoch_ms)
+        .bind(max_change_seq)
+        .execute(&self.pool)
+        .await
+        .map_err(plugin_sqlx_error)?
+        .rows_affected() as usize)
     }
 
-    async fn pending_wake_deliveries(
+    async fn claim_pending_wake_deliveries(
         &self,
         limit: usize,
     ) -> Result<Vec<lash_core::WakeDelivery>, PluginError> {
-        if limit == 0 {
-            return Ok(Vec::new());
-        }
-        let mut tx = self.pool.begin().await.map_err(plugin_sqlx_error)?;
-        let ids = sqlx::query_scalar::<_, String>(
-            "SELECT candidate.delivery_id
-             FROM lash_process_wake_deliveries AS candidate
-             WHERE candidate.state = 'pending'
-               AND candidate.next_attempt_at_ms <= $2
-               AND NOT EXISTS (
-                   SELECT 1
-                   FROM lash_process_wake_deliveries AS earlier
-                   WHERE earlier.state <> 'enqueued'
-                     AND earlier.target_session_id = candidate.target_session_id
-                     AND earlier.process_id = candidate.process_id
-                     AND earlier.sequence < candidate.sequence
-               )
-             ORDER BY candidate.next_attempt_at_ms ASC,
-                      candidate.target_session_id ASC,
-                      candidate.process_id ASC,
-                      candidate.sequence ASC
-             LIMIT $1
-             FOR UPDATE OF candidate SKIP LOCKED",
-        )
-        .bind(limit as i64)
-        .bind(self.clock.timestamp_ms() as i64)
-        .fetch_all(&mut *tx)
-        .await
-        .map_err(plugin_sqlx_error)?;
-        let now = self.clock.timestamp_ms() as i64;
-        let mut deliveries = Vec::with_capacity(ids.len());
-        for id in ids {
-            sqlx::query(
-                "UPDATE lash_process_wake_deliveries
-                 SET attempts = attempts + 1,
-                     first_attempt_ms = COALESCE(first_attempt_ms, $2)
-                 WHERE delivery_id = $1 AND state = 'pending'",
-            )
-            .bind(&id)
-            .bind(now)
-            .execute(&mut *tx)
-            .await
-            .map_err(plugin_sqlx_error)?;
-            deliveries.push(load_wake_delivery_tx(&mut tx, &id).await?);
-        }
-        tx.commit().await.map_err(plugin_sqlx_error)?;
-        Ok(deliveries)
+        claim_pending_wake_deliveries(self, limit).await
     }
 
     async fn list_wake_deliveries(
@@ -1160,8 +1159,8 @@ impl ProcessRegistry for PostgresProcessRegistry {
     ) -> Result<(), PluginError> {
         let changed = sqlx::query(
             "UPDATE lash_process_wake_deliveries
-             SET next_attempt_at_ms = GREATEST(next_attempt_at_ms, $2)
-             WHERE delivery_id = $1 AND state = 'pending'",
+             SET state = 'pending', next_attempt_at_ms = $2
+             WHERE delivery_id = $1 AND state = 'enqueuing'",
         )
         .bind(delivery_id)
         .bind(next_attempt_at_ms as i64)
@@ -1184,7 +1183,7 @@ impl ProcessRegistry for PostgresProcessRegistry {
     async fn list_non_terminal(&self) -> Result<Vec<ProcessRecord>, PluginError> {
         let rows = sqlx::query(
             "SELECT record_json FROM lash_processes
-             WHERE status = 'running'
+             WHERE status IN ('running', 'waiting')
              ORDER BY process_id ASC",
         )
         .fetch_all(&self.pool)
@@ -1390,7 +1389,8 @@ impl ProcessRegistry for PostgresProcessRegistry {
         filter: Option<lash_core::ProcessListFilter>,
         watermark: lash_core::ProjectionWatermark,
     ) -> Result<ProcessPruneReport, PluginError> {
-        let cutoff = cutoff_epoch_ms as i64;
+        let cutoff = i64::try_from(cutoff_epoch_ms).unwrap_or(i64::MAX);
+        let pruned_at_ms = self.clock.timestamp_ms() as i64;
         let max_change_seq = match watermark {
             lash_core::ProjectionWatermark::UpTo(cursor) => Some(cursor.store_sequence() as i64),
             lash_core::ProjectionWatermark::NoProjector => None,
@@ -1404,7 +1404,7 @@ impl ProcessRegistry for PostgresProcessRegistry {
                AND NOT EXISTS (
                    SELECT 1 FROM lash_process_wake_deliveries AS delivery
                    WHERE delivery.process_id = lash_processes.process_id
-                     AND delivery.state = 'pending'
+                     AND delivery.state IN ('pending', 'enqueuing')
                )
              ORDER BY process_id ASC
              FOR UPDATE",
@@ -1471,7 +1471,7 @@ impl ProcessRegistry for PostgresProcessRegistry {
             )
             .bind(&process_id)
             .bind(terminal_label)
-            .bind(cutoff)
+            .bind(pruned_at_ms)
             .bind(pruned_change_seq as i64)
             .execute(&mut *tx)
             .await

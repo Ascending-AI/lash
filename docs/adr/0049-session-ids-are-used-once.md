@@ -82,4 +82,7 @@ orphaned under the prior key.
   domains. The fork relation retains the selected process ids as durable apply
   intent until every idempotent observer event commits. A crash burns no
   visibility choice: opening the single-use fork id replays the pending intent,
-  and that id can never alias a later session lifetime.
+  and that id can never alias a later session lifetime. Replay reasserts the
+  resolved selector wholesale: an observer removed before the intent is
+  cleared can be added again, because clearing the durable host decision is
+  the commit point.

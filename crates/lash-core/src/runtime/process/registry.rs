@@ -31,6 +31,7 @@ pub enum ProjectionWatermark {
 }
 
 pub const DEFAULT_WAKE_DELIVERY_EXPIRY_MS: u64 = 7 * 24 * 60 * 60 * 1_000;
+pub const WAKE_ENQUEUING_STALE_AFTER_MS: u64 = 30_000;
 
 /// Host-owned bound for process-wake redelivery.
 ///
@@ -45,12 +46,14 @@ pub const DEFAULT_WAKE_DELIVERY_EXPIRY_MS: u64 = 7 * 24 * 60 * 60 * 1_000;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct WakeDeliveryConfig {
     pub delivery_expiry_ms: u64,
+    pub enqueuing_stale_after_ms: u64,
 }
 
 impl Default for WakeDeliveryConfig {
     fn default() -> Self {
         Self {
             delivery_expiry_ms: DEFAULT_WAKE_DELIVERY_EXPIRY_MS,
+            enqueuing_stale_after_ms: WAKE_ENQUEUING_STALE_AFTER_MS,
         }
     }
 }
@@ -62,7 +65,23 @@ impl WakeDeliveryConfig {
                 "process wake delivery expiry must be greater than zero".to_string(),
             ));
         }
-        Ok(Self { delivery_expiry_ms })
+        Ok(Self {
+            delivery_expiry_ms,
+            enqueuing_stale_after_ms: WAKE_ENQUEUING_STALE_AFTER_MS,
+        })
+    }
+
+    pub fn with_enqueuing_stale_after_ms(
+        mut self,
+        enqueuing_stale_after_ms: u64,
+    ) -> Result<Self, PluginError> {
+        if enqueuing_stale_after_ms == 0 {
+            return Err(PluginError::Session(
+                "process wake enqueuing stale age must be greater than zero".to_string(),
+            ));
+        }
+        self.enqueuing_stale_after_ms = enqueuing_stale_after_ms;
+        Ok(self)
     }
 }
 
@@ -70,6 +89,7 @@ impl WakeDeliveryConfig {
 #[serde(rename_all = "snake_case")]
 pub enum WakeDeliveryState {
     Pending,
+    Enqueuing,
     Enqueued,
     Discarded,
 }
@@ -78,6 +98,7 @@ impl WakeDeliveryState {
     pub fn as_str(self) -> &'static str {
         match self {
             Self::Pending => "pending",
+            Self::Enqueuing => "enqueuing",
             Self::Enqueued => "enqueued",
             Self::Discarded => "discarded",
         }
@@ -155,6 +176,7 @@ impl WakeDelivery {
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct WakeDeliveryReport {
     pub pending: usize,
+    pub enqueuing: usize,
     pub enqueued: usize,
     pub discarded: usize,
     pub expired: usize,
@@ -301,6 +323,10 @@ pub trait ProcessRegistry: Send + Sync {
         target: Option<&str>,
     ) -> Result<(), PluginError>;
 
+    /// Remove observer edges and wake routing owned by a deleted session.
+    ///
+    /// This bulk session-lifecycle cleanup deliberately does not append
+    /// per-process observer or retarget audit events.
     async fn delete_session_process_state(
         &self,
         session_id: &str,
@@ -467,16 +493,24 @@ pub trait ProcessRegistry: Send + Sync {
         limit: usize,
     ) -> Result<(Vec<ProcessChange>, ProcessChangeCursor), PluginError>;
 
-    /// Delete payload-free tombstones older than `cutoff_epoch_ms`.
-    async fn compact_process_tombstones(&self, cutoff_epoch_ms: u64) -> Result<usize, PluginError>;
+    /// Delete payload-free tombstones older than `cutoff_epoch_ms` without
+    /// outrunning a trusted projection. `NoProjector` permits free compaction;
+    /// `UpTo(cursor)` retains deletion entries beyond that cursor.
+    async fn compact_process_tombstones(
+        &self,
+        cutoff_epoch_ms: u64,
+        watermark: ProjectionWatermark,
+    ) -> Result<usize, PluginError>;
 
     /// Return due group heads and record one delivery attempt for each.
     ///
     /// Implementations must preserve sequence order inside a
     /// `(target_session_id, process_id)` group while selecting fairly across
     /// distinct groups by `next_attempt_at_ms`.
-    async fn pending_wake_deliveries(&self, limit: usize)
-    -> Result<Vec<WakeDelivery>, PluginError>;
+    async fn claim_pending_wake_deliveries(
+        &self,
+        limit: usize,
+    ) -> Result<Vec<WakeDelivery>, PluginError>;
 
     async fn list_wake_deliveries(
         &self,

@@ -737,9 +737,74 @@ mod tests {
             )
             .await
             .expect("observe process");
-        let observed = context
-            .await_process_handle("await-observed-process".to_string(), handle)
+        let retained = host
+            .process_registry
+            .get_process("hidden-process")
+            .await
+            .expect("read observed process")
+            .expect("observed process remains retained");
+
+        let prune = host
+            .process_registry
+            .prune_terminal_processes(
+                retained.updated_at_ms.saturating_add(1),
+                None,
+                crate::ProjectionWatermark::NoProjector,
+            )
+            .await
+            .expect("prune observed process");
+        assert_eq!(prune.pruned_processes, 1);
+        assert!(matches!(
+            host.process_registry.get_process("hidden-process").await,
+            Err(crate::PluginError::ProcessNoLongerRetained { .. })
+        ));
+        let pruned_await = context
+            .await_process_handle("await-pruned-process".to_string(), handle.clone())
             .await;
-        assert!(observed.output.is_success());
+        assert!(
+            pruned_await.output.is_success(),
+            "a pruned await must be information in turn history: {:?}",
+            pruned_await.output.value_for_projection()
+        );
+        let rendered = pruned_await.output.value_for_projection().to_string();
+        assert!(
+            rendered.contains("process_no_longer_retained"),
+            "pruned await must render the typed information code: {rendered}"
+        );
+        let history_record = pruned_await
+            .record
+            .expect("record pruned await in turn history");
+        assert!(
+            history_record.output.is_success(),
+            "turn history must retain pruned await as information, not tool failure"
+        );
+
+        let pruned_cancel = context
+            .cancel_process_handle("cancel-pruned-process".to_string(), handle.clone())
+            .await;
+        assert!(!pruned_cancel.output.is_success());
+        assert!(
+            pruned_cancel
+                .output
+                .value_for_projection()
+                .to_string()
+                .contains("outcome is no longer retained")
+        );
+        let pruned_signal = context
+            .signal_process_handle(
+                "signal-pruned-process".to_string(),
+                handle,
+                "ready".to_string(),
+                serde_json::Value::Null,
+            )
+            .await;
+        assert!(!pruned_signal.output.is_success());
+        assert!(
+            pruned_signal
+                .output
+                .value_for_projection()
+                .to_string()
+                .contains("outcome is no longer retained")
+        );
     }
 }

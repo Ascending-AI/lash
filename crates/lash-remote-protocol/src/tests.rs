@@ -540,6 +540,7 @@ fn remote_session_observation_dtos_json_round_trip_typed_kinds() {
 
 #[test]
 fn remote_process_dtos_json_round_trip() {
+    assert_eq!(REMOTE_PROTOCOL_VERSION, 23, "process DTO wire-shape pin");
     let start = RemoteProcessStartRequest {
         protocol_version: REMOTE_PROTOCOL_VERSION,
         id: "process:1".to_string(),
@@ -569,7 +570,7 @@ fn remote_process_dtos_json_round_trip() {
             },
         }),
         originator: RemoteProcessOriginator::Session {
-            scope: RemoteSessionScope::new("session"),
+            session_id: "session".to_string(),
         },
         identity: Some(RemoteProcessIdentity {
             kind: "import".to_string(),
@@ -809,7 +810,7 @@ fn remote_trigger_subscription_dtos_json_round_trip() {
         revision: 1,
         definition_hash: "definition-hash-a".to_string(),
         registrant: RemoteProcessOriginator::Session {
-            scope: RemoteSessionScope::new("session"),
+            session_id: "session".to_string(),
         },
         env_ref: draft.env_ref.clone(),
         wake_target: draft.wake_target.clone(),
@@ -960,7 +961,6 @@ fn nested_protocol_versions_must_match_envelope() {
 
 #[test]
 fn remote_process_env_ref_is_validated_but_serializes_as_string() {
-    assert_eq!(REMOTE_PROTOCOL_VERSION, 22);
     let env_ref: RemoteProcessExecutionEnvRef =
         canonical_env_ref().parse().expect("canonical env ref");
     assert_eq!(env_ref.as_str(), canonical_env_ref());
@@ -1280,6 +1280,62 @@ fn remote_process_record() -> RemoteProcessRecord {
         status: RemoteProcessStatus::Running,
         outcome: None,
     }
+}
+
+#[test]
+fn remote_terminal_semantics_reject_non_terminal_status() {
+    let terminal = RemoteProcessTerminalSpec {
+        status: RemoteProcessStatus::Running,
+        await_output: Some(RemoteProcessValueSelector::Payload),
+    };
+    assert!(
+        terminal
+            .validate("RemoteProcessTerminalSpec")
+            .expect_err("running terminal semantics must be rejected")
+            .to_string()
+            .contains("require a terminal status")
+    );
+}
+
+#[test]
+fn remote_process_record_rejects_contradictory_status_and_outcome() {
+    let mut terminal_without_outcome = remote_process_record();
+    terminal_without_outcome.status = RemoteProcessStatus::Completed;
+    assert!(
+        terminal_without_outcome
+            .validate("RemoteProcessRecord")
+            .expect_err("terminal status without outcome must be rejected")
+            .to_string()
+            .contains("must carry an outcome")
+    );
+
+    let mut non_terminal_with_outcome = remote_process_record();
+    non_terminal_with_outcome.outcome = Some(RemoteProcessAwaitOutput::Success {
+        value: serde_json::Value::Null,
+        control: None,
+    });
+    assert!(
+        non_terminal_with_outcome
+            .validate("RemoteProcessRecord")
+            .expect_err("non-terminal status with outcome must be rejected")
+            .to_string()
+            .contains("must not carry an outcome")
+    );
+
+    let mut mismatched = remote_process_record();
+    mismatched.status = RemoteProcessStatus::Completed;
+    mismatched.outcome = Some(RemoteProcessAwaitOutput::Cancelled {
+        message: "cancelled".to_string(),
+        raw: None,
+        control: None,
+    });
+    assert!(
+        mismatched
+            .validate("RemoteProcessRecord")
+            .expect_err("mismatched terminal status and outcome must be rejected")
+            .to_string()
+            .contains("contradicts its outcome")
+    );
 }
 
 fn remote_process_event() -> RemoteProcessEvent {

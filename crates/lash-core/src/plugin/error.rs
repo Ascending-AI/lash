@@ -31,6 +31,8 @@ pub enum PluginError {
         terminal_label: String,
         pruned_at_ms: u64,
     },
+    #[error("process event type `{event_type}` is reserved for its dedicated registry mutation")]
+    ReservedProcessEvent { event_type: String },
     #[error("wake delivery `{delivery_id}` is already terminal in state `{state:?}`")]
     WakeDeliveryNotPending {
         delivery_id: String,
