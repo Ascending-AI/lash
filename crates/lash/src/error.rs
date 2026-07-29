@@ -137,7 +137,10 @@ impl EmbedError {
     ///   `DurableEffectLivePluginInput`;
     /// - session provider-configuration errors (`ProviderMismatch`,
     ///   `ProviderUnconfigured`, `ProviderUnavailable`,
-    ///   `CodeExecutionUnavailable`).
+    ///   `CodeExecutionUnavailable`);
+    /// - direct or session-wrapped
+    ///   [`StoreError::SessionDeleted`](lash_core::StoreError::SessionDeleted)
+    ///   tombstones — session ids are permanently single-use.
     pub fn is_terminal(&self) -> bool {
         use lash_core::RuntimeErrorCode;
         match self {
@@ -155,6 +158,7 @@ impl EmbedError {
             | Self::MissingPluginTurnInput { .. }
             | Self::DurableEffectHostRequiresHandlerContext { .. }
             | Self::StaticTurnStreamRequiresStaticEffectHost => true,
+            Self::Store(lash_core::StoreError::SessionDeleted { .. }) => true,
             Self::Runtime(err) => matches!(
                 err.code,
                 RuntimeErrorCode::MissingExecutionScopeId
@@ -171,6 +175,10 @@ impl EmbedError {
                     | SessionError::ProviderUnconfigured { .. }
                     | SessionError::ProviderUnavailable { .. }
                     | SessionError::CodeExecutionUnavailable
+                    | SessionError::Store {
+                        source: lash_core::StoreError::SessionDeleted { .. },
+                        ..
+                    }
             ),
             _ => false,
         }
@@ -182,7 +190,7 @@ pub type Result<T> = std::result::Result<T, EmbedError>;
 #[cfg(test)]
 mod tests {
     use super::EmbedError;
-    use lash_core::{RuntimeError, RuntimeErrorCode};
+    use lash_core::{RuntimeError, RuntimeErrorCode, SessionError, StoreError};
 
     fn runtime_error(code: RuntimeErrorCode) -> EmbedError {
         EmbedError::Runtime(RuntimeError::new(code, "test"))
@@ -233,6 +241,24 @@ mod tests {
             let err = runtime_error(code);
             assert!(err.is_terminal(), "{err}");
             assert!(!err.is_retryable(), "{err}");
+        }
+    }
+
+    #[test]
+    fn deleted_sessions_are_terminal_in_direct_and_wrapped_store_shapes() {
+        let direct = EmbedError::Store(StoreError::SessionDeleted {
+            session_id: "retired-direct".to_string(),
+        });
+        let wrapped = EmbedError::Session(SessionError::Store {
+            context: "failed to bind retired session".to_string(),
+            source: StoreError::SessionDeleted {
+                session_id: "retired-wrapped".to_string(),
+            },
+        });
+
+        for error in [direct, wrapped] {
+            assert!(error.is_terminal(), "{error}");
+            assert!(!error.is_retryable(), "{error}");
         }
     }
 }

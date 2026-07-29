@@ -487,6 +487,16 @@ async fn verified_commit_chokepoint_is_nameable(
     commit_runtime_state_verified(store, commit).await
 }
 
+fn wrapped_session_store_refusal_is_nameable(error: lash::EmbedError) -> bool {
+    matches!(
+        error,
+        lash::EmbedError::Session(lash::SessionError::Store {
+            source: lash::persistence::StoreError::SessionDeleted { .. },
+            ..
+        })
+    )
+}
+
 // Types that appear in facade public signatures must have a reachable facade
 // home (no bare `lash_core::` leak). See lib.rs contract: "Every public name
 // has exactly one home."
@@ -546,6 +556,7 @@ fn main() {
     let _ = model_spec_types_are_nameable;
     let _ = persistence_load_helpers_are_nameable;
     let _ = verified_commit_chokepoint_is_nameable;
+    let _ = wrapped_session_store_refusal_is_nameable;
     let _ = observation_types_are_homed_in_observe;
     let _ = trigger_types_are_homed_in_triggers;
     let _ = cancellation_token_is_at_root;

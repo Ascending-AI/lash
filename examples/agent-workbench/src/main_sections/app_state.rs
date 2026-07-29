@@ -43,6 +43,33 @@ impl AppState {
         );
     }
 
+    fn session_admission_error(
+        &self,
+        session_id: &str,
+        surface: &str,
+        error: lash::EmbedError,
+    ) -> AppError {
+        if let Some((deleted_session_id, context)) = deleted_session_details(&error) {
+            self.trace_for_session(
+                session_id,
+                "session.admission_refused",
+                json!({
+                    "session_id": session_id,
+                    "surface": surface,
+                    "consulted_state": {
+                        "kind": "session_store_tombstone",
+                        "freshness": "admission_read",
+                        "session_id": deleted_session_id,
+                    },
+                    "tombstone_outcome": "retired",
+                    "outcome": "refused",
+                    "store_context": context,
+                }),
+            );
+        }
+        AppError::session_open(error)
+    }
+
     fn publish_for_session_identified(
         &self,
         session_id: &str,
@@ -96,7 +123,9 @@ impl AppState {
             .session(session_id)
             .open()
             .await
-            .map_err(AppError::internal)?;
+            .map_err(|error| {
+                self.session_admission_error(session_id, "api.turn.cancel", error)
+            })?;
         let mut receipts = Vec::with_capacity(active.len());
         let mut operation_ids = Vec::with_capacity(active.len());
         for tracked_address in active {
@@ -580,6 +609,7 @@ struct AppError {
     status: StatusCode,
     message: String,
     retryable: bool,
+    terminal: bool,
 }
 
 impl AppError {
@@ -588,6 +618,7 @@ impl AppError {
             status: StatusCode::BAD_REQUEST,
             message: message.into(),
             retryable: false,
+            terminal: true,
         }
     }
 
@@ -596,6 +627,7 @@ impl AppError {
             status: StatusCode::CONFLICT,
             message: message.into(),
             retryable: false,
+            terminal: true,
         }
     }
 
@@ -604,6 +636,7 @@ impl AppError {
             status: StatusCode::NOT_FOUND,
             message: message.into(),
             retryable: false,
+            terminal: true,
         }
     }
 
@@ -613,16 +646,16 @@ impl AppError {
             status: StatusCode::INTERNAL_SERVER_ERROR,
             message: "internal server error".to_string(),
             retryable: false,
+            terminal: false,
         }
     }
 
     fn session_open(error: lash::EmbedError) -> Self {
-        match &error {
-            lash::EmbedError::Store(lash::persistence::StoreError::SessionDeleted { .. }) => {
-                Self::conflict(error.to_string())
-            }
-            _ => Self::internal(error),
+        if let Some((session_id, context)) = deleted_session_details(&error) {
+            log_deleted_session_refusal(session_id, context);
+            return Self::conflict(deleted_session_message(session_id));
         }
+        Self::internal(error)
     }
 
     #[allow(dead_code, reason = "production authorizers use this denial constructor")]
@@ -631,6 +664,7 @@ impl AppError {
             status: StatusCode::FORBIDDEN,
             message: message.into(),
             retryable: false,
+            terminal: true,
         }
     }
 
@@ -639,17 +673,64 @@ impl AppError {
             status: StatusCode::GATEWAY_TIMEOUT,
             message: message.into(),
             retryable: false,
+            terminal: false,
         }
     }
 
     fn runtime(error: lash::EmbedError) -> Self {
+        let retryable = error.is_retryable();
+        let terminal = error.is_terminal();
+        debug_assert!(
+            !(retryable && terminal),
+            "an embed error cannot be both retryable and terminal: {error}"
+        );
+        if let Some((session_id, context)) = deleted_session_details(&error) {
+            log_deleted_session_refusal(session_id, context);
+            return Self {
+                status: StatusCode::CONFLICT,
+                message: deleted_session_message(session_id),
+                retryable,
+                terminal,
+            };
+        }
         eprintln!("agent-workbench runtime request failure: {error}");
         Self {
             status: StatusCode::INTERNAL_SERVER_ERROR,
-            retryable: error.is_retryable(),
+            retryable,
+            terminal,
             message: "internal server error".to_string(),
         }
     }
+}
+
+fn deleted_session_details(error: &lash::EmbedError) -> Option<(&str, Option<&str>)> {
+    let (source, context) = match error {
+        lash::EmbedError::Store(source) => (source, None),
+        lash::EmbedError::Session(lash::SessionError::Store { context, source }) => {
+            (source, Some(context.as_str()))
+        }
+        _ => return None,
+    };
+    match source {
+        lash::persistence::StoreError::SessionDeleted { session_id } => {
+            Some((session_id.as_str(), context))
+        }
+        _ => None,
+    }
+}
+
+fn deleted_session_message(session_id: &str) -> String {
+    lash::EmbedError::Store(lash::persistence::StoreError::SessionDeleted {
+        session_id: session_id.to_string(),
+    })
+    .to_string()
+}
+
+fn log_deleted_session_refusal(session_id: &str, context: Option<&str>) {
+    eprintln!(
+        "agent-workbench session admission refusal: session_id={session_id:?} \
+         tombstone_outcome=\"retired\" outcome=\"refused\" store_context={context:?}"
+    );
 }
 
 impl std::fmt::Display for AppError {
@@ -684,7 +765,31 @@ mod app_error_tests {
             },
         ));
         assert_eq!(error.status, StatusCode::CONFLICT);
-        assert!(error.message.contains("retired-session"));
-        assert!(error.message.contains("was used and deleted"));
+        assert_eq!(error.message, deleted_session_message("retired-session"));
+    }
+
+    #[tokio::test]
+    async fn wrapped_session_deletion_is_a_comprehensible_conflict_response() {
+        let session_id = "retired-during-runtime-binding";
+        let error = AppError::session_open(lash::EmbedError::Session(
+            lash_core::SessionError::Store {
+                context: format!("failed to bind session `{session_id}` to its store"),
+                source: lash::persistence::StoreError::SessionDeleted {
+                    session_id: session_id.to_string(),
+                },
+            },
+        ));
+        let response = error.into_response();
+
+        assert_eq!(response.status(), StatusCode::CONFLICT);
+        let body = axum::body::to_bytes(response.into_body(), 4096)
+            .await
+            .expect("read conflict response");
+        assert_eq!(
+            serde_json::from_slice::<Value>(&body).expect("decode conflict response"),
+            json!({
+                "error": deleted_session_message(session_id),
+            })
+        );
     }
 }

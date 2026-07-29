@@ -48,11 +48,11 @@ pub use lash_core::{
     PendingTurnInput, PendingTurnInputCancelOutcome, PendingTurnInputCancelResult,
     PendingTurnInputCancelTarget, PendingTurnInputSuffixCancelOutcome, PluginStack, Resolution,
     ResolveOutcome, SessionCommand, SessionCommandReceipt, SessionConfigPatch,
-    SessionCreateRequest, SessionSpec, SessionStartPoint, TurnActivity, TurnActivityId,
-    TurnActivitySink, TurnAddress, TurnAttach, TurnCancelOriginHint, TurnCancelOutcome,
-    TurnCancelReceipt, TurnCancelRequest, TurnCancellationEvidence, TurnCause, TurnEvent,
-    TurnFinish, TurnInput, TurnInputAcceptanceReceipt, TurnInputApplication, TurnOutcome, TurnStop,
-    TurnTerminal, TurnWorkDriver,
+    SessionCreateRequest, SessionError, SessionSpec, SessionStartPoint, TurnActivity,
+    TurnActivityId, TurnActivitySink, TurnAddress, TurnAttach, TurnCancelOriginHint,
+    TurnCancelOutcome, TurnCancelReceipt, TurnCancelRequest, TurnCancellationEvidence, TurnCause,
+    TurnEvent, TurnFinish, TurnInput, TurnInputAcceptanceReceipt, TurnInputApplication,
+    TurnOutcome, TurnStop, TurnTerminal, TurnWorkDriver,
 };
 /// Cooperative cancellation handle accepted by
 /// [`TurnBuilder::cancel`](crate::TurnBuilder::cancel); re-exported so

@@ -683,7 +683,7 @@ async fn run_user_turn(
         ))
         .open()
         .await
-        .map_err(AppError::internal)?;
+        .map_err(AppError::session_open)?;
     apply_model_selection_to_session(&state, &session, turn_model.clone(), "restate_user_turn")
         .await?;
     let turn_state = Arc::new(Mutex::new(TurnStreamState::default()));
@@ -904,7 +904,7 @@ async fn run_queued_turn(
         ))
         .open()
         .await
-        .map_err(AppError::internal)?;
+        .map_err(AppError::session_open)?;
     let selected_model = model_spec_from_selection(state.selected_model());
     session
         .configure(lash::SessionConfigPatch {
@@ -978,7 +978,7 @@ async fn run_queued_turn_terminalized(
     .await
 }
 
-async fn terminalize_turn_execution(
+pub(crate) async fn terminalize_turn_execution(
     state: &AppState,
     session_id: &str,
     turn_id: &str,
@@ -989,7 +989,7 @@ async fn terminalize_turn_execution(
         Ok(Ok(())) => {
             settle_workbench_turn(state, session_id, turn_id)
                 .await
-                .map_err(HandlerError::from)?;
+                .map_err(settlement_handler_error)?;
             Ok(())
         }
         Ok(Err(err)) if err.retryable => {
@@ -1007,9 +1007,12 @@ async fn terminalize_turn_execution(
         }
         Ok(Err(err)) => {
             let message = err.message.clone();
+            // Settlement is the durable boundary for this attempt. If it
+            // fails, that failure necessarily masks the original turn error
+            // because publishing either outcome before settlement would lie.
             settle_workbench_turn(state, session_id, turn_id)
                 .await
-                .map_err(HandlerError::from)?;
+                .map_err(settlement_handler_error)?;
             record_turn_failure(state, session_id, turn_id, trace_name, &message);
             Err(terminal_handler_error(err))
         }
@@ -1018,7 +1021,7 @@ async fn terminalize_turn_execution(
             let message = format!("Restate-backed turn panicked: {message}");
             settle_workbench_turn(state, session_id, turn_id)
                 .await
-                .map_err(HandlerError::from)?;
+                .map_err(settlement_handler_error)?;
             record_turn_failure(state, session_id, turn_id, trace_name, &message);
             Err(TerminalError::new(message).into())
         }
@@ -1244,12 +1247,12 @@ async fn sync_cron_jobs_with_context(
         .session(session_id)
         .open()
         .await
-        .map_err(|err| TerminalError::new(err.to_string()))?;
+        .map_err(classified_embed_handler_error)?;
     let registrations = session
         .triggers()
         .by_source_type(CRON_SCHEDULE_SOURCE_TYPE)
         .await
-        .map_err(|err| TerminalError::new(err.to_string()))?;
+        .map_err(classified_embed_handler_error)?;
     let previous = state
         .restate_cron_job_keys
         .lock()
@@ -1525,25 +1528,18 @@ fn terminal_handler_error(err: AppError) -> HandlerError {
     TerminalError::new(err.message).into()
 }
 
-#[cfg(test)]
-mod tests {
-    use super::cron_occurrence_key;
-
-    #[test]
-    fn cron_occurrence_key_is_unique_per_tick() {
-        let job = "session:source:cron.Schedule:sha256:abc";
-        let first = cron_occurrence_key(job, "2026-06-09T22:30:30+00:00");
-        let second = cron_occurrence_key(job, "2026-06-09T22:31:00+00:00");
-        // Two ticks of one job must not collide: a constant key makes the
-        // second tick fail its trigger emit with an idempotency conflict
-        // before re-arming, killing the schedule after exactly one fire.
-        assert_ne!(first, second);
-        // A retried tick (same journaled fired_at) must dedupe.
-        assert_eq!(first, cron_occurrence_key(job, "2026-06-09T22:30:30+00:00"));
-        // Distinct jobs never collide on the same tick time.
-        assert_ne!(
-            first,
-            cron_occurrence_key("other-job", "2026-06-09T22:30:30+00:00")
-        );
+fn settlement_handler_error(err: AppError) -> HandlerError {
+    if err.terminal {
+        terminal_handler_error(err)
+    } else {
+        HandlerError::from(err)
     }
 }
+
+fn classified_embed_handler_error(error: lash::EmbedError) -> HandlerError {
+    settlement_handler_error(AppError::runtime(error))
+}
+
+#[cfg(test)]
+#[path = "restate_tests.rs"]
+mod tests;

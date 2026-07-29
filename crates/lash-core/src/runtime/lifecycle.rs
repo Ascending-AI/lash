@@ -43,37 +43,40 @@ async fn bind_state_to_store(
     store
         .admit_and_bind_session(&binding)
         .await
-        .map_err(|err| {
-            SessionError::Protocol(format!(
-                "failed to bind session `{}` to its store: {err}",
-                state.session_id
-            ))
+        .map_err(|source| SessionError::Store {
+            context: format!("failed to bind session `{}` to its store", state.session_id),
+            source,
         })?;
     let meta = store
         .load_session_meta()
         .await
-        .map_err(|err| {
-            SessionError::Protocol(format!(
-                "failed to verify session `{}` store binding: {err}",
+        .map_err(|source| SessionError::Store {
+            context: format!(
+                "failed to verify session `{}` store binding",
                 state.session_id
-            ))
+            ),
+            source,
         })?
-        .ok_or_else(|| {
-            SessionError::Protocol(
-                crate::StoreError::SessionBindingNotMaterialized {
-                    session_id: state.session_id.clone(),
-                }
-                .to_string(),
-            )
+        .ok_or_else(|| SessionError::Store {
+            context: format!(
+                "failed to verify session `{}` store binding",
+                state.session_id
+            ),
+            source: crate::StoreError::SessionBindingNotMaterialized {
+                session_id: state.session_id.clone(),
+            },
         })?;
     if meta.session_id != state.session_id {
-        return Err(SessionError::Protocol(
-            crate::StoreError::SessionBindingMismatch {
+        return Err(SessionError::Store {
+            context: format!(
+                "failed to verify session `{}` store binding",
+                state.session_id
+            ),
+            source: crate::StoreError::SessionBindingMismatch {
                 bound_session_id: meta.session_id,
                 attempted_session_id: state.session_id.clone(),
-            }
-            .to_string(),
-        ));
+            },
+        });
     }
     Ok(())
 }
@@ -496,7 +499,8 @@ impl LashRuntime {
 
 #[cfg(test)]
 mod tests {
-    use super::{initial_park_operation, initial_park_preview};
+    use super::{bind_state_to_store, initial_park_operation, initial_park_preview};
+    use crate::SessionError;
 
     fn user_message(id: &str, content: &str) -> crate::Message {
         crate::Message {
@@ -551,5 +555,50 @@ mod tests {
             first, changed,
             "different persisted content must not reuse one park receipt"
         );
+    }
+
+    #[tokio::test]
+    async fn session_deletion_refusal_keeps_its_type_through_runtime_binding() {
+        use crate::SessionStoreFactory;
+
+        let session_id = "deleted-during-runtime-binding";
+        let policy = crate::SessionPolicy::default();
+        let request = crate::SessionStoreCreateRequest {
+            session_id: session_id.to_string(),
+            relation: crate::SessionRelation::Root,
+            policy: policy.clone(),
+        };
+        let factory = crate::InMemorySessionStoreFactory::new();
+        let store = factory
+            .create_store(&request)
+            .await
+            .expect("create session store before deletion");
+        factory
+            .delete_session(session_id)
+            .await
+            .expect("delete session before runtime binding");
+        let mut state = crate::RuntimeSessionState {
+            session_id: session_id.to_string(),
+            ..crate::RuntimeSessionState::default()
+        };
+
+        let error = bind_state_to_store(
+            &policy,
+            store.as_ref(),
+            &mut state,
+            crate::SessionRelation::Root,
+        )
+        .await
+        .expect_err("runtime binding must refuse a retired session");
+
+        assert!(matches!(
+            error,
+            SessionError::Store {
+                source: crate::StoreError::SessionDeleted {
+                    session_id: deleted_session_id,
+                },
+                ..
+            } if deleted_session_id == session_id
+        ));
     }
 }

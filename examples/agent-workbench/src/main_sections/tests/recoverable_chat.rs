@@ -72,6 +72,301 @@ async fn recoverable_chat_test_state_with_provider(
     }
 }
 
+async fn retire_workbench_session(state: &AppState, session_id: &str) {
+    drop(
+        state
+            .core
+            .session(session_id)
+            .open()
+            .await
+            .expect("open session before retirement"),
+    );
+    let scope = state
+        .core
+        .session_delete_scope(session_id)
+        .await
+        .expect("build session delete scope");
+    let effect_host = state.core.effect_host();
+    let scoped = effect_host
+        .scoped(scope)
+        .expect("scope inline session deletion");
+    state
+        .core
+        .delete_session(session_id, scoped)
+        .await
+        .expect("retire session");
+}
+
+fn assert_deleted_session_conflict(error: &AppError, session_id: &str) {
+    assert_eq!(error.status, StatusCode::CONFLICT);
+    assert_eq!(error.message, deleted_session_message(session_id));
+}
+
+#[test]
+fn retired_session_admission_precedes_attachment_reads_and_submission() {
+    run_async_test_on_stack_budget("retired-session-send-turn-test", || async {
+        let data_dir = tempfile::tempdir().expect("tempdir");
+        let mut state = recoverable_chat_test_state(data_dir.path(), 16).await;
+        let (restate_ingress_url, mut restate_requests) = spawn_restate_ingress_capture().await;
+        state.restate_ingress_url = restate_ingress_url;
+        let session_id = state.current_session_id();
+        retire_workbench_session(&state, &session_id).await;
+
+        let error = send_turn(
+            State(state.clone()),
+            Query(SessionQuery {
+                session_id: Some(session_id.clone()),
+            }),
+            Json(TurnRequest {
+                text: "must not be accepted".to_string(),
+                model: Some("test-model".to_string()),
+                model_variant: None,
+                attachment_id: Some("missing-retired-attachment".to_string()),
+            }),
+        )
+        .await
+        .expect_err("retired session turn must be refused");
+
+        assert_deleted_session_conflict(&error, &session_id);
+        assert!(
+            matches!(
+                restate_requests.try_recv(),
+                Err(tokio::sync::mpsc::error::TryRecvError::Empty)
+            ),
+            "retired session refusal must not submit a Restate workflow"
+        );
+        assert!(state.messages_snapshot().is_empty());
+        assert!(state.active_turns.for_session(&session_id).is_empty());
+    });
+}
+
+#[test]
+fn observing_a_retired_session_returns_the_typed_conflict() {
+    run_async_test_on_stack_budget("retired-session-observations-test", || async {
+        let data_dir = tempfile::tempdir().expect("tempdir");
+        let state = recoverable_chat_test_state(data_dir.path(), 16).await;
+        let session_id = state.current_session_id();
+        retire_workbench_session(&state, &session_id).await;
+
+        let error = session_observations(
+            State(state),
+            Query(EventsQuery {
+                cursor: None,
+                session_id: Some(session_id.clone()),
+            }),
+        )
+        .await
+        .expect_err("retired session observations must be refused");
+
+        assert_deleted_session_conflict(&error, &session_id);
+    });
+}
+
+#[test]
+fn enqueuing_turn_input_to_a_retired_session_returns_the_typed_conflict() {
+    run_async_test_on_stack_budget("retired-session-turn-input-test", || async {
+        let data_dir = tempfile::tempdir().expect("tempdir");
+        let state = recoverable_chat_test_state(data_dir.path(), 16).await;
+        let session_id = state.current_session_id();
+        retire_workbench_session(&state, &session_id).await;
+
+        let error = enqueue_turn_input(
+            State(state),
+            Query(SessionQuery {
+                session_id: Some(session_id.clone()),
+            }),
+            Json(TurnInputRequest {
+                text: "must not be queued".to_string(),
+                ingress: TurnInputIngressRequest::NextTurn,
+            }),
+        )
+        .await
+        .expect_err("retired session turn input must be refused");
+
+        assert_deleted_session_conflict(&error, &session_id);
+    });
+}
+
+#[test]
+fn retired_session_cancel_and_tool_refresh_return_the_typed_conflict() {
+    run_async_test_on_stack_budget("retired-session-secondary-surfaces-test", || async {
+        let data_dir = tempfile::tempdir().expect("tempdir");
+        let state = recoverable_chat_test_state(data_dir.path(), 16).await;
+        let session_id = state.current_session_id();
+        retire_workbench_session(&state, &session_id).await;
+
+        let cancel_error = state
+            .cancel_turns_for_session(&session_id)
+            .await
+            .expect_err("retired session cancellation must be refused");
+        assert_deleted_session_conflict(&cancel_error, &session_id);
+
+        let refresh_error = enqueue_tool_catalog_refresh(&state, "retired_session_test")
+            .await
+            .expect_err("retired session tool refresh must be refused");
+        assert_deleted_session_conflict(&refresh_error, &session_id);
+    });
+}
+
+#[test]
+fn retired_session_http_refusals_record_structured_admission_evidence() {
+    run_async_test_on_stack_budget("retired-session-refusal-evidence-test", || async {
+        let data_dir = tempfile::tempdir().expect("tempdir");
+        let trace_path = data_dir.path().join("refusals.jsonl");
+        let mut state = recoverable_chat_test_state(data_dir.path(), 16).await;
+        state.trace_sink = Some(Arc::new(JsonlTraceSink::new(trace_path.clone())));
+        let session_id = state.current_session_id();
+        retire_workbench_session(&state, &session_id).await;
+
+        let state_error = app_state(
+            State(state.clone()),
+            Query(SessionQuery {
+                session_id: Some(session_id.clone()),
+            }),
+        )
+        .await
+        .expect_err("retired session state read must be refused");
+        assert_deleted_session_conflict(&state_error, &session_id);
+
+        let observation_error = session_observations(
+            State(state.clone()),
+            Query(EventsQuery {
+                cursor: None,
+                session_id: Some(session_id.clone()),
+            }),
+        )
+        .await
+        .expect_err("retired session observation must be refused");
+        assert_deleted_session_conflict(&observation_error, &session_id);
+
+        let turn_error = send_turn(
+            State(state.clone()),
+            Query(SessionQuery {
+                session_id: Some(session_id.clone()),
+            }),
+            Json(TurnRequest {
+                text: "must not be accepted".to_string(),
+                model: Some("test-model".to_string()),
+                model_variant: None,
+                attachment_id: None,
+            }),
+        )
+        .await
+        .expect_err("retired session turn must be refused");
+        assert_deleted_session_conflict(&turn_error, &session_id);
+
+        let input_error = enqueue_turn_input(
+            State(state),
+            Query(SessionQuery {
+                session_id: Some(session_id.clone()),
+            }),
+            Json(TurnInputRequest {
+                text: "must not be queued".to_string(),
+                ingress: TurnInputIngressRequest::NextTurn,
+            }),
+        )
+        .await
+        .expect_err("retired session turn input must be refused");
+        assert_deleted_session_conflict(&input_error, &session_id);
+
+        let records = std::fs::read_to_string(&trace_path).expect("read refusal trace");
+        assert!(
+            !records.contains("agent_workbench.api.turn.request"),
+            "a refused turn must not be traced as accepted"
+        );
+        let surfaces = records
+            .lines()
+            .map(|line| serde_json::from_str::<Value>(line).expect("decode refusal trace record"))
+            .filter(|record| {
+                record.get("name").and_then(Value::as_str)
+                    == Some("agent_workbench.session.admission_refused")
+            })
+            .map(|record| {
+                assert_eq!(
+                    record.pointer("/payload/session_id").and_then(Value::as_str),
+                    Some(session_id.as_str())
+                );
+                assert_eq!(
+                    record
+                        .pointer("/payload/consulted_state/kind")
+                        .and_then(Value::as_str),
+                    Some("session_store_tombstone")
+                );
+                assert_eq!(
+                    record
+                        .pointer("/payload/consulted_state/freshness")
+                        .and_then(Value::as_str),
+                    Some("admission_read")
+                );
+                assert_eq!(
+                    record
+                        .pointer("/payload/tombstone_outcome")
+                        .and_then(Value::as_str),
+                    Some("retired")
+                );
+                assert_eq!(
+                    record.pointer("/payload/outcome").and_then(Value::as_str),
+                    Some("refused")
+                );
+                record
+                    .pointer("/payload/surface")
+                    .and_then(Value::as_str)
+                    .expect("refusal surface")
+                    .to_string()
+            })
+            .collect::<BTreeSet<_>>();
+        assert_eq!(
+            surfaces,
+            ["api.observations", "api.state", "api.turn", "api.turn.input"]
+                .into_iter()
+                .map(str::to_string)
+                .collect()
+        );
+    });
+}
+
+#[test]
+fn every_terminalize_branch_makes_runtime_shaped_session_deletion_terminal() {
+    run_async_test_on_stack_budget("retired-session-settlement-callers-test", || async {
+        let data_dir = tempfile::tempdir().expect("tempdir");
+        let state = recoverable_chat_test_state(data_dir.path(), 16).await;
+        let session_id = state.current_session_id();
+        retire_workbench_session(&state, &session_id).await;
+
+        type TerminalizeResult =
+            Result<Result<(), AppError>, Box<dyn std::any::Any + Send>>;
+        let cases: Vec<(&str, TerminalizeResult)> = vec![
+            ("successful_turn", Ok(Ok(()))),
+            (
+                "failed_turn",
+                Ok(Err(AppError::internal("original turn failure"))),
+            ),
+            ("panicked_turn", Err(Box::new("original turn panic"))),
+        ];
+
+        for (case, result) in cases {
+            let turn_id = format!("{case}-turn");
+            state.track_turn(&session_id, &turn_id);
+            let error = crate::restate::terminalize_turn_execution(
+                &state,
+                &session_id,
+                &turn_id,
+                "test.turn.failed",
+                result,
+            )
+            .await
+            .expect_err("settlement against a retired session must fail");
+            let rendered =
+                <restate_sdk::errors::HandlerError as AsRef<dyn std::error::Error>>::as_ref(&error)
+                    .to_string();
+            assert!(
+                rendered.starts_with("Terminal error"),
+                "{case} must terminalize the runtime-shaped SessionDeleted, got {rendered}"
+            );
+        }
+    });
+}
+
 #[test]
 fn workbench_browser_recovery_projection_preserves_rows_and_scopes_session_cursors() {
     let script = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
