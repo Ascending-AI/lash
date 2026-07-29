@@ -332,7 +332,7 @@ async fn session_observations(
         .session(session_id)
         .open()
         .await
-        .map_err(AppError::internal)?;
+        .map_err(AppError::session_open)?;
     let cursor = match query.cursor.as_deref().filter(|cursor| !cursor.trim().is_empty()) {
         Some(cursor) => serde_json::from_value::<SessionCursor>(json!(cursor))
             .map_err(|err| AppError::bad_request(format!("invalid session cursor: {err}")))?,
@@ -386,6 +386,14 @@ async fn send_turn(
         .authorize(WorkbenchAuthorizationAction::EnqueueTurn {
             session_id: session_id.clone(),
         })?;
+    drop(
+        state
+            .core
+            .session(session_id.clone())
+            .open()
+            .await
+            .map_err(AppError::session_open)?,
+    );
     state.trace_for_session(
         &session_id,
         "api.turn.request",

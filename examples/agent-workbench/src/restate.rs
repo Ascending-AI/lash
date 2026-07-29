@@ -683,7 +683,7 @@ async fn run_user_turn(
         ))
         .open()
         .await
-        .map_err(AppError::internal)?;
+        .map_err(AppError::session_open)?;
     apply_model_selection_to_session(&state, &session, turn_model.clone(), "restate_user_turn")
         .await?;
     let turn_state = Arc::new(Mutex::new(TurnStreamState::default()));
@@ -904,7 +904,7 @@ async fn run_queued_turn(
         ))
         .open()
         .await
-        .map_err(AppError::internal)?;
+        .map_err(AppError::session_open)?;
     let selected_model = model_spec_from_selection(state.selected_model());
     session
         .configure(lash::SessionConfigPatch {
@@ -989,7 +989,7 @@ async fn terminalize_turn_execution(
         Ok(Ok(())) => {
             settle_workbench_turn(state, session_id, turn_id)
                 .await
-                .map_err(HandlerError::from)?;
+                .map_err(settlement_handler_error)?;
             Ok(())
         }
         Ok(Err(err)) if err.retryable => {
@@ -1009,7 +1009,7 @@ async fn terminalize_turn_execution(
             let message = err.message.clone();
             settle_workbench_turn(state, session_id, turn_id)
                 .await
-                .map_err(HandlerError::from)?;
+                .map_err(settlement_handler_error)?;
             record_turn_failure(state, session_id, turn_id, trace_name, &message);
             Err(terminal_handler_error(err))
         }
@@ -1018,7 +1018,7 @@ async fn terminalize_turn_execution(
             let message = format!("Restate-backed turn panicked: {message}");
             settle_workbench_turn(state, session_id, turn_id)
                 .await
-                .map_err(HandlerError::from)?;
+                .map_err(settlement_handler_error)?;
             record_turn_failure(state, session_id, turn_id, trace_name, &message);
             Err(TerminalError::new(message).into())
         }
@@ -1525,9 +1525,18 @@ fn terminal_handler_error(err: AppError) -> HandlerError {
     TerminalError::new(err.message).into()
 }
 
+fn settlement_handler_error(err: AppError) -> HandlerError {
+    if err.terminal {
+        terminal_handler_error(err)
+    } else {
+        HandlerError::from(err)
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use super::cron_occurrence_key;
+    use super::{cron_occurrence_key, settlement_handler_error};
+    use crate::AppError;
 
     #[test]
     fn cron_occurrence_key_is_unique_per_tick() {
@@ -1544,6 +1553,26 @@ mod tests {
         assert_ne!(
             first,
             cron_occurrence_key("other-job", "2026-06-09T22:30:30+00:00")
+        );
+    }
+
+    #[test]
+    fn deleted_session_settlement_failure_is_terminal() {
+        let error = AppError::session_open(lash::EmbedError::Store(
+            lash::persistence::StoreError::SessionDeleted {
+                session_id: "retired-session".to_string(),
+            },
+        ));
+
+        let handler_error = settlement_handler_error(error);
+        let rendered = <restate_sdk::errors::HandlerError as AsRef<dyn std::error::Error>>::as_ref(
+            &handler_error,
+        )
+        .to_string();
+
+        assert!(
+            rendered.starts_with("Terminal error"),
+            "SessionDeleted must be terminal at the Restate call site, got {rendered}"
         );
     }
 }

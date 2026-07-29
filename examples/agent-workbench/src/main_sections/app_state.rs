@@ -580,6 +580,7 @@ struct AppError {
     status: StatusCode,
     message: String,
     retryable: bool,
+    terminal: bool,
 }
 
 impl AppError {
@@ -588,6 +589,7 @@ impl AppError {
             status: StatusCode::BAD_REQUEST,
             message: message.into(),
             retryable: false,
+            terminal: true,
         }
     }
 
@@ -596,6 +598,7 @@ impl AppError {
             status: StatusCode::CONFLICT,
             message: message.into(),
             retryable: false,
+            terminal: true,
         }
     }
 
@@ -604,6 +607,7 @@ impl AppError {
             status: StatusCode::NOT_FOUND,
             message: message.into(),
             retryable: false,
+            terminal: true,
         }
     }
 
@@ -613,15 +617,28 @@ impl AppError {
             status: StatusCode::INTERNAL_SERVER_ERROR,
             message: "internal server error".to_string(),
             retryable: false,
+            terminal: false,
         }
     }
 
     fn session_open(error: lash::EmbedError) -> Self {
-        match &error {
-            lash::EmbedError::Store(lash::persistence::StoreError::SessionDeleted { .. }) => {
-                Self::conflict(error.to_string())
-            }
-            _ => Self::internal(error),
+        if let Some(error) = Self::session_deleted(&error) {
+            return error;
+        }
+        Self::internal(error)
+    }
+
+    fn session_deleted(error: &lash::EmbedError) -> Option<Self> {
+        let source = match error {
+            lash::EmbedError::Store(source) => source,
+            lash::EmbedError::Session(lash_core::SessionError::Store { source, .. }) => source,
+            _ => return None,
+        };
+        match source {
+            lash::persistence::StoreError::SessionDeleted { .. } => Some(Self::conflict(format!(
+                "session store operation failed: {source}"
+            ))),
+            _ => None,
         }
     }
 
@@ -631,6 +648,7 @@ impl AppError {
             status: StatusCode::FORBIDDEN,
             message: message.into(),
             retryable: false,
+            terminal: true,
         }
     }
 
@@ -639,14 +657,21 @@ impl AppError {
             status: StatusCode::GATEWAY_TIMEOUT,
             message: message.into(),
             retryable: false,
+            terminal: false,
         }
     }
 
     fn runtime(error: lash::EmbedError) -> Self {
+        if let Some(error) = Self::session_deleted(&error) {
+            return error;
+        }
         eprintln!("agent-workbench runtime request failure: {error}");
+        let retryable = error.is_retryable();
+        let terminal = error.is_terminal();
         Self {
             status: StatusCode::INTERNAL_SERVER_ERROR,
-            retryable: error.is_retryable(),
+            retryable,
+            terminal,
             message: "internal server error".to_string(),
         }
     }
@@ -686,5 +711,32 @@ mod app_error_tests {
         assert_eq!(error.status, StatusCode::CONFLICT);
         assert!(error.message.contains("retired-session"));
         assert!(error.message.contains("was used and deleted"));
+    }
+
+    #[tokio::test]
+    async fn wrapped_session_deletion_is_a_comprehensible_conflict_response() {
+        let session_id = "retired-during-runtime-binding";
+        let error = AppError::session_open(lash::EmbedError::Session(
+            lash_core::SessionError::Store {
+                context: format!("failed to bind session `{session_id}` to its store"),
+                source: lash::persistence::StoreError::SessionDeleted {
+                    session_id: session_id.to_string(),
+                },
+            },
+        ));
+        let response = error.into_response();
+
+        assert_eq!(response.status(), StatusCode::CONFLICT);
+        let body = axum::body::to_bytes(response.into_body(), 4096)
+            .await
+            .expect("read conflict response");
+        assert_eq!(
+            serde_json::from_slice::<Value>(&body).expect("decode conflict response"),
+            json!({
+                "error": format!(
+                    "session store operation failed: session `{session_id}` was used and deleted; session ids cannot be reused in this store"
+                ),
+            })
+        );
     }
 }

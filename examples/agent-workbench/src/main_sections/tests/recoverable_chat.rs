@@ -72,6 +72,103 @@ async fn recoverable_chat_test_state_with_provider(
     }
 }
 
+async fn retire_workbench_session(state: &AppState, session_id: &str) {
+    drop(
+        state
+            .core
+            .session(session_id)
+            .open()
+            .await
+            .expect("open session before retirement"),
+    );
+    let scope = state
+        .core
+        .session_delete_scope(session_id)
+        .await
+        .expect("build session delete scope");
+    let effect_host = state.core.effect_host();
+    let scoped = effect_host
+        .scoped(scope)
+        .expect("scope inline session deletion");
+    state
+        .core
+        .delete_session(session_id, scoped)
+        .await
+        .expect("retire session");
+}
+
+#[test]
+fn sending_a_turn_to_a_retired_session_is_refused_before_submission() {
+    run_async_test_on_stack_budget("retired-session-send-turn-test", || async {
+        let data_dir = tempfile::tempdir().expect("tempdir");
+        let mut state = recoverable_chat_test_state(data_dir.path(), 16).await;
+        let (restate_ingress_url, mut restate_requests) = spawn_restate_ingress_capture().await;
+        state.restate_ingress_url = restate_ingress_url;
+        let session_id = state.current_session_id();
+        retire_workbench_session(&state, &session_id).await;
+
+        let error = send_turn(
+            State(state.clone()),
+            Query(SessionQuery {
+                session_id: Some(session_id.clone()),
+            }),
+            Json(TurnRequest {
+                text: "must not be accepted".to_string(),
+                model: Some("test-model".to_string()),
+                model_variant: None,
+                attachment_id: None,
+            }),
+        )
+        .await
+        .expect_err("retired session turn must be refused");
+
+        assert_eq!(error.status, StatusCode::CONFLICT);
+        assert_eq!(
+            error.message,
+            format!(
+                "session store operation failed: session `{session_id}` was used and deleted; session ids cannot be reused in this store"
+            )
+        );
+        assert!(
+            matches!(
+                restate_requests.try_recv(),
+                Err(tokio::sync::mpsc::error::TryRecvError::Empty)
+            ),
+            "retired session refusal must not submit a Restate workflow"
+        );
+        assert!(state.messages_snapshot().is_empty());
+        assert!(state.active_turns.for_session(&session_id).is_empty());
+    });
+}
+
+#[test]
+fn observing_a_retired_session_returns_the_typed_conflict() {
+    run_async_test_on_stack_budget("retired-session-observations-test", || async {
+        let data_dir = tempfile::tempdir().expect("tempdir");
+        let state = recoverable_chat_test_state(data_dir.path(), 16).await;
+        let session_id = state.current_session_id();
+        retire_workbench_session(&state, &session_id).await;
+
+        let error = session_observations(
+            State(state),
+            Query(EventsQuery {
+                cursor: None,
+                session_id: Some(session_id.clone()),
+            }),
+        )
+        .await
+        .expect_err("retired session observations must be refused");
+
+        assert_eq!(error.status, StatusCode::CONFLICT);
+        assert_eq!(
+            error.message,
+            format!(
+                "session store operation failed: session `{session_id}` was used and deleted; session ids cannot be reused in this store"
+            )
+        );
+    });
+}
+
 #[test]
 fn workbench_browser_recovery_projection_preserves_rows_and_scopes_session_cursors() {
     let script = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
