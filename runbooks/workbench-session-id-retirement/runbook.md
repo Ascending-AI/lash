@@ -125,10 +125,15 @@ HTTP 200 and a snapshot whose `settings.session_id` is a non-empty
 `session_meta` row. Save the complete delete response and both storage query results as
 `02-delete-and-rotation.json`.
 
+Call the DELETE through an in-page fetch; do not substitute the rendered reset button,
+which posts `POST /api/reset`. A bare DELETE fetch does not apply its returned snapshot
+to the current page, so the rendered session-id label on that page does not rotate.
+
 Do not use the delete response's empty message list as proof of fresh state: it describes
 the rotated target before the browser has independently opened and read it. Screenshot
-the post-delete page as `02-delete-returned-rotation.png`, including the rendered rotated
-session id if the current surface applies the returned snapshot.
+the post-delete page as `02-delete-returned-rotation.png`. The still-rendered retired id
+on that bare-fetch page is expected, not a contract violation; Phase 4 opens a page
+scoped to the rotated id.
 
 ## Phase 3 — Prove the retired id is refused
 
@@ -169,7 +174,7 @@ Then prove the rotated id is alive:
    marker, and the turn must settle.
 2. Register `retirement-watch` for the same Blue source and `retirement_job` target.
    Require exactly one enabled registration whose registrant is scoped to
-   `<rotated-id>` and whose incarnation differs from registration A.
+   `<rotated-id>` and whose registration incarnation differs from registration A.
 3. Activate Blue. Require exactly one new `retirement_job` process from
    `GET /api/work?session_id=<rotated-id>`, require its id to differ from the retired
    session's process id, and await it to terminal.

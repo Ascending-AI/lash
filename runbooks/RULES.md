@@ -44,6 +44,11 @@ from playwright.sync_api import sync_playwright
 `~/.cache/ms-playwright` Chromium (run `playwright install chromium` once if the launch
 reports a missing browser build).
 
+When navigating either example app, use `wait_until="domcontentloaded"` and then an
+explicit waiting assertion such as `expect(locator)` or `wait_for_function` on a row
+count. Never use `wait_until="networkidle"`: the Workbench holds an SSE stream open and
+polls `/api/state`, so network idle is not a reachable readiness condition.
+
 Apply every rule below to the browser surface:
 
 - **Poll, don't sleep** → gate on a waiting assertion with an explicit timeout
@@ -83,6 +88,12 @@ never launch a `target/debug/*` path directly: this repo redirects builds throug
 runbook gates on and fake a contract violation. You own everything you started: end the run — success
 or Abort — with the example stopped and any Docker containers it launched torn down
 (`just agent-workbench-down <port>`).
+
+`agent-workbench-restart` is a new helper invocation and does not inherit
+`AGENT_WORKBENCH_RUN_DIR` or `AGENT_WORKBENCH_DATA_DIR` from the original `up` command.
+Export both values in the invoking shell, or repeat the same values on every
+`just agent-workbench-restart <port>` command. Otherwise the helper can silently select
+different run metadata or a different durable data directory.
 
 For an Abort/RCA, use the app's pipeline — UI event handling / HTTP API / turn or trigger
 execution / durable process / store persistence / render — and name the stage the failure
