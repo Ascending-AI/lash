@@ -359,7 +359,19 @@ async fn generated_park_resume_transcript_is_readable_and_ref_aware() {
         "generated park/resume must commit durable state after resolution: {:#?}",
         trace.durable_writes
     );
-    insta::assert_snapshot!(trace.render_session_transcript("suspend-tool"), @r"
+    let transcript = trace.render_session_transcript("suspend-tool");
+    for seed in [2, 3] {
+        let workload = generate_workload(seed, "fast", 72).expect("workload");
+        let varied = run_generated_workload_for_fixture(workload, "park-resume-transcript")
+            .await
+            .expect("generated seed variation");
+        assert_eq!(
+            varied.render_session_transcript("suspend-tool"),
+            transcript,
+            "park/resume transcript changed for seed {seed}"
+        );
+    }
+    insta::assert_snapshot!(transcript, @r"
     turn 1  session-001
       0001  Ingress            session.open.suspend
     park   session-001
