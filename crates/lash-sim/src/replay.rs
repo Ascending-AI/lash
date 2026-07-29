@@ -107,7 +107,13 @@ pub fn replay_trace(
         )));
     }
 
-    let final_summary = store.summary();
+    // The abstract model cannot execute a runtime commit. It therefore carries
+    // the trace's checkpoint observations as recorded evidence; real backend
+    // replay lanes independently re-execute and compare their runtime-turn
+    // subset before using observed commits in their summaries.
+    let final_summary = store
+        .summarize_with_trace_checkpoint_writes(&trace.events, &trace.durable_writes)
+        .map_err(ReplayError::Divergence)?;
     let terminal_verdict = replay_determinism(&trace.final_summary, &final_summary);
     if !terminal_verdict.is_passed() {
         return Err(ReplayError::Divergence(terminal_verdict.message.clone()));

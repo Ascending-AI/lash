@@ -251,7 +251,7 @@ pub fn minimize_trace(
         let mut candidate = best.clone();
         candidate.events.retain(|event| event.kind != kind);
         renumber_events(&mut candidate);
-        refresh_trace_verdicts(&mut candidate, Some(target));
+        refresh_trace_verdicts(&mut candidate, Some(target))?;
         let accepted = preserves_target_failure(&candidate, target)
             && replay_trace(Path::new("candidate-family.trace.json"), &candidate).is_ok();
         if accepted {
@@ -269,7 +269,7 @@ pub fn minimize_trace(
         let mut candidate = best.clone();
         candidate.events.remove(index);
         renumber_events(&mut candidate);
-        refresh_trace_verdicts(&mut candidate, Some(target));
+        refresh_trace_verdicts(&mut candidate, Some(target))?;
         if preserves_target_failure(&candidate, target)
             && replay_trace(Path::new("candidate.trace.json"), &candidate).is_ok()
         {
@@ -278,7 +278,7 @@ pub fn minimize_trace(
             index += 1;
         }
     }
-    refresh_trace_verdicts(&mut best, Some(target));
+    refresh_trace_verdicts(&mut best, Some(target))?;
 
     let package_dir = artifact_root.join("minimized-regression");
     std::fs::create_dir_all(&package_dir)?;
@@ -381,8 +381,12 @@ fn renumber_events(trace: &mut SimulationTrace) {
     }
 }
 
-fn refresh_trace_verdicts(trace: &mut SimulationTrace, target: Option<TargetFailure<'_>>) {
-    let final_summary = summary_for_trace(trace);
+fn refresh_trace_verdicts(
+    trace: &mut SimulationTrace,
+    target: Option<TargetFailure<'_>>,
+) -> Result<(), MinimizeError> {
+    retain_causally_supported_checkpoint_writes(trace);
+    let final_summary = summary_for_trace(trace)?;
     let oracles = generated_oracles(&trace.events, &final_summary);
     let mut oracle = combine_oracles(&oracles);
     if let Some(target) = target
@@ -393,6 +397,7 @@ fn refresh_trace_verdicts(trace: &mut SimulationTrace, target: Option<TargetFail
     trace.final_summary = final_summary;
     trace.oracles = oracles;
     trace.oracle = oracle;
+    Ok(())
 }
 
 fn find_target_oracle<'a>(
@@ -428,12 +433,59 @@ fn select_fixture_target_oracle(
     Ok(())
 }
 
-fn summary_for_trace(trace: &SimulationTrace) -> AbstractWorldSummary {
+fn summary_for_trace(trace: &SimulationTrace) -> Result<AbstractWorldSummary, MinimizeError> {
     let mut store = ModelStore::default();
     for event in &trace.events {
         store.apply_observed_boundary(&event.as_event(), &event.observed);
     }
-    store.summary()
+    // Minimization carries only checkpoint evidence whose causal boundary
+    // survived the candidate reduction. The abstract model cannot re-execute a
+    // commit, so the retained records are intentionally carried as data.
+    store
+        .summarize_with_trace_checkpoint_writes(&trace.events, &trace.durable_writes)
+        .map_err(MinimizeError::Fixture)
+}
+
+fn retain_causally_supported_checkpoint_writes(trace: &mut SimulationTrace) {
+    let admitted_sessions = trace
+        .events
+        .iter()
+        .filter(|event| event.kind == BoundaryKind::Ingress)
+        .map(|event| event.actor_alias.as_str())
+        .collect::<BTreeSet<_>>();
+    let retained_boundary_ids = trace
+        .events
+        .iter()
+        .map(|event| event.boundary_id.as_str())
+        .collect::<BTreeSet<_>>();
+    let retained_runtime_turns = trace
+        .events
+        .iter()
+        .filter(|event| {
+            event.kind == BoundaryKind::Provider
+                || event
+                    .payload
+                    .get("suspend_resume")
+                    .and_then(serde_json::Value::as_bool)
+                    == Some(true)
+        })
+        .map(|event| {
+            let turn_index = event
+                .observed
+                .get("turn_index")
+                .or_else(|| event.payload.get("turn_index"))
+                .and_then(serde_json::Value::as_u64)
+                .unwrap_or(1) as usize;
+            (event.actor_alias.as_str(), turn_index)
+        })
+        .collect::<BTreeSet<_>>();
+    trace.durable_writes.retain(|write| {
+        admitted_sessions.contains(write.attributed_session())
+            && write.cause_boundary_id.as_deref().map_or_else(
+                || retained_runtime_turns.contains(&(write.attributed_session(), write.turn_index)),
+                |boundary_id| retained_boundary_ids.contains(boundary_id),
+            )
+    });
 }
 
 fn apply_fixture_mutation(
@@ -543,7 +595,7 @@ fn apply_fixture_mutation(
         }
     }
     renumber_events(trace);
-    refresh_trace_verdicts(trace, None);
+    refresh_trace_verdicts(trace, None)?;
     Ok(())
 }
 
@@ -775,6 +827,65 @@ mod tests {
         assert!(report.replay_report_path.exists());
         assert!(report.failure_package_path.exists());
         assert!(report.minimized_event_count <= report.original_event_count);
+    }
+
+    #[tokio::test]
+    async fn removing_a_sessions_provider_family_removes_its_checkpoint_evidence() {
+        let workload = generate_workload(1, "fast-random", 72).expect("workload");
+        let mut trace = run_generated_workload_for_fixture(workload, "checkpoint-causality")
+            .await
+            .expect("trace");
+        let contract_attributions = trace
+            .durable_writes
+            .iter()
+            .filter(|write| write.cause_boundary_id.is_some())
+            .map(|write| write.attributed_session().to_string())
+            .collect::<BTreeSet<_>>();
+        let target = trace
+            .durable_writes
+            .iter()
+            .find(|write| {
+                write.cause_boundary_id.is_none()
+                    && !contract_attributions.contains(write.attributed_session())
+            })
+            .map(|write| write.attributed_session().to_string())
+            .expect("generated runtime session outside contract attribution");
+        assert!(
+            trace
+                .durable_writes
+                .iter()
+                .any(|write| write.attributed_session() == target),
+            "fixture must start with checkpoint writes for {target}"
+        );
+
+        trace
+            .events
+            .retain(|event| event.actor_alias != target || event.kind != BoundaryKind::Provider);
+        renumber_events(&mut trace);
+        refresh_trace_verdicts(&mut trace, None).expect("refresh minimized trace");
+
+        assert!(
+            trace
+                .durable_writes
+                .iter()
+                .all(|write| write.attributed_session() != target),
+            "removed provider family retained phantom checkpoint writes: {:#?}",
+            trace.durable_writes
+        );
+        let summary = trace
+            .final_summary
+            .sessions
+            .iter()
+            .find(|session| session.alias == target)
+            .expect("target session summary");
+        assert_eq!(summary.checkpoint_commit_count, 0);
+        let transcript = trace.render_transcript();
+        assert!(
+            !transcript
+                .lines()
+                .any(|line| { line.starts_with(&target) && line.contains("Checkpoint") }),
+            "minimized transcript retained phantom checkpoint evidence:\n{transcript}"
+        );
     }
 
     #[tokio::test]

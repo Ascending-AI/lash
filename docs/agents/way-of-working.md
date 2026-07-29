@@ -95,6 +95,10 @@ State the expected proof on the ticket. Defaults when unstated:
 
 Gate merges on the local battery (`just push-gate`, plus the confidence-gate lane the change warrants) and review; CI is the backstop, not the first signal. Deterministic failure classes (docs lint, conformance, contract drift) must be fixed, never bypassed.
 
+### Expect tests versus conformance assertions
+
+Use an inline expect test when the review artifact is a short, deterministic behavior transcript and a changed ordering or rendered state should be judged as one coherent diff. Keep conformance suites assertion-based: they prove backend-independent invariants across implementations, where pinning one example interleaving would narrow the contract instead of strengthening it. Never bless an expect diff until its durable-write lines still distinguish the defect the test is meant to catch.
+
 ## Team and session norms
 
 - Read `CONTEXT.md` and area-relevant ADRs before exploring (see [domain.md](domain.md)).

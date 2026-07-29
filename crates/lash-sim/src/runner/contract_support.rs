@@ -4,11 +4,12 @@ pub(super) async fn append_contract_execution_boundaries(
     events: &mut Vec<crate::scheduler::DeliveredBoundary>,
     store: &mut ModelStore,
     seed: u64,
+    checkpoint_writes: CheckpointWriteCollector,
 ) -> Result<(), FixedScriptRunnerError> {
     let start_sequence = events.len();
     let mut scheduler = BoundaryScheduler::with_events(
         seed ^ 0x5e_3a_11_ce_c0_de,
-        contract_execution_boundaries(events).await?,
+        contract_execution_boundaries(events, &checkpoint_writes).await?,
     );
     while let Some(mut delivered) = scheduler.deliver_next_with(|event| store.apply_boundary(event))
     {
@@ -20,6 +21,7 @@ pub(super) async fn append_contract_execution_boundaries(
 
 async fn contract_execution_boundaries(
     events: &[crate::scheduler::DeliveredBoundary],
+    checkpoint_writes: &CheckpointWriteCollector,
 ) -> Result<Vec<BoundaryEvent>, FixedScriptRunnerError> {
     let mut next_at = events
         .iter()
@@ -39,9 +41,23 @@ async fn contract_execution_boundaries(
         next_at = next_at.saturating_add(1);
     }
     for execution in agent_contract_executions().await? {
-        proof_events.push(agent_contract_execution_boundary(
-            events, next_at, execution,
-        )?);
+        let boundary = agent_contract_execution_boundary(events, next_at, execution.payload)?;
+        for mut write in execution.checkpoint_writes {
+            write.attributed_session_id = Some(boundary.actor_alias.clone());
+            write.cause_boundary_id = Some(boundary.boundary_id.clone());
+            // Contract proofs execute in isolated facade worlds whose opaque
+            // execution-state identities are intentionally not seed-canonical.
+            // Preserve the durable stored/ref disposition, but do not let those
+            // unstable logical JSON lengths churn the deterministic transcript.
+            for component in &mut write.components {
+                if let CheckpointComponentWriteKind::Stored { logical_bytes } = &mut component.kind
+                {
+                    *logical_bytes = None;
+                }
+            }
+            checkpoint_writes.push(write);
+        }
+        proof_events.push(boundary);
         next_at = next_at.saturating_add(1);
     }
     Ok(proof_events)

@@ -8551,6 +8551,10 @@ mod tests {
                     process_lifecycle_count: 1,
                     durable_effect_keys: vec!["durable/session-001".to_string()],
                     lease_time_ticks: vec![1, 2],
+                    checkpoint_commit_count: 0,
+                    checkpoint_component_stored_count: 0,
+                    checkpoint_component_ref_count: 0,
+                    checkpoint_head_revision: 0,
                 },
                 SessionAbstractSummary {
                     alias: "session-002".to_string(),
@@ -8576,6 +8580,10 @@ mod tests {
                     process_lifecycle_count: 0,
                     durable_effect_keys: Vec::new(),
                     lease_time_ticks: vec![1, 2],
+                    checkpoint_commit_count: 0,
+                    checkpoint_component_stored_count: 0,
+                    checkpoint_component_ref_count: 0,
+                    checkpoint_head_revision: 0,
                 },
             ],
             vec![DurableEffectAbstractSummary {

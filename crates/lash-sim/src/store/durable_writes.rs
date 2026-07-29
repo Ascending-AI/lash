@@ -1,0 +1,726 @@
+use std::collections::BTreeMap;
+use std::sync::{Arc, Mutex};
+
+use lash_core::runtime::{
+    QueuedWorkBatch, QueuedWorkBatchDraft, QueuedWorkClaim, QueuedWorkClaimBoundary,
+};
+use lash_core::store::{
+    AttachmentIntent, AttachmentManifest, AttachmentManifestEntry, PersistedSessionRead,
+    RuntimeCommit, RuntimeCommitResult, RuntimePersistence, SessionCommitStore, StoreError,
+};
+use lash_core::{
+    AttachmentId, BlobRef, CheckpointKind, ForkPoint, ForkSessionRequest, ForkSessionResult,
+    GcReport, LeaseOwnerIdentity, PendingTurnInput, PendingTurnInputCancelOutcome,
+    PendingTurnInputCancelResult, PendingTurnInputCancelTarget, PendingTurnInputDraft,
+    SessionAdmission, SessionBinding, SessionExecutionLease, SessionExecutionLeaseClaimOutcome,
+    SessionExecutionLeaseCompletion, SessionExecutionLeaseFence, SessionExecutionLeaseStore,
+    SessionMeta, SessionStoreCreateRequest, SessionStoreFactory, StoreMaintenance,
+    TurnInputApplication, TurnInputClaim, TurnInputStore, VacuumReport,
+};
+use serde::{Deserialize, Serialize};
+
+pub const CHECKPOINT_WRITE_EVENT_SCHEMA: &str = "lash.sim.checkpoint-write-event.v1";
+
+/// One checkpoint component observed at the successful store-commit seam.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct CheckpointComponentWrite {
+    pub component: CheckpointComponent,
+    pub kind: CheckpointComponentWriteKind,
+}
+
+/// Closed vocabulary of runtime-checkpoint components.
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CheckpointComponent {
+    TurnState,
+    ToolState,
+    PluginSnapshot,
+    ExecutionState,
+}
+
+impl CheckpointComponent {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::TurnState => "turn_state",
+            Self::ToolState => "tool_state",
+            Self::PluginSnapshot => "plugin_snapshot",
+            Self::ExecutionState => "execution_state",
+        }
+    }
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case", tag = "kind")]
+pub enum CheckpointComponentWriteKind {
+    /// Body present at the commit seam. `logical_bytes` is the size of the
+    /// encoding-independent JSON projection used only for human comparison;
+    /// it is not a backend's MessagePack/compressed byte count.
+    Stored {
+        #[serde(default, alias = "bytes", skip_serializing_if = "Option::is_none")]
+        logical_bytes: Option<usize>,
+    },
+    UnchangedRef,
+}
+
+/// A successful runtime-state commit as observed by the simulator's store
+/// wrapper. Component bodies are inspected before delegation, while the
+/// resulting head revision is recorded only after the backend accepts them.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct CheckpointWriteEvent {
+    pub schema: String,
+    /// The real session id passed to the store commit.
+    pub session_id: String,
+    /// Optional generated-trace attribution for a separately executed contract
+    /// proof. Ordinary generated runtime commits use `session_id` directly.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub attributed_session_id: Option<String>,
+    /// Boundary that caused a separately executed contract proof. Runtime-turn
+    /// writes are linked by session plus turn instead.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cause_boundary_id: Option<String>,
+    pub commit_index: usize,
+    pub turn_index: usize,
+    pub revision_before: u64,
+    pub revision_after: u64,
+    pub components: Vec<CheckpointComponentWrite>,
+}
+
+impl CheckpointWriteEvent {
+    pub fn has_unchanged_ref(&self) -> bool {
+        self.components
+            .iter()
+            .any(|component| component.kind == CheckpointComponentWriteKind::UnchangedRef)
+    }
+
+    pub fn attributed_session(&self) -> &str {
+        self.attributed_session_id
+            .as_deref()
+            .unwrap_or(&self.session_id)
+    }
+}
+
+/// Shared sink used by every store handle created during one generated run.
+///
+/// This observes commits made through decorated `SessionStoreFactory` handles.
+/// `DurableProcessWorker` task bodies currently construct a bare
+/// `InMemorySessionStore` inside lash-core and are therefore explicitly outside
+/// this collector's coverage; transcript consumers are warned at the renderer
+/// boundary too.
+#[derive(Clone, Debug, Default)]
+pub struct CheckpointWriteCollector {
+    state: Arc<Mutex<CheckpointWriteCollectorState>>,
+    #[cfg(test)]
+    ref_only_mutation: Option<RefOnlyCommitMutation>,
+}
+
+#[derive(Debug, Default)]
+struct CheckpointWriteCollectorState {
+    events: Vec<CheckpointWriteEvent>,
+    next_commit_by_session: BTreeMap<String, usize>,
+}
+
+#[cfg(test)]
+#[derive(Clone, Debug)]
+struct RefOnlyCommitMutation {
+    session_id: String,
+    revision_before: u64,
+}
+
+impl CheckpointWriteCollector {
+    /// Configure the regression-test mutation that reproduces the missing-body
+    /// defect: when an updated component also carries its prior ref, drop the
+    /// body before the backend sees the commit.
+    #[cfg(test)]
+    pub fn with_ref_only_mutation(session_id: impl Into<String>, revision_before: u64) -> Self {
+        Self {
+            state: Arc::default(),
+            ref_only_mutation: Some(RefOnlyCommitMutation {
+                session_id: session_id.into(),
+                revision_before,
+            }),
+        }
+    }
+
+    pub fn events(&self) -> Vec<CheckpointWriteEvent> {
+        let mut events = self
+            .state
+            .lock()
+            .expect("checkpoint-write collector lock")
+            .events
+            .clone();
+        events.sort_by(|left, right| {
+            (
+                left.attributed_session(),
+                left.revision_before,
+                left.revision_after,
+                left.commit_index,
+            )
+                .cmp(&(
+                    right.attributed_session(),
+                    right.revision_before,
+                    right.revision_after,
+                    right.commit_index,
+                ))
+        });
+        events
+    }
+
+    pub(crate) fn push(&self, mut event: CheckpointWriteEvent) {
+        let mut state = self.state.lock().expect("checkpoint-write collector lock");
+        let session_id = event.attributed_session().to_string();
+        let next = state.next_commit_by_session.entry(session_id).or_insert(0);
+        *next += 1;
+        event.commit_index = *next;
+        state.events.push(event);
+    }
+
+    #[cfg(test)]
+    fn apply_mutation(&self, commit: &mut RuntimeCommit) {
+        let Some(mutation) = &self.ref_only_mutation else {
+            return;
+        };
+        if commit.session_id != mutation.session_id
+            || commit.expected_head_revision != mutation.revision_before
+        {
+            return;
+        }
+        if commit.checkpoint.tool_state_ref.is_some() {
+            commit.checkpoint.tool_state = None;
+        }
+        if commit.checkpoint.plugin_snapshot_ref.is_some() {
+            commit.checkpoint.plugin_snapshot = None;
+        }
+        if commit.checkpoint.execution_state_ref.is_some() {
+            commit.checkpoint.execution_state = None;
+        }
+    }
+}
+
+/// Simulator-only store factory decorator. It preserves the backend contract
+/// exactly and adds observation only after a real commit succeeds.
+pub struct ObservedSessionStoreFactory {
+    inner: Arc<dyn SessionStoreFactory>,
+    collector: CheckpointWriteCollector,
+}
+
+impl ObservedSessionStoreFactory {
+    pub fn new(inner: Arc<dyn SessionStoreFactory>, collector: CheckpointWriteCollector) -> Self {
+        Self { inner, collector }
+    }
+
+    fn wrap(&self, inner: Arc<dyn RuntimePersistence>) -> Arc<dyn RuntimePersistence> {
+        Arc::new(ObservedSessionStore {
+            inner,
+            collector: self.collector.clone(),
+        })
+    }
+}
+
+#[async_trait::async_trait]
+impl SessionStoreFactory for ObservedSessionStoreFactory {
+    async fn create_store(
+        &self,
+        request: &SessionStoreCreateRequest,
+    ) -> Result<Arc<dyn RuntimePersistence>, StoreError> {
+        Ok(self.wrap(self.inner.create_store(request).await?))
+    }
+
+    async fn open_existing_store(
+        &self,
+        request: &SessionStoreCreateRequest,
+    ) -> Result<Option<Arc<dyn RuntimePersistence>>, String> {
+        Ok(self
+            .inner
+            .open_existing_store(request)
+            .await?
+            .map(|store| self.wrap(store)))
+    }
+
+    async fn delete_session(&self, session_id: &str) -> Result<(), String> {
+        self.inner.delete_session(session_id).await
+    }
+
+    async fn pin(&self, node_id: &str) -> Result<ForkPoint, StoreError> {
+        self.inner.pin(node_id).await
+    }
+
+    async fn unpin(&self, node_id: &str) -> Result<(), StoreError> {
+        self.inner.unpin(node_id).await
+    }
+
+    async fn fork_points(&self) -> Result<Vec<ForkPoint>, StoreError> {
+        self.inner.fork_points().await
+    }
+
+    async fn fork_at(&self, request: &ForkSessionRequest) -> Result<ForkSessionResult, StoreError> {
+        self.inner.fork_at(request).await
+    }
+
+    async fn live_attachment_refs(
+        &self,
+        intent_grace_cutoff_epoch_ms: u64,
+    ) -> Result<std::collections::BTreeSet<AttachmentId>, StoreError> {
+        self.inner
+            .live_attachment_refs(intent_grace_cutoff_epoch_ms)
+            .await
+    }
+
+    async fn has_live_attachment_ref(
+        &self,
+        attachment_id: &AttachmentId,
+        intent_grace_cutoff_epoch_ms: u64,
+    ) -> Result<bool, StoreError> {
+        self.inner
+            .has_live_attachment_ref(attachment_id, intent_grace_cutoff_epoch_ms)
+            .await
+    }
+}
+
+struct ObservedSessionStore {
+    inner: Arc<dyn RuntimePersistence>,
+    collector: CheckpointWriteCollector,
+}
+
+impl AttachmentManifest for ObservedSessionStore {
+    fn record_intent(&self, intent: AttachmentIntent) -> Result<(), StoreError> {
+        self.inner.record_intent(intent)
+    }
+
+    fn commit_refs(
+        &self,
+        session_id: &str,
+        attachment_ids: &[AttachmentId],
+    ) -> Result<(), StoreError> {
+        self.inner.commit_refs(session_id, attachment_ids)
+    }
+
+    fn list_uncommitted(
+        &self,
+        older_than_epoch_ms: u64,
+    ) -> Result<Vec<AttachmentManifestEntry>, StoreError> {
+        self.inner.list_uncommitted(older_than_epoch_ms)
+    }
+
+    fn forget_aged_uncommitted_intents(
+        &self,
+        intent_grace_cutoff_epoch_ms: u64,
+    ) -> Result<(), StoreError> {
+        self.inner
+            .forget_aged_uncommitted_intents(intent_grace_cutoff_epoch_ms)
+    }
+
+    fn has_live_ref_for_id(
+        &self,
+        attachment_id: &AttachmentId,
+        intent_grace_cutoff_epoch_ms: u64,
+    ) -> Result<bool, StoreError> {
+        self.inner
+            .has_live_ref_for_id(attachment_id, intent_grace_cutoff_epoch_ms)
+    }
+
+    fn forget(&self, session_id: &str, attachment_id: &AttachmentId) -> Result<(), StoreError> {
+        self.inner.forget(session_id, attachment_id)
+    }
+
+    fn holds_ref(
+        &self,
+        session_id: &str,
+        attachment_id: &AttachmentId,
+    ) -> Result<bool, StoreError> {
+        self.inner.holds_ref(session_id, attachment_id)
+    }
+
+    fn list_all_refs(&self) -> Result<Vec<AttachmentId>, StoreError> {
+        self.inner.list_all_refs()
+    }
+}
+
+#[async_trait::async_trait]
+impl SessionCommitStore for ObservedSessionStore {
+    async fn load_session(&self) -> Result<Option<PersistedSessionRead>, StoreError> {
+        self.inner.load_session().await
+    }
+
+    async fn load_node(
+        &self,
+        node_id: &str,
+    ) -> Result<Option<lash_core::SessionNodeRecord>, StoreError> {
+        self.inner.load_node(node_id).await
+    }
+
+    #[allow(unused_mut)]
+    async fn commit_runtime_state(
+        &self,
+        mut commit: RuntimeCommit,
+    ) -> Result<RuntimeCommitResult, StoreError> {
+        #[cfg(test)]
+        self.collector.apply_mutation(&mut commit);
+        let event = checkpoint_write_event(&commit);
+        let result = self.inner.commit_runtime_state(commit).await?;
+        self.collector.push(CheckpointWriteEvent {
+            revision_after: result.head_revision,
+            ..event
+        });
+        Ok(result)
+    }
+
+    async fn admit_and_bind_session(
+        &self,
+        binding: &SessionBinding,
+    ) -> Result<SessionAdmission, StoreError> {
+        self.inner.admit_and_bind_session(binding).await
+    }
+
+    async fn save_session_meta(&self, meta: SessionMeta) -> Result<(), StoreError> {
+        self.inner.save_session_meta(meta).await
+    }
+
+    async fn load_session_meta(&self) -> Result<Option<SessionMeta>, StoreError> {
+        self.inner.load_session_meta().await
+    }
+}
+
+fn checkpoint_write_event(commit: &RuntimeCommit) -> CheckpointWriteEvent {
+    let checkpoint = &commit.checkpoint;
+    let mut components = vec![CheckpointComponentWrite {
+        component: CheckpointComponent::TurnState,
+        kind: CheckpointComponentWriteKind::Stored {
+            logical_bytes: logical_encoded_len(&checkpoint.turn_state).ok(),
+        },
+    }];
+    record_component(
+        &mut components,
+        CheckpointComponent::ToolState,
+        checkpoint.tool_state_ref.as_ref(),
+        checkpoint.tool_state.as_ref().map(logical_encoded_len),
+    );
+    record_component(
+        &mut components,
+        CheckpointComponent::PluginSnapshot,
+        checkpoint.plugin_snapshot_ref.as_ref(),
+        checkpoint.plugin_snapshot.as_ref().map(logical_encoded_len),
+    );
+    record_component(
+        &mut components,
+        CheckpointComponent::ExecutionState,
+        checkpoint.execution_state_ref.as_ref(),
+        checkpoint.execution_state.as_ref().map(logical_encoded_len),
+    );
+    CheckpointWriteEvent {
+        schema: CHECKPOINT_WRITE_EVENT_SCHEMA.to_string(),
+        session_id: commit.session_id.clone(),
+        attributed_session_id: None,
+        cause_boundary_id: None,
+        commit_index: 0,
+        turn_index: commit.checkpoint.turn_state.turn_index,
+        revision_before: commit.expected_head_revision,
+        revision_after: 0,
+        components,
+    }
+}
+
+fn logical_encoded_len(value: &impl Serialize) -> Result<usize, serde_json::Error> {
+    serde_json::to_vec(value).map(|bytes| bytes.len())
+}
+
+fn record_component(
+    components: &mut Vec<CheckpointComponentWrite>,
+    component: CheckpointComponent,
+    component_ref: Option<&BlobRef>,
+    logical_bytes: Option<Result<usize, serde_json::Error>>,
+) {
+    let kind = if let Some(logical_bytes) = logical_bytes {
+        Some(CheckpointComponentWriteKind::Stored {
+            logical_bytes: logical_bytes.ok(),
+        })
+    } else if component_ref.is_some() {
+        Some(CheckpointComponentWriteKind::UnchangedRef)
+    } else {
+        None
+    };
+    if let Some(kind) = kind {
+        components.push(CheckpointComponentWrite { component, kind });
+    }
+}
+
+#[async_trait::async_trait]
+impl TurnInputStore for ObservedSessionStore {
+    async fn enqueue_pending_turn_input(
+        &self,
+        input: PendingTurnInputDraft,
+    ) -> Result<PendingTurnInput, StoreError> {
+        self.inner.enqueue_pending_turn_input(input).await
+    }
+
+    async fn list_pending_turn_inputs(
+        &self,
+        session_id: &str,
+    ) -> Result<Vec<PendingTurnInput>, StoreError> {
+        self.inner.list_pending_turn_inputs(session_id).await
+    }
+
+    async fn list_turn_input_applications(
+        &self,
+        session_id: &str,
+    ) -> Result<Vec<TurnInputApplication>, StoreError> {
+        self.inner.list_turn_input_applications(session_id).await
+    }
+
+    async fn cancel_pending_turn_input(
+        &self,
+        session_id: &str,
+        input_id: &str,
+    ) -> Result<PendingTurnInputCancelOutcome, StoreError> {
+        self.inner
+            .cancel_pending_turn_input(session_id, input_id)
+            .await
+    }
+
+    async fn cancel_pending_turn_inputs(
+        &self,
+        session_id: &str,
+        targets: &[PendingTurnInputCancelTarget],
+    ) -> Result<Vec<PendingTurnInputCancelResult>, StoreError> {
+        self.inner
+            .cancel_pending_turn_inputs(session_id, targets)
+            .await
+    }
+
+    async fn cancel_pending_turn_input_suffix(
+        &self,
+        session_id: &str,
+        anchor: &PendingTurnInputCancelTarget,
+    ) -> Result<lash_core::PendingTurnInputSuffixCancelOutcome, StoreError> {
+        self.inner
+            .cancel_pending_turn_input_suffix(session_id, anchor)
+            .await
+    }
+
+    async fn claim_active_turn_inputs(
+        &self,
+        session_id: &str,
+        session_execution_lease: &SessionExecutionLeaseFence,
+        owner: &LeaseOwnerIdentity,
+        turn_id: &str,
+        checkpoint: CheckpointKind,
+        max_inputs: usize,
+    ) -> Result<Option<TurnInputClaim>, StoreError> {
+        self.inner
+            .claim_active_turn_inputs(
+                session_id,
+                session_execution_lease,
+                owner,
+                turn_id,
+                checkpoint,
+                max_inputs,
+            )
+            .await
+    }
+
+    async fn claim_next_turn_inputs(
+        &self,
+        session_id: &str,
+        session_execution_lease: &SessionExecutionLeaseFence,
+        owner: &LeaseOwnerIdentity,
+        max_inputs: usize,
+    ) -> Result<Option<TurnInputClaim>, StoreError> {
+        self.inner
+            .claim_next_turn_inputs(session_id, session_execution_lease, owner, max_inputs)
+            .await
+    }
+
+    async fn abandon_turn_input_claim(&self, claim: &TurnInputClaim) -> Result<(), StoreError> {
+        self.inner.abandon_turn_input_claim(claim).await
+    }
+
+    async fn abandon_turn_input_claims(&self, claims: &[TurnInputClaim]) -> Result<(), StoreError> {
+        self.inner.abandon_turn_input_claims(claims).await
+    }
+}
+
+#[async_trait::async_trait]
+impl SessionExecutionLeaseStore for ObservedSessionStore {
+    async fn try_claim_session_execution_lease(
+        &self,
+        session_id: &str,
+        owner: &LeaseOwnerIdentity,
+        lease_ttl_ms: u64,
+    ) -> Result<SessionExecutionLeaseClaimOutcome, StoreError> {
+        self.inner
+            .try_claim_session_execution_lease(session_id, owner, lease_ttl_ms)
+            .await
+    }
+
+    async fn renew_session_execution_lease(
+        &self,
+        fence: &SessionExecutionLeaseFence,
+        lease_ttl_ms: u64,
+    ) -> Result<SessionExecutionLease, StoreError> {
+        self.inner
+            .renew_session_execution_lease(fence, lease_ttl_ms)
+            .await
+    }
+
+    async fn release_session_execution_lease(
+        &self,
+        completion: &SessionExecutionLeaseCompletion,
+    ) -> Result<(), StoreError> {
+        self.inner.release_session_execution_lease(completion).await
+    }
+}
+
+#[async_trait::async_trait]
+impl lash_core::QueuedWorkStore for ObservedSessionStore {
+    async fn enqueue_queued_work(
+        &self,
+        batch: QueuedWorkBatchDraft,
+    ) -> Result<QueuedWorkBatch, StoreError> {
+        self.inner.enqueue_queued_work(batch).await
+    }
+
+    async fn claim_leading_ready_session_command(
+        &self,
+        session_id: &str,
+        session_execution_lease: &SessionExecutionLeaseFence,
+        owner: &LeaseOwnerIdentity,
+    ) -> Result<Option<QueuedWorkClaim>, StoreError> {
+        self.inner
+            .claim_leading_ready_session_command(session_id, session_execution_lease, owner)
+            .await
+    }
+
+    async fn claim_ready_queued_work(
+        &self,
+        session_id: &str,
+        session_execution_lease: &SessionExecutionLeaseFence,
+        owner: &LeaseOwnerIdentity,
+        boundary: QueuedWorkClaimBoundary,
+        max_batches: usize,
+    ) -> Result<Option<QueuedWorkClaim>, StoreError> {
+        self.inner
+            .claim_ready_queued_work(
+                session_id,
+                session_execution_lease,
+                owner,
+                boundary,
+                max_batches,
+            )
+            .await
+    }
+
+    async fn claim_checkpoint_work(
+        &self,
+        session_id: &str,
+        session_execution_lease: &SessionExecutionLeaseFence,
+        owner: &LeaseOwnerIdentity,
+        turn_id: &str,
+        checkpoint: CheckpointKind,
+        max_inputs: usize,
+        max_batches: usize,
+    ) -> Result<(Option<TurnInputClaim>, Option<QueuedWorkClaim>), StoreError> {
+        self.inner
+            .claim_checkpoint_work(
+                session_id,
+                session_execution_lease,
+                owner,
+                turn_id,
+                checkpoint,
+                max_inputs,
+                max_batches,
+            )
+            .await
+    }
+
+    async fn claim_ready_queued_work_by_batch_ids(
+        &self,
+        session_id: &str,
+        session_execution_lease: &SessionExecutionLeaseFence,
+        owner: &LeaseOwnerIdentity,
+        boundary: QueuedWorkClaimBoundary,
+        batch_ids: &[String],
+    ) -> Result<Option<QueuedWorkClaim>, StoreError> {
+        self.inner
+            .claim_ready_queued_work_by_batch_ids(
+                session_id,
+                session_execution_lease,
+                owner,
+                boundary,
+                batch_ids,
+            )
+            .await
+    }
+
+    async fn abandon_queued_work_claim(&self, claim: &QueuedWorkClaim) -> Result<(), StoreError> {
+        self.inner.abandon_queued_work_claim(claim).await
+    }
+
+    async fn abandon_queued_work_claims(
+        &self,
+        claims: &[QueuedWorkClaim],
+    ) -> Result<(), StoreError> {
+        self.inner.abandon_queued_work_claims(claims).await
+    }
+
+    async fn cancel_queued_work_batch(
+        &self,
+        session_id: &str,
+        batch_id: &str,
+    ) -> Result<Option<QueuedWorkBatch>, StoreError> {
+        self.inner
+            .cancel_queued_work_batch(session_id, batch_id)
+            .await
+    }
+
+    async fn list_queued_work(&self, session_id: &str) -> Result<Vec<QueuedWorkBatch>, StoreError> {
+        self.inner.list_queued_work(session_id).await
+    }
+
+    async fn list_pending_queued_work(
+        &self,
+        session_id: &str,
+    ) -> Result<Vec<QueuedWorkBatch>, StoreError> {
+        self.inner.list_pending_queued_work(session_id).await
+    }
+}
+
+#[async_trait::async_trait]
+impl StoreMaintenance for ObservedSessionStore {
+    async fn vacuum(&self) -> Result<VacuumReport, StoreError> {
+        self.inner.vacuum().await
+    }
+
+    async fn gc_unreachable(&self) -> Result<GcReport, StoreError> {
+        self.inner.gc_unreachable().await
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::BTreeMap;
+
+    use super::*;
+
+    #[test]
+    fn logical_size_failure_degrades_to_unknown_stored_size() {
+        let unsupported_json_key = BTreeMap::from([((1_u8, 2_u8), 3_u8)]);
+        let size = logical_encoded_len(&unsupported_json_key);
+        assert!(size.is_err(), "fixture must be invalid JSON");
+
+        let mut components = Vec::new();
+        record_component(
+            &mut components,
+            CheckpointComponent::ToolState,
+            None,
+            Some(size),
+        );
+        assert_eq!(
+            components,
+            vec![CheckpointComponentWrite {
+                component: CheckpointComponent::ToolState,
+                kind: CheckpointComponentWriteKind::Stored {
+                    logical_bytes: None,
+                },
+            }]
+        );
+    }
+}

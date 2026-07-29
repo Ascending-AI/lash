@@ -2385,6 +2385,7 @@ dependencies = [
  "async-trait",
  "bytes",
  "chrono",
+ "insta",
  "lash-core",
  "lash-lashlang-runtime",
  "lash-llm-transport",
