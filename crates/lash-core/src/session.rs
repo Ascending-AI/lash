@@ -87,6 +87,12 @@ pub enum SessionError {
         provider_id: String,
         session_id: String,
     },
+    #[error("{context}: {source}")]
+    Store {
+        context: String,
+        #[source]
+        source: crate::StoreError,
+    },
     #[error("protocol error: {0}")]
     Protocol(String),
 }
