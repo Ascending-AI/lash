@@ -48,12 +48,12 @@ fn cron_sync_classifies_permanent_errors_terminal_and_unknown_errors_retryable()
 
 #[test]
 fn runtime_shape_uses_the_shared_terminal_classifier() {
-    let error = AppError::runtime(lash::EmbedError::Session(lash::SessionError::Store {
-        context: "failed to bind retired session".to_string(),
-        source: lash::persistence::StoreError::SessionDeleted {
-            session_id: "retired-session".to_string(),
-        },
-    }));
+    let error = AppError::runtime(lash::EmbedError::Runtime(
+        lash_core::RuntimeError::new("runtime_store", "retired controller-owned session")
+            .with_cause(lash_core::RuntimeErrorCause::SessionDeleted {
+                session_id: "retired-session".to_string(),
+            }),
+    ));
 
     assert!(error.terminal);
     assert!(!error.retryable);

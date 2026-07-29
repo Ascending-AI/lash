@@ -9,6 +9,8 @@ use crate::{
 };
 
 mod execution_context;
+#[cfg(test)]
+mod fig790_tests;
 pub(crate) mod process_handles;
 mod tool_execution;
 

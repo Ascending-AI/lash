@@ -709,6 +709,9 @@ fn deleted_session_details(error: &lash::EmbedError) -> Option<(&str, Option<&st
         lash::EmbedError::Session(lash::SessionError::Store { context, source }) => {
             (source, Some(context.as_str()))
         }
+        lash::EmbedError::Runtime(error) => {
+            return error.deleted_session_id().map(|session_id| (session_id, None));
+        }
         _ => return None,
     };
     match source {

@@ -12,6 +12,8 @@ pub struct RuntimeEffectControllerError {
     pub message: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub summary: Option<crate::runtime::effect::RuntimeEffectReplayMismatchSummary>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cause: Option<crate::RuntimeErrorCause>,
 }
 
 impl RuntimeEffectControllerError {
@@ -20,6 +22,7 @@ impl RuntimeEffectControllerError {
             code: code.into(),
             message: message.into(),
             summary: None,
+            cause: None,
         }
     }
 
@@ -46,24 +49,49 @@ impl RuntimeEffectControllerError {
     }
 
     pub(crate) fn into_runtime_error(self) -> RuntimeError {
-        RuntimeError::new(self.code, self.message)
+        let runtime = RuntimeError::new(self.code, self.message);
+        match self.cause {
+            Some(cause) => runtime.with_cause(cause),
+            None => runtime,
+        }
     }
 }
 
 impl From<RuntimeError> for RuntimeEffectControllerError {
     fn from(err: RuntimeError) -> Self {
-        Self::new(err.code.as_str(), err.message)
+        Self {
+            code: err.code.as_str().to_string(),
+            message: err.message,
+            summary: None,
+            cause: err.cause,
+        }
     }
 }
 
 impl From<PluginError> for RuntimeEffectControllerError {
     fn from(err: PluginError) -> Self {
-        Self::new("plugin", err.to_string())
+        match err {
+            PluginError::RuntimeEffectController(err) => err,
+            err => Self::new("plugin", err.to_string()),
+        }
     }
 }
 
 impl From<crate::StoreError> for RuntimeEffectControllerError {
     fn from(err: crate::StoreError) -> Self {
-        Self::new("runtime_store", err.to_string())
+        let cause = match &err {
+            crate::StoreError::SessionDeleted { session_id } => {
+                Some(crate::RuntimeErrorCause::SessionDeleted {
+                    session_id: session_id.clone(),
+                })
+            }
+            _ => None,
+        };
+        Self {
+            code: "runtime_store".to_string(),
+            message: err.to_string(),
+            summary: None,
+            cause,
+        }
     }
 }

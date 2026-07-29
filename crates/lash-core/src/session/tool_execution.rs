@@ -729,40 +729,26 @@ impl RuntimeExecutionContext<'_> {
         cancellation: Option<tokio_util::sync::CancellationToken>,
     ) -> Result<crate::ProcessAwaitOutput, crate::PluginError> {
         let _phase = self.named_phase("process.await_handle");
-        if let Some(cancellation) = cancellation {
-            let result = crate::runtime::release_process_execution_permit_while(async {
-                tokio::select! {
-                    result = self.dispatch.processes.await_process(
-                        process_id,
-                        self.process_scope(parent_invocation.clone()),
-                    ) => Some(result),
-                    _ = cancellation.cancelled() => None,
-                }
-            })
-            .await;
-            if let Some(result) = result {
-                result
-            } else {
-                let _ = self
-                    .dispatch
-                    .processes
-                    .cancel(
-                        &self.dispatch.session_id,
-                        process_id,
-                        self.process_scope(parent_invocation.clone()),
-                    )
-                    .await;
-                self.dispatch
-                    .processes
-                    .await_process(process_id, self.process_scope(parent_invocation))
-                    .await
-            }
-        } else {
+        let cancellation = cancellation.unwrap_or_default();
+        let turn_cancel_scope = self
+            .dispatch
+            .effect_controller
+            .scoped()
+            .execution_scope()
+            .clone();
+        let mut process_scope = self.process_scope(parent_invocation);
+        if self.observe_turn_cancel {
+            process_scope = process_scope.with_turn_cancellation(cancellation, turn_cancel_scope);
+        }
+        // FIG-790: whether a journaled command is emitted must be
+        // replay-deterministic. Emit one Process::Await unconditionally and
+        // let the effect controller observe turn cancellation only afterward.
+        crate::runtime::release_process_execution_permit_while(
             self.dispatch
                 .processes
-                .await_process(process_id, self.process_scope(parent_invocation))
-                .await
-        }
+                .await_process(process_id, process_scope),
+        )
+        .await
     }
 
     pub(crate) async fn complete_tool_call(

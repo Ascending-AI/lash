@@ -7,6 +7,7 @@ struct ProcessCommandRunner<'scope> {
     registry: Arc<dyn crate::ProcessRegistry>,
     parent_invocation: Option<crate::RuntimeInvocation>,
     effect_controller: &'scope dyn crate::RuntimeEffectController,
+    turn_cancellation: Option<crate::ProcessTurnCancellation>,
 }
 
 impl<'scope> ProcessCommandRunner<'scope> {
@@ -24,6 +25,7 @@ impl<'scope> ProcessCommandRunner<'scope> {
             registry: Arc::clone(registry),
             parent_invocation: scope.parent_invocation.clone(),
             effect_controller,
+            turn_cancellation: scope.turn_cancellation.clone(),
         })
     }
 
@@ -199,15 +201,16 @@ impl<'scope> ProcessCommandRunner<'scope> {
         // Route through the controller explicitly selected by the process
         // operation scope: host-configured for host/API paths, scoped for
         // in-turn paths.
+        let mut local_executor = crate::RuntimeEffectLocalExecutor::processes(
+            Arc::clone(&self.registry),
+            self.current.host.process_work_driver.clone(),
+        );
+        if let Some(turn_cancellation) = self.turn_cancellation.clone() {
+            local_executor = local_executor.with_process_turn_cancellation(turn_cancellation);
+        }
         let outcome = self
             .effect_controller
-            .execute_effect(
-                envelope,
-                crate::RuntimeEffectLocalExecutor::processes(
-                    Arc::clone(&self.registry),
-                    self.current.host.process_work_driver.clone(),
-                ),
-            )
+            .execute_effect(envelope, local_executor)
             .await?;
         outcome.into_process().map_err(crate::PluginError::from)
     }

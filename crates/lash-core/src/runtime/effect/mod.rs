@@ -16,9 +16,9 @@ pub use envelope::{
 pub use executor::{
     AwaitEventKey, AwaitEventResolver, AwaitEventWaitIdentity, BoundaryReason, EffectHost,
     EffectJournalIdentity, EffectJournalRetirement, ExecutionScope, ExternalCompletionError,
-    InlineRuntimeEffectController, Resolution, ResolveOutcome, RuntimeAwaitEventOptions,
-    RuntimeEffectController, RuntimeEffectControllerError, RuntimeEffectLocalExecutor,
-    RuntimeSleepOptions, ScopedEffectController, SegmentProgress,
+    InlineRuntimeEffectController, ProcessTurnCancellation, Resolution, ResolveOutcome,
+    RuntimeAwaitEventOptions, RuntimeEffectController, RuntimeEffectControllerError,
+    RuntimeEffectLocalExecutor, RuntimeSleepOptions, ScopedEffectController, SegmentProgress,
 };
 pub use inline_host::InlineEffectHost;
 pub use lash_sansio::CausalRef;

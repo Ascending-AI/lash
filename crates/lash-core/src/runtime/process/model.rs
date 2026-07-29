@@ -9,6 +9,7 @@ use super::events::{
     ProcessAwaitOutput, ProcessEventType, ProcessTerminalSemantics, ProcessTerminalState,
     default_process_event_types,
 };
+use super::op_scope::ProcessOpScope;
 use super::validation::prepare_process_registration;
 
 mod execution;
@@ -323,46 +324,6 @@ pub async fn load_process_execution_env(
             "failed to decode process execution env `{env_ref}`: {err}"
         ))
     })
-}
-
-#[derive(Clone)]
-pub struct ProcessOpScope<'scope> {
-    pub(crate) parent_invocation: Option<crate::RuntimeInvocation>,
-    pub(crate) effect_controller: crate::runtime::RuntimeEffectControllerHandle<'scope>,
-    pub(crate) agent_frame_id: Option<crate::AgentFrameId>,
-}
-
-impl<'scope> ProcessOpScope<'scope> {
-    pub fn new(scoped_effect_controller: crate::ScopedEffectController<'scope>) -> Self {
-        Self {
-            parent_invocation: None,
-            effect_controller: crate::runtime::RuntimeEffectControllerHandle::borrowed(
-                scoped_effect_controller,
-            ),
-            agent_frame_id: None,
-        }
-    }
-
-    pub fn with_parent_invocation(
-        mut self,
-        parent_invocation: Option<crate::RuntimeInvocation>,
-    ) -> Self {
-        self.parent_invocation = parent_invocation;
-        self
-    }
-
-    pub fn with_agent_frame_id(mut self, agent_frame_id: Option<crate::AgentFrameId>) -> Self {
-        self.agent_frame_id = agent_frame_id;
-        self
-    }
-
-    pub fn agent_frame_id(&self) -> Option<&str> {
-        self.agent_frame_id.as_deref()
-    }
-
-    pub(crate) fn controller(&self) -> &dyn crate::RuntimeEffectController {
-        self.effect_controller.controller()
-    }
 }
 
 #[derive(Clone, Debug, Default)]

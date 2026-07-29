@@ -6,6 +6,7 @@ mod model;
 #[cfg(test)]
 mod model_filter_tests;
 mod observation;
+mod op_scope;
 mod references;
 mod registry;
 mod service;
@@ -42,7 +43,7 @@ pub use model::{
     ProcessExecutionWriteAuthority, ProcessExternalRef, ProcessHandleDescriptor,
     ProcessHandleGrant, ProcessHandleGrantEntry, ProcessHandleSummary, ProcessId, ProcessIdentity,
     ProcessInput, ProcessLease, ProcessLeaseClaimOutcome, ProcessLeaseCompletion,
-    ProcessLifecycleStatus, ProcessListFilter, ProcessListMode, ProcessOpScope, ProcessOriginator,
+    ProcessLifecycleStatus, ProcessListFilter, ProcessListMode, ProcessOriginator,
     ProcessProvenance, ProcessRecord, ProcessRegistration, ProcessSessionDeleteReport,
     ProcessSpawnProvenance, ProcessStartGrant, ProcessStartOptions, ProcessStartOutcome,
     ProcessStartRequest, ProcessStarted, ProcessStatus, ProcessStatusFilter, RecoveryDisposition,
@@ -53,6 +54,7 @@ pub use observation::{
     ObservedProcess, ObservedProcessEvent, ObservedWorkItem, ProcessWorkObserver,
     ProcessWorkSnapshot,
 };
+pub use op_scope::ProcessOpScope;
 pub use references::ProcessLiveReferenceSummary;
 pub use registry::{
     DEFAULT_WAKE_DELIVERY_EXPIRY_MS, ProcessPruneReport, ProcessRegistry, WakeDelivery,

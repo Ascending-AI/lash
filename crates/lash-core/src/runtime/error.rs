@@ -126,11 +126,21 @@ impl<'de> serde::Deserialize<'de> for RuntimeErrorCode {
     }
 }
 
+/// Typed terminal cause retained when a controller-owned runtime effect must
+/// abort through the generic runtime error boundary.
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum RuntimeErrorCause {
+    SessionDeleted { session_id: String },
+}
+
 /// Runtime error for unexpected failures.
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct RuntimeError {
     pub code: RuntimeErrorCode,
     pub message: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cause: Option<RuntimeErrorCause>,
 }
 
 impl RuntimeError {
@@ -138,6 +148,18 @@ impl RuntimeError {
         Self {
             code: code.into(),
             message: message.into(),
+            cause: None,
+        }
+    }
+
+    pub fn with_cause(mut self, cause: RuntimeErrorCause) -> Self {
+        self.cause = Some(cause);
+        self
+    }
+
+    pub fn deleted_session_id(&self) -> Option<&str> {
+        match self.cause.as_ref()? {
+            RuntimeErrorCause::SessionDeleted { session_id } => Some(session_id),
         }
     }
 

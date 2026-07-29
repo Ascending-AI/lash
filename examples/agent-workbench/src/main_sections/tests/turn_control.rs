@@ -2,6 +2,7 @@
 mod turn_control_timeout_tests {
     use super::tests::{
         explicit_durable_test_facets, in_memory_trigger_store, run_async_test_on_stack_budget,
+        spawn_restate_ingress_capture, text_response,
     };
     use super::*;
 
@@ -398,6 +399,182 @@ mod turn_control_timeout_tests {
             recovered.for_session(&session_id),
             vec![lash::TurnAddress::new(session_id, "live-turn")]
         );
+        let _ = std::fs::remove_dir_all(data_dir);
+    }
+
+    #[test]
+    fn stop_over_real_process_await_commits_cancelled_terminal() {
+        run_async_test_on_stack_budget("workbench-stop-over-process-await-test", || {
+            stop_over_real_process_await_commits_cancelled_terminal_inner()
+        });
+    }
+
+    async fn stop_over_real_process_await_commits_cancelled_terminal_inner() {
+        let data_dir = std::env::temp_dir().join(format!(
+            "agent-workbench-stop-over-process-await-{}",
+            uuid::Uuid::new_v4()
+        ));
+        std::fs::create_dir_all(&data_dir).expect("create Stop-over-process data dir");
+        let process_registry = Arc::new(
+            lash_sqlite_store::SqliteProcessRegistry::open(
+                &data_dir.join("processes.db"),
+                data_dir.join("lash-sessions"),
+            )
+            .await
+            .expect("open process registry"),
+        ) as Arc<dyn lash::process::ProcessRegistry>;
+        let store_factory: Arc<dyn lash::persistence::SessionStoreFactory> = Arc::new(
+            lash_sqlite_store::SqliteSessionStoreFactory::new(data_dir.join("lash-sessions")),
+        );
+        let provider = lash::testing::TestProvider::builder()
+            .kind("workbench-stop-over-process-await")
+            .complete(|_| async {
+                Ok(text_response(
+                    r#"<lashlang>
+process hold_for_stop() {
+  sleep for "10m"
+  finish "unreachable"
+}
+handle = start hold_for_stop()
+finish (await handle)?
+</lashlang>"#,
+                ))
+            })
+            .build()
+            .into_handle();
+        let model =
+            lash::ModelSpec::from_token_limits("test-model", Default::default(), 4096, None)
+                .expect("model spec");
+        let core = explicit_durable_test_facets(&data_dir)
+            .provider(provider)
+            .model(model)
+            .store_factory(Arc::clone(&store_factory))
+            .process_registry(Arc::clone(&process_registry))
+            .build()
+            .expect("build Stop-over-process core");
+        let process_observer = core
+            .processes()
+            .observer()
+            .expect("process observer configured");
+        let (restate_ingress_url, mut restate_requests) = spawn_restate_ingress_capture().await;
+        let state = AppState {
+            core,
+            attachment_store: test_attachment_store(),
+            trigger_store: in_memory_trigger_store(),
+            process_observer,
+            process_work_driver: inert_process_work_driver(Arc::clone(&process_registry)),
+            session_ids: WorkbenchSessionIds::fresh(),
+            messages: Arc::new(Mutex::new(Vec::new())),
+            selected_model: Arc::new(Mutex::new(ModelSelection {
+                model: "test-model".to_string(),
+                model_variant: Default::default(),
+            })),
+            web_configured: false,
+            trace_sink: None,
+            lashlang_execution: Arc::new(TraceLashlangGraphStore::default()),
+            event_tx: SessionEventRegistry::new(16),
+            queued_work_driver: inert_queued_work_driver(),
+            restate_ingress_url,
+            restate_admin_url: "http://127.0.0.1:9070".to_string(),
+            restate_http: reqwest::Client::new(),
+            restate_cron_job_keys: Arc::new(Mutex::new(BTreeSet::new())),
+            mail_world: mail::MailWorld::new(),
+            active_turns: ActiveTurns::default(),
+            authorization: WorkbenchAuthorization::allow_all(),
+        };
+        let session_id = state.current_session_id();
+        let turn_text = "start and await the held process";
+        let Json(accepted) = send_turn(
+            State(state.clone()),
+            Query(SessionQuery::default()),
+            Json(TurnRequest {
+                text: turn_text.to_string(),
+                model: Some("test-model".to_string()),
+                model_variant: None,
+                attachment_id: None,
+            }),
+        )
+        .await
+        .expect("send process-await turn through the production handler");
+        assert!(accepted.accepted);
+        let submitted = restate_requests
+            .recv()
+            .await
+            .expect("capture submitted process-await Restate turn");
+        let turn_id = submitted
+            .pointer("/body/turn_id")
+            .and_then(Value::as_str)
+            .expect("submitted process-await turn id")
+            .to_string();
+        let session = state
+            .core
+            .session(session_id.clone())
+            .open()
+            .await
+            .expect("open submitted Stop-over-process session");
+        let run_turn_id = turn_id.clone();
+        let turn = tokio::spawn(async move {
+            session
+                .turn(lash::TurnInput::text(turn_text))
+                .turn_id(run_turn_id)
+                .run()
+                .await
+        });
+
+        let process_id = tokio::time::timeout(Duration::from_secs(10), async {
+            loop {
+                let live = process_registry
+                    .list_non_terminal()
+                    .await
+                    .expect("list live process while turn awaits");
+                if let [process] = live.as_slice() {
+                    break process.id.clone();
+                }
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("turn must reach a real process await");
+
+        let Json(receipt) = cancel_turn(
+            State(state.clone()),
+            Query(SessionQuery {
+                session_id: Some(session_id.clone()),
+            }),
+        )
+        .await
+        .expect("production Stop handler must cancel the process-await turn");
+        let turn = turn
+            .await
+            .expect("Stop-over-process turn joins")
+            .expect("Stop-over-process turn commits");
+
+        assert!(receipt.accepted);
+        assert!(matches!(
+            receipt.cancellations.as_slice(),
+            [TurnCancelReceipt {
+                terminal: Some(lash::TurnTerminal::Committed {
+                    outcome: lash::TurnOutcome::Stopped(lash::TurnStop::Cancelled),
+                    cancellation: Some(_),
+                    ..
+                }),
+                ..
+            }]
+        ));
+        assert!(matches!(
+            turn.result.outcome,
+            lash::TurnOutcome::Stopped(lash::TurnStop::Cancelled)
+        ));
+        assert!(matches!(
+            process_registry
+                .get_process(&process_id)
+                .await
+                .expect("process record after Stop")
+                .status
+                .await_output(),
+            Some(lash::process::ProcessAwaitOutput::Cancelled { .. })
+        ));
+        assert!(state.active_turns.for_session(&session_id).is_empty());
         let _ = std::fs::remove_dir_all(data_dir);
     }
 }

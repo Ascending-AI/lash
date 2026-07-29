@@ -159,16 +159,19 @@ impl EmbedError {
             | Self::DurableEffectHostRequiresHandlerContext { .. }
             | Self::StaticTurnStreamRequiresStaticEffectHost => true,
             Self::Store(lash_core::StoreError::SessionDeleted { .. }) => true,
-            Self::Runtime(err) => matches!(
-                err.code,
-                RuntimeErrorCode::MissingExecutionScopeId
-                    | RuntimeErrorCode::ExecutionScopeTurnIdMismatch
-                    | RuntimeErrorCode::MissingProcessExecutionId
-                    | RuntimeErrorCode::StoreCommitNodeBudgetExceeded
-                    | RuntimeErrorCode::StoreCommitByteBudgetExceeded
-                    | RuntimeErrorCode::DurableEffectLiveProtocolExtension
-                    | RuntimeErrorCode::DurableEffectLivePluginInput
-            ),
+            Self::Runtime(err) => {
+                err.deleted_session_id().is_some()
+                    || matches!(
+                        err.code,
+                        RuntimeErrorCode::MissingExecutionScopeId
+                            | RuntimeErrorCode::ExecutionScopeTurnIdMismatch
+                            | RuntimeErrorCode::MissingProcessExecutionId
+                            | RuntimeErrorCode::StoreCommitNodeBudgetExceeded
+                            | RuntimeErrorCode::StoreCommitByteBudgetExceeded
+                            | RuntimeErrorCode::DurableEffectLiveProtocolExtension
+                            | RuntimeErrorCode::DurableEffectLivePluginInput
+                    )
+            }
             Self::Session(err) => matches!(
                 err,
                 SessionError::ProviderMismatch { .. }
@@ -190,7 +193,7 @@ pub type Result<T> = std::result::Result<T, EmbedError>;
 #[cfg(test)]
 mod tests {
     use super::EmbedError;
-    use lash_core::{RuntimeError, RuntimeErrorCode, SessionError, StoreError};
+    use lash_core::{RuntimeError, RuntimeErrorCause, RuntimeErrorCode, SessionError, StoreError};
 
     fn runtime_error(code: RuntimeErrorCode) -> EmbedError {
         EmbedError::Runtime(RuntimeError::new(code, "test"))
@@ -255,8 +258,15 @@ mod tests {
                 session_id: "retired-wrapped".to_string(),
             },
         });
+        let controller_owned = EmbedError::Runtime(
+            RuntimeError::new("runtime_store", "retired controller-owned session").with_cause(
+                RuntimeErrorCause::SessionDeleted {
+                    session_id: "retired-controller-owned".to_string(),
+                },
+            ),
+        );
 
-        for error in [direct, wrapped] {
+        for error in [direct, wrapped, controller_owned] {
             assert!(error.is_terminal(), "{error}");
             assert!(!error.is_retryable(), "{error}");
         }

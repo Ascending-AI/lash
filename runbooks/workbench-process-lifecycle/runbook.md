@@ -100,6 +100,11 @@ Use the reset/new-session control while capturing its HTTP response, or issue
 - `process_handle_grants` has no grants for the deleted session;
 - `/api/work` and the rendered work rail still show both original process ids.
 
+The production delete path first revokes the old session's active durable waits and
+allows those turns to settle as typed deleted-session refusals; only then does it remove
+the session store. This ordering lets a suspended turn replay its existing journal while
+ensuring revocation never becomes process-cancellation authority.
+
 The last item is the judged crown-jewel checkpoint: screenshot the new session identity
 and still-live process cards together as `02-owner-gone-processes-live.png`. Save the API,
 trace, and database extracts as `02-after-delete-*.json`.

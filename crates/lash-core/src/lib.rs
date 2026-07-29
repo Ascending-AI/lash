@@ -384,6 +384,8 @@ pub use provider::{
 pub use runtime::TestLocalProcessRegistry;
 #[cfg(any(test, feature = "testing"))]
 pub use runtime::TestProcessRegistryWriteExt;
+#[doc(hidden)]
+pub use runtime::drive_with_event_pump;
 pub use runtime::promise_semantics;
 pub use runtime::{
     AbandonEvidence, AbandonRequest, AbandonWriter, AgentFrameRun, AssembledTurn, AssistantOutput,
@@ -418,15 +420,15 @@ pub use runtime::{
     ProcessRunOutcome, ProcessRuntimeHost, ProcessService, ProcessSessionDeleteReport,
     ProcessSpawnProvenance, ProcessStartGrant, ProcessStartOptions, ProcessStartOutcome,
     ProcessStartPlan, ProcessStartRequest, ProcessStarted, ProcessStatus, ProcessStatusFilter,
-    ProcessTerminalSemantics, ProcessTerminalSpec, ProcessTerminalState, ProcessValueSelector,
-    ProcessWake, ProcessWakeDelivery, ProcessWakeDeliveryRequest, ProcessWakeSpec,
-    ProcessWorkDriver, ProcessWorkObserver, ProcessWorkSnapshot, PromptUsage,
+    ProcessTerminalSemantics, ProcessTerminalSpec, ProcessTerminalState, ProcessTurnCancellation,
+    ProcessValueSelector, ProcessWake, ProcessWakeDelivery, ProcessWakeDeliveryRequest,
+    ProcessWakeSpec, ProcessWorkDriver, ProcessWorkObserver, ProcessWorkSnapshot, PromptUsage,
     ProtocolSessionExtension, ProtocolSessionExtensionHandle, ProtocolTurnExtension,
     ProtocolTurnExtensionHandle, QueuedWorkDriver, QueuedWorkRunError, QueuedWorkRunErrorClass,
     QueuedWorkRunHandle, QueuedWorkRunRequest, QueuedWorkWakeDisposition, QueuedWorkWakeFailure,
     RecoveryDisposition, Resolution, ResolveOutcome, RuntimeEnvironment, RuntimeEnvironmentBuilder,
-    RuntimeError, RuntimeErrorCode, RuntimeHandle, RuntimeHostConfig, RuntimeObservation,
-    ScopedEffectController, SegmentHandover, SegmentProgress, SessionCommand,
+    RuntimeError, RuntimeErrorCause, RuntimeErrorCode, RuntimeHandle, RuntimeHostConfig,
+    RuntimeObservation, ScopedEffectController, SegmentHandover, SegmentProgress, SessionCommand,
     SessionCommandReceipt, SessionCursor, SessionCursorError, SessionObservation,
     SessionObservationEvent, SessionObservationEventPayload, SessionObservationSubscription,
     SessionProcessEventKind, SessionQueueEventKind, SessionResume, SessionRevision, SessionScope,

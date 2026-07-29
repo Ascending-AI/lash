@@ -3,9 +3,9 @@ use crate::plugin::PluginError;
 use super::events::{ProcessAwaitOutput, ProcessEvent};
 use super::model::{
     ProcessCancelSummary, ProcessCompletionOutcome, ProcessHandleGrantEntry, ProcessHandleSummary,
-    ProcessListMode, ProcessOpScope, ProcessRecord, ProcessRegistration, ProcessStartOptions,
-    ProcessStartRequest,
+    ProcessListMode, ProcessRecord, ProcessRegistration, ProcessStartOptions, ProcessStartRequest,
 };
+use super::op_scope::ProcessOpScope;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ProcessCancelSource {

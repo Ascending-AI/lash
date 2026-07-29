@@ -79,9 +79,30 @@ pub(crate) trait ProcessRunner: Send + Sync {
     ) -> Result<crate::ProcessRunOutcome, crate::ProcessInfraError>;
 }
 
+/// Valid turn-cancellation controls for a process operation.
+///
+/// Presence means the process operation observes the exact turn gate; absence
+/// means it does not. Keeping token and scope together makes an enabled
+/// observation without a durable scope unrepresentable.
+#[derive(Clone)]
+pub struct ProcessTurnCancellation {
+    pub cancellation: CancellationToken,
+    pub scope: crate::ExecutionScope,
+}
+
+impl ProcessTurnCancellation {
+    pub fn new(cancellation: CancellationToken, scope: crate::ExecutionScope) -> Self {
+        Self {
+            cancellation,
+            scope,
+        }
+    }
+}
+
 pub struct ProcessLocalExecution {
     pub registry: Arc<dyn ProcessRegistry>,
     pub process_work_driver: Option<crate::ProcessWorkDriver>,
+    pub turn_cancellation: Option<ProcessTurnCancellation>,
 }
 
 impl ProcessLocalExecution {
@@ -92,6 +113,7 @@ impl ProcessLocalExecution {
         let Self {
             registry,
             process_work_driver,
+            turn_cancellation,
         } = self;
         match command {
             ProcessCommand::Start {
@@ -138,12 +160,31 @@ impl ProcessLocalExecution {
                 Ok(ProcessEffectOutcome::DeleteSession { report })
             }
             ProcessCommand::Await { process_id } => {
-                let output = if let Some(driver) = process_work_driver.as_ref() {
-                    driver.await_terminal(&process_id).await?
+                let await_terminal = || async {
+                    if let Some(driver) = process_work_driver.as_ref() {
+                        driver.await_terminal(&process_id).await
+                    } else {
+                        crate::ProcessAwaiter::polling(Arc::clone(&registry))
+                            .await_terminal(&process_id)
+                            .await
+                    }
+                };
+                let output = if let Some(turn_cancellation) = turn_cancellation {
+                    tokio::select! {
+                        biased;
+                        output = await_terminal() => output?,
+                        _ = turn_cancellation.cancellation.cancelled() => {
+                            InlineRuntimeEffectController::request_process_cancel(
+                                Arc::clone(&registry),
+                                &process_id,
+                                Some("turn cancelled while awaiting process".to_string()),
+                            )
+                            .await?;
+                            await_terminal().await?
+                        }
+                    }
                 } else {
-                    crate::ProcessAwaiter::polling(registry)
-                        .await_terminal(&process_id)
-                        .await?
+                    await_terminal().await?
                 };
                 Ok(ProcessEffectOutcome::Await {
                     output: Box::new(output),
@@ -371,6 +412,21 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
         self
     }
 
+    #[doc(hidden)]
+    pub fn with_process_turn_cancellation(
+        mut self,
+        turn_cancellation: ProcessTurnCancellation,
+    ) -> Self {
+        if let RuntimeEffectLocalExecutorState::Process(ProcessLocalExecution {
+            turn_cancellation: current,
+            ..
+        }) = &mut self.state
+        {
+            *current = Some(turn_cancellation);
+        }
+        self
+    }
+
     pub fn processes(
         registry: Arc<dyn ProcessRegistry>,
         process_work_driver: Option<crate::ProcessWorkDriver>,
@@ -379,6 +435,7 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
             state: RuntimeEffectLocalExecutorState::Process(ProcessLocalExecution {
                 registry,
                 process_work_driver,
+                turn_cancellation: None,
             }),
             replay_trace: None,
         }
@@ -1002,21 +1059,20 @@ impl RuntimeEffectLocalRunner for LocalTurnEffectRunner {
                     triggers: outcome.triggers,
                 }),
             RuntimeEffectCommand::ExecCode { language, code } => {
+                let result = runner
+                    .driver
+                    .run_exec_code(
+                        language,
+                        &code,
+                        runner.messages.clone(),
+                        runner.protocol_iteration,
+                        envelope.invocation,
+                        &runner.event_tx,
+                        &runner.cancellation,
+                    )
+                    .await?;
                 Ok(RuntimeEffectOutcome::ExecCode {
-                    result: Box::new(
-                        runner
-                            .driver
-                            .run_exec_code(
-                                language,
-                                &code,
-                                runner.messages.clone(),
-                                runner.protocol_iteration,
-                                envelope.invocation,
-                                &runner.event_tx,
-                                &runner.cancellation,
-                            )
-                            .await,
-                    ),
+                    result: Box::new(result),
                 })
             }
             RuntimeEffectCommand::Checkpoint { checkpoint } => {
