@@ -8,7 +8,18 @@ error[E0425]: cannot find type `SessionCursor` in crate `lash`
  --> tests/ui/taxonomy_types_are_not_root.rs:6:25
   |
 6 |     let _: Option<lash::SessionCursor> = None;
-  |                         ^^^^^^^^^^^^^ not found in `lash`
+  |                         ^^^^^^^^^^^^^
+  |
+ ::: $WORKSPACE/crates/lash-core/src/session.rs
+  |
+  | pub enum SessionError {
+  | --------------------- similarly named enum `SessionError` defined here
+  |
+help: an enum with a similar name exists
+  |
+6 -     let _: Option<lash::SessionCursor> = None;
+6 +     let _: Option<lash::SessionError> = None;
+  |
 
 error[E0425]: cannot find type `SessionResume` in crate `lash`
  --> tests/ui/taxonomy_types_are_not_root.rs:7:25

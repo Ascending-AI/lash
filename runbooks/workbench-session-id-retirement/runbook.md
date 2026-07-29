@@ -29,7 +29,8 @@ receipts, the rotated id, and the typed retirement response — never on model p
    different id returned by deletion as `<rotated-id>`. Never substitute one for the
    other in a gate.
 2. **Retirement is a typed refusal, not an empty view.** Opening `<retired-id>` after
-   deletion must return HTTP 409 with an `error` containing the id and
+   deletion through state, observations, turn submission, or turn-input submission must
+   return HTTP 409 with an `error` containing the id and
    `was used and deleted; session ids cannot be reused in this store`. The Workbench page
    scoped to that id must render the same explanatory refusal. A 200 with an empty
    transcript, a generic 500, or a generic rendered error is a contract violation at
@@ -69,7 +70,8 @@ receipts, the rotated id, and the typed retirement response — never on model p
   `no turns yet. ask the agent something below, or click red or blue to fire a trigger
   occurrence.` and an empty registrations rail reads `none in this session`.
 - Backend truth for id `<S>`: `GET /api/state?session_id=<S>`,
-  `POST /api/turn?session_id=<S>`, `GET /api/triggers?session_id=<S>`,
+  `GET /api/observations?session_id=<S>`, `POST /api/turn?session_id=<S>`,
+  `POST /api/turn/input?session_id=<S>`, `GET /api/triggers?session_id=<S>`,
   `POST /api/button-trigger?session_id=<S>`, `GET /api/work?session_id=<S>`,
   `GET /api/work/{process_id}/await`, `POST /api/turn/cancel?session_id=<S>`, and
   `DELETE /api/session?session_id=<S>`.
@@ -140,10 +142,25 @@ timeline, the ordinary empty-state literal, or only `internal server error` fail
 gate.
 
 Issue one second `GET /api/state?session_id=<retired-id>` and require the same status and
-message so the refusal is stable rather than a transient race. Save both responses as
-`03-retired-id-refused.json`; screenshot the explanatory error as
-`03-retired-id-refused.png`. Do not submit a model turn and do not read work in this
-phase: session opening itself is the authoritative refusal.
+message so the refusal is stable rather than a transient race. Then gate every accepting
+or observing surface changed by the retirement fence:
+
+1. Record `GET /api/work?session_id=<retired-id>` and require its process-id set to equal
+   the saved Phase-1 retired work set. Submit
+   `POST /api/turn?session_id=<retired-id>` with a non-empty marker prompt. Require HTTP
+   409 and the exact same canonical `error`; then read scoped work again and require the
+   complete process-id set to remain identical. Any accepted response, new work row, or
+   changed existing row means work escaped the fence → Abort/RCA.
+2. Call `GET /api/observations?session_id=<retired-id>` without a cursor. Require HTTP
+   409 JSON with the exact canonical `error`, not an NDJSON stream, empty snapshot, or
+   generic failure.
+3. Submit `POST /api/turn/input?session_id=<retired-id>` with
+   `{"text":"FIG754-RETIRED-INPUT-<run-id>","ingress":"next_turn"}`. Require HTTP 409
+   JSON with the exact canonical `error`, not an acceptance receipt.
+
+Save the two state refusals, turn refusal, observations refusal, turn-input refusal, and
+before/after scoped-work comparison as `03-retired-id-refused.json`; screenshot the
+explanatory browser error as `03-retired-id-refused.png`.
 
 ## Phase 4 — Prove rotation is empty, isolated, and fully usable
 
@@ -213,7 +230,8 @@ port-derived Restate container are gone.
 | Named session | URL, rendered, API, disk, and live metadata ids agree | | `00-retired-id-before-delete.json`, `00-named-session-ready.png` |
 | Populated before delete | assistant marker, registration, terminal process, and cancellation | | `01-*` |
 | Deleted and rotated | 200 response returns a different id; disk rotates; tombstone persists | | `02-*` |
-| Retired id refused | repeated HTTP 409 and rendered single-use explanation | | `03-retired-id-refused.*` |
+| Retired id refused | repeated state HTTP 409 and rendered single-use explanation | | `03-retired-id-refused.*` |
+| Retired work refused | turn, observations, and turn-input return the same 409; scoped work is unchanged | | `03-retired-id-refused.json` |
 | Rotation inherited nothing | empty transcript, triggers, and scoped work; retired identities absent | | `04-rotated-fresh-*` |
 | Rotation is usable | assistant marker, fresh registration/process, and matching cancellation | | `04-rotated-live-*`, `04-rotated-session-usable.png` |
 | Restart preserves both rules | new PID, rotated session restored, retired id still refused | | `05-*` or not-run reason |

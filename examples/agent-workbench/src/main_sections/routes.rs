@@ -21,7 +21,7 @@ async fn app_state(
         .session(session_id.clone())
         .open()
         .await
-        .map_err(AppError::session_open)?;
+        .map_err(|error| state.session_admission_error(&session_id, "api.state", error))?;
     let observation_snapshot = session.observe().recoverable_chat_snapshot();
     let active_turns = state.active_turns.for_session(&session_id);
     let active_turn_ids = active_turns
@@ -329,10 +329,12 @@ async fn session_observations(
         })?;
     let session = state
         .core
-        .session(session_id)
+        .session(session_id.clone())
         .open()
         .await
-        .map_err(AppError::session_open)?;
+        .map_err(|error| {
+            state.session_admission_error(&session_id, "api.observations", error)
+        })?;
     let cursor = match query.cursor.as_deref().filter(|cursor| !cursor.trim().is_empty()) {
         Some(cursor) => serde_json::from_value::<SessionCursor>(json!(cursor))
             .map_err(|err| AppError::bad_request(format!("invalid session cursor: {err}")))?,
@@ -360,6 +362,22 @@ async fn send_turn(
         .map(str::trim)
         .filter(|id| !id.is_empty())
         .map(str::to_string);
+    let session_id = query.resolve(&state)?;
+    state
+        .authorization
+        .authorize(WorkbenchAuthorizationAction::EnqueueTurn {
+            session_id: session_id.clone(),
+        })?;
+    drop(
+        state
+            .core
+            .session(session_id.clone())
+            .open()
+            .await
+            .map_err(|error| {
+                state.session_admission_error(&session_id, "api.turn", error)
+            })?,
+    );
     if let Some(attachment_id) = attachment_id.as_deref() {
         match state
             .attachment_store
@@ -380,20 +398,6 @@ async fn send_turn(
         request.model.as_deref(),
         request.model_variant.as_deref(),
     )?;
-    let session_id = query.resolve(&state)?;
-    state
-        .authorization
-        .authorize(WorkbenchAuthorizationAction::EnqueueTurn {
-            session_id: session_id.clone(),
-        })?;
-    drop(
-        state
-            .core
-            .session(session_id.clone())
-            .open()
-            .await
-            .map_err(AppError::session_open)?,
-    );
     state.trace_for_session(
         &session_id,
         "api.turn.request",
@@ -470,7 +474,9 @@ async fn enqueue_turn_input(
             Some(source_id),
         )
         .await
-        .map_err(AppError::internal)?;
+        .map_err(|error| {
+            state.session_admission_error(&session_id, "api.turn.input", error)
+        })?;
     reject_if_active_turn_settled(&state, &acceptance).await?;
     let accepted_state = match acceptance.ingress {
         lash::persistence::TurnInputIngress::ActiveTurn { .. } => {
@@ -781,7 +787,9 @@ async fn enqueue_tool_catalog_refresh(
         .session(session_id.clone())
         .open()
         .await
-        .map_err(AppError::internal)?;
+        .map_err(|error| {
+            state.session_admission_error(&session_id, "mail.tool_catalog.refresh", error)
+        })?;
     let receipt = session
         .commands()
         .refresh_tool_catalog(
