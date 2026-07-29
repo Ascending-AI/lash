@@ -220,7 +220,7 @@ impl crate::ProcessService for EffectBackedProcessService {
         _session_id: &str,
         _mode: crate::ProcessListMode,
         _scope: crate::ProcessOpScope<'_>,
-    ) -> Result<Vec<crate::runtime::ProcessHandleGrantEntry>, crate::PluginError> {
+    ) -> Result<Vec<crate::ProcessRecord>, crate::PluginError> {
         Err(crate::PluginError::Session(
             "list is not used by the FIG-790 fixture".to_string(),
         ))
@@ -322,7 +322,6 @@ fn fig790_process_await_context(
         session_lifecycle: host.clone(),
         session_graph: host,
         processes,
-        process_cancel_ability: Arc::new(crate::DefaultProcessCancelAbility),
         trigger_router: None,
         effect_controller: crate::runtime::RuntimeEffectControllerHandle::shared(controller),
         direct_completions: crate::DirectCompletionClient::unavailable(

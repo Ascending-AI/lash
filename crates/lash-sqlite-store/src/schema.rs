@@ -258,13 +258,17 @@ CREATE INDEX IF NOT EXISTS idx_attachment_manifest_owner
 ///
 /// Bumped to 22 to replace per-message evidence with monotone consumed
 /// high-water marks. Pre-22 durable-core catalogs are rejected and recreated.
-pub(crate) const SCHEMA_VERSION: i32 = 22;
+pub(crate) const SCHEMA_VERSION: i32 = 23;
 
 pub(crate) const PROCESS_SCHEMA: &str = "
 CREATE TABLE IF NOT EXISTS processes (
     process_id            TEXT PRIMARY KEY,
     registration_hash     TEXT NOT NULL,
-    owner_scope_id       TEXT NOT NULL,
+    originator_scope_id   TEXT NOT NULL,
+    wake_session_id       TEXT,
+    identity_kind         TEXT NOT NULL,
+    identity_label        TEXT,
+    is_waiting            INTEGER NOT NULL,
     created_at_ms         INTEGER NOT NULL,
     updated_at_ms         INTEGER NOT NULL,
     change_seq            INTEGER NOT NULL,
@@ -277,6 +281,16 @@ CREATE INDEX IF NOT EXISTS idx_processes_status
 
 CREATE INDEX IF NOT EXISTS idx_processes_change_seq
     ON processes(change_seq);
+CREATE INDEX IF NOT EXISTS idx_processes_originator
+    ON processes(originator_scope_id);
+CREATE INDEX IF NOT EXISTS idx_processes_identity
+    ON processes(identity_kind, identity_label);
+CREATE INDEX IF NOT EXISTS idx_processes_waiting
+    ON processes(is_waiting);
+CREATE INDEX IF NOT EXISTS idx_processes_created
+    ON processes(created_at_ms);
+CREATE INDEX IF NOT EXISTS idx_processes_wake_session
+    ON processes(wake_session_id);
 
 CREATE TABLE IF NOT EXISTS process_change_clock (
     singleton    INTEGER PRIMARY KEY CHECK (singleton = 1),
@@ -324,20 +338,24 @@ CREATE INDEX IF NOT EXISTS idx_wake_deliveries_group_sequence
     ON process_wake_deliveries(target_session_id, process_id, sequence)
     WHERE state <> 'enqueued';
 
-CREATE TABLE IF NOT EXISTS process_handle_grants (
+CREATE TABLE IF NOT EXISTS process_observers (
     session_id       TEXT NOT NULL,
-    scope_id        TEXT NOT NULL,
     process_id       TEXT NOT NULL,
-    descriptor_json  TEXT NOT NULL,
-    PRIMARY KEY (scope_id, process_id),
+    PRIMARY KEY (session_id, process_id),
     FOREIGN KEY (process_id) REFERENCES processes(process_id) ON DELETE CASCADE
 );
 
-CREATE INDEX IF NOT EXISTS idx_process_handle_grants_session
-    ON process_handle_grants(session_id);
+CREATE INDEX IF NOT EXISTS idx_process_observers_process
+    ON process_observers(process_id, session_id);
 
-CREATE INDEX IF NOT EXISTS idx_process_handle_grants_process
-    ON process_handle_grants(process_id);
+CREATE TABLE IF NOT EXISTS process_tombstones (
+    process_id          TEXT PRIMARY KEY,
+    terminal_label      TEXT NOT NULL,
+    pruned_at_ms        INTEGER NOT NULL,
+    pruned_change_seq   INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_process_tombstones_change
+    ON process_tombstones(pruned_change_seq);
 
 CREATE TABLE IF NOT EXISTS process_leases (
     process_id       TEXT PRIMARY KEY,
@@ -382,9 +400,10 @@ CREATE TABLE IF NOT EXISTS process_segment_handovers (
 // Bumped to 15 so terminal wake deliveries retain a durable exact-evidence
 // cleanup reconciliation bit. Pre-15 registries are rejected and recreated.
 //
-// Bumped to 16 to remove that cleanup lane and add fair retry scheduling.
-// Pre-16 registries are rejected and recreated.
-pub(crate) const PROCESS_SCHEMA_VERSION: i32 = 16;
+// Bumped to 17 for FIG-661: observer edges replace the former visibility table, wake targets
+// are indexed subscription state, filter columns are extracted, and pruning
+// leaves payload-free tombstones.
+pub(crate) const PROCESS_SCHEMA_VERSION: i32 = 17;
 
 pub(crate) const TRIGGER_SCHEMA: &str = "
 CREATE TABLE IF NOT EXISTS trigger_subscriptions (

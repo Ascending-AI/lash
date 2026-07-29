@@ -145,23 +145,21 @@ impl RuntimeSessionServices {
     }
 }
 
-fn process_terminal_state_for_turn(turn: &crate::AssembledTurn) -> crate::ProcessTerminalState {
+fn process_terminal_state_for_turn(turn: &crate::AssembledTurn) -> crate::ProcessStatus {
     match &turn.outcome {
         crate::TurnOutcome::Finished(_) | crate::TurnOutcome::AgentFrameSwitch { .. } => {
-            crate::ProcessTerminalState::Completed
+            crate::ProcessStatus::Completed
         }
-        crate::TurnOutcome::Stopped(crate::TurnStop::Cancelled) => {
-            crate::ProcessTerminalState::Cancelled
-        }
-        crate::TurnOutcome::Stopped(_) => crate::ProcessTerminalState::Failed,
+        crate::TurnOutcome::Stopped(crate::TurnStop::Cancelled) => crate::ProcessStatus::Cancelled,
+        crate::TurnOutcome::Stopped(_) => crate::ProcessStatus::Failed,
     }
 }
 
 fn process_turn_summary(
     turn: &crate::AssembledTurn,
-    state: crate::ProcessTerminalState,
+    state: crate::ProcessStatus,
 ) -> Option<String> {
-    if state != crate::ProcessTerminalState::Failed {
+    if state != crate::ProcessStatus::Failed {
         return None;
     }
     match &turn.outcome {
@@ -179,14 +177,14 @@ fn output_from_process_turn(
     registration: &crate::ProcessRegistration,
     child_session_id: &str,
     turn: crate::AssembledTurn,
-    state: crate::ProcessTerminalState,
+    state: crate::ProcessStatus,
 ) -> crate::ToolCallOutput {
-    if state == crate::ProcessTerminalState::Cancelled {
+    if state == crate::ProcessStatus::Cancelled {
         return crate::ToolCallOutput::cancelled(crate::ToolCancellation::runtime(
             "background session turn was cancelled",
         ));
     }
-    if state == crate::ProcessTerminalState::Failed {
+    if state == crate::ProcessStatus::Failed {
         return crate::ToolCallOutput::failure(crate::ToolFailure::tool(
             crate::ToolFailureClass::Execution,
             "process_session_turn_failed",

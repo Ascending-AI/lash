@@ -7,11 +7,10 @@ use super::events::{
     ProcessEventAppendResult, ProcessWakeDelivery,
 };
 use super::model::{
-    AbandonRequest, ProcessChangeCursor, ProcessExecutionWriteAuthority, ProcessExternalRef,
-    ProcessHandleDescriptor, ProcessHandleGrant, ProcessHandleGrantEntry, ProcessLease,
-    ProcessLeaseClaimOutcome, ProcessLeaseCompletion, ProcessListFilter, ProcessRecord,
-    ProcessRegistration, ProcessSessionDeleteReport, ProcessStartOutcome, ProcessStarted,
-    SessionScope, WaitState,
+    AbandonRequest, ProcessChange, ProcessChangeCursor, ProcessExecutionWriteAuthority,
+    ProcessExternalRef, ProcessLease, ProcessLeaseClaimOutcome, ProcessLeaseCompletion,
+    ProcessListFilter, ProcessObserverBy, ProcessRecord, ProcessRegistration,
+    ProcessSessionDeleteReport, ProcessStartOutcome, ProcessStarted, SessionId, WaitState,
 };
 use super::references::ProcessLiveReferenceSummary;
 
@@ -23,6 +22,12 @@ pub struct ProcessPruneReport {
     pub pruned_processes: usize,
     /// Event rows deleted across those processes.
     pub pruned_events: usize,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ProjectionWatermark {
+    UpTo(ProcessChangeCursor),
+    NoProjector,
 }
 
 pub const DEFAULT_WAKE_DELIVERY_EXPIRY_MS: u64 = 7 * 24 * 60 * 60 * 1_000;
@@ -81,14 +86,14 @@ impl WakeDeliveryState {
 
 /// Durable terminal outcome for an undeliverable wake.
 ///
-/// This is non-exhaustive because subscription retargeting will add its typed
-/// discard in the wave that introduces the retarget verb.
+/// Non-exhaustive so future delivery-terminal reasons remain additive.
 #[non_exhaustive]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum WakeDiscardReason {
     Expired,
     TargetGone,
+    Retargeted,
 }
 
 impl WakeDiscardReason {
@@ -96,6 +101,7 @@ impl WakeDiscardReason {
         match self {
             Self::Expired => "expired",
             Self::TargetGone => "target_gone",
+            Self::Retargeted => "retargeted",
         }
     }
 }
@@ -153,6 +159,32 @@ pub struct WakeDeliveryReport {
     pub discarded: usize,
     pub expired: usize,
     pub target_gone: usize,
+    pub retargeted: usize,
+}
+
+/// Substrate-scoped durable continuation storage. This is not part of the
+/// uniform process registry because only segmented execution substrates need
+/// it.
+#[async_trait::async_trait]
+pub trait ProcessContinuationStore: Send + Sync {
+    async fn put_segment_handover(
+        &self,
+        process_id: &str,
+        handover: PersistedSegmentHandover,
+    ) -> Result<(), PluginError>;
+
+    async fn get_segment_handover(
+        &self,
+        process_id: &str,
+        segment_ordinal: u64,
+    ) -> Result<Option<PersistedSegmentHandover>, PluginError>;
+
+    async fn latest_segment_handover(
+        &self,
+        process_id: &str,
+    ) -> Result<Option<PersistedSegmentHandover>, PluginError>;
+
+    async fn delete_segment_handovers(&self, process_id: &str) -> Result<(), PluginError>;
 }
 
 /// Durability-neutral process registry.
@@ -188,32 +220,17 @@ pub trait ProcessRegistry: Send + Sync {
     async fn register_process(
         &self,
         registration: ProcessRegistration,
+    ) -> Result<ProcessRecord, PluginError> {
+        self.register_process_with_observers(registration, &[])
+            .await
+    }
+
+    /// Atomically register the process and its explicit initial observer set.
+    async fn register_process_with_observers(
+        &self,
+        registration: ProcessRegistration,
+        observers: &[SessionId],
     ) -> Result<ProcessRecord, PluginError>;
-
-    /// Persist the bounded engine continuation for exactly one segment.
-    /// Repeating an identical write is an idempotent no-op; conflicting data
-    /// for the same `(process_id, segment_ordinal)` is rejected.
-    async fn put_segment_handover(
-        &self,
-        process_id: &str,
-        handover: PersistedSegmentHandover,
-    ) -> Result<(), PluginError>;
-
-    /// Load the continuation for an exact process segment ordinal.
-    async fn get_segment_handover(
-        &self,
-        process_id: &str,
-        segment_ordinal: u64,
-    ) -> Result<Option<PersistedSegmentHandover>, PluginError>;
-
-    /// Load the highest persisted segment ordinal for recovery.
-    async fn latest_segment_handover(
-        &self,
-        process_id: &str,
-    ) -> Result<Option<PersistedSegmentHandover>, PluginError>;
-
-    /// Remove all cross-segment execution state once the process is terminal.
-    async fn delete_segment_handovers(&self, process_id: &str) -> Result<(), PluginError>;
 
     /// Attach a durable backend reference to a registered process.
     ///
@@ -227,59 +244,62 @@ pub trait ProcessRegistry: Send + Sync {
         external_ref: ProcessExternalRef,
     ) -> Result<ProcessRecord, PluginError>;
 
-    async fn grant_handle(
+    async fn add_observer(
         &self,
-        session_scope: &SessionScope,
+        session_id: &str,
         process_id: &str,
-        descriptor: ProcessHandleDescriptor,
-    ) -> Result<ProcessHandleGrant, PluginError>;
-
-    async fn revoke_handle(
-        &self,
-        session_scope: &SessionScope,
-        process_id: &str,
+        by: ProcessObserverBy,
     ) -> Result<(), PluginError>;
 
-    async fn transfer_handle_grants(
+    async fn remove_observer(
         &self,
-        from_scope: &SessionScope,
-        to_scope: &SessionScope,
+        session_id: &str,
+        process_id: &str,
+        by: ProcessObserverBy,
+    ) -> Result<(), PluginError>;
+
+    async fn transfer_observers(
+        &self,
+        from_session_id: &str,
+        to_session_id: &str,
         process_ids: &[String],
+        by: ProcessObserverBy,
     ) -> Result<(), PluginError>;
 
-    async fn list_handle_grants(
-        &self,
-        session_scope: &SessionScope,
-    ) -> Result<Vec<ProcessHandleGrantEntry>, PluginError>;
+    async fn list_observed_by(&self, session_id: &str) -> Result<Vec<ProcessRecord>, PluginError>;
 
-    async fn list_live_handle_grants(
+    async fn list_live_observed_by(
         &self,
-        session_scope: &SessionScope,
-    ) -> Result<Vec<ProcessHandleGrantEntry>, PluginError> {
+        session_id: &str,
+    ) -> Result<Vec<ProcessRecord>, PluginError> {
         Ok(self
-            .list_handle_grants(session_scope)
+            .list_observed_by(session_id)
             .await?
             .into_iter()
-            .filter(|(_, record)| !record.is_terminal())
+            .filter(|record| !record.is_terminal())
             .collect())
     }
 
-    async fn has_handle_grant(
-        &self,
-        session_scope: &SessionScope,
-        process_id: &str,
-    ) -> Result<bool, PluginError> {
+    async fn is_observer(&self, session_id: &str, process_id: &str) -> Result<bool, PluginError> {
+        if self.get_process(process_id).await?.is_none() {
+            return Ok(false);
+        }
         Ok(self
-            .list_handle_grants(session_scope)
+            .list_observed_by(session_id)
             .await?
             .into_iter()
-            .any(|(grant, _)| grant.process_id == process_id))
+            .any(|record| record.id == process_id))
     }
 
-    async fn handle_grants_for_process(
+    async fn observers_for_process(&self, process_id: &str) -> Result<Vec<SessionId>, PluginError>;
+
+    /// Append a subscription-retarget audit event, update the indexed target,
+    /// and discard pending deliveries to the old target atomically.
+    async fn retarget_subscription(
         &self,
         process_id: &str,
-    ) -> Result<Vec<ProcessHandleGrant>, PluginError>;
+        target: Option<&str>,
+    ) -> Result<(), PluginError>;
 
     async fn delete_session_process_state(
         &self,
@@ -428,16 +448,7 @@ pub trait ProcessRegistry: Send + Sync {
         authority: &ProcessExecutionWriteAuthority,
     ) -> Result<ProcessRecord, PluginError>;
 
-    async fn get_process(&self, process_id: &str) -> Option<ProcessRecord>;
-
-    /// Fallible process lookup for correctness-critical execution paths where
-    /// a transient store failure must not be mistaken for an absent row.
-    async fn try_get_process(
-        &self,
-        process_id: &str,
-    ) -> Result<Option<ProcessRecord>, PluginError> {
-        Ok(self.get_process(process_id).await)
-    }
+    async fn get_process(&self, process_id: &str) -> Result<Option<ProcessRecord>, PluginError>;
 
     async fn list_processes(
         &self,
@@ -448,13 +459,16 @@ pub trait ProcessRegistry: Send + Sync {
     /// `cursor`, ordered by the backend's per-store change sequence.
     ///
     /// This is a host-level completeness read for trusted projectors. It is not
-    /// scoped by handle grants, and the cursor must be treated as opaque outside
+    /// scoped by observer edges, and the cursor must be treated as opaque outside
     /// the store that issued it.
     async fn processes_changed_since(
         &self,
         cursor: ProcessChangeCursor,
         limit: usize,
-    ) -> Result<(Vec<ProcessRecord>, ProcessChangeCursor), PluginError>;
+    ) -> Result<(Vec<ProcessChange>, ProcessChangeCursor), PluginError>;
+
+    /// Delete payload-free tombstones older than `cutoff_epoch_ms`.
+    async fn compact_process_tombstones(&self, cutoff_epoch_ms: u64) -> Result<usize, PluginError>;
 
     /// Return due group heads and record one delivery attempt for each.
     ///
@@ -506,7 +520,7 @@ pub trait ProcessRegistry: Send + Sync {
     ) -> Result<Vec<String>, PluginError> {
         let mut missing = Vec::new();
         for process_id in process_ids {
-            if self.get_process(process_id).await.is_none() {
+            if self.get_process(process_id).await?.is_none() {
                 missing.push(process_id.clone());
             }
         }
@@ -586,7 +600,7 @@ pub trait ProcessRegistry: Send + Sync {
     /// Physically delete terminal process rows whose `updated_at_ms` is older
     /// than `cutoff_epoch_ms`, match `filter` when one is supplied, and have a
     /// process change sequence no later than `up_to_change_seq` when supplied,
-    /// together with their events, handle grants, lease rows, and
+    /// together with their events, observer edges, lease rows, and
     /// trigger-delivery reservations whose deterministic process id points at a
     /// pruned row. The same cutoff also prunes trigger-mutation idempotency
     /// receipts, bounding receipt retention under the host's existing cleanup
@@ -598,15 +612,16 @@ pub trait ProcessRegistry: Send + Sync {
     /// Host-scheduled retention: hosts that project results/events into their
     /// own store call this to keep the registry bounded. Non-terminal rows are
     /// never touched. Callers must choose a retention window comfortably longer
-    /// than any waiter lifetime — a pruned process id becomes "unknown process"
-    /// to late awaits. Re-emitting the same trigger occurrence id after its
+    /// than any waiter lifetime. A late await receives the typed
+    /// `ProcessNoLongerRetained` information outcome from the payload-free
+    /// tombstone. Re-emitting the same trigger occurrence id after its
     /// process has aged out of retention may reserve a fresh delivery process
     /// id; occurrence-level idempotency still holds, and ordinary emit replays
     /// do not straddle a retention window in practice.
     ///
     /// ```no_run
     /// use std::time::{Duration, SystemTime, UNIX_EPOCH};
-    /// use lash_core::{PluginError, ProcessRegistry};
+    /// use lash_core::{PluginError, ProcessRegistry, ProjectionWatermark};
     ///
     /// async fn prune_week_old(registry: &dyn ProcessRegistry) -> Result<(), PluginError> {
     ///     let now_ms = SystemTime::now()
@@ -615,7 +630,9 @@ pub trait ProcessRegistry: Send + Sync {
     ///         .as_millis() as u64;
     ///     // Window must exceed any in-flight await's lifetime (ADR 0017).
     ///     let cutoff = now_ms - Duration::from_secs(7 * 24 * 60 * 60).as_millis() as u64;
-    ///     let report = registry.prune_terminal_processes(cutoff, None, None).await?;
+    ///     let report = registry
+    ///         .prune_terminal_processes(cutoff, None, ProjectionWatermark::NoProjector)
+    ///         .await?;
     ///     eprintln!(
     ///         "pruned {} processes, {} events",
     ///         report.pruned_processes, report.pruned_events
@@ -627,6 +644,6 @@ pub trait ProcessRegistry: Send + Sync {
         &self,
         cutoff_epoch_ms: u64,
         filter: Option<ProcessListFilter>,
-        up_to_change_seq: Option<ProcessChangeCursor>,
+        watermark: ProjectionWatermark,
     ) -> Result<ProcessPruneReport, PluginError>;
 }

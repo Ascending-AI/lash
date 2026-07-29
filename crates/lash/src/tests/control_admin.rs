@@ -1,33 +1,5 @@
 use super::*;
 
-#[derive(Default)]
-struct DenyCancelAbility {
-    calls: StdMutex<Vec<(lash_core::ProcessCancelSource, String)>>,
-}
-
-impl DenyCancelAbility {
-    fn calls(&self) -> Vec<(lash_core::ProcessCancelSource, String)> {
-        self.calls.lock().expect("cancel calls").clone()
-    }
-}
-
-#[async_trait]
-impl lash_core::ProcessCancelAbility for DenyCancelAbility {
-    async fn cancel(
-        &self,
-        _processes: &dyn lash_core::ProcessService,
-        request: lash_core::ProcessCancelRequest<'_>,
-    ) -> std::result::Result<lash_core::ProcessRecord, lash_core::PluginError> {
-        self.calls
-            .lock()
-            .expect("cancel calls")
-            .push((request.source, request.process_id.to_string()));
-        Err(lash_core::PluginError::Session(
-            "denied by host".to_string(),
-        ))
-    }
-}
-
 struct NoopProcessRunHandle;
 
 #[async_trait]
@@ -50,35 +22,6 @@ impl lash_core::PluginOperation for NonblockingObservationQuery {
 }
 
 impl lash_core::PluginQuery for NonblockingObservationQuery {}
-
-#[derive(Default)]
-struct RecordingCancelAbility {
-    calls: StdMutex<Vec<(lash_core::ProcessCancelSource, String, Option<String>)>>,
-}
-
-impl RecordingCancelAbility {
-    fn calls(&self) -> Vec<(lash_core::ProcessCancelSource, String, Option<String>)> {
-        self.calls.lock().expect("cancel calls").clone()
-    }
-}
-
-#[async_trait]
-impl lash_core::ProcessCancelAbility for RecordingCancelAbility {
-    async fn cancel(
-        &self,
-        processes: &dyn lash_core::ProcessService,
-        request: lash_core::ProcessCancelRequest<'_>,
-    ) -> std::result::Result<lash_core::ProcessRecord, lash_core::PluginError> {
-        self.calls.lock().expect("cancel calls").push((
-            request.source,
-            request.process_id.to_string(),
-            request.reason.clone(),
-        ));
-        lash_core::DefaultProcessCancelAbility
-            .cancel(processes, request)
-            .await
-    }
-}
 
 struct FixedCompactor;
 
@@ -454,13 +397,7 @@ async fn process_start_and_cancel_emit_typed_observation_events() -> Result<()> 
                 lash_core::ProcessOriginator::host(),
                 serde_json::Value::Null,
             )
-            .with_grant(Some(lash_core::ProcessStartGrant {
-                session_scope: lash_core::SessionScope::new("request-descriptor"),
-                descriptor: lash_core::ProcessHandleDescriptor::new(
-                    Some("test"),
-                    Some("observed process"),
-                ),
-            })),
+            .with_observers(["process-observation-events".to_string()]),
             inline_scope(lash_core::ExecutionScope::process(process_id)),
         )
         .await?;
@@ -618,9 +555,8 @@ async fn observation_reads_do_not_wait_for_active_turn() -> Result<()> {
 }
 
 #[tokio::test]
-async fn processes_cancel_uses_host_cancel_ability() -> Result<()> {
-    let ability = Arc::new(DenyCancelAbility::default());
-    let runtime_host = RuntimeHostConfig::in_memory().with_process_cancel_ability(ability.clone());
+async fn processes_cancel_cancels_visible_process() -> Result<()> {
+    let runtime_host = RuntimeHostConfig::in_memory();
     let core = explicit_ephemeral_facets(LashCore::standard_builder())
         .provider(mock_provider())
         .model(mock_model_spec())
@@ -638,44 +574,39 @@ async fn processes_cancel_uses_host_cancel_ability() -> Result<()> {
                 lash_core::ProcessOriginator::host(),
                 serde_json::Value::Null,
             )
-            .with_grant(Some(lash_core::ProcessStartGrant {
-                session_scope: lash_core::SessionScope::new("request-descriptor"),
-                descriptor: lash_core::ProcessHandleDescriptor::new(
-                    Some("test"),
-                    Some("host process"),
-                ),
-            })),
+            .with_observers(["host-cancel".to_string()]),
             inline_scope(lash_core::ExecutionScope::process("host-process")),
         )
         .await?;
 
-    let err = session
+    let summary = session
         .processes()
         .cancel(
             "host-process",
             inline_scope(lash_core::ExecutionScope::process("host-process")),
         )
-        .await
-        .expect_err("host ability should deny cancellation");
+        .await?;
 
-    assert!(
-        err.to_string().contains("denied by host"),
-        "unexpected error: {err}"
-    );
+    assert_eq!(summary.process_id, "host-process");
     assert_eq!(
-        ability.calls(),
-        vec![(
-            lash_core::ProcessCancelSource::HostApi,
-            "host-process".to_string()
-        )]
+        summary.status,
+        lash_core::ProcessStatus::Running,
+        "cancel is a durable request; the runner owns terminalization"
+    );
+    assert!(
+        core.processes()
+            .events("host-process", 0)
+            .await?
+            .iter()
+            .any(|event| event.event_type == "process.cancel_requested"),
+        "the visible-process cancel appended its durable request"
     );
     Ok(())
 }
 
 #[tokio::test]
-async fn processes_cancel_all_uses_host_cancel_ability() -> Result<()> {
-    let ability = Arc::new(RecordingCancelAbility::default());
-    let runtime_host = RuntimeHostConfig::in_memory().with_process_cancel_ability(ability.clone());
+async fn processes_cancel_all_cancels_visible_processes() -> Result<()> {
+    let runtime_host = RuntimeHostConfig::in_memory();
     let registry =
         Arc::new(TestLocalProcessRegistry::default()) as Arc<dyn lash_core::ProcessRegistry>;
     let driver =
@@ -698,13 +629,7 @@ async fn processes_cancel_all_uses_host_cancel_ability() -> Result<()> {
                     lash_core::ProcessOriginator::host(),
                     serde_json::Value::Null,
                 )
-                .with_grant(Some(lash_core::ProcessStartGrant {
-                    session_scope: lash_core::SessionScope::new("request-descriptor"),
-                    descriptor: lash_core::ProcessHandleDescriptor::new(
-                        Some("test"),
-                        Some(process_id),
-                    ),
-                })),
+                .with_observers(["host-cancel-all".to_string()]),
                 inline_scope(lash_core::ExecutionScope::process(process_id)),
             )
             .await?;
@@ -715,8 +640,6 @@ async fn processes_cancel_all_uses_host_cancel_ability() -> Result<()> {
         .cancel_all(runtime_operation_scope(&core, "host-cancel-all"))
         .await?;
     summaries.sort_by(|left, right| left.process_id.cmp(&right.process_id));
-    let mut calls = ability.calls();
-    calls.sort_by(|left, right| left.1.cmp(&right.1));
 
     assert_eq!(
         summaries
@@ -724,21 +647,6 @@ async fn processes_cancel_all_uses_host_cancel_ability() -> Result<()> {
             .map(|summary| summary.process_id.as_str())
             .collect::<Vec<_>>(),
         vec!["host-process-a", "host-process-b"]
-    );
-    assert_eq!(
-        calls,
-        vec![
-            (
-                lash_core::ProcessCancelSource::HostApi,
-                "host-process-a".to_string(),
-                Some("requested by host API".to_string())
-            ),
-            (
-                lash_core::ProcessCancelSource::HostApi,
-                "host-process-b".to_string(),
-                Some("requested by host API".to_string())
-            )
-        ]
     );
     Ok(())
 }
@@ -821,6 +729,7 @@ async fn session_control_manages_child_session_lifecycle() -> Result<()> {
             context_overlay: lash_core::SessionContextOverlay::default(),
             plugin_options: lash_core::PluginOptions::default(),
             usage_source: None,
+            observed_processes: Vec::new(),
         })
         .await?;
 

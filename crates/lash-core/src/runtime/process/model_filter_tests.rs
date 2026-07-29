@@ -58,14 +58,13 @@ fn process_list_filter_matches_definition_and_status() {
 
     let mut matching = record("matching", "target", 100);
     matching.identity.definition = Some(target_ref);
-    matching.status = ProcessStatus::Completed {
-        await_output: crate::ProcessAwaitOutput::from_tool_output(crate::ToolCallOutput::success(
-            json!(true),
-        )),
-    };
+    matching.status = ProcessStatus::Completed;
+    matching.outcome = Some(crate::ProcessAwaitOutput::from_tool_output(
+        crate::ToolCallOutput::success(json!(true)),
+    ));
     let mut wrong_definition = record("wrong-definition", "other", 100);
     wrong_definition.identity.definition = Some(other_ref);
-    wrong_definition.status = matching.status.clone();
+    wrong_definition.status = matching.status;
 
     assert_eq!(filter.list_mode(), ProcessListMode::All);
     assert!(filter.matches_record(&matching));

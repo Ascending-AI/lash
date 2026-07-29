@@ -945,6 +945,7 @@ async fn malformed_rlm_create_extras_fail_child_session_creation() -> Result<()>
             context_overlay: lash_core::SessionContextOverlay::default(),
             plugin_options,
             usage_source: None,
+            observed_processes: Vec::new(),
         })
         .await
         .expect_err("malformed RLM create extras should fail session creation");
@@ -1726,6 +1727,7 @@ async fn core_store_factory_is_used_for_managed_child_sessions() -> Result<()> {
             context_overlay: lash_core::SessionContextOverlay::default(),
             plugin_options: lash_core::PluginOptions::default(),
             usage_source: None,
+            observed_processes: Vec::new(),
         })
         .await?;
 
@@ -1771,6 +1773,7 @@ async fn reused_root_store_factory_reports_child_store_guidance() -> Result<()> 
             context_overlay: lash_core::SessionContextOverlay::default(),
             plugin_options: lash_core::PluginOptions::default(),
             usage_source: None,
+            observed_processes: Vec::new(),
         })
         .await
         .expect_err("reused root store should not open a child session");
@@ -1815,6 +1818,7 @@ async fn explicit_root_store_keeps_configured_child_store_factory() -> Result<()
             context_overlay: lash_core::SessionContextOverlay::default(),
             plugin_options: lash_core::PluginOptions::default(),
             usage_source: None,
+            observed_processes: Vec::new(),
         })
         .await?;
 

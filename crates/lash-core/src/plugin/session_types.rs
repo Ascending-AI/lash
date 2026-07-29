@@ -340,8 +340,10 @@ pub enum SessionRelation {
     Fork {
         source_session_id: String,
         source_node_id: String,
+        #[serde(default)]
+        observer_inheritance: crate::ObserverInheritance,
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
-        process_grants: Vec<crate::ProcessHandleGrant>,
+        pending_observer_process_ids: Vec<crate::ProcessId>,
     },
 }
 
@@ -355,6 +357,26 @@ impl SessionRelation {
             Self::Fork { .. } => None,
         }
     }
+
+    /// Render the durable host choice when a historical process start is
+    /// outside a fork's observer-inheritance selector.
+    pub fn historical_process_start_exclusion(&self, process_id: &str) -> Option<&'static str> {
+        let Self::Fork {
+            observer_inheritance,
+            ..
+        } = self
+        else {
+            return None;
+        };
+        let included = match observer_inheritance {
+            crate::ObserverInheritance::All => true,
+            crate::ObserverInheritance::None => false,
+            crate::ObserverInheritance::Only(process_ids) => {
+                process_ids.iter().any(|candidate| candidate == process_id)
+            }
+        };
+        (!included).then_some("started before this branch; not observed here")
+    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -363,6 +385,8 @@ pub struct SessionCreateRequest {
     pub session_id: Option<String>,
     #[serde(default)]
     pub relation: SessionRelation,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub observed_processes: Vec<crate::ProcessId>,
     pub start: SessionStartPoint,
     #[serde(default)]
     pub policy: Option<SessionPolicy>,
@@ -398,6 +422,7 @@ impl SessionCreateRequest {
             plugin_source: SessionPluginSource::CurrentHostFresh,
             initial_nodes: Vec::new(),
             tool_access: SessionToolAccess::default(),
+            observed_processes: Vec::new(),
             subagent: None,
             context_overlay: SessionContextOverlay::default(),
             plugin_options,
@@ -432,6 +457,7 @@ impl SessionCreateRequest {
             plugin_source: SessionPluginSource::CurrentHostFresh,
             initial_nodes: Vec::new(),
             tool_access: SessionToolAccess::default(),
+            observed_processes: Vec::new(),
             subagent: None,
             context_overlay: SessionContextOverlay::default(),
             plugin_options,
@@ -503,6 +529,7 @@ impl SessionCreateRequest {
             plugin_source: SessionPluginSource::CurrentHostFresh,
             initial_nodes: Vec::new(),
             tool_access: SessionToolAccess::default(),
+            observed_processes: Vec::new(),
             subagent: None,
             context_overlay: SessionContextOverlay::default(),
             plugin_options,

@@ -14,11 +14,12 @@ transition is an event. The store inserts that event and saves its projected
 record in the same transaction. Reads continue to use the stored projection;
 they do not refold the log.
 
-There is one temporary, named exception: deleting session process state clears
-a matching `wake_target` directly from the record. Subscription state moves to
-its own column in the later subscription-retargeting wave; that cutover removes
-this last eventless record mutation. Until then, the invariant and conformance
-claim exclude this session-delete cleanup.
+The former `wake_target` exception is closed. Wake subscription is queryable
+edge state in the indexed `wake_session_id` column, not a lifecycle-record
+field. `process.subscription_retargeted` is its durable audit event; retargeting
+updates the edge and discards pending deliveries to the old target in one
+transaction. Session deletion clears the indexed edge without changing the
+process record or event log.
 
 This decision closes the split that previously let first-started facts, wait
 entry and clearance, external references, and abandon requests mutate the
@@ -63,6 +64,35 @@ watermark after projection, and a typed “no longer retained” result once
 neither layer can render the process. Absence is therefore explicit rather than
 being confused with an empty or inaccessible process.
 
+Visibility is likewise edge state rather than fold state. The
+`process_observers(session_id, process_id)` relation is query truth, while
+`process.observer_added` and `process.observer_removed` are replay-keyed audit
+events. Observer removal never changes lifecycle or retention. Session ids are
+single-use under [ADR 0049](0049-session-ids-are-used-once.md), so an observer
+edge cannot suffer delete-and-reuse ABA ambiguity.
+
+Forks select observer inheritance explicitly: `All`, `None`, or
+`Only(process_ids)`. The selected ids are stored in the durable fork relation
+as pending apply intent. Publishing the fork precedes idempotent observer-event
+application, and session open replays any uncleared intent before clearing it.
+This gives hosts customizable branch visibility without coupling observation
+to wake routing.
+
+## Shipped storage boundary
+
+The reject-and-recreate schema stores lifecycle JSON beside extracted,
+indexed query columns: originator session, wake session, identity kind and
+label, waiting, timestamps, status, and change sequence. It adds
+`process_observers` with a composite session/process key and reverse index, and
+payload-free `process_tombstones` carrying the deletion change sequence.
+Segment handovers remain in their existing tables but are exposed only through
+the substrate-scoped `ProcessContinuationStore`.
+
+`ProcessStatus` is the sole label-only lifecycle enum. Terminal payloads live
+in `ProcessRecord::outcome`; list and projection queries can filter lifecycle
+without decoding those outputs. SQL backends push every `ProcessListFilter`
+predicate into the query.
+
 ## Consequences
 
 Lifecycle retries deduplicate through deterministic replay keys. A failed
@@ -75,13 +105,8 @@ registration, lifecycle transition, signal, cancellation request, terminal
 outcome, replay, and failed append, folding the complete event log from the
 registration base must equal the stored record field-for-field.
 
-External consumers of `events_after` now observe five additive reserved event
-kinds: `process.first_started`, `process.waiting`, `process.resumed`,
-`process.external_ref_set`, and `process.abandon_requested`. Consumers must
-ignore unknown event kinds so future runtime facts remain additive. The
-best-effort `ProcessEventSink` emits these lifecycle events as well; the durable
-event log remains the reconcile source.
-
-Append concurrency controls, wake delivery, observers, grants, remote
-protocols, and durable-core graph commits are separate decisions. This ADR does
-not redesign the append API or storage schema.
+External consumers of `events_after` observe additive reserved event kinds,
+including lifecycle transitions, observer audit events, and subscription
+retargets. Consumers must ignore unknown event kinds so future runtime facts
+remain additive. The best-effort `ProcessEventSink` emits these events as well;
+the durable event log remains the reconcile source.

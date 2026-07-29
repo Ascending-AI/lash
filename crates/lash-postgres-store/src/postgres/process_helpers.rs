@@ -36,6 +36,17 @@ pub(crate) async fn load_process(
         .transpose()
 }
 
+pub(crate) async fn wake_session_id_tx(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    process_id: &str,
+) -> Result<Option<String>, PluginError> {
+    sqlx::query_scalar("SELECT wake_session_id FROM lash_processes WHERE process_id = $1")
+        .bind(process_id)
+        .fetch_one(&mut **tx)
+        .await
+        .map_err(plugin_sqlx_error)
+}
+
 pub(crate) async fn save_process_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     record: &ProcessRecord,
@@ -43,13 +54,15 @@ pub(crate) async fn save_process_tx(
     let change_seq = next_process_change_seq_tx(tx).await?;
     sqlx::query(
         "UPDATE lash_processes
-         SET updated_at_ms = $2, change_seq = $3, status = $4, record_json = $5
+         SET updated_at_ms = $2, change_seq = $3, status = $4,
+             is_waiting = $5, record_json = $6
          WHERE process_id = $1",
     )
     .bind(&record.id)
     .bind(record.updated_at_ms as i64)
     .bind(change_seq as i64)
     .bind(process_status_label(record))
+    .bind(record.wait.is_some())
     .bind(serde_json::to_string(record).map_err(process_decode_error)?)
     .execute(&mut **tx)
     .await
@@ -128,12 +141,14 @@ pub(crate) async fn append_process_event_tx(
             None
         };
     let sequence = next_process_event_sequence_tx(tx, &process_id).await?;
+    let wake_session_id = wake_session_id_tx(tx, &process_id).await?;
     let prepared = lash_core::runtime::prepare_process_event_append(
         record,
         request,
         sequence,
         replay_lookup,
         occurred_at_ms,
+        wake_session_id.as_deref(),
     )?;
     match prepared {
         lash_core::ProcessEventAppendPlan::Replay {
@@ -391,47 +406,4 @@ pub(crate) fn guard_lease(current: Option<&ProcessLease>, lease_token: &str, now
     current
         .map(|current| current.lease_token == lease_token && current.expires_at_epoch_ms > now)
         .unwrap_or(false)
-}
-
-pub(crate) async fn list_grants_for_scope(
-    pool: &PgPool,
-    session_scope: &SessionScope,
-    live_only: bool,
-) -> Result<Vec<ProcessHandleGrantEntry>, PluginError> {
-    let status_clause = if live_only {
-        "AND p.status = 'running'"
-    } else {
-        ""
-    };
-    let sql = format!(
-        "SELECT g.process_id, g.descriptor_json, p.record_json
-         FROM lash_process_handle_grants g
-         JOIN lash_processes p ON p.process_id = g.process_id
-         WHERE g.scope_id = $1 {status_clause}
-         ORDER BY g.process_id ASC"
-    );
-    let rows = sqlx::query(&sql)
-        .bind(session_scope.id().as_str())
-        .fetch_all(pool)
-        .await
-        .map_err(plugin_sqlx_error)?;
-    let mut entries = Vec::new();
-    for row in rows {
-        let process_id: String = row.get(0);
-        let descriptor_json: String = row.get(1);
-        let record_json: String = row.get(2);
-        let descriptor: ProcessHandleDescriptor =
-            serde_json::from_str(&descriptor_json).map_err(process_decode_error)?;
-        let record: ProcessRecord =
-            serde_json::from_str(&record_json).map_err(process_decode_error)?;
-        entries.push((
-            ProcessHandleGrant {
-                session_id: session_scope.session_id.clone(),
-                process_id,
-                descriptor,
-            },
-            record,
-        ));
-    }
-    Ok(entries)
 }

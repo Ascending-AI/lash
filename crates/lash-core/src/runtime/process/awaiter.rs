@@ -7,13 +7,12 @@ use super::events::{
     ProcessEventAppendResult,
 };
 use super::model::{
-    AbandonRequest, ProcessChangeCursor, ProcessCompletionOutcome, ProcessExecutionWriteAuthority,
-    ProcessExternalRef, ProcessHandleDescriptor, ProcessHandleGrant, ProcessHandleGrantEntry,
-    ProcessLease, ProcessLeaseClaimOutcome, ProcessLeaseCompletion, ProcessListFilter,
-    ProcessRecord, ProcessRegistration, ProcessSessionDeleteReport, ProcessStarted, SessionScope,
-    WaitState,
+    AbandonRequest, ProcessChange, ProcessChangeCursor, ProcessCompletionOutcome,
+    ProcessExecutionWriteAuthority, ProcessExternalRef, ProcessLease, ProcessLeaseClaimOutcome,
+    ProcessLeaseCompletion, ProcessListFilter, ProcessObserverBy, ProcessRecord,
+    ProcessRegistration, ProcessSessionDeleteReport, ProcessStarted, SessionId, WaitState,
 };
-use super::registry::{ProcessPruneReport, ProcessRegistry};
+use super::registry::{ProcessPruneReport, ProcessRegistry, ProjectionWatermark};
 use crate::PluginError;
 
 mod change_hub;
@@ -321,12 +320,25 @@ impl ProcessAwaiter {
         &self,
         process_id: &str,
     ) -> Result<Option<ProcessAwaitOutput>, PluginError> {
-        let record = self
-            .registry
-            .try_get_process(process_id)
-            .await?
-            .ok_or_else(|| PluginError::Session(format!("unknown process `{process_id}`")))?;
-        Ok(record.status.await_output().cloned())
+        let record = match self.registry.get_process(process_id).await {
+            Ok(Some(record)) => record,
+            Ok(None) => {
+                return Err(PluginError::Session(format!(
+                    "unknown process `{process_id}`"
+                )));
+            }
+            Err(PluginError::ProcessNoLongerRetained {
+                terminal_label,
+                pruned_at_ms,
+            }) => {
+                return Ok(Some(ProcessAwaitOutput::NoLongerRetained {
+                    terminal_label,
+                    pruned_at_ms,
+                }));
+            }
+            Err(error) => return Err(error),
+        };
+        Ok(record.outcome)
     }
 
     async fn read_event(
@@ -370,43 +382,18 @@ impl ProcessRegistry for WatchedProcessRegistry {
         })
     }
 
-    async fn register_process(
+    async fn register_process_with_observers(
         &self,
         registration: ProcessRegistration,
+        observers: &[SessionId],
     ) -> Result<ProcessRecord, PluginError> {
         let process_id = registration.id.clone();
-        let record = self.inner.register_process(registration).await?;
+        let record = self
+            .inner
+            .register_process_with_observers(registration, observers)
+            .await?;
         self.hub.notify(&process_id);
         Ok(record)
-    }
-
-    async fn put_segment_handover(
-        &self,
-        process_id: &str,
-        handover: crate::PersistedSegmentHandover,
-    ) -> Result<(), PluginError> {
-        self.inner.put_segment_handover(process_id, handover).await
-    }
-
-    async fn get_segment_handover(
-        &self,
-        process_id: &str,
-        segment_ordinal: u64,
-    ) -> Result<Option<crate::PersistedSegmentHandover>, PluginError> {
-        self.inner
-            .get_segment_handover(process_id, segment_ordinal)
-            .await
-    }
-
-    async fn latest_segment_handover(
-        &self,
-        process_id: &str,
-    ) -> Result<Option<crate::PersistedSegmentHandover>, PluginError> {
-        self.inner.latest_segment_handover(process_id).await
-    }
-
-    async fn delete_segment_handovers(&self, process_id: &str) -> Result<(), PluginError> {
-        self.inner.delete_segment_handovers(process_id).await
     }
 
     async fn set_external_ref(
@@ -426,63 +413,50 @@ impl ProcessRegistry for WatchedProcessRegistry {
         Ok(record)
     }
 
-    async fn grant_handle(
+    async fn add_observer(
         &self,
-        session_scope: &SessionScope,
+        session_id: &str,
         process_id: &str,
-        descriptor: ProcessHandleDescriptor,
-    ) -> Result<ProcessHandleGrant, PluginError> {
-        self.inner
-            .grant_handle(session_scope, process_id, descriptor)
-            .await
-    }
-
-    async fn revoke_handle(
-        &self,
-        session_scope: &SessionScope,
-        process_id: &str,
+        by: ProcessObserverBy,
     ) -> Result<(), PluginError> {
-        self.inner.revoke_handle(session_scope, process_id).await
+        self.inner.add_observer(session_id, process_id, by).await
     }
 
-    async fn transfer_handle_grants(
+    async fn remove_observer(
         &self,
-        from_scope: &SessionScope,
-        to_scope: &SessionScope,
+        session_id: &str,
+        process_id: &str,
+        by: ProcessObserverBy,
+    ) -> Result<(), PluginError> {
+        self.inner.remove_observer(session_id, process_id, by).await
+    }
+
+    async fn transfer_observers(
+        &self,
+        from_session_id: &str,
+        to_session_id: &str,
         process_ids: &[String],
+        by: ProcessObserverBy,
     ) -> Result<(), PluginError> {
         self.inner
-            .transfer_handle_grants(from_scope, to_scope, process_ids)
+            .transfer_observers(from_session_id, to_session_id, process_ids, by)
             .await
     }
 
-    async fn list_handle_grants(
-        &self,
-        session_scope: &SessionScope,
-    ) -> Result<Vec<ProcessHandleGrantEntry>, PluginError> {
-        self.inner.list_handle_grants(session_scope).await
+    async fn list_observed_by(&self, session_id: &str) -> Result<Vec<ProcessRecord>, PluginError> {
+        self.inner.list_observed_by(session_id).await
     }
 
-    async fn list_live_handle_grants(
-        &self,
-        session_scope: &SessionScope,
-    ) -> Result<Vec<ProcessHandleGrantEntry>, PluginError> {
-        self.inner.list_live_handle_grants(session_scope).await
+    async fn observers_for_process(&self, process_id: &str) -> Result<Vec<SessionId>, PluginError> {
+        self.inner.observers_for_process(process_id).await
     }
 
-    async fn has_handle_grant(
-        &self,
-        session_scope: &SessionScope,
-        process_id: &str,
-    ) -> Result<bool, PluginError> {
-        self.inner.has_handle_grant(session_scope, process_id).await
-    }
-
-    async fn handle_grants_for_process(
+    async fn retarget_subscription(
         &self,
         process_id: &str,
-    ) -> Result<Vec<ProcessHandleGrant>, PluginError> {
-        self.inner.handle_grants_for_process(process_id).await
+        target: Option<&str>,
+    ) -> Result<(), PluginError> {
+        self.inner.retarget_subscription(process_id, target).await
     }
 
     async fn delete_session_process_state(
@@ -656,15 +630,8 @@ impl ProcessRegistry for WatchedProcessRegistry {
         Ok(record)
     }
 
-    async fn get_process(&self, process_id: &str) -> Option<ProcessRecord> {
+    async fn get_process(&self, process_id: &str) -> Result<Option<ProcessRecord>, PluginError> {
         self.inner.get_process(process_id).await
-    }
-
-    async fn try_get_process(
-        &self,
-        process_id: &str,
-    ) -> Result<Option<ProcessRecord>, PluginError> {
-        self.inner.try_get_process(process_id).await
     }
 
     async fn list_processes(
@@ -678,8 +645,12 @@ impl ProcessRegistry for WatchedProcessRegistry {
         &self,
         cursor: ProcessChangeCursor,
         limit: usize,
-    ) -> Result<(Vec<ProcessRecord>, ProcessChangeCursor), PluginError> {
+    ) -> Result<(Vec<ProcessChange>, ProcessChangeCursor), PluginError> {
         self.inner.processes_changed_since(cursor, limit).await
+    }
+
+    async fn compact_process_tombstones(&self, cutoff_epoch_ms: u64) -> Result<usize, PluginError> {
+        self.inner.compact_process_tombstones(cutoff_epoch_ms).await
     }
 
     async fn pending_wake_deliveries(
@@ -785,12 +756,12 @@ impl ProcessRegistry for WatchedProcessRegistry {
         &self,
         cutoff_epoch_ms: u64,
         filter: Option<ProcessListFilter>,
-        up_to_change_seq: Option<ProcessChangeCursor>,
+        watermark: ProjectionWatermark,
     ) -> Result<ProcessPruneReport, PluginError> {
         // No hub bump: pruned rows are terminal, so any waiter on them resolved
         // long ago (terminal state is durable and observed via the await seam).
         self.inner
-            .prune_terminal_processes(cutoff_epoch_ms, filter, up_to_change_seq)
+            .prune_terminal_processes(cutoff_epoch_ms, filter, watermark)
             .await
     }
 }
@@ -919,7 +890,7 @@ mod tests {
         live_rx.mark_unchanged();
 
         let report = registry
-            .prune_terminal_processes(u64::MAX, None, None)
+            .prune_terminal_processes(u64::MAX, None, ProjectionWatermark::NoProjector)
             .await
             .expect("prune");
         assert_eq!(report.pruned_processes, 1, "the terminal process pruned");

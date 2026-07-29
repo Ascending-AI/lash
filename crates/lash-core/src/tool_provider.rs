@@ -77,7 +77,6 @@ pub struct ToolContext<'run> {
     pub(crate) sessions: Arc<dyn SessionStateService>,
     pub(crate) session_lifecycle: Arc<dyn SessionLifecycleService>,
     pub(crate) processes: Arc<dyn crate::ProcessService>,
-    pub(crate) process_cancel_ability: Arc<dyn crate::ProcessCancelAbility>,
     pub(crate) effect_controller: crate::runtime::RuntimeEffectControllerHandle<'run>,
     pub(crate) runtime_dispatch: Option<Arc<crate::tool_dispatch::ToolDispatchContext<'run>>>,
     pub(crate) runtime_execution_context: Option<crate::RuntimeExecutionContext<'run>>,
@@ -145,7 +144,6 @@ pub(crate) struct ToolContextBuilder<'run> {
     session_lifecycle: Arc<dyn SessionLifecycleService>,
     session_graph: Arc<dyn SessionGraphService>,
     processes: Arc<dyn crate::ProcessService>,
-    process_cancel_ability: Arc<dyn crate::ProcessCancelAbility>,
     effect_controller: crate::runtime::RuntimeEffectControllerHandle<'run>,
     runtime_dispatch: Option<Arc<crate::tool_dispatch::ToolDispatchContext<'run>>>,
     runtime_execution_context: Option<crate::RuntimeExecutionContext<'run>>,
@@ -175,7 +173,6 @@ impl<'run> ToolContextBuilder<'run> {
             session_lifecycle: Arc::clone(&dispatch.session_lifecycle),
             session_graph: Arc::clone(&dispatch.session_graph),
             processes: Arc::clone(&dispatch.processes),
-            process_cancel_ability: Arc::clone(&dispatch.process_cancel_ability),
             effect_controller: dispatch.effect_controller.clone(),
             runtime_dispatch: Some(Arc::clone(&dispatch)),
             runtime_execution_context: None,
@@ -290,7 +287,6 @@ impl<'run> ToolContextBuilder<'run> {
             sessions: self.sessions,
             session_lifecycle: self.session_lifecycle,
             processes: self.processes,
-            process_cancel_ability: self.process_cancel_ability,
             effect_controller: self.effect_controller,
             runtime_dispatch: self.runtime_dispatch,
             runtime_execution_context: self.runtime_execution_context,
@@ -328,7 +324,6 @@ impl<'run> ToolContext<'run> {
             sessions: Arc::clone(&self.sessions),
             session_lifecycle: Arc::clone(&self.session_lifecycle),
             processes: Arc::clone(&self.processes),
-            process_cancel_ability: Arc::clone(&self.process_cancel_ability),
             effect_controller: self.effect_controller.to_static()?,
             runtime_dispatch: match self.runtime_dispatch.as_ref() {
                 Some(dispatch) => Some(Arc::new(dispatch.to_static()?)),
@@ -368,7 +363,6 @@ impl<'run> ToolContext<'run> {
         session_lifecycle: Arc<dyn SessionLifecycleService>,
         session_graph: Arc<dyn SessionGraphService>,
         processes: Arc<dyn crate::ProcessService>,
-        process_cancel_ability: Arc<dyn crate::ProcessCancelAbility>,
         effect_controller: crate::runtime::RuntimeEffectControllerHandle<'run>,
         attachment_store: Arc<crate::SessionAttachmentStore>,
         direct_completions: crate::DirectCompletionClient<'run>,
@@ -380,7 +374,6 @@ impl<'run> ToolContext<'run> {
             session_lifecycle,
             session_graph,
             processes,
-            process_cancel_ability,
             effect_controller,
             runtime_dispatch: None,
             runtime_execution_context: None,
@@ -443,7 +436,6 @@ impl<'run> ToolContext<'run> {
             session_id: self.session_id.clone(),
             agent_frame_id: self.agent_frame_id.clone(),
             processes: Arc::clone(&self.processes),
-            process_cancel_ability: Arc::clone(&self.process_cancel_ability),
             effect_controller: self.effect_controller.clone(),
             parent_invocation: self.parent_invocation.clone(),
             tool_call_id: self.tool_call_id.clone(),
@@ -685,45 +677,6 @@ impl<'run> ToolContext<'run> {
             session_lifecycle,
             session_graph,
             processes,
-            Arc::new(crate::DefaultProcessCancelAbility),
-            crate::runtime::RuntimeEffectControllerHandle::shared(Arc::new(
-                crate::InlineRuntimeEffectController::default()
-                    .allow_process_lifetime_completion_keys(),
-            )),
-            attachment_store,
-            direct_completions,
-        )
-        .tool_call_id(tool_call_id)
-        .build()
-    }
-
-    /// Constructor reserved for tests that need a custom process-cancel host
-    /// ability. Do not call directly; prefer public testing helpers when they
-    /// cover the case.
-    #[cfg(any(test, feature = "testing"))]
-    #[doc(hidden)]
-    #[expect(
-        clippy::too_many_arguments,
-        reason = "test-only constructor mirrors the sealed runtime context"
-    )]
-    pub fn __for_testing_with_process_cancel_ability(
-        session_id: String,
-        sessions: Arc<dyn SessionStateService>,
-        session_lifecycle: Arc<dyn SessionLifecycleService>,
-        session_graph: Arc<dyn SessionGraphService>,
-        processes: Arc<dyn crate::ProcessService>,
-        process_cancel_ability: Arc<dyn crate::ProcessCancelAbility>,
-        attachment_store: Arc<crate::SessionAttachmentStore>,
-        direct_completions: crate::DirectCompletionClient<'static>,
-        tool_call_id: Option<String>,
-    ) -> ToolContext<'static> {
-        ToolContext::builder(
-            session_id,
-            sessions,
-            session_lifecycle,
-            session_graph,
-            processes,
-            process_cancel_ability,
             crate::runtime::RuntimeEffectControllerHandle::shared(Arc::new(
                 crate::InlineRuntimeEffectController::default()
                     .allow_process_lifetime_completion_keys(),
@@ -1095,7 +1048,6 @@ mod tests {
             Arc::new(crate::testing::MockSessionManager::default()),
             Arc::new(crate::testing::MockSessionManager::default()),
             Arc::new(crate::UnavailableProcessService),
-            Arc::new(crate::DefaultProcessCancelAbility),
             crate::runtime::RuntimeEffectControllerHandle::shared(Arc::new(
                 crate::InlineRuntimeEffectController::default(),
             )),
@@ -1135,7 +1087,6 @@ mod tests {
             Arc::new(crate::testing::MockSessionManager::default()),
             Arc::new(crate::testing::MockSessionManager::default()),
             Arc::new(crate::UnavailableProcessService),
-            Arc::new(crate::DefaultProcessCancelAbility),
             crate::runtime::RuntimeEffectControllerHandle::shared(Arc::new(
                 crate::InlineRuntimeEffectController::default(),
             )),
@@ -1176,7 +1127,6 @@ mod tests {
             Arc::new(crate::testing::MockSessionManager::default()),
             Arc::new(crate::testing::MockSessionManager::default()),
             Arc::new(crate::UnavailableProcessService),
-            Arc::new(crate::DefaultProcessCancelAbility),
             crate::runtime::RuntimeEffectControllerHandle::shared(Arc::new(
                 ControllerOwnedWithoutCompletionKeyCapability,
             )),

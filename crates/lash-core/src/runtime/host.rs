@@ -51,7 +51,6 @@ pub struct RuntimePromptConfig {
 #[derive(Clone)]
 pub struct RuntimeControlConfig {
     pub effect_host: Arc<dyn EffectHost>,
-    pub process_cancel_ability: Arc<dyn crate::ProcessCancelAbility>,
     pub termination: TerminationPolicy,
     /// Lease timing capability for every durable single-writer *lease* lane this
     /// runtime renews on a cadence: session execution leases, process leases,
@@ -99,7 +98,6 @@ impl RuntimeHostConfig {
             control: RuntimeControlConfig {
                 termination: TerminationPolicy::default(),
                 effect_host,
-                process_cancel_ability: Arc::new(crate::DefaultProcessCancelAbility),
                 lease_timings: crate::LeaseTimings::default(),
             },
             tracing: RuntimeTracingConfig {
@@ -146,14 +144,6 @@ impl RuntimeHostConfig {
         process_env_store: Arc<dyn ProcessExecutionEnvStore>,
     ) -> Self {
         self.durability.process_env_store = process_env_store;
-        self
-    }
-
-    pub fn with_process_cancel_ability(
-        mut self,
-        process_cancel_ability: Arc<dyn crate::ProcessCancelAbility>,
-    ) -> Self {
-        self.control.process_cancel_ability = process_cancel_ability;
         self
     }
 

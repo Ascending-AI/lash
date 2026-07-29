@@ -332,7 +332,6 @@ fn strict_mcp_dispatch_context(executed: Arc<AtomicUsize>) -> ToolDispatchContex
         session_lifecycle: Arc::new(MockSessionManager::default()),
         session_graph: Arc::new(MockSessionManager::default()),
         processes: Arc::new(crate::UnavailableProcessService),
-        process_cancel_ability: Arc::new(crate::DefaultProcessCancelAbility),
         trigger_router: None,
         effect_controller: RuntimeEffectControllerHandle::shared(Arc::new(
             crate::InlineRuntimeEffectController::default()
@@ -384,7 +383,6 @@ fn dispatch_context() -> ToolDispatchContext<'static> {
         session_lifecycle: Arc::new(MockSessionManager::default()),
         session_graph: Arc::new(MockSessionManager::default()),
         processes: Arc::new(crate::UnavailableProcessService),
-        process_cancel_ability: Arc::new(crate::DefaultProcessCancelAbility),
         trigger_router: None,
         effect_controller: RuntimeEffectControllerHandle::shared(Arc::new(
             crate::InlineRuntimeEffectController::default()
@@ -443,7 +441,6 @@ fn projection_policy_dispatch_context(
         session_lifecycle: Arc::new(MockSessionManager::default()),
         session_graph: Arc::new(MockSessionManager::default()),
         processes: Arc::new(crate::UnavailableProcessService),
-        process_cancel_ability: Arc::new(crate::DefaultProcessCancelAbility),
         trigger_router: None,
         effect_controller: RuntimeEffectControllerHandle::shared(Arc::new(
             crate::InlineRuntimeEffectController::default()
@@ -638,7 +635,6 @@ fn lazy_contract_dispatch_context(
         session_lifecycle: Arc::new(MockSessionManager::default()),
         session_graph: Arc::new(MockSessionManager::default()),
         processes: Arc::new(crate::UnavailableProcessService),
-        process_cancel_ability: Arc::new(crate::DefaultProcessCancelAbility),
         trigger_router: None,
         effect_controller: RuntimeEffectControllerHandle::shared(Arc::new(
             crate::InlineRuntimeEffectController::default()
@@ -697,7 +693,6 @@ fn hidden_member_dispatch_context(provider: Arc<dyn ToolProvider>) -> ToolDispat
         session_lifecycle: Arc::new(MockSessionManager::default()),
         session_graph: Arc::new(MockSessionManager::default()),
         processes: Arc::new(crate::UnavailableProcessService),
-        process_cancel_ability: Arc::new(crate::DefaultProcessCancelAbility),
         trigger_router: None,
         effect_controller: RuntimeEffectControllerHandle::shared(Arc::new(
             crate::InlineRuntimeEffectController::default()
@@ -743,7 +738,6 @@ fn exact_dispatch_context_with_plugins(
         session_lifecycle: Arc::new(MockSessionManager::default()),
         session_graph: Arc::new(MockSessionManager::default()),
         processes: Arc::new(crate::UnavailableProcessService),
-        process_cancel_ability: Arc::new(crate::DefaultProcessCancelAbility),
         trigger_router: None,
         effect_controller: RuntimeEffectControllerHandle::shared(Arc::new(
             crate::InlineRuntimeEffectController::default()
@@ -873,7 +867,6 @@ fn pending_dispatch_context(
         session_lifecycle: Arc::new(MockSessionManager::default()),
         session_graph: Arc::new(MockSessionManager::default()),
         processes: Arc::new(crate::UnavailableProcessService),
-        process_cancel_ability: Arc::new(crate::DefaultProcessCancelAbility),
         trigger_router: None,
         effect_controller: RuntimeEffectControllerHandle::shared(Arc::new(
             crate::InlineRuntimeEffectController::default()
@@ -937,7 +930,6 @@ fn parallel_dispatch_context(
         session_lifecycle: Arc::new(MockSessionManager::default()),
         session_graph: Arc::new(MockSessionManager::default()),
         processes: Arc::new(crate::UnavailableProcessService),
-        process_cancel_ability: Arc::new(crate::DefaultProcessCancelAbility),
         trigger_router: None,
         effect_controller: RuntimeEffectControllerHandle::shared(Arc::new(
             crate::InlineRuntimeEffectController::default()

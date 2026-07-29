@@ -267,7 +267,7 @@ mod tests {
             _session_id: &str,
             _mode: lash_core::ProcessListMode,
             _scope: lash_core::ProcessOpScope<'_>,
-        ) -> Result<Vec<lash_core::runtime::ProcessHandleGrantEntry>, PluginError> {
+        ) -> Result<Vec<lash_core::ProcessRecord>, PluginError> {
             Ok(Vec::new())
         }
 

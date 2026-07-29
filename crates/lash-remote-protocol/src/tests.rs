@@ -571,14 +571,13 @@ fn remote_process_dtos_json_round_trip() {
         originator: RemoteProcessOriginator::Session {
             scope: RemoteSessionScope::new("session"),
         },
-        wake_target: Some(RemoteSessionScope::new("session")),
-        grant: Some(RemoteProcessStartGrant {
-            session_scope: RemoteSessionScope::new("session"),
-            descriptor: RemoteProcessHandleDescriptor {
-                kind: Some("external".to_string()),
-                label: Some("Import".to_string()),
-            },
+        identity: Some(RemoteProcessIdentity {
+            kind: "import".to_string(),
+            label: Some("Import".to_string()),
+            definition: None,
         }),
+        wake_session_id: Some("session".to_string()),
+        observers: vec!["session".to_string()],
         event_types: vec![remote_process_event_type()],
     };
     start.validate().expect("valid process start request");
@@ -628,7 +627,7 @@ fn remote_process_dtos_json_round_trip() {
                     label: Some("Import".to_string()),
                     definition: None,
                 },
-                lifecycle: RemoteProcessLifecycleStatus::Running,
+                lifecycle: RemoteProcessStatus::Running,
                 status_label: "running".to_string(),
                 terminal: false,
                 disposition: RemoteRecoveryDisposition::ExternallyOwned,
@@ -644,16 +643,11 @@ fn remote_process_dtos_json_round_trip() {
                 },
                 originator: RemoteProcessOriginator::Host { scope: None },
                 env_ref: None,
-                wake_target: Some(RemoteSessionScope::new("session")),
                 caused_by: None,
                 external_ref: None,
                 wait: None,
                 child_session_id: None,
                 label: "Import".to_string(),
-            },
-            descriptor: RemoteProcessHandleDescriptor {
-                kind: Some("external".to_string()),
-                label: Some("Import".to_string()),
             },
             events: vec![RemoteObservedProcessEvent {
                 sequence: 1,
@@ -694,7 +688,7 @@ fn remote_process_dtos_json_round_trip() {
     let cancel_result = RemoteProcessCancelResult {
         protocol_version: REMOTE_PROTOCOL_VERSION,
         process_id: "process:1".to_string(),
-        status: RemoteProcessLifecycleStatus::Cancelled,
+        status: RemoteProcessStatus::Cancelled,
         record: Some(remote_process_record()),
     };
     cancel_result.validate().expect("valid cancel result");
@@ -706,7 +700,6 @@ fn remote_process_dtos_json_round_trip() {
         signal_id: "signal:1".to_string(),
         payload: serde_json::json!({ "ready": true }),
         replay_key: Some("process:1:signal:ready:1".to_string()),
-        wake_target_scope: Some(RemoteSessionScope::new("session")),
     };
     signal.validate().expect("valid signal request");
     let signal_result = RemoteProcessSignalResult {
@@ -967,7 +960,7 @@ fn nested_protocol_versions_must_match_envelope() {
 
 #[test]
 fn remote_process_env_ref_is_validated_but_serializes_as_string() {
-    assert_eq!(REMOTE_PROTOCOL_VERSION, 21);
+    assert_eq!(REMOTE_PROTOCOL_VERSION, 22);
     let env_ref: RemoteProcessExecutionEnvRef =
         canonical_env_ref().parse().expect("canonical env ref");
     assert_eq!(env_ref.as_str(), canonical_env_ref());
@@ -1230,7 +1223,7 @@ fn remote_process_event_type() -> RemoteProcessEventType {
         payload_schema: serde_json::json!({}),
         semantics: RemoteProcessEventSemanticsSpec {
             terminal: Some(RemoteProcessTerminalSpec {
-                state: RemoteProcessTerminalState::Completed,
+                status: RemoteProcessStatus::Completed,
                 await_output: Some(RemoteProcessValueSelector::Pointer(
                     "/await_output".to_string(),
                 )),
@@ -1266,7 +1259,6 @@ fn remote_process_record() -> RemoteProcessRecord {
                 .parse()
                 .expect("canonical env ref"),
         ),
-        wake_target: Some(RemoteSessionScope::new("session")),
         created_at_ms: 1,
         updated_at_ms: 2,
         external_ref: Some(RemoteProcessExternalRef {
@@ -1286,6 +1278,7 @@ fn remote_process_record() -> RemoteProcessRecord {
             since_ms: 2,
         }),
         status: RemoteProcessStatus::Running,
+        outcome: None,
     }
 }
 
@@ -1316,8 +1309,8 @@ fn remote_process_event() -> RemoteProcessEvent {
         }),
         semantics: RemoteProcessEventSemantics {
             terminal: Some(RemoteProcessTerminalSemantics {
-                state: RemoteProcessTerminalState::Completed,
-                await_output: RemoteProcessAwaitOutput::Success {
+                status: RemoteProcessStatus::Completed,
+                outcome: RemoteProcessAwaitOutput::Success {
                     value: serde_json::json!(true),
                     control: None,
                 },

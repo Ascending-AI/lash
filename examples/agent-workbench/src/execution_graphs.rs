@@ -34,7 +34,7 @@ pub(crate) struct LashlangGraphSummary {
 pub(crate) struct LashlangGraphProcessSummary {
     pub(crate) process_id: String,
     pub(crate) status_label: String,
-    pub(crate) lifecycle: lash::process::ProcessLifecycleStatus,
+    pub(crate) lifecycle: lash::process::ProcessStatus,
     pub(crate) terminal: bool,
     pub(crate) label: String,
     pub(crate) created_at_ms: u64,
@@ -649,13 +649,13 @@ mod tests {
             .await
             .expect("register subagent process");
         registry
-            .grant_handle(
-                &lash::process::SessionScope::new(current_session_id),
+            .add_observer(
+                current_session_id,
                 "subagent-process",
-                lash::process::ProcessHandleDescriptor::new(Some("subagent"), Some("Subagent")),
+                lash::process::ProcessObserverBy::host("workbench-current"),
             )
             .await
-            .expect("grant current process handle");
+            .expect("observe current process");
         registry
             .register_process(lash::process::ProcessRegistration::new(
                 "old-process",
@@ -668,13 +668,13 @@ mod tests {
             .await
             .expect("register old process");
         registry
-            .grant_handle(
-                &lash::process::SessionScope::new(old_session_id),
+            .add_observer(
+                old_session_id,
                 "old-process",
-                lash::process::ProcessHandleDescriptor::new(Some("old"), Some("Old")),
+                lash::process::ProcessObserverBy::host("workbench-old"),
             )
             .await
-            .expect("grant old process handle");
+            .expect("observe old process");
 
         let parent_graph = test_graph(
             "effect:current-session:turn-1:exec-1",

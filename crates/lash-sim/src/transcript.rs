@@ -253,6 +253,33 @@ fn write_boundary_line(
                 write!(output, "  tick={tick}").expect("write transcript");
             }
         }
+        BoundaryKind::ProcessWake => {
+            if let Some(reason) = event
+                .observed
+                .get("discard_reason")
+                .and_then(serde_json::Value::as_str)
+            {
+                write!(output, "  discard={reason}").expect("write transcript");
+            }
+        }
+        BoundaryKind::ProcessLifecycle => {
+            if let Some(outcome) = event
+                .observed
+                .get("outcome")
+                .and_then(serde_json::Value::as_str)
+            {
+                write!(output, "  outcome={outcome}").expect("write transcript");
+            }
+        }
+        BoundaryKind::Observer => {
+            if let Some(visibility) = event
+                .observed
+                .get("visibility")
+                .and_then(serde_json::Value::as_str)
+            {
+                write!(output, "  visibility={visibility}").expect("write transcript");
+            }
+        }
         _ => {}
     }
     output.push('\n');
@@ -477,7 +504,10 @@ mod tests {
 
     use lash_core::store::RuntimeCommit;
     use lash_core::{
-        InMemorySessionStoreFactory, PluginSessionSnapshot, RuntimeSessionState, SessionRelation,
+        InMemorySessionStoreFactory, PluginSessionSnapshot, ProcessAwaitOutput, ProcessChangeHub,
+        ProcessCompletionAuthority, ProcessEventAppendRequest, ProcessEventSemanticsSpec,
+        ProcessEventType, ProcessRegistry as _, ProcessValueSelector, ProcessWakeSpec,
+        ProjectionWatermark, RecoveryDisposition, RuntimeSessionState, SessionRelation,
         SessionStoreCreateRequest, SessionStoreFactory as _, ToolState,
     };
 
@@ -509,6 +539,135 @@ mod tests {
             defect.contains("tool_state        ref (unchanged)"),
             "mutated transcript must expose the missing body: {defect}"
         );
+    }
+
+    #[tokio::test]
+    async fn process_cutover_transcript_shows_retarget_and_retention_degradation() {
+        let registry = Arc::new(lash_core::TestLocalProcessRegistry::default());
+        let process_id = "transcript-process";
+        registry
+            .register_process(
+                lash_core::ProcessRegistration::new(
+                    process_id,
+                    lash_core::ProcessInput::External {
+                        metadata: serde_json::Value::Null,
+                    },
+                    RecoveryDisposition::ExternallyOwned,
+                    lash_core::ProcessProvenance::host(),
+                )
+                .with_extra_event_types([ProcessEventType {
+                    name: "producer.wake".to_string(),
+                    payload_schema: lash_core::LashSchema::any(),
+                    semantics: ProcessEventSemanticsSpec {
+                        wake: Some(ProcessWakeSpec {
+                            when: Some(ProcessValueSelector::Present("/wake_input".to_string())),
+                            input: ProcessValueSelector::Pointer("/wake_input".to_string()),
+                        }),
+                        ..ProcessEventSemanticsSpec::default()
+                    },
+                }])
+                .with_wake_session_id(Some("source-session".to_string())),
+            )
+            .await
+            .expect("register transcript process");
+        registry
+            .append_event(
+                process_id,
+                ProcessEventAppendRequest::new(
+                    "producer.wake",
+                    serde_json::json!({"wake_input": "resume"}),
+                ),
+            )
+            .await
+            .expect("append wake event");
+        registry
+            .retarget_subscription(process_id, Some("branch-session"))
+            .await
+            .expect("retarget subscription");
+        let retargeted = registry
+            .list_wake_deliveries(None)
+            .await
+            .expect("read wake delivery")
+            .into_iter()
+            .find(|delivery| {
+                delivery.discard_reason == Some(lash_core::WakeDiscardReason::Retargeted)
+            })
+            .expect("retargeted delivery");
+
+        let terminal = registry
+            .complete_process(
+                process_id,
+                ProcessAwaitOutput::Success {
+                    value: serde_json::json!({"done": true}),
+                    control: None,
+                },
+                ProcessCompletionAuthority::external_owner(),
+            )
+            .await
+            .expect("complete transcript process");
+        registry
+            .prune_terminal_processes(
+                terminal.updated_at_ms.saturating_add(1),
+                None,
+                ProjectionWatermark::NoProjector,
+            )
+            .await
+            .expect("prune transcript process");
+        let output = lash_core::ProcessAwaiter::new(
+            registry as Arc<dyn lash_core::ProcessRegistry>,
+            ProcessChangeHub::new(),
+        )
+        .await_terminal(process_id)
+        .await
+        .expect("await pruned process");
+        assert!(matches!(
+            output,
+            ProcessAwaitOutput::NoLongerRetained { .. }
+        ));
+
+        let trace = trace_with_events(
+            vec![
+                DeliveredBoundary {
+                    schema: crate::scheduler::BOUNDARY_EVENT_SCHEMA.to_string(),
+                    sequence: 1,
+                    scheduler: Default::default(),
+                    boundary_id: "retarget".to_string(),
+                    actor_alias: "source-session".to_string(),
+                    kind: BoundaryKind::ProcessWake,
+                    at: 1,
+                    label: "process.subscription.retargeted".to_string(),
+                    payload: serde_json::json!({"turn_index": 1}),
+                    observed: serde_json::json!({
+                        "turn_index": 1,
+                        "discard_reason": retargeted
+                            .discard_reason
+                            .expect("discard reason")
+                            .as_str(),
+                    }),
+                },
+                DeliveredBoundary {
+                    schema: crate::scheduler::BOUNDARY_EVENT_SCHEMA.to_string(),
+                    sequence: 2,
+                    scheduler: Default::default(),
+                    boundary_id: "pruned-await".to_string(),
+                    actor_alias: "branch-session".to_string(),
+                    kind: BoundaryKind::ProcessLifecycle,
+                    at: 2,
+                    label: "process.await.information".to_string(),
+                    payload: serde_json::json!({"turn_index": 1}),
+                    observed: serde_json::json!({
+                        "turn_index": 1,
+                        "outcome": "no_longer_retained",
+                    }),
+                },
+            ],
+            Vec::new(),
+        );
+
+        insta::assert_snapshot!(trace.render_transcript(), @r"
+session-001 0001  ProcessWake        process.subscription.retargeted  discard=retargeted
+session-002 0002  ProcessLifecycle   process.await.information  outcome=no_longer_retained
+");
     }
 
     async fn changed_component_commit(collector: CheckpointWriteCollector) -> CheckpointWriteEvent {

@@ -508,14 +508,18 @@ mod restate_tests {
         let app_db = Arc::new(Mutex::new(
             AppDb::open(&data_dir.join("app.db")).expect("open app db"),
         ));
-        let process_registry = Arc::new(
+        let process_registry_store = Arc::new(
             lash_sqlite_store::SqliteProcessRegistry::open(
                 &data_dir.join("processes.db"),
                 data_dir.join("lash-sessions"),
             )
             .await
             .expect("open process registry"),
-        ) as Arc<dyn lash::process::ProcessRegistry>;
+        );
+        let process_registry =
+            Arc::clone(&process_registry_store) as Arc<dyn lash::process::ProcessRegistry>;
+        let process_continuations =
+            process_registry_store as Arc<dyn lash::process::ProcessContinuationStore>;
         let provider = lash::testing::TestProvider::builder()
             .kind("mock-provider")
             .complete(|_request| async {
@@ -566,6 +570,7 @@ finish "done via Restate E2E"
         let process_deployment = lash_restate::RestateProcessDeployment::new(
             ingress_url.clone(),
             Arc::clone(&process_registry),
+            process_continuations,
         );
         let turn_deployment = lash_restate::RestateTurnDeployment::new(ingress_url);
         let factory = lash_protocol_rlm::RlmProtocolPluginFactory::new(

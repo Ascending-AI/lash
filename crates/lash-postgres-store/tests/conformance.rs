@@ -1026,6 +1026,21 @@ async fn postgres_process_registry_satisfies_conformance_when_configured() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn postgres_process_continuation_store_satisfies_conformance_when_configured() {
+    let Some((_database_lock, storage)) = storage().await else {
+        eprintln!(
+            "skipping Postgres continuation conformance: LASH_POSTGRES_DATABASE_URL is not set"
+        );
+        return;
+    };
+    reset(&storage).await;
+    let process_storage = Arc::new(storage.process_registry());
+    let registry = Arc::clone(&process_storage) as Arc<dyn lash_core::ProcessRegistry>;
+    let store = process_storage as Arc<dyn lash_core::ProcessContinuationStore>;
+    lash_core::testing::conformance::process_continuation_store(registry, store).await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn postgres_trigger_store_satisfies_conformance_when_configured() {
     let Some((_database_lock, storage)) = storage().await else {
         eprintln!("skipping Postgres trigger conformance: LASH_POSTGRES_DATABASE_URL is not set");

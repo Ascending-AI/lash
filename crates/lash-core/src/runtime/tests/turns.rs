@@ -1811,7 +1811,8 @@ async fn next_turn_input_turn_claims_process_wake_at_active_checkpoint() {
                 crate::RecoveryDisposition::ExternallyOwned,
                 crate::ProcessProvenance::session(target_scope.clone()),
             )
-            .with_extra_event_types([process_wake_event_type()]),
+            .with_extra_event_types([process_wake_event_type()])
+            .with_wake_session_id(Some(target_scope.session_id.clone())),
         )
         .await
         .expect("register wake process");
@@ -1827,8 +1828,7 @@ async fn next_turn_input_turn_claims_process_wake_at_active_checkpoint() {
                     "status": "wake should wait"
                 }
             }),
-        )
-        .with_wake_target_scope(target_scope),
+        ),
     )
     .await;
 
@@ -1903,7 +1903,8 @@ async fn selected_process_wake_drain_does_not_claim_pending_next_turn_input() {
                 crate::RecoveryDisposition::ExternallyOwned,
                 crate::ProcessProvenance::session(target_scope.clone()),
             )
-            .with_extra_event_types([process_wake_event_type()]),
+            .with_extra_event_types([process_wake_event_type()])
+            .with_wake_session_id(Some(target_scope.session_id.clone())),
         )
         .await
         .expect("register wake process");
@@ -1919,8 +1920,7 @@ async fn selected_process_wake_drain_does_not_claim_pending_next_turn_input() {
                     "status": "selected wake"
                 }
             }),
-        )
-        .with_wake_target_scope(target_scope),
+        ),
     )
     .await;
     let wake_batch = crate::store::QueuedWorkStore::list_queued_work(store.as_ref(), "root")
@@ -2036,7 +2036,8 @@ async fn process_wake_claimed_at_checkpoint_is_completed_when_turn_is_cancelled(
                 crate::RecoveryDisposition::ExternallyOwned,
                 crate::ProcessProvenance::session(target_scope.clone()),
             )
-            .with_extra_event_types([process_wake_event_type()]),
+            .with_extra_event_types([process_wake_event_type()])
+            .with_wake_session_id(Some(target_scope.session_id.clone())),
         )
         .await
         .expect("register wake process");
@@ -2052,8 +2053,7 @@ async fn process_wake_claimed_at_checkpoint_is_completed_when_turn_is_cancelled(
                     "status": "wake cancelled in checkpoint"
                 }
             }),
-        )
-        .with_wake_target_scope(target_scope),
+        ),
     )
     .await;
     let cancel = CancellationToken::new();
@@ -2218,7 +2218,8 @@ async fn long_turn_keeps_claims_live_across_session_lease_renewals() {
                 crate::RecoveryDisposition::ExternallyOwned,
                 crate::ProcessProvenance::session(target_scope.clone()),
             )
-            .with_extra_event_types([process_wake_event_type()]),
+            .with_extra_event_types([process_wake_event_type()])
+            .with_wake_session_id(Some(target_scope.session_id.clone())),
         )
         .await
         .expect("register wake process");
@@ -2234,8 +2235,7 @@ async fn long_turn_keeps_claims_live_across_session_lease_renewals() {
                     "status": "queued work claimed mid turn"
                 }
             }),
-        )
-        .with_wake_target_scope(target_scope),
+        ),
     )
     .await;
 
@@ -3307,7 +3307,8 @@ async fn pending_process_wake_drains_into_idle_queued_turn_as_turn_event() {
                 crate::ProcessProvenance::session(target_scope.clone())
                     .with_caused_by(Some(process_caused_by.clone())),
             )
-            .with_extra_event_types([process_wake_event_type()]),
+            .with_extra_event_types([process_wake_event_type()])
+            .with_wake_session_id(Some(target_scope.session_id.clone())),
         )
         .await
         .expect("register wake process");
@@ -3323,8 +3324,7 @@ async fn pending_process_wake_drains_into_idle_queued_turn_as_turn_event() {
                     "status": "deploy complete"
                 }
             }),
-        )
-        .with_wake_target_scope(target_scope.clone()),
+        ),
     )
     .await;
 
@@ -4055,7 +4055,8 @@ async fn renewal_failure_mid_turn_does_not_select_a_durable_branch() {
                 crate::RecoveryDisposition::ExternallyOwned,
                 crate::ProcessProvenance::session(target_scope.clone()),
             )
-            .with_extra_event_types([process_wake_event_type()]),
+            .with_extra_event_types([process_wake_event_type()])
+            .with_wake_session_id(Some(target_scope.session_id.clone())),
         )
         .await
         .expect("register wake process");
@@ -4069,8 +4070,7 @@ async fn renewal_failure_mid_turn_does_not_select_a_durable_branch() {
                 "text": "queued work held when the lease is lost",
                 "value": { "status": "lease lost" }
             }),
-        )
-        .with_wake_target_scope(target_scope),
+        ),
     )
     .await;
 
@@ -4404,7 +4404,8 @@ async fn durable_process_wake_drains_as_committed_event_history_and_acknowledges
                 crate::ProcessProvenance::session(target_scope.clone())
                     .with_caused_by(Some(process_caused_by.clone())),
             )
-            .with_extra_event_types([process_wake_event_type()]),
+            .with_extra_event_types([process_wake_event_type()])
+            .with_wake_session_id(Some(target_scope.session_id.clone())),
         )
         .await
         .expect("register wake process");
@@ -4420,8 +4421,7 @@ async fn durable_process_wake_drains_as_committed_event_history_and_acknowledges
                     "status": "deploy complete"
                 }
             }),
-        )
-        .with_wake_target_scope(target_scope.clone()),
+        ),
     )
     .await;
     let expected_wake_id = wake.wake_id.clone();

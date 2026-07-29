@@ -10,11 +10,7 @@ impl SqliteProcessRegistry {
         self.conn
             .write_flow(move |tx| {
                 Ok(tx_outcome((|| {
-                    if Self::load_process_conn(tx, &process_id)?.is_none() {
-                        return Err(lash_core::PluginError::Session(format!(
-                            "unknown process `{process_id}`"
-                        )));
-                    }
+                    Self::require_process_conn(tx, &process_id)?;
                     let existing: Option<String> = tx
                         .query_row(
                             "SELECT handover_json FROM process_segment_handovers

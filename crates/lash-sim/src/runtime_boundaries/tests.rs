@@ -516,7 +516,7 @@ async fn sqlite_seeded_segment_crash_matrix_preserves_results_and_effect_identit
             SegmentCrashPoint::BeforeHandoverPersist => {
                 harness = sqlite_segment_harness(&root);
                 harness
-                    .ensure_worker_process_registry()
+                    .ensure_worker_process_continuations()
                     .await
                     .expect("reopen registry")
                     .put_segment_handover(&process_id, handover.clone())
@@ -524,13 +524,16 @@ async fn sqlite_seeded_segment_crash_matrix_preserves_results_and_effect_identit
                     .expect("persist recovered handover");
             }
             SegmentCrashPoint::AfterPersistBeforeSuccessor => {
-                registry
+                harness
+                    .ensure_worker_process_continuations()
+                    .await
+                    .expect("continuation store")
                     .put_segment_handover(&process_id, handover.clone())
                     .await
                     .expect("persist handover");
                 harness = sqlite_segment_harness(&root);
                 harness
-                    .ensure_worker_process_registry()
+                    .ensure_worker_process_continuations()
                     .await
                     .expect("reopen registry")
                     .put_segment_handover(&process_id, handover.clone())
@@ -538,7 +541,10 @@ async fn sqlite_seeded_segment_crash_matrix_preserves_results_and_effect_identit
                     .expect("idempotent handover replay");
             }
             SegmentCrashPoint::DuringSuccessorResume => {
-                registry
+                harness
+                    .ensure_worker_process_continuations()
+                    .await
+                    .expect("continuation store")
                     .put_segment_handover(&process_id, handover.clone())
                     .await
                     .expect("persist handover");
@@ -570,12 +576,12 @@ async fn sqlite_seeded_segment_crash_matrix_preserves_results_and_effect_identit
         }
         assert_eq!(segmented_results, baseline_results, "result identity");
 
-        let registry = harness
-            .ensure_worker_process_registry()
+        let continuations = harness
+            .ensure_worker_process_continuations()
             .await
-            .expect("final registry");
+            .expect("final continuation store");
         assert_eq!(
-            registry
+            continuations
                 .latest_segment_handover(&process_id)
                 .await
                 .expect("latest handover")
@@ -584,6 +590,10 @@ async fn sqlite_seeded_segment_crash_matrix_preserves_results_and_effect_identit
             1,
             "restart must leave an addressable successor"
         );
+        let registry = harness
+            .ensure_worker_process_registry()
+            .await
+            .expect("final registry");
         let terminal = ProcessAwaitOutput::Success {
             value: json!({"effects": effect_count, "seed": seed}),
             control: None,

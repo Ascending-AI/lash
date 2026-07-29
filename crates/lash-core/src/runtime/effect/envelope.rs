@@ -7,13 +7,12 @@ use crate::llm::types::{
     AttachmentSource, LlmEventSender, LlmMessage, LlmOutputSpec, LlmProviderTraceSender,
     LlmToolChoice, LlmToolSpec,
 };
-use crate::runtime::ProcessHandleGrantEntry;
 use crate::sansio::{CompletedToolCall, ExecutionEnvironmentSync, LlmCallError};
 use crate::tool_dispatch::ToolTriggerEffectOutcome;
 use crate::{
     AttachmentCreateMeta, CausalRef, CheckpointDelivery, ExecResponse,
     LlmRequest as CoreLlmRequest, LlmResponse, ProcessAwaitOutput, ProcessExecutionContext,
-    ProcessListMode, ProcessRecord, ProcessRegistration, ProcessStartGrant, SessionScope,
+    ProcessListMode, ProcessRecord, ProcessRegistration, SessionScope,
 };
 
 use super::executor::RuntimeEffectControllerError;
@@ -424,8 +423,8 @@ impl RuntimeEffectCommand {
 pub enum ProcessCommand {
     Start {
         registration: ProcessRegistration,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        grant: Option<ProcessStartGrant>,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        observers: Vec<String>,
         #[serde(
             default,
             skip_serializing_if = "boxed_process_execution_context_is_empty"
@@ -515,7 +514,7 @@ pub enum ProcessEffectOutcome {
         record: Box<ProcessRecord>,
     },
     List {
-        entries: Vec<ProcessHandleGrantEntry>,
+        entries: Vec<ProcessRecord>,
     },
     Transfer,
     DeleteSession {

@@ -415,7 +415,9 @@ pub async fn reset_e2e_rows(pool: &PgPool) -> Result<()> {
         "DELETE FROM lash_queued_work_batches",
         "DELETE FROM lash_consumed_wake_high_water",
         "DELETE FROM lash_process_leases",
-        "DELETE FROM lash_process_handle_grants",
+        "DELETE FROM lash_process_observers",
+        "DELETE FROM lash_process_tombstones",
+        "DELETE FROM lash_process_segment_handovers",
         "DELETE FROM lash_process_wake_deliveries",
         "DELETE FROM lash_process_events",
         "DELETE FROM lash_processes",
@@ -682,6 +684,12 @@ pub fn process_registry_from_storage(
     storage: &lash_postgres_store::PostgresStorage,
 ) -> Arc<dyn ProcessRegistry> {
     Arc::new(storage.process_registry()) as Arc<dyn ProcessRegistry>
+}
+
+pub fn process_continuations_from_storage(
+    storage: &lash_postgres_store::PostgresStorage,
+) -> Arc<dyn lash_core::ProcessContinuationStore> {
+    Arc::new(storage.process_registry()) as Arc<dyn lash_core::ProcessContinuationStore>
 }
 
 #[derive(Clone)]

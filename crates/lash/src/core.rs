@@ -652,6 +652,20 @@ impl LashCore {
         node_id: impl Into<String>,
         session_id: impl Into<String>,
     ) -> Result<lash_core::ForkSessionResult> {
+        self.fork_at_with_observer_inheritance(
+            node_id,
+            session_id,
+            lash_core::ObserverInheritance::All,
+        )
+        .await
+    }
+
+    pub async fn fork_at_with_observer_inheritance(
+        &self,
+        node_id: impl Into<String>,
+        session_id: impl Into<String>,
+        observer_inheritance: lash_core::ObserverInheritance,
+    ) -> Result<lash_core::ForkSessionResult> {
         let Some(store_factory) = self.store_factory.as_ref() else {
             return Err(EmbedError::MissingSessionStoreFactory);
         };
@@ -665,17 +679,26 @@ impl LashCore {
             .ok_or_else(|| lash_core::StoreError::ForkPointNotRetained {
                 node_id: node_id.clone(),
             })?;
-        let inherited = if let Some(process_registry) = self.process_registry() {
-            process_registry
-                .list_handle_grants(&lash_core::SessionScope::new(
-                    point.source_session_id.clone(),
-                ))
+        let inherited = match (&observer_inheritance, self.process_registry()) {
+            (lash_core::ObserverInheritance::None, _) | (_, None) => Vec::new(),
+            (lash_core::ObserverInheritance::All, Some(process_registry)) => process_registry
+                .list_observed_by(&point.source_session_id)
                 .await?
                 .into_iter()
-                .map(|(grant, _)| grant)
-                .collect()
-        } else {
-            Vec::new()
+                .map(|record| record.id)
+                .collect(),
+            (lash_core::ObserverInheritance::Only(ids), Some(process_registry)) => {
+                let observed = process_registry
+                    .list_observed_by(&point.source_session_id)
+                    .await?
+                    .into_iter()
+                    .map(|record| record.id)
+                    .collect::<std::collections::HashSet<_>>();
+                ids.iter()
+                    .filter(|id| observed.contains(*id))
+                    .cloned()
+                    .collect()
+            }
         };
         let mut fork_policy = self.policy.clone();
         fork_policy.provider_id = point.config.provider_id;
@@ -686,7 +709,8 @@ impl LashCore {
             relation: lash_core::SessionRelation::Fork {
                 source_session_id: point.source_session_id,
                 source_node_id: point.node_id,
-                process_grants: inherited.clone(),
+                observer_inheritance,
+                pending_observer_process_ids: inherited.clone(),
             },
             policy: fork_policy,
         };
@@ -694,18 +718,14 @@ impl LashCore {
         let Some(process_registry) = self.process_registry() else {
             return Ok(fork);
         };
-        let target_scope = lash_core::SessionScope::new(fork.session_id.clone());
-        for grant in inherited {
-            if let Err(err) = process_registry
-                .grant_handle(&target_scope, &grant.process_id, grant.descriptor)
-                .await
-            {
-                let _ = process_registry
-                    .delete_session_process_state(&fork.session_id)
-                    .await;
-                let _ = store_factory.delete_session(&fork.session_id).await;
-                return Err(err.into());
-            }
+        for process_id in inherited {
+            process_registry
+                .add_observer(
+                    &fork.session_id,
+                    &process_id,
+                    lash_core::ProcessObserverBy::ForkInheritance,
+                )
+                .await?;
         }
         let create_request = lash_core::SessionStoreCreateRequest {
             session_id: request.session_id,
@@ -723,7 +743,7 @@ impl LashCore {
             })?
             .ok_or_else(|| {
                 lash_core::StoreError::Backend(format!(
-                    "fork store `{}` disappeared before grant publication completed",
+                    "fork store `{}` disappeared before observer publication completed",
                     create_request.session_id
                 ))
             })?;
@@ -733,10 +753,14 @@ impl LashCore {
                 create_request.session_id
             ))
         })?;
-        let lash_core::SessionRelation::Fork { process_grants, .. } = &mut meta.relation else {
+        let lash_core::SessionRelation::Fork {
+            pending_observer_process_ids,
+            ..
+        } = &mut meta.relation
+        else {
             unreachable!("fork factory must persist fork metadata");
         };
-        process_grants.clear();
+        pending_observer_process_ids.clear();
         branch_store.save_session_meta(meta).await?;
         Ok(fork)
     }

@@ -63,17 +63,6 @@ mod tests {
         fn registry(&self) -> Arc<lash_core::TestLocalProcessRegistry> {
             Arc::clone(&self.registry)
         }
-
-        fn session_scope(
-            session_id: &str,
-            scope: &lash_core::ProcessOpScope<'_>,
-        ) -> lash_core::SessionScope {
-            scope
-                .agent_frame_id()
-                .filter(|frame_id| !frame_id.is_empty())
-                .map(|frame_id| lash_core::SessionScope::for_agent_frame(session_id, frame_id))
-                .unwrap_or_else(|| lash_core::SessionScope::new(session_id))
-        }
     }
 
     #[async_trait::async_trait]
@@ -92,25 +81,21 @@ mod tests {
                 .map_err(|err| {
                     PluginError::Session(format!("failed to hash test process env: {err}"))
                 })?;
-            let descriptor = request
-                .grant
-                .as_ref()
-                .map(|grant| grant.descriptor.clone())
-                .unwrap_or_default();
+            let observers = request.observers.clone();
             let registration = request.into_registration(env_ref);
             let record = self
                 .start(
                     session_id,
                     registration,
-                    lash_core::ProcessStartOptions::new().with_descriptor(descriptor.clone()),
+                    lash_core::ProcessStartOptions::new().with_observers(observers),
                     scope,
                 )
                 .await?;
             let definition = record.identity.definition.clone();
             Ok(lash_core::ProcessHandleSummary::new(
                 record.id,
-                descriptor,
-                lash_core::ProcessLifecycleStatus::from(record.status),
+                record.identity,
+                record.status,
             )
             .with_definition(definition))
         }
@@ -120,20 +105,15 @@ mod tests {
             session_id: &str,
             registration: lash_core::ProcessRegistration,
             options: lash_core::ProcessStartOptions,
-            scope: lash_core::ProcessOpScope<'_>,
+            _scope: lash_core::ProcessOpScope<'_>,
         ) -> Result<lash_core::ProcessRecord, PluginError> {
-            let process_id = registration.id.clone();
-            let record = self.registry.register_process(registration).await?;
-            if let Some(descriptor) = options.descriptor {
-                self.registry
-                    .grant_handle(
-                        &Self::session_scope(session_id, &scope),
-                        &process_id,
-                        descriptor,
-                    )
-                    .await?;
+            let mut observers = options.observers;
+            if observers.is_empty() {
+                observers.push(session_id.to_string());
             }
-            Ok(record)
+            self.registry
+                .register_process_with_observers(registration, &observers)
+                .await
         }
 
         async fn complete_external(
@@ -141,19 +121,18 @@ mod tests {
             session_id: &str,
             process_id: &str,
             await_output: lash_core::ProcessAwaitOutput,
-            scope: lash_core::ProcessOpScope<'_>,
+            _scope: lash_core::ProcessOpScope<'_>,
         ) -> Result<lash_core::ProcessCompletionOutcome, PluginError> {
-            let session_scope = Self::session_scope(session_id, &scope);
             if !self
                 .registry
-                .has_handle_grant(&session_scope, process_id)
+                .is_observer(session_id, process_id)
                 .await?
             {
                 return Err(PluginError::Session(format!(
                     "process handle `{process_id}` is not visible in this session"
                 )));
             }
-            match self.registry.get_process(process_id).await {
+            match self.registry.get_process(process_id).await? {
                 Some(record)
                     if record.disposition != lash_core::RecoveryDisposition::ExternallyOwned =>
                 {
@@ -193,14 +172,14 @@ mod tests {
             session_id: &str,
             mode: lash_core::ProcessListMode,
             scope: lash_core::ProcessOpScope<'_>,
-        ) -> Result<Vec<lash_core::runtime::ProcessHandleGrantEntry>, PluginError> {
-            let session_scope = Self::session_scope(session_id, &scope);
+        ) -> Result<Vec<lash_core::ProcessRecord>, PluginError> {
+            let _ = scope;
             match mode {
                 lash_core::ProcessListMode::Live => {
-                    self.registry.list_live_handle_grants(&session_scope).await
+                    self.registry.list_live_observed_by(session_id).await
                 }
                 lash_core::ProcessListMode::All => {
-                    self.registry.list_handle_grants(&session_scope).await
+                    self.registry.list_observed_by(session_id).await
                 }
             }
         }
@@ -211,11 +190,11 @@ mod tests {
             process_ids: &[String],
             scope: lash_core::ProcessOpScope<'_>,
         ) -> Result<(), PluginError> {
-            let session_scope = Self::session_scope(session_id, &scope);
+            let _ = scope;
             for process_id in process_ids {
                 if !self
                     .registry
-                    .has_handle_grant(&session_scope, process_id)
+                    .is_observer(session_id, process_id)
                     .await?
                 {
                     return Err(PluginError::Session(format!(
@@ -243,7 +222,7 @@ mod tests {
                 .await?;
             self.registry
                 .get_process(process_id)
-                .await
+                .await?
                 .ok_or_else(|| PluginError::Session(format!("unknown process `{process_id}`")))
         }
 
@@ -258,13 +237,13 @@ mod tests {
         ) -> Result<lash_core::ProcessEvent, PluginError> {
             // Mirror the real service: a signal only targets a live, visible
             // handle, so a terminal row (e.g. a detached command) is rejected.
-            let session_scope = Self::session_scope(session_id, &scope);
+            let _ = scope;
             let visible = self
                 .registry
-                .list_live_handle_grants(&session_scope)
+                .list_live_observed_by(session_id)
                 .await?
                 .into_iter()
-                .any(|(grant, _record)| grant.process_id == process_id);
+                .any(|record| record.id == process_id);
             if !visible {
                 return Err(PluginError::Session(format!(
                     "process handle `{process_id}` is not live or visible in this session"
@@ -360,13 +339,13 @@ mod tests {
             .await
             .expect("register process");
         registry
-            .grant_handle(
-                &lash_core::SessionScope::new("test-session"),
+            .add_observer(
+                "test-session",
                 process_id,
-                lash_core::ProcessHandleDescriptor::new(Some("shell"), Some("test")),
+                lash_core::ProcessObserverBy::host("shell-test"),
             )
             .await
-            .expect("grant handle");
+            .expect("observe process");
     }
 
     async fn claim_signal_target_execution(
@@ -602,12 +581,16 @@ mod tests {
 
         let entries = service
             .registry()
-            .list_live_handle_grants(&lash_core::SessionScope::new("test-session"))
+            .list_live_observed_by("test-session")
             .await
-            .expect("list live handles");
+            .expect("list live observed");
         assert_eq!(entries.len(), 1);
-        assert_eq!(entries[0].0.process_id, "shell-call-1");
-        assert_eq!(entries[0].0.descriptor.kind.as_deref(), Some("shell"));
+        assert_eq!(entries[0].id, "shell-call-1");
+        assert_eq!(entries[0].identity.kind, "shell");
+        assert_eq!(
+            entries[0].identity.label.as_deref(),
+            Some("sleep 1; echo done")
+        );
     }
 
     #[tokio::test]
@@ -634,10 +617,13 @@ mod tests {
             .events_after("shell-call-1", 0)
             .await
             .expect("events");
-        assert_eq!(events.len(), 1);
-        assert_eq!(events[0].event_type, SHELL_STDIN_SIGNAL_EVENT);
-        assert_eq!(events[0].payload["chars"], "hello\n");
-        assert_eq!(events[0].payload["close_stdin"], true);
+        let signal_events = events
+            .iter()
+            .filter(|event| event.event_type == SHELL_STDIN_SIGNAL_EVENT)
+            .collect::<Vec<_>>();
+        assert_eq!(signal_events.len(), 1);
+        assert_eq!(signal_events[0].payload["chars"], "hello\n");
+        assert_eq!(signal_events[0].payload["close_stdin"], true);
     }
 
     #[cfg(unix)]
@@ -749,6 +735,7 @@ mod tests {
             .registry()
             .get_process("detach-call-1")
             .await
+            .expect("read process")
             .expect("registry row");
         assert!(
             record.is_terminal(),

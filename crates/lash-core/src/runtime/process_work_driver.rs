@@ -114,10 +114,10 @@ impl ProcessWorkDriver {
     ) -> Result<ProcessAwaitOutput, PluginError> {
         let record = self
             .registry
-            .try_get_process(process_id)
+            .get_process(process_id)
             .await?
             .ok_or_else(|| PluginError::Session(format!("unknown process `{process_id}`")))?;
-        if let Some(output) = record.status.await_output() {
+        if let Some(output) = record.outcome.as_ref() {
             return Ok(output.clone());
         }
         crate::runtime::process_worker::release_process_execution_permit_while(async {

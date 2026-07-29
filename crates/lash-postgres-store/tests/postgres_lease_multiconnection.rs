@@ -320,6 +320,7 @@ async fn postgres_lease_clock_and_fencing_hold_across_independent_connections() 
     let mid_record = reg_c
         .get_process(&process_id)
         .await
+        .expect("read process")
         .expect("observer reads the record");
     assert!(
         !mid_record.is_terminal(),
@@ -378,6 +379,7 @@ async fn postgres_lease_clock_and_fencing_hold_across_independent_connections() 
     let final_record = reg_c
         .get_process(&process_id)
         .await
+        .expect("read process")
         .expect("observer final read");
     assert_eq!(
         final_record.first_started.as_deref(),

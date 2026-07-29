@@ -339,7 +339,6 @@ fn code_execution_context_with_tool_provider_catalog_trigger_router_and_effect_c
         session_lifecycle: Arc::new(MockSessionManager::default()),
         session_graph: Arc::new(MockSessionManager::default()),
         processes: Arc::new(crate::UnavailableProcessService),
-        process_cancel_ability: Arc::new(crate::DefaultProcessCancelAbility),
         trigger_router,
         effect_controller: crate::runtime::RuntimeEffectControllerHandle::shared(effect_controller),
         direct_completions: crate::DirectCompletionClient::unavailable(
@@ -636,13 +635,14 @@ impl crate::ProcessService for MockSessionManager {
         } else {
             crate::ProcessCompletionAuthority::workflow_key(&id)
         };
-        self.process_registry.register_process(registration).await?;
-        if let Some(descriptor) = options.descriptor {
-            let session_scope = crate::SessionScope::new(session_id);
-            self.process_registry
-                .grant_handle(&session_scope, &id, descriptor)
-                .await?;
-        }
+        let observers = if options.observers.is_empty() {
+            vec![session_id.to_string()]
+        } else {
+            options.observers
+        };
+        self.process_registry
+            .register_process_with_observers(registration, &observers)
+            .await?;
         self.process_registry
             .complete_process(
                 &id,
@@ -673,23 +673,15 @@ impl crate::ProcessService for MockSessionManager {
         session_id: &str,
         mode: crate::ProcessListMode,
         scope: crate::ProcessOpScope<'_>,
-    ) -> Result<Vec<crate::runtime::ProcessHandleGrantEntry>, PluginError> {
-        let session_scope = scope
-            .agent_frame_id
-            .as_deref()
-            .map(|frame_id| crate::SessionScope::for_agent_frame(session_id, frame_id))
-            .unwrap_or_else(|| crate::SessionScope::new(session_id));
+    ) -> Result<Vec<crate::ProcessRecord>, PluginError> {
+        let _ = scope;
         match mode {
             crate::ProcessListMode::Live => {
                 self.process_registry
-                    .list_live_handle_grants(&session_scope)
+                    .list_live_observed_by(session_id)
                     .await
             }
-            crate::ProcessListMode::All => {
-                self.process_registry
-                    .list_handle_grants(&session_scope)
-                    .await
-            }
+            crate::ProcessListMode::All => self.process_registry.list_observed_by(session_id).await,
         }
     }
 
@@ -699,15 +691,11 @@ impl crate::ProcessService for MockSessionManager {
         handle_ids: &[String],
         scope: crate::ProcessOpScope<'_>,
     ) -> Result<(), PluginError> {
-        let session_scope = scope
-            .agent_frame_id
-            .as_deref()
-            .map(|frame_id| crate::SessionScope::for_agent_frame(session_id, frame_id))
-            .unwrap_or_else(|| crate::SessionScope::new(session_id));
+        let _ = scope;
         for handle_id in handle_ids {
             if !self
                 .process_registry
-                .has_handle_grant(&session_scope, handle_id)
+                .is_observer(session_id, handle_id)
                 .await?
             {
                 return Err(PluginError::Session(format!(
@@ -760,14 +748,14 @@ impl crate::ProcessService for MockSessionManager {
         process_ids: Vec<String>,
         scope: crate::ProcessOpScope<'_>,
     ) -> Result<(), PluginError> {
-        let from_scope = scope
-            .agent_frame_id
-            .as_deref()
-            .map(|frame_id| crate::SessionScope::for_agent_frame(from_session_id, frame_id))
-            .unwrap_or_else(|| crate::SessionScope::new(from_session_id));
-        let to_scope = crate::SessionScope::new(to_session_id);
+        let _ = scope;
         self.process_registry
-            .transfer_handle_grants(&from_scope, &to_scope, &process_ids)
+            .transfer_observers(
+                from_session_id,
+                to_session_id,
+                &process_ids,
+                crate::ProcessObserverBy::host("mock-transfer"),
+            )
             .await
     }
 }

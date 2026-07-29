@@ -53,9 +53,12 @@ pub(super) async fn process_change_feed_never_misses_concurrent_terminal_writers
                 "a non-empty process change page must advance the cursor"
             );
             cursor = next_cursor;
-            for record in records {
+            for change in records {
+                let ProcessChange::Upsert { record } = change else {
+                    continue;
+                };
                 if reader_expected_ids.contains(record.id.as_str()) && record.is_terminal() {
-                    *terminal_observations.entry(record.id).or_default() += 1;
+                    *terminal_observations.entry(record.id.clone()).or_default() += 1;
                 }
             }
         }

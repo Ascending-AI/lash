@@ -411,8 +411,7 @@ pub(super) fn assert_subagent_bridge_exec_graphs(
         .final_process_list
         .iter()
         .filter(|process| {
-            process.descriptor.kind.as_deref() == Some("subagent")
-                || process.process_id.starts_with("process:subagent:")
+            process.kind == "subagent" || process.process_id.starts_with("process:subagent:")
         })
         .map(|process| process.process_id.as_str())
         .collect::<Vec<_>>();

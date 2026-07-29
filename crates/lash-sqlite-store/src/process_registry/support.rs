@@ -5,6 +5,137 @@ pub(super) fn process_status_label(record: &ProcessRecord) -> &'static str {
 }
 
 impl SqliteProcessRegistry {
+    pub(crate) fn require_process_conn(
+        conn: &rusqlite::Connection,
+        process_id: &str,
+    ) -> Result<ProcessRecord, lash_core::PluginError> {
+        if let Some(record) = Self::load_process_conn(conn, process_id)? {
+            return Ok(record);
+        }
+        let tombstone = conn
+            .query_row(
+                "SELECT terminal_label, pruned_at_ms
+                 FROM process_tombstones WHERE process_id = ?1",
+                params![process_id],
+                |row| Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?)),
+            )
+            .optional()
+            .map_err(process_sqlite_error)?;
+        match tombstone {
+            Some((terminal_label, pruned_at_ms)) => {
+                Err(lash_core::PluginError::ProcessNoLongerRetained {
+                    terminal_label,
+                    pruned_at_ms: pruned_at_ms as u64,
+                })
+            }
+            None => Err(lash_core::PluginError::Session(format!(
+                "unknown process `{process_id}`"
+            ))),
+        }
+    }
+
+    pub(crate) async fn set_observer(
+        &self,
+        session_id: &str,
+        process_id: &str,
+        by: ProcessObserverBy,
+        add: bool,
+    ) -> Result<(), lash_core::PluginError> {
+        let session_id = session_id.to_string();
+        let process_id = process_id.to_string();
+        let now = self.clock.timestamp_ms();
+        let config = self.wake_delivery_config;
+        self.conn
+            .write_flow(move |tx| {
+                Ok(tx_outcome((|| {
+                    let mut record = Self::require_process_conn(tx, &process_id)?;
+                    let changed = if add {
+                        tx.execute(
+                            "INSERT OR IGNORE INTO process_observers (session_id, process_id)
+                             VALUES (?1, ?2)",
+                            params![session_id, process_id],
+                        )
+                    } else {
+                        tx.execute(
+                            "DELETE FROM process_observers
+                             WHERE session_id = ?1 AND process_id = ?2",
+                            params![session_id, process_id],
+                        )
+                    }
+                    .map_err(process_sqlite_error)?;
+                    if changed > 0 {
+                        let request = if add {
+                            ProcessEventAppendRequest::observer_added(&process_id, &session_id, &by)
+                        } else {
+                            ProcessEventAppendRequest::observer_removed(
+                                &process_id,
+                                &session_id,
+                                &by,
+                            )
+                        };
+                        Self::append_event_conn(tx, &mut record, request, now, config)?;
+                    }
+                    Ok(())
+                })()))
+            })
+            .await
+            .map_err(process_sqlite_error)?
+    }
+
+    pub(crate) async fn retarget_subscription_impl(
+        &self,
+        process_id: &str,
+        target: Option<&str>,
+    ) -> Result<(), lash_core::PluginError> {
+        let process_id = process_id.to_string();
+        let target = target.map(ToOwned::to_owned);
+        let now = self.clock.timestamp_ms();
+        let config = self.wake_delivery_config;
+        self.conn
+            .write_flow(move |tx| {
+                Ok(tx_outcome((|| {
+                    let mut record = Self::require_process_conn(tx, &process_id)?;
+                    let previous: Option<String> = tx
+                        .query_row(
+                            "SELECT wake_session_id FROM processes WHERE process_id = ?1",
+                            params![process_id],
+                            |row| row.get(0),
+                        )
+                        .map_err(process_sqlite_error)?;
+                    if previous == target {
+                        return Ok(());
+                    }
+                    Self::append_event_conn(
+                        tx,
+                        &mut record,
+                        ProcessEventAppendRequest::subscription_retargeted(
+                            &process_id,
+                            target.as_deref(),
+                        ),
+                        now,
+                        config,
+                    )?;
+                    tx.execute(
+                        "UPDATE processes SET wake_session_id = ?2 WHERE process_id = ?1",
+                        params![process_id, target],
+                    )
+                    .map_err(process_sqlite_error)?;
+                    if let Some(previous) = previous {
+                        tx.execute(
+                            "UPDATE process_wake_deliveries
+                             SET state = 'discarded', discard_reason = 'retargeted'
+                             WHERE process_id = ?1 AND target_session_id = ?2 AND state = 'pending'",
+                            params![process_id, previous],
+                        )
+                        .map_err(process_sqlite_error)?;
+                    }
+                    Ok(())
+                })()))
+            })
+            .await
+            .map_err(process_sqlite_error)?
+    }
+
     /// Open a process registry whose terminal-retention prune removes the two
     /// process-owned session stores from `session_store_root` before the process
     /// row. The root is required and explicit; no sibling-directory convention
@@ -86,13 +217,15 @@ impl SqliteProcessRegistry {
         let change_seq = Self::next_change_seq_conn(conn)?;
         conn.execute(
             "UPDATE processes
-             SET updated_at_ms = ?2, change_seq = ?3, status = ?4, record_json = ?5
+             SET updated_at_ms = ?2, change_seq = ?3, status = ?4,
+                 is_waiting = ?5, record_json = ?6
              WHERE process_id = ?1",
             params![
                 record.id.as_str(),
                 record.updated_at_ms as i64,
                 change_seq as i64,
                 process_status_label(record),
+                i64::from(record.wait.is_some()),
                 process_encode_json(record)?
             ],
         )
@@ -100,7 +233,7 @@ impl SqliteProcessRegistry {
         Ok(())
     }
 
-    pub(super) fn next_change_seq_conn(conn: &Connection) -> Result<u64, lash_core::PluginError> {
+    pub(crate) fn next_change_seq_conn(conn: &Connection) -> Result<u64, lash_core::PluginError> {
         conn.execute(
             "UPDATE process_change_clock
              SET current_seq = current_seq + 1
@@ -114,6 +247,18 @@ impl SqliteProcessRegistry {
             |row| row.get::<_, i64>(0),
         )
         .map(|seq| seq as u64)
+        .map_err(process_sqlite_error)
+    }
+
+    pub(crate) fn wake_session_id_conn(
+        conn: &Connection,
+        process_id: &str,
+    ) -> Result<Option<String>, lash_core::PluginError> {
+        conn.query_row(
+            "SELECT wake_session_id FROM processes WHERE process_id = ?1",
+            params![process_id],
+            |row| row.get(0),
+        )
         .map_err(process_sqlite_error)
     }
 
@@ -155,8 +300,15 @@ impl SqliteProcessRegistry {
                 None
             };
         let sequence = Self::next_event_sequence_conn(conn, &process_id)?;
-        let prepared =
-            prepare_process_event_append(record, request, sequence, replay_lookup, occurred_at_ms)?;
+        let wake_session_id = Self::wake_session_id_conn(conn, &process_id)?;
+        let prepared = prepare_process_event_append(
+            record,
+            request,
+            sequence,
+            replay_lookup,
+            occurred_at_ms,
+            wake_session_id.as_deref(),
+        )?;
         match prepared {
             lash_core::ProcessEventAppendPlan::Replay {
                 event,
@@ -358,54 +510,6 @@ impl SqliteProcessRegistry {
         )
         .map_err(process_sqlite_error)?;
         Ok(lease)
-    }
-
-    pub(super) fn list_grants_for_scope_conn(
-        conn: &Connection,
-        session_scope: &SessionScope,
-        live_only: bool,
-    ) -> Result<Vec<ProcessHandleGrantEntry>, lash_core::PluginError> {
-        let session_scope_id = session_scope.id();
-        let status_clause = if live_only {
-            "AND p.status = 'running'"
-        } else {
-            ""
-        };
-        let mut stmt = conn
-            .prepare(&format!(
-                "SELECT g.process_id, g.descriptor_json, p.record_json
-                 FROM process_handle_grants g
-                 JOIN processes p ON p.process_id = g.process_id
-                 WHERE g.scope_id = ?1 {status_clause}
-                 ORDER BY g.process_id ASC"
-            ))
-            .map_err(process_sqlite_error)?;
-        let rows = stmt
-            .query_map(params![session_scope_id.as_str()], |row| {
-                Ok((
-                    row.get::<_, String>(0)?,
-                    row.get::<_, String>(1)?,
-                    row.get::<_, String>(2)?,
-                ))
-            })
-            .map_err(process_sqlite_error)?;
-        let mut entries = Vec::new();
-        for row in rows {
-            let (process_id, descriptor_json, record_json) = row.map_err(process_sqlite_error)?;
-            let descriptor: ProcessHandleDescriptor =
-                serde_json::from_str(&descriptor_json).map_err(process_decode_error)?;
-            let record: ProcessRecord =
-                serde_json::from_str(&record_json).map_err(process_decode_error)?;
-            entries.push((
-                ProcessHandleGrant {
-                    session_id: session_scope.session_id.clone(),
-                    process_id,
-                    descriptor,
-                },
-                record,
-            ));
-        }
-        Ok(entries)
     }
 }
 

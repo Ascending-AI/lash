@@ -25,10 +25,8 @@ pub(super) async fn complete_process(
         .conn
         .write_flow(move |tx| {
             Ok(tx_outcome((|| {
-                let mut record = SqliteProcessRegistry::load_process_conn(tx, &process_id)?
-                    .ok_or_else(|| {
-                        lash_core::PluginError::Session(format!("unknown process `{process_id}`"))
-                    })?;
+                let mut record =
+                    SqliteProcessRegistry::require_process_conn(tx, &process_id)?;
                 if record.is_terminal() {
                     return Ok(lash_core::ProcessCompletionOutcome::from_stored(
                         record,
@@ -61,8 +59,16 @@ pub(super) async fn complete_process(
                         |row| row.get::<_, i64>(0),
                     )
                     .map_err(process_sqlite_error)? as u64;
-                let prepared =
-                    prepare_process_event_append(&record, request, sequence, replay_lookup, now)?;
+                let wake_session_id =
+                    SqliteProcessRegistry::wake_session_id_conn(tx, &process_id)?;
+                let prepared = prepare_process_event_append(
+                    &record,
+                    request,
+                    sequence,
+                    replay_lookup,
+                    now,
+                    wake_session_id.as_deref(),
+                )?;
                 match prepared {
                     lash_core::ProcessEventAppendPlan::Replay {
                         repair_record,
@@ -133,11 +139,7 @@ pub(super) async fn complete_process_with_lease(
         .write_flow(move |tx| {
             Ok(tx_outcome((|| {
                 let process_id = lease.process_id.as_str();
-                let mut record = SqliteProcessRegistry::load_process_conn(tx, process_id)?.ok_or_else(|| {
-                    lash_core::PluginError::Session(format!(
-                        "unknown process `{process_id}`"
-                    ))
-                })?;
+                let mut record = SqliteProcessRegistry::require_process_conn(tx, process_id)?;
                 if record.is_terminal() {
                     return Ok(lash_core::ProcessCompletionOutcome::from_stored(
                         record,
@@ -168,6 +170,7 @@ pub(super) async fn complete_process_with_lease(
                     sequence,
                     replay_lookup,
                     now,
+                    SqliteProcessRegistry::wake_session_id_conn(tx, process_id)?.as_deref(),
                 )?;
                 if matches!(prepared, lash_core::ProcessEventAppendPlan::Replay { .. }) {
                     if let lash_core::ProcessEventAppendPlan::Replay {

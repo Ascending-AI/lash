@@ -29,7 +29,7 @@
 <div class="section">
           <div class="section-header">
             <h2>Runtime Shape</h2>
-            <p><code>LashRuntime</code> holds the live session registry, managed child-session state, AgentFrame-following turn execution, process grants, pending user turn input, queued background work, and a usage ledger. Sans-IO computes protocol effects, <code>RuntimeEffectController</code> handles nondeterministic host work, plugins contribute behavior, providers complete requests, and persistence records committed session state plus final turn commit idempotency.</p>
+            <p><code>LashRuntime</code> holds the live session registry, managed child-session state, AgentFrame-following turn execution, process observer edges, pending user turn input, queued background work, and a usage ledger. Sans-IO computes protocol effects, <code>RuntimeEffectController</code> handles nondeterministic host work, plugins contribute behavior, providers complete requests, and persistence records committed session state plus final turn commit idempotency.</p>
           </div>
           <div class="diagram">
             <div class="diagram-title">Runtime composition</div>
@@ -77,7 +77,7 @@ flowchart TD
         <div class="section">
           <div class="section-header">
             <h2>Host Capabilities</h2>
-            <p>The internal <code>RuntimeSessionServices</code> capability set is projected through thin wrappers (<code>RuntimeSessionStateService</code>, <code>RuntimeSessionLifecycleService</code>, <code>RuntimeSessionGraphService</code>, <code>RuntimeSessionProcessService</code>) that implement the split host-boundary traits <code>SessionStateService</code>, <code>SessionLifecycleService</code>, <code>SessionGraphService</code>, and <code>ProcessService</code> with typed operations for plugin and tool needs. Tool authors do not receive the runtime handle directly; <code>ToolContext</code> projects host capabilities into explicit methods such as <code>sessions()</code> (whose <code>ToolSessionAdmin</code> exposes <code>model()</code> and <code>tool_catalog()</code>), <code>processes()</code>, <code>direct_completions()</code>, and <code>attachments()</code>. Process starts enter through <code>ProcessStartRequest</code>, and intentional cancellation enters through the host-owned <code>ProcessCancelAbility</code>.</p>
+            <p>The internal <code>RuntimeSessionServices</code> capability set is projected through thin wrappers (<code>RuntimeSessionStateService</code>, <code>RuntimeSessionLifecycleService</code>, <code>RuntimeSessionGraphService</code>, <code>RuntimeSessionProcessService</code>) that implement the split host-boundary traits <code>SessionStateService</code>, <code>SessionLifecycleService</code>, <code>SessionGraphService</code>, and <code>ProcessService</code> with typed operations for plugin and tool needs. Tool authors do not receive the runtime handle directly; <code>ToolContext</code> projects host capabilities into explicit methods such as <code>sessions()</code> (whose <code>ToolSessionAdmin</code> exposes <code>model()</code> and <code>tool_catalog()</code>), <code>processes()</code>, <code>direct_completions()</code>, and <code>attachments()</code>. Process starts enter through <code>ProcessStartRequest</code>, and intentional cancellation is a direct visibility-scoped <code>ProcessService</code> operation.</p>
           </div>
           <div class="table">
             <table>

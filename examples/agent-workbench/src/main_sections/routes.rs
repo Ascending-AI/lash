@@ -1071,7 +1071,7 @@ async fn await_work(
         "api.work.await",
         json!({
             "process_id": process_id,
-            "terminal_state": format!("{:?}", outcome.terminal_state()),
+            "terminal_state": format!("{:?}", outcome.terminal_status()),
             "event_count": events.len(),
         }),
     );

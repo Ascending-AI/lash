@@ -101,6 +101,7 @@ async fn async_main() -> AnyhowResult<()> {
     eprintln!("agent-workbench durable store: {}", stores.backend);
     let core_store_factory = Arc::clone(&stores.session_store_factory);
     let process_registry = Arc::clone(&stores.process_registry);
+    let process_continuations = Arc::clone(&stores.process_continuations);
     let trigger_store = Arc::clone(&stores.trigger_store);
     let artifact_store = Arc::clone(&stores.artifact_store);
     let subagent_registry = Arc::new(lash_subagents::default_registry(&BTreeMap::new()));
@@ -131,6 +132,7 @@ async fn async_main() -> AnyhowResult<()> {
     let process_deployment = lash_restate::RestateProcessDeployment::new_with_sink(
         restate_ingress_url.clone(),
         process_registry,
+        process_continuations,
         Some(process_event_sink),
     );
     // Retained so a host-facing "wait for the work item" flow can route through

@@ -606,7 +606,7 @@ impl AppState {
         Ok(sqlx::query_scalar::<_, String>(
             "SELECT process_id
              FROM lash_processes
-             WHERE owner_scope_id = $1 OR owner_scope_id LIKE $2
+             WHERE originator_scope_id = $1 OR originator_scope_id LIKE $2
              ORDER BY created_at_ms, process_id",
         )
         .bind(default_session_originator_scope_id())
@@ -927,8 +927,13 @@ async fn async_main() -> Result<()> {
         .context("connect Postgres storage for process deployment")?;
     ensure_e2e_schema(storage.pool()).await?;
     let registry = process_registry_from_storage(&storage);
-    let deployment =
-        RestateProcessDeployment::new(env("RESTATE_INGRESS_URL", "http://restate:8080"), registry);
+    let continuations =
+        lash_restate_postgres_workers_e2e::process_continuations_from_storage(&storage);
+    let deployment = RestateProcessDeployment::new(
+        env("RESTATE_INGRESS_URL", "http://restate:8080"),
+        registry,
+        continuations,
+    );
     let process_work_driver = deployment.process_work_driver();
     let state = AppState::connect(process_work_driver.clone()).await?;
     if state.fail_once {

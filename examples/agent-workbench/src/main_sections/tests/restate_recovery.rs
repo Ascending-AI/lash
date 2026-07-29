@@ -815,7 +815,8 @@ finish (await handle)?
         .process_registry()
         .get_process(&process_id)
         .await
-        .expect("read process immediately after session revocation");
+        .expect("read process immediately after session revocation")
+        .expect("session revocation keeps its process record");
     assert!(
         !immediately_after_delete.is_terminal(),
         "session revocation must leave the independently sleeping process live"
@@ -1062,12 +1063,12 @@ finish "started lifecycle gates"
     assert!(terminal_work.iter().any(|item| {
         item.process.process_id == survivor_id
             && item.process.terminal
-            && item.process.lifecycle == lash::process::ProcessLifecycleStatus::Completed
+            && item.process.lifecycle == lash::process::ProcessStatus::Completed
     }));
     assert!(terminal_work.iter().any(|item| {
         item.process.process_id == cancellable_id
             && item.process.terminal
-            && item.process.lifecycle == lash::process::ProcessLifecycleStatus::Cancelled
+            && item.process.lifecycle == lash::process::ProcessStatus::Cancelled
             && item
                 .events
                 .iter()

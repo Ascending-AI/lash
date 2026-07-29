@@ -7,7 +7,6 @@ pub struct ToolSessionProcessAdmin<'run> {
     pub(super) session_id: String,
     pub(super) agent_frame_id: crate::AgentFrameId,
     pub(super) processes: Arc<dyn crate::ProcessService>,
-    pub(super) process_cancel_ability: Arc<dyn crate::ProcessCancelAbility>,
     pub(super) effect_controller: crate::runtime::RuntimeEffectControllerHandle<'run>,
     pub(super) parent_invocation: Option<crate::RuntimeInvocation>,
     pub(super) tool_call_id: Option<String>,
@@ -30,6 +29,13 @@ impl ToolSessionProcessAdmin<'_> {
         &self,
         mut request: crate::ProcessStartRequest,
     ) -> Result<crate::ProcessHandleSummary, PluginError> {
+        if !request
+            .observers
+            .iter()
+            .any(|observer| observer == &self.session_id)
+        {
+            request.observers.push(self.session_id.clone());
+        }
         if request.env_spec.is_none()
             && matches!(
                 &request.input,
@@ -90,7 +96,7 @@ impl ToolSessionProcessAdmin<'_> {
             )
             .await?
             .into_iter()
-            .map(crate::ProcessHandleSummary::from)
+            .map(crate::ProcessHandleSummary::from_record)
             .collect())
     }
 
@@ -104,7 +110,7 @@ impl ToolSessionProcessAdmin<'_> {
             )
             .await?
             .into_iter()
-            .map(crate::ProcessHandleSummary::from)
+            .map(crate::ProcessHandleSummary::from_record)
             .collect())
     }
 
@@ -117,8 +123,8 @@ impl ToolSessionProcessAdmin<'_> {
             .list_visible(&self.session_id, filter.list_mode(), self.process_scope())
             .await?
             .into_iter()
-            .filter(|entry| filter.matches_entry(entry))
-            .map(crate::ProcessHandleSummary::from)
+            .filter(|record| filter.matches_record(record))
+            .map(crate::ProcessHandleSummary::from_record)
             .collect())
     }
 
@@ -132,16 +138,10 @@ impl ToolSessionProcessAdmin<'_> {
         &self,
         process_id: &str,
     ) -> Result<crate::ProcessCancelSummary, PluginError> {
-        let request = crate::ProcessCancelRequest::new(
-            &self.session_id,
-            process_id,
-            self.process_scope(),
-            crate::ProcessCancelSource::Tool,
-        )
-        .with_reason("requested by tool");
-        self.process_cancel_ability
-            .cancel_summary(self.processes.as_ref(), request)
+        self.processes
+            .cancel_visible(&self.session_id, process_id, self.process_scope())
             .await
+            .map(crate::ProcessCancelSummary::from_record)
     }
 
     pub async fn signal(
@@ -167,16 +167,8 @@ impl ToolSessionProcessAdmin<'_> {
     }
 
     pub async fn cancel_all(&self) -> Result<Vec<crate::ProcessCancelSummary>, PluginError> {
-        self.process_cancel_ability
-            .cancel_all_visible(
-                self.processes.as_ref(),
-                crate::ProcessCancelAllRequest::new(
-                    &self.session_id,
-                    self.process_scope(),
-                    crate::ProcessCancelSource::Tool,
-                )
-                .with_reason("requested by tool"),
-            )
+        self.processes
+            .cancel_all_visible(&self.session_id, self.process_scope())
             .await
     }
 
@@ -207,7 +199,6 @@ mod tests {
             session_id: "session".to_string(),
             agent_frame_id: "frame".to_string(),
             processes,
-            process_cancel_ability: Arc::new(crate::DefaultProcessCancelAbility),
             effect_controller: RuntimeEffectControllerHandle::shared(Arc::new(
                 crate::InlineRuntimeEffectController::default(),
             )),
@@ -258,13 +249,13 @@ mod tests {
         );
 
         host.process_registry
-            .grant_handle(
-                &crate::SessionScope::for_agent_frame("session", "frame"),
+            .add_observer(
+                "session",
                 "process",
-                crate::ProcessHandleDescriptor::new(Some("test"), Some("process")),
+                crate::ProcessObserverBy::host("tool-provider-test"),
             )
             .await
-            .expect("grant process handle");
+            .expect("observe process");
         assert!(admin.await_process("process").await.is_ok());
     }
 }

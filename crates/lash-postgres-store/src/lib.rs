@@ -9,8 +9,8 @@ use std::sync::{Arc, OnceLock};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use lash_core::runtime::{
-    ProcessHandleGrantEntry, QueuedWorkBatch, QueuedWorkBatchDraft, QueuedWorkClaim,
-    QueuedWorkClaimBoundary, QueuedWorkCompletion, QueuedWorkItem,
+    QueuedWorkBatch, QueuedWorkBatchDraft, QueuedWorkClaim, QueuedWorkClaimBoundary,
+    QueuedWorkCompletion, QueuedWorkItem,
 };
 use lash_core::store::queued_work::{
     ClaimCandidate, QueuedWorkClaimLease, claim_scan_limit, derive_batch_id,
@@ -24,18 +24,18 @@ use lash_core::{
     AbandonRequest, AttachmentId, AttachmentIntent, AttachmentManifest, AttachmentManifestEntry,
     AttachmentOwnerKind, AwaitEventResolver, BlobRef, CanonicalRuntimeEffectEnvelope,
     DeliveryPolicy, EffectHost, ExecutionScope, GcReport, LeaseOwnerIdentity, MergeKey,
-    PersistedSegmentHandover, ProcessAwaitOutput, ProcessChangeCursor, ProcessEvent,
-    ProcessEventAppendRequest, ProcessEventAppendResult, ProcessExecutionWriteAuthority,
-    ProcessExternalRef, ProcessHandleDescriptor, ProcessHandleGrant, ProcessLease,
-    ProcessLeaseCompletion, ProcessLiveReferenceSummary, ProcessPruneReport, ProcessRecord,
+    PersistedSegmentHandover, ProcessAwaitOutput, ProcessChange, ProcessChangeCursor,
+    ProcessContinuationStore, ProcessEvent, ProcessEventAppendRequest, ProcessEventAppendResult,
+    ProcessExecutionWriteAuthority, ProcessExternalRef, ProcessLease, ProcessLeaseCompletion,
+    ProcessLiveReferenceSummary, ProcessObserverBy, ProcessPruneReport, ProcessRecord,
     ProcessRegistration, ProcessRegistry, ProcessStartOutcome, ProcessStartPlan, ProcessStarted,
     QueuedWorkStore, RuntimeEffectCommand, RuntimeEffectController, RuntimeEffectControllerError,
     RuntimeEffectEnvelope, RuntimeEffectLocalExecutor, RuntimeEffectOutcome, RuntimeError,
     RuntimePersistence, ScopedEffectController, SessionCommitStore, SessionExecutionLease,
     SessionExecutionLeaseClaimOutcome, SessionExecutionLeaseCompletion, SessionExecutionLeaseFence,
-    SessionExecutionLeaseStore, SessionMeta, SessionNodeRecord, SessionScope,
-    SessionStoreCreateRequest, SessionStoreFactory, SlotPolicy, StoreError, StoreMaintenance,
-    TokenLedgerEntry, TurnInputStore, VacuumReport, validate_replayed_effect_envelope,
+    SessionExecutionLeaseStore, SessionMeta, SessionNodeRecord, SessionStoreCreateRequest,
+    SessionStoreFactory, SlotPolicy, StoreError, StoreMaintenance, TokenLedgerEntry,
+    TurnInputStore, VacuumReport, validate_replayed_effect_envelope,
 };
 use lash_core::{
     PluginError, TriggerDeliveryReservation, TriggerOccurrenceRecord, TriggerOccurrenceRequest,
@@ -111,7 +111,8 @@ const SCHEMA_COMPONENT: &str = "lash-postgres-store";
 // cleanup reconciliation bit. Pre-30 components are rejected and recreated.
 // Bumped to 31 to replace that lane with consumed high-water marks and add
 // fair per-group retry scheduling. Pre-31 components are rejected and recreated.
-const SCHEMA_VERSION: i32 = 31;
+// Bumped to 32 for the FIG-661 observer, indexed wake, and tombstone cutover.
+const SCHEMA_VERSION: i32 = 32;
 const PROCESS_LEASE_SCHEMA_VERSION: u32 = lash_core::PROCESS_LEASE_SCHEMA_VERSION;
 
 #[derive(Clone)]

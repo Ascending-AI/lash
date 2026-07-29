@@ -1,6 +1,7 @@
 struct WorkbenchStores {
     session_store_factory: Arc<dyn lash::persistence::SessionStoreFactory>,
     process_registry: Arc<dyn lash::process::ProcessRegistry>,
+    process_continuations: Arc<dyn lash::process::ProcessContinuationStore>,
     trigger_store: Arc<dyn lash::triggers::TriggerStore>,
     artifact_store: Arc<dyn lash::persistence::LashlangArtifactStore>,
     process_env_store: Arc<dyn lash::persistence::ProcessExecutionEnvStore>,
@@ -24,14 +25,17 @@ impl WorkbenchStores {
                 &process_registry_path,
             ),
         ) as Arc<dyn lash::persistence::SessionStoreFactory>;
-        let process_registry = Arc::new(
+        let process_store = Arc::new(
             lash_sqlite_store::SqliteProcessRegistry::open(
                 &process_registry_path,
                 session_store_root,
             )
                 .await
                 .context("open SQLite process registry")?,
-        ) as Arc<dyn lash::process::ProcessRegistry>;
+        );
+        let process_registry = process_store.clone() as Arc<dyn lash::process::ProcessRegistry>;
+        let process_continuations =
+            process_store as Arc<dyn lash::process::ProcessContinuationStore>;
         let trigger_store = Arc::new(
             lash_sqlite_store::SqliteTriggerStore::open(&data_dir.join("triggers.db"))
                 .await
@@ -45,6 +49,7 @@ impl WorkbenchStores {
         Ok(Self {
             session_store_factory,
             process_registry,
+            process_continuations,
             trigger_store,
             artifact_store: artifacts.clone(),
             process_env_store: artifacts,
@@ -61,12 +66,14 @@ impl WorkbenchStores {
             .await
             .context("open Postgres workbench storage")?;
         let artifacts = Arc::new(storage.lashlang_artifact_store());
+        let process_store = Arc::new(storage.process_registry());
         Ok(Self {
             session_store_factory: Arc::new(
                 storage
                     .session_store_factory_with_shared_process_registry(),
             ),
-            process_registry: Arc::new(storage.process_registry()),
+            process_registry: process_store.clone(),
+            process_continuations: process_store,
             trigger_store: Arc::new(storage.trigger_store()),
             artifact_store: artifacts.clone(),
             process_env_store: artifacts,

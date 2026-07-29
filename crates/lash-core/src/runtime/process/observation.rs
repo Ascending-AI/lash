@@ -1,4 +1,3 @@
-use std::collections::BTreeSet;
 use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
@@ -7,10 +6,9 @@ use crate::plugin::PluginError;
 
 use super::events::{ProcessAwaitOutput, ProcessEvent};
 use super::model::{
-    AbandonRequest, ProcessExecutionEnvRef, ProcessExternalRef, ProcessHandleDescriptor, ProcessId,
-    ProcessIdentity, ProcessInput, ProcessLease, ProcessLifecycleStatus, ProcessListFilter,
-    ProcessOriginator, ProcessRecord, ProcessStarted, ProcessStatusFilter, RecoveryDisposition,
-    SessionScope, WaitState,
+    AbandonRequest, ProcessExecutionEnvRef, ProcessExternalRef, ProcessId, ProcessIdentity,
+    ProcessInput, ProcessLease, ProcessListFilter, ProcessOriginator, ProcessRecord,
+    ProcessStarted, ProcessStatus, RecoveryDisposition, SessionScope, WaitState,
 };
 use super::registry::ProcessRegistry;
 use super::time::epoch_ms_from_system_time;
@@ -30,7 +28,6 @@ pub struct ProcessWorkSnapshot {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ObservedWorkItem {
     pub process: ObservedProcess,
-    pub descriptor: ProcessHandleDescriptor,
     pub events: Vec<ObservedProcessEvent>,
     pub kind: String,
     pub label: String,
@@ -41,7 +38,7 @@ pub struct ObservedProcess {
     pub process_id: ProcessId,
     pub graph_key: String,
     pub kind: String,
-    pub lifecycle: ProcessLifecycleStatus,
+    pub lifecycle: ProcessStatus,
     pub identity: ProcessIdentity,
     pub status_label: String,
     pub terminal: bool,
@@ -68,8 +65,6 @@ pub struct ObservedProcess {
     pub originator: ProcessOriginator,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub env_ref: Option<ProcessExecutionEnvRef>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub wake_target: Option<SessionScope>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub caused_by: Option<crate::CausalRef>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -105,30 +100,10 @@ impl ProcessWorkObserver {
         session_id: impl Into<String>,
     ) -> Result<ProcessWorkSnapshot, PluginError> {
         let session_id = session_id.into();
-        let session_scope = SessionScope::new(session_id.clone());
-        let entries = self.registry.list_handle_grants(&session_scope).await?;
+        let entries = self.registry.list_observed_by(&session_id).await?;
         let mut items = Vec::new();
-        let mut seen_process_ids = BTreeSet::new();
-        for (grant, record) in entries {
-            seen_process_ids.insert(record.id.clone());
-            items.push(self.work_item_from_record(record, grant.descriptor).await?);
-        }
-        let visible_records = self
-            .registry
-            .list_processes(&ProcessListFilter {
-                status: ProcessStatusFilter::Any,
-                ..ProcessListFilter::default()
-            })
-            .await?;
-        for record in visible_records {
-            if seen_process_ids.contains(&record.id)
-                || !process_visible_to_session(&record, &session_id)
-            {
-                continue;
-            }
-            seen_process_ids.insert(record.id.clone());
-            let descriptor = descriptor_from_process_identity(&record.identity);
-            items.push(self.work_item_from_record(record, descriptor).await?);
+        for record in entries {
+            items.push(self.work_item_from_record(record).await?);
         }
         items.sort_by(|left, right| {
             right
@@ -152,9 +127,9 @@ impl ProcessWorkObserver {
     /// Snapshot every process matching `filter`, including the bounded event
     /// tail used by host work rails. Unlike [`Self::snapshot_for_session`],
     /// this is the runtime-wide observation surface: it does not depend on a
-    /// session handle grant and therefore continues to expose processes whose
+    /// session observer edge and therefore continues to expose processes whose
     /// originating session has been deleted.
-    /// Because grants are bypassed, the host must authorize access; routing
+    /// Because observer edges are bypassed, the host must authorize access; routing
     /// identity is not authorization.
     pub async fn snapshot_all(
         &self,
@@ -163,8 +138,7 @@ impl ProcessWorkObserver {
         let records = self.registry.list_processes(filter).await?;
         let mut items = Vec::with_capacity(records.len());
         for record in records {
-            let descriptor = descriptor_from_process_identity(&record.identity);
-            items.push(self.work_item_from_record(record, descriptor).await?);
+            items.push(self.work_item_from_record(record).await?);
         }
         items.sort_by(|left, right| {
             right
@@ -180,7 +154,6 @@ impl ProcessWorkObserver {
     async fn work_item_from_record(
         &self,
         record: ProcessRecord,
-        descriptor: ProcessHandleDescriptor,
     ) -> Result<ObservedWorkItem, PluginError> {
         let events = self
             .registry
@@ -196,11 +169,9 @@ impl ProcessWorkObserver {
             .identity
             .label
             .clone()
-            .or_else(|| descriptor.label.clone())
             .unwrap_or_else(|| kind.clone());
         Ok(ObservedWorkItem {
             process,
-            descriptor,
             events,
             kind,
             label,
@@ -208,7 +179,7 @@ impl ProcessWorkObserver {
     }
 
     pub async fn process(&self, process_id: &str) -> Option<ObservedProcess> {
-        let record = self.registry.get_process(process_id).await?;
+        let record = self.registry.get_process(process_id).await.ok().flatten()?;
         let lease = self
             .registry
             .get_process_lease(process_id)
@@ -226,20 +197,18 @@ impl ProcessWorkObserver {
         self.observe_records(records).await
     }
 
-    /// List processes a session may address — the grant filter (ADR 0019 /
-    /// process design grill). "Granted to" is the security lens: a process is
-    /// visible here only if `scope` holds a handle grant for it. This is the
-    /// single home for the grant-scoped view; the session facade sugar is a thin
+    /// List processes a session may address — the observer filter. A process is
+    /// visible here only if `scope.session_id` has an observer edge. This is the
+    /// single home for the observer-scoped view; the session facade sugar is a thin
     /// caller of this method, never a parallel implementation.
-    pub async fn list_granted_to(
+    pub async fn list_observed_by(
         &self,
         scope: &SessionScope,
         filter: &ProcessListFilter,
     ) -> Result<Vec<ObservedProcess>, PluginError> {
-        let entries = self.registry.list_handle_grants(scope).await?;
+        let entries = self.registry.list_observed_by(&scope.session_id).await?;
         let records = entries
             .into_iter()
-            .map(|(_, record)| record)
             .filter(|record| filter.matches_record(record))
             .collect::<Vec<_>>();
         self.observe_records(records).await
@@ -247,9 +216,9 @@ impl ProcessWorkObserver {
 
     /// List processes a session originated — the provenance filter (ADR 0019 /
     /// process design grill). "Originated by" is the lineage lens, distinct from
-    /// the grant lens: a process matches when its recorded originator is a
+    /// the observer lens: a process matches when its recorded originator is a
     /// session whose id equals `scope.session_id` (and its agent frame, when
-    /// `scope` names one), regardless of who currently holds a grant.
+    /// `scope` names one), regardless of which sessions currently observe it.
     pub async fn list_originated_by(
         &self,
         scope: &SessionScope,
@@ -297,7 +266,7 @@ impl ObservedProcess {
     /// any), read separately so the observer exposes holder identity and expiry
     /// as raw facts — no derived "stuck" classification (ADR 0019).
     fn from_record(record: ProcessRecord, lease: Option<ProcessLease>) -> Self {
-        let lifecycle = ProcessLifecycleStatus::from(&record.status);
+        let lifecycle = record.status;
         let input = record.input.as_ref().clone();
         let identity = record.identity;
         let kind = identity.kind.clone();
@@ -316,7 +285,7 @@ impl ObservedProcess {
             status_label: lifecycle.label().to_string(),
             terminal: lifecycle.is_terminal(),
             disposition: record.disposition,
-            error: terminal_error(&record.status),
+            error: terminal_error(record.outcome.as_ref()),
             created_at_ms: record.created_at_ms,
             updated_at_ms: record.updated_at_ms,
             first_started: record.first_started.map(|started| *started),
@@ -325,7 +294,6 @@ impl ObservedProcess {
             abandon_request: record.abandon_request.map(|request| *request),
             originator: record.provenance.originator,
             env_ref: record.env_ref,
-            wake_target: record.wake_target,
             caused_by: record.provenance.caused_by,
             external_ref: record.external_ref,
             wait: record.wait,
@@ -347,13 +315,15 @@ impl From<ProcessEvent> for ObservedProcessEvent {
     }
 }
 
-fn terminal_error(status: &super::model::ProcessStatus) -> Option<String> {
-    match status.await_output()? {
+fn terminal_error(outcome: Option<&ProcessAwaitOutput>) -> Option<String> {
+    match outcome? {
         ProcessAwaitOutput::Failure { message, .. }
         | ProcessAwaitOutput::Cancelled { message, .. } => Some(message.clone()),
         // Abandonment is not a reported failure; the status label conveys it and
         // the evidence rides the terminal event. No derived error string here.
-        ProcessAwaitOutput::Success { .. } | ProcessAwaitOutput::Abandoned { .. } => None,
+        ProcessAwaitOutput::Success { .. }
+        | ProcessAwaitOutput::Abandoned { .. }
+        | ProcessAwaitOutput::NoLongerRetained { .. } => None,
     }
 }
 
@@ -382,17 +352,6 @@ fn originator_matches(originator: &ProcessOriginator, scope: &SessionScope) -> b
     }
 }
 
-fn process_visible_to_session(record: &ProcessRecord, session_id: &str) -> bool {
-    record
-        .wake_target
-        .as_ref()
-        .is_some_and(|scope| scope.session_id == session_id)
-}
-
-fn descriptor_from_process_identity(identity: &ProcessIdentity) -> ProcessHandleDescriptor {
-    ProcessHandleDescriptor::new(Some(identity.kind.clone()), identity.label.clone())
-}
-
 #[cfg(test)]
 mod tests {
     use std::sync::Arc;
@@ -403,9 +362,10 @@ mod tests {
     use super::*;
     use crate::{
         InputItem, PluginOptions, PreparedToolCall, ProcessEventAppendRequest,
-        ProcessExecutionEnvRef, ProcessIdentity, ProcessProvenance, ProcessRegistration,
-        SessionCreateRequest, SessionScope, SessionStartPoint, SubagentSessionContext,
-        TestProcessRegistryWriteExt, ToolFailureClass, ToolOutputContract, TurnInput, WaitKind,
+        ProcessExecutionEnvRef, ProcessIdentity, ProcessObserverBy, ProcessProvenance,
+        ProcessRegistration, SessionCreateRequest, SessionScope, SessionStartPoint,
+        SubagentSessionContext, TestProcessRegistryWriteExt, ToolFailureClass, ToolOutputContract,
+        TurnInput, WaitKind,
     };
 
     fn observer(registry: Arc<dyn ProcessRegistry>) -> ProcessWorkObserver {
@@ -427,7 +387,6 @@ mod tests {
         registry: &Arc<dyn ProcessRegistry>,
         scope: &SessionScope,
         registration: ProcessRegistration,
-        descriptor: ProcessHandleDescriptor,
     ) {
         let process_id = registration.id.clone();
         registry
@@ -435,13 +394,17 @@ mod tests {
             .await
             .expect("register process");
         registry
-            .grant_handle(scope, &process_id, descriptor)
+            .add_observer(
+                &scope.session_id,
+                &process_id,
+                ProcessObserverBy::host("observation-test"),
+            )
             .await
-            .expect("grant process handle");
+            .expect("add process observer");
     }
 
     #[tokio::test]
-    async fn snapshot_for_session_reads_visible_grants_and_events_as_epoch_ms() {
+    async fn snapshot_for_session_reads_observed_processes_and_events_as_epoch_ms() {
         let registry =
             Arc::new(super::super::TestLocalProcessRegistry::default()) as Arc<dyn ProcessRegistry>;
         let visible_scope = SessionScope::new("visible");
@@ -449,14 +412,12 @@ mod tests {
             &registry,
             &visible_scope,
             external_registration("visible-process", "Visible"),
-            ProcessHandleDescriptor::new(Some("visible-kind"), Some("Visible descriptor")),
         )
         .await;
         register_visible(
             &registry,
             &SessionScope::new("other"),
             external_registration("hidden-process", "Hidden"),
-            ProcessHandleDescriptor::new(Some("hidden-kind"), Some("Hidden")),
         )
         .await;
         registry
@@ -476,12 +437,23 @@ mod tests {
         assert_eq!(snapshot.session_id, "visible");
         assert_eq!(snapshot.visible_process_ids, vec!["visible-process"]);
         assert_eq!(snapshot.items.len(), 1);
-        assert_eq!(snapshot.items[0].events.len(), 1);
-        assert_eq!(
-            snapshot.items[0].events[0].event_type,
-            "process.cancel_requested"
+        assert_eq!(snapshot.items[0].events.len(), 2);
+        assert!(
+            snapshot.items[0]
+                .events
+                .iter()
+                .any(|event| event.event_type == "process.observer_added"),
+            "observer membership changes are part of the durable audit tail"
         );
-        assert!(snapshot.items[0].events[0].occurred_at_ms > 0);
+        let cancelled = snapshot.items[0]
+            .events
+            .iter()
+            .find(|event| event.event_type == "process.cancel_requested")
+            .expect("cancel event");
+        assert!(
+            cancelled.occurred_at_ms > 0,
+            "event timestamps are epoch milliseconds"
+        );
     }
 
     #[tokio::test]
@@ -492,7 +464,6 @@ mod tests {
             &registry,
             &SessionScope::new("deleted-session"),
             external_registration("surviving-process", "Survivor"),
-            ProcessHandleDescriptor::new(Some("test"), Some("Survivor")),
         )
         .await;
 
@@ -500,7 +471,7 @@ mod tests {
             .delete_session_process_state("deleted-session")
             .await
             .expect("delete session process edges");
-        assert_eq!(report.orphaned_process_ids, vec!["surviving-process"]);
+        assert_eq!(report.removed_observer_count, 1);
         assert!(
             observer(Arc::clone(&registry))
                 .snapshot_for_session("deleted-session")
@@ -522,118 +493,13 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn snapshot_for_session_includes_frame_wake_targets_without_handle_grants() {
-        let registry =
-            Arc::new(super::super::TestLocalProcessRegistry::default()) as Arc<dyn ProcessRegistry>;
-        let frame_scope = SessionScope::for_agent_frame("visible", "frame-a");
-        registry
-            .register_process(ProcessRegistration::new(
-                "frame-originated",
-                ProcessInput::External {
-                    metadata: json!({ "label": "Frame originated" }),
-                },
-                RecoveryDisposition::ExternallyOwned,
-                ProcessProvenance::session(frame_scope.clone()),
-            ))
-            .await
-            .expect("register frame-originated process");
-        registry
-            .register_process(
-                external_registration("frame-wake-targeted", "Frame wake targeted")
-                    .with_wake_target(Some(frame_scope)),
-            )
-            .await
-            .expect("register frame wake-targeted process");
-        registry
-            .register_process(
-                external_registration("hidden-frame", "Hidden")
-                    .with_wake_target(Some(SessionScope::for_agent_frame("other", "frame-b"))),
-            )
-            .await
-            .expect("register hidden process");
-
-        let snapshot = observer(Arc::clone(&registry))
-            .snapshot_for_session("visible")
-            .await
-            .expect("snapshot");
-        let visible_process_ids = snapshot
-            .visible_process_ids
-            .iter()
-            .cloned()
-            .collect::<std::collections::BTreeSet<_>>();
-
-        assert_eq!(
-            visible_process_ids,
-            std::collections::BTreeSet::from(["frame-wake-targeted".to_string()])
-        );
-        assert_eq!(snapshot.items.len(), 1);
-    }
-
-    #[tokio::test]
-    async fn snapshot_for_session_labels_engine_wake_targets_from_identity_without_handle_grants() {
-        let registry =
-            Arc::new(super::super::TestLocalProcessRegistry::default()) as Arc<dyn ProcessRegistry>;
-        let scope = SessionScope::new("visible");
-        registry
-            .register_process(
-                ProcessRegistration::new(
-                    "engine-wake-targeted",
-                    ProcessInput::Engine {
-                        kind: "test-engine".to_string(),
-                        payload: json!({}),
-                    },
-                    RecoveryDisposition::Rerunnable,
-                    ProcessProvenance::host(),
-                )
-                .with_identity(
-                    ProcessIdentity::new("test-engine").with_label(Some("remember".to_string())),
-                )
-                .with_execution_env_ref(Some(ProcessExecutionEnvRef::new("process-env:test")))
-                .with_wake_target(Some(scope)),
-            )
-            .await
-            .expect("register engine wake-targeted process");
-
-        let snapshot = observer(Arc::clone(&registry))
-            .snapshot_for_session("visible")
-            .await
-            .expect("snapshot");
-
-        assert_eq!(snapshot.items.len(), 1);
-        assert_eq!(snapshot.items[0].kind, "test-engine");
-        assert_eq!(snapshot.items[0].label, "remember");
-        assert_eq!(
-            snapshot.items[0].descriptor.kind.as_deref(),
-            Some("test-engine")
-        );
-        assert_eq!(
-            snapshot.items[0].descriptor.label.as_deref(),
-            Some("remember")
-        );
-        assert_eq!(snapshot.items[0].process.kind, "test-engine");
-        assert_eq!(snapshot.items[0].process.label, "remember");
-    }
-
-    #[tokio::test]
     async fn snapshot_for_session_sorts_work_by_updated_then_created_descending() {
         let registry =
             Arc::new(super::super::TestLocalProcessRegistry::default()) as Arc<dyn ProcessRegistry>;
         let scope = SessionScope::new("sort");
-        register_visible(
-            &registry,
-            &scope,
-            external_registration("older", "Older"),
-            ProcessHandleDescriptor::new(None::<String>, None::<String>),
-        )
-        .await;
+        register_visible(&registry, &scope, external_registration("older", "Older")).await;
         tokio::time::sleep(Duration::from_millis(2)).await;
-        register_visible(
-            &registry,
-            &scope,
-            external_registration("newer", "Newer"),
-            ProcessHandleDescriptor::new(None::<String>, None::<String>),
-        )
-        .await;
+        register_visible(&registry, &scope, external_registration("newer", "Newer")).await;
         tokio::time::sleep(Duration::from_millis(2)).await;
         registry
             .append_event(
@@ -713,7 +579,6 @@ mod tests {
             &registry,
             &scope,
             external_registration("waiting-process", "Waiting"),
-            ProcessHandleDescriptor::new(Some("external"), Some("Waiting")),
         )
         .await;
         let wait = WaitState {
@@ -827,13 +692,7 @@ mod tests {
                     ProcessExecutionEnvRef::new(format!("process-env:test:{process_id}")),
                 ));
             }
-            register_visible(
-                &registry,
-                &scope,
-                registration,
-                ProcessHandleDescriptor::new(Some("descriptor-kind"), Some("Descriptor label")),
-            )
-            .await;
+            register_visible(&registry, &scope, registration).await;
         }
 
         let snapshot = observer(Arc::clone(&registry))

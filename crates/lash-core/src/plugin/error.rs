@@ -24,6 +24,13 @@ pub enum PluginError {
     },
     #[error("process lease for `{process_id}` is missing or expired (superseded)")]
     ProcessLeaseSuperseded { process_id: String },
+    #[error(
+        "process outcome is no longer retained (terminal state `{terminal_label}`, pruned at {pruned_at_ms}ms)"
+    )]
+    ProcessNoLongerRetained {
+        terminal_label: String,
+        pruned_at_ms: u64,
+    },
     #[error("wake delivery `{delivery_id}` is already terminal in state `{state:?}`")]
     WakeDeliveryNotPending {
         delivery_id: String,

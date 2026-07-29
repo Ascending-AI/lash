@@ -549,6 +549,7 @@ finish "registered"
         let record = registry
             .get_process(&process_id)
             .await
+            .expect("read process")
             .expect("trigger-triggered process record");
         let process_caused_by = record
             .provenance

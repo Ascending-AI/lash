@@ -31,7 +31,6 @@ impl<'run> RuntimeTurnDriver<'run> {
                 manager.lifecycle_service(),
                 manager.graph_service(),
                 manager.process_service(),
-                manager.process_cancel_ability(),
                 effect_controller,
                 direct_completions,
                 manager.trigger_router(),

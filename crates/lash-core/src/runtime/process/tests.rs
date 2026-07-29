@@ -212,7 +212,7 @@ fn replayed_terminal_event_repairs_non_terminal_status_projection() {
         }),
     )
     .with_replay_key("process-repair-terminal");
-    let first = prepare_process_event_append(&record, request.clone(), 1, None, 42)
+    let first = prepare_process_event_append(&record, request.clone(), 1, None, 42, None)
         .expect("prepare first terminal event");
     let ProcessEventAppendPlan::Insert {
         event: first_event,
@@ -229,6 +229,7 @@ fn replayed_terminal_event_repairs_non_terminal_status_projection() {
         99,
         Some((first_payload_hash, first_event)),
         100,
+        None,
     )
     .expect("prepare replayed terminal event");
 
@@ -244,15 +245,17 @@ fn replayed_terminal_event_repairs_non_terminal_status_projection() {
     assert_eq!(event.sequence, 1);
     assert_eq!(occurred_at_ms, 42);
     assert!(matches!(
-        repair_record.map(|record| record.status),
-        Some(ProcessStatus::Completed {
-            await_output: ProcessAwaitOutput::Success { .. }
-        })
+        repair_record.as_ref().map(|record| record.status),
+        Some(ProcessStatus::Completed)
+    ));
+    assert!(matches!(
+        repair_record.and_then(|record| record.outcome),
+        Some(ProcessAwaitOutput::Success { .. })
     ));
 }
 
 // Contract invariants (registration idempotency, event/wake materialization,
-// ack suppression, terminal/await, handle grants, session deletion) live in the
+// ack suppression, terminal/await, observer edges, session deletion) live in the
 // backend-agnostic conformance suite so the in-memory and Sqlite registries are
 // held to one spec. See `crate::testing::conformance`.
 #[tokio::test]
@@ -264,33 +267,45 @@ async fn test_local_process_registry_satisfies_conformance() {
 }
 
 #[tokio::test]
-async fn delete_session_process_command_revokes_edges_and_reports_orphans() {
+async fn delete_session_process_command_revokes_only_observer_edges() {
     let registry = Arc::new(TestLocalProcessRegistry::default());
     let registry_dyn = Arc::clone(&registry) as Arc<dyn ProcessRegistry>;
-    let deleted_scope = SessionScope::new("deleted");
-    let remaining_scope = SessionScope::new("remaining");
     for process_id in ["sole", "shared"] {
         registry
             .register_process(registration(process_id))
             .await
             .expect("register");
         registry
-            .grant_handle(
-                &deleted_scope,
+            .add_observer(
+                "deleted",
                 process_id,
-                ProcessHandleDescriptor::new(Some("test"), Some(process_id)),
+                ProcessObserverBy::host(format!("deleted:{process_id}")),
             )
             .await
-            .expect("grant deleted");
+            .expect("observe from deleted");
     }
     registry
-        .grant_handle(
-            &remaining_scope,
+        .add_observer(
+            "remaining",
             "shared",
-            ProcessHandleDescriptor::new(Some("test"), Some("shared")),
+            ProcessObserverBy::host("remaining:shared"),
         )
         .await
-        .expect("grant remaining");
+        .expect("observe from remaining");
+    let sole_events = serde_json::to_vec(
+        &registry
+            .events_after("sole", 0)
+            .await
+            .expect("sole events before delete"),
+    )
+    .expect("serialize sole events");
+    let shared_events = serde_json::to_vec(
+        &registry
+            .events_after("shared", 0)
+            .await
+            .expect("shared events before delete"),
+    )
+    .expect("serialize shared events");
     let controller = crate::InlineRuntimeEffectController::default();
     let invocation = crate::RuntimeInvocation::effect(
         crate::RuntimeScope::new("deleted"),
@@ -313,33 +328,25 @@ async fn delete_session_process_command_revokes_edges_and_reports_orphans() {
     .expect("delete session process command");
 
     let crate::RuntimeEffectOutcome::Process {
-        result:
-            crate::ProcessEffectOutcome::DeleteSession {
-                report:
-                    crate::ProcessSessionDeleteReport {
-                        orphaned_process_ids,
-                        preserved_process_ids,
-                        ..
-                    },
-            },
+        result: crate::ProcessEffectOutcome::DeleteSession { report },
     } = outcome
     else {
         panic!("unexpected delete session outcome: {outcome:?}");
     };
-    assert_eq!(orphaned_process_ids, vec!["sole".to_string()]);
-    assert_eq!(preserved_process_ids, vec!["shared".to_string()]);
-    assert!(
-        registry
-            .events_after("sole", 0)
-            .await
-            .expect("sole events")
-            .is_empty()
+    assert_eq!(report.removed_observer_count, 2);
+    assert_eq!(
+        serde_json::to_vec(&registry.events_after("sole", 0).await.expect("sole events"))
+            .expect("serialize sole events"),
+        sole_events
     );
-    assert!(
-        registry
-            .events_after("shared", 0)
-            .await
-            .expect("shared events")
-            .is_empty()
+    assert_eq!(
+        serde_json::to_vec(
+            &registry
+                .events_after("shared", 0)
+                .await
+                .expect("shared events")
+        )
+        .expect("serialize shared events"),
+        shared_events
     );
 }

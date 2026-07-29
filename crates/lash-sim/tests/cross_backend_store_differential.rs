@@ -1707,7 +1707,8 @@ impl BackendRunner {
                         relation: SessionRelation::Fork {
                             source_session_id: self.session_id.clone(),
                             source_node_id: node_id,
-                            process_grants: Vec::new(),
+                            observer_inheritance: lash_core::ObserverInheritance::None,
+                            pending_observer_process_ids: Vec::new(),
                         },
                         policy: lash_core::SessionPolicy::default(),
                     })

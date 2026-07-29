@@ -45,7 +45,7 @@ registry path). Stores stay pure state: nothing sink-related touches the
 Retention is an explicit host lever, not an automatic policy.
 `ProcessRegistry::prune_terminal_processes(cutoff_epoch_ms)` physically deletes
 terminal process rows older than the cutoff — together with their events, wake
-acks, handle grants, and lease rows — and never touches non-terminal rows. It
+acks, observer edges, and lease rows — and never touches non-terminal rows. It
 returns a `ProcessPruneReport { pruned_processes, pruned_events }`.
 
 ## Why

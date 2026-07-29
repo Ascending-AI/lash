@@ -196,7 +196,7 @@ async fn wait_for_waiting_signal(
 async fn wait_for_terminal(
     core: &LashCore,
     process_id: &str,
-    status: lash_core::ProcessLifecycleStatus,
+    status: lash_core::ProcessStatus,
 ) -> lash_core::ObservedProcess {
     wait_for_process(core, process_id, "terminal process", |process| {
         process.lifecycle == status
@@ -286,11 +286,11 @@ async fn host_owned_processes_run_without_application_session() -> Result<()> {
             runtime_operation_scope(&core, "sessionless-direct-cancel"),
         )
         .await?;
-    assert_eq!(cancelled.status, lash_core::ProcessLifecycleStatus::Running);
+    assert_eq!(cancelled.status, lash_core::ProcessStatus::Waiting);
     wait_for_terminal(
         &core,
         "sessionless-direct",
-        lash_core::ProcessLifecycleStatus::Cancelled,
+        lash_core::ProcessStatus::Cancelled,
     )
     .await;
 
@@ -432,10 +432,7 @@ async fn signal_validation_rejects_undeclared_names_and_mistyped_payloads() -> R
 
     // Both rejected sends left the process parked with nothing consumed.
     let still_waiting = wait_for_waiting_signal(&core, process_id, "ready").await;
-    assert_eq!(
-        still_waiting.lifecycle,
-        lash_core::ProcessLifecycleStatus::Running
-    );
+    assert_eq!(still_waiting.lifecycle, lash_core::ProcessStatus::Waiting);
     assert!(
         core.processes()
             .events(process_id, 0)
@@ -621,11 +618,10 @@ async fn process_starts_and_awaits_child_process() -> Result<()> {
         )),
         "children of a host chain stay host-originated"
     );
-    let child = all
-        .iter()
-        .find(|process| process.process_id != process_id)
-        .expect("child process record");
-    assert!(child.wake_target.is_none(), "host chain has no wake target");
+    assert!(
+        all.iter().any(|process| process.process_id != process_id),
+        "child process record"
+    );
     Ok(())
 }
 
@@ -671,28 +667,16 @@ async fn process_children_inherit_session_chain_provenance() -> Result<()> {
                     lash_core::ProcessOriginator::session(lash_core::SessionScope::new(session_id));
                 request
             }
-            .with_wake_target(Some(lash_core::SessionScope::new(session_id)))
-            .with_grant(Some(lash_core::ProcessStartGrant {
-                session_scope: lash_core::SessionScope::new(session_id),
-                descriptor: lash_core::ProcessHandleDescriptor::new(
-                    Some("lashlang"),
-                    Some("chain parent"),
-                ),
-            })),
+            .with_wake_session_id(Some(session_id.to_string()))
+            .with_observers([session_id.to_string()]),
             runtime_operation_scope(&core, "chain-parent-start"),
         )
         .await?;
-    wait_for_terminal(
-        &core,
-        process_id,
-        lash_core::ProcessLifecycleStatus::Completed,
-    )
-    .await;
+    wait_for_terminal(&core, process_id, lash_core::ProcessStatus::Completed).await;
 
-    // The child inherited the chain: session originator, session wake target,
-    // and a grant derived from the wake target — so the session's snapshot
-    // shows the whole background tree, and the ephemeral execution scope
-    // appears nowhere.
+    // The child inherited the session originator and indexed wake target, while
+    // observation remained the explicit start-time decision for the parent.
+    // No child observer is minted implicitly from its wake subscription.
     let completed = core
         .processes()
         .list(&lash_core::ProcessListFilter {
@@ -708,20 +692,14 @@ async fn process_children_inherit_session_chain_provenance() -> Result<()> {
             }
             other => panic!("expected session originator, got {other:?}"),
         }
-        assert_eq!(
-            observed
-                .wake_target
-                .as_ref()
-                .map(|scope| scope.session_id.as_str()),
-            Some(session_id)
-        );
     }
     let snapshot = core.processes().session_snapshot(session_id).await?;
     assert_eq!(
         snapshot.items.len(),
-        2,
-        "parent and child are both visible in the originating session"
+        1,
+        "only the explicitly observed parent is visible in the originating session"
     );
+    assert_eq!(snapshot.items[0].process.process_id, process_id);
     Ok(())
 }
 
@@ -758,13 +736,7 @@ async fn process_outlives_deleted_session_and_resumes_from_host_signal() -> Resu
         .start(
             process
                 .start_request(process_id)
-                .with_grant(Some(lash_core::ProcessStartGrant {
-                    session_scope: lash_core::SessionScope::new(session_id),
-                    descriptor: lash_core::ProcessHandleDescriptor::new(
-                        Some("lashlang"),
-                        Some("outliving process"),
-                    ),
-                })),
+                .with_observers([session_id.to_string()]),
             runtime_operation_scope(&core, "outliving-process-start"),
         )
         .await?;
@@ -775,11 +747,7 @@ async fn process_outlives_deleted_session_and_resumes_from_host_signal() -> Resu
         .delete_session(session_id, session_delete_scope(&core, session_id).await)
         .await?;
     let process_report = report.process.expect("process delete report");
-    assert_eq!(
-        process_report.orphaned_process_ids,
-        vec![process_id.to_string()]
-    );
-    assert!(process_report.preserved_process_ids.is_empty());
+    assert_eq!(process_report.removed_observer_count, 1);
     assert_eq!(process_report.discarded_wake_delivery_count, 0);
     assert!(
         core.processes()
@@ -797,8 +765,7 @@ async fn process_outlives_deleted_session_and_resumes_from_host_signal() -> Resu
             lash_core::ProcessEventAppendRequest::new(
                 "process.wake",
                 serde_json::json!({ "text": "wake after deleted session" }),
-            )
-            .with_wake_target_scope(lash_core::SessionScope::new(session_id)),
+            ),
         )
         .await?;
     assert_eq!(wake_after_delete.event.event_type, "process.wake");
@@ -839,12 +806,7 @@ async fn process_outlives_deleted_session_and_resumes_from_host_signal() -> Resu
         value,
         serde_json::json!({ "resumed": { "after_delete": true } })
     );
-    wait_for_terminal(
-        &core,
-        process_id,
-        lash_core::ProcessLifecycleStatus::Completed,
-    )
-    .await;
+    wait_for_terminal(&core, process_id, lash_core::ProcessStatus::Completed).await;
     Ok(())
 }
 
@@ -1000,12 +962,7 @@ async fn inline_process_await_sink_and_prune_end_to_end() -> Result<()> {
         "the sink observed the terminal append; got {collected:?}"
     );
 
-    wait_for_terminal(
-        &core,
-        process_id,
-        lash_core::ProcessLifecycleStatus::Completed,
-    )
-    .await;
+    wait_for_terminal(&core, process_id, lash_core::ProcessStatus::Completed).await;
 
     // Retention: prune the terminal registry rows. The registry forgets the
     // process, but the host's projected copies (the sink log) remain intact.
@@ -1020,12 +977,11 @@ async fn inline_process_await_sink_and_prune_end_to_end() -> Result<()> {
         "the single terminal process is pruned"
     );
     assert!(
-        core.processes().get(process_id).await?.is_none(),
-        "the pruned process is gone from the registry observer"
-    );
-    assert!(
-        registry.get_process(process_id).await.is_none(),
-        "the pruned process row is physically deleted"
+        matches!(
+            registry.get_process(process_id).await,
+            Err(lash_core::PluginError::ProcessNoLongerRetained { .. })
+        ),
+        "the pruned process returns the typed retained-history miss"
     );
     assert_eq!(
         sink.collected(),
@@ -1161,10 +1117,7 @@ async fn owner_bound_graceful_drain_resolves_awaiter_and_prunes_end_to_end() -> 
         .get(process_id)
         .await?
         .expect("abandoned row observed through the facade");
-    assert_eq!(
-        observed.lifecycle,
-        lash_core::ProcessLifecycleStatus::Abandoned
-    );
+    assert_eq!(observed.lifecycle, lash_core::ProcessStatus::Abandoned);
     assert!(observed.terminal);
 
     // A foreign worker's sweep never resurrects or re-runs an abandoned row: the
@@ -1260,7 +1213,7 @@ async fn silent_owner_stays_running_then_abandon_request_reconciles_end_to_end()
         .expect("silent row observed");
     assert_eq!(
         observed.lifecycle,
-        lash_core::ProcessLifecycleStatus::Running,
+        lash_core::ProcessStatus::Running,
         "a silent holder is left non-terminal by the sweep"
     );
     // The read exposes the lease facts a host classifies staleness from.
@@ -1296,7 +1249,7 @@ async fn silent_owner_stays_running_then_abandon_request_reconciles_end_to_end()
     assert_eq!(request.requested_by, "operator");
     assert_eq!(
         after_request.lifecycle,
-        lash_core::ProcessLifecycleStatus::Running,
+        lash_core::ProcessStatus::Running,
         "the abandon request does not terminalize the row"
     );
     assert!(

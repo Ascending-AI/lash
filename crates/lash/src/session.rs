@@ -106,14 +106,15 @@ impl SessionBuilder {
     pub async fn open(self) -> Result<LashSession> {
         let policy = self.session_policy();
         let store = self.create_store(&policy).await?;
-        self.reconcile_fork_process_grants(store.as_deref()).await?;
+        self.reconcile_fork_process_observers(store.as_deref())
+            .await?;
         let state = self
             .load_or_default_state(&policy, store.as_deref())
             .await?;
         Box::pin(self.open_resolved(policy, state, store)).await
     }
 
-    async fn reconcile_fork_process_grants(
+    async fn reconcile_fork_process_observers(
         &self,
         store: Option<&dyn RuntimePersistence>,
     ) -> Result<()> {
@@ -125,19 +126,30 @@ impl SessionBuilder {
         let Some(mut meta) = store.load_session_meta().await? else {
             return Ok(());
         };
-        let lash_core::SessionRelation::Fork { process_grants, .. } = &meta.relation else {
+        let lash_core::SessionRelation::Fork {
+            pending_observer_process_ids,
+            ..
+        } = &meta.relation
+        else {
             return Ok(());
         };
-        let target_scope = lash_core::SessionScope::new(self.session_id.clone());
-        for grant in process_grants {
+        for process_id in pending_observer_process_ids {
             process_registry
-                .grant_handle(&target_scope, &grant.process_id, grant.descriptor.clone())
+                .add_observer(
+                    &self.session_id,
+                    process_id,
+                    lash_core::ProcessObserverBy::ForkInheritance,
+                )
                 .await?;
         }
-        let lash_core::SessionRelation::Fork { process_grants, .. } = &mut meta.relation else {
+        let lash_core::SessionRelation::Fork {
+            pending_observer_process_ids,
+            ..
+        } = &mut meta.relation
+        else {
             unreachable!("relation was checked above");
         };
-        process_grants.clear();
+        pending_observer_process_ids.clear();
         store.save_session_meta(meta).await?;
         Ok(())
     }

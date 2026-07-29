@@ -545,11 +545,8 @@ fn process_start_requests_round_trip_core_values() {
         lash_core::ProcessOriginator::host(),
         serde_json::json!({ "label": "External" }),
     )
-    .with_wake_target(Some(lash_core::SessionScope::new("session-a")))
-    .with_grant(Some(lash_core::ProcessStartGrant {
-        session_scope: lash_core::SessionScope::new("session-a"),
-        descriptor: lash_core::ProcessHandleDescriptor::new(Some("external"), Some("External")),
-    }))
+    .with_wake_session_id(Some("session-a".to_string()))
+    .with_observers(["session-a".to_string()])
     .with_event_types([process_event_type()]);
     assert_process_start_roundtrip(external);
 
@@ -613,12 +610,11 @@ fn process_start_requests_round_trip_core_values() {
 #[test]
 fn process_records_events_snapshots_and_results_round_trip_core_values() {
     let mut record = process_record("process:record");
-    record.status = lash_core::ProcessStatus::Completed {
-        await_output: lash_core::ProcessAwaitOutput::Success {
-            value: serde_json::json!({ "done": true }),
-            control: None,
-        },
-    };
+    record.status = lash_core::ProcessStatus::Completed;
+    record.outcome = Some(lash_core::ProcessAwaitOutput::Success {
+        value: serde_json::json!({ "done": true }),
+        control: None,
+    });
     let remote = RemoteProcessRecord::try_from(record.clone()).expect("remote record");
     remote
         .validate("RemoteProcessRecord")
@@ -633,8 +629,8 @@ fn process_records_events_snapshots_and_results_round_trip_core_values() {
 
     let summary = lash_core::ProcessHandleSummary::new(
         "process:record",
-        lash_core::ProcessHandleDescriptor::new(Some("external"), Some("External")),
-        lash_core::ProcessLifecycleStatus::Completed,
+        lash_core::ProcessIdentity::new("external").with_label(Some("External".to_string())),
+        lash_core::ProcessStatus::Completed,
     )
     .with_definition(Some(process_definition_identity("main")));
     let remote = RemoteProcessSummary::from(summary.clone());
@@ -671,7 +667,6 @@ fn process_records_events_snapshots_and_results_round_trip_core_values() {
         visible_process_ids: vec!["process:observed".to_string()],
         items: vec![lash_core::ObservedWorkItem {
             process: observed,
-            descriptor: lash_core::ProcessHandleDescriptor::new(Some("external"), Some("External")),
             events: vec![lash_core::ObservedProcessEvent {
                 sequence: 1,
                 event_type: "process.yield".to_string(),
@@ -695,10 +690,10 @@ fn process_records_events_snapshots_and_results_round_trip_core_values() {
 
     let cancel = RemoteProcessCancelResult::from(lash_core::ProcessCancelSummary {
         process_id: "process:cancel".to_string(),
-        status: lash_core::ProcessLifecycleStatus::Cancelled,
+        status: lash_core::ProcessStatus::Cancelled,
     });
     let core = lash_core::ProcessCancelSummary::try_from(cancel).expect("core cancel summary");
-    assert_eq!(core.status, lash_core::ProcessLifecycleStatus::Cancelled);
+    assert_eq!(core.status, lash_core::ProcessStatus::Cancelled);
 
     let await_result = RemoteProcessAwaitResult::from((
         "process:await".to_string(),
@@ -774,7 +769,6 @@ fn process_list_cancel_signal_and_await_requests_convert_to_core_commands() {
         signal_id: "signal:1".to_string(),
         payload: serde_json::json!({ "ok": true }),
         replay_key: Some("signal-replay".to_string()),
-        wake_target_scope: Some(lash_core::SessionScope::new("session-a").into()),
     };
     let append =
         lash_core::ProcessEventAppendRequest::try_from(signal.clone()).expect("append request");
@@ -798,6 +792,29 @@ fn process_list_cancel_signal_and_await_requests_convert_to_core_commands() {
         command,
         lash_core::ProcessCommand::Await { process_id } if process_id == "process:await"
     ));
+}
+
+#[test]
+fn observer_audit_and_fork_selector_types_round_trip() {
+    let by = lash_core::ProcessObserverBy::host("fork-operation");
+    let remote_by = RemoteProcessObserverBy::from(by.clone());
+    remote_by
+        .validate("observer round trip")
+        .expect("valid observer");
+    assert_eq!(lash_core::ProcessObserverBy::from(remote_by), by);
+
+    let selector = lash_core::ObserverInheritance::Only(vec![
+        "process-a".to_string(),
+        "process-b".to_string(),
+    ]);
+    let remote_selector = RemoteObserverInheritance::from(selector.clone());
+    remote_selector
+        .validate("selector round trip")
+        .expect("valid selector");
+    assert_eq!(
+        lash_core::ObserverInheritance::from(remote_selector),
+        selector
+    );
 }
 
 #[test]
@@ -1313,7 +1330,7 @@ fn process_event_type() -> lash_core::ProcessEventType {
         payload_schema: lash_core::LashSchema::any(),
         semantics: lash_core::ProcessEventSemanticsSpec {
             terminal: Some(lash_core::ProcessTerminalSpec {
-                state: lash_core::ProcessTerminalState::Completed,
+                status: lash_core::ProcessStatus::Completed,
                 await_output: Some(lash_core::ProcessValueSelector::Pointer(
                     "/await_output".to_string(),
                 )),
@@ -1343,7 +1360,7 @@ fn process_record(process_id: &str) -> lash_core::ProcessRecord {
         )),
     )
     .with_event_types([process_event_type()])
-    .with_wake_target(Some(lash_core::SessionScope::new("session-a")));
+    .with_wake_session_id(Some("session-a".to_string()));
     let mut record = lash_core::ProcessRecord::from_registration(registration);
     record.external_ref = Some(lash_core::ProcessExternalRef {
         backend: "worker".to_string(),
@@ -1379,8 +1396,8 @@ fn process_event(process_id: &str) -> lash_core::ProcessEvent {
         })),
         semantics: lash_core::runtime::ProcessEventSemantics {
             terminal: Some(lash_core::ProcessTerminalSemantics {
-                state: lash_core::ProcessTerminalState::Completed,
-                await_output: lash_core::ProcessAwaitOutput::Success {
+                status: lash_core::ProcessStatus::Completed,
+                outcome: lash_core::ProcessAwaitOutput::Success {
                     value: serde_json::json!(true),
                     control: None,
                 },
@@ -1400,7 +1417,7 @@ fn observed_process() -> lash_core::ObservedProcess {
         kind: "external".to_string(),
         identity: lash_core::ProcessIdentity::new("external")
             .with_label(Some("External".to_string())),
-        lifecycle: lash_core::ProcessLifecycleStatus::Running,
+        lifecycle: lash_core::ProcessStatus::Running,
         status_label: "running".to_string(),
         terminal: false,
         disposition: lash_core::RecoveryDisposition::ExternallyOwned,
@@ -1416,7 +1433,6 @@ fn observed_process() -> lash_core::ObservedProcess {
         },
         originator: lash_core::ProcessOriginator::host(),
         env_ref: None,
-        wake_target: Some(lash_core::SessionScope::new("session-a")),
         caused_by: None,
         external_ref: None,
         wait: None,

@@ -118,7 +118,8 @@ async fn builder_rebinds_first_party_process_registry_to_runtime_clock() {
                     }),
                     ..lash_core::ProcessEventSemanticsSpec::default()
                 },
-            }]),
+            }])
+            .with_wake_session_id(Some("builder-clock-target".to_string())),
         )
         .await
         .expect("register clock-wiring process");
@@ -128,8 +129,7 @@ async fn builder_rebinds_first_party_process_registry_to_runtime_clock() {
             lash_core::ProcessEventAppendRequest::new(
                 "builder.clock.wake",
                 serde_json::json!({"wake_input": "wake"}),
-            )
-            .with_wake_target_scope(lash_core::SessionScope::new("builder-clock-target")),
+            ),
         )
         .await
         .expect("append clock-wiring wake");
@@ -396,7 +396,7 @@ async fn fork_distinguishes_collected_point_from_retained_orphaned_source() -> R
 }
 
 #[tokio::test]
-async fn fork_inherits_process_grants_without_inheriting_wake_subscription() -> Result<()> {
+async fn fork_observer_inheritance_is_recoverable_selective_and_wake_independent() -> Result<()> {
     use lash_core::{ProcessRegistry as _, SessionStoreFactory as _};
 
     let factory = Arc::new(lash_core::InMemorySessionStoreFactory::new());
@@ -412,19 +412,19 @@ async fn fork_inherits_process_grants_without_inheriting_wake_subscription() -> 
     let policy = lash_core::SessionPolicy {
         provider_id: "fork-source-provider".to_string(),
         model: source_model,
-        session_id: Some("fork-grant-source".to_string()),
+        session_id: Some("fork-observer-source".to_string()),
         ..Default::default()
     };
     let source_store = factory
         .create_store(&lash_core::SessionStoreCreateRequest {
-            session_id: "fork-grant-source".to_string(),
+            session_id: "fork-observer-source".to_string(),
             relation: lash_core::SessionRelation::Root,
             policy: policy.clone(),
         })
         .await
-        .expect("create fork grant source");
+        .expect("create fork observer source");
     let mut source_state = lash_core::RuntimeSessionState {
-        session_id: "fork-grant-source".to_string(),
+        session_id: "fork-observer-source".to_string(),
         policy,
         ..Default::default()
     };
@@ -435,15 +435,14 @@ async fn fork_inherits_process_grants_without_inheriting_wake_subscription() -> 
             &[],
         ))
         .await
-        .expect("commit fork grant source");
+        .expect("commit fork observer source");
     let fork_node_id = source_state
         .session_graph
         .leaf_node_id
         .clone()
-        .expect("fork grant source leaf");
+        .expect("fork observer source leaf");
     core.pin(&fork_node_id).await?;
 
-    let source_scope = lash_core::SessionScope::new("fork-grant-source");
     registry
         .register_process(
             lash_core::ProcessRegistration::new(
@@ -454,23 +453,38 @@ async fn fork_inherits_process_grants_without_inheriting_wake_subscription() -> 
                 lash_core::RecoveryDisposition::ExternallyOwned,
                 lash_core::ProcessProvenance::host(),
             )
-            .with_wake_target(Some(source_scope.clone())),
+            .with_extra_event_types([lash_core::ProcessEventType {
+                name: "fork.wake".to_string(),
+                payload_schema: lash_core::LashSchema::any(),
+                semantics: lash_core::ProcessEventSemanticsSpec {
+                    wake: Some(lash_core::ProcessWakeSpec {
+                        when: Some(lash_core::ProcessValueSelector::Present(
+                            "/wake_input".to_string(),
+                        )),
+                        input: lash_core::ProcessValueSelector::Pointer(
+                            "/wake_input".to_string(),
+                        ),
+                    }),
+                    ..lash_core::ProcessEventSemanticsSpec::default()
+                },
+            }])
+            .with_wake_session_id(Some("fork-observer-source".to_string())),
         )
         .await
         .expect("register fork-visible process");
     registry
-        .grant_handle(
-            &source_scope,
+        .add_observer(
+            "fork-observer-source",
             "fork-visible-process",
-            lash_core::ProcessHandleDescriptor::new(Some("test"), Some("fork inherited")),
+            lash_core::ProcessObserverBy::host("fork-test-source"),
         )
         .await
-        .expect("grant source process handle");
+        .expect("observe source process");
 
-    core.fork_at(&fork_node_id, "fork-grant-branch").await?;
+    core.fork_at(&fork_node_id, "fork-observer-branch").await?;
     let branch_store = factory
         .open_existing_store(&lash_core::SessionStoreCreateRequest {
-            session_id: "fork-grant-branch".to_string(),
+            session_id: "fork-observer-branch".to_string(),
             relation: lash_core::SessionRelation::Root,
             policy: lash_core::SessionPolicy::default(),
         })
@@ -485,87 +499,211 @@ async fn fork_inherits_process_grants_without_inheriting_wake_subscription() -> 
     assert_eq!(branch_read.config.provider_id, "fork-source-provider");
     assert_eq!(branch_read.config.model.id, "fork-source-model");
 
-    let branch_scope = lash_core::SessionScope::new("fork-grant-branch");
     let inherited = registry
-        .list_handle_grants(&branch_scope)
+        .list_observed_by("fork-observer-branch")
         .await
-        .expect("list inherited grants");
+        .expect("list inherited observations");
     assert_eq!(inherited.len(), 1);
-    assert_eq!(inherited[0].0.process_id, "fork-visible-process");
-    assert_eq!(
-        inherited[0]
-            .1
-            .wake_target
-            .as_ref()
-            .map(|scope| scope.session_id.as_str()),
-        Some("fork-grant-source"),
-        "fork observes the process but does not become its wake target"
-    );
+    assert_eq!(inherited[0].id, "fork-visible-process");
     let published_meta = branch_store
         .load_session_meta()
         .await
         .expect("load published fork metadata")
         .expect("published fork metadata exists");
-    let lash_core::SessionRelation::Fork { process_grants, .. } = &published_meta.relation else {
+    let lash_core::SessionRelation::Fork {
+        pending_observer_process_ids,
+        ..
+    } = &published_meta.relation
+    else {
         panic!("branch metadata must retain its fork relation");
     };
     assert!(
-        process_grants.is_empty(),
-        "successfully published grants must be consumed from the recovery snapshot"
+        pending_observer_process_ids.is_empty(),
+        "successfully published observers must be consumed from the recovery intent"
     );
 
     let mut recovery_meta = published_meta;
-    let lash_core::SessionRelation::Fork { process_grants, .. } = &mut recovery_meta.relation
+    let lash_core::SessionRelation::Fork {
+        pending_observer_process_ids,
+        ..
+    } = &mut recovery_meta.relation
     else {
         unreachable!("relation was checked above");
     };
-    process_grants.push(lash_core::ProcessHandleGrant {
-        session_id: "fork-grant-source".to_string(),
-        process_id: "fork-visible-process".to_string(),
-        descriptor: lash_core::ProcessHandleDescriptor::new(Some("test"), Some("fork inherited")),
-    });
+    pending_observer_process_ids.push("fork-visible-process".to_string());
     branch_store
         .save_session_meta(recovery_meta)
         .await
-        .expect("simulate a crash before grant snapshot consumption");
+        .expect("simulate a crash before observer intent consumption");
     registry
-        .revoke_handle(&branch_scope, "fork-visible-process")
+        .remove_observer(
+            "fork-observer-branch",
+            "fork-visible-process",
+            lash_core::ProcessObserverBy::host("fork-test-crash"),
+        )
         .await
-        .expect("remove the partially published grant");
-    core.session("fork-grant-branch").open().await?;
+        .expect("remove the partially published observer");
+    core.session("fork-observer-branch").open().await?;
     assert_eq!(
         registry
-            .list_handle_grants(&branch_scope)
+            .list_observed_by("fork-observer-branch")
             .await
-            .expect("list recovered fork grants")
+            .expect("list recovered fork observations")
             .len(),
         1,
-        "opening a durable fork must reconcile an unconsumed grant snapshot"
+        "opening a durable fork must reconcile an unconsumed observer intent"
     );
     let recovered_meta = branch_store
         .load_session_meta()
         .await
         .expect("load recovered fork metadata")
         .expect("recovered fork metadata exists");
-    let lash_core::SessionRelation::Fork { process_grants, .. } = &recovered_meta.relation else {
+    let lash_core::SessionRelation::Fork {
+        pending_observer_process_ids,
+        ..
+    } = &recovered_meta.relation
+    else {
         unreachable!("relation was checked above");
     };
     assert!(
-        process_grants.is_empty(),
-        "recovery must consume the snapshot after idempotent publication"
+        pending_observer_process_ids.is_empty(),
+        "recovery must consume the intent after idempotent publication"
     );
     registry
-        .revoke_handle(&branch_scope, "fork-visible-process")
+        .remove_observer(
+            "fork-observer-branch",
+            "fork-visible-process",
+            lash_core::ProcessObserverBy::host("fork-test-revoke"),
+        )
         .await
-        .expect("deliberately revoke the recovered grant");
-    core.session("fork-grant-branch").open().await?;
+        .expect("deliberately remove the recovered observer");
+    core.session("fork-observer-branch").open().await?;
     assert!(
         registry
-            .list_handle_grants(&branch_scope)
+            .list_observed_by("fork-observer-branch")
             .await
-            .expect("list grants after deliberate revocation")
+            .expect("list observations after deliberate removal")
             .is_empty(),
-        "a later deliberate revocation must remain revoked"
+        "a later deliberate observer removal must remain removed"
+    );
+
+    registry
+        .register_process_with_observers(
+            lash_core::ProcessRegistration::new(
+                "fork-selective-process",
+                lash_core::ProcessInput::External {
+                    metadata: serde_json::Value::Null,
+                },
+                lash_core::RecoveryDisposition::ExternallyOwned,
+                lash_core::ProcessProvenance::host(),
+            ),
+            &["fork-observer-source".to_string()],
+        )
+        .await
+        .expect("register second observed process");
+    core.fork_at_with_observer_inheritance(
+        &fork_node_id,
+        "fork-only-branch",
+        lash_core::ObserverInheritance::Only(vec!["fork-selective-process".to_string()]),
+    )
+    .await?;
+    let only = registry
+        .list_observed_by("fork-only-branch")
+        .await
+        .expect("list Only selector result");
+    assert_eq!(
+        only.iter()
+            .map(|record| record.id.as_str())
+            .collect::<Vec<_>>(),
+        vec!["fork-selective-process"]
+    );
+    let only_store = factory
+        .open_existing_store(&lash_core::SessionStoreCreateRequest {
+            session_id: "fork-only-branch".to_string(),
+            relation: lash_core::SessionRelation::Root,
+            policy: lash_core::SessionPolicy::default(),
+        })
+        .await
+        .expect("open Only branch store")
+        .expect("Only branch store exists");
+    let only_meta = only_store
+        .load_session_meta()
+        .await
+        .expect("load Only branch metadata")
+        .expect("Only branch metadata exists");
+    assert_eq!(
+        only_meta
+            .relation
+            .historical_process_start_exclusion("fork-visible-process"),
+        Some("started before this branch; not observed here"),
+        "historical starts excluded by the durable selector must render honestly"
+    );
+    assert_eq!(
+        only_meta
+            .relation
+            .historical_process_start_exclusion("fork-selective-process"),
+        None,
+        "historical starts included by the durable selector remain normal"
+    );
+
+    let event_count_before = registry
+        .events_after("fork-selective-process", 0)
+        .await
+        .expect("read observer audit before duplicate apply")
+        .len();
+    registry
+        .add_observer(
+            "fork-only-branch",
+            "fork-selective-process",
+            lash_core::ProcessObserverBy::ForkInheritance,
+        )
+        .await
+        .expect("reapply fork observer");
+    assert_eq!(
+        registry
+            .events_after("fork-selective-process", 0)
+            .await
+            .expect("read observer audit after duplicate apply")
+            .len(),
+        event_count_before,
+        "double-apply must be an event-log no-op"
+    );
+
+    core.fork_at_with_observer_inheritance(
+        &fork_node_id,
+        "fork-none-branch",
+        lash_core::ObserverInheritance::None,
+    )
+    .await?;
+    assert!(
+        registry
+            .list_observed_by("fork-none-branch")
+            .await
+            .expect("list None selector result")
+            .is_empty()
+    );
+
+    registry
+        .append_event(
+            "fork-visible-process",
+            lash_core::ProcessEventAppendRequest::new(
+                "fork.wake",
+                serde_json::json!({"wake_input": "source-only"}),
+            ),
+        )
+        .await
+        .expect("append fork wake event");
+    assert!(
+        registry
+            .list_wake_deliveries(None)
+            .await
+            .expect("list wake deliveries")
+            .iter()
+            .any(|delivery| {
+                delivery.wake.process_id == "fork-visible-process"
+                    && delivery.wake.target_session_id == "fork-observer-source"
+            }),
+        "observer inheritance must not retarget the source wake subscription"
     );
     Ok(())
 }

@@ -909,6 +909,10 @@ impl LashlangProcessExecutionTrace {
                 TraceLashlangStatus::Failed,
                 Some("process abandoned".to_string()),
             ),
+            lash_core::ProcessAwaitOutput::NoLongerRetained { terminal_label, .. } => (
+                TraceLashlangStatus::Failed,
+                Some(format!("process no longer retained ({terminal_label})")),
+            ),
         };
         self.emit(TraceLashlangExecutionEvent::ExecutionFinished {
             event_key: self.event_key("finished"),

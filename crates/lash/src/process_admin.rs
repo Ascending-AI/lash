@@ -4,10 +4,10 @@
 //! re-exported as [`lash::process::Processes`](crate::process::Processes)) is THE
 //! host-level process surface (ADR 0019 grill): start, observe, signal, cancel,
 //! transfer, prune, and abandon-request every process, with the two distinct
-//! scope filters — `granted_to` (what a session may address) and `originated_by`
+//! scope filters — `observed_by` (what a session may address) and `originated_by`
 //! (what a session created). The session-scoped
 //! [`SessionProcessAdmin`](crate::admin::SessionProcessAdmin) is thin sugar over
-//! this surface pre-filtered by a session's grant; it lives in `admin` because it
+//! this surface pre-filtered by a session's observer edge; it lives in `admin` because it
 //! wraps a [`SessionAdmin`](crate::admin::SessionAdmin).
 
 use crate::support::*;
@@ -89,11 +89,11 @@ impl Processes {
             ),
             None => None,
         };
-        let grant = request.grant.clone();
+        let observers = request.observers.clone();
         let registration = request.into_registration(env_ref);
         let command = lash_core::ProcessCommand::Start {
             registration,
-            grant,
+            observers,
             execution_context: Box::new(lash_core::ProcessExecutionContext::default()),
         };
         let outcome = self
@@ -117,25 +117,25 @@ impl Processes {
         self.make_observer()?.list(filter).await.map_err(Into::into)
     }
 
-    /// List processes a session may address — the **grant** filter (ADR 0019).
-    /// This is the security lens (what a session is authorized to see), distinct
+    /// List processes a session may address — the **observer** filter.
+    /// This is the visibility lens (what a session may see), distinct
     /// from [`list_originated_by`](Self::list_originated_by). `session.processes()`
-    /// is thin sugar over this method pre-scoped to the session's own grant.
-    pub async fn list_granted_to(
+    /// is thin sugar over this method pre-scoped to the session's observer edge.
+    pub async fn list_observed_by(
         &self,
         session_scope: &lash_core::SessionScope,
         filter: &lash_core::ProcessListFilter,
     ) -> Result<Vec<lash_core::ObservedProcess>> {
         self.make_observer()?
-            .list_granted_to(session_scope, filter)
+            .list_observed_by(session_scope, filter)
             .await
             .map_err(Into::into)
     }
 
     /// List processes a session originated — the **provenance** filter (ADR
     /// 0019). This is the lineage lens (what a session created), distinct from
-    /// [`list_granted_to`](Self::list_granted_to): a process a session started
-    /// then transferred away still matches here, and one merely granted to it
+    /// [`list_observed_by`](Self::list_observed_by): a process a session started
+    /// then transferred away still matches here, and one merely observed by it
     /// does not.
     pub async fn list_originated_by(
         &self,
@@ -222,7 +222,7 @@ impl Processes {
         let waiting_ordinal =
             registry
                 .get_process(process_id)
-                .await
+                .await?
                 .and_then(|record| match record.wait {
                     Some(lash_core::WaitState {
                         kind:
@@ -306,8 +306,8 @@ impl Processes {
         Ok(summaries)
     }
 
-    /// Move handle grants for `process_ids` from one session scope to another.
-    /// Processes are global; this re-homes only the addressing grant, never the
+    /// Move observer membership for `process_ids` from one session to another.
+    /// Processes are global; this re-homes only observer membership, never the
     /// process itself.
     pub async fn transfer(
         &self,
@@ -316,13 +316,18 @@ impl Processes {
         process_ids: &[String],
     ) -> Result<()> {
         self.registry()?
-            .transfer_handle_grants(from_scope, to_scope, process_ids)
+            .transfer_observers(
+                &from_scope.session_id,
+                &to_scope.session_id,
+                process_ids,
+                lash_core::ProcessObserverBy::host("admin-transfer"),
+            )
             .await
             .map_err(Into::into)
     }
 
     /// Host-scheduled retention lever (ADR 0017): physically delete terminal
-    /// process rows (and their events, grants, leases) older than
+    /// process rows (and their events, observer edges, leases) older than
     /// `cutoff_epoch_ms`, returning what was reclaimed. Non-terminal rows are
     /// never touched. Choose a cutoff comfortably longer than any live await.
     pub async fn prune(&self, cutoff_epoch_ms: u64) -> Result<lash_core::ProcessPruneReport> {
@@ -348,7 +353,11 @@ impl Processes {
                 .await?;
         }
         registry
-            .prune_terminal_processes(cutoff_epoch_ms, None, None)
+            .prune_terminal_processes(
+                cutoff_epoch_ms,
+                None,
+                lash_core::ProjectionWatermark::NoProjector,
+            )
             .await
             .map_err(Into::into)
     }

@@ -46,9 +46,9 @@ on surrounding model prose.
   /api/work/{process_id}/cancel`, and `DELETE /api/session` (or the reset control's
   equivalent `POST /api/reset`).
 - Disk truth: `<data-dir>/processes.db` tables `processes`, `process_events`, and
-  `process_handle_grants`; `<data-dir>/lash-sessions/`; `<data-dir>/trace.jsonl` event
-  `agent_workbench.reset.restate.session_deleted`, whose report names orphaned process
-  ids.
+  `process_observers`; `<data-dir>/lash-sessions/`; `<data-dir>/trace.jsonl` event
+  `agent_workbench.reset.restate.session_deleted`, whose report includes the removed
+  observer count.
 
 ## Phase 0 — Boot and record owner identity
 
@@ -85,7 +85,7 @@ while elapsed_seconds < 240 {
 
 Poll `/api/work` until both named rows are non-terminal, capture their full process ids,
 and require matching running cards in the rendered work rail. Verify `processes.db`
-contains both ids and handle grants for the owner session. Save `01-running-work.json`
+contains both ids and observer rows for the owner session. Save `01-running-work.json`
 and the relevant database extraction as `01-running-store.json`; screenshot
 `01-two-running-processes.png`.
 
@@ -96,8 +96,8 @@ Use the reset/new-session control while capturing its HTTP response, or issue
 
 - the rendered and `/api/state` session id changes;
 - the old session's database is absent from `<data-dir>/lash-sessions/`;
-- the session-deleted trace report contains both original process ids as orphaned;
-- `process_handle_grants` has no grants for the deleted session;
+- the session-deleted trace report reports two removed observers;
+- `process_observers` has no rows for the deleted session;
 - `/api/work` and the rendered work rail still show both original process ids.
 
 The production delete path first revokes the old session's active durable waits and
@@ -135,7 +135,7 @@ container are gone.
 | Item | Objective gate | Verdict | Evidence |
 |------|----------------|---------|----------|
 | Processes started | two named non-terminal ids agree in rail, API, and store | | `01-two-running-processes.png`, `01-running-*.json` |
-| Owner deleted | new rendered/API session id; old store/grants gone | | `02-owner-gone-processes-live.png`, `02-after-delete-*.json` |
+| Owner deleted | new rendered/API session id; old store/observer rows gone | | `02-owner-gone-processes-live.png`, `02-after-delete-*.json` |
 | Runtime independence | both original ids remain live in rail and `/api/work` after delete | | `02-owner-gone-processes-live.png`, API/trace report |
 | Global cancel | exact id accepted; `cancel_requested` then cancelled | | `03-orphan-cancelled.png`, `03-cancel-receipt.json`, store events |
 | Survivor completion | completed terminal and finish marker persist after owner deletion | | `04-survivor-completed.png`, `04-terminal-*.json` |

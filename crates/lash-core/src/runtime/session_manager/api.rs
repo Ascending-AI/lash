@@ -176,7 +176,7 @@ impl crate::plugin::ProcessReadService for RuntimeSessionProcessService {
         session_id: &str,
         mode: crate::ProcessListMode,
         scope: crate::ProcessOpScope<'_>,
-    ) -> Result<Vec<crate::runtime::ProcessHandleGrantEntry>, crate::PluginError> {
+    ) -> Result<Vec<crate::ProcessRecord>, crate::PluginError> {
         self.services
             .processes
             .list_process_handles(&self.services.current, session_id, mode, scope)
@@ -192,11 +192,6 @@ impl crate::ProcessService for RuntimeSessionProcessService {
         request: crate::ProcessStartRequest,
         scope: crate::ProcessOpScope<'_>,
     ) -> Result<crate::ProcessHandleSummary, crate::PluginError> {
-        let descriptor = request
-            .grant
-            .as_ref()
-            .map(|grant| grant.descriptor.clone())
-            .unwrap_or_default();
         let env_ref = match request.env_spec.as_ref() {
             Some(env_spec) => Some(
                 crate::persist_process_execution_env(
@@ -213,21 +208,17 @@ impl crate::ProcessService for RuntimeSessionProcessService {
             ),
             None => None,
         };
+        let observers = request.observers.clone();
         let registration = request.into_registration(env_ref);
         let record = self
             .start(
                 session_id,
                 registration,
-                crate::ProcessStartOptions::new().with_descriptor(descriptor.clone()),
+                crate::ProcessStartOptions::new().with_observers(observers),
                 scope,
             )
             .await?;
-        Ok(crate::ProcessHandleSummary::new(
-            record.id.clone(),
-            descriptor,
-            crate::ProcessLifecycleStatus::from(record.status.clone()),
-        )
-        .with_definition(record.identity.definition))
+        Ok(crate::ProcessHandleSummary::from_record(record))
     }
 
     async fn start(
@@ -285,7 +276,7 @@ impl crate::ProcessService for RuntimeSessionProcessService {
         session_id: &str,
         mode: crate::ProcessListMode,
         scope: crate::ProcessOpScope<'_>,
-    ) -> Result<Vec<crate::runtime::ProcessHandleGrantEntry>, crate::PluginError> {
+    ) -> Result<Vec<crate::ProcessRecord>, crate::PluginError> {
         self.services
             .processes
             .list_process_handles(&self.services.current, session_id, mode, scope)

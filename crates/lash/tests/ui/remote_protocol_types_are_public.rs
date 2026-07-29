@@ -112,8 +112,9 @@ fn main() {
             },
         }),
         originator: lash::remote::processes::RemoteProcessOriginator::Host { scope: None },
-        wake_target: None,
-        grant: None,
+        identity: None,
+        wake_session_id: None,
+        observers: Vec::new(),
         event_types: Vec::new(),
     };
     process_start.validate().unwrap();

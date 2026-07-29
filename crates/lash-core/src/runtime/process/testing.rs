@@ -12,20 +12,20 @@ use super::events::{
     ProcessEventAppendResult, terminal_append_request,
 };
 use super::model::{
-    AbandonRequest, PROCESS_LEASE_SCHEMA_VERSION, ProcessChangeCursor, ProcessCompletionOutcome,
-    ProcessExecutionWriteAuthority, ProcessExternalRef, ProcessHandleDescriptor,
-    ProcessHandleGrant, ProcessHandleGrantEntry, ProcessLease, ProcessLeaseClaimOutcome,
-    ProcessLeaseCompletion, ProcessListFilter, ProcessRecord, ProcessRegistration,
-    ProcessSessionDeleteReport, ProcessStartOutcome, ProcessStarted, SessionScope, SessionScopeId,
-    WaitState,
+    AbandonRequest, PROCESS_LEASE_SCHEMA_VERSION, ProcessChange, ProcessChangeCursor,
+    ProcessCompletionOutcome, ProcessExecutionWriteAuthority, ProcessExternalRef, ProcessLease,
+    ProcessLeaseClaimOutcome, ProcessLeaseCompletion, ProcessListFilter, ProcessObserverBy,
+    ProcessRecord, ProcessRegistration, ProcessSessionDeleteReport, ProcessStartOutcome,
+    ProcessStarted, ProcessTombstone, SessionId, WaitState,
 };
 use super::references::ProcessLiveReferenceSummary;
-use super::registry::{ProcessPruneReport, ProcessRegistry};
+use super::registry::{ProcessPruneReport, ProcessRegistry, ProjectionWatermark};
 use super::validation::{
     ProcessStartPlan, prepare_process_event_append, prepare_process_registration,
     prepare_process_start,
 };
 
+mod continuation;
 mod support;
 use support::ExecutionWritePause;
 pub use support::{ExecutionWritePauseHandle, TestProcessRegistryWriteExt};
@@ -36,7 +36,9 @@ pub struct TestLocalProcessRegistry {
     managed: Arc<Mutex<ManagedProcessMap>>,
     process_read_error: Arc<Mutex<Option<PluginError>>>,
     next_change_seq: Arc<Mutex<u64>>,
-    grants: Arc<Mutex<ManagedGrantMap>>,
+    observers: Arc<Mutex<HashMap<SessionId, HashSet<String>>>>,
+    wake_targets: Arc<Mutex<HashMap<String, SessionId>>>,
+    tombstones: Arc<Mutex<HashMap<String, ProcessTombstone>>>,
     leases: Arc<Mutex<ManagedLeaseMap>>,
     handovers: Arc<Mutex<HashMap<(String, u64), crate::PersistedSegmentHandover>>>,
     trigger_store: Option<Arc<crate::InMemoryTriggerStore>>,
@@ -55,7 +57,9 @@ impl Default for TestLocalProcessRegistry {
             managed: Arc::new(Mutex::new(HashMap::new())),
             process_read_error: Arc::new(Mutex::new(None)),
             next_change_seq: Arc::new(Mutex::new(0)),
-            grants: Arc::new(Mutex::new(HashMap::new())),
+            observers: Arc::new(Mutex::new(HashMap::new())),
+            wake_targets: Arc::new(Mutex::new(HashMap::new())),
+            tombstones: Arc::new(Mutex::new(HashMap::new())),
             leases: Arc::new(Mutex::new(HashMap::new())),
             handovers: Arc::new(Mutex::new(HashMap::new())),
             trigger_store: None,
@@ -70,9 +74,9 @@ impl Default for TestLocalProcessRegistry {
 }
 
 type ManagedProcessMap = HashMap<String, ManagedProcessRecord>;
-type ManagedGrantMap = HashMap<SessionScopeId, HashMap<String, ProcessHandleGrant>>;
 type ManagedLeaseMap = HashMap<String, ProcessLease>;
 
+#[derive(Clone)]
 struct ManagedProcessRecord {
     record: ProcessRecord,
     change_seq: u64,
@@ -165,11 +169,29 @@ impl TestLocalProcessRegistry {
         *next
     }
 
+    async fn process_miss(&self, process_id: &str) -> PluginError {
+        self.tombstones.lock().await.get(process_id).map_or_else(
+            || PluginError::Session(format!("unknown process `{process_id}`")),
+            |tombstone| PluginError::ProcessNoLongerRetained {
+                terminal_label: tombstone.terminal_label.clone(),
+                pruned_at_ms: tombstone.pruned_at_ms,
+            },
+        )
+    }
+
     async fn insert_process(
         &self,
         registration: ProcessRegistration,
+        observers: &[SessionId],
     ) -> Result<ProcessRecord, PluginError> {
-        let (registration, registration_hash) = prepare_process_registration(registration)?;
+        let (registration, base_registration_hash) = prepare_process_registration(registration)?;
+        let registration_hash = crate::runtime::process_registration_with_observers_hash(
+            base_registration_hash,
+            observers,
+        )?;
+        let mut observer_set = observers.to_vec();
+        observer_set.sort();
+        observer_set.dedup();
         let mut managed = self.managed.lock().await;
         if let Some(existing) = managed.get(&registration.id) {
             if existing.record.registration_hash == registration_hash {
@@ -181,6 +203,7 @@ impl TestLocalProcessRegistry {
             )));
         }
         let id = registration.id.clone();
+        let wake_session_id = registration.wake_session_id.clone();
         let record = ProcessRecord::from_prepared_registration(
             registration,
             registration_hash,
@@ -196,6 +219,17 @@ impl TestLocalProcessRegistry {
                 keyed_events: HashMap::new(),
             },
         );
+        if let Some(target) = wake_session_id {
+            self.wake_targets.lock().await.insert(id.clone(), target);
+        }
+        for session_id in observer_set {
+            self.observers
+                .lock()
+                .await
+                .entry(session_id)
+                .or_default()
+                .insert(id.clone());
+        }
         Ok(record)
     }
 
@@ -210,12 +244,19 @@ impl TestLocalProcessRegistry {
             .and_then(|replay| record.keyed_events.get(replay.key.as_str()))
             .map(|(hash, event)| (hash.clone(), event.clone()));
         let sequence = record.events.len() as u64 + 1;
+        let wake_session_id = self
+            .wake_targets
+            .lock()
+            .await
+            .get(&record.record.id)
+            .cloned();
         let prepared = prepare_process_event_append(
             &record.record,
             request,
             sequence,
             replay_lookup,
             self.clock.timestamp_ms(),
+            wake_session_id.as_deref(),
         )?;
         match prepared {
             super::ProcessEventAppendPlan::Replay {
@@ -282,75 +323,42 @@ impl ProcessRegistry for TestLocalProcessRegistry {
         self.wake_delivery_config
     }
 
-    async fn register_process(
+    async fn register_process_with_observers(
         &self,
         registration: ProcessRegistration,
+        observers: &[SessionId],
     ) -> Result<ProcessRecord, PluginError> {
-        self.insert_process(registration).await
-    }
-
-    async fn put_segment_handover(
-        &self,
-        process_id: &str,
-        handover: crate::PersistedSegmentHandover,
-    ) -> Result<(), PluginError> {
-        if !self.managed.lock().await.contains_key(process_id) {
-            return Err(PluginError::Session(format!(
-                "unknown process `{process_id}`"
-            )));
-        }
-        let key = (process_id.to_string(), handover.segment_ordinal);
-        let mut handovers = self.handovers.lock().await;
-        if let Some(existing) = handovers.get(&key) {
-            if existing == &handover {
-                return Ok(());
+        let _transaction = self.transaction.lock().await;
+        let process_id = registration.id.clone();
+        let managed_before = self.managed.lock().await.clone();
+        let observers_before = self.observers.lock().await.clone();
+        let wake_targets_before = self.wake_targets.lock().await.clone();
+        let result = async {
+            self.insert_process(registration, observers).await?;
+            let mut managed = self.managed.lock().await;
+            let record = managed
+                .get_mut(&process_id)
+                .expect("registration inserted process");
+            for session_id in observers {
+                self.append_managed_event(
+                    record,
+                    ProcessEventAppendRequest::observer_added(
+                        &process_id,
+                        session_id,
+                        &ProcessObserverBy::host("registration"),
+                    ),
+                )
+                .await?;
             }
-            return Err(PluginError::Session(format!(
-                "process `{process_id}` segment {} handover conflict",
-                handover.segment_ordinal
-            )));
+            Ok(record.record.clone())
         }
-        handovers.retain(|(stored_process_id, stored_ordinal), _| {
-            stored_process_id != process_id
-                || *stored_ordinal >= handover.segment_ordinal.saturating_sub(1)
-        });
-        handovers.insert(key, handover);
-        Ok(())
-    }
-
-    async fn get_segment_handover(
-        &self,
-        process_id: &str,
-        segment_ordinal: u64,
-    ) -> Result<Option<crate::PersistedSegmentHandover>, PluginError> {
-        Ok(self
-            .handovers
-            .lock()
-            .await
-            .get(&(process_id.to_string(), segment_ordinal))
-            .cloned())
-    }
-
-    async fn latest_segment_handover(
-        &self,
-        process_id: &str,
-    ) -> Result<Option<crate::PersistedSegmentHandover>, PluginError> {
-        Ok(self
-            .handovers
-            .lock()
-            .await
-            .iter()
-            .filter(|((stored_process_id, _), _)| stored_process_id == process_id)
-            .max_by_key(|((_, ordinal), _)| *ordinal)
-            .map(|(_, handover)| handover.clone()))
-    }
-
-    async fn delete_segment_handovers(&self, process_id: &str) -> Result<(), PluginError> {
-        self.handovers
-            .lock()
-            .await
-            .retain(|(stored_process_id, _), _| stored_process_id != process_id);
-        Ok(())
+        .await;
+        if result.is_err() {
+            *self.managed.lock().await = managed_before;
+            *self.observers.lock().await = observers_before;
+            *self.wake_targets.lock().await = wake_targets_before;
+        }
+        result
     }
 
     async fn set_external_ref(
@@ -360,9 +368,7 @@ impl ProcessRegistry for TestLocalProcessRegistry {
     ) -> Result<ProcessRecord, PluginError> {
         let mut managed = self.managed.lock().await;
         let Some(record) = managed.get_mut(process_id) else {
-            return Err(PluginError::Session(format!(
-                "unknown process `{process_id}`"
-            )));
+            return Err(self.process_miss(process_id).await);
         };
         if let Some(existing) = &record.record.external_ref {
             if existing == &external_ref {
@@ -379,163 +385,206 @@ impl ProcessRegistry for TestLocalProcessRegistry {
         Ok(record.record.clone())
     }
 
-    async fn grant_handle(
+    async fn add_observer(
         &self,
-        session_scope: &SessionScope,
+        session_id: &str,
         process_id: &str,
-        descriptor: ProcessHandleDescriptor,
-    ) -> Result<ProcessHandleGrant, PluginError> {
-        let _transaction = self.transaction.lock().await;
-        if self.get_process(process_id).await.is_none() {
-            return Err(PluginError::Session(format!(
-                "unknown process `{process_id}`"
-            )));
-        }
-        let grant = ProcessHandleGrant {
-            session_id: session_scope.session_id.clone(),
-            process_id: process_id.to_string(),
-            descriptor,
-        };
-        self.grants
-            .lock()
-            .await
-            .entry(session_scope.id())
-            .or_default()
-            .insert(process_id.to_string(), grant.clone());
-        Ok(grant)
-    }
-
-    async fn revoke_handle(
-        &self,
-        session_scope: &SessionScope,
-        process_id: &str,
+        by: ProcessObserverBy,
     ) -> Result<(), PluginError> {
         let _transaction = self.transaction.lock().await;
-        if let Some(session_grants) = self.grants.lock().await.get_mut(&session_scope.id()) {
-            session_grants.remove(process_id);
+        let managed_before = self.managed.lock().await.clone();
+        let observers_before = self.observers.lock().await.clone();
+        let result = async {
+            let mut managed = self.managed.lock().await;
+            let Some(record) = managed.get_mut(process_id) else {
+                return Err(self.process_miss(process_id).await);
+            };
+            let inserted = self
+                .observers
+                .lock()
+                .await
+                .entry(session_id.to_string())
+                .or_default()
+                .insert(process_id.to_string());
+            if inserted {
+                self.append_managed_event(
+                    record,
+                    ProcessEventAppendRequest::observer_added(process_id, session_id, &by),
+                )
+                .await?;
+            }
+            Ok(())
         }
-        Ok(())
+        .await;
+        if result.is_err() {
+            *self.managed.lock().await = managed_before;
+            *self.observers.lock().await = observers_before;
+        }
+        result
     }
 
-    async fn transfer_handle_grants(
+    async fn remove_observer(
         &self,
-        from_scope: &SessionScope,
-        to_scope: &SessionScope,
+        session_id: &str,
+        process_id: &str,
+        by: ProcessObserverBy,
+    ) -> Result<(), PluginError> {
+        let _transaction = self.transaction.lock().await;
+        let managed_before = self.managed.lock().await.clone();
+        let observers_before = self.observers.lock().await.clone();
+        let result = async {
+            let mut managed = self.managed.lock().await;
+            let Some(record) = managed.get_mut(process_id) else {
+                return Err(self.process_miss(process_id).await);
+            };
+            let removed = self
+                .observers
+                .lock()
+                .await
+                .get_mut(session_id)
+                .is_some_and(|processes| processes.remove(process_id));
+            if removed {
+                self.append_managed_event(
+                    record,
+                    ProcessEventAppendRequest::observer_removed(process_id, session_id, &by),
+                )
+                .await?;
+            }
+            Ok(())
+        }
+        .await;
+        if result.is_err() {
+            *self.managed.lock().await = managed_before;
+            *self.observers.lock().await = observers_before;
+        }
+        result
+    }
+
+    async fn transfer_observers(
+        &self,
+        from_session_id: &str,
+        to_session_id: &str,
         process_ids: &[String],
+        by: ProcessObserverBy,
     ) -> Result<(), PluginError> {
         let _transaction = self.transaction.lock().await;
-        let mut grants = self.grants.lock().await;
-        let from_scope_id = from_scope.id();
-        let to_scope_id = to_scope.id();
-        for process_id in process_ids {
-            let grant = grants
-                .get_mut(&from_scope_id)
-                .and_then(|session_grants| session_grants.remove(process_id))
-                .ok_or_else(|| {
-                    PluginError::Session(format!(
-                        "process handle `{process_id}` is not granted to session `{}`",
-                        from_scope.session_id
-                    ))
-                })?;
-            grants.entry(to_scope_id.clone()).or_default().insert(
-                process_id.clone(),
-                ProcessHandleGrant {
-                    session_id: to_scope.session_id.clone(),
-                    process_id: process_id.clone(),
-                    descriptor: grant.descriptor,
-                },
-            );
+        let managed_before = self.managed.lock().await.clone();
+        let observers_before = self.observers.lock().await.clone();
+        let result = async {
+            for process_id in process_ids {
+                let mut managed = self.managed.lock().await;
+                let Some(record) = managed.get_mut(process_id) else {
+                    return Err(self.process_miss(process_id).await);
+                };
+                let mut observers = self.observers.lock().await;
+                let removed = observers
+                    .get_mut(from_session_id)
+                    .is_some_and(|processes| processes.remove(process_id));
+                if !removed {
+                    return Err(PluginError::Session(format!(
+                        "process `{process_id}` is not observed by session `{from_session_id}`"
+                    )));
+                }
+                observers
+                    .entry(to_session_id.to_string())
+                    .or_default()
+                    .insert(process_id.clone());
+                drop(observers);
+                self.append_managed_event(
+                    record,
+                    ProcessEventAppendRequest::observer_removed(process_id, from_session_id, &by),
+                )
+                .await?;
+                self.append_managed_event(
+                    record,
+                    ProcessEventAppendRequest::observer_added(process_id, to_session_id, &by),
+                )
+                .await?;
+            }
+            Ok(())
+        }
+        .await;
+        if result.is_err() {
+            *self.managed.lock().await = managed_before;
+            *self.observers.lock().await = observers_before;
+        }
+        result
+    }
+
+    async fn list_observed_by(&self, session_id: &str) -> Result<Vec<ProcessRecord>, PluginError> {
+        let process_ids = self
+            .observers
+            .lock()
+            .await
+            .get(session_id)
+            .cloned()
+            .unwrap_or_default();
+        let managed = self.managed.lock().await;
+        let mut records = process_ids
+            .into_iter()
+            .filter_map(|process_id| managed.get(&process_id).map(|row| row.record.clone()))
+            .collect::<Vec<_>>();
+        records.sort_by(|left, right| left.id.cmp(&right.id));
+        Ok(records)
+    }
+
+    async fn observers_for_process(&self, process_id: &str) -> Result<Vec<SessionId>, PluginError> {
+        if !self.managed.lock().await.contains_key(process_id) {
+            return Err(self.process_miss(process_id).await);
+        }
+        let mut sessions = self
+            .observers
+            .lock()
+            .await
+            .iter()
+            .filter(|(_, processes)| processes.contains(process_id))
+            .map(|(session_id, _)| session_id.clone())
+            .collect::<Vec<_>>();
+        sessions.sort();
+        Ok(sessions)
+    }
+
+    async fn retarget_subscription(
+        &self,
+        process_id: &str,
+        target: Option<&str>,
+    ) -> Result<(), PluginError> {
+        let _transaction = self.transaction.lock().await;
+        let mut managed = self.managed.lock().await;
+        let Some(record) = managed.get_mut(process_id) else {
+            return Err(self.process_miss(process_id).await);
+        };
+        let old_target = self.wake_targets.lock().await.get(process_id).cloned();
+        if old_target.as_deref() == target {
+            return Ok(());
+        }
+        self.append_managed_event(
+            record,
+            ProcessEventAppendRequest::subscription_retargeted(process_id, target),
+        )
+        .await?;
+        let mut wake_targets = self.wake_targets.lock().await;
+        match target {
+            Some(target) => {
+                wake_targets.insert(process_id.to_string(), target.to_string());
+            }
+            None => {
+                wake_targets.remove(process_id);
+            }
+        }
+        drop(wake_targets);
+        if let Some(old_target) = old_target {
+            for delivery in self.wake_deliveries.lock().await.values_mut() {
+                if delivery.state == super::WakeDeliveryState::Pending
+                    && delivery.wake.process_id == process_id
+                    && delivery.wake.target_session_id == old_target
+                {
+                    delivery.state = super::WakeDeliveryState::Discarded;
+                    delivery.discard_reason = Some(super::WakeDiscardReason::Retargeted);
+                }
+            }
         }
         Ok(())
-    }
-
-    async fn list_handle_grants(
-        &self,
-        session_scope: &SessionScope,
-    ) -> Result<Vec<ProcessHandleGrantEntry>, PluginError> {
-        let _transaction = self.transaction.lock().await;
-        let grants = self
-            .grants
-            .lock()
-            .await
-            .get(&session_scope.id())
-            .cloned()
-            .unwrap_or_default();
-        let managed = self.managed.lock().await;
-        let mut entries = grants
-            .into_values()
-            .filter_map(|grant| {
-                managed
-                    .get(&grant.process_id)
-                    .map(|record| (grant, record.record.clone()))
-            })
-            .collect::<Vec<_>>();
-        entries.sort_by(|(left, _), (right, _)| left.process_id.cmp(&right.process_id));
-        Ok(entries)
-    }
-
-    async fn list_live_handle_grants(
-        &self,
-        session_scope: &SessionScope,
-    ) -> Result<Vec<ProcessHandleGrantEntry>, PluginError> {
-        let _transaction = self.transaction.lock().await;
-        let grants = self
-            .grants
-            .lock()
-            .await
-            .get(&session_scope.id())
-            .cloned()
-            .unwrap_or_default();
-        let managed = self.managed.lock().await;
-        let mut entries = grants
-            .into_values()
-            .filter_map(|grant| {
-                managed
-                    .get(&grant.process_id)
-                    .filter(|record| !record.record.is_terminal())
-                    .map(|record| (grant, record.record.clone()))
-            })
-            .collect::<Vec<_>>();
-        entries.sort_by(|(left, _), (right, _)| left.process_id.cmp(&right.process_id));
-        Ok(entries)
-    }
-
-    async fn has_handle_grant(
-        &self,
-        session_scope: &SessionScope,
-        process_id: &str,
-    ) -> Result<bool, PluginError> {
-        let _transaction = self.transaction.lock().await;
-        let session_scope_id = session_scope.id();
-        let granted = self
-            .grants
-            .lock()
-            .await
-            .get(&session_scope_id)
-            .is_some_and(|session_grants| session_grants.contains_key(process_id));
-        if !granted {
-            return Ok(false);
-        }
-        Ok(self.managed.lock().await.contains_key(process_id))
-    }
-
-    async fn handle_grants_for_process(
-        &self,
-        process_id: &str,
-    ) -> Result<Vec<ProcessHandleGrant>, PluginError> {
-        let _transaction = self.transaction.lock().await;
-        if self.get_process(process_id).await.is_none() {
-            return Err(PluginError::Session(format!(
-                "unknown process `{process_id}`"
-            )));
-        }
-        let grants = self.grants.lock().await;
-        let mut entries = grants
-            .values()
-            .filter_map(|session_grants| session_grants.get(process_id).cloned())
-            .collect::<Vec<_>>();
-        entries.sort_by(|left, right| left.session_id.cmp(&right.session_id));
-        Ok(entries)
     }
 
     async fn delete_session_process_state(
@@ -543,48 +592,24 @@ impl ProcessRegistry for TestLocalProcessRegistry {
         session_id: &str,
     ) -> Result<ProcessSessionDeleteReport, PluginError> {
         let _transaction = self.transaction.lock().await;
-        let removed = {
-            let mut grants = self.grants.lock().await;
-            let mut removed = Vec::new();
-            grants.retain(|_, session_grants| {
-                if session_grants
-                    .values()
-                    .next()
-                    .is_some_and(|grant| grant.session_id == session_id)
-                {
-                    removed.extend(session_grants.drain().map(|(_, grant)| grant));
-                    false
-                } else {
-                    true
-                }
-            });
-            removed
-        };
-        let mut managed = self.managed.lock().await;
-        let grants = self.grants.lock().await;
-        let mut orphaned_process_ids = Vec::new();
-        let mut preserved_process_ids = Vec::new();
-        for grant in &removed {
-            let Some(record) = managed.get(&grant.process_id) else {
-                continue;
-            };
-            if record.record.is_terminal() {
-                continue;
-            }
-            let still_granted = grants
-                .values()
-                .any(|session_grants| session_grants.contains_key(&grant.process_id));
-            if still_granted {
-                preserved_process_ids.push(grant.process_id.clone());
-            } else {
-                orphaned_process_ids.push(grant.process_id.clone());
-            }
-        }
-        for record in managed.values_mut() {
-            if record.record.clear_wake_target_for_session(session_id) {
-                record.change_seq = self.next_change_seq().await;
-            }
-        }
+        let removed_observer_count = self
+            .observers
+            .lock()
+            .await
+            .remove(session_id)
+            .map_or(0, |processes| processes.len());
+        let cleared_processes = self
+            .wake_targets
+            .lock()
+            .await
+            .iter()
+            .filter(|(_, target)| target.as_str() == session_id)
+            .map(|(process_id, _)| process_id.clone())
+            .collect::<Vec<_>>();
+        self.wake_targets
+            .lock()
+            .await
+            .retain(|_, target| target != session_id);
         let mut discarded_wake_delivery_count = 0;
         for delivery in self.wake_deliveries.lock().await.values_mut() {
             if delivery.state == super::WakeDeliveryState::Pending
@@ -595,16 +620,11 @@ impl ProcessRegistry for TestLocalProcessRegistry {
                 discarded_wake_delivery_count += 1;
             }
         }
-        orphaned_process_ids.sort();
-        orphaned_process_ids.dedup();
-        preserved_process_ids.sort();
-        preserved_process_ids.dedup();
         Ok(ProcessSessionDeleteReport {
             session_id: session_id.to_string(),
-            revoked_handle_count: removed.len(),
+            removed_observer_count,
             discarded_wake_delivery_count,
-            orphaned_process_ids,
-            preserved_process_ids,
+            cleared_subscription_count: cleared_processes.len(),
         })
     }
 
@@ -616,9 +636,7 @@ impl ProcessRegistry for TestLocalProcessRegistry {
         let _transaction = self.transaction.lock().await;
         let mut managed = self.managed.lock().await;
         let Some(record) = managed.get_mut(process_id) else {
-            return Err(PluginError::Session(format!(
-                "unknown process `{process_id}`"
-            )));
+            return Err(self.process_miss(process_id).await);
         };
         self.append_managed_event(record, request).await
     }
@@ -632,9 +650,7 @@ impl ProcessRegistry for TestLocalProcessRegistry {
         let _transaction = self.transaction.lock().await;
         let mut managed = self.managed.lock().await;
         let Some(record) = managed.get_mut(process_id) else {
-            return Err(PluginError::Session(format!(
-                "unknown process `{process_id}`"
-            )));
+            return Err(self.process_miss(process_id).await);
         };
         let leases = self.leases.lock().await;
         validate_in_memory_execution_authority(
@@ -659,9 +675,7 @@ impl ProcessRegistry for TestLocalProcessRegistry {
         let _transaction = self.transaction.lock().await;
         let managed = self.managed.lock().await;
         let Some(record) = managed.get(process_id) else {
-            return Err(PluginError::Session(format!(
-                "unknown process `{process_id}`"
-            )));
+            return Err(self.process_miss(process_id).await);
         };
         Ok(record
             .events
@@ -684,9 +698,7 @@ impl ProcessRegistry for TestLocalProcessRegistry {
         // The row we validate is the row we append to.
         let mut managed = self.managed.lock().await;
         let Some(record) = managed.get_mut(process_id) else {
-            return Err(PluginError::Session(format!(
-                "unknown process `{process_id}`"
-            )));
+            return Err(self.process_miss(process_id).await);
         };
         if record.record.is_terminal() {
             return Ok(ProcessCompletionOutcome::from_stored(
@@ -702,12 +714,14 @@ impl ProcessRegistry for TestLocalProcessRegistry {
             .and_then(|replay| record.keyed_events.get(replay.key.as_str()))
             .map(|(hash, event)| (hash.clone(), event.clone()));
         let sequence = record.events.len() as u64 + 1;
+        let wake_session_id = self.wake_targets.lock().await.get(process_id).cloned();
         let prepared = prepare_process_event_append(
             &record.record,
             request,
             sequence,
             replay_lookup,
             self.clock.timestamp_ms(),
+            wake_session_id.as_deref(),
         )?;
         let outcome = match prepared {
             super::ProcessEventAppendPlan::Replay {
@@ -754,10 +768,7 @@ impl ProcessRegistry for TestLocalProcessRegistry {
         let _transaction = self.transaction.lock().await;
         let mut managed = self.managed.lock().await;
         let Some(record) = managed.get_mut(&lease.process_id) else {
-            return Err(PluginError::Session(format!(
-                "unknown process `{}`",
-                lease.process_id
-            )));
+            return Err(self.process_miss(&lease.process_id).await);
         };
         if record.record.is_terminal() {
             return Ok(ProcessCompletionOutcome::from_stored(
@@ -773,8 +784,20 @@ impl ProcessRegistry for TestLocalProcessRegistry {
             .and_then(|replay| record.keyed_events.get(replay.key.as_str()))
             .map(|(hash, event)| (hash.clone(), event.clone()));
         let sequence = record.events.len() as u64 + 1;
-        let prepared =
-            prepare_process_event_append(&record.record, request, sequence, replay_lookup, now)?;
+        let wake_session_id = self
+            .wake_targets
+            .lock()
+            .await
+            .get(&lease.process_id)
+            .cloned();
+        let prepared = prepare_process_event_append(
+            &record.record,
+            request,
+            sequence,
+            replay_lookup,
+            now,
+            wake_session_id.as_deref(),
+        )?;
         if let super::ProcessEventAppendPlan::Replay { wake_delivery, .. } = &prepared {
             self.insert_wake_delivery(wake_delivery.as_ref()).await?;
             return Ok(ProcessCompletionOutcome::AlreadyApplied {
@@ -828,9 +851,7 @@ impl ProcessRegistry for TestLocalProcessRegistry {
     ) -> Result<ProcessStartOutcome, PluginError> {
         let mut managed = self.managed.lock().await;
         let Some(record) = managed.get_mut(process_id) else {
-            return Err(PluginError::Session(format!(
-                "unknown process `{process_id}`"
-            )));
+            return Err(self.process_miss(process_id).await);
         };
         let leases = self.leases.lock().await;
         validate_in_memory_execution_authority(
@@ -882,9 +903,7 @@ impl ProcessRegistry for TestLocalProcessRegistry {
     ) -> Result<ProcessRecord, PluginError> {
         let mut managed = self.managed.lock().await;
         let Some(record) = managed.get_mut(process_id) else {
-            return Err(PluginError::Session(format!(
-                "unknown process `{process_id}`"
-            )));
+            return Err(self.process_miss(process_id).await);
         };
         if record.record.is_terminal() {
             return Err(PluginError::Session(format!(
@@ -907,9 +926,7 @@ impl ProcessRegistry for TestLocalProcessRegistry {
     ) -> Result<ProcessRecord, PluginError> {
         let mut managed = self.managed.lock().await;
         let Some(record) = managed.get_mut(process_id) else {
-            return Err(PluginError::Session(format!(
-                "unknown process `{process_id}`"
-            )));
+            return Err(self.process_miss(process_id).await);
         };
         let leases = self.leases.lock().await;
         validate_in_memory_execution_authority(
@@ -941,9 +958,7 @@ impl ProcessRegistry for TestLocalProcessRegistry {
     ) -> Result<ProcessRecord, PluginError> {
         let mut managed = self.managed.lock().await;
         let Some(record) = managed.get_mut(process_id) else {
-            return Err(PluginError::Session(format!(
-                "unknown process `{process_id}`"
-            )));
+            return Err(self.process_miss(process_id).await);
         };
         let leases = self.leases.lock().await;
         validate_in_memory_execution_authority(
@@ -963,19 +978,17 @@ impl ProcessRegistry for TestLocalProcessRegistry {
         Ok(record.record.clone())
     }
 
-    async fn get_process(&self, process_id: &str) -> Option<ProcessRecord> {
-        self.try_get_process(process_id).await.ok().flatten()
-    }
-
-    async fn try_get_process(
-        &self,
-        process_id: &str,
-    ) -> Result<Option<ProcessRecord>, PluginError> {
+    async fn get_process(&self, process_id: &str) -> Result<Option<ProcessRecord>, PluginError> {
         if let Some(error) = self.process_read_error.lock().await.clone() {
             return Err(error);
         }
-        let managed = self.managed.lock().await;
-        Ok(managed.get(process_id).map(|record| record.record.clone()))
+        if let Some(record) = self.managed.lock().await.get(process_id) {
+            return Ok(Some(record.record.clone()));
+        }
+        if self.tombstones.lock().await.contains_key(process_id) {
+            return Err(self.process_miss(process_id).await);
+        }
+        Ok(None)
     }
 
     async fn list_processes(
@@ -996,7 +1009,7 @@ impl ProcessRegistry for TestLocalProcessRegistry {
         &self,
         cursor: ProcessChangeCursor,
         limit: usize,
-    ) -> Result<(Vec<ProcessRecord>, ProcessChangeCursor), PluginError> {
+    ) -> Result<(Vec<ProcessChange>, ProcessChangeCursor), PluginError> {
         if limit == 0 {
             return Ok((Vec::new(), cursor));
         }
@@ -1004,20 +1017,52 @@ impl ProcessRegistry for TestLocalProcessRegistry {
         let mut rows = managed
             .values()
             .filter(|record| record.change_seq > cursor.store_sequence())
-            .map(|record| (record.change_seq, record.record.clone()))
+            .map(|record| {
+                (
+                    record.change_seq,
+                    record.record.id.clone(),
+                    ProcessChange::Upsert {
+                        record: Box::new(record.record.clone()),
+                    },
+                )
+            })
             .collect::<Vec<_>>();
-        rows.sort_by(|(left_seq, left), (right_seq, right)| {
-            left_seq.cmp(right_seq).then_with(|| left.id.cmp(&right.id))
+        drop(managed);
+        rows.extend(
+            self.tombstones
+                .lock()
+                .await
+                .values()
+                .filter(|tombstone| tombstone.pruned_change_seq > cursor.store_sequence())
+                .map(|tombstone| {
+                    (
+                        tombstone.pruned_change_seq,
+                        tombstone.process_id.clone(),
+                        ProcessChange::Deleted {
+                            tombstone: tombstone.clone(),
+                        },
+                    )
+                }),
+        );
+        rows.sort_by(|(left_seq, left_id, _), (right_seq, right_id, _)| {
+            left_seq.cmp(right_seq).then_with(|| left_id.cmp(right_id))
         });
         rows.truncate(limit);
         let next_cursor = rows
             .last()
-            .map(|(change_seq, _)| ProcessChangeCursor::from_store_sequence(*change_seq))
+            .map(|(change_seq, _, _)| ProcessChangeCursor::from_store_sequence(*change_seq))
             .unwrap_or(cursor);
         Ok((
-            rows.into_iter().map(|(_, record)| record).collect(),
+            rows.into_iter().map(|(_, _, change)| change).collect(),
             next_cursor,
         ))
+    }
+
+    async fn compact_process_tombstones(&self, cutoff_epoch_ms: u64) -> Result<usize, PluginError> {
+        let mut tombstones = self.tombstones.lock().await;
+        let before = tombstones.len();
+        tombstones.retain(|_, tombstone| tombstone.pruned_at_ms >= cutoff_epoch_ms);
+        Ok(before - tombstones.len())
     }
 
     async fn pending_wake_deliveries(
@@ -1094,6 +1139,7 @@ impl ProcessRegistry for TestLocalProcessRegistry {
                     match delivery.discard_reason {
                         Some(super::WakeDiscardReason::Expired) => report.expired += 1,
                         Some(super::WakeDiscardReason::TargetGone) => report.target_gone += 1,
+                        Some(super::WakeDiscardReason::Retargeted) => report.retargeted += 1,
                         None => {}
                     }
                 }
@@ -1338,9 +1384,12 @@ impl ProcessRegistry for TestLocalProcessRegistry {
         &self,
         cutoff_epoch_ms: u64,
         filter: Option<ProcessListFilter>,
-        up_to_change_seq: Option<ProcessChangeCursor>,
+        watermark: ProjectionWatermark,
     ) -> Result<ProcessPruneReport, PluginError> {
-        let max_change_seq = up_to_change_seq.map(ProcessChangeCursor::store_sequence);
+        let max_change_seq = match watermark {
+            ProjectionWatermark::UpTo(cursor) => Some(cursor.store_sequence()),
+            ProjectionWatermark::NoProjector => None,
+        };
         let processes_with_pending_deliveries = self
             .wake_deliveries
             .lock()
@@ -1366,20 +1415,35 @@ impl ProcessRegistry for TestLocalProcessRegistry {
                 .filter(|(id, _)| !processes_with_pending_deliveries.contains(*id))
                 .map(|(id, _)| id.clone())
                 .collect();
+            let pruned_at_ms = self.clock.timestamp_ms();
             for id in &prunable {
                 if let Some(record) = managed.remove(id) {
                     pruned_events += record.events.len();
+                    let pruned_change_seq = self.next_change_seq().await;
+                    self.tombstones.lock().await.insert(
+                        id.clone(),
+                        ProcessTombstone {
+                            process_id: id.clone(),
+                            terminal_label: record.record.status.label().to_string(),
+                            pruned_at_ms,
+                            pruned_change_seq,
+                        },
+                    );
                 }
             }
             prunable.into_iter().collect()
         };
         {
-            let mut grants = self.grants.lock().await;
-            for session_grants in grants.values_mut() {
-                session_grants.retain(|process_id, _| !prunable.contains(process_id));
+            let mut observers = self.observers.lock().await;
+            for process_ids in observers.values_mut() {
+                process_ids.retain(|process_id| !prunable.contains(process_id));
             }
-            grants.retain(|_, session_grants| !session_grants.is_empty());
+            observers.retain(|_, process_ids| !process_ids.is_empty());
         }
+        self.wake_targets
+            .lock()
+            .await
+            .retain(|process_id, _| !prunable.contains(process_id));
         self.leases
             .lock()
             .await
@@ -1472,99 +1536,4 @@ fn process_external_ref_conflict(
 }
 
 #[cfg(test)]
-mod atomic_execution_write_tests {
-    use super::*;
-
-    #[tokio::test]
-    async fn claim_cannot_interleave_between_authority_validation_and_append() {
-        const PROCESS_ID: &str = "atomic-authority-append";
-        let registry = Arc::new(TestLocalProcessRegistry::default());
-        registry
-            .register_process(
-                ProcessRegistration::new(
-                    PROCESS_ID,
-                    crate::ProcessInput::Engine {
-                        kind: "test".to_string(),
-                        payload: serde_json::Value::Null,
-                    },
-                    crate::RecoveryDisposition::Rerunnable,
-                    crate::ProcessProvenance::host(),
-                )
-                .with_execution_env_ref(Some(crate::ProcessExecutionEnvRef::new("test-env"))),
-            )
-            .await
-            .expect("register");
-        let owner = crate::LeaseOwnerIdentity::opaque("worker-a", "incarnation-a");
-        let lease = registry
-            .claim_process_lease(PROCESS_ID, &owner, 60_000)
-            .await
-            .expect("claim")
-            .acquired()
-            .expect("lease");
-        registry
-            .record_first_started_with_authority(
-                PROCESS_ID,
-                ProcessStarted {
-                    owner: owner.clone(),
-                    fencing_token: lease.fencing_token,
-                    attempt: 1,
-                    started_at_ms: 1,
-                },
-                &ProcessExecutionWriteAuthority::lease(lease.clone()),
-            )
-            .await
-            .expect("start");
-
-        let pause = registry.pause_next_execution_write_after_validation();
-        let writer_registry = Arc::clone(&registry);
-        let writer_lease = lease.clone();
-        let writer = crate::task::spawn(async move {
-            writer_registry
-                .append_event_with_authority(
-                    PROCESS_ID,
-                    ProcessEventAppendRequest::cancel_requested(PROCESS_ID, Some("race".into())),
-                    &ProcessExecutionWriteAuthority::lease(writer_lease),
-                )
-                .await
-        });
-        pause.wait_until_validated().await;
-
-        let claimant_registry = Arc::clone(&registry);
-        let claimant_lease = lease.clone();
-        let claimant = crate::task::spawn(async move {
-            claimant_registry
-                .complete_process_lease(&ProcessLeaseCompletion::from_lease(&claimant_lease))
-                .await?;
-            claimant_registry
-                .claim_process_lease(
-                    PROCESS_ID,
-                    &crate::LeaseOwnerIdentity::opaque("worker-b", "incarnation-b"),
-                    60_000,
-                )
-                .await
-        });
-        assert!(
-            tokio::time::timeout(std::time::Duration::from_millis(25), async {
-                while !claimant.is_finished() {
-                    tokio::task::yield_now().await;
-                }
-            })
-            .await
-            .is_err(),
-            "claim must remain blocked while the validated append holds the lease lock"
-        );
-
-        pause.resume();
-        writer
-            .await
-            .expect("writer joins")
-            .expect("validated writer appends");
-        let claimed = claimant
-            .await
-            .expect("claimant joins")
-            .expect("claim after append")
-            .acquired()
-            .expect("new lease");
-        assert!(claimed.fencing_token > lease.fencing_token);
-    }
-}
+mod atomic_execution_write_tests;

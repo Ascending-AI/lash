@@ -461,7 +461,7 @@ impl DurableProcessWorker {
         let current = self
             .config
             .process_registry
-            .try_get_process(&registration.id)
+            .get_process(&registration.id)
             .await?
             .ok_or_else(|| {
                 PluginError::Session(format!("unknown process `{}`", registration.id))
@@ -523,7 +523,11 @@ impl DurableProcessWorker {
         } else {
             None
         };
-        let probe_scope = registration.wake_target.as_ref().or(originator_scope);
+        let wake_scope = registration
+            .wake_session_id
+            .as_ref()
+            .map(crate::SessionScope::new);
+        let probe_scope = wake_scope.as_ref().or(originator_scope);
         if let Some(probe) =
             probe_scope.and_then(|scope| self.config.turn_phase_probe_slot.get_for_scope(scope))
         {
@@ -818,6 +822,8 @@ impl DurableProcessWorker {
             .process_registry
             .get_process(process_id)
             .await
+            .ok()
+            .flatten()
             .is_some_and(|current| current.is_terminal())
         {
             self.release_or_log(&lease).await;
@@ -897,7 +903,7 @@ impl DurableProcessWorker {
         let Some(record) = self
             .config
             .process_registry
-            .try_get_process(&process_id)
+            .get_process(&process_id)
             .await
             .ok()
             .flatten()
@@ -1025,6 +1031,8 @@ impl DurableProcessWorker {
             .process_registry
             .get_process(process_id)
             .await
+            .ok()
+            .flatten()
             .is_some_and(|current| current.is_terminal())
         {
             self.release_or_log(&lease).await;

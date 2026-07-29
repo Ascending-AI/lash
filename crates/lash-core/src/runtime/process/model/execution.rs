@@ -287,7 +287,7 @@ pub enum ProcessCompletionOutcome {
 
 impl ProcessCompletionOutcome {
     pub fn from_stored(record: ProcessRecord, proposed: &super::ProcessAwaitOutput) -> Self {
-        if record.status.await_output() == Some(proposed) {
+        if record.outcome.as_ref() == Some(proposed) {
             Self::AlreadyApplied { stored: record }
         } else {
             Self::Superseded { stored: record }

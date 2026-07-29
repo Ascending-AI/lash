@@ -1729,6 +1729,7 @@ impl RuntimeEffectController for RestateEffectHostController {
 pub struct RestateProcessIngressRunner {
     ingress: RestateIngressClient,
     registry: Arc<dyn ProcessRegistry>,
+    continuations: Arc<dyn lash_core::ProcessContinuationStore>,
 }
 
 impl RestateProcessIngressRunner {
@@ -1737,10 +1738,12 @@ impl RestateProcessIngressRunner {
     pub fn new(
         connection: impl Into<RestateConnection>,
         registry: Arc<dyn ProcessRegistry>,
+        continuations: Arc<dyn lash_core::ProcessContinuationStore>,
     ) -> Self {
         Self {
             ingress: RestateIngressClient::new(connection),
             registry,
+            continuations,
         }
     }
 
@@ -1759,12 +1762,15 @@ impl RestateProcessIngressRunner {
         if self
             .registry
             .get_process(&process_id)
-            .await
+            .await?
             .is_some_and(|current| current.is_terminal())
         {
             return Ok(());
         }
-        let latest_handover = self.registry.latest_segment_handover(&process_id).await?;
+        let latest_handover = self
+            .continuations
+            .latest_segment_handover(&process_id)
+            .await?;
         let segment_ordinal = latest_handover
             .as_ref()
             .map_or(0, |handover| handover.segment_ordinal);
@@ -1778,7 +1784,7 @@ impl RestateProcessIngressRunner {
             event_types: record.event_types,
             provenance: record.provenance.clone(),
             env_ref: record.env_ref,
-            wake_target: record.wake_target,
+            wake_session_id: None,
         };
         let execution_context = ProcessExecutionContext::default();
         let invocation_id = self
@@ -1836,7 +1842,7 @@ impl RestateProcessIngressRunner {
         if self
             .registry
             .get_process(process_id)
-            .await
+            .await?
             .is_some_and(|current| current.is_terminal())
         {
             return Ok(());
@@ -1884,11 +1890,8 @@ impl ProcessRunHandle for RestateProcessIngressRunner {
 #[async_trait::async_trait]
 impl ProcessAttach for RestateProcessIngressRunner {
     async fn await_terminal(&self, process_id: &str) -> Result<ProcessAwaitOutput, PluginError> {
-        let record = self.registry.try_get_process(process_id).await?;
-        if let Some(output) = record
-            .as_ref()
-            .and_then(|record| record.status.await_output())
-        {
+        let record = self.registry.get_process(process_id).await?;
+        if let Some(output) = record.as_ref().and_then(|record| record.outcome.as_ref()) {
             return Ok(output.clone());
         }
         self.ingress
@@ -1918,14 +1921,16 @@ impl ProcessAttach for RestateProcessIngressRunner {
 pub struct RestateProcessDeployment {
     driver: ProcessWorkDriver,
     ingress: RestateIngressClient,
+    continuations: Arc<dyn lash_core::ProcessContinuationStore>,
 }
 
 impl RestateProcessDeployment {
     pub fn new(
         connection: impl Into<RestateConnection>,
         registry: Arc<dyn ProcessRegistry>,
+        continuations: Arc<dyn lash_core::ProcessContinuationStore>,
     ) -> Self {
-        Self::new_with_sink(connection, registry, None)
+        Self::new_with_sink(connection, registry, continuations, None)
     }
 
     /// Like [`new`](Self::new), but installs a host-facing
@@ -1937,6 +1942,7 @@ impl RestateProcessDeployment {
     pub fn new_with_sink(
         connection: impl Into<RestateConnection>,
         registry: Arc<dyn ProcessRegistry>,
+        continuations: Arc<dyn lash_core::ProcessContinuationStore>,
         sink: Option<Arc<dyn ProcessEventSink>>,
     ) -> Self {
         let connection = connection.into();
@@ -1944,6 +1950,7 @@ impl RestateProcessDeployment {
         let ingress_runner = Arc::new(RestateProcessIngressRunner::new(
             connection.clone(),
             Arc::clone(&registry),
+            Arc::clone(&continuations),
         ));
         let run_handle: Arc<dyn ProcessRunHandle> = ingress_runner.clone();
         let attach: Arc<dyn ProcessAttach> = ingress_runner;
@@ -1951,6 +1958,7 @@ impl RestateProcessDeployment {
         Self {
             driver,
             ingress: RestateIngressClient::new(connection),
+            continuations,
         }
     }
 
@@ -1965,6 +1973,7 @@ impl RestateProcessDeployment {
         LashProcessWorkflowImpl::new(
             Arc::new(RestateCoreProcessRunner::new(worker)),
             self.driver.process_registry(),
+            Arc::clone(&self.continuations),
             self.ingress.clone(),
         )
     }
@@ -2094,6 +2103,7 @@ pub enum RestateProcessCancelSignal {
 pub struct LashProcessWorkflowImpl<R> {
     runner: Arc<R>,
     registry: Arc<dyn ProcessRegistry>,
+    continuations: Arc<dyn lash_core::ProcessContinuationStore>,
     segment_duration_cap: Option<Duration>,
     segment_effect_budget: Arc<dyn Fn(&ProcessRegistration) -> u64 + Send + Sync>,
     cancel_ingress: Option<RestateIngressClient>,
@@ -2107,24 +2117,31 @@ impl<R> LashProcessWorkflowImpl<R> {
     pub fn new(
         runner: Arc<R>,
         registry: Arc<dyn ProcessRegistry>,
+        continuations: Arc<dyn lash_core::ProcessContinuationStore>,
         cancel_ingress: RestateIngressClient,
     ) -> Self {
-        Self::new_inner(runner, registry, Some(cancel_ingress))
+        Self::new_inner(runner, registry, continuations, Some(cancel_ingress))
     }
 
     #[cfg(test)]
-    fn new_for_test(runner: Arc<R>, registry: Arc<dyn ProcessRegistry>) -> Self {
-        Self::new_inner(runner, registry, None)
+    fn new_for_test(
+        runner: Arc<R>,
+        registry: Arc<dyn ProcessRegistry>,
+        continuations: Arc<dyn lash_core::ProcessContinuationStore>,
+    ) -> Self {
+        Self::new_inner(runner, registry, continuations, None)
     }
 
     fn new_inner(
         runner: Arc<R>,
         registry: Arc<dyn ProcessRegistry>,
+        continuations: Arc<dyn lash_core::ProcessContinuationStore>,
         cancel_ingress: Option<RestateIngressClient>,
     ) -> Self {
         Self {
             runner,
             registry,
+            continuations,
             segment_duration_cap: None,
             segment_effect_budget: Arc::new(|_| 10_000),
             cancel_ingress,
@@ -2207,7 +2224,7 @@ where
             lash_core::ProcessCompletionOutcome::AlreadyApplied { stored }
             | lash_core::ProcessCompletionOutcome::Superseded { stored } => stored,
         };
-        record.status.await_output().cloned().ok_or_else(|| {
+        record.outcome.ok_or_else(|| {
             PluginError::Session(format!(
                 "process `{process_id}` completion returned a non-terminal record"
             ))
@@ -2290,7 +2307,7 @@ where
             Err(PluginError::ProcessAttemptsExhausted { .. }) => {
                 let owner = self
                     .registry
-                    .try_get_process(&process_id)
+                    .get_process(&process_id)
                     .await
                     .map_err(retryable_registry_error)?
                     .and_then(|record| record.first_started.map(|started| started.owner.clone()));
@@ -2396,7 +2413,7 @@ where
         let process_id = input.registration.id.clone();
         let record = self
             .registry
-            .try_get_process(&process_id)
+            .get_process(&process_id)
             .await
             .map_err(HandlerError::from)?
             .ok_or_else(|| {
@@ -2404,8 +2421,8 @@ where
                     "unknown process `{process_id}`"
                 )))
             })?;
-        if let Some(output) = record.status.await_output().cloned() {
-            self.registry
+        if let Some(output) = record.outcome.clone() {
+            self.continuations
                 .delete_segment_handovers(&process_id)
                 .await
                 .map_err(HandlerError::from)?;
@@ -2438,13 +2455,13 @@ where
             None
         } else {
             let persisted = self
-                .registry
+                .continuations
                 .get_segment_handover(&process_id, input.segment_ordinal)
                 .await
                 .map_err(HandlerError::from)?;
             let Some(persisted) = persisted else {
                 let latest = self
-                    .registry
+                    .continuations
                     .latest_segment_handover(&process_id)
                     .await
                     .map_err(HandlerError::from)?;
@@ -2480,7 +2497,7 @@ where
                         .complete_with_stored_outcome(&process_id, output)
                         .await
                         .map_err(|err| HandlerError::from(TerminalError::from_error(err)))?;
-                    self.registry
+                    self.continuations
                         .delete_segment_handovers(&process_id)
                         .await
                         .map_err(HandlerError::from)?;
@@ -2551,7 +2568,7 @@ where
             if let lash_core::ProcessRunOutcome::SegmentBoundary(boundary) = &outcome {
                 let current = self
                     .registry
-                    .try_get_process(&process_id)
+                    .get_process(&process_id)
                     .await
                     .map_err(retryable_registry_error)?;
                 if boundary_must_be_declined(current.as_ref()) {
@@ -2568,7 +2585,7 @@ where
         match outcome {
             lash_core::ProcessRunOutcome::Terminal(output) => {
                 let output = *output;
-                self.registry
+                self.continuations
                     .delete_segment_handovers(&process_id)
                     .await
                     .map_err(HandlerError::from)?;
@@ -2599,7 +2616,7 @@ where
             }
             lash_core::ProcessRunOutcome::SegmentBoundary(handover) => {
                 let next_segment_ordinal = input.segment_ordinal.saturating_add(1);
-                self.registry
+                self.continuations
                     .put_segment_handover(
                         &process_id,
                         lash_core::PersistedSegmentHandover {
@@ -2628,7 +2645,7 @@ where
                         .complete_with_stored_outcome(&process_id, output)
                         .await
                         .map_err(HandlerError::from)?;
-                    self.registry
+                    self.continuations
                         .delete_segment_handovers(&process_id)
                         .await
                         .map_err(HandlerError::from)?;
@@ -2706,7 +2723,7 @@ where
         resolve_process_cancel_signal(&ctx, RestateProcessCancelSignal::CancelRequested)?;
 
         if let Some(handover) = self
-            .registry
+            .continuations
             .latest_segment_handover(&request.process_id)
             .await
             .map_err(retryable_registry_error)?
@@ -4709,13 +4726,13 @@ where
     match command {
         ProcessCommand::Start {
             registration,
-            grant,
+            observers,
             execution_context,
         } => {
             let record = schedule_restate_process(
                 registry,
                 registration,
-                grant,
+                observers,
                 *execution_context,
                 context,
             )
@@ -4730,10 +4747,12 @@ where
         } => {
             let entries = match mode {
                 lash_core::ProcessListMode::Live => {
-                    registry.list_live_handle_grants(&session_scope).await?
+                    registry
+                        .list_live_observed_by(&session_scope.session_id)
+                        .await?
                 }
                 lash_core::ProcessListMode::All => {
-                    registry.list_handle_grants(&session_scope).await?
+                    registry.list_observed_by(&session_scope.session_id).await?
                 }
             };
             Ok(ProcessEffectOutcome::List { entries })
@@ -4744,7 +4763,12 @@ where
             process_ids,
         } => {
             registry
-                .transfer_handle_grants(&from_scope, &to_scope, &process_ids)
+                .transfer_observers(
+                    &from_scope.session_id,
+                    &to_scope.session_id,
+                    &process_ids,
+                    lash_core::ProcessObserverBy::host("restate-transfer"),
+                )
                 .await?;
             Ok(ProcessEffectOutcome::Transfer)
         }
@@ -4757,7 +4781,7 @@ where
             // within the host's `prune_terminal_processes` retention window.
             // The retention qualification is tracked there; do not turn this
             // registry state into a new journal-shape branch in FIG-790.
-            if registry.get_process(&process_id).await.is_none() {
+            if registry.get_process(&process_id).await?.is_none() {
                 return Err(PluginError::Session(format!("unknown process `{process_id}`")).into());
             }
             let turn_cancel = restate_process_turn_cancel_wait_request(
@@ -4813,7 +4837,7 @@ where
         ProcessCommand::Cancel { process_id, reason } => {
             let record = registry
                 .get_process(&process_id)
-                .await
+                .await?
                 .ok_or_else(|| PluginError::Session(format!("unknown process `{process_id}`")))?;
             registry
                 .append_event(
@@ -4885,7 +4909,7 @@ async fn signal_ordinal_for_event(
 async fn schedule_restate_process<'ctx, C>(
     registry: Arc<dyn ProcessRegistry>,
     registration: lash_core::ProcessRegistration,
-    grant: Option<lash_core::ProcessStartGrant>,
+    observers: Vec<String>,
     execution_context: lash_core::ProcessExecutionContext,
     context: &C,
 ) -> Result<ProcessRecord, PluginError>
@@ -4893,12 +4917,9 @@ where
     C: RestateControllerContext<'ctx> + ?Sized,
 {
     let process_id = registration.id.clone();
-    registry.register_process(registration.clone()).await?;
-    if let Some(grant) = grant {
-        registry
-            .grant_handle(&grant.session_scope, &process_id, grant.descriptor)
-            .await?;
-    }
+    registry
+        .register_process_with_observers(registration.clone(), &observers)
+        .await?;
     let invocation_id = context
         .start_process_workflow(registration, execution_context)
         .await

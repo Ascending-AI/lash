@@ -2643,7 +2643,10 @@ async fn wait_for_queued_work(
     ingress_url: &str,
 ) -> Result<()> {
     let registry = process_registry_from_storage(storage);
-    let deployment = RestateProcessDeployment::new(ingress_url.to_string(), registry);
+    let continuations =
+        lash_restate_postgres_workers_e2e::process_continuations_from_storage(storage);
+    let deployment =
+        RestateProcessDeployment::new(ingress_url.to_string(), registry, continuations);
     let process_work_driver = deployment.process_work_driver();
     let core = build_e2e_core(lash_restate_postgres_workers_e2e::E2eCoreConfig {
         worker_id: "runner-queue-watch".to_string(),
@@ -2683,10 +2686,6 @@ async fn wait_for_process_signal_wait(
                 .await
                 .with_context(|| format!("load process `{process_id}` wait state"))?;
         if let Some((status, record_json)) = row {
-            anyhow::ensure!(
-                status == "running",
-                "process `{process_id}` reached status `{status}` before signal `{signal_name}` wait"
-            );
             let record: Value = serde_json::from_str(&record_json)
                 .with_context(|| format!("decode process `{process_id}` record"))?;
             let wait = record.get("wait").cloned().unwrap_or(Value::Null);
@@ -2697,6 +2696,10 @@ async fn wait_for_process_signal_wait(
             {
                 return Ok(());
             }
+            anyhow::ensure!(
+                matches!(status.as_str(), "running" | "waiting"),
+                "process `{process_id}` reached status `{status}` before signal `{signal_name}` wait"
+            );
         }
         tokio::time::sleep(Duration::from_millis(500)).await;
     }
@@ -2710,7 +2713,10 @@ async fn emit_button_event(
     ingress_url: &str,
 ) -> Result<String> {
     let registry = process_registry_from_storage(storage);
-    let deployment = RestateProcessDeployment::new(ingress_url.to_string(), registry);
+    let continuations =
+        lash_restate_postgres_workers_e2e::process_continuations_from_storage(storage);
+    let deployment =
+        RestateProcessDeployment::new(ingress_url.to_string(), registry, continuations);
     let process_work_driver = deployment.process_work_driver();
     let core = build_e2e_core(lash_restate_postgres_workers_e2e::E2eCoreConfig {
         worker_id: "runner".to_string(),
@@ -3279,7 +3285,10 @@ async fn assert_reopened_session_agrees(
     responses: &[TurnResponse],
 ) -> Result<()> {
     let registry = process_registry_from_storage(storage);
-    let deployment = RestateProcessDeployment::new(ingress_url.to_string(), registry);
+    let continuations =
+        lash_restate_postgres_workers_e2e::process_continuations_from_storage(storage);
+    let deployment =
+        RestateProcessDeployment::new(ingress_url.to_string(), registry, continuations);
     let process_work_driver = deployment.process_work_driver();
     let core = build_e2e_core(lash_restate_postgres_workers_e2e::E2eCoreConfig {
         worker_id: "runner-reopen".to_string(),

@@ -114,70 +114,6 @@ impl From<RemoteProcessIdentity> for lash_core::ProcessIdentity {
     }
 }
 
-impl From<lash_core::ProcessHandleDescriptor> for RemoteProcessHandleDescriptor {
-    fn from(value: lash_core::ProcessHandleDescriptor) -> Self {
-        let lash_core::ProcessHandleDescriptor { kind, label } = value;
-        Self { kind, label }
-    }
-}
-
-impl From<RemoteProcessHandleDescriptor> for lash_core::ProcessHandleDescriptor {
-    fn from(value: RemoteProcessHandleDescriptor) -> Self {
-        let RemoteProcessHandleDescriptor { kind, label } = value;
-        Self { kind, label }
-    }
-}
-
-impl From<lash_core::ProcessStartGrant> for RemoteProcessStartGrant {
-    fn from(value: lash_core::ProcessStartGrant) -> Self {
-        let lash_core::ProcessStartGrant {
-            session_scope,
-            descriptor,
-        } = value;
-        Self {
-            session_scope: session_scope.into(),
-            descriptor: descriptor.into(),
-        }
-    }
-}
-
-impl From<RemoteProcessStartGrant> for lash_core::ProcessStartGrant {
-    fn from(value: RemoteProcessStartGrant) -> Self {
-        let RemoteProcessStartGrant {
-            session_scope,
-            descriptor,
-        } = value;
-        Self {
-            session_scope: session_scope.into(),
-            descriptor: descriptor.into(),
-        }
-    }
-}
-
-impl From<lash_core::ProcessLifecycleStatus> for RemoteProcessLifecycleStatus {
-    fn from(value: lash_core::ProcessLifecycleStatus) -> Self {
-        match value {
-            lash_core::ProcessLifecycleStatus::Running => Self::Running,
-            lash_core::ProcessLifecycleStatus::Completed => Self::Completed,
-            lash_core::ProcessLifecycleStatus::Failed => Self::Failed,
-            lash_core::ProcessLifecycleStatus::Cancelled => Self::Cancelled,
-            lash_core::ProcessLifecycleStatus::Abandoned => Self::Abandoned,
-        }
-    }
-}
-
-impl From<RemoteProcessLifecycleStatus> for lash_core::ProcessLifecycleStatus {
-    fn from(value: RemoteProcessLifecycleStatus) -> Self {
-        match value {
-            RemoteProcessLifecycleStatus::Running => Self::Running,
-            RemoteProcessLifecycleStatus::Completed => Self::Completed,
-            RemoteProcessLifecycleStatus::Failed => Self::Failed,
-            RemoteProcessLifecycleStatus::Cancelled => Self::Cancelled,
-            RemoteProcessLifecycleStatus::Abandoned => Self::Abandoned,
-        }
-    }
-}
-
 impl From<lash_core::ToolFailureClass> for RemoteToolFailureClass {
     fn from(value: lash_core::ToolFailureClass) -> Self {
         match value {
@@ -249,6 +185,13 @@ impl From<lash_core::ProcessAwaitOutput> for RemoteProcessAwaitOutput {
                     serde_json::to_value(control).expect("tool control serializes")
                 }),
             },
+            lash_core::ProcessAwaitOutput::NoLongerRetained {
+                terminal_label,
+                pruned_at_ms,
+            } => Self::NoLongerRetained {
+                terminal_label,
+                pruned_at_ms,
+            },
         }
     }
 }
@@ -289,6 +232,13 @@ impl TryFrom<RemoteProcessAwaitOutput> for lash_core::ProcessAwaitOutput {
                 evidence: Box::new(evidence.try_into()?),
                 control: decode_remote_tool_control(control, "RemoteProcessAwaitOutput")?,
             }),
+            RemoteProcessAwaitOutput::NoLongerRetained {
+                terminal_label,
+                pruned_at_ms,
+            } => Ok(Self::NoLongerRetained {
+                terminal_label,
+                pruned_at_ms,
+            }),
         }
     }
 }
@@ -306,40 +256,24 @@ impl From<lash_core::ProcessStatus> for RemoteProcessStatus {
     fn from(value: lash_core::ProcessStatus) -> Self {
         match value {
             lash_core::ProcessStatus::Running => Self::Running,
-            lash_core::ProcessStatus::Completed { await_output } => Self::Completed {
-                await_output: await_output.into(),
-            },
-            lash_core::ProcessStatus::Failed { await_output } => Self::Failed {
-                await_output: await_output.into(),
-            },
-            lash_core::ProcessStatus::Cancelled { await_output } => Self::Cancelled {
-                await_output: await_output.into(),
-            },
-            lash_core::ProcessStatus::Abandoned { await_output } => Self::Abandoned {
-                await_output: await_output.into(),
-            },
+            lash_core::ProcessStatus::Waiting => Self::Waiting,
+            lash_core::ProcessStatus::Completed => Self::Completed,
+            lash_core::ProcessStatus::Failed => Self::Failed,
+            lash_core::ProcessStatus::Cancelled => Self::Cancelled,
+            lash_core::ProcessStatus::Abandoned => Self::Abandoned,
         }
     }
 }
 
-impl TryFrom<RemoteProcessStatus> for lash_core::ProcessStatus {
-    type Error = RemoteProtocolError;
-
-    fn try_from(value: RemoteProcessStatus) -> Result<Self, Self::Error> {
+impl From<RemoteProcessStatus> for lash_core::ProcessStatus {
+    fn from(value: RemoteProcessStatus) -> Self {
         match value {
-            RemoteProcessStatus::Running => Ok(Self::Running),
-            RemoteProcessStatus::Completed { await_output } => Ok(Self::Completed {
-                await_output: await_output.try_into()?,
-            }),
-            RemoteProcessStatus::Failed { await_output } => Ok(Self::Failed {
-                await_output: await_output.try_into()?,
-            }),
-            RemoteProcessStatus::Cancelled { await_output } => Ok(Self::Cancelled {
-                await_output: await_output.try_into()?,
-            }),
-            RemoteProcessStatus::Abandoned { await_output } => Ok(Self::Abandoned {
-                await_output: await_output.try_into()?,
-            }),
+            RemoteProcessStatus::Running => Self::Running,
+            RemoteProcessStatus::Waiting => Self::Waiting,
+            RemoteProcessStatus::Completed => Self::Completed,
+            RemoteProcessStatus::Failed => Self::Failed,
+            RemoteProcessStatus::Cancelled => Self::Cancelled,
+            RemoteProcessStatus::Abandoned => Self::Abandoned,
         }
     }
 }
@@ -550,11 +484,11 @@ impl From<RemoteProcessEventSemanticsSpec> for lash_core::runtime::ProcessEventS
 impl From<lash_core::ProcessTerminalSpec> for RemoteProcessTerminalSpec {
     fn from(value: lash_core::ProcessTerminalSpec) -> Self {
         let lash_core::ProcessTerminalSpec {
-            state,
+            status,
             await_output,
         } = value;
         Self {
-            state: state.into(),
+            status: status.into(),
             await_output: await_output.map(Into::into),
         }
     }
@@ -563,11 +497,11 @@ impl From<lash_core::ProcessTerminalSpec> for RemoteProcessTerminalSpec {
 impl From<RemoteProcessTerminalSpec> for lash_core::ProcessTerminalSpec {
     fn from(value: RemoteProcessTerminalSpec) -> Self {
         let RemoteProcessTerminalSpec {
-            state,
+            status,
             await_output,
         } = value;
         Self {
-            state: state.into(),
+            status: status.into(),
             await_output: await_output.map(Into::into),
         }
     }
@@ -612,28 +546,6 @@ impl TryFrom<RemoteProcessEventSemantics> for lash_core::runtime::ProcessEventSe
             terminal: terminal.map(TryInto::try_into).transpose()?,
             wake: wake.map(Into::into),
         })
-    }
-}
-
-impl From<lash_core::ProcessTerminalState> for RemoteProcessTerminalState {
-    fn from(value: lash_core::ProcessTerminalState) -> Self {
-        match value {
-            lash_core::ProcessTerminalState::Completed => Self::Completed,
-            lash_core::ProcessTerminalState::Failed => Self::Failed,
-            lash_core::ProcessTerminalState::Cancelled => Self::Cancelled,
-            lash_core::ProcessTerminalState::Abandoned => Self::Abandoned,
-        }
-    }
-}
-
-impl From<RemoteProcessTerminalState> for lash_core::ProcessTerminalState {
-    fn from(value: RemoteProcessTerminalState) -> Self {
-        match value {
-            RemoteProcessTerminalState::Completed => Self::Completed,
-            RemoteProcessTerminalState::Failed => Self::Failed,
-            RemoteProcessTerminalState::Cancelled => Self::Cancelled,
-            RemoteProcessTerminalState::Abandoned => Self::Abandoned,
-        }
     }
 }
 
@@ -784,12 +696,12 @@ impl From<RemoteAbandonRequest> for lash_core::AbandonRequest {
 impl From<lash_core::ProcessTerminalSemantics> for RemoteProcessTerminalSemantics {
     fn from(value: lash_core::ProcessTerminalSemantics) -> Self {
         let lash_core::ProcessTerminalSemantics {
-            state,
-            await_output,
+            status,
+            outcome,
         } = value;
         Self {
-            state: state.into(),
-            await_output: await_output.into(),
+            status: status.into(),
+            outcome: outcome.into(),
         }
     }
 }
@@ -799,12 +711,12 @@ impl TryFrom<RemoteProcessTerminalSemantics> for lash_core::ProcessTerminalSeman
 
     fn try_from(value: RemoteProcessTerminalSemantics) -> Result<Self, Self::Error> {
         let RemoteProcessTerminalSemantics {
-            state,
-            await_output,
+            status,
+            outcome,
         } = value;
         Ok(Self {
-            state: state.into(),
-            await_output: await_output.try_into()?,
+            status: status.into(),
+            outcome: outcome.try_into()?,
         })
     }
 }
@@ -1263,7 +1175,8 @@ impl From<lash_core::ProcessHandleSummary> for RemoteProcessSummary {
             handle_type,
             id,
             process_id,
-            descriptor,
+            kind,
+            label,
             definition,
             status,
         } = value;
@@ -1271,7 +1184,8 @@ impl From<lash_core::ProcessHandleSummary> for RemoteProcessSummary {
             handle_type,
             id,
             process_id,
-            descriptor: descriptor.into(),
+            kind,
+            label,
             definition: definition.map(Into::into),
             status: status.into(),
         }
@@ -1287,7 +1201,8 @@ impl TryFrom<RemoteProcessSummary> for lash_core::ProcessHandleSummary {
             handle_type,
             id,
             process_id,
-            descriptor,
+            kind,
+            label,
             definition,
             status,
         } = value;
@@ -1295,7 +1210,8 @@ impl TryFrom<RemoteProcessSummary> for lash_core::ProcessHandleSummary {
             handle_type,
             id,
             process_id,
-            descriptor: descriptor.into(),
+            kind,
+            label,
             definition: definition.map(Into::into),
             status: status.into(),
         })
@@ -1316,7 +1232,6 @@ impl TryFrom<lash_core::ProcessRecord> for RemoteProcessRecord {
             event_types,
             provenance,
             env_ref,
-            wake_target,
             created_at_ms,
             updated_at_ms,
             external_ref,
@@ -1324,6 +1239,7 @@ impl TryFrom<lash_core::ProcessRecord> for RemoteProcessRecord {
             abandon_request,
             wait,
             status,
+            outcome,
         } = value;
         Ok(Self {
             process_id: id,
@@ -1336,7 +1252,6 @@ impl TryFrom<lash_core::ProcessRecord> for RemoteProcessRecord {
             env_ref: env_ref
                 .map(|env_ref| env_ref.as_str().parse())
                 .transpose()?,
-            wake_target: wake_target.map(Into::into),
             created_at_ms,
             updated_at_ms,
             external_ref: external_ref.map(Into::into),
@@ -1344,6 +1259,7 @@ impl TryFrom<lash_core::ProcessRecord> for RemoteProcessRecord {
             abandon_request: abandon_request.map(|request| (*request).into()),
             wait: wait.map(Into::into),
             status: status.into(),
+            outcome: outcome.map(Into::into),
         })
     }
 }
@@ -1362,7 +1278,6 @@ impl TryFrom<RemoteProcessRecord> for lash_core::ProcessRecord {
             event_types,
             provenance,
             env_ref,
-            wake_target,
             created_at_ms,
             updated_at_ms,
             external_ref,
@@ -1370,6 +1285,7 @@ impl TryFrom<RemoteProcessRecord> for lash_core::ProcessRecord {
             abandon_request,
             wait,
             status,
+            outcome,
         } = value;
         let registration = lash_core::ProcessRegistration::new(
             process_id,
@@ -1382,8 +1298,7 @@ impl TryFrom<RemoteProcessRecord> for lash_core::ProcessRecord {
         .with_event_types(event_types.into_iter().map(Into::into))
         .with_execution_env_ref(env_ref.map(|env_ref| {
             lash_core::ProcessExecutionEnvRef::new(env_ref.as_str().to_string())
-        }))
-        .with_wake_target(wake_target.map(Into::into));
+        }));
         let mut record = lash_core::ProcessRecord::from_registration(registration);
         record.created_at_ms = created_at_ms;
         record.updated_at_ms = updated_at_ms;
@@ -1393,7 +1308,8 @@ impl TryFrom<RemoteProcessRecord> for lash_core::ProcessRecord {
             .transpose()?;
         record.abandon_request = abandon_request.map(|request| Box::new(request.into()));
         record.wait = wait.map(Into::into);
-        record.status = status.try_into()?;
+        record.status = status.into();
+        record.outcome = outcome.map(TryInto::try_into).transpose()?;
         Ok(record)
     }
 }
@@ -1421,7 +1337,6 @@ impl TryFrom<lash_core::ObservedProcess> for RemoteObservedProcess {
             input,
             originator,
             env_ref,
-            wake_target,
             caused_by,
             external_ref,
             wait,
@@ -1451,7 +1366,6 @@ impl TryFrom<lash_core::ObservedProcess> for RemoteObservedProcess {
             env_ref: env_ref
                 .map(|env_ref| env_ref.as_str().parse())
                 .transpose()?,
-            wake_target: wake_target.map(Into::into),
             caused_by: caused_by.map(Into::into),
             external_ref: external_ref.map(Into::into),
             wait: wait.map(Into::into),
@@ -1485,7 +1399,6 @@ impl TryFrom<RemoteObservedProcess> for lash_core::ObservedProcess {
             input,
             originator,
             env_ref,
-            wake_target,
             caused_by,
             external_ref,
             wait,
@@ -1515,7 +1428,6 @@ impl TryFrom<RemoteObservedProcess> for lash_core::ObservedProcess {
             env_ref: env_ref.map(|env_ref| {
                 lash_core::ProcessExecutionEnvRef::new(env_ref.as_str().to_string())
             }),
-            wake_target: wake_target.map(Into::into),
             caused_by: caused_by.map(Into::into),
             external_ref: external_ref.map(Into::into),
             wait: wait.map(Into::into),
@@ -1531,14 +1443,12 @@ impl TryFrom<lash_core::ObservedWorkItem> for RemoteProcessWorkItem {
     fn try_from(value: lash_core::ObservedWorkItem) -> Result<Self, Self::Error> {
         let lash_core::ObservedWorkItem {
             process,
-            descriptor,
             events,
             kind,
             label,
         } = value;
         Ok(Self {
             process: process.try_into()?,
-            descriptor: descriptor.into(),
             events: events.into_iter().map(Into::into).collect(),
             kind,
             label,
@@ -1553,14 +1463,12 @@ impl TryFrom<RemoteProcessWorkItem> for lash_core::ObservedWorkItem {
         value.validate("RemoteProcessWorkItem")?;
         let RemoteProcessWorkItem {
             process,
-            descriptor,
             events,
             kind,
             label,
         } = value;
         Ok(Self {
             process: process.try_into()?,
-            descriptor: descriptor.into(),
             events: events.into_iter().map(Into::into).collect(),
             kind,
             label,
@@ -1611,6 +1519,44 @@ impl TryFrom<RemoteProcessWorkSnapshot> for lash_core::ProcessWorkSnapshot {
     }
 }
 
+impl From<lash_core::ProcessObserverBy> for RemoteProcessObserverBy {
+    fn from(value: lash_core::ProcessObserverBy) -> Self {
+        match value {
+            lash_core::ProcessObserverBy::Host { operation_id } => Self::Host { operation_id },
+            lash_core::ProcessObserverBy::ForkInheritance => Self::ForkInheritance,
+        }
+    }
+}
+
+impl From<RemoteProcessObserverBy> for lash_core::ProcessObserverBy {
+    fn from(value: RemoteProcessObserverBy) -> Self {
+        match value {
+            RemoteProcessObserverBy::Host { operation_id } => Self::Host { operation_id },
+            RemoteProcessObserverBy::ForkInheritance => Self::ForkInheritance,
+        }
+    }
+}
+
+impl From<lash_core::ObserverInheritance> for RemoteObserverInheritance {
+    fn from(value: lash_core::ObserverInheritance) -> Self {
+        match value {
+            lash_core::ObserverInheritance::All => Self::All,
+            lash_core::ObserverInheritance::None => Self::None,
+            lash_core::ObserverInheritance::Only(process_ids) => Self::Only(process_ids),
+        }
+    }
+}
+
+impl From<RemoteObserverInheritance> for lash_core::ObserverInheritance {
+    fn from(value: RemoteObserverInheritance) -> Self {
+        match value {
+            RemoteObserverInheritance::All => Self::All,
+            RemoteObserverInheritance::None => Self::None,
+            RemoteObserverInheritance::Only(process_ids) => Self::Only(process_ids),
+        }
+    }
+}
+
 impl TryFrom<RemoteProcessStartRequest> for lash_core::ProcessStartRequest {
     type Error = RemoteProtocolError;
 
@@ -1624,8 +1570,9 @@ impl TryFrom<RemoteProcessStartRequest> for lash_core::ProcessStartRequest {
             max_attempts,
             env_spec,
             originator,
-            wake_target,
-            grant,
+            identity,
+            wake_session_id,
+            observers,
             event_types,
         } = value;
         let mut request = lash_core::ProcessStartRequest::new(
@@ -1635,9 +1582,12 @@ impl TryFrom<RemoteProcessStartRequest> for lash_core::ProcessStartRequest {
             originator.into(),
         )
         .with_max_attempts(max_attempts)
-        .with_wake_target(wake_target.map(Into::into))
-        .with_grant(grant.map(Into::into))
+        .with_wake_session_id(wake_session_id)
+        .with_observers(observers)
         .with_event_types(event_types.into_iter().map(Into::into));
+        if let Some(identity) = identity {
+            request = request.with_identity(identity.into());
+        }
         request.env_spec = env_spec.map(TryInto::try_into).transpose()?;
         Ok(request)
     }
@@ -1654,8 +1604,9 @@ impl TryFrom<lash_core::ProcessStartRequest> for RemoteProcessStartRequest {
             max_attempts,
             env_spec,
             originator,
-            wake_target,
-            grant,
+            identity,
+            wake_session_id,
+            observers,
             event_types,
         } = value;
         Ok(Self {
@@ -1666,8 +1617,9 @@ impl TryFrom<lash_core::ProcessStartRequest> for RemoteProcessStartRequest {
             max_attempts,
             env_spec: env_spec.map(Into::into),
             originator: originator.into(),
-            wake_target: wake_target.map(Into::into),
-            grant: grant.map(Into::into),
+            identity: identity.map(Into::into),
+            wake_session_id,
+            observers,
             event_types: event_types.into_iter().map(Into::into).collect(),
         })
     }
@@ -1703,6 +1655,7 @@ impl From<lash_core::ProcessStatusFilter> for RemoteProcessStatusFilter {
     fn from(value: lash_core::ProcessStatusFilter) -> Self {
         match value {
             lash_core::ProcessStatusFilter::Running => Self::Running,
+            lash_core::ProcessStatusFilter::Waiting => Self::Waiting,
             lash_core::ProcessStatusFilter::Completed => Self::Completed,
             lash_core::ProcessStatusFilter::Failed => Self::Failed,
             lash_core::ProcessStatusFilter::Cancelled => Self::Cancelled,
@@ -1716,6 +1669,7 @@ impl From<RemoteProcessStatusFilter> for lash_core::ProcessStatusFilter {
     fn from(value: RemoteProcessStatusFilter) -> Self {
         match value {
             RemoteProcessStatusFilter::Running => Self::Running,
+            RemoteProcessStatusFilter::Waiting => Self::Waiting,
             RemoteProcessStatusFilter::Completed => Self::Completed,
             RemoteProcessStatusFilter::Failed => Self::Failed,
             RemoteProcessStatusFilter::Cancelled => Self::Cancelled,
@@ -1868,7 +1822,6 @@ impl TryFrom<RemoteProcessSignalRequest> for lash_core::ProcessEventAppendReques
             signal_id: _,
             payload,
             replay_key,
-            wake_target_scope,
         } = value;
         let event_type =
             lash_core::process_signal_event_type(&signal_name).map_err(|err| {
@@ -1881,7 +1834,6 @@ impl TryFrom<RemoteProcessSignalRequest> for lash_core::ProcessEventAppendReques
             event_type,
             payload,
             replay: replay_key.map(|key| lash_core::runtime::RuntimeReplay { key }),
-            wake_target_scope: wake_target_scope.map(Into::into),
         })
     }
 }

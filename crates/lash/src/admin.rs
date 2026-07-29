@@ -299,22 +299,9 @@ impl SessionAdmin {
             .map(lash_core::ProcessWorkObserver::new)
     }
 
-    /// The session scopes this session may address grants under: its root scope
-    /// plus its current agent frame, deduplicated. Mirrors the scope set the
-    /// runtime observation lists handles across, so the grant-scoped session
-    /// view sees exactly what the session can address.
-    fn process_visible_scopes(&self) -> Vec<lash_core::SessionScope> {
-        let observation = self.runtime.observe();
-        let root = observation.process_scope();
-        let mut scopes = vec![root.clone()];
-        if let Some(frame_id) = observation.persisted_state.current_frame_node_id.as_deref() {
-            let frame_scope =
-                lash_core::SessionScope::for_agent_frame(observation.session_id(), frame_id);
-            if frame_scope.id() != root.id() {
-                scopes.push(frame_scope);
-            }
-        }
-        scopes
+    /// Observer edges are session-scoped and deliberately frame-less.
+    fn process_observer_scope(&self) -> lash_core::SessionScope {
+        self.runtime.observe().process_scope()
     }
 
     async fn signal_process(
@@ -597,20 +584,11 @@ impl SessionAdmin {
         let runtime = writer.lock().await;
         let session_id = runtime.session_id().to_string();
         let processes = runtime.process_service()?;
-        let cancel_ability = runtime.process_cancel_ability();
         let scope = lash_core::ProcessOpScope::new(scoped_effect_controller);
-        let summary = cancel_ability
-            .cancel_summary(
-                processes.as_ref(),
-                lash_core::ProcessCancelRequest::new(
-                    &session_id,
-                    process_id,
-                    scope,
-                    lash_core::ProcessCancelSource::HostApi,
-                )
-                .with_reason("requested by host API"),
-            )
+        let summary = processes
+            .cancel_visible(&session_id, process_id, scope)
             .await
+            .map(lash_core::ProcessCancelSummary::from_record)
             .map_err(EmbedError::Plugin)?;
         self.runtime.record_process_changed(
             SessionProcessEventKind::Cancelled,
@@ -627,18 +605,9 @@ impl SessionAdmin {
         let runtime = writer.lock().await;
         let session_id = runtime.session_id().to_string();
         let processes = runtime.process_service()?;
-        let cancel_ability = runtime.process_cancel_ability();
         let scope = lash_core::ProcessOpScope::new(scoped_effect_controller);
-        let summaries = cancel_ability
-            .cancel_all_visible(
-                processes.as_ref(),
-                lash_core::ProcessCancelAllRequest::new(
-                    &session_id,
-                    scope,
-                    lash_core::ProcessCancelSource::HostApi,
-                )
-                .with_reason("requested by host API"),
-            )
+        let summaries = processes
+            .cancel_all_visible(&session_id, scope)
             .await
             .map_err(EmbedError::Plugin)?;
         self.runtime.record_process_changed(
@@ -1006,21 +975,21 @@ pub struct SessionProcessAdmin {
 /// Session-scoped view of the global process surface ([`Processes`]).
 ///
 /// This is thin sugar, not a parallel surface (ADR 0019 grill): every read is
-/// the global observer pre-filtered by this session's **grant** scope (what the
+/// the global observer pre-filtered by this session's observer scope (what the
 /// session may address), and every mutation delegates to the same runtime
 /// process path the global surface uses. It speaks the same [`ObservedProcess`]
 /// vocabulary as [`Processes`]; [`start`](Self::start) returns the
-/// grant-entry handle row ([`lash_core::ProcessHandleSummary`]), the one row
+/// model-facing handle summary ([`lash_core::ProcessHandleSummary`]), the one row
 /// type retained for the model/handle contract.
 impl SessionProcessAdmin {
     pub(crate) fn new(control: SessionAdmin) -> Self {
         Self { control }
     }
 
-    /// Grant-scoped read: the global observer filtered to every scope this
-    /// session may address (root + current frame), deduplicated. One home for
-    /// the session's read logic — it calls the observer, never reimplements it.
-    async fn list_granted(
+    /// Observer-scoped read: the global observer filtered to this session.
+    /// One home for the session's read logic — it calls the observer, never
+    /// reimplements it.
+    async fn list_observed(
         &self,
         filter: &lash_core::ProcessListFilter,
     ) -> Result<Vec<lash_core::ObservedProcess>> {
@@ -1029,16 +998,10 @@ impl SessionProcessAdmin {
         let Some(observer) = self.control.process_observer_opt() else {
             return Ok(Vec::new());
         };
-        let mut seen = std::collections::BTreeSet::new();
-        let mut out = Vec::new();
-        for scope in self.control.process_visible_scopes() {
-            for process in observer.list_granted_to(&scope, filter).await? {
-                if seen.insert(process.process_id.clone()) {
-                    out.push(process);
-                }
-            }
-        }
-        Ok(out)
+        observer
+            .list_observed_by(&self.control.process_observer_scope(), filter)
+            .await
+            .map_err(Into::into)
     }
 
     pub async fn start(
@@ -1053,7 +1016,7 @@ impl SessionProcessAdmin {
 
     /// Running processes this session may address.
     pub async fn list(&self) -> Result<Vec<lash_core::ObservedProcess>> {
-        self.list_granted(&lash_core::ProcessListFilter {
+        self.list_observed(&lash_core::ProcessListFilter {
             status: lash_core::ProcessStatusFilter::Running,
             ..lash_core::ProcessListFilter::default()
         })
@@ -1062,7 +1025,7 @@ impl SessionProcessAdmin {
 
     /// Every process (any status) this session may address.
     pub async fn list_all(&self) -> Result<Vec<lash_core::ObservedProcess>> {
-        self.list_granted(&lash_core::ProcessListFilter {
+        self.list_observed(&lash_core::ProcessListFilter {
             status: lash_core::ProcessStatusFilter::Any,
             ..lash_core::ProcessListFilter::default()
         })
@@ -1134,8 +1097,8 @@ impl SessionProcessAdmin {
             .await
     }
 
-    /// Move this session's handle grants for `process_ids` to another session.
-    /// Re-homes the addressing grant only; the process itself is global.
+    /// Move this session's observer edges for `process_ids` to another session.
+    /// Re-homes addressability only; the process itself is global.
     pub async fn transfer(
         &self,
         to_session_id: &str,

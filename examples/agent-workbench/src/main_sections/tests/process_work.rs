@@ -302,21 +302,18 @@ mod process_work_tests {
             .await
             .expect("register process");
         process_registry
-            .grant_handle(
-                &lash::process::SessionScope::new(&session_id),
+            .add_observer(
+                &session_id,
                 process_id,
-                lash::process::ProcessHandleDescriptor::new(
-                    Some("test"),
-                    Some("Session-independent process"),
-                ),
+                lash::process::ProcessObserverBy::host("workbench-session-delete"),
             )
             .await
-            .expect("grant process handle");
+            .expect("observe process");
         let deletion = process_registry
             .delete_session_process_state(&session_id)
             .await
             .expect("delete session process edges");
-        assert_eq!(deletion.orphaned_process_ids, vec![process_id]);
+        assert_eq!(deletion.removed_observer_count, 1);
         let (_, current_session_id) = state.session_ids.rotate();
         assert_ne!(current_session_id, session_id);
 
