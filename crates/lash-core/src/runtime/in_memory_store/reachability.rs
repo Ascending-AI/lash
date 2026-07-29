@@ -155,6 +155,25 @@ impl InMemorySessionStore {
             .expect("lock tombstoned nodes") = tombstoned;
         *self.session_graph.lock().expect("lock graph") = crate::SessionGraph::default();
         *self.session_head_meta.lock().expect("lock session head") = None;
+        *self.session_meta.lock().expect("lock session meta") = None;
+        *self.checkpoint.lock().expect("lock checkpoint") = None;
+        self.attachment_manifest
+            .lock()
+            .expect("lock attachment manifest")
+            .clear();
+        self.usage_deltas.lock().expect("lock usage deltas").clear();
+        self.runtime_turn_commits
+            .lock()
+            .expect("lock runtime turn commits")
+            .clear();
+        self.pending_turn_inputs
+            .lock()
+            .expect("lock pending turn input")
+            .clear();
+        self.session_execution_leases
+            .lock()
+            .expect("lock session execution leases")
+            .clear();
         Ok(())
     }
 }

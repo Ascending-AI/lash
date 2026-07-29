@@ -25,11 +25,13 @@ where
     session_store_factory_delete_fences_stale_handles(make()).await;
 }
 
-/// Deleting a session must fence handles that were opened before the delete.
+/// Deleting a session must erase readable state and fence handles that were
+/// opened before the delete.
 ///
 /// A store handle held by an in-flight turn outlives `delete_session`. If that
-/// stale handle can still write, the delete is undone: the session row, its
-/// metadata, and its history come back after the host retired the id.
+/// stale handle can still read retained state or write, backend behavior
+/// depends on object lifetime and the delete can be undone after the host
+/// retired the id.
 pub async fn session_store_factory_delete_fences_stale_handles(
     factory: Arc<dyn crate::SessionStoreFactory>,
 ) {
@@ -52,11 +54,51 @@ pub async fn session_store_factory_delete_fences_stale_handles(
         ..Default::default()
     };
     state.ensure_agent_frame_initialized();
+    stale
+        .commit_runtime_state(crate::RuntimeCommit::persisted_state_for_test(&state, &[]))
+        .await
+        .expect("seed a checkpoint on the handle that will go stale");
+    stale
+        .enqueue_pending_turn_input(
+            crate::PendingTurnInputDraft::new(
+                &request.session_id,
+                crate::TurnInputIngress::NextTurn,
+                crate::TurnInput::text("pending input on the handle that will go stale"),
+            )
+            .with_source_key("delete-fence-stale-handle:pending-input"),
+        )
+        .await
+        .expect("seed a pending turn input on the handle that will go stale");
 
     factory
         .delete_session(&request.session_id)
         .await
         .expect("delete the session out from under the stale handle");
+
+    assert!(
+        stale
+            .load_session_meta()
+            .await
+            .expect("read metadata through the stale handle")
+            .is_none(),
+        "a stale handle must observe deleted session metadata as absent"
+    );
+    assert!(
+        stale
+            .load_session()
+            .await
+            .expect("load checkpoint through the stale handle")
+            .is_none(),
+        "a stale handle must observe the deleted session checkpoint as absent"
+    );
+    assert!(
+        stale
+            .list_pending_turn_inputs(&request.session_id)
+            .await
+            .expect("list pending inputs through the stale handle")
+            .is_empty(),
+        "a stale handle must observe deleted pending turn inputs as absent"
+    );
 
     let ensure_error = stale
         .admit_and_bind_session(&crate::SessionBinding::from_create_request(&request))
