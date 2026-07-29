@@ -22,6 +22,11 @@ pub enum PluginError {
     },
     #[error("process lease for `{process_id}` is missing or expired (superseded)")]
     ProcessLeaseSuperseded { process_id: String },
+    #[error("wake delivery `{delivery_id}` is already terminal in state `{state:?}`")]
+    WakeDeliveryNotPending {
+        delivery_id: String,
+        state: crate::WakeDeliveryState,
+    },
 }
 
 impl From<crate::RuntimeEffectControllerError> for PluginError {

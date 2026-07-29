@@ -182,7 +182,7 @@ pub use observation::{
     SessionRevision,
 };
 pub use process::{
-    AbandonEvidence, AbandonRequest, AbandonWriter, DEFAULT_WAKE_EVIDENCE_RETENTION_MS,
+    AbandonEvidence, AbandonRequest, AbandonWriter, DEFAULT_WAKE_DELIVERY_EXPIRY_MS,
     DefaultProcessCancelAbility, InMemoryProcessExecutionEnvStore, ObservedProcess,
     ObservedProcessEvent, ObservedWorkItem, PROCESS_LEASE_SCHEMA_VERSION, PersistedSegmentHandover,
     ProcessAttach, ProcessAwaitOutput, ProcessAwaiter, ProcessCancelAbility,

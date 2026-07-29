@@ -2,8 +2,6 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex, Weak};
 use std::time::Duration;
 
-use tokio::sync::watch;
-
 use super::events::{
     ProcessAwaitOutput, ProcessCompletionAuthority, ProcessEvent, ProcessEventAppendRequest,
     ProcessEventAppendResult,
@@ -18,58 +16,11 @@ use super::model::{
 use super::registry::{ProcessPruneReport, ProcessRegistry};
 use crate::PluginError;
 
+mod change_hub;
+pub use change_hub::ProcessChangeHub;
+
 const AWAIT_BACKOFF_MIN: Duration = Duration::from_millis(25);
 const AWAIT_BACKOFF_MAX: Duration = Duration::from_secs(1);
-
-#[derive(Clone, Default)]
-pub struct ProcessChangeHub {
-    inner: Arc<Mutex<HashMap<String, watch::Sender<u64>>>>,
-}
-
-impl ProcessChangeHub {
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    /// Subscribe before reading a process row. The receiver carries only a
-    /// version counter; waiters always re-read the registry after a bump.
-    pub fn subscribe(&self, process_id: &str) -> watch::Receiver<u64> {
-        let mut guard = self.inner.lock().expect("process change hub lock poisoned");
-        guard
-            .entry(process_id.to_string())
-            .or_insert_with(|| {
-                let (tx, _rx) = watch::channel(0);
-                tx
-            })
-            .subscribe()
-    }
-
-    pub fn notify(&self, process_id: &str) {
-        let mut guard = self.inner.lock().expect("process change hub lock poisoned");
-        let mut remove = false;
-        if let Some(tx) = guard.get(process_id) {
-            if tx.receiver_count() == 0 {
-                remove = true;
-            } else {
-                let next = (*tx.borrow()).wrapping_add(1);
-                if tx.send(next).is_err() {
-                    remove = true;
-                }
-            }
-        }
-        if remove {
-            guard.remove(process_id);
-        }
-    }
-
-    #[cfg(test)]
-    fn tracked_processes(&self) -> usize {
-        self.inner
-            .lock()
-            .expect("process change hub lock poisoned")
-            .len()
-    }
-}
 
 /// Host-facing, best-effort push of each appended process event.
 ///
@@ -752,6 +703,17 @@ impl ProcessRegistry for WatchedProcessRegistry {
 
     async fn redrive_wake_delivery(&self, delivery_id: &str) -> Result<(), PluginError> {
         self.inner.redrive_wake_delivery(delivery_id).await
+    }
+
+    async fn wake_evidence_cleanup_deliveries(
+        &self,
+        limit: usize,
+    ) -> Result<Vec<super::WakeDelivery>, PluginError> {
+        self.inner.wake_evidence_cleanup_deliveries(limit).await
+    }
+
+    async fn mark_wake_evidence_cleaned(&self, delivery_id: &str) -> Result<(), PluginError> {
+        self.inner.mark_wake_evidence_cleaned(delivery_id).await
     }
 
     async fn list_non_terminal(&self) -> Result<Vec<ProcessRecord>, PluginError> {

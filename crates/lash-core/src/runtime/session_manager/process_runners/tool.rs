@@ -63,6 +63,7 @@ impl RuntimeSessionServices {
                 self.current.store.clone(),
                 self.current.host.session_store_factory.clone(),
                 self.current.host.queued_work_driver.clone(),
+                Arc::clone(&self.current.host.core.clock),
             )
             .build();
         let retry_policy =

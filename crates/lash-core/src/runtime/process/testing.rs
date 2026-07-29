@@ -21,14 +21,18 @@ use super::model::{
 };
 use super::references::ProcessLiveReferenceSummary;
 use super::registry::{ProcessPruneReport, ProcessRegistry};
-use super::time::current_epoch_ms;
 use super::validation::{
     ProcessStartPlan, prepare_process_event_append, prepare_process_registration,
     prepare_process_start,
 };
 
+mod support;
+use support::ExecutionWritePause;
+pub use support::{ExecutionWritePauseHandle, TestProcessRegistryWriteExt};
+
 /// In-memory process registry for core tests.
 pub struct TestLocalProcessRegistry {
+    transaction: Arc<Mutex<()>>,
     managed: Arc<Mutex<ManagedProcessMap>>,
     process_read_error: Arc<Mutex<Option<PluginError>>>,
     next_change_seq: Arc<Mutex<u64>>,
@@ -37,13 +41,17 @@ pub struct TestLocalProcessRegistry {
     handovers: Arc<Mutex<HashMap<(String, u64), crate::PersistedSegmentHandover>>>,
     trigger_store: Option<Arc<crate::InMemoryTriggerStore>>,
     execution_write_pause: Arc<std::sync::Mutex<Option<ExecutionWritePause>>>,
+    wake_mark_pause: Arc<std::sync::Mutex<Option<ExecutionWritePause>>>,
+    append_outbox_pause: Arc<std::sync::Mutex<Option<ExecutionWritePause>>>,
     wake_delivery_config: super::WakeDeliveryConfig,
     wake_deliveries: Arc<Mutex<HashMap<String, super::WakeDelivery>>>,
+    clock: Arc<dyn crate::Clock>,
 }
 
 impl Default for TestLocalProcessRegistry {
     fn default() -> Self {
         Self {
+            transaction: Arc::new(Mutex::new(())),
             managed: Arc::new(Mutex::new(HashMap::new())),
             process_read_error: Arc::new(Mutex::new(None)),
             next_change_seq: Arc::new(Mutex::new(0)),
@@ -52,8 +60,11 @@ impl Default for TestLocalProcessRegistry {
             handovers: Arc::new(Mutex::new(HashMap::new())),
             trigger_store: None,
             execution_write_pause: Arc::new(std::sync::Mutex::new(None)),
+            wake_mark_pause: Arc::new(std::sync::Mutex::new(None)),
+            append_outbox_pause: Arc::new(std::sync::Mutex::new(None)),
             wake_delivery_config: super::WakeDeliveryConfig::default(),
             wake_deliveries: Arc::new(Mutex::new(HashMap::new())),
+            clock: Arc::new(crate::SystemClock),
         }
     }
 }
@@ -61,116 +72,6 @@ impl Default for TestLocalProcessRegistry {
 type ManagedProcessMap = HashMap<String, ManagedProcessRecord>;
 type ManagedGrantMap = HashMap<SessionScopeId, HashMap<String, ProcessHandleGrant>>;
 type ManagedLeaseMap = HashMap<String, ProcessLease>;
-
-#[derive(Clone)]
-struct ExecutionWritePause {
-    validated: Arc<tokio::sync::Notify>,
-    resume: Arc<tokio::sync::Notify>,
-}
-
-#[derive(Clone)]
-pub struct ExecutionWritePauseHandle {
-    validated: Arc<tokio::sync::Notify>,
-    resume: Arc<tokio::sync::Notify>,
-}
-
-impl ExecutionWritePauseHandle {
-    pub async fn wait_until_validated(&self) {
-        self.validated.notified().await;
-    }
-
-    pub fn resume(&self) {
-        self.resume.notify_one();
-    }
-}
-
-/// Explicit fixture-only conveniences for lifecycle writes whose production
-/// API requires an execution authority. Each write claims and releases a real
-/// process lease through the registry under test.
-#[async_trait::async_trait]
-#[doc(hidden)]
-pub trait TestProcessRegistryWriteExt: ProcessRegistry {
-    async fn record_first_started(
-        &self,
-        process_id: &str,
-        started: ProcessStarted,
-    ) -> Result<ProcessRecord, PluginError> {
-        let lease = claim_fixture_write_lease(self, process_id).await?;
-        let result = self
-            .record_first_started_with_authority(
-                process_id,
-                started,
-                &ProcessExecutionWriteAuthority::lease(lease.clone()),
-            )
-            .await
-            .and_then(ProcessStartOutcome::into_record);
-        finish_fixture_write(self, &lease, result).await
-    }
-
-    async fn set_process_wait(
-        &self,
-        process_id: &str,
-        wait: WaitState,
-    ) -> Result<ProcessRecord, PluginError> {
-        let lease = claim_fixture_write_lease(self, process_id).await?;
-        let result = self
-            .set_process_wait_with_authority(
-                process_id,
-                wait,
-                &ProcessExecutionWriteAuthority::lease(lease.clone()),
-            )
-            .await;
-        finish_fixture_write(self, &lease, result).await
-    }
-
-    async fn clear_process_wait(&self, process_id: &str) -> Result<ProcessRecord, PluginError> {
-        let lease = claim_fixture_write_lease(self, process_id).await?;
-        let result = self
-            .clear_process_wait_with_authority(
-                process_id,
-                &ProcessExecutionWriteAuthority::lease(lease.clone()),
-            )
-            .await;
-        finish_fixture_write(self, &lease, result).await
-    }
-}
-
-impl<T> TestProcessRegistryWriteExt for T where T: ProcessRegistry + ?Sized {}
-
-async fn claim_fixture_write_lease(
-    registry: &(impl ProcessRegistry + ?Sized),
-    process_id: &str,
-) -> Result<ProcessLease, PluginError> {
-    let owner =
-        crate::LeaseOwnerIdentity::opaque(format!("test-fixture:{process_id}"), "lifecycle-write");
-    match registry
-        .claim_process_lease(process_id, &owner, 60_000)
-        .await?
-    {
-        ProcessLeaseClaimOutcome::Acquired(lease) => Ok(lease),
-        ProcessLeaseClaimOutcome::Busy { holder } => Err(PluginError::Session(format!(
-            "test fixture cannot claim process `{process_id}` held by `{}`",
-            holder.owner.owner_id
-        ))),
-    }
-}
-
-async fn finish_fixture_write<T>(
-    registry: &(impl ProcessRegistry + ?Sized),
-    lease: &ProcessLease,
-    result: Result<T, PluginError>,
-) -> Result<T, PluginError> {
-    let release = registry
-        .complete_process_lease(&ProcessLeaseCompletion::from_lease(lease))
-        .await;
-    match result {
-        Err(error) => Err(error),
-        Ok(value) => {
-            release?;
-            Ok(value)
-        }
-    }
-}
 
 struct ManagedProcessRecord {
     record: ProcessRecord,
@@ -180,11 +81,6 @@ struct ManagedProcessRecord {
 }
 
 impl TestLocalProcessRegistry {
-    pub fn with_wake_delivery_config(mut self, config: super::WakeDeliveryConfig) -> Self {
-        self.wake_delivery_config = config;
-        self
-    }
-
     #[doc(hidden)]
     pub fn pause_next_execution_write_after_validation(&self) -> ExecutionWritePauseHandle {
         let pause = ExecutionWritePause {
@@ -198,6 +94,47 @@ impl TestLocalProcessRegistry {
         ExecutionWritePauseHandle {
             validated: pause.validated,
             resume: pause.resume,
+        }
+    }
+
+    #[doc(hidden)]
+    pub fn pause_next_wake_mark(&self) -> ExecutionWritePauseHandle {
+        let pause = ExecutionWritePause {
+            validated: Arc::new(tokio::sync::Notify::new()),
+            resume: Arc::new(tokio::sync::Notify::new()),
+        };
+        *self.wake_mark_pause.lock().expect("wake mark pause lock") = Some(pause.clone());
+        ExecutionWritePauseHandle {
+            validated: pause.validated,
+            resume: pause.resume,
+        }
+    }
+
+    #[doc(hidden)]
+    pub fn pause_next_append_after_outbox(&self) -> ExecutionWritePauseHandle {
+        let pause = ExecutionWritePause {
+            validated: Arc::new(tokio::sync::Notify::new()),
+            resume: Arc::new(tokio::sync::Notify::new()),
+        };
+        *self
+            .append_outbox_pause
+            .lock()
+            .expect("append outbox pause lock") = Some(pause.clone());
+        ExecutionWritePauseHandle {
+            validated: pause.validated,
+            resume: pause.resume,
+        }
+    }
+
+    async fn pause_append_after_outbox(&self) {
+        let pause = self
+            .append_outbox_pause
+            .lock()
+            .expect("append outbox pause lock")
+            .take();
+        if let Some(pause) = pause {
+            pause.validated.notify_one();
+            pause.resume.notified().await;
         }
     }
 
@@ -247,7 +184,7 @@ impl TestLocalProcessRegistry {
         let record = ProcessRecord::from_prepared_registration(
             registration,
             registration_hash,
-            current_epoch_ms(),
+            self.clock.timestamp_ms(),
         );
         let change_seq = self.next_change_seq().await;
         managed.insert(
@@ -278,7 +215,7 @@ impl TestLocalProcessRegistry {
             request,
             sequence,
             replay_lookup,
-            current_epoch_ms(),
+            self.clock.timestamp_ms(),
         )?;
         match prepared {
             super::ProcessEventAppendPlan::Replay {
@@ -287,14 +224,7 @@ impl TestLocalProcessRegistry {
                 wake_delivery,
                 ..
             } => {
-                if let Some(wake) = wake_delivery.clone() {
-                    let delivery = super::WakeDelivery::pending(wake, self.wake_delivery_config)?;
-                    self.wake_deliveries
-                        .lock()
-                        .await
-                        .entry(delivery.delivery_id.clone())
-                        .or_insert(delivery);
-                }
+                self.insert_wake_delivery(wake_delivery.as_ref()).await?;
                 if let Some(repaired) = repair_record {
                     record.record = repaired;
                     record.change_seq = self.next_change_seq().await;
@@ -311,14 +241,8 @@ impl TestLocalProcessRegistry {
                 wake_delivery,
                 ..
             } => {
-                if let Some(wake) = wake_delivery.clone() {
-                    let delivery = super::WakeDelivery::pending(wake, self.wake_delivery_config)?;
-                    self.wake_deliveries
-                        .lock()
-                        .await
-                        .entry(delivery.delivery_id.clone())
-                        .or_insert(delivery);
-                }
+                self.insert_wake_delivery(wake_delivery.as_ref()).await?;
+                self.pause_append_after_outbox().await;
                 record.record = projected_record;
                 record.change_seq = self.next_change_seq().await;
                 record.events.push(event.clone());
@@ -333,6 +257,22 @@ impl TestLocalProcessRegistry {
                 })
             }
         }
+    }
+
+    async fn insert_wake_delivery(
+        &self,
+        wake: Option<&super::ProcessWakeDelivery>,
+    ) -> Result<(), PluginError> {
+        let Some(wake) = wake else {
+            return Ok(());
+        };
+        let delivery = super::WakeDelivery::pending(wake.clone(), self.wake_delivery_config)?;
+        self.wake_deliveries
+            .lock()
+            .await
+            .entry(delivery.delivery_id.clone())
+            .or_insert(delivery);
+        Ok(())
     }
 }
 
@@ -445,6 +385,7 @@ impl ProcessRegistry for TestLocalProcessRegistry {
         process_id: &str,
         descriptor: ProcessHandleDescriptor,
     ) -> Result<ProcessHandleGrant, PluginError> {
+        let _transaction = self.transaction.lock().await;
         if self.get_process(process_id).await.is_none() {
             return Err(PluginError::Session(format!(
                 "unknown process `{process_id}`"
@@ -469,6 +410,7 @@ impl ProcessRegistry for TestLocalProcessRegistry {
         session_scope: &SessionScope,
         process_id: &str,
     ) -> Result<(), PluginError> {
+        let _transaction = self.transaction.lock().await;
         if let Some(session_grants) = self.grants.lock().await.get_mut(&session_scope.id()) {
             session_grants.remove(process_id);
         }
@@ -481,6 +423,7 @@ impl ProcessRegistry for TestLocalProcessRegistry {
         to_scope: &SessionScope,
         process_ids: &[String],
     ) -> Result<(), PluginError> {
+        let _transaction = self.transaction.lock().await;
         let mut grants = self.grants.lock().await;
         let from_scope_id = from_scope.id();
         let to_scope_id = to_scope.id();
@@ -510,6 +453,7 @@ impl ProcessRegistry for TestLocalProcessRegistry {
         &self,
         session_scope: &SessionScope,
     ) -> Result<Vec<ProcessHandleGrantEntry>, PluginError> {
+        let _transaction = self.transaction.lock().await;
         let grants = self
             .grants
             .lock()
@@ -534,6 +478,7 @@ impl ProcessRegistry for TestLocalProcessRegistry {
         &self,
         session_scope: &SessionScope,
     ) -> Result<Vec<ProcessHandleGrantEntry>, PluginError> {
+        let _transaction = self.transaction.lock().await;
         let grants = self
             .grants
             .lock()
@@ -560,6 +505,7 @@ impl ProcessRegistry for TestLocalProcessRegistry {
         session_scope: &SessionScope,
         process_id: &str,
     ) -> Result<bool, PluginError> {
+        let _transaction = self.transaction.lock().await;
         let session_scope_id = session_scope.id();
         let granted = self
             .grants
@@ -577,6 +523,7 @@ impl ProcessRegistry for TestLocalProcessRegistry {
         &self,
         process_id: &str,
     ) -> Result<Vec<ProcessHandleGrant>, PluginError> {
+        let _transaction = self.transaction.lock().await;
         if self.get_process(process_id).await.is_none() {
             return Err(PluginError::Session(format!(
                 "unknown process `{process_id}`"
@@ -595,6 +542,7 @@ impl ProcessRegistry for TestLocalProcessRegistry {
         &self,
         session_id: &str,
     ) -> Result<ProcessSessionDeleteReport, PluginError> {
+        let _transaction = self.transaction.lock().await;
         let removed = {
             let mut grants = self.grants.lock().await;
             let mut removed = Vec::new();
@@ -644,6 +592,7 @@ impl ProcessRegistry for TestLocalProcessRegistry {
             {
                 delivery.state = super::WakeDeliveryState::Discarded;
                 delivery.discard_reason = Some(super::WakeDiscardReason::TargetGone);
+                delivery.evidence_cleanup_pending = true;
                 discarded_wake_delivery_count += 1;
             }
         }
@@ -665,6 +614,7 @@ impl ProcessRegistry for TestLocalProcessRegistry {
         process_id: &str,
         request: ProcessEventAppendRequest,
     ) -> Result<ProcessEventAppendResult, PluginError> {
+        let _transaction = self.transaction.lock().await;
         let mut managed = self.managed.lock().await;
         let Some(record) = managed.get_mut(process_id) else {
             return Err(PluginError::Session(format!(
@@ -680,6 +630,7 @@ impl ProcessRegistry for TestLocalProcessRegistry {
         request: ProcessEventAppendRequest,
         authority: &ProcessExecutionWriteAuthority,
     ) -> Result<ProcessEventAppendResult, PluginError> {
+        let _transaction = self.transaction.lock().await;
         let mut managed = self.managed.lock().await;
         let Some(record) = managed.get_mut(process_id) else {
             return Err(PluginError::Session(format!(
@@ -693,7 +644,7 @@ impl ProcessRegistry for TestLocalProcessRegistry {
             &record.record,
             authority,
             None,
-            current_epoch_ms(),
+            self.clock.timestamp_ms(),
         )?;
         self.pause_execution_write_after_validation().await;
         let result = self.append_managed_event(record, request).await;
@@ -706,6 +657,7 @@ impl ProcessRegistry for TestLocalProcessRegistry {
         process_id: &str,
         after_sequence: u64,
     ) -> Result<Vec<ProcessEvent>, PluginError> {
+        let _transaction = self.transaction.lock().await;
         let managed = self.managed.lock().await;
         let Some(record) = managed.get(process_id) else {
             return Err(PluginError::Session(format!(
@@ -726,6 +678,7 @@ impl ProcessRegistry for TestLocalProcessRegistry {
         await_output: ProcessAwaitOutput,
         authority: ProcessCompletionAuthority,
     ) -> Result<ProcessCompletionOutcome, PluginError> {
+        let _transaction = self.transaction.lock().await;
         // Hold the `managed` lock across load→validate→append so no other
         // completion can complete, prune, and re-register the row with a
         // different disposition between the validation and the terminal append.
@@ -755,10 +708,15 @@ impl ProcessRegistry for TestLocalProcessRegistry {
             request,
             sequence,
             replay_lookup,
-            current_epoch_ms(),
+            self.clock.timestamp_ms(),
         )?;
         let outcome = match prepared {
-            super::ProcessEventAppendPlan::Replay { repair_record, .. } => {
+            super::ProcessEventAppendPlan::Replay {
+                repair_record,
+                wake_delivery,
+                ..
+            } => {
+                self.insert_wake_delivery(wake_delivery.as_ref()).await?;
                 if let Some(repaired) = repair_record {
                     record.record = repaired;
                     record.change_seq = self.next_change_seq().await;
@@ -771,8 +729,10 @@ impl ProcessRegistry for TestLocalProcessRegistry {
                 event,
                 payload_hash,
                 projected_record,
+                wake_delivery,
                 ..
             } => {
+                self.insert_wake_delivery(wake_delivery.as_ref()).await?;
                 record.record = projected_record;
                 record.change_seq = self.next_change_seq().await;
                 if let Some(replay) = event.invocation.replay.clone() {
@@ -792,6 +752,7 @@ impl ProcessRegistry for TestLocalProcessRegistry {
         lease: &ProcessLease,
         await_output: ProcessAwaitOutput,
     ) -> Result<ProcessCompletionOutcome, PluginError> {
+        let _transaction = self.transaction.lock().await;
         let mut managed = self.managed.lock().await;
         let Some(record) = managed.get_mut(&lease.process_id) else {
             return Err(PluginError::Session(format!(
@@ -805,7 +766,7 @@ impl ProcessRegistry for TestLocalProcessRegistry {
                 &await_output,
             ));
         }
-        let now = current_epoch_ms();
+        let now = self.clock.timestamp_ms();
         let request = terminal_append_request(&lease.process_id, &await_output, None);
         let replay_lookup = request
             .replay
@@ -815,7 +776,8 @@ impl ProcessRegistry for TestLocalProcessRegistry {
         let sequence = record.events.len() as u64 + 1;
         let prepared =
             prepare_process_event_append(&record.record, request, sequence, replay_lookup, now)?;
-        if matches!(prepared, super::ProcessEventAppendPlan::Replay { .. }) {
+        if let super::ProcessEventAppendPlan::Replay { wake_delivery, .. } = &prepared {
+            self.insert_wake_delivery(wake_delivery.as_ref()).await?;
             return Ok(ProcessCompletionOutcome::AlreadyApplied {
                 stored: record.record.clone(),
             });
@@ -838,8 +800,10 @@ impl ProcessRegistry for TestLocalProcessRegistry {
                 event,
                 payload_hash,
                 projected_record,
+                wake_delivery,
                 ..
             } => {
+                self.insert_wake_delivery(wake_delivery.as_ref()).await?;
                 record.record = projected_record;
                 if let Some(replay) = event.invocation.replay.clone() {
                     record
@@ -876,7 +840,7 @@ impl ProcessRegistry for TestLocalProcessRegistry {
             &record.record,
             authority,
             Some(&started),
-            current_epoch_ms(),
+            self.clock.timestamp_ms(),
         )?;
         match prepare_process_start(&record.record, &started, authority)? {
             ProcessStartPlan::AlreadyApplied => {
@@ -955,7 +919,7 @@ impl ProcessRegistry for TestLocalProcessRegistry {
             &record.record,
             authority,
             None,
-            current_epoch_ms(),
+            self.clock.timestamp_ms(),
         )?;
         if record.record.is_terminal() {
             return Err(PluginError::Session(format!(
@@ -989,7 +953,7 @@ impl ProcessRegistry for TestLocalProcessRegistry {
             &record.record,
             authority,
             None,
-            current_epoch_ms(),
+            self.clock.timestamp_ms(),
         )?;
         let Some(wait) = record.record.wait.clone() else {
             return Ok(record.record.clone());
@@ -1064,18 +1028,34 @@ impl ProcessRegistry for TestLocalProcessRegistry {
         if limit == 0 {
             return Ok(Vec::new());
         }
-        let now = current_epoch_ms();
+        let _transaction = self.transaction.lock().await;
+        let now = self.clock.timestamp_ms();
         let mut deliveries = self.wake_deliveries.lock().await;
         let mut ids = deliveries
             .values()
             .filter(|delivery| delivery.state == super::WakeDeliveryState::Pending)
-            .map(|delivery| (delivery.expires_at_ms, delivery.delivery_id.clone()))
+            .filter(|candidate| {
+                !deliveries.values().any(|earlier| {
+                    earlier.state == super::WakeDeliveryState::Pending
+                        && earlier.wake.target_session_id == candidate.wake.target_session_id
+                        && earlier.wake.process_id == candidate.wake.process_id
+                        && earlier.wake.sequence < candidate.wake.sequence
+                })
+            })
+            .map(|delivery| {
+                (
+                    delivery.wake.target_session_id.clone(),
+                    delivery.wake.process_id.clone(),
+                    delivery.wake.sequence,
+                    delivery.delivery_id.clone(),
+                )
+            })
             .collect::<Vec<_>>();
         ids.sort();
         ids.truncate(limit);
         Ok(ids
             .into_iter()
-            .filter_map(|(_, id)| {
+            .filter_map(|(_, _, _, id)| {
                 let delivery = deliveries.get_mut(&id)?;
                 delivery.attempts = delivery.attempts.saturating_add(1);
                 delivery.first_attempt_ms.get_or_insert(now);
@@ -1088,6 +1068,7 @@ impl ProcessRegistry for TestLocalProcessRegistry {
         &self,
         state: Option<super::WakeDeliveryState>,
     ) -> Result<Vec<super::WakeDelivery>, PluginError> {
+        let _transaction = self.transaction.lock().await;
         let mut deliveries = self
             .wake_deliveries
             .lock()
@@ -1101,6 +1082,7 @@ impl ProcessRegistry for TestLocalProcessRegistry {
     }
 
     async fn wake_delivery_report(&self) -> Result<super::WakeDeliveryReport, PluginError> {
+        let _transaction = self.transaction.lock().await;
         let mut report = super::WakeDeliveryReport::default();
         for delivery in self.wake_deliveries.lock().await.values() {
             match delivery.state {
@@ -1120,14 +1102,29 @@ impl ProcessRegistry for TestLocalProcessRegistry {
     }
 
     async fn mark_wake_enqueued(&self, delivery_id: &str) -> Result<(), PluginError> {
+        let pause = self
+            .wake_mark_pause
+            .lock()
+            .expect("wake mark pause lock")
+            .take();
+        if let Some(pause) = pause {
+            pause.validated.notify_one();
+            pause.resume.notified().await;
+        }
+        let _transaction = self.transaction.lock().await;
         let mut deliveries = self.wake_deliveries.lock().await;
         let delivery = deliveries.get_mut(delivery_id).ok_or_else(|| {
             PluginError::Session(format!("unknown wake delivery `{delivery_id}`"))
         })?;
-        if delivery.state == super::WakeDeliveryState::Pending {
-            delivery.state = super::WakeDeliveryState::Enqueued;
-            delivery.discard_reason = None;
+        if delivery.state != super::WakeDeliveryState::Pending {
+            return Err(PluginError::WakeDeliveryNotPending {
+                delivery_id: delivery_id.to_string(),
+                state: delivery.state,
+            });
         }
+        delivery.state = super::WakeDeliveryState::Enqueued;
+        delivery.discard_reason = None;
+        delivery.evidence_cleanup_pending = true;
         Ok(())
     }
 
@@ -1136,28 +1133,83 @@ impl ProcessRegistry for TestLocalProcessRegistry {
         delivery_id: &str,
         reason: super::WakeDiscardReason,
     ) -> Result<(), PluginError> {
+        let _transaction = self.transaction.lock().await;
+        let mut deliveries = self.wake_deliveries.lock().await;
+        let delivery = deliveries.get_mut(delivery_id).ok_or_else(|| {
+            PluginError::Session(format!("unknown wake delivery `{delivery_id}`"))
+        })?;
+        if delivery.state != super::WakeDeliveryState::Pending {
+            return Err(PluginError::WakeDeliveryNotPending {
+                delivery_id: delivery_id.to_string(),
+                state: delivery.state,
+            });
+        }
+        delivery.state = super::WakeDeliveryState::Discarded;
+        delivery.discard_reason = Some(reason);
+        delivery.evidence_cleanup_pending = true;
+        Ok(())
+    }
+
+    async fn redrive_wake_delivery(&self, delivery_id: &str) -> Result<(), PluginError> {
+        let _transaction = self.transaction.lock().await;
+        let mut deliveries = self.wake_deliveries.lock().await;
+        let delivery = deliveries.get_mut(delivery_id).ok_or_else(|| {
+            PluginError::Session(format!("unknown wake delivery `{delivery_id}`"))
+        })?;
+        if delivery.state != super::WakeDeliveryState::Discarded {
+            return Err(PluginError::Session(format!(
+                "wake delivery `{delivery_id}` is not discarded"
+            )));
+        }
+        delivery.state = super::WakeDeliveryState::Pending;
+        delivery.attempts = 0;
+        delivery.first_attempt_ms = None;
+        delivery.expires_at_ms = self
+            .clock
+            .timestamp_ms()
+            .saturating_add(self.wake_delivery_config.delivery_expiry_ms);
+        delivery.discard_reason = None;
+        delivery.evidence_cleanup_pending = false;
+        Ok(())
+    }
+
+    async fn wake_evidence_cleanup_deliveries(
+        &self,
+        limit: usize,
+    ) -> Result<Vec<super::WakeDelivery>, PluginError> {
+        let _transaction = self.transaction.lock().await;
+        let deliveries = self.wake_deliveries.lock().await;
+        let mut pending = deliveries
+            .values()
+            .filter(|delivery| {
+                delivery.state != super::WakeDeliveryState::Pending
+                    && delivery.evidence_cleanup_pending
+            })
+            .cloned()
+            .collect::<Vec<_>>();
+        pending.sort_by(|left, right| {
+            left.wake
+                .target_session_id
+                .cmp(&right.wake.target_session_id)
+                .then_with(|| left.wake.process_id.cmp(&right.wake.process_id))
+                .then_with(|| left.wake.sequence.cmp(&right.wake.sequence))
+        });
+        pending.truncate(limit);
+        Ok(pending)
+    }
+
+    async fn mark_wake_evidence_cleaned(&self, delivery_id: &str) -> Result<(), PluginError> {
+        let _transaction = self.transaction.lock().await;
         let mut deliveries = self.wake_deliveries.lock().await;
         let delivery = deliveries.get_mut(delivery_id).ok_or_else(|| {
             PluginError::Session(format!("unknown wake delivery `{delivery_id}`"))
         })?;
         if delivery.state == super::WakeDeliveryState::Pending {
-            delivery.state = super::WakeDeliveryState::Discarded;
-            delivery.discard_reason = Some(reason);
+            return Err(PluginError::Session(format!(
+                "wake delivery `{delivery_id}` is pending"
+            )));
         }
-        Ok(())
-    }
-
-    async fn redrive_wake_delivery(&self, delivery_id: &str) -> Result<(), PluginError> {
-        let mut deliveries = self.wake_deliveries.lock().await;
-        let delivery = deliveries.get_mut(delivery_id).ok_or_else(|| {
-            PluginError::Session(format!("unknown wake delivery `{delivery_id}`"))
-        })?;
-        delivery.state = super::WakeDeliveryState::Pending;
-        delivery.attempts = 0;
-        delivery.first_attempt_ms = None;
-        delivery.expires_at_ms =
-            current_epoch_ms().saturating_add(self.wake_delivery_config.delivery_expiry_ms);
-        delivery.discard_reason = None;
+        delivery.evidence_cleanup_pending = false;
         Ok(())
     }
 
@@ -1188,7 +1240,7 @@ impl ProcessRegistry for TestLocalProcessRegistry {
         lease_ttl_ms: u64,
     ) -> Result<ProcessLeaseClaimOutcome, PluginError> {
         let mut leases = self.leases.lock().await;
-        let now = current_epoch_ms();
+        let now = self.clock.timestamp_ms();
         if let Some(current) = leases.get_mut(process_id)
             && !current.lease_token.is_empty()
             && current.expires_at_epoch_ms > now
@@ -1223,7 +1275,7 @@ impl ProcessRegistry for TestLocalProcessRegistry {
         lease_ttl_ms: u64,
     ) -> Result<ProcessLeaseClaimOutcome, PluginError> {
         let mut leases = self.leases.lock().await;
-        let now = current_epoch_ms();
+        let now = self.clock.timestamp_ms();
         let Some(current) = leases.get(process_id) else {
             let lease = acquire_test_lease(process_id, owner, 1, now, lease_ttl_ms);
             leases.insert(process_id.to_string(), lease.clone());
@@ -1252,7 +1304,7 @@ impl ProcessRegistry for TestLocalProcessRegistry {
         lease_ttl_ms: u64,
     ) -> Result<ProcessLease, PluginError> {
         let mut leases = self.leases.lock().await;
-        let now = current_epoch_ms();
+        let now = self.clock.timestamp_ms();
         let live = leases.get(&lease.process_id).filter(|current| {
             !current.lease_token.is_empty()
                 && current.owner.same_incarnation(&lease.owner)

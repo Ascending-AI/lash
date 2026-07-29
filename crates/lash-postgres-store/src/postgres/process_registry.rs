@@ -30,7 +30,7 @@ impl ProcessRegistry for PostgresProcessRegistry {
                 registration.id, existing.registration_hash, registration_hash
             )));
         }
-        let now = current_epoch_ms();
+        let now = self.clock.timestamp_ms();
         let record =
             ProcessRecord::from_prepared_registration(registration, registration_hash, now);
         let record_json = serde_json::to_string(&record).map_err(process_decode_error)?;
@@ -185,7 +185,7 @@ impl ProcessRegistry for PostgresProcessRegistry {
             &mut tx,
             &mut record,
             request,
-            current_epoch_ms(),
+            self.clock.timestamp_ms(),
             self.wake_delivery_config,
         )
         .await?;
@@ -381,7 +381,8 @@ impl ProcessRegistry for PostgresProcessRegistry {
         }
         let discarded_wake_delivery_count = sqlx::query(
             "UPDATE lash_process_wake_deliveries
-             SET state = 'discarded', discard_reason = 'target_gone'
+             SET state = 'discarded', discard_reason = 'target_gone',
+                 evidence_cleanup_pending = TRUE
              WHERE target_session_id = $1 AND state = 'pending'",
         )
         .bind(session_id)
@@ -454,7 +455,7 @@ impl ProcessRegistry for PostgresProcessRegistry {
         let mut record = load_process_tx(&mut tx, process_id)
             .await?
             .ok_or_else(|| PluginError::Session(format!("unknown process `{process_id}`")))?;
-        let occurred_at_ms = current_epoch_ms();
+        let occurred_at_ms = self.clock.timestamp_ms();
         let result = append_process_event_tx(
             &mut tx,
             &mut record,
@@ -482,7 +483,7 @@ impl ProcessRegistry for PostgresProcessRegistry {
             &mut tx, process_id, &record, authority, None, now_ms,
         )
         .await?;
-        let occurred_at_ms = current_epoch_ms();
+        let occurred_at_ms = self.clock.timestamp_ms();
         let result = append_process_event_tx(
             &mut tx,
             &mut record,
@@ -619,7 +620,7 @@ impl ProcessRegistry for PostgresProcessRegistry {
         .fetch_one(&mut *tx)
         .await
         .map_err(plugin_sqlx_error)?;
-        let occurred_at_ms = current_epoch_ms();
+        let occurred_at_ms = self.clock.timestamp_ms();
         let prepared = lash_core::runtime::prepare_process_event_append(
             &record,
             request,
@@ -628,7 +629,13 @@ impl ProcessRegistry for PostgresProcessRegistry {
             occurred_at_ms,
         )?;
         match prepared {
-            lash_core::ProcessEventAppendPlan::Replay { repair_record, .. } => {
+            lash_core::ProcessEventAppendPlan::Replay {
+                repair_record,
+                wake_delivery,
+                ..
+            } => {
+                insert_wake_delivery_tx(&mut tx, wake_delivery.as_ref(), self.wake_delivery_config)
+                    .await?;
                 if let Some(repaired) = repair_record {
                     record = repaired;
                     save_process_tx(&mut tx, &record).await?;
@@ -641,7 +648,7 @@ impl ProcessRegistry for PostgresProcessRegistry {
                 payload_hash,
                 projected_record,
                 occurred_at_ms,
-                ..
+                wake_delivery,
             } => {
                 sqlx::query(
                     "INSERT INTO lash_process_events (
@@ -662,6 +669,8 @@ impl ProcessRegistry for PostgresProcessRegistry {
                 .map_err(plugin_sqlx_error)?;
                 record = projected_record;
                 save_process_tx(&mut tx, &record).await?;
+                insert_wake_delivery_tx(&mut tx, wake_delivery.as_ref(), self.wake_delivery_config)
+                    .await?;
                 tx.commit().await.map_err(plugin_sqlx_error)?;
                 Ok(lash_core::ProcessCompletionOutcome::Committed(record))
             }
@@ -707,7 +716,9 @@ impl ProcessRegistry for PostgresProcessRegistry {
             replay_lookup,
             now,
         )?;
-        if matches!(prepared, lash_core::ProcessEventAppendPlan::Replay { .. }) {
+        if let lash_core::ProcessEventAppendPlan::Replay { wake_delivery, .. } = &prepared {
+            insert_wake_delivery_tx(&mut tx, wake_delivery.as_ref(), self.wake_delivery_config)
+                .await?;
             tx.commit().await.map_err(plugin_sqlx_error)?;
             return Ok(lash_core::ProcessCompletionOutcome::AlreadyApplied { stored: record });
         }
@@ -727,7 +738,7 @@ impl ProcessRegistry for PostgresProcessRegistry {
             payload_hash,
             projected_record,
             occurred_at_ms,
-            ..
+            wake_delivery,
         } = prepared
         else {
             unreachable!("replay returned above")
@@ -750,6 +761,7 @@ impl ProcessRegistry for PostgresProcessRegistry {
         .map_err(plugin_sqlx_error)?;
         record = projected_record;
         save_process_tx(&mut tx, &record).await?;
+        insert_wake_delivery_tx(&mut tx, wake_delivery.as_ref(), self.wake_delivery_config).await?;
         let released = sqlx::query(
             "UPDATE lash_process_leases
              SET lease_owner_id = NULL,
@@ -862,7 +874,7 @@ impl ProcessRegistry for PostgresProcessRegistry {
             &mut tx,
             &mut record,
             append,
-            current_epoch_ms(),
+            self.clock.timestamp_ms(),
             self.wake_delivery_config,
         )
         .await?;
@@ -1007,17 +1019,28 @@ impl ProcessRegistry for PostgresProcessRegistry {
         }
         let mut tx = self.pool.begin().await.map_err(plugin_sqlx_error)?;
         let ids = sqlx::query_scalar::<_, String>(
-            "SELECT delivery_id FROM lash_process_wake_deliveries
-             WHERE state = 'pending'
-             ORDER BY expires_at_ms ASC, delivery_id ASC
+            "SELECT candidate.delivery_id
+             FROM lash_process_wake_deliveries AS candidate
+             WHERE candidate.state = 'pending'
+               AND NOT EXISTS (
+                   SELECT 1
+                   FROM lash_process_wake_deliveries AS earlier
+                   WHERE earlier.state = 'pending'
+                     AND earlier.target_session_id = candidate.target_session_id
+                     AND earlier.process_id = candidate.process_id
+                     AND earlier.sequence < candidate.sequence
+               )
+             ORDER BY candidate.target_session_id ASC,
+                      candidate.process_id ASC,
+                      candidate.sequence ASC
              LIMIT $1
-             FOR UPDATE",
+             FOR UPDATE OF candidate SKIP LOCKED",
         )
         .bind(limit as i64)
         .fetch_all(&mut *tx)
         .await
         .map_err(plugin_sqlx_error)?;
-        let now = current_epoch_ms() as i64;
+        let now = self.clock.timestamp_ms() as i64;
         let mut deliveries = Vec::with_capacity(ids.len());
         for id in ids {
             sqlx::query(
@@ -1044,7 +1067,7 @@ impl ProcessRegistry for PostgresProcessRegistry {
         let rows = if let Some(state) = state {
             sqlx::query(
                 "SELECT delivery_id, state, attempts, first_attempt_ms, expires_at_ms,
-                        discard_reason, delivery_json
+                        discard_reason, evidence_cleanup_pending, delivery_json
                  FROM lash_process_wake_deliveries
                  WHERE state = $1
                  ORDER BY delivery_id ASC",
@@ -1056,7 +1079,7 @@ impl ProcessRegistry for PostgresProcessRegistry {
         } else {
             sqlx::query(
                 "SELECT delivery_id, state, attempts, first_attempt_ms, expires_at_ms,
-                        discard_reason, delivery_json
+                        discard_reason, evidence_cleanup_pending, delivery_json
                  FROM lash_process_wake_deliveries
                  ORDER BY delivery_id ASC",
             )
@@ -1097,13 +1120,16 @@ impl ProcessRegistry for PostgresProcessRegistry {
     }
 
     async fn redrive_wake_delivery(&self, delivery_id: &str) -> Result<(), PluginError> {
-        let expires_at_ms =
-            current_epoch_ms().saturating_add(self.wake_delivery_config.delivery_expiry_ms);
+        let expires_at_ms = self
+            .clock
+            .timestamp_ms()
+            .saturating_add(self.wake_delivery_config.delivery_expiry_ms);
         let changed = sqlx::query(
             "UPDATE lash_process_wake_deliveries
              SET state = 'pending', attempts = 0, first_attempt_ms = NULL,
-                 expires_at_ms = $2, discard_reason = NULL
-             WHERE delivery_id = $1",
+                 expires_at_ms = $2, discard_reason = NULL,
+                 evidence_cleanup_pending = FALSE
+             WHERE delivery_id = $1 AND state = 'discarded'",
         )
         .bind(delivery_id)
         .bind(expires_at_ms as i64)
@@ -1113,7 +1139,48 @@ impl ProcessRegistry for PostgresProcessRegistry {
         .rows_affected();
         if changed == 0 {
             return Err(PluginError::Session(format!(
-                "unknown wake delivery `{delivery_id}`"
+                "wake delivery `{delivery_id}` is not discarded or does not exist"
+            )));
+        }
+        Ok(())
+    }
+
+    async fn wake_evidence_cleanup_deliveries(
+        &self,
+        limit: usize,
+    ) -> Result<Vec<lash_core::WakeDelivery>, PluginError> {
+        if limit == 0 {
+            return Ok(Vec::new());
+        }
+        let rows = sqlx::query(
+            "SELECT delivery_id, state, attempts, first_attempt_ms, expires_at_ms,
+                    discard_reason, evidence_cleanup_pending, delivery_json
+             FROM lash_process_wake_deliveries
+             WHERE state <> 'pending' AND evidence_cleanup_pending = TRUE
+             ORDER BY target_session_id ASC, process_id ASC, sequence ASC
+             LIMIT $1",
+        )
+        .bind(limit as i64)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(plugin_sqlx_error)?;
+        rows.into_iter().map(decode_wake_delivery_row).collect()
+    }
+
+    async fn mark_wake_evidence_cleaned(&self, delivery_id: &str) -> Result<(), PluginError> {
+        let changed = sqlx::query(
+            "UPDATE lash_process_wake_deliveries
+             SET evidence_cleanup_pending = FALSE
+             WHERE delivery_id = $1 AND state <> 'pending'",
+        )
+        .bind(delivery_id)
+        .execute(&self.pool)
+        .await
+        .map_err(plugin_sqlx_error)?
+        .rows_affected();
+        if changed == 0 {
+            return Err(PluginError::Session(format!(
+                "wake delivery `{delivery_id}` is pending or does not exist"
             )));
         }
         Ok(())

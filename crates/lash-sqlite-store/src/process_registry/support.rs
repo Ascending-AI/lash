@@ -226,7 +226,7 @@ impl SqliteProcessRegistry {
         }
     }
 
-    fn insert_wake_delivery_conn(
+    pub(crate) fn insert_wake_delivery_conn(
         conn: &Connection,
         wake: Option<&lash_core::ProcessWakeDelivery>,
         config: lash_core::WakeDeliveryConfig,
@@ -238,8 +238,9 @@ impl SqliteProcessRegistry {
         conn.execute(
             "INSERT OR IGNORE INTO process_wake_deliveries (
                 delivery_id, process_id, target_session_id, sequence, state,
-                attempts, first_attempt_ms, expires_at_ms, discard_reason, delivery_json
-             ) VALUES (?1, ?2, ?3, ?4, 'pending', 0, NULL, ?5, NULL, ?6)",
+                attempts, first_attempt_ms, expires_at_ms, discard_reason,
+                evidence_cleanup_pending, delivery_json
+             ) VALUES (?1, ?2, ?3, ?4, 'pending', 0, NULL, ?5, NULL, 0, ?6)",
             params![
                 delivery.delivery_id,
                 delivery.wake.process_id,

@@ -21,11 +21,13 @@ pub struct WakeDeliveryDriveReport {
     pub discarded_expired: usize,
     pub discarded_target_gone: usize,
     pub retryable_failures: usize,
+    pub evidence_cleaned: usize,
 }
 
 #[derive(Clone)]
 pub struct WakeDeliveryDriver {
     inner: Arc<WakeDeliveryDriverInner>,
+    lifetime: Arc<WakeDeliveryDriverLifetime>,
 }
 
 struct WakeDeliveryDriverInner {
@@ -34,11 +36,14 @@ struct WakeDeliveryDriverInner {
     queued_work_driver: Option<QueuedWorkDriver>,
     clock: Arc<dyn Clock>,
     notify: Notify,
+}
+
+struct WakeDeliveryDriverLifetime {
     shutdown: CancellationToken,
     tasks: TaskTracker,
 }
 
-impl Drop for WakeDeliveryDriverInner {
+impl Drop for WakeDeliveryDriverLifetime {
     fn drop(&mut self) {
         self.shutdown.cancel();
         self.tasks.close();
@@ -60,13 +65,16 @@ impl WakeDeliveryDriver {
                 queued_work_driver,
                 clock,
                 notify: Notify::new(),
+            }),
+            lifetime: Arc::new(WakeDeliveryDriverLifetime {
                 shutdown: CancellationToken::new(),
                 tasks: TaskTracker::new(),
             }),
         };
-        let running = driver.clone();
-        driver.inner.tasks.spawn(async move {
-            running.run_loop().await;
+        let inner = Arc::clone(&driver.inner);
+        let shutdown = driver.lifetime.shutdown.clone();
+        driver.lifetime.tasks.spawn(async move {
+            Self::run_loop(inner, shutdown).await;
         });
         driver
     }
@@ -74,6 +82,20 @@ impl WakeDeliveryDriver {
     /// Wake the autonomous loop after a process append commits an outbox row.
     pub fn nudge(&self) {
         self.inner.notify.notify_one();
+    }
+
+    /// Stop the autonomous loop and wait until it has released its store
+    /// handles. The runtime calls this during teardown.
+    pub async fn shutdown(&self) {
+        self.lifetime.shutdown.cancel();
+        self.lifetime.tasks.close();
+        self.lifetime.tasks.wait().await;
+    }
+
+    /// Request shutdown without waiting. Used by synchronous runtime teardown.
+    pub fn request_shutdown(&self) {
+        self.lifetime.shutdown.cancel();
+        self.lifetime.tasks.close();
     }
 
     /// Host/runbook lever: synchronously run one bounded delivery scan.
@@ -101,10 +123,28 @@ impl WakeDeliveryDriver {
         for delivery in registry.pending_wake_deliveries(limit).await? {
             report.inspected += 1;
             if clock.timestamp_ms() >= delivery.expires_at_ms {
-                registry
+                match registry
                     .discard_wake_delivery(&delivery.delivery_id, WakeDiscardReason::Expired)
-                    .await?;
-                report.discarded_expired += 1;
+                    .await
+                {
+                    Ok(()) => {
+                        tracing::info!(
+                            delivery_id = %delivery.delivery_id,
+                            target_session_id = %delivery.wake.target_session_id,
+                            reason = "expired",
+                            "process wake delivery discarded"
+                        );
+                        report.discarded_expired += 1;
+                    }
+                    Err(PluginError::WakeDeliveryNotPending { state, .. }) => {
+                        tracing::debug!(
+                            delivery_id = %delivery.delivery_id,
+                            ?state,
+                            "concurrent process wake transition won before expiry discard"
+                        );
+                    }
+                    Err(error) => return Err(error),
+                }
                 continue;
             }
 
@@ -117,17 +157,56 @@ impl WakeDeliveryDriver {
             let store = match session_store_factory.open_existing_store(&request).await {
                 Ok(Some(store)) => store,
                 Ok(None) => {
-                    // Consult the permanent tombstone as explicit diagnostic
-                    // evidence; absence is still terminal because delivery is
-                    // not authorized to create a target session.
-                    let _was_deleted = session_store_factory
+                    let was_deleted = match session_store_factory
                         .session_was_deleted(&target_session_id)
                         .await
-                        .map_err(PluginError::Session)?;
-                    registry
-                        .discard_wake_delivery(&delivery.delivery_id, WakeDiscardReason::TargetGone)
-                        .await?;
-                    report.discarded_target_gone += 1;
+                    {
+                        Ok(was_deleted) => was_deleted,
+                        Err(error) => {
+                            tracing::warn!(
+                                delivery_id = %delivery.delivery_id,
+                                target_session_id = %target_session_id,
+                                error = %error,
+                                "process wake target tombstone lookup failed; delivery remains pending"
+                            );
+                            report.retryable_failures += 1;
+                            continue;
+                        }
+                    };
+                    if was_deleted {
+                        match registry
+                            .discard_wake_delivery(
+                                &delivery.delivery_id,
+                                WakeDiscardReason::TargetGone,
+                            )
+                            .await
+                        {
+                            Ok(()) => {
+                                tracing::info!(
+                                    delivery_id = %delivery.delivery_id,
+                                    target_session_id = %target_session_id,
+                                    reason = "target_gone",
+                                    "process wake delivery discarded"
+                                );
+                                report.discarded_target_gone += 1;
+                            }
+                            Err(PluginError::WakeDeliveryNotPending { state, .. }) => {
+                                tracing::debug!(
+                                    delivery_id = %delivery.delivery_id,
+                                    ?state,
+                                    "concurrent process wake transition won before target-gone discard"
+                                );
+                            }
+                            Err(error) => return Err(error),
+                        }
+                    } else {
+                        tracing::debug!(
+                            delivery_id = %delivery.delivery_id,
+                            target_session_id = %target_session_id,
+                            "process wake target has never existed; delivery remains pending"
+                        );
+                        report.retryable_failures += 1;
+                    }
                     continue;
                 }
                 Err(error) => {
@@ -146,12 +225,60 @@ impl WakeDeliveryDriver {
                 .enqueue_queued_work(process_wake_batch_draft(delivery.wake.clone()))
                 .await
             {
-                Ok(_) => {
-                    registry.mark_wake_enqueued(&delivery.delivery_id).await?;
-                    if let Some(driver) = queued_work_driver.as_ref() {
-                        driver.wake_pending(Some(&target_session_id), "process_wake");
+                Ok(enqueued) => {
+                    tracing::info!(
+                        delivery_id = %delivery.delivery_id,
+                        target_session_id = %target_session_id,
+                        batch_id = %enqueued.batch_id,
+                        source_key = ?enqueued.source_key,
+                        "process wake enqueued"
+                    );
+                    match registry.mark_wake_enqueued(&delivery.delivery_id).await {
+                        Ok(()) => {
+                            tracing::info!(
+                                delivery_id = %delivery.delivery_id,
+                                state = "enqueued",
+                                "process wake delivery marked terminal"
+                            );
+                            if let Some(driver) = queued_work_driver.as_ref() {
+                                driver.wake_pending(Some(&target_session_id), "process_wake");
+                            }
+                            report.enqueued += 1;
+                        }
+                        Err(PluginError::WakeDeliveryNotPending {
+                            state: crate::WakeDeliveryState::Enqueued,
+                            ..
+                        }) => {
+                            tracing::debug!(
+                                delivery_id = %delivery.delivery_id,
+                                "concurrent process wake driver already marked delivery enqueued"
+                            );
+                        }
+                        Err(PluginError::WakeDeliveryNotPending {
+                            state: crate::WakeDeliveryState::Discarded,
+                            ..
+                        }) => {
+                            let converged = store
+                                .compensate_queued_work_batch(
+                                    &target_session_id,
+                                    &enqueued.batch_id,
+                                )
+                                .await
+                                .map_err(|error| PluginError::Session(error.to_string()))?;
+                            if !converged {
+                                return Err(PluginError::Session(format!(
+                                    "discarded wake delivery `{}` could not remove queued batch `{}`",
+                                    delivery.delivery_id, enqueued.batch_id
+                                )));
+                            }
+                            tracing::info!(
+                                delivery_id = %delivery.delivery_id,
+                                batch_id = %enqueued.batch_id,
+                                "compensated process wake enqueue after terminal discard"
+                            );
+                        }
+                        Err(error) => return Err(error),
                     }
-                    report.enqueued += 1;
                 }
                 Err(error) => {
                     tracing::warn!(
@@ -164,13 +291,61 @@ impl WakeDeliveryDriver {
                 }
             }
         }
+        for delivery in registry.wake_evidence_cleanup_deliveries(limit).await? {
+            let target_session_id = delivery.wake.target_session_id.clone();
+            let request = SessionStoreCreateRequest {
+                session_id: target_session_id.clone(),
+                relation: SessionRelation::default(),
+                policy: SessionPolicy::default(),
+            };
+            match session_store_factory.open_existing_store(&request).await {
+                Ok(Some(store)) => {
+                    store
+                        .prune_consumed_wake_source_keys(
+                            &target_session_id,
+                            &[delivery.source_key()],
+                        )
+                        .await
+                        .map_err(|error| PluginError::Session(error.to_string()))?;
+                }
+                Ok(None) => {}
+                Err(error) => {
+                    tracing::warn!(
+                        delivery_id = %delivery.delivery_id,
+                        target_session_id = %target_session_id,
+                        error = %error,
+                        "process wake evidence cleanup target lookup failed"
+                    );
+                    report.retryable_failures += 1;
+                    continue;
+                }
+            }
+            registry
+                .mark_wake_evidence_cleaned(&delivery.delivery_id)
+                .await?;
+            tracing::info!(
+                delivery_id = %delivery.delivery_id,
+                target_session_id = %target_session_id,
+                source_key = %delivery.source_key(),
+                "process wake consumed evidence reconciled after terminal delivery"
+            );
+            report.evidence_cleaned += 1;
+        }
         Ok(report)
     }
 
-    async fn run_loop(self) {
+    async fn run_loop(inner: Arc<WakeDeliveryDriverInner>, shutdown: CancellationToken) {
         let mut poll = POLL_INITIAL;
         loop {
-            let report = match self.drive_pending().await {
+            let report = match Self::drive_pending_once(
+                Arc::clone(&inner.registry),
+                Arc::clone(&inner.session_store_factory),
+                inner.queued_work_driver.clone(),
+                Arc::clone(&inner.clock),
+                DELIVERY_BATCH_SIZE,
+            )
+            .await
+            {
                 Ok(report) => report,
                 Err(error) => {
                     tracing::warn!(error = %error, "process wake delivery scan failed");
@@ -180,17 +355,27 @@ impl WakeDeliveryDriver {
                     }
                 }
             };
-            if report.inspected >= DELIVERY_BATCH_SIZE {
+            let made_progress = report.enqueued
+                + report.discarded_expired
+                + report.discarded_target_gone
+                + report.evidence_cleaned
+                > 0;
+            let delay = if made_progress
+                && report.retryable_failures == 0
+                && report.inspected >= DELIVERY_BATCH_SIZE
+            {
                 poll = POLL_INITIAL;
-                continue;
-            }
-            if report.inspected > 0 && report.retryable_failures == 0 {
+                Duration::ZERO
+            } else {
+                poll
+            };
+            if made_progress && report.retryable_failures == 0 {
                 poll = POLL_INITIAL;
             }
             tokio::select! {
-                () = self.inner.shutdown.cancelled() => return,
-                () = self.inner.notify.notified() => poll = POLL_INITIAL,
-                () = tokio::time::sleep(poll) => {
+                () = shutdown.cancelled() => return,
+                () = inner.notify.notified() => poll = POLL_INITIAL,
+                () = tokio::time::sleep(delay) => {
                     poll = poll.saturating_mul(2).min(POLL_MAX);
                 }
             }

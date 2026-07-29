@@ -20,6 +20,7 @@ pub(super) async fn complete_process(
 ) -> Result<lash_core::ProcessCompletionOutcome, lash_core::PluginError> {
     let process_id = process_id.to_string();
     let now = registry.clock.timestamp_ms();
+    let wake_delivery_config = registry.wake_delivery_config;
     registry
         .conn
         .write_flow(move |tx| {
@@ -65,8 +66,14 @@ pub(super) async fn complete_process(
                 match prepared {
                     lash_core::ProcessEventAppendPlan::Replay {
                         repair_record,
+                        wake_delivery,
                         ..
                     } => {
+                        SqliteProcessRegistry::insert_wake_delivery_conn(
+                            tx,
+                            wake_delivery.as_ref(),
+                            wake_delivery_config,
+                        )?;
                         if let Some(repaired) = repair_record {
                             record = repaired;
                             SqliteProcessRegistry::save_process_conn(tx, &record)?;
@@ -80,7 +87,7 @@ pub(super) async fn complete_process(
                         payload_hash,
                         projected_record,
                         occurred_at_ms,
-                        ..
+                        wake_delivery,
                     } => {
                         tx.execute(
                             "INSERT INTO process_events (
@@ -100,6 +107,11 @@ pub(super) async fn complete_process(
                         .map_err(process_sqlite_error)?;
                         record = projected_record;
                         SqliteProcessRegistry::save_process_conn(tx, &record)?;
+                        SqliteProcessRegistry::insert_wake_delivery_conn(
+                            tx,
+                            wake_delivery.as_ref(),
+                            wake_delivery_config,
+                        )?;
                         Ok(lash_core::ProcessCompletionOutcome::Committed(record))
                     }
                 }
@@ -116,6 +128,7 @@ pub(super) async fn complete_process_with_lease(
 ) -> Result<lash_core::ProcessCompletionOutcome, lash_core::PluginError> {
     let lease = lease.clone();
     let now = registry.clock.timestamp_ms();
+    let wake_delivery_config = registry.wake_delivery_config;
     registry.conn
         .write_flow(move |tx| {
             Ok(tx_outcome((|| {
@@ -157,6 +170,16 @@ pub(super) async fn complete_process_with_lease(
                     now,
                 )?;
                 if matches!(prepared, lash_core::ProcessEventAppendPlan::Replay { .. }) {
+                    if let lash_core::ProcessEventAppendPlan::Replay {
+                        wake_delivery, ..
+                    } = &prepared
+                    {
+                        SqliteProcessRegistry::insert_wake_delivery_conn(
+                            tx,
+                            wake_delivery.as_ref(),
+                            wake_delivery_config,
+                        )?;
+                    }
                     return Ok(lash_core::ProcessCompletionOutcome::AlreadyApplied {
                         stored: record,
                     });
@@ -177,7 +200,7 @@ pub(super) async fn complete_process_with_lease(
                     payload_hash,
                     projected_record,
                     occurred_at_ms,
-                    ..
+                    wake_delivery,
                 } = prepared
                 else {
                     unreachable!("replay returned above")
@@ -200,6 +223,11 @@ pub(super) async fn complete_process_with_lease(
                 .map_err(process_sqlite_error)?;
                 record = projected_record;
                 SqliteProcessRegistry::save_process_conn(tx, &record)?;
+                SqliteProcessRegistry::insert_wake_delivery_conn(
+                    tx,
+                    wake_delivery.as_ref(),
+                    wake_delivery_config,
+                )?;
                 tx.execute(
                     "UPDATE process_leases
                      SET lease_owner_id = NULL,

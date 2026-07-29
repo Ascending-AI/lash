@@ -69,8 +69,8 @@ impl crate::store::StoreMaintenance for InMemorySessionStore {
 
     async fn prune_consumed_wake_source_keys(
         &self,
-        cutoff_epoch_ms: u64,
-        up_to_consumed_at_ms: Option<u64>,
+        session_id: &str,
+        source_keys: &[String],
     ) -> Result<crate::store::ConsumedWakePruneReport, crate::store::StoreError> {
         let _transaction = self
             .write_transaction
@@ -81,9 +81,8 @@ impl crate::store::StoreMaintenance for InMemorySessionStore {
             .lock()
             .expect("lock consumed wake source keys");
         let before = consumed.len();
-        consumed.retain(|_, consumed_at_ms| {
-            *consumed_at_ms >= cutoff_epoch_ms
-                || up_to_consumed_at_ms.is_some_and(|watermark| *consumed_at_ms > watermark)
+        consumed.retain(|(stored_session_id, source_key), _| {
+            stored_session_id != session_id || !source_keys.contains(source_key)
         });
         Ok(crate::store::ConsumedWakePruneReport {
             removed_source_key_count: before.saturating_sub(consumed.len()),

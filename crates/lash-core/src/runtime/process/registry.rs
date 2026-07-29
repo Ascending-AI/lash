@@ -25,47 +25,38 @@ pub struct ProcessPruneReport {
     pub pruned_events: usize,
 }
 
-pub const DEFAULT_WAKE_EVIDENCE_RETENTION_MS: u64 = 7 * 24 * 60 * 60 * 1_000;
+pub const DEFAULT_WAKE_DELIVERY_EXPIRY_MS: u64 = 7 * 24 * 60 * 60 * 1_000;
 
-/// Host-owned bounds for process-wake redelivery and receiver dedupe evidence.
+/// Host-owned bound for process-wake redelivery.
+///
+/// Exactly-once delivery does not depend on comparing clocks across the
+/// process registry and target session store. Receiver-side consumed evidence
+/// is retained while the corresponding sender delivery is `pending`. Once the
+/// sender row is terminal (`enqueued` or `discarded`), it cannot redeliver and
+/// maintenance may prune that exact `(session_id, source_key)` evidence row.
+/// `delivery_expiry_ms` is therefore only a pending-delivery liveness bound,
+/// evaluated with the runtime's injected clock.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct WakeDeliveryConfig {
     pub delivery_expiry_ms: u64,
-    pub evidence_retention_ms: u64,
 }
 
 impl Default for WakeDeliveryConfig {
     fn default() -> Self {
-        Self::from_evidence_retention_ms(DEFAULT_WAKE_EVIDENCE_RETENTION_MS)
-            .expect("default wake evidence retention is valid")
+        Self {
+            delivery_expiry_ms: DEFAULT_WAKE_DELIVERY_EXPIRY_MS,
+        }
     }
 }
 
 impl WakeDeliveryConfig {
-    /// Derive the longest valid sender window from the receiver evidence floor.
-    pub fn from_evidence_retention_ms(evidence_retention_ms: u64) -> Result<Self, PluginError> {
-        if evidence_retention_ms < 2 {
+    pub fn new(delivery_expiry_ms: u64) -> Result<Self, PluginError> {
+        if delivery_expiry_ms == 0 {
             return Err(PluginError::Session(
-                "process wake evidence retention must be at least 2ms".to_string(),
+                "process wake delivery expiry must be greater than zero".to_string(),
             ));
         }
-        Ok(Self {
-            delivery_expiry_ms: evidence_retention_ms - 1,
-            evidence_retention_ms,
-        })
-    }
-
-    pub fn new(delivery_expiry_ms: u64, evidence_retention_ms: u64) -> Result<Self, PluginError> {
-        if delivery_expiry_ms >= evidence_retention_ms {
-            return Err(PluginError::Session(format!(
-                "process wake delivery expiry ({delivery_expiry_ms}ms) must be strictly shorter \
-                 than consumed-wake evidence retention ({evidence_retention_ms}ms)"
-            )));
-        }
-        Ok(Self {
-            delivery_expiry_ms,
-            evidence_retention_ms,
-        })
+        Ok(Self { delivery_expiry_ms })
     }
 }
 
@@ -117,6 +108,9 @@ pub struct WakeDelivery {
     pub first_attempt_ms: Option<u64>,
     pub expires_at_ms: u64,
     pub discard_reason: Option<WakeDiscardReason>,
+    /// Terminal sender rows remain in this reconciliation lane until the
+    /// receiver confirms exact source-key evidence cleanup.
+    pub evidence_cleanup_pending: bool,
 }
 
 impl WakeDelivery {
@@ -143,6 +137,7 @@ impl WakeDelivery {
             attempts: 0,
             first_attempt_ms: None,
             discard_reason: None,
+            evidence_cleanup_pending: false,
         })
     }
 
@@ -462,6 +457,16 @@ pub trait ProcessRegistry: Send + Sync {
     ) -> Result<(), PluginError>;
 
     async fn redrive_wake_delivery(&self, delivery_id: &str) -> Result<(), PluginError>;
+
+    /// Return terminal deliveries whose exact receiver evidence still needs
+    /// reconciliation.
+    async fn wake_evidence_cleanup_deliveries(
+        &self,
+        limit: usize,
+    ) -> Result<Vec<WakeDelivery>, PluginError>;
+
+    /// Confirm exact receiver evidence cleanup for a terminal delivery.
+    async fn mark_wake_evidence_cleaned(&self, delivery_id: &str) -> Result<(), PluginError>;
 
     /// All non-terminal process records, in stable `process_id` order.
     ///

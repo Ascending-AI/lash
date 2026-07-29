@@ -309,6 +309,7 @@ CREATE TABLE IF NOT EXISTS process_wake_deliveries (
     first_attempt_ms  INTEGER,
     expires_at_ms     INTEGER NOT NULL,
     discard_reason    TEXT,
+    evidence_cleanup_pending INTEGER NOT NULL DEFAULT 0,
     delivery_json     TEXT NOT NULL,
     FOREIGN KEY (process_id) REFERENCES processes(process_id) ON DELETE CASCADE
 );
@@ -371,7 +372,10 @@ CREATE TABLE IF NOT EXISTS process_segment_handovers (
 //
 // Bumped to 14 for the durable process-wake outbox and removal of the wake-ack
 // lane. Pre-14 process registries are rejected and recreated.
-pub(crate) const PROCESS_SCHEMA_VERSION: i32 = 14;
+//
+// Bumped to 15 so terminal wake deliveries retain a durable exact-evidence
+// cleanup reconciliation bit. Pre-15 registries are rejected and recreated.
+pub(crate) const PROCESS_SCHEMA_VERSION: i32 = 15;
 
 pub(crate) const TRIGGER_SCHEMA: &str = "
 CREATE TABLE IF NOT EXISTS trigger_subscriptions (

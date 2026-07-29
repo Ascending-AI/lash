@@ -107,7 +107,9 @@ const SCHEMA_COMPONENT: &str = "lash-postgres-store";
 // incarnation identity from session metadata and effect journals.
 // Bumped to 29 for the process-wake outbox and receiver-side consumed-wake
 // evidence. Pre-29 components are rejected and recreated.
-const SCHEMA_VERSION: i32 = 29;
+// Bumped to 30 so terminal wake deliveries retain a durable exact-evidence
+// cleanup reconciliation bit. Pre-30 components are rejected and recreated.
+const SCHEMA_VERSION: i32 = 30;
 const PROCESS_LEASE_SCHEMA_VERSION: u32 = lash_core::PROCESS_LEASE_SCHEMA_VERSION;
 
 #[derive(Clone)]
@@ -142,9 +144,65 @@ pub struct PostgresSessionStore {
 }
 
 #[derive(Clone)]
+struct WakeEnqueuePause {
+    paused: Arc<tokio::sync::Notify>,
+    resume: Arc<tokio::sync::Notify>,
+}
+
+static WAKE_ENQUEUE_PAUSE: std::sync::Mutex<Option<WakeEnqueuePause>> = std::sync::Mutex::new(None);
+
+#[doc(hidden)]
+pub struct PostgresWakeEnqueuePauseHandle {
+    paused: Arc<tokio::sync::Notify>,
+    resume: Arc<tokio::sync::Notify>,
+}
+
+impl PostgresWakeEnqueuePauseHandle {
+    pub async fn wait_until_paused(&self) {
+        self.paused.notified().await;
+    }
+
+    pub fn resume(&self) {
+        self.resume.notify_one();
+    }
+}
+
+#[doc(hidden)]
+pub fn pause_next_process_wake_enqueue_after_evidence_check() -> PostgresWakeEnqueuePauseHandle {
+    let pause = WakeEnqueuePause {
+        paused: Arc::new(tokio::sync::Notify::new()),
+        resume: Arc::new(tokio::sync::Notify::new()),
+    };
+    *WAKE_ENQUEUE_PAUSE.lock().expect("wake enqueue pause lock") = Some(pause.clone());
+    PostgresWakeEnqueuePauseHandle {
+        paused: pause.paused,
+        resume: pause.resume,
+    }
+}
+
+async fn run_process_wake_enqueue_pause() {
+    let pause = WAKE_ENQUEUE_PAUSE
+        .lock()
+        .expect("wake enqueue pause lock")
+        .take();
+    if let Some(pause) = pause {
+        pause.paused.notify_one();
+        pause.resume.notified().await;
+    }
+}
+
+#[derive(Clone)]
 pub struct PostgresProcessRegistry {
     pool: PgPool,
     wake_delivery_config: lash_core::WakeDeliveryConfig,
+    clock: Arc<dyn lash_core::Clock>,
+}
+
+impl PostgresProcessRegistry {
+    pub fn with_clock(mut self, clock: Arc<dyn lash_core::Clock>) -> Self {
+        self.clock = clock;
+        self
+    }
 }
 
 #[derive(Clone)]
@@ -318,6 +376,7 @@ impl PostgresStorage {
         PostgresProcessRegistry {
             pool: self.pool.clone(),
             wake_delivery_config: lash_core::WakeDeliveryConfig::default(),
+            clock: Arc::new(lash_core::SystemClock),
         }
     }
 
@@ -328,6 +387,7 @@ impl PostgresStorage {
         PostgresProcessRegistry {
             pool: self.pool.clone(),
             wake_delivery_config,
+            clock: Arc::new(lash_core::SystemClock),
         }
     }
 

@@ -6,6 +6,10 @@ impl crate::store::QueuedWorkStore for InMemorySessionStore {
         &self,
         batch: crate::QueuedWorkBatchDraft,
     ) -> Result<crate::QueuedWorkBatch, crate::store::StoreError> {
+        // This is the in-memory counterpart of the SQL transaction/advisory
+        // source lock: evidence lookup, live-row lookup, and insertion all run
+        // while the single write-transaction mutex is held. Queue completion
+        // takes the same mutex before inserting evidence and deleting the row.
         let _transaction = self
             .write_transaction
             .lock()
@@ -251,6 +255,25 @@ impl crate::store::QueuedWorkStore for InMemorySessionStore {
             return Ok(None);
         }
         Ok(Some(queued.remove(index).batch))
+    }
+
+    async fn compensate_queued_work_batch(
+        &self,
+        session_id: &str,
+        batch_id: &str,
+    ) -> Result<bool, crate::store::StoreError> {
+        let _transaction = self
+            .write_transaction
+            .lock()
+            .expect("lock in-memory write transaction");
+        let mut queued = self.queued_work.lock().expect("lock queued work");
+        let Some(index) = queued.iter().position(|entry| {
+            entry.batch.session_id == session_id && entry.batch.batch_id == batch_id
+        }) else {
+            return Ok(true);
+        };
+        queued.remove(index);
+        Ok(true)
     }
 
     async fn list_queued_work(

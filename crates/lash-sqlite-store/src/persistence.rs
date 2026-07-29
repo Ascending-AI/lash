@@ -1632,6 +1632,26 @@ impl QueuedWorkStore for Store {
             .map_err(sqlite_error)?
     }
 
+    async fn compensate_queued_work_batch(
+        &self,
+        session_id: &str,
+        batch_id: &str,
+    ) -> Result<bool, StoreError> {
+        let session_id = session_id.to_string();
+        let batch_id = batch_id.to_string();
+        self.conn
+            .write(move |tx| {
+                tx.execute(
+                    "DELETE FROM queued_work_batches
+                     WHERE session_id = ?1 AND batch_id = ?2",
+                    params![session_id, batch_id],
+                )
+            })
+            .await
+            .map_err(sqlite_error)?;
+        Ok(true)
+    }
+
     async fn list_queued_work(&self, session_id: &str) -> Result<Vec<QueuedWorkBatch>, StoreError> {
         let session_id = session_id.to_string();
         self.conn
@@ -2185,21 +2205,23 @@ impl StoreMaintenance for Store {
 
     async fn prune_consumed_wake_source_keys(
         &self,
-        cutoff_epoch_ms: u64,
-        up_to_consumed_at_ms: Option<u64>,
+        session_id: &str,
+        source_keys: &[String],
     ) -> Result<lash_core::ConsumedWakePruneReport, StoreError> {
+        let session_id = session_id.to_string();
+        let source_keys = source_keys.to_vec();
         let removed_source_key_count = self
             .conn
             .write(move |tx| {
-                tx.execute(
-                    "DELETE FROM consumed_wake_source_keys
-                     WHERE consumed_at_ms < ?1
-                       AND (?2 IS NULL OR consumed_at_ms <= ?2)",
-                    params![
-                        cutoff_epoch_ms as i64,
-                        up_to_consumed_at_ms.map(|value| value as i64)
-                    ],
-                )
+                let mut removed = 0;
+                for source_key in source_keys {
+                    removed += tx.execute(
+                        "DELETE FROM consumed_wake_source_keys
+                         WHERE session_id = ?1 AND source_key = ?2",
+                        params![session_id, source_key],
+                    )?;
+                }
+                Ok(removed)
             })
             .await
             .map_err(sqlite_error)?;

@@ -372,7 +372,7 @@ impl Processes {
             .map_err(Into::into)
     }
 
-    /// Explicitly return an enqueued or discarded delivery to the pending lane.
+    /// Explicitly return a discarded delivery to the pending lane.
     pub async fn redrive_wake_delivery(&self, delivery_id: &str) -> Result<()> {
         self.registry()?
             .redrive_wake_delivery(delivery_id)

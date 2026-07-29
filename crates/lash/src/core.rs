@@ -227,6 +227,16 @@ impl InlineWorkDriverSlot {
     }
 }
 
+impl Drop for InlineWorkDriverSlot {
+    fn drop(&mut self) {
+        if let Some(drivers) = self.drivers.get()
+            && let Some(wake) = drivers._wake.as_ref()
+        {
+            wake.request_shutdown();
+        }
+    }
+}
+
 pub(crate) struct InlineQueuedWorkRunConfig {
     env: RuntimeEnvironment,
     policy: SessionPolicy,

@@ -208,6 +208,7 @@ pub(crate) async fn ensure_schema(pool: &PgPool) -> Result<Vec<u8>, StoreError> 
             first_attempt_ms BIGINT,
             expires_at_ms BIGINT NOT NULL,
             discard_reason TEXT,
+            evidence_cleanup_pending BOOLEAN NOT NULL DEFAULT FALSE,
             delivery_json TEXT NOT NULL
         );
         CREATE INDEX IF NOT EXISTS idx_lash_wake_deliveries_pending

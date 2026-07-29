@@ -177,9 +177,136 @@ async fn postgres_wake_delivery_crash_matrix_when_configured() {
     reset(&storage).await;
     let factory = Arc::new(storage.session_store_factory()) as Arc<dyn SessionStoreFactory>;
     let registry = Arc::new(storage.process_registry_with_wake_delivery_config(
-        lash_core::WakeDeliveryConfig::new(250, 10_000).expect("valid short test retention"),
+        lash_core::WakeDeliveryConfig::new(250).expect("valid short test retention"),
     )) as Arc<dyn ProcessRegistry>;
-    lash_core::testing::conformance::wake_delivery_crash_matrix(factory, registry).await;
+    Box::pin(lash_core::testing::conformance::wake_delivery_crash_matrix(
+        factory, registry,
+    ))
+    .await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn postgres_wake_enqueue_serializes_with_consumption_when_configured() {
+    let Some((_database_lock, storage)) = storage().await else {
+        eprintln!(
+            "skipping Postgres wake enqueue interleaving test: \
+             LASH_POSTGRES_DATABASE_URL is not set"
+        );
+        return;
+    };
+    reset(&storage).await;
+    let factory = storage.session_store_factory();
+    let session_id = "wake-source-lock-target";
+    let store = factory
+        .create_store(&lash_core::SessionStoreCreateRequest {
+            session_id: session_id.to_string(),
+            relation: lash_core::SessionRelation::Root,
+            policy: lash_core::SessionPolicy::default(),
+        })
+        .await
+        .expect("create source-lock target");
+    let wake = lash_core::ProcessWakeDelivery {
+        wake_id: "wake:source-lock".to_string(),
+        target_session_id: session_id.to_string(),
+        target_scope_id: lash_core::SessionScope::new(session_id).id(),
+        process_id: "wake-source-lock-process".to_string(),
+        sequence: 1,
+        event_type: "producer.wake".to_string(),
+        event_invocation: lash_core::RuntimeInvocation::effect(
+            lash_core::RuntimeScope::new(session_id),
+            "wake-source-lock",
+            lash_core::RuntimeEffectKind::Process,
+            "wake-source-lock",
+        ),
+        process_caused_by: None,
+        input: "wake".to_string(),
+        created_at_ms: lash_core::Clock::timestamp_ms(&lash_core::SystemClock),
+    };
+    let draft = lash_core::runtime::process_wake_batch_draft(wake.clone());
+    let first = store
+        .enqueue_queued_work(draft.clone())
+        .await
+        .expect("enqueue original wake");
+    let owner = lash_core::LeaseOwnerIdentity::opaque("wake-source-lock", "test");
+    let lease = match store
+        .try_claim_session_execution_lease(session_id, &owner, 60_000)
+        .await
+        .expect("claim target session")
+    {
+        lash_core::SessionExecutionLeaseClaimOutcome::Acquired(lease) => lease,
+        lash_core::SessionExecutionLeaseClaimOutcome::Busy { .. } => {
+            panic!("fresh source-lock target lease must be available")
+        }
+    };
+    let claim = store
+        .claim_ready_queued_work_by_batch_ids(
+            session_id,
+            &lease.fence(),
+            &owner,
+            lash_core::runtime::QueuedWorkClaimBoundary::Idle,
+            std::slice::from_ref(&first.batch_id),
+        )
+        .await
+        .expect("claim source-lock wake")
+        .expect("source-lock wake claim");
+
+    let pause = lash_postgres_store::pause_next_process_wake_enqueue_after_evidence_check();
+    let redelivery_store = Arc::clone(&store);
+    let redelivery_draft = draft.clone();
+    let redelivery =
+        tokio::spawn(async move { redelivery_store.enqueue_queued_work(redelivery_draft).await });
+    pause.wait_until_paused().await;
+
+    let completion_store = Arc::clone(&store);
+    let completion = tokio::spawn(async move {
+        let state = lash_core::RuntimeSessionState {
+            session_id: session_id.to_string(),
+            ..lash_core::RuntimeSessionState::default()
+        };
+        completion_store
+            .commit_runtime_state(
+                lash_core::RuntimeCommit::persisted_state_for_test(&state, &[])
+                    .completing_queue_claim(claim.completion())
+                    .releasing_session_execution_lease(lease.completion()),
+            )
+            .await
+    });
+    tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    assert!(
+        !completion.is_finished(),
+        "consumption must block on the enqueue transaction's shared source lock"
+    );
+
+    pause.resume();
+    redelivery
+        .await
+        .expect("join paused redelivery")
+        .expect("paused redelivery returns the live batch");
+    completion
+        .await
+        .expect("join wake consumption")
+        .expect("consume wake after source lock release");
+    assert!(
+        store
+            .list_queued_work(session_id)
+            .await
+            .expect("list queue after forced interleaving")
+            .iter()
+            .all(|batch| batch.source_key.as_deref() != draft.source_key.as_deref()),
+        "forced evidence-check/drain/live-check interleaving must not recreate the wake"
+    );
+    store
+        .enqueue_queued_work(draft.clone())
+        .await
+        .expect("late redelivery resolves against consumed evidence");
+    assert!(
+        store
+            .list_queued_work(session_id)
+            .await
+            .expect("list queue after late redelivery")
+            .iter()
+            .all(|batch| batch.source_key.as_deref() != draft.source_key.as_deref())
+    );
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]

@@ -32,6 +32,8 @@ pub use turn_input::*;
 pub use turn_result::*;
 pub use usage_activity::*;
 
+// Bumped to 21: process wake dedupe is always event identity; the removed
+// selector and constant variants no longer exist on the wire.
 // Bumped to 20: `RemoteProcessExecutionPolicy` carries the session's
 // generation options, mirroring `SessionPolicy.generation`. A version 19 peer
 // would drop them on the way in and resume a session with uncontrolled

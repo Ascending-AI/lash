@@ -411,7 +411,8 @@ impl ProcessRegistry for SqliteProcessRegistry {
                     let discarded_wake_delivery_count = tx
                         .execute(
                             "UPDATE process_wake_deliveries
-                             SET state = 'discarded', discard_reason = 'target_gone'
+                             SET state = 'discarded', discard_reason = 'target_gone',
+                                 evidence_cleanup_pending = 1
                              WHERE target_session_id = ?1 AND state = 'pending'",
                             params![session_id],
                         )
@@ -972,9 +973,21 @@ impl ProcessRegistry for SqliteProcessRegistry {
                     let ids = {
                         let mut stmt = tx
                             .prepare(
-                                "SELECT delivery_id FROM process_wake_deliveries
-                                 WHERE state = 'pending'
-                                 ORDER BY expires_at_ms ASC, delivery_id ASC
+                                "SELECT candidate.delivery_id
+                                 FROM process_wake_deliveries AS candidate
+                                 WHERE candidate.state = 'pending'
+                                   AND NOT EXISTS (
+                                       SELECT 1
+                                       FROM process_wake_deliveries AS earlier
+                                       WHERE earlier.state = 'pending'
+                                         AND earlier.target_session_id =
+                                             candidate.target_session_id
+                                         AND earlier.process_id = candidate.process_id
+                                         AND earlier.sequence < candidate.sequence
+                                   )
+                                 ORDER BY candidate.target_session_id ASC,
+                                          candidate.process_id ASC,
+                                          candidate.sequence ASC
                                  LIMIT ?1",
                             )
                             .map_err(process_sqlite_error)?;
@@ -1079,14 +1092,75 @@ impl ProcessRegistry for SqliteProcessRegistry {
                         .execute(
                             "UPDATE process_wake_deliveries
                              SET state = 'pending', attempts = 0, first_attempt_ms = NULL,
-                                 expires_at_ms = ?2, discard_reason = NULL
-                             WHERE delivery_id = ?1",
+                                 expires_at_ms = ?2, discard_reason = NULL,
+                                 evidence_cleanup_pending = 0
+                             WHERE delivery_id = ?1 AND state = 'discarded'",
                             params![delivery_id, expires_at_ms as i64],
                         )
                         .map_err(process_sqlite_error)?;
                     if changed == 0 {
                         return Err(lash_core::PluginError::Session(format!(
-                            "unknown wake delivery `{delivery_id}`"
+                            "wake delivery `{delivery_id}` is not discarded or does not exist"
+                        )));
+                    }
+                    Ok(())
+                })()))
+            })
+            .await
+            .map_err(process_sqlite_error)?
+    }
+
+    async fn wake_evidence_cleanup_deliveries(
+        &self,
+        limit: usize,
+    ) -> Result<Vec<lash_core::WakeDelivery>, lash_core::PluginError> {
+        if limit == 0 {
+            return Ok(Vec::new());
+        }
+        self.conn
+            .call(move |conn| {
+                Ok((|| {
+                    let mut stmt = conn
+                        .prepare(
+                            "SELECT delivery_id FROM process_wake_deliveries
+                             WHERE state <> 'pending' AND evidence_cleanup_pending = 1
+                             ORDER BY target_session_id ASC, process_id ASC, sequence ASC
+                             LIMIT ?1",
+                        )
+                        .map_err(process_sqlite_error)?;
+                    let ids = stmt
+                        .query_map(params![limit as i64], |row| row.get::<_, String>(0))
+                        .map_err(process_sqlite_error)?
+                        .collect::<Result<Vec<_>, _>>()
+                        .map_err(process_sqlite_error)?;
+                    ids.iter()
+                        .map(|id| load_wake_delivery_conn(conn, id))
+                        .collect()
+                })())
+            })
+            .await
+            .map_err(process_sqlite_error)?
+    }
+
+    async fn mark_wake_evidence_cleaned(
+        &self,
+        delivery_id: &str,
+    ) -> Result<(), lash_core::PluginError> {
+        let delivery_id = delivery_id.to_string();
+        self.conn
+            .write_flow(move |tx| {
+                Ok(tx_outcome((|| {
+                    let changed = tx
+                        .execute(
+                            "UPDATE process_wake_deliveries
+                             SET evidence_cleanup_pending = 0
+                             WHERE delivery_id = ?1 AND state <> 'pending'",
+                            params![delivery_id],
+                        )
+                        .map_err(process_sqlite_error)?;
+                    if changed == 0 {
+                        return Err(lash_core::PluginError::Session(format!(
+                            "wake delivery `{delivery_id}` is pending or does not exist"
                         )));
                     }
                     Ok(())

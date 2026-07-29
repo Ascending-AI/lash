@@ -55,7 +55,7 @@ pub use observation::{
 };
 pub use references::ProcessLiveReferenceSummary;
 pub use registry::{
-    DEFAULT_WAKE_EVIDENCE_RETENTION_MS, ProcessPruneReport, ProcessRegistry, WakeDelivery,
+    DEFAULT_WAKE_DELIVERY_EXPIRY_MS, ProcessPruneReport, ProcessRegistry, WakeDelivery,
     WakeDeliveryConfig, WakeDeliveryReport, WakeDeliveryState, WakeDiscardReason,
 };
 pub use service::{

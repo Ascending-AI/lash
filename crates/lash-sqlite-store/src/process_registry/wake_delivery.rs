@@ -7,7 +7,7 @@ pub(super) fn load_wake_delivery_conn(
     let row = conn
         .query_row(
             "SELECT state, attempts, first_attempt_ms, expires_at_ms,
-                    discard_reason, delivery_json
+                    discard_reason, evidence_cleanup_pending, delivery_json
              FROM process_wake_deliveries WHERE delivery_id = ?1",
             params![delivery_id],
             |row| {
@@ -17,7 +17,8 @@ pub(super) fn load_wake_delivery_conn(
                     row.get::<_, Option<i64>>(2)?,
                     row.get::<_, i64>(3)?,
                     row.get::<_, Option<String>>(4)?,
-                    row.get::<_, String>(5)?,
+                    row.get::<_, bool>(5)?,
+                    row.get::<_, String>(6)?,
                 ))
             },
         )
@@ -48,12 +49,13 @@ pub(super) fn load_wake_delivery_conn(
     };
     Ok(lash_core::WakeDelivery {
         delivery_id: delivery_id.to_string(),
-        wake: serde_json::from_str(&row.5).map_err(process_decode_error)?,
+        wake: serde_json::from_str(&row.6).map_err(process_decode_error)?,
         state,
         attempts: row.1 as u64,
         first_attempt_ms: row.2.map(|value| value as u64),
         expires_at_ms: row.3 as u64,
         discard_reason,
+        evidence_cleanup_pending: row.5,
     })
 }
 
@@ -90,7 +92,8 @@ pub(super) async fn update_wake_delivery_state(
             let changed = tx
                 .execute(
                     "UPDATE process_wake_deliveries
-                     SET state = ?2, discard_reason = ?3
+                     SET state = ?2, discard_reason = ?3,
+                         evidence_cleanup_pending = 1
                      WHERE delivery_id = ?1 AND state = 'pending'",
                     params![
                         delivery_id,
@@ -99,20 +102,31 @@ pub(super) async fn update_wake_delivery_state(
                     ],
                 )
                 .map_err(process_sqlite_error)?;
-            if changed == 0
-                && tx
+            if changed == 0 {
+                let current = tx
                     .query_row(
-                        "SELECT 1 FROM process_wake_deliveries WHERE delivery_id = ?1",
+                        "SELECT state FROM process_wake_deliveries WHERE delivery_id = ?1",
                         params![delivery_id],
-                        |_| Ok(()),
+                        |row| row.get::<_, String>(0),
                     )
                     .optional()
                     .map_err(process_sqlite_error)?
-                    .is_none()
-            {
-                return Err(lash_core::PluginError::Session(format!(
-                    "unknown wake delivery `{delivery_id}`"
-                )));
+                    .ok_or_else(|| {
+                        lash_core::PluginError::Session(format!(
+                            "unknown wake delivery `{delivery_id}`"
+                        ))
+                    })?;
+                let state = match current.as_str() {
+                    "pending" => lash_core::WakeDeliveryState::Pending,
+                    "enqueued" => lash_core::WakeDeliveryState::Enqueued,
+                    "discarded" => lash_core::WakeDeliveryState::Discarded,
+                    _ => {
+                        return Err(lash_core::PluginError::Session(format!(
+                            "wake delivery `{delivery_id}` has unknown state `{current}`"
+                        )));
+                    }
+                };
+                return Err(lash_core::PluginError::WakeDeliveryNotPending { delivery_id, state });
             }
             Ok(())
         })()))

@@ -187,7 +187,7 @@ pub(crate) async fn append_process_event_tx(
     }
 }
 
-async fn insert_wake_delivery_tx(
+pub(crate) async fn insert_wake_delivery_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     wake: Option<&lash_core::ProcessWakeDelivery>,
     config: lash_core::WakeDeliveryConfig,
@@ -199,8 +199,9 @@ async fn insert_wake_delivery_tx(
     sqlx::query(
         "INSERT INTO lash_process_wake_deliveries (
             delivery_id, process_id, target_session_id, sequence, state,
-            attempts, first_attempt_ms, expires_at_ms, discard_reason, delivery_json
-         ) VALUES ($1, $2, $3, $4, 'pending', 0, NULL, $5, NULL, $6)
+            attempts, first_attempt_ms, expires_at_ms, discard_reason,
+            evidence_cleanup_pending, delivery_json
+         ) VALUES ($1, $2, $3, $4, 'pending', 0, NULL, $5, NULL, FALSE, $6)
          ON CONFLICT (delivery_id) DO NOTHING",
     )
     .bind(&delivery.delivery_id)
