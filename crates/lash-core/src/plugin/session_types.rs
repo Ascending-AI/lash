@@ -418,24 +418,6 @@ impl SessionRelation {
             }
         }
     }
-
-    pub(crate) fn settle_observer_intent(
-        &mut self,
-        pending_observer_process_ids: Vec<crate::ProcessId>,
-    ) {
-        let Self::ObserverIntent { relation, .. } = self else {
-            return;
-        };
-        if pending_observer_process_ids.is_empty() {
-            *self = *relation.clone();
-        } else if let Self::ObserverIntent {
-            pending_observer_process_ids: pending,
-            ..
-        } = self
-        {
-            *pending = pending_observer_process_ids;
-        }
-    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]

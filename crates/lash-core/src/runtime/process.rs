@@ -6,6 +6,7 @@ mod model;
 #[cfg(test)]
 mod model_filter_tests;
 mod observation;
+mod observer_intent;
 mod op_scope;
 mod references;
 mod registry;
@@ -53,6 +54,9 @@ pub use model::{
 pub use observation::{
     ObservedProcess, ObservedProcessEvent, ObservedWorkItem, ProcessWorkObserver,
     ProcessWorkSnapshot,
+};
+pub use observer_intent::{
+    SessionObserverIntentSource, reconcile_session_process_observer_intents,
 };
 pub use op_scope::ProcessOpScope;
 pub use references::ProcessLiveReferenceSummary;

@@ -212,72 +212,15 @@ impl SessionBuilder {
         &self,
         store: Option<&dyn RuntimePersistence>,
     ) -> Result<()> {
-        let (Some(store), Some(process_registry)) =
-            (store, self.core.env.process_registry.as_ref())
-        else {
+        let Some(store) = store else {
             return Ok(());
         };
-        let Some(mut meta) = store.load_session_meta().await? else {
-            return Ok(());
-        };
-        let mut relation = meta.relation;
-        let mut settled_intent = false;
-        loop {
-            match &relation {
-                lash_core::SessionRelation::Fork {
-                    pending_observer_process_ids,
-                    ..
-                } if !pending_observer_process_ids.is_empty() => {
-                    apply_process_observer_intent(
-                        process_registry.as_ref(),
-                        &self.session_id,
-                        pending_observer_process_ids,
-                        lash_core::ProcessObserverBy::ForkInheritance,
-                        "fork",
-                    )
-                    .await?;
-                    let lash_core::SessionRelation::Fork {
-                        pending_observer_process_ids,
-                        ..
-                    } = &mut relation
-                    else {
-                        unreachable!("relation was checked above");
-                    };
-                    pending_observer_process_ids.clear();
-                    settled_intent = true;
-                }
-                lash_core::SessionRelation::ObserverIntent {
-                    pending_observer_process_ids,
-                    ..
-                } => {
-                    apply_process_observer_intent(
-                        process_registry.as_ref(),
-                        &self.session_id,
-                        pending_observer_process_ids,
-                        lash_core::ProcessObserverBy::host(format!(
-                            "session-create:{}",
-                            self.session_id
-                        )),
-                        "session_create",
-                    )
-                    .await?;
-                    let lash_core::SessionRelation::ObserverIntent {
-                        relation: inner, ..
-                    } = relation
-                    else {
-                        unreachable!("relation was checked above");
-                    };
-                    relation = *inner;
-                    settled_intent = true;
-                }
-                _ => break,
-            }
-        }
-        if !settled_intent {
-            return Ok(());
-        }
-        meta.relation = relation;
-        store.save_session_meta(meta).await?;
+        lash_core::runtime::reconcile_session_process_observer_intents(
+            self.core.env.process_registry.as_deref(),
+            &self.session_id,
+            lash_core::runtime::SessionObserverIntentSource::PersistedIfPresent(store),
+        )
+        .await?;
         Ok(())
     }
 
