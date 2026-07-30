@@ -5,6 +5,7 @@ struct AppendRollbackProtocolFactory {
     store: Arc<RecordingStore>,
     protocol_dirty: Arc<AtomicBool>,
     restore_called: Arc<AtomicBool>,
+    fail_restore: Arc<AtomicBool>,
 }
 
 impl crate::PluginFactory for AppendRollbackProtocolFactory {
@@ -20,6 +21,7 @@ impl crate::PluginFactory for AppendRollbackProtocolFactory {
             store: Arc::clone(&self.store),
             protocol_dirty: Arc::clone(&self.protocol_dirty),
             restore_called: Arc::clone(&self.restore_called),
+            fail_restore: Arc::clone(&self.fail_restore),
         }))
     }
 }
@@ -28,6 +30,7 @@ struct AppendRollbackProtocolPlugin {
     store: Arc<RecordingStore>,
     protocol_dirty: Arc<AtomicBool>,
     restore_called: Arc<AtomicBool>,
+    fail_restore: Arc<AtomicBool>,
 }
 
 impl crate::SessionPlugin for AppendRollbackProtocolPlugin {
@@ -41,6 +44,7 @@ impl crate::SessionPlugin for AppendRollbackProtocolPlugin {
                 store: Arc::clone(&self.store),
                 protocol_dirty: Arc::clone(&self.protocol_dirty),
                 restore_called: Arc::clone(&self.restore_called),
+                fail_restore: Arc::clone(&self.fail_restore),
             }))?;
         reg.protocol()
             .protocol_driver(Arc::new(UnusedAppendRollbackProtocolDriver))?;
@@ -52,6 +56,7 @@ struct AppendRollbackProtocolSession {
     store: Arc<RecordingStore>,
     protocol_dirty: Arc<AtomicBool>,
     restore_called: Arc<AtomicBool>,
+    fail_restore: Arc<AtomicBool>,
 }
 
 #[async_trait::async_trait]
@@ -80,6 +85,11 @@ impl crate::plugin::ProtocolSessionPlugin for AppendRollbackProtocolSession {
     ) -> Result<(), crate::SessionError> {
         self.protocol_dirty.store(false, Ordering::SeqCst);
         self.restore_called.store(true, Ordering::SeqCst);
+        if self.fail_restore.load(Ordering::SeqCst) {
+            return Err(crate::SessionError::Protocol(
+                "injected protocol restore failure".to_string(),
+            ));
+        }
         Ok(())
     }
 }
@@ -388,6 +398,7 @@ async fn failed_append_restores_runtime_and_protocol_session_state() {
         store: Arc::clone(&store),
         protocol_dirty: Arc::clone(&protocol_dirty),
         restore_called: Arc::clone(&restore_called),
+        fail_restore: Arc::new(AtomicBool::new(false)),
     })]);
     let plugins = plugin_host.build_session("root", None).expect("plugins");
     let mut runtime = LashRuntime::from_persistent_embedded_state(
@@ -430,6 +441,77 @@ async fn failed_append_restores_runtime_and_protocol_session_state() {
         runtime.state.session_graph.nodes[0].payload,
         crate::SessionNodePayload::FrameOpen { .. }
     ));
+}
+
+#[tokio::test]
+async fn failed_append_rollback_preserves_a_deleted_session_cause() {
+    let session_id = "deleted-during-append-rollback";
+    let store = Arc::new(RecordingStore::default());
+    let protocol_dirty = Arc::new(AtomicBool::new(false));
+    let restore_called = Arc::new(AtomicBool::new(false));
+    let fail_restore = Arc::new(AtomicBool::new(false));
+    let plugin_host = crate::PluginHost::new(vec![Arc::new(AppendRollbackProtocolFactory {
+        store: Arc::clone(&store),
+        protocol_dirty,
+        restore_called: Arc::clone(&restore_called),
+        fail_restore: Arc::clone(&fail_restore),
+    })]);
+    let plugins = plugin_host.build_session("root", None).expect("plugins");
+    let mut runtime = LashRuntime::from_persistent_embedded_state(
+        standard_test_policy(),
+        test_host_config(),
+        crate::PersistentRuntimeServices::new(
+            plugins,
+            store.clone() as Arc<dyn crate::store::RuntimePersistence>,
+        ),
+        RuntimeSessionState {
+            session_id: session_id.to_string(),
+            ..RuntimeSessionState::default()
+        },
+    )
+    .await
+    .expect("runtime");
+    fail_restore.store(true, Ordering::SeqCst);
+    store.fail_next_runtime_commit(crate::StoreError::SessionDeleted {
+        session_id: session_id.to_string(),
+    });
+
+    let error = runtime
+        .append_session_nodes(crate::AppendSessionNodesRequest {
+            operation_id: "typed-append-rollback".to_string(),
+            nodes: vec![crate::SessionAppendNode::plugin(
+                "rollback-test",
+                serde_json::json!({"value": 1}),
+            )],
+            requires_ancestor_node_id: None,
+        })
+        .await
+        .expect_err("the injected persistence and rollback failures must reject the append");
+
+    assert!(restore_called.load(Ordering::SeqCst));
+    assert!(matches!(
+        &error,
+        crate::SessionError::Store { context, source }
+            if context.contains("failed to persist runtime state")
+                && context.contains(
+                    "failed to restore protocol session: protocol error: injected protocol restore failure"
+                )
+                && matches!(
+                    source,
+                    crate::StoreError::SessionDeleted {
+                        session_id: deleted_session_id
+                    } if deleted_session_id == session_id
+                )
+    ));
+    assert!(
+        error.to_string().contains(
+            &crate::StoreError::SessionDeleted {
+                session_id: session_id.to_string(),
+            }
+            .to_string()
+        ),
+        "the canonical tombstone message must remain renderable: {error}"
+    );
 }
 
 #[tokio::test]

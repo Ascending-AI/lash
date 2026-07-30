@@ -66,10 +66,12 @@ async fn app_state(
     let pending_turn_inputs = session
         .pending_turn_inputs()
         .await
+        // Audited: this facade read lowers TurnInputStore failures to RuntimeError::StoreCommitFailed without a typed cause.
         .map_err(AppError::internal)?;
     let turn_input_applications = session
         .remote_turn_input_applications()
         .await
+        // Audited: application reconciliation lowers TurnInputStore failures to RuntimeError::StoreCommitFailed without a typed cause.
         .map_err(AppError::internal)?;
     let usage = session.usage_report();
     let observation =
@@ -159,6 +161,7 @@ async fn upload_attachment(
             lash_core::AttachmentCreateMeta::new(media_type, None, Some(name.to_string())),
         )
         .await
+        // Audited: the content-addressed attachment store has no session identity or tombstone error variant.
         .map_err(AppError::internal)?;
     let retrieve_url = format!("/api/attachments/{}", attachment.id);
     state.trace(
@@ -195,6 +198,7 @@ async fn retrieve_attachment(
                 "attachment `{attachment_id}` was not found"
             )));
         }
+        // Audited: the content-addressed attachment store has no session identity or tombstone error variant.
         Err(err) => return Err(AppError::internal(err)),
     };
     Ok(Response::builder()
@@ -390,6 +394,7 @@ async fn send_turn(
                     "attachment `{attachment_id}` was not found"
                 )));
             }
+            // Audited: the content-addressed attachment store has no session identity or tombstone error variant.
             Err(err) => return Err(AppError::internal(err)),
         }
     }
@@ -539,6 +544,7 @@ async fn reject_if_active_turn_settled(
         )),
         lash::PendingTurnInputCancelOutcome::AlreadyClaimed { .. }
         | lash::PendingTurnInputCancelOutcome::AlreadyCompleted(_) => Ok(()),
+        // Audited: this is a locally synthesized reconciliation-invariant failure, not a propagated store error.
         lash::PendingTurnInputCancelOutcome::NotFound => Err(AppError::internal(format!(
             "active-turn input `{}` disappeared during settle reconciliation",
             acceptance.input_id
@@ -602,6 +608,7 @@ async fn list_triggers(
             &session_id,
         ))
         .await
+        // Audited: first-party trigger-store reads have no session tombstone path or effect-controller boundary.
         .map_err(AppError::internal)?;
     Ok(Json(
         records
@@ -642,9 +649,12 @@ async fn set_trigger_enabled(
             command,
         )
         .await
+        // Audited: first-party trigger mutation stores return only local validation/backend PluginError values.
         .map_err(AppError::internal)?
+        // Audited: TriggerOperationError carries only conflict, validation, or string-valued store failures.
         .map_err(AppError::internal)?;
     let lash::triggers::TriggerCommandOutcome::Mutation { receipt } = outcome else {
+        // Audited: this locally generated error guards an impossible command/outcome shape.
         return Err(AppError::internal("trigger mutation returned a list outcome"));
     };
     let registration = lash::triggers::TriggerRegistration::from(&receipt.record_snapshot);
@@ -682,7 +692,9 @@ async fn delete_trigger(
             },
         )
         .await
+        // Audited: first-party trigger mutation stores return only local validation/backend PluginError values.
         .map_err(AppError::internal)?
+        // Audited: TriggerOperationError carries only conflict, validation, or string-valued store failures.
         .map_err(AppError::internal)?;
     let changed = true;
     state.trace_for_session(
@@ -707,6 +719,7 @@ async fn trigger_record_for_session(
         .trigger_store
         .list_subscriptions(filter)
         .await
+        // Audited: first-party trigger-store reads have no session tombstone path or effect-controller boundary.
         .map_err(AppError::internal)?
         .into_iter()
         .next()
@@ -802,6 +815,7 @@ async fn enqueue_tool_catalog_refresh(
             ),
         )
         .await
+        // Audited: session-command enqueue lowers store and queued-work failures to RuntimeError without a tombstone cause.
         .map_err(AppError::internal)?;
     session.close().await.map_err(AppError::session_open)?;
     state.trace_for_session(
@@ -892,6 +906,7 @@ async fn reset_chat(
         .core
         .session_delete_scope(&old_session_id)
         .await
+        // Audited: first-party existence probes return absence or untyped factory/backend errors, never SessionDeleted.
         .map_err(AppError::internal)?;
     restate::submit_session_delete(
         &state,
@@ -930,6 +945,7 @@ async fn reset_chat(
             ..lash::SessionConfigPatch::default()
         })
         .await
+        // Audited: session configuration updates only resident state and its current implementation is infallible.
         .map_err(AppError::internal)?;
     state.messages.lock().expect("messages lock").clear();
     state.lashlang_execution.clear();
@@ -956,6 +972,7 @@ async fn list_work(
             .process_observer
             .snapshot_for_session(session_id.clone())
             .await
+            // Audited: process observation reads the global registry, which has no session tombstone contract.
             .map_err(AppError::internal)?
             .items
     } else {
@@ -966,6 +983,7 @@ async fn list_work(
                 ..lash::process::ProcessListFilter::default()
             })
             .await
+            // Audited: runtime-wide process observation reads the global registry without a session store.
             .map_err(AppError::internal)?
     };
     let work = observed
@@ -991,6 +1009,7 @@ async fn cancel_work(
         .process_observer
         .process(&process_id)
         .await
+        // Audited: process lookup reads the global registry, which has no session tombstone contract.
         .map_err(AppError::internal)?
         .ok_or_else(|| AppError::not_found(format!("unknown process `{process_id}`")))?;
     if process.terminal {
@@ -1049,6 +1068,7 @@ async fn await_work(
     .await
     {
         Ok(Ok(outcome)) => outcome,
+        // Audited: the Restate process attachment lowers workflow/transport failures to untyped PluginError::Session values.
         Ok(Err(err)) => return Err(AppError::internal(err)),
         Err(_elapsed) => {
             return Err(AppError::gateway_timeout(format!(
@@ -1061,6 +1081,7 @@ async fn await_work(
         .process_registry()
         .events_after(&process_id, 0)
         .await
+        // Audited: process-event reads use the global registry and have no session tombstone contract.
         .map_err(AppError::internal)?
         .into_iter()
         .map(|event| WorkAwaitEvent {

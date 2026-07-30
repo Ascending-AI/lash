@@ -30,6 +30,7 @@ use crate::{
     TurnStreamState, apply_model_selection_to_session, assistant_text_for_display,
     enqueue_button_trigger_command, enqueue_mail_received_trigger_command,
     model_spec_from_selection,
+    restate_ingress::{submit_restate_empty, submit_restate_workflow_json},
 };
 
 const CRON_STATE_KEY: &str = "state";
@@ -174,6 +175,7 @@ impl WorkbenchTurnWorkflow for WorkbenchTurnWorkflowImpl {
             .queued_work_driver
             .claim_and_run_pending(Some(&session_id), "user_turn_completed")
             .await
+            // Audited: the production queued-work submitter lowers factory/store failures to untyped PluginError::Session values.
             .map_err(AppError::internal)
             .map_err(terminal_handler_error)?;
         Ok(Json(()))
@@ -213,6 +215,7 @@ impl WorkbenchQueuedTurnWorkflow for WorkbenchQueuedTurnWorkflowImpl {
             .queued_work_driver
             .claim_and_run_pending(Some(&session_id), "queued_turn_completed")
             .await
+            // Audited: the production queued-work submitter lowers factory/store failures to untyped PluginError::Session values.
             .map_err(AppError::internal)
             .map_err(terminal_handler_error)?;
         sync_cron_jobs_with_context(
@@ -256,6 +259,7 @@ impl WorkbenchButtonTriggerWorkflow for WorkbenchButtonTriggerWorkflowImpl {
             .queued_work_driver
             .claim_and_run_pending(Some(&session_id), "button_trigger")
             .await
+            // Audited: the production queued-work submitter lowers factory/store failures to untyped PluginError::Session values.
             .map_err(AppError::internal)
             .map_err(terminal_handler_error)?;
         Ok(Json(()))
@@ -292,6 +296,7 @@ impl WorkbenchMailReceivedWorkflow for WorkbenchMailReceivedWorkflowImpl {
             .queued_work_driver
             .claim_and_run_pending(Some(&session_id), "mail_received")
             .await
+            // Audited: the production queued-work submitter lowers factory/store failures to untyped PluginError::Session values.
             .map_err(AppError::internal)
             .map_err(terminal_handler_error)?;
         Ok(Json(()))
@@ -473,6 +478,7 @@ impl WorkbenchCronJob for WorkbenchCronJobImpl {
             .queued_work_driver
             .claim_and_run_pending(Some(&state.request.session_id), "cron_tick")
             .await
+            // Audited: the production queued-work submitter lowers factory/store failures to untyped PluginError::Session values.
             .map_err(AppError::internal)
             .map_err(terminal_handler_error)?;
         Ok(Json(()))
@@ -635,6 +641,7 @@ pub(crate) async fn cancel_cron_jobs_for_session(
         .triggers()
         .by_source_type(CRON_SCHEDULE_SOURCE_TYPE)
         .await
+        // Audited: trigger-registration reads lower trigger-store errors to SessionError::Protocol before this boundary.
         .map_err(AppError::internal)?;
     let mut job_keys: BTreeSet<String> = registrations
         .iter()
@@ -696,6 +703,7 @@ async fn run_user_turn(
         .turn(input)
         .turn_id(request.turn_id.clone())
         .require_finish()
+        // Audited: require_finish only validates local turn-builder configuration and performs no session-store I/O.
         .map_err(AppError::internal)?
         .effects(controller)
         .stream_to(&ui_events)
@@ -723,6 +731,7 @@ pub(crate) async fn workbench_turn_input(
             .attachment_store
             .get(&lash_core::AttachmentId::new(attachment_id))
             .await
+            // Audited: the content-addressed attachment store has no session identity or tombstone error variant.
             .map_err(AppError::internal)?;
         input = input.with_attachment(lash_core::AttachmentSource::inline(
             lash_core::MediaType::parse("image/png").expect("workbench uploads only PNG"),
@@ -762,6 +771,7 @@ async fn run_button_trigger(
             "button-trigger:{}",
             request.operation_id
         )))
+        // Audited: constructing this scope only validates the local runtime-operation id.
         .map_err(AppError::internal)?;
     let receipt = enqueue_button_trigger_command(
         &state,
@@ -772,6 +782,7 @@ async fn run_button_trigger(
         scoped_effect_controller,
     )
     .await
+    // Audited: trigger delivery consumes per-subscription failures into its report, so this helper cannot return a typed session tombstone.
     .map_err(AppError::internal)?;
     state.trace_for_session(
         &request.session_id,
@@ -806,6 +817,7 @@ async fn run_mail_received(
             "mail-received:{}",
             request.operation_id
         )))
+        // Audited: constructing this scope only validates the local runtime-operation id.
         .map_err(AppError::internal)?;
     let receipt = enqueue_mail_received_trigger_command(
         &state,
@@ -815,6 +827,7 @@ async fn run_mail_received(
         scoped_effect_controller,
     )
     .await
+    // Audited: trigger delivery consumes per-subscription failures into its report, so this helper cannot return a typed session tombstone.
     .map_err(AppError::internal)?;
     state.trace_for_session(
         &request.session_id,
@@ -848,6 +861,7 @@ async fn run_session_delete(
     controller
         .revoke_await_events_for_session(&request.session_id)
         .await
+        // Audited: Restate wait-index transport failures are untyped RuntimeError values with no store cause.
         .map_err(AppError::internal)?;
     if !active_turns.is_empty() {
         let deadline = tokio::time::Instant::now() + Duration::from_secs(20);
@@ -860,6 +874,7 @@ async fn run_session_delete(
                 break;
             }
             if tokio::time::Instant::now() >= deadline {
+                // Audited: this locally generated timeout observes only the in-process active-turn registry.
                 return Err(AppError::internal(format!(
                     "timed out waiting for revoked turns to settle before deleting session `{}`",
                     request.session_id
@@ -870,11 +885,13 @@ async fn run_session_delete(
     }
     let scoped_effect_controller = controller
         .scoped_effect_controller(request.execution_scope)
+        // Audited: constructing this scope only validates the supplied execution-scope fields.
         .map_err(AppError::internal)?;
     let report = state
         .core
         .delete_session(&request.session_id, scoped_effect_controller)
         .await
+        // Audited: delete_session lowers component and factory failures to non-tombstone EmbedError variants.
         .map_err(AppError::internal)?;
     state.trace_for_session(
         &request.session_id,
@@ -897,12 +914,14 @@ async fn run_process_cancel(
             "workbench-process-cancel:{}",
             request.process_id
         )))
+        // Audited: constructing this scope only validates the local runtime-operation id.
         .map_err(AppError::internal)?;
     let summary = state
         .core
         .processes()
         .cancel(&request.process_id, scoped_effect_controller)
         .await
+        // Audited: process cancellation uses the global process registry and never consults a session tombstone.
         .map_err(AppError::internal)?;
     state.trace_for_session(
         &request.session_id,
@@ -937,6 +956,7 @@ async fn run_queued_turn(
             ..lash::SessionConfigPatch::default()
         })
         .await
+        // Audited: session configuration updates only resident state and its current implementation is infallible.
         .map_err(AppError::internal)?;
     let turn_state = Arc::new(Mutex::new(TurnStreamState::default()));
     let ui_events = ChannelTurnEvents {
@@ -1533,38 +1553,6 @@ fn cron_request_from_registration(
 
 fn cron_job_key(session_id: &str, source_key: &str) -> String {
     format!("{session_id}:{source_key}")
-}
-
-async fn submit_restate_workflow_json<T: Serialize>(
-    restate_http: &reqwest::Client,
-    restate_ingress_url: &str,
-    workflow: &str,
-    workflow_key: &str,
-    body: &T,
-) -> Result<lash_restate::RestateInvocationId, AppError> {
-    lash_restate::RestateIngressClient::new(lash_restate::RestateConnection::with_client(
-        restate_ingress_url,
-        restate_http.clone(),
-    ))
-    .send_workflow_json(workflow, workflow_key, "run", body)
-    .await
-    .map_err(|err| AppError::internal(format!("Restate submit failed: {err}")))
-}
-
-async fn submit_restate_empty(state: &AppState, url: String) -> Result<(), AppError> {
-    let response = state
-        .restate_http
-        .post(&url)
-        .send()
-        .await
-        .map_err(|err| AppError::internal(format!("Restate submit failed: {err}")))?;
-    if !response.status().is_success() {
-        return Err(AppError::internal(format!(
-            "Restate submit failed with status {} for {url}",
-            response.status()
-        )));
-    }
-    Ok(())
 }
 
 fn terminal_handler_error(err: AppError) -> HandlerError {

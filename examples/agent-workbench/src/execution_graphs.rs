@@ -101,6 +101,7 @@ impl<'a> GraphProjection<'a> {
         let snapshot = process_observer
             .snapshot_for_session(current_session_id)
             .await
+            // Audited: process observation reads the global registry, which has no session tombstone contract.
             .map_err(AppError::internal)?;
         let mut processes = BTreeMap::new();
         for item in snapshot.items {
