@@ -64,10 +64,17 @@ impl InMemorySessionStore {
     /// Return raw queued-work batches and their claim state for differential
     /// tests. The sequence is backend-local, so callers normalize ordering.
     pub fn raw_queued_work_for_testing(&self) -> Vec<super::RawQueuedWorkForTesting> {
+        let session_id = self
+            .session_meta
+            .lock()
+            .expect("lock session meta")
+            .as_ref()
+            .map(|meta| meta.session_id.clone());
         self.queued_work
             .lock()
             .expect("lock queued work")
             .iter()
+            .filter(|entry| Some(&entry.batch.session_id) == session_id.as_ref())
             .map(|entry| {
                 (
                     entry.batch.clone(),

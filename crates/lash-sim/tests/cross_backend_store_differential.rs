@@ -18,7 +18,10 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use lash_core::runtime::{QueuedWorkBatch, QueuedWorkBatchDraft, QueuedWorkPayload};
+use lash_core::runtime::{
+    QueuedWorkBatch, QueuedWorkBatchDraft, QueuedWorkClaim, QueuedWorkClaimBoundary,
+    QueuedWorkPayload,
+};
 use lash_core::store::{GraphAppend, RuntimeCommitResult};
 use lash_core::{
     AttachmentId, AttachmentIntent, AttachmentOwnerKind, BlobRef, Clock, DeliveryPolicy,
@@ -28,15 +31,22 @@ use lash_core::{
     ProtocolEvent, RuntimeCommit, RuntimePersistence, RuntimeSessionState, RuntimeTurnCommitStamp,
     SessionCommitStore, SessionHistoryRecord, SessionMeta, SessionNodePayload, SessionNodeRecord,
     SessionRelation, SessionStoreCreateRequest, SessionStoreFactory, SlotPolicy, StoreError,
-    TokenLedgerEntry, TokenUsage, ToolState, TurnInput, TurnInputApplication, TurnInputClaim,
-    TurnInputIngress, TurnInputState,
+    StoreMaintenance, TokenLedgerEntry, TokenUsage, ToolState, TurnInput, TurnInputApplication,
+    TurnInputClaim, TurnInputIngress, TurnInputState,
 };
 use lash_postgres_store::PostgresStorage;
 use rusqlite::OptionalExtension;
 use sqlx::{Connection, PgConnection, PgPool};
 
+#[path = "cross_backend_store_differential/observations.rs"]
+mod observations;
 #[path = "cross_backend_store_differential/raw_durable_reader.rs"]
 mod raw_durable_reader;
+use observations::{
+    PendingTurnInputObservation, QueuedWorkObservation, SessionOwnedArtifactRefObservation,
+    queued_work_observation, queued_work_observations_from_sql_rows,
+    session_owned_artifact_ref_observations,
+};
 
 const SESSION_LEASE_TTL_MS: u64 = 60_000;
 // "LASH_PGT" encoded as a positive i64. This must match the shared-database
@@ -56,6 +66,7 @@ enum CaseName {
     MissingCheckpointComponentRef,
     PinForkUnpin,
     AttachmentAdoption,
+    QueuedWorkClaimAndAbandon,
     DeleteThenAttemptAdmission,
     StaleHandleAfterDelete,
 }
@@ -76,6 +87,7 @@ impl CaseName {
             Self::MissingCheckpointComponentRef => "missing_checkpoint_component_ref",
             Self::PinForkUnpin => "pin_fork_unpin_moves_node_anchor",
             Self::AttachmentAdoption => "attachment_intent_adopted_by_commit",
+            Self::QueuedWorkClaimAndAbandon => "queued_work_claim_abandon_preserves_fencing_token",
             Self::DeleteThenAttemptAdmission => "delete_then_attempt_admission",
             Self::StaleHandleAfterDelete => "stale_handle_after_delete",
         }
@@ -105,6 +117,7 @@ enum StoreOperation {
     UnpinLeaf,
     EnqueueNextTurnInput,
     EnqueueQueuedWork,
+    EnqueueClaimableQueuedWork,
     AcquireSessionLease {
         slot: LeaseSlot,
         owner: &'static str,
@@ -112,6 +125,10 @@ enum StoreOperation {
     ClaimNextTurnInput {
         lease: LeaseSlot,
     },
+    ClaimQueuedWork {
+        lease: LeaseSlot,
+    },
+    AbandonQueuedWorkClaim,
     ReleaseSessionLease {
         lease: LeaseSlot,
     },
@@ -155,6 +172,7 @@ impl StoreOperation {
             Self::UnpinLeaf => "unpin_leaf",
             Self::EnqueueNextTurnInput => "enqueue_next_turn_input",
             Self::EnqueueQueuedWork => "enqueue_queued_work",
+            Self::EnqueueClaimableQueuedWork => "enqueue_claimable_queued_work",
             Self::AcquireSessionLease {
                 slot: LeaseSlot::First,
                 ..
@@ -164,6 +182,8 @@ impl StoreOperation {
                 ..
             } => "acquire_successor_session_lease_generation",
             Self::ClaimNextTurnInput { .. } => "claim_next_turn_input",
+            Self::ClaimQueuedWork { .. } => "claim_queued_work",
+            Self::AbandonQueuedWorkClaim => "abandon_queued_work_claim",
             Self::ReleaseSessionLease { .. } => "release_first_session_lease_generation",
             Self::CommitStaleTurnInputClaim { .. } => {
                 "commit_stale_claim_before_successor_reclaims_row"
@@ -543,6 +563,20 @@ fn generated_cases() -> Vec<GeneratedCase> {
             ],
         },
         GeneratedCase {
+            name: CaseName::QueuedWorkClaimAndAbandon,
+            operations: vec![
+                StoreOperation::EnqueueClaimableQueuedWork,
+                StoreOperation::AcquireSessionLease {
+                    slot: LeaseSlot::First,
+                    owner: "queued-work-owner",
+                },
+                StoreOperation::ClaimQueuedWork {
+                    lease: LeaseSlot::First,
+                },
+                StoreOperation::AbandonQueuedWorkClaim,
+            ],
+        },
+        GeneratedCase {
             name: CaseName::DeleteThenAttemptAdmission,
             operations: vec![
                 StoreOperation::DeleteSession,
@@ -791,126 +825,6 @@ impl std::fmt::Debug for DurableNode {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-struct PendingTurnInputObservation {
-    input_id: String,
-    state: TurnInputState,
-    claim_session_lease_generation: Option<u64>,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-struct QueuedWorkObservation {
-    ordinal: usize,
-    source_key: Option<String>,
-    delivery_policy: DeliveryPolicy,
-    slot_policy: SlotPolicy,
-    merge_key: MergeKey,
-    available_at_ms: u64,
-    payloads: Vec<serde_json::Value>,
-    claim_id_present: bool,
-    claim_owner: Option<LeaseOwnerIdentity>,
-    claim_token_present: bool,
-    claim_fencing_token: u64,
-    claim_session_lease_generation: Option<u64>,
-}
-
-fn queued_work_observation(
-    ordinal: usize,
-    batch: QueuedWorkBatch,
-    claim_id_present: bool,
-    claim_owner: Option<LeaseOwnerIdentity>,
-    claim_token_present: bool,
-    claim_fencing_token: u64,
-    claim_session_lease_generation: Option<u64>,
-) -> QueuedWorkObservation {
-    QueuedWorkObservation {
-        ordinal,
-        source_key: batch.source_key,
-        delivery_policy: batch.delivery_policy,
-        slot_policy: batch.slot_policy,
-        merge_key: batch.merge_key,
-        available_at_ms: batch.available_at_ms,
-        payloads: batch
-            .items
-            .into_iter()
-            .map(|item| serde_json::to_value(item.payload).expect("encode queued-work payload"))
-            .collect(),
-        claim_id_present,
-        claim_owner,
-        claim_token_present,
-        claim_fencing_token,
-        claim_session_lease_generation,
-    }
-}
-
-fn queued_work_observations_from_sql_rows(
-    batches: Vec<QueuedWorkBatchRow>,
-    items: Vec<QueuedWorkItemRow>,
-) -> Vec<QueuedWorkObservation> {
-    let mut payloads_by_batch = BTreeMap::<String, Vec<(i64, serde_json::Value)>>::new();
-    for (batch_id, item_index, payload_json) in items {
-        payloads_by_batch.entry(batch_id).or_default().push((
-            item_index,
-            serde_json::from_str(&payload_json).expect("decode queued-work payload"),
-        ));
-    }
-
-    batches
-        .into_iter()
-        .enumerate()
-        .map(
-            |(
-                ordinal,
-                (
-                    _enqueue_seq,
-                    batch_id,
-                    source_key,
-                    delivery_policy,
-                    slot_policy,
-                    merge_key_json,
-                    available_at_ms,
-                    claim_id,
-                    claim_owner_id,
-                    claim_owner_incarnation_id,
-                    claim_owner_liveness_json,
-                    claim_token,
-                    claim_fencing_token,
-                    claim_session_lease_generation,
-                ),
-            )| {
-                let mut payloads = payloads_by_batch.remove(&batch_id).unwrap_or_default();
-                payloads.sort_by_key(|(item_index, _)| *item_index);
-                QueuedWorkObservation {
-                    ordinal,
-                    source_key,
-                    delivery_policy: DeliveryPolicy::from_wire_str(&delivery_policy)
-                        .expect("decode queued-work delivery policy"),
-                    slot_policy: SlotPolicy::from_wire_str(&slot_policy)
-                        .expect("decode queued-work slot policy"),
-                    merge_key: serde_json::from_str(&merge_key_json)
-                        .expect("decode queued-work merge key"),
-                    available_at_ms: available_at_ms as u64,
-                    payloads: payloads
-                        .into_iter()
-                        .map(|(_item_index, payload)| payload)
-                        .collect(),
-                    claim_id_present: claim_id.is_some(),
-                    claim_owner: decode_lease_owner(
-                        claim_owner_id,
-                        claim_owner_incarnation_id,
-                        claim_owner_liveness_json,
-                    ),
-                    claim_token_present: claim_token.is_some(),
-                    claim_fencing_token: claim_fencing_token as u64,
-                    claim_session_lease_generation: claim_token
-                        .as_ref()
-                        .map(|_| claim_session_lease_generation as u64),
-                }
-            },
-        )
-        .collect()
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
 struct CheckpointObservation {
     checkpoint_ref: Option<BlobRef>,
     turn_state: serde_json::Value,
@@ -1009,6 +923,7 @@ struct RawDurableState {
     session_execution_leases: Vec<SessionExecutionLeaseObservation>,
     pending_turn_inputs: Vec<PendingTurnInputObservation>,
     queued_work: Vec<QueuedWorkObservation>,
+    session_owned_artifact_refs: Vec<SessionOwnedArtifactRefObservation>,
     // `process_*` and `trigger_*` are deliberately excluded: they are separate
     // subsystems with dedicated conformance suites, while this harness and its
     // operation vocabulary are scoped to one runtime session. Effect/await
@@ -1026,6 +941,7 @@ enum RawDurableReader {
     InMemory {
         store: Arc<InMemorySessionStore>,
         factory: Arc<InMemorySessionStoreFactory>,
+        session_id: String,
     },
     Sqlite {
         path: PathBuf,
@@ -1486,6 +1402,12 @@ async fn read_sqlite_durable_state(
     };
     let queued_work =
         queued_work_observations_from_sql_rows(queued_work_batches, queued_work_items);
+    let session_owned_artifact_refs = session_owned_artifact_ref_observations(
+        store
+            .raw_session_owned_artifact_refs_for_testing(session_id)
+            .await
+            .expect("read SQLite session-owned artifact refs"),
+    );
 
     RawDurableState {
         head_revision,
@@ -1500,6 +1422,7 @@ async fn read_sqlite_durable_state(
         session_execution_leases,
         pending_turn_inputs,
         queued_work,
+        session_owned_artifact_refs,
     }
 }
 
@@ -1535,6 +1458,7 @@ struct BackendRunner {
     first_lease: Option<lash_core::SessionExecutionLease>,
     successor_lease: Option<lash_core::SessionExecutionLease>,
     stale_turn_input_claim: Option<TurnInputClaim>,
+    queued_work_claim: Option<QueuedWorkClaim>,
     current_frame_node_id: Option<String>,
     current_leaf_node_id: Option<String>,
     checkpoint_component_refs: Option<CheckpointComponentRefs>,
@@ -1754,6 +1678,27 @@ impl BackendRunner {
                 )
                 .await
                 .map(|_| None),
+            StoreOperation::EnqueueClaimableQueuedWork => self
+                .store()
+                .enqueue_queued_work(
+                    QueuedWorkBatchDraft::new(
+                        &self.session_id,
+                        DeliveryPolicy::AfterCurrentTurnCommit,
+                        SlotPolicy::Join,
+                        vec![QueuedWorkPayload::agent_frame_task(
+                            "differential-frame",
+                            "exercise queued-work claim state",
+                            None,
+                        )],
+                    )
+                    .with_source_key("cross-backend-claim-observability")
+                    .with_available_at_ms(777)
+                    .with_merge_key(MergeKey::Group(
+                        "cross-backend-claim-observability".to_string(),
+                    )),
+                )
+                .await
+                .map(|_| None),
             StoreOperation::AcquireSessionLease { slot, owner } => {
                 let owner = LeaseOwnerIdentity::opaque(*owner, format!("{owner}:incarnation"));
                 let lease = self
@@ -1799,6 +1744,39 @@ impl BackendRunner {
                 claim.record_initial_turn_application("claim-turn", "claim-message");
                 self.stale_turn_input_claim = Some(claim);
                 Ok(None)
+            }
+            StoreOperation::ClaimQueuedWork { lease } => {
+                let lease = self.lease(*lease);
+                let owner = lease.owner.clone();
+                let claim = self
+                    .store()
+                    .claim_ready_queued_work(
+                        &self.session_id,
+                        &lease.fence(),
+                        &owner,
+                        QueuedWorkClaimBoundary::Idle,
+                        1,
+                    )
+                    .await?
+                    .ok_or_else(|| {
+                        StoreError::Backend(format!(
+                            "{} did not return the generated queued-work claim",
+                            self.name
+                        ))
+                    })?;
+                self.queued_work_claim = Some(claim);
+                Ok(None)
+            }
+            StoreOperation::AbandonQueuedWorkClaim => {
+                let claim = self
+                    .queued_work_claim
+                    .as_ref()
+                    .expect("generated sequence claimed queued work before abandonment")
+                    .clone();
+                self.store()
+                    .abandon_queued_work_claim(&claim)
+                    .await
+                    .map(|_| None)
             }
             StoreOperation::ReleaseSessionLease { lease } => self
                 .store()
@@ -2006,6 +1984,23 @@ impl BackendRunner {
                 Ok(None)
             }
             StoreOperation::DeleteSessionThroughFactory => {
+                let store = self.store();
+                let has_session_artifact_refs = store
+                    .seed_session_trigger_manifest_ref_for_testing(&self.session_id)
+                    .await?;
+                if has_session_artifact_refs {
+                    assert_eq!(
+                        store
+                            .raw_session_owned_artifact_refs_for_testing(&self.session_id)
+                            .await?,
+                        vec![(
+                            "lashlang_trigger_manifest".to_string(),
+                            format!("session:{}", self.session_id),
+                        )],
+                        "{} did not seed the exact session-owned trigger-manifest ref",
+                        self.name
+                    );
+                }
                 self.factory()
                     .delete_session(&self.session_id)
                     .await
@@ -2276,6 +2271,7 @@ async fn runners_for_case(
             raw_reader: RawDurableReader::InMemory {
                 store: memory,
                 factory: memory_factory,
+                session_id: session_id.clone(),
             },
             reopen: BackendReopen::InMemory,
             clock: Arc::clone(&clock),
@@ -2285,6 +2281,7 @@ async fn runners_for_case(
             first_lease: None,
             successor_lease: None,
             stale_turn_input_claim: None,
+            queued_work_claim: None,
             current_frame_node_id: None,
             current_leaf_node_id: None,
             checkpoint_component_refs: None,
@@ -2309,6 +2306,7 @@ async fn runners_for_case(
             first_lease: None,
             successor_lease: None,
             stale_turn_input_claim: None,
+            queued_work_claim: None,
             current_frame_node_id: None,
             current_leaf_node_id: None,
             checkpoint_component_refs: None,
@@ -2333,6 +2331,7 @@ async fn runners_for_case(
             first_lease: None,
             successor_lease: None,
             stale_turn_input_claim: None,
+            queued_work_claim: None,
             current_frame_node_id: None,
             current_leaf_node_id: None,
             checkpoint_component_refs: None,
@@ -2370,7 +2369,7 @@ fn render_divergence(
 #[test]
 fn generated_catalog_covers_required_adversarial_shapes() {
     let cases = generated_cases();
-    assert_eq!(cases.len(), 13);
+    assert_eq!(cases.len(), 14);
     assert!(cases.iter().all(|case| !case.operations.is_empty()));
     assert_eq!(
         cases
@@ -2389,6 +2388,7 @@ fn generated_catalog_covers_required_adversarial_shapes() {
             "missing_checkpoint_component_ref",
             "pin_fork_unpin_moves_node_anchor",
             "attachment_intent_adopted_by_commit",
+            "queued_work_claim_abandon_preserves_fencing_token",
             "delete_then_attempt_admission",
             "stale_handle_after_delete",
         ]
