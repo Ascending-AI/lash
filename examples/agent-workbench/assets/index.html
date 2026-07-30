@@ -2258,8 +2258,9 @@
        /api/state answers — and after the backend stops answering — it knows
        nothing about the session, so it reports the one thing it does know: the
        state of its own connection. A turn parked durably behind an outage must
-       never render as an empty, idle session. */
-    /* A channel is `null` until something has been learned about it. Unknown is
+       never render as an empty, idle session.
+
+       A channel is `null` until something has been learned about it. Unknown is
        not the same as down — a stream that has not attached yet is not evidence
        of an outage — but it is not evidence of liveness either, which is why a
        connect that never lands is bounded by a watchdog that turns it into a
