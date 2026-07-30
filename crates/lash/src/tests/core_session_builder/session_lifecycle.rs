@@ -1370,6 +1370,67 @@ async fn core_delete_session_retires_the_deleted_session_effect_journal() -> Res
 }
 
 #[tokio::test]
+async fn public_session_state_appends_preserve_concurrent_retirement_refusals() -> Result<()> {
+    let factory = Arc::new(lash_core::InMemorySessionStoreFactory::new());
+    let core = explicit_ephemeral_facets(LashCore::standard_builder())
+        .provider(mock_provider())
+        .model(mock_model_spec())
+        .store_factory(factory.clone())
+        .build()?;
+
+    for (session_id, append_plugin_body) in [
+        ("retired-append-messages", false),
+        ("retired-append-plugin-body", true),
+    ] {
+        let session = core.session(session_id).open().await?;
+        factory
+            .delete_session(session_id)
+            .await
+            .expect("retire session before public state append");
+
+        let error = if append_plugin_body {
+            session
+                .admin()
+                .state()
+                .append_plugin_body("test-plugin", serde_json::json!({ "retired": true }))
+                .await
+                .expect_err("plugin-body append must preserve the retirement refusal")
+        } else {
+            session
+                .admin()
+                .state()
+                .append_messages(vec![lash_core::PluginMessage::text(
+                    lash_core::MessageRole::User,
+                    "must not append",
+                )])
+                .await
+                .expect_err("message append must preserve the retirement refusal")
+        };
+
+        assert!(matches!(
+            &error,
+            EmbedError::Session(lash_core::SessionError::Store {
+                context,
+                source: lash_core::StoreError::SessionDeleted {
+                    session_id: deleted_session_id,
+                },
+            }) if context == "failed to persist runtime state"
+                && deleted_session_id == session_id
+        ));
+        assert_eq!(
+            error.to_string(),
+            format!(
+                "runtime session error: failed to persist runtime state: {}",
+                lash_core::StoreError::SessionDeleted {
+                    session_id: session_id.to_string(),
+                }
+            )
+        );
+    }
+    Ok(())
+}
+
+#[tokio::test]
 async fn store_session_id_mismatch_is_rejected() -> Result<()> {
     let state = RuntimeSessionState {
         session_id: "actual-session".to_string(),

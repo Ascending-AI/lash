@@ -98,6 +98,19 @@ pub(super) fn runtime_error_from_store_commit(err: crate::store::StoreError) -> 
     }
 }
 
+pub(super) fn session_commit_error(
+    context: &str,
+    source: crate::store::StoreError,
+) -> SessionError {
+    match source {
+        source @ crate::store::StoreError::SessionDeleted { .. } => SessionError::Store {
+            context: context.to_string(),
+            source,
+        },
+        source => SessionError::Protocol(format!("{context}: {source}")),
+    }
+}
+
 #[cfg(test)]
 mod store_commit_error_tests {
     use super::{RuntimeErrorCode, runtime_error_from_store_commit};

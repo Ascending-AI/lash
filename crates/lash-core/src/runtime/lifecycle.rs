@@ -461,10 +461,7 @@ impl LashRuntime {
                 Arc::clone(&self.host.core.clock),
             )
             .await
-            .map_err(|source| SessionError::Store {
-                context: "failed to persist runtime state".to_string(),
-                source,
-            })?;
+            .map_err(|source| session_commit_error("failed to persist runtime state", source))?;
             self.state.apply_persisted_commit_result(result);
             self.state.mark_node_ids_persisted(persisted_node_ids);
         }
@@ -665,5 +662,63 @@ mod tests {
                 ..
             } if deleted_session_id == session_id
         ));
+    }
+
+    #[tokio::test]
+    async fn park_commit_keeps_a_transient_backend_failure_as_protocol() {
+        use crate::SessionStoreFactory;
+        use crate::runtime::tests::helpers::{
+            EmptyTools, plugin_session_with_tools, standard_test_policy, test_host_config,
+        };
+        use std::sync::Arc;
+
+        let session_id = "transient-park-commit-failure";
+        let policy = standard_test_policy();
+        let factory = crate::InMemorySessionStoreFactory::new();
+        let store = factory
+            .create_store(&crate::SessionStoreCreateRequest {
+                session_id: session_id.to_string(),
+                relation: crate::SessionRelation::Root,
+                policy: policy.clone(),
+            })
+            .await
+            .expect("create session store before parking");
+        let runtime = crate::LashRuntime::from_persistent_embedded_state(
+            policy.clone(),
+            test_host_config(),
+            crate::PersistentRuntimeServices::new(
+                plugin_session_with_tools(session_id, Arc::new(EmptyTools)),
+                store,
+            ),
+            crate::RuntimeSessionState {
+                session_id: session_id.to_string(),
+                policy,
+                ..crate::RuntimeSessionState::default()
+            },
+        )
+        .await
+        .expect("build runtime before injected backend failure");
+        factory
+            .raw_store_for_testing(session_id)
+            .expect("raw in-memory store")
+            .fail_next_runtime_commit(crate::StoreError::Backend(
+                "temporary park backend outage".to_string(),
+            ));
+
+        let error = match runtime.park().await {
+            Ok(_) => panic!("park commit must surface the injected backend failure"),
+            Err(error) => error,
+        };
+
+        assert!(matches!(
+            &error,
+            SessionError::Protocol(message)
+                if message
+                    == "failed to persist runtime state: store backend error: temporary park backend outage"
+        ));
+        assert_eq!(
+            error.to_string(),
+            "protocol error: failed to persist runtime state: store backend error: temporary park backend outage"
+        );
     }
 }
