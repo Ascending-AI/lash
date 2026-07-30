@@ -20,6 +20,7 @@ where
     owner_namespaces_are_exact_and_session_cleanup_is_scoped(make()).await;
     explicit_prune_is_journaled_and_owner_scoped(make()).await;
     occurrence_and_reservations_are_atomic_and_idempotent(make()).await;
+    first_ingress_and_replay_share_canonical_subscription_order(make()).await;
 }
 
 pub async fn trigger_store_reopenable<F>(make: F)
@@ -711,6 +712,44 @@ async fn occurrence_and_reservations_are_atomic_and_idempotent(
         replay.reservations[0].reservation_status,
         crate::TriggerDeliveryReservationStatus::AlreadyReserved
     );
+}
+
+async fn first_ingress_and_replay_share_canonical_subscription_order(
+    store: Arc<dyn crate::TriggerStore>,
+) {
+    let owner_scope = crate::TriggerOwnerScope::host("fig811").unwrap();
+    for key in ["beta", "alpha"] {
+        let mut draft = sample_draft("fig811", key, "canonical-order-source", key);
+        draft.wake_target = None;
+        mutate(
+            &store,
+            &format!("canonical-order-register-{key}"),
+            crate::TriggerCommand::Register {
+                owner_scope: owner_scope.clone(),
+                actor: crate::ProcessOriginator::host_scoped("fig811"),
+                draft,
+            },
+        )
+        .await;
+    }
+    let request = button_occurrence("canonical-order-source", "canonical-order-occurrence");
+    let first = store.ingest_occurrence(request.clone()).await.unwrap();
+    let replay = store.ingest_occurrence(request).await.unwrap();
+    let alpha_id = crate::deterministic_subscription_id(&owner_scope, "alpha").unwrap();
+    let beta_id = crate::deterministic_subscription_id(&owner_scope, "beta").unwrap();
+    assert!(
+        alpha_id > beta_id,
+        "fixture must oppose hash order so canonical-order coverage cannot pass accidentally"
+    );
+    let keys = |ingress: &crate::TriggerIngressResult| {
+        ingress
+            .reservations
+            .iter()
+            .map(|reservation| reservation.subscription.subscription_key.clone())
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(keys(&first), vec!["alpha".to_string(), "beta".to_string()]);
+    assert_eq!(keys(&replay), vec!["alpha".to_string(), "beta".to_string()]);
 }
 
 async fn same_identity_and_receipt_survive_store_reopen(factory: ReopenableTriggerStore) {

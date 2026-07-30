@@ -332,7 +332,9 @@ impl Processes {
     /// Host-scheduled retention lever (ADR 0017): physically delete terminal
     /// process rows (and their events, observer edges, leases) older than
     /// `cutoff_epoch_ms`, returning what was reclaimed. Non-terminal rows are
-    /// never touched. Choose a cutoff comfortably longer than any live await.
+    /// never touched. Lash exposes no finite maximum waiter lifetime: the host
+    /// must retain rows beyond every still-replayable await, and a later await
+    /// after pruning receives the typed `ProcessNoLongerRetained` outcome.
     pub async fn prune(&self, cutoff_epoch_ms: u64) -> Result<lash_core::ProcessPruneReport> {
         let registry = self.registry()?;
         let candidates = registry

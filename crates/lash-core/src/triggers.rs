@@ -964,6 +964,34 @@ pub struct TriggerDeliveryReservation {
     pub reservation_status: TriggerDeliveryReservationStatus,
 }
 
+/// Orders delivery starts by the stable subscription identity fields captured
+/// in each reservation snapshot.
+///
+/// Trigger emission is journal-order-sensitive: first ingress and every
+/// idempotent replay must visit the same subscriptions in the same order on
+/// every backend. A tie on `(owner_scope, subscription_key)` is impossible in
+/// valid state because that exact projection is unique and `subscription_id`
+/// is derived from it. The final tie-breaker only defends corrupted snapshots;
+/// if reached, it remains replay-stable because the ID is content-derived.
+pub fn sort_trigger_delivery_reservations(reservations: &mut [TriggerDeliveryReservation]) {
+    reservations.sort_by(|left, right| {
+        left.subscription
+            .owner_scope
+            .namespace()
+            .cmp(&right.subscription.owner_scope.namespace())
+            .then_with(|| {
+                left.subscription
+                    .subscription_key
+                    .cmp(&right.subscription.subscription_key)
+            })
+            .then_with(|| {
+                left.subscription
+                    .subscription_id
+                    .cmp(&right.subscription.subscription_id)
+            })
+    });
+}
+
 impl TriggerDeliveryReservation {
     fn emit_report(&self, outcome: TriggerDeliveryEmitOutcome) -> TriggerDeliveryEmitReport {
         TriggerDeliveryEmitReport {

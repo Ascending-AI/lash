@@ -1,10 +1,31 @@
 use bytes::{BufMut, Bytes, BytesMut};
+use http_body::{Body, Frame};
 use http_body_util::{BodyExt, Full, channel::Channel};
 use restate_sdk::errors::TerminalError;
 use restate_sdk::prelude::Endpoint;
 use std::convert::Infallible;
+use std::pin::Pin;
+use std::task::{Context, Poll};
 
 const RESTATE_INVOCATION_CONTENT_TYPE: &str = "application/vnd.restate.invocation.v6";
+
+struct FusedChannelBody {
+    receiver: tokio::sync::mpsc::Receiver<Bytes>,
+}
+
+impl Body for FusedChannelBody {
+    type Data = Bytes;
+    type Error = Infallible;
+
+    fn poll_frame(
+        mut self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+    ) -> Poll<Option<Result<Frame<Self::Data>, Self::Error>>> {
+        self.receiver
+            .poll_recv(cx)
+            .map(|value| value.map(|bytes| Ok(Frame::data(bytes))))
+    }
+}
 
 fn encode_restate_message(message_type: u16, payload: Vec<u8>) -> Bytes {
     let mut encoded = BytesMut::with_capacity(8 + payload.len());
@@ -82,6 +103,23 @@ fn restate_message_frame(input: &[u8], expected_type: u16) -> Option<&[u8]> {
         cursor = frame_end;
     }
     None
+}
+
+fn restate_message_frames(input: &[u8], expected_type: u16) -> Option<Vec<&[u8]>> {
+    let mut cursor = 0;
+    let mut frames = Vec::new();
+    while cursor < input.len() {
+        let header = u64::from_be_bytes(input.get(cursor..cursor + 8)?.try_into().ok()?);
+        let message_type = (header >> 48) as u16;
+        let payload_len = usize::try_from(header & 0x0000_FFFF_FFFF_FFFF).ok()?;
+        let frame_end = cursor.checked_add(8 + payload_len)?;
+        let frame = input.get(cursor..frame_end)?;
+        if message_type == expected_type {
+            frames.push(frame);
+        }
+        cursor = frame_end;
+    }
+    Some(frames)
 }
 
 pub(super) fn restate_error_message(input: &[u8]) -> Option<String> {
@@ -357,6 +395,73 @@ pub(super) fn encode_one_way_call_replay<T: serde::Serialize>(
     Ok(body.freeze())
 }
 
+/// FIG-811: splice the two process starts and the following call from a
+/// multi-subscription attempt, completing them with the invocation identities
+/// the live attempt observed.
+pub(super) fn encode_two_one_way_calls_and_call_replay<T: serde::Serialize>(
+    workflow_key: &str,
+    input: &T,
+    suspended_output: &[u8],
+    invocation_ids: [&str; 2],
+    call_completion: serde_json::Value,
+) -> Result<Bytes, TerminalError> {
+    let input = serde_json::to_vec(input).map_err(TerminalError::from_error)?;
+    let one_way_calls = restate_message_frames(suspended_output, 0x040E)
+        .ok_or_else(|| TerminalError::new("invalid suspended attempt frames"))?;
+    if one_way_calls.len() != invocation_ids.len() {
+        return Err(TerminalError::new(format!(
+            "expected {} one-way calls, found {}",
+            invocation_ids.len(),
+            one_way_calls.len()
+        )));
+    }
+    let terminal_call = restate_message_frame(suspended_output, 0x040D)
+        .ok_or_else(|| TerminalError::new("suspended attempt omitted its following CallCommand"))?;
+    let call_completion_id = u32::try_from(
+        protobuf_varint_field(
+            terminal_call
+                .get(8..)
+                .ok_or_else(|| TerminalError::new("following call omitted its frame payload"))?,
+            11,
+        )
+        .ok_or_else(|| TerminalError::new("following call omitted its completion id"))?,
+    )
+    .map_err(|_| TerminalError::new("following call completion id exceeded u32"))?;
+    let call_completion =
+        serde_json::to_vec(&call_completion).map_err(TerminalError::from_error)?;
+
+    let mut body = BytesMut::new();
+    body.extend_from_slice(&encode_start_message(workflow_key, 4));
+    body.extend_from_slice(&encode_input_command(&input));
+    let mut invocation_completions = Vec::with_capacity(invocation_ids.len());
+    for (one_way_call, invocation_id) in one_way_calls.into_iter().zip(invocation_ids) {
+        let completion_id = u32::try_from(
+            protobuf_varint_field(
+                one_way_call
+                    .get(8..)
+                    .ok_or_else(|| TerminalError::new("one-way call omitted its frame payload"))?,
+                10,
+            )
+            .ok_or_else(|| TerminalError::new("one-way call omitted its invocation-id index"))?,
+        )
+        .map_err(|_| TerminalError::new("one-way call invocation-id index exceeded u32"))?;
+        body.extend_from_slice(one_way_call);
+        invocation_completions.push((completion_id, invocation_id));
+    }
+    body.extend_from_slice(terminal_call);
+    for (completion_id, invocation_id) in invocation_completions {
+        body.extend_from_slice(&encode_invocation_id_completion(
+            completion_id,
+            invocation_id,
+        ));
+    }
+    body.extend_from_slice(&encode_call_completion(
+        call_completion_id,
+        &call_completion,
+    ));
+    Ok(body.freeze())
+}
+
 /// FIG-788: splice the exact segment-finished and terminal-delivery commands
 /// from an ordinal greater than zero, then complete the terminal call.
 pub(super) fn encode_process_terminal_delivery_replay<T: serde::Serialize>(
@@ -387,6 +492,59 @@ pub(super) fn encode_process_terminal_delivery_replay<T: serde::Serialize>(
     body.extend_from_slice(segment_finished);
     body.extend_from_slice(terminal_call);
     body.extend_from_slice(&encode_call_completion(completion_id, &completion));
+    Ok(body.freeze())
+}
+
+/// FIG-811: splice an effectful ordinal segment's complete deployed prefix:
+/// the captured sleep and its completion followed by the captured terminal
+/// delivery and its completion.
+pub(super) fn encode_effectful_process_terminal_replay<T: serde::Serialize>(
+    workflow_key: &str,
+    input: &T,
+    effect_suspension: &[u8],
+    terminal_delivery_suspension: &[u8],
+) -> Result<Bytes, TerminalError> {
+    let input = serde_json::to_vec(input).map_err(TerminalError::from_error)?;
+    let sleep_command = restate_message_frame(effect_suspension, 0x040C)
+        .ok_or_else(|| TerminalError::new("effectful attempt omitted its SleepCommand"))?;
+    let sleep_completion_id = u32::try_from(
+        protobuf_varint_field(
+            sleep_command
+                .get(8..)
+                .ok_or_else(|| TerminalError::new("sleep command omitted its frame payload"))?,
+            11,
+        )
+        .ok_or_else(|| TerminalError::new("sleep command omitted its completion id"))?,
+    )
+    .map_err(|_| TerminalError::new("sleep command completion id exceeded u32"))?;
+    let segment_finished = restate_message_frame(terminal_delivery_suspension, 0x040B)
+        .ok_or_else(|| TerminalError::new("terminal attempt omitted CompletePromiseCommand"))?;
+    let terminal_call = restate_message_frame(terminal_delivery_suspension, 0x040D)
+        .ok_or_else(|| TerminalError::new("terminal attempt omitted CallCommand"))?;
+    let call_completion_id = u32::try_from(
+        protobuf_varint_field(
+            terminal_call
+                .get(8..)
+                .ok_or_else(|| TerminalError::new("terminal call omitted its frame payload"))?,
+            11,
+        )
+        .ok_or_else(|| TerminalError::new("terminal call omitted its completion id"))?,
+    )
+    .map_err(|_| TerminalError::new("terminal call completion id exceeded u32"))?;
+    let call_completion =
+        serde_json::to_vec(&serde_json::Value::Null).map_err(TerminalError::from_error)?;
+
+    let mut body = BytesMut::new();
+    body.extend_from_slice(&encode_start_message(workflow_key, 5));
+    body.extend_from_slice(&encode_input_command(&input));
+    body.extend_from_slice(sleep_command);
+    body.extend_from_slice(&encode_sleep_completion(sleep_completion_id));
+    body.extend_from_slice(segment_finished);
+    body.extend_from_slice(terminal_call);
+    body.extend_from_slice(&encode_call_completion(
+        call_completion_id,
+        &call_completion,
+    ));
     Ok(body.freeze())
 }
 
@@ -719,6 +877,139 @@ pub(super) async fn invoke_endpoint_body_with_json_call_responses(
     )
     .await
     .map_err(|_| TerminalError::new("scripted-call endpoint test timed out"))?
+}
+
+pub(super) async fn invoke_endpoint_with_scripted_responses<T: serde::Serialize>(
+    endpoint: &Endpoint,
+    service: &str,
+    handler: &str,
+    key: &str,
+    input: &T,
+    invocation_ids: Vec<String>,
+    responses: Vec<serde_json::Value>,
+) -> Result<Bytes, TerminalError> {
+    tokio::time::timeout(
+        ENDPOINT_TEST_TIMEOUT,
+        invoke_endpoint_body_with_scripted_responses_unbounded(
+            endpoint,
+            service,
+            handler,
+            encode_invocation_body(key, input)?,
+            invocation_ids,
+            responses,
+        ),
+    )
+    .await
+    .map_err(|_| TerminalError::new("scripted endpoint test timed out"))?
+}
+
+async fn invoke_endpoint_body_with_scripted_responses_unbounded(
+    endpoint: &Endpoint,
+    service: &str,
+    handler: &str,
+    invocation_body: Bytes,
+    invocation_ids: Vec<String>,
+    responses: Vec<serde_json::Value>,
+) -> Result<Bytes, TerminalError> {
+    let (input_sender, receiver) = tokio::sync::mpsc::channel(8);
+    input_sender
+        .send(invocation_body)
+        .await
+        .map_err(|err| TerminalError::new(format!("endpoint input failed: {err}")))?;
+    let mut input_sender = Some(input_sender);
+    let mut invocation_ids = invocation_ids.into_iter();
+    let mut responses = responses.into_iter();
+    let response = endpoint.handle(
+        http::Request::builder()
+            .uri(format!("/invoke/{service}/{handler}"))
+            .header(http::header::CONTENT_TYPE, RESTATE_INVOCATION_CONTENT_TYPE)
+            .body(FusedChannelBody { receiver })
+            .expect("endpoint invocation request"),
+    );
+    let status = response.status();
+    if !status.is_success() {
+        return Err(TerminalError::new_with_code(
+            status.as_u16(),
+            format!("endpoint invocation returned status {status}"),
+        ));
+    }
+    let mut response = response.into_body();
+    let mut output = BytesMut::new();
+    let mut decoded = 0;
+    while let Some(frame) = response.frame().await {
+        let frame =
+            frame.map_err(|err| TerminalError::new(format!("endpoint body failed: {err}")))?;
+        let Ok(data) = frame.into_data() else {
+            continue;
+        };
+        output.extend_from_slice(&data);
+        while output.len().saturating_sub(decoded) >= 8 {
+            let header = u64::from_be_bytes(
+                output[decoded..decoded + 8]
+                    .try_into()
+                    .expect("restate frame header"),
+            );
+            let message_type = (header >> 48) as u16;
+            let payload_len = usize::try_from(header & 0x0000_FFFF_FFFF_FFFF)
+                .expect("restate frame payload length");
+            let frame_end = decoded + 8 + payload_len;
+            if output.len() < frame_end {
+                break;
+            }
+            match message_type {
+                0x040E => {
+                    let completion_id = u32::try_from(
+                        protobuf_varint_field(&output[decoded + 8..frame_end], 10).ok_or_else(
+                            || TerminalError::new("one-way call omitted its invocation-id index"),
+                        )?,
+                    )
+                    .map_err(|_| {
+                        TerminalError::new("one-way call invocation-id index exceeded u32")
+                    })?;
+                    if let Some(invocation_id) = invocation_ids.next() {
+                        input_sender
+                            .as_mut()
+                            .expect("endpoint input remains open for scripted notifications")
+                            .send(encode_invocation_id_completion(
+                                completion_id,
+                                &invocation_id,
+                            ))
+                            .await
+                            .map_err(|err| {
+                                TerminalError::new(format!(
+                                    "invocation-id completion input failed: {err}"
+                                ))
+                            })?;
+                    } else {
+                        drop(input_sender.take());
+                    }
+                }
+                0x040D => {
+                    let call = decode_call_frame(&output[decoded..frame_end])
+                        .ok_or_else(|| TerminalError::new("invalid call command frame"))?;
+                    if let Some(response) = responses.next() {
+                        let response =
+                            serde_json::to_vec(&response).map_err(TerminalError::from_error)?;
+                        input_sender
+                            .as_mut()
+                            .expect("endpoint input remains open for scripted calls")
+                            .send(encode_call_completion(call.result_completion_id, &response))
+                            .await
+                            .map_err(|err| {
+                                TerminalError::new(format!("call completion input failed: {err}"))
+                            })?;
+                    } else {
+                        drop(input_sender.take());
+                    }
+                }
+                0x0001..=0x0003 => drop(input_sender.take()),
+                _ => {}
+            }
+            decoded = frame_end;
+        }
+    }
+    drop(input_sender);
+    Ok(output.freeze())
 }
 
 async fn invoke_endpoint_body_with_json_call_responses_unbounded(

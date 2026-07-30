@@ -2264,6 +2264,7 @@ dependencies = [
  "async-trait",
  "bytes",
  "http",
+ "http-body",
  "http-body-util",
  "lash-core",
  "lash-http-transport",
