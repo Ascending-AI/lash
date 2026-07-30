@@ -222,7 +222,7 @@ impl TriggerStore for InMemoryTriggerStore {
                 ))
             });
             let occurrence = occurrence?;
-            let reservations = state
+            let mut reservations = state
                 .deliveries
                 .values()
                 .filter(|delivery| delivery.occurrence_id == existing_id)
@@ -234,6 +234,7 @@ impl TriggerStore for InMemoryTriggerStore {
                     )
                 })
                 .collect::<Result<Vec<_>, _>>()?;
+            sort_trigger_delivery_reservations(&mut reservations);
             return Ok(TriggerIngressResult {
                 occurrence,
                 reservations,

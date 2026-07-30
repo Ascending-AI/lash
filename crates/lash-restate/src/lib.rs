@@ -2449,6 +2449,38 @@ where
                     .latest_segment_handover(&process_id)
                     .await
                     .map_err(HandlerError::from)?;
+                if let Some(output) = record.outcome.clone() {
+                    // FIG-811: compatibility for a terminal segment whose
+                    // handover was deleted by a pre-lazy-cleanup deployment.
+                    // This suffix is a complete replay only when that attempt
+                    // emitted no runner commands before terminal delivery.
+                    // Current deployments retain handovers until process
+                    // pruning, so effectful attempts replay through the runner.
+                    resolve_process_cancel_signal(
+                        &ctx,
+                        RestateProcessCancelSignal::SegmentFinished,
+                    )?;
+                    let request: restate_sdk::context::Request<
+                        '_,
+                        Json<RestateProcessCompleteRequest>,
+                        Json<()>,
+                    > = ContextClient::request(
+                        &ctx,
+                        RequestTarget::workflow(
+                            "LashProcessWorkflow",
+                            process_id.clone(),
+                            "complete_terminal",
+                        ),
+                        Json(RestateProcessCompleteRequest {
+                            process_id: process_id.clone(),
+                            output: output.clone(),
+                        }),
+                    );
+                    request.call().await?;
+                    return Ok(Json(RestateProcessWorkflowOutput::Terminal {
+                        output: Box::new(output),
+                    }));
+                }
                 if missing_segment_is_superseded(input.segment_ordinal, latest.as_ref()) {
                     tracing::debug!(
                         process_id,
@@ -2498,10 +2530,6 @@ where
                         }),
                     );
                     request.call().await?;
-                    self.continuations
-                        .delete_segment_handovers(&process_id)
-                        .await
-                        .map_err(HandlerError::from)?;
                     return Ok(Json(RestateProcessWorkflowOutput::Terminal {
                         output: Box::new(output),
                     }));
@@ -2590,10 +2618,10 @@ where
                     );
                     request.call().await?;
                 }
-                self.continuations
-                    .delete_segment_handovers(&process_id)
-                    .await
-                    .map_err(HandlerError::from)?;
+                // FIG-811: the handover remains replay authority until the
+                // terminal process reaches host-owned retention pruning. A
+                // redrive after delivery can therefore reproduce every runner
+                // command before idempotently repeating this terminal suffix.
                 Ok(Json(RestateProcessWorkflowOutput::Terminal {
                     output: Box::new(output),
                 }))

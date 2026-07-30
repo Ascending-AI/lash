@@ -75,6 +75,7 @@ pub(super) fn reserve_in_memory_for_occurrence(
             reservation_status: TriggerDeliveryReservationStatus::Reserved,
         });
     }
+    sort_trigger_delivery_reservations(&mut reservations);
     Ok(reservations)
 }
 

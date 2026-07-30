@@ -138,6 +138,14 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn in_memory_process_continuation_store_satisfies_conformance() {
+        let storage = Arc::new(crate::TestLocalProcessRegistry::default());
+        let registry = Arc::clone(&storage) as Arc<dyn crate::ProcessRegistry>;
+        let store = storage as Arc<dyn crate::ProcessContinuationStore>;
+        process_continuation_store(registry, store).await;
+    }
+
+    #[tokio::test]
     async fn in_memory_trigger_store_satisfies_conformance() {
         // Independent in-memory instances cannot reopen shared state, so the
         // durable-only `trigger_store_reopenable` vector is genuinely N/A.

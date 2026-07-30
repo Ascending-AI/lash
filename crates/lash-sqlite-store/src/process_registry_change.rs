@@ -103,6 +103,11 @@ pub(crate) fn prune_terminal_processes_conn(
             params![process_id],
         )
         .map_err(process_sqlite_error)?;
+        conn.execute(
+            "DELETE FROM process_segment_handovers WHERE process_id = ?1",
+            params![process_id],
+        )
+        .map_err(process_sqlite_error)?;
         if trigger_deliveries_exists {
             conn.execute(
                 "DELETE FROM trigger_deliveries WHERE process_id = ?1",

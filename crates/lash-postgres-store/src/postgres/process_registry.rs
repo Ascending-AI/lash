@@ -1460,7 +1460,7 @@ impl ProcessRegistry for PostgresProcessRegistry {
                 .execute(&mut *tx)
                 .await
                 .map_err(plugin_sqlx_error)?;
-            sqlx::query("DELETE FROM lash_trigger_deliveries WHERE process_id = $1")
+            sqlx::query("WITH deleted_handovers AS (DELETE FROM lash_process_segment_handovers WHERE process_id = $1) DELETE FROM lash_trigger_deliveries WHERE process_id = $1")
                 .bind(&process_id)
                 .execute(&mut *tx)
                 .await

@@ -242,7 +242,9 @@ a sink must return fast and offload any I/O. Retention is
 projected a process's outcome into its own store calls it on the maintenance
 cadence to replace eligible terminal rows with payload-free tombstones after
 the projection watermark advances — removing their events, wakes, observer edges, and leases —
-older than a window comfortably longer than any in-flight `await_terminal`.
+only once host policy has retained them beyond every still-replayable
+`await_terminal`. Lash exposes no finite maximum waiter lifetime to validate a
+cutoff against; a later await after pruning receives `ProcessNoLongerRetained`.
 
 ## The primitive (a process-side mirror of the turn machinery)
 

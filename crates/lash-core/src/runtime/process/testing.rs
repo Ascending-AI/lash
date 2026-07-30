@@ -1479,6 +1479,10 @@ impl ProcessRegistry for TestLocalProcessRegistry {
             .lock()
             .await
             .retain(|process_id, _| !prunable.contains(process_id));
+        self.handovers
+            .lock()
+            .await
+            .retain(|(process_id, _), _| !prunable.contains(process_id));
         if let Some(trigger_store) = self.trigger_store.as_ref() {
             trigger_store.delete_deliveries_by_process_ids(&prunable)?;
         }

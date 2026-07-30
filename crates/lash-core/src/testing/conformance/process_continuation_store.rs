@@ -3,8 +3,9 @@
 use std::sync::Arc;
 
 use crate::{
-    BoundaryReason, PersistedSegmentHandover, ProcessContinuationStore, ProcessInput,
-    ProcessProvenance, ProcessRegistration, ProcessRegistry, RecoveryDisposition, SegmentHandover,
+    BoundaryReason, PersistedSegmentHandover, ProcessAwaitOutput, ProcessCompletionAuthority,
+    ProcessContinuationStore, ProcessInput, ProcessProvenance, ProcessRegistration,
+    ProcessRegistry, ProjectionWatermark, RecoveryDisposition, SegmentHandover,
 };
 
 pub async fn process_continuation_store(
@@ -76,5 +77,58 @@ pub async fn process_continuation_store(
             .await
             .expect("read after delete")
             .is_none()
+    );
+
+    let pruned_process_id = "pruned-continuation-conformance";
+    registry
+        .register_process(ProcessRegistration::new(
+            pruned_process_id,
+            ProcessInput::External {
+                metadata: serde_json::Value::Null,
+            },
+            RecoveryDisposition::ExternallyOwned,
+            ProcessProvenance::host(),
+        ))
+        .await
+        .expect("register prunable continuation owner");
+    let pruned_handover = PersistedSegmentHandover {
+        segment_ordinal: 1,
+        program_hash: "pruned-program-v1".to_string(),
+        handover: SegmentHandover {
+            reason: BoundaryReason::JournalBudget,
+            program_hash: Some("pruned-program-v1".to_string()),
+            engine_state: vec![8, 1, 1],
+        },
+    };
+    store
+        .put_segment_handover(pruned_process_id, pruned_handover)
+        .await
+        .expect("persist handover until terminal retention pruning");
+    let terminal = registry
+        .complete_process(
+            pruned_process_id,
+            ProcessAwaitOutput::Success {
+                value: serde_json::Value::Null,
+                control: None,
+            },
+            ProcessCompletionAuthority::external_owner(),
+        )
+        .await
+        .expect("complete prunable continuation owner");
+    registry
+        .prune_terminal_processes(
+            terminal.updated_at_ms.saturating_add(1),
+            None,
+            ProjectionWatermark::NoProjector,
+        )
+        .await
+        .expect("prune terminal continuation owner");
+    assert!(
+        store
+            .latest_segment_handover(pruned_process_id)
+            .await
+            .expect("read handover after terminal prune")
+            .is_none(),
+        "terminal process pruning must remove its retained handovers"
     );
 }

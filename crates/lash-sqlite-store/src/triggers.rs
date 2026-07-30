@@ -696,6 +696,7 @@ fn reserve_sqlite_deliveries(
             reservation_status: lash_core::TriggerDeliveryReservationStatus::Reserved,
         });
     }
+    lash_core::sort_trigger_delivery_reservations(&mut reservations);
     Ok(reservations)
 }
 
@@ -708,8 +709,7 @@ fn sqlite_delivery_snapshots(
         .prepare(
             "SELECT process_id, created_at_ms, subscription_snapshot_json
              FROM trigger_deliveries
-             WHERE occurrence_id = ?1
-             ORDER BY created_at_ms ASC, subscription_id ASC",
+             WHERE occurrence_id = ?1",
         )
         .map_err(process_sqlite_error)?;
     let rows = stmt
@@ -732,5 +732,6 @@ fn sqlite_delivery_snapshots(
             reservation_status: reservation_status.clone(),
         });
     }
+    lash_core::sort_trigger_delivery_reservations(&mut reservations);
     Ok(reservations)
 }

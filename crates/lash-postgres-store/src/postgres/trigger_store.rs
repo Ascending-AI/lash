@@ -486,6 +486,7 @@ async fn reserve_postgres_deliveries(
             reservation_status: lash_core::TriggerDeliveryReservationStatus::Reserved,
         });
     }
+    lash_core::sort_trigger_delivery_reservations(&mut reservations);
     Ok(reservations)
 }
 
@@ -495,14 +496,14 @@ async fn postgres_delivery_snapshots(
 ) -> Result<Vec<TriggerDeliveryReservation>, PluginError> {
     let rows = sqlx::query(
         "SELECT process_id, created_at_ms, subscription_snapshot_json
-         FROM lash_trigger_deliveries WHERE occurrence_id = $1
-         ORDER BY created_at_ms ASC, subscription_id ASC",
+         FROM lash_trigger_deliveries WHERE occurrence_id = $1",
     )
     .bind(&occurrence.occurrence_id)
     .fetch_all(&mut **tx)
     .await
     .map_err(plugin_sqlx_error)?;
-    rows.into_iter()
+    let mut reservations = rows
+        .into_iter()
         .map(|row| {
             let json: String = row.get(2);
             Ok(TriggerDeliveryReservation {
@@ -513,7 +514,9 @@ async fn postgres_delivery_snapshots(
                 reservation_status: lash_core::TriggerDeliveryReservationStatus::AlreadyReserved,
             })
         })
-        .collect()
+        .collect::<Result<Vec<_>, PluginError>>()?;
+    lash_core::sort_trigger_delivery_reservations(&mut reservations);
+    Ok(reservations)
 }
 
 async fn list_deliveries_where(
