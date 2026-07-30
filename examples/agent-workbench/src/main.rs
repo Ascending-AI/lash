@@ -2,6 +2,7 @@ mod execution_graphs;
 mod failure_provider;
 mod mail;
 mod restate;
+mod restate_ingress;
 mod ui;
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};

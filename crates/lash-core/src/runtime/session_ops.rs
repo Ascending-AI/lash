@@ -130,15 +130,15 @@ impl LashRuntime {
             {
                 Ok(result) => result,
                 Err(err) => {
-                    let persistence_error = format!("failed to persist runtime state: {err}");
                     if let Err(rollback_err) = self
                         .restore_protocol_session_after_failed_append(state_before_append)
                         .await
                     {
-                        return Err(SessionError::Protocol(format!(
-                            "{persistence_error}; failed to restore protocol session: \
+                        let context = format!(
+                            "failed to persist runtime state; failed to restore protocol session: \
                              {rollback_err}"
-                        )));
+                        );
+                        return Err(super::session_commit_error(&context, err));
                     }
                     return Err(super::session_commit_error(
                         "failed to persist runtime state",

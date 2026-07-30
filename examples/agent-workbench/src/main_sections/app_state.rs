@@ -140,6 +140,7 @@ impl AppState {
                     Some("user".to_string()),
                 ).with_reason("workbench Stop control"))
                 .await
+                // Audited: revoked turn-cancel gates become an UnknownOrRevoked outcome; remaining failures are untyped control errors.
                 .map_err(|err| AppError::internal(err.to_string()))?;
             let (terminal, terminal_error) = if matches!(
                 &receipt.outcome,
@@ -154,6 +155,7 @@ impl AppState {
                     Err(err) if err.code.as_str() == "turn_terminal_await_timeout" => {
                         (None, Some(err))
                     }
+                    // Audited: terminal attachment lowers Restate transport and revocation failures to RuntimeError without a tombstone cause.
                     Err(err) => return Err(AppError::internal(err.to_string())),
                 }
             } else {
@@ -491,6 +493,7 @@ async fn apply_model_selection_to_session(
             ..lash::SessionConfigPatch::default()
         })
         .await
+        // Audited: session configuration updates only resident state and its current implementation is infallible.
         .map_err(AppError::internal)?;
     state.trace_for_session(
         &session.session_id(),

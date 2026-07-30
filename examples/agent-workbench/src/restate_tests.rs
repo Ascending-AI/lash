@@ -200,6 +200,75 @@ fn nested_deleted_session_details_preserve_controller_store_context() {
 }
 
 #[tokio::test]
+async fn queued_work_wake_preserves_a_retired_session_terminal() {
+    let data_dir = tempfile::tempdir().expect("tempdir");
+    let store_factory: Arc<dyn lash::persistence::SessionStoreFactory> = Arc::new(
+        lash_sqlite_store::SqliteSessionStoreFactory::new(data_dir.path().join("lash-sessions")),
+    );
+    let session_id = "retired-queued-work-wake";
+    drop(
+        store_factory
+            .create_store(&lash::persistence::SessionStoreCreateRequest {
+                session_id: session_id.to_string(),
+                relation: lash::persistence::SessionRelation::default(),
+                policy: lash::runtime::SessionPolicy::default(),
+            })
+            .await
+            .expect("create session before retirement"),
+    );
+    store_factory
+        .delete_session(session_id)
+        .await
+        .expect("retire queued-work session");
+    let queued_work_driver =
+        lash::runtime::QueuedWorkDriver::new(Arc::new(crate::WorkbenchQueuedWorkSubmitter {
+            session_ids: crate::WorkbenchSessionIds::fresh(),
+            store_factory,
+            restate_ingress_url: "http://127.0.0.1:8080".to_string(),
+            restate_http: reqwest::Client::new(),
+            active_turns: crate::ActiveTurns::default(),
+        }));
+
+    let error = queued_work_driver
+        .claim_and_run_pending(Some(session_id), "retired_session_regression")
+        .await
+        .expect_err("the queued-work wake must refuse the retired session");
+    let classified = AppError::runtime(lash::EmbedError::Plugin(error.clone()));
+
+    assert_eq!(classified.status, axum::http::StatusCode::CONFLICT);
+    assert_eq!(
+        classified.message,
+        crate::deleted_session_message(session_id)
+    );
+    assert!(classified.terminal);
+    assert!(!classified.retryable);
+
+    let rendered = <restate_sdk::errors::HandlerError as AsRef<dyn std::error::Error>>::as_ref(
+        &super::classified_plugin_handler_error(error),
+    )
+    .to_string();
+    assert!(
+        rendered.starts_with("Terminal error"),
+        "the retired-session refusal must be terminal: {rendered}"
+    );
+    assert!(
+        rendered.contains(&crate::deleted_session_message(session_id)),
+        "the terminal must retain the canonical message: {rendered}"
+    );
+
+    let ambiguous = super::classified_plugin_handler_error(lash::plugins::PluginError::Session(
+        "temporary queued-work outage".to_string(),
+    ));
+    let ambiguous_rendered =
+        <restate_sdk::errors::HandlerError as AsRef<dyn std::error::Error>>::as_ref(&ambiguous)
+            .to_string();
+    assert!(
+        !ambiguous_rendered.starts_with("Terminal error"),
+        "ambiguous queued-work failures must remain retryable: {ambiguous_rendered}"
+    );
+}
+
+#[tokio::test]
 async fn cron_occurrence_call_site_terminalizes_typed_refusals_and_retries_unknown_failures() {
     let session_id = "retired-cron-occurrence";
     let canonical = crate::deleted_session_message(session_id);

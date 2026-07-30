@@ -910,15 +910,15 @@ impl WorkbenchQueuedWorkSubmitter {
                 policy: lash::runtime::SessionPolicy::default(),
             })
             .await
-            .map_err(|error| PluginError::Session(error.to_string()))?;
+            .map_err(lash_core::RuntimeEffectControllerError::from)?;
         let queued = store
             .list_queued_work(session_id)
             .await
-            .map_err(|err| PluginError::Session(err.to_string()))?;
+            .map_err(lash_core::RuntimeEffectControllerError::from)?;
         let next_turn_inputs = store
             .list_pending_turn_inputs(session_id)
             .await
-            .map_err(|err| PluginError::Session(err.to_string()))?
+            .map_err(lash_core::RuntimeEffectControllerError::from)?
             .into_iter()
             .any(|input| {
                 matches!(
