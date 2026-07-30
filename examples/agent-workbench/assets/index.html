@@ -2259,10 +2259,15 @@
        nothing about the session, so it reports the one thing it does know: the
        state of its own connection. A turn parked durably behind an outage must
        never render as an empty, idle session. */
+    /* A channel is `null` until something has been learned about it. Unknown is
+       not the same as down — a stream that has not attached yet is not evidence
+       of an outage — but it is not evidence of liveness either, which is why a
+       connect that never lands is bounded by a watchdog that turns it into a
+       known-down channel rather than leaving it unknown forever. */
     function createShellAvailability() {
       return {
         hydrated: false,
-        channels: { state: true, product: true, observation: true },
+        channels: { state: null, product: null, observation: null },
         reasons: { state: "", product: "", observation: "" }
       };
     }
@@ -2287,15 +2292,17 @@
       return availability;
     }
 
-    function shellChannelsReachable(availability) {
+    function shellChannelDown(availability) {
       const channels = availability.channels;
-      return channels.state && channels.product && channels.observation;
+      return channels.state === false
+        || channels.product === false
+        || channels.observation === false;
     }
 
     function shellPhase(availability) {
-      const reachable = shellChannelsReachable(availability);
-      if (availability.hydrated) return reachable ? "live" : "reconnecting";
-      return reachable ? "connecting" : "unavailable";
+      const down = shellChannelDown(availability);
+      if (availability.hydrated) return down ? "reconnecting" : "live";
+      return down ? "unavailable" : "connecting";
     }
 
     function timelinePlaceholder(phase) {
@@ -2309,10 +2316,28 @@
       return "the workbench is not answering. this is a connection problem, not an empty session: whatever this session is doing is unknown, not absent.";
     }
 
+    /* How a /api/state response should land, given what is already on screen.
+       A retried snapshot is not single-flight — the retry button, the backoff
+       timer and a reset can all be in flight at once — so a response that is no
+       longer the newest request is dropped outright; that is the only rule that
+       holds before hydration, when the recovery guard cannot compare sessions.
+       Before any stream has started nothing else can have rendered, so the
+       response is simply applied. Once one has, the response lands over rows the
+       product stream already drew and must replace them authoritatively —
+       reasoning and code rows carry no id dedup, so appending would double them.
+       And once a snapshot has been applied before, the recovery guard rules: a
+       response behind the live projection must not erase rows it never saw. */
+    function snapshotApplication(availability, request = {}) {
+      if (!request.isLatestRequest) return "ignore";
+      if (!request.streamsStarted) return "initial";
+      if (availability.hydrated && !request.responseIsCurrent) return "ignore";
+      return "authoritative";
+    }
+
     function shellStatusModel(availability, view = {}) {
       const phase = shellPhase(availability);
       const busy = Boolean(view.busy);
-      const stateDown = !availability.channels.state;
+      const stateDown = availability.channels.state === false;
       const model = {
         phase,
         pillText: phase,
@@ -3159,14 +3184,34 @@
       connectObservations(streamGeneration, observationStreamController.signal);
     }
 
+    /* A stream request stays open by design, so what is bounded is its
+       establishment, not its lifetime — and by a watchdog rather than an abort,
+       which would tear down a slow but healthy connection. A connect that never
+       produces headers would otherwise leave its channel in the state it was
+       born in and the shell claiming a liveness nothing has evidenced. */
+    const STREAM_CONNECT_TIMEOUT_MS = 8000;
+
+    async function openStream(url, signal, channel, label) {
+      const watchdog = setTimeout(() => {
+        markShellChannel(shellAvailability, channel, false, label + " is not connecting");
+        renderShellStatus();
+      }, STREAM_CONNECT_TIMEOUT_MS);
+      try {
+        const response = await fetch(url, { cache: "no-store", signal });
+        if (!response.ok || !response.body) throw new Error(label + " unavailable");
+        markShellChannel(shellAvailability, channel, true);
+        renderShellStatus();
+        return response;
+      } finally {
+        clearTimeout(watchdog);
+      }
+    }
+
     async function connectProductEvents(generation, signal) {
       while (generation === streamGeneration && !signal.aborted) {
         try {
           const url = "/api/events?cursor=" + encodeURIComponent(projectionState.productCursor);
-          const response = await fetch(url, { cache: "no-store", signal });
-          if (!response.ok || !response.body) throw new Error("product stream unavailable");
-          markShellChannel(shellAvailability, "product", true);
-          renderShellStatus();
+          const response = await openStream(url, signal, "product", "the transcript stream");
           const reader = response.body.getReader();
           const decoder = new TextDecoder();
           let buffer = "";
@@ -3179,11 +3224,17 @@
             for (const line of lines) handleProductStreamLine(line);
           }
           handleProductStreamLine(buffer);
+          /* a stream that ended on its own is not a live channel until the next
+             attempt re-establishes it */
+          if (!signal.aborted) {
+            markShellChannel(shellAvailability, "product", false, "the transcript stream closed");
+            renderShellStatus();
+          }
         } catch (error) {
           if (signal.aborted) return;
           /* the banner carries this: one reconnect attempt per second must not
              append a row to the transcript it is failing to update */
-          markShellChannel(shellAvailability, "product", false, "transcript stream disconnected");
+          markShellChannel(shellAvailability, "product", false, "the transcript stream disconnected");
           renderShellStatus();
         }
         await new Promise(resolve => setTimeout(resolve, 900));
@@ -3196,10 +3247,7 @@
           const url = projectionState.observationCursor
             ? "/api/observations?cursor=" + encodeURIComponent(projectionState.observationCursor)
             : "/api/observations";
-          const response = await fetch(url, { cache: "no-store", signal });
-          if (!response.ok || !response.body) throw new Error("observation stream unavailable");
-          markShellChannel(shellAvailability, "observation", true);
-          renderShellStatus();
+          const response = await openStream(url, signal, "observation", "the live turn stream");
           const reader = response.body.getReader();
           const decoder = new TextDecoder();
           let buffer = "";
@@ -3212,9 +3260,13 @@
             for (const line of lines) handleObservationStreamLine(line);
           }
           handleObservationStreamLine(buffer);
+          if (!signal.aborted) {
+            markShellChannel(shellAvailability, "observation", false, "the live turn stream closed");
+            renderShellStatus();
+          }
         } catch (error) {
           if (signal.aborted) return;
-          markShellChannel(shellAvailability, "observation", false, "live turn stream disconnected");
+          markShellChannel(shellAvailability, "observation", false, "the live turn stream disconnected");
           renderShellStatus();
         }
         await new Promise(resolve => setTimeout(resolve, 900));
@@ -3408,6 +3460,10 @@
         clearExecutionState();
         clearAttachment();
         lastRequest = null;
+        /* the new session invalidates any snapshot request still in flight;
+           restartEventStreams(true) below bumps the recovery generation, which
+           is what makes a late response for the old session land as "ignore" */
+        cancelStateRetry();
         markShellChannel(shellAvailability, "state", true);
         knownSessionLabel = state.settings.session_id || "—";
         renderUsage(state.usage);
@@ -4194,6 +4250,12 @@
        down. Before hydration that is what turns the unavailable state into a
        promise rather than a dead end needing a manual reload; after it, it is
        what ends a "showing the last known state" banner without one. */
+    function cancelStateRetry() {
+      clearTimeout(stateRetryTimer);
+      stateRetryTimer = 0;
+      stateRetryDelay = 900;
+    }
+
     function scheduleStateRetry() {
       if (stateRetryTimer) return;
       stateRetryTimer = setTimeout(() => {
@@ -4204,20 +4266,28 @@
     }
 
     async function loadState() {
+      const token = beginStateRecovery(projectionState);
       try {
         const state = await fetchStateSnapshot();
-        clearTimeout(stateRetryTimer);
-        stateRetryTimer = 0;
-        stateRetryDelay = 900;
         markShellChannel(shellAvailability, "state", true);
-        /* A retried hydration lands after the streams have already started, so
-           it replaces the transcript authoritatively rather than appending a
-           second copy of rows the product stream rendered while /api/state was
-           still failing. The first attempt precedes every stream. */
-        const late = streamGeneration > 0;
-        applyStateSnapshot(state, late, late);
+        const application = snapshotApplication(shellAvailability, {
+          isLatestRequest: token.generation === projectionState.recoveryGeneration,
+          streamsStarted: streamGeneration > 0,
+          responseIsCurrent: recoveryResponseIsCurrent(projectionState, token, state)
+        });
+        if (application === "ignore") {
+          /* a dropped response must not cancel a newer request's retry */
+          renderShellStatus();
+          return;
+        }
+        cancelStateRetry();
+        if (application === "initial") {
+          applyStateSnapshot(state);
+          return;
+        }
+        applyStateSnapshot(state, true, true);
         /* re-attach the streams at the snapshot's cursors */
-        if (late) restartEventStreams();
+        restartEventStreams();
       } catch (error) {
         markShellChannel(shellAvailability, "state", false, snapshotFailureReason(error));
         renderShellStatus();
@@ -5331,9 +5401,7 @@
     workCount.addEventListener("click", () => { if (workStale) refreshWork(); });
 
     shellStatusRetry.addEventListener("click", () => {
-      clearTimeout(stateRetryTimer);
-      stateRetryTimer = 0;
-      stateRetryDelay = 900;
+      cancelStateRetry();
       loadState().catch(() => {});
       restartEventStreams();
       refreshWork();

@@ -149,6 +149,7 @@ function shellModule() {
        markShellHydrated,
        shellPhase,
        shellStatusModel,
+       snapshotApplication,
        timelinePlaceholder
      };`,
     context,
@@ -171,7 +172,11 @@ function shellRender(model) {
     shellStatusDetail: element({ hidden: true }),
     timelineEmpty: element({ className: "empty pending" }),
   };
-  const timelineRows = ["a rendered turn"];
+  // The context deliberately withholds every handle to transcript content —
+  // `timeline`, `clearTranscript`, `renderError`, `renderNote`. A renderer that
+  // reached for one to express a degraded state would throw a ReferenceError
+  // here, which is what makes "a connection change never touches content" a
+  // tested property rather than an intention.
   const renderContext = {
     ...elements,
     document: {
@@ -196,7 +201,6 @@ function shellRender(model) {
     bannerDetail: elements.shellStatusDetail.textContent,
     placeholder: elements.timelineEmpty.textContent,
     placeholderClass: elements.timelineEmpty.className,
-    timelineRows,
   };
 }
 
@@ -277,8 +281,14 @@ test("a drop after hydration reconnects over the last known content", () => {
   );
 
   // Last-known-good content survives, identity included: a reconnect states
-  // that the view may be stale, it does not retract the session.
-  assert.deepEqual(render.timelineRows, ["a rendered turn"]);
+  // that the view may be stale, it does not retract the session. That the
+  // renderer cannot reach transcript content at all is enforced by the stub
+  // context above; here we assert it does not retract the identity either.
+  const renderSource = markedSource(
+    "WORKBENCH_SHELL_STATUS_RENDER",
+    "WORKBENCH_SHELL_STATUS_RENDER",
+  );
+  assert.doesNotMatch(renderSource, /innerHTML|clearTranscript|timeline\.|renderError/);
   assert.equal(render.session, "workbench-a");
   assert.equal(render.web, "ready");
   assert.equal(render.pill, "reconnecting");
@@ -325,6 +335,89 @@ test("a successful response is what promotes the shell to session claims", () =>
   for (const phase of ["connecting", "unavailable", "reconnecting"]) {
     assert.doesNotMatch(shell.timelinePlaceholder(phase), /no turns yet/);
   }
+});
+
+test("a late snapshot replaces the streams' rows without erasing newer ones", () => {
+  const shell = shellModule();
+  const fresh = shell.createShellAvailability();
+  const hydrated = shell.markShellHydrated(shell.createShellAvailability());
+  const latest = { isLatestRequest: true };
+
+  // Nothing has rendered before the first stream starts.
+  assert.equal(
+    shell.snapshotApplication(fresh, { ...latest, streamsStarted: false, responseIsCurrent: true }),
+    "initial",
+  );
+  assert.equal(
+    shell.snapshotApplication(fresh, { ...latest, streamsStarted: false, responseIsCurrent: false }),
+    "initial",
+  );
+
+  // A hydration that lands after the streams started replaces their rows:
+  // reasoning and code rows carry no id dedup, so appending would double them.
+  assert.equal(
+    shell.snapshotApplication(fresh, { ...latest, streamsStarted: true, responseIsCurrent: false }),
+    "authoritative",
+  );
+  assert.equal(
+    shell.snapshotApplication(hydrated, { ...latest, streamsStarted: true, responseIsCurrent: true }),
+    "authoritative",
+  );
+
+  // But once a snapshot has been applied, a response behind the live projection
+  // may not erase rows it never saw — the existing recovery guard still rules.
+  assert.equal(
+    shell.snapshotApplication(hydrated, { ...latest, streamsStarted: true, responseIsCurrent: false }),
+    "ignore",
+  );
+
+  // The retry button, the backoff timer and a reset can all have a request in
+  // flight at once. A response that is no longer the newest request is dropped
+  // whatever else is true of it — including before hydration, where the
+  // recovery guard has no session to compare and cannot speak.
+  for (const availability of [fresh, hydrated]) {
+    for (const streamsStarted of [false, true]) {
+      for (const responseIsCurrent of [false, true]) {
+        assert.equal(
+          shell.snapshotApplication(availability, {
+            isLatestRequest: false,
+            streamsStarted,
+            responseIsCurrent,
+          }),
+          "ignore",
+        );
+      }
+    }
+  }
+});
+
+test("an unattached stream is neither a live channel nor an outage", () => {
+  const shell = shellModule();
+
+  // Born unknown: a stream that has not attached yet is not evidence of an
+  // outage, so a fresh shell is "connecting", not "unavailable".
+  const fresh = shell.createShellAvailability();
+  assert.equal(fresh.channels.product, null);
+  assert.equal(shell.shellPhase(fresh), "connecting");
+
+  // …but it is not evidence of liveness either. The connect watchdog turns a
+  // stream that never lands into a known-down channel, and the shell stops
+  // claiming the session is idle.
+  const stuck = shell.markShellChannel(
+    shell.markShellHydrated(shell.createShellAvailability()),
+    "product",
+    false,
+    "the transcript stream is not connecting",
+  );
+  assert.equal(shell.shellPhase(stuck), "reconnecting");
+  const render = shellRender(shell.shellStatusModel(stuck, { session: "workbench-a" }));
+  assert.notEqual(render.pill, "idle");
+  assert.equal(render.bannerDetail, "the transcript stream is not connecting");
+
+  // A stream that ends on its own is down until the next attempt re-establishes
+  // it: the shell must not keep claiming liveness through a silent close.
+  assert.match(html, /markShellChannel\(shellAvailability, "product", false, "the transcript stream closed"\)/);
+  assert.match(html, /const STREAM_CONNECT_TIMEOUT_MS = \d+;/);
 });
 
 test("the boot path bounds its snapshot request and retries it", () => {
