@@ -9,15 +9,6 @@ impl RuntimeTurnDriver<'_> {
         event_tx: &mpsc::Sender<RuntimeStreamEvent>,
         cancel: &CancellationToken,
     ) -> Result<(), RuntimeError> {
-        // FIG-790 invariant: a racy gate must never decide whether a journaled
-        // command is emitted. This gate is racy by construction and is safe
-        // only because the attempt terminalises immediately afterward.
-        // FIG-793 tracks replacing this out-of-scope LLM gate.
-        if cancel.is_cancelled() {
-            send_session_event(event_tx, SessionStreamEvent::Done).await;
-            machine.finish_with_outcome(crate::TurnOutcome::Stopped(TurnStop::Cancelled));
-            return Ok(());
-        }
         match self.before_llm_call(machine, &request).await {
             Ok(Some(crate::ProtocolLlmCallAction::SwitchAgentFrame { frame_id, task })) => {
                 machine.finish_with_outcome(crate::TurnOutcome::AgentFrameSwitch {
@@ -57,6 +48,34 @@ impl RuntimeTurnDriver<'_> {
         };
         if let Some(call_record) = call_record {
             self.llm_calls.push(call_record);
+        }
+        // FIG-793: the LLM run is the deployed first journal command for this
+        // protocol iteration, so it must be emitted and awaited before any
+        // cancellation observation is registered. Restate SDK 0.10 emits a
+        // `ctx.run` command only when its future is polled and requires that
+        // future to be awaited immediately; it cannot honestly be selected
+        // away from mid-flight. The durable contract is therefore cancellation
+        // between iterations. A local provider may still cooperatively observe
+        // `cancel` while the run is executing, and that result is journaled.
+        // Runtime-owned (inline) execution keeps its existing cooperative-token
+        // behavior. Only a controller-owned journal needs this additional
+        // durable, replayed boundary.
+        if self.observes_durable_cancel_after_llm {
+            let pending_cancel = self
+                .turn_control
+                .observe_pending_cancel(
+                    self.scoped_effect_controller.controller(),
+                    crate::runtime::turn_control::TurnCancelPeekIdentity::AfterLlm {
+                        protocol_iteration: machine.protocol_iteration(),
+                    },
+                )
+                .await?;
+            if pending_cancel.is_some() {
+                cancel.cancel();
+                send_session_event(event_tx, SessionStreamEvent::Done).await;
+                machine.finish_with_outcome(crate::TurnOutcome::Stopped(TurnStop::Cancelled));
+                return Ok(());
+            }
         }
         if let Ok(response) = &result {
             let usage = crate::runtime::effect::token_usage_from_llm(&response.usage);

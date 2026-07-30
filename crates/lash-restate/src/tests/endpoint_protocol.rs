@@ -84,6 +84,11 @@ fn restate_message_frame(input: &[u8], expected_type: u16) -> Option<&[u8]> {
     None
 }
 
+pub(super) fn restate_error_message(input: &[u8]) -> Option<String> {
+    let frame = restate_message_frame(input, 0x0002)?;
+    String::from_utf8(protobuf_len_field(frame.get(8..)?, 2)?.to_vec()).ok()
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) struct RestateCallFrame {
     pub frame: Bytes,
@@ -179,6 +184,13 @@ fn encode_call_completion(completion_id: u32, value: &[u8]) -> Bytes {
     encode_restate_message(0x800D, notification.to_vec())
 }
 
+fn encode_invocation_id_completion(completion_id: u32, invocation_id: &str) -> Bytes {
+    let mut notification = BytesMut::new();
+    put_varint_field(&mut notification, 1, u64::from(completion_id));
+    put_len_field(&mut notification, 16, invocation_id.as_bytes());
+    encode_restate_message(0x800E, notification.to_vec())
+}
+
 fn encode_signal_value(signal_id: u32, value: &[u8]) -> Bytes {
     let mut nested_value = BytesMut::new();
     put_len_field(&mut nested_value, 1, value);
@@ -249,6 +261,163 @@ pub(super) fn encode_pending_sleep_replay<T: serde::Serialize>(
     body.extend_from_slice(&encode_start_message(workflow_key, 2));
     body.extend_from_slice(&encode_input_command(&input));
     body.extend_from_slice(sleep_command);
+    Ok(body.freeze())
+}
+
+/// FIG-788: redrive a prior attempt's exact sleep command with its completion
+/// appended, preserving every command byte emitted by the deployed code.
+pub(super) fn encode_completed_captured_sleep_replay<T: serde::Serialize>(
+    workflow_key: &str,
+    input: &T,
+    suspended_output: &[u8],
+) -> Result<Bytes, TerminalError> {
+    let input = serde_json::to_vec(input).map_err(TerminalError::from_error)?;
+    let sleep_command = restate_message_frame(suspended_output, 0x040C)
+        .ok_or_else(|| TerminalError::new("suspended attempt omitted its SleepCommand"))?;
+    let completion_id = u32::try_from(
+        protobuf_varint_field(
+            sleep_command
+                .get(8..)
+                .ok_or_else(|| TerminalError::new("sleep command omitted its frame payload"))?,
+            11,
+        )
+        .ok_or_else(|| TerminalError::new("sleep command omitted its completion id"))?,
+    )
+    .map_err(|_| TerminalError::new("sleep command completion id exceeded u32"))?;
+    let mut body = BytesMut::new();
+    body.extend_from_slice(&encode_start_message(workflow_key, 3));
+    body.extend_from_slice(&encode_input_command(&input));
+    body.extend_from_slice(sleep_command);
+    body.extend_from_slice(&encode_sleep_completion(completion_id));
+    Ok(body.freeze())
+}
+
+/// FIG-788: splice the exact deployed segment-finish and successor-send
+/// commands, then complete only the send's invocation-id notification.
+pub(super) fn encode_process_segment_send_replay<T: serde::Serialize>(
+    workflow_key: &str,
+    input: &T,
+    suspended_output: &[u8],
+) -> Result<Bytes, TerminalError> {
+    let input = serde_json::to_vec(input).map_err(TerminalError::from_error)?;
+    let segment_finished = restate_message_frame(suspended_output, 0x040B)
+        .ok_or_else(|| TerminalError::new("segment attempt omitted CompletePromiseCommand"))?;
+    let successor_send = restate_message_frame(suspended_output, 0x040E)
+        .ok_or_else(|| TerminalError::new("segment attempt omitted OneWayCallCommand"))?;
+    let completion_id = u32::try_from(
+        protobuf_varint_field(
+            successor_send
+                .get(8..)
+                .ok_or_else(|| TerminalError::new("successor send omitted its frame payload"))?,
+            10,
+        )
+        .ok_or_else(|| TerminalError::new("successor send omitted its invocation-id index"))?,
+    )
+    .map_err(|_| TerminalError::new("successor invocation-id index exceeded u32"))?;
+    let mut body = BytesMut::new();
+    body.extend_from_slice(&encode_start_message(workflow_key, 3));
+    body.extend_from_slice(&encode_input_command(&input));
+    body.extend_from_slice(segment_finished);
+    body.extend_from_slice(successor_send);
+    body.extend_from_slice(&encode_invocation_id_completion(
+        completion_id,
+        "inv_fig788_successor",
+    ));
+    Ok(body.freeze())
+}
+
+/// FIG-806: splice a deployed one-way process start and complete its
+/// invocation-id notification so the redrive can advance to its next command.
+pub(super) fn encode_one_way_call_replay<T: serde::Serialize>(
+    workflow_key: &str,
+    input: &T,
+    suspended_output: &[u8],
+) -> Result<Bytes, TerminalError> {
+    let input = serde_json::to_vec(input).map_err(TerminalError::from_error)?;
+    let one_way_call = restate_message_frame(suspended_output, 0x040E)
+        .ok_or_else(|| TerminalError::new("suspended attempt omitted OneWayCallCommand"))?;
+    let completion_id = u32::try_from(
+        protobuf_varint_field(
+            one_way_call
+                .get(8..)
+                .ok_or_else(|| TerminalError::new("one-way call omitted its frame payload"))?,
+            10,
+        )
+        .ok_or_else(|| TerminalError::new("one-way call omitted its invocation-id index"))?,
+    )
+    .map_err(|_| TerminalError::new("one-way call invocation-id index exceeded u32"))?;
+    let mut body = BytesMut::new();
+    body.extend_from_slice(&encode_start_message(workflow_key, 2));
+    body.extend_from_slice(&encode_input_command(&input));
+    body.extend_from_slice(one_way_call);
+    body.extend_from_slice(&encode_invocation_id_completion(
+        completion_id,
+        "inv_fig806_trigger_process",
+    ));
+    Ok(body.freeze())
+}
+
+/// FIG-788: splice the exact segment-finished and terminal-delivery commands
+/// from an ordinal greater than zero, then complete the terminal call.
+pub(super) fn encode_process_terminal_delivery_replay<T: serde::Serialize>(
+    workflow_key: &str,
+    input: &T,
+    suspended_output: &[u8],
+) -> Result<Bytes, TerminalError> {
+    let input = serde_json::to_vec(input).map_err(TerminalError::from_error)?;
+    let segment_finished = restate_message_frame(suspended_output, 0x040B)
+        .ok_or_else(|| TerminalError::new("terminal attempt omitted CompletePromiseCommand"))?;
+    let terminal_call = restate_message_frame(suspended_output, 0x040D)
+        .ok_or_else(|| TerminalError::new("terminal attempt omitted CallCommand"))?;
+    let completion_id = u32::try_from(
+        protobuf_varint_field(
+            terminal_call
+                .get(8..)
+                .ok_or_else(|| TerminalError::new("terminal call omitted its frame payload"))?,
+            11,
+        )
+        .ok_or_else(|| TerminalError::new("terminal call omitted its completion id"))?,
+    )
+    .map_err(|_| TerminalError::new("terminal call completion id exceeded u32"))?;
+    let completion =
+        serde_json::to_vec(&serde_json::Value::Null).map_err(TerminalError::from_error)?;
+    let mut body = BytesMut::new();
+    body.extend_from_slice(&encode_start_message(workflow_key, 3));
+    body.extend_from_slice(&encode_input_command(&input));
+    body.extend_from_slice(segment_finished);
+    body.extend_from_slice(terminal_call);
+    body.extend_from_slice(&encode_call_completion(completion_id, &completion));
+    Ok(body.freeze())
+}
+
+/// FIG-793: splice a suspended pre-fix `RunCommand` and complete it with the
+/// exact recorded Lash effect value, leaving new cancellation commands to be
+/// appended by the upgraded handler.
+pub(super) fn encode_run_replay<T: serde::Serialize>(
+    workflow_key: &str,
+    input: &T,
+    suspended_output: &[u8],
+    completion: serde_json::Value,
+) -> Result<Bytes, TerminalError> {
+    let input = serde_json::to_vec(input).map_err(TerminalError::from_error)?;
+    let run_command = restate_message_frame(suspended_output, 0x0411)
+        .ok_or_else(|| TerminalError::new("suspended attempt omitted its RunCommand"))?;
+    let completion_id = u32::try_from(
+        protobuf_varint_field(
+            run_command
+                .get(8..)
+                .ok_or_else(|| TerminalError::new("run command omitted its frame payload"))?,
+            11,
+        )
+        .ok_or_else(|| TerminalError::new("run command omitted its completion id"))?,
+    )
+    .map_err(|_| TerminalError::new("run command completion id exceeded u32"))?;
+    let completion = serde_json::to_vec(&completion).map_err(TerminalError::from_error)?;
+    let mut body = BytesMut::new();
+    body.extend_from_slice(&encode_start_message(workflow_key, 2));
+    body.extend_from_slice(&encode_input_command(&input));
+    body.extend_from_slice(run_command);
+    body.extend_from_slice(&encode_run_completion(completion_id, &completion));
     Ok(body.freeze())
 }
 

@@ -180,11 +180,11 @@ impl TriggerRouter {
         let mut deliveries = Vec::new();
         let mut started_any = false;
         for reservation in reservations {
-            if reservation.reservation_status == TriggerDeliveryReservationStatus::AlreadyReserved {
-                deliveries
-                    .push(reservation.emit_report(TriggerDeliveryEmitOutcome::AlreadyReserved));
-                continue;
-            }
+            // FIG-806: reservation status is committed outside the effect
+            // journal and changes from Reserved to AlreadyReserved on replay.
+            // Emit the deterministic process start before consulting it. The
+            // journal and deterministic process id provide the dedupe point;
+            // status may shape only the post-emission report.
             if let Err(err) = self
                 .start_delivery(
                     &reservation,
@@ -199,7 +199,13 @@ impl TriggerRouter {
                 continue;
             }
             started_any = true;
-            deliveries.push(reservation.emit_report(TriggerDeliveryEmitOutcome::Started));
+            let outcome = match reservation.reservation_status {
+                TriggerDeliveryReservationStatus::Reserved => TriggerDeliveryEmitOutcome::Started,
+                TriggerDeliveryReservationStatus::AlreadyReserved => {
+                    TriggerDeliveryEmitOutcome::AlreadyReserved
+                }
+            };
+            deliveries.push(reservation.emit_report(outcome));
         }
         if started_any && let Some(driver) = self.process_work_driver.as_ref() {
             driver.claim_and_run_pending("trigger_delivery").await?;

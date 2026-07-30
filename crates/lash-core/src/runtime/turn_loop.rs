@@ -1974,6 +1974,12 @@ impl LashRuntime {
             .as_ref()
             .map(ScopedEffectController::controller)
             .unwrap_or_else(|| finish_scoped_effect_controller.controller());
+        let observes_durable_cancel_after_llm = turn_control_host.replay_ownership()
+            == crate::EffectReplayOwnership::Controller
+            && finish_scoped_effect_controller
+                .controller()
+                .replay_ownership()
+                == crate::EffectReplayOwnership::Controller;
         let session = self
             .session
             .take()
@@ -2002,6 +2008,8 @@ impl LashRuntime {
             session_execution_lease: session_execution_fence,
             runtime_lease_owner: self.runtime_lease_owner.clone(),
             turn_phase_probe: self.turn_phase_probe.clone(),
+            turn_control: Arc::clone(&turn_control),
+            observes_durable_cancel_after_llm,
         });
         let protocol_run_offset = 0;
         self.mark_phase_begin(RuntimeTurnPhase::EffectLoop);

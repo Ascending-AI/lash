@@ -1,4 +1,5 @@
 use super::*;
+use crate::runtime::turn_control::ActiveTurnControl;
 
 mod context;
 mod effects;
@@ -47,4 +48,6 @@ pub(super) struct RuntimeTurnDriver<'a> {
     pub(super) session_execution_lease: Option<crate::SessionExecutionLeaseFence>,
     pub(super) runtime_lease_owner: crate::LeaseOwnerIdentity,
     pub(super) turn_phase_probe: Option<Arc<dyn RuntimeTurnPhaseProbe>>,
+    pub(super) turn_control: Arc<ActiveTurnControl>,
+    pub(super) observes_durable_cancel_after_llm: bool,
 }

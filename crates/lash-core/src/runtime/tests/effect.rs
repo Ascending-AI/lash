@@ -15,9 +15,21 @@ struct RecordingEffectController {
     envelopes: Arc<Mutex<Vec<String>>>,
     llm_calls: Arc<Mutex<usize>>,
     inline: InlineRuntimeEffectController,
+    cancel_after_llm: bool,
+    controller_owned_replay: bool,
 }
 
 impl RecordingEffectController {
+    fn with_cancel_after_llm(mut self) -> Self {
+        self.cancel_after_llm = true;
+        self
+    }
+
+    fn with_controller_owned_replay(mut self) -> Self {
+        self.controller_owned_replay = true;
+        self
+    }
+
     fn records(&self) -> Vec<EffectControllerRecord> {
         self.records.lock().expect("effect records").clone()
     }
@@ -72,6 +84,14 @@ fn runtime_host_config_with_provider(provider: crate::ProviderHandle) -> Runtime
 
 #[async_trait::async_trait]
 impl crate::AwaitEventResolver for RecordingEffectController {
+    fn replay_ownership(&self) -> crate::EffectReplayOwnership {
+        if self.controller_owned_replay {
+            crate::EffectReplayOwnership::Controller
+        } else {
+            crate::EffectReplayOwnership::Runtime
+        }
+    }
+
     async fn await_event_key(
         &self,
         scope: &ExecutionScope,
@@ -255,6 +275,20 @@ impl RuntimeEffectController for RecordingEffectController {
             RuntimeEffectCommand::AwaitEvent { .. } => Ok(RuntimeEffectOutcome::AwaitEvent {
                 resolution: crate::Resolution::Ok(serde_json::json!(null)),
             }),
+            RuntimeEffectCommand::PeekAwaitEvent { .. }
+                if self.cancel_after_llm && *self.llm_calls.lock().expect("llm calls") > 0 =>
+            {
+                Ok(RuntimeEffectOutcome::PeekAwaitEvent {
+                    resolution: Some(Resolution::Ok(serde_json::json!({
+                        "state": "cancel_requested",
+                        "cancellation": {
+                            "request_id": "cancel-after-llm",
+                            "origin": "effect-controller-test",
+                            "reason": "cancel landed during the journaled LLM run"
+                        }
+                    }))),
+                })
+            }
             RuntimeEffectCommand::PeekAwaitEvent { .. } => {
                 Ok(RuntimeEffectOutcome::PeekAwaitEvent { resolution: None })
             }
@@ -627,6 +661,56 @@ async fn standard_turn_llm_and_checkpoint_effects_cross_controller_once() {
 }
 
 #[tokio::test]
+async fn durable_cancel_landing_during_llm_is_observed_after_the_journaled_run() {
+    let recorder = RecordingEffectController::default()
+        .with_cancel_after_llm()
+        .with_controller_owned_replay();
+    let mut runtime = runtime_with_plugins_and_tools_and_host(
+        Vec::new(),
+        Arc::new(EmptyTools),
+        mock_provider(Vec::new()),
+        host_with_effect_recorder(recorder.clone()),
+    )
+    .await;
+
+    let turn = runtime
+        .run_turn_assembled(
+            TurnInput::text("cancel while the model is running"),
+            CancellationToken::new(),
+            scoped_test_turn(&recorder, "llm-cancel-boundary"),
+        )
+        .await
+        .expect("cancelled turn");
+
+    assert!(matches!(
+        turn.outcome,
+        TurnOutcome::Stopped(TurnStop::Cancelled)
+    ));
+    assert_eq!(
+        recorder
+            .records()
+            .into_iter()
+            .map(|record| (record.kind, record.replay_key))
+            .collect::<Vec<_>>(),
+        vec![
+            (
+                RuntimeEffectKind::PeekAwaitEvent,
+                "turn_cancel.start_gate".to_string()
+            ),
+            (
+                RuntimeEffectKind::LlmCall,
+                "root:llm-cancel-boundary:1:0:llm_call:1".to_string()
+            ),
+            (
+                RuntimeEffectKind::PeekAwaitEvent,
+                "turn_cancel.after_llm.0".to_string()
+            ),
+        ],
+        "the deployed LLM command must stay first within the iteration and the durable cancel observation must follow it"
+    );
+}
+
+#[tokio::test]
 async fn turn_effect_envelope_does_not_carry_checkpoint_payload() {
     let recorder = RecordingEffectController::default();
     let transport = mock_provider(vec![MockCall {
@@ -923,11 +1007,12 @@ async fn tool_direct_completion_is_opaque_inside_scoped_attempt() {
 }
 
 #[tokio::test]
-async fn tool_emitted_trigger_is_serialized_without_appending_session_node() {
+async fn tool_emitted_trigger_redrive_reemits_reserved_start_without_appending_session_node() {
     #[derive(Clone, Default)]
     struct CapturingToolReplayController {
         llm_calls: Arc<Mutex<usize>>,
         tool_outcomes: Arc<Mutex<Vec<serde_json::Value>>>,
+        process_starts: Arc<std::sync::atomic::AtomicUsize>,
         inline: InlineRuntimeEffectController,
     }
 
@@ -935,10 +1020,18 @@ async fn tool_emitted_trigger_is_serialized_without_appending_session_node() {
         fn tool_outcomes(&self) -> Vec<serde_json::Value> {
             self.tool_outcomes.lock().expect("tool outcomes").clone()
         }
+
+        fn process_starts(&self) -> usize {
+            self.process_starts.load(Ordering::SeqCst)
+        }
     }
 
     #[async_trait::async_trait]
     impl crate::AwaitEventResolver for CapturingToolReplayController {
+        fn replay_ownership(&self) -> crate::EffectReplayOwnership {
+            crate::EffectReplayOwnership::Controller
+        }
+
         async fn await_event_key(
             &self,
             scope: &ExecutionScope,
@@ -1069,6 +1162,15 @@ async fn tool_emitted_trigger_is_serialized_without_appending_session_node() {
                 RuntimeEffectCommand::Checkpoint { .. } => Ok(RuntimeEffectOutcome::Checkpoint {
                     result: Ok(crate::CheckpointDelivery::default()),
                 }),
+                RuntimeEffectCommand::Process { command } => {
+                    self.process_starts.fetch_add(1, Ordering::SeqCst);
+                    local_executor
+                        .execute(RuntimeEffectEnvelope::new(
+                            envelope.invocation,
+                            RuntimeEffectCommand::Process { command },
+                        ))
+                        .await
+                }
                 other => Err(RuntimeEffectControllerError::new(
                     "unexpected_effect",
                     format!("unexpected effect {}", other.kind().as_str()),
@@ -1125,6 +1227,23 @@ async fn tool_emitted_trigger_is_serialized_without_appending_session_node() {
                 )
                 .await
                 .expect("emit tool trigger occurrence");
+            call.context
+                .triggers()
+                .emit(
+                    crate::TriggerOccurrenceRequest::new(
+                        crate::trigger_event_type("ui.button", "pressed"),
+                        crate::empty_trigger_source_key("ui.button.pressed")
+                            .expect("empty trigger source key"),
+                        serde_json::json!({ "pressed": true }),
+                        call.context
+                            .replay_key()
+                            .map(|key| format!("{key}:trigger:button-pressed"))
+                            .unwrap_or_else(|| "test-trigger:button-pressed".to_string()),
+                    )
+                    .with_source(serde_json::json!({})),
+                )
+                .await
+                .expect("redrive tool trigger occurrence");
             crate::ToolResult::ok(serde_json::json!({ "emitted": true }))
         }
     }
@@ -1133,6 +1252,36 @@ async fn tool_emitted_trigger_is_serialized_without_appending_session_node() {
     let mut config = runtime_host_config_with_inline_controller(Arc::new(controller.clone()));
     config.providers.provider_resolver = Arc::new(crate::SingleProviderResolver::new(
         mock_provider(Vec::new()).into_handle(),
+    ));
+    let trigger_store = Arc::new(crate::InMemoryTriggerStore::default());
+    let source_key =
+        crate::empty_trigger_source_key("ui.button.pressed").expect("empty trigger source key");
+    let registration = crate::TriggerStore::execute_command(
+        trigger_store.as_ref(),
+        "fig806-tool-register",
+        crate::TriggerCommand::Register {
+            owner_scope: crate::TriggerOwnerScope::session("root"),
+            actor: crate::ProcessOriginator::session(crate::SessionScope::new("root")),
+            draft: crate::TriggerSubscriptionDraft::for_process(
+                "fig806/tool",
+                crate::ProcessExecutionEnvRef::new("process-env:fig806-tool"),
+                "ui.button.pressed",
+                source_key,
+                crate::ProcessInput::Engine {
+                    kind: "fig806-tool-engine".to_string(),
+                    payload: serde_json::json!({}),
+                },
+                crate::ProcessIdentity::new("fig806-tool-engine"),
+            )
+            .with_payload_schema(crate::LashSchema::any()),
+        },
+    )
+    .await
+    .expect("register tool trigger")
+    .expect("tool trigger mutation");
+    assert!(matches!(
+        registration,
+        crate::TriggerCommandOutcome::Mutation { .. }
     ));
     let trigger =
         crate::TriggerEvent::new("Button", "ui.button", "pressed", crate::LashSchema::any());
@@ -1143,7 +1292,8 @@ async fn tool_emitted_trigger_is_serialized_without_appending_session_node() {
         ))],
         Arc::new(TriggerEventTool),
         mock_provider(Vec::new()),
-        EmbeddedRuntimeHost::new(config),
+        EmbeddedRuntimeHost::new(config)
+            .with_trigger_store(Arc::clone(&trigger_store) as Arc<dyn crate::TriggerStore>),
     )
     .await;
 
@@ -1168,6 +1318,14 @@ async fn tool_emitted_trigger_is_serialized_without_appending_session_node() {
     assert_eq!(tool_outcomes.len(), 1);
     assert_eq!(tool_outcomes[0]["type"], "tool_batch");
     assert_eq!(
+        tool_outcomes[0]["triggers"]
+            .as_array()
+            .expect("tool trigger outcomes")
+            .len(),
+        2,
+        "the tool attempt must retain both the first emission and its redrive"
+    );
+    assert_eq!(
         tool_outcomes[0]["triggers"][0]["source_type"],
         serde_json::json!("ui.button.pressed")
     );
@@ -1179,6 +1337,19 @@ async fn tool_emitted_trigger_is_serialized_without_appending_session_node() {
         tool_outcomes[0]["triggers"][0]["occurrence_id"]
             .as_str()
             .is_some_and(|value| !value.is_empty())
+    );
+    assert_eq!(
+        controller.process_starts(),
+        2,
+        "the already-reserved tool redrive must emit the same process start"
+    );
+    assert_eq!(
+        crate::TriggerStore::list_deliveries(trigger_store.as_ref())
+            .await
+            .expect("list tool trigger deliveries")
+            .len(),
+        1,
+        "the repeated tool occurrence still owns one deterministic delivery"
     );
 
     let trigger_nodes = turn
