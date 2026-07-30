@@ -25,10 +25,11 @@ cancellation receipts, committed state, and UI/API agreement—not model prose.
    Workbench PID, data directory, Restate endpoint worker, session id, and active turn
    address must stay unchanged. Removing/recreating the container or restarting the web
    process invalidates this geometry.
-2. **Prove the turn is durably parked first.** Before stopping Restate, require the
-   running pill, visible **stop turn**, exactly one `/api/state.active_turns` address, and
-   a trace event showing the turn entered durable work. A turn that already settled is a
-   retry of this phase.
+2. **Prove execution, not prompt echo.** Before stopping Restate, require the running
+   pill, visible **stop turn**, exactly one `/api/state.active_turns` address, an
+   `exec_code_started` trace record for that turn, and its `/api/work` entry with
+   `lifecycle: "running"`. LLM request trace records echo the prompt and are never gate
+   evidence. A turn that already settled is a retry of this phase.
 3. **Reconverge before Stop.** After Restate is ready again, reload/poll until the UI and
    `/api/state` show the exact pre-bounce address as running and Stop is visible. Do not
    press a stale button during the engine outage.
@@ -37,6 +38,11 @@ cancellation receipts, committed state, and UI/API agreement—not model prose.
    `turn stopped · request <id>` must use the same request id.
 5. **No Admin API substitution.** Restate Admin cancel/kill is never a passing action.
    Container stop/start creates the fault; Lash's public Stop path settles it.
+6. **Pin the cancellation surface.** The baseline declares and starts a process with a
+   long sleep, then foreground-awaits its handle. The named turn-scoped variant uses a
+   top-level durable sleep with no process declaration, `start`, handle, or process
+   `await`. Do not accept whichever shape the model happens to choose; these are
+   different cancellation surfaces.
 
 ## Working material
 
@@ -51,7 +57,7 @@ cancellation receipts, committed state, and UI/API agreement—not model prose.
   endpoints until ready after start.
 - UI: session id, idle/running pill, transcript, composer, **stop turn**.
 - HTTP truth: `GET /healthz`, `GET /api/state`, `POST /api/turn`,
-  `POST /api/turn/cancel`.
+  `POST /api/turn/cancel`, `GET /api/work`.
 - Disk/trace truth: `<data-dir>/session-id`, `<data-dir>/active-turns.json`, and
   `<data-dir>/trace.jsonl`.
 - Teardown: `just agent-workbench-down <port>`.
@@ -65,16 +71,39 @@ ids to agree. Screenshot `00-ready.png`.
 
 ## Phase 1 — Park one exact turn in durable work
 
-Submit a turn explicitly asking for a Lashlang durable sleep of at least 60 seconds
-before returning a short result. Poll until all of these agree:
+Submit a shape-pinned prompt: ask the agent to execute one Lashlang block that declares
+and starts a named process whose body sleeps for at least 60 seconds, then
+foreground-awaits the returned handle. Explicitly require this **spawned process-await**
+shape; ordinary tool work or a top-level turn-scoped sleep does not qualify.
+
+Poll until all of these agree:
 
 - the running pill and **stop turn** are visible;
 - `/api/state.active_turns` contains exactly one address for the rendered session;
 - `active-turns.json` contains that exact session/turn pair;
-- `trace.jsonl` shows the same turn entered the sleep/durable-effect path.
+- `trace.jsonl` contains an `exec_code_started` record for that exact turn after the
+  prompt was submitted; an LLM request or response containing prompt text such as
+  `sleep for "300s"` does not count;
+- `/api/work` contains that named process with `lifecycle: "running"`.
 
 Record the address and Workbench PID. Screenshot `01-parked-running.png`; save the state
-and matching trace records as `01-parked-state.json` and `01-durable-trace.json`.
+and matching trace/work records as `01-parked-state.json`, `01-durable-trace.json`, and
+`01-running-work.json`, including the named process id. If the required process-await
+shape was not produced, use the public Stop control, wait at most 10 seconds for its
+committed terminal, and retry Phase 1 with a fresh turn. Abort/RCA if two attempts fail
+to produce the pinned shape.
+
+### Named variant — turn-scoped suspended sleep
+
+Run the complete scenario a second time with fresh Phase 0 identities and variant-labeled
+artifacts. In its Phase 1 prompt, require one Lashlang block whose top level directly
+sleeps for at least 60 seconds and then returns a short result. Explicitly forbid a
+process declaration, `start`, handle, or process `await`. This variant is admitted only
+when the same exact-turn `exec_code_started` gate passes, its recorded block has the
+direct top-level sleep shape, `/api/state` and disk still agree on the one running turn,
+and `/api/work` contains no spawned process for that turn. Apply the same bounded
+two-attempt shape retry. Through Phases 2–3, retain the no-process assertion and require
+the turn-scoped sleep itself to settle `Cancelled`.
 
 ## Phase 2 — Stop/start the Restate engine only
 
@@ -90,8 +119,9 @@ address are unchanged from Phase 0/1.
 
 Reload and poll until the page reconverges on the running pill and **stop turn**, and
 `/api/state.active_turns` contains the exact Phase 1 address. `active-turns.json` must
-still agree. Screenshot `03-reconverged-running.png`; save the state as
-`03-reconverged-state.json`.
+still agree. For the baseline shape, `/api/work` must show the exact Phase 1 process id
+still at `lifecycle: "running"`. Screenshot `03-reconverged-running.png`; save the state
+and work snapshot as `03-reconverged-state.json` and `03-reconverged-work.json`.
 
 ## Phase 3 — Stop the replayed turn
 
@@ -104,18 +134,29 @@ Press **stop turn** while capturing `POST /api/turn/cancel`. Gate:
 4. the UI renders `turn stopped · request <id>` with the same id, returns idle, and hides
    Stop;
 5. `/api/state.active_turns` and `active-turns.json` clear the address, and the trace
-   records the cancellation against the original turn id.
+   records the cancellation against the original turn id;
+6. for the baseline shape, `/api/work` shows the exact Phase 1 process at terminal
+   `Cancelled`, with a `process.cancel_requested` event, before its original sleep
+   deadline.
 
-Save `04-cancel-receipt.json`, `04-cancelled-state.json`, and screenshot
-`04-restarted-cancelled.png`.
+Save `04-cancel-receipt.json`, `04-cancelled-state.json`,
+`04-cancelled-work.json`, and screenshot `04-restarted-cancelled.png`.
 
 ## Phase 4 — Commit normally after restart
 
-Submit a short turn with a unique literal marker and ask for it in the answer. Poll until
-idle and require the new user/assistant pair to agree across the rendered transcript and
-`/api/state.messages`, with no active address left. Its turn id must differ from the
-cancelled turn. Screenshot `05-post-restart-completed.png`; save state as
-`05-post-restart-state.json`.
+Submit a short turn with a unique literal marker and ask for it in the answer. Prose-only
+instructions are not a reliable shape constraint: a model may wrap even this marker
+request in a durable process. Poll for either a completed turn or a running `/api/work`
+process for at most 60 seconds. If a process appears, do not wait for its declared sleep
+deadline: use the public Stop control, require its committed terminal within 10 seconds,
+and retry once with a fresh marker. If neither completion nor the unexpected-process
+signal appears within 60 seconds, or the second attempt also wraps the marker in a
+process, Abort/RCA.
+
+For the successful attempt, require idle and the new user/assistant pair to agree across
+the rendered transcript and `/api/state.messages`, with no active address left. Its turn
+id must differ from the cancelled turn. Screenshot `05-post-restart-completed.png`; save
+state as `05-post-restart-state.json`.
 
 ## Phase 5 — Teardown and score
 
@@ -125,10 +166,10 @@ Restate container are gone.
 | Item | Objective gate | Verdict | Evidence |
 |------|----------------|---------|----------|
 | Boot identity | Workbench/Restate ready; rendered/API/disk session ids agree | | `00-ready.png` |
-| Durable park | one exact address agrees across UI, API, disk, and trace | | `01-parked-*` |
+| Durable park | pinned shape has `exec_code_started`; one exact running address agrees across UI, API, disk, trace, and work API | | `01-parked-*`, `01-running-work.json` |
 | Engine-only bounce | same container id; Workbench PID and endpoint stay live | | command log, `02-engine-down.png` |
 | UI reconvergence | exact pre-bounce address restores running pill + Stop | | `03-reconverged-*` |
-| Stop after reconnect | committed Cancelled terminal carries matching user evidence | | `04-restarted-cancelled.png`, receipt/state JSON |
+| Stop after reconnect | committed Cancelled terminal carries matching user evidence; baseline process reaches Cancelled with `process.cancel_requested` | | `04-restarted-cancelled.png`, receipt/state/work JSON |
 | Normal post-restart commit | new turn commits and UI/API transcript agree | | `05-post-restart-*` |
 | No break-glass substitution | no Restate Admin cancel/kill used | | command log |
 

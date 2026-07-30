@@ -110,6 +110,136 @@ fn live_restate_ingress_owner_restart_resumes_and_remains_cancellable() {
 
 #[test]
 #[ignore = "requires a running Restate server; use `just agent-workbench-restate-e2e`"]
+fn live_restate_suspended_sleep_cancel_wakes_and_streams_evidence() {
+    run_async_test_on_stack_budget_multi_thread("workbench-suspended-sleep-cancel", 4, || {
+        live_restate_suspended_sleep_cancel_wakes_and_streams_evidence_inner()
+    });
+}
+
+async fn live_restate_suspended_sleep_cancel_wakes_and_streams_evidence_inner() {
+    let ingress_url = std::env::var("RESTATE_INGRESS_URL")
+        .expect("RESTATE_INGRESS_URL must be set by the workbench Restate E2E recipe");
+    let admin_url =
+        std::env::var("RESTATE_ADMIN_URL").unwrap_or_else(|_| "http://127.0.0.1:19071".to_string());
+    let endpoint_bind: SocketAddr = std::env::var("AGENT_WORKBENCH_E2E_ENDPOINT_BIND")
+        .unwrap_or_else(|_| "127.0.0.1:19081".to_string())
+        .parse()
+        .expect("valid workbench E2E endpoint bind");
+    let endpoint_url = std::env::var("AGENT_WORKBENCH_E2E_ENDPOINT_URL")
+        .unwrap_or_else(|_| format!("http://{endpoint_bind}"));
+    let data_dir = std::env::temp_dir().join(format!(
+        "agent-workbench-suspended-sleep-cancel-e2e-{}",
+        uuid::Uuid::new_v4()
+    ));
+    std::fs::create_dir_all(&data_dir).expect("create suspended sleep E2E data dir");
+    let provider = lash::testing::TestProvider::builder()
+        .kind("workbench-suspended-sleep-cancel-e2e")
+        .complete(|_| async {
+            Ok(text_response(
+                "<lashlang>\nsleep for \"300s\"\nfinish \"unreachable\"\n</lashlang>",
+            ))
+        })
+        .build()
+        .into_handle();
+    let harness = live_workbench_restate_state_with_provider(
+        &data_dir,
+        ingress_url,
+        provider,
+        WorkbenchSessionIds::fresh(),
+        ActiveTurns::default(),
+    )
+    .await;
+    restate::spawn_restate_endpoint(
+        endpoint_bind,
+        harness.state.clone(),
+        harness.process_deployment,
+        harness.process_worker,
+    );
+    wait_for_endpoint_socket(endpoint_bind).await;
+    register_restate_deployment(&admin_url, &endpoint_url).await;
+
+    let invocation_id =
+        run_workbench_turn_via_restate(&harness.state, "cancel this suspended durable sleep").await;
+    wait_for_workbench_restate_invocation_suspended(
+        &harness.state,
+        &invocation_id,
+        Duration::from_secs(90),
+    )
+    .await;
+    let session_id = harness.state.current_session_id();
+    let active_turns = harness.state.active_turns.for_session(&session_id);
+    let [routed_address] = active_turns.as_slice() else {
+        panic!("expected exactly one routed suspended turn")
+    };
+    let routed_address = routed_address.clone();
+    let session = harness
+        .state
+        .core
+        .session(&session_id)
+        .open()
+        .await
+        .expect("open suspended turn session for durable address");
+    let address = session.turn_address(&routed_address.turn_id);
+    drop(session);
+    let mut events = harness.state.event_tx.subscribe(&session_id);
+    let started = tokio::time::Instant::now();
+    let receipts = harness
+        .state
+        .cancel_turns_for_session(&session_id)
+        .await
+        .expect("cancel suspended workbench turn");
+    let [receipt] = receipts.as_slice() else {
+        panic!("expected one suspended-turn cancellation receipt")
+    };
+    let evidence = match &receipt.outcome {
+        lash::TurnCancelOutcome::Requested(evidence)
+        | lash::TurnCancelOutcome::AlreadyRequested(evidence) => evidence.clone(),
+        other => panic!("suspended-turn cancellation did not win: {other:?}"),
+    };
+    let terminal = tokio::time::timeout(
+        Duration::from_secs(10),
+        harness
+            .state
+            .core
+            .turn_work_driver()
+            .await_terminal(&address),
+    )
+    .await
+    .expect("suspended sleep cancellation must not wait for the 300-second timer")
+    .expect("attach suspended sleep terminal");
+    assert!(matches!(
+        terminal,
+        lash::TurnTerminal::Committed {
+            outcome: lash::TurnOutcome::Stopped(lash::TurnStop::Cancelled),
+            cancellation: Some(ref terminal_evidence),
+            ..
+        } if terminal_evidence == &evidence
+    ));
+    assert!(started.elapsed() < Duration::from_secs(10));
+
+    let expected_message = format!("turn stopped · request {}", evidence.request_id);
+    tokio::time::timeout(Duration::from_secs(10), async {
+        loop {
+            if matches!(
+                events.recv().await,
+                Ok(ProductEvent {
+                    item: StreamItem::Message { ref message },
+                    ..
+                }) if message.text == expected_message
+            ) {
+                break;
+            }
+        }
+    })
+    .await
+    .expect("late cancellation evidence must arrive on the SSE product stream");
+    wait_for_active_turns_empty(&harness.state, &session_id, Duration::from_secs(10)).await;
+    println!("workbench suspended-sleep gate passed: post-suspension-cancel; late-SSE-evidence");
+    let _ = std::fs::remove_dir_all(data_dir);
+}
+
+#[test]
+#[ignore = "requires a running Restate server; use `just agent-workbench-restate-e2e`"]
 fn live_restate_stop_over_process_await_commits_cancelled_and_streams_evidence() {
     run_async_test_on_stack_budget_multi_thread("workbench-stop-over-process-await", 4, || {
         live_restate_stop_over_process_await_commits_cancelled_and_streams_evidence_inner()
