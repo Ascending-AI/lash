@@ -277,6 +277,20 @@ impl QueuedWorkStore for FacadeStore {
 
 #[async_trait]
 impl StoreMaintenance for FacadeStore {
+    async fn seed_session_trigger_manifest_ref_for_testing(
+        &self,
+        _session_id: &str,
+    ) -> Result<bool, StoreError> {
+        Ok(false)
+    }
+
+    async fn raw_session_owned_artifact_refs_for_testing(
+        &self,
+        _session_id: &str,
+    ) -> Result<Vec<(String, String)>, StoreError> {
+        Ok(Vec::new())
+    }
+
     async fn vacuum(&self) -> Result<VacuumReport, StoreError> {
         Ok(VacuumReport::default())
     }

@@ -628,7 +628,7 @@ pub(crate) async fn delete_session_tx(
          WHERE namespace = $1 AND artifact_ref = $2",
     )
     .bind(crate::artifact_store::CURRENT_TRIGGER_MANIFEST_NAMESPACE)
-    .bind(format!("session:{session_id}"))
+    .bind(lash_core::TriggerOwnerScope::session(session_id).namespace())
     .execute(&mut **tx)
     .await
     .map_err(store_sqlx_error)?;

@@ -637,7 +637,11 @@ fn reserve_sqlite_deliveries(
     ];
     if let Some(session_id) = occurrence.session_id.as_deref() {
         sql.push_str(" AND owner_scope = ?3");
-        values.push(format!("session:{session_id}").into());
+        values.push(
+            lash_core::TriggerOwnerScope::session(session_id)
+                .namespace()
+                .into(),
+        );
     }
     sql.push_str(" ORDER BY owner_scope ASC, subscription_key ASC");
     let mut stmt = tx.prepare(&sql).map_err(process_sqlite_error)?;

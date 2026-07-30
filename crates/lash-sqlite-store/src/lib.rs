@@ -765,7 +765,7 @@ async fn delete_session_from_catalog(
              WHERE namespace = ?1 AND artifact_ref = ?2",
                 params![
                     attachments::CURRENT_TRIGGER_MANIFEST_NAMESPACE,
-                    format!("session:{session_id}")
+                    lash_core::TriggerOwnerScope::session(session_id).namespace()
                 ],
             )
             .map_err(sqlite_error)?;

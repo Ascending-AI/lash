@@ -74,7 +74,11 @@ impl InMemorySessionStore {
             .lock()
             .expect("lock queued work")
             .iter()
-            .filter(|entry| Some(&entry.batch.session_id) == session_id.as_ref())
+            .filter(|entry| {
+                session_id
+                    .as_ref()
+                    .is_none_or(|session_id| &entry.batch.session_id == session_id)
+            })
             .map(|entry| {
                 (
                     entry.batch.clone(),
@@ -216,5 +220,34 @@ impl super::InMemorySessionStoreFactory {
             .collect::<Vec<_>>();
         rows.sort_by(|left, right| left.0.cmp(&right.0));
         rows
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::{
+        DeliveryPolicy, QueuedWorkBatchDraft, QueuedWorkPayload, QueuedWorkStore, SlotPolicy,
+    };
+
+    #[tokio::test]
+    async fn queued_work_diagnostic_is_unfiltered_without_session_meta() {
+        let store = super::InMemorySessionStore::default();
+        store
+            .enqueue_queued_work(QueuedWorkBatchDraft::new(
+                "deleted-session",
+                DeliveryPolicy::EarliestSafeBoundary,
+                SlotPolicy::Exclusive,
+                vec![QueuedWorkPayload::session_command(
+                    crate::SessionCommand::RefreshToolCatalog {
+                        reason: "prove post-delete diagnostics are non-vacuous".to_string(),
+                    },
+                )],
+            ))
+            .await
+            .expect("seed queued work without session metadata");
+
+        let rows = store.raw_queued_work_for_testing();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].0.session_id, "deleted-session");
     }
 }

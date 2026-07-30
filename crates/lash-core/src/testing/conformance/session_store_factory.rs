@@ -98,7 +98,7 @@ pub async fn session_store_factory_delete_fences_stale_handles(
         );
         assert_eq!(
             refs[0].1,
-            format!("session:{}", request.session_id),
+            crate::TriggerOwnerScope::session(&request.session_id).namespace(),
             "the deletion fixture must exercise the exact session owner ref"
         );
     }

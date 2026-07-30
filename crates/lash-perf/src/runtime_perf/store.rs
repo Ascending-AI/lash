@@ -1411,6 +1411,24 @@ impl QueuedWorkStore for RuntimePerfStore {
 
 #[async_trait::async_trait]
 impl StoreMaintenance for RuntimePerfStore {
+    async fn seed_session_trigger_manifest_ref_for_testing(
+        &self,
+        _session_id: &str,
+    ) -> Result<bool, store::StoreError> {
+        Err(unsupported_maintenance(
+            "seed_session_trigger_manifest_ref_for_testing",
+        ))
+    }
+
+    async fn raw_session_owned_artifact_refs_for_testing(
+        &self,
+        _session_id: &str,
+    ) -> Result<Vec<(String, String)>, store::StoreError> {
+        Err(unsupported_maintenance(
+            "raw_session_owned_artifact_refs_for_testing",
+        ))
+    }
+
     async fn vacuum(&self) -> Result<VacuumReport, store::StoreError> {
         Err(unsupported_maintenance("vacuum"))
     }

@@ -31,8 +31,8 @@ use lash_core::{
     ProtocolEvent, RuntimeCommit, RuntimePersistence, RuntimeSessionState, RuntimeTurnCommitStamp,
     SessionCommitStore, SessionHistoryRecord, SessionMeta, SessionNodePayload, SessionNodeRecord,
     SessionRelation, SessionStoreCreateRequest, SessionStoreFactory, SlotPolicy, StoreError,
-    StoreMaintenance, TokenLedgerEntry, TokenUsage, ToolState, TurnInput, TurnInputApplication,
-    TurnInputClaim, TurnInputIngress, TurnInputState,
+    StoreMaintenance, TokenLedgerEntry, TokenUsage, ToolState, TriggerOwnerScope, TurnInput,
+    TurnInputApplication, TurnInputClaim, TurnInputIngress, TurnInputState,
 };
 use lash_postgres_store::PostgresStorage;
 use rusqlite::OptionalExtension;
@@ -42,11 +42,7 @@ use sqlx::{Connection, PgConnection, PgPool};
 mod observations;
 #[path = "cross_backend_store_differential/raw_durable_reader.rs"]
 mod raw_durable_reader;
-use observations::{
-    PendingTurnInputObservation, QueuedWorkObservation, SessionOwnedArtifactRefObservation,
-    queued_work_observation, queued_work_observations_from_sql_rows,
-    session_owned_artifact_ref_observations,
-};
+use observations::*;
 
 const SESSION_LEASE_TTL_MS: u64 = 60_000;
 // "LASH_PGT" encoded as a positive i64. This must match the shared-database
@@ -793,149 +789,6 @@ type QueuedWorkBatchRow = (
     i64,
 );
 type QueuedWorkItemRow = (String, i64, String);
-
-#[derive(Clone, PartialEq, Eq)]
-struct DurableNode {
-    // SQL rows are read by `seq`; the in-memory vector uses its native index.
-    // Comparing this normalized replay ordinal keeps transcript order
-    // contract-visible without comparing backend-local sequence counters.
-    ordinal: usize,
-    node_id: String,
-    // Compared as its own field rather than inside `bytes`: SQL keeps parent
-    // topology in an indexed column while the in-memory record carries it in
-    // the struct, so byte comparison alone would report a physical layout
-    // choice as drift while leaving the edge itself uncompared.
-    parent_node_id: Option<String>,
-    // Both SQL backends currently store node_json as TEXT. A future jsonb
-    // migration would reserialize values and make every byte comparison red
-    // for a reason outside the persistence contract.
-    bytes: Vec<u8>,
-}
-
-impl std::fmt::Debug for DurableNode {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter
-            .debug_struct("DurableNode")
-            .field("ordinal", &self.ordinal)
-            .field("node_id", &self.node_id)
-            .field("parent_node_id", &self.parent_node_id)
-            .field("bytes", &String::from_utf8_lossy(&self.bytes))
-            .finish()
-    }
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-struct CheckpointObservation {
-    checkpoint_ref: Option<BlobRef>,
-    turn_state: serde_json::Value,
-    tool_state_ref: Option<BlobRef>,
-    tool_state: Option<serde_json::Value>,
-    plugin_snapshot_ref: Option<BlobRef>,
-    plugin_snapshot: Option<serde_json::Value>,
-    plugin_snapshot_revision: Option<u64>,
-    execution_state_ref: Option<BlobRef>,
-    execution_state: Option<Vec<u8>>,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-struct RuntimeTurnCommitObservation {
-    operation: String,
-    turn_commit_hash: String,
-    result: serde_json::Value,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-struct AttachmentManifestObservation {
-    attachment_id: AttachmentId,
-    canonical_uri: String,
-    intent_at_epoch_ms: u64,
-    // Commit time is store-authoritative (database time in PostgreSQL, injected
-    // host time locally). The logical lifecycle fact is compared explicitly.
-    committed: bool,
-    owner_kind: Option<AttachmentOwnerKind>,
-    owner_id: Option<String>,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-struct NodeAnchorObservation {
-    node_id: String,
-    checkpoint_ref: BlobRef,
-    source_session_id: String,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-struct UsageDeltaObservation {
-    source: String,
-    model: String,
-    usage: TokenUsage,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-struct SessionMetaObservation {
-    session_name: String,
-    created_at: String,
-    model: String,
-    cwd: Option<String>,
-    relation: SessionRelation,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-struct SessionExecutionLeaseObservation {
-    owner: Option<LeaseOwnerIdentity>,
-    // Lease tokens are backend-generated CAS capabilities. Their bytes are a
-    // physical implementation detail; token presence is the logical row state
-    // and is compared explicitly alongside owner, generation, and times.
-    lease_token_present: bool,
-    fencing_token: u64,
-    // PostgreSQL uses database-authoritative wall time while local stores use
-    // the injected clock. Compare the durable temporal contract (claimed and
-    // TTL) rather than incomparable clock-domain epoch values.
-    claimed: bool,
-    ttl_ms: Option<u64>,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-struct ComparableRuntimeCommitResult {
-    head_revision: u64,
-    turn_input_applications: Vec<TurnInputApplication>,
-}
-
-impl From<RuntimeCommitResult> for ComparableRuntimeCommitResult {
-    fn from(result: RuntimeCommitResult) -> Self {
-        Self {
-            head_revision: result.head_revision,
-            turn_input_applications: result.turn_input_applications,
-        }
-    }
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-struct RawDurableState {
-    head_revision: Option<u64>,
-    leaf_node_id: Option<String>,
-    checkpoint: Option<CheckpointObservation>,
-    durable_nodes: Vec<DurableNode>,
-    runtime_turn_commits: Vec<RuntimeTurnCommitObservation>,
-    attachment_manifest: Vec<AttachmentManifestObservation>,
-    node_anchors: Vec<NodeAnchorObservation>,
-    usage_deltas: Vec<UsageDeltaObservation>,
-    session_meta: Option<SessionMetaObservation>,
-    session_execution_leases: Vec<SessionExecutionLeaseObservation>,
-    pending_turn_inputs: Vec<PendingTurnInputObservation>,
-    queued_work: Vec<QueuedWorkObservation>,
-    session_owned_artifact_refs: Vec<SessionOwnedArtifactRefObservation>,
-    // `process_*` and `trigger_*` are deliberately excluded: they are separate
-    // subsystems with dedicated conformance suites, while this harness and its
-    // operation vocabulary are scoped to one runtime session. Effect/await
-    // state is likewise owned by the separate EffectHost contract.
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-struct StepObservation {
-    store_error: Option<String>,
-    runtime_commit_result: Option<ComparableRuntimeCommitResult>,
-    durable_state: RawDurableState,
-}
 
 enum RawDurableReader {
     InMemory {
@@ -1995,7 +1848,7 @@ impl BackendRunner {
                             .await?,
                         vec![(
                             "lashlang_trigger_manifest".to_string(),
-                            format!("session:{}", self.session_id),
+                            TriggerOwnerScope::session(&self.session_id).namespace(),
                         )],
                         "{} did not seed the exact session-owned trigger-manifest ref",
                         self.name

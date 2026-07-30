@@ -1411,10 +1411,8 @@ pub trait StoreMaintenance: Send + Sync {
     #[doc(hidden)]
     async fn seed_session_trigger_manifest_ref_for_testing(
         &self,
-        _session_id: &str,
-    ) -> Result<bool, StoreError> {
-        Ok(false)
-    }
+        session_id: &str,
+    ) -> Result<bool, StoreError>;
 
     /// Return session-owned artifact-ref identities through this retained store
     /// handle. Values are `(namespace, artifact_ref)` pairs; physical pointer
@@ -1422,10 +1420,8 @@ pub trait StoreMaintenance: Send + Sync {
     #[doc(hidden)]
     async fn raw_session_owned_artifact_refs_for_testing(
         &self,
-        _session_id: &str,
-    ) -> Result<Vec<(String, String)>, StoreError> {
-        Ok(Vec::new())
-    }
+        session_id: &str,
+    ) -> Result<Vec<(String, String)>, StoreError>;
 }
 
 /// Exact settled-session persistence protocol required by the runtime.

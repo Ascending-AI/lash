@@ -361,6 +361,12 @@ pub trait LashlangArtifactStore: Send + Sync {
 #[derive(Clone, Default)]
 pub struct InMemoryLashlangArtifactStore {
     modules: Arc<Mutex<BTreeMap<ModuleRef, Arc<ModuleArtifact>>>>,
+    // This store is process-global in ephemeral mode, so current manifests are
+    // intentionally retained for the process lifetime and this map can grow
+    // without bound. Session deletion is owned by `lash-core`, which cannot
+    // depend on this lower-level crate without reversing the dependency graph.
+    // A bounded lifecycle therefore requires a durable artifact-store backend
+    // rather than coupling the in-memory session factory to this map.
     current_trigger_manifests: Arc<Mutex<BTreeMap<String, CurrentTriggerKeyManifest>>>,
     artifacts: Arc<Mutex<BTreeMap<String, Vec<u8>>>>,
 }

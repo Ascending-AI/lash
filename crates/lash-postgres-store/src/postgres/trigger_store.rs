@@ -213,7 +213,7 @@ impl TriggerStore for PostgresTriggerStore {
     }
 
     async fn delete_session_subscriptions(&self, session_id: &str) -> Result<usize, PluginError> {
-        let owner_scope = format!("session:{session_id}");
+        let owner_scope = lash_core::TriggerOwnerScope::session(session_id).namespace();
         let mut tx = self.pool.begin().await.map_err(plugin_sqlx_error)?;
         let rows = sqlx::query(
             "SELECT subscription_id, record_json FROM lash_trigger_subscriptions
@@ -432,7 +432,7 @@ async fn reserve_postgres_deliveries(
     if let Some(session_id) = occurrence.session_id.as_deref() {
         query
             .push(" AND owner_scope = ")
-            .push_bind(format!("session:{session_id}"));
+            .push_bind(lash_core::TriggerOwnerScope::session(session_id).namespace());
     }
     query.push(" ORDER BY owner_scope ASC, subscription_key ASC FOR SHARE");
     let rows = query

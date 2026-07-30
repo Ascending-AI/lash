@@ -685,6 +685,24 @@ impl lash_core::QueuedWorkStore for ObservedSessionStore {
 
 #[async_trait::async_trait]
 impl StoreMaintenance for ObservedSessionStore {
+    async fn seed_session_trigger_manifest_ref_for_testing(
+        &self,
+        session_id: &str,
+    ) -> Result<bool, StoreError> {
+        self.inner
+            .seed_session_trigger_manifest_ref_for_testing(session_id)
+            .await
+    }
+
+    async fn raw_session_owned_artifact_refs_for_testing(
+        &self,
+        session_id: &str,
+    ) -> Result<Vec<(String, String)>, StoreError> {
+        self.inner
+            .raw_session_owned_artifact_refs_for_testing(session_id)
+            .await
+    }
+
     async fn vacuum(&self) -> Result<VacuumReport, StoreError> {
         self.inner.vacuum().await
     }

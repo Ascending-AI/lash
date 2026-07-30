@@ -2955,6 +2955,24 @@ impl lash_core::TurnInputStore for CommitRetryStore {
 
 #[async_trait::async_trait]
 impl lash_core::StoreMaintenance for CommitRetryStore {
+    async fn seed_session_trigger_manifest_ref_for_testing(
+        &self,
+        session_id: &str,
+    ) -> Result<bool, lash_core::StoreError> {
+        self.inner
+            .seed_session_trigger_manifest_ref_for_testing(session_id)
+            .await
+    }
+
+    async fn raw_session_owned_artifact_refs_for_testing(
+        &self,
+        session_id: &str,
+    ) -> Result<Vec<(String, String)>, lash_core::StoreError> {
+        self.inner
+            .raw_session_owned_artifact_refs_for_testing(session_id)
+            .await
+    }
+
     async fn vacuum(&self) -> Result<lash_core::VacuumReport, lash_core::StoreError> {
         self.inner.vacuum().await
     }
