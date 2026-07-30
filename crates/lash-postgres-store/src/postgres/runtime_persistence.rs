@@ -2079,7 +2079,7 @@ impl StoreMaintenance for PostgresSessionStore {
              DO UPDATE SET artifact_bytes = EXCLUDED.artifact_bytes",
         )
         .bind(crate::artifact_store::CURRENT_TRIGGER_MANIFEST_NAMESPACE)
-        .bind(format!("session:{session_id}"))
+        .bind(lash_core::TriggerOwnerScope::session(session_id).namespace())
         .bind([1_u8].as_slice())
         .execute(&self.pool)
         .await
@@ -2098,7 +2098,7 @@ impl StoreMaintenance for PostgresSessionStore {
              ORDER BY namespace, artifact_ref",
         )
         .bind(crate::artifact_store::CURRENT_TRIGGER_MANIFEST_NAMESPACE)
-        .bind(format!("session:{session_id}"))
+        .bind(lash_core::TriggerOwnerScope::session(session_id).namespace())
         .fetch_all(&self.pool)
         .await
         .map_err(store_sqlx_error)
@@ -2153,9 +2153,11 @@ impl StoreMaintenance for PostgresSessionStore {
     /// Checkpoint-rooted mark/sweep over `lash_blobs`, mirroring the SQLite
     /// store's semantics ([`GcReport`] fields match). PostgreSQL stores each
     /// checkpoint as one manifest plus separately addressed tool, plugin, and
-    /// execution-state components. The three
-    /// Lashlang artifact namespaces live in a separate, upsert-in-place table
-    /// (`lash_lashlang_artifacts`) that never orphans, so GC does not touch it.
+    /// execution-state components. The four Lashlang artifact namespaces live
+    /// in a separate, upsert-in-place table (`lash_lashlang_artifacts`).
+    /// Session-owned trigger-manifest rows are removed with their session; the
+    /// other artifact rows are retained service roots, so GC does not touch
+    /// this table.
     async fn gc_unreachable(&self) -> Result<GcReport, StoreError> {
         let mut tx = self.pool.begin().await.map_err(store_sqlx_error)?;
         // Serialize against concurrent checkpoint-blob writers. Every commit

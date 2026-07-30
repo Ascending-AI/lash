@@ -2141,7 +2141,7 @@ impl StoreMaintenance for Store {
         &self,
         session_id: &str,
     ) -> Result<bool, StoreError> {
-        let artifact_ref = format!("session:{session_id}");
+        let artifact_ref = lash_core::TriggerOwnerScope::session(session_id).namespace();
         let blob_ref = format!("testing-trigger-manifest:{session_id}");
         self.conn
             .write(move |tx| {
@@ -2169,7 +2169,7 @@ impl StoreMaintenance for Store {
         &self,
         session_id: &str,
     ) -> Result<Vec<(String, String)>, StoreError> {
-        let artifact_ref = format!("session:{session_id}");
+        let artifact_ref = lash_core::TriggerOwnerScope::session(session_id).namespace();
         self.conn
             .call(move |connection| {
                 let mut statement = connection.prepare(
