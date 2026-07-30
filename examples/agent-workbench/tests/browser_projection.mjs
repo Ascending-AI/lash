@@ -135,6 +135,207 @@ test("an authoritative settled snapshot clears a busy projection even when Done 
   );
 });
 
+/* FIG-791: the shell may only claim "idle" / "no turns yet" from a snapshot it
+   actually received. These run the production availability state machine and
+   its renderer against stub elements, so the assertions are about what the DOM
+   says, not about the internal phase name. */
+function shellModule() {
+  const context = { Object, Number, String, Boolean };
+  vm.runInNewContext(
+    `${markedSource("WORKBENCH_SHELL_AVAILABILITY", "WORKBENCH_SHELL_AVAILABILITY")}
+     this.exports = {
+       createShellAvailability,
+       markShellChannel,
+       markShellHydrated,
+       shellPhase,
+       shellStatusModel,
+       timelinePlaceholder
+     };`,
+    context,
+  );
+  return context.exports;
+}
+
+function shellRender(model) {
+  function element(initial = {}) {
+    return { textContent: "", className: "", hidden: false, ...initial };
+  }
+  const elements = {
+    busyText: element(),
+    busyPill: element({ className: "pill pending" }),
+    streamState: element(),
+    sessionId: element(),
+    webState: element(),
+    shellStatus: element({ hidden: true }),
+    shellStatusText: element(),
+    shellStatusDetail: element({ hidden: true }),
+    timelineEmpty: element({ className: "empty pending" }),
+  };
+  const timelineRows = ["a rendered turn"];
+  const renderContext = {
+    ...elements,
+    document: {
+      getElementById(id) {
+        return id === "timelineEmpty" ? elements.timelineEmpty : null;
+      },
+    },
+  };
+  vm.runInNewContext(
+    `${markedSource("WORKBENCH_SHELL_STATUS_RENDER", "WORKBENCH_SHELL_STATUS_RENDER")}
+     applyShellStatus(${JSON.stringify(model)});`,
+    renderContext,
+  );
+  return {
+    pill: elements.busyText.textContent,
+    pillClass: elements.busyPill.className,
+    subtitle: elements.streamState.textContent,
+    session: elements.sessionId.textContent,
+    web: elements.webState.textContent,
+    bannerHidden: elements.shellStatus.hidden,
+    banner: elements.shellStatusText.textContent,
+    bannerDetail: elements.shellStatusDetail.textContent,
+    placeholder: elements.timelineEmpty.textContent,
+    placeholderClass: elements.timelineEmpty.className,
+    timelineRows,
+  };
+}
+
+test("the shipped markup ships no session claim of its own", () => {
+  // The byte-identical outage screenshot in FIG-791 was the pristine, never
+  // hydrated shell: every claim on it came from static HTML, not from a
+  // response. The static shell must therefore claim nothing.
+  const shell = html.slice(html.indexOf("<body"));
+  assert.doesNotMatch(shell, /id="timelineEmpty"[^>]*>\s*no turns yet/);
+  assert.match(shell, /id="timelineEmpty"[^>]*>\s*connecting to the workbench…/);
+  assert.match(shell, /id="busyText"[^>]*>connecting</);
+  assert.match(shell, /id="sessionId"[^>]*>connecting…</);
+  assert.doesNotMatch(shell, /id="busyText"[^>]*>idle</);
+});
+
+test("the pre-hydration shell reports its connection, not an empty session", () => {
+  const shell = shellModule();
+  const render = shellRender(
+    shell.shellStatusModel(shell.createShellAvailability(), {}),
+  );
+
+  assert.equal(render.pill, "connecting");
+  assert.doesNotMatch(render.placeholder, /no turns yet/);
+  assert.match(render.placeholder, /connecting/);
+  assert.equal(render.session, "connecting…");
+  assert.notEqual(render.pill, "idle");
+});
+
+test("a failed /api/state is a visibly different render from an empty session", () => {
+  const shell = shellModule();
+  const outage = shell.markShellChannel(
+    shell.createShellAvailability(),
+    "state",
+    false,
+    "the workbench did not answer within 5s",
+  );
+  const settledEmpty = shell.markShellHydrated(shell.createShellAvailability());
+
+  const outageRender = shellRender(shell.shellStatusModel(outage, {}));
+  const emptyRender = shellRender(
+    shell.shellStatusModel(settledEmpty, { session: "workbench-a", web: "ready" }),
+  );
+
+  // The defect this replaces: two different situations rendering the same shell.
+  assert.notDeepEqual(outageRender, emptyRender);
+  assert.notEqual(outageRender.pill, emptyRender.pill);
+  assert.notEqual(outageRender.placeholder, emptyRender.placeholder);
+  assert.notEqual(outageRender.bannerHidden, emptyRender.bannerHidden);
+  assert.notEqual(outageRender.placeholderClass, emptyRender.placeholderClass);
+
+  assert.equal(emptyRender.pill, "idle");
+  assert.match(emptyRender.placeholder, /^no turns yet/);
+  assert.equal(emptyRender.bannerHidden, true);
+
+  assert.notEqual(outageRender.pill, "idle");
+  assert.doesNotMatch(outageRender.placeholder, /no turns yet/);
+  assert.equal(outageRender.bannerHidden, false);
+  assert.match(outageRender.banner, /unreachable/);
+  assert.equal(outageRender.bannerDetail, "the workbench did not answer within 5s");
+  assert.equal(outageRender.session, "unknown");
+});
+
+test("a drop after hydration reconnects over the last known content", () => {
+  const shell = shellModule();
+  const availability = shell.markShellChannel(
+    shell.markShellHydrated(shell.createShellAvailability()),
+    "product",
+    false,
+    "transcript stream disconnected",
+  );
+
+  const render = shellRender(
+    shell.shellStatusModel(availability, {
+      session: "workbench-a",
+      web: "ready",
+      busy: true,
+    }),
+  );
+
+  // Last-known-good content survives, identity included: a reconnect states
+  // that the view may be stale, it does not retract the session.
+  assert.deepEqual(render.timelineRows, ["a rendered turn"]);
+  assert.equal(render.session, "workbench-a");
+  assert.equal(render.web, "ready");
+  assert.equal(render.pill, "reconnecting");
+  assert.equal(render.bannerHidden, false);
+  assert.match(render.banner, /live updates paused/);
+  assert.match(render.subtitle, /a turn was running/);
+  assert.doesNotMatch(render.placeholder, /no turns yet/);
+
+  // A snapshot channel that is also down changes the claim about the content.
+  const stateDown = shell.markShellChannel(
+    availability,
+    "state",
+    false,
+    "state request failed (503)",
+  );
+  const stateDownRender = shellRender(shell.shellStatusModel(stateDown, { session: "workbench-a" }));
+  assert.match(stateDownRender.banner, /last known state/);
+  assert.equal(stateDownRender.bannerDetail, "state request failed (503)");
+});
+
+test("a successful response is what promotes the shell to session claims", () => {
+  const shell = shellModule();
+  const availability = shell.createShellAvailability();
+  assert.equal(shell.shellPhase(availability), "connecting");
+
+  shell.markShellChannel(availability, "state", false, "boot failure");
+  assert.equal(shell.shellPhase(availability), "unavailable");
+
+  shell.markShellChannel(availability, "state", true);
+  shell.markShellHydrated(availability);
+  assert.equal(shell.shellPhase(availability), "live");
+
+  const render = shellRender(
+    shell.shellStatusModel(availability, { session: "workbench-a", web: "ready" }),
+  );
+  assert.equal(render.pill, "idle");
+  assert.equal(render.pillClass, "pill");
+  assert.equal(render.session, "workbench-a");
+  assert.equal(render.bannerHidden, true);
+  assert.equal(render.placeholderClass, "empty");
+  assert.equal(render.placeholder, shell.timelinePlaceholder("live"));
+
+  // Only "live" may say it.
+  for (const phase of ["connecting", "unavailable", "reconnecting"]) {
+    assert.doesNotMatch(shell.timelinePlaceholder(phase), /no turns yet/);
+  }
+});
+
+test("the boot path bounds its snapshot request and retries it", () => {
+  // The non-determinism in FIG-791: an unbounded, un-retried one-shot left a
+  // reload during the outage on whatever the static markup said, forever, when
+  // the backend accepted the connection and blocked instead of refusing it.
+  assert.match(html, /AbortSignal\.timeout\(timeoutMs\)/);
+  assert.match(html, /function scheduleStateRetry\(\)/);
+  assert.doesNotMatch(html, /renderNote\("transcript updates reconnecting"\)/);
+});
+
 test("trigger registration controls use the payload subscription key", () => {
   assert.doesNotMatch(html, /registration\.handle/);
   assert.match(html, /registration\.subscription_key/);

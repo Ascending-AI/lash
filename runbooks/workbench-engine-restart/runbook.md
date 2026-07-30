@@ -84,6 +84,13 @@ address remains unchanged. Capture `02-engine-down.png` only if the page remains
 renderable; a transient browser fetch failure during the outage is evidence to record,
 not permission to continue without the post-start gates.
 
+**Reload once during the outage and gate the outage render.** The parked turn is durable
+truth; the shell must not contradict it. Require that the reloaded page shows the
+connection banner or a connecting/unavailable/reconnecting pill, and that it renders
+**neither** an `idle` pill **nor** "no turns yet". A render that is indistinguishable from
+an empty, idle session is a failure of this phase even though the engine is down.
+Screenshot `02-outage-reload.png`.
+
 Run `docker start <restate-container>`. Poll—not sleep—until its admin and ingress ports
 are ready. Require the container id, Workbench PID, session id, and endpoint-worker
 address are unchanged from Phase 0/1.
@@ -127,6 +134,7 @@ Restate container are gone.
 | Boot identity | Workbench/Restate ready; rendered/API/disk session ids agree | | `00-ready.png` |
 | Durable park | one exact address agrees across UI, API, disk, and trace | | `01-parked-*` |
 | Engine-only bounce | same container id; Workbench PID and endpoint stay live | | command log, `02-engine-down.png` |
+| Outage render | reload during the outage shows the connection state, never `idle` / "no turns yet" | | `02-outage-reload.png` |
 | UI reconvergence | exact pre-bounce address restores running pill + Stop | | `03-reconverged-*` |
 | Stop after reconnect | committed Cancelled terminal carries matching user evidence | | `04-restarted-cancelled.png`, receipt/state JSON |
 | Normal post-restart commit | new turn commits and UI/API transcript agree | | `05-post-restart-*` |
