@@ -605,7 +605,9 @@ finish "registered"
         let current = observation.current_observation();
         if !contains_expected_wake(&current.read_view) {
             let mut commits = observation.subscribe_and_recover(current.cursor);
-            let committed = tokio::time::timeout(Duration::from_secs(10), async {
+            // 60s, not 10s: this waits for a full scripted turn through a durable
+            // rebuild, and contended CI shards have exceeded 10s (PR #170 run).
+            let committed = tokio::time::timeout(Duration::from_secs(60), async {
                 loop {
                     match commits.next().await {
                         Some(Ok(crate::observe::SessionObservationStreamItem::Event(event))) => {
