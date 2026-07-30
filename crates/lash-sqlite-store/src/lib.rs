@@ -51,7 +51,6 @@ use std::sync::{Arc, Mutex, OnceLock};
 use flate2::Compression;
 use flate2::read::ZlibDecoder;
 use flate2::write::ZlibEncoder;
-use lash_core::runtime::ProcessHandleGrantEntry;
 use lash_core::runtime::{
     QueuedWorkBatch, QueuedWorkBatchDraft, QueuedWorkClaim, QueuedWorkClaimBoundary,
     QueuedWorkCompletion, QueuedWorkItem, QueuedWorkPayload, prepare_process_event_append,
@@ -69,17 +68,16 @@ use lash_core::store::{
 use lash_core::{
     AbandonRequest, AttachmentId, AttachmentIntent, AttachmentManifest, AttachmentManifestEntry,
     AttachmentOwnerKind, BlobRef, DeliveryPolicy, GcReport, LeaseOwnerIdentity, MergeKey,
-    PROCESS_LEASE_SCHEMA_VERSION, PersistedSegmentHandover, ProcessAwaitOutput,
-    ProcessChangeCursor, ProcessEvent, ProcessEventAppendRequest, ProcessEventAppendResult,
-    ProcessExecutionWriteAuthority, ProcessExternalRef, ProcessHandleDescriptor,
-    ProcessHandleGrant, ProcessLease, ProcessLeaseClaimOutcome, ProcessLeaseCompletion,
-    ProcessListFilter, ProcessLiveReferenceSummary, ProcessPruneReport, ProcessRecord,
+    PROCESS_LEASE_SCHEMA_VERSION, PersistedSegmentHandover, ProcessAwaitOutput, ProcessChange,
+    ProcessChangeCursor, ProcessContinuationStore, ProcessEvent, ProcessEventAppendRequest,
+    ProcessEventAppendResult, ProcessExecutionWriteAuthority, ProcessExternalRef, ProcessLease,
+    ProcessLeaseClaimOutcome, ProcessLeaseCompletion, ProcessListFilter,
+    ProcessLiveReferenceSummary, ProcessObserverBy, ProcessPruneReport, ProcessRecord,
     ProcessRegistration, ProcessRegistry, ProcessStartOutcome, ProcessStartPlan, ProcessStarted,
     QueuedWorkStore, RuntimePersistence, SessionCommitStore, SessionExecutionLease,
     SessionExecutionLeaseClaimOutcome, SessionExecutionLeaseCompletion, SessionExecutionLeaseFence,
-    SessionExecutionLeaseStore, SessionMeta, SessionPickerInfo, SessionScope,
-    SessionStoreCreateRequest, SessionStoreFactory, SlotPolicy, StoreError, StoreMaintenance,
-    TurnInputStore, VacuumReport,
+    SessionExecutionLeaseStore, SessionMeta, SessionPickerInfo, SessionStoreCreateRequest,
+    SessionStoreFactory, SlotPolicy, StoreError, StoreMaintenance, TurnInputStore, VacuumReport,
 };
 use rusqlite::{Connection, OptionalExtension, Transaction, params};
 use sha2::{Digest, Sha256};
@@ -1257,13 +1255,13 @@ mod tests {
                 .await
                 .expect("register");
             registry
-                .grant_handle(
-                    &session_scope,
+                .add_observer(
+                    &session_scope.session_id,
                     "proc-persist",
-                    ProcessHandleDescriptor::new(Some("tool"), Some("demo")),
+                    lash_core::ProcessObserverBy::host("sqlite-reopen-test"),
                 )
                 .await
-                .expect("grant");
+                .expect("observe");
             registry
                 .complete_process(
                     "proc-persist",
@@ -1286,9 +1284,10 @@ mod tests {
         let record = registry
             .get_process("proc-persist")
             .await
+            .expect("read process")
             .expect("persisted process");
 
-        assert_eq!(record.originator_scope_id(), session_scope.id().as_str());
+        assert_eq!(record.originator_id(), session_scope.session_id);
         assert_eq!(
             record.provenance.originator,
             lash_core::ProcessOriginator::session(session_scope.clone())
@@ -1305,9 +1304,9 @@ mod tests {
         );
         assert_eq!(
             registry
-                .list_handle_grants(&session_scope)
+                .list_observed_by(&session_scope.session_id)
                 .await
-                .expect("grants")
+                .expect("observed processes")
                 .len(),
             1
         );

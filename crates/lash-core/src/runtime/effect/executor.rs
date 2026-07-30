@@ -118,11 +118,11 @@ impl ProcessLocalExecution {
         match command {
             ProcessCommand::Start {
                 registration,
-                grant,
+                observers,
                 execution_context: _,
             } => {
                 let record =
-                    InlineRuntimeEffectController::start_process(registry, registration, grant)
+                    InlineRuntimeEffectController::start_process(registry, registration, observers)
                         .await?;
                 if let Some(driver) = process_work_driver.as_ref() {
                     driver.claim_and_run_pending("process_start").await?;
@@ -137,10 +137,12 @@ impl ProcessLocalExecution {
             } => {
                 let entries = match mode {
                     crate::ProcessListMode::Live => {
-                        registry.list_live_handle_grants(&session_scope).await?
+                        registry
+                            .list_live_observed_by(&session_scope.session_id)
+                            .await?
                     }
                     crate::ProcessListMode::All => {
-                        registry.list_handle_grants(&session_scope).await?
+                        registry.list_observed_by(&session_scope.session_id).await?
                     }
                 };
                 Ok(ProcessEffectOutcome::List { entries })
@@ -151,7 +153,12 @@ impl ProcessLocalExecution {
                 process_ids,
             } => {
                 registry
-                    .transfer_handle_grants(&from_scope, &to_scope, &process_ids)
+                    .transfer_observers(
+                        &from_scope.session_id,
+                        &to_scope.session_id,
+                        &process_ids,
+                        crate::ProcessObserverBy::host("runtime-effect-transfer"),
+                    )
                     .await?;
                 Ok(ProcessEffectOutcome::Transfer)
             }
@@ -1407,7 +1414,7 @@ impl InlineRuntimeEffectController {
         self.allow_process_lifetime_completion_keys = true;
         self
     }
-    /// Register the process (and any handle grant) into the durable registry.
+    /// Register the process and its initial observer edges into the durable registry.
     ///
     /// The inline controller no longer runs the process here: the registry's
     /// non-terminal row *is* the durable work queue, and the host-owned
@@ -1417,16 +1424,11 @@ impl InlineRuntimeEffectController {
     pub(crate) async fn start_process(
         registry: Arc<dyn crate::ProcessRegistry>,
         registration: crate::ProcessRegistration,
-        grant: Option<crate::ProcessStartGrant>,
+        observers: Vec<String>,
     ) -> Result<ProcessRecord, PluginError> {
-        let registration_for_record = registration.clone();
-        let record = registry.register_process(registration_for_record).await?;
-        if let Some(grant) = grant {
-            registry
-                .grant_handle(&grant.session_scope, &registration.id, grant.descriptor)
-                .await?;
-        }
-        Ok(record)
+        registry
+            .register_process_with_observers(registration, &observers)
+            .await
     }
 
     pub(crate) async fn request_process_cancel(
@@ -1445,7 +1447,7 @@ impl InlineRuntimeEffectController {
             .await?;
         registry
             .get_process(process_id)
-            .await
+            .await?
             .ok_or_else(|| PluginError::Session(format!("unknown process `{process_id}`")))
     }
 }

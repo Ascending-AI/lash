@@ -7,7 +7,7 @@ accepted
 ## Decision
 
 `ProcessRegistry` is a state interface, not a coordination primitive. Registry
-implementations record process rows, handle grants, leases, wake bookkeeping,
+implementations record process rows, observer edges, leases, wake bookkeeping,
 and event logs through point reads and writes; they do not expose
 `await_process`, `wait_event_after`, store-local `Notify` loops, or
 backend-specific polling contracts.

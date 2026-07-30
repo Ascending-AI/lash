@@ -21,9 +21,8 @@ use lash_core::plugin::{
 };
 use lash_core::runtime::ProcessEventSemanticsSpec;
 use lash_core::{
-    PreparedToolCall, ProcessEventType, ProcessHandleDescriptor, ProcessInput, ProcessStartRequest,
-    ProgressSender, PromptContribution, SessionScope, SessionToolAccess, ToolCall, ToolDefinition,
-    ToolProvider, ToolResult,
+    PreparedToolCall, ProcessEventType, ProcessInput, ProcessStartRequest, ProgressSender,
+    PromptContribution, SessionToolAccess, ToolCall, ToolDefinition, ToolProvider, ToolResult,
 };
 
 use lash_tool_support::{
@@ -269,7 +268,6 @@ impl StandardShell {
             "command": params.cmd.clone(),
             "started_at": started_at,
         });
-        let descriptor = ProcessHandleDescriptor::new(Some("shell"), Some(params.cmd.clone()));
         let request = ProcessStartRequest::new(
             process_id.clone(),
             ProcessInput::External {
@@ -280,10 +278,9 @@ impl StandardShell {
             lash_core::RecoveryDisposition::ExternallyOwned,
             lash_core::ProcessOriginator::host(),
         )
-        .with_grant(Some(lash_core::ProcessStartGrant {
-            session_scope: SessionScope::new("request-descriptor"),
-            descriptor,
-        }));
+        .with_identity(
+            lash_core::ProcessIdentity::new("shell").with_label(Some(params.cmd.clone())),
+        );
         if let Err(err) = context.processes().start(request).await {
             return ToolResult::err_fmt(err.to_string());
         }
@@ -329,7 +326,6 @@ impl StandardShell {
             None,
             serde_json::Value::Null,
         );
-        let descriptor = ProcessHandleDescriptor::new(Some("shell"), Some(params.cmd.clone()));
         let request = ProcessStartRequest::new(
             process_id.clone(),
             ProcessInput::ToolCall { call },
@@ -339,10 +335,9 @@ impl StandardShell {
             lash_core::RecoveryDisposition::OwnerBound,
             lash_core::ProcessOriginator::host(),
         )
-        .with_grant(Some(lash_core::ProcessStartGrant {
-            session_scope: SessionScope::new("request-descriptor"),
-            descriptor,
-        }))
+        .with_identity(
+            lash_core::ProcessIdentity::new("shell").with_label(Some(params.cmd.clone())),
+        )
         .with_extra_event_types([shell_signal_event_type()]);
         match context.processes().start(request).await {
             Ok(summary) => {

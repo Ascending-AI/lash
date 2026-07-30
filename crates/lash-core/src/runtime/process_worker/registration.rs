@@ -12,6 +12,6 @@ pub(super) fn registration_from_record(record: ProcessRecord) -> ProcessRegistra
         event_types: record.event_types,
         provenance: record.provenance,
         env_ref: record.env_ref,
-        wake_target: record.wake_target,
+        wake_session_id: None,
     }
 }

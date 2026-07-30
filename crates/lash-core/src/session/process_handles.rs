@@ -3,9 +3,7 @@ use serde_json::json;
 use super::execution_context::RuntimeExecutionContext;
 use super::tool_execution::ToolInvocationReply;
 use crate::tool_dispatch::ToolPreparationOutcome;
-use crate::{
-    ProcessHandleDescriptor, ProcessInput, ProcessRegistration, ToolCallOutput, ToolCallRecord,
-};
+use crate::{ProcessInput, ProcessRegistration, ToolCallOutput, ToolCallRecord};
 
 const PROCESS_HANDLE_KIND: &str = "process";
 
@@ -88,18 +86,16 @@ impl RuntimeExecutionContext<'_> {
             Ok(registration) => registration,
             Err(err) => return ToolInvocationReply::error(json!(err.to_string())),
         };
-        if let Err(err) =
-            self.dispatch
-                .processes
-                .start(
-                    &self.session_id,
-                    registration,
-                    crate::ProcessStartOptions::new().with_descriptor(
-                        ProcessHandleDescriptor::new(Some("tool"), Some(tool_name.clone())),
-                    ),
-                    self.process_scope(self.parent_invocation.clone()),
-                )
-                .await
+        if let Err(err) = self
+            .dispatch
+            .processes
+            .start(
+                &self.session_id,
+                registration,
+                crate::ProcessStartOptions::new().with_observer(self.session_id.clone()),
+                self.process_scope(self.parent_invocation.clone()),
+            )
+            .await
         {
             return ToolInvocationReply::error(json!(err.to_string()));
         }
@@ -171,8 +167,8 @@ impl RuntimeExecutionContext<'_> {
             }
         };
         // Possession of a handle this run created is sufficient capability;
-        // session grant visibility only gates handles that arrived from
-        // elsewhere (run-local children carry no grants by design).
+        // session observation gates only handles that arrived from elsewhere
+        // (run-local children need no observer edge).
         if !self.is_run_local_process(&handle_id)
             && let Err(err) = self
                 .dispatch
@@ -289,9 +285,9 @@ impl RuntimeExecutionContext<'_> {
                 );
             }
         };
-        // Run-local children bypass the grant-validating cancel ability:
-        // possession of the handle this run created is the capability, and
-        // these children carry no session grants by design.
+        // Run-local children bypass observer validation: possession of the
+        // handle this run created is the capability, and these children carry
+        // no session observer edge by design.
         let result = if self.is_run_local_process(&handle_id) {
             self.dispatch
                 .processes
@@ -303,17 +299,11 @@ impl RuntimeExecutionContext<'_> {
                 .await
         } else {
             self.dispatch
-                .process_cancel_ability
-                .cancel(
-                    self.dispatch.processes.as_ref(),
-                    crate::ProcessCancelRequest::new(
-                        &self.session_id,
-                        &handle_id,
-                        self.process_scope(self.parent_invocation.clone()),
-                        crate::ProcessCancelSource::Process,
-                    )
-                    .with_handle(handle)
-                    .with_reason("requested by process handle"),
+                .processes
+                .cancel_visible(
+                    &self.session_id,
+                    &handle_id,
+                    self.process_scope(self.parent_invocation.clone()),
                 )
                 .await
         };
@@ -343,37 +333,10 @@ mod tests {
     };
     use std::collections::BTreeMap;
     use std::sync::Arc;
-    use std::sync::Mutex;
     use std::sync::atomic::{AtomicUsize, Ordering};
 
     struct PrepareRecordingTool {
         prepares: Arc<AtomicUsize>,
-    }
-
-    #[derive(Default)]
-    struct DenyCancelAbility {
-        calls: Mutex<Vec<(crate::ProcessCancelSource, String)>>,
-    }
-
-    impl DenyCancelAbility {
-        fn calls(&self) -> Vec<(crate::ProcessCancelSource, String)> {
-            self.calls.lock().expect("cancel calls").clone()
-        }
-    }
-
-    #[async_trait::async_trait]
-    impl crate::ProcessCancelAbility for DenyCancelAbility {
-        async fn cancel(
-            &self,
-            _processes: &dyn crate::ProcessService,
-            request: crate::ProcessCancelRequest<'_>,
-        ) -> Result<crate::ProcessRecord, crate::PluginError> {
-            self.calls
-                .lock()
-                .expect("cancel calls")
-                .push((request.source, request.process_id.to_string()));
-            Err(crate::PluginError::Session("denied by host".to_string()))
-        }
     }
 
     fn process_tool_definition() -> ToolDefinition {
@@ -448,7 +411,6 @@ mod tests {
             session_lifecycle: host.clone(),
             session_graph: host.clone(),
             processes: host.clone(),
-            process_cancel_ability: Arc::new(crate::DefaultProcessCancelAbility),
             trigger_router: None,
             effect_controller: RuntimeEffectControllerHandle::shared(Arc::new(
                 crate::InlineRuntimeEffectController::default(),
@@ -507,19 +469,23 @@ mod tests {
             .process_registry
             .get_process("async-call-1")
             .await
+            .expect("read process")
             .expect("registered process");
-        let run_scope = crate::SessionScope::for_agent_frame("session", "");
         host.process_registry
-            .revoke_handle(&run_scope, "async-call-1")
+            .remove_observer(
+                "session",
+                "async-call-1",
+                crate::ProcessObserverBy::host("remove-test-observer"),
+            )
             .await
-            .expect("remove persisted grant");
+            .expect("remove persisted observer");
         assert!(
             !host
                 .process_registry
-                .has_handle_grant(&run_scope, "async-call-1")
+                .is_observer("session", "async-call-1")
                 .await
-                .expect("check revoked handle grant"),
-            "tool-started process must rely on its persisted handle grant"
+                .expect("check removed observer"),
+            "tool-started process must rely on its persisted observer edge"
         );
         let ProcessInput::ToolCall { call } = record.input.as_ref() else {
             panic!("expected prepared tool call process input");
@@ -587,7 +553,6 @@ mod tests {
             session_lifecycle: host.clone(),
             session_graph: host.clone(),
             processes: host.clone(),
-            process_cancel_ability: Arc::new(crate::DefaultProcessCancelAbility),
             trigger_router: None,
             effect_controller: RuntimeEffectControllerHandle::shared(Arc::new(
                 crate::InlineRuntimeEffectController::default(),
@@ -651,7 +616,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn process_handle_await_and_cancel_require_session_grant() {
+    async fn process_handle_await_and_cancel_require_session_observer() {
         let provider: Arc<dyn ToolProvider> = Arc::new(PrepareRecordingTool {
             prepares: Arc::new(AtomicUsize::new(0)),
         });
@@ -683,7 +648,6 @@ mod tests {
             session_lifecycle: host.clone(),
             session_graph: host.clone(),
             processes: host.clone(),
-            process_cancel_ability: Arc::new(crate::DefaultProcessCancelAbility),
             trigger_router: None,
             effect_controller: RuntimeEffectControllerHandle::shared(Arc::new(
                 crate::InlineRuntimeEffectController::default(),
@@ -766,93 +730,112 @@ mod tests {
             .await
             .expect("complete observed process");
         host.process_registry
-            .grant_handle(
-                &crate::SessionScope::for_agent_frame("session", ""),
+            .add_observer(
+                "session",
                 "hidden-process",
-                crate::ProcessHandleDescriptor::new(Some("test"), Some("hidden")),
+                crate::ProcessObserverBy::host("observe-hidden-process"),
             )
             .await
-            .expect("grant observed process");
-        let observed = context
-            .await_process_handle("await-observed-process".to_string(), handle)
-            .await;
-        assert!(observed.output.is_success());
-    }
-
-    #[tokio::test]
-    async fn process_handle_cancel_uses_host_cancel_ability() {
-        let provider: Arc<dyn ToolProvider> = Arc::new(PrepareRecordingTool {
-            prepares: Arc::new(AtomicUsize::new(0)),
-        });
-        let plugins = PluginHost::empty()
-            .build_session("root", None)
-            .expect("plugin session");
-        let tool_catalog = Arc::new(crate::ToolCatalog::from_tools(
-            provider.tool_manifests(),
-            BTreeMap::new(),
-        ));
-        let host = Arc::new(crate::testing::MockSessionManager::default());
-        let ability = Arc::new(DenyCancelAbility::default());
-        let (event_tx, _event_rx) = tokio::sync::mpsc::channel(8);
-        let dispatch = Arc::new(ToolDispatchContext {
-            plugins,
-            tools: provider,
-            tool_catalog,
-            sessions: host.clone(),
-            session_lifecycle: host.clone(),
-            session_graph: host,
-            processes: Arc::new(crate::UnavailableProcessService),
-            process_cancel_ability: ability.clone(),
-            trigger_router: None,
-            effect_controller: RuntimeEffectControllerHandle::shared(Arc::new(
-                crate::InlineRuntimeEffectController::default(),
-            )),
-            direct_completions: crate::DirectCompletionClient::unavailable(
-                "direct completions are unavailable in this test context",
-            ),
-            parent_invocation: None,
-            execution_env_spec: crate::ProcessExecutionEnvSpec::new(
-                crate::PluginOptions::default(),
-                crate::SessionPolicy::default(),
-            ),
-            session_id: "session".to_string(),
-            agent_frame_id: String::new(),
-            event_tx,
-            checkpoint_messages: crate::tool_dispatch::CheckpointMessageBuffer::default(),
-            trigger_outcomes: crate::tool_dispatch::ToolTriggerOutcomeBuffer::default(),
-            attachment_store: Arc::new(crate::SessionAttachmentStore::in_memory()),
-            attachment_source_policy: Arc::new(crate::OpenAttachmentSourcePolicy),
-            turn_context: crate::TurnContext::default(),
-            clock: std::sync::Arc::new(crate::SystemClock),
-        });
-        let context = RuntimeExecutionContext::new(
-            "session".to_string(),
-            dispatch,
-            Arc::new(crate::InMemoryProcessExecutionEnvStore::new()),
-            Arc::new(crate::SessionAttachmentStore::in_memory()),
-            Arc::new(crate::ChronologicalProjection::default()),
-            None,
-            crate::TurnContext::default(),
-        );
-
-        let cancelled = context
-            .cancel_process_handle(
-                "cancel-process-1".to_string(),
-                json!({
-                    "__handle__": "process",
-                    "id": "process-1"
-                }),
+            .expect("observe process");
+        let retained = host
+            .process_registry
+            .get_process("hidden-process")
+            .await
+            .expect("read observed process")
+            .expect("observed process remains retained");
+        let retained_bytes =
+            serde_json::to_vec(&retained).expect("serialize retained terminal process");
+        let terminal_signal = context
+            .signal_process_handle(
+                "signal-terminal-process".to_string(),
+                handle.clone(),
+                "ready".to_string(),
+                serde_json::Value::Null,
             )
             .await;
-
-        assert!(!cancelled.output.is_success());
-        assert_eq!(
-            cancelled.output.value_for_projection()["message"],
-            json!("cancel failed: plugin session error: denied by host")
+        assert!(!terminal_signal.output.is_success());
+        assert!(
+            terminal_signal
+                .output
+                .value_for_projection()
+                .to_string()
+                .contains("already terminal"),
+            "signaling a retained terminal process must return the typed terminal error"
         );
+        let after_rejected_signal = host
+            .process_registry
+            .get_process("hidden-process")
+            .await
+            .expect("read terminal process after rejected signal")
+            .expect("terminal process remains retained");
         assert_eq!(
-            ability.calls(),
-            vec![(crate::ProcessCancelSource::Process, "process-1".to_string())]
+            serde_json::to_vec(&after_rejected_signal)
+                .expect("serialize terminal process after rejected signal"),
+            retained_bytes,
+            "a rejected terminal signal must leave prune eligibility byte-stable"
+        );
+
+        let prune = host
+            .process_registry
+            .prune_terminal_processes(
+                retained.updated_at_ms.saturating_add(1),
+                None,
+                crate::ProjectionWatermark::NoProjector,
+            )
+            .await
+            .expect("prune observed process");
+        assert_eq!(prune.pruned_processes, 1);
+        assert!(matches!(
+            host.process_registry.get_process("hidden-process").await,
+            Err(crate::PluginError::ProcessNoLongerRetained { .. })
+        ));
+        let pruned_await = context
+            .await_process_handle("await-pruned-process".to_string(), handle.clone())
+            .await;
+        assert!(
+            pruned_await.output.is_success(),
+            "a pruned await must be information in turn history: {:?}",
+            pruned_await.output.value_for_projection()
+        );
+        let rendered = pruned_await.output.value_for_projection().to_string();
+        assert!(
+            rendered.contains("process_no_longer_retained"),
+            "pruned await must render the typed information code: {rendered}"
+        );
+        let history_record = pruned_await
+            .record
+            .expect("record pruned await in turn history");
+        assert!(
+            history_record.output.is_success(),
+            "turn history must retain pruned await as information, not tool failure"
+        );
+
+        let pruned_cancel = context
+            .cancel_process_handle("cancel-pruned-process".to_string(), handle.clone())
+            .await;
+        assert!(!pruned_cancel.output.is_success());
+        assert!(
+            pruned_cancel
+                .output
+                .value_for_projection()
+                .to_string()
+                .contains("outcome is no longer retained")
+        );
+        let pruned_signal = context
+            .signal_process_handle(
+                "signal-pruned-process".to_string(),
+                handle,
+                "ready".to_string(),
+                serde_json::Value::Null,
+            )
+            .await;
+        assert!(!pruned_signal.output.is_success());
+        assert!(
+            pruned_signal
+                .output
+                .value_for_projection()
+                .to_string()
+                .contains("outcome is no longer retained")
         );
     }
 }

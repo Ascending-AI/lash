@@ -7,7 +7,8 @@ use tokio_util::task::TaskTracker;
 
 use crate::{
     Clock, PluginError, ProcessRegistry, QueuedWorkDriver, SessionPolicy, SessionRelation,
-    SessionStoreCreateRequest, SessionStoreFactory, WakeDiscardReason, process_wake_batch_draft,
+    SessionStoreCreateRequest, SessionStoreFactory, WakeDeliveryClaimOutcome, WakeDiscardReason,
+    process_wake_batch_draft,
 };
 
 const DELIVERY_BATCH_SIZE: usize = 32;
@@ -128,14 +129,19 @@ impl WakeDeliveryDriver {
         limit: usize,
     ) -> Result<WakeDeliveryDriveReport, PluginError> {
         let mut report = WakeDeliveryDriveReport::default();
-        for delivery in registry.pending_wake_deliveries(limit).await? {
+        for delivery in registry.claim_pending_wake_deliveries(limit).await? {
             report.inspected += 1;
+            let claim_token = delivery.claim_token()?;
             if clock.timestamp_ms() >= delivery.expires_at_ms {
                 match registry
-                    .discard_wake_delivery(&delivery.delivery_id, WakeDiscardReason::Expired)
+                    .discard_wake_delivery(
+                        &delivery.delivery_id,
+                        claim_token,
+                        WakeDiscardReason::Expired,
+                    )
                     .await
                 {
-                    Ok(()) => {
+                    Ok(WakeDeliveryClaimOutcome::Applied) => {
                         tracing::info!(
                             delivery_id = %delivery.delivery_id,
                             target_session_id = %delivery.wake.target_session_id,
@@ -144,7 +150,7 @@ impl WakeDeliveryDriver {
                         );
                         report.discarded_expired += 1;
                     }
-                    Err(PluginError::WakeDeliveryNotPending { state, .. }) => {
+                    Ok(WakeDeliveryClaimOutcome::ClaimLost { state }) => {
                         tracing::debug!(
                             delivery_id = %delivery.delivery_id,
                             ?state,
@@ -194,11 +200,12 @@ impl WakeDeliveryDriver {
                         match registry
                             .discard_wake_delivery(
                                 &delivery.delivery_id,
+                                claim_token,
                                 WakeDiscardReason::TargetGone,
                             )
                             .await
                         {
-                            Ok(()) => {
+                            Ok(WakeDeliveryClaimOutcome::Applied) => {
                                 tracing::info!(
                                     delivery_id = %delivery.delivery_id,
                                     target_session_id = %target_session_id,
@@ -207,7 +214,7 @@ impl WakeDeliveryDriver {
                                 );
                                 report.discarded_target_gone += 1;
                             }
-                            Err(PluginError::WakeDeliveryNotPending { state, .. }) => {
+                            Ok(WakeDeliveryClaimOutcome::ClaimLost { state }) => {
                                 tracing::debug!(
                                     delivery_id = %delivery.delivery_id,
                                     ?state,
@@ -261,8 +268,11 @@ impl WakeDeliveryDriver {
                         source_key = ?enqueued.source_key,
                         "process wake enqueued"
                     );
-                    match registry.mark_wake_enqueued(&delivery.delivery_id).await {
-                        Ok(()) => {
+                    match registry
+                        .mark_wake_enqueued(&delivery.delivery_id, claim_token)
+                        .await
+                    {
+                        Ok(WakeDeliveryClaimOutcome::Applied) => {
                             tracing::info!(
                                 delivery_id = %delivery.delivery_id,
                                 state = "enqueued",
@@ -273,7 +283,7 @@ impl WakeDeliveryDriver {
                             }
                             report.enqueued += 1;
                         }
-                        Err(PluginError::WakeDeliveryNotPending { state, .. }) => {
+                        Ok(WakeDeliveryClaimOutcome::ClaimLost { state }) => {
                             tracing::debug!(
                                 delivery_id = %delivery.delivery_id,
                                 ?state,
@@ -314,13 +324,16 @@ impl WakeDeliveryDriver {
         match registry
             .defer_wake_delivery(
                 &delivery.delivery_id,
+                delivery.claim_token()?,
                 clock
                     .timestamp_ms()
                     .saturating_add(retry_delay_ms(delivery.attempts)),
             )
             .await
         {
-            Ok(()) | Err(PluginError::WakeDeliveryNotPending { .. }) => Ok(()),
+            Ok(WakeDeliveryClaimOutcome::Applied | WakeDeliveryClaimOutcome::ClaimLost { .. }) => {
+                Ok(())
+            }
             Err(error) => Err(error),
         }
     }

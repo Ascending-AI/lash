@@ -63,7 +63,7 @@
       <div class="listing__row">
         <div class="listing__label">delete a session</div>
         <div class="listing__body">
-          <p>Call <code>LashCore::delete_session(..., scope)</code> for factory-backed sessions. A materialized host-facing id is permanently retired, so reset flows must rotate to a new id; deleting a never-materialized id is a no-op. If a process registry is installed, Lash revokes that session's process grants and wake bookkeeping, deletes its trigger subscriptions, and reports orphaned live processes without cancelling them. See <a href="./persistence.html#delete-sessions">Delete sessions</a>.</p>
+          <p>Call <code>LashCore::delete_session(..., scope)</code> for factory-backed sessions. A materialized host-facing id is permanently retired, so reset flows must rotate to a new id; deleting a never-materialized id is a no-op. If a process registry is installed, Lash removes that session's observer edges and wake bookkeeping and deletes its trigger subscriptions without changing process lifecycle. See <a href="./persistence.html#delete-sessions">Delete sessions</a>.</p>
         </div>
       </div>
     </div>
@@ -105,7 +105,7 @@
       <div class="listing__row">
         <div class="listing__label">start background work</div>
         <div class="listing__body">
-          <p>Install a <code>ProcessRegistry</code> with <code>.process_registry(...)</code> plus a <code>SessionStoreFactory</code> (required at <code>build()</code>); the default inline worker runs each process in an ephemeral runtime built from its captured execution environment, never by reopening the origin session. Pass <code>.process_work_driver(...)</code> when an external durable runner owns work execution. Observe and control runs through <code>core.processes()</code> (host-level) or <code>session.processes()</code> (grant-scoped). See <a href="./embedding-advanced.html#process-work">Process work</a> and <a href="./architecture/durability.html">Durability and replay</a>.</p>
+          <p>Install a <code>ProcessRegistry</code> with <code>.process_registry(...)</code> plus a <code>SessionStoreFactory</code> (required at <code>build()</code>); the default inline worker runs each process in an ephemeral runtime built from its captured execution environment, never by reopening the origin session. Pass <code>.process_work_driver(...)</code> when an external durable runner owns work execution. Observe and control runs through <code>core.processes()</code> (host-level) or <code>session.processes()</code> (observer-scoped). See <a href="./embedding-advanced.html#process-work">Process work</a> and <a href="./architecture/durability.html">Durability and replay</a>.</p>
         </div>
       </div>
     </div>

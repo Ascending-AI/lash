@@ -383,7 +383,12 @@ pub trait LiveReplayStore: Send + Sync {
         cursor: &SessionCursor,
     ) -> Result<LiveReplaySubscribeResult, LiveReplayStoreError>;
 
-    /// Return the latest cursor known locally for a session.
+    /// Return the latest cursor known locally for a session without skipping
+    /// buffered events newer than `revision`.
+    ///
+    /// A runtime snapshot at revision N can race with a separate worker
+    /// publishing revision N+1. The returned cursor must remain before that
+    /// newer event so replay reconciles the stale snapshot.
     ///
     /// This must be fast and nonblocking from the runtime's point of view.
     fn current_cursor(&self, session_id: &str, revision: SessionRevision) -> SessionCursor;
@@ -630,13 +635,23 @@ impl LiveReplayStore for InMemoryLiveReplayStore {
     }
 
     fn current_cursor(&self, session_id: &str, revision: SessionRevision) -> SessionCursor {
-        let tail_position = self
+        let live_position = self
             .sessions
             .lock()
             .ok()
-            .and_then(|sessions| sessions.get(session_id).map(|buffer| buffer.tail_position))
+            .and_then(|sessions| {
+                sessions.get(session_id).map(|buffer| {
+                    buffer
+                        .events
+                        .iter()
+                        .find(|stored| stored.event.revision > revision)
+                        .map_or(buffer.tail_position, |stored| {
+                            stored.position.saturating_sub(1)
+                        })
+                })
+            })
             .unwrap_or(0);
-        SessionCursor::new(session_id, revision, tail_position)
+        SessionCursor::new(session_id, revision, live_position)
     }
 
     fn trim_session(&self, session_id: &str) -> Result<(), LiveReplayStoreError> {
@@ -736,6 +751,27 @@ mod tests {
             },
             _ => panic!("wrong payload"),
         }
+    }
+
+    #[test]
+    fn current_cursor_for_stale_snapshot_replays_newer_revision_events() {
+        let store = InMemoryLiveReplayStore::default();
+        store
+            .append("s", SessionRevision(2), None, activity("worker commit"))
+            .expect("append newer worker commit");
+
+        // A runtime can finish loading durable revision 1 just before a separate
+        // worker publishes revision 2. Its initial cursor must not skip that
+        // newer event merely because the live-replay tail already advanced.
+        let stale_snapshot_cursor = store.current_cursor("s", SessionRevision(1));
+        let LiveReplayResult::Replayed(events) = store
+            .replay_after_cursor(&stale_snapshot_cursor)
+            .expect("replay from stale snapshot")
+        else {
+            panic!("expected replay");
+        };
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].revision, SessionRevision(2));
     }
 
     #[test]

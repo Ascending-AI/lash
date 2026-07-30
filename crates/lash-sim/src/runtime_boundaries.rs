@@ -13,8 +13,8 @@ use lash_core::{
     RecoveryDisposition, RuntimeCommit, RuntimeEffectCommand, RuntimeEffectController,
     RuntimeEffectEnvelope, RuntimeEffectKind, RuntimeEffectLocalExecutor, RuntimeEffectOutcome,
     RuntimeInvocation, RuntimePersistence, RuntimeSessionState, SessionExecutionLeaseClaimOutcome,
-    SessionRelation, SessionScope, SessionStoreCreateRequest, SessionStoreFactory,
-    ToolAttemptLaunch, ToolCallOutput, ToolCallRecord, ToolId,
+    SessionRelation, SessionStoreCreateRequest, SessionStoreFactory, ToolAttemptLaunch,
+    ToolCallOutput, ToolCallRecord, ToolId,
 };
 use serde_json::{Value, json};
 
@@ -101,6 +101,7 @@ pub struct RuntimeBoundaryHarness {
     durable_entries: BTreeMap<String, DurableEntry>,
     delivered_process_wake_source_keys: BTreeSet<String>,
     worker_process_registry: Option<Arc<dyn ProcessRegistry>>,
+    worker_process_continuations: Option<Arc<dyn lash_core::ProcessContinuationStore>>,
     clock: Arc<SimClock>,
 }
 
@@ -117,6 +118,7 @@ impl RuntimeBoundaryHarness {
             durable_entries: BTreeMap::new(),
             delivered_process_wake_source_keys: BTreeSet::new(),
             worker_process_registry: None,
+            worker_process_continuations: None,
             clock,
         }
     }
@@ -491,7 +493,7 @@ impl RuntimeBoundaryHarness {
             .unwrap_or(&source_key)
             .to_string();
         let wake = lash_core::process_wake_delivery(lash_core::ProcessWakeDeliveryRequest {
-            target_scope: SessionScope::new(session.clone()),
+            target_session_id: session.clone(),
             process_id: process_id.clone(),
             sequence,
             event_type: "process.wake".to_string(),
@@ -1213,13 +1215,17 @@ impl RuntimeBoundaryHarness {
         if let Some(registry) = self.worker_process_registry.as_ref() {
             return Ok(Arc::clone(registry));
         }
-        let registry: Arc<dyn ProcessRegistry> = match &self.effect_replay_store {
+        let (registry, continuations): (
+            Arc<dyn ProcessRegistry>,
+            Arc<dyn lash_core::ProcessContinuationStore>,
+        ) = match &self.effect_replay_store {
             RuntimeEffectReplayStore::Memory => {
-                Arc::new(lash_core::TestLocalProcessRegistry::default())
+                let store = Arc::new(lash_core::TestLocalProcessRegistry::default());
+                (store.clone(), store)
             }
             RuntimeEffectReplayStore::SqliteFile(path) => {
                 let process_path = path.with_extension("process-registry.sqlite");
-                Arc::new(
+                let store = Arc::new(
                     lash_sqlite_store::SqliteProcessRegistry::open(
                         &process_path,
                         process_path.with_extension("sessions"),
@@ -1231,12 +1237,28 @@ impl RuntimeBoundaryHarness {
                             process_path.display()
                         ))
                     })?,
-                )
+                );
+                (store.clone(), store)
             }
-            RuntimeEffectReplayStore::Postgres(storage) => Arc::new(storage.process_registry()),
+            RuntimeEffectReplayStore::Postgres(storage) => {
+                let store = Arc::new(storage.process_registry());
+                (store.clone(), store)
+            }
         };
         self.worker_process_registry = Some(Arc::clone(&registry));
+        self.worker_process_continuations = Some(continuations);
         Ok(registry)
+    }
+
+    #[cfg(test)]
+    async fn ensure_worker_process_continuations(
+        &mut self,
+    ) -> Result<Arc<dyn lash_core::ProcessContinuationStore>, RuntimeBoundaryError> {
+        self.ensure_worker_process_registry().await?;
+        self.worker_process_continuations
+            .as_ref()
+            .cloned()
+            .ok_or_else(|| RuntimeBoundaryError::new("process continuation store unavailable"))
     }
 
     async fn ensure_effect_controller(
@@ -1360,7 +1382,7 @@ async fn terminal_writer(
 fn terminal_writer_from_events(events: &[lash_core::ProcessEvent]) -> Option<String> {
     events.iter().find_map(|event| {
         let terminal = event.semantics.terminal.as_ref()?;
-        let ProcessAwaitOutput::Success { value, .. } = &terminal.await_output else {
+        let ProcessAwaitOutput::Success { value, .. } = &terminal.outcome else {
             return None;
         };
         value
@@ -1376,7 +1398,7 @@ fn worker_failover_work(
 ) -> Result<lash_core::ProcessWakeDelivery, RuntimeBoundaryError> {
     let process_id = format!("sim-worker-{session}");
     lash_core::process_wake_delivery(lash_core::ProcessWakeDeliveryRequest {
-        target_scope: SessionScope::new(session.to_string()),
+        target_session_id: session.to_string(),
         process_id: process_id.clone(),
         sequence: 1,
         event_type: "process.wake".to_string(),

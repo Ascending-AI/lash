@@ -78,7 +78,11 @@ orphaned under the prior key.
   host-facing tombstones permanently. Lash detects reuse at creation rather
   than relying on every downstream identity preimage to carry a lifetime
   discriminator.
-- Fork materialization followed by process-grant publication spans transaction
-  domains. A publication failure burns the fork id: an earlier grant may have
-  been durably observable before compensating cleanup, so releasing the id
-  would permit aliasing against external evidence.
+- Fork materialization followed by observer publication spans transaction
+  domains. The fork relation retains the selected process ids as durable apply
+  intent until every idempotent observer event commits. A crash burns no
+  visibility choice: opening the single-use fork id replays the pending intent,
+  and that id can never alias a later session lifetime. Replay reasserts the
+  resolved selector wholesale: an observer removed before the intent is
+  cleared can be added again, because clearing the durable host decision is
+  the commit point.

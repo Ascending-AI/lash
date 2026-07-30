@@ -273,12 +273,6 @@ impl RuntimeSessionServices {
         })
     }
 
-    pub(in crate::runtime) fn process_cancel_ability(
-        self: &Arc<Self>,
-    ) -> Arc<dyn crate::ProcessCancelAbility> {
-        Arc::clone(&self.current.host.core.control.process_cancel_ability)
-    }
-
     pub(super) fn direct_completion_client<'run>(
         self: &Arc<Self>,
         effect_controller: crate::runtime::RuntimeEffectControllerHandle<'run>,

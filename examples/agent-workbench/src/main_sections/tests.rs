@@ -1790,6 +1790,7 @@ finish initial
             .expect("open live workbench stores");
         let core_store_factory = Arc::clone(&stores.session_store_factory);
         let process_registry = Arc::clone(&stores.process_registry);
+        let process_continuations = Arc::clone(&stores.process_continuations);
         let trigger_store = Arc::clone(&stores.trigger_store);
         let process_env_store = Arc::clone(&stores.process_env_store);
         let artifact_store = Arc::clone(&stores.artifact_store);
@@ -1813,6 +1814,7 @@ finish initial
         let process_deployment = lash_restate::RestateProcessDeployment::new(
             restate_ingress_url.clone(),
             Arc::clone(&process_registry),
+            process_continuations,
         );
         let restate_http = reqwest::Client::new();
         let turn_deployment = lash_restate::RestateTurnDeployment::new(
@@ -2353,6 +2355,7 @@ finish initial
             let record = registry
                 .get_process(process_id)
                 .await
+                .expect("process read should succeed")
                 .expect("started process record should exist");
             let remote_record = lash_remote_protocol::RemoteProcessRecord::try_from(record)
                 .expect("started process record should convert to remote DTO");

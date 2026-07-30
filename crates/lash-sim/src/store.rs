@@ -748,7 +748,7 @@ impl ModelStore {
                     .to_string();
                 let wake =
                     lash_core::process_wake_delivery(lash_core::ProcessWakeDeliveryRequest {
-                        target_scope: lash_core::SessionScope::new(session.clone()),
+                        target_session_id: session.clone(),
                         process_id: process_id.clone(),
                         sequence,
                         event_type: "process.wake".to_string(),

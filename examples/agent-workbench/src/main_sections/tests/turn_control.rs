@@ -570,8 +570,8 @@ finish (await handle)?
                 .get_process(&process_id)
                 .await
                 .expect("process record after Stop")
-                .status
-                .await_output(),
+                .expect("Stop keeps the process record present")
+                .outcome,
             Some(lash::process::ProcessAwaitOutput::Cancelled { .. })
         ));
         assert!(state.active_turns.for_session(&session_id).is_empty());

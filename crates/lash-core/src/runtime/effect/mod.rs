@@ -273,7 +273,7 @@ mod tests {
             invocation,
             RuntimeEffectCommand::process(ProcessCommand::Start {
                 registration,
-                grant: None,
+                observers: Vec::new(),
                 execution_context: Box::new(crate::ProcessExecutionContext::default()),
             }),
         );
@@ -290,12 +290,13 @@ mod tests {
         };
         let ProcessCommand::Start {
             registration,
-            grant: None,
+            observers,
             execution_context,
         } = *command
         else {
             panic!("wrong process command");
         };
+        assert!(observers.is_empty());
         assert!(execution_context.is_empty());
         let crate::ProcessInput::ToolCall { call } = registration.input.as_ref() else {
             panic!("wrong process input");

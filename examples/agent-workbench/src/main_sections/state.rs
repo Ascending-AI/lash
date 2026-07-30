@@ -972,7 +972,6 @@ fn inert_process_work_driver(
 #[derive(Debug, Serialize)]
 struct WorkItem {
     process: WorkProcess,
-    descriptor: lash::process::ProcessHandleDescriptor,
     events: Vec<WorkEvent>,
     kind: String,
     label: String,
@@ -982,7 +981,7 @@ struct WorkItem {
 struct WorkProcess {
     process_id: String,
     graph_key: String,
-    lifecycle: lash::process::ProcessLifecycleStatus,
+    lifecycle: lash::process::ProcessStatus,
     status_label: String,
     terminal: bool,
     error: Option<String>,

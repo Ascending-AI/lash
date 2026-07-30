@@ -488,10 +488,7 @@ fn assert_lashlang_process_ids_unique_for_labels<const N: usize>(
     let mut ids = BTreeSet::new();
     let mut labels = Vec::new();
     for process in processes {
-        let Some(kind) = process.descriptor.kind.as_deref() else {
-            continue;
-        };
-        if kind != lash_lashlang_runtime::LASHLANG_ENGINE_KIND {
+        if process.kind != lash_lashlang_runtime::LASHLANG_ENGINE_KIND {
             continue;
         }
         assert!(
@@ -504,7 +501,7 @@ fn assert_lashlang_process_ids_unique_for_labels<const N: usize>(
             "duplicate lashlang process id `{}`",
             process.process_id
         );
-        labels.push(process.descriptor.label.as_deref().unwrap_or("<missing>"));
+        labels.push(process.label.as_deref().unwrap_or("<missing>"));
     }
     labels.sort_unstable();
     let mut expected = expected_labels;

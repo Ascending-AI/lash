@@ -7,10 +7,10 @@ module/host requirements refs) is captured at creation as immutable content-addr
 and the durable worker always executes against an ephemeral runtime instantiated from
 that capture — it never rebuilds the originating session. Session relationships are
 explicit, orthogonal, optional edges (originator and caused_by as pure provenance, a
-0..1 wake target, 0..n visibility grants), none of which implies another and none of
+0..1 wake target, 0..n weak observer edges), none of which implies another and none of
 which implies cleanup: deleting a session erases only the session's side of every edge
-(its grants, pending wake deliveries addressed to it, its trigger subscriptions) and
-never cancels a process — orphans are reported and lifecycle is host policy.
+(its observer edges, pending wake deliveries addressed to it, its trigger subscriptions) and
+never cancels a process; lifecycle remains host policy.
 
 ## Considered Options
 

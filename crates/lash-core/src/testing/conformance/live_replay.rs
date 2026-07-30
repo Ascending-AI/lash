@@ -16,6 +16,7 @@ where
     F: Fn() -> Arc<dyn LiveReplayStore>,
 {
     live_replay_store_appends_replays_and_isolates_sessions(make()).await;
+    live_replay_store_cursor_preserves_newer_revisions(make()).await;
     live_replay_store_subscribe_replays_then_yields_live_events(make()).await;
     live_replay_store_rejects_malformed_cursors(make()).await;
     live_replay_store_reports_unavailable_for_cursor_ahead_of_tail(make()).await;
@@ -197,6 +198,25 @@ async fn live_replay_store_appends_replays_and_isolates_sessions(store: Arc<dyn 
         replay_from_tail.is_empty(),
         "current tail cursor must not replay old events"
     );
+}
+
+async fn live_replay_store_cursor_preserves_newer_revisions(store: Arc<dyn LiveReplayStore>) {
+    store
+        .append(
+            "stale-snapshot-session",
+            SessionRevision::new(2),
+            Some("worker-turn"),
+            live_replay_text_payload("newer worker commit"),
+        )
+        .expect("append newer worker event");
+
+    let stale_snapshot_cursor =
+        store.current_cursor("stale-snapshot-session", SessionRevision::new(1));
+    let replay = expect_live_replay_replayed(
+        store.replay_after_cursor(&stale_snapshot_cursor),
+        "newer revision after stale snapshot",
+    );
+    assert_live_replay_labels(&replay, &["text:newer worker commit"]);
 }
 
 async fn live_replay_store_subscribe_replays_then_yields_live_events(

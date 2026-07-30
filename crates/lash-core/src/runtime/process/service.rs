@@ -2,153 +2,10 @@ use crate::plugin::PluginError;
 
 use super::events::{ProcessAwaitOutput, ProcessEvent};
 use super::model::{
-    ProcessCancelSummary, ProcessCompletionOutcome, ProcessHandleGrantEntry, ProcessHandleSummary,
-    ProcessListMode, ProcessRecord, ProcessRegistration, ProcessStartOptions, ProcessStartRequest,
+    ProcessCancelSummary, ProcessCompletionOutcome, ProcessHandleSummary, ProcessListMode,
+    ProcessRecord, ProcessRegistration, ProcessStartOptions, ProcessStartRequest,
 };
 use super::op_scope::ProcessOpScope;
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum ProcessCancelSource {
-    Tool,
-    Process,
-    HostApi,
-}
-
-#[derive(Clone)]
-pub struct ProcessCancelRequest<'scope> {
-    pub session_id: &'scope str,
-    pub process_id: &'scope str,
-    pub handle: Option<serde_json::Value>,
-    pub scope: ProcessOpScope<'scope>,
-    pub reason: Option<String>,
-    pub source: ProcessCancelSource,
-}
-
-impl<'scope> ProcessCancelRequest<'scope> {
-    pub fn new(
-        session_id: &'scope str,
-        process_id: &'scope str,
-        scope: ProcessOpScope<'scope>,
-        source: ProcessCancelSource,
-    ) -> Self {
-        Self {
-            session_id,
-            process_id,
-            handle: None,
-            scope,
-            reason: None,
-            source,
-        }
-    }
-
-    pub fn with_handle(mut self, handle: serde_json::Value) -> Self {
-        self.handle = Some(handle);
-        self
-    }
-
-    pub fn with_reason(mut self, reason: impl Into<String>) -> Self {
-        self.reason = Some(reason.into());
-        self
-    }
-}
-
-#[derive(Clone)]
-pub struct ProcessCancelAllRequest<'scope> {
-    pub session_id: &'scope str,
-    pub scope: ProcessOpScope<'scope>,
-    pub source: ProcessCancelSource,
-    pub reason: Option<String>,
-}
-
-impl<'scope> ProcessCancelAllRequest<'scope> {
-    pub fn new(
-        session_id: &'scope str,
-        scope: ProcessOpScope<'scope>,
-        source: ProcessCancelSource,
-    ) -> Self {
-        Self {
-            session_id,
-            scope,
-            source,
-            reason: None,
-        }
-    }
-
-    pub fn with_reason(mut self, reason: impl Into<String>) -> Self {
-        self.reason = Some(reason.into());
-        self
-    }
-}
-
-#[async_trait::async_trait]
-pub trait ProcessCancelAbility: Send + Sync {
-    async fn cancel(
-        &self,
-        processes: &dyn ProcessService,
-        request: ProcessCancelRequest<'_>,
-    ) -> Result<ProcessRecord, PluginError>;
-
-    async fn cancel_summary(
-        &self,
-        processes: &dyn ProcessService,
-        request: ProcessCancelRequest<'_>,
-    ) -> Result<ProcessCancelSummary, PluginError> {
-        self.cancel(processes, request)
-            .await
-            .map(ProcessCancelSummary::from_record)
-    }
-
-    async fn cancel_all_visible(
-        &self,
-        processes: &dyn ProcessService,
-        request: ProcessCancelAllRequest<'_>,
-    ) -> Result<Vec<ProcessCancelSummary>, PluginError> {
-        let entries = processes
-            .list_visible(
-                request.session_id,
-                ProcessListMode::Live,
-                request.scope.clone(),
-            )
-            .await?;
-        let mut cancelled = Vec::new();
-        for (grant, record) in entries {
-            if record.is_terminal() {
-                continue;
-            }
-            let mut cancel_request = ProcessCancelRequest::new(
-                request.session_id,
-                &grant.process_id,
-                request.scope.clone(),
-                request.source,
-            );
-            if let Some(reason) = request.reason.clone() {
-                cancel_request = cancel_request.with_reason(reason);
-            }
-            cancelled.push(self.cancel_summary(processes, cancel_request).await?);
-        }
-        Ok(cancelled)
-    }
-}
-
-#[derive(Clone, Copy, Debug, Default)]
-pub struct DefaultProcessCancelAbility;
-
-#[async_trait::async_trait]
-impl ProcessCancelAbility for DefaultProcessCancelAbility {
-    async fn cancel(
-        &self,
-        processes: &dyn ProcessService,
-        request: ProcessCancelRequest<'_>,
-    ) -> Result<ProcessRecord, PluginError> {
-        let process_ids = [request.process_id.to_string()];
-        processes
-            .validate_visible(request.session_id, &process_ids, request.scope.clone())
-            .await?;
-        processes
-            .cancel(request.session_id, request.process_id, request.scope)
-            .await
-    }
-}
 
 #[async_trait::async_trait]
 pub trait ProcessService: Send + Sync {
@@ -173,7 +30,7 @@ pub trait ProcessService: Send + Sync {
     ) -> Result<ProcessRecord, PluginError>;
 
     /// Write the terminal outcome for an Externally-Owned process the session
-    /// holds a grant for (ADR 0019). Closure for work lash never executes — a
+    /// observes (ADR 0019). Closure for work lash never executes — a
     /// detached command records its immediately-terminal launch fact here. Only
     /// Externally-Owned rows may be completed this way. The typed completion
     /// outcome tells the caller whether this write committed, replayed an
@@ -202,7 +59,7 @@ pub trait ProcessService: Send + Sync {
         session_id: &str,
         mode: ProcessListMode,
         scope: ProcessOpScope<'_>,
-    ) -> Result<Vec<ProcessHandleGrantEntry>, PluginError>;
+    ) -> Result<Vec<ProcessRecord>, PluginError>;
 
     async fn validate_visible(
         &self,
@@ -217,6 +74,39 @@ pub trait ProcessService: Send + Sync {
         process_id: &str,
         scope: ProcessOpScope<'_>,
     ) -> Result<ProcessRecord, PluginError>;
+
+    async fn cancel_visible(
+        &self,
+        session_id: &str,
+        process_id: &str,
+        scope: ProcessOpScope<'_>,
+    ) -> Result<ProcessRecord, PluginError> {
+        self.validate_visible(session_id, &[process_id.to_string()], scope.clone())
+            .await?;
+        self.cancel(session_id, process_id, scope).await
+    }
+
+    async fn cancel_all_visible(
+        &self,
+        session_id: &str,
+        scope: ProcessOpScope<'_>,
+    ) -> Result<Vec<ProcessCancelSummary>, PluginError> {
+        let entries = self
+            .list_visible(session_id, ProcessListMode::Live, scope.clone())
+            .await?;
+        let mut cancelled = Vec::new();
+        for record in entries {
+            if record.is_terminal() {
+                continue;
+            }
+            cancelled.push(
+                self.cancel(session_id, &record.id, scope.clone())
+                    .await
+                    .map(ProcessCancelSummary::from_record)?,
+            );
+        }
+        Ok(cancelled)
+    }
 
     async fn signal(
         &self,
@@ -268,7 +158,7 @@ impl ProcessService for UnavailableProcessService {
         _session_id: &str,
         _mode: ProcessListMode,
         _scope: ProcessOpScope<'_>,
-    ) -> Result<Vec<ProcessHandleGrantEntry>, PluginError> {
+    ) -> Result<Vec<ProcessRecord>, PluginError> {
         Err(PluginError::Session(
             "process registry is unavailable in this runtime".to_string(),
         ))
@@ -335,15 +225,15 @@ mod tests {
 
     use super::*;
     use crate::{
-        ProcessAwaitOutput, ProcessEvent, ProcessHandleDescriptor, ProcessHandleGrant,
-        ProcessInput, ProcessProvenance, ProcessRegistration, ProcessStatus,
+        ProcessAwaitOutput, ProcessEvent, ProcessInput, ProcessProvenance, ProcessRegistration,
+        ProcessStatus,
     };
 
     struct RecordingProcessService {
         visible: HashSet<String>,
         validate_calls: Mutex<Vec<Vec<String>>>,
         cancel_calls: Mutex<Vec<String>>,
-        visible_entries: Vec<ProcessHandleGrantEntry>,
+        visible_entries: Vec<ProcessRecord>,
         record: ProcessRecord,
     }
 
@@ -362,24 +252,14 @@ mod tests {
             self.visible_entries = process_ids
                 .into_iter()
                 .map(|process_id| {
-                    (
-                        ProcessHandleGrant {
-                            session_id: "session-1".to_string(),
-                            process_id: process_id.clone(),
-                            descriptor: ProcessHandleDescriptor::new(
-                                Some("test"),
-                                Some(process_id.clone()),
-                            ),
+                    ProcessRecord::from_registration(ProcessRegistration::new(
+                        process_id,
+                        ProcessInput::External {
+                            metadata: json!(null),
                         },
-                        ProcessRecord::from_registration(ProcessRegistration::new(
-                            process_id,
-                            ProcessInput::External {
-                                metadata: json!(null),
-                            },
-                            crate::RecoveryDisposition::ExternallyOwned,
-                            ProcessProvenance::host(),
-                        )),
-                    )
+                        crate::RecoveryDisposition::ExternallyOwned,
+                        ProcessProvenance::host(),
+                    ))
                 })
                 .collect();
             self
@@ -391,33 +271,6 @@ mod tests {
 
         fn cancel_calls(&self) -> Vec<String> {
             self.cancel_calls.lock().expect("cancel calls").clone()
-        }
-    }
-
-    #[derive(Default)]
-    struct RecordingCancelAbility {
-        requests: Mutex<Vec<(String, ProcessCancelSource, Option<String>)>>,
-    }
-
-    impl RecordingCancelAbility {
-        fn requests(&self) -> Vec<(String, ProcessCancelSource, Option<String>)> {
-            self.requests.lock().expect("cancel requests").clone()
-        }
-    }
-
-    #[async_trait::async_trait]
-    impl ProcessCancelAbility for RecordingCancelAbility {
-        async fn cancel(
-            &self,
-            processes: &dyn ProcessService,
-            request: ProcessCancelRequest<'_>,
-        ) -> Result<ProcessRecord, PluginError> {
-            self.requests.lock().expect("cancel requests").push((
-                request.process_id.to_string(),
-                request.source,
-                request.reason.clone(),
-            ));
-            DefaultProcessCancelAbility.cancel(processes, request).await
         }
     }
 
@@ -446,7 +299,7 @@ mod tests {
             _session_id: &str,
             _mode: ProcessListMode,
             _scope: ProcessOpScope<'_>,
-        ) -> Result<Vec<ProcessHandleGrantEntry>, PluginError> {
+        ) -> Result<Vec<ProcessRecord>, PluginError> {
             Ok(self.visible_entries.clone())
         }
 
@@ -518,13 +371,12 @@ mod tests {
             crate::RecoveryDisposition::ExternallyOwned,
             ProcessProvenance::host(),
         ));
-        record.status = ProcessStatus::Cancelled {
-            await_output: ProcessAwaitOutput::Cancelled {
-                message: "cancelled".to_string(),
-                raw: None,
-                control: None,
-            },
-        };
+        record.status = ProcessStatus::Cancelled;
+        record.outcome = Some(ProcessAwaitOutput::Cancelled {
+            message: "cancelled".to_string(),
+            raw: None,
+            control: None,
+        });
         record
     }
 
@@ -539,19 +391,15 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn default_process_cancel_ability_validates_visibility_and_calls_primitive() {
+    async fn cancel_visible_validates_visibility_and_calls_primitive() {
         let service =
             RecordingProcessService::new(["process-1".to_string()], cancelled_record("process-1"));
 
-        let record = DefaultProcessCancelAbility
-            .cancel(
-                &service,
-                ProcessCancelRequest::new(
-                    "session-1",
-                    "process-1",
-                    test_process_scope("cancel-visible"),
-                    ProcessCancelSource::HostApi,
-                ),
+        let record = service
+            .cancel_visible(
+                "session-1",
+                "process-1",
+                test_process_scope("cancel-visible"),
             )
             .await
             .expect("cancel process");
@@ -565,19 +413,11 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn default_process_cancel_ability_rejects_invisible_process_without_cancel() {
+    async fn cancel_visible_rejects_invisible_process_without_cancel() {
         let service = RecordingProcessService::new(Vec::<String>::new(), cancelled_record("p1"));
 
-        let err = DefaultProcessCancelAbility
-            .cancel(
-                &service,
-                ProcessCancelRequest::new(
-                    "session-1",
-                    "p1",
-                    test_process_scope("cancel-hidden"),
-                    ProcessCancelSource::Tool,
-                ),
-            )
+        let err = service
+            .cancel_visible("session-1", "p1", test_process_scope("cancel-hidden"))
             .await
             .expect_err("hidden process should be rejected");
 
@@ -586,24 +426,14 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn process_cancel_ability_cancel_all_visible_uses_same_cancel_path() {
+    async fn cancel_all_visible_cancels_each_visible_live_process() {
         let service = RecordingProcessService::new(
             ["process-1".to_string(), "process-2".to_string()],
             cancelled_record("template"),
         )
         .with_visible_entries(["process-1".to_string(), "process-2".to_string()]);
-        let ability = RecordingCancelAbility::default();
-
-        let summaries = ability
-            .cancel_all_visible(
-                &service,
-                ProcessCancelAllRequest::new(
-                    "session-1",
-                    test_process_scope("cancel-all"),
-                    ProcessCancelSource::Tool,
-                )
-                .with_reason("requested by tool"),
-            )
+        let summaries = service
+            .cancel_all_visible("session-1", test_process_scope("cancel-all"))
             .await
             .expect("cancel all visible");
 
@@ -614,25 +444,7 @@ mod tests {
                 .collect::<Vec<_>>(),
             vec!["process-1", "process-2"]
         );
-        assert_eq!(
-            ability.requests(),
-            vec![
-                (
-                    "process-1".to_string(),
-                    ProcessCancelSource::Tool,
-                    Some("requested by tool".to_string())
-                ),
-                (
-                    "process-2".to_string(),
-                    ProcessCancelSource::Tool,
-                    Some("requested by tool".to_string())
-                )
-            ]
-        );
-        assert_eq!(
-            service.validate_calls(),
-            vec![vec!["process-1".to_string()], vec!["process-2".to_string()]]
-        );
+        assert!(service.validate_calls().is_empty());
         assert_eq!(
             service.cancel_calls(),
             vec!["process-1".to_string(), "process-2".to_string()]

@@ -31,10 +31,10 @@ fn process_originator_host_scope_is_serde_compatible() {
     let old_host: ProcessOriginator =
         serde_json::from_value(json!({ "type": "host" })).expect("old host originator");
     assert_eq!(old_host, ProcessOriginator::host());
-    assert_eq!(old_host.scope_id(), "host");
+    assert_eq!(old_host.id(), "host");
 
     let scoped = ProcessOriginator::host_scoped("automation-a");
-    assert_eq!(scoped.scope_id(), "host:automation-a");
+    assert_eq!(scoped.id(), "host:automation-a");
     assert_eq!(
         serde_json::to_value(&scoped).expect("scoped host json"),
         json!({ "type": "host", "scope": "automation-a" })
@@ -58,14 +58,13 @@ fn process_list_filter_matches_definition_and_status() {
 
     let mut matching = record("matching", "target", 100);
     matching.identity.definition = Some(target_ref);
-    matching.status = ProcessStatus::Completed {
-        await_output: crate::ProcessAwaitOutput::from_tool_output(crate::ToolCallOutput::success(
-            json!(true),
-        )),
-    };
+    matching.status = ProcessStatus::Completed;
+    matching.outcome = Some(crate::ProcessAwaitOutput::from_tool_output(
+        crate::ToolCallOutput::success(json!(true)),
+    ));
     let mut wrong_definition = record("wrong-definition", "other", 100);
     wrong_definition.identity.definition = Some(other_ref);
-    wrong_definition.status = matching.status.clone();
+    wrong_definition.status = matching.status;
 
     assert_eq!(filter.list_mode(), ProcessListMode::All);
     assert!(filter.matches_record(&matching));
@@ -103,7 +102,7 @@ fn process_list_filter_matches_enriched_facets() {
     let wrong = record("wrong", "other", 200);
 
     let filter = ProcessListFilter::decode(&json!({
-        "originator_scope_id": "session:origin-session",
+        "originator_id": "origin-session",
         "identity_kind": "test-engine",
         "identity_label": "target",
         "caused_by_occurrence_id": "occurrence-target",

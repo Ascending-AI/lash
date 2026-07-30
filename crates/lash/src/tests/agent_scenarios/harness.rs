@@ -349,7 +349,7 @@ fn observed_process_summary(
 ) -> lash_core::ProcessHandleSummary {
     lash_core::ProcessHandleSummary::new(
         process.process_id,
-        lash_core::ProcessHandleDescriptor::new(Some(process.kind), Some(process.label)),
+        process.identity.clone(),
         process.lifecycle,
     )
     .with_definition(process.identity.definition)
@@ -515,13 +515,6 @@ impl AgentSessionTurnProcessScenario {
             lash_core::RecoveryDisposition::Rerunnable,
             lash_core::ProcessOriginator::host(),
         )
-        .with_grant(Some(lash_core::ProcessStartGrant {
-            session_scope: lash_core::SessionScope::new("request-descriptor"),
-            descriptor: lash_core::ProcessHandleDescriptor::new(
-                Some("session_turn"),
-                Some("child turn"),
-            ),
-        }))
     }
 
     fn child_create_request(&self) -> lash_core::SessionCreateRequest {

@@ -20,7 +20,7 @@ pub struct RuntimeExecutionContext<'run> {
     pub(super) runtime_process_id: Option<String>,
     pub(super) process_event_context: Option<RuntimeExecutionProcessEventContext>,
     process_env_ref: Option<crate::ProcessExecutionEnvRef>,
-    process_wake_target: Option<crate::SessionScope>,
+    process_wake_session_id: Option<String>,
     pub(super) parent_invocation: Option<crate::RuntimeInvocation>,
     turn_phase_probe: Option<Arc<dyn crate::runtime::RuntimeTurnPhaseProbe>>,
     pub(super) turn_event_tx: Option<Sender<TurnActivity>>,
@@ -46,7 +46,7 @@ pub struct RuntimeExecutionContext<'run> {
     process_work_driver: Option<crate::ProcessWorkDriver>,
     /// Process ids started by THIS execution context. Possession of a handle
     /// the run itself created is sufficient capability to await/cancel it —
-    /// run-local children are not session handle grants (the ephemeral
+    /// run-local children do not require session observer edges (the ephemeral
     /// execution scope must never appear in durable grant state).
     started_process_ids: Arc<std::sync::Mutex<std::collections::HashSet<String>>>,
     /// Nested durable-controller failure captured while a language runtime
@@ -148,7 +148,7 @@ impl<'run> RuntimeExecutionContext<'run> {
             started_process_ids: Arc::default(),
             nested_effect_error: Arc::default(),
             process_env_ref: None,
-            process_wake_target: None,
+            process_wake_session_id: None,
             parent_invocation: None,
             turn_phase_probe: None,
             turn_event_tx: None,
@@ -179,7 +179,7 @@ impl<'run> RuntimeExecutionContext<'run> {
             runtime_process_id: self.runtime_process_id.clone(),
             process_event_context: self.process_event_context.clone(),
             process_env_ref: self.process_env_ref.clone(),
-            process_wake_target: self.process_wake_target.clone(),
+            process_wake_session_id: self.process_wake_session_id.clone(),
             parent_invocation: self.parent_invocation.clone(),
             turn_phase_probe: self.turn_phase_probe.clone(),
             turn_event_tx: self.turn_event_tx.clone(),
@@ -289,8 +289,9 @@ impl<'run> RuntimeExecutionContext<'run> {
     }
 
     pub fn trigger_registration_wake_target(&self) -> Option<crate::SessionScope> {
-        self.process_wake_target
-            .clone()
+        self.process_wake_session_id
+            .as_ref()
+            .map(crate::SessionScope::new)
             .or_else(|| Some(self.session_scope()))
     }
 
@@ -434,7 +435,7 @@ impl<'run> RuntimeExecutionContext<'run> {
         self.process_originator = Some(registration.provenance.originator.clone());
         self.runtime_process_id = Some(registration.id.clone());
         self.process_env_ref = registration.env_ref.clone();
-        self.process_wake_target = registration.wake_target.clone();
+        self.process_wake_session_id = registration.wake_session_id.clone();
         self
     }
 
@@ -485,7 +486,7 @@ impl<'run> RuntimeExecutionContext<'run> {
             .clone()
             .map(|originator| crate::ProcessSpawnProvenance {
                 originator,
-                wake_target: self.process_wake_target.clone(),
+                wake_session_id: self.process_wake_session_id.clone(),
             })
     }
 
@@ -573,8 +574,8 @@ impl<'run> RuntimeExecutionContext<'run> {
     pub async fn start_child_process(
         &self,
         registration: crate::ProcessRegistration,
-        kind: impl Into<String>,
-        label: Option<String>,
+        _kind: impl Into<String>,
+        _label: Option<String>,
     ) -> crate::ToolInvocationReply {
         let _phase = self.named_phase("process.start_child");
         let registration = match self
@@ -587,8 +588,7 @@ impl<'run> RuntimeExecutionContext<'run> {
             }
         };
         let process_id = registration.id.clone();
-        let mut options = crate::ProcessStartOptions::new()
-            .with_descriptor(crate::ProcessHandleDescriptor::new(Some(kind), label));
+        let mut options = crate::ProcessStartOptions::new().with_observer(self.session_id.clone());
         if let Some(spawn) = self.process_spawn_provenance() {
             options = options.with_spawn_provenance(spawn);
         }
@@ -777,7 +777,7 @@ impl<'run> RuntimeExecutionContext<'run> {
                 let waiting_ordinal =
                     registry
                         .get_process(process_id)
-                        .await
+                        .await?
                         .and_then(|record| match record.wait {
                             Some(crate::WaitState {
                                 kind:
@@ -880,8 +880,8 @@ fn resolve_trigger_owner_scope(
             "bare host authority cannot own user trigger subscriptions; use an explicit host binding"
                 .to_string(),
         )),
-        Some(crate::ProcessOriginator::Session { scope }) => {
-            Ok(crate::TriggerOwnerScope::session(scope.session_id.clone()))
+        Some(crate::ProcessOriginator::Session { session_id }) => {
+            Ok(crate::TriggerOwnerScope::session(session_id.clone()))
         }
         None => Ok(crate::TriggerOwnerScope::session(root_session_id)),
     }
@@ -970,7 +970,6 @@ mod tests {
             session_lifecycle: Arc::new(crate::testing::MockSessionManager::default()),
             session_graph: Arc::new(crate::testing::MockSessionManager::default()),
             processes: Arc::new(crate::UnavailableProcessService),
-            process_cancel_ability: Arc::new(crate::DefaultProcessCancelAbility),
             trigger_router: None,
             effect_controller: crate::runtime::RuntimeEffectControllerHandle::shared(Arc::new(
                 crate::InlineRuntimeEffectController::default(),

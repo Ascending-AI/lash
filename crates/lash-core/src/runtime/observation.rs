@@ -4,7 +4,7 @@ use arc_swap::ArcSwap;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
-use super::{LashRuntime, ProcessHandleGrantEntry, ProcessHandleSummary, ProcessRegistry};
+use super::{LashRuntime, ProcessHandleSummary, ProcessRecord, ProcessRegistry};
 
 pub use replay::{
     InMemoryLiveReplayStore, InMemoryLiveReplayStoreConfig, LiveReplayGap, LiveReplayGapReason,
@@ -200,13 +200,13 @@ impl RuntimeObservation {
                 crate::SessionScope::for_agent_frame(self.session_id.as_ref(), agent_frame_id);
             if frame_scope.id() != root_scope.id() {
                 entries.extend(list_scope_process_handles(executor, &frame_scope, mode).await);
-                entries.sort_by(|(left, _), (right, _)| left.process_id.cmp(&right.process_id));
-                entries.dedup_by(|(left, _), (right, _)| left.process_id == right.process_id);
+                entries.sort_by(|left, right| left.id.cmp(&right.id));
+                entries.dedup_by(|left, right| left.id == right.id);
             }
         }
         entries
             .into_iter()
-            .map(ProcessHandleSummary::from)
+            .map(ProcessHandleSummary::from_record)
             .collect()
     }
 }
@@ -235,10 +235,10 @@ async fn list_scope_process_handles(
     executor: &Arc<dyn crate::ProcessRegistry>,
     scope: &crate::SessionScope,
     mode: crate::ProcessListMode,
-) -> Vec<ProcessHandleGrantEntry> {
+) -> Vec<ProcessRecord> {
     match mode {
-        crate::ProcessListMode::Live => executor.list_live_handle_grants(scope).await,
-        crate::ProcessListMode::All => executor.list_handle_grants(scope).await,
+        crate::ProcessListMode::Live => executor.list_live_observed_by(&scope.session_id).await,
+        crate::ProcessListMode::All => executor.list_observed_by(&scope.session_id).await,
     }
     .unwrap_or_default()
 }

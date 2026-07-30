@@ -45,7 +45,7 @@ registry path). Stores stay pure state: nothing sink-related touches the
 Retention is an explicit host lever, not an automatic policy.
 `ProcessRegistry::prune_terminal_processes(cutoff_epoch_ms)` physically deletes
 terminal process rows older than the cutoff — together with their events, wake
-acks, handle grants, and lease rows — and never touches non-terminal rows. It
+acks, observer edges, and lease rows — and never touches non-terminal rows. It
 returns a `ProcessPruneReport { pruned_processes, pruned_events }`.
 
 ## Why
@@ -85,10 +85,13 @@ rather than silently inheriting a no-op.
   the sink.
 - `prune_terminal_processes` is a required `ProcessRegistry` method. New and
   downstream registry implementations must implement physical deletion across
-  the process/event/wake-delivery/grant/lease rows in one transaction. The
+  the process/event/wake-delivery/observer/lease rows in one transaction. The
   `WatchedProcessRegistry` decorator delegates it without a hub bump, since
   pruned rows are terminal and their waiters resolved long ago.
 - Callers of `prune_terminal_processes` own correctness of the retention window:
-  a cutoff shorter than a live waiter's lifetime can prune a process id out from
-  under a late await, which then reads as "unknown process". The window must be
-  comfortably longer than any await.
+  a retained tombstone produces a typed no-longer-retained result rather than an
+  unknown-process result. A cutoff shorter than a live waiter's lifetime can
+  prune a process id out from under a late await, which then returns the typed
+  no-longer-retained information. After tombstone compaction, the same id is
+  indistinguishable from an unknown process. The retention and compaction
+  windows must be comfortably longer than any await.

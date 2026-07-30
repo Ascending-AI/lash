@@ -31,10 +31,9 @@ use lash_restate_postgres_workers_e2e::{
     EXPECTED_DURABLE_INPUT_TEXT, EXPECTED_FINAL_TEXT, EXPECTED_FRAME_SWITCH_CANCEL_TEXT,
     EXPECTED_FRAME_SWITCH_TEXT, EXPECTED_PARENT_DURABLE_INPUT_TEXT, EXPECTED_SEGMENT_LOOP_TEXT,
     HealthResponse, TurnRequest, TurnResponse, TurnScenario, build_e2e_core,
-    default_session_child_originator_scope_pattern, default_session_originator_scope_id,
-    e2e_tokio_thread_stack_bytes, ensure_e2e_schema, env, process_registry_from_storage,
-    record_terminal_result, record_turn_activity, record_worker_event, required_env,
-    s3_store_from_env, turn_session_id,
+    default_session_originator_id, e2e_tokio_thread_stack_bytes, ensure_e2e_schema, env,
+    process_registry_from_storage, record_terminal_result, record_turn_activity,
+    record_worker_event, required_env, s3_store_from_env, turn_session_id,
 };
 
 fn terminal_error(err: impl Display) -> TerminalError {
@@ -606,11 +605,10 @@ impl AppState {
         Ok(sqlx::query_scalar::<_, String>(
             "SELECT process_id
              FROM lash_processes
-             WHERE owner_scope_id = $1 OR owner_scope_id LIKE $2
+             WHERE originator_id = $1
              ORDER BY created_at_ms, process_id",
         )
-        .bind(default_session_originator_scope_id())
-        .bind(default_session_child_originator_scope_pattern())
+        .bind(default_session_originator_id())
         .fetch_all(self.storage.pool())
         .await
         .map_err(terminal_error)?)
@@ -927,8 +925,13 @@ async fn async_main() -> Result<()> {
         .context("connect Postgres storage for process deployment")?;
     ensure_e2e_schema(storage.pool()).await?;
     let registry = process_registry_from_storage(&storage);
-    let deployment =
-        RestateProcessDeployment::new(env("RESTATE_INGRESS_URL", "http://restate:8080"), registry);
+    let continuations =
+        lash_restate_postgres_workers_e2e::process_continuations_from_storage(&storage);
+    let deployment = RestateProcessDeployment::new(
+        env("RESTATE_INGRESS_URL", "http://restate:8080"),
+        registry,
+        continuations,
+    );
     let process_work_driver = deployment.process_work_driver();
     let state = AppState::connect(process_work_driver.clone()).await?;
     if state.fail_once {

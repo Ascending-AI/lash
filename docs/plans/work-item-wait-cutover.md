@@ -190,8 +190,8 @@ hub (`self.hub.notify(process_id)`) after these mutating methods succeed:
 `register_process`, `set_external_ref`, `append_event`, `complete_process`,
 `set_process_wait`, `clear_process_wait`, `mark_wake_enqueued`,
 `discard_wake_delivery`, and `redrive_wake_delivery`. Pure reads and
-lease/grant methods delegate without bumping (waits only observe record
-status and the event log; `grant_handle`/lease traffic would just cause
+lease/observer methods delegate without bumping (waits only observe record
+status and the event log; observer/lease traffic would just cause
 spurious re-reads). `durability_tier` delegates.
 
 ```rust

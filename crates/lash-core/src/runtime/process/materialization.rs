@@ -2,9 +2,10 @@ use crate::plugin::PluginError;
 
 use super::events::{
     AbandonEvidence, AbandonWriter, ProcessAwaitOutput, ProcessEventSemantics,
-    ProcessEventSemanticsSpec, ProcessTerminalSemantics, ProcessTerminalSpec, ProcessTerminalState,
-    ProcessValueSelector, ProcessWake, ProcessWakeSpec,
+    ProcessEventSemanticsSpec, ProcessTerminalSemantics, ProcessTerminalSpec, ProcessValueSelector,
+    ProcessWake, ProcessWakeSpec,
 };
+use super::model::ProcessStatus;
 
 pub fn materialize_process_event_semantics(
     process_id: &str,
@@ -42,10 +43,12 @@ fn materialize_terminal_semantics(
     let await_output = match &terminal.await_output {
         Some(selector) => {
             let selected = select_value(payload, selector)?;
-            serde_json::from_value::<ProcessAwaitOutput>(selected.clone())
-                .unwrap_or_else(|_| selected_value_to_await_output(terminal.state, selected))
+            match serde_json::from_value::<ProcessAwaitOutput>(selected.clone()) {
+                Ok(output) => output,
+                Err(_) => selected_value_to_await_output(terminal.status, selected)?,
+            }
         }
-        None if terminal.state == ProcessTerminalState::Completed => ProcessAwaitOutput::Success {
+        None if terminal.status == ProcessStatus::Completed => ProcessAwaitOutput::Success {
             value: payload.clone(),
             control: None,
         },
@@ -55,29 +58,36 @@ fn materialize_terminal_semantics(
             ));
         }
     };
+    let outcome_status = await_output.terminal_status();
+    if outcome_status != Some(terminal.status) {
+        return Err(PluginError::ProcessTerminalOutcomeMismatch {
+            declared_status: terminal.status,
+            outcome_status,
+        });
+    }
     Ok(ProcessTerminalSemantics {
-        state: terminal.state,
-        await_output,
+        status: terminal.status,
+        outcome: await_output,
     })
 }
 
 fn selected_value_to_await_output(
-    state: ProcessTerminalState,
+    status: ProcessStatus,
     value: serde_json::Value,
-) -> ProcessAwaitOutput {
-    match state {
-        ProcessTerminalState::Completed => ProcessAwaitOutput::Success {
+) -> Result<ProcessAwaitOutput, PluginError> {
+    Ok(match status {
+        ProcessStatus::Completed => ProcessAwaitOutput::Success {
             value,
             control: None,
         },
-        ProcessTerminalState::Failed => ProcessAwaitOutput::Failure {
+        ProcessStatus::Failed => ProcessAwaitOutput::Failure {
             class: crate::ToolFailureClass::Execution,
             code: "process_failed".to_string(),
             message: selector_value_to_string(&value),
             raw: Some(value),
             control: None,
         },
-        ProcessTerminalState::Cancelled => ProcessAwaitOutput::Cancelled {
+        ProcessStatus::Cancelled => ProcessAwaitOutput::Cancelled {
             message: selector_value_to_string(&value),
             raw: Some(value),
             control: None,
@@ -87,7 +97,7 @@ fn selected_value_to_await_output(
         // sweep/drain path writes structured evidence through `complete_process`,
         // which deserializes directly above. With no structured evidence to carry,
         // synthesize a minimal owner-drain marker.
-        ProcessTerminalState::Abandoned => ProcessAwaitOutput::Abandoned {
+        ProcessStatus::Abandoned => ProcessAwaitOutput::Abandoned {
             evidence: Box::new(AbandonEvidence {
                 writer: AbandonWriter::OwnerDrain,
                 owner: None,
@@ -95,7 +105,13 @@ fn selected_value_to_await_output(
             }),
             control: None,
         },
-    }
+        ProcessStatus::Running | ProcessStatus::Waiting => {
+            return Err(PluginError::Session(format!(
+                "terminal event semantics used non-terminal status `{}`",
+                status.label()
+            )));
+        }
+    })
 }
 
 fn materialize_wake(

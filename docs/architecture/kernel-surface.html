@@ -28,7 +28,7 @@
     <div class="section">
       <div class="section-header">
         <h2>Kernel Rule</h2>
-        <p>A type belongs in the kernel only when core must understand its semantics to enforce runtime mechanism: turn effects, durable commits, process leases, handle grants, plugin dispatch, tool execution, provider calls, or store consistency. Runtime policy, prompt language, product resources, and protocol-specific meaning live outside the kernel.</p>
+        <p>A type belongs in the kernel only when core must understand its semantics to enforce runtime mechanism: turn effects, durable commits, process leases, observer edges, plugin dispatch, tool execution, provider calls, or store consistency. Runtime policy, prompt language, product resources, and protocol-specific meaning live outside the kernel.</p>
       </div>
       <ol class="principle-list">
         <li>
@@ -68,7 +68,7 @@
             <tr><td><code>ProcessEngine</code></td><td><code>lash-lashlang-runtime</code>, custom process runtimes</td><td>Run opaque <code>ProcessInput::Engine</code> payloads under the generic process registry, lease, cancellation, environment, and event machinery.</td></tr>
             <tr><td><code>EffectHost</code>, <code>RuntimeEffectController</code>, <code>ScopedEffectController</code></td><td>Inline runtime, <code>lash-restate</code>, workflow adapters</td><td>Execute nondeterministic work with typed invocation metadata and replay keys while the turn machine remains deterministic.</td></tr>
             <tr><td><code>RuntimePersistence</code>, <code>SessionStoreFactory</code></td><td>SQLite, Postgres, host stores</td><td>Persist committed session graph state, final turn stamps, checkpoints, pending turn input, queued work, and the fenced session execution lane.</td></tr>
-            <tr><td><code>ProcessRegistry</code>, <code>TriggerStore</code></td><td>SQLite, Postgres, host stores</td><td>Persist process records/events/leases/handle grants and source-keyed trigger subscriptions/deliveries.</td></tr>
+            <tr><td><code>ProcessRegistry</code>, <code>TriggerStore</code></td><td>SQLite, Postgres, host stores</td><td>Persist process records/events/leases/observer edges and source-keyed trigger subscriptions/deliveries.</td></tr>
             <tr><td><code>AttachmentStore</code></td><td>File, S3-compatible, host stores</td><td>Persist or serve attachment bytes while the graph stores refs and metadata.</td></tr>
             <tr><td><code>ToolResultProjector</code>, <code>ToolCatalogContributor</code></td><td>Plugin crates</td><td>Project model-facing tool results and contribute tool-catalog entries through explicit exclusive or additive plugin hooks.</td></tr>
           </tbody>

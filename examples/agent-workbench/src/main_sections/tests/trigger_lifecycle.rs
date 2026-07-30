@@ -203,7 +203,7 @@
             active_turns: active_turns.clone(),
             authorization: WorkbenchAuthorization::allow_all(),
         };
-        let target_scope_prefix = format!("session:{}/frame:", state.current_session_id());
+        let target_session_id = state.current_session_id();
         let session_store =
             session_store_factory
                 .create_store(&lash::persistence::SessionStoreCreateRequest {
@@ -226,12 +226,10 @@
         };
         assert!(wake.input.contains("button_pressed"));
         assert!(wake.input.contains("Red"));
-        assert!(
-            wake.target_scope_id
-                .as_str()
-                .starts_with(&target_scope_prefix),
-            "process wake should target the current session's active frame, got {}",
-            wake.target_scope_id
+        assert_eq!(
+            wake.target_session_id.as_str(),
+            target_session_id,
+            "process wake should target the current session"
         );
 
         let (restate_ingress_url, mut restate_requests) = spawn_restate_ingress_capture().await;

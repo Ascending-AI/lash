@@ -199,14 +199,23 @@ async fn async_main() -> anyhow_like::Result<()> {
         ])))
         .trace_level(TraceLevel::Extended)
         .trigger_store(trigger_store);
-    let process_registry = Arc::new(
+    let process_registry_store = Arc::new(
         lash_sqlite_store::SqliteProcessRegistry::open(&process_registry_path, session_store_root)
             .await
             .map_err(|err| err.to_string())?,
-    ) as Arc<dyn lash::process::ProcessRegistry>;
+    );
+    let process_registry =
+        Arc::clone(&process_registry_store) as Arc<dyn lash::process::ProcessRegistry>;
+    #[cfg(feature = "restate")]
+    let process_continuations =
+        process_registry_store as Arc<dyn lash::process::ProcessContinuationStore>;
     #[cfg(feature = "restate")]
     let process_deployment = (durability == AgentServiceDurability::Restate).then(|| {
-        RestateProcessDeployment::new(restate_ingress_url.clone(), Arc::clone(&process_registry))
+        RestateProcessDeployment::new(
+            restate_ingress_url.clone(),
+            Arc::clone(&process_registry),
+            process_continuations,
+        )
     });
     #[cfg(feature = "restate")]
     let turn_deployment = (durability == AgentServiceDurability::Restate)
@@ -381,7 +390,7 @@ async fn async_main() -> anyhow_like::Result<()> {
 }
 
 /// Host-scheduled retention for terminal process rows (ADR 0017). The process
-/// registry keeps a row — plus its events, wake deliveries, handle grants, and leases
+/// registry keeps a row — plus its events, wake deliveries, observer edges, and leases
 /// — for every process this service ever started; once a run is terminal and
 /// its outcome has been consumed, those rows have no remaining reader and would
 /// grow without bound. `prune_terminal_processes` drops terminal rows older than

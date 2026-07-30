@@ -477,7 +477,11 @@ async fn process_owner_leg(backend: &AttachmentOwnerColdReplayBackend) {
         .expect("complete process owner");
     backend
         .process_registry
-        .prune_terminal_processes(terminal.updated_at_ms.saturating_add(1), None, None)
+        .prune_terminal_processes(
+            terminal.updated_at_ms.saturating_add(1),
+            None,
+            crate::ProjectionWatermark::NoProjector,
+        )
         .await
         .expect("prune process owner");
     let pruned_report = crate::reclaim_unreferenced_attachments(

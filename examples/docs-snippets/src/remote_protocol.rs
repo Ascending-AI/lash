@@ -75,8 +75,9 @@ fn remote_process_start_request() -> anyhow::Result<()> {
             },
         }),
         originator: RemoteProcessOriginator::Host { scope: None },
-        wake_target: None,
-        grant: None,
+        identity: None,
+        wake_session_id: None,
+        observers: Vec::new(),
         event_types: Vec::new(),
     };
 

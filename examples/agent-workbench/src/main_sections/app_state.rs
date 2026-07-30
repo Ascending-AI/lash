@@ -564,7 +564,6 @@ fn truncate_chars(text: &str, max_chars: usize) -> String {
 fn work_item_from_observed(item: lash::process::ObservedWorkItem) -> WorkItem {
     WorkItem {
         process: work_process_from_observed(item.process),
-        descriptor: item.descriptor,
         events: item
             .events
             .into_iter()

@@ -241,54 +241,6 @@ pub async fn execute_process_cancel_tool_call(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::Mutex;
-
-    #[derive(Default)]
-    struct DenyCancelAbility {
-        calls: Mutex<Vec<(lash_core::ProcessCancelSource, String)>>,
-    }
-
-    impl DenyCancelAbility {
-        fn calls(&self) -> Vec<(lash_core::ProcessCancelSource, String)> {
-            self.calls.lock().expect("cancel calls").clone()
-        }
-    }
-
-    #[async_trait::async_trait]
-    impl lash_core::ProcessCancelAbility for DenyCancelAbility {
-        async fn cancel(
-            &self,
-            _processes: &dyn lash_core::ProcessService,
-            request: lash_core::ProcessCancelRequest<'_>,
-        ) -> Result<lash_core::ProcessRecord, PluginError> {
-            self.calls
-                .lock()
-                .expect("cancel calls")
-                .push((request.source, request.process_id.to_string()));
-            Err(PluginError::Session("denied by host".to_string()))
-        }
-    }
-
-    fn context_with_cancel_ability(
-        ability: Arc<dyn lash_core::ProcessCancelAbility>,
-    ) -> lash_core::ToolContext<'static> {
-        let manager = Arc::new(lash_core::testing::MockSessionManager::default());
-        lash_core::ToolContext::__for_testing_with_process_cancel_ability(
-            "session".to_string(),
-            manager.clone(),
-            manager.clone(),
-            manager,
-            Arc::new(lash_core::UnavailableProcessService),
-            ability,
-            Arc::new(lash_core::SessionAttachmentStore::in_memory()),
-            lash_core::DirectCompletionClient::from_fn(|_, _| {
-                Err(PluginError::Session(
-                    "direct completions are unavailable in this test context".to_string(),
-                ))
-            }),
-            None,
-        )
-    }
 
     #[test]
     fn tool_definitions_expose_processes_tools() {
@@ -380,30 +332,5 @@ mod tests {
         assert!(standard_names.contains(&"cancel_process".to_string()));
         assert!(rlm_names.contains(&"list_process_handles".to_string()));
         assert!(!rlm_names.contains(&"cancel_process".to_string()));
-    }
-
-    #[tokio::test]
-    async fn cancel_process_tool_uses_host_cancel_ability() {
-        let ability = Arc::new(DenyCancelAbility::default());
-        let context = context_with_cancel_ability(ability.clone());
-
-        let result = execute_process_cancel_tool_call(
-            &context,
-            &serde_json::json!({ "process_id": "process-1" }),
-        )
-        .await;
-
-        assert!(!result.is_success());
-        assert_eq!(
-            result.value_for_projection(),
-            serde_json::json!("plugin session error: denied by host")
-        );
-        assert_eq!(
-            ability.calls(),
-            vec![(
-                lash_core::ProcessCancelSource::Tool,
-                "process-1".to_string()
-            )]
-        );
     }
 }

@@ -250,7 +250,11 @@ pub async fn process_prune_deletes_owned_session_stores(
         .await
         .expect("complete process with owned stores");
     let report = registry
-        .prune_terminal_processes(terminal.updated_at_ms.saturating_add(1), None, None)
+        .prune_terminal_processes(
+            terminal.updated_at_ms.saturating_add(1),
+            None,
+            crate::ProjectionWatermark::NoProjector,
+        )
         .await
         .expect("prune process with owned stores");
     assert_eq!(report.pruned_processes, 1);

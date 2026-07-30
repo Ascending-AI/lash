@@ -250,24 +250,21 @@ impl TriggerRouter {
         .with_identity(subscription.target_identity.clone())
         .with_extra_event_types(subscription.event_types.clone())
         .with_execution_env_ref(Some(subscription.env_ref.clone()))
-        .with_wake_target(subscription.wake_target.clone());
-        let descriptor_kind = subscription.target_identity.kind.clone();
-        let grant =
+        .with_wake_session_id(
             subscription
                 .wake_target
-                .clone()
-                .map(|session_scope| crate::ProcessStartGrant {
-                    session_scope,
-                    descriptor: crate::ProcessHandleDescriptor::new(
-                        Some(descriptor_kind.as_str()),
-                        subscription.target_label.as_deref(),
-                    ),
-                });
+                .as_ref()
+                .map(|scope| scope.session_id.clone()),
+        );
         let execution_context = crate::ProcessExecutionContext::default()
             .with_causal_invocation(Some(trigger_occurrence_invocation));
         let command = crate::ProcessCommand::Start {
             registration,
-            grant,
+            observers: subscription
+                .registrant_session_id()
+                .map(str::to_owned)
+                .into_iter()
+                .collect(),
             execution_context: Box::new(execution_context),
         };
         let effect_id = command.effect_id();
@@ -423,6 +420,30 @@ mod tests {
         receipt.record_snapshot
     }
 
+    async fn register_for_session(
+        store: &InMemoryTriggerStore,
+        operation_id: &str,
+        session_id: &str,
+        draft: TriggerSubscriptionDraft,
+    ) -> TriggerSubscriptionRecord {
+        let outcome = store
+            .execute_command(
+                operation_id,
+                TriggerCommand::Register {
+                    owner_scope: TriggerOwnerScope::session(session_id),
+                    actor: crate::ProcessOriginator::session(crate::SessionScope::new(session_id)),
+                    draft,
+                },
+            )
+            .await
+            .expect("execute session registration")
+            .expect("register session subscription");
+        let TriggerCommandOutcome::Mutation { receipt } = outcome else {
+            panic!("expected mutation receipt")
+        };
+        receipt.record_snapshot
+    }
+
     fn button_occurrence(
         source_key: impl Into<String>,
         idempotency_key: impl Into<String>,
@@ -519,6 +540,7 @@ mod tests {
         let record = registry
             .get_process(&delivery.process_id)
             .await
+            .expect("read process")
             .expect("started process record");
         assert!(matches!(
             record.provenance.caused_by,
@@ -543,6 +565,40 @@ mod tests {
             TriggerDeliveryEmitOutcome::AlreadyReserved
         );
         assert_eq!(replay.deliveries[0].process_id, delivery.process_id);
+    }
+
+    #[tokio::test]
+    async fn session_trigger_process_is_observed_by_its_registrant() {
+        let store = Arc::new(InMemoryTriggerStore::default());
+        let registry = Arc::new(crate::TestLocalProcessRegistry::default());
+        let source_key = empty_trigger_source_key("ui.button.pressed").expect("source key");
+        register_for_session(
+            store.as_ref(),
+            "session-register",
+            "session-owner",
+            trigger_process_draft(&source_key, "session-owned"),
+        )
+        .await;
+        let router = TriggerRouter::new(
+            store,
+            Some(Arc::clone(&registry) as Arc<dyn crate::ProcessRegistry>),
+            None,
+        );
+
+        let report = router
+            .emit(
+                button_occurrence(source_key, "session-button-blue"),
+                &crate::InlineRuntimeEffectController::default(),
+            )
+            .await
+            .expect("emit session trigger");
+        let process_id = &report.deliveries[0].process_id;
+        assert!(
+            crate::ProcessRegistry::is_observer(registry.as_ref(), "session-owner", process_id)
+                .await
+                .expect("read initial observer"),
+            "the session that explicitly registered the trigger must observe its process"
+        );
     }
 
     #[tokio::test]

@@ -340,8 +340,10 @@ pub enum SessionRelation {
     Fork {
         source_session_id: String,
         source_node_id: String,
+        #[serde(default)]
+        observer_inheritance: crate::ObserverInheritance,
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
-        process_grants: Vec<crate::ProcessHandleGrant>,
+        pending_observer_process_ids: Vec<crate::ProcessId>,
     },
 }
 

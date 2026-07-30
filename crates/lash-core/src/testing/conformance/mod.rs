@@ -18,7 +18,7 @@ mod effect_host;
 mod helpers;
 mod live_replay;
 mod process_change_feed;
-mod process_coordination;
+mod process_continuation_store;
 mod process_filters;
 mod process_references;
 mod process_registry;
@@ -35,6 +35,7 @@ pub use await_event_cold::*;
 pub use effect_host::*;
 pub use helpers::*;
 pub use live_replay::*;
+pub use process_continuation_store::*;
 pub use process_registry::*;
 pub use runtime_persistence::*;
 pub use session_store_factory::*;
@@ -47,23 +48,12 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use crate::{
-    AbandonEvidence, AbandonRequest, AbandonWriter, LashSchema, ProcessAwaitOutput,
-    ProcessChangeCursor, ProcessCompletionAuthority, ProcessEventAppendRequest,
-    ProcessEventSemanticsSpec, ProcessEventType, ProcessExecutionEnvRef,
-    ProcessExecutionWriteAuthority, ProcessExternalRef, ProcessHandleDescriptor, ProcessIdentity,
-    ProcessInput, ProcessLeaseCompletion, ProcessListFilter, ProcessLiveReferenceSummary,
-    ProcessProvenance, ProcessRecord, ProcessRegistration, ProcessRegistry, ProcessStartOutcome,
-    ProcessStarted, ProcessStatus, ProcessStatusFilter, ProcessTerminalState, ProcessValueSelector,
-    ProcessWakeDelivery, ProcessWakeSpec, RecoveryDisposition, SessionScope, SessionScopeId,
-    WaitKind, WaitState,
-};
-use crate::{
-    AgentFrameReason, AttachmentId, AttachmentIntent, AwaitEventWaitIdentity, CausalRef,
-    DeliveryPolicy, EffectHost, ExecutionScope, LiveReplayGapReason, LiveReplayResult,
-    LiveReplayStore, LiveReplayStoreError, LiveReplaySubscribeResult, MergeKey, ModelSpec,
-    PluginSessionSnapshot, ProtocolEvent, ProtocolTurnOptions, QueuedWorkBatch,
-    QueuedWorkBatchDraft, QueuedWorkClaimBoundary, QueuedWorkPayload, Resolution, ResolveOutcome,
-    RuntimeCommit, RuntimeEffectCommand, RuntimeEffectController, RuntimeEffectControllerError,
+    AgentFrameReason, AttachmentId, AttachmentIntent, AwaitEventWaitIdentity, DeliveryPolicy,
+    EffectHost, ExecutionScope, LiveReplayGapReason, LiveReplayResult, LiveReplayStore,
+    LiveReplayStoreError, LiveReplaySubscribeResult, MergeKey, ModelSpec, PluginSessionSnapshot,
+    ProtocolEvent, ProtocolTurnOptions, QueuedWorkBatch, QueuedWorkBatchDraft,
+    QueuedWorkClaimBoundary, QueuedWorkPayload, Resolution, ResolveOutcome, RuntimeCommit,
+    RuntimeEffectCommand, RuntimeEffectController, RuntimeEffectControllerError,
     RuntimeEffectEnvelope, RuntimeEffectKind, RuntimeEffectLocalExecutor, RuntimeEffectOutcome,
     RuntimeInvocation, RuntimePersistence, RuntimeScope, RuntimeSessionState, RuntimeSubject,
     RuntimeTurnCommitStamp, ScopedEffectController, SessionMeta, SessionNodePayload,
@@ -72,6 +62,14 @@ use crate::{
     StoreError, TokenLedgerEntry, TokenUsage, ToolState, TurnActivity, TurnEvent,
 };
 use crate::{AttachmentStore, AttachmentStoreError, AttachmentStorePersistence};
+use crate::{
+    CausalRef, LashSchema, ProcessAwaitOutput, ProcessChange, ProcessChangeCursor,
+    ProcessCompletionAuthority, ProcessEventAppendRequest, ProcessEventSemanticsSpec,
+    ProcessEventType, ProcessExecutionEnvRef, ProcessIdentity, ProcessInput, ProcessListFilter,
+    ProcessLiveReferenceSummary, ProcessProvenance, ProcessRegistration, ProcessRegistry,
+    ProcessStatus, ProcessStatusFilter, ProcessValueSelector, ProcessWakeDelivery, ProcessWakeSpec,
+    RecoveryDisposition, SessionScope, WaitKind, WaitState,
+};
 use lash_sansio::{AttachmentCreateMeta, AttachmentTypeMetadata, MediaType};
 
 #[cfg(test)]
@@ -180,6 +178,21 @@ mod tests {
             Arc::new(crate::TestLocalProcessRegistry::default()) as Arc<dyn ProcessRegistry>
         })
         .await;
+    }
+
+    #[tokio::test]
+    async fn in_memory_wake_delivery_crash_matrix() {
+        let registry = Arc::new(
+            crate::TestLocalProcessRegistry::default().with_wake_delivery_config(
+                crate::WakeDeliveryConfig::new(10_000)
+                    .expect("valid wake expiry")
+                    .with_enqueuing_stale_after_ms(25)
+                    .expect("valid short stale-claim age"),
+            ),
+        ) as Arc<dyn ProcessRegistry>;
+        let factory = Arc::new(crate::InMemorySessionStoreFactory::new())
+            as Arc<dyn crate::SessionStoreFactory>;
+        wake_delivery_crash_matrix(factory, registry).await;
     }
 
     #[tokio::test]

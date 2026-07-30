@@ -112,7 +112,7 @@ work the only sound policy is to never start the replacement.
   subagent session-turn rows → Rerunnable, external placeholders →
   ExternallyOwned). There is no migration default: construction without a
   disposition does not compile.
-- `ProcessTerminalState::Abandoned` ripples through every exhaustive match —
+- `ProcessStatus::Abandoned` ripples through every exhaustive match —
   both store schemas, the awaiter contract, the remote-protocol mirror, the
   conformance suite, and the model-visible `processes.list` status vocabulary.
   That ripple is the migration checklist working as designed.

@@ -157,14 +157,18 @@ pub(super) async fn lifecycle_process_fact(
             },
         )
     };
-    let record = registry.get_process(id).await.ok_or_else(|| {
-        RuntimeBoundaryError::new(format!("process `{id}` vanished after terminal"))
-    })?;
+    let record = registry
+        .get_process(id)
+        .await
+        .map_err(|err| RuntimeBoundaryError::new(format!("read process `{id}`: {err}")))?
+        .ok_or_else(|| {
+            RuntimeBoundaryError::new(format!("process `{id}` vanished after terminal"))
+        })?;
     let reran = matches!(
         record.status,
-        lash_core::ProcessStatus::Completed { .. }
-            | lash_core::ProcessStatus::Failed { .. }
-            | lash_core::ProcessStatus::Cancelled { .. }
+        lash_core::ProcessStatus::Completed
+            | lash_core::ProcessStatus::Failed
+            | lash_core::ProcessStatus::Cancelled
     );
     let lease_lapsed = registry
         .get_process_lease(id)

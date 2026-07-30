@@ -30,13 +30,12 @@ async fn run_once_process_list_stress(chat_turns: usize) -> anyhow::Result<Runti
             ))
             .await?;
         registry
-            .grant_handle(
-                &session_scope,
+            .add_observer(
+                &session_scope.session_id,
                 &process_id,
-                lash_core::ProcessHandleDescriptor::new(
-                    Some("stress"),
-                    Some(format!("process-list-stress-{index:05}")),
-                ),
+                lash_core::ProcessObserverBy::host(format!(
+                    "process-list-stress-{index:05}"
+                )),
             )
             .await?;
         if index % 2 == 1 {
@@ -89,7 +88,9 @@ async fn run_once_process_list_stress(chat_turns: usize) -> anyhow::Result<Runti
         let phase_started = Instant::now();
         let phase_before_alloc = allocator_stats();
         let phase_before_memory = process_memory_sample();
-        let live_entries = registry.list_live_handle_grants(&session_scope).await?;
+        let live_entries = registry
+            .list_live_observed_by(&session_scope.session_id)
+            .await?;
         phase_profile.insert(
             "process_list_stress.list_live".to_string(),
             RuntimePerfPhaseRunResult {
@@ -102,14 +103,14 @@ async fn run_once_process_list_stress(chat_turns: usize) -> anyhow::Result<Runti
                 ),
             },
         );
-        if live_entries.iter().any(|(_, record)| record.is_terminal()) {
+        if live_entries.iter().any(lash_core::ProcessRecord::is_terminal) {
             anyhow::bail!("process_list_stress live listing included a terminal process");
         }
 
         let phase_started = Instant::now();
         let phase_before_alloc = allocator_stats();
         let phase_before_memory = process_memory_sample();
-        let all_entries = registry.list_handle_grants(&session_scope).await?;
+        let all_entries = registry.list_observed_by(&session_scope.session_id).await?;
         phase_profile.insert(
             "process_list_stress.list_all".to_string(),
             RuntimePerfPhaseRunResult {
@@ -398,14 +399,17 @@ fn process_list_stress_registration(
     )
 }
 
-fn process_list_tool_payload(
-    entries: &[lash_core::runtime::ProcessHandleGrantEntry],
-) -> serde_json::Value {
+fn process_list_tool_payload(entries: &[lash_core::ProcessRecord]) -> serde_json::Value {
     serde_json::json!(
         entries
             .iter()
-            .cloned()
-            .map(lash_core::ProcessHandleSummary::from)
+            .map(|record| {
+                lash_core::ProcessHandleSummary::new(
+                    record.id.clone(),
+                    record.identity.clone(),
+                    record.status,
+                )
+            })
             .collect::<Vec<_>>()
     )
 }

@@ -115,7 +115,7 @@ pub enum RemoteProcessOriginator {
         scope: Option<String>,
     },
     Session {
-        scope: RemoteSessionScope,
+        session_id: String,
     },
 }
 
@@ -123,7 +123,7 @@ impl RemoteProcessOriginator {
     pub fn validate(&self, type_name: &'static str) -> Result<(), RemoteProtocolError> {
         match self {
             Self::Host { .. } => Ok(()),
-            Self::Session { scope } => scope.validate(type_name),
+            Self::Session { session_id } => require_non_empty(type_name, "session_id", session_id),
         }
     }
 }
@@ -175,39 +175,6 @@ impl RemoteProcessIdentity {
             definition.validate(type_name)?;
         }
         Ok(())
-    }
-}
-
-#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-pub struct RemoteProcessHandleDescriptor {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub kind: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub label: Option<String>,
-}
-
-impl RemoteProcessHandleDescriptor {
-    pub fn validate(&self, type_name: &'static str) -> Result<(), RemoteProtocolError> {
-        if let Some(kind) = &self.kind {
-            require_non_empty(type_name, "descriptor.kind", kind)?;
-        }
-        if let Some(label) = &self.label {
-            require_non_empty(type_name, "descriptor.label", label)?;
-        }
-        Ok(())
-    }
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-pub struct RemoteProcessStartGrant {
-    pub session_scope: RemoteSessionScope,
-    pub descriptor: RemoteProcessHandleDescriptor,
-}
-
-impl RemoteProcessStartGrant {
-    pub fn validate(&self, type_name: &'static str) -> Result<(), RemoteProtocolError> {
-        self.session_scope.validate(type_name)?;
-        self.descriptor.validate(type_name)
     }
 }
 
@@ -266,38 +233,20 @@ impl RemoteProcessInput {
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
-pub enum RemoteProcessLifecycleStatus {
+pub enum RemoteProcessStatus {
     #[default]
     Running,
+    Waiting,
     Completed,
     Failed,
     Cancelled,
     Abandoned,
 }
 
-impl RemoteProcessLifecycleStatus {
+impl RemoteProcessStatus {
     pub fn is_terminal(self) -> bool {
-        !matches!(self, Self::Running)
+        !matches!(self, Self::Running | Self::Waiting)
     }
-}
-
-#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
-#[serde(tag = "state", rename_all = "snake_case")]
-pub enum RemoteProcessStatus {
-    #[default]
-    Running,
-    Completed {
-        await_output: RemoteProcessAwaitOutput,
-    },
-    Failed {
-        await_output: RemoteProcessAwaitOutput,
-    },
-    Cancelled {
-        await_output: RemoteProcessAwaitOutput,
-    },
-    Abandoned {
-        await_output: RemoteProcessAwaitOutput,
-    },
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -329,12 +278,26 @@ pub enum RemoteProcessAwaitOutput {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         control: Option<serde_json::Value>,
     },
+    NoLongerRetained {
+        terminal_label: String,
+        pruned_at_ms: u64,
+    },
 }
 
 impl RemoteProcessAwaitOutput {
+    fn terminal_status(&self) -> Option<RemoteProcessStatus> {
+        match self {
+            Self::Success { .. } => Some(RemoteProcessStatus::Completed),
+            Self::Failure { .. } => Some(RemoteProcessStatus::Failed),
+            Self::Cancelled { .. } => Some(RemoteProcessStatus::Cancelled),
+            Self::Abandoned { .. } => Some(RemoteProcessStatus::Abandoned),
+            Self::NoLongerRetained { .. } => None,
+        }
+    }
+
     pub fn validate(&self, type_name: &'static str) -> Result<(), RemoteProtocolError> {
         match self {
-            Self::Success { .. } | Self::Abandoned { .. } => Ok(()),
+            Self::Success { .. } | Self::Abandoned { .. } | Self::NoLongerRetained { .. } => Ok(()),
             Self::Failure { code, message, .. } => {
                 require_non_empty(type_name, "await_output.code", code)?;
                 require_non_empty(type_name, "await_output.message", message)
@@ -421,10 +384,12 @@ pub struct RemoteProcessSummary {
     pub handle_type: String,
     pub id: String,
     pub process_id: String,
-    pub descriptor: RemoteProcessHandleDescriptor,
+    pub kind: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub label: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub definition: Option<RemoteProcessDefinitionIdentity>,
-    pub status: RemoteProcessLifecycleStatus,
+    pub status: RemoteProcessStatus,
 }
 
 impl RemoteProcessSummary {
@@ -432,7 +397,7 @@ impl RemoteProcessSummary {
         require_non_empty(type_name, "handle_type", &self.handle_type)?;
         require_non_empty(type_name, "id", &self.id)?;
         require_non_empty(type_name, "process_id", &self.process_id)?;
-        self.descriptor.validate(type_name)?;
+        require_non_empty(type_name, "kind", &self.kind)?;
         if let Some(definition) = &self.definition {
             definition.validate(type_name)?;
         }
@@ -453,8 +418,6 @@ pub struct RemoteProcessRecord {
     pub provenance: RemoteProcessProvenance,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub env_ref: Option<RemoteProcessExecutionEnvRef>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub wake_target: Option<RemoteSessionScope>,
     pub created_at_ms: u64,
     pub updated_at_ms: u64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -467,6 +430,8 @@ pub struct RemoteProcessRecord {
     pub wait: Option<RemoteProcessWaitState>,
     #[serde(default)]
     pub status: RemoteProcessStatus,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub outcome: Option<RemoteProcessAwaitOutput>,
 }
 
 impl RemoteProcessRecord {
@@ -481,22 +446,44 @@ impl RemoteProcessRecord {
         if let Some(env_ref) = &self.env_ref {
             env_ref.validate(type_name)?;
         }
-        if let Some(wake_target) = &self.wake_target {
-            wake_target.validate(type_name)?;
-        }
         if let Some(external_ref) = &self.external_ref {
             external_ref.validate(type_name)?;
         }
         if let Some(wait) = &self.wait {
             wait.validate(type_name)?;
         }
-        match &self.status {
-            RemoteProcessStatus::Running => Ok(()),
-            RemoteProcessStatus::Completed { await_output }
-            | RemoteProcessStatus::Failed { await_output }
-            | RemoteProcessStatus::Cancelled { await_output }
-            | RemoteProcessStatus::Abandoned { await_output } => await_output.validate(type_name),
+        if let Some(outcome) = &self.outcome {
+            outcome.validate(type_name)?;
         }
+        match (self.status.is_terminal(), self.outcome.as_ref()) {
+            (false, None) => {}
+            (false, Some(_)) => {
+                return Err(RemoteProtocolError::InvalidEnvelope {
+                    type_name,
+                    message: format!(
+                        "non-terminal process status `{:?}` must not carry an outcome",
+                        self.status
+                    ),
+                });
+            }
+            (true, None) => {
+                return Err(RemoteProtocolError::InvalidEnvelope {
+                    type_name,
+                    message: format!(
+                        "terminal process status `{:?}` must carry an outcome",
+                        self.status
+                    ),
+                });
+            }
+            (true, Some(outcome)) if outcome.terminal_status() != Some(self.status) => {
+                return Err(RemoteProtocolError::InvalidEnvelope {
+                    type_name,
+                    message: format!("process status `{:?}` contradicts its outcome", self.status),
+                });
+            }
+            (true, Some(_)) => {}
+        }
+        Ok(())
     }
 }
 
@@ -531,7 +518,6 @@ impl RemoteProcessWorkSnapshot {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct RemoteProcessWorkItem {
     pub process: RemoteObservedProcess,
-    pub descriptor: RemoteProcessHandleDescriptor,
     #[serde(default)]
     pub events: Vec<RemoteObservedProcessEvent>,
     pub kind: String,
@@ -541,7 +527,6 @@ pub struct RemoteProcessWorkItem {
 impl RemoteProcessWorkItem {
     pub fn validate(&self, type_name: &'static str) -> Result<(), RemoteProtocolError> {
         self.process.validate(type_name)?;
-        self.descriptor.validate(type_name)?;
         for event in &self.events {
             event.validate(type_name)?;
         }
@@ -556,7 +541,7 @@ pub struct RemoteObservedProcess {
     pub graph_key: String,
     pub kind: String,
     pub identity: RemoteProcessIdentity,
-    pub lifecycle: RemoteProcessLifecycleStatus,
+    pub lifecycle: RemoteProcessStatus,
     pub status_label: String,
     pub terminal: bool,
     pub disposition: RemoteRecoveryDisposition,
@@ -576,8 +561,6 @@ pub struct RemoteObservedProcess {
     pub originator: RemoteProcessOriginator,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub env_ref: Option<RemoteProcessExecutionEnvRef>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub wake_target: Option<RemoteSessionScope>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub caused_by: Option<RemoteCausalRef>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -600,9 +583,6 @@ impl RemoteObservedProcess {
         self.originator.validate(type_name)?;
         if let Some(env_ref) = &self.env_ref {
             env_ref.validate(type_name)?;
-        }
-        if let Some(wake_target) = &self.wake_target {
-            wake_target.validate(type_name)?;
         }
         if let Some(external_ref) = &self.external_ref {
             external_ref.validate(type_name)?;
@@ -695,15 +675,32 @@ impl RemoteProcessEventSemanticsSpec {
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct RemoteProcessTerminalSpec {
-    pub state: RemoteProcessTerminalState,
+    pub status: RemoteProcessStatus,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub await_output: Option<RemoteProcessValueSelector>,
 }
 
 impl RemoteProcessTerminalSpec {
     pub fn validate(&self, type_name: &'static str) -> Result<(), RemoteProtocolError> {
+        if !self.status.is_terminal() {
+            return Err(RemoteProtocolError::InvalidEnvelope {
+                type_name,
+                message: format!(
+                    "terminal event semantics require a terminal status, got `{:?}`",
+                    self.status
+                ),
+            });
+        }
         if let Some(await_output) = &self.await_output {
             await_output.validate(type_name)?;
+        }
+        if self.status != RemoteProcessStatus::Completed && self.await_output.is_none() {
+            return Err(RemoteProtocolError::InvalidEnvelope {
+                type_name,
+                message:
+                    "failed, cancelled, and abandoned terminal events must declare await output"
+                        .to_string(),
+            });
         }
         Ok(())
     }
@@ -736,22 +733,13 @@ pub struct RemoteProcessEventSemantics {
 impl RemoteProcessEventSemantics {
     pub fn validate(&self, type_name: &'static str) -> Result<(), RemoteProtocolError> {
         if let Some(terminal) = &self.terminal {
-            terminal.await_output.validate(type_name)?;
+            terminal.outcome.validate(type_name)?;
         }
         if let Some(wake) = &self.wake {
             wake.validate(type_name)?;
         }
         Ok(())
     }
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[serde(rename_all = "snake_case")]
-pub enum RemoteProcessTerminalState {
-    Completed,
-    Failed,
-    Cancelled,
-    Abandoned,
 }
 
 /// Wire mirror of the producer-declared recovery contract (ADR 0019).
@@ -811,8 +799,8 @@ pub struct RemoteAbandonRequest {
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct RemoteProcessTerminalSemantics {
-    pub state: RemoteProcessTerminalState,
-    pub await_output: RemoteProcessAwaitOutput,
+    pub status: RemoteProcessStatus,
+    pub outcome: RemoteProcessAwaitOutput,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -1125,6 +1113,43 @@ impl RemotePersistProcessEnvResult {
     }
 }
 
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum RemoteProcessObserverBy {
+    Host { operation_id: String },
+    ForkInheritance,
+}
+
+impl RemoteProcessObserverBy {
+    pub fn validate(&self, type_name: &'static str) -> Result<(), RemoteProtocolError> {
+        match self {
+            Self::Host { operation_id } => {
+                require_non_empty(type_name, "observer_by.operation_id", operation_id)
+            }
+            Self::ForkInheritance => Ok(()),
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum RemoteObserverInheritance {
+    All,
+    None,
+    Only(Vec<String>),
+}
+
+impl RemoteObserverInheritance {
+    pub fn validate(&self, type_name: &'static str) -> Result<(), RemoteProtocolError> {
+        if let Self::Only(process_ids) = self {
+            for process_id in process_ids {
+                require_non_empty(type_name, "observer_inheritance.only", process_id)?;
+            }
+        }
+        Ok(())
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct RemoteProcessStartRequest {
     pub protocol_version: u32,
@@ -1137,9 +1162,11 @@ pub struct RemoteProcessStartRequest {
     pub env_spec: Option<RemoteProcessExecutionEnvSpec>,
     pub originator: RemoteProcessOriginator,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub wake_target: Option<RemoteSessionScope>,
+    pub identity: Option<RemoteProcessIdentity>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub grant: Option<RemoteProcessStartGrant>,
+    pub wake_session_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub observers: Vec<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub event_types: Vec<RemoteProcessEventType>,
 }
@@ -1158,6 +1185,9 @@ impl RemoteProcessStartRequest {
         if let Some(env_spec) = &self.env_spec {
             env_spec.validate("RemoteProcessStartRequest")?;
         }
+        if let Some(identity) = &self.identity {
+            identity.validate("RemoteProcessStartRequest")?;
+        }
         if let RemoteProcessInput::SessionTurn { turn_input, .. } = &self.input
             && turn_input.protocol_version != self.protocol_version
         {
@@ -1169,11 +1199,15 @@ impl RemoteProcessStartRequest {
             });
         }
         self.originator.validate("RemoteProcessStartRequest")?;
-        if let Some(wake_target) = &self.wake_target {
-            wake_target.validate("RemoteProcessStartRequest")?;
+        if let Some(wake_session_id) = &self.wake_session_id {
+            require_non_empty(
+                "RemoteProcessStartRequest",
+                "wake_session_id",
+                wake_session_id,
+            )?;
         }
-        if let Some(grant) = &self.grant {
-            grant.validate("RemoteProcessStartRequest")?;
+        for observer in &self.observers {
+            require_non_empty("RemoteProcessStartRequest", "observers", observer)?;
         }
         for event_type in &self.event_types {
             event_type.validate("RemoteProcessStartRequest")?;
@@ -1206,6 +1240,7 @@ impl RemoteProcessStartResult {
 pub enum RemoteProcessStatusFilter {
     #[default]
     Running,
+    Waiting,
     Completed,
     Failed,
     Cancelled,
@@ -1223,7 +1258,7 @@ pub struct RemoteProcessListFilter {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub waiting: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub originator_scope_id: Option<String>,
+    pub originator_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub identity_kind: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1245,7 +1280,7 @@ impl Default for RemoteProcessListFilter {
             definition: None,
             status: RemoteProcessStatusFilter::Running,
             waiting: None,
-            originator_scope_id: None,
+            originator_id: None,
             identity_kind: None,
             identity_label: None,
             caused_by_occurrence_id: None,
@@ -1306,7 +1341,7 @@ impl RemoteProcessCancelRequest {
 pub struct RemoteProcessCancelResult {
     pub protocol_version: u32,
     pub process_id: String,
-    pub status: RemoteProcessLifecycleStatus,
+    pub status: RemoteProcessStatus,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub record: Option<RemoteProcessRecord>,
 }
@@ -1332,8 +1367,6 @@ pub struct RemoteProcessSignalRequest {
     pub payload: serde_json::Value,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub replay_key: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub wake_target_scope: Option<RemoteSessionScope>,
 }
 
 impl RemoteProcessSignalRequest {
@@ -1348,9 +1381,6 @@ impl RemoteProcessSignalRequest {
         require_non_empty("RemoteProcessSignalRequest", "signal_id", &self.signal_id)?;
         if let Some(replay_key) = &self.replay_key {
             require_non_empty("RemoteProcessSignalRequest", "replay_key", replay_key)?;
-        }
-        if let Some(scope) = &self.wake_target_scope {
-            scope.validate("RemoteProcessSignalRequest")?;
         }
         Ok(())
     }

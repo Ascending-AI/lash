@@ -18,8 +18,8 @@ alias.
 unleased writer:
 
 - **`ExternalOwner`** — an external actor closes an `ExternallyOwned` row it
-  holds a session handle grant for (the `shell.start` detach path). The
-  session-manager completion path verifies the caller holds a handle grant for
+  observes (the `shell.start` detach path). The
+  session-manager completion path verifies the caller has an observer edge for
   the row before the authority reaches the registry; per-closer attribution is
   no longer recorded on the terminal event.
 - **`WorkflowKey { workflow_key }`** — a workflow-key-coalesced substrate (e.g.
@@ -65,7 +65,7 @@ authority was pure convention. Any holder could terminalize any row with any
 outcome; the only thing standing between a caller and an unsound write was a doc
 comment and whatever ad-hoc checks each caller happened to perform. Those checks
 were real but scattered and inconsistent: `complete_external_process` verified a
-handle grant *and* re-read the row to reject non-`ExternallyOwned` dispositions;
+observer edge *and* re-read the row to reject non-`ExternallyOwned` dispositions;
 the Restate run handler relied entirely on workflow-key coalescing and checked
 nothing about disposition; the reconcile path checked only that the row was still
 non-terminal. The single invariant they were all groping toward — *this writer is
@@ -80,7 +80,7 @@ so (there is no `Default`, matching the runtime's explicit-over-defaults stance
 and ADR 0019's no-default disposition). Moving the disposition check into the
 backend means every store enforces the same matrix uniformly, and a caller can
 no longer forget it. For `ExternalOwner`, the session-manager completion path
-also verifies the caller's handle grant before entering the registry; the
+also verifies the caller's observer edge before entering the registry; the
 terminal event records the validated authority kind without copying an
 unverified per-closer scope string into durable audit data.
 

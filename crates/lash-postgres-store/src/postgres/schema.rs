@@ -6,6 +6,27 @@ pub(crate) async fn ensure_schema(pool: &PgPool) -> Result<Vec<u8>, StoreError> 
         .await
         .map_err(store_sqlx_error)?;
     tx.execute(
+        "CREATE TABLE IF NOT EXISTS lash_schema_versions (
+             component TEXT PRIMARY KEY,
+             version INTEGER NOT NULL
+         )",
+    )
+    .await
+    .map_err(store_sqlx_error)?;
+    let preflight_version: Option<i32> =
+        sqlx::query_scalar("SELECT version FROM lash_schema_versions WHERE component = $1")
+            .bind(SCHEMA_COMPONENT)
+            .fetch_optional(&mut *tx)
+            .await
+            .map_err(store_sqlx_error)?;
+    if let Some(version) = preflight_version
+        && version != SCHEMA_VERSION
+    {
+        return Err(StoreError::Backend(format!(
+            "Postgres schema component `{SCHEMA_COMPONENT}` has version {version}, expected {SCHEMA_VERSION}"
+        )));
+    }
+    tx.execute(
         r#"
         CREATE TABLE IF NOT EXISTS lash_schema_versions (
             component TEXT PRIMARY KEY,
@@ -172,7 +193,11 @@ pub(crate) async fn ensure_schema(pool: &PgPool) -> Result<Vec<u8>, StoreError> 
         CREATE TABLE IF NOT EXISTS lash_processes (
             process_id TEXT PRIMARY KEY,
             registration_hash TEXT NOT NULL,
-            owner_scope_id TEXT NOT NULL,
+            originator_id TEXT NOT NULL,
+            wake_session_id TEXT,
+            identity_kind TEXT NOT NULL,
+            identity_label TEXT,
+            is_waiting BOOLEAN NOT NULL,
             created_at_ms BIGINT NOT NULL,
             updated_at_ms BIGINT NOT NULL,
             change_seq BIGINT NOT NULL,
@@ -183,6 +208,16 @@ pub(crate) async fn ensure_schema(pool: &PgPool) -> Result<Vec<u8>, StoreError> 
             ON lash_processes(status);
         CREATE INDEX IF NOT EXISTS idx_lash_processes_change_seq
             ON lash_processes(change_seq);
+        CREATE INDEX IF NOT EXISTS idx_lash_processes_originator
+            ON lash_processes(originator_id);
+        CREATE INDEX IF NOT EXISTS idx_lash_processes_identity
+            ON lash_processes(identity_kind, identity_label);
+        CREATE INDEX IF NOT EXISTS idx_lash_processes_waiting
+            ON lash_processes(is_waiting);
+        CREATE INDEX IF NOT EXISTS idx_lash_processes_created
+            ON lash_processes(created_at_ms);
+        CREATE INDEX IF NOT EXISTS idx_lash_processes_wake_session
+            ON lash_processes(wake_session_id);
 
         CREATE TABLE IF NOT EXISTS lash_process_events (
             process_id TEXT NOT NULL REFERENCES lash_processes(process_id) ON DELETE CASCADE,
@@ -204,6 +239,7 @@ pub(crate) async fn ensure_schema(pool: &PgPool) -> Result<Vec<u8>, StoreError> 
             target_session_id TEXT NOT NULL,
             sequence BIGINT NOT NULL,
             state TEXT NOT NULL,
+            claim_token TEXT,
             attempts BIGINT NOT NULL DEFAULT 0,
             first_attempt_ms BIGINT,
             next_attempt_at_ms BIGINT NOT NULL,
@@ -215,22 +251,27 @@ pub(crate) async fn ensure_schema(pool: &PgPool) -> Result<Vec<u8>, StoreError> 
             ON lash_process_wake_deliveries(
                 next_attempt_at_ms, target_session_id, process_id, sequence
             )
-            WHERE state = 'pending';
+            WHERE state IN ('pending', 'enqueuing');
         CREATE INDEX IF NOT EXISTS idx_lash_wake_deliveries_group_sequence
             ON lash_process_wake_deliveries(target_session_id, process_id, sequence)
             WHERE state <> 'enqueued';
 
-        CREATE TABLE IF NOT EXISTS lash_process_handle_grants (
+        CREATE TABLE IF NOT EXISTS lash_process_observers (
             session_id TEXT NOT NULL,
-            scope_id TEXT NOT NULL,
             process_id TEXT NOT NULL REFERENCES lash_processes(process_id) ON DELETE CASCADE,
-            descriptor_json TEXT NOT NULL,
-            PRIMARY KEY (scope_id, process_id)
+            PRIMARY KEY (session_id, process_id)
         );
-        CREATE INDEX IF NOT EXISTS idx_lash_process_handle_grants_session
-            ON lash_process_handle_grants(session_id);
-        CREATE INDEX IF NOT EXISTS idx_lash_process_handle_grants_process
-            ON lash_process_handle_grants(process_id);
+        CREATE INDEX IF NOT EXISTS idx_lash_process_observers_process
+            ON lash_process_observers(process_id, session_id);
+
+        CREATE TABLE IF NOT EXISTS lash_process_tombstones (
+            process_id TEXT PRIMARY KEY,
+            terminal_label TEXT NOT NULL,
+            pruned_at_ms BIGINT NOT NULL,
+            pruned_change_seq BIGINT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_lash_process_tombstones_change
+            ON lash_process_tombstones(pruned_change_seq);
 
         CREATE TABLE IF NOT EXISTS lash_process_leases (
             process_id TEXT PRIMARY KEY REFERENCES lash_processes(process_id) ON DELETE CASCADE,

@@ -3,7 +3,7 @@ use std::time::SystemTime;
 
 use serde::{Deserialize, Serialize};
 
-use super::model::{ProcessId, RecoveryDisposition, SessionScope, SessionScopeId};
+use super::model::{ProcessId, ProcessObserverBy, ProcessStatus, RecoveryDisposition};
 use super::validation::process_event_payload_hash;
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -23,7 +23,7 @@ pub struct ProcessEventSemanticsSpec {
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ProcessTerminalSpec {
-    pub state: ProcessTerminalState,
+    pub status: ProcessStatus,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub await_output: Option<ProcessValueSelector>,
 }
@@ -57,19 +57,7 @@ pub struct ProcessEventSemantics {
     pub wake: Option<ProcessWake>,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum ProcessTerminalState {
-    Completed,
-    Failed,
-    Cancelled,
-    /// The owner stopped executing the work without recording an outcome. The
-    /// true result is unknowable and no cleanup is assumed to have run. Peer of
-    /// the other three terminals; see ADR 0019.
-    Abandoned,
-}
-
-/// Who wrote an [`ProcessTerminalState::Abandoned`] terminal — the exactly-one
+/// Who wrote an [`ProcessStatus::Abandoned`] terminal — the exactly-one
 /// legitimate writer per path (ADR 0019).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -88,7 +76,7 @@ pub enum AbandonWriter {
     EngineGaveUp,
 }
 
-/// Evidence attached to an [`ProcessTerminalState::Abandoned`] terminal: which
+/// Evidence attached to an [`ProcessStatus::Abandoned`] terminal: which
 /// path wrote it, the owner identity it was established against
 /// (absent for an externally-owned row lash never executed), and when.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -120,7 +108,7 @@ pub struct AbandonEvidence {
 #[serde(tag = "authority", rename_all = "snake_case")]
 pub enum ProcessCompletionAuthority {
     /// An external actor closes an [`RecoveryDisposition::ExternallyOwned`] row
-    /// it holds a handle grant for (the `shell.start` detach path, ADR 0019).
+    /// it observes (the `shell.start` detach path, ADR 0019).
     /// Rejected on any lash-executed disposition: those have a lease-fenced
     /// single writer.
     ExternalOwner,
@@ -136,7 +124,7 @@ pub enum ProcessCompletionAuthority {
     /// The sweep reconciled a durable Abandon Request on an
     /// [`RecoveryDisposition::ExternallyOwned`] row (whose lease had lapsed, or
     /// which Lash never leased) into an
-    /// [`ProcessTerminalState::Abandoned`] terminal. Carries no owner: the
+    /// [`ProcessStatus::Abandoned`] terminal. Carries no owner: the
     /// closure is authorized by the recorded request, not a live writer. Only
     /// ever writes an `Abandoned` terminal.
     ReconciledAbandon,
@@ -207,7 +195,7 @@ impl ProcessCompletionAuthority {
                          row is abandoned under its lease",
                     );
                 }
-                if await_output.terminal_state() != ProcessTerminalState::Abandoned {
+                if await_output.terminal_status() != Some(ProcessStatus::Abandoned) {
                     return reject("reconciled-abandon writes only an Abandoned terminal");
                 }
             }
@@ -217,12 +205,15 @@ impl ProcessCompletionAuthority {
 }
 
 /// Terminal event type name for a terminal state.
-pub fn terminal_event_type_name(state: ProcessTerminalState) -> &'static str {
-    match state {
-        ProcessTerminalState::Completed => "process.completed",
-        ProcessTerminalState::Failed => "process.failed",
-        ProcessTerminalState::Cancelled => "process.cancelled",
-        ProcessTerminalState::Abandoned => "process.abandoned",
+pub fn terminal_event_type_name(status: ProcessStatus) -> &'static str {
+    match status {
+        ProcessStatus::Completed => "process.completed",
+        ProcessStatus::Failed => "process.failed",
+        ProcessStatus::Cancelled => "process.cancelled",
+        ProcessStatus::Abandoned => "process.abandoned",
+        ProcessStatus::Running | ProcessStatus::Waiting => {
+            unreachable!("non-terminal process status has no terminal event")
+        }
     }
 }
 
@@ -241,7 +232,11 @@ pub fn terminal_append_request(
     await_output: &ProcessAwaitOutput,
     authority: Option<&ProcessCompletionAuthority>,
 ) -> ProcessEventAppendRequest {
-    let event_type = terminal_event_type_name(await_output.terminal_state());
+    let event_type = terminal_event_type_name(
+        await_output
+            .terminal_status()
+            .expect("only terminal outcomes may be appended"),
+    );
     let mut payload = serde_json::json!({ "await_output": await_output });
     if let Some(authority) = authority {
         payload["completion_authority"] =
@@ -253,8 +248,8 @@ pub fn terminal_append_request(
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ProcessTerminalSemantics {
-    pub state: ProcessTerminalState,
-    pub await_output: ProcessAwaitOutput,
+    pub status: ProcessStatus,
+    pub outcome: ProcessAwaitOutput,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -291,15 +286,20 @@ pub enum ProcessAwaitOutput {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         control: Option<crate::ToolControl>,
     },
+    NoLongerRetained {
+        terminal_label: String,
+        pruned_at_ms: u64,
+    },
 }
 
 impl ProcessAwaitOutput {
-    pub fn terminal_state(&self) -> ProcessTerminalState {
+    pub fn terminal_status(&self) -> Option<ProcessStatus> {
         match self {
-            Self::Success { .. } => ProcessTerminalState::Completed,
-            Self::Failure { .. } => ProcessTerminalState::Failed,
-            Self::Cancelled { .. } => ProcessTerminalState::Cancelled,
-            Self::Abandoned { .. } => ProcessTerminalState::Abandoned,
+            Self::Success { .. } => Some(ProcessStatus::Completed),
+            Self::Failure { .. } => Some(ProcessStatus::Failed),
+            Self::Cancelled { .. } => Some(ProcessStatus::Cancelled),
+            Self::Abandoned { .. } => Some(ProcessStatus::Abandoned),
+            Self::NoLongerRetained { .. } => None,
         }
     }
 
@@ -391,6 +391,16 @@ impl ProcessAwaitOutput {
                 output.control = control;
                 output
             }
+            Self::NoLongerRetained {
+                terminal_label,
+                pruned_at_ms,
+            } => crate::ToolCallOutput::success(serde_json::json!({
+                "type": "information",
+                "code": "process_no_longer_retained",
+                "message": "process completed, but its outcome is no longer retained",
+                "terminal_label": terminal_label,
+                "pruned_at_ms": pruned_at_ms,
+            })),
         }
     }
 }
@@ -451,8 +461,6 @@ pub struct ProcessEventAppendRequest {
     pub payload: serde_json::Value,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub replay: Option<crate::RuntimeReplay>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub wake_target_scope: Option<SessionScope>,
 }
 
 impl ProcessEventAppendRequest {
@@ -461,7 +469,6 @@ impl ProcessEventAppendRequest {
             event_type: event_type.into(),
             payload,
             replay: None,
-            wake_target_scope: None,
         }
     }
 
@@ -474,16 +481,6 @@ impl ProcessEventAppendRequest {
 
     pub fn with_optional_replay(mut self, replay: Option<crate::RuntimeReplay>) -> Self {
         self.replay = replay;
-        self
-    }
-
-    pub fn with_wake_target_scope(mut self, scope: SessionScope) -> Self {
-        self.wake_target_scope = Some(scope);
-        self
-    }
-
-    pub fn with_optional_wake_target_scope(mut self, scope: Option<SessionScope>) -> Self {
-        self.wake_target_scope = scope;
         self
     }
 
@@ -550,13 +547,45 @@ impl ProcessEventAppendRequest {
         )
         .with_replay_key(format!("process:{process_id}:abandon-requested"))
     }
+
+    pub fn observer_added(process_id: &str, session: &str, by: &ProcessObserverBy) -> Self {
+        Self::new(
+            "process.observer_added",
+            serde_json::json!({ "session": session, "by": by }),
+        )
+        .with_replay_key(format!(
+            "process:{process_id}:observer:{session}:add:{}",
+            by.replay_component()
+        ))
+    }
+
+    pub fn observer_removed(process_id: &str, session: &str, by: &ProcessObserverBy) -> Self {
+        Self::new(
+            "process.observer_removed",
+            serde_json::json!({ "session": session, "by": by }),
+        )
+        .with_replay_key(format!(
+            "process:{process_id}:observer:{session}:remove:{}",
+            by.replay_component()
+        ))
+    }
+
+    pub fn subscription_retargeted(process_id: &str, target: Option<&str>) -> Self {
+        Self::new(
+            "process.subscription_retargeted",
+            serde_json::json!({ "target": target }),
+        )
+        .with_replay_key(format!(
+            "process:{process_id}:subscription-retargeted:{}",
+            target.unwrap_or("none")
+        ))
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ProcessWakeDelivery {
     pub wake_id: String,
     pub target_session_id: String,
-    pub target_scope_id: SessionScopeId,
     pub process_id: ProcessId,
     pub sequence: u64,
     #[serde(default = "default_process_wake_event_type")]
@@ -592,7 +621,10 @@ pub(super) fn runtime_lifecycle_event_type(name: &str) -> Option<ProcessEventTyp
         | "process.waiting"
         | "process.resumed"
         | "process.external_ref_set"
-        | "process.abandon_requested" => Some(ProcessEventType {
+        | "process.abandon_requested"
+        | "process.observer_added"
+        | "process.observer_removed"
+        | "process.subscription_retargeted" => Some(ProcessEventType {
             name: name.to_string(),
             payload_schema: crate::LashSchema::any(),
             semantics: ProcessEventSemanticsSpec::default(),
@@ -618,26 +650,29 @@ pub(super) fn default_process_event_types() -> Vec<ProcessEventType> {
             "process.resumed",
             "process.external_ref_set",
             "process.abandon_requested",
+            "process.observer_added",
+            "process.observer_removed",
+            "process.subscription_retargeted",
         ]
         .into_iter()
         .filter_map(runtime_lifecycle_event_type),
     );
     event_types.extend([
-        terminal_event_type("process.completed", ProcessTerminalState::Completed),
-        terminal_event_type("process.failed", ProcessTerminalState::Failed),
-        terminal_event_type("process.cancelled", ProcessTerminalState::Cancelled),
-        terminal_event_type("process.abandoned", ProcessTerminalState::Abandoned),
+        terminal_event_type("process.completed", ProcessStatus::Completed),
+        terminal_event_type("process.failed", ProcessStatus::Failed),
+        terminal_event_type("process.cancelled", ProcessStatus::Cancelled),
+        terminal_event_type("process.abandoned", ProcessStatus::Abandoned),
     ]);
     event_types
 }
 
-fn terminal_event_type(name: &str, state: ProcessTerminalState) -> ProcessEventType {
+fn terminal_event_type(name: &str, status: ProcessStatus) -> ProcessEventType {
     ProcessEventType {
         name: name.to_string(),
         payload_schema: crate::LashSchema::any(),
         semantics: ProcessEventSemanticsSpec {
             terminal: Some(ProcessTerminalSpec {
-                state,
+                status,
                 await_output: Some(ProcessValueSelector::Pointer("/await_output".to_string())),
             }),
             ..ProcessEventSemanticsSpec::default()

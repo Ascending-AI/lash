@@ -72,10 +72,9 @@ impl RlmSubagentToolsProvider {
             lash_core::RecoveryDisposition::Rerunnable,
             lash_core::ProcessOriginator::host(),
         )
-        .with_grant(Some(lash_core::ProcessStartGrant {
-            session_scope: lash_core::SessionScope::new("request-descriptor"),
-            descriptor: lash_core::ProcessHandleDescriptor::new(Some("subagent"), Some("spawn")),
-        }));
+        .with_identity(
+            lash_core::ProcessIdentity::new("subagent").with_label(Some("spawn".to_string())),
+        );
         context
             .processes()
             .start(request)
@@ -188,6 +187,9 @@ fn child_task_result(output: lash_core::ProcessAwaitOutput) -> Result<Value, Str
         lash_core::ProcessAwaitOutput::Cancelled { message, .. } => Err(message),
         lash_core::ProcessAwaitOutput::Abandoned { .. } => {
             Err("subagent process was abandoned before recording an outcome".to_string())
+        }
+        lash_core::ProcessAwaitOutput::NoLongerRetained { .. } => {
+            Err("subagent process outcome is no longer retained".to_string())
         }
     }
 }

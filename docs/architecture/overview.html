@@ -145,7 +145,7 @@ flowchart TD
             <li>
               <div>
                 <h3>Runtime host capabilities are trait-shaped.</h3>
-                <p><code>RuntimeSessionServices</code> implements focused plugin host traits for snapshots, tool catalogs, session tool state, session lifecycle, turns, processes, the session graph, prompt state, direct completion, and tracing. Public tools see these through named <code>ToolContext</code> capabilities, not through a general host escape hatch. Tool attempts are atomic; independently durable composition belongs in processes. A configured process registry enables the generic process admin plane; protocol/language runtimes decide how that plane is exposed to authored code. <code>ProcessCancelAbility</code> lets the host customize intentional cancellation.</p>
+                <p><code>RuntimeSessionServices</code> implements focused plugin host traits for snapshots, tool catalogs, session tool state, session lifecycle, turns, processes, the session graph, prompt state, direct completion, and tracing. Public tools see these through named <code>ToolContext</code> capabilities, not through a general host escape hatch. Tool attempts are atomic; independently durable composition belongs in processes. A configured process registry enables the generic process admin plane; protocol/language runtimes decide how that plane is exposed to authored code. Process cancellation is a direct visibility-scoped service operation.</p>
               </div>
             </li>
           </ol>

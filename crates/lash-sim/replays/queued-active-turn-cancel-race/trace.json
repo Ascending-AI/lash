@@ -5755,9 +5755,8 @@
           "input": "wake for session-004",
           "process_id": "sim-process-session-004-001",
           "sequence": 1,
-          "target_scope_id": "session:session-004",
           "target_session_id": "session-004",
-          "wake_id": "wake:220549cfd078494606faaa9fc55019d17f47602aee3c4be4bc40e206278c405b"
+          "wake_id": "wake:53c7d667c825d42d52bf7ed2086931bacd63ef9ef71cbd8fb643488caf755cc7"
         },
         "runtime_queued_work": {
           "batch_id_present": true,
@@ -5772,7 +5771,7 @@
         },
         "sequence": 1,
         "session": "session-004",
-        "wake_id": "wake:220549cfd078494606faaa9fc55019d17f47602aee3c4be4bc40e206278c405b"
+        "wake_id": "wake:53c7d667c825d42d52bf7ed2086931bacd63ef9ef71cbd8fb643488caf755cc7"
       }
     },
     {
@@ -5896,9 +5895,8 @@
           "input": "wake for session-004",
           "process_id": "sim-process-session-004-001",
           "sequence": 1,
-          "target_scope_id": "session:session-004",
           "target_session_id": "session-004",
-          "wake_id": "wake:220549cfd078494606faaa9fc55019d17f47602aee3c4be4bc40e206278c405b"
+          "wake_id": "wake:53c7d667c825d42d52bf7ed2086931bacd63ef9ef71cbd8fb643488caf755cc7"
         },
         "runtime_queued_work": {
           "batch_id_present": true,
@@ -5913,7 +5911,7 @@
         },
         "sequence": 1,
         "session": "session-004",
-        "wake_id": "wake:220549cfd078494606faaa9fc55019d17f47602aee3c4be4bc40e206278c405b"
+        "wake_id": "wake:53c7d667c825d42d52bf7ed2086931bacd63ef9ef71cbd8fb643488caf755cc7"
       }
     },
     {

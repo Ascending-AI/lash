@@ -192,7 +192,7 @@ impl ProcessEngineProcessContext {
     }
 
     pub async fn record(&self) -> Result<Option<super::model::ProcessRecord>, crate::PluginError> {
-        self.registry.try_get_process(&self.process_id).await
+        self.registry.get_process(&self.process_id).await
     }
 
     pub async fn events_after(

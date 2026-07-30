@@ -277,11 +277,12 @@ async fn abandoned_evidence(
     let record = registry
         .get_process(process_id)
         .await
+        .expect("read process")
         .expect("process exists");
-    match record.status {
-        ProcessStatus::Abandoned {
-            await_output: ProcessAwaitOutput::Abandoned { evidence, .. },
-        } => *evidence,
+    match (record.status, record.outcome) {
+        (ProcessStatus::Abandoned, Some(ProcessAwaitOutput::Abandoned { evidence, .. })) => {
+            *evidence
+        }
         other => panic!("expected an Abandoned terminal, got {other:?}"),
     }
 }
@@ -579,11 +580,7 @@ impl crate::ToolProvider for NestedProcessWaitTool {
             },
             RecoveryDisposition::Rerunnable,
             crate::ProcessOriginator::host(),
-        )
-        .with_grant(Some(crate::ProcessStartGrant {
-            session_scope: crate::SessionScope::new("request-descriptor"),
-            descriptor: crate::ProcessHandleDescriptor::new(Some("test"), Some("nested process")),
-        }));
+        );
         if let Err(err) = call.context.processes().start(request).await {
             return crate::ToolResult::err_fmt(format_args!(
                 "failed to start nested process: {err}"
@@ -1092,12 +1089,10 @@ async fn segment_boundary_reenters_in_memory_without_premature_terminal() {
     let final_record = registry
         .get_process("segmented-process")
         .await
+        .expect("read process")
         .expect("process exists");
     assert_eq!(runs.load(Ordering::SeqCst), 2, "{:?}", final_record.status);
-    assert!(matches!(
-        final_record.status,
-        ProcessStatus::Completed { .. }
-    ));
+    assert!(matches!(final_record.status, ProcessStatus::Completed));
 }
 
 #[tokio::test]
@@ -1106,7 +1101,11 @@ async fn sweep_reconciles_reserved_trigger_delivery_without_process() {
     let trigger_store: Arc<dyn TriggerStore> = Arc::new(crate::InMemoryTriggerStore::default());
     let delivery = seed_reserved_trigger_delivery(&trigger_store).await;
     assert!(
-        registry.get_process(&delivery.process_id).await.is_none(),
+        registry
+            .get_process(&delivery.process_id)
+            .await
+            .expect("read process")
+            .is_none(),
         "test starts in the reserve/start crash window"
     );
 
@@ -1123,6 +1122,7 @@ async fn sweep_reconciles_reserved_trigger_delivery_without_process() {
     let record = registry
         .get_process(&delivery.process_id)
         .await
+        .expect("read process")
         .expect("sweep registers missing trigger delivery process");
     assert_eq!(record.id, delivery.process_id);
     assert_eq!(process_count(&registry, &delivery.process_id).await, 1);
@@ -1275,9 +1275,10 @@ async fn sweep_recovers_reserved_v1_snapshot_after_v2_update_exactly_once() {
     let terminal = registry
         .get_process(&delivery.process_id)
         .await
+        .expect("read process")
         .expect("recovered delivery process");
     assert!(
-        matches!(terminal.status, ProcessStatus::Completed { .. }),
+        matches!(terminal.status, ProcessStatus::Completed),
         "recovered delivery must complete: {:?}",
         terminal.status
     );
@@ -1311,9 +1312,10 @@ async fn sweep_recovers_reserved_v1_snapshot_after_tombstone_exactly_once() {
     let terminal = registry
         .get_process(&delivery.process_id)
         .await
+        .expect("read process")
         .expect("recovered delivery process");
     assert!(
-        matches!(terminal.status, ProcessStatus::Completed { .. }),
+        matches!(terminal.status, ProcessStatus::Completed),
         "recovered delivery must complete: {:?}",
         terminal.status
     );
@@ -1338,7 +1340,11 @@ async fn sweep_does_not_reconcile_trigger_delivery_pruned_with_terminal_process(
     let trigger_store_dyn: Arc<dyn TriggerStore> = trigger_store.clone();
     let delivery = seed_reserved_trigger_delivery(&trigger_store_dyn).await;
     assert!(
-        registry.get_process(&delivery.process_id).await.is_none(),
+        registry
+            .get_process(&delivery.process_id)
+            .await
+            .expect("read process")
+            .is_none(),
         "test starts in the reserve/start crash window"
     );
 
@@ -1354,6 +1360,7 @@ async fn sweep_does_not_reconcile_trigger_delivery_pruned_with_terminal_process(
     registry
         .get_process(&delivery.process_id)
         .await
+        .expect("read process")
         .expect("sweep registers missing trigger delivery process");
 
     let terminal = registry
@@ -1368,12 +1375,19 @@ async fn sweep_does_not_reconcile_trigger_delivery_pruned_with_terminal_process(
         .await
         .expect("complete trigger delivery process");
     let report = registry
-        .prune_terminal_processes(terminal.updated_at_ms.saturating_add(1), None, None)
+        .prune_terminal_processes(
+            terminal.updated_at_ms.saturating_add(1),
+            None,
+            crate::ProjectionWatermark::NoProjector,
+        )
         .await
         .expect("prune completed trigger delivery process");
     assert_eq!(report.pruned_processes, 1);
     assert!(
-        registry.get_process(&delivery.process_id).await.is_none(),
+        matches!(
+            registry.get_process(&delivery.process_id).await,
+            Err(crate::PluginError::ProcessNoLongerRetained { .. })
+        ),
         "terminal trigger delivery process is pruned"
     );
     assert!(
@@ -1443,6 +1457,7 @@ async fn sweep_does_not_reconcile_trigger_delivery_when_process_exists() {
     let record = registry
         .get_process(&delivery.process_id)
         .await
+        .expect("read process")
         .expect("existing process remains");
     assert_eq!(record.provenance.caused_by, None);
     assert_eq!(
@@ -1475,7 +1490,11 @@ async fn sweep_never_claims_externally_owned_rows() {
         .expect("sweep dispatches");
     tokio::time::sleep(Duration::from_millis(200)).await;
 
-    let record = registry.get_process("proc-ext").await.expect("process");
+    let record = registry
+        .get_process("proc-ext")
+        .await
+        .expect("read process")
+        .expect("process");
     assert!(
         !record.is_terminal(),
         "an externally-owned row must never be claimed or run by the sweep"
@@ -1581,6 +1600,7 @@ async fn sweep_skips_started_owner_bound_with_silent_holder() {
     let record = registry
         .get_process("proc-ob-silent")
         .await
+        .expect("read process")
         .expect("process");
     assert!(
         !record.is_terminal(),
@@ -1673,6 +1693,7 @@ async fn owner_bound_unstarted_infra_failure_stays_claimable() {
             if registry
                 .get_process("proc-ob-unstarted")
                 .await
+                .expect("read process")
                 .expect("process")
                 .first_started
                 .is_some()
@@ -1702,6 +1723,7 @@ async fn owner_bound_unstarted_infra_failure_stays_claimable() {
     let record = registry
         .get_process("proc-ob-unstarted")
         .await
+        .expect("read process")
         .expect("process");
     assert!(
         record.first_started.is_some(),
@@ -1748,6 +1770,7 @@ async fn missing_engine_configuration_is_retryable_infrastructure_failure() {
             let record = registry
                 .get_process("missing-engine")
                 .await
+                .expect("read process")
                 .expect("missing engine row");
             let lease = registry
                 .get_process_lease("missing-engine")
@@ -1811,6 +1834,7 @@ async fn transient_engine_artifact_read_retries_and_terminally_commits() {
             let record = registry
                 .get_process("artifact-read-retry")
                 .await
+                .expect("read process")
                 .expect("artifact retry row");
             if record.first_started.is_some()
                 && !record.is_terminal()
@@ -1836,6 +1860,7 @@ async fn transient_engine_artifact_read_retries_and_terminally_commits() {
     let record = registry
         .get_process("artifact-read-retry")
         .await
+        .expect("read process")
         .expect("terminal artifact retry row");
     assert!(record.is_terminal());
     assert_eq!(
@@ -1942,6 +1967,7 @@ async fn drain_terminalizes_this_hosts_started_owner_bound_work() {
             !registry
                 .get_process(untouched)
                 .await
+                .expect("read process")
                 .expect("row exists")
                 .is_terminal(),
             "{untouched} must be left non-terminal by owner drain",
@@ -1985,6 +2011,7 @@ async fn inline_start_records_stable_owner_that_owner_drain_can_match() {
     let record = registry
         .get_process("real-inline-owner-bound")
         .await
+        .expect("read process")
         .expect("started record");
     assert_eq!(
         record.first_started.as_deref().map(|start| &start.owner),

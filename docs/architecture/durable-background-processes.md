@@ -52,7 +52,7 @@ in-process under normal operation, but the spawn held **no lease**, so a recover
 sweep on another node or after a restart could re-run a process already running
 (the off-lease/double-exec window), and on crash the in-memory task was gone with
 **no prompt re-execution** — only the next restart's startup sweep would re-run
-it. Registry rows — record, events, grants, and wake outbox — survived a restart; the
+it. Registry rows — record, events, observer edges, and wake outbox — survived a restart; the
 *execution* was either off-lease or merely eventually-recovered.
 
 The fix removes that silent fallback **and** the off-lease spawn. Process admin
@@ -110,8 +110,8 @@ clean worker-owns-execution-durability model belongs.
 **1. Start = durable intent, full stop.** `start name(...)` in a turn and a
 matched trigger delivery each do one thing: write a durable process record
 (carrying the captured execution-environment ref the worker will execute
-against — see `docs/adr/0011-self-contained-processes.md`) plus any handle
-grant to the registry. The rows survive restart. Turn starts carry turn
+against — see `docs/adr/0011-self-contained-processes.md`) plus the explicitly
+selected initial observer edges. The rows survive restart. Turn starts carry turn
 causality; trigger deliveries carry
 `CausalRef::TriggerOccurrence { occurrence_id, subscription_id }`.
 Neither path carries a borrowed execution scope or a live session binding.
@@ -192,6 +192,11 @@ enqueued. A discarded head blocks only its own group until a host explicitly
 redrives it; later sequences therefore cannot create a gap in the receiver's
 consumed prefix. This includes an expired head: after the configured expiry
 horizon, its group remains stopped and visible until a host redrives that head.
+The delivery report identifies every such group by target and process, names
+the discarded head and reason, and supplies the delivery id accepted by
+`redrive_wake_delivery`. Retargeting creates no new deliveries for the old
+group, so its discarded block is operationally moot; an expired head for a
+current target is the live host-action case.
 Retryable non-delivery advances `next_attempt_at_ms` with bounded exponential
 backoff, so a missing target stalls its own group without monopolizing the scan
 or producing a write storm. The facade rebinds first-party SQLite and PostgreSQL
@@ -201,6 +206,12 @@ targets and expired deliveries remain visible as typed `TargetGone` or
 `Expired` discards. Hosts inspect them through `wake_deliveries` /
 `wake_delivery_report`, redrive one explicitly with `redrive_wake_delivery`,
 and can force a bounded scan with `drive_wake_deliveries`.
+
+Each `enqueuing` attempt carries a fresh claim token. Mark, defer, and discard
+compare both delivery id and token, so a slow claimant that outlives the stale
+deadline cannot mutate its successor's claim. A reclaimed attempt can still
+finish against the target it originally claimed even after retargeting; the
+retarget bound applies to work not yet in flight.
 
 Restate does not implement a second wake route. Its process execution still
 runs under Restate, while wake handoff uses this same durable driver and
@@ -229,7 +240,8 @@ and terminal events deliberately do not ride the sink (they ride
 a sink must return fast and offload any I/O. Retention is
 `ProcessRegistry::prune_terminal_processes(cutoff_epoch_ms)`: a host that has
 projected a process's outcome into its own store calls it on the maintenance
-cadence to drop terminal rows — with their events, wakes, grants, and leases —
+cadence to replace eligible terminal rows with payload-free tombstones after
+the projection watermark advances — removing their events, wakes, observer edges, and leases —
 older than a window comfortably longer than any in-flight `await_terminal`.
 
 ## The primitive (a process-side mirror of the turn machinery)
@@ -349,7 +361,7 @@ wire mirror bumps `REMOTE_PROTOCOL_VERSION` 6→7.
 
 ### Abandoned is a written fact, not an inferred one
 
-`ProcessTerminalState::Abandoned` is a fourth terminal state, peer to
+`ProcessStatus::Abandoned` is a terminal status, peer to
 `Completed | Failed | Cancelled`, with a matching `ProcessAwaitOutput::Abandoned`
 arm. It records that the owner stopped executing without recording an outcome: the
 true result is unknowable and no cleanup is assumed to have run. The terminal
@@ -407,11 +419,11 @@ owns its OS resources.
 ### The unified facade
 
 `core.processes()` is the single global `Processes` surface (start / get / list /
-list_granted_to / list_originated_by / events / signal / await_output / cancel /
+list_observed_by / list_originated_by / events / signal / await_output / cancel /
 cancel_all / transfer / prune / request_abandon / session_snapshot / observer),
-carrying two distinct filters: **grants** are addressability (what a session may
+carrying two distinct filters: **observers** are addressability (what a session may
 address) and **provenance** is origin (what a session created). `session.processes()`
-is thin grant-scoped sugar returning `ObservedProcess`, and the old
+is thin observer-scoped sugar returning `ObservedProcess`, and the old
 `SessionProcessAdmin::await_all` misnomer — a session-graph refresh, never a wait —
 is renamed `LashSession::refresh_background_graph`. `ProcessDrainReport` lives in
 `lash::durability`; the Restate tier skips `ExternallyOwned` submission at ingress,
@@ -461,12 +473,10 @@ and `driver.process_registry()` refer to the same decorated state store. A Resta
 An emitter-supplied durability API was **not** added — the worker owns execution
 durability, not the emitter.
 
-Intentional cancellation now follows the host-owned ability seam instead of the
-durable-start path. `ProcessCancelAbility` receives typed cancel requests with a
-source (`HostApi`, `Tool`, or `Lashlang`) and reason; cancel-all first lists live
-visible handles, then calls the same cancel-summary path for each. Handle
-revocation and process cancellation remain explicit operations rather than a
-combined unreferenced-handle cleanup request.
+Intentional cancellation is a scoped `ProcessService` operation, separate from
+execution recovery. Session tool surfaces validate observer visibility before
+cancelling; cancel-all first lists live visible processes and then cancels each.
+There is no host-injectable cancellation policy inside the runtime.
 
 ### Subagent collapse
 
@@ -510,8 +520,8 @@ terminal are carried as request config / tool-access, not lost.
   explicit-controller routing (the silent fallback removed), register-and-poke
   seam after a successful `Start`, + out-of-turn idempotency comment.
 - `crates/lash-core/src/runtime/process/service.rs` —
-  `ProcessService::start_from_request`, `ProcessCancelAbility`,
-  `ProcessCancelAllRequest`, and typed cancel summaries.
+  `ProcessService::start_from_request`, visibility-scoped cancellation, and
+  typed cancel summaries.
 - `crates/lash-core/src/runtime/effect/executor.rs` —
   `InlineEffectHost` / inline controller (stateless; the off-lease
   `tokio::spawn` deleted, `Start` only registers the row, cancel is a durable
@@ -524,7 +534,7 @@ terminal are carried as request config / tool-access, not lost.
   `ProcessInput::SessionTurn`.
 - `crates/lash-restate/src/tests.rs` —
   `sqlite_trigger_started_process_recovered_after_worker_registry_reopen` and
-  `sqlite_process_recovery_reopens_registry_worker_grants_wakes_and_cancel`.
+  `sqlite_process_recovery_reopens_registry_worker_observers_wakes_and_cancel`.
 - `crates/lash-core/src/testing/conformance/` — process-lease single-owner /
   fencing conformance suite (`process_registry.rs`), plus the ADR 0019 cases:
   sweep obeys disposition, Abandoned requires owner drain or a lapsed-lease
@@ -536,7 +546,7 @@ terminal are carried as request config / tool-access, not lost.
 - `crates/lash-core/src/runtime/process/model.rs` — `RecoveryDisposition`, the
   durable `first_started` fact, and `AbandonRequest`.
 - `crates/lash-core/src/runtime/process/events.rs` —
-  `ProcessTerminalState::Abandoned`, `AbandonWriter`
+  `ProcessStatus::Abandoned`, `AbandonWriter`
   (`OwnerDrain | Sweep | ReconciledRequest | EngineGaveUp`), and `AbandonEvidence`.
 - `crates/lash-core/src/runtime/process/observation.rs` — `ObservedProcess`
   exposing `disposition`, `first_started`, `lease_holder`, `lease_expires_at_ms`,
@@ -546,7 +556,7 @@ terminal are carried as request config / tool-access, not lost.
 - `crates/lash-core/src/runtime/process/registry.rs` — `record_first_started`,
   `request_process_abandon`, and `get_process_lease` (state-only).
 - `crates/lash/src/process_admin.rs` — the global `Processes` facade with the
-  `granted_to` / `originated_by` filters and `request_abandon` / `prune`.
+  `observed_by` / `originated_by` filters and `request_abandon` / `prune`.
 - `crates/lash-tools/src/shell/mod.rs` / `shell/runtime.rs` — `shell.start`
   `detach: true` (double-fork/`setsid`, `ExternallyOwned` row terminal at birth)
   and the `ShellProcessTable` teardown SIGKILL.

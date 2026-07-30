@@ -29,7 +29,7 @@
 <div class="section">
           <div class="section-header">
             <h2>Runtime Shape</h2>
-            <p><code>LashRuntime</code> holds the live session registry, managed child-session state, AgentFrame-following turn execution, process grants, pending user turn input, queued background work, and a usage ledger. Sans-IO computes protocol effects, <code>RuntimeEffectController</code> handles nondeterministic host work, plugins contribute behavior, providers complete requests, and persistence records committed session state plus final turn commit idempotency.</p>
+            <p><code>LashRuntime</code> holds the live session registry, managed child-session state, AgentFrame-following turn execution, process observer edges, pending user turn input, queued background work, and a usage ledger. Sans-IO computes protocol effects, <code>RuntimeEffectController</code> handles nondeterministic host work, plugins contribute behavior, providers complete requests, and persistence records committed session state plus final turn commit idempotency.</p>
           </div>
           <div class="diagram">
             <div class="diagram-title">Runtime composition</div>
@@ -77,7 +77,7 @@ flowchart TD
         <div class="section">
           <div class="section-header">
             <h2>Host Capabilities</h2>
-            <p>The internal <code>RuntimeSessionServices</code> capability set is projected through thin wrappers (<code>RuntimeSessionStateService</code>, <code>RuntimeSessionLifecycleService</code>, <code>RuntimeSessionGraphService</code>, <code>RuntimeSessionProcessService</code>) that implement the split host-boundary traits <code>SessionStateService</code>, <code>SessionLifecycleService</code>, <code>SessionGraphService</code>, and <code>ProcessService</code> with typed operations for plugin and tool needs. Tool authors do not receive the runtime handle directly; <code>ToolContext</code> projects host capabilities into explicit methods such as <code>sessions()</code> (whose <code>ToolSessionAdmin</code> exposes <code>model()</code> and <code>tool_catalog()</code>), <code>processes()</code>, <code>direct_completions()</code>, and <code>attachments()</code>. Process starts enter through <code>ProcessStartRequest</code>, and intentional cancellation enters through the host-owned <code>ProcessCancelAbility</code>.</p>
+            <p>The internal <code>RuntimeSessionServices</code> capability set is projected through thin wrappers (<code>RuntimeSessionStateService</code>, <code>RuntimeSessionLifecycleService</code>, <code>RuntimeSessionGraphService</code>, <code>RuntimeSessionProcessService</code>) that implement the split host-boundary traits <code>SessionStateService</code>, <code>SessionLifecycleService</code>, <code>SessionGraphService</code>, and <code>ProcessService</code> with typed operations for plugin and tool needs. Tool authors do not receive the runtime handle directly; <code>ToolContext</code> projects host capabilities into explicit methods such as <code>sessions()</code> (whose <code>ToolSessionAdmin</code> exposes <code>model()</code> and <code>tool_catalog()</code>), <code>processes()</code>, <code>direct_completions()</code>, and <code>attachments()</code>. Process starts enter through <code>ProcessStartRequest</code>, and intentional cancellation is a direct visibility-scoped <code>ProcessService</code> operation.</p>
           </div>
           <div class="table">
             <table>
@@ -87,7 +87,7 @@ flowchart TD
                 <tr><td>Tool state</td><td>Read and mutate per-session Tool Catalog membership without exposing the inner registry.</td></tr>
                 <tr><td>Session lifecycle and turns</td><td>Create child sessions, fork sessions, append AgentFrames, and stream managed turns.</td></tr>
                 <tr><td>Session graph writes</td><td>Append plugin-authored nodes to a session graph through a guarded contract.</td></tr>
-                <tr><td>Processes</td><td>Register durable processes from typed start requests, grant process handles, deliver wakeups, and route user-facing cancellation through the configured cancel ability.</td></tr>
+                <tr><td>Processes</td><td>Register durable processes from typed start requests, record session observers, deliver wakeups, and route user-facing cancellation through the canonical process service.</td></tr>
                 <tr><td>Trace access</td><td>Expose trace sinks to hooks without exposing session internals. Human input is provided by host tools such as the CLI <code>ask</code> implementation, not by a runtime prompt event.</td></tr>
                 <tr><td>Direct completions</td><td>Run one-shot completions and account for their usage. Inside an atomic tool attempt, the provider call executes locally under that attempt rather than becoming a nested journal entry.</td></tr>
               </tbody>

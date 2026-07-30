@@ -6,8 +6,7 @@ use std::sync::Mutex;
 use serde::{Deserialize, Serialize};
 
 use super::events::{
-    ProcessAwaitOutput, ProcessEventType, ProcessTerminalSemantics, ProcessTerminalState,
-    default_process_event_types,
+    ProcessAwaitOutput, ProcessEventType, ProcessTerminalSemantics, default_process_event_types,
 };
 use super::op_scope::ProcessOpScope;
 use super::validation::prepare_process_registration;
@@ -16,6 +15,8 @@ mod execution;
 pub use execution::*;
 
 pub type ProcessId = String;
+pub type SessionId = String;
+pub type ProcessOutcome = ProcessAwaitOutput;
 
 /// Opaque position in a store's Process Change Feed.
 ///
@@ -175,7 +176,7 @@ pub enum RecoveryDisposition {
 
 /// Durable, non-terminal marker recording that a non-owner authorized
 /// abandonment without proof the owner is gone. The sweep reconciles it into
-/// [`ProcessTerminalState::Abandoned`](super::events::ProcessTerminalState::Abandoned)
+/// [`ProcessStatus::Abandoned`]
 /// only once the row's lease has lapsed; the marker never terminates anything
 /// by itself and is visible to observers while pending. See ADR 0019.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -328,7 +329,8 @@ pub async fn load_process_execution_env(
 
 #[derive(Clone, Debug, Default)]
 pub struct ProcessStartOptions {
-    pub descriptor: Option<ProcessHandleDescriptor>,
+    /// Explicit host-selected initial observer session ids.
+    pub observers: Vec<SessionId>,
     /// Runtime-internal spawn provenance override. Set by process execution
     /// contexts so children started *by a process* inherit the parent's
     /// originator and wake target instead of being stamped with the ephemeral
@@ -340,13 +342,12 @@ pub struct ProcessStartOptions {
 }
 
 /// Provenance a process-run context hands to its children: the chain's
-/// originator and the chain's wake target. Mirrors the trigger fire path,
-/// where the spawned process inherits the registrant and the grant is derived
-/// from the wake target.
+/// originator and wake target. Observer membership remains an independent,
+/// explicit start option.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ProcessSpawnProvenance {
     pub originator: ProcessOriginator,
-    pub wake_target: Option<SessionScope>,
+    pub wake_session_id: Option<SessionId>,
 }
 
 impl ProcessStartOptions {
@@ -354,13 +355,16 @@ impl ProcessStartOptions {
         Self::default()
     }
 
-    pub fn with_descriptor(mut self, descriptor: ProcessHandleDescriptor) -> Self {
-        self.descriptor = Some(descriptor);
+    pub fn with_observer(mut self, session_id: impl Into<SessionId>) -> Self {
+        self.observers.push(session_id.into());
         self
     }
 
-    pub fn with_optional_descriptor(mut self, descriptor: Option<ProcessHandleDescriptor>) -> Self {
-        self.descriptor = descriptor;
+    pub fn with_observers(
+        mut self,
+        observers: impl IntoIterator<Item = impl Into<SessionId>>,
+    ) -> Self {
+        self.observers = observers.into_iter().map(Into::into).collect();
         self
     }
 
@@ -392,9 +396,11 @@ pub struct ProcessStartRequest {
     pub env_spec: Option<ProcessExecutionEnvSpec>,
     pub originator: ProcessOriginator,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub wake_target: Option<SessionScope>,
+    pub identity: Option<ProcessIdentity>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub grant: Option<ProcessStartGrant>,
+    pub wake_session_id: Option<SessionId>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub observers: Vec<SessionId>,
     #[serde(default)]
     pub event_types: Vec<ProcessEventType>,
 }
@@ -413,8 +419,9 @@ impl ProcessStartRequest {
             max_attempts: None,
             env_spec: None,
             originator,
-            wake_target: None,
-            grant: None,
+            identity: None,
+            wake_session_id: None,
+            observers: Vec::new(),
             event_types: default_process_event_types(),
         }
     }
@@ -444,13 +451,21 @@ impl ProcessStartRequest {
         self
     }
 
-    pub fn with_wake_target(mut self, wake_target: Option<SessionScope>) -> Self {
-        self.wake_target = wake_target;
+    pub fn with_identity(mut self, identity: ProcessIdentity) -> Self {
+        self.identity = Some(identity);
         self
     }
 
-    pub fn with_grant(mut self, grant: Option<ProcessStartGrant>) -> Self {
-        self.grant = grant;
+    pub fn with_wake_session_id(mut self, wake_session_id: Option<SessionId>) -> Self {
+        self.wake_session_id = wake_session_id;
+        self
+    }
+
+    pub fn with_observers(
+        mut self,
+        observers: impl IntoIterator<Item = impl Into<SessionId>>,
+    ) -> Self {
+        self.observers = observers.into_iter().map(Into::into).collect();
         self
     }
 
@@ -471,7 +486,7 @@ impl ProcessStartRequest {
     }
 
     pub fn into_registration(self, env_ref: Option<ProcessExecutionEnvRef>) -> ProcessRegistration {
-        ProcessRegistration::new(
+        let mut registration = ProcessRegistration::new(
             self.id,
             self.input,
             self.disposition,
@@ -480,7 +495,11 @@ impl ProcessStartRequest {
         .with_max_attempts(self.max_attempts)
         .with_event_types(self.event_types)
         .with_execution_env_ref(env_ref)
-        .with_wake_target(self.wake_target)
+        .with_wake_session_id(self.wake_session_id);
+        if let Some(identity) = self.identity {
+            registration = registration.with_identity(identity);
+        }
+        registration
     }
 }
 
@@ -528,7 +547,7 @@ pub enum ProcessOriginator {
         scope: Option<String>,
     },
     Session {
-        scope: SessionScope,
+        session_id: SessionId,
     },
 }
 
@@ -544,16 +563,18 @@ impl ProcessOriginator {
     }
 
     pub fn session(scope: SessionScope) -> Self {
-        Self::Session { scope }
+        Self::Session {
+            session_id: scope.session_id,
+        }
     }
 
-    pub fn scope_id(&self) -> String {
+    pub fn id(&self) -> String {
         match self {
             Self::Host { scope } => scope
                 .as_ref()
                 .map(|scope| format!("host:{scope}"))
                 .unwrap_or_else(|| "host".to_string()),
-            Self::Session { scope } => scope.id().to_string(),
+            Self::Session { session_id } => session_id.clone(),
         }
     }
 }
@@ -609,7 +630,7 @@ pub struct ProcessRegistration {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub env_ref: Option<ProcessExecutionEnvRef>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub wake_target: Option<SessionScope>,
+    pub wake_session_id: Option<SessionId>,
 }
 
 impl Clone for ProcessRegistration {
@@ -623,7 +644,7 @@ impl Clone for ProcessRegistration {
             event_types: self.event_types.clone(),
             provenance: self.provenance.clone(),
             env_ref: self.env_ref.clone(),
-            wake_target: self.wake_target.clone(),
+            wake_session_id: self.wake_session_id.clone(),
         }
     }
 }
@@ -645,7 +666,7 @@ impl ProcessRegistration {
             event_types: default_process_event_types(),
             provenance,
             env_ref: None,
-            wake_target: None,
+            wake_session_id: None,
         }
     }
 
@@ -672,8 +693,8 @@ impl ProcessRegistration {
         self
     }
 
-    pub fn with_wake_target(mut self, wake_target: Option<SessionScope>) -> Self {
-        self.wake_target = wake_target;
+    pub fn with_wake_session_id(mut self, wake_session_id: Option<SessionId>) -> Self {
+        self.wake_session_id = wake_session_id;
         self
     }
 
@@ -699,88 +720,46 @@ impl ProcessRegistration {
     }
 }
 
-#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
-#[serde(tag = "state", rename_all = "snake_case")]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum ProcessStatus {
     #[default]
     Running,
-    Completed {
-        await_output: ProcessAwaitOutput,
-    },
-    Failed {
-        await_output: ProcessAwaitOutput,
-    },
-    Cancelled {
-        await_output: ProcessAwaitOutput,
-    },
-    Abandoned {
-        await_output: ProcessAwaitOutput,
-    },
+    Waiting,
+    Completed,
+    Failed,
+    Cancelled,
+    Abandoned,
 }
 
 impl ProcessStatus {
     pub fn from_terminal(terminal: ProcessTerminalSemantics) -> Self {
-        match terminal.state {
-            ProcessTerminalState::Completed => Self::Completed {
-                await_output: terminal.await_output,
-            },
-            ProcessTerminalState::Failed => Self::Failed {
-                await_output: terminal.await_output,
-            },
-            ProcessTerminalState::Cancelled => Self::Cancelled {
-                await_output: terminal.await_output,
-            },
-            ProcessTerminalState::Abandoned => Self::Abandoned {
-                await_output: terminal.await_output,
-            },
-        }
+        terminal.status
     }
 
     pub fn is_terminal(&self) -> bool {
-        !matches!(self, Self::Running)
+        matches!(
+            self,
+            Self::Completed | Self::Failed | Self::Cancelled | Self::Abandoned
+        )
     }
 
     pub fn label(&self) -> &'static str {
         match self {
             Self::Running => "running",
-            Self::Completed { .. } => "completed",
-            Self::Failed { .. } => "failed",
-            Self::Cancelled { .. } => "cancelled",
-            Self::Abandoned { .. } => "abandoned",
+            Self::Waiting => "waiting",
+            Self::Completed => "completed",
+            Self::Failed => "failed",
+            Self::Cancelled => "cancelled",
+            Self::Abandoned => "abandoned",
         }
-    }
-
-    pub fn terminal_state(&self) -> Option<ProcessTerminalState> {
-        match self {
-            Self::Running => None,
-            Self::Completed { .. } => Some(ProcessTerminalState::Completed),
-            Self::Failed { .. } => Some(ProcessTerminalState::Failed),
-            Self::Cancelled { .. } => Some(ProcessTerminalState::Cancelled),
-            Self::Abandoned { .. } => Some(ProcessTerminalState::Abandoned),
-        }
-    }
-
-    pub fn await_output(&self) -> Option<&ProcessAwaitOutput> {
-        match self {
-            Self::Running => None,
-            Self::Completed { await_output }
-            | Self::Failed { await_output }
-            | Self::Cancelled { await_output }
-            | Self::Abandoned { await_output } => Some(await_output),
-        }
-    }
-
-    pub fn terminal_semantics(&self) -> Option<ProcessTerminalSemantics> {
-        Some(ProcessTerminalSemantics {
-            state: self.terminal_state()?,
-            await_output: self.await_output()?.clone(),
-        })
     }
 }
 
-/// Durable process row. Session-visible addressability lives in
-/// [`ProcessHandleGrant`], not in the process record.
-#[derive(Clone, Debug, Serialize, Deserialize)]
+/// Durable process lifecycle fold. Observer membership and wake subscription
+/// are queryable edge state, audited by events but deliberately not projected
+/// into this record.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ProcessRecord {
     pub id: ProcessId,
     pub registration_hash: String,
@@ -798,8 +777,6 @@ pub struct ProcessRecord {
     pub provenance: ProcessProvenance,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub env_ref: Option<ProcessExecutionEnvRef>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub wake_target: Option<SessionScope>,
     #[serde(default)]
     pub created_at_ms: u64,
     #[serde(default)]
@@ -820,6 +797,8 @@ pub struct ProcessRecord {
     pub wait: Option<WaitState>,
     #[serde(default)]
     pub status: ProcessStatus,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub outcome: Option<ProcessOutcome>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -875,7 +854,6 @@ impl ProcessRecord {
             event_types: registration.event_types,
             provenance: registration.provenance,
             env_ref: registration.env_ref,
-            wake_target: registration.wake_target,
             created_at_ms: now_ms,
             updated_at_ms: now_ms,
             external_ref: None,
@@ -883,6 +861,7 @@ impl ProcessRecord {
             abandon_request: None,
             wait: None,
             status: ProcessStatus::Running,
+            outcome: None,
         }
     }
 
@@ -890,28 +869,8 @@ impl ProcessRecord {
         self.status.is_terminal()
     }
 
-    pub fn clear_wake_target_for_session(&mut self, session_id: &str) -> bool {
-        self.clear_wake_target_for_session_with_clock(session_id, &crate::SystemClock)
-    }
-
-    pub fn clear_wake_target_for_session_with_clock(
-        &mut self,
-        session_id: &str,
-        clock: &dyn crate::Clock,
-    ) -> bool {
-        let should_clear = self
-            .wake_target
-            .as_ref()
-            .is_some_and(|scope| scope.session_id == session_id);
-        if should_clear {
-            self.wake_target = None;
-            self.updated_at_ms = clock.timestamp_ms();
-        }
-        should_clear
-    }
-
-    pub fn originator_scope_id(&self) -> String {
-        self.provenance.originator.scope_id()
+    pub fn originator_id(&self) -> String {
+        self.provenance.originator.id()
     }
 }
 
@@ -926,8 +885,21 @@ pub struct ProcessIdentity {
     pub kind: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub label: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "deserialize_present_json_value"
+    )]
     pub definition: Option<serde_json::Value>,
+}
+
+fn deserialize_present_json_value<'de, D>(
+    deserializer: D,
+) -> Result<Option<serde_json::Value>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    serde_json::Value::deserialize(deserializer).map(Some)
 }
 
 impl ProcessIdentity {
@@ -1067,112 +1039,34 @@ pub struct ProcessExternalRef {
     pub metadata: Option<serde_json::Value>,
 }
 
-#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ProcessHandleDescriptor {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub kind: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub label: Option<String>,
-}
-
-impl ProcessHandleDescriptor {
-    pub fn new(kind: Option<impl Into<String>>, label: Option<impl Into<String>>) -> Self {
-        Self {
-            kind: kind.map(Into::into),
-            label: label.map(Into::into),
-        }
-    }
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ProcessHandleGrant {
-    pub session_id: String,
-    pub process_id: ProcessId,
-    pub descriptor: ProcessHandleDescriptor,
-}
-
-pub type ProcessHandleGrantEntry = (ProcessHandleGrant, ProcessRecord);
-
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum ProcessLifecycleStatus {
-    #[default]
-    Running,
-    Completed,
-    Failed,
-    Cancelled,
-    Abandoned,
-}
-
-impl ProcessLifecycleStatus {
-    pub fn label(self) -> &'static str {
-        match self {
-            Self::Running => "running",
-            Self::Completed => "completed",
-            Self::Failed => "failed",
-            Self::Cancelled => "cancelled",
-            Self::Abandoned => "abandoned",
-        }
-    }
-
-    pub fn is_terminal(self) -> bool {
-        !matches!(self, Self::Running)
-    }
-
-    pub fn terminal_state(self) -> Option<ProcessTerminalState> {
-        match self {
-            Self::Running => None,
-            Self::Completed => Some(ProcessTerminalState::Completed),
-            Self::Failed => Some(ProcessTerminalState::Failed),
-            Self::Cancelled => Some(ProcessTerminalState::Cancelled),
-            Self::Abandoned => Some(ProcessTerminalState::Abandoned),
-        }
-    }
-}
-
-impl From<&ProcessStatus> for ProcessLifecycleStatus {
-    fn from(status: &ProcessStatus) -> Self {
-        match status {
-            ProcessStatus::Running => Self::Running,
-            ProcessStatus::Completed { .. } => Self::Completed,
-            ProcessStatus::Failed { .. } => Self::Failed,
-            ProcessStatus::Cancelled { .. } => Self::Cancelled,
-            ProcessStatus::Abandoned { .. } => Self::Abandoned,
-        }
-    }
-}
-
-impl From<ProcessStatus> for ProcessLifecycleStatus {
-    fn from(status: ProcessStatus) -> Self {
-        Self::from(&status)
-    }
-}
-
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ProcessHandleSummary {
     #[serde(rename = "__handle__")]
     pub handle_type: String,
     pub id: ProcessId,
     pub process_id: ProcessId,
-    pub descriptor: ProcessHandleDescriptor,
+    pub kind: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub label: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub definition: Option<serde_json::Value>,
-    pub status: ProcessLifecycleStatus,
+    pub status: ProcessStatus,
 }
 
 impl ProcessHandleSummary {
     pub fn new(
         process_id: impl Into<ProcessId>,
-        descriptor: ProcessHandleDescriptor,
-        status: ProcessLifecycleStatus,
+        identity: ProcessIdentity,
+        status: ProcessStatus,
     ) -> Self {
         let process_id = process_id.into();
         Self {
             handle_type: "process".to_string(),
             id: process_id.clone(),
             process_id,
-            descriptor,
-            definition: None,
+            kind: identity.kind,
+            label: identity.label,
+            definition: identity.definition,
             status,
         }
     }
@@ -1182,34 +1076,22 @@ impl ProcessHandleSummary {
         self
     }
 
-    pub fn from_grant_record(grant: ProcessHandleGrant, record: ProcessRecord) -> Self {
-        let definition = record.identity.definition.clone();
-        Self::new(
-            record.id,
-            grant.descriptor,
-            ProcessLifecycleStatus::from(record.status),
-        )
-        .with_definition(definition)
-    }
-}
-
-impl From<ProcessHandleGrantEntry> for ProcessHandleSummary {
-    fn from((grant, record): ProcessHandleGrantEntry) -> Self {
-        Self::from_grant_record(grant, record)
+    pub fn from_record(record: ProcessRecord) -> Self {
+        Self::new(record.id, record.identity, record.status)
     }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ProcessCancelSummary {
     pub process_id: ProcessId,
-    pub status: ProcessLifecycleStatus,
+    pub status: ProcessStatus,
 }
 
 impl ProcessCancelSummary {
     pub fn from_record(record: ProcessRecord) -> Self {
         Self {
             process_id: record.id,
-            status: ProcessLifecycleStatus::from(record.status),
+            status: record.status,
         }
     }
 }
@@ -1218,6 +1100,7 @@ impl ProcessCancelSummary {
 pub enum ProcessStatusFilter {
     #[default]
     Running,
+    Waiting,
     Completed,
     Failed,
     Cancelled,
@@ -1226,36 +1109,50 @@ pub enum ProcessStatusFilter {
 }
 
 impl ProcessStatusFilter {
+    pub fn label(self) -> Option<&'static str> {
+        match self {
+            Self::Running => Some("running"),
+            Self::Waiting => Some("waiting"),
+            Self::Completed => Some("completed"),
+            Self::Failed => Some("failed"),
+            Self::Cancelled => Some("cancelled"),
+            Self::Abandoned => Some("abandoned"),
+            Self::Any => None,
+        }
+    }
+
     pub fn decode(value: Option<&str>) -> Result<Self, String> {
         match value.unwrap_or("running") {
             "running" => Ok(Self::Running),
+            "waiting" => Ok(Self::Waiting),
             "completed" => Ok(Self::Completed),
             "failed" => Ok(Self::Failed),
             "cancelled" => Ok(Self::Cancelled),
             "abandoned" => Ok(Self::Abandoned),
             "any" => Ok(Self::Any),
             other => Err(format!(
-                "processes.list status must be `running`, `completed`, `failed`, `cancelled`, `abandoned`, or `any`, got `{other}`"
+                "processes.list status must be `running`, `waiting`, `completed`, `failed`, `cancelled`, `abandoned`, or `any`, got `{other}`"
             )),
         }
     }
 
     pub fn list_mode(self) -> ProcessListMode {
         match self {
-            Self::Running => ProcessListMode::Live,
+            Self::Running | Self::Waiting => ProcessListMode::Live,
             Self::Completed | Self::Failed | Self::Cancelled | Self::Abandoned | Self::Any => {
                 ProcessListMode::All
             }
         }
     }
 
-    pub fn matches(self, status: ProcessLifecycleStatus) -> bool {
+    pub fn matches(self, status: ProcessStatus) -> bool {
         match self {
-            Self::Running => status == ProcessLifecycleStatus::Running,
-            Self::Completed => status == ProcessLifecycleStatus::Completed,
-            Self::Failed => status == ProcessLifecycleStatus::Failed,
-            Self::Cancelled => status == ProcessLifecycleStatus::Cancelled,
-            Self::Abandoned => status == ProcessLifecycleStatus::Abandoned,
+            Self::Running => status == ProcessStatus::Running,
+            Self::Waiting => status == ProcessStatus::Waiting,
+            Self::Completed => status == ProcessStatus::Completed,
+            Self::Failed => status == ProcessStatus::Failed,
+            Self::Cancelled => status == ProcessStatus::Cancelled,
+            Self::Abandoned => status == ProcessStatus::Abandoned,
             Self::Any => true,
         }
     }
@@ -1266,7 +1163,7 @@ pub struct ProcessListFilter {
     pub definition: Option<serde_json::Value>,
     pub status: ProcessStatusFilter,
     pub waiting: Option<bool>,
-    pub originator_scope_id: Option<String>,
+    pub originator_id: Option<String>,
     pub identity_kind: Option<String>,
     pub identity_label: Option<String>,
     pub caused_by_occurrence_id: Option<String>,
@@ -1289,7 +1186,7 @@ impl ProcessListFilter {
                 "definition"
                 | "status"
                 | "waiting"
-                | "originator_scope_id"
+                | "originator_id"
                 | "identity_kind"
                 | "identity_label"
                 | "caused_by_occurrence_id"
@@ -1310,7 +1207,7 @@ impl ProcessListFilter {
                     .ok_or_else(|| "processes.list `waiting` filter must be a boolean".to_string())
             })
             .transpose()?;
-        let originator_scope_id = optional_string_filter(args, "originator_scope_id")?;
+        let originator_id = optional_string_filter(args, "originator_id")?;
         let identity_kind = optional_string_filter(args, "identity_kind")?;
         let identity_label = optional_string_filter(args, "identity_label")?;
         let caused_by_occurrence_id = optional_string_filter(args, "caused_by_occurrence_id")?;
@@ -1321,7 +1218,7 @@ impl ProcessListFilter {
             definition,
             status,
             waiting,
-            originator_scope_id,
+            originator_id,
             identity_kind,
             identity_label,
             caused_by_occurrence_id,
@@ -1335,14 +1232,8 @@ impl ProcessListFilter {
         self.status.list_mode()
     }
 
-    pub fn matches_entry(&self, entry: &ProcessHandleGrantEntry) -> bool {
-        let (_grant, record) = entry;
-        self.matches_record(record)
-    }
-
     pub fn matches_record(&self, record: &ProcessRecord) -> bool {
-        let status = ProcessLifecycleStatus::from(&record.status);
-        self.status.matches(status)
+        self.status.matches(record.status)
             && self
                 .definition
                 .as_ref()
@@ -1351,9 +1242,9 @@ impl ProcessListFilter {
                 .waiting
                 .is_none_or(|waiting| record.wait.is_some() == waiting)
             && self
-                .originator_scope_id
+                .originator_id
                 .as_ref()
-                .is_none_or(|scope_id| record.originator_scope_id() == scope_id.as_str())
+                .is_none_or(|originator_id| record.originator_id() == originator_id.as_str())
             && self
                 .identity_kind
                 .as_ref()
@@ -1436,19 +1327,58 @@ impl ProcessListMode {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ProcessStartGrant {
-    pub session_scope: SessionScope,
-    pub descriptor: ProcessHandleDescriptor,
-}
-
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ProcessSessionDeleteReport {
     pub session_id: String,
-    pub revoked_handle_count: usize,
+    pub removed_observer_count: usize,
     pub discarded_wake_delivery_count: usize,
-    pub orphaned_process_ids: Vec<String>,
-    pub preserved_process_ids: Vec<String>,
+    pub cleared_subscription_count: usize,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum ProcessObserverBy {
+    Host { operation_id: String },
+    ForkInheritance,
+}
+
+impl ProcessObserverBy {
+    pub fn host(operation_id: impl Into<String>) -> Self {
+        Self::Host {
+            operation_id: operation_id.into(),
+        }
+    }
+
+    pub fn replay_component(&self) -> &str {
+        match self {
+            Self::Host { operation_id } => operation_id,
+            Self::ForkInheritance => "fork_inheritance",
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ProcessTombstone {
+    pub process_id: ProcessId,
+    pub terminal_label: String,
+    pub pruned_at_ms: u64,
+    pub pruned_change_seq: u64,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum ProcessChange {
+    Upsert { record: Box<ProcessRecord> },
+    Deleted { tombstone: ProcessTombstone },
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ObserverInheritance {
+    #[default]
+    All,
+    None,
+    Only(Vec<ProcessId>),
 }
 
 #[cfg(test)]
@@ -1470,7 +1400,7 @@ mod tests {
         definition: serde_json::Value,
         process_name: &str,
         status: ProcessStatus,
-    ) -> ProcessHandleGrantEntry {
+    ) -> ProcessRecord {
         let mut record = ProcessRecord::from_registration(
             ProcessRegistration::new(
                 process_id,
@@ -1494,14 +1424,7 @@ mod tests {
             )))),
         );
         record.status = status;
-        (
-            ProcessHandleGrant {
-                session_id: "session".to_string(),
-                process_id: process_id.to_string(),
-                descriptor: ProcessHandleDescriptor::new(Some("test-engine"), Some(process_name)),
-            },
-            record,
-        )
+        record
     }
 
     #[test]
@@ -1513,7 +1436,7 @@ mod tests {
             "target",
             ProcessStatus::Running,
         );
-        waiting_entry.1.wait = Some(WaitState {
+        waiting_entry.wait = Some(WaitState {
             since_ms: 42,
             kind: WaitKind::Signal {
                 name: "ready".to_string(),
@@ -1529,10 +1452,10 @@ mod tests {
             ProcessListFilter::decode(&json!({ "waiting": false })).expect("decode idle filter");
 
         assert_eq!(waiting_filter.list_mode(), ProcessListMode::Live);
-        assert!(waiting_filter.matches_entry(&waiting_entry));
-        assert!(!waiting_filter.matches_entry(&idle_entry));
-        assert!(!idle_filter.matches_entry(&waiting_entry));
-        assert!(idle_filter.matches_entry(&idle_entry));
+        assert!(waiting_filter.matches_record(&waiting_entry));
+        assert!(!waiting_filter.matches_record(&idle_entry));
+        assert!(!idle_filter.matches_record(&waiting_entry));
+        assert!(idle_filter.matches_record(&idle_entry));
         assert!(
             ProcessListFilter::decode(&json!({ "waiting": "yes" }))
                 .expect_err("invalid waiting filter")

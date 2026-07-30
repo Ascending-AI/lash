@@ -230,6 +230,18 @@ async fn sqlite_process_registry_satisfies_conformance() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn sqlite_process_continuation_store_satisfies_conformance() {
+    let storage = Arc::new(
+        SqliteProcessRegistry::memory()
+            .await
+            .expect("open continuation store"),
+    );
+    let registry = Arc::clone(&storage) as Arc<dyn lash_core::ProcessRegistry>;
+    let store = storage as Arc<dyn lash_core::ProcessContinuationStore>;
+    lash_core::testing::conformance::process_continuation_store(registry, store).await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn sqlite_wake_delivery_crash_matrix() {
     let dir = tempfile::tempdir().expect("tempdir");
     let registry = Arc::new(
@@ -240,7 +252,10 @@ async fn sqlite_wake_delivery_crash_matrix() {
         .await
         .expect("open process registry")
         .with_wake_delivery_config(
-            lash_core::WakeDeliveryConfig::new(250).expect("valid short test retention"),
+            lash_core::WakeDeliveryConfig::new(10_000)
+                .expect("valid test retention")
+                .with_enqueuing_stale_after_ms(25)
+                .expect("valid short stale-claim age"),
         ),
     ) as Arc<dyn ProcessRegistry>;
     let factory =
@@ -266,7 +281,7 @@ async fn sqlite_process_registry_rejects_pre_unit_external_owner_schema_before_s
     };
     let message = error.to_string();
     assert!(message.contains("Unsupported lash process registry schema"));
-    assert!(message.contains("supports schema version 16"));
+    assert!(message.contains("supports schema version 19"));
     assert!(message.contains("delete the process registry database and start fresh"));
 }
 

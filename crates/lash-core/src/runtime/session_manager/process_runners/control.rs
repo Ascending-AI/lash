@@ -36,13 +36,13 @@ impl<'scope> ProcessCommandRunner<'scope> {
     async fn start(
         &self,
         registration: crate::ProcessRegistration,
-        grant: Option<crate::ProcessStartGrant>,
+        observers: Vec<String>,
         execution_context: crate::ProcessExecutionContext,
     ) -> Result<crate::ProcessRecord, crate::PluginError> {
         match self
             .run(crate::ProcessCommand::Start {
                 registration,
-                grant,
+                observers,
                 execution_context: Box::new(execution_context),
             })
             .await?
@@ -71,7 +71,7 @@ impl<'scope> ProcessCommandRunner<'scope> {
         &self,
         session_scope: crate::SessionScope,
         mode: crate::ProcessListMode,
-    ) -> Result<Vec<crate::runtime::ProcessHandleGrantEntry>, crate::PluginError> {
+    ) -> Result<Vec<crate::ProcessRecord>, crate::PluginError> {
         match self
             .run(crate::ProcessCommand::List {
                 session_scope,
@@ -121,7 +121,7 @@ impl<'scope> ProcessCommandRunner<'scope> {
         let waiting_ordinal = self
             .registry
             .get_process(process_id)
-            .await
+            .await?
             .and_then(|record| match record.wait {
                 Some(crate::WaitState {
                     kind:
@@ -298,23 +298,22 @@ impl ProcessCapability {
             .await?;
         // Children started *by a process* inherit the chain's provenance (the
         // run context provides it); in-session starts stamp the creating
-        // session. The grant always follows the wake target, mirroring the
-        // trigger fire path — the ephemeral execution scope must never appear
-        // on a record.
-        let (originator, wake_target) = match options.spawn_provenance.clone() {
-            Some(spawn) => (spawn.originator, spawn.wake_target),
+        // session. Wake routing and observer membership are independent: only
+        // the explicit `options.observers` set creates edges. The ephemeral
+        // execution scope must never appear on a record.
+        let (originator, wake_session_id) = match options.spawn_provenance.clone() {
+            Some(spawn) => (spawn.originator, spawn.wake_session_id),
             None => (
                 crate::ProcessOriginator::session(creator_scope.clone()),
-                Some(creator_scope.clone()),
+                Some(creator_scope.session_id.clone()),
             ),
         };
-        let grant_scope = wake_target.clone();
         let registration = registration
             .with_process_provenance(
                 crate::ProcessProvenance::new(originator).with_caused_by(caused_by),
             )
             .with_execution_env_ref(env_ref)
-            .with_wake_target(wake_target);
+            .with_wake_session_id(wake_session_id);
         let registration = self
             .prepare_process_environment(current, session_id, registration)
             .await?;
@@ -325,16 +324,7 @@ impl ProcessCapability {
             "processes are unavailable in this runtime",
         )?;
         runner
-            .start(
-                registration,
-                options.descriptor.and_then(|descriptor| {
-                    grant_scope.map(|session_scope| crate::ProcessStartGrant {
-                        session_scope,
-                        descriptor,
-                    })
-                }),
-                execution_context,
-            )
+            .start(registration, options.observers, execution_context)
             .await
     }
 
@@ -387,7 +377,7 @@ impl ProcessCapability {
     }
 
     /// Write the terminal outcome for an Externally-Owned process the session
-    /// holds a grant for (ADR 0019). This is the "external actor calling
+    /// observes (ADR 0019). This is the "external actor calling
     /// `complete_process`" closure path: a `shell.start` detach records its
     /// immediately-terminal launch fact through here. Only Externally-Owned rows
     /// may be completed this way — an OwnerBound or Rerunnable row has a lash
@@ -403,11 +393,10 @@ impl ProcessCapability {
     ) -> Result<crate::ProcessCompletionOutcome, crate::PluginError> {
         let runner = self.command_runner(current, &scope)?;
         let session_scope = self.process_scope_for_op(session_id, scope.agent_frame_id());
-        // Session-visibility authorization: the caller must hold a live handle
-        // grant for the row. This scopes *which* rows this session may complete.
+        // Session-visibility authorization: the caller must observe the row.
         if !runner
             .registry()
-            .has_handle_grant(&session_scope, process_id)
+            .is_observer(&session_scope.session_id, process_id)
             .await?
         {
             return Err(crate::PluginError::Session(format!(
@@ -435,7 +424,7 @@ impl ProcessCapability {
         session_id: &str,
         mode: crate::ProcessListMode,
         scope: crate::ProcessOpScope<'_>,
-    ) -> Result<Vec<crate::runtime::ProcessHandleGrantEntry>, crate::PluginError> {
+    ) -> Result<Vec<crate::ProcessRecord>, crate::PluginError> {
         self.command_runner(current, &scope)?
             .list(
                 self.process_scope_for_op(session_id, scope.agent_frame_id()),
@@ -453,7 +442,7 @@ impl ProcessCapability {
         scope: crate::ProcessOpScope<'_>,
     ) -> Result<crate::ProcessRecord, crate::PluginError> {
         let runner = self.command_runner(current, &scope)?;
-        if runner.registry().get_process(process_id).await.is_none() {
+        if runner.registry().get_process(process_id).await?.is_none() {
             return Err(crate::PluginError::Session(format!(
                 "unknown process `{process_id}`"
             )));
@@ -475,16 +464,27 @@ impl ProcessCapability {
     ) -> Result<crate::ProcessEvent, crate::PluginError> {
         let runner = self.command_runner(current, &scope)?;
         let session_scope = self.process_scope_for_op(session_id, scope.agent_frame_id());
-        let visible = runner
+        if !runner
             .registry()
-            .list_live_handle_grants(&session_scope)
+            .is_observer(&session_scope.session_id, process_id)
             .await?
-            .into_iter()
-            .any(|(grant, _record)| grant.process_id == process_id);
-        if !visible {
+        {
             return Err(crate::PluginError::Session(format!(
                 "process handle `{process_id}` is not live or visible in this session"
             )));
+        }
+        let record = runner
+            .registry()
+            .get_process(process_id)
+            .await?
+            .ok_or_else(|| {
+                crate::PluginError::Session(format!("unknown process `{process_id}`"))
+            })?;
+        if record.is_terminal() {
+            return Err(crate::PluginError::ProcessAlreadyTerminal {
+                process_id: process_id.to_string(),
+                status: record.status,
+            });
         }
         let event_type = crate::process_signal_event_type(&signal_name)?;
         let request = crate::ProcessEventAppendRequest::new(event_type, payload).with_replay_key(
@@ -509,14 +509,18 @@ impl ProcessCapability {
         let runner = self.command_runner(current, &scope)?;
         let session_scope = self.process_scope_for_op(session_id, scope.agent_frame_id());
         for process_id in handle_ids {
-            if !runner
+            match runner
                 .registry()
-                .has_handle_grant(&session_scope, process_id)
-                .await?
+                .is_observer(&session_scope.session_id, process_id)
+                .await
             {
-                return Err(crate::PluginError::Session(format!(
-                    "process handle `{process_id}` is not live or visible in this session"
-                )));
+                Ok(true) | Err(crate::PluginError::ProcessNoLongerRetained { .. }) => {}
+                Ok(false) => {
+                    return Err(crate::PluginError::Session(format!(
+                        "process handle `{process_id}` is not live or visible in this session"
+                    )));
+                }
+                Err(error) => return Err(error),
             }
         }
         Ok(())

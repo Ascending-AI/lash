@@ -215,7 +215,7 @@ Ok(())</code></pre>
         <p>lash ships no stuck-process daemon and writes no "stuck" verdict. Staleness is a host-built read-side classification over raw facts (ADR 0019): the runtime exposes the lease and start facts, and the host decides what its own timeouts mean. The <code>silent, not dead</code> case above is exactly the ambiguity this read-side check surfaces.</p>
       </div>
       <p>The recipe: list the non-terminal rows, then read four raw fields off each <code>ObservedProcess</code> and classify.</p>
-      <pre data-lang="rust"><code>// List the live rows (host-wide, or `list_granted_to`/`list_originated_by`
+      <pre data-lang="rust"><code>// List the live rows (host-wide, or `list_observed_by`/`list_originated_by`
 // for a session lens), then classify each from raw facts — no derived verdict.
 let live = core
     .processes()
@@ -265,10 +265,10 @@ for p in live {
         <h2>Process Retention</h2>
         <p>Terminal process rows accumulate. The registry never garbage-collects itself — only the host knows how long its consumers still need to await or reconcile a finished process — so retention is one more explicit lever.</p>
       </div>
-      <p><code>core.processes().prune(cutoff_epoch_ms)</code> physically deletes terminal rows — with their events, wakes, handle grants, and leases — older than the cutoff, returning a <code>ProcessPruneReport</code> of what it reclaimed. Non-terminal rows are never touched. Run it on the same maintenance cadence as the session store's <code>vacuum</code> / <code>gc_unreachable</code> reclamation (see <a href="./persistence.html#garbage-collection">persistence</a>).</p>
+      <p><code>core.processes().prune(cutoff_epoch_ms)</code> replaces eligible terminal rows with payload-free tombstones after the mandatory projection watermark has advanced beyond them. Their events, wakes, observer edges, and leases are removed, and <code>ProcessPruneReport</code> reports what was reclaimed. Non-terminal rows are never touched. Compact old tombstones separately on the same maintenance cadence as the session store's <code>vacuum</code> / <code>gc_unreachable</code> reclamation (see <a href="./persistence.html#garbage-collection">persistence</a>).</p>
       <aside class="gotcha">
         <strong>Gotcha</strong>
-        <p>The cutoff window must sit comfortably longer than any in-flight wait. Terminal state is delivered through <code>ProcessWorkDriver::await_terminal</code>, not the best-effort event sink (<code>docs/adr/0017-process-observation-is-best-effort-push-over-state-truth.md</code>); a cutoff shorter than a live <code>await_terminal</code> can prune a process out from under a late awaiter, which then observes a vanished row instead of its outcome. Size the window against your longest reconcile lag, not your average one.</p>
+        <p>The cutoff window must sit comfortably longer than any in-flight wait. Terminal state is delivered through <code>ProcessWorkDriver::await_terminal</code>, not the best-effort event sink (<code>docs/adr/0017-process-observation-is-best-effort-push-over-state-truth.md</code>); a late await after pruning receives the typed <code>ProcessNoLongerRetained</code> information outcome. Size the window against your longest reconcile lag, not your average one.</p>
       </aside>
       <p>The <a href="./example-agent-service.html">agent service</a> example wires this exactly: it captures a <code>core.processes()</code> handle before the core moves into app state and drives <code>prune</code> from a maintenance task on a fixed cadence with a retention window longer than any wait, in both the inline and Restate durability modes.</p>
     </div>

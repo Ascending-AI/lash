@@ -213,7 +213,6 @@ enum QueuedPayloadIntent<'a> {
     ProcessWake {
         wake_id: &'a str,
         target_session_id: &'a str,
-        target_scope_id: &'a crate::SessionScopeId,
         process_id: &'a str,
         sequence: u64,
         event_type: &'a str,
@@ -237,7 +236,6 @@ impl<'a> From<&'a crate::QueuedWorkPayload> for QueuedPayloadIntent<'a> {
             crate::QueuedWorkPayload::ProcessWake { wake } => Self::ProcessWake {
                 wake_id: &wake.wake_id,
                 target_session_id: &wake.target_session_id,
-                target_scope_id: &wake.target_scope_id,
                 process_id: &wake.process_id,
                 sequence: wake.sequence,
                 event_type: &wake.event_type,

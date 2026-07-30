@@ -119,7 +119,6 @@ impl<'a, 'run> ProcessRunContextBuilder<'a, 'run> {
             session_lifecycle: services.lifecycle_service(),
             session_graph: services.graph_service(),
             processes: services.process_service(),
-            process_cancel_ability: services.process_cancel_ability(),
             trigger_router: services.trigger_router(),
             effect_controller,
             direct_completions,
