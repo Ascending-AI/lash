@@ -52,6 +52,10 @@ pub struct RuntimePromptConfig {
 pub struct RuntimeControlConfig {
     pub effect_host: Arc<dyn EffectHost>,
     pub termination: TerminationPolicy,
+    /// Factory-scoped policy for drafting process wakes into queued turns.
+    pub wake_turn_policy: crate::WakeTurnPolicy,
+    /// Optional narrow-only policy for the model-facing session process tools.
+    pub process_tool_visibility_filter: Option<Arc<dyn crate::ProcessToolVisibilityFilter>>,
     /// Lease timing capability for every durable single-writer *lease* lane this
     /// runtime renews on a cadence: session execution leases, process leases,
     /// and durable effect-replay leases. Queued-work and turn-input claims are
@@ -99,6 +103,8 @@ impl RuntimeHostConfig {
                 termination: TerminationPolicy::default(),
                 effect_host,
                 lease_timings: crate::LeaseTimings::default(),
+                wake_turn_policy: crate::WakeTurnPolicy::default(),
+                process_tool_visibility_filter: None,
             },
             tracing: RuntimeTracingConfig {
                 trace_sink: None,
@@ -156,6 +162,20 @@ impl RuntimeHostConfig {
     /// claim this runtime takes.
     pub fn with_lease_timings(mut self, lease_timings: crate::LeaseTimings) -> Self {
         self.control.lease_timings = lease_timings;
+        self
+    }
+
+    /// Configure how this runtime factory turns process wakes into queued work.
+    pub fn with_wake_turn_policy(mut self, policy: crate::WakeTurnPolicy) -> Self {
+        self.control.wake_turn_policy = policy;
+        self
+    }
+
+    pub fn with_process_tool_visibility_filter(
+        mut self,
+        filter: Arc<dyn crate::ProcessToolVisibilityFilter>,
+    ) -> Self {
+        self.control.process_tool_visibility_filter = Some(filter);
         self
     }
 }

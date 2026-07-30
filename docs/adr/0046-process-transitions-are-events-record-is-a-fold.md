@@ -78,6 +78,56 @@ application, and session open replays any uncleared intent before clearing it.
 This gives hosts customizable branch visibility without coupling observation
 to wake routing.
 
+## Host policy surface
+
+All four host visibility decisions are now explicit data at their decision
+points:
+
+1. `ProcessStartOptions::initial_observers` selects the observer edges created
+   atomically with a process start. Wake routing never creates an observer.
+2. `SessionCreateRequest::observed_processes` requests edges for a new session.
+   Durable sessions commit an `ObserverIntent` before publishing those edges,
+   then consume it after idempotent application; opening a session replays an
+   intent left by a crash. The returned `SessionHandle::observed_processes`
+   reports a typed outcome for every id; unknown and pruned processes do not
+   fail session creation.
+3. Fork creation records `ObserverInheritance::{All,None,Only}` and its pending
+   replay intent.
+4. Hosts may add or remove an observer explicitly through the standard
+   replay-keyed observer-event path.
+
+No path creates an unnamed edge: a tool-start request names its initiating
+session in `ProcessStartRequest::observers` before the start reaches the
+registry, while host starts, session creation, forks, and explicit observer
+mutations use the recorded choices above.
+
+Hosts may also register one factory-scoped
+`ProcessToolVisibilityFilter`. It applies only to the session process tools
+(`list`, `signal`, `cancel`, and `await`) after observer-edge visibility has
+been established. The filter is synchronous, in-process, no-I/O, infallible,
+and narrow-only. Core intersects its result with the edge-visible candidates,
+so returning a foreign process id cannot widen visibility. Decisions are pure
+per `(session, candidate)`; Lash may evaluate singleton candidates. Run-local
+handle possession remains a capability and bypasses the filter.
+
+The filter is never consulted by the read model, projections, the wake driver,
+cleanup, prune, or admin/host reads. Structured decision traces record the
+candidate set, returned set, policy, and outcome; ordinary tool results persist
+the model-visible outcome in turn history.
+
+`WakeTurnPolicy::new(delivery, mode)` is the single factory-level knob for
+drafting process wakes into queued turns. `WakeTurnMode::EachWake { slot }`
+always gives every wake a separate claim; `WakeTurnMode::Coalesce { key }`
+requires a non-never `WakeCoalescingKey` and joins matching adjacent wakes.
+The default exactly preserves the former
+`EarliestSafeBoundary / Exclusive / never-merge` behavior. Structured claim
+traces record candidates, wake keys, policy, and selection. Producer-side
+event-identity deduplication remains independent of receiver-side turn merging.
+
+Retention likewise requires an explicit choice. Both terminal-process pruning
+and tombstone compaction take `ProjectionWatermark::{UpTo(cursor),NoProjector}`;
+there is no optional or silently defaulted watermark.
+
 Session deletion is the deliberate exception to per-edge observer audit events:
 it removes all observer rows and wake routing owned by that session without
 appending `observer_removed` or subscription-retarget events. The deletion is

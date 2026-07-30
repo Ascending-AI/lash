@@ -7,6 +7,28 @@ use super::model::{
 };
 use super::op_scope::ProcessOpScope;
 
+/// Optional factory-scoped filter for the session process tools only.
+///
+/// Synchronous, in-process, no I/O, infallible. May only NARROW: called with
+/// candidates already visible by observer edges; returns the subset to expose.
+/// The decision MUST be pure per `(session, candidate)`: Lash may evaluate
+/// candidates independently and the presence of siblings must not change a
+/// candidate's result.
+///
+/// NEVER consulted by: the read model, projections, the wake driver, cleanup,
+/// prune, admin/host reads. Tool layer only.
+///
+/// Lash emits structured decision evidence for each evaluation. Turn-scoped
+/// outcomes are durable through normal recorded tool results; replay does not
+/// require a separate policy log.
+pub trait ProcessToolVisibilityFilter: Send + Sync {
+    fn narrow(
+        &self,
+        session: &super::model::SessionId,
+        candidates: &[super::model::ProcessId],
+    ) -> Vec<super::model::ProcessId>;
+}
+
 #[async_trait::async_trait]
 pub trait ProcessService: Send + Sync {
     async fn start_from_request(
@@ -117,6 +139,31 @@ pub trait ProcessService: Send + Sync {
         payload: serde_json::Value,
         scope: ProcessOpScope<'_>,
     ) -> Result<ProcessEvent, PluginError>;
+
+    /// Signal a process whose handle is possessed by the current run.
+    ///
+    /// Run-local possession is the capability, so this bypasses observer-edge
+    /// and tier-2 tool filtering. Implementations that do not distinguish
+    /// possession may retain their ordinary signal behavior.
+    async fn signal_possessed(
+        &self,
+        session_id: &str,
+        process_id: &str,
+        signal_name: String,
+        signal_id: String,
+        payload: serde_json::Value,
+        scope: ProcessOpScope<'_>,
+    ) -> Result<ProcessEvent, PluginError> {
+        self.signal(
+            session_id,
+            process_id,
+            signal_name,
+            signal_id,
+            payload,
+            scope,
+        )
+        .await
+    }
 
     async fn transfer(
         &self,

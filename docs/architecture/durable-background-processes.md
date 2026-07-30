@@ -238,13 +238,49 @@ guarantee, so a consumer that needs completeness reconciles from `events_after`,
 and terminal events deliberately do not ride the sink (they ride
 `await_terminal`). Because the decorator awaits `emit` inline on the append path,
 a sink must return fast and offload any I/O. Retention is
-`ProcessRegistry::prune_terminal_processes(cutoff_epoch_ms)`: a host that has
+`ProcessRegistry::prune_terminal_processes(cutoff_epoch_ms, filter, watermark)`:
+a host that has
 projected a process's outcome into its own store calls it on the maintenance
 cadence to replace eligible terminal rows with payload-free tombstones after
 the projection watermark advances — removing their events, wakes, observer edges, and leases —
 only once host policy has retained them beyond every still-replayable
 `await_terminal`. Lash exposes no finite maximum waiter lifetime to validate a
 cutoff against; a later await after pruning receives `ProcessNoLongerRetained`.
+
+## Host policy and configuration surface
+
+Process policy is factory-scoped and deliberately small:
+
+- `WakeTurnPolicy::new(delivery, mode)` controls how durable wakes become queued
+  turns. `WakeTurnMode::EachWake { slot }` preserves one wake per claim even
+  when the slot is joinable. `WakeTurnMode::Coalesce { key }` requires a
+  `WakeCoalescingKey` and merges matching adjacent wakes. The default is
+  `EarliestSafeBoundary / EachWake { Exclusive }`, preserving prior behavior.
+  This does not change producer-side event-identity deduplication.
+- `ProcessStartOptions::initial_observers` and
+  `SessionCreateRequest::observed_processes` create only the observer edges the
+  host names. Durable session creation commits observer intent before
+  idempotently applying edges, and open replays any unconsumed intent. Session
+  creation returns typed per-id edge outcomes and still succeeds for unknown or
+  pruned process ids. Fork inheritance remains the separate recorded
+  `All | None | Only(ids)` choice.
+- `LashCoreBuilder::process_tool_visibility_filter` installs an optional
+  `ProcessToolVisibilityFilter` for session `list`, `signal`, `cancel`, and
+  `await` tools. It is synchronous, in-process, no-I/O, infallible, and
+  narrow-only and pure per `(session, candidate)`. Lash intersects its answer
+  with the observer-visible candidates, while run-local possession remains a
+  capability. Admin/host list, event, signal, and cancel paths use the complete
+  observer-edge view.
+- `Processes::prune(cutoff, ProjectionWatermark)` and the registry prune and
+  tombstone-compaction operations require
+  `ProjectionWatermark::UpTo(cursor)` or the explicit
+  `ProjectionWatermark::NoProjector` statement.
+
+The visibility filter is never called by read models, projections, wake
+delivery, cleanup, prune, or admin/host reads. Its turn-scoped outcome is
+already durable in ordinary tool-result history. Recovery disposition,
+fencing, delivery reliability, and failure classification are not host policy
+knobs.
 
 ## The primitive (a process-side mirror of the turn machinery)
 

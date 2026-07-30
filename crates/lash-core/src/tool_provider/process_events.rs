@@ -2,6 +2,7 @@ use crate::plugin::PluginError;
 
 use super::ToolProcessEventContext;
 
+#[allow(clippy::too_many_arguments)]
 pub(crate) async fn enqueue_wake_delivery(
     registry: std::sync::Arc<dyn crate::ProcessRegistry>,
     _store: Option<std::sync::Arc<dyn crate::RuntimePersistence>>,
@@ -10,6 +11,7 @@ pub(crate) async fn enqueue_wake_delivery(
     trace_host: Option<&dyn crate::plugin::SessionGraphService>,
     queued_work_driver: Option<&crate::QueuedWorkDriver>,
     clock: std::sync::Arc<dyn crate::Clock>,
+    wake_turn_policy: &crate::WakeTurnPolicy,
 ) -> Result<(), PluginError> {
     let Some(wake_delivery) = wake_delivery else {
         return Ok(());
@@ -20,11 +22,12 @@ pub(crate) async fn enqueue_wake_delivery(
         // runbook lever once that resolver is available.
         return Ok(());
     };
-    if let Err(error) = crate::WakeDeliveryDriver::drive_pending_once(
+    if let Err(error) = crate::WakeDeliveryDriver::drive_pending_once_with_policy(
         registry,
         std::sync::Arc::clone(factory),
         queued_work_driver.cloned(),
         clock,
+        wake_turn_policy,
         32,
     )
     .await
@@ -125,6 +128,7 @@ impl ToolProcessEventClient {
             Some(process.session_graph.as_ref()),
             process.queued_work_driver.as_ref(),
             std::sync::Arc::clone(&process.clock),
+            &process.wake_turn_policy,
         )
         .await?;
         Ok(result.event)

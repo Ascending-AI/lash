@@ -92,7 +92,7 @@ impl RuntimeExecutionContext<'_> {
             .start(
                 &self.session_id,
                 registration,
-                crate::ProcessStartOptions::new().with_observer(self.session_id.clone()),
+                crate::ProcessStartOptions::new().with_initial_observer(self.session_id.clone()),
                 self.process_scope(self.parent_invocation.clone()),
             )
             .await
@@ -238,19 +238,32 @@ impl RuntimeExecutionContext<'_> {
             }
         };
         let signal_id = format!("process-{call_id}");
-        let output = match self
-            .dispatch
-            .processes
-            .signal(
-                &self.session_id,
-                &handle_id,
-                signal_name,
-                signal_id,
-                payload,
-                self.process_scope(self.parent_invocation.clone()),
-            )
-            .await
-        {
+        let result = if self.is_run_local_process(&handle_id) {
+            self.dispatch
+                .processes
+                .signal_possessed(
+                    &self.session_id,
+                    &handle_id,
+                    signal_name,
+                    signal_id,
+                    payload,
+                    self.process_scope(self.parent_invocation.clone()),
+                )
+                .await
+        } else {
+            self.dispatch
+                .processes
+                .signal(
+                    &self.session_id,
+                    &handle_id,
+                    signal_name,
+                    signal_id,
+                    payload,
+                    self.process_scope(self.parent_invocation.clone()),
+                )
+                .await
+        };
+        let output = match result {
             Ok(event) => ToolCallOutput::success(json!({
                 "process_id": event.process_id,
                 "sequence": event.sequence,
@@ -717,6 +730,72 @@ mod tests {
                 .and_then(|record| record.call_id.as_deref()),
             Some("cancel-hidden-process")
         );
+
+        for process_id in ["local-signal", "local-cancel", "local-await"] {
+            let mut registration = ProcessRegistration::new(
+                process_id,
+                ProcessInput::External {
+                    metadata: serde_json::Value::Null,
+                },
+                crate::RecoveryDisposition::ExternallyOwned,
+                crate::ProcessProvenance::host(),
+            );
+            if process_id == "local-signal" {
+                registration = registration.with_extra_event_types([crate::ProcessEventType {
+                    name: "signal.ready".to_string(),
+                    payload_schema: crate::LashSchema::any(),
+                    semantics: crate::ProcessEventSemanticsSpec::default(),
+                }]);
+            }
+            host.process_registry
+                .register_process(registration)
+                .await
+                .expect("register run-local process without observer edge");
+            context.record_started_process(process_id);
+        }
+        host.process_registry
+            .complete_process(
+                "local-await",
+                crate::ProcessAwaitOutput::Success {
+                    value: json!("local done"),
+                    control: None,
+                },
+                crate::ProcessCompletionAuthority::external_owner(),
+            )
+            .await
+            .expect("complete run-local await process");
+        let local_handle = |process_id: &str| {
+            json!({
+                "__handle__": "process",
+                "id": process_id,
+            })
+        };
+        let local_signal = context
+            .signal_process_handle(
+                "signal-local".to_string(),
+                local_handle("local-signal"),
+                "ready".to_string(),
+                serde_json::Value::Null,
+            )
+            .await;
+        let local_cancel = context
+            .cancel_process_handle("cancel-local".to_string(), local_handle("local-cancel"))
+            .await;
+        let local_await = context
+            .await_process_handle("await-local".to_string(), local_handle("local-await"))
+            .await;
+        assert!(
+            local_signal.output.is_success()
+                && local_cancel.output.is_success()
+                && local_await.output.is_success(),
+            "run-local possession must bypass observer and tier-2 visibility checks"
+        );
+        let local_prune = host
+            .process_registry
+            .prune_terminal_processes(u64::MAX, None, crate::ProjectionWatermark::NoProjector)
+            .await
+            .expect("prune terminal run-local fixtures");
+        assert_eq!(local_prune.pruned_processes, 1);
 
         host.process_registry
             .complete_process(

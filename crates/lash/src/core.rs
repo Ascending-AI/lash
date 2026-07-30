@@ -122,6 +122,7 @@ pub(crate) struct WakeDeliveryDriverSetup {
     registry: Arc<dyn ProcessRegistry>,
     factory: Arc<dyn SessionStoreFactory>,
     clock: Arc<dyn lash_core::Clock>,
+    wake_turn_policy: lash_core::WakeTurnPolicy,
 }
 
 pub(crate) struct InlineWorkDriverSetup {
@@ -200,11 +201,12 @@ impl InlineWorkDriverSlot {
                     }
                 };
                 let wake = self.setup.wake.as_ref().map(|setup| {
-                    lash_core::WakeDeliveryDriver::new(
+                    lash_core::WakeDeliveryDriver::new_with_policy(
                         Arc::clone(&setup.registry),
                         Arc::clone(&setup.factory),
                         queued.clone(),
                         Arc::clone(&setup.clock),
+                        setup.wake_turn_policy.clone(),
                     )
                 });
                 ResolvedWorkDrivers {
@@ -963,6 +965,8 @@ pub struct LashCoreBuilder {
     // Optional host-facing best-effort feed of appended process events,
     // installed on the inline process-registry decorator at build time.
     process_event_sink: Option<Arc<dyn lash_core::ProcessEventSink>>,
+    wake_turn_policy: Option<lash_core::WakeTurnPolicy>,
+    process_tool_visibility_filter: Option<Arc<dyn lash_core::ProcessToolVisibilityFilter>>,
     queued_work_source: QueuedWorkSource,
     live_replay_store: Option<Arc<dyn LiveReplayStore>>,
 }
@@ -1056,6 +1060,25 @@ impl LashCoreBuilder {
     /// Invalid values are reported by [`build`](Self::build).
     pub fn process_execution_concurrency(mut self, concurrency: usize) -> Self {
         self.process_execution_concurrency = Some(concurrency);
+        self
+    }
+
+    /// Configure how process wake events are drafted into queued turns.
+    ///
+    /// The default preserves the original behavior: earliest-safe-boundary
+    /// delivery, an exclusive slot, and no merge.
+    pub fn wake_turn_policy(mut self, policy: lash_core::WakeTurnPolicy) -> Self {
+        self.wake_turn_policy = Some(policy);
+        self
+    }
+
+    /// Install a synchronous, in-process, narrow-only filter for the
+    /// model-facing session process tools.
+    pub fn process_tool_visibility_filter(
+        mut self,
+        filter: Arc<dyn lash_core::ProcessToolVisibilityFilter>,
+    ) -> Self {
+        self.process_tool_visibility_filter = Some(filter);
         self
     }
 
@@ -1199,6 +1222,12 @@ impl LashCoreBuilder {
         }
         if let Some(clock) = self.clock.take() {
             core.clock = clock;
+        }
+        if let Some(wake_turn_policy) = self.wake_turn_policy.take() {
+            core.control.wake_turn_policy = wake_turn_policy;
+        }
+        if let Some(filter) = self.process_tool_visibility_filter.take() {
+            core.control.process_tool_visibility_filter = Some(filter);
         }
         core
     }
@@ -1348,6 +1377,7 @@ impl LashCoreBuilder {
                     registry,
                     factory,
                     clock: Arc::clone(&env.core.clock),
+                    wake_turn_policy: env.core.control.wake_turn_policy.clone(),
                 }),
         };
 

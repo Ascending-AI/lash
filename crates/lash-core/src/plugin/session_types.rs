@@ -12,6 +12,29 @@ pub struct SessionHandle {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub parent_session_id: Option<String>,
     pub policy: SessionPolicy,
+    /// Per-id outcome for observer edges requested at session creation.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub observed_processes: Vec<SessionObservedProcessResult>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SessionObservedProcessResult {
+    pub process_id: crate::ProcessId,
+    pub outcome: SessionObservedProcessOutcome,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum SessionObservedProcessOutcome {
+    Observed,
+    NotFound,
+    NoLongerRetained {
+        terminal_label: String,
+        pruned_at_ms: u64,
+    },
+    Unavailable {
+        message: String,
+    },
 }
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
@@ -345,6 +368,13 @@ pub enum SessionRelation {
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         pending_observer_process_ids: Vec<crate::ProcessId>,
     },
+    /// Durable session-create intent for observer edges that are published
+    /// after the session's initial state commit.
+    ObserverIntent {
+        relation: Box<SessionRelation>,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        pending_observer_process_ids: Vec<crate::ProcessId>,
+    },
 }
 
 impl SessionRelation {
@@ -355,6 +385,55 @@ impl SessionRelation {
                 parent_session_id, ..
             } => Some(parent_session_id),
             Self::Fork { .. } => None,
+            Self::ObserverIntent { relation, .. } => relation.parent_session_id(),
+        }
+    }
+
+    pub(crate) fn with_observer_intent(
+        self,
+        pending_observer_process_ids: Vec<crate::ProcessId>,
+    ) -> Self {
+        if pending_observer_process_ids.is_empty() {
+            self
+        } else {
+            match self {
+                Self::ObserverIntent {
+                    relation,
+                    pending_observer_process_ids: mut pending,
+                } => {
+                    for process_id in pending_observer_process_ids {
+                        if !pending.contains(&process_id) {
+                            pending.push(process_id);
+                        }
+                    }
+                    Self::ObserverIntent {
+                        relation,
+                        pending_observer_process_ids: pending,
+                    }
+                }
+                relation => Self::ObserverIntent {
+                    relation: Box::new(relation),
+                    pending_observer_process_ids,
+                },
+            }
+        }
+    }
+
+    pub(crate) fn settle_observer_intent(
+        &mut self,
+        pending_observer_process_ids: Vec<crate::ProcessId>,
+    ) {
+        let Self::ObserverIntent { relation, .. } = self else {
+            return;
+        };
+        if pending_observer_process_ids.is_empty() {
+            *self = *relation.clone();
+        } else if let Self::ObserverIntent {
+            pending_observer_process_ids: pending,
+            ..
+        } = self
+        {
+            *pending = pending_observer_process_ids;
         }
     }
 }
@@ -372,6 +451,13 @@ pub struct SessionCreateRequest {
     pub plugin_source: SessionPluginSource,
     #[serde(default)]
     pub initial_nodes: Vec<SessionAppendNode>,
+    /// Host-selected process observer edges to apply after session creation.
+    ///
+    /// Edge application is idempotent, durably recoverable when the session
+    /// has a store, and reported per process on the returned [`SessionHandle`].
+    /// Unknown or pruned ids do not fail session creation.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub observed_processes: Vec<crate::ProcessId>,
     #[serde(default)]
     pub tool_access: SessionToolAccess,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -399,6 +485,7 @@ impl SessionCreateRequest {
             policy: None,
             plugin_source: SessionPluginSource::CurrentHostFresh,
             initial_nodes: Vec::new(),
+            observed_processes: Vec::new(),
             tool_access: SessionToolAccess::default(),
             subagent: None,
             context_overlay: SessionContextOverlay::default(),
@@ -433,6 +520,7 @@ impl SessionCreateRequest {
             policy: None,
             plugin_source: SessionPluginSource::CurrentHostFresh,
             initial_nodes: Vec::new(),
+            observed_processes: Vec::new(),
             tool_access: SessionToolAccess::default(),
             subagent: None,
             context_overlay: SessionContextOverlay::default(),
@@ -504,6 +592,7 @@ impl SessionCreateRequest {
             policy,
             plugin_source: SessionPluginSource::CurrentHostFresh,
             initial_nodes: Vec::new(),
+            observed_processes: Vec::new(),
             tool_access: SessionToolAccess::default(),
             subagent: None,
             context_overlay: SessionContextOverlay::default(),
@@ -524,6 +613,14 @@ impl SessionCreateRequest {
 
     pub fn with_initial_nodes(mut self, initial_nodes: Vec<SessionAppendNode>) -> Self {
         self.initial_nodes = initial_nodes;
+        self
+    }
+
+    pub fn with_observed_processes(
+        mut self,
+        process_ids: impl IntoIterator<Item = impl Into<crate::ProcessId>>,
+    ) -> Self {
+        self.observed_processes = process_ids.into_iter().map(Into::into).collect();
         self
     }
 

@@ -589,6 +589,7 @@ impl crate::plugin::SessionLifecycleService for MockSessionManager {
                 .unwrap_or_else(|| "child".to_string()),
             parent_session_id: request.relation.parent_session_id().map(ToOwned::to_owned),
             policy: request.policy.unwrap_or_else(mock_session_policy),
+            observed_processes: Vec::new(),
         })
     }
 
@@ -621,7 +622,7 @@ impl crate::plugin::SessionGraphService for MockSessionManager {}
 impl crate::ProcessService for MockSessionManager {
     async fn start(
         &self,
-        session_id: &str,
+        _session_id: &str,
         registration: crate::ProcessRegistration,
         options: crate::ProcessStartOptions,
         _scope: crate::ProcessOpScope<'_>,
@@ -635,11 +636,7 @@ impl crate::ProcessService for MockSessionManager {
         } else {
             crate::ProcessCompletionAuthority::workflow_key(&id)
         };
-        let observers = if options.observers.is_empty() {
-            vec![session_id.to_string()]
-        } else {
-            options.observers
-        };
+        let observers = options.initial_observers;
         self.process_registry
             .register_process_with_observers(registration, &observers)
             .await?;

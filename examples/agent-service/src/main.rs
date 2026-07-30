@@ -407,7 +407,7 @@ fn spawn_process_retention(processes: lash::process::Processes) {
 
     // The window must be comfortably longer than any wait: a cutoff shorter than
     // a live `await_terminal` could prune a process out from under a late await,
-    // which then reads back as "unknown process".
+    // which then returns the typed `ProcessNoLongerRetained` outcome.
     const RETENTION_WINDOW: Duration = Duration::from_secs(7 * 24 * 60 * 60);
     const PRUNE_INTERVAL: Duration = Duration::from_secs(60 * 60);
 
@@ -422,7 +422,10 @@ fn spawn_process_retention(processes: lash::process::Processes) {
                 Err(_) => continue,
             };
             let cutoff = now_ms.saturating_sub(RETENTION_WINDOW.as_millis() as u64);
-            match processes.prune(cutoff).await {
+            match processes
+                .prune(cutoff, lash::process::ProjectionWatermark::NoProjector)
+                .await
+            {
                 Ok(report) if report.pruned_processes > 0 || report.pruned_events > 0 => {
                     println!(
                         "agent-service pruned {} terminal processes and {} events (cutoff {cutoff}ms)",

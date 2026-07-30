@@ -11,6 +11,18 @@ impl lash_core::ProcessRunHandle for NoopProcessRunHandle {
 
 struct NonblockingObservationQuery;
 
+struct HideAllProcessTools;
+
+impl lash_core::ProcessToolVisibilityFilter for HideAllProcessTools {
+    fn narrow(
+        &self,
+        _session: &lash_core::SessionId,
+        _candidates: &[lash_core::ProcessId],
+    ) -> Vec<lash_core::ProcessId> {
+        Vec::new()
+    }
+}
+
 impl lash_core::PluginOperation for NonblockingObservationQuery {
     const NAME: &'static str = "test.nonblocking_observation_query";
     const DESCRIPTION: &'static str =
@@ -605,6 +617,81 @@ async fn processes_cancel_cancels_visible_process() -> Result<()> {
 }
 
 #[tokio::test]
+async fn process_admin_list_signal_and_cancel_bypass_model_tool_filter() -> Result<()> {
+    let core = explicit_ephemeral_facets(LashCore::standard_builder())
+        .provider(mock_provider())
+        .model(mock_model_spec())
+        .store_factory(Arc::new(lash_core::InMemorySessionStoreFactory::new()))
+        .process_registry(Arc::new(TestLocalProcessRegistry::default()))
+        .process_tool_visibility_filter(Arc::new(HideAllProcessTools))
+        .advanced()
+        .runtime_host_config(RuntimeHostConfig::in_memory())
+        .build()?;
+    let session = core.session("host-filter-bypass").open().await?;
+    for process_id in ["host-filter-signal", "host-filter-cancel"] {
+        session
+            .processes()
+            .start(
+                lash_core::ProcessStartRequest::external(
+                    process_id,
+                    lash_core::ProcessOriginator::host(),
+                    serde_json::Value::Null,
+                )
+                .with_extra_event_types([lash_core::ProcessEventType {
+                    name: "signal.ready".to_string(),
+                    payload_schema: lash_core::LashSchema::any(),
+                    semantics: lash_core::ProcessEventSemanticsSpec::default(),
+                }])
+                .with_observers(["host-filter-bypass".to_string()]),
+                inline_scope(lash_core::ExecutionScope::process(process_id)),
+            )
+            .await?;
+    }
+
+    assert_eq!(
+        session.processes().list_all().await?.len(),
+        2,
+        "host list_all must retain the complete observer-edge view"
+    );
+    session
+        .processes()
+        .signal(
+            "host-filter-signal",
+            "ready",
+            "host-filter-signal-id",
+            serde_json::json!({"source": "host"}),
+            inline_scope(lash_core::ExecutionScope::process("host-filter-signal")),
+        )
+        .await?;
+    assert!(
+        session
+            .processes()
+            .events("host-filter-signal", 0)
+            .await?
+            .iter()
+            .any(|event| event.event_type == "signal.ready"),
+        "host events must expose the signal hidden from model tools"
+    );
+    session
+        .processes()
+        .cancel(
+            "host-filter-cancel",
+            inline_scope(lash_core::ExecutionScope::process("host-filter-cancel")),
+        )
+        .await?;
+    assert!(
+        session
+            .processes()
+            .events("host-filter-cancel", 0)
+            .await?
+            .iter()
+            .any(|event| event.event_type == "process.cancel_requested"),
+        "host cancel must bypass the model-tool filter"
+    );
+    Ok(())
+}
+
+#[tokio::test]
 async fn processes_cancel_all_cancels_visible_processes() -> Result<()> {
     let runtime_host = RuntimeHostConfig::in_memory();
     let registry =
@@ -724,6 +811,7 @@ async fn session_control_manages_child_session_lifecycle() -> Result<()> {
             policy: None,
             plugin_source: lash_core::SessionPluginSource::CurrentSessionFork,
             initial_nodes: Vec::new(),
+            observed_processes: Vec::new(),
             tool_access: lash_core::SessionToolAccess::default(),
             subagent: None,
             context_overlay: lash_core::SessionContextOverlay::default(),

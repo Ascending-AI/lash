@@ -9,6 +9,8 @@ pub enum PluginError {
     Invoke(String),
     #[error("plugin session error: {0}")]
     Session(String),
+    #[error("process handle `{process_id}` is not live or visible in this session")]
+    ProcessNotVisible { process_id: String },
     #[error(transparent)]
     RuntimeEffectController(#[from] crate::RuntimeEffectControllerError),
     #[error("process `{process_id}` execution was already started by {by:?}")]

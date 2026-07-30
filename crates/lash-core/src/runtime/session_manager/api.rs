@@ -214,7 +214,7 @@ impl crate::ProcessService for RuntimeSessionProcessService {
             .start(
                 session_id,
                 registration,
-                crate::ProcessStartOptions::new().with_observers(observers),
+                crate::ProcessStartOptions::new().with_initial_observers(observers),
                 scope,
             )
             .await?;
@@ -291,7 +291,7 @@ impl crate::ProcessService for RuntimeSessionProcessService {
     ) -> Result<(), crate::PluginError> {
         self.services
             .processes
-            .validate_process_handles_visible(
+            .validate_process_handles_observed(
                 &self.services.current,
                 &self.services.managed,
                 session_id,
@@ -331,6 +331,198 @@ impl crate::ProcessService for RuntimeSessionProcessService {
         self.services
             .processes
             .signal_process(
+                &self.services.current,
+                session_id,
+                process_id,
+                signal_name,
+                signal_id,
+                payload,
+                scope,
+            )
+            .await
+    }
+
+    async fn signal_possessed(
+        &self,
+        session_id: &str,
+        process_id: &str,
+        signal_name: String,
+        signal_id: String,
+        payload: serde_json::Value,
+        scope: crate::ProcessOpScope<'_>,
+    ) -> Result<crate::ProcessEvent, crate::PluginError> {
+        self.services
+            .processes
+            .signal_possessed_process(
+                &self.services.current,
+                session_id,
+                process_id,
+                signal_name,
+                signal_id,
+                payload,
+                scope,
+            )
+            .await
+    }
+
+    async fn transfer(
+        &self,
+        from_session_id: &str,
+        to_session_id: &str,
+        process_ids: Vec<String>,
+        scope: crate::ProcessOpScope<'_>,
+    ) -> Result<(), crate::PluginError> {
+        self.services
+            .processes
+            .transfer_process_handles(
+                &self.services.current,
+                &self.services.managed,
+                from_session_id,
+                to_session_id,
+                process_ids,
+                scope,
+            )
+            .await
+    }
+}
+
+#[async_trait::async_trait]
+impl crate::ProcessService for ModelToolSessionProcessService {
+    async fn start_from_request(
+        &self,
+        session_id: &str,
+        request: crate::ProcessStartRequest,
+        scope: crate::ProcessOpScope<'_>,
+    ) -> Result<crate::ProcessHandleSummary, crate::PluginError> {
+        let host = RuntimeSessionProcessService {
+            services: Arc::clone(&self.services),
+        };
+        crate::ProcessService::start_from_request(&host, session_id, request, scope).await
+    }
+
+    async fn start(
+        &self,
+        session_id: &str,
+        registration: crate::ProcessRegistration,
+        options: crate::ProcessStartOptions,
+        scope: crate::ProcessOpScope<'_>,
+    ) -> Result<crate::ProcessRecord, crate::PluginError> {
+        let host = RuntimeSessionProcessService {
+            services: Arc::clone(&self.services),
+        };
+        crate::ProcessService::start(&host, session_id, registration, options, scope).await
+    }
+
+    async fn complete_external(
+        &self,
+        session_id: &str,
+        process_id: &str,
+        await_output: crate::ProcessAwaitOutput,
+        scope: crate::ProcessOpScope<'_>,
+    ) -> Result<crate::ProcessCompletionOutcome, crate::PluginError> {
+        let host = RuntimeSessionProcessService {
+            services: Arc::clone(&self.services),
+        };
+        crate::ProcessService::complete_external(&host, session_id, process_id, await_output, scope)
+            .await
+    }
+
+    async fn await_process(
+        &self,
+        process_id: &str,
+        scope: crate::ProcessOpScope<'_>,
+    ) -> Result<crate::ProcessAwaitOutput, crate::PluginError> {
+        self.services
+            .processes
+            .await_process(&self.services.current, process_id, scope)
+            .await
+    }
+
+    async fn list_visible(
+        &self,
+        session_id: &str,
+        mode: crate::ProcessListMode,
+        scope: crate::ProcessOpScope<'_>,
+    ) -> Result<Vec<crate::ProcessRecord>, crate::PluginError> {
+        self.services
+            .processes
+            .list_model_tool_process_handles(&self.services.current, session_id, mode, scope)
+            .await
+    }
+
+    async fn validate_visible(
+        &self,
+        session_id: &str,
+        process_ids: &[String],
+        _scope: crate::ProcessOpScope<'_>,
+    ) -> Result<(), crate::PluginError> {
+        self.services
+            .processes
+            .validate_model_tool_process_handles(&self.services.current, session_id, process_ids)
+            .await
+    }
+
+    async fn cancel(
+        &self,
+        session_id: &str,
+        process_id: &str,
+        scope: crate::ProcessOpScope<'_>,
+    ) -> Result<crate::ProcessRecord, crate::PluginError> {
+        self.services
+            .processes
+            .cancel_process(
+                &self.services.current,
+                &self.services.managed,
+                session_id,
+                process_id,
+                scope,
+            )
+            .await
+    }
+
+    async fn signal(
+        &self,
+        session_id: &str,
+        process_id: &str,
+        signal_name: String,
+        signal_id: String,
+        payload: serde_json::Value,
+        scope: crate::ProcessOpScope<'_>,
+    ) -> Result<crate::ProcessEvent, crate::PluginError> {
+        self.services
+            .processes
+            .validate_model_tool_process_handles(
+                &self.services.current,
+                session_id,
+                &[process_id.to_string()],
+            )
+            .await?;
+        self.services
+            .processes
+            .signal_possessed_process(
+                &self.services.current,
+                session_id,
+                process_id,
+                signal_name,
+                signal_id,
+                payload,
+                scope,
+            )
+            .await
+    }
+
+    async fn signal_possessed(
+        &self,
+        session_id: &str,
+        process_id: &str,
+        signal_name: String,
+        signal_id: String,
+        payload: serde_json::Value,
+        scope: crate::ProcessOpScope<'_>,
+    ) -> Result<crate::ProcessEvent, crate::PluginError> {
+        self.services
+            .processes
+            .signal_possessed_process(
                 &self.services.current,
                 session_id,
                 process_id,

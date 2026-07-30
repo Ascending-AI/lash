@@ -48,9 +48,13 @@ pub(in crate::runtime::session_manager) async fn resolve_session_create_plan(
         plugin_options: request.plugin_options.clone(),
     };
 
+    let relation = request
+        .relation
+        .clone()
+        .with_observer_intent(request.observed_processes.clone());
     Ok(SessionCreatePlan {
         session_id,
-        relation: request.relation.clone(),
+        relation,
         parent_session_id,
         policy,
         initial_runtime_state,

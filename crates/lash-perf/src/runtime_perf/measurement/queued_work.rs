@@ -396,6 +396,7 @@ async fn enqueue_queued_work_stress_turn(
         );
         let mut draft = lash_core::runtime::process_wake_batch_draft(wake);
         draft.slot_policy = SlotPolicy::Join;
+        draft.merge_key = MergeKey::Group("runtime-perf-queued-work-stress".to_string());
         store
             .enqueue_queued_work(draft)
             .await?;

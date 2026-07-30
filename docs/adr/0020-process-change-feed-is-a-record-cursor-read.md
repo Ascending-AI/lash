@@ -22,6 +22,7 @@ re-creates the durable log badly.
   rows; the cursor is opaque to consumers and not comparable across stores.
 - The feed is a host-level, unscoped read for trusted projectors. App-facing visibility uses
   session-scoped observer edges; the feed does not filter by observer.
-- The change cursor is the natural watermark for retention: a host can gate
-  `prune_terminal_processes` on its projector's acknowledged cursor so unprojected history is
-  never pruned.
+- The change cursor is the natural watermark for retention: a host gates
+  `prune_terminal_processes(..., ProjectionWatermark::UpTo(cursor))` on its
+  projector's acknowledged cursor so unprojected history is never pruned. A
+  host without a projector must say `ProjectionWatermark::NoProjector`.

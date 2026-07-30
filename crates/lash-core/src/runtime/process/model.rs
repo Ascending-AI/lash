@@ -330,7 +330,7 @@ pub async fn load_process_execution_env(
 #[derive(Clone, Debug, Default)]
 pub struct ProcessStartOptions {
     /// Explicit host-selected initial observer session ids.
-    pub observers: Vec<SessionId>,
+    pub initial_observers: Vec<SessionId>,
     /// Runtime-internal spawn provenance override. Set by process execution
     /// contexts so children started *by a process* inherit the parent's
     /// originator and wake target instead of being stamped with the ephemeral
@@ -355,16 +355,16 @@ impl ProcessStartOptions {
         Self::default()
     }
 
-    pub fn with_observer(mut self, session_id: impl Into<SessionId>) -> Self {
-        self.observers.push(session_id.into());
+    pub fn with_initial_observer(mut self, session_id: impl Into<SessionId>) -> Self {
+        self.initial_observers.push(session_id.into());
         self
     }
 
-    pub fn with_observers(
+    pub fn with_initial_observers(
         mut self,
         observers: impl IntoIterator<Item = impl Into<SessionId>>,
     ) -> Self {
-        self.observers = observers.into_iter().map(Into::into).collect();
+        self.initial_observers = observers.into_iter().map(Into::into).collect();
         self
     }
 

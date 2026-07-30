@@ -87,7 +87,7 @@ mod tests {
                 .start(
                     session_id,
                     registration,
-                    lash_core::ProcessStartOptions::new().with_observers(observers),
+                    lash_core::ProcessStartOptions::new().with_initial_observers(observers),
                     scope,
                 )
                 .await?;
@@ -102,17 +102,13 @@ mod tests {
 
         async fn start(
             &self,
-            session_id: &str,
+            _session_id: &str,
             registration: lash_core::ProcessRegistration,
             options: lash_core::ProcessStartOptions,
             _scope: lash_core::ProcessOpScope<'_>,
         ) -> Result<lash_core::ProcessRecord, PluginError> {
-            let mut observers = options.observers;
-            if observers.is_empty() {
-                observers.push(session_id.to_string());
-            }
             self.registry
-                .register_process_with_observers(registration, &observers)
+                .register_process_with_observers(registration, &options.initial_observers)
                 .await
         }
 

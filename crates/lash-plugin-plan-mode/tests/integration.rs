@@ -1080,6 +1080,7 @@ async fn plan_mode_after_tool_call_switches_agent_frame_on_fresh_context_approva
                     .unwrap_or_else(|| "new-session".to_string()),
                 parent_session_id: request.relation.parent_session_id().map(ToOwned::to_owned),
                 policy: request.policy.clone().unwrap_or_default(),
+                observed_processes: Vec::new(),
             })
         }
 

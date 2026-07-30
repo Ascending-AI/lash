@@ -746,7 +746,8 @@ pub trait ProcessRegistry: Send + Sync {
 
     /// Physically delete terminal process rows whose `updated_at_ms` is older
     /// than `cutoff_epoch_ms`, match `filter` when one is supplied, and have a
-    /// process change sequence no later than `up_to_change_seq` when supplied,
+    /// process change sequence allowed by the caller's explicit projection
+    /// `watermark`,
     /// together with their events, observer edges, lease rows, and
     /// trigger-delivery reservations whose deterministic process id points at a
     /// pruned row. The same cutoff also prunes trigger-mutation idempotency

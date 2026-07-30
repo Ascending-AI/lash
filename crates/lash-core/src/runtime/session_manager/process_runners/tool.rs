@@ -64,6 +64,7 @@ impl RuntimeSessionServices {
                 self.current.host.session_store_factory.clone(),
                 self.current.host.queued_work_driver.clone(),
                 Arc::clone(&self.current.host.core.clock),
+                self.current.host.core.control.wake_turn_policy.clone(),
             )
             .build();
         let retry_policy =

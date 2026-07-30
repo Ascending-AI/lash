@@ -120,6 +120,11 @@ pub(in crate::runtime) struct RuntimeSessionProcessService {
     services: Arc<RuntimeSessionServices>,
 }
 
+#[derive(Clone)]
+pub(in crate::runtime) struct ModelToolSessionProcessService {
+    services: Arc<RuntimeSessionServices>,
+}
+
 impl CurrentSessionCapability {
     fn snapshot_meta_with_frame_root(runtime: &LashRuntime) -> RuntimeSessionState {
         let frame_root = runtime
@@ -261,6 +266,14 @@ impl RuntimeSessionServices {
 
     pub(in crate::runtime) fn process_service(self: &Arc<Self>) -> Arc<dyn crate::ProcessService> {
         Arc::new(RuntimeSessionProcessService {
+            services: Arc::clone(self),
+        })
+    }
+
+    pub(in crate::runtime) fn model_tool_process_service(
+        self: &Arc<Self>,
+    ) -> Arc<dyn crate::ProcessService> {
+        Arc::new(ModelToolSessionProcessService {
             services: Arc::clone(self),
         })
     }

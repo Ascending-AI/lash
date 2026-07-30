@@ -5,9 +5,10 @@ aggressively, long-lived processes kept until the host's own projection has dura
 them. We considered a producer-declared retention class on `ProcessRegistration` (shaped like
 Recovery Disposition) and rejected it: retention is operational policy, not a correctness
 contract, and ADR 0014/0017 already place operational policy with the host. Instead
-`prune_terminal_processes` gains two optional parameters: a process filter (the enriched
-`ProcessListFilter` — originator scope, identity kind/label, caused-by, created-at range) and
-an `up_to_change_seq` bound tied to the Process Change Cursor (ADR 0020), so a host can express
+`prune_terminal_processes` takes an optional process filter (the enriched
+`ProcessListFilter` — originator scope, identity kind/label, caused-by, created-at range) and a
+required `ProjectionWatermark::{UpTo(cursor),NoProjector}` choice tied to the Process Change
+Cursor (ADR 0020), so a host can express
 "prune terminal subagent processes after 24h" and "prune terminal host-scope processes after
 90 days, but never past my projector's acknowledged cursor" as two scheduled calls.
 
