@@ -727,12 +727,67 @@
 
     .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--ash-mid); }
     .pill.run .dot { background: var(--sodium); animation: pulse 1.6s ease-in-out infinite; }
+    /* connection phases: the pill states what the shell knows, not what the
+       session is doing, so they never borrow the running accent. */
+    .pill.pending .dot { animation: pulse 1.6s ease-in-out infinite; }
+    .pill.degraded { border-color: var(--line-danger); color: var(--chalk-dim); }
+    .pill.degraded .dot { background: var(--error); animation: pulse 1.6s ease-in-out infinite; }
 
     @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
     @media (prefers-reduced-motion: reduce) {
       .pill.run .dot,
+      .pill.pending .dot,
+      .pill.degraded .dot,
+      .shell-status-dot,
       .work-card.running .work-dot { animation: none; }
     }
+
+    /* Connection banner — shown only while the shell is degraded, so its
+       presence alone is the signal. Quiet: one line, no fill, mono like the
+       other status furniture. */
+    .shell-status {
+      display: flex;
+      align-items: center;
+      gap: var(--space-xs);
+      padding: var(--space-xs) var(--space-lg);
+      border-bottom: 1px solid var(--line-danger);
+      background: var(--error-tint);
+      font-family: var(--font-ui);
+      font-size: 0.75rem;
+      color: var(--chalk-dim);
+    }
+    .shell-status[hidden] { display: none; }
+    .shell-status-dot {
+      flex: none;
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background: var(--error);
+      animation: pulse 1.6s ease-in-out infinite;
+    }
+    .shell-status-text { min-width: 0; }
+    .shell-status-detail {
+      min-width: 0;
+      color: var(--ash-text);
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .shell-status-detail[hidden] { display: none; }
+    .shell-status-detail::before { content: "· "; }
+    .shell-status-retry {
+      margin-left: auto;
+      flex: none;
+      border: 1px solid var(--line-danger);
+      border-radius: 4px;
+      background: transparent;
+      color: var(--chalk-dim);
+      font-family: var(--font-ui);
+      font-size: 0.75rem;
+      padding: var(--space-2xs) var(--space-sm);
+      cursor: pointer;
+    }
+    .shell-status-retry:hover { background: var(--error-tint); color: var(--chalk); }
 
     .stop {
       min-height: 30px;
@@ -1664,6 +1719,15 @@
       overflow-wrap: anywhere;
     }
 
+    /* A placeholder that reports the connection, not the session, must not read
+       as the settled "nothing here" box. */
+    .empty.pending { border-style: solid; color: var(--chalk-dim); }
+    .empty.degraded {
+      border-style: solid;
+      border-color: var(--line-danger);
+      color: var(--chalk-dim);
+    }
+
     .node-inspector {
       min-width: 0;
       min-height: 0;
@@ -1903,8 +1967,8 @@
       <div></div>
 
       <div class="status-stack">
-        <div class="status-row"><span>web</span><span id="webState">loading</span></div>
-        <div class="status-row"><span>session</span><span id="sessionId">—</span></div>
+        <div class="status-row"><span>web</span><span id="webState">checking</span></div>
+        <div class="status-row"><span>session</span><span id="sessionId">connecting…</span></div>
         <div class="status-row"><span>usage</span><span id="usageTotal">0 total</span></div>
         <div class="status-row"><span>tokens</span><span id="usageBreakdown">0 in · 0 out</span></div>
         <button id="newSessionTab" class="ghost-btn" type="button" title="Open an isolated session in a second tab">new session tab</button>
@@ -1920,12 +1984,12 @@
             <button class="view-tab" type="button" data-view="accounts" role="tab"
                     aria-selected="false">accounts</button>
           </div>
-          <div class="subtitle" id="streamState">ready</div>
+          <div class="subtitle" id="streamState">connecting…</div>
         </div>
         <div class="topbar-right">
           <button id="reset" class="ghost-btn" type="button" title="Clear the conversation and reset the session">reset</button>
           <button id="stop" class="stop" type="button" hidden title="Cancel the running turn (Esc).">stop turn</button>
-          <span id="busyPill" class="pill"><span id="busyDot" class="dot"></span><span id="busyText" aria-live="polite">idle</span></span>
+          <span id="busyPill" class="pill pending"><span id="busyDot" class="dot"></span><span id="busyText" aria-live="polite">connecting</span></span>
           <button id="helpBtn" class="help" type="button" aria-expanded="false" aria-controls="helpPanel"
                   aria-label="Help and keyboard shortcuts">?</button>
           <div id="helpPanel" class="help-panel" role="region" aria-label="Workbench help" tabindex="-1" hidden>
@@ -1947,9 +2011,17 @@
         </div>
       </header>
 
+      <div id="shellStatus" class="shell-status" role="status" aria-live="polite" hidden>
+        <span class="shell-status-dot"></span>
+        <span id="shellStatusText" class="shell-status-text"></span>
+        <span id="shellStatusDetail" class="shell-status-detail" hidden></span>
+        <button id="shellStatusRetry" class="shell-status-retry" type="button"
+                title="Retry the session snapshot and the live streams now">retry now</button>
+      </div>
+
       <section id="timeline" class="timeline" aria-busy="false">
-        <div id="timelineEmpty" class="empty">
-          no turns yet. ask the agent something below, or click red or blue to fire a trigger occurrence.
+        <div id="timelineEmpty" class="empty pending">
+          connecting to the workbench…
         </div>
       </section>
 
@@ -2100,6 +2172,10 @@
     const modelInput = document.getElementById("modelInput");
     const variantSelect = document.getElementById("variantSelect");
     const streamState = document.getElementById("streamState");
+    const shellStatus = document.getElementById("shellStatus");
+    const shellStatusText = document.getElementById("shellStatusText");
+    const shellStatusDetail = document.getElementById("shellStatusDetail");
+    const shellStatusRetry = document.getElementById("shellStatusRetry");
     const busyPill = document.getElementById("busyPill");
     const busyText = document.getElementById("busyText");
     const webState = document.getElementById("webState");
@@ -2176,6 +2252,174 @@
     }
     // END WORKBENCH_PROJECTION_STATE
 
+    // BEGIN WORKBENCH_SHELL_AVAILABILITY
+    /* "idle" and "no turns yet" are claims about the session; the shell can only
+       make them from a snapshot it actually received. Before the first
+       /api/state answers — and after the backend stops answering — it knows
+       nothing about the session, so it reports the one thing it does know: the
+       state of its own connection. A turn parked durably behind an outage must
+       never render as an empty, idle session.
+
+       A channel is `null` until something has been learned about it. Unknown is
+       not the same as down — a stream that has not attached yet is not evidence
+       of an outage — but it is not evidence of liveness either, which is why a
+       connect that never lands is bounded by a watchdog that turns it into a
+       known-down channel rather than leaving it unknown forever. */
+    function createShellAvailability() {
+      return {
+        hydrated: false,
+        channels: { state: null, product: null, observation: null },
+        reasons: { state: "", product: "", observation: "" }
+      };
+    }
+
+    function markShellChannel(availability, channel, reachable, reason = "") {
+      availability.channels[channel] = reachable;
+      availability.reasons[channel] = reachable ? "" : (reason || availability.reasons[channel]);
+      return availability;
+    }
+
+    /* The snapshot channel is the one that decides what the shell may claim, so
+       its reason outranks a stream's when several are down at once. */
+    function shellReason(availability) {
+      const reasons = availability.reasons;
+      return reasons.state || reasons.product || reasons.observation || "";
+    }
+
+    /* Hydration is a separate fact from reachability: it means a snapshot was
+       applied to the DOM, which is what licenses session-specific claims. */
+    function markShellHydrated(availability) {
+      availability.hydrated = true;
+      return availability;
+    }
+
+    function shellChannelDown(availability) {
+      const channels = availability.channels;
+      return channels.state === false
+        || channels.product === false
+        || channels.observation === false;
+    }
+
+    function shellPhase(availability) {
+      const down = shellChannelDown(availability);
+      if (availability.hydrated) return down ? "reconnecting" : "live";
+      return down ? "unavailable" : "connecting";
+    }
+
+    function timelinePlaceholder(phase) {
+      if (phase === "live") {
+        return "no turns yet. ask the agent something below, or click red or blue to fire a trigger occurrence.";
+      }
+      if (phase === "connecting") return "connecting to the workbench…";
+      if (phase === "reconnecting") {
+        return "reconnecting. this is the last state the workbench reported — it may have moved on since.";
+      }
+      return "the workbench is not answering. this is a connection problem, not an empty session: whatever this session is doing is unknown, not absent.";
+    }
+
+    /* How a /api/state response should land, given what is already on screen.
+       A retried snapshot is not single-flight — the retry button, the backoff
+       timer and a reset can all be in flight at once — so a response that is no
+       longer the newest request is dropped outright; that is the only rule that
+       holds before hydration, when the recovery guard cannot compare sessions.
+       Before any stream has started nothing else can have rendered, so the
+       response is simply applied. Once one has, the response lands over rows the
+       product stream already drew and must replace them authoritatively —
+       reasoning and code rows carry no id dedup, so appending would double them.
+       And once a snapshot has been applied before, the recovery guard rules: a
+       response behind the live projection must not erase rows it never saw. */
+    function snapshotApplication(availability, request = {}) {
+      if (!request.isLatestRequest) return "ignore";
+      if (!request.streamsStarted) return "initial";
+      if (availability.hydrated && !request.responseIsCurrent) return "ignore";
+      return "authoritative";
+    }
+
+    function shellStatusModel(availability, view = {}) {
+      const phase = shellPhase(availability);
+      const busy = Boolean(view.busy);
+      const stateDown = availability.channels.state === false;
+      const model = {
+        phase,
+        pillText: phase,
+        pillTone: phase === "connecting" ? "pending" : "degraded",
+        subtitle: "connecting…",
+        session: phase === "connecting" ? "connecting…" : "unknown",
+        web: view.web || (phase === "connecting" ? "checking" : "unknown"),
+        placeholder: timelinePlaceholder(phase),
+        placeholderTone: phase === "live" ? "" : (phase === "connecting" ? "pending" : "degraded"),
+        banner: { hidden: true, text: "", detail: shellReason(availability) }
+      };
+      if (phase === "live") {
+        model.pillText = busy ? "running" : "idle";
+        model.pillTone = busy ? "run" : "";
+        model.subtitle = view.busyLabel || (busy ? "turn running" : "ready");
+        model.session = view.session || "—";
+        return model;
+      }
+      if (phase === "unavailable") {
+        model.subtitle = "no answer from the workbench";
+        model.banner = {
+          hidden: false,
+          text: "workbench unreachable — retrying",
+          detail: shellReason(availability)
+        };
+        return model;
+      }
+      if (phase === "reconnecting") {
+        model.session = view.session || "—";
+        model.subtitle = busy
+          ? "reconnecting · a turn was running"
+          : "reconnecting · showing the last known state";
+        model.banner = {
+          hidden: false,
+          text: stateDown
+            ? "reconnecting — showing the last known state"
+            : "live updates paused — reconnecting",
+          detail: shellReason(availability)
+        };
+        return model;
+      }
+      return model;
+    }
+    // END WORKBENCH_SHELL_AVAILABILITY
+
+    const shellAvailability = createShellAvailability();
+    let knownSessionLabel = null;
+    let knownWebState = null;
+    let busyLabel = "ready";
+
+    // BEGIN WORKBENCH_SHELL_STATUS_RENDER
+    /* Paints the availability model. It only ever writes status furniture: the
+       transcript is never cleared by a connection change, so a degraded shell
+       keeps whatever the last good snapshot rendered. */
+    function applyShellStatus(model) {
+      busyText.textContent = model.pillText;
+      busyPill.className = "pill" + (model.pillTone ? " " + model.pillTone : "");
+      streamState.textContent = model.subtitle;
+      sessionId.textContent = model.session;
+      webState.textContent = model.web;
+      shellStatus.hidden = model.banner.hidden;
+      shellStatusText.textContent = model.banner.text;
+      shellStatusDetail.textContent = model.banner.detail;
+      shellStatusDetail.hidden = !model.banner.detail;
+      const placeholder = document.getElementById("timelineEmpty");
+      if (placeholder) {
+        placeholder.textContent = model.placeholder;
+        placeholder.className = "empty" + (model.placeholderTone ? " " + model.placeholderTone : "");
+      }
+    }
+    // END WORKBENCH_SHELL_STATUS_RENDER
+
+    function renderShellStatus() {
+      applyShellStatus(shellStatusModel(shellAvailability, {
+        busy,
+        busyLabel,
+        session: knownSessionLabel,
+        web: knownWebState
+      }));
+    }
+
     const renderedMessages = new Set();
     const projectionState = createWorkbenchProjectionState();
     const renderedProductEvents = projectionState.renderedProductEvents;
@@ -2240,21 +2484,21 @@
         : "ask the agent — enter to send, shift + enter for a newline";
       syncCommandAvailability();
       stopButton.hidden = !next;
-      busyPill.classList.toggle("run", next);
-      busyText.textContent = next ? "running" : "idle";
       timeline.setAttribute("aria-busy", String(next));
       clearInterval(turnTimer);
       turnTimer = 0;
       if (next) {
         turnStart = performance.now();
-        streamState.textContent = label || "turn running";
+        busyLabel = label || "turn running";
         turnTimer = setInterval(() => {
           const secs = Math.floor((performance.now() - turnStart) / 1000);
-          streamState.textContent = "running · " + secs + "s";
+          busyLabel = "running · " + secs + "s";
+          renderShellStatus();
         }, 1000);
       } else {
-        streamState.textContent = label || "ready";
+        busyLabel = label || "ready";
       }
+      renderShellStatus();
     }
 
     function scrollToEnd() {
@@ -2941,12 +3185,34 @@
       connectObservations(streamGeneration, observationStreamController.signal);
     }
 
+    /* A stream request stays open by design, so what is bounded is its
+       establishment, not its lifetime — and by a watchdog rather than an abort,
+       which would tear down a slow but healthy connection. A connect that never
+       produces headers would otherwise leave its channel in the state it was
+       born in and the shell claiming a liveness nothing has evidenced. */
+    const STREAM_CONNECT_TIMEOUT_MS = 8000;
+
+    async function openStream(url, signal, channel, label) {
+      const watchdog = setTimeout(() => {
+        markShellChannel(shellAvailability, channel, false, label + " is not connecting");
+        renderShellStatus();
+      }, STREAM_CONNECT_TIMEOUT_MS);
+      try {
+        const response = await fetch(url, { cache: "no-store", signal });
+        if (!response.ok || !response.body) throw new Error(label + " unavailable");
+        markShellChannel(shellAvailability, channel, true);
+        renderShellStatus();
+        return response;
+      } finally {
+        clearTimeout(watchdog);
+      }
+    }
+
     async function connectProductEvents(generation, signal) {
       while (generation === streamGeneration && !signal.aborted) {
         try {
           const url = "/api/events?cursor=" + encodeURIComponent(projectionState.productCursor);
-          const response = await fetch(url, { cache: "no-store", signal });
-          if (!response.ok || !response.body) throw new Error("product stream unavailable");
+          const response = await openStream(url, signal, "product", "the transcript stream");
           const reader = response.body.getReader();
           const decoder = new TextDecoder();
           let buffer = "";
@@ -2959,9 +3225,18 @@
             for (const line of lines) handleProductStreamLine(line);
           }
           handleProductStreamLine(buffer);
+          /* a stream that ended on its own is not a live channel until the next
+             attempt re-establishes it */
+          if (!signal.aborted) {
+            markShellChannel(shellAvailability, "product", false, "the transcript stream closed");
+            renderShellStatus();
+          }
         } catch (error) {
           if (signal.aborted) return;
-          renderNote("transcript updates reconnecting");
+          /* the banner carries this: one reconnect attempt per second must not
+             append a row to the transcript it is failing to update */
+          markShellChannel(shellAvailability, "product", false, "the transcript stream disconnected");
+          renderShellStatus();
         }
         await new Promise(resolve => setTimeout(resolve, 900));
       }
@@ -2973,8 +3248,7 @@
           const url = projectionState.observationCursor
             ? "/api/observations?cursor=" + encodeURIComponent(projectionState.observationCursor)
             : "/api/observations";
-          const response = await fetch(url, { cache: "no-store", signal });
-          if (!response.ok || !response.body) throw new Error("observation stream unavailable");
+          const response = await openStream(url, signal, "observation", "the live turn stream");
           const reader = response.body.getReader();
           const decoder = new TextDecoder();
           let buffer = "";
@@ -2987,9 +3261,14 @@
             for (const line of lines) handleObservationStreamLine(line);
           }
           handleObservationStreamLine(buffer);
+          if (!signal.aborted) {
+            markShellChannel(shellAvailability, "observation", false, "the live turn stream closed");
+            renderShellStatus();
+          }
         } catch (error) {
           if (signal.aborted) return;
-          renderNote("live turn updates reconnecting");
+          markShellChannel(shellAvailability, "observation", false, "the live turn stream disconnected");
+          renderShellStatus();
         }
         await new Promise(resolve => setTimeout(resolve, 900));
       }
@@ -3060,9 +3339,16 @@
       const token = beginStateRecovery(projectionState);
       try {
         const state = await fetchStateSnapshot();
-        if (!recoveryResponseIsCurrent(projectionState, token, state)) return;
+        markShellChannel(shellAvailability, "state", true);
+        if (!recoveryResponseIsCurrent(projectionState, token, state)) {
+          renderShellStatus();
+          return;
+        }
         applyStateSnapshot(state, true, true);
-      } catch (_) {
+      } catch (error) {
+        markShellChannel(shellAvailability, "state", false, snapshotFailureReason(error));
+        renderShellStatus();
+        scheduleStateRetry();
         renderError(failureMessage, { retry: false });
       }
     }
@@ -3135,8 +3421,8 @@
       const empty = document.createElement("div");
       empty.id = "timelineEmpty";
       empty.className = "empty";
-      empty.textContent = "no turns yet. ask the agent something below, or click red or blue to fire a trigger occurrence.";
       timeline.appendChild(empty);
+      renderShellStatus();
     }
 
     // BEGIN WORKBENCH_SETTLED_TRANSCRIPT
@@ -3175,7 +3461,12 @@
         clearExecutionState();
         clearAttachment();
         lastRequest = null;
-        sessionId.textContent = state.settings.session_id || "—";
+        /* the new session invalidates any snapshot request still in flight;
+           restartEventStreams(true) below bumps the recovery generation, which
+           is what makes a late response for the old session land as "ignore" */
+        cancelStateRetry();
+        markShellChannel(shellAvailability, "state", true);
+        knownSessionLabel = state.settings.session_id || "—";
         renderUsage(state.usage);
         applyStateSnapshot(state, true);
         restartEventStreams(true);
@@ -3871,8 +4162,10 @@
         variantSelect.addEventListener("change", validateModel);
         modelListenersBound = true;
       }
-      webState.textContent = state.settings.web_configured ? "ready" : "not configured";
-      sessionId.textContent = state.settings.session_id;
+      knownWebState = state.settings.web_configured ? "ready" : "not configured";
+      knownSessionLabel = state.settings.session_id;
+      markShellHydrated(shellAvailability);
+      renderShellStatus();
       renderUsage(state.usage);
       renderStateTranscript(state);
       for (const pending of state.pending_turn_inputs || []) {
@@ -3891,8 +4184,14 @@
       }
     }
 
-    async function fetchStateSnapshot() {
-      const response = await fetch("/api/state");
+    /* Every snapshot request is bounded. A backend that accepts the connection
+       and then blocks on an unavailable engine is otherwise indistinguishable
+       from a slow one, and an unbounded request leaves the shell in its
+       pre-hydration state forever with nothing to say about it. */
+    const STATE_REQUEST_TIMEOUT_MS = 5000;
+
+    async function fetchStateSnapshot(timeoutMs = STATE_REQUEST_TIMEOUT_MS) {
+      const response = await fetch("/api/state", { signal: AbortSignal.timeout(timeoutMs) });
       if (!response.ok) {
         let message = "state request failed (" + response.status + ")";
         try {
@@ -3928,18 +4227,72 @@
     async function refreshUsage() {
       try {
         const state = await fetchStateSnapshot();
+        markShellChannel(shellAvailability, "state", true);
         renderUsage(state.usage);
-      } catch (_) { /* the reconnect path will refresh the full snapshot */ }
+        renderShellStatus();
+      } catch (error) {
+        markShellChannel(shellAvailability, "state", false, snapshotFailureReason(error));
+        renderShellStatus();
+        scheduleStateRetry();
+      }
+    }
+
+    function snapshotFailureReason(error) {
+      if (error?.name === "TimeoutError") {
+        return "the workbench did not answer within " + (STATE_REQUEST_TIMEOUT_MS / 1000) + "s";
+      }
+      return cleanErrorText(error?.message || "the workbench did not answer");
+    }
+
+    let stateRetryTimer = 0;
+    let stateRetryDelay = 900;
+
+    /* The snapshot channel repairs itself, with backoff, for as long as it is
+       down. Before hydration that is what turns the unavailable state into a
+       promise rather than a dead end needing a manual reload; after it, it is
+       what ends a "showing the last known state" banner without one. */
+    function cancelStateRetry() {
+      clearTimeout(stateRetryTimer);
+      stateRetryTimer = 0;
+      stateRetryDelay = 900;
+    }
+
+    function scheduleStateRetry() {
+      if (stateRetryTimer) return;
+      stateRetryTimer = setTimeout(() => {
+        stateRetryTimer = 0;
+        loadState().catch(() => {});
+      }, stateRetryDelay);
+      stateRetryDelay = Math.min(stateRetryDelay * 2, 5000);
     }
 
     async function loadState() {
+      const token = beginStateRecovery(projectionState);
       try {
-        applyStateSnapshot(await fetchStateSnapshot());
+        const state = await fetchStateSnapshot();
+        markShellChannel(shellAvailability, "state", true);
+        const application = snapshotApplication(shellAvailability, {
+          isLatestRequest: token.generation === projectionState.recoveryGeneration,
+          streamsStarted: streamGeneration > 0,
+          responseIsCurrent: recoveryResponseIsCurrent(projectionState, token, state)
+        });
+        if (application === "ignore") {
+          /* a dropped response must not cancel a newer request's retry */
+          renderShellStatus();
+          return;
+        }
+        cancelStateRetry();
+        if (application === "initial") {
+          applyStateSnapshot(state);
+          return;
+        }
+        applyStateSnapshot(state, true, true);
+        /* re-attach the streams at the snapshot's cursors */
+        restartEventStreams();
       } catch (error) {
-        webState.textContent = "unavailable";
-        sessionId.textContent = "—";
-        streamState.textContent = "could not load session";
-        renderError(error?.message || "the workbench session could not be loaded; check the server, then reload");
+        markShellChannel(shellAvailability, "state", false, snapshotFailureReason(error));
+        renderShellStatus();
+        scheduleStateRetry();
         throw new Error("state unavailable");
       }
     }
@@ -5048,6 +5401,19 @@
 
     workCount.addEventListener("click", () => { if (workStale) refreshWork(); });
 
+    shellStatusRetry.addEventListener("click", () => {
+      cancelStateRetry();
+      loadState().catch(() => {});
+      restartEventStreams();
+      refreshWork();
+    });
+
+    /* Paint the pre-hydration state before any request is in flight: the shell
+       is rendered by the state machine from the first frame, never by whatever
+       the static markup happened to say. The snapshot request is bounded, so
+       this always advances to a real phase — a refused connection and a
+       backend that accepts and then blocks now converge on the same render. */
+    renderShellStatus();
     loadState().catch(() => {}).finally(() => {
       refreshWork();
       loadTriggers();
