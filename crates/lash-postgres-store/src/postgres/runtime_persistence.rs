@@ -2068,6 +2068,42 @@ impl TurnInputStore for PostgresSessionStore {
 
 #[async_trait::async_trait]
 impl StoreMaintenance for PostgresSessionStore {
+    async fn seed_session_trigger_manifest_ref_for_testing(
+        &self,
+        session_id: &str,
+    ) -> Result<bool, StoreError> {
+        sqlx::query(
+            "INSERT INTO lash_lashlang_artifacts (namespace, artifact_ref, artifact_bytes)
+             VALUES ($1, $2, $3)
+             ON CONFLICT (namespace, artifact_ref)
+             DO UPDATE SET artifact_bytes = EXCLUDED.artifact_bytes",
+        )
+        .bind(crate::artifact_store::CURRENT_TRIGGER_MANIFEST_NAMESPACE)
+        .bind(format!("session:{session_id}"))
+        .bind([1_u8].as_slice())
+        .execute(&self.pool)
+        .await
+        .map_err(store_sqlx_error)?;
+        Ok(true)
+    }
+
+    async fn raw_session_owned_artifact_refs_for_testing(
+        &self,
+        session_id: &str,
+    ) -> Result<Vec<(String, String)>, StoreError> {
+        sqlx::query_as(
+            "SELECT namespace, artifact_ref
+             FROM lash_lashlang_artifacts
+             WHERE namespace = $1 AND artifact_ref = $2
+             ORDER BY namespace, artifact_ref",
+        )
+        .bind(crate::artifact_store::CURRENT_TRIGGER_MANIFEST_NAMESPACE)
+        .bind(format!("session:{session_id}"))
+        .fetch_all(&self.pool)
+        .await
+        .map_err(store_sqlx_error)
+    }
+
     async fn vacuum(&self) -> Result<VacuumReport, StoreError> {
         // `lash_deleted_sessions` is deliberately exempt: it is permanent
         // identity evidence and must survive every retention-pruning pass.

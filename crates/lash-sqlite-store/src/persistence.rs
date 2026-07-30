@@ -2137,6 +2137,61 @@ impl TurnInputStore for Store {
 
 #[async_trait::async_trait]
 impl StoreMaintenance for Store {
+    async fn seed_session_trigger_manifest_ref_for_testing(
+        &self,
+        session_id: &str,
+    ) -> Result<bool, StoreError> {
+        let artifact_ref = format!("session:{session_id}");
+        let blob_ref = format!("testing-trigger-manifest:{session_id}");
+        self.conn
+            .write(move |tx| {
+                tx.execute(
+                    "INSERT OR IGNORE INTO blobs (hash, content) VALUES (?1, X'01')",
+                    params![blob_ref],
+                )?;
+                tx.execute(
+                    "INSERT OR REPLACE INTO artifact_refs (namespace, artifact_ref, blob_ref)
+                     VALUES (?1, ?2, ?3)",
+                    params![
+                        crate::attachments::CURRENT_TRIGGER_MANIFEST_NAMESPACE,
+                        artifact_ref,
+                        blob_ref
+                    ],
+                )?;
+                Ok(())
+            })
+            .await
+            .map_err(sqlite_error)?;
+        Ok(true)
+    }
+
+    async fn raw_session_owned_artifact_refs_for_testing(
+        &self,
+        session_id: &str,
+    ) -> Result<Vec<(String, String)>, StoreError> {
+        let artifact_ref = format!("session:{session_id}");
+        self.conn
+            .call(move |connection| {
+                let mut statement = connection.prepare(
+                    "SELECT namespace, artifact_ref
+                     FROM artifact_refs
+                     WHERE namespace = ?1 AND artifact_ref = ?2
+                     ORDER BY namespace, artifact_ref",
+                )?;
+                statement
+                    .query_map(
+                        params![
+                            crate::attachments::CURRENT_TRIGGER_MANIFEST_NAMESPACE,
+                            artifact_ref
+                        ],
+                        |row| Ok((row.get(0)?, row.get(1)?)),
+                    )?
+                    .collect()
+            })
+            .await
+            .map_err(sqlite_error)
+    }
+
     async fn vacuum(&self) -> Result<VacuumReport, StoreError> {
         // `deleted_sessions` is deliberately exempt: it is permanent identity
         // evidence and must survive every retention-pruning pass.

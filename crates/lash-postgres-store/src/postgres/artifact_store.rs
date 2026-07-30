@@ -8,7 +8,7 @@ use crate::*;
 const MODULE_ARTIFACT_NAMESPACE: &str = "lashlang_module";
 const RAW_ARTIFACT_NAMESPACE: &str = "lashlang_artifact";
 const PROCESS_ENV_NAMESPACE: &str = "process_execution_env";
-const CURRENT_TRIGGER_MANIFEST_NAMESPACE: &str = "lashlang_trigger_manifest";
+pub(crate) const CURRENT_TRIGGER_MANIFEST_NAMESPACE: &str = "lashlang_trigger_manifest";
 
 impl PostgresLashlangArtifactStore {
     async fn put_namespaced_bytes(

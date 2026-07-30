@@ -1402,6 +1402,30 @@ pub trait StoreMaintenance: Send + Sync {
 
     /// Delete blobs no longer reachable from any retained root.
     async fn gc_unreachable(&self) -> Result<GcReport, StoreError>;
+
+    /// Seed the exact session-owned trigger-manifest artifact-ref namespace for
+    /// deletion conformance and differential tests.
+    ///
+    /// Returns `false` when the backend has no artifact-ref namespace on this
+    /// store surface (the in-memory runtime store is such a backend).
+    #[doc(hidden)]
+    async fn seed_session_trigger_manifest_ref_for_testing(
+        &self,
+        _session_id: &str,
+    ) -> Result<bool, StoreError> {
+        Ok(false)
+    }
+
+    /// Return session-owned artifact-ref identities through this retained store
+    /// handle. Values are `(namespace, artifact_ref)` pairs; physical pointer
+    /// and body representations are deliberately excluded.
+    #[doc(hidden)]
+    async fn raw_session_owned_artifact_refs_for_testing(
+        &self,
+        _session_id: &str,
+    ) -> Result<Vec<(String, String)>, StoreError> {
+        Ok(Vec::new())
+    }
 }
 
 /// Exact settled-session persistence protocol required by the runtime.
