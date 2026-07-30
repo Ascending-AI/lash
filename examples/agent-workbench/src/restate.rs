@@ -630,7 +630,7 @@ pub(crate) async fn cancel_cron_jobs_for_session(
         .session(session_id.to_string())
         .open()
         .await
-        .map_err(AppError::internal)?;
+        .map_err(AppError::session_open)?;
     let registrations = session
         .triggers()
         .by_source_type(CRON_SCHEDULE_SOURCE_TYPE)
@@ -1366,7 +1366,24 @@ async fn emit_cron_occurrence(
             "cron:{}:{fired_at}",
             controller.context().key()
         )))
-        .map_err(|err| HandlerError::from(TerminalError::new(err.to_string())))?;
+        .map_err(|error| classified_embed_handler_error(error.into()))?;
+    emit_cron_occurrence_with_effect_controller(
+        state,
+        request,
+        fired_at,
+        controller.context().key(),
+        scoped_effect_controller,
+    )
+    .await
+}
+
+async fn emit_cron_occurrence_with_effect_controller(
+    state: AppState,
+    request: WorkbenchCronRequest,
+    fired_at: String,
+    job_key: &str,
+    scoped_effect_controller: lash::runtime::ScopedEffectController<'_>,
+) -> HandlerResult<Json<CronEmitReport>> {
     let report = state
         .core
         .triggers()
@@ -1377,7 +1394,7 @@ async fn emit_cron_occurrence(
                 json!({
                     "fired_at": fired_at,
                 }),
-                cron_occurrence_key(controller.context().key(), &fired_at),
+                cron_occurrence_key(job_key, &fired_at),
             )
             .with_source(json!({
                 "expr": request.expr,
@@ -1386,7 +1403,7 @@ async fn emit_cron_occurrence(
             scoped_effect_controller,
         )
         .await
-        .map_err(|err| HandlerError::from(TerminalError::new(err.to_string())))?;
+        .map_err(classified_embed_handler_error)?;
     Ok(Json(CronEmitReport {
         started_process_ids: report.started_process_ids(),
     }))
