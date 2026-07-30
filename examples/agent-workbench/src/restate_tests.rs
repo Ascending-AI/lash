@@ -158,6 +158,21 @@ fn runtime_shape_uses_the_shared_terminal_classifier() {
     );
 }
 
+#[test]
+fn nested_deleted_session_details_preserve_controller_store_context() {
+    let source = lash::persistence::StoreError::SessionDeleted {
+        session_id: "retired-nested-context".to_string(),
+    };
+    let error = lash::EmbedError::Plugin(lash::plugins::PluginError::RuntimeEffectController(
+        lash_core::RuntimeEffectControllerError::from(source),
+    ));
+
+    assert_eq!(
+        crate::deleted_session_details(&error),
+        Some(("retired-nested-context", Some("runtime_store"),))
+    );
+}
+
 #[tokio::test]
 async fn cron_occurrence_call_site_terminalizes_typed_refusals_and_retries_unknown_failures() {
     let session_id = "retired-cron-occurrence";

@@ -140,7 +140,10 @@ impl LashRuntime {
                              {rollback_err}"
                         )));
                     }
-                    return Err(SessionError::Protocol(persistence_error));
+                    return Err(super::session_commit_error(
+                        "failed to persist runtime state",
+                        err,
+                    ));
                 }
             };
             self.state.apply_persisted_commit_result(result);

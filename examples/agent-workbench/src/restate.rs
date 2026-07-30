@@ -640,7 +640,7 @@ pub(crate) async fn cancel_cron_jobs_for_session(
         .iter()
         .map(|registration| cron_job_key(session_id, &registration.source_key))
         .collect();
-    session.close().await.map_err(AppError::internal)?;
+    session.close().await.map_err(AppError::session_open)?;
     job_keys.extend({
         let mut guard = state
             .restate_cron_job_keys
@@ -1366,7 +1366,7 @@ async fn emit_cron_occurrence(
             "cron:{}:{fired_at}",
             controller.context().key()
         )))
-        .map_err(|error| classified_embed_handler_error(error.into()))?;
+        .map_err(|err| HandlerError::from(TerminalError::new(err.to_string())))?;
     emit_cron_occurrence_with_effect_controller(
         state,
         request,

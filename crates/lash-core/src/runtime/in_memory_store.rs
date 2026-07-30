@@ -201,6 +201,8 @@ pub struct InMemorySessionStore {
     #[cfg(test)]
     commit_write_transaction_count: std::sync::atomic::AtomicUsize,
     #[cfg(test)]
+    fail_next_runtime_commit: Mutex<Option<crate::StoreError>>,
+    #[cfg(test)]
     fail_next_session_execution_lease_renewal: std::sync::atomic::AtomicBool,
     #[cfg(test)]
     session_execution_lease_renewal_count: std::sync::atomic::AtomicUsize,
@@ -290,6 +292,8 @@ impl InMemorySessionStore {
             #[cfg(test)]
             commit_write_transaction_count: std::sync::atomic::AtomicUsize::new(0),
             #[cfg(test)]
+            fail_next_runtime_commit: Mutex::new(None),
+            #[cfg(test)]
             fail_next_session_execution_lease_renewal: std::sync::atomic::AtomicBool::new(false),
             #[cfg(test)]
             session_execution_lease_renewal_count: std::sync::atomic::AtomicUsize::new(0),
@@ -326,6 +330,14 @@ impl InMemorySessionStore {
     pub(crate) fn fail_next_exact_queue_claim(&self) {
         self.fail_next_exact_queue_claim
             .store(true, std::sync::atomic::Ordering::SeqCst);
+    }
+
+    #[cfg(test)]
+    pub(crate) fn fail_next_runtime_commit(&self, error: crate::StoreError) {
+        *self
+            .fail_next_runtime_commit
+            .lock()
+            .expect("lock next runtime commit failure") = Some(error);
     }
 
     fn verify_session_execution_lease(
@@ -903,6 +915,15 @@ impl crate::store::SessionCommitStore for InMemorySessionStore {
         #[cfg(test)]
         self.commit_write_transaction_count
             .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        #[cfg(test)]
+        if let Some(error) = self
+            .fail_next_runtime_commit
+            .lock()
+            .expect("lock next runtime commit failure")
+            .take()
+        {
+            return Err(error);
+        }
         let mut meta = self.session_head_meta.lock().expect("lock store");
         let actual = meta.as_ref().map_or(0, |meta| meta.head_revision);
         if let Some(bound) = meta.as_ref().map(|meta| meta.session_id.clone())

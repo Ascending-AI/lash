@@ -56,6 +56,28 @@ async fn recoverable_chat_test_state_with_provider_and_trigger_store(
     provider: ProviderHandle,
     trigger_store: Arc<dyn lash::triggers::TriggerStore>,
 ) -> AppState {
+    let store_factory: Arc<dyn lash::persistence::SessionStoreFactory> = Arc::new(
+        lash_sqlite_store::SqliteSessionStoreFactory::new(data_dir.join("lash-sessions")),
+    );
+    recoverable_chat_test_state_with_dependencies(
+        data_dir,
+        channel_capacity,
+        provider,
+        trigger_store,
+        store_factory,
+        None,
+    )
+    .await
+}
+
+async fn recoverable_chat_test_state_with_dependencies(
+    data_dir: &std::path::Path,
+    channel_capacity: usize,
+    provider: ProviderHandle,
+    trigger_store: Arc<dyn lash::triggers::TriggerStore>,
+    store_factory: Arc<dyn lash::persistence::SessionStoreFactory>,
+    queued_work_driver: Option<lash::runtime::QueuedWorkDriver>,
+) -> AppState {
     let process_registry = Arc::new(
         lash_sqlite_store::SqliteProcessRegistry::open(
             &data_dir.join("processes.db"),
@@ -64,19 +86,20 @@ async fn recoverable_chat_test_state_with_provider_and_trigger_store(
         .await
         .expect("open process registry"),
     ) as Arc<dyn lash::process::ProcessRegistry>;
-    let store_factory: Arc<dyn lash::persistence::SessionStoreFactory> = Arc::new(
-        lash_sqlite_store::SqliteSessionStoreFactory::new(data_dir.join("lash-sessions")),
-    );
     let model = with_workbench_model_capability(
         lash::ModelSpec::from_token_limits("test-model", Default::default(), 4096, None)
             .expect("model spec"),
     );
-    let core = explicit_durable_test_facets(data_dir)
+    let mut core_builder = explicit_durable_test_facets(data_dir)
         .provider(provider)
         .model(model)
         .store_factory(store_factory)
         .process_registry(Arc::clone(&process_registry))
-        .trigger_store(Arc::clone(&trigger_store))
+        .trigger_store(Arc::clone(&trigger_store));
+    if let Some(queued_work_driver) = queued_work_driver {
+        core_builder = core_builder.queued_work_driver(queued_work_driver);
+    }
+    let core = core_builder
         .build()
         .expect("build test core");
     let process_observer = core
@@ -110,6 +133,184 @@ async fn recoverable_chat_test_state_with_provider_and_trigger_store(
     }
 }
 
+struct RetiringSubscriptionListTriggerStore {
+    inner: lash_core::InMemoryTriggerStore,
+    store_factory: Arc<dyn lash::persistence::SessionStoreFactory>,
+    session_to_retire: Mutex<Option<String>>,
+}
+
+impl RetiringSubscriptionListTriggerStore {
+    fn new(store_factory: Arc<dyn lash::persistence::SessionStoreFactory>) -> Self {
+        Self {
+            inner: lash_core::InMemoryTriggerStore::new(),
+            store_factory,
+            session_to_retire: Mutex::new(None),
+        }
+    }
+
+    fn retire_on_next_list(&self, session_id: &str) {
+        *self
+            .session_to_retire
+            .lock()
+            .expect("retiring trigger store session lock") = Some(session_id.to_string());
+    }
+}
+
+#[async_trait::async_trait]
+impl lash::triggers::TriggerStore for RetiringSubscriptionListTriggerStore {
+    async fn execute_command(
+        &self,
+        operation_id: &str,
+        command: lash::triggers::TriggerCommand,
+    ) -> std::result::Result<
+        lash::triggers::TriggerEffectResult,
+        lash::plugins::PluginError,
+    > {
+        self.inner.execute_command(operation_id, command).await
+    }
+
+    async fn list_subscriptions(
+        &self,
+        filter: lash::triggers::TriggerSubscriptionFilter,
+    ) -> std::result::Result<
+        Vec<lash::triggers::TriggerSubscriptionRecord>,
+        lash::plugins::PluginError,
+    > {
+        let session_id = self
+            .session_to_retire
+            .lock()
+            .expect("retiring trigger store session lock")
+            .take();
+        if let Some(session_id) = session_id {
+            self.store_factory
+                .delete_session(&session_id)
+                .await
+                .map_err(lash::plugins::PluginError::Session)?;
+        }
+        self.inner.list_subscriptions(filter).await
+    }
+
+    async fn delete_session_subscriptions(
+        &self,
+        session_id: &str,
+    ) -> std::result::Result<usize, lash::plugins::PluginError> {
+        self.inner.delete_session_subscriptions(session_id).await
+    }
+
+    async fn ingest_occurrence(
+        &self,
+        request: lash::triggers::TriggerOccurrenceRequest,
+    ) -> std::result::Result<lash_core::TriggerIngressResult, lash::plugins::PluginError> {
+        self.inner.ingest_occurrence(request).await
+    }
+
+    async fn list_occurrences(
+        &self,
+        filter: lash::triggers::TriggerOccurrenceFilter,
+    ) -> std::result::Result<
+        Vec<lash::triggers::TriggerOccurrenceRecord>,
+        lash::plugins::PluginError,
+    > {
+        self.inner.list_occurrences(filter).await
+    }
+
+    async fn list_deliveries_by_occurrence_id(
+        &self,
+        occurrence_id: &str,
+    ) -> std::result::Result<
+        Vec<lash::triggers::TriggerDeliveryReservation>,
+        lash::plugins::PluginError,
+    > {
+        self.inner
+            .list_deliveries_by_occurrence_id(occurrence_id)
+            .await
+    }
+
+    async fn list_deliveries_by_subscription_id(
+        &self,
+        subscription_id: &str,
+    ) -> std::result::Result<
+        Vec<lash::triggers::TriggerDeliveryReservation>,
+        lash::plugins::PluginError,
+    > {
+        self.inner
+            .list_deliveries_by_subscription_id(subscription_id)
+            .await
+    }
+
+    async fn list_deliveries_by_process_id(
+        &self,
+        process_id: &str,
+    ) -> std::result::Result<
+        Vec<lash::triggers::TriggerDeliveryReservation>,
+        lash::plugins::PluginError,
+    > {
+        self.inner.list_deliveries_by_process_id(process_id).await
+    }
+
+    async fn list_deliveries(
+        &self,
+    ) -> std::result::Result<
+        Vec<lash::triggers::TriggerDeliveryReservation>,
+        lash::plugins::PluginError,
+    > {
+        self.inner.list_deliveries().await
+    }
+
+    async fn prune_mutation_receipts(
+        &self,
+        cutoff_epoch_ms: u64,
+    ) -> std::result::Result<usize, lash::plugins::PluginError> {
+        self.inner.prune_mutation_receipts(cutoff_epoch_ms).await
+    }
+}
+
+struct RetiringQueuedWorkRunHandle {
+    store_factory: Arc<dyn lash::persistence::SessionStoreFactory>,
+    session_to_retire: Mutex<Option<String>>,
+}
+
+impl RetiringQueuedWorkRunHandle {
+    fn new(store_factory: Arc<dyn lash::persistence::SessionStoreFactory>) -> Self {
+        Self {
+            store_factory,
+            session_to_retire: Mutex::new(None),
+        }
+    }
+
+    fn retire_on_next_run(&self, session_id: &str) {
+        *self
+            .session_to_retire
+            .lock()
+            .expect("retiring queued-work session lock") = Some(session_id.to_string());
+    }
+}
+
+#[async_trait::async_trait]
+impl lash::runtime::QueuedWorkRunHandle for RetiringQueuedWorkRunHandle {
+    async fn run_queued_work(
+        &self,
+        _request: lash::runtime::QueuedWorkRunRequest,
+    ) -> std::result::Result<(), lash::runtime::QueuedWorkRunError> {
+        let session_id = self
+            .session_to_retire
+            .lock()
+            .expect("retiring queued-work session lock")
+            .take();
+        if let Some(session_id) = session_id {
+            self.store_factory
+                .delete_session(&session_id)
+                .await
+                .map_err(|error| {
+                    lash::runtime::QueuedWorkRunError::terminal(
+                        lash::plugins::PluginError::Session(error),
+                    )
+                })?;
+        }
+        Ok(())
+    }
+}
+
 async fn retire_workbench_session(state: &AppState, session_id: &str) {
     drop(
         state
@@ -138,6 +339,8 @@ async fn retire_workbench_session(state: &AppState, session_id: &str) {
 fn assert_deleted_session_conflict(error: &AppError, session_id: &str) {
     assert_eq!(error.status, StatusCode::CONFLICT);
     assert_eq!(error.message, deleted_session_message(session_id));
+    assert!(error.terminal);
+    assert!(!error.retryable);
 }
 
 #[test]
@@ -155,6 +358,89 @@ fn reset_cron_cancellation_preserves_a_retired_session_refusal() {
         )
         .await
         .expect_err("reset cron cancellation must refuse a retired session");
+
+        assert_deleted_session_conflict(&error, &session_id);
+    });
+}
+
+#[test]
+fn reset_cron_close_preserves_a_concurrent_retirement_refusal() {
+    run_async_test_on_stack_budget("retired-session-reset-cron-close-test", || async {
+        let data_dir = tempfile::tempdir().expect("tempdir");
+        let store_factory: Arc<dyn lash::persistence::SessionStoreFactory> = Arc::new(
+            lash_sqlite_store::SqliteSessionStoreFactory::new(data_dir.path().join("lash-sessions")),
+        );
+        let trigger_store = Arc::new(RetiringSubscriptionListTriggerStore::new(Arc::clone(
+            &store_factory,
+        )));
+        let provider = lash::testing::TestProvider::builder()
+            .kind("retired-session-reset-cron-close-test")
+            .complete(|_| async {
+                Ok(text_response(
+                    "<lashlang>\nfinish \"canonical answer\"\n</lashlang>",
+                ))
+            })
+            .build()
+            .into_handle();
+        let state = recoverable_chat_test_state_with_dependencies(
+            data_dir.path(),
+            16,
+            provider,
+            trigger_store.clone(),
+            store_factory,
+            None,
+        )
+        .await;
+        let session_id = state.current_session_id();
+        trigger_store.retire_on_next_list(&session_id);
+
+        let error = crate::restate::cancel_cron_jobs_for_session(
+            &state,
+            &session_id,
+            "reset-close-race",
+        )
+        .await
+        .expect_err("cron cancellation close must preserve a concurrent retirement");
+
+        assert_deleted_session_conflict(&error, &session_id);
+    });
+}
+
+#[test]
+fn tool_catalog_refresh_close_preserves_a_concurrent_retirement_refusal() {
+    run_async_test_on_stack_budget("retired-session-tool-refresh-close-test", || async {
+        let data_dir = tempfile::tempdir().expect("tempdir");
+        let store_factory: Arc<dyn lash::persistence::SessionStoreFactory> = Arc::new(
+            lash_sqlite_store::SqliteSessionStoreFactory::new(data_dir.path().join("lash-sessions")),
+        );
+        let retiring_run_handle =
+            Arc::new(RetiringQueuedWorkRunHandle::new(Arc::clone(&store_factory)));
+        let queued_work_driver =
+            lash::runtime::QueuedWorkDriver::new(retiring_run_handle.clone());
+        let provider = lash::testing::TestProvider::builder()
+            .kind("retired-session-tool-refresh-close-test")
+            .complete(|_| async {
+                Ok(text_response(
+                    "<lashlang>\nfinish \"canonical answer\"\n</lashlang>",
+                ))
+            })
+            .build()
+            .into_handle();
+        let state = recoverable_chat_test_state_with_dependencies(
+            data_dir.path(),
+            16,
+            provider,
+            in_memory_trigger_store(),
+            store_factory,
+            Some(queued_work_driver),
+        )
+        .await;
+        let session_id = state.current_session_id();
+        retiring_run_handle.retire_on_next_run(&session_id);
+
+        let error = enqueue_tool_catalog_refresh(&state, "close_retirement_race")
+            .await
+            .expect_err("tool-catalog refresh close must preserve a concurrent retirement");
 
         assert_deleted_session_conflict(&error, &session_id);
     });

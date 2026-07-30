@@ -803,7 +803,7 @@ async fn enqueue_tool_catalog_refresh(
         )
         .await
         .map_err(AppError::internal)?;
-    session.close().await.map_err(AppError::internal)?;
+    session.close().await.map_err(AppError::session_open)?;
     state.trace_for_session(
         &session_id,
         "mail.tool_catalog.refresh_enqueued",
