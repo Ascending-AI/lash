@@ -175,9 +175,8 @@ impl WorkbenchTurnWorkflow for WorkbenchTurnWorkflowImpl {
             .queued_work_driver
             .claim_and_run_pending(Some(&session_id), "user_turn_completed")
             .await
-            // Audited: the production queued-work submitter lowers factory/store failures to untyped PluginError::Session values.
-            .map_err(AppError::internal)
-            .map_err(terminal_handler_error)?;
+            // Audited: typed queued-work store refusals use the shared terminal classifier; ambiguous failures remain retryable.
+            .map_err(classified_plugin_handler_error)?;
         Ok(Json(()))
     }
 }
@@ -215,9 +214,8 @@ impl WorkbenchQueuedTurnWorkflow for WorkbenchQueuedTurnWorkflowImpl {
             .queued_work_driver
             .claim_and_run_pending(Some(&session_id), "queued_turn_completed")
             .await
-            // Audited: the production queued-work submitter lowers factory/store failures to untyped PluginError::Session values.
-            .map_err(AppError::internal)
-            .map_err(terminal_handler_error)?;
+            // Audited: typed queued-work store refusals use the shared terminal classifier; ambiguous failures remain retryable.
+            .map_err(classified_plugin_handler_error)?;
         sync_cron_jobs_with_context(
             &self.state,
             controller.context(),
@@ -259,9 +257,8 @@ impl WorkbenchButtonTriggerWorkflow for WorkbenchButtonTriggerWorkflowImpl {
             .queued_work_driver
             .claim_and_run_pending(Some(&session_id), "button_trigger")
             .await
-            // Audited: the production queued-work submitter lowers factory/store failures to untyped PluginError::Session values.
-            .map_err(AppError::internal)
-            .map_err(terminal_handler_error)?;
+            // Audited: typed queued-work store refusals use the shared terminal classifier; ambiguous failures remain retryable.
+            .map_err(classified_plugin_handler_error)?;
         Ok(Json(()))
     }
 }
@@ -296,9 +293,8 @@ impl WorkbenchMailReceivedWorkflow for WorkbenchMailReceivedWorkflowImpl {
             .queued_work_driver
             .claim_and_run_pending(Some(&session_id), "mail_received")
             .await
-            // Audited: the production queued-work submitter lowers factory/store failures to untyped PluginError::Session values.
-            .map_err(AppError::internal)
-            .map_err(terminal_handler_error)?;
+            // Audited: typed queued-work store refusals use the shared terminal classifier; ambiguous failures remain retryable.
+            .map_err(classified_plugin_handler_error)?;
         Ok(Json(()))
     }
 }
@@ -478,9 +474,8 @@ impl WorkbenchCronJob for WorkbenchCronJobImpl {
             .queued_work_driver
             .claim_and_run_pending(Some(&state.request.session_id), "cron_tick")
             .await
-            // Audited: the production queued-work submitter lowers factory/store failures to untyped PluginError::Session values.
-            .map_err(AppError::internal)
-            .map_err(terminal_handler_error)?;
+            // Audited: typed queued-work store refusals use the shared terminal classifier; ambiguous failures remain retryable.
+            .map_err(classified_plugin_handler_error)?;
         Ok(Json(()))
     }
 
@@ -1569,6 +1564,10 @@ fn settlement_handler_error(err: AppError) -> HandlerError {
 
 fn classified_embed_handler_error(error: lash::EmbedError) -> HandlerError {
     settlement_handler_error(AppError::runtime(error))
+}
+
+fn classified_plugin_handler_error(error: lash::plugins::PluginError) -> HandlerError {
+    classified_embed_handler_error(lash::EmbedError::Plugin(error))
 }
 
 #[cfg(test)]
