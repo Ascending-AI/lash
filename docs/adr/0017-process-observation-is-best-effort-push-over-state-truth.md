@@ -90,6 +90,8 @@ rather than silently inheriting a no-op.
   pruned rows are terminal and their waiters resolved long ago.
 - Callers of `prune_terminal_processes` own correctness of the retention window:
   a retained tombstone produces a typed no-longer-retained result rather than an
-  unknown-process result. A cutoff shorter than a live waiter's lifetime can prune a process id out from
-  under a late await, which then reads as "unknown process". The window must be
-  comfortably longer than any await.
+  unknown-process result. A cutoff shorter than a live waiter's lifetime can
+  prune a process id out from under a late await, which then returns the typed
+  no-longer-retained information. After tombstone compaction, the same id is
+  indistinguishable from an unknown process. The retention and compaction
+  windows must be comfortably longer than any await.

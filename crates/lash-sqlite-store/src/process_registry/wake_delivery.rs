@@ -6,19 +6,20 @@ pub(super) fn load_wake_delivery_conn(
 ) -> Result<lash_core::WakeDelivery, lash_core::PluginError> {
     let row = conn
         .query_row(
-            "SELECT state, attempts, first_attempt_ms, next_attempt_at_ms,
+            "SELECT state, claim_token, attempts, first_attempt_ms, next_attempt_at_ms,
                     expires_at_ms, discard_reason, delivery_json
              FROM process_wake_deliveries WHERE delivery_id = ?1",
             params![delivery_id],
             |row| {
                 Ok((
                     row.get::<_, String>(0)?,
-                    row.get::<_, i64>(1)?,
-                    row.get::<_, Option<i64>>(2)?,
-                    row.get::<_, i64>(3)?,
+                    row.get::<_, Option<String>>(1)?,
+                    row.get::<_, i64>(2)?,
+                    row.get::<_, Option<i64>>(3)?,
                     row.get::<_, i64>(4)?,
-                    row.get::<_, Option<String>>(5)?,
-                    row.get::<_, String>(6)?,
+                    row.get::<_, i64>(5)?,
+                    row.get::<_, Option<String>>(6)?,
+                    row.get::<_, String>(7)?,
                 ))
             },
         )
@@ -38,7 +39,7 @@ pub(super) fn load_wake_delivery_conn(
             )));
         }
     };
-    let discard_reason = match row.5.as_deref() {
+    let discard_reason = match row.6.as_deref() {
         None => None,
         Some("expired") => Some(lash_core::WakeDiscardReason::Expired),
         Some("target_gone") => Some(lash_core::WakeDiscardReason::TargetGone),
@@ -51,12 +52,13 @@ pub(super) fn load_wake_delivery_conn(
     };
     Ok(lash_core::WakeDelivery {
         delivery_id: delivery_id.to_string(),
-        wake: serde_json::from_str(&row.6).map_err(process_decode_error)?,
+        wake: serde_json::from_str(&row.7).map_err(process_decode_error)?,
         state,
-        attempts: row.1 as u64,
-        first_attempt_ms: row.2.map(|value| value as u64),
-        next_attempt_at_ms: row.3 as u64,
-        expires_at_ms: row.4 as u64,
+        claim_token: row.1,
+        attempts: row.2 as u64,
+        first_attempt_ms: row.3.map(|value| value as u64),
+        next_attempt_at_ms: row.4 as u64,
+        expires_at_ms: row.5 as u64,
         discard_reason,
     })
 }
@@ -64,42 +66,28 @@ pub(super) fn load_wake_delivery_conn(
 pub(super) fn wake_delivery_report<'a>(
     deliveries: impl IntoIterator<Item = &'a lash_core::WakeDelivery>,
 ) -> lash_core::WakeDeliveryReport {
-    let mut report = lash_core::WakeDeliveryReport::default();
-    for delivery in deliveries {
-        match delivery.state {
-            lash_core::WakeDeliveryState::Pending => report.pending += 1,
-            lash_core::WakeDeliveryState::Enqueuing => report.enqueuing += 1,
-            lash_core::WakeDeliveryState::Enqueued => report.enqueued += 1,
-            lash_core::WakeDeliveryState::Discarded => {
-                report.discarded += 1;
-                match delivery.discard_reason {
-                    Some(lash_core::WakeDiscardReason::Expired) => report.expired += 1,
-                    Some(lash_core::WakeDiscardReason::TargetGone) => report.target_gone += 1,
-                    Some(lash_core::WakeDiscardReason::Retargeted) => report.retargeted += 1,
-                    Some(_) | None => {}
-                }
-            }
-        }
-    }
-    report
+    lash_core::WakeDeliveryReport::from_deliveries(deliveries)
 }
 
 pub(super) async fn update_wake_delivery_state(
     conn: &SqliteConnection,
     delivery_id: &str,
+    claim_token: &str,
     state: lash_core::WakeDeliveryState,
     reason: Option<lash_core::WakeDiscardReason>,
-) -> Result<(), lash_core::PluginError> {
+) -> Result<lash_core::WakeDeliveryClaimOutcome, lash_core::PluginError> {
     let delivery_id = delivery_id.to_string();
+    let claim_token = claim_token.to_string();
     conn.write_flow(move |tx| {
         Ok(tx_outcome((|| {
             let changed = tx
                 .execute(
                     "UPDATE process_wake_deliveries
-                     SET state = ?2, discard_reason = ?3
-                     WHERE delivery_id = ?1 AND state = 'enqueuing'",
+                     SET state = ?3, claim_token = NULL, discard_reason = ?4
+                     WHERE delivery_id = ?1 AND state = 'enqueuing' AND claim_token = ?2",
                     params![
                         delivery_id,
+                        claim_token,
                         state.as_str(),
                         reason.map(lash_core::WakeDiscardReason::as_str)
                     ],
@@ -130,9 +118,9 @@ pub(super) async fn update_wake_delivery_state(
                         )));
                     }
                 };
-                return Err(lash_core::PluginError::WakeDeliveryNotPending { delivery_id, state });
+                return Ok(lash_core::WakeDeliveryClaimOutcome::ClaimLost { state });
             }
-            Ok(())
+            Ok(lash_core::WakeDeliveryClaimOutcome::Applied)
         })()))
     })
     .await

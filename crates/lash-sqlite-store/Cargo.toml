@@ -35,6 +35,7 @@ sha2 = { workspace = true }
 tokio = { workspace = true, features = ["sync", "time"] }
 tokio-util = { workspace = true, features = ["rt"] }
 tracing = { workspace = true }
+uuid = { workspace = true, features = ["v4"] }
 
 [dev-dependencies]
 chrono = { workspace = true }
@@ -43,4 +44,3 @@ lash-lashlang-runtime = { workspace = true, features = ["testing"] }
 rusqlite = { version = "0.37", features = ["bundled"] }
 tempfile = { workspace = true }
 tokio = { workspace = true, features = ["full"] }
-uuid = { workspace = true, features = ["v4"] }

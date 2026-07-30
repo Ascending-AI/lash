@@ -811,9 +811,15 @@ impl ProcessRegistry for SqliteProcessRegistry {
                                AND (?5 IS NULL OR identity_label = ?5)
                                AND (?6 IS NULL OR
                                     (json_type(record_json, '$.identity.definition') IS NOT NULL
-                                     AND json_extract(
+                                     AND json_type(
                                              record_json, '$.identity.definition'
-                                         ) IS json_extract(?6, '$')))
+                                         ) = json_type(?6, '$')
+                                     AND (
+                                         json_type(?6, '$') IN ('null', 'true', 'false')
+                                         OR json_quote(json_extract(
+                                             record_json, '$.identity.definition'
+                                         )) IS json(?6)
+                                     )))
                                AND (?7 IS NULL OR
                                     json_extract(record_json, '$.provenance.caused_by.occurrence_id') = ?7)
                                AND (?8 IS NULL OR
@@ -848,7 +854,13 @@ impl ProcessRegistry for SqliteProcessRegistry {
                         let record: ProcessRecord =
                             serde_json::from_str(&row.map_err(process_sqlite_error)?)
                                 .map_err(process_decode_error)?;
-                        records.push(record);
+                        // SQLite's JSON functions deliberately coerce some JSON
+                        // representations. The typed/canonical SQL predicate is
+                        // the pushdown; the Rust predicate is the exact
+                        // `serde_json::Value` equality fence.
+                        if filter.matches_record(&record) {
+                            records.push(record);
+                        }
                     }
                     Ok(records)
                 })())
@@ -914,7 +926,7 @@ impl ProcessRegistry for SqliteProcessRegistry {
                 Ok(tx_outcome((|| {
                     tx.execute(
                         "UPDATE process_wake_deliveries
-                         SET state = 'pending'
+                         SET state = 'pending', claim_token = NULL
                          WHERE state = 'enqueuing' AND next_attempt_at_ms <= ?1",
                         params![now as i64],
                     )
@@ -950,9 +962,11 @@ impl ProcessRegistry for SqliteProcessRegistry {
                         .map_err(process_sqlite_error)?
                     };
                     for id in &ids {
+                        let claim_token = uuid::Uuid::new_v4().to_string();
                         tx.execute(
                             "UPDATE process_wake_deliveries
                              SET state = 'enqueuing',
+                                 claim_token = ?4,
                                  attempts = attempts + 1,
                                  first_attempt_ms = COALESCE(first_attempt_ms, ?2),
                                  next_attempt_at_ms = ?3
@@ -960,7 +974,8 @@ impl ProcessRegistry for SqliteProcessRegistry {
                             params![
                                 id,
                                 now as i64,
-                                now.saturating_add(enqueuing_stale_after_ms) as i64
+                                now.saturating_add(enqueuing_stale_after_ms) as i64,
+                                claim_token,
                             ],
                         )
                         .map_err(process_sqlite_error)?;
@@ -1014,10 +1029,15 @@ impl ProcessRegistry for SqliteProcessRegistry {
         Ok(wake_delivery_report(deliveries.iter()))
     }
 
-    async fn mark_wake_enqueued(&self, delivery_id: &str) -> Result<(), lash_core::PluginError> {
+    async fn mark_wake_enqueued(
+        &self,
+        delivery_id: &str,
+        claim_token: &str,
+    ) -> Result<lash_core::WakeDeliveryClaimOutcome, lash_core::PluginError> {
         update_wake_delivery_state(
             &self.conn,
             delivery_id,
+            claim_token,
             lash_core::WakeDeliveryState::Enqueued,
             None,
         )
@@ -1027,11 +1047,13 @@ impl ProcessRegistry for SqliteProcessRegistry {
     async fn discard_wake_delivery(
         &self,
         delivery_id: &str,
+        claim_token: &str,
         reason: lash_core::WakeDiscardReason,
-    ) -> Result<(), lash_core::PluginError> {
+    ) -> Result<lash_core::WakeDeliveryClaimOutcome, lash_core::PluginError> {
         update_wake_delivery_state(
             &self.conn,
             delivery_id,
+            claim_token,
             lash_core::WakeDeliveryState::Discarded,
             Some(reason),
         )
@@ -1052,7 +1074,7 @@ impl ProcessRegistry for SqliteProcessRegistry {
                         .execute(
                             "UPDATE process_wake_deliveries
                              SET state = 'pending', attempts = 0, first_attempt_ms = NULL,
-                                 next_attempt_at_ms = ?3, expires_at_ms = ?2,
+                                 claim_token = NULL, next_attempt_at_ms = ?3, expires_at_ms = ?2,
                                  discard_reason = NULL
                              WHERE delivery_id = ?1 AND state = 'discarded'",
                             params![delivery_id, expires_at_ms as i64, next_attempt_at_ms as i64],
@@ -1073,28 +1095,29 @@ impl ProcessRegistry for SqliteProcessRegistry {
     async fn defer_wake_delivery(
         &self,
         delivery_id: &str,
+        claim_token: &str,
         next_attempt_at_ms: u64,
-    ) -> Result<(), lash_core::PluginError> {
+    ) -> Result<lash_core::WakeDeliveryClaimOutcome, lash_core::PluginError> {
         let delivery_id = delivery_id.to_string();
+        let claim_token = claim_token.to_string();
         self.conn
             .write_flow(move |tx| {
                 Ok(tx_outcome((|| {
                     let changed = tx
                         .execute(
                             "UPDATE process_wake_deliveries
-                             SET state = 'pending', next_attempt_at_ms = ?2
-                             WHERE delivery_id = ?1 AND state = 'enqueuing'",
-                            params![delivery_id, next_attempt_at_ms as i64],
+                             SET state = 'pending', claim_token = NULL, next_attempt_at_ms = ?3
+                             WHERE delivery_id = ?1 AND state = 'enqueuing' AND claim_token = ?2",
+                            params![delivery_id, claim_token, next_attempt_at_ms as i64],
                         )
                         .map_err(process_sqlite_error)?;
                     if changed == 0 {
                         let delivery = load_wake_delivery_conn(tx, &delivery_id)?;
-                        return Err(lash_core::PluginError::WakeDeliveryNotPending {
-                            delivery_id,
+                        return Ok(lash_core::WakeDeliveryClaimOutcome::ClaimLost {
                             state: delivery.state,
                         });
                     }
-                    Ok(())
+                    Ok(lash_core::WakeDeliveryClaimOutcome::Applied)
                 })()))
             })
             .await

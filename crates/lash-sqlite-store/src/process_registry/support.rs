@@ -390,9 +390,9 @@ impl SqliteProcessRegistry {
         conn.execute(
             "INSERT OR IGNORE INTO process_wake_deliveries (
                 delivery_id, process_id, target_session_id, sequence, state,
-                attempts, first_attempt_ms, next_attempt_at_ms, expires_at_ms,
+                claim_token, attempts, first_attempt_ms, next_attempt_at_ms, expires_at_ms,
                 discard_reason, delivery_json
-             ) VALUES (?1, ?2, ?3, ?4, 'pending', 0, NULL, ?5, ?6, NULL, ?7)",
+             ) VALUES (?1, ?2, ?3, ?4, 'pending', NULL, 0, NULL, ?5, ?6, NULL, ?7)",
             params![
                 delivery.delivery_id,
                 delivery.wake.process_id,

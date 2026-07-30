@@ -132,6 +132,11 @@ pub struct WakeDelivery {
     pub delivery_id: String,
     pub wake: ProcessWakeDelivery,
     pub state: WakeDeliveryState,
+    /// Ownership fence minted for the current `enqueuing` claim.
+    ///
+    /// Every transition out of `enqueuing` must present this exact token.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub claim_token: Option<String>,
     pub attempts: u64,
     pub first_attempt_ms: Option<u64>,
     pub next_attempt_at_ms: u64,
@@ -161,6 +166,7 @@ impl WakeDelivery {
             expires_at_ms: wake.created_at_ms.saturating_add(config.delivery_expiry_ms),
             wake,
             state: WakeDeliveryState::Pending,
+            claim_token: None,
             attempts: 0,
             first_attempt_ms: None,
             next_attempt_at_ms,
@@ -171,9 +177,35 @@ impl WakeDelivery {
     pub fn source_key(&self) -> String {
         crate::process_wake_source_key(&self.wake.process_id, self.wake.sequence)
     }
+
+    pub fn claim_token(&self) -> Result<&str, PluginError> {
+        self.claim_token.as_deref().ok_or_else(|| {
+            PluginError::Session(format!(
+                "enqueuing wake delivery `{}` is missing its claim token",
+                self.delivery_id
+            ))
+        })
+    }
 }
 
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum WakeDeliveryClaimOutcome {
+    Applied,
+    ClaimLost { state: WakeDeliveryState },
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct WakeDeliveryBlockedGroup {
+    pub target_session_id: String,
+    pub process_id: String,
+    pub blocking_delivery_id: String,
+    pub blocking_sequence: u64,
+    pub reason: WakeDiscardReason,
+    /// Pass this id to `redrive_wake_delivery` to unblock the group.
+    pub redrive_delivery_id: String,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct WakeDeliveryReport {
     pub pending: usize,
     pub enqueuing: usize,
@@ -182,6 +214,81 @@ pub struct WakeDeliveryReport {
     pub expired: usize,
     pub target_gone: usize,
     pub retargeted: usize,
+    /// Ordering groups stopped by a discarded head while later work remains.
+    pub blocked_groups: Vec<WakeDeliveryBlockedGroup>,
+}
+
+impl WakeDeliveryReport {
+    pub fn from_deliveries<'a>(deliveries: impl IntoIterator<Item = &'a WakeDelivery>) -> Self {
+        let deliveries = deliveries.into_iter().collect::<Vec<_>>();
+        let mut report = Self::default();
+        for delivery in &deliveries {
+            match delivery.state {
+                WakeDeliveryState::Pending => report.pending += 1,
+                WakeDeliveryState::Enqueuing => report.enqueuing += 1,
+                WakeDeliveryState::Enqueued => report.enqueued += 1,
+                WakeDeliveryState::Discarded => {
+                    report.discarded += 1;
+                    match delivery.discard_reason {
+                        Some(WakeDiscardReason::Expired) => report.expired += 1,
+                        Some(WakeDiscardReason::TargetGone) => report.target_gone += 1,
+                        Some(WakeDiscardReason::Retargeted) => report.retargeted += 1,
+                        None => {}
+                    }
+                }
+            }
+        }
+
+        let mut groups = std::collections::BTreeMap::<(&str, &str), Vec<&WakeDelivery>>::new();
+        for delivery in &deliveries {
+            groups
+                .entry((
+                    delivery.wake.target_session_id.as_str(),
+                    delivery.wake.process_id.as_str(),
+                ))
+                .or_default()
+                .push(delivery);
+        }
+        for group in groups.values_mut() {
+            group.sort_by_key(|delivery| delivery.wake.sequence);
+            let Some(last_active_index) = group.iter().rposition(|delivery| {
+                matches!(
+                    delivery.state,
+                    WakeDeliveryState::Pending | WakeDeliveryState::Enqueuing
+                )
+            }) else {
+                continue;
+            };
+            if let Some(delivery) = group[..last_active_index].iter().find(|delivery| {
+                delivery.state == WakeDeliveryState::Discarded && delivery.discard_reason.is_some()
+            }) {
+                let reason = delivery
+                    .discard_reason
+                    .expect("discarded delivery filtered to a typed reason");
+                report.blocked_groups.push(WakeDeliveryBlockedGroup {
+                    target_session_id: delivery.wake.target_session_id.clone(),
+                    process_id: delivery.wake.process_id.clone(),
+                    blocking_delivery_id: delivery.delivery_id.clone(),
+                    blocking_sequence: delivery.wake.sequence,
+                    reason,
+                    redrive_delivery_id: delivery.delivery_id.clone(),
+                });
+            }
+        }
+        report.blocked_groups.sort_by(|left, right| {
+            (
+                &left.target_session_id,
+                &left.process_id,
+                left.blocking_sequence,
+            )
+                .cmp(&(
+                    &right.target_session_id,
+                    &right.process_id,
+                    right.blocking_sequence,
+                ))
+        });
+        report
+    }
 }
 
 /// Substrate-scoped durable continuation storage. This is not part of the
@@ -519,13 +626,18 @@ pub trait ProcessRegistry: Send + Sync {
 
     async fn wake_delivery_report(&self) -> Result<WakeDeliveryReport, PluginError>;
 
-    async fn mark_wake_enqueued(&self, delivery_id: &str) -> Result<(), PluginError>;
+    async fn mark_wake_enqueued(
+        &self,
+        delivery_id: &str,
+        claim_token: &str,
+    ) -> Result<WakeDeliveryClaimOutcome, PluginError>;
 
     async fn discard_wake_delivery(
         &self,
         delivery_id: &str,
+        claim_token: &str,
         reason: WakeDiscardReason,
-    ) -> Result<(), PluginError>;
+    ) -> Result<WakeDeliveryClaimOutcome, PluginError>;
 
     async fn redrive_wake_delivery(&self, delivery_id: &str) -> Result<(), PluginError>;
 
@@ -533,8 +645,9 @@ pub trait ProcessRegistry: Send + Sync {
     async fn defer_wake_delivery(
         &self,
         delivery_id: &str,
+        claim_token: &str,
         next_attempt_at_ms: u64,
-    ) -> Result<(), PluginError>;
+    ) -> Result<WakeDeliveryClaimOutcome, PluginError>;
 
     /// All non-terminal process records, in stable `process_id` order.
     ///

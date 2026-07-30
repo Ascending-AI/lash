@@ -677,16 +677,25 @@ impl ProcessRegistry for WatchedProcessRegistry {
         self.inner.wake_delivery_report().await
     }
 
-    async fn mark_wake_enqueued(&self, delivery_id: &str) -> Result<(), PluginError> {
-        self.inner.mark_wake_enqueued(delivery_id).await
+    async fn mark_wake_enqueued(
+        &self,
+        delivery_id: &str,
+        claim_token: &str,
+    ) -> Result<super::WakeDeliveryClaimOutcome, PluginError> {
+        self.inner
+            .mark_wake_enqueued(delivery_id, claim_token)
+            .await
     }
 
     async fn discard_wake_delivery(
         &self,
         delivery_id: &str,
+        claim_token: &str,
         reason: super::WakeDiscardReason,
-    ) -> Result<(), PluginError> {
-        self.inner.discard_wake_delivery(delivery_id, reason).await
+    ) -> Result<super::WakeDeliveryClaimOutcome, PluginError> {
+        self.inner
+            .discard_wake_delivery(delivery_id, claim_token, reason)
+            .await
     }
 
     async fn redrive_wake_delivery(&self, delivery_id: &str) -> Result<(), PluginError> {
@@ -696,10 +705,11 @@ impl ProcessRegistry for WatchedProcessRegistry {
     async fn defer_wake_delivery(
         &self,
         delivery_id: &str,
+        claim_token: &str,
         next_attempt_at_ms: u64,
-    ) -> Result<(), PluginError> {
+    ) -> Result<super::WakeDeliveryClaimOutcome, PluginError> {
         self.inner
-            .defer_wake_delivery(delivery_id, next_attempt_at_ms)
+            .defer_wake_delivery(delivery_id, claim_token, next_attempt_at_ms)
             .await
     }
 

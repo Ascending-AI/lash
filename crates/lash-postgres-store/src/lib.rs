@@ -113,7 +113,8 @@ const SCHEMA_COMPONENT: &str = "lash-postgres-store";
 // fair per-group retry scheduling. Pre-31 components are rejected and recreated.
 // Bumped to 32 for the FIG-661 observer, indexed wake, and tombstone cutover.
 // Bumped to 33 for enqueuing wake claims and raw session originator ids.
-const SCHEMA_VERSION: i32 = 33;
+// Bumped to 34 for per-attempt wake-delivery claim tokens.
+const SCHEMA_VERSION: i32 = 34;
 const PROCESS_LEASE_SCHEMA_VERSION: u32 = lash_core::PROCESS_LEASE_SCHEMA_VERSION;
 
 #[derive(Clone)]

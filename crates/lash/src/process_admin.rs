@@ -376,7 +376,7 @@ impl Processes {
             .map_err(Into::into)
     }
 
-    /// Summarize pending, delivered, and typed-discard wake outcomes.
+    /// Summarize delivery states and name blocked groups with their redrive ids.
     pub async fn wake_delivery_report(&self) -> Result<lash_core::WakeDeliveryReport> {
         self.registry()?
             .wake_delivery_report()

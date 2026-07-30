@@ -89,14 +89,30 @@ rows with the process.
 Wake retargeting and session deletion discard only deliveries that have not
 entered the durable `enqueuing` claim state. A claimed delivery settles
 truthfully against its original target; retargeting bounds work not yet in
-flight. If a driver crashes after claiming, the bounded stale-claim recovery
-returns the delivery to pending and receiver high-water deduplication absorbs
-any retry.
+flight. If a driver crashes after claiming, bounded stale-claim recovery mints
+a new ownership token. The old claimant can no longer settle or defer that
+delivery. Recovery may still truthfully deliver the reclaimed wake to the
+retargeted-away target: retargeting bounds deliveries that were not already in
+flight, and receiver high-water deduplication absorbs any retry.
+
+A discarded group head remains an ordering barrier: skipping it would let the
+receiver high-water mark absorb a gap. `wake_delivery_report` therefore names
+each blocked `(target_session_id, process_id)` group, the discarded head and
+reason, and the delivery id to pass to `redrive_wake_delivery`. A
+retargeted-away group receives no new deliveries, so any block there is moot.
+The live operational case is an `Expired` head on a current target; the host
+redrives that named head explicitly.
+
+After pruning, observer rows no longer exist. Consequently, a caller that
+guesses any retained tombstone id can receive its terminal label and prune
+timestamp through the typed no-longer-retained result; that informational
+probe cannot prove the caller was formerly an observer. Lash's single-host
+trust-domain ruling accepts this limited disclosure.
 
 ## Shipped storage boundary
 
 The reject-and-recreate schema stores lifecycle JSON beside extracted,
-    indexed query columns: originator id, wake session, identity kind and
+indexed query columns: originator id, wake session, identity kind and
 label, waiting, timestamps, status, and change sequence. It adds
 `process_observers` with a composite session/process key and reverse index, and
 payload-free `process_tombstones` carrying the deletion change sequence.

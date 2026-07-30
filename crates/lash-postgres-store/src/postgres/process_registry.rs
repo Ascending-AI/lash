@@ -978,10 +978,9 @@ impl ProcessRegistry for PostgresProcessRegistry {
         .map_err(plugin_sqlx_error)?;
         let mut records = Vec::new();
         for row in rows {
-            let json: String = row.get(0);
-            let record: ProcessRecord =
-                serde_json::from_str(&json).map_err(process_decode_error)?;
-            records.push(record);
+            if let Some(record) = decode_matching_process(row, filter)? {
+                records.push(record);
+            }
         }
         Ok(records)
     }
@@ -1072,8 +1071,8 @@ impl ProcessRegistry for PostgresProcessRegistry {
     ) -> Result<Vec<lash_core::WakeDelivery>, PluginError> {
         let rows = if let Some(state) = state {
             sqlx::query(
-                "SELECT delivery_id, state, attempts, first_attempt_ms, next_attempt_at_ms,
-                        expires_at_ms, discard_reason, delivery_json
+                "SELECT delivery_id, state, claim_token, attempts, first_attempt_ms,
+                        next_attempt_at_ms, expires_at_ms, discard_reason, delivery_json
                  FROM lash_process_wake_deliveries
                  WHERE state = $1
                  ORDER BY delivery_id ASC",
@@ -1084,8 +1083,8 @@ impl ProcessRegistry for PostgresProcessRegistry {
             .map_err(plugin_sqlx_error)?
         } else {
             sqlx::query(
-                "SELECT delivery_id, state, attempts, first_attempt_ms, next_attempt_at_ms,
-                        expires_at_ms, discard_reason, delivery_json
+                "SELECT delivery_id, state, claim_token, attempts, first_attempt_ms,
+                        next_attempt_at_ms, expires_at_ms, discard_reason, delivery_json
                  FROM lash_process_wake_deliveries
                  ORDER BY delivery_id ASC",
             )
@@ -1101,10 +1100,15 @@ impl ProcessRegistry for PostgresProcessRegistry {
         Ok(wake_delivery_report(deliveries.iter()))
     }
 
-    async fn mark_wake_enqueued(&self, delivery_id: &str) -> Result<(), PluginError> {
+    async fn mark_wake_enqueued(
+        &self,
+        delivery_id: &str,
+        claim_token: &str,
+    ) -> Result<lash_core::WakeDeliveryClaimOutcome, PluginError> {
         update_wake_delivery_state(
             &self.pool,
             delivery_id,
+            claim_token,
             lash_core::WakeDeliveryState::Enqueued,
             None,
         )
@@ -1114,11 +1118,13 @@ impl ProcessRegistry for PostgresProcessRegistry {
     async fn discard_wake_delivery(
         &self,
         delivery_id: &str,
+        claim_token: &str,
         reason: lash_core::WakeDiscardReason,
-    ) -> Result<(), PluginError> {
+    ) -> Result<lash_core::WakeDeliveryClaimOutcome, PluginError> {
         update_wake_delivery_state(
             &self.pool,
             delivery_id,
+            claim_token,
             lash_core::WakeDeliveryState::Discarded,
             Some(reason),
         )
@@ -1134,7 +1140,8 @@ impl ProcessRegistry for PostgresProcessRegistry {
         let changed = sqlx::query(
             "UPDATE lash_process_wake_deliveries
              SET state = 'pending', attempts = 0, first_attempt_ms = NULL,
-                 next_attempt_at_ms = $3, expires_at_ms = $2, discard_reason = NULL
+                 claim_token = NULL, next_attempt_at_ms = $3, expires_at_ms = $2,
+                 discard_reason = NULL
              WHERE delivery_id = $1 AND state = 'discarded'",
         )
         .bind(delivery_id)
@@ -1155,14 +1162,16 @@ impl ProcessRegistry for PostgresProcessRegistry {
     async fn defer_wake_delivery(
         &self,
         delivery_id: &str,
+        claim_token: &str,
         next_attempt_at_ms: u64,
-    ) -> Result<(), PluginError> {
+    ) -> Result<lash_core::WakeDeliveryClaimOutcome, PluginError> {
         let changed = sqlx::query(
             "UPDATE lash_process_wake_deliveries
-             SET state = 'pending', next_attempt_at_ms = $2
-             WHERE delivery_id = $1 AND state = 'enqueuing'",
+             SET state = 'pending', claim_token = NULL, next_attempt_at_ms = $3
+             WHERE delivery_id = $1 AND state = 'enqueuing' AND claim_token = $2",
         )
         .bind(delivery_id)
+        .bind(claim_token)
         .bind(next_attempt_at_ms as i64)
         .execute(&self.pool)
         .await
@@ -1172,12 +1181,11 @@ impl ProcessRegistry for PostgresProcessRegistry {
             let mut tx = self.pool.begin().await.map_err(plugin_sqlx_error)?;
             let delivery = load_wake_delivery_tx(&mut tx, delivery_id).await?;
             tx.commit().await.map_err(plugin_sqlx_error)?;
-            return Err(PluginError::WakeDeliveryNotPending {
-                delivery_id: delivery_id.to_string(),
+            return Ok(lash_core::WakeDeliveryClaimOutcome::ClaimLost {
                 state: delivery.state,
             });
         }
-        Ok(())
+        Ok(lash_core::WakeDeliveryClaimOutcome::Applied)
     }
 
     async fn list_non_terminal(&self) -> Result<Vec<ProcessRecord>, PluginError> {

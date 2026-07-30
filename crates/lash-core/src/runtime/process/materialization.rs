@@ -58,6 +58,13 @@ fn materialize_terminal_semantics(
             ));
         }
     };
+    let outcome_status = await_output.terminal_status();
+    if outcome_status != Some(terminal.status) {
+        return Err(PluginError::ProcessTerminalOutcomeMismatch {
+            declared_status: terminal.status,
+            outcome_status,
+        });
+    }
     Ok(ProcessTerminalSemantics {
         status: terminal.status,
         outcome: await_output,

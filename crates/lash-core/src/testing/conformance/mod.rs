@@ -181,6 +181,21 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn in_memory_wake_delivery_crash_matrix() {
+        let registry = Arc::new(
+            crate::TestLocalProcessRegistry::default().with_wake_delivery_config(
+                crate::WakeDeliveryConfig::new(10_000)
+                    .expect("valid wake expiry")
+                    .with_enqueuing_stale_after_ms(25)
+                    .expect("valid short stale-claim age"),
+            ),
+        ) as Arc<dyn ProcessRegistry>;
+        let factory = Arc::new(crate::InMemorySessionStoreFactory::new())
+            as Arc<dyn crate::SessionStoreFactory>;
+        wake_delivery_crash_matrix(factory, registry).await;
+    }
+
+    #[tokio::test]
     async fn in_memory_session_store_factory_satisfies_conformance() {
         session_store_factory(
             || {

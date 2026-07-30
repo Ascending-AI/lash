@@ -1093,6 +1093,7 @@ impl ProcessRegistry for TestLocalProcessRegistry {
                 && delivery.next_attempt_at_ms <= now
             {
                 delivery.state = super::WakeDeliveryState::Pending;
+                delivery.claim_token = None;
             }
         }
         let mut ids = deliveries
@@ -1124,6 +1125,7 @@ impl ProcessRegistry for TestLocalProcessRegistry {
             .filter_map(|(_, _, _, _, id)| {
                 let delivery = deliveries.get_mut(&id)?;
                 delivery.state = super::WakeDeliveryState::Enqueuing;
+                delivery.claim_token = Some(uuid::Uuid::new_v4().to_string());
                 delivery.attempts = delivery.attempts.saturating_add(1);
                 delivery.first_attempt_ms.get_or_insert(now);
                 delivery.next_attempt_at_ms =
@@ -1152,27 +1154,17 @@ impl ProcessRegistry for TestLocalProcessRegistry {
 
     async fn wake_delivery_report(&self) -> Result<super::WakeDeliveryReport, PluginError> {
         let _transaction = self.transaction.lock().await;
-        let mut report = super::WakeDeliveryReport::default();
-        for delivery in self.wake_deliveries.lock().await.values() {
-            match delivery.state {
-                super::WakeDeliveryState::Pending => report.pending += 1,
-                super::WakeDeliveryState::Enqueuing => report.enqueuing += 1,
-                super::WakeDeliveryState::Enqueued => report.enqueued += 1,
-                super::WakeDeliveryState::Discarded => {
-                    report.discarded += 1;
-                    match delivery.discard_reason {
-                        Some(super::WakeDiscardReason::Expired) => report.expired += 1,
-                        Some(super::WakeDiscardReason::TargetGone) => report.target_gone += 1,
-                        Some(super::WakeDiscardReason::Retargeted) => report.retargeted += 1,
-                        None => {}
-                    }
-                }
-            }
-        }
-        Ok(report)
+        let deliveries = self.wake_deliveries.lock().await;
+        Ok(super::WakeDeliveryReport::from_deliveries(
+            deliveries.values(),
+        ))
     }
 
-    async fn mark_wake_enqueued(&self, delivery_id: &str) -> Result<(), PluginError> {
+    async fn mark_wake_enqueued(
+        &self,
+        delivery_id: &str,
+        claim_token: &str,
+    ) -> Result<super::WakeDeliveryClaimOutcome, PluginError> {
         let pause = self
             .wake_mark_pause
             .lock()
@@ -1187,36 +1179,41 @@ impl ProcessRegistry for TestLocalProcessRegistry {
         let delivery = deliveries.get_mut(delivery_id).ok_or_else(|| {
             PluginError::Session(format!("unknown wake delivery `{delivery_id}`"))
         })?;
-        if delivery.state != super::WakeDeliveryState::Enqueuing {
-            return Err(PluginError::WakeDeliveryNotPending {
-                delivery_id: delivery_id.to_string(),
+        if delivery.state != super::WakeDeliveryState::Enqueuing
+            || delivery.claim_token.as_deref() != Some(claim_token)
+        {
+            return Ok(super::WakeDeliveryClaimOutcome::ClaimLost {
                 state: delivery.state,
             });
         }
         delivery.state = super::WakeDeliveryState::Enqueued;
+        delivery.claim_token = None;
         delivery.discard_reason = None;
-        Ok(())
+        Ok(super::WakeDeliveryClaimOutcome::Applied)
     }
 
     async fn discard_wake_delivery(
         &self,
         delivery_id: &str,
+        claim_token: &str,
         reason: super::WakeDiscardReason,
-    ) -> Result<(), PluginError> {
+    ) -> Result<super::WakeDeliveryClaimOutcome, PluginError> {
         let _transaction = self.transaction.lock().await;
         let mut deliveries = self.wake_deliveries.lock().await;
         let delivery = deliveries.get_mut(delivery_id).ok_or_else(|| {
             PluginError::Session(format!("unknown wake delivery `{delivery_id}`"))
         })?;
-        if delivery.state != super::WakeDeliveryState::Enqueuing {
-            return Err(PluginError::WakeDeliveryNotPending {
-                delivery_id: delivery_id.to_string(),
+        if delivery.state != super::WakeDeliveryState::Enqueuing
+            || delivery.claim_token.as_deref() != Some(claim_token)
+        {
+            return Ok(super::WakeDeliveryClaimOutcome::ClaimLost {
                 state: delivery.state,
             });
         }
         delivery.state = super::WakeDeliveryState::Discarded;
+        delivery.claim_token = None;
         delivery.discard_reason = Some(reason);
-        Ok(())
+        Ok(super::WakeDeliveryClaimOutcome::Applied)
     }
 
     async fn redrive_wake_delivery(&self, delivery_id: &str) -> Result<(), PluginError> {
@@ -1231,6 +1228,7 @@ impl ProcessRegistry for TestLocalProcessRegistry {
             )));
         }
         delivery.state = super::WakeDeliveryState::Pending;
+        delivery.claim_token = None;
         delivery.attempts = 0;
         delivery.first_attempt_ms = None;
         delivery.next_attempt_at_ms = self.clock.timestamp_ms();
@@ -1245,22 +1243,25 @@ impl ProcessRegistry for TestLocalProcessRegistry {
     async fn defer_wake_delivery(
         &self,
         delivery_id: &str,
+        claim_token: &str,
         next_attempt_at_ms: u64,
-    ) -> Result<(), PluginError> {
+    ) -> Result<super::WakeDeliveryClaimOutcome, PluginError> {
         let _transaction = self.transaction.lock().await;
         let mut deliveries = self.wake_deliveries.lock().await;
         let delivery = deliveries.get_mut(delivery_id).ok_or_else(|| {
             PluginError::Session(format!("unknown wake delivery `{delivery_id}`"))
         })?;
-        if delivery.state != super::WakeDeliveryState::Enqueuing {
-            return Err(PluginError::WakeDeliveryNotPending {
-                delivery_id: delivery_id.to_string(),
+        if delivery.state != super::WakeDeliveryState::Enqueuing
+            || delivery.claim_token.as_deref() != Some(claim_token)
+        {
+            return Ok(super::WakeDeliveryClaimOutcome::ClaimLost {
                 state: delivery.state,
             });
         }
         delivery.state = super::WakeDeliveryState::Pending;
+        delivery.claim_token = None;
         delivery.next_attempt_at_ms = next_attempt_at_ms;
-        Ok(())
+        Ok(super::WakeDeliveryClaimOutcome::Applied)
     }
 
     async fn list_non_terminal(&self) -> Result<Vec<ProcessRecord>, PluginError> {

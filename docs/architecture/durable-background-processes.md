@@ -192,6 +192,11 @@ enqueued. A discarded head blocks only its own group until a host explicitly
 redrives it; later sequences therefore cannot create a gap in the receiver's
 consumed prefix. This includes an expired head: after the configured expiry
 horizon, its group remains stopped and visible until a host redrives that head.
+The delivery report identifies every such group by target and process, names
+the discarded head and reason, and supplies the delivery id accepted by
+`redrive_wake_delivery`. Retargeting creates no new deliveries for the old
+group, so its discarded block is operationally moot; an expired head for a
+current target is the live host-action case.
 Retryable non-delivery advances `next_attempt_at_ms` with bounded exponential
 backoff, so a missing target stalls its own group without monopolizing the scan
 or producing a write storm. The facade rebinds first-party SQLite and PostgreSQL
@@ -201,6 +206,12 @@ targets and expired deliveries remain visible as typed `TargetGone` or
 `Expired` discards. Hosts inspect them through `wake_deliveries` /
 `wake_delivery_report`, redrive one explicitly with `redrive_wake_delivery`,
 and can force a bounded scan with `drive_wake_deliveries`.
+
+Each `enqueuing` attempt carries a fresh claim token. Mark, defer, and discard
+compare both delivery id and token, so a slow claimant that outlives the stale
+deadline cannot mutate its successor's claim. A reclaimed attempt can still
+finish against the target it originally claimed even after retargeting; the
+retarget bound applies to work not yet in flight.
 
 Restate does not implement a second wake route. Its process execution still
 runs under Restate, while wake handoff uses this same durable driver and

@@ -239,6 +239,7 @@ pub(crate) async fn ensure_schema(pool: &PgPool) -> Result<Vec<u8>, StoreError> 
             target_session_id TEXT NOT NULL,
             sequence BIGINT NOT NULL,
             state TEXT NOT NULL,
+            claim_token TEXT,
             attempts BIGINT NOT NULL DEFAULT 0,
             first_attempt_ms BIGINT,
             next_attempt_at_ms BIGINT NOT NULL,

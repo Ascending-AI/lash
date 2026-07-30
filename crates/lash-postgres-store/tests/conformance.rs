@@ -649,7 +649,7 @@ async fn postgres_from_pool_enforces_schema_version_gate_when_configured() {
     .fetch_one(&pool)
     .await
     .expect("read current schema version");
-    assert_eq!(current_version, 33, "Postgres component schema pin");
+    assert_eq!(current_version, 34, "Postgres component schema pin");
     let stale_version = current_version - 1;
     // Force the recorded component version to a stale value.
     sqlx::query(

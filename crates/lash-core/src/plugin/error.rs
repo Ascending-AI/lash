@@ -31,11 +31,18 @@ pub enum PluginError {
         terminal_label: String,
         pruned_at_ms: u64,
     },
+    #[error("process `{process_id}` is already terminal in state `{status:?}`")]
+    ProcessAlreadyTerminal {
+        process_id: String,
+        status: crate::ProcessStatus,
+    },
+    #[error(
+        "terminal process status `{declared_status:?}` contradicts outcome status `{outcome_status:?}`"
+    )]
+    ProcessTerminalOutcomeMismatch {
+        declared_status: crate::ProcessStatus,
+        outcome_status: Option<crate::ProcessStatus>,
+    },
     #[error("process event type `{event_type}` is reserved for its dedicated registry mutation")]
     ReservedProcessEvent { event_type: String },
-    #[error("wake delivery `{delivery_id}` is already terminal in state `{state:?}`")]
-    WakeDeliveryNotPending {
-        delivery_id: String,
-        state: crate::WakeDeliveryState,
-    },
 }

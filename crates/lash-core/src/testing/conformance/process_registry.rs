@@ -69,6 +69,7 @@ async fn process_registry_conformance(registry: Arc<dyn ProcessRegistry>) {
     generic_append_rejects_reserved_edge_audit_events(Arc::clone(&registry)).await;
     wake_subscription_is_indexed_and_retargetable(Arc::clone(&registry)).await;
     lifecycle_status_and_outcome_fold(Arc::clone(&registry)).await;
+    producer_terminal_status_must_match_materialized_outcome(Arc::clone(&registry)).await;
     list_filters_match_extracted_and_json_fields(Arc::clone(&registry)).await;
     waiting_processes_remain_in_the_recovery_worklist(Arc::clone(&registry)).await;
     tokio::time::sleep(std::time::Duration::from_millis(5)).await;
@@ -77,6 +78,70 @@ async fn process_registry_conformance(registry: Arc<dyn ProcessRegistry>) {
     process_lease_fencing_contract(Arc::clone(&registry)).await;
     session_delete_preserves_process_bytes(Arc::clone(&registry)).await;
     tombstones_make_pruned_processes_distinguishable(registry).await;
+}
+
+async fn producer_terminal_status_must_match_materialized_outcome(
+    registry: Arc<dyn ProcessRegistry>,
+) {
+    let process_id = "producer-terminal-outcome-mismatch";
+    let record = registry
+        .register_process(
+            registration(process_id).with_extra_event_types([ProcessEventType {
+                name: "producer.failed".to_string(),
+                payload_schema: LashSchema::any(),
+                semantics: ProcessEventSemanticsSpec {
+                    terminal: Some(crate::ProcessTerminalSpec {
+                        status: ProcessStatus::Failed,
+                        await_output: Some(ProcessValueSelector::Pointer("/out".to_string())),
+                    }),
+                    ..ProcessEventSemanticsSpec::default()
+                },
+            }]),
+        )
+        .await
+        .expect("register producer terminal event");
+    let before = serde_json::to_vec(&record).expect("serialize producer before rejected append");
+    let error = registry
+        .append_event(
+            process_id,
+            ProcessEventAppendRequest::new(
+                "producer.failed",
+                serde_json::json!({
+                    "out": {
+                        "type": "success",
+                        "value": 1
+                    }
+                }),
+            )
+            .with_replay_key(format!("{process_id}:producer.failed")),
+        )
+        .await
+        .expect_err("declared terminal status must match the selected structured outcome");
+    assert!(matches!(
+        error,
+        crate::PluginError::ProcessTerminalOutcomeMismatch {
+            declared_status: ProcessStatus::Failed,
+            outcome_status: Some(ProcessStatus::Completed),
+        }
+    ));
+    let after = registry
+        .get_process(process_id)
+        .await
+        .expect("read producer after rejected append")
+        .expect("producer remains");
+    assert_eq!(
+        serde_json::to_vec(&after).expect("serialize producer after rejected append"),
+        before,
+        "rejected core terminal semantics must not mutate the producer record"
+    );
+    assert!(
+        registry
+            .events_after(process_id, 0)
+            .await
+            .expect("read events after rejected append")
+            .is_empty(),
+        "rejected core terminal semantics must not append an event"
+    );
 }
 
 async fn generic_append_rejects_reserved_edge_audit_events(registry: Arc<dyn ProcessRegistry>) {
@@ -113,8 +178,25 @@ async fn generic_append_rejects_reserved_edge_audit_events(registry: Arc<dyn Pro
 
 async fn waiting_processes_remain_in_the_recovery_worklist(registry: Arc<dyn ProcessRegistry>) {
     let process_id = "waiting-recovery-worklist";
+    let definition = serde_json::json!({"suite": "waiting-recovery-worklist"});
+    let env_ref = ProcessExecutionEnvRef::new("process-env:waiting-recovery-worklist");
     let record = registry
-        .register_process(registration(process_id))
+        .register_process(
+            ProcessRegistration::new(
+                process_id,
+                ProcessInput::Engine {
+                    kind: "waiting-recovery-worklist".to_string(),
+                    payload: serde_json::Value::Null,
+                },
+                RecoveryDisposition::Rerunnable,
+                ProcessProvenance::host(),
+            )
+            .with_identity(
+                ProcessIdentity::new("waiting-recovery-worklist")
+                    .with_definition(Some(definition.clone())),
+            )
+            .with_execution_env_ref(Some(env_ref.clone())),
+        )
         .await
         .expect("register waiting process");
     registry
@@ -140,6 +222,18 @@ async fn waiting_processes_remain_in_the_recovery_worklist(registry: Arc<dyn Pro
     assert!(
         non_terminal.iter().any(|record| record.id == process_id),
         "a waiting process must remain claimable by crash recovery"
+    );
+    let references = registry
+        .live_reference_summary()
+        .await
+        .expect("summarize waiting live references");
+    assert!(
+        references.iter().any(|summary| {
+            summary.definition.as_ref() == Some(&definition)
+                && summary.env_ref.as_ref() == Some(&env_ref)
+                && summary.process_count == 1
+        }),
+        "live-reference accounting must retain waiting process rows"
     );
 }
 

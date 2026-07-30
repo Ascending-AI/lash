@@ -324,6 +324,7 @@ CREATE TABLE IF NOT EXISTS process_wake_deliveries (
     target_session_id TEXT NOT NULL,
     sequence          INTEGER NOT NULL,
     state             TEXT NOT NULL,
+    claim_token       TEXT,
     attempts          INTEGER NOT NULL DEFAULT 0,
     first_attempt_ms  INTEGER,
     next_attempt_at_ms INTEGER NOT NULL,
@@ -405,8 +406,9 @@ CREATE TABLE IF NOT EXISTS process_segment_handovers (
 // Bumped to 17 for FIG-661: observer edges replace the former visibility table, wake targets
 // are indexed subscription state, filter columns are extracted, and pruning
 // leaves payload-free tombstones.
+/// Bumped to 19 for per-attempt wake-delivery claim tokens.
 /// Bumped to 18 for wake-delivery claims and raw session originator ids.
-pub(crate) const PROCESS_SCHEMA_VERSION: i32 = 18;
+pub(crate) const PROCESS_SCHEMA_VERSION: i32 = 19;
 
 pub(crate) const TRIGGER_SCHEMA: &str = "
 CREATE TABLE IF NOT EXISTS trigger_subscriptions (

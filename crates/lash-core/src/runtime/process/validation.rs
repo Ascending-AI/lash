@@ -375,6 +375,14 @@ pub fn prepare_process_event_append(
             "process `{process_id}` event replay key `{replay_key}` conflicts with an existing event"
         )));
     }
+    if record.is_terminal()
+        && super::events::process_signal_name_from_event_type(&request.event_type).is_some()
+    {
+        return Err(PluginError::ProcessAlreadyTerminal {
+            process_id: process_id.to_string(),
+            status: record.status,
+        });
+    }
     let runtime_owned = runtime_lifecycle_event_type(&request.event_type);
     let declared = runtime_owned
         .as_ref()
@@ -404,9 +412,10 @@ pub fn prepare_process_event_append(
         &declared.semantics,
     )?;
     if semantics.terminal.is_some() && record.is_terminal() {
-        return Err(PluginError::Session(format!(
-            "process `{process_id}` is already terminal"
-        )));
+        return Err(PluginError::ProcessAlreadyTerminal {
+            process_id: process_id.to_string(),
+            status: record.status,
+        });
     }
     let occurred_at = system_time_from_epoch_ms(occurred_at_ms);
     let event = ProcessEvent {

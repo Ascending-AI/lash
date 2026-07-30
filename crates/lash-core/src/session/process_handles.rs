@@ -743,6 +743,37 @@ mod tests {
             .await
             .expect("read observed process")
             .expect("observed process remains retained");
+        let retained_bytes =
+            serde_json::to_vec(&retained).expect("serialize retained terminal process");
+        let terminal_signal = context
+            .signal_process_handle(
+                "signal-terminal-process".to_string(),
+                handle.clone(),
+                "ready".to_string(),
+                serde_json::Value::Null,
+            )
+            .await;
+        assert!(!terminal_signal.output.is_success());
+        assert!(
+            terminal_signal
+                .output
+                .value_for_projection()
+                .to_string()
+                .contains("already terminal"),
+            "signaling a retained terminal process must return the typed terminal error"
+        );
+        let after_rejected_signal = host
+            .process_registry
+            .get_process("hidden-process")
+            .await
+            .expect("read terminal process after rejected signal")
+            .expect("terminal process remains retained");
+        assert_eq!(
+            serde_json::to_vec(&after_rejected_signal)
+                .expect("serialize terminal process after rejected signal"),
+            retained_bytes,
+            "a rejected terminal signal must leave prune eligibility byte-stable"
+        );
 
         let prune = host
             .process_registry

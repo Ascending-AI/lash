@@ -58,8 +58,9 @@ pub use op_scope::ProcessOpScope;
 pub use references::ProcessLiveReferenceSummary;
 pub use registry::{
     DEFAULT_WAKE_DELIVERY_EXPIRY_MS, ProcessContinuationStore, ProcessPruneReport, ProcessRegistry,
-    ProjectionWatermark, WAKE_ENQUEUING_STALE_AFTER_MS, WakeDelivery, WakeDeliveryConfig,
-    WakeDeliveryReport, WakeDeliveryState, WakeDiscardReason,
+    ProjectionWatermark, WAKE_ENQUEUING_STALE_AFTER_MS, WakeDelivery, WakeDeliveryBlockedGroup,
+    WakeDeliveryClaimOutcome, WakeDeliveryConfig, WakeDeliveryReport, WakeDeliveryState,
+    WakeDiscardReason,
 };
 pub use service::{ProcessService, UnavailableProcessService};
 #[cfg(any(test, feature = "testing"))]

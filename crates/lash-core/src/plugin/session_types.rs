@@ -357,26 +357,6 @@ impl SessionRelation {
             Self::Fork { .. } => None,
         }
     }
-
-    /// Render the durable host choice when a historical process start is
-    /// outside a fork's observer-inheritance selector.
-    pub fn historical_process_start_exclusion(&self, process_id: &str) -> Option<&'static str> {
-        let Self::Fork {
-            observer_inheritance,
-            ..
-        } = self
-        else {
-            return None;
-        };
-        let included = match observer_inheritance {
-            crate::ObserverInheritance::All => true,
-            crate::ObserverInheritance::None => false,
-            crate::ObserverInheritance::Only(process_ids) => {
-                process_ids.iter().any(|candidate| candidate == process_id)
-            }
-        };
-        (!included).then_some("started before this branch; not observed here")
-    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]

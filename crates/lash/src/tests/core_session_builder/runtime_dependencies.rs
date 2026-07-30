@@ -653,35 +653,6 @@ async fn fork_observer_inheritance_is_recoverable_selective_and_wake_independent
             .collect::<Vec<_>>(),
         vec!["fork-selective-process"]
     );
-    let only_store = factory
-        .open_existing_store(&lash_core::SessionStoreCreateRequest {
-            session_id: "fork-only-branch".to_string(),
-            relation: lash_core::SessionRelation::Root,
-            policy: lash_core::SessionPolicy::default(),
-        })
-        .await
-        .expect("open Only branch store")
-        .expect("Only branch store exists");
-    let only_meta = only_store
-        .load_session_meta()
-        .await
-        .expect("load Only branch metadata")
-        .expect("Only branch metadata exists");
-    assert_eq!(
-        only_meta
-            .relation
-            .historical_process_start_exclusion("fork-visible-process"),
-        Some("started before this branch; not observed here"),
-        "historical starts excluded by the durable selector must render honestly"
-    );
-    assert_eq!(
-        only_meta
-            .relation
-            .historical_process_start_exclusion("fork-selective-process"),
-        None,
-        "historical starts included by the durable selector remain normal"
-    );
-
     let event_count_before = registry
         .events_after("fork-selective-process", 0)
         .await

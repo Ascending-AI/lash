@@ -36,6 +36,17 @@ pub(crate) async fn load_process(
         .transpose()
 }
 
+pub(crate) fn decode_matching_process(
+    row: sqlx::postgres::PgRow,
+    filter: &lash_core::ProcessListFilter,
+) -> Result<Option<ProcessRecord>, PluginError> {
+    let json: String = row.get(0);
+    let record = serde_json::from_str(&json).map_err(process_decode_error)?;
+    // JSONB normalizes numeric representations (`1` equals `1.0`).
+    // SQL is the coarse pushdown; this is the exact public Value contract.
+    Ok(filter.matches_record(&record).then_some(record))
+}
+
 pub(crate) async fn wake_session_id_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     process_id: &str,
@@ -214,9 +225,9 @@ pub(crate) async fn insert_wake_delivery_tx(
     sqlx::query(
         "INSERT INTO lash_process_wake_deliveries (
             delivery_id, process_id, target_session_id, sequence, state,
-            attempts, first_attempt_ms, next_attempt_at_ms, expires_at_ms,
+            claim_token, attempts, first_attempt_ms, next_attempt_at_ms, expires_at_ms,
             discard_reason, delivery_json
-         ) VALUES ($1, $2, $3, $4, 'pending', 0, NULL, $5, $6, NULL, $7)
+         ) VALUES ($1, $2, $3, $4, 'pending', NULL, 0, NULL, $5, $6, NULL, $7)
          ON CONFLICT (delivery_id) DO NOTHING",
     )
     .bind(&delivery.delivery_id)

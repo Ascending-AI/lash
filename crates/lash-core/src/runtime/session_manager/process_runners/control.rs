@@ -473,6 +473,19 @@ impl ProcessCapability {
                 "process handle `{process_id}` is not live or visible in this session"
             )));
         }
+        let record = runner
+            .registry()
+            .get_process(process_id)
+            .await?
+            .ok_or_else(|| {
+                crate::PluginError::Session(format!("unknown process `{process_id}`"))
+            })?;
+        if record.is_terminal() {
+            return Err(crate::PluginError::ProcessAlreadyTerminal {
+                process_id: process_id.to_string(),
+                status: record.status,
+            });
+        }
         let event_type = crate::process_signal_event_type(&signal_name)?;
         let request = crate::ProcessEventAppendRequest::new(event_type, payload).with_replay_key(
             format!("process:{process_id}:signal.{signal_name}:{signal_id}"),

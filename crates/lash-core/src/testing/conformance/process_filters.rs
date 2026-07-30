@@ -63,9 +63,17 @@ pub(super) async fn list_processes_filters_by_enriched_fields(registry: Arc<dyn 
     for (suffix, definition) in [
         ("null", serde_json::Value::Null),
         ("string", serde_json::json!("scalar-definition")),
-        ("number", serde_json::json!(17)),
-        ("boolean", serde_json::json!(true)),
+        ("integer-one", serde_json::json!(1)),
+        ("real-one", serde_json::json!(1.0)),
+        ("integer-zero", serde_json::json!(0)),
+        ("true", serde_json::json!(true)),
+        ("false", serde_json::json!(false)),
+        ("string-one", serde_json::json!("1")),
         ("object", serde_json::json!({"nested": "definition"})),
+        (
+            "nested-object",
+            serde_json::json!({"z": {"b": 2, "a": 1}, "a": [3, 2, 1]}),
+        ),
     ] {
         registry
             .register_process(
@@ -157,9 +165,14 @@ pub(super) async fn list_processes_filters_by_enriched_fields(registry: Arc<dyn 
     for definition in [
         serde_json::Value::Null,
         serde_json::json!("scalar-definition"),
-        serde_json::json!(17),
+        serde_json::json!(1),
+        serde_json::json!(1.0),
+        serde_json::json!(0),
         serde_json::json!(true),
+        serde_json::json!(false),
+        serde_json::json!("1"),
         serde_json::json!({"nested": "definition"}),
+        serde_json::from_str(r#"{"a":[3,2,1],"z":{"a":1,"b":2}}"#).expect("nested object filter"),
     ] {
         assert_rust_parity(
             &registry,
