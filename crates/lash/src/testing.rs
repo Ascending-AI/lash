@@ -583,6 +583,22 @@ finish "registered"
             .open()
             .await
             .expect("reopen session");
+        let describe_process_messages = |read_view: &lash_core::SessionReadView| {
+            read_view
+                .messages()
+                .iter()
+                .filter(|message| {
+                    matches!(
+                        &message.origin,
+                        Some(lash_core::MessageOrigin::Process {
+                            process_id: message_process_id,
+                            ..
+                        }) if message_process_id == &process_id
+                    )
+                })
+                .map(|message| format!("{message:?}"))
+                .collect::<Vec<_>>()
+        };
         let contains_expected_wake = |read_view: &lash_core::SessionReadView| {
             read_view.messages().iter().any(|message| {
                 message.role == lash_core::MessageRole::Event
@@ -605,12 +621,14 @@ finish "registered"
         let current = observation.current_observation();
         if !contains_expected_wake(&current.read_view) {
             let mut commits = observation.subscribe_and_recover(current.cursor);
+            let mut observed_items = Vec::new();
             // 60s, not 10s: this waits for a full scripted turn through a durable
             // rebuild, and contended CI shards have exceeded 10s (PR #170 run).
             let committed = tokio::time::timeout(Duration::from_secs(60), async {
                 loop {
                     match commits.next().await {
                         Some(Ok(crate::observe::SessionObservationStreamItem::Event(event))) => {
+                            observed_items.push(format!("{event:?}"));
                             if let lash_core::SessionObservationEventPayload::Committed {
                                 read_view,
                             } = &event.payload
@@ -622,8 +640,12 @@ finish "registered"
                         Some(Ok(crate::observe::SessionObservationStreamItem::Gap {
                             observation,
                             ..
-                        })) if contains_expected_wake(&observation.read_view) => break,
-                        Some(Ok(_)) => {}
+                        })) => {
+                            observed_items.push(format!("gap={observation:?}"));
+                            if contains_expected_wake(&observation.read_view) {
+                                break;
+                            }
+                        }
                         Some(Err(error)) => {
                             panic!("wake commit observation failed: {error}")
                         }
@@ -641,8 +663,13 @@ finish "registered"
                     .queued_work()
                     .await
                     .expect("inspect stalled wake queue");
+                let latest = observation.current_observation();
                 panic!(
-                    "wake turn did not commit promptly; deliveries={deliveries:?}; queued={queued:?}"
+                    "wake turn did not commit promptly; deliveries={deliveries:?}; \
+                     queued={queued:?}; initial_process_messages={:?}; \
+                     latest_process_messages={:?}; observed_items={observed_items:?}",
+                    describe_process_messages(&current.read_view),
+                    describe_process_messages(&latest.read_view),
                 );
             }
         }
