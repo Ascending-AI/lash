@@ -711,6 +711,14 @@ fn deleted_session_details(error: &lash::EmbedError) -> Option<(&str, Option<&st
         lash::EmbedError::Runtime(error) => {
             return error.deleted_session_id().map(|session_id| (session_id, None));
         }
+        lash::EmbedError::Plugin(lash::plugins::PluginError::RuntimeEffectController(error)) => {
+            return match error.cause.as_ref() {
+                Some(lash_core::RuntimeErrorCause::SessionDeleted { session_id }) => {
+                    Some((session_id.as_str(), None))
+                }
+                None => None,
+            };
+        }
         _ => return None,
     };
     match source {

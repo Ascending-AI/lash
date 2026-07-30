@@ -138,7 +138,7 @@ impl EmbedError {
     /// - session provider-configuration errors (`ProviderMismatch`,
     ///   `ProviderUnconfigured`, `ProviderUnavailable`,
     ///   `CodeExecutionUnavailable`);
-    /// - direct or session-wrapped
+    /// - direct, session-wrapped, or nested controller-owned
     ///   [`StoreError::SessionDeleted`](lash_core::StoreError::SessionDeleted)
     ///   tombstones — session ids are permanently single-use.
     pub fn is_terminal(&self) -> bool {
@@ -172,6 +172,10 @@ impl EmbedError {
                             | RuntimeErrorCode::DurableEffectLivePluginInput
                     )
             }
+            Self::Plugin(lash_core::PluginError::RuntimeEffectController(err)) => matches!(
+                err.cause.as_ref(),
+                Some(lash_core::RuntimeErrorCause::SessionDeleted { .. })
+            ),
             Self::Session(err) => matches!(
                 err,
                 SessionError::ProviderMismatch { .. }
@@ -193,7 +197,10 @@ pub type Result<T> = std::result::Result<T, EmbedError>;
 #[cfg(test)]
 mod tests {
     use super::EmbedError;
-    use lash_core::{RuntimeError, RuntimeErrorCause, RuntimeErrorCode, SessionError, StoreError};
+    use lash_core::{
+        PluginError, RuntimeEffectControllerError, RuntimeError, RuntimeErrorCause,
+        RuntimeErrorCode, SessionError, StoreError,
+    };
 
     fn runtime_error(code: RuntimeErrorCode) -> EmbedError {
         EmbedError::Runtime(RuntimeError::new(code, "test"))
@@ -265,8 +272,13 @@ mod tests {
                 },
             ),
         );
+        let nested_controller_owned = EmbedError::Plugin(PluginError::RuntimeEffectController(
+            RuntimeEffectControllerError::from(StoreError::SessionDeleted {
+                session_id: "retired-nested-controller-owned".to_string(),
+            }),
+        ));
 
-        for error in [direct, wrapped, controller_owned] {
+        for error in [direct, wrapped, controller_owned, nested_controller_owned] {
             assert!(error.is_terminal(), "{error}");
             assert!(!error.is_retryable(), "{error}");
         }

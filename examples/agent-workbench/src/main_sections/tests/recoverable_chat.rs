@@ -19,6 +19,43 @@ async fn recoverable_chat_test_state_with_provider(
     channel_capacity: usize,
     provider: ProviderHandle,
 ) -> AppState {
+    recoverable_chat_test_state_with_provider_and_trigger_store(
+        data_dir,
+        channel_capacity,
+        provider,
+        in_memory_trigger_store(),
+    )
+    .await
+}
+
+pub(crate) async fn recoverable_chat_test_state_with_trigger_store(
+    data_dir: &std::path::Path,
+    trigger_store: Arc<dyn lash::triggers::TriggerStore>,
+) -> AppState {
+    let provider = lash::testing::TestProvider::builder()
+        .kind("recoverable-chat-trigger-store-test")
+        .complete(|_| async {
+            Ok(text_response(
+                "<lashlang>\nfinish \"canonical answer\"\n</lashlang>",
+            ))
+        })
+        .build()
+        .into_handle();
+    recoverable_chat_test_state_with_provider_and_trigger_store(
+        data_dir,
+        16,
+        provider,
+        trigger_store,
+    )
+    .await
+}
+
+async fn recoverable_chat_test_state_with_provider_and_trigger_store(
+    data_dir: &std::path::Path,
+    channel_capacity: usize,
+    provider: ProviderHandle,
+    trigger_store: Arc<dyn lash::triggers::TriggerStore>,
+) -> AppState {
     let process_registry = Arc::new(
         lash_sqlite_store::SqliteProcessRegistry::open(
             &data_dir.join("processes.db"),
@@ -39,6 +76,7 @@ async fn recoverable_chat_test_state_with_provider(
         .model(model)
         .store_factory(store_factory)
         .process_registry(Arc::clone(&process_registry))
+        .trigger_store(Arc::clone(&trigger_store))
         .build()
         .expect("build test core");
     let process_observer = core
@@ -48,7 +86,7 @@ async fn recoverable_chat_test_state_with_provider(
     AppState {
         core,
         attachment_store: test_attachment_store(),
-        trigger_store: in_memory_trigger_store(),
+        trigger_store,
         process_observer,
         process_work_driver: inert_process_work_driver(process_registry),
         session_ids: WorkbenchSessionIds::fresh(),
@@ -100,6 +138,26 @@ async fn retire_workbench_session(state: &AppState, session_id: &str) {
 fn assert_deleted_session_conflict(error: &AppError, session_id: &str) {
     assert_eq!(error.status, StatusCode::CONFLICT);
     assert_eq!(error.message, deleted_session_message(session_id));
+}
+
+#[test]
+fn reset_cron_cancellation_preserves_a_retired_session_refusal() {
+    run_async_test_on_stack_budget("retired-session-reset-cron-cancel-test", || async {
+        let data_dir = tempfile::tempdir().expect("tempdir");
+        let state = recoverable_chat_test_state(data_dir.path(), 16).await;
+        let session_id = state.current_session_id();
+        retire_workbench_session(&state, &session_id).await;
+
+        let error = crate::restate::cancel_cron_jobs_for_session(
+            &state,
+            &session_id,
+            "reset",
+        )
+        .await
+        .expect_err("reset cron cancellation must refuse a retired session");
+
+        assert_deleted_session_conflict(&error, &session_id);
+    });
 }
 
 #[test]

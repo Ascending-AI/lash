@@ -461,8 +461,9 @@ impl LashRuntime {
                 Arc::clone(&self.host.core.clock),
             )
             .await
-            .map_err(|err| {
-                SessionError::Protocol(format!("failed to persist runtime state: {err}"))
+            .map_err(|source| SessionError::Store {
+                context: "failed to persist runtime state".to_string(),
+                source,
             })?;
             self.state.apply_persisted_commit_result(result);
             self.state.mark_node_ids_persisted(persisted_node_ids);
@@ -591,6 +592,70 @@ mod tests {
         .await
         .expect_err("runtime binding must refuse a retired session");
 
+        assert!(matches!(
+            error,
+            SessionError::Store {
+                source: crate::StoreError::SessionDeleted {
+                    session_id: deleted_session_id,
+                },
+                ..
+            } if deleted_session_id == session_id
+        ));
+    }
+
+    #[tokio::test]
+    async fn park_commit_preserves_a_concurrent_session_deletion_refusal() {
+        use crate::SessionStoreFactory;
+        use crate::runtime::tests::helpers::{
+            EmptyTools, plugin_session_with_tools, standard_test_policy, test_host_config,
+        };
+        use std::sync::Arc;
+
+        let session_id = "deleted-during-park-commit";
+        let policy = standard_test_policy();
+        let request = crate::SessionStoreCreateRequest {
+            session_id: session_id.to_string(),
+            relation: crate::SessionRelation::Root,
+            policy: policy.clone(),
+        };
+        let factory = crate::InMemorySessionStoreFactory::new();
+        let store = factory
+            .create_store(&request)
+            .await
+            .expect("create session store before parking");
+        let runtime = crate::LashRuntime::from_persistent_embedded_state(
+            policy.clone(),
+            test_host_config(),
+            crate::PersistentRuntimeServices::new(
+                plugin_session_with_tools(session_id, Arc::new(EmptyTools)),
+                Arc::clone(&store),
+            ),
+            crate::RuntimeSessionState {
+                session_id: session_id.to_string(),
+                policy,
+                ..crate::RuntimeSessionState::default()
+            },
+        )
+        .await
+        .expect("build runtime before concurrent deletion");
+        factory
+            .delete_session(session_id)
+            .await
+            .expect("delete session before park commit");
+
+        let error = match runtime.park().await {
+            Ok(_) => panic!("park commit must refuse the retired session"),
+            Err(error) => error,
+        };
+        let canonical = crate::StoreError::SessionDeleted {
+            session_id: session_id.to_string(),
+        }
+        .to_string();
+
+        assert_eq!(
+            error.to_string(),
+            format!("failed to persist runtime state: {canonical}")
+        );
         assert!(matches!(
             error,
             SessionError::Store {
