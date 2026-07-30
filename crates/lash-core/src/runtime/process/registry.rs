@@ -758,13 +758,15 @@ pub trait ProcessRegistry: Send + Sync {
     /// cleanup cannot complete.
     /// Host-scheduled retention: hosts that project results/events into their
     /// own store call this to keep the registry bounded. Non-terminal rows are
-    /// never touched. Callers must choose a retention window comfortably longer
-    /// than any waiter lifetime. A late await receives the typed
+    /// never touched. A late await receives the typed
     /// `ProcessNoLongerRetained` information outcome from the payload-free
-    /// tombstone. Re-emitting the same trigger occurrence id after its
-    /// process has aged out of retention may reserve a fresh delivery process
-    /// id; occurrence-level idempotency still holds, and ordinary emit replays
-    /// do not straddle a retention window in practice.
+    /// tombstone. The API accepts a raw cutoff and the runtime exposes no finite
+    /// maximum waiter lifetime, so callers cannot validate this against a
+    /// library-owned bound; retaining terminal rows beyond every still-replayable
+    /// waiter is currently an explicit host operational responsibility.
+    /// Re-emitting the same trigger occurrence id after its process has aged out
+    /// of retention may reserve a fresh delivery process id; occurrence-level
+    /// idempotency still holds.
     ///
     /// ```no_run
     /// use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -775,7 +777,8 @@ pub trait ProcessRegistry: Send + Sync {
     ///         .duration_since(UNIX_EPOCH)
     ///         .expect("clock after epoch")
     ///         .as_millis() as u64;
-    ///     // Window must exceed any in-flight await's lifetime (ADR 0017).
+    ///     // Host policy must keep this beyond every still-replayable waiter;
+    ///     // lash has no finite waiter-lifetime bound to validate here.
     ///     let cutoff = now_ms - Duration::from_secs(7 * 24 * 60 * 60).as_millis() as u64;
     ///     let report = registry
     ///         .prune_terminal_processes(cutoff, None, ProjectionWatermark::NoProjector)

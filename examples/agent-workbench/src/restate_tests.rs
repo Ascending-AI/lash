@@ -4,6 +4,32 @@ use super::{
 };
 use crate::AppError;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
+
+#[derive(Default)]
+struct CountingProcessEffectController {
+    process_starts: AtomicUsize,
+}
+
+impl lash_core::AwaitEventResolver for CountingProcessEffectController {}
+
+#[async_trait::async_trait]
+impl lash_core::RuntimeEffectController for CountingProcessEffectController {
+    async fn execute_effect(
+        &self,
+        envelope: lash_core::RuntimeEffectEnvelope,
+        local_executor: lash_core::RuntimeEffectLocalExecutor<'_>,
+    ) -> Result<lash_core::RuntimeEffectOutcome, lash_core::RuntimeEffectControllerError> {
+        if matches!(
+            &envelope.command,
+            lash_core::RuntimeEffectCommand::Process { command }
+                if matches!(command.as_ref(), lash_core::ProcessCommand::Start { .. })
+        ) {
+            self.process_starts.fetch_add(1, Ordering::SeqCst);
+        }
+        local_executor.execute(envelope).await
+    }
+}
 
 struct OccurrenceFailureTriggerStore {
     inner: lash_core::InMemoryTriggerStore,
@@ -230,4 +256,85 @@ async fn cron_occurrence_call_site_terminalizes_typed_refusals_and_retries_unkno
             );
         }
     }
+}
+
+#[tokio::test]
+async fn cron_occurrence_redrive_reemits_the_reserved_process_start() {
+    let data_dir = tempfile::tempdir().expect("tempdir");
+    let trigger_store = Arc::new(lash_core::InMemoryTriggerStore::default());
+    let state = crate::tests::recoverable_chat_test_state_with_trigger_store(
+        data_dir.path(),
+        Arc::clone(&trigger_store) as Arc<dyn lash::triggers::TriggerStore>,
+    )
+    .await;
+    let source_key = "cron-source:fig806";
+    let outcome = lash::triggers::TriggerStore::execute_command(
+        trigger_store.as_ref(),
+        "fig806-cron-register",
+        lash::triggers::TriggerCommand::Register {
+            owner_scope: lash::triggers::TriggerOwnerScope::session("fig806-cron-session"),
+            actor: lash_core::ProcessOriginator::session(lash_core::SessionScope::new(
+                "fig806-cron-session",
+            )),
+            draft: lash::triggers::TriggerSubscriptionDraft::for_process(
+                "fig806/cron",
+                lash_core::ProcessExecutionEnvRef::new("process-env:fig806-cron"),
+                crate::CRON_SCHEDULE_SOURCE_TYPE,
+                source_key,
+                lash_core::ProcessInput::Engine {
+                    kind: "fig806-cron-engine".to_string(),
+                    payload: serde_json::json!({}),
+                },
+                lash_core::ProcessIdentity::new("fig806-cron-engine"),
+            )
+            .with_payload_schema(lash_core::LashSchema::any()),
+        },
+    )
+    .await
+    .expect("register cron trigger")
+    .expect("cron trigger mutation");
+    assert!(matches!(
+        outcome,
+        lash::triggers::TriggerCommandOutcome::Mutation { .. }
+    ));
+    let controller = CountingProcessEffectController::default();
+    let request = WorkbenchCronRequest {
+        session_id: "fig806-cron-session".to_string(),
+        source_key: source_key.to_string(),
+        expr: "*/10 * * * * *".to_string(),
+        tz: Some("UTC".to_string()),
+        name: Some("FIG-806 cron replay".to_string()),
+    };
+    let fired_at = "2026-07-30T12:00:00+00:00".to_string();
+
+    for attempt in 0..2 {
+        let scoped = lash_core::ScopedEffectController::borrowed(
+            &controller,
+            lash_core::ExecutionScope::runtime_operation("fig806-cron-redrive"),
+        )
+        .expect("scope cron trigger emission");
+        emit_cron_occurrence_with_effect_controller(
+            state.clone(),
+            request.clone(),
+            fired_at.clone(),
+            "fig806-cron-job",
+            scoped,
+        )
+        .await
+        .unwrap_or_else(|error| panic!("cron attempt {attempt} failed: {error:?}"));
+    }
+
+    assert_eq!(
+        controller.process_starts.load(Ordering::SeqCst),
+        2,
+        "the reserved replay must emit the same process-start effect"
+    );
+    assert_eq!(
+        lash::triggers::TriggerStore::list_deliveries(trigger_store.as_ref())
+            .await
+            .expect("list cron deliveries")
+            .len(),
+        1,
+        "the repeated cron occurrence still owns one deterministic delivery"
+    );
 }

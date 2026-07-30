@@ -17,13 +17,19 @@ use super::{
 pub(crate) enum TurnCancelPeekIdentity {
     StartGate,
     PostAbortGate,
+    // Shipped protocols issue at most one LLM call per protocol iteration, so
+    // the iteration is a unique replay identity for this between-call peek.
+    AfterLlm { protocol_iteration: usize },
 }
 
 impl TurnCancelPeekIdentity {
-    fn as_str(self) -> &'static str {
+    fn causal_identity(self) -> String {
         match self {
-            Self::StartGate => "turn_cancel.start_gate",
-            Self::PostAbortGate => "turn_cancel.post_abort_gate",
+            Self::StartGate => "turn_cancel.start_gate".to_string(),
+            Self::PostAbortGate => "turn_cancel.post_abort_gate".to_string(),
+            Self::AfterLlm { protocol_iteration } => {
+                format!("turn_cancel.after_llm.{protocol_iteration}")
+            }
         }
     }
 }
@@ -426,7 +432,7 @@ impl ActiveTurnControl {
         controller: &dyn RuntimeEffectController,
         identity: TurnCancelPeekIdentity,
     ) -> Result<Option<TurnCancellationEvidence>, RuntimeError> {
-        let causal_identity = identity.as_str();
+        let causal_identity = identity.causal_identity();
         let invocation = RuntimeInvocation::effect(
             RuntimeScope {
                 session_id: self.address.session_id.clone(),
@@ -434,9 +440,9 @@ impl ActiveTurnControl {
                 turn_index: None,
                 protocol_iteration: None,
             },
-            causal_identity,
+            causal_identity.clone(),
             RuntimeEffectKind::PeekAwaitEvent,
-            causal_identity,
+            causal_identity.clone(),
         );
         let outcome = controller
             .execute_effect(

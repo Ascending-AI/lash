@@ -159,6 +159,11 @@ where
 }
 
 struct SynchronousWakeTracker {
+    // Deliberately redundant: the Restate SDK also wakes the handler through
+    // its output channel when it records suspension. Forwarding preserves the
+    // ordinary Future/Waker contract for other synchronous wake paths, but the
+    // suspension fix does not depend on this parent wake; the tracker flag is
+    // what fuses the one-shot SDK future.
     parent: Waker,
     polling_thread: ThreadId,
     polling: AtomicBool,
@@ -2421,36 +2426,15 @@ where
                     "unknown process `{process_id}`"
                 )))
             })?;
-        if let Some(output) = record.outcome.clone() {
-            self.continuations
-                .delete_segment_handovers(&process_id)
-                .await
-                .map_err(HandlerError::from)?;
-            if terminal_completion_workflow_key(&process_id, input.segment_ordinal).is_none() {
-                resolve_process_terminal_promise(&ctx, &process_id, &output)?;
-            } else {
-                let request: restate_sdk::context::Request<
-                    '_,
-                    Json<RestateProcessCompleteRequest>,
-                    Json<()>,
-                > = ContextClient::request(
-                    &ctx,
-                    RequestTarget::workflow(
-                        "LashProcessWorkflow",
-                        process_id.clone(),
-                        "complete_terminal",
-                    ),
-                    Json(RestateProcessCompleteRequest {
-                        process_id: process_id.clone(),
-                        output: output.clone(),
-                    }),
-                );
-                request.call().await?;
-            }
-            return Ok(Json(RestateProcessWorkflowOutput::Terminal {
-                output: Box::new(output),
-            }));
-        }
+        // FIG-788: a terminal outcome can land after an attempt has emitted
+        // runner commands but before its handler output is committed. Never
+        // branch around the runner from this non-journaled read: redrive must
+        // reconstruct the deployed command prefix, and idempotent completion
+        // below returns the already-stored terminal outcome. `first_started` is
+        // immutable execution authority. PR #170 observer removal cannot
+        // terminalize a process. Terminal pruning remains a host-owned exposure:
+        // the raw cutoff has no finite workflow-lifetime bound to validate
+        // against, so a host must retain this row while the workflow can replay.
         let mut handover = if input.segment_ordinal == 0 {
             None
         } else {
@@ -2497,10 +2481,6 @@ where
                         .complete_with_stored_outcome(&process_id, output)
                         .await
                         .map_err(|err| HandlerError::from(TerminalError::from_error(err)))?;
-                    self.continuations
-                        .delete_segment_handovers(&process_id)
-                        .await
-                        .map_err(HandlerError::from)?;
                     let request: restate_sdk::context::Request<
                         '_,
                         Json<RestateProcessCompleteRequest>,
@@ -2518,6 +2498,10 @@ where
                         }),
                     );
                     request.call().await?;
+                    self.continuations
+                        .delete_segment_handovers(&process_id)
+                        .await
+                        .map_err(HandlerError::from)?;
                     return Ok(Json(RestateProcessWorkflowOutput::Terminal {
                         output: Box::new(output),
                     }));
@@ -2585,10 +2569,6 @@ where
         match outcome {
             lash_core::ProcessRunOutcome::Terminal(output) => {
                 let output = *output;
-                self.continuations
-                    .delete_segment_handovers(&process_id)
-                    .await
-                    .map_err(HandlerError::from)?;
                 if terminal_completion_workflow_key(&process_id, input.segment_ordinal).is_none() {
                     resolve_process_terminal_promise(controller.context(), &process_id, &output)?;
                 } else {
@@ -2610,6 +2590,10 @@ where
                     );
                     request.call().await?;
                 }
+                self.continuations
+                    .delete_segment_handovers(&process_id)
+                    .await
+                    .map_err(HandlerError::from)?;
                 Ok(Json(RestateProcessWorkflowOutput::Terminal {
                     output: Box::new(output),
                 }))
@@ -2631,63 +2615,17 @@ where
                     )
                     .await
                     .map_err(HandlerError::from)?;
-                if self
-                    .process_cancel_requested(&process_id)
-                    .await
-                    .map_err(HandlerError::from)?
-                {
-                    let output = ProcessAwaitOutput::Cancelled {
-                        message: format!("process `{process_id}` was cancelled between segments"),
-                        raw: None,
-                        control: None,
-                    };
-                    let output = self
-                        .complete_with_stored_outcome(&process_id, output)
-                        .await
-                        .map_err(HandlerError::from)?;
-                    self.continuations
-                        .delete_segment_handovers(&process_id)
-                        .await
-                        .map_err(HandlerError::from)?;
-                    if terminal_completion_workflow_key(&process_id, input.segment_ordinal)
-                        .is_none()
-                    {
-                        resolve_process_terminal_promise(
-                            controller.context(),
-                            &process_id,
-                            &output,
-                        )?;
-                    } else {
-                        let request: restate_sdk::context::Request<
-                            '_,
-                            Json<RestateProcessCompleteRequest>,
-                            Json<()>,
-                        > = ContextClient::request(
-                            controller.context(),
-                            RequestTarget::workflow(
-                                "LashProcessWorkflow",
-                                process_id.clone(),
-                                "complete_terminal",
-                            ),
-                            Json(RestateProcessCompleteRequest {
-                                process_id: process_id.clone(),
-                                output: output.clone(),
-                            }),
-                        );
-                        request.call().await?;
-                    }
-                    return Ok(Json(RestateProcessWorkflowOutput::Terminal {
-                        output: Box::new(output),
-                    }));
-                }
                 let successor_key = process_segment_workflow_key(&process_id, next_segment_ordinal);
+                // FIG-788: successor emission is unconditional. A cancellation
+                // event can land between attempts, so the append-only registry
+                // read below may shape only commands after this deployed prefix.
                 let request: restate_sdk::context::Request<
                     '_,
                     Json<RestateProcessWorkflowInput>,
                     Json<RestateProcessWorkflowOutput>,
                 > = ContextClient::request(
                     controller.context(),
-                    RequestTarget::workflow("LashProcessWorkflow", successor_key, "run"),
+                    RequestTarget::workflow("LashProcessWorkflow", successor_key.clone(), "run"),
                     Json(RestateProcessWorkflowInput {
                         registration: input.registration,
                         execution_context: input.execution_context,
@@ -2696,6 +2634,33 @@ where
                     }),
                 );
                 let _ = request.send().invocation_id().await?;
+                if self
+                    .process_cancel_requested(&process_id)
+                    .await
+                    .map_err(HandlerError::from)?
+                {
+                    // Cancellation can race the gap after the current segment
+                    // retires its promise but before the successor handover is
+                    // visible to the cancel endpoint. Forward that durable fact
+                    // after scheduling so the successor owns terminalization.
+                    let deliver: restate_sdk::context::Request<
+                        '_,
+                        Json<RestateProcessCancelRequest>,
+                        Json<()>,
+                    > = ContextClient::request(
+                        controller.context(),
+                        RequestTarget::workflow(
+                            "LashProcessWorkflow",
+                            successor_key,
+                            "deliver_cancel",
+                        ),
+                        Json(RestateProcessCancelRequest {
+                            process_id: process_id.clone(),
+                            reason: Some("process cancelled between segments".to_string()),
+                        }),
+                    );
+                    let Json(()) = deliver.call().await?;
+                }
                 Ok(Json(RestateProcessWorkflowOutput::SegmentChained {
                     next_segment_ordinal,
                 }))
@@ -4777,10 +4742,23 @@ where
             Ok(ProcessEffectOutcome::DeleteSession { report })
         }
         ProcessCommand::Await { process_id } => {
-            // FIG-788/FIG-793 class inventory: this guard is replay-safe only
-            // within the host's `prune_terminal_processes` retention window.
-            // The retention qualification is tracked there; do not turn this
-            // registry state into a new journal-shape branch in FIG-790.
+            // Replay-determinism class inventory: PR #166 removed the process
+            // start gate. FIG-788 always redrives the process runner, retains
+            // ordinal handovers until terminal delivery resolves, and schedules
+            // each segment successor before reading cancellation. FIG-790 emits
+            // Process::Await before observing state. FIG-793 emits LlmCall
+            // before its durable cancel peek. FIG-806 makes TriggerRouter emit
+            // the deterministic process start before consulting reservation
+            // status.
+            //
+            // This existence guard remains an explicit retention exposure, not
+            // a proof: registration precedes the effect, and terminal events
+            // plus weak-observer removal retain the row, but a host can prune a
+            // terminal row while this invocation is still replayable. There is
+            // no finite waiter-lifetime bound against which the raw prune cutoff
+            // can be validated. In that case `get_process` returns
+            // `Err(ProcessNoLongerRetained)` at `?`, not `Ok(None)` at this
+            // branch. Hosts must retain terminal rows beyond every such waiter.
             if registry.get_process(&process_id).await?.is_none() {
                 return Err(PluginError::Session(format!("unknown process `{process_id}`")).into());
             }

@@ -3486,8 +3486,20 @@ async fn cancelled_provider_stream_does_not_commit_partial_output() {
         assembled.outcome,
         TurnOutcome::Stopped(TurnStop::Cancelled)
     ));
+    assert!(
+        assembled.errors.is_empty(),
+        "requested cancellation must not become an llm_provider TurnIssue: {:?}",
+        assembled.errors
+    );
     assert!(assembled.assistant_output.safe_text.is_empty());
     assert!(assembled.assistant_output.raw_text.is_empty());
+    assert!(
+        turn_events
+            .snapshot()
+            .iter()
+            .all(|activity| !matches!(&activity.event, TurnEvent::Error { message } if message == "LLM error: cancelled")),
+        "requested cancellation must not emit a user-visible LLM error"
+    );
     assert!(
         turn_events.snapshot().iter().any(|activity| matches!(
             &activity.event,

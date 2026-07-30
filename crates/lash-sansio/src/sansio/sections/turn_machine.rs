@@ -643,6 +643,9 @@ impl<M: TurnProtocol> TurnMachine<M> {
             return;
         };
         match result {
+            Err(error) if error.terminal_reason == LlmTerminalReason::Cancelled => {
+                self.finish(TurnOutcome::Stopped(TurnStop::Cancelled));
+            }
             Err(error) => {
                 self.emit_llm_error(error);
             }

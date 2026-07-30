@@ -1,9 +1,10 @@
 //! Tests for the Restate adapter (extracted from lib.rs).
 
 use super::*;
+use bytes::Bytes;
 use http_body_util::{BodyExt, Empty};
 use lash_core::TestProcessRegistryWriteExt;
-use lash_core::{ProcessInput, ProcessRegistration, RuntimeScope};
+use lash_core::{ProcessInput, ProcessRegistration, RuntimeScope, TriggerStore};
 use lash_http_transport::{HttpResponse, HttpResponseBody, HttpTransport, HttpTransportError};
 use lash_lashlang_runtime::{LashlangToolBinding, ToolDefinitionLashlangExt};
 use restate_sdk::prelude::Endpoint;
@@ -20,11 +21,13 @@ mod endpoint_protocol;
 mod process_tool_replay;
 mod tool_context_conformance;
 use endpoint_protocol::{
-    encode_call_replay, encode_completed_sleep_replay, encode_pending_sleep_replay,
-    invoke_endpoint, invoke_endpoint_body, invoke_endpoint_body_open,
-    invoke_endpoint_body_with_json_call_responses, invoke_endpoint_open,
-    invoke_process_workflow_endpoint, restate_call_frames, restate_message_types,
-    restate_output_failure_message, restate_output_json,
+    encode_call_replay, encode_completed_captured_sleep_replay, encode_completed_sleep_replay,
+    encode_one_way_call_replay, encode_pending_sleep_replay, encode_process_segment_send_replay,
+    encode_process_terminal_delivery_replay, encode_run_replay, invoke_endpoint,
+    invoke_endpoint_body, invoke_endpoint_body_open, invoke_endpoint_body_with_json_call_responses,
+    invoke_endpoint_open, invoke_process_workflow_endpoint, restate_call_frames,
+    restate_error_message, restate_message_types, restate_output_failure_message,
+    restate_output_json,
 };
 
 fn durable_turn_scope(session_id: impl Into<String>, turn_id: impl Into<String>) -> ExecutionScope {
@@ -118,6 +121,7 @@ const RESTATE_SUSPENSION_MESSAGE_TYPE: u16 = 0x0001;
 const RESTATE_COMPLETE_PROMISE_COMMAND_MESSAGE_TYPE: u16 = 0x040B;
 const RESTATE_OUTPUT_COMMAND_MESSAGE_TYPE: u16 = 0x0401;
 const RESTATE_END_MESSAGE_TYPE: u16 = 0x0003;
+const RESTATE_RUN_COMMAND_MESSAGE_TYPE: u16 = 0x0411;
 
 #[derive(Debug, Serialize, serde::Deserialize)]
 struct Fig779TimerGuardReproInput {
@@ -331,6 +335,224 @@ impl RestateProcessRunner for Fig779SuspendingProcessRunner {
     }
 }
 
+#[derive(Debug)]
+struct Fig788TerminalRedriveRunner;
+
+#[async_trait::async_trait]
+impl RestateProcessRunner for Fig788TerminalRedriveRunner {
+    async fn run_process_segment(
+        &self,
+        _registration: ProcessRegistration,
+        _execution_context: ProcessExecutionContext,
+        scoped_effect_controller: ScopedEffectController<'_>,
+        _handover: Option<lash_core::SegmentHandover>,
+        cancellation: tokio_util::sync::CancellationToken,
+    ) -> Result<lash_core::ProcessRunOutcome, PluginError> {
+        scoped_effect_controller
+            .controller()
+            .execute_effect(
+                RuntimeEffectEnvelope::new(
+                    runtime_invocation(RuntimeEffectKind::Sleep, "fig788-terminal-redrive-sleep"),
+                    RuntimeEffectCommand::Sleep {
+                        duration_ms: 60_000,
+                    },
+                ),
+                RuntimeEffectLocalExecutor::sleep(cancellation).with_turn_cancel_observation(false),
+            )
+            .await
+            .map_err(|error| PluginError::Session(error.to_string()))?;
+        Ok(ProcessAwaitOutput::Success {
+            value: serde_json::json!({"runner": "replayed"}),
+            control: None,
+        }
+        .into())
+    }
+
+    async fn request_process_cancel(
+        &self,
+        _request: RestateProcessCancelRequest,
+    ) -> Result<(), PluginError> {
+        Ok(())
+    }
+}
+
+#[derive(Debug)]
+struct Fig788SegmentBoundaryRunner;
+
+#[async_trait::async_trait]
+impl RestateProcessRunner for Fig788SegmentBoundaryRunner {
+    async fn run_process_segment(
+        &self,
+        _registration: ProcessRegistration,
+        _execution_context: ProcessExecutionContext,
+        _scoped_effect_controller: ScopedEffectController<'_>,
+        _handover: Option<lash_core::SegmentHandover>,
+        _cancellation: tokio_util::sync::CancellationToken,
+    ) -> Result<lash_core::ProcessRunOutcome, PluginError> {
+        Ok(lash_core::ProcessRunOutcome::SegmentBoundary(
+            lash_core::SegmentHandover {
+                reason: lash_core::BoundaryReason::JournalBudget,
+                program_hash: Some("fig788-segment-program".to_string()),
+                engine_state: vec![7, 8, 8],
+            },
+        ))
+    }
+
+    async fn request_process_cancel(
+        &self,
+        _request: RestateProcessCancelRequest,
+    ) -> Result<(), PluginError> {
+        Ok(())
+    }
+}
+
+#[derive(Debug)]
+struct Fig788OrdinalOneTerminalRunner;
+
+#[async_trait::async_trait]
+impl RestateProcessRunner for Fig788OrdinalOneTerminalRunner {
+    async fn run_process_segment(
+        &self,
+        _registration: ProcessRegistration,
+        _execution_context: ProcessExecutionContext,
+        _scoped_effect_controller: ScopedEffectController<'_>,
+        handover: Option<lash_core::SegmentHandover>,
+        _cancellation: tokio_util::sync::CancellationToken,
+    ) -> Result<lash_core::ProcessRunOutcome, PluginError> {
+        assert_eq!(
+            handover.expect("ordinal-one runner must receive its handover"),
+            lash_core::SegmentHandover {
+                reason: lash_core::BoundaryReason::JournalBudget,
+                program_hash: Some("fig788-terminal-program".to_string()),
+                engine_state: vec![1],
+            }
+        );
+        Ok(ProcessAwaitOutput::Success {
+            value: serde_json::json!({"segment": 1, "terminal": true}),
+            control: None,
+        }
+        .into())
+    }
+
+    async fn request_process_cancel(
+        &self,
+        _request: RestateProcessCancelRequest,
+    ) -> Result<(), PluginError> {
+        Ok(())
+    }
+}
+
+#[derive(Clone, Debug, Serialize, serde::Deserialize)]
+struct Fig806TriggerRedriveInput {
+    occurrence: lash_core::TriggerOccurrenceRequest,
+}
+
+#[restate_sdk::workflow]
+trait Fig806TriggerRedrive {
+    async fn run(input: Json<Fig806TriggerRedriveInput>) -> HandlerResult<Json<usize>>;
+}
+
+struct Fig806TriggerRedriveImpl {
+    router: lash_core::TriggerRouter,
+}
+
+impl Fig806TriggerRedrive for Fig806TriggerRedriveImpl {
+    async fn run(
+        &self,
+        ctx: WorkflowContext<'_>,
+        Json(input): Json<Fig806TriggerRedriveInput>,
+    ) -> HandlerResult<Json<usize>> {
+        let controller = RestateRuntimeEffectController::new(ctx);
+        let report = self
+            .router
+            .emit(input.occurrence, &controller)
+            .await
+            .map_err(HandlerError::from)?;
+        let request: restate_sdk::context::Request<'_, Json<()>, Json<()>> = ContextClient::request(
+            controller.context(),
+            RequestTarget::workflow("Fig806TriggerSink", "fig806-sink", "complete"),
+            Json(()),
+        );
+        let Json(()) = request.call().await?;
+        Ok(Json(report.deliveries.len()))
+    }
+}
+
+#[derive(Clone, Debug, Serialize, serde::Deserialize)]
+struct Fig793LlmGateRedriveInput;
+
+#[restate_sdk::workflow]
+trait Fig793LlmGateRedrive {
+    async fn run(input: Json<Fig793LlmGateRedriveInput>) -> HandlerResult<Json<bool>>;
+}
+
+fn fig793_llm_envelope() -> RuntimeEffectEnvelope {
+    RuntimeEffectEnvelope::new(
+        runtime_invocation(RuntimeEffectKind::LlmCall, "fig793-llm"),
+        RuntimeEffectCommand::LlmCall {
+            request: Box::new(llm_spec()),
+        },
+    )
+}
+
+fn fig793_llm_outcome() -> RuntimeEffectOutcome {
+    RuntimeEffectOutcome::LlmCall {
+        result: Box::new(Ok(lash_core::LlmResponse {
+            full_text: "journaled response".to_string(),
+            parts: vec![lash_core::LlmOutputPart::Text {
+                text: "journaled response".to_string(),
+                response_meta: None,
+            }],
+            ..lash_core::LlmResponse::default()
+        })),
+        text_streamed: false,
+        call_record: None,
+    }
+}
+
+struct Fig793LlmGateRedriveImpl;
+
+impl Fig793LlmGateRedrive for Fig793LlmGateRedriveImpl {
+    async fn run(
+        &self,
+        ctx: WorkflowContext<'_>,
+        Json(_input): Json<Fig793LlmGateRedriveInput>,
+    ) -> HandlerResult<Json<bool>> {
+        let controller = RestateRuntimeEffectController::new(ctx);
+        controller
+            .execute_effect(
+                fig793_llm_envelope(),
+                RuntimeEffectLocalExecutor::testing(|_envelope| async { Ok(fig793_llm_outcome()) }),
+            )
+            .await
+            .map_err(TerminalError::from_error)?;
+        let key = restate_await_event_key(
+            &durable_turn_scope("fig793-session", "fig793-turn"),
+            AwaitEventWaitIdentity::TurnCancelGate,
+        )
+        .map_err(TerminalError::from_error)?;
+        let outcome = controller
+            .execute_effect(
+                RuntimeEffectEnvelope::new(
+                    RuntimeInvocation::effect(
+                        RuntimeScope::for_turn("fig793-session", "fig793-turn", 1, 0),
+                        "turn_cancel.after_llm.0",
+                        RuntimeEffectKind::PeekAwaitEvent,
+                        "turn_cancel.after_llm.0",
+                    ),
+                    RuntimeEffectCommand::PeekAwaitEvent { key },
+                ),
+                RuntimeEffectLocalExecutor::unavailable(),
+            )
+            .await
+            .map_err(TerminalError::from_error)?;
+        let RuntimeEffectOutcome::PeekAwaitEvent { resolution } = outcome else {
+            return Err(TerminalError::new("FIG-793 fixture expected a peek outcome").into());
+        };
+        Ok(Json(resolution.is_some()))
+    }
+}
+
 /// FIG-779 repro. A not-yet-completed durable timer is an SDK-legitimate
 /// synchronous-wake-then-Pending state — it is exactly how the SDK signals a
 /// durable suspension. `RestateContextFuture` must fuse that resolved inner
@@ -494,6 +716,458 @@ async fn fig779_suspended_process_redrive_observes_durable_cancellation() {
             .outcome,
         Some(ProcessAwaitOutput::Cancelled { .. })
     ));
+}
+
+#[tokio::test]
+async fn fig788_terminal_outcome_landing_preserves_the_suspended_command_prefix() {
+    let process_id = "fig788-terminal-outcome-redrive";
+    let registry = process_registry();
+    let registration = rerunnable_registration(process_id);
+    registry
+        .register_process(registration.clone())
+        .await
+        .expect("register FIG-788 process");
+    let endpoint = Endpoint::builder()
+        .bind(
+            LashProcessWorkflowImpl::new_for_test(
+                Arc::new(Fig788TerminalRedriveRunner),
+                Arc::clone(&registry),
+                continuation_store(),
+            )
+            .serve(),
+        )
+        .build();
+    let input = RestateProcessWorkflowInput {
+        registration,
+        execution_context: ProcessExecutionContext::default(),
+        segment_ordinal: 0,
+        execution_id: None,
+    };
+
+    let suspended = invoke_endpoint(&endpoint, "LashProcessWorkflow", "run", process_id, &input)
+        .await
+        .expect("first process attempt should suspend");
+    assert_eq!(
+        restate_message_types(&suspended).expect("decode suspended process frames"),
+        vec![
+            RESTATE_SLEEP_COMMAND_MESSAGE_TYPE,
+            RESTATE_SUSPENSION_MESSAGE_TYPE
+        ]
+    );
+
+    let stored = ProcessAwaitOutput::Cancelled {
+        message: "terminal outcome landed between attempts".to_string(),
+        raw: None,
+        control: None,
+    };
+    registry
+        .complete_process(
+            process_id,
+            stored.clone(),
+            workflow_key_authority(process_id),
+        )
+        .await
+        .expect("store terminal outcome between attempts");
+    let replay = encode_completed_captured_sleep_replay(process_id, &input, &suspended)
+        .expect("splice the deployed suspended journal");
+    let output = invoke_endpoint_body_open(&endpoint, "LashProcessWorkflow", "run", replay)
+        .await
+        .expect("terminal redrive must preserve the deployed command prefix");
+
+    assert_eq!(
+        restate_output_json::<RestateProcessWorkflowOutput>(&output),
+        Some(RestateProcessWorkflowOutput::Terminal {
+            output: Box::new(stored),
+        })
+    );
+}
+
+#[tokio::test]
+async fn fig788_ordinal_one_terminal_delivery_redrive_retains_its_handover() {
+    let process_id = "fig788-ordinal-one-terminal-redrive";
+    let (registry, continuations) = process_stores();
+    let registration = rerunnable_registration(process_id);
+    registry
+        .register_process(registration.clone())
+        .await
+        .expect("register ordinal-one process");
+    let (execution_authority, started) =
+        invocation_started(process_id, "fig788-ordinal-one-execution", 1);
+    registry
+        .record_first_started_with_authority(process_id, started, &execution_authority)
+        .await
+        .expect("record retained Restate execution start");
+    let persisted = lash_core::PersistedSegmentHandover {
+        segment_ordinal: 1,
+        program_hash: "fig788-terminal-program".to_string(),
+        handover: lash_core::SegmentHandover {
+            reason: lash_core::BoundaryReason::JournalBudget,
+            program_hash: Some("fig788-terminal-program".to_string()),
+            engine_state: vec![1],
+        },
+    };
+    continuations
+        .put_segment_handover(process_id, persisted.clone())
+        .await
+        .expect("persist ordinal-one handover");
+    let endpoint = Endpoint::builder()
+        .bind(
+            LashProcessWorkflowImpl::new_for_test(
+                Arc::new(Fig788OrdinalOneTerminalRunner),
+                Arc::clone(&registry),
+                Arc::clone(&continuations),
+            )
+            .serve(),
+        )
+        .build();
+    let input = RestateProcessWorkflowInput {
+        registration,
+        execution_context: ProcessExecutionContext::default(),
+        segment_ordinal: 1,
+        execution_id: Some("fig788-ordinal-one-execution".to_string()),
+    };
+
+    let terminal_delivery_suspension =
+        invoke_endpoint(&endpoint, "LashProcessWorkflow", "run", process_id, &input)
+            .await
+            .expect("ordinal-one terminal delivery should suspend on its call");
+    assert_eq!(
+        restate_message_types(&terminal_delivery_suspension)
+            .expect("decode ordinal-one terminal suspension"),
+        vec![
+            RESTATE_COMPLETE_PROMISE_COMMAND_MESSAGE_TYPE,
+            RESTATE_CALL_COMMAND_MESSAGE_TYPE,
+            RESTATE_SUSPENSION_MESSAGE_TYPE
+        ],
+        "endpoint error: {:?}",
+        restate_error_message(&terminal_delivery_suspension)
+    );
+    assert_eq!(
+        continuations
+            .get_segment_handover(process_id, 1)
+            .await
+            .expect("read handover during terminal delivery"),
+        Some(persisted),
+        "redrive input must survive until the journaled terminal delivery resolves"
+    );
+
+    let replay =
+        encode_process_terminal_delivery_replay(process_id, &input, &terminal_delivery_suspension)
+            .expect("splice deployed ordinal-one terminal journal");
+    let output = invoke_endpoint_body_open(&endpoint, "LashProcessWorkflow", "run", replay)
+        .await
+        .expect("ordinal-one redrive must reconstruct and resolve the terminal prefix");
+    let stored = registry
+        .get_process(process_id)
+        .await
+        .expect("read terminal process")
+        .expect("terminal process record")
+        .outcome
+        .expect("stored terminal outcome");
+    assert_eq!(
+        restate_output_json::<RestateProcessWorkflowOutput>(&output),
+        Some(RestateProcessWorkflowOutput::Terminal {
+            output: Box::new(stored),
+        })
+    );
+    assert!(
+        continuations
+            .get_segment_handover(process_id, 1)
+            .await
+            .expect("read handover after terminal delivery")
+            .is_none(),
+        "terminal cleanup must run after the delivery resolves"
+    );
+}
+
+#[tokio::test]
+async fn fig788_cancel_landing_after_segment_send_preserves_the_deployed_prefix() {
+    let process_id = "fig788-segment-cancel-redrive";
+    let (registry, continuations) = process_stores();
+    let registration = rerunnable_registration(process_id);
+    registry
+        .register_process(registration.clone())
+        .await
+        .expect("register FIG-788 segmented process");
+    let endpoint = Endpoint::builder()
+        .bind(
+            LashProcessWorkflowImpl::new_for_test(
+                Arc::new(Fig788SegmentBoundaryRunner),
+                Arc::clone(&registry),
+                continuations,
+            )
+            .serve(),
+        )
+        .build();
+    let input = RestateProcessWorkflowInput {
+        registration,
+        execution_context: ProcessExecutionContext::default(),
+        segment_ordinal: 0,
+        execution_id: None,
+    };
+
+    let segment_finish_suspension =
+        invoke_endpoint(&endpoint, "LashProcessWorkflow", "run", process_id, &input)
+            .await
+            .expect("first segment attempt should suspend after scheduling its successor");
+    assert_eq!(
+        restate_message_types(&segment_finish_suspension)
+            .expect("decode segment-finish suspension frames"),
+        vec![
+            RESTATE_COMPLETE_PROMISE_COMMAND_MESSAGE_TYPE,
+            0x040E,
+            RESTATE_SUSPENSION_MESSAGE_TYPE
+        ],
+        "endpoint error: {:?}",
+        restate_error_message(&segment_finish_suspension)
+    );
+
+    registry
+        .append_event(
+            process_id,
+            lash_core::ProcessEventAppendRequest::cancel_requested(
+                process_id,
+                Some("cancel landed after successor send".to_string()),
+            ),
+        )
+        .await
+        .expect("record between-attempt cancellation");
+    let replay = encode_process_segment_send_replay(process_id, &input, &segment_finish_suspension)
+        .expect("splice deployed segment-send journal");
+    let output = invoke_endpoint_body_with_json_call_responses(
+        &endpoint,
+        "LashProcessWorkflow",
+        "run",
+        replay,
+        vec![serde_json::Value::Null],
+    )
+    .await
+    .expect("cancelled segment redrive must preserve the deployed send prefix");
+
+    assert_eq!(
+        restate_call_frames(&output)
+            .expect("decode appended cancellation forwarding")
+            .iter()
+            .map(|call| (call.key.as_str(), call.handler.as_str()))
+            .collect::<Vec<_>>(),
+        vec![("fig788-segment-cancel-redrive#1", "deliver_cancel")]
+    );
+    assert_eq!(
+        restate_output_json::<RestateProcessWorkflowOutput>(&output),
+        Some(RestateProcessWorkflowOutput::SegmentChained {
+            next_segment_ordinal: 1,
+        })
+    );
+}
+
+#[tokio::test]
+async fn fig806_reserved_trigger_redrive_replays_the_process_start_prefix() {
+    let store = Arc::new(lash_core::InMemoryTriggerStore::default());
+    let source_key = lash_core::empty_trigger_source_key("ui.button.pressed").expect("source key");
+    let registration = store
+        .execute_command(
+            "fig806-register",
+            lash_core::TriggerCommand::Register {
+                owner_scope: lash_core::TriggerOwnerScope::host("fig806").expect("owner scope"),
+                actor: lash_core::ProcessOriginator::host_scoped("fig806"),
+                draft: lash_core::TriggerSubscriptionDraft::for_process(
+                    "fig806/subscription",
+                    lash_core::ProcessExecutionEnvRef::new("process-env:fig806"),
+                    "ui.button.pressed",
+                    source_key.clone(),
+                    ProcessInput::Engine {
+                        kind: "fig806-engine".to_string(),
+                        payload: serde_json::json!({}),
+                    },
+                    lash_core::ProcessIdentity::new("fig806-engine"),
+                )
+                .with_payload_schema(lash_core::LashSchema::any()),
+            },
+        )
+        .await
+        .expect("register trigger subscription")
+        .expect("trigger registration outcome");
+    assert!(matches!(
+        registration,
+        lash_core::TriggerCommandOutcome::Mutation { .. }
+    ));
+    let registry = process_registry();
+    let router = lash_core::TriggerRouter::new(
+        Arc::clone(&store) as Arc<dyn lash_core::TriggerStore>,
+        Some(Arc::clone(&registry)),
+        None,
+    );
+    let endpoint = Endpoint::builder()
+        .bind(Fig806TriggerRedriveImpl { router }.serve())
+        .build();
+    let input = Fig806TriggerRedriveInput {
+        occurrence: lash_core::TriggerOccurrenceRequest::new(
+            "ui.button.pressed",
+            source_key,
+            serde_json::json!({"button": "Blue"}),
+            "fig806-occurrence",
+        ),
+    };
+    let workflow_key = "fig806-trigger-redrive";
+
+    let suspended = invoke_endpoint(
+        &endpoint,
+        "Fig806TriggerRedrive",
+        "run",
+        workflow_key,
+        &input,
+    )
+    .await
+    .expect("trigger start should suspend on its invocation id");
+    assert_eq!(
+        restate_message_types(&suspended).expect("decode trigger suspension"),
+        vec![0x040E, RESTATE_SUSPENSION_MESSAGE_TYPE],
+        "endpoint error: {:?}",
+        restate_error_message(&suspended)
+    );
+    let replay = encode_one_way_call_replay(workflow_key, &input, &suspended)
+        .expect("splice deployed trigger process start");
+    let output = invoke_endpoint_body_with_json_call_responses(
+        &endpoint,
+        "Fig806TriggerRedrive",
+        "run",
+        replay,
+        vec![serde_json::Value::Null],
+    )
+    .await
+    .expect("reserved trigger redrive must preserve the process-start prefix");
+
+    assert_eq!(restate_output_json::<usize>(&output), Some(1));
+    assert_eq!(
+        restate_call_frames(&output)
+            .expect("decode post-start call")
+            .iter()
+            .map(|call| call.handler.as_str())
+            .collect::<Vec<_>>(),
+        vec!["complete"]
+    );
+    assert_eq!(
+        registry
+            .list_processes(&lash_core::ProcessListFilter::default())
+            .await
+            .expect("list trigger processes")
+            .len(),
+        1,
+        "one occurrence must still create exactly one process"
+    );
+}
+
+async fn fig793_pre_fix_suspended_llm_run(
+    invocation_id: &str,
+) -> (Endpoint, Bytes, serde_json::Value) {
+    let endpoint = Endpoint::builder()
+        .bind(Fig793LlmGateRedriveImpl.serve())
+        .build();
+    let input = Fig793LlmGateRedriveInput;
+    let suspended = invoke_endpoint(
+        &endpoint,
+        "Fig793LlmGateRedrive",
+        "run",
+        invocation_id,
+        &input,
+    )
+    .await
+    .expect("capture deployed pre-FIG-793 LLM journal");
+    assert_eq!(
+        restate_message_types(&suspended).expect("decode suspended LLM run frames"),
+        vec![
+            RESTATE_RUN_COMMAND_MESSAGE_TYPE,
+            0x0005,
+            RESTATE_SUSPENSION_MESSAGE_TYPE
+        ]
+    );
+    let recorded = RecordedRuntimeEffect {
+        envelope: Arc::new(
+            fig793_llm_envelope()
+                .canonical_form()
+                .expect("canonical FIG-793 LLM envelope"),
+        ),
+        outcome: Ok(fig793_llm_outcome()),
+    };
+    (
+        endpoint,
+        suspended,
+        serde_json::to_value(recorded).expect("serialize recorded LLM outcome"),
+    )
+}
+
+#[tokio::test]
+async fn fig793_pre_fix_suspended_llm_run_redrives_without_cancellation() {
+    let invocation_id = "fig793-pre-fix-no-cancel";
+    let (endpoint, suspended, completion) = fig793_pre_fix_suspended_llm_run(invocation_id).await;
+    let replay = encode_run_replay(
+        invocation_id,
+        &Fig793LlmGateRedriveInput,
+        &suspended,
+        completion,
+    )
+    .expect("splice pre-FIG-793 LLM journal");
+    let output = invoke_endpoint_body_with_json_call_responses(
+        &endpoint,
+        "Fig793LlmGateRedrive",
+        "run",
+        replay,
+        vec![serde_json::json!(false), serde_json::Value::Null],
+    )
+    .await
+    .expect("new cancellation observation must extend the deployed LLM prefix");
+
+    assert_eq!(
+        restate_call_frames(&output)
+            .expect("decode post-LLM observation calls")
+            .iter()
+            .map(|call| call.handler.as_str())
+            .collect::<Vec<_>>(),
+        vec!["is_revoked", "peek"]
+    );
+    assert_eq!(restate_output_json::<bool>(&output), Some(false));
+}
+
+#[tokio::test]
+async fn fig793_pre_fix_suspended_llm_run_redrives_to_cancelled_boundary() {
+    let invocation_id = "fig793-pre-fix-cancelled";
+    let (endpoint, suspended, completion) = fig793_pre_fix_suspended_llm_run(invocation_id).await;
+    let replay = encode_run_replay(
+        invocation_id,
+        &Fig793LlmGateRedriveInput,
+        &suspended,
+        completion,
+    )
+    .expect("splice pre-FIG-793 cancelled LLM journal");
+    let cancellation = Resolution::Ok(serde_json::json!({
+        "state": "cancel_requested",
+        "cancellation": {
+            "request_id": "fig793-cancel",
+            "reason": "cancel landed while the LLM run was suspended"
+        }
+    }));
+    let output = invoke_endpoint_body_with_json_call_responses(
+        &endpoint,
+        "Fig793LlmGateRedrive",
+        "run",
+        replay,
+        vec![
+            serde_json::json!(false),
+            serde_json::to_value(Some(cancellation)).expect("serialize durable cancellation"),
+        ],
+    )
+    .await
+    .expect("cancelled redrive must extend the deployed LLM prefix");
+
+    assert_eq!(
+        restate_call_frames(&output)
+            .expect("decode cancelled post-LLM observation calls")
+            .iter()
+            .map(|call| call.handler.as_str())
+            .collect::<Vec<_>>(),
+        vec!["is_revoked", "peek"]
+    );
+    assert_eq!(restate_output_json::<bool>(&output), Some(true));
 }
 
 /// PR #78's synthetic re-poll defense is re-scoped to the fused-state boundary.
