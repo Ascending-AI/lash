@@ -1031,6 +1031,28 @@ async fn postgres_process_registry_satisfies_conformance_when_configured() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn postgres_store_contract_state_machine_properties_when_configured() {
+    let Some((_database_lock, storage)) = storage().await else {
+        eprintln!(
+            "skipping Postgres store-contract properties: LASH_POSTGRES_DATABASE_URL is not set"
+        );
+        return;
+    };
+    let storage = Arc::new(storage);
+    lash_core::testing::conformance::store_contract_state_machine("postgres", move |_| {
+        let storage = Arc::clone(&storage);
+        async move {
+            reset(&storage).await;
+            lash_core::testing::conformance::StoreContractHandles {
+                registry: Arc::new(storage.process_registry()) as Arc<dyn ProcessRegistry>,
+                runtime: Arc::new(storage.unbound_session_store()) as Arc<dyn RuntimePersistence>,
+            }
+        }
+    })
+    .await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn postgres_process_continuation_store_satisfies_conformance_when_configured() {
     let Some((_database_lock, storage)) = storage().await else {
         eprintln!(

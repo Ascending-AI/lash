@@ -230,6 +230,33 @@ async fn sqlite_process_registry_satisfies_conformance() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn sqlite_store_contract_state_machine_properties() {
+    let dirs = Arc::new(Mutex::new(Vec::new()));
+    lash_core::testing::conformance::store_contract_state_machine("sqlite", move |seed| {
+        let dirs = Arc::clone(&dirs);
+        async move {
+            let dir = tempfile::tempdir().expect("store-contract tempdir");
+            let registry_path = dir.path().join(format!("processes-{seed}.db"));
+            let runtime_path = dir.path().join(format!("runtime-{seed}.db"));
+            let sessions = dir.path().join("sessions");
+            let registry = Arc::new(
+                SqliteProcessRegistry::open(&registry_path, sessions)
+                    .await
+                    .expect("open property process registry"),
+            ) as Arc<dyn ProcessRegistry>;
+            let runtime = Arc::new(
+                Store::open(&runtime_path)
+                    .await
+                    .expect("open property runtime store"),
+            ) as Arc<dyn RuntimePersistence>;
+            dirs.lock().expect("property tempdirs lock").push(dir);
+            lash_core::testing::conformance::StoreContractHandles { registry, runtime }
+        }
+    })
+    .await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn sqlite_process_continuation_store_satisfies_conformance() {
     let storage = Arc::new(
         SqliteProcessRegistry::memory()

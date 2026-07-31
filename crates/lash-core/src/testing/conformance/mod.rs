@@ -24,6 +24,7 @@ mod process_references;
 mod process_registry;
 mod runtime_persistence;
 mod session_store_factory;
+mod store_contract_state_machine;
 mod trigger_store;
 mod turn_control;
 mod wake_delivery;
@@ -39,6 +40,7 @@ pub use process_continuation_store::*;
 pub use process_registry::*;
 pub use runtime_persistence::*;
 pub use session_store_factory::*;
+pub use store_contract_state_machine::*;
 pub use trigger_store::*;
 pub use turn_control::*;
 pub use wake_delivery::*;
@@ -184,6 +186,19 @@ mod tests {
     async fn in_memory_process_registry_satisfies_conformance() {
         process_registry(|| {
             Arc::new(crate::TestLocalProcessRegistry::default()) as Arc<dyn ProcessRegistry>
+        })
+        .await;
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn in_memory_store_contract_state_machine_properties() {
+        store_contract_state_machine("in-memory", |_| async {
+            StoreContractHandles {
+                registry: Arc::new(crate::TestLocalProcessRegistry::default())
+                    as Arc<dyn ProcessRegistry>,
+                runtime: Arc::new(crate::InMemorySessionStore::default())
+                    as Arc<dyn RuntimePersistence>,
+            }
         })
         .await;
     }
