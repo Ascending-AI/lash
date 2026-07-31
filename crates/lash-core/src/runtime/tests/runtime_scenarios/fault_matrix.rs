@@ -1,8 +1,6 @@
 use super::cases::RUNTIME_SCENARIO_COVERAGE;
 use std::collections::BTreeSet;
 
-const CONFIDENCE_GATE_SH: &str = include_str!("../../../../../../scripts/confidence-gate.sh");
-
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd)]
 enum DurableFaultKind {
     CrashReopen,
@@ -265,22 +263,143 @@ fn durable_fault_matrix_rows_have_executable_or_blocked_evidence() {
 
 #[test]
 fn durable_fault_matrix_fast_gate_executes_all_nonblocked_evidence() {
+    let scenario_commands = run_fast_gate_with_fake_cargo("scenario-harnesses");
     assert!(
-        CONFIDENCE_GATE_SH.contains("run_cargo_tests -p lash-core --locked runtime_scenario"),
+        scenario_commands.iter().any(|command| {
+            command == &["test", "-p", "lash-core", "--locked", "runtime_scenario"]
+        }),
         "fast gate must execute RuntimeScenario evidence rows"
     );
 
+    let fault_matrix_commands = run_fast_gate_with_fake_cargo("fault-matrix");
     for row in DURABLE_FAULT_MATRIX {
         match row.evidence {
             FaultEvidence::RuntimeScenario { .. } | FaultEvidence::Blocked { .. } => {}
-            FaultEvidence::CargoTest(_) => {
-                let marker = format!("durable-fault-matrix: {}", row.id);
+            FaultEvidence::CargoTest(evidence) => {
+                let command = fault_matrix_commands
+                    .iter()
+                    .find(|command| command_executes_evidence(command, evidence));
                 assert!(
-                    CONFIDENCE_GATE_SH.contains(&marker),
-                    "{} is non-blocked CargoTest evidence but is not executed by scripts/confidence-gate.sh fast",
+                    command.is_some(),
+                    "{} is non-blocked CargoTest evidence but is not executed by scripts/confidence-gate.sh fast:fault-matrix; observed commands: {fault_matrix_commands:?}",
                     row.id
+                );
+                assert_real_cargo_filter_selects_tests(
+                    command.expect("command checked above"),
+                    row.id,
                 );
             }
         }
     }
+}
+
+fn assert_real_cargo_filter_selects_tests(command: &[String], row_id: &str) {
+    let repo_root = repository_root();
+    let output =
+        std::process::Command::new(std::env::var_os("CARGO").unwrap_or_else(|| "cargo".into()))
+            .args(command)
+            .args(["--", "--list"])
+            .current_dir(repo_root)
+            .output()
+            .unwrap_or_else(|err| panic!("execute real cargo list probe for {row_id}: {err}"));
+    assert!(
+        output.status.success(),
+        "real cargo list probe failed for {row_id}: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let selected = String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .filter(|line| line.ends_with(": test"))
+        .count();
+    assert!(
+        selected > 0,
+        "confidence-gate command for {row_id} selected zero tests under real cargo: {command:?}"
+    );
+}
+
+fn command_executes_evidence(command: &[String], evidence: CargoTestEvidence) -> bool {
+    if command.first().map(String::as_str) != Some("test")
+        || !command
+            .windows(2)
+            .any(|pair| pair[0] == "-p" && pair[1] == evidence.package)
+        || !command.iter().any(|arg| arg == evidence.filter)
+    {
+        return false;
+    }
+    evidence.test_target.is_none_or(|target| {
+        command
+            .windows(2)
+            .any(|pair| pair[0] == "--test" && pair[1] == target)
+    })
+}
+
+fn run_fast_gate_with_fake_cargo(shard: &str) -> Vec<Vec<String>> {
+    use std::os::unix::fs::PermissionsExt;
+
+    let temp = tempfile::tempdir().expect("confidence-gate probe tempdir");
+    let cargo_dir = temp.path().join(".cargo/bin");
+    std::fs::create_dir_all(&cargo_dir).expect("create fake cargo directory");
+    let cargo_path = cargo_dir.join("cargo");
+    std::fs::write(
+        &cargo_path,
+        r#"#!/usr/bin/env bash
+if [ "${1:-}" = "nextest" ] && [ "${2:-}" = "--version" ]; then
+  exit 1
+fi
+{
+  printf 'BEGIN\n'
+  for arg in "$@"; do
+    printf '%s\n' "$arg"
+  done
+  printf 'END\n'
+} >> "$LASH_FAKE_CARGO_LOG"
+"#,
+    )
+    .expect("write fake cargo");
+    let mut permissions = std::fs::metadata(&cargo_path)
+        .expect("stat fake cargo")
+        .permissions();
+    permissions.set_mode(0o755);
+    std::fs::set_permissions(&cargo_path, permissions).expect("make fake cargo executable");
+    let log_path = temp.path().join("cargo.log");
+    let out_dir = temp.path().join("confidence");
+    let repo_root = repository_root();
+
+    let output = std::process::Command::new("bash")
+        .arg(repo_root.join("scripts/confidence-gate.sh"))
+        .arg(format!("fast:{shard}"))
+        .current_dir(repo_root)
+        .env("HOME", temp.path())
+        .env("LASH_FAKE_CARGO_LOG", &log_path)
+        .env("LASH_CONFIDENCE_OUT_DIR", &out_dir)
+        .output()
+        .expect("execute confidence gate with fake cargo");
+    assert!(
+        output.status.success(),
+        "confidence gate routing probe failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let log = std::fs::read_to_string(log_path).expect("read fake cargo command log");
+    let mut commands = Vec::new();
+    let mut current = None;
+    for line in log.lines() {
+        match line {
+            "BEGIN" => current = Some(Vec::new()),
+            "END" => commands.push(current.take().expect("command begin before end")),
+            arg => current
+                .as_mut()
+                .expect("command argument inside begin/end")
+                .push(arg.to_string()),
+        }
+    }
+    assert!(current.is_none(), "unterminated fake cargo command log");
+    commands
+}
+
+fn repository_root() -> &'static std::path::Path {
+    std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .ancestors()
+        .nth(2)
+        .expect("lash-core has repository root two ancestors above")
 }

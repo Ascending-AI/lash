@@ -4,7 +4,7 @@ use super::process_change_feed::process_change_feed_never_misses_concurrent_term
 use super::process_filters::list_processes_filters_by_enriched_fields;
 use super::process_references::live_reference_summary_tracks_non_terminal_reference_counts;
 use super::*;
-use crate::TestProcessRegistryWriteExt;
+use crate::{ProcessRecord, TestProcessRegistryWriteExt};
 
 /// Run the process-registry contract against a fresh backend.
 pub async fn process_registry<F>(make: F)
@@ -77,7 +77,246 @@ async fn process_registry_conformance(registry: Arc<dyn ProcessRegistry>) {
     process_change_feed_never_misses_concurrent_terminal_writers(Arc::clone(&registry)).await;
     process_lease_fencing_contract(Arc::clone(&registry)).await;
     session_delete_preserves_process_bytes(Arc::clone(&registry)).await;
+    refolded_process_record_matches_stored_projection(
+        Arc::clone(&registry),
+        Arc::clone(&registry),
+        "process-refold-hot",
+    )
+    .await;
+    process_attempt_budget_is_typed(Arc::clone(&registry)).await;
     tombstones_make_pruned_processes_distinguishable(registry).await;
+}
+
+async fn refolded_process_record_matches_stored_projection(
+    writer: Arc<dyn ProcessRegistry>,
+    reader: Arc<dyn ProcessRegistry>,
+    process_id: &str,
+) {
+    let base = writer
+        .register_process(
+            ProcessRegistration::new(
+                process_id,
+                ProcessInput::Engine {
+                    kind: "refold-conformance".to_string(),
+                    payload: serde_json::json!({"case": process_id}),
+                },
+                RecoveryDisposition::Rerunnable,
+                ProcessProvenance::host(),
+            )
+            .with_execution_env_ref(Some(ProcessExecutionEnvRef::new(format!(
+                "process-env:{process_id}"
+            ))))
+            .with_extra_event_types([plain_event_type("signal.ready")]),
+        )
+        .await
+        .expect("register refold process");
+    assert_refold_matches_stored_projection(&reader, &base, process_id, "registration").await;
+    writer
+        .record_first_started(
+            process_id,
+            crate::ProcessStarted {
+                owner: crate::LeaseOwnerIdentity::opaque(
+                    "refold-worker",
+                    format!("refold-worker:{process_id}"),
+                ),
+                fencing_token: 0,
+                attempt: 1,
+                started_at_ms: base.created_at_ms,
+            },
+        )
+        .await
+        .expect("record refold first start");
+    assert_refold_matches_stored_projection(&reader, &base, process_id, "first start").await;
+    let wait = WaitState {
+        since_ms: base.created_at_ms,
+        kind: WaitKind::Signal {
+            name: "ready".to_string(),
+            event_type: "signal.ready".to_string(),
+            key: format!("process:{process_id}:signal.ready:1"),
+            ordinal: 1,
+        },
+    };
+    writer
+        .set_process_wait(process_id, wait)
+        .await
+        .expect("enter refold wait");
+    assert_refold_matches_stored_projection(&reader, &base, process_id, "wait entered").await;
+    writer
+        .clear_process_wait(process_id)
+        .await
+        .expect("clear refold wait");
+    assert_refold_matches_stored_projection(&reader, &base, process_id, "wait cleared").await;
+    writer
+        .set_external_ref(
+            process_id,
+            crate::ProcessExternalRef {
+                backend: "refold-conformance".to_string(),
+                id: format!("external:{process_id}"),
+                metadata: Some(serde_json::json!({"cold": !Arc::ptr_eq(&writer, &reader)})),
+            },
+        )
+        .await
+        .expect("set refold external reference");
+    assert_refold_matches_stored_projection(&reader, &base, process_id, "external ref set").await;
+    let signal =
+        ProcessEventAppendRequest::new("signal.ready", serde_json::json!({"signal": "ready"}))
+            .with_replay_key(format!("process:{process_id}:signal.ready:1"));
+    let first_signal = writer
+        .append_event(process_id, signal.clone())
+        .await
+        .expect("append refold signal");
+    assert_refold_matches_stored_projection(&reader, &base, process_id, "signal appended").await;
+    let replayed_signal = writer
+        .append_event(process_id, signal)
+        .await
+        .expect("replay refold signal");
+    assert_eq!(
+        replayed_signal.event.sequence, first_signal.event.sequence,
+        "a replayed duplicate must not add another event to the fold"
+    );
+    assert_refold_matches_stored_projection(&reader, &base, process_id, "signal replayed").await;
+    writer
+        .add_observer(
+            "refold-observer",
+            process_id,
+            crate::ProcessObserverBy::host("refold-add"),
+        )
+        .await
+        .expect("add refold observer");
+    assert_refold_matches_stored_projection(&reader, &base, process_id, "observer added").await;
+    writer
+        .remove_observer(
+            "refold-observer",
+            process_id,
+            crate::ProcessObserverBy::host("refold-remove"),
+        )
+        .await
+        .expect("remove refold observer");
+    assert_refold_matches_stored_projection(&reader, &base, process_id, "observer removed").await;
+    writer
+        .complete_process(
+            process_id,
+            ProcessAwaitOutput::Success {
+                value: serde_json::json!({"refolded": true}),
+                control: None,
+            },
+            ProcessCompletionAuthority::workflow_key(format!("refold:{process_id}")),
+        )
+        .await
+        .expect("complete refold process");
+
+    assert_refold_matches_stored_projection(&reader, &base, process_id, "terminal completion")
+        .await;
+}
+
+async fn assert_refold_matches_stored_projection(
+    reader: &Arc<dyn ProcessRegistry>,
+    base: &ProcessRecord,
+    process_id: &str,
+    transition: &str,
+) {
+    let events = reader
+        .events_after(process_id, 0)
+        .await
+        .expect("load refold event log");
+    let stored = reader
+        .get_process(process_id)
+        .await
+        .expect("load stored refold projection")
+        .expect("refold process remains stored");
+    let refolded = crate::fold_process_record(base.clone(), &events).expect("refold event log");
+    assert_eq!(
+        refolded, stored,
+        "folding the event log after {transition} from the registration base must reproduce the stored record field-for-field"
+    );
+}
+
+async fn process_attempt_budget_is_typed(registry: Arc<dyn ProcessRegistry>) {
+    let process_id = "process-attempt-budget";
+    registry
+        .register_process(
+            ProcessRegistration::new(
+                process_id,
+                ProcessInput::External {
+                    metadata: serde_json::Value::Null,
+                },
+                RecoveryDisposition::Rerunnable,
+                ProcessProvenance::host(),
+            )
+            .with_max_attempts(Some(1)),
+        )
+        .await
+        .expect("register attempt-budget process");
+
+    let first_owner = crate::LeaseOwnerIdentity::opaque("attempt-owner-1", "attempt-owner-1:i");
+    let first_lease = registry
+        .claim_process_lease(process_id, &first_owner, 60_000)
+        .await
+        .expect("claim first attempt lease")
+        .acquired()
+        .expect("first attempt lease acquired");
+    let first_started = crate::ProcessStarted {
+        owner: first_owner,
+        fencing_token: first_lease.fencing_token,
+        attempt: 1,
+        started_at_ms: first_lease.claimed_at_epoch_ms,
+    };
+    assert!(matches!(
+        registry
+            .record_first_started_with_authority(
+                process_id,
+                first_started,
+                &crate::ProcessExecutionWriteAuthority::lease(first_lease.clone()),
+            )
+            .await
+            .expect("record first attempt"),
+        crate::ProcessStartOutcome::Started(_)
+    ));
+    registry
+        .complete_process_lease(&crate::ProcessLeaseCompletion::from_lease(&first_lease))
+        .await
+        .expect("release first attempt lease");
+
+    let next_owner = crate::LeaseOwnerIdentity::opaque("attempt-owner-2", "attempt-owner-2:i");
+    let next_lease = registry
+        .claim_process_lease(process_id, &next_owner, 60_000)
+        .await
+        .expect("claim next attempt lease")
+        .acquired()
+        .expect("next attempt lease acquired");
+    let outcome = registry
+        .record_first_started_with_authority(
+            process_id,
+            crate::ProcessStarted {
+                owner: next_owner,
+                fencing_token: next_lease.fencing_token,
+                attempt: 2,
+                started_at_ms: next_lease.claimed_at_epoch_ms,
+            },
+            &crate::ProcessExecutionWriteAuthority::lease(next_lease.clone()),
+        )
+        .await
+        .expect("attempt exhaustion is a typed start outcome");
+    match outcome {
+        crate::ProcessStartOutcome::AttemptsExhausted {
+            current,
+            attempts,
+            max_attempts,
+        } => {
+            assert_eq!(attempts, 1);
+            assert_eq!(max_attempts, 1);
+            assert_eq!(
+                current.first_started.as_deref().map(|start| start.attempt),
+                Some(1)
+            );
+            assert!(!current.is_terminal());
+        }
+        other => panic!("expected AttemptsExhausted, got {other:?}"),
+    }
+    registry
+        .complete_process_lease(&crate::ProcessLeaseCompletion::from_lease(&next_lease))
+        .await
+        .expect("release exhausted-attempt lease");
 }
 
 async fn producer_terminal_status_must_match_materialized_outcome(
@@ -930,6 +1169,12 @@ async fn tombstones_make_pruned_processes_distinguishable(registry: Arc<dyn Proc
 }
 
 async fn reopen_conformance(handles: ReopenableProcessRegistry) {
+    refolded_process_record_matches_stored_projection(
+        Arc::clone(&handles.open),
+        Arc::clone(&handles.reopen),
+        "process-refold-cold",
+    )
+    .await;
     let process_id = "observer-reopen";
     handles
         .open
