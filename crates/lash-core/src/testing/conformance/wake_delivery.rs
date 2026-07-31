@@ -1,5 +1,35 @@
 use super::*;
 
+#[derive(Debug)]
+struct WakeDeliveryConformanceClock(u64);
+
+#[async_trait::async_trait]
+impl crate::Clock for WakeDeliveryConformanceClock {
+    fn now(&self) -> std::time::Instant {
+        std::time::Instant::now()
+    }
+
+    fn timestamp_ms(&self) -> u64 {
+        self.0
+    }
+
+    fn timestamp_rfc3339(&self) -> String {
+        self.timestamp_datetime().to_rfc3339()
+    }
+
+    fn timestamp_datetime(&self) -> chrono::DateTime<chrono::Utc> {
+        chrono::DateTime::from(std::time::UNIX_EPOCH + std::time::Duration::from_millis(self.0))
+    }
+
+    async fn sleep(&self, duration: std::time::Duration) {
+        tokio::time::sleep(duration).await;
+    }
+
+    async fn sleep_until(&self, deadline: std::time::Instant) {
+        tokio::time::sleep_until(deadline.into()).await;
+    }
+}
+
 /// Cross-backend wake-delivery crash contract.
 ///
 /// A process append owns the outbox insertion. Delivery may happen on a later
@@ -444,5 +474,139 @@ pub async fn wake_delivery_crash_matrix(
             .iter()
             .all(|group| group.process_id != blocked_process_id),
         "redriving the named head must clear the blocked-group report"
+    );
+
+    target_gone_is_a_typed_discard(Arc::clone(&factory), Arc::clone(&registry)).await;
+    expired_is_a_typed_discard(factory, registry).await;
+}
+
+async fn target_gone_is_a_typed_discard(
+    factory: Arc<dyn crate::SessionStoreFactory>,
+    registry: Arc<dyn crate::ProcessRegistry>,
+) {
+    let target_session_id = "wake-target-gone-session";
+    let target_request = crate::SessionStoreCreateRequest {
+        session_id: target_session_id.to_string(),
+        relation: crate::SessionRelation::Root,
+        policy: crate::SessionPolicy::default(),
+    };
+    factory
+        .create_store(&target_request)
+        .await
+        .expect("create target-gone wake target");
+    factory
+        .delete_session(target_session_id)
+        .await
+        .expect("tombstone target-gone wake target");
+
+    let process_id = "wake-target-gone-sender";
+    registry
+        .register_process(
+            process_registry::registration(process_id)
+                .with_extra_event_types([process_registry::wake_event_type("producer.wake")])
+                .with_wake_session_id(Some(target_session_id.to_string())),
+        )
+        .await
+        .expect("register target-gone wake sender");
+    let wake = registry
+        .append_event(
+            process_id,
+            crate::ProcessEventAppendRequest::new(
+                "producer.wake",
+                serde_json::json!({"wake_input": "target-gone"}),
+            ),
+        )
+        .await
+        .expect("append target-gone wake")
+        .wake_delivery
+        .expect("target-gone wake delivery");
+    let report = crate::WakeDeliveryDriver::drive_pending_once(
+        Arc::clone(&registry),
+        factory,
+        None,
+        Arc::new(crate::SystemClock),
+        32,
+    )
+    .await
+    .expect("drive target-gone wake");
+    assert_eq!(report.discarded_target_gone, 1);
+    let delivery = registry
+        .list_wake_deliveries(None)
+        .await
+        .expect("list target-gone wake")
+        .into_iter()
+        .find(|delivery| {
+            delivery.wake.process_id == wake.process_id && delivery.wake.sequence == wake.sequence
+        })
+        .expect("target-gone wake remains inspectable");
+    assert_eq!(delivery.state, crate::WakeDeliveryState::Discarded);
+    assert_eq!(
+        delivery.discard_reason,
+        Some(crate::WakeDiscardReason::TargetGone)
+    );
+}
+
+async fn expired_is_a_typed_discard(
+    factory: Arc<dyn crate::SessionStoreFactory>,
+    registry: Arc<dyn crate::ProcessRegistry>,
+) {
+    let target_session_id = "wake-crash-target";
+    let process_id = "wake-expired-sender";
+    registry
+        .register_process(
+            process_registry::registration(process_id)
+                .with_extra_event_types([process_registry::wake_event_type("producer.wake")])
+                .with_wake_session_id(Some(target_session_id.to_string())),
+        )
+        .await
+        .expect("register expiring wake sender");
+    let wake = registry
+        .append_event(
+            process_id,
+            crate::ProcessEventAppendRequest::new(
+                "producer.wake",
+                serde_json::json!({"wake_input": "expired"}),
+            ),
+        )
+        .await
+        .expect("append expiring wake")
+        .wake_delivery
+        .expect("expiring wake delivery");
+    let expires_at_ms = registry
+        .list_wake_deliveries(Some(crate::WakeDeliveryState::Pending))
+        .await
+        .expect("list pending expiring wake")
+        .into_iter()
+        .find(|delivery| {
+            delivery.wake.process_id == wake.process_id && delivery.wake.sequence == wake.sequence
+        })
+        .expect("expiring wake remains pending")
+        .expires_at_ms;
+    let report = crate::WakeDeliveryDriver::drive_pending_once(
+        Arc::clone(&registry),
+        factory,
+        None,
+        Arc::new(WakeDeliveryConformanceClock(expires_at_ms)),
+        32,
+    )
+    .await
+    .expect("drive expired wake with injected clock");
+    assert!(
+        report.discarded_expired >= 1,
+        "the injected expiry clock must discard at least the named wake: {report:?}"
+    );
+    let delivery = registry
+        .list_wake_deliveries(None)
+        .await
+        .expect("list expired wake")
+        .into_iter()
+        .find(|delivery| {
+            delivery.wake.process_id == wake.process_id && delivery.wake.sequence == wake.sequence
+        })
+        .expect("expired wake remains inspectable");
+    assert_eq!(delivery.state, crate::WakeDeliveryState::Discarded);
+    assert_eq!(
+        delivery.discard_reason,
+        Some(crate::WakeDiscardReason::Expired)
     );
 }

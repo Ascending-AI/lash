@@ -1,8 +1,7 @@
 //! Live, multi-connection process-lease clock/fencing evidence.
 //!
-//! The single-pool conformance suite (`tests/conformance.rs`) forces lease
-//! expiry with `ttl_ms = 0` rather than by elapsed time, and the clock-contract
-//! test only string-scans the source. Neither exercises two *independent*
+//! The single-pool conformance and clock-contract suites cover expiry and
+//! injected client-clock skew, but neither exercises two *independent*
 //! connections competing for one lease under real time. This test does, proving
 //! the property the DB-clock design exists to guarantee: worker wall-clock skew
 //! can neither steal a live lease nor spuriously expire one, because every lease

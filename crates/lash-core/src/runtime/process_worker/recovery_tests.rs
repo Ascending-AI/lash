@@ -1509,6 +1509,54 @@ async fn sweep_never_claims_externally_owned_rows() {
     );
 }
 
+/// A rerunnable process whose declared attempt budget is already consumed is
+/// terminalized by recovery without invoking the engine again.
+#[tokio::test]
+async fn sweep_terminalizes_exhausted_attempt_budget_as_engine_gave_up() {
+    let registry: Arc<dyn ProcessRegistry> = Arc::new(TestLocalProcessRegistry::default());
+    registry
+        .register_process(
+            registration_with_disposition(
+                "proc-attempts-exhausted",
+                RecoveryDisposition::Rerunnable,
+            )
+            .with_max_attempts(Some(1)),
+        )
+        .await
+        .expect("register attempt-exhausted process");
+    let exhausted_owner = LeaseOwnerIdentity::opaque("exhausted-owner", "exhausted-incarnation");
+    registry
+        .record_first_started(
+            "proc-attempts-exhausted",
+            ProcessStarted {
+                owner: exhausted_owner.clone(),
+                fencing_token: 0,
+                attempt: 1,
+                started_at_ms: 1,
+            },
+        )
+        .await
+        .expect("record exhausted attempt");
+
+    let worker = inline_worker(
+        Arc::clone(&registry),
+        local_owner("recovery-worker", "host-b", "recovery-start"),
+    );
+    worker
+        .drive_pending_processes()
+        .await
+        .expect("sweep dispatches exhausted process");
+    await_terminal(&registry, "proc-attempts-exhausted").await;
+
+    let evidence = abandoned_evidence(&registry, "proc-attempts-exhausted").await;
+    assert_eq!(evidence.writer, AbandonWriter::EngineGaveUp);
+    assert_eq!(
+        evidence.owner,
+        Some(exhausted_owner),
+        "engine-gave-up evidence must retain the exhausted attempt owner"
+    );
+}
+
 /// A pending Abandon Request on an externally-owned row is reconciled into
 /// `Abandoned{reconciled_request}` — there is no owner lease to wait out.
 #[tokio::test]
