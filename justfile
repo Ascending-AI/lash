@@ -202,6 +202,13 @@ confidence-broad:
 confidence-full:
   bash "{{repo}}/scripts/confidence-gate.sh" full
 
+# Opt-in durable-store property soak. PostgreSQL executes when its standard
+# LASH_POSTGRES_DATABASE_URL configuration is present.
+store-contract-soak cases='256':
+  LASH_STORE_CONTRACT_PROPTEST_CASES="{{cases}}" cargo test -p lash-core --locked store_contract_state_machine_properties -- --nocapture
+  LASH_STORE_CONTRACT_PROPTEST_CASES="{{cases}}" cargo test -p lash-sqlite-store --locked --test conformance store_contract_state_machine_properties -- --nocapture
+  LASH_STORE_CONTRACT_PROPTEST_CASES="{{cases}}" cargo test -p lash-postgres-store --locked --test conformance store_contract_state_machine_properties_when_configured -- --nocapture
+
 perf-guard:
   python3 "{{repo}}/scripts/profile_runtime.py" --profile quick --release --enforce-budgets --out "{{repo}}/.benchmarks/perf-guard/runtime-local.json"
   python3 "{{repo}}/scripts/profile_lashlang.py" --iterations 500 --profile-iterations 500 --enforce-budgets --out "{{repo}}/.benchmarks/perf-guard/lashlang-local.json"

@@ -484,6 +484,22 @@ run_cargo_tests() {
 }
 
 run_scenario_harnesses() {
+  local default_store_contract_cases=32
+  if [ "$lane" = "full" ]; then
+    default_store_contract_cases=256
+  fi
+  local store_contract_cases="${LASH_STORE_CONTRACT_PROPTEST_CASES:-$default_store_contract_cases}"
+
+  step "Durable store-contract state-machine properties"
+  LASH_STORE_CONTRACT_PROPTEST_CASES="$store_contract_cases" \
+    run_cargo_tests -p lash-core --locked store_contract_state_machine_properties
+  LASH_STORE_CONTRACT_PROPTEST_CASES="$store_contract_cases" \
+    run_cargo_tests -p lash-sqlite-store --locked --test conformance \
+    store_contract_state_machine_properties
+  LASH_STORE_CONTRACT_PROPTEST_CASES="$store_contract_cases" \
+    run_cargo_tests -p lash-postgres-store --locked --test conformance \
+    store_contract_state_machine_properties_when_configured
+
   step "Runtime Scenario harness"
   run_cargo_tests -p lash-core --locked runtime_scenario
 
