@@ -30,7 +30,7 @@ impl<'run> RuntimeTurnDriver<'run> {
                 manager.state_service(),
                 manager.lifecycle_service(),
                 manager.graph_service(),
-                manager.process_service(),
+                manager.model_tool_process_service(),
                 effect_controller,
                 direct_completions,
                 manager.trigger_router(),

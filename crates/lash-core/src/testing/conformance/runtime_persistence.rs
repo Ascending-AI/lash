@@ -193,6 +193,7 @@ where
     same_generation_claim_scans_reach_rows_beyond_the_scan_surplus(make()).await;
     queued_work_respects_membership_limits_exclusivity_reclaim_and_sessions(make()).await;
     queued_work_join_groups_by_delivery_policy_and_merge_key(make()).await;
+    wake_turn_policy_controls_coalescing(make()).await;
     queued_work_completion_is_lease_guarded(make()).await;
     queued_wake_delivery_is_source_key_idempotent_and_claimed_once(make()).await;
     queue_completion_and_turn_commit_stamp_are_atomic(make()).await;
@@ -2814,6 +2815,186 @@ async fn queued_work_join_groups_by_delivery_policy_and_merge_key(
         .expect("third group claim");
     release_session_execution_lease_for_test(&store, &session_lease).await;
     assert_eq!(third_claim.batches[0].batch_id, different_delivery.batch_id);
+}
+
+async fn wake_turn_policy_controls_coalescing(store: Arc<dyn RuntimePersistence>) {
+    let default_policy = crate::WakeTurnPolicy::default();
+    assert_eq!(
+        default_policy,
+        crate::WakeTurnPolicy::each_wake(
+            DeliveryPolicy::EarliestSafeBoundary,
+            SlotPolicy::Exclusive,
+        ),
+        "the host policy default must preserve the pre-configuration behavior"
+    );
+    for process_id in ["exclusive-a", "exclusive-b"] {
+        store
+            .enqueue_queued_work(crate::process_wake_batch_draft_with_policy(
+                policy_test_wake("wake-policy-exclusive", process_id, 1),
+                &default_policy,
+            ))
+            .await
+            .expect("enqueue default-policy wake");
+    }
+    let exclusive_lease =
+        claim_session_execution_lease_for_test(&store, "wake-policy-exclusive", "exclusive-owner")
+            .await;
+    let first_exclusive = store
+        .claim_ready_queued_work(
+            "wake-policy-exclusive",
+            &exclusive_lease.fence(),
+            &lease_owner("exclusive-owner"),
+            QueuedWorkClaimBoundary::Idle,
+            10,
+        )
+        .await
+        .expect("claim first default-policy wake")
+        .expect("first default-policy wake exists");
+    let second_exclusive = store
+        .claim_ready_queued_work(
+            "wake-policy-exclusive",
+            &exclusive_lease.fence(),
+            &lease_owner("exclusive-owner"),
+            QueuedWorkClaimBoundary::Idle,
+            10,
+        )
+        .await
+        .expect("claim second default-policy wake")
+        .expect("second default-policy wake exists");
+    release_session_execution_lease_for_test(&store, &exclusive_lease).await;
+    assert_eq!(first_exclusive.batches.len(), 1);
+    assert_eq!(
+        second_exclusive.batches.len(),
+        1,
+        "exclusive wakes must remain separate turns by default"
+    );
+
+    let join_each_policy =
+        crate::WakeTurnPolicy::each_wake(DeliveryPolicy::EarliestSafeBoundary, SlotPolicy::Join);
+    for process_id in ["join-each-a", "join-each-b"] {
+        store
+            .enqueue_queued_work(crate::process_wake_batch_draft_with_policy(
+                policy_test_wake("wake-policy-join-each", process_id, 1),
+                &join_each_policy,
+            ))
+            .await
+            .expect("enqueue join-each wake");
+    }
+    let join_each_lease =
+        claim_session_execution_lease_for_test(&store, "wake-policy-join-each", "join-each-owner")
+            .await;
+    for claim_number in 1..=2 {
+        let claim = store
+            .claim_ready_queued_work(
+                "wake-policy-join-each",
+                &join_each_lease.fence(),
+                &lease_owner("join-each-owner"),
+                QueuedWorkClaimBoundary::Idle,
+                10,
+            )
+            .await
+            .expect("claim join-each wake")
+            .expect("join-each wake exists");
+        assert_eq!(
+            claim.batches.len(),
+            1,
+            "each-wake mode with a join slot must not merge claim {claim_number}"
+        );
+    }
+    release_session_execution_lease_for_test(&store, &join_each_lease).await;
+
+    let merge_policy = crate::WakeTurnPolicy::coalesce(
+        DeliveryPolicy::EarliestSafeBoundary,
+        crate::WakeCoalescingKey::Group("process-wakes".to_string()),
+    );
+    let merged_wakes = [
+        policy_test_wake("wake-policy-merge", "merge-same-process", 1),
+        policy_test_wake("wake-policy-merge", "merge-same-process", 2),
+    ];
+    for wake in &merged_wakes {
+        store
+            .enqueue_queued_work(crate::process_wake_batch_draft_with_policy(
+                wake.clone(),
+                &merge_policy,
+            ))
+            .await
+            .expect("enqueue merge-policy wake");
+    }
+    let merge_lease =
+        claim_session_execution_lease_for_test(&store, "wake-policy-merge", "merge-owner").await;
+    let merged = store
+        .claim_ready_queued_work(
+            "wake-policy-merge",
+            &merge_lease.fence(),
+            &lease_owner("merge-owner"),
+            QueuedWorkClaimBoundary::Idle,
+            10,
+        )
+        .await
+        .expect("claim merge-policy wakes")
+        .expect("merge-policy wakes exist");
+    assert_eq!(
+        merged.batches.len(),
+        2,
+        "merge-enabled wake policy must coalesce two sequences from one process"
+    );
+    let state = RuntimeSessionState {
+        session_id: "wake-policy-merge".to_string(),
+        ..RuntimeSessionState::default()
+    };
+    store
+        .commit_runtime_state(
+            RuntimeCommit::persisted_state_for_test(&state, &[])
+                .releasing_session_execution_lease(merge_lease.completion())
+                .completing_queue_claim(merged.completion()),
+        )
+        .await
+        .expect("settle every batch in merged wake claim");
+    assert!(
+        store
+            .list_queued_work("wake-policy-merge")
+            .await
+            .expect("list merged queue after settlement")
+            .is_empty(),
+        "merged settlement must delete every claimed receiver row"
+    );
+    for wake in merged_wakes {
+        let receipt = store
+            .enqueue_queued_work(crate::process_wake_batch_draft_with_policy(
+                wake,
+                &merge_policy,
+            ))
+            .await
+            .expect("replay settled wake");
+        assert_eq!(
+            receipt.enqueue_seq, 0,
+            "receiver high-water must consume every settled sequence"
+        );
+        assert!(receipt.batch_id.starts_with("consumed:"));
+    }
+}
+
+fn policy_test_wake(session_id: &str, process_id: &str, sequence: u64) -> ProcessWakeDelivery {
+    ProcessWakeDelivery {
+        wake_id: format!("wake:{process_id}:{sequence}"),
+        target_session_id: session_id.to_string(),
+        process_id: process_id.to_string(),
+        sequence,
+        event_type: "process.wake".to_string(),
+        event_invocation: RuntimeInvocation {
+            scope: RuntimeScope::new(session_id),
+            subject: RuntimeSubject::ProcessEvent {
+                process_id: process_id.to_string(),
+                sequence,
+                event_type: "process.wake".to_string(),
+            },
+            caused_by: None,
+            replay: None,
+        },
+        process_caused_by: None,
+        input: process_id.to_string(),
+        created_at_ms: 1,
+    }
 }
 
 async fn queued_work_completion_is_lease_guarded(store: Arc<dyn RuntimePersistence>) {

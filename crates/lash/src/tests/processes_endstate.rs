@@ -971,7 +971,7 @@ async fn inline_process_await_sink_and_prune_end_to_end() -> Result<()> {
     let projected_before_prune = sink.collected();
     let report = core
         .processes()
-        .prune(i64::MAX as u64)
+        .prune(i64::MAX as u64, lash_core::ProjectionWatermark::NoProjector)
         .await
         .expect("prune terminal process");
     assert_eq!(
@@ -1145,7 +1145,10 @@ async fn owner_bound_graceful_drain_resolves_awaiter_and_prunes_end_to_end() -> 
     );
 
     // Retention: the facade prune reclaims the terminal row.
-    let prune = core.processes().prune(i64::MAX as u64).await?;
+    let prune = core
+        .processes()
+        .prune(i64::MAX as u64, lash_core::ProjectionWatermark::NoProjector)
+        .await?;
     assert_eq!(prune.pruned_processes, 1);
     assert!(
         matches!(

@@ -217,22 +217,23 @@ pub use process::{
     ProcessService, ProcessSessionDeleteReport, ProcessSpawnProvenance, ProcessStartOptions,
     ProcessStartOutcome, ProcessStartPlan, ProcessStartRequest, ProcessStarted, ProcessStatus,
     ProcessStatusFilter, ProcessTerminalSemantics, ProcessTerminalSpec, ProcessTombstone,
-    ProcessValueSelector, ProcessWake, ProcessWakeDelivery, ProcessWakeDeliveryRequest,
-    ProcessWakeSpec, ProcessWorkObserver, ProcessWorkSnapshot, ProjectionWatermark,
-    RecoveryDisposition, SegmentHandover, SessionId, SessionScope, SessionScopeId,
-    UnavailableProcessService, WAKE_ENQUEUING_STALE_AFTER_MS, WaitKind, WaitState, WakeDelivery,
-    WakeDeliveryBlockedGroup, WakeDeliveryClaimOutcome, WakeDeliveryConfig, WakeDeliveryReport,
-    WakeDeliveryState, WakeDiscardReason, apply_process_event_projection,
-    apply_process_status_projection, current_epoch_ms, epoch_ms_from_system_time,
-    fold_process_record, load_process_execution_env, materialize_process_event_semantics,
-    persist_process_execution_env, prepare_process_event_append, prepare_process_registration,
-    prepare_process_start, process_event_payload_hash, process_registration_with_observers_hash,
+    ProcessToolVisibilityFilter, ProcessValueSelector, ProcessWake, ProcessWakeDelivery,
+    ProcessWakeDeliveryRequest, ProcessWakeSpec, ProcessWorkObserver, ProcessWorkSnapshot,
+    ProjectionWatermark, RecoveryDisposition, SegmentHandover, SessionId,
+    SessionObserverIntentSource, SessionScope, SessionScopeId, UnavailableProcessService,
+    WAKE_ENQUEUING_STALE_AFTER_MS, WaitKind, WaitState, WakeDelivery, WakeDeliveryBlockedGroup,
+    WakeDeliveryClaimOutcome, WakeDeliveryConfig, WakeDeliveryReport, WakeDeliveryState,
+    WakeDiscardReason, apply_process_event_projection, apply_process_status_projection,
+    current_epoch_ms, epoch_ms_from_system_time, fold_process_record, load_process_execution_env,
+    materialize_process_event_semantics, persist_process_execution_env,
+    prepare_process_event_append, prepare_process_registration, prepare_process_start,
+    process_event_payload_hash, process_registration_with_observers_hash,
     process_runtime_session_ids, process_signal_event_type, process_signal_name_from_event_type,
     process_signal_wait_key, process_wake_delivery, process_wake_input_from_event_payload,
-    process_wake_turn_cause, process_wake_turn_text, require_event_replay,
-    system_time_from_epoch_ms, terminal_append_request, terminal_event_type_name,
-    validate_generic_process_event_append, validate_process_signal_name, watch_process_registry,
-    watch_process_registry_with_sink,
+    process_wake_turn_cause, process_wake_turn_text, reconcile_session_process_observer_intents,
+    require_event_replay, system_time_from_epoch_ms, terminal_append_request,
+    terminal_event_type_name, validate_generic_process_event_append, validate_process_signal_name,
+    watch_process_registry, watch_process_registry_with_sink,
 };
 #[cfg(any(test, feature = "testing"))]
 pub use process::{TestLocalProcessRegistry, TestProcessRegistryWriteExt};
@@ -265,12 +266,13 @@ pub use turn_input_ingress::{
     TurnInputCompletion, TurnInputIngress, TurnInputState,
 };
 pub use turn_loop::ensure_durable_effect_input;
+pub(crate) use turn_queue::process_wake_batch_draft_with_policy;
 pub use turn_queue::{
     DeliveryPolicy, MergeKey, ProcessWakeSource, QueuedCheckpointWork, QueuedTurnWork,
     QueuedWorkBatch, QueuedWorkBatchDraft, QueuedWorkClaim, QueuedWorkClaimBoundary,
     QueuedWorkClass, QueuedWorkCompletion, QueuedWorkItem, QueuedWorkPayload, SessionCommand,
-    SessionCommandReceipt, SlotPolicy, consumed_queued_work_batch, process_wake_batch_draft,
-    process_wake_source_key,
+    SessionCommandReceipt, SlotPolicy, WakeCoalescingKey, WakeTurnMode, WakeTurnPolicy,
+    consumed_queued_work_batch, process_wake_batch_draft, process_wake_source_key,
 };
 pub use usage::{
     SessionUsageReport, TokenLedgerEntry, UsageReportRow, UsageTotals, diff_token_ledger,

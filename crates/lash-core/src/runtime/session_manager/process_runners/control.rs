@@ -1,4 +1,5 @@
 use super::*;
+use std::collections::HashSet;
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
 
@@ -299,7 +300,7 @@ impl ProcessCapability {
         // Children started *by a process* inherit the chain's provenance (the
         // run context provides it); in-session starts stamp the creating
         // session. Wake routing and observer membership are independent: only
-        // the explicit `options.observers` set creates edges. The ephemeral
+        // the explicit `options.initial_observers` set creates edges. The ephemeral
         // execution scope must never appear on a record.
         let (originator, wake_session_id) = match options.spawn_provenance.clone() {
             Some(spawn) => (spawn.originator, spawn.wake_session_id),
@@ -324,7 +325,7 @@ impl ProcessCapability {
             "processes are unavailable in this runtime",
         )?;
         runner
-            .start(registration, options.observers, execution_context)
+            .start(registration, options.initial_observers, execution_context)
             .await
     }
 
@@ -433,6 +434,21 @@ impl ProcessCapability {
             .await
     }
 
+    pub(in crate::runtime::session_manager) async fn list_model_tool_process_handles(
+        &self,
+        current: &CurrentSessionCapability,
+        session_id: &str,
+        mode: crate::ProcessListMode,
+        scope: crate::ProcessOpScope<'_>,
+    ) -> Result<Vec<crate::ProcessRecord>, crate::PluginError> {
+        let records = self
+            .list_process_handles(current, session_id, mode, scope)
+            .await?;
+        Ok(Self::narrow_tool_visible_records(
+            current, session_id, records,
+        ))
+    }
+
     pub(in crate::runtime::session_manager) async fn cancel_process(
         &self,
         current: &CurrentSessionCapability,
@@ -462,16 +478,63 @@ impl ProcessCapability {
         payload: serde_json::Value,
         scope: crate::ProcessOpScope<'_>,
     ) -> Result<crate::ProcessEvent, crate::PluginError> {
+        self.signal_process_with_visibility(
+            current,
+            session_id,
+            process_id,
+            signal_name,
+            signal_id,
+            payload,
+            scope,
+            true,
+        )
+        .await
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub(in crate::runtime::session_manager) async fn signal_possessed_process(
+        &self,
+        current: &CurrentSessionCapability,
+        session_id: &str,
+        process_id: &str,
+        signal_name: String,
+        signal_id: String,
+        payload: serde_json::Value,
+        scope: crate::ProcessOpScope<'_>,
+    ) -> Result<crate::ProcessEvent, crate::PluginError> {
+        self.signal_process_with_visibility(
+            current,
+            session_id,
+            process_id,
+            signal_name,
+            signal_id,
+            payload,
+            scope,
+            false,
+        )
+        .await
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    async fn signal_process_with_visibility(
+        &self,
+        current: &CurrentSessionCapability,
+        session_id: &str,
+        process_id: &str,
+        signal_name: String,
+        signal_id: String,
+        payload: serde_json::Value,
+        scope: crate::ProcessOpScope<'_>,
+        require_session_visibility: bool,
+    ) -> Result<crate::ProcessEvent, crate::PluginError> {
         let runner = self.command_runner(current, &scope)?;
-        let session_scope = self.process_scope_for_op(session_id, scope.agent_frame_id());
-        if !runner
-            .registry()
-            .is_observer(&session_scope.session_id, process_id)
-            .await?
-        {
-            return Err(crate::PluginError::Session(format!(
-                "process handle `{process_id}` is not live or visible in this session"
-            )));
+        if require_session_visibility {
+            self.validate_process_handles_observed_inner(
+                current,
+                session_id,
+                &[process_id.to_string()],
+            )
+            .await?;
         }
         let record = runner
             .registry()
@@ -495,7 +558,7 @@ impl ProcessCapability {
             .await
     }
 
-    pub(in crate::runtime::session_manager) async fn validate_process_handles_visible(
+    pub(in crate::runtime::session_manager) async fn validate_process_handles_observed(
         &self,
         current: &CurrentSessionCapability,
         _managed: &ManagedSessionCapability,
@@ -503,27 +566,21 @@ impl ProcessCapability {
         handle_ids: &[String],
         scope: crate::ProcessOpScope<'_>,
     ) -> Result<(), crate::PluginError> {
-        if handle_ids.is_empty() {
-            return Ok(());
-        }
-        let runner = self.command_runner(current, &scope)?;
-        let session_scope = self.process_scope_for_op(session_id, scope.agent_frame_id());
-        for process_id in handle_ids {
-            match runner
-                .registry()
-                .is_observer(&session_scope.session_id, process_id)
-                .await
-            {
-                Ok(true) | Err(crate::PluginError::ProcessNoLongerRetained { .. }) => {}
-                Ok(false) => {
-                    return Err(crate::PluginError::Session(format!(
-                        "process handle `{process_id}` is not live or visible in this session"
-                    )));
-                }
-                Err(error) => return Err(error),
-            }
-        }
-        Ok(())
+        let _ = scope;
+        self.validate_process_handles_observed_inner(current, session_id, handle_ids)
+            .await
+    }
+
+    pub(in crate::runtime::session_manager) async fn validate_model_tool_process_handles(
+        &self,
+        current: &CurrentSessionCapability,
+        session_id: &str,
+        handle_ids: &[String],
+    ) -> Result<(), crate::PluginError> {
+        self.validate_process_handles_observed_inner(current, session_id, handle_ids)
+            .await?;
+        self.validate_tool_filter(current, session_id, handle_ids)
+            .await
     }
 
     pub(in crate::runtime::session_manager) async fn transfer_process_handles(
@@ -571,5 +628,118 @@ impl ProcessCapability {
         if session_id == current.session_id {
             self.sync_needed.store(true, Ordering::Release);
         }
+    }
+
+    fn narrow_tool_visible_records(
+        current: &CurrentSessionCapability,
+        session_id: &str,
+        records: Vec<crate::ProcessRecord>,
+    ) -> Vec<crate::ProcessRecord> {
+        let Some(filter) = current
+            .host
+            .core
+            .control
+            .process_tool_visibility_filter
+            .as_ref()
+        else {
+            return records;
+        };
+        let candidates = records
+            .iter()
+            .map(|record| record.id.clone())
+            .collect::<Vec<_>>();
+        let returned_candidates = candidates
+            .iter()
+            .filter(|process_id| {
+                filter
+                    .narrow(&session_id.to_string(), std::slice::from_ref(process_id))
+                    .iter()
+                    .any(|returned| returned == *process_id)
+            })
+            .cloned()
+            .collect::<Vec<_>>();
+        let returned = returned_candidates.iter().cloned().collect::<HashSet<_>>();
+        let outcome = if returned_candidates.len() == candidates.len() {
+            "unchanged"
+        } else {
+            "narrowed"
+        };
+        tracing::info!(
+            target: "lash::process_tool_visibility",
+            %session_id,
+            operation = "list",
+            candidates = ?candidates,
+            returned = ?returned_candidates,
+            policy = "host_filter",
+            %outcome,
+            "model process-tool visibility decision"
+        );
+        records
+            .into_iter()
+            .filter(|record| returned.contains(&record.id))
+            .collect()
+    }
+
+    async fn validate_process_handles_observed_inner(
+        &self,
+        current: &CurrentSessionCapability,
+        session_id: &str,
+        process_ids: &[String],
+    ) -> Result<(), crate::PluginError> {
+        if process_ids.is_empty() {
+            return Ok(());
+        }
+        let registry = current.host.process_registry.as_ref().ok_or_else(|| {
+            crate::PluginError::Session("process registry is unavailable in this runtime".into())
+        })?;
+        for process_id in process_ids {
+            match registry.is_observer(session_id, process_id).await {
+                Ok(true) | Err(crate::PluginError::ProcessNoLongerRetained { .. }) => {}
+                Ok(false) => return Err(process_visibility_miss(process_id)),
+                Err(error) => return Err(error),
+            }
+        }
+        Ok(())
+    }
+
+    async fn validate_tool_filter(
+        &self,
+        current: &CurrentSessionCapability,
+        session_id: &str,
+        process_ids: &[String],
+    ) -> Result<(), crate::PluginError> {
+        let Some(filter) = current
+            .host
+            .core
+            .control
+            .process_tool_visibility_filter
+            .as_ref()
+        else {
+            return Ok(());
+        };
+        for process_id in process_ids {
+            let returned = filter.narrow(&session_id.to_string(), std::slice::from_ref(process_id));
+            let allowed = returned.iter().any(|returned| returned == process_id);
+            tracing::info!(
+                target: "lash::process_tool_visibility",
+                %session_id,
+                operation = "target",
+                candidate = %process_id,
+                returned = ?returned,
+                policy = "host_filter",
+                outcome = if allowed { "allowed" } else { "denied" },
+                "model process-tool visibility decision"
+            );
+            if !allowed {
+                return Err(process_visibility_miss(process_id));
+            }
+        }
+        Ok(())
+    }
+}
+
+fn process_visibility_miss(process_id: &str) -> crate::PluginError {
+    crate::PluginError::ProcessNotVisible {
+        process_id: process_id.to_string(),
     }
 }

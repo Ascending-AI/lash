@@ -5,6 +5,7 @@ use super::*;
 impl ManagedSessionCapability {
     async fn register_materialized_session(
         &self,
+        current: &CurrentSessionCapability,
         usage: &UsageCapability,
         plan: SessionCreatePlan,
         mut materialized: MaterializedSession,
@@ -36,6 +37,21 @@ impl ManagedSessionCapability {
             persisted_state.mark_node_ids_persisted(persisted_node_ids);
             materialized.runtime.state = persisted_state;
         }
+        let observer_intent_source = match materialized.store_binding.as_deref() {
+            Some(store) => crate::runtime::SessionObserverIntentSource::Persisted(store),
+            None => crate::runtime::SessionObserverIntentSource::Unstored(plan.relation.clone()),
+        };
+        let observed_processes = crate::runtime::reconcile_session_process_observer_intents(
+            current.host.process_registry.as_deref(),
+            &plan.session_id,
+            observer_intent_source,
+        )
+        .await
+        .map_err(|error| {
+            crate::PluginError::Session(format!(
+                "failed to settle session-create observer intents: {error}"
+            ))
+        })?;
         self.registry.lock().await.insert(
             plan.session_id.clone(),
             RuntimeHandle::new(materialized.runtime),
@@ -51,6 +67,7 @@ impl ManagedSessionCapability {
             session_id: plan.session_id,
             parent_session_id: plan.parent_session_id,
             policy: plan.policy,
+            observed_processes,
         })
     }
 
@@ -62,7 +79,7 @@ impl ManagedSessionCapability {
     ) -> Result<SessionHandle, crate::PluginError> {
         let plan = resolve_session_create_plan(self, current, request).await?;
         let materialized = materialize_session_create_plan(current, &plan).await?;
-        self.register_materialized_session(usage, plan, materialized)
+        self.register_materialized_session(current, usage, plan, materialized)
             .await
     }
 

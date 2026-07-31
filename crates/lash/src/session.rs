@@ -19,6 +19,23 @@ pub(crate) async fn apply_fork_observer_intent(
     session_id: &str,
     process_ids: &[lash_core::ProcessId],
 ) -> Result<()> {
+    apply_process_observer_intent(
+        process_registry,
+        session_id,
+        process_ids,
+        lash_core::ProcessObserverBy::ForkInheritance,
+        "fork",
+    )
+    .await
+}
+
+async fn apply_process_observer_intent(
+    process_registry: &dyn lash_core::ProcessRegistry,
+    session_id: &str,
+    process_ids: &[lash_core::ProcessId],
+    observer_by: lash_core::ProcessObserverBy,
+    intent_kind: &'static str,
+) -> Result<()> {
     for process_id in process_ids {
         match process_registry.get_process(process_id).await {
             Ok(Some(_)) => {}
@@ -26,8 +43,9 @@ pub(crate) async fn apply_fork_observer_intent(
                 tracing::info!(
                     %session_id,
                     %process_id,
+                    %intent_kind,
                     reason = "never_existed_or_tombstone_compacted",
-                    "skipping unavailable process in fork observer recovery intent"
+                    "skipping unavailable process observer recovery intent"
                 );
                 continue;
             }
@@ -38,10 +56,11 @@ pub(crate) async fn apply_fork_observer_intent(
                 tracing::info!(
                     %session_id,
                     %process_id,
+                    %intent_kind,
                     %terminal_label,
                     pruned_at_ms,
                     reason = "no_longer_retained",
-                    "skipping pruned process in fork observer recovery intent"
+                    "skipping pruned process observer recovery intent"
                 );
                 continue;
             }
@@ -49,11 +68,7 @@ pub(crate) async fn apply_fork_observer_intent(
         }
 
         match process_registry
-            .add_observer(
-                session_id,
-                process_id,
-                lash_core::ProcessObserverBy::ForkInheritance,
-            )
+            .add_observer(session_id, process_id, observer_by.clone())
             .await
         {
             Ok(()) => {}
@@ -64,10 +79,11 @@ pub(crate) async fn apply_fork_observer_intent(
                 tracing::info!(
                     %session_id,
                     %process_id,
+                    %intent_kind,
                     %terminal_label,
                     pruned_at_ms,
                     reason = "pruned_during_observer_apply",
-                    "skipping concurrently pruned process in fork observer recovery intent"
+                    "skipping concurrently pruned process observer recovery intent"
                 );
             }
             Err(apply_error) => {
@@ -79,8 +95,9 @@ pub(crate) async fn apply_fork_observer_intent(
                         tracing::info!(
                             %session_id,
                             %process_id,
+                            %intent_kind,
                             reason = "removed_during_observer_apply",
-                            "skipping unavailable process in fork observer recovery intent"
+                            "skipping unavailable process observer recovery intent"
                         );
                     }
                     Ok(Some(_)) | Err(_) => return Err(apply_error.into()),
@@ -183,7 +200,7 @@ impl SessionBuilder {
     pub async fn open(self) -> Result<LashSession> {
         let policy = self.session_policy();
         let store = self.create_store(&policy).await?;
-        self.reconcile_fork_process_observers(store.as_deref())
+        self.reconcile_process_observer_intents(store.as_deref())
             .await?;
         let state = self
             .load_or_default_state(&policy, store.as_deref())
@@ -191,40 +208,19 @@ impl SessionBuilder {
         Box::pin(self.open_resolved(policy, state, store)).await
     }
 
-    async fn reconcile_fork_process_observers(
+    async fn reconcile_process_observer_intents(
         &self,
         store: Option<&dyn RuntimePersistence>,
     ) -> Result<()> {
-        let (Some(store), Some(process_registry)) =
-            (store, self.core.env.process_registry.as_ref())
-        else {
+        let Some(store) = store else {
             return Ok(());
         };
-        let Some(mut meta) = store.load_session_meta().await? else {
-            return Ok(());
-        };
-        let lash_core::SessionRelation::Fork {
-            pending_observer_process_ids,
-            ..
-        } = &meta.relation
-        else {
-            return Ok(());
-        };
-        apply_fork_observer_intent(
-            process_registry.as_ref(),
+        lash_core::runtime::reconcile_session_process_observer_intents(
+            self.core.env.process_registry.as_deref(),
             &self.session_id,
-            pending_observer_process_ids,
+            lash_core::runtime::SessionObserverIntentSource::PersistedIfPresent(store),
         )
         .await?;
-        let lash_core::SessionRelation::Fork {
-            pending_observer_process_ids,
-            ..
-        } = &mut meta.relation
-        else {
-            unreachable!("relation was checked above");
-        };
-        pending_observer_process_ids.clear();
-        store.save_session_meta(meta).await?;
         Ok(())
     }
 
@@ -236,7 +232,7 @@ impl SessionBuilder {
     pub async fn open_with_state(self, mut state: RuntimeSessionState) -> Result<LashSession> {
         let policy = self.session_policy();
         let store = self.create_store(&policy).await?;
-        self.reconcile_fork_process_observers(store.as_deref())
+        self.reconcile_process_observer_intents(store.as_deref())
             .await?;
         if state.session_id != self.session_id {
             return Err(EmbedError::StoreSessionMismatch {

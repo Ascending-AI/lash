@@ -715,6 +715,216 @@ async fn fork_observer_inheritance_is_recoverable_selective_and_wake_independent
     Ok(())
 }
 
+#[tokio::test]
+async fn session_create_observer_intent_replays_idempotently_on_open() -> Result<()> {
+    use lash_core::{ProcessRegistry as _, SessionStoreFactory as _};
+
+    let session_id = "session-create-observer-recovery";
+    let process_id = "session-create-observed-process";
+    let factory = Arc::new(lash_core::InMemorySessionStoreFactory::new());
+    let registry = Arc::new(TestLocalProcessRegistry::default());
+    registry
+        .register_process(lash_core::ProcessRegistration::new(
+            process_id,
+            lash_core::ProcessInput::External {
+                metadata: serde_json::Value::Null,
+            },
+            lash_core::RecoveryDisposition::ExternallyOwned,
+            lash_core::ProcessProvenance::host(),
+        ))
+        .await?;
+    let store = factory
+        .create_store(&lash_core::SessionStoreCreateRequest {
+            session_id: session_id.to_string(),
+            relation: lash_core::SessionRelation::ObserverIntent {
+                relation: Box::new(lash_core::SessionRelation::Root),
+                pending_observer_process_ids: vec![process_id.to_string()],
+            },
+            policy: lash_core::SessionPolicy::default(),
+        })
+        .await?;
+    let core = explicit_ephemeral_facets(LashCore::standard_builder())
+        .provider(mock_provider())
+        .model(mock_model_spec())
+        .store_factory(Arc::clone(&factory) as Arc<dyn lash_core::SessionStoreFactory>)
+        .process_registry(Arc::clone(&registry) as Arc<dyn lash_core::ProcessRegistry>)
+        .build()?;
+
+    assert!(
+        !registry.is_observer(session_id, process_id).await?,
+        "the fixture must preserve the real crash gap before publication"
+    );
+    core.session(session_id).open().await?;
+    assert!(
+        registry.is_observer(session_id, process_id).await?,
+        "open must publish the observer edge left pending by a create crash"
+    );
+    let observer_event_count = registry
+        .events_after(process_id, 0)
+        .await?
+        .into_iter()
+        .filter(|event| event.event_type == "process.observer_added")
+        .count();
+    assert_eq!(
+        observer_event_count, 1,
+        "recovery must publish the missing observer edge exactly once"
+    );
+    core.session(session_id).open().await?;
+    assert_eq!(
+        registry
+            .events_after(process_id, 0)
+            .await?
+            .into_iter()
+            .filter(|event| event.event_type == "process.observer_added")
+            .count(),
+        observer_event_count,
+        "recovery after edge publication must be idempotent"
+    );
+    assert!(matches!(
+        store
+            .load_session_meta()
+            .await?
+            .expect("session metadata")
+            .relation,
+        lash_core::SessionRelation::Root
+    ));
+
+    registry
+        .remove_observer(
+            session_id,
+            process_id,
+            lash_core::ProcessObserverBy::host("post-recovery-removal"),
+        )
+        .await?;
+    core.session(session_id).open().await?;
+    assert!(
+        !registry.is_observer(session_id, process_id).await?,
+        "consumed create intent must not recreate a deliberately removed edge"
+    );
+    Ok(())
+}
+
+#[tokio::test]
+async fn nested_session_observer_intents_settle_every_layer_before_open_returns() -> Result<()> {
+    use lash_core::{ProcessRegistry as _, SessionStoreFactory as _};
+
+    let factory = Arc::new(lash_core::InMemorySessionStoreFactory::new());
+    let registry = Arc::new(TestLocalProcessRegistry::default());
+    let core = explicit_ephemeral_facets(LashCore::standard_builder())
+        .provider(mock_provider())
+        .model(mock_model_spec())
+        .store_factory(Arc::clone(&factory) as Arc<dyn lash_core::SessionStoreFactory>)
+        .process_registry(Arc::clone(&registry) as Arc<dyn lash_core::ProcessRegistry>)
+        .build()?;
+
+    for (case, simulate_crash_between_layers) in [("fresh", false), ("crash-resume", true)] {
+        let session_id = format!("nested-observer-intent-{case}");
+        let create_process_id = format!("nested-create-process-{case}");
+        let fork_process_id = format!("nested-fork-process-{case}");
+        for process_id in [&create_process_id, &fork_process_id] {
+            registry
+                .register_process(lash_core::ProcessRegistration::new(
+                    process_id,
+                    lash_core::ProcessInput::External {
+                        metadata: serde_json::Value::Null,
+                    },
+                    lash_core::RecoveryDisposition::ExternallyOwned,
+                    lash_core::ProcessProvenance::host(),
+                ))
+                .await?;
+        }
+        let store = factory
+            .create_store(&lash_core::SessionStoreCreateRequest {
+                session_id: session_id.clone(),
+                relation: lash_core::SessionRelation::ObserverIntent {
+                    relation: Box::new(lash_core::SessionRelation::Fork {
+                        source_session_id: format!("nested-source-{case}"),
+                        source_node_id: format!("nested-source-node-{case}"),
+                        observer_inheritance: lash_core::ObserverInheritance::All,
+                        pending_observer_process_ids: vec![fork_process_id.clone()],
+                    }),
+                    pending_observer_process_ids: vec![create_process_id.clone()],
+                },
+                policy: lash_core::SessionPolicy::default(),
+            })
+            .await?;
+
+        if simulate_crash_between_layers {
+            registry
+                .add_observer(
+                    &session_id,
+                    &create_process_id,
+                    lash_core::ProcessObserverBy::host(format!("session-create:{session_id}")),
+                )
+                .await
+                .expect("simulate outer publication before a crash between layers");
+            assert!(
+                !registry
+                    .is_observer(&session_id, &fork_process_id)
+                    .await?,
+                "the crash fixture must leave the inner fork layer unpublished"
+            );
+        }
+
+        core.session(&session_id).open().await?;
+
+        assert!(
+            registry
+                .is_observer(&session_id, &create_process_id)
+                .await?,
+            "open must settle the outer session-create observer intent"
+        );
+        assert!(
+            registry
+                .is_observer(&session_id, &fork_process_id)
+                .await?,
+            "open must settle the inner fork observer intent"
+        );
+        let relation = store
+            .load_session_meta()
+            .await?
+            .expect("nested session metadata")
+            .relation;
+        assert!(
+            matches!(
+                relation,
+                lash_core::SessionRelation::Fork {
+                    ref pending_observer_process_ids,
+                    ..
+                } if pending_observer_process_ids.is_empty()
+            ),
+            "open must persist a fully settled base fork relation, got {relation:?}"
+        );
+
+        let create_events = registry
+            .events_after(&create_process_id, 0)
+            .await?
+            .into_iter()
+            .filter(|event| event.event_type == "process.observer_added")
+            .collect::<Vec<_>>();
+        assert_eq!(create_events.len(), 1);
+        assert_eq!(
+            create_events[0].payload["by"],
+            serde_json::json!({
+                "kind": "host",
+                "operation_id": format!("session-create:{session_id}")
+            })
+        );
+        let fork_events = registry
+            .events_after(&fork_process_id, 0)
+            .await?
+            .into_iter()
+            .filter(|event| event.event_type == "process.observer_added")
+            .collect::<Vec<_>>();
+        assert_eq!(fork_events.len(), 1);
+        assert_eq!(
+            fork_events[0].payload["by"],
+            serde_json::json!({"kind": "fork_inheritance"})
+        );
+    }
+    Ok(())
+}
+
 #[test]
 fn builder_rejects_invalid_process_execution_concurrency() {
     let err = expect_build_error(

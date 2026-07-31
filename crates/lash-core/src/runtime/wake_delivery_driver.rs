@@ -8,7 +8,7 @@ use tokio_util::task::TaskTracker;
 use crate::{
     Clock, PluginError, ProcessRegistry, QueuedWorkDriver, SessionPolicy, SessionRelation,
     SessionStoreCreateRequest, SessionStoreFactory, WakeDeliveryClaimOutcome, WakeDiscardReason,
-    process_wake_batch_draft,
+    WakeTurnPolicy, process_wake_batch_draft_with_policy,
 };
 
 const DELIVERY_BATCH_SIZE: usize = 32;
@@ -44,6 +44,7 @@ struct WakeDeliveryDriverInner {
     session_store_factory: Arc<dyn SessionStoreFactory>,
     queued_work_driver: Option<QueuedWorkDriver>,
     clock: Arc<dyn Clock>,
+    wake_turn_policy: WakeTurnPolicy,
     notify: Notify,
 }
 
@@ -67,12 +68,30 @@ impl WakeDeliveryDriver {
         queued_work_driver: Option<QueuedWorkDriver>,
         clock: Arc<dyn Clock>,
     ) -> Self {
+        Self::new_with_policy(
+            registry,
+            session_store_factory,
+            queued_work_driver,
+            clock,
+            WakeTurnPolicy::default(),
+        )
+    }
+
+    /// Start the driver with a factory-selected wake-to-turn policy.
+    pub fn new_with_policy(
+        registry: Arc<dyn ProcessRegistry>,
+        session_store_factory: Arc<dyn SessionStoreFactory>,
+        queued_work_driver: Option<QueuedWorkDriver>,
+        clock: Arc<dyn Clock>,
+        wake_turn_policy: WakeTurnPolicy,
+    ) -> Self {
         let driver = Self {
             inner: Arc::new(WakeDeliveryDriverInner {
                 registry,
                 session_store_factory,
                 queued_work_driver,
                 clock,
+                wake_turn_policy,
                 notify: Notify::new(),
             }),
             lifetime: Arc::new(WakeDeliveryDriverLifetime {
@@ -109,11 +128,12 @@ impl WakeDeliveryDriver {
 
     /// Host/runbook lever: synchronously run one bounded delivery scan.
     pub async fn drive_pending(&self) -> Result<WakeDeliveryDriveReport, PluginError> {
-        Self::drive_pending_once(
+        Self::drive_pending_once_with_policy(
             Arc::clone(&self.inner.registry),
             Arc::clone(&self.inner.session_store_factory),
             self.inner.queued_work_driver.clone(),
             Arc::clone(&self.inner.clock),
+            &self.inner.wake_turn_policy,
             DELIVERY_BATCH_SIZE,
         )
         .await
@@ -126,6 +146,25 @@ impl WakeDeliveryDriver {
         session_store_factory: Arc<dyn SessionStoreFactory>,
         queued_work_driver: Option<QueuedWorkDriver>,
         clock: Arc<dyn Clock>,
+        limit: usize,
+    ) -> Result<WakeDeliveryDriveReport, PluginError> {
+        Self::drive_pending_once_with_policy(
+            registry,
+            session_store_factory,
+            queued_work_driver,
+            clock,
+            &WakeTurnPolicy::default(),
+            limit,
+        )
+        .await
+    }
+
+    pub(crate) async fn drive_pending_once_with_policy(
+        registry: Arc<dyn ProcessRegistry>,
+        session_store_factory: Arc<dyn SessionStoreFactory>,
+        queued_work_driver: Option<QueuedWorkDriver>,
+        clock: Arc<dyn Clock>,
+        wake_turn_policy: &WakeTurnPolicy,
         limit: usize,
     ) -> Result<WakeDeliveryDriveReport, PluginError> {
         let mut report = WakeDeliveryDriveReport::default();
@@ -257,7 +296,10 @@ impl WakeDeliveryDriver {
             };
 
             match store
-                .enqueue_queued_work(process_wake_batch_draft(delivery.wake.clone()))
+                .enqueue_queued_work(process_wake_batch_draft_with_policy(
+                    delivery.wake.clone(),
+                    wake_turn_policy,
+                ))
                 .await
             {
                 Ok(enqueued) => {
@@ -266,6 +308,11 @@ impl WakeDeliveryDriver {
                         target_session_id = %target_session_id,
                         batch_id = %enqueued.batch_id,
                         source_key = ?enqueued.source_key,
+                        delivery_policy = wake_turn_policy.delivery().as_str(),
+                        wake_mode = ?wake_turn_policy.mode(),
+                        slot_policy = enqueued.slot_policy.as_str(),
+                        merge_key = ?enqueued.merge_key,
+                        outcome = "enqueued",
                         "process wake enqueued"
                     );
                     match registry
@@ -341,11 +388,12 @@ impl WakeDeliveryDriver {
     async fn run_loop(inner: Arc<WakeDeliveryDriverInner>, shutdown: CancellationToken) {
         let mut poll = POLL_INITIAL;
         loop {
-            let report = match Self::drive_pending_once(
+            let report = match Self::drive_pending_once_with_policy(
                 Arc::clone(&inner.registry),
                 Arc::clone(&inner.session_store_factory),
                 inner.queued_work_driver.clone(),
                 Arc::clone(&inner.clock),
+                &inner.wake_turn_policy,
                 DELIVERY_BATCH_SIZE,
             )
             .await

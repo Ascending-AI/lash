@@ -86,6 +86,91 @@ pub enum MergeKey {
     Group(String),
 }
 
+/// A non-empty receiver-side key used only when wake coalescing is enabled.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub enum WakeCoalescingKey {
+    /// Use the queued payload's default merge identity.
+    PayloadDefault,
+    /// Join wakes assigned to one host-defined group.
+    Group(String),
+}
+
+impl WakeCoalescingKey {
+    fn as_queue_merge_key(&self) -> MergeKey {
+        match self {
+            Self::PayloadDefault => MergeKey::PayloadDefault,
+            Self::Group(group) => MergeKey::Group(group.clone()),
+        }
+    }
+}
+
+/// Whether receiver-side wake claims stay separate or coalesce.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub enum WakeTurnMode {
+    /// Deliver every durable wake as its own turn claim.
+    EachWake { slot: SlotPolicy },
+    /// Coalesce adjacent wakes that share the selected merge key.
+    Coalesce { key: WakeCoalescingKey },
+}
+
+/// Factory-scoped policy for turning durable process wakes into queued turns.
+///
+/// Producer-side wake deduplication remains keyed by process event identity.
+/// This policy controls only receiver-side delivery and drain coalescing.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct WakeTurnPolicy {
+    delivery: DeliveryPolicy,
+    mode: WakeTurnMode,
+}
+
+impl WakeTurnPolicy {
+    /// Build a policy from an independently selected delivery boundary and a
+    /// coherent receiver claim mode.
+    pub fn new(delivery: DeliveryPolicy, mode: WakeTurnMode) -> Self {
+        Self { delivery, mode }
+    }
+
+    /// Deliver every wake as a separate claim.
+    pub fn each_wake(delivery: DeliveryPolicy, slot: SlotPolicy) -> Self {
+        Self::new(delivery, WakeTurnMode::EachWake { slot })
+    }
+
+    /// Coalesce adjacent wakes that share `key`.
+    pub fn coalesce(delivery: DeliveryPolicy, key: WakeCoalescingKey) -> Self {
+        Self::new(delivery, WakeTurnMode::Coalesce { key })
+    }
+
+    /// The turn boundary at which a queued wake becomes eligible.
+    pub fn delivery(&self) -> DeliveryPolicy {
+        self.delivery
+    }
+
+    /// The receiver claim mode.
+    pub fn mode(&self) -> &WakeTurnMode {
+        &self.mode
+    }
+
+    pub(crate) fn queue_slot_policy(&self) -> SlotPolicy {
+        match self.mode {
+            WakeTurnMode::EachWake { slot } => slot,
+            WakeTurnMode::Coalesce { .. } => SlotPolicy::Join,
+        }
+    }
+
+    pub(crate) fn queue_merge_key(&self) -> MergeKey {
+        match &self.mode {
+            WakeTurnMode::EachWake { .. } => MergeKey::Never,
+            WakeTurnMode::Coalesce { key } => key.as_queue_merge_key(),
+        }
+    }
+}
+
+impl Default for WakeTurnPolicy {
+    fn default() -> Self {
+        Self::each_wake(DeliveryPolicy::EarliestSafeBoundary, SlotPolicy::Exclusive)
+    }
+}
+
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum QueuedWorkPayload {
@@ -478,17 +563,25 @@ pub struct QueuedTurnWork {
 }
 
 pub fn process_wake_batch_draft(wake: ProcessWakeDelivery) -> QueuedWorkBatchDraft {
+    process_wake_batch_draft_with_policy(wake, &WakeTurnPolicy::default())
+}
+
+pub(crate) fn process_wake_batch_draft_with_policy(
+    wake: ProcessWakeDelivery,
+    policy: &WakeTurnPolicy,
+) -> QueuedWorkBatchDraft {
     let source_key = process_wake_source_key(&wake.process_id, wake.sequence);
     let process_id = wake.process_id.clone();
     let sequence = wake.sequence;
     QueuedWorkBatchDraft::new(
         wake.target_session_id.clone(),
-        DeliveryPolicy::EarliestSafeBoundary,
-        SlotPolicy::Exclusive,
+        policy.delivery(),
+        policy.queue_slot_policy(),
         vec![QueuedWorkPayload::process_wake(wake)],
     )
     .with_source_key(source_key)
     .with_process_wake_source(process_id, sequence)
+    .with_merge_key(policy.queue_merge_key())
 }
 
 pub fn process_wake_source_key(process_id: &str, sequence: u64) -> String {

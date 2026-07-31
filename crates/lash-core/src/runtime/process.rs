@@ -6,6 +6,7 @@ mod model;
 #[cfg(test)]
 mod model_filter_tests;
 mod observation;
+mod observer_intent;
 mod op_scope;
 mod references;
 mod registry;
@@ -54,6 +55,9 @@ pub use observation::{
     ObservedProcess, ObservedProcessEvent, ObservedWorkItem, ProcessWorkObserver,
     ProcessWorkSnapshot,
 };
+pub use observer_intent::{
+    SessionObserverIntentSource, reconcile_session_process_observer_intents,
+};
 pub use op_scope::ProcessOpScope;
 pub use references::ProcessLiveReferenceSummary;
 pub use registry::{
@@ -62,7 +66,7 @@ pub use registry::{
     WakeDeliveryClaimOutcome, WakeDeliveryConfig, WakeDeliveryReport, WakeDeliveryState,
     WakeDiscardReason,
 };
-pub use service::{ProcessService, UnavailableProcessService};
+pub use service::{ProcessService, ProcessToolVisibilityFilter, UnavailableProcessService};
 #[cfg(any(test, feature = "testing"))]
 pub use testing::*;
 pub use time::{current_epoch_ms, epoch_ms_from_system_time, system_time_from_epoch_ms};

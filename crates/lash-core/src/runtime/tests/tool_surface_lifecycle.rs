@@ -117,6 +117,28 @@ fn runtime_environment(plugin_host: Arc<crate::PluginHost>) -> crate::RuntimeEnv
         .build()
 }
 
+struct AllowNamedProcess {
+    allowed: String,
+}
+
+impl crate::ProcessToolVisibilityFilter for AllowNamedProcess {
+    fn narrow(
+        &self,
+        _session: &crate::SessionId,
+        candidates: &[crate::ProcessId],
+    ) -> Vec<crate::ProcessId> {
+        let mut narrowed = candidates
+            .iter()
+            .filter(|process_id| *process_id == &self.allowed)
+            .cloned()
+            .collect::<Vec<_>>();
+        // A foreign id proves the runtime intersects the answer with the
+        // already edge-visible candidate set instead of trusting widening.
+        narrowed.push("foreign-process".to_string());
+        narrowed
+    }
+}
+
 fn hidden_authority(tool_name: &str) -> SessionAuthorityContext {
     SessionAuthorityContext {
         tool_access: crate::SessionToolAccess {
@@ -214,6 +236,494 @@ async fn parked_resume_keeps_the_store_bound_session_id() {
             ref session_id,
             ref turn_id,
         } if session_id == "parked-session" && turn_id == "resumed-turn"
+    ));
+}
+
+#[tokio::test]
+async fn process_tool_filter_narrows_only_session_tools_and_never_internal_wakes() {
+    let session_id = "filter-session";
+    let registry = Arc::new(crate::TestLocalProcessRegistry::default());
+    let factory = Arc::new(crate::InMemorySessionStoreFactory::new());
+    let target_store = factory
+        .create_store(&crate::SessionStoreCreateRequest {
+            session_id: session_id.to_string(),
+            relation: crate::SessionRelation::Root,
+            policy: standard_test_policy(),
+        })
+        .await
+        .expect("create filter target store");
+    let core = test_host_config()
+        .core
+        .with_process_tool_visibility_filter(Arc::new(AllowNamedProcess {
+            allowed: "allowed-process".to_string(),
+        }));
+    let env = crate::RuntimeEnvironment::builder()
+        .with_plugin_host(dynamic_plugin_host(Arc::new(DynamicToolSurface::default())))
+        .with_runtime_host_config(core)
+        .with_process_registry(registry.clone())
+        .with_session_store_factory(factory.clone())
+        .build();
+    let runtime =
+        LashRuntime::from_environment(&env, standard_test_policy(), root_state(session_id), None)
+            .await
+            .expect("runtime with process tool filter");
+
+    for process_id in ["allowed-process", "filtered-process", "filtered-cancel"] {
+        let mut registration = crate::ProcessRegistration::new(
+            process_id,
+            crate::ProcessInput::External {
+                metadata: serde_json::Value::Null,
+            },
+            crate::RecoveryDisposition::ExternallyOwned,
+            crate::ProcessProvenance::host(),
+        );
+        if process_id == "filtered-process" {
+            registration = registration
+                .with_extra_event_types([
+                    crate::ProcessEventType {
+                        name: "filter.wake".to_string(),
+                        payload_schema: crate::LashSchema::any(),
+                        semantics: crate::ProcessEventSemanticsSpec {
+                            wake: Some(crate::ProcessWakeSpec {
+                                when: None,
+                                input: crate::ProcessValueSelector::Pointer(
+                                    "/wake_input".to_string(),
+                                ),
+                            }),
+                            ..crate::ProcessEventSemanticsSpec::default()
+                        },
+                    },
+                    crate::ProcessEventType {
+                        name: "signal.ready".to_string(),
+                        payload_schema: crate::LashSchema::any(),
+                        semantics: crate::ProcessEventSemanticsSpec::default(),
+                    },
+                ])
+                .with_wake_session_id(Some(session_id.to_string()));
+        }
+        registry
+            .register_process_with_observers(registration, &[session_id.to_string()])
+            .await
+            .expect("register observed filter process");
+    }
+
+    let host_service = runtime.process_service().expect("host process service");
+    let service = runtime
+        .runtime_session_services()
+        .expect("runtime session services")
+        .model_tool_process_service();
+    let scope = || {
+        crate::ProcessOpScope::new(named_turn_scope(
+            session_id,
+            &uuid::Uuid::new_v4().to_string(),
+        ))
+    };
+    let listed = service
+        .list_visible(session_id, crate::ProcessListMode::Live, scope())
+        .await
+        .expect("list filtered process tools");
+    assert_eq!(
+        listed
+            .iter()
+            .map(|record| record.id.as_str())
+            .collect::<Vec<_>>(),
+        vec!["allowed-process"],
+        "the filter must narrow and must not widen with a foreign id"
+    );
+    for result in [
+        service
+            .validate_visible(session_id, &["filtered-process".to_string()], scope())
+            .await
+            .map(|_| ()),
+        service
+            .cancel_visible(session_id, "filtered-process", scope())
+            .await
+            .map(|_| ()),
+        service
+            .signal(
+                session_id,
+                "filtered-process",
+                "ready".to_string(),
+                "filter-signal".to_string(),
+                serde_json::Value::Null,
+                scope(),
+            )
+            .await
+            .map(|_| ()),
+    ] {
+        let error = result.expect_err("filtered tool operation must be hidden");
+        assert!(
+            matches!(
+                error,
+                crate::PluginError::ProcessNotVisible { ref process_id }
+                    if process_id == "filtered-process"
+            ),
+            "signal/cancel/await validation must share the exact typed visibility miss: {error}"
+        );
+    }
+    let unobserved_error = service
+        .validate_visible(session_id, &["never-observed".to_string()], scope())
+        .await
+        .expect_err("unobserved handle must be hidden");
+    assert!(
+        matches!(
+            unobserved_error,
+            crate::PluginError::ProcessNotVisible { ref process_id }
+                if process_id == "never-observed"
+        ),
+        "edge and filter misses must have the same exact typed error: {unobserved_error}"
+    );
+
+    assert_eq!(
+        host_service
+            .list_visible(session_id, crate::ProcessListMode::Live, scope())
+            .await
+            .expect("host read bypasses tool filter")
+            .len(),
+        3,
+        "admin/host reads must not consult the tool filter"
+    );
+    host_service
+        .signal(
+            session_id,
+            "filtered-process",
+            "ready".to_string(),
+            "host-signal".to_string(),
+            serde_json::Value::Null,
+            scope(),
+        )
+        .await
+        .expect("host signal bypasses model-tool filter");
+    host_service
+        .cancel_visible(session_id, "filtered-cancel", scope())
+        .await
+        .expect("host cancel bypasses model-tool filter");
+    registry
+        .append_event(
+            "filtered-process",
+            crate::ProcessEventAppendRequest::new(
+                "filter.wake",
+                serde_json::json!({"wake_input": "still deliver"}),
+            ),
+        )
+        .await
+        .expect("append wake from filtered process");
+    let report = crate::WakeDeliveryDriver::drive_pending_once_with_policy(
+        registry,
+        factory,
+        None,
+        Arc::new(crate::SystemClock),
+        &crate::WakeTurnPolicy::default(),
+        32,
+    )
+    .await
+    .expect("drive wake for filtered process");
+    assert_eq!(report.enqueued, 1);
+    assert_eq!(
+        target_store
+            .list_queued_work(session_id)
+            .await
+            .expect("read internally delivered wake")
+            .len(),
+        1,
+        "the wake driver must never consult the session tool filter"
+    );
+}
+
+#[tokio::test]
+async fn pruned_previous_turn_model_handle_preserves_typed_operation_outcomes() {
+    let session_id = "pruned-model-handle-session";
+    let process_id = "pruned-previous-turn-process";
+    let registry = Arc::new(crate::TestLocalProcessRegistry::default());
+    let env = crate::RuntimeEnvironment::builder()
+        .with_plugin_host(dynamic_plugin_host(Arc::new(DynamicToolSurface::default())))
+        .with_runtime_host_config(test_host_config().core)
+        .with_process_registry(registry.clone())
+        .build();
+    let runtime =
+        LashRuntime::from_environment(&env, standard_test_policy(), root_state(session_id), None)
+            .await
+            .expect("runtime with process registry");
+    registry
+        .register_process_with_observers(
+            crate::ProcessRegistration::new(
+                process_id,
+                crate::ProcessInput::External {
+                    metadata: serde_json::Value::Null,
+                },
+                crate::RecoveryDisposition::ExternallyOwned,
+                crate::ProcessProvenance::host(),
+            )
+            .with_extra_event_types([crate::ProcessEventType {
+                name: "signal.ready".to_string(),
+                payload_schema: crate::LashSchema::any(),
+                semantics: crate::ProcessEventSemanticsSpec::default(),
+            }]),
+            &[session_id.to_string()],
+        )
+        .await
+        .expect("register process observed by the model session");
+    let terminal = registry
+        .complete_process(
+            process_id,
+            crate::ProcessAwaitOutput::Success {
+                value: serde_json::json!("previous turn result"),
+                control: None,
+            },
+            crate::ProcessCompletionAuthority::external_owner(),
+        )
+        .await
+        .expect("complete previous-turn process");
+    registry
+        .prune_terminal_processes(
+            terminal.updated_at_ms.saturating_add(1),
+            None,
+            crate::ProjectionWatermark::NoProjector,
+        )
+        .await
+        .expect("prune previous-turn process");
+
+    let service = runtime
+        .runtime_session_services()
+        .expect("runtime session services")
+        .model_tool_process_service();
+    let scope = || {
+        crate::ProcessOpScope::new(named_turn_scope(
+            session_id,
+            &uuid::Uuid::new_v4().to_string(),
+        ))
+    };
+    service
+        .validate_visible(session_id, &[process_id.to_string()], scope())
+        .await
+        .expect("a retained tombstone must pass model-handle validation");
+    let await_output = service
+        .await_process(process_id, scope())
+        .await
+        .expect("await must reach the tombstone-aware registry path");
+    assert!(matches!(
+        await_output,
+        crate::ProcessAwaitOutput::NoLongerRetained { .. }
+    ));
+    let rendered = await_output.into_tool_output();
+    assert!(
+        rendered.is_success(),
+        "a pruned await is information, not a tool failure"
+    );
+    assert_eq!(
+        rendered
+            .value_for_projection()
+            .get("code")
+            .and_then(serde_json::Value::as_str),
+        Some("process_no_longer_retained")
+    );
+
+    for error in [
+        service
+            .cancel_visible(session_id, process_id, scope())
+            .await
+            .expect_err("cancel must return its tombstone outcome"),
+        service
+            .signal(
+                session_id,
+                process_id,
+                "ready".to_string(),
+                "previous-turn-signal".to_string(),
+                serde_json::Value::Null,
+                scope(),
+            )
+            .await
+            .expect_err("signal must return its tombstone outcome"),
+    ] {
+        assert!(
+            matches!(error, crate::PluginError::ProcessNoLongerRetained { .. }),
+            "cancel and signal must preserve the typed tombstone outcome, got {error}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn session_creation_applies_only_named_process_observers_with_typed_outcomes() {
+    let parent_session_id = "observer-parent";
+    let registry = Arc::new(crate::TestLocalProcessRegistry::default());
+    let factory = Arc::new(crate::InMemorySessionStoreFactory::new());
+    let env = crate::RuntimeEnvironment::builder()
+        .with_plugin_host(dynamic_plugin_host(Arc::new(DynamicToolSurface::default())))
+        .with_runtime_host_config(test_host_config().core)
+        .with_process_registry(registry.clone())
+        .with_session_store_factory(factory.clone())
+        .build();
+    let runtime = LashRuntime::from_environment(
+        &env,
+        standard_test_policy(),
+        root_state(parent_session_id),
+        None,
+    )
+    .await
+    .expect("runtime with process registry");
+
+    let process_service = runtime.process_service().expect("process service");
+    for (process_id, options) in [
+        ("default-start", crate::ProcessStartOptions::new()),
+        (
+            "explicit-start",
+            crate::ProcessStartOptions::new().with_initial_observer(parent_session_id),
+        ),
+    ] {
+        process_service
+            .start(
+                parent_session_id,
+                crate::ProcessRegistration::new(
+                    process_id,
+                    crate::ProcessInput::External {
+                        metadata: serde_json::Value::Null,
+                    },
+                    crate::RecoveryDisposition::ExternallyOwned,
+                    crate::ProcessProvenance::host(),
+                ),
+                options,
+                crate::ProcessOpScope::new(named_turn_scope(
+                    parent_session_id,
+                    &format!("{process_id}-turn"),
+                )),
+            )
+            .await
+            .expect("start process with explicit observer options");
+    }
+    assert!(
+        !registry
+            .is_observer(parent_session_id, "default-start")
+            .await
+            .expect("read default start observer"),
+        "the start scope and wake target must not imply an observer edge"
+    );
+    assert!(
+        registry
+            .is_observer(parent_session_id, "explicit-start")
+            .await
+            .expect("read explicit start observer"),
+        "only the explicitly named initial observer must receive an edge"
+    );
+
+    for process_id in ["named-process", "unnamed-process", "pruned-process"] {
+        registry
+            .register_process(crate::ProcessRegistration::new(
+                process_id,
+                crate::ProcessInput::External {
+                    metadata: serde_json::Value::Null,
+                },
+                crate::RecoveryDisposition::ExternallyOwned,
+                crate::ProcessProvenance::host(),
+            ))
+            .await
+            .expect("register observer test process");
+    }
+    let pruned = registry
+        .complete_process(
+            "pruned-process",
+            crate::ProcessAwaitOutput::Success {
+                value: serde_json::Value::Null,
+                control: None,
+            },
+            crate::ProcessCompletionAuthority::external_owner(),
+        )
+        .await
+        .expect("complete process before pruning");
+    registry
+        .prune_terminal_processes(
+            pruned.updated_at_ms.saturating_add(1),
+            None,
+            crate::ProjectionWatermark::NoProjector,
+        )
+        .await
+        .expect("prune terminal process");
+
+    let child = runtime
+        .session_lifecycle_service()
+        .expect("session lifecycle")
+        .create_session(
+            crate::SessionCreateRequest::child_session(
+                parent_session_id,
+                crate::SessionStartPoint::Empty,
+                crate::PluginOptions::default(),
+            )
+            .with_session_id("observer-child")
+            .with_observed_processes([
+                "named-process",
+                "missing-process",
+                "pruned-process",
+            ]),
+        )
+        .await
+        .expect("create child with observer requests");
+
+    assert_eq!(child.observed_processes.len(), 3);
+    assert_eq!(
+        child.observed_processes[0],
+        crate::SessionObservedProcessResult {
+            process_id: "named-process".to_string(),
+            outcome: crate::SessionObservedProcessOutcome::Observed,
+        }
+    );
+    assert_eq!(
+        child.observed_processes[1],
+        crate::SessionObservedProcessResult {
+            process_id: "missing-process".to_string(),
+            outcome: crate::SessionObservedProcessOutcome::NotFound,
+        }
+    );
+    assert_eq!(child.observed_processes[2].process_id, "pruned-process");
+    assert!(matches!(
+        &child.observed_processes[2].outcome,
+        crate::SessionObservedProcessOutcome::NoLongerRetained {
+            terminal_label,
+            ..
+        } if terminal_label == "completed"
+    ));
+    assert!(
+        registry
+            .is_observer("observer-child", "named-process")
+            .await
+            .expect("read named edge")
+    );
+    assert!(
+        !registry
+            .is_observer("observer-child", "unnamed-process")
+            .await
+            .expect("read unnamed edge"),
+        "session creation must not mint an edge the host did not name"
+    );
+    let observer_events = registry
+        .events_after("named-process", 0)
+        .await
+        .expect("read observer audit events")
+        .into_iter()
+        .filter(|event| event.event_type == "process.observer_added")
+        .count();
+    assert_eq!(
+        observer_events, 1,
+        "session creation must use the standard replay-keyed observer-event path"
+    );
+    let child_store = factory
+        .open_existing_store(&crate::SessionStoreCreateRequest {
+            session_id: "observer-child".to_string(),
+            relation: crate::SessionRelation::Root,
+            policy: crate::SessionPolicy::default(),
+        })
+        .await
+        .expect("open child store")
+        .expect("child store exists");
+    let child_meta = child_store
+        .load_session_meta()
+        .await
+        .expect("load child metadata")
+        .expect("child metadata exists");
+    assert!(matches!(
+        child_meta.relation,
+        crate::SessionRelation::Child {
+            parent_session_id: ref stored_parent_session_id,
+            ..
+        } if stored_parent_session_id == parent_session_id
     ));
 }
 

@@ -74,21 +74,27 @@ pub fn select_turn_work_claim_prefix(
     max_batches: usize,
 ) -> usize {
     if max_batches == 0 {
-        return 0;
+        return record_turn_claim_decision(candidates, boundary, max_batches, 0, "zero_limit");
     }
     let Some(first) = candidates.first() else {
-        return 0;
+        return record_turn_claim_decision(candidates, boundary, max_batches, 0, "empty");
     };
     if first.work_class != QueuedWorkClass::TurnWork {
-        return 0;
+        return record_turn_claim_decision(candidates, boundary, max_batches, 0, "command_at_head");
     }
     if boundary == QueuedWorkClaimBoundary::ActiveTurnCheckpoint
         && first.delivery_policy != DeliveryPolicy::EarliestSafeBoundary
     {
-        return 0;
+        return record_turn_claim_decision(
+            candidates,
+            boundary,
+            max_batches,
+            0,
+            "delivery_boundary_blocked",
+        );
     }
-    if first.slot_policy != SlotPolicy::Join {
-        return 1;
+    if first.slot_policy != SlotPolicy::Join || first.merge_key == MergeKey::Never {
+        return record_turn_claim_decision(candidates, boundary, max_batches, 1, "single_wake");
     }
     let mut selected = 1;
     for candidate in &candidates[1..] {
@@ -102,6 +108,31 @@ pub fn select_turn_work_claim_prefix(
         }
         selected += 1;
     }
+    record_turn_claim_decision(
+        candidates,
+        boundary,
+        max_batches,
+        selected,
+        "coalesced_prefix",
+    )
+}
+
+fn record_turn_claim_decision(
+    candidates: &[ClaimCandidate],
+    boundary: QueuedWorkClaimBoundary,
+    max_batches: usize,
+    selected: usize,
+    outcome: &'static str,
+) -> usize {
+    tracing::info!(
+        target: "lash::wake_turn_policy",
+        ?boundary,
+        max_batches,
+        candidates = ?candidates,
+        selected,
+        outcome,
+        "wake turn claim decision"
+    );
     selected
 }
 
@@ -243,6 +274,54 @@ mod tests {
         assert_eq!(
             select_turn_work_claim_prefix(&candidates, QueuedWorkClaimBoundary::Idle, 3),
             3
+        );
+    }
+
+    #[test]
+    fn join_slot_with_never_merge_key_claims_each_wake_separately() {
+        let candidates = vec![
+            candidate(
+                1,
+                QueuedWorkClass::TurnWork,
+                DeliveryPolicy::EarliestSafeBoundary,
+                SlotPolicy::Join,
+                MergeKey::Never,
+            ),
+            candidate(
+                2,
+                QueuedWorkClass::TurnWork,
+                DeliveryPolicy::EarliestSafeBoundary,
+                SlotPolicy::Join,
+                MergeKey::Never,
+            ),
+        ];
+        assert_eq!(
+            select_turn_work_claim_prefix(&candidates, QueuedWorkClaimBoundary::Idle, 8),
+            1
+        );
+    }
+
+    #[test]
+    fn exclusive_slot_with_group_key_still_claims_one() {
+        let candidates = vec![
+            candidate(
+                1,
+                QueuedWorkClass::TurnWork,
+                DeliveryPolicy::EarliestSafeBoundary,
+                SlotPolicy::Exclusive,
+                MergeKey::Group("inert-under-exclusive".to_string()),
+            ),
+            candidate(
+                2,
+                QueuedWorkClass::TurnWork,
+                DeliveryPolicy::EarliestSafeBoundary,
+                SlotPolicy::Exclusive,
+                MergeKey::Group("inert-under-exclusive".to_string()),
+            ),
+        ];
+        assert_eq!(
+            select_turn_work_claim_prefix(&candidates, QueuedWorkClaimBoundary::Idle, 8),
+            1
         );
     }
 

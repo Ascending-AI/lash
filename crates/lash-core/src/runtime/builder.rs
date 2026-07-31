@@ -223,6 +223,19 @@ impl EmbeddedRuntimeBuilder {
         self
     }
 
+    pub fn with_wake_turn_policy(mut self, policy: crate::WakeTurnPolicy) -> Self {
+        self.core.control.wake_turn_policy = policy;
+        self
+    }
+
+    pub fn with_process_tool_visibility_filter(
+        mut self,
+        filter: Arc<dyn crate::ProcessToolVisibilityFilter>,
+    ) -> Self {
+        self.core.control.process_tool_visibility_filter = Some(filter);
+        self
+    }
+
     fn resolve_state_from_defaults(&self) -> RuntimeSessionState {
         let mut state = self.initial_state.clone().unwrap_or_default();
         if let Some(session_id) = &self.session_id {

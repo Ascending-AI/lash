@@ -147,6 +147,19 @@ impl RuntimeEnvironmentBuilder {
         self
     }
 
+    pub fn with_wake_turn_policy(mut self, policy: crate::WakeTurnPolicy) -> Self {
+        self.env.core.control.wake_turn_policy = policy;
+        self
+    }
+
+    pub fn with_process_tool_visibility_filter(
+        mut self,
+        filter: Arc<dyn crate::ProcessToolVisibilityFilter>,
+    ) -> Self {
+        self.env.core.control.process_tool_visibility_filter = Some(filter);
+        self
+    }
+
     pub fn with_runtime_host_config(mut self, core: RuntimeHostConfig) -> Self {
         self.env.core = core;
         self

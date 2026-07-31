@@ -334,8 +334,16 @@ impl Processes {
     /// `cutoff_epoch_ms`, returning what was reclaimed. Non-terminal rows are
     /// never touched. Lash exposes no finite maximum waiter lifetime: the host
     /// must retain rows beyond every still-replayable await, and a later await
-    /// after pruning receives the typed `ProcessNoLongerRetained` outcome.
-    pub async fn prune(&self, cutoff_epoch_ms: u64) -> Result<lash_core::ProcessPruneReport> {
+    /// after pruning receives the typed `ProcessNoLongerRetained` outcome. Pass
+    /// either the projector's acknowledged
+    /// [`ProjectionWatermark::UpTo`](lash_core::ProjectionWatermark::UpTo)
+    /// cursor or an explicit
+    /// [`ProjectionWatermark::NoProjector`](lash_core::ProjectionWatermark::NoProjector).
+    pub async fn prune(
+        &self,
+        cutoff_epoch_ms: u64,
+        watermark: lash_core::ProjectionWatermark,
+    ) -> Result<lash_core::ProcessPruneReport> {
         let registry = self.registry()?;
         let candidates = registry
             .list_processes(&lash_core::ProcessListFilter {
@@ -358,11 +366,7 @@ impl Processes {
                 .await?;
         }
         registry
-            .prune_terminal_processes(
-                cutoff_epoch_ms,
-                None,
-                lash_core::ProjectionWatermark::NoProjector,
-            )
+            .prune_terminal_processes(cutoff_epoch_ms, None, watermark)
             .await
             .map_err(Into::into)
     }

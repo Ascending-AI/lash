@@ -825,6 +825,27 @@ async fn tombstones_make_pruned_processes_distinguishable(registry: Arc<dyn Proc
         pruned_at_ms >= prune_cutoff,
         "tombstones must be stamped with prune time, not the retention cutoff"
     );
+    let await_output = crate::ProcessAwaiter::polling(Arc::clone(&registry))
+        .await_terminal(process_id)
+        .await
+        .expect("await must render a retained tombstone as a typed outcome");
+    assert!(matches!(
+        await_output,
+        crate::ProcessAwaitOutput::NoLongerRetained { .. }
+    ));
+    assert!(
+        await_output.into_tool_output().is_success(),
+        "a retained tombstone await must render as information, not a tool failure"
+    );
+    assert!(matches!(
+        crate::InlineRuntimeEffectController::request_process_cancel(
+            Arc::clone(&registry),
+            process_id,
+            Some("cancel after prune".to_string()),
+        )
+        .await,
+        Err(crate::PluginError::ProcessNoLongerRetained { .. })
+    ));
     assert!(matches!(
         registry.events_after(process_id, 0).await,
         Err(crate::PluginError::ProcessNoLongerRetained { .. })

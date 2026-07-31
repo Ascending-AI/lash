@@ -7,7 +7,7 @@ use anyhow::Context;
 use lash::usage::SessionUsageReport;
 use lash_core::llm::types::{LlmResponse, LlmUsage};
 use lash_core::runtime::{
-    DeliveryPolicy, QueuedWorkBatchDraft, QueuedWorkClaimBoundary, QueuedWorkCompletion,
+    DeliveryPolicy, MergeKey, QueuedWorkBatchDraft, QueuedWorkClaimBoundary, QueuedWorkCompletion,
     QueuedWorkPayload, RuntimeScope, RuntimeSubject, RuntimeTurnPhase, RuntimeTurnPhaseProbe,
     SessionCommand, SlotPolicy,
 };

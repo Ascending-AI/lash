@@ -119,6 +119,91 @@ pub async fn wake_delivery_crash_matrix(
         "wake outbox and delivery transitions changed lifecycle bytes"
     );
 
+    let coalesced_process_id = "wake-coalesced-sender";
+    registry
+        .register_process(
+            process_registry::registration(coalesced_process_id)
+                .with_extra_event_types([process_registry::wake_event_type("producer.wake")])
+                .with_wake_session_id(Some(target_session_id.to_string())),
+        )
+        .await
+        .expect("register coalesced wake producer");
+    let mut coalesced_sequences = Vec::new();
+    for wake_input in ["coalesced-a", "coalesced-b"] {
+        coalesced_sequences.push(
+            registry
+                .append_event(
+                    coalesced_process_id,
+                    crate::ProcessEventAppendRequest::new(
+                        "producer.wake",
+                        serde_json::json!({"wake_input": wake_input}),
+                    ),
+                )
+                .await
+                .expect("append coalesced wake")
+                .wake_delivery
+                .expect("coalesced wake outbox row")
+                .sequence,
+        );
+    }
+    let coalesce_policy = crate::WakeTurnPolicy::coalesce(
+        crate::DeliveryPolicy::EarliestSafeBoundary,
+        crate::WakeCoalescingKey::Group("conformance-wakes".to_string()),
+    );
+    let mut coalesced_enqueued = 0;
+    for _ in 0..2 {
+        coalesced_enqueued += crate::WakeDeliveryDriver::drive_pending_once_with_policy(
+            Arc::clone(&registry),
+            Arc::clone(&factory),
+            None,
+            Arc::new(crate::SystemClock),
+            &coalesce_policy,
+            32,
+        )
+        .await
+        .expect("deliver coalescing candidates")
+        .enqueued;
+    }
+    assert_eq!(
+        coalesced_enqueued, 2,
+        "each sender outbox row must settle even when receiver claims can merge"
+    );
+    let deliveries = registry
+        .list_wake_deliveries(None)
+        .await
+        .expect("list coalesced sender rows");
+    for sequence in coalesced_sequences {
+        assert_eq!(
+            deliveries
+                .iter()
+                .find(|delivery| {
+                    delivery.wake.process_id == coalesced_process_id
+                        && delivery.wake.sequence == sequence
+                })
+                .expect("coalesced sender row remains inspectable")
+                .state,
+            crate::WakeDeliveryState::Enqueued,
+            "every sender row must be settled independently"
+        );
+    }
+    let coalesced_receiver_rows = target
+        .list_queued_work(target_session_id)
+        .await
+        .expect("list coalesced receiver rows")
+        .into_iter()
+        .filter(|batch| {
+            batch
+                .source_key
+                .as_deref()
+                .is_some_and(|key| key.contains(coalesced_process_id))
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(coalesced_receiver_rows.len(), 2);
+    assert!(coalesced_receiver_rows.iter().all(|batch| {
+        batch.slot_policy == crate::SlotPolicy::Join
+            && batch.merge_key == crate::MergeKey::Group("conformance-wakes".to_string())
+    }));
+
     let retarget_process_id = "wake-retarget-in-flight";
     registry
         .register_process(

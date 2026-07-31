@@ -11,6 +11,18 @@ impl lash_core::ProcessRunHandle for NoopProcessRunHandle {
 
 struct NonblockingObservationQuery;
 
+struct HideAllProcessTools;
+
+impl lash_core::ProcessToolVisibilityFilter for HideAllProcessTools {
+    fn narrow(
+        &self,
+        _session: &lash_core::SessionId,
+        _candidates: &[lash_core::ProcessId],
+    ) -> Vec<lash_core::ProcessId> {
+        Vec::new()
+    }
+}
+
 impl lash_core::PluginOperation for NonblockingObservationQuery {
     const NAME: &'static str = "test.nonblocking_observation_query";
     const DESCRIPTION: &'static str =
@@ -605,6 +617,81 @@ async fn processes_cancel_cancels_visible_process() -> Result<()> {
 }
 
 #[tokio::test]
+async fn process_admin_list_signal_and_cancel_bypass_model_tool_filter() -> Result<()> {
+    let core = explicit_ephemeral_facets(LashCore::standard_builder())
+        .provider(mock_provider())
+        .model(mock_model_spec())
+        .store_factory(Arc::new(lash_core::InMemorySessionStoreFactory::new()))
+        .process_registry(Arc::new(TestLocalProcessRegistry::default()))
+        .process_tool_visibility_filter(Arc::new(HideAllProcessTools))
+        .advanced()
+        .runtime_host_config(RuntimeHostConfig::in_memory())
+        .build()?;
+    let session = core.session("host-filter-bypass").open().await?;
+    for process_id in ["host-filter-signal", "host-filter-cancel"] {
+        session
+            .processes()
+            .start(
+                lash_core::ProcessStartRequest::external(
+                    process_id,
+                    lash_core::ProcessOriginator::host(),
+                    serde_json::Value::Null,
+                )
+                .with_extra_event_types([lash_core::ProcessEventType {
+                    name: "signal.ready".to_string(),
+                    payload_schema: lash_core::LashSchema::any(),
+                    semantics: lash_core::ProcessEventSemanticsSpec::default(),
+                }])
+                .with_observers(["host-filter-bypass".to_string()]),
+                inline_scope(lash_core::ExecutionScope::process(process_id)),
+            )
+            .await?;
+    }
+
+    assert_eq!(
+        session.processes().list_all().await?.len(),
+        2,
+        "host list_all must retain the complete observer-edge view"
+    );
+    session
+        .processes()
+        .signal(
+            "host-filter-signal",
+            "ready",
+            "host-filter-signal-id",
+            serde_json::json!({"source": "host"}),
+            inline_scope(lash_core::ExecutionScope::process("host-filter-signal")),
+        )
+        .await?;
+    assert!(
+        session
+            .processes()
+            .events("host-filter-signal", 0)
+            .await?
+            .iter()
+            .any(|event| event.event_type == "signal.ready"),
+        "host events must expose the signal hidden from model tools"
+    );
+    session
+        .processes()
+        .cancel(
+            "host-filter-cancel",
+            inline_scope(lash_core::ExecutionScope::process("host-filter-cancel")),
+        )
+        .await?;
+    assert!(
+        session
+            .processes()
+            .events("host-filter-cancel", 0)
+            .await?
+            .iter()
+            .any(|event| event.event_type == "process.cancel_requested"),
+        "host cancel must bypass the model-tool filter"
+    );
+    Ok(())
+}
+
+#[tokio::test]
 async fn processes_cancel_all_cancels_visible_processes() -> Result<()> {
     let runtime_host = RuntimeHostConfig::in_memory();
     let registry =
@@ -724,6 +811,7 @@ async fn session_control_manages_child_session_lifecycle() -> Result<()> {
             policy: None,
             plugin_source: lash_core::SessionPluginSource::CurrentSessionFork,
             initial_nodes: Vec::new(),
+            observed_processes: Vec::new(),
             tool_access: lash_core::SessionToolAccess::default(),
             subagent: None,
             context_overlay: lash_core::SessionContextOverlay::default(),
@@ -734,5 +822,145 @@ async fn session_control_manages_child_session_lifecycle() -> Result<()> {
 
     assert_eq!(child.session_id, "child-control");
     children.close_session(&child.session_id).await?;
+    Ok(())
+}
+
+#[tokio::test]
+async fn managed_create_publishes_create_and_fork_observers_before_returning() -> Result<()> {
+    use lash_core::ProcessRegistry as _;
+
+    let sqlite_dir = tempfile::tempdir().expect("create managed-create SQLite directory");
+    let cases: Vec<(&str, Option<Arc<dyn lash_core::SessionStoreFactory>>)> = vec![
+        (
+            "in-memory",
+            Some(Arc::new(lash_core::InMemorySessionStoreFactory::new())),
+        ),
+        (
+            "sqlite",
+            Some(Arc::new(lash_sqlite_store::SqliteSessionStoreFactory::new(
+                sqlite_dir.path().join("managed-create-sessions"),
+            ))),
+        ),
+        ("ephemeral", None),
+    ];
+
+    for (case, store_factory) in cases {
+        let parent_session_id = format!("managed-observer-parent-{case}");
+        let child_session_id = format!("managed-observer-child-{case}");
+        let create_process_id = format!("managed-create-process-{case}");
+        let fork_process_id = format!("managed-fork-process-{case}");
+        let missing_fork_process_id = format!("managed-missing-fork-process-{case}");
+        let registry = Arc::new(TestLocalProcessRegistry::default());
+        let driver =
+            lash_core::ProcessWorkDriver::new(registry.clone(), Arc::new(NoopProcessRunHandle));
+        let mut builder = explicit_ephemeral_facets(LashCore::standard_builder())
+            .provider(mock_provider())
+            .model(mock_model_spec())
+            .process_work_driver(driver);
+        if let Some(store_factory) = store_factory.clone() {
+            builder = builder.store_factory(store_factory);
+        }
+        let core = builder.build()?;
+        let session = core.session(&parent_session_id).open().await?;
+
+        for process_id in [&create_process_id, &fork_process_id] {
+            registry
+                .register_process(lash_core::ProcessRegistration::new(
+                    process_id,
+                    lash_core::ProcessInput::External {
+                        metadata: serde_json::Value::Null,
+                    },
+                    lash_core::RecoveryDisposition::ExternallyOwned,
+                    lash_core::ProcessProvenance::host(),
+                ))
+                .await?;
+        }
+
+        let mut request = SessionCreateRequest::root(
+            lash_core::SessionStartPoint::Empty,
+            lash_core::PluginOptions::default(),
+        )
+        .with_session_id(&child_session_id)
+        .with_observed_processes([&create_process_id]);
+        request.relation = lash_core::SessionRelation::Fork {
+            source_session_id: format!("managed-observer-source-{case}"),
+            source_node_id: format!("managed-observer-source-node-{case}"),
+            observer_inheritance: lash_core::ObserverInheritance::All,
+            pending_observer_process_ids: vec![
+                fork_process_id.clone(),
+                missing_fork_process_id.clone(),
+            ],
+        };
+
+        let child = session.admin().children().create_session(request).await?;
+
+        assert_eq!(child.session_id, child_session_id);
+        assert_eq!(
+            child.observed_processes,
+            vec![lash_core::SessionObservedProcessResult {
+                process_id: create_process_id.clone(),
+                outcome: lash_core::SessionObservedProcessOutcome::Observed,
+            }]
+        );
+        assert!(
+            registry
+                .is_observer(&child.session_id, &create_process_id)
+                .await?,
+            "the returned live session must have its create observer edge"
+        );
+        assert!(
+            registry
+                .is_observer(&child.session_id, &fork_process_id)
+                .await?,
+            "the returned live session must have its inherited fork observer edge"
+        );
+        assert!(
+            !registry
+                .is_observer(&child.session_id, &missing_fork_process_id)
+                .await?,
+            "an unavailable inherited process must not fail managed creation"
+        );
+
+        let create_events = registry.events_after(&create_process_id, 0).await?;
+        assert!(create_events.iter().any(|event| {
+            event.event_type == "process.observer_added"
+                && event.payload["by"]
+                    == serde_json::json!({
+                        "kind": "host",
+                        "operation_id": format!("session-create:{child_session_id}")
+                    })
+        }));
+        let fork_events = registry.events_after(&fork_process_id, 0).await?;
+        assert!(fork_events.iter().any(|event| {
+            event.event_type == "process.observer_added"
+                && event.payload["by"] == serde_json::json!({"kind": "fork_inheritance"})
+        }));
+
+        if let Some(store_factory) = store_factory {
+            let child_store = store_factory
+                .open_existing_store(&lash_core::SessionStoreCreateRequest {
+                    session_id: child_session_id,
+                    relation: lash_core::SessionRelation::Root,
+                    policy: lash_core::SessionPolicy::default(),
+                })
+                .await
+                .expect("open managed child store")
+                .expect("managed child store exists");
+            let child_meta = child_store
+                .load_session_meta()
+                .await?
+                .expect("managed child metadata exists");
+            assert!(
+                matches!(
+                    child_meta.relation,
+                    lash_core::SessionRelation::Fork {
+                        ref pending_observer_process_ids,
+                        ..
+                    } if pending_observer_process_ids.is_empty()
+                ),
+                "managed creation must persist a fully settled base fork relation"
+            );
+        }
+    }
     Ok(())
 }
