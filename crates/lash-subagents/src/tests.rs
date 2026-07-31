@@ -258,7 +258,8 @@ fn spawn_schema_is_strict_and_nameless() {
 }
 
 #[test]
-fn subagents_source_does_not_reintroduce_retired_lifecycle_api() {
+// Architecture lint: lexical guard for retired API names, not behavior proof.
+fn lint_subagents_source_does_not_reintroduce_retired_lifecycle_api() {
     let manifest_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
     let source_files = [
         "src/lib.rs",

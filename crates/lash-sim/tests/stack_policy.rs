@@ -33,7 +33,9 @@ fn stack_policy_agent_contract_product_probes_pass_at_2_mib() {
 }
 
 #[test]
-fn stack_policy_rejects_raw_stack_literals_and_global_stack_escape_hatches() {
+// Architecture lint: lexical escape-hatch guard. The preceding product-stack
+// probe is the behavioral half of this policy.
+fn lint_stack_policy_rejects_raw_stack_literals_and_global_stack_escape_hatches() {
     assert_eq!(PRODUCT_STACK_BUDGET_BYTES, 2 * 1024 * 1024);
     assert_eq!(SIM_HARNESS_STACK_LIMIT_BYTES, 8 * 1024 * 1024);
 

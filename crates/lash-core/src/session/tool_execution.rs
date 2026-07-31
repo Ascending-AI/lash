@@ -66,6 +66,48 @@ impl std::fmt::Debug for ToolInvocation {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn invocation(id: &str, value: i64) -> ToolInvocation {
+        ToolInvocation::new(
+            id,
+            crate::ToolId::from("tool:test"),
+            serde_json::json!({"value": value}),
+        )
+    }
+
+    #[test]
+    fn deterministic_batch_identity_is_stable_and_content_addressed() {
+        let calls = vec![invocation("a", 1), invocation("b", 2)];
+        let first = deterministic_tool_invocation_batch_id(&calls);
+        let retry = deterministic_tool_invocation_batch_id(&calls);
+        assert_eq!(first, retry);
+        assert!(first.starts_with("tool-batch:"));
+
+        let changed_args = vec![invocation("a", 1), invocation("b", 3)];
+        let reordered = vec![invocation("b", 2), invocation("a", 1)];
+        assert_ne!(first, deterministic_tool_invocation_batch_id(&changed_args));
+        assert_ne!(first, deterministic_tool_invocation_batch_id(&reordered));
+    }
+
+    #[test]
+    fn cancelled_tool_call_preserves_protocol_identity_and_typed_outcome() {
+        let completed = cancelled_completed_tool_call(
+            "call".to_string(),
+            "tool".to_string(),
+            serde_json::json!({"arg": true}),
+            None,
+        );
+        assert_eq!(completed.call_id, "call");
+        assert_eq!(completed.tool_name, "tool");
+        assert_eq!(completed.model_return.call_id, "call");
+        assert_eq!(completed.output.status(), crate::ToolCallStatus::Cancelled);
+        assert_eq!(completed.duration_ms, 0);
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct ToolInvocationReply {
     pub output: ToolCallOutput,

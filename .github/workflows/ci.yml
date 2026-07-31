@@ -426,6 +426,60 @@ jobs:
           LASH_POSTGRES_DATABASE_URL: postgres://lash:lash@localhost:5432/lash
           LASH_REQUIRE_POSTGRES: "1"
 
+  s3-store:
+    name: Test S3 store against MinIO
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Restore cargo cache
+        uses: useblacksmith/rust-cache@v3.0.1
+        with:
+          cache-bin: false
+          shared-key: linux-debug
+          save-if: false
+
+      - name: Install protoc
+        uses: taiki-e/install-action@v2
+        with:
+          tool: protoc
+
+      - name: Start MinIO and create test bucket
+        run: |
+          docker run -d --name lash-ci-minio \
+            -e MINIO_ROOT_USER=minioadmin \
+            -e MINIO_ROOT_PASSWORD=minioadmin \
+            -p 9000:9000 \
+            minio/minio:RELEASE.2025-04-22T22-12-26Z server /data
+          for attempt in $(seq 1 60); do
+            if docker run --rm --network host minio/mc:RELEASE.2025-04-16T18-13-26Z \
+              alias set ci http://127.0.0.1:9000 minioadmin minioadmin; then
+              break
+            fi
+            if [ "$attempt" -eq 60 ]; then
+              docker logs lash-ci-minio
+              exit 1
+            fi
+            sleep 1
+          done
+          docker run --rm --network host --entrypoint /bin/sh minio/mc:RELEASE.2025-04-16T18-13-26Z -c \
+            'mc alias set ci http://127.0.0.1:9000 minioadmin minioadmin >/dev/null && mc mb --ignore-existing ci/lash-attachments'
+
+      - name: Test S3 store conformance
+        run: cargo test -p lash-s3-store --locked
+        env:
+          LASH_MINIO_ENDPOINT: http://127.0.0.1:9000
+          LASH_REQUIRE_MINIO: "1"
+
+      - name: Stop MinIO
+        if: always()
+        run: docker rm -f lash-ci-minio
+
   stack-budget:
     name: Stack budget
     runs-on: blacksmith-8vcpu-ubuntu-2404

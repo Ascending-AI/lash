@@ -85,6 +85,11 @@ async fn append_plugin_nodes(
             }
             Ok(Some(next))
         }
+        // Ruling: observational-memory maintenance is derived, best-effort
+        // enrichment. A concurrent durable turn owns the newer branch; do not
+        // graft an observation computed from the stale transcript onto it.
+        // The next post-persist maintenance pass recomputes from durable graph
+        // state, so dropping this stale derived append is intentional.
         AppendSessionNodesResult::StaleBranch { .. } => Ok(None),
     }
 }

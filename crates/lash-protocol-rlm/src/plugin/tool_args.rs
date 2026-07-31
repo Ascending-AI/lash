@@ -228,7 +228,49 @@ mod tests {
     }
 
     #[test]
-    fn projection_policy_cutover_has_no_name_based_projection_checks() {
+    fn renaming_a_tool_does_not_change_projection_policy() {
+        let args = serde_json::json!({
+            "seed": {
+                "projected": projected(serde_json::json!("preserve me")),
+                "computed": {"value": projected(serde_json::json!(7))}
+            }
+        });
+        let policy =
+            lash_core::ToolArgumentProjectionPolicy::preserve_projected_refs_in_field("seed");
+
+        for tool_name in ["continue_as", "renamed_control_tool", "arbitrary_tool_name"] {
+            let context = lash_core::plugin::ToolCallHookContext::new(
+                "session".to_string(),
+                tool_name.to_string(),
+                args.clone(),
+                policy.clone(),
+                lash_core::TurnContext::default(),
+                std::sync::Arc::new(lash_core::testing::MockSessionManager::default()),
+            );
+            let directives = super::normalize_projected_tool_args(context)
+                .expect("projection normalization succeeds");
+            let [lash_core::plugin::PluginDirective::ReplaceToolArgs { args: normalized }] =
+                directives.as_slice()
+            else {
+                panic!("projection-aware args must be rewritten for {tool_name}")
+            };
+            assert_eq!(
+                normalized,
+                &serde_json::json!({
+                    "seed": {
+                        "projected": {"__projected__": "preserve me"},
+                        "computed": {"value": 7}
+                    }
+                }),
+                "tool identity must not participate in projection policy"
+            );
+        }
+    }
+
+    #[test]
+    // Architecture lint: lexical cutover guard, not behavior proof. The table
+    // above proves the name-independent runtime behavior.
+    fn lint_projection_policy_cutover_has_no_name_based_projection_checks() {
         let manifest_dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
         let registration_src =
             std::fs::read_to_string(manifest_dir.join("src/plugin/registration.rs"))

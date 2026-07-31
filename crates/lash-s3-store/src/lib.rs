@@ -448,7 +448,25 @@ mod tests {
     }
 
     fn minio_config_from_env() -> Option<S3AttachmentStoreConfig> {
-        let endpoint_url = std::env::var("LASH_MINIO_ENDPOINT").ok()?;
+        let endpoint_url = match std::env::var("LASH_MINIO_ENDPOINT") {
+            Ok(endpoint) if !endpoint.is_empty() => endpoint,
+            Ok(_) => {
+                assert_ne!(
+                    std::env::var("LASH_REQUIRE_MINIO").as_deref(),
+                    Ok("1"),
+                    "LASH_MINIO_ENDPOINT must be non-empty when LASH_REQUIRE_MINIO=1"
+                );
+                return None;
+            }
+            Err(error) => {
+                assert_ne!(
+                    std::env::var("LASH_REQUIRE_MINIO").as_deref(),
+                    Ok("1"),
+                    "LASH_MINIO_ENDPOINT must be set when LASH_REQUIRE_MINIO=1: {error}"
+                );
+                return None;
+            }
+        };
         let bucket =
             std::env::var("LASH_MINIO_BUCKET").unwrap_or_else(|_| "lash-attachments".into());
         let region = std::env::var("LASH_MINIO_REGION").unwrap_or_else(|_| "us-east-1".into());

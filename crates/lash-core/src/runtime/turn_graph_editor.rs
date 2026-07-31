@@ -267,3 +267,80 @@ impl TurnGraphEditor {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn message(id: &str, text: &str) -> Message {
+        Message {
+            id: id.to_string(),
+            role: crate::MessageRole::User,
+            parts: crate::shared_parts(vec![crate::Part {
+                id: format!("{id}.p0"),
+                kind: crate::PartKind::Text,
+                content: text.to_string(),
+                attachment: None,
+                tool_call_id: None,
+                tool_name: None,
+                tool_replay: None,
+                prune_state: crate::PruneState::Intact,
+                reasoning_meta: None,
+                response_meta: None,
+            }]),
+            origin: None,
+        }
+    }
+
+    fn editor() -> TurnGraphEditor {
+        let graph = Arc::new(SessionGraph::default());
+        TurnGraphEditor::new(
+            Arc::clone(&graph),
+            graph.read_model(),
+            None,
+            "turn-graph-editor-test",
+            Arc::new(crate::SystemClock),
+            HashSet::new(),
+        )
+    }
+
+    #[test]
+    fn append_commit_and_persistence_marking_follow_the_same_graph_path() {
+        let mut editor = editor();
+        let first = message("first", "one");
+        let delta = editor
+            .message_delta_if_current_preserved([&first])
+            .expect("empty editor accepts appended message");
+        assert_eq!(
+            delta
+                .iter()
+                .map(|message| message.id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["first"]
+        );
+
+        editor.append_active_conversation_messages(&[first]);
+        let pending = editor.graph_commit();
+        assert_eq!(pending.nodes.len(), 1);
+        assert_eq!(pending.leaf_node_id, Some(pending.nodes[0].node_id.clone()));
+        editor.mark_node_ids_persisted(pending.nodes.iter().map(|node| node.node_id.clone()));
+        assert!(editor.graph_commit().nodes.is_empty());
+
+        let graph = editor.into_session_graph();
+        assert_eq!(graph.nodes.len(), 1);
+        assert_eq!(graph.read_model().messages.len(), 1);
+    }
+
+    #[test]
+    fn message_delta_rejects_rewriting_the_existing_prefix() {
+        let first = message("first", "one");
+        let mut editor = editor();
+        editor.append_active_conversation_messages(std::slice::from_ref(&first));
+        let rewritten = message("first", "changed");
+        assert!(
+            editor
+                .message_delta_if_current_preserved([&rewritten])
+                .is_none()
+        );
+    }
+}
