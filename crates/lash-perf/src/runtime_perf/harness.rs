@@ -17,7 +17,6 @@ use lash::{
 };
 use lash_core::SessionHistoryRecord;
 use lash_llm_tools::LlmToolsPluginFactory;
-use lash_plugin_observational_memory::ACTIVE_STATE_PLUGIN_TYPE as OM_ACTIVE_STATE_PLUGIN_TYPE;
 use lash_protocol_rlm::RlmTurnInputExt;
 use lash_provider_openai::OpenAiCompatibleProvider;
 use lash_rlm_types::{RlmProtocolEvent, RlmTrajectoryEntry};
@@ -127,13 +126,6 @@ impl BenchmarkRuntime {
             .as_ref()
             .expect("benchmark session")
             .usage_report()
-    }
-
-    pub(crate) fn read_view(&self) -> lash::persistence::SessionReadView {
-        self.session
-            .as_ref()
-            .expect("benchmark session")
-            .read_view()
     }
 
     pub(crate) fn store(&self) -> Arc<RuntimePerfStore> {
@@ -1094,43 +1086,6 @@ pub(crate) async fn seed_runtime_state(
         .await
         .map_err(|err| anyhow::anyhow!("seed historical messages: {err}"))?;
 
-    if matches!(
-        scenario,
-        RuntimePerfScenario::ObservationalMemory
-            | RuntimePerfScenario::ObservationalMemoryMaintenance
-    ) {
-        if matches!(
-            scenario,
-            RuntimePerfScenario::ObservationalMemoryMaintenance
-        ) {
-            return Ok(());
-        }
-
-        let observed_through_message_id = runtime
-            .read_view()
-            .messages()
-            .last()
-            .map(|message| message.id.clone())
-            .ok_or_else(|| anyhow::anyhow!("OM scenario expected seeded messages"))?;
-        runtime
-            .session
-            .as_ref()
-            .expect("benchmark session")
-            .admin()
-            .state()
-            .append_plugin_body(
-                OM_ACTIVE_STATE_PLUGIN_TYPE,
-                serde_json::json!({
-                    "observed_through_message_id": observed_through_message_id,
-                    "observations": "Date: Apr 13, 2026\n* 🔴 User is evaluating Lash runtime performance without model inference.\n* 🟡 Historical inspection focused on runtime, token ledger export, and tool initialization overhead.\n* ✅ Shared process-wide search cache was added for indexed grep state.",
-                    "current_task": "Primary: Benchmark runtime overhead.\nSecondary: Compare standard, rlm, and observational memory paths.",
-                    "suggested_response": "Report the runtime benchmark numbers and the dominant overheads directly."
-                }),
-            )
-            .await
-            .map_err(|err| anyhow::anyhow!("seed OM reflection node: {err}"))?;
-    }
-
     if matches!(scenario, RuntimePerfScenario::RlmGlobals) {
         seed_rlm_live_globals(runtime).await?;
     }
@@ -1346,18 +1301,6 @@ pub(crate) fn benchmark_prompt(scenario: RuntimePerfScenario, turn_index: usize)
                 .rsplit_once(": ")
                 .map(|(_, text)| text)
                 .unwrap_or("runtime perf benchmark ok")
-        ),
-        RuntimePerfScenario::ObservationalMemory => format!(
-            "Turn {} in observational memory mode. Continue the same longer benchmark conversation and reply with exactly: {}",
-            turn_index + 1,
-            DEFAULT_PROMPT
-                .rsplit_once(": ")
-                .map(|(_, text)| text)
-                .unwrap_or("runtime perf benchmark ok")
-        ),
-        RuntimePerfScenario::ObservationalMemoryMaintenance => format!(
-            "Turn {} in observational memory maintenance benchmark mode. Leave the hidden observer maintenance path eligible after persistence and reply with exactly: runtime perf benchmark ok",
-            turn_index + 1
         ),
         RuntimePerfScenario::OpenAiCompatStream => format!(
             "Turn {} in OpenAI-compatible streaming benchmark mode. Continue the benchmark chat and reply with exactly: runtime perf benchmark ok",

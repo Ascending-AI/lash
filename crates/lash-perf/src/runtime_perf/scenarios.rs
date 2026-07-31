@@ -1,6 +1,4 @@
-use lash_standard_plugins::{
-    ObservationalMemoryConfig, RollingHistoryConfig, StandardContextApproach,
-};
+use lash_standard_plugins::{RollingHistoryConfig, StandardContextApproach};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub(crate) enum ExecutionMode {
@@ -66,8 +64,6 @@ pub(crate) enum RuntimePerfScenario {
     RlmStreamedPairedLashlang,
     RlmLargeToolCatalog,
     RlmObliqueStackMix,
-    ObservationalMemory,
-    ObservationalMemoryMaintenance,
     OpenAiCompatStream,
     StandardShellOutput,
     ToolDiscoverySearch,
@@ -118,7 +114,7 @@ macro_rules! runtime_perf_metadata {
 }
 
 impl RuntimePerfScenario {
-    pub(crate) const METADATA: [RuntimePerfScenarioMetadata; 39] = [
+    pub(crate) const METADATA: [RuntimePerfScenarioMetadata; 37] = [
         runtime_perf_metadata!(
             Standard,
             "standard",
@@ -239,20 +235,6 @@ impl RuntimePerfScenario {
             Rlm,
             RlmProtocolScenario,
             "Measures mixed RLM protocol/Lashlang execution pressure without facade subagent ownership."
-        ),
-        runtime_perf_metadata!(
-            ObservationalMemory,
-            "observational_memory",
-            Standard,
-            AgentScenario,
-            "Measures full agent memory/context composition through the Standard facade."
-        ),
-        runtime_perf_metadata!(
-            ObservationalMemoryMaintenance,
-            "observational_memory_maintenance",
-            Standard,
-            AgentScenario,
-            "Measures facade-level observational memory maintenance and context composition."
         ),
         runtime_perf_metadata!(
             OpenAiCompatStream,
@@ -406,8 +388,8 @@ impl RuntimePerfScenario {
             "Measures active-turn input enqueue, checkpoint claim, and next-request RLM projection."
         ),
     ];
-    pub(crate) const KNOWN: [Self; 39] = runtime_perf_known_scenarios();
-    pub(crate) const DEFAULTS: [Self; 39] = Self::KNOWN;
+    pub(crate) const KNOWN: [Self; 37] = runtime_perf_known_scenarios();
+    pub(crate) const DEFAULTS: [Self; 37] = Self::KNOWN;
 
     pub(crate) fn parse(value: &str) -> Option<Self> {
         Self::METADATA
@@ -444,31 +426,17 @@ impl RuntimePerfScenario {
     }
 
     pub(crate) fn standard_context_approach(self) -> Option<StandardContextApproach> {
-        match self.execution_mode() {
-            mode if !mode.is_standard() => None,
-            _ => Some(match self {
-                Self::ObservationalMemory => StandardContextApproach::ObservationalMemory(
-                    ObservationalMemoryConfig::default(),
-                ),
-                Self::ObservationalMemoryMaintenance => {
-                    StandardContextApproach::ObservationalMemory(ObservationalMemoryConfig {
-                        observation_message_tokens: 30_000,
-                        observation_buffer_tokens: 128,
-                        observation_block_after_tokens: 60_000,
-                        observation_max_tokens_per_batch: 128,
-                        previous_observer_tokens: 256,
-                        reflection_observation_tokens: 40_000,
-                        reflection_buffer_activation_bps: 5_000,
-                        reflection_block_after_tokens: 60_000,
-                    })
-                }
-                _ => StandardContextApproach::RollingHistory(RollingHistoryConfig),
-            }),
+        if self.execution_mode().is_standard() {
+            Some(StandardContextApproach::RollingHistory(
+                RollingHistoryConfig,
+            ))
+        } else {
+            None
         }
     }
 }
 
-const fn runtime_perf_known_scenarios() -> [RuntimePerfScenario; 39] {
+const fn runtime_perf_known_scenarios() -> [RuntimePerfScenario; 37] {
     [
         RuntimePerfScenario::METADATA[0].scenario,
         RuntimePerfScenario::METADATA[1].scenario,
@@ -507,7 +475,5 @@ const fn runtime_perf_known_scenarios() -> [RuntimePerfScenario; 39] {
         RuntimePerfScenario::METADATA[34].scenario,
         RuntimePerfScenario::METADATA[35].scenario,
         RuntimePerfScenario::METADATA[36].scenario,
-        RuntimePerfScenario::METADATA[37].scenario,
-        RuntimePerfScenario::METADATA[38].scenario,
     ]
 }

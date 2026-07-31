@@ -161,8 +161,6 @@ pub(crate) async fn run_once(
         | RuntimePerfScenario::RlmStreamedPairedLashlang
         | RuntimePerfScenario::RlmLargeToolCatalog
         | RuntimePerfScenario::RlmObliqueStackMix
-        | RuntimePerfScenario::ObservationalMemory
-        | RuntimePerfScenario::ObservationalMemoryMaintenance
         | RuntimePerfScenario::OpenAiCompatStream
         | RuntimePerfScenario::StandardShellOutput
         | RuntimePerfScenario::ToolDiscoverySearch

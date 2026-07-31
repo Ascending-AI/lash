@@ -2032,7 +2032,6 @@ dependencies = [
  "lash-core",
  "lash-lashlang-runtime",
  "lash-llm-tools",
- "lash-plugin-observational-memory",
  "lash-protocol-rlm",
  "lash-provider-openai",
  "lash-rlm-types",
@@ -2063,18 +2062,6 @@ dependencies = [
  "thiserror 2.0.18",
  "tokio",
  "tracing",
-]
-
-[[package]]
-name = "lash-plugin-observational-memory"
-version = "0.0.0-dev"
-dependencies = [
- "async-trait",
- "chrono",
- "lash-core",
- "serde",
- "serde_json",
- "tokio",
 ]
 
 [[package]]
@@ -2443,7 +2430,6 @@ version = "0.0.0-dev"
 dependencies = [
  "async-trait",
  "lash-core",
- "lash-plugin-observational-memory",
  "lash-plugin-process-controls",
  "lash-plugin-tool-output-budget",
  "lash-tools",

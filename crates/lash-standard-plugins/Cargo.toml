@@ -25,7 +25,6 @@ workspace = true
 
 [dependencies]
 lash-core = { workspace = true }
-lash-plugin-observational-memory = { workspace = true }
 lash-plugin-process-controls = { workspace = true }
 lash-plugin-tool-output-budget = { workspace = true }
 lash-tools = { workspace = true }

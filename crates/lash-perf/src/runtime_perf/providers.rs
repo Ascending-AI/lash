@@ -1306,18 +1306,6 @@ finish { len: result.value }"#,
         return text_profile(lashlang_block("finish { len: len(chunk) }"));
     }
 
-    if matches!(
-        scenario,
-        RuntimePerfScenario::ObservationalMemoryMaintenance
-    ) && request.session_id().ends_with("-om-observer")
-    {
-        return text_profile(
-            "<observations>Runtime perf observer captured persisted benchmark messages.</observations>\n\
-             <current-task>Measure post-persist observational memory maintenance.</current-task>\n\
-             <suggested-response>Report the runtime perf benchmark marker.</suggested-response>",
-        );
-    }
-
     if request.output_spec.is_some() || request.session_id().ends_with("-llm-query") {
         if request.output_spec.as_ref().is_some_and(|spec| {
             matches!(spec, LlmOutputSpec::JsonSchema(schema) if schema.name == "tool_search_rerank")

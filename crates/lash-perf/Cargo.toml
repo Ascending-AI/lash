@@ -29,7 +29,6 @@ lash-core = { workspace = true, features = ["testing"] }
 lash-lashlang-runtime = { workspace = true }
 lash = { workspace = true, features = ["rlm"] }
 lash-llm-tools = { workspace = true, features = ["lashlang"] }
-lash-plugin-observational-memory = { workspace = true }
 lash-protocol-rlm = { workspace = true }
 lash-provider-openai = { workspace = true }
 lash-rlm-types = { workspace = true }

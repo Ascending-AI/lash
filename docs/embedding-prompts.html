@@ -30,35 +30,7 @@
             <h2>Context Window And History</h2>
             <p><code>ModelSpec.limits.context_window_tokens</code> caps every provider request. It is the model's <strong>prompt (input) budget</strong>, not the total input+output context: the value the rolling-history / prompt-view layer prunes against. The CLI resolves it from a built-in limits table first and falls back to models.dev, applying a provider-level clamp where the route's real ceiling is lower than the catalog (e.g. the Codex OAuth route is clamped to ~256k). Overflow finishes as <code>TurnStop::ProviderError</code>; the runtime does <strong>not</strong> rewrite committed history. Compact into a new Agent Frame, switch model, or switch frames.</p>
           </div>
-          <p>Two context strategies, picked via the mode's context-approach setting:</p>
-          <div class="two-col">
-            <article class="panel">
-              <h3><code>RollingHistory</code> (default)</h3>
-              <p>Prompt View shaping each turn: old images can be elided and the prompt can project a tail window. Durable session graph content remains append-only.</p>
-            </article>
-            <article class="panel">
-              <h3><code>ObservationalMemory</code></h3>
-              <p>Older context is represented through runtime-authored observations in the Prompt View. Configurable: <code>observation_message_tokens</code> (default 30 000), <code>observation_buffer_tokens</code> (6 000), reflection thresholds.</p>
-            </article>
-          </div>
-          <pre data-lang="rust" data-snippet="embedding_prompts#observational-memory-core"><code>use std::sync::Arc;
-
-use lash_standard_plugins::{
-    ObservationalMemoryConfig, StandardContextApproach, StandardToolStackOptions,
-    standard_tool_stack,
-};
-
-let core = lash::LashCore::standard_builder()
-    .plugins(standard_tool_stack(StandardToolStackOptions {
-        standard_context_approach: Some(StandardContextApproach::ObservationalMemory(
-            ObservationalMemoryConfig::default(),
-        )),
-        ..Default::default()
-    }))
-    .effect_host(Arc::new(lash::durability::InlineEffectHost::default()))
-    .attachment_store(Arc::new(lash::persistence::InMemoryAttachmentStore::new()))
-    .build()?;</code></pre>
-          <p>The CLI applies this only to the standard preset; RLM uses its protocol projection state and locked-down runtime stack instead. See <a href="./rlm.html#provider-request-shape">RLM provider request shape</a> for the model-visible request shape.</p>
+          <p>Standard sessions use <code>RollingHistory</code> for Prompt View shaping each turn: old images can be elided and the prompt can project a tail window. Durable session graph content remains append-only. RLM uses its protocol projection state and locked-down runtime stack instead. See <a href="./rlm.html#provider-request-shape">RLM provider request shape</a> for the model-visible request shape.</p>
         </div>
 
         <div class="section" id="projected-bindings">

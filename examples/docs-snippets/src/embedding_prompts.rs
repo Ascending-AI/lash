@@ -9,30 +9,6 @@ use lash::plugins::{
 use lash::provider::ProviderHandle;
 use lash::{LashSession, TurnInput};
 
-async fn observational_memory_core() -> anyhow::Result<()> {
-    // docs:start:observational-memory-core
-    use std::sync::Arc;
-
-    use lash_standard_plugins::{
-        ObservationalMemoryConfig, StandardContextApproach, StandardToolStackOptions,
-        standard_tool_stack,
-    };
-
-    let core = lash::LashCore::standard_builder()
-        .plugins(standard_tool_stack(StandardToolStackOptions {
-            standard_context_approach: Some(StandardContextApproach::ObservationalMemory(
-                ObservationalMemoryConfig::default(),
-            )),
-            ..Default::default()
-        }))
-        .effect_host(Arc::new(lash::durability::InlineEffectHost::default()))
-        .attachment_store(Arc::new(lash::persistence::InMemoryAttachmentStore::new()))
-        .build()?;
-    // docs:end:observational-memory-core
-    let _ = core;
-    Ok(())
-}
-
 #[derive(serde::Serialize)]
 struct Task {
     name: String,
