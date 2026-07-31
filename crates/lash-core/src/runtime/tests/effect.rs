@@ -2094,7 +2094,8 @@ fn effect_module_sources(manifest_dir: &std::path::Path) -> Vec<PathBuf> {
 }
 
 #[test]
-fn runtime_effect_executor_has_no_legacy_future_api() {
+// Architecture lint: lexical guard for a completed cutover, not behavior proof.
+fn lint_runtime_effect_executor_has_no_legacy_future_api() {
     let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let source_files = effect_module_sources(&manifest_dir)
         .into_iter()
@@ -2121,7 +2122,8 @@ fn runtime_effect_executor_has_no_legacy_future_api() {
 }
 
 #[test]
-fn runtime_effect_controller_cutover_has_no_legacy_host_request_or_fallback_symbols() {
+// Architecture lint: lexical guard for a completed cutover, not behavior proof.
+fn lint_runtime_effect_controller_cutover_has_no_legacy_host_request_or_fallback_symbols() {
     let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let source_files = effect_module_sources(&manifest_dir)
         .into_iter()

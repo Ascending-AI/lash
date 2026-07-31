@@ -1,3 +1,4 @@
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
@@ -45,6 +46,7 @@ fn user_message(id: &str, content: &str) -> MessageNode {
 #[derive(Default)]
 struct RecordingHost {
     append_requests: Mutex<Vec<(String, AppendSessionNodesRequest)>>,
+    reject_as_stale: AtomicBool,
 }
 
 #[async_trait]
@@ -68,15 +70,67 @@ impl SessionGraphService for RecordingHost {
             .cloned()
             .or_else(|| request.requires_ancestor_node_id.clone())
             .unwrap_or_else(|| "empty-append".to_string());
+        let required_ancestor = request.requires_ancestor_node_id.clone();
         self.append_requests
             .lock()
             .expect("append requests lock")
             .push((session_id.to_string(), request));
-        Ok(AppendSessionNodesResult::Appended {
-            node_ids,
-            leaf_node_id,
-        })
+        if self.reject_as_stale.load(Ordering::SeqCst) {
+            Ok(AppendSessionNodesResult::StaleBranch {
+                current_leaf_node_id: required_ancestor,
+            })
+        } else {
+            Ok(AppendSessionNodesResult::Appended {
+                node_ids,
+                leaf_node_id,
+            })
+        }
     }
+}
+
+#[tokio::test]
+async fn stale_observation_append_is_dropped_without_mutating_the_local_graph() {
+    let host = Arc::new(RecordingHost::default());
+    host.reject_as_stale.store(true, Ordering::SeqCst);
+    let mut graph = SessionGraph::default();
+    graph.append_message(user_message("committed", "durable transcript").message);
+    let graph_before = serde_json::to_value(&graph).expect("serialize graph before stale append");
+    let sessions: Arc<dyn SessionGraphService> = host.clone();
+    let om_host = crate::host::OmRuntimeHost::new(
+        "session",
+        &sessions,
+        DirectCompletionClient::from_fn(|_, _| {
+            Err(PluginError::Session(
+                "direct completion must not run in append test".to_string(),
+            ))
+        }),
+    );
+
+    let result = om_host
+        .append_plugin_nodes(
+            &graph,
+            vec![(
+                BUFFERED_OBSERVATION_PLUGIN_TYPE.to_string(),
+                serde_json::json!({"observations": "derived from stale transcript"}),
+            )],
+        )
+        .await
+        .expect("stale branch is an intentional best-effort drop");
+
+    assert!(result.is_none(), "stale derived memory must be dropped");
+    assert_eq!(
+        serde_json::to_value(&graph).expect("serialize graph after stale append"),
+        graph_before,
+        "dropping stale observational memory must not mutate the caller's graph"
+    );
+    assert_eq!(
+        host.append_requests
+            .lock()
+            .expect("append requests lock")
+            .len(),
+        1,
+        "the drop ruling must be exercised through an actual host CAS response"
+    );
 }
 
 fn post_persist_context_with_completion(

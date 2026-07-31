@@ -7,10 +7,14 @@ cd "$repo"
 ci_features="${LASH_CI_FEATURES:-}"
 port_base="${LASH_PUSH_GATE_PORT_BASE:-$((20000 + ($$ % 20000)))}"
 postgres_container=""
+minio_container=""
 
 cleanup() {
   if [ -n "$postgres_container" ]; then
     docker rm -f "$postgres_container" >/dev/null 2>&1 || true
+  fi
+  if [ -n "$minio_container" ]; then
+    docker rm -f "$minio_container" >/dev/null 2>&1 || true
   fi
 }
 trap cleanup EXIT
@@ -155,6 +159,38 @@ run_postgres_conformance() {
   fi
 }
 
+run_minio_conformance() {
+  step "MinIO/S3 conformance"
+  minio_container="lash-minio-push-gate-$$"
+  local port="${LASH_PUSH_GATE_MINIO_PORT:-$((port_base + 11))}"
+  docker rm -f "$minio_container" >/dev/null 2>&1 || true
+  bash scripts/docker-pull-with-retry.sh minio/minio:RELEASE.2025-04-22T22-12-26Z
+  bash scripts/docker-pull-with-retry.sh minio/mc:RELEASE.2025-04-16T18-13-26Z
+  docker run -d --name "$minio_container" \
+    -e MINIO_ROOT_USER=minioadmin \
+    -e MINIO_ROOT_PASSWORD=minioadmin \
+    -p "127.0.0.1:${port}:9000" \
+    minio/minio:RELEASE.2025-04-22T22-12-26Z server /data >/dev/null
+
+  local endpoint="http://127.0.0.1:${port}"
+  local deadline=$((SECONDS + 60))
+  until docker run --rm --network host minio/mc:RELEASE.2025-04-16T18-13-26Z \
+    alias set fig831 "$endpoint" minioadmin minioadmin >/dev/null 2>&1; do
+    if (( SECONDS >= deadline )); then
+      docker logs "$minio_container" >&2 || true
+      echo "MinIO did not become ready on port ${port}" >&2
+      exit 1
+    fi
+    sleep 1
+  done
+  docker run --rm --network host --entrypoint /bin/sh minio/mc:RELEASE.2025-04-16T18-13-26Z -c \
+    "mc alias set fig831 '$endpoint' minioadmin minioadmin >/dev/null && mc mb --ignore-existing fig831/lash-attachments >/dev/null"
+
+  LASH_MINIO_ENDPOINT="$endpoint" \
+    LASH_REQUIRE_MINIO=1 \
+    cargo test -p lash-s3-store --locked
+}
+
 configure_bindgen_headers
 
 step "Formatting"
@@ -188,6 +224,7 @@ cargo check --workspace --all-targets --locked ${ci_features}
 
 run_runtime_feature_boundary_check
 run_postgres_conformance
+run_minio_conformance
 run_workspace_tests
 
 step "Workspace doctests"

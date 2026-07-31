@@ -165,3 +165,87 @@ fn estimate_request_tokens(request: &LlmRequest) -> u32 {
     );
     ((chars / 4).max(1)).try_into().unwrap_or(u32::MAX)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn disabled_and_zero_limits_admit_without_consuming_a_bucket() {
+        let now = std::time::Instant::now();
+        for limit in [None, Some(0)] {
+            let mut bucket = WindowBucket::new(now);
+            assert_eq!(bucket_wait(&mut bucket, now, limit, Some(10), 1), None);
+            assert_eq!(bucket.used, 0);
+        }
+    }
+
+    #[test]
+    fn exact_window_capacity_is_admitted_and_next_request_waits() {
+        let now = std::time::Instant::now();
+        let mut bucket = WindowBucket::new(now);
+        assert_eq!(bucket_wait(&mut bucket, now, Some(2), Some(50), 1), None);
+        assert_eq!(bucket_wait(&mut bucket, now, Some(2), Some(50), 1), None);
+        assert_eq!(
+            bucket_wait(&mut bucket, now, Some(2), Some(50), 1),
+            Some(Duration::from_millis(50))
+        );
+    }
+
+    #[test]
+    fn an_oversized_single_cost_consumes_one_full_window_without_deadlock() {
+        let now = std::time::Instant::now();
+        let mut bucket = WindowBucket::new(now);
+        assert_eq!(bucket_wait(&mut bucket, now, Some(3), Some(20), 99), None);
+        assert_eq!(bucket.used, 3);
+        assert_eq!(
+            bucket_wait(&mut bucket, now, Some(3), Some(20), 1),
+            Some(Duration::from_millis(20))
+        );
+    }
+
+    #[test]
+    fn reaching_the_window_boundary_resets_usage_before_admission() {
+        let now = std::time::Instant::now();
+        let mut bucket = WindowBucket::new(now);
+        assert_eq!(bucket_wait(&mut bucket, now, Some(1), Some(10), 1), None);
+        let boundary = now + Duration::from_millis(10);
+        assert_eq!(
+            bucket_wait(&mut bucket, boundary, Some(1), Some(10), 1),
+            None
+        );
+        assert_eq!(bucket.used, 1);
+        assert_eq!(bucket.reset_at, boundary + Duration::from_millis(10));
+    }
+
+    #[test]
+    fn concurrency_zero_is_unlimited_and_positive_values_install_a_gate() {
+        let limiter = ProviderRateLimiter::new(ProviderRateLimitPolicy {
+            max_concurrency: Some(0),
+            ..Default::default()
+        });
+        assert!(
+            limiter
+                .state
+                .lock()
+                .expect("rate limiter lock")
+                .semaphore
+                .is_none()
+        );
+        limiter.configure(ProviderRateLimitPolicy {
+            max_concurrency: Some(2),
+            ..Default::default()
+        });
+        assert_eq!(
+            limiter
+                .state
+                .lock()
+                .expect("rate limiter lock")
+                .semaphore
+                .as_ref()
+                .expect("configured semaphore")
+                .available_permits(),
+            2
+        );
+    }
+}

@@ -1,15 +1,19 @@
 # lash-sim
 
-Deterministic Simulation Harness for Lash: an unpublished workspace crate that
-drives real Lash runtime, protocol, provider, tool, process, and persistence
-contracts inside a deterministic simulated world. The architecture is recorded
-in `docs/adr/0009-deterministic-simulation-harness.md`. This README is the
-current-status ledger for what is actually implemented and gated.
+Seeded boundary simulation for Lash: an unpublished workspace crate that drives
+real runtime, protocol, provider, tool, process, and persistence contracts while
+a seed chooses modeled boundary delivery order. Tokio scheduling and other
+in-process interleavings remain uncontrolled, so this is not a deterministic
+simulated world or an exhaustive interleaving harness. ADR 0044 records that
+ruling; this README is the current-status ledger for what is implemented and
+gated.
 
 ## Run modes
 
-Every generated run is deterministic by seed and generator version and runs
-the full oracle set. The `run` command has two modes:
+The generated workload and modeled boundary schedule are stable for a seed and
+generator version, and every run executes the full oracle set. Real execution
+may still vary between runs; captured traces and minimized failure packages are
+the replay evidence. The `run` command has two modes:
 
 - `--mode evidence` (default): every seed writes trace/replay/minimize
   artifacts plus a best-effort review transcript (`.trace.txt`, with path and
@@ -60,10 +64,10 @@ cargo run -p lash-sim -- run --out target/lash-sim/search \
 - Generated traces include scheduler/completion evidence, a named
   `sim.oracle.operational-coverage.v1` oracle for the operational case set,
   and scenario contract oracles for Runtime, Standard, RLM, and Agent coverage
-  without importing scenario test modules. Combined with the interleaved live
-  turns, suspend/resume, live failure-turn, invariant floor, and real worker
-  failover below, this is true DST and not only operation-level
-  conformance/replay.
+  without importing scenario test modules. Combined with interleaved live
+  turns, suspend/resume, a live failure turn, the invariant floor, and real
+  worker failover, this is seeded boundary orchestration over real execution,
+  not a claim that Tokio interleavings are deterministic.
 - Runtime, Standard, RLM, and Agent scenario contract metadata is exported
   from production/test-independent modules and serialized into `lash-sim`
   summaries alongside the generated oracle verdicts.

@@ -5035,66 +5035,28 @@ async fn runtime_can_activate_managed_child_session() {
 }
 
 #[test]
-fn turn_input_queue_ingress_has_one_production_draft_persistence_path() {
-    fn scan_dir(root: &std::path::Path, file: &mut dyn FnMut(&std::path::Path)) {
-        let Ok(entries) = std::fs::read_dir(root) else {
-            return;
-        };
-        for entry in entries.flatten() {
-            let path = entry.path();
-            if path
-                .file_name()
-                .and_then(|name| name.to_str())
-                .is_some_and(|name| name == "target" || name == ".git")
-            {
-                continue;
+fn queued_work_payload_cannot_encode_persisted_turn_input() {
+    // This exhaustive match is the type-level ingress proof: generic queued
+    // work has no model-visible TurnInput representation. Persisted user input
+    // therefore has to cross the dedicated PendingTurnInputDraft/
+    // TurnInputStore seam used by `LashRuntime::enqueue_turn_input`.
+    fn work_class(payload: &crate::QueuedWorkPayload) -> crate::runtime::QueuedWorkClass {
+        match payload {
+            crate::QueuedWorkPayload::ProcessWake { .. }
+            | crate::QueuedWorkPayload::AgentFrameTask { .. } => {
+                crate::runtime::QueuedWorkClass::TurnWork
             }
-            if path.is_dir() {
-                scan_dir(&path, file);
-            } else if path.extension().and_then(|ext| ext.to_str()) == Some("rs") {
-                file(&path);
+            crate::QueuedWorkPayload::SessionCommand { .. } => {
+                crate::runtime::QueuedWorkClass::SessionCommand
             }
         }
     }
 
-    let workspace = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-        .parent()
-        .and_then(std::path::Path::parent)
-        .expect("workspace root");
-    let allowed = workspace.join("crates/lash-core/src/runtime/session_api.rs");
-    let mut offenders = Vec::new();
-    for root in [workspace.join("crates"), workspace.join("examples")] {
-        scan_dir(&root, &mut |path| {
-            let normalized = path.to_string_lossy();
-            if normalized.contains("/src/runtime/tests/")
-                || normalized.contains("/src/testing/")
-                || normalized.contains("/tests/")
-            {
-                return;
-            }
-            let Ok(source) = std::fs::read_to_string(path) else {
-                return;
-            };
-            for (offset, _) in source.match_indices("QueuedWorkBatchDraft::new") {
-                let snippet_end = source.len().min(offset + 800);
-                let snippet = &source[offset..snippet_end];
-                let constructs_turn_input_draft = snippet.contains("QueuedWorkPayload::turn_input")
-                    || snippet.contains("QueuedWorkPayload::TurnInput");
-                if constructs_turn_input_draft && path != allowed {
-                    offenders.push(
-                        path.strip_prefix(workspace)
-                            .unwrap_or(path)
-                            .display()
-                            .to_string(),
-                    );
-                }
-            }
+    let payload =
+        crate::QueuedWorkPayload::session_command(crate::SessionCommand::RefreshToolCatalog {
+            reason: "type-level ingress proof".to_string(),
         });
-    }
-    assert!(
-        offenders.is_empty(),
-        "turn-input queued work drafts must be persisted only through LashRuntime::enqueue_turn_input; offenders: {offenders:?}"
-    );
+    assert_eq!(work_class(&payload), payload.work_class());
 }
 
 #[tokio::test]

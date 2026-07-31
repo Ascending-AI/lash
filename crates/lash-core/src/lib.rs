@@ -588,7 +588,8 @@ mod tests {
     }
 
     #[test]
-    fn root_exports_do_not_reintroduce_removed_session_state_shapes() {
+    // Architecture lint: lexical public-surface guard, not behavior proof.
+    fn lint_root_exports_do_not_reintroduce_removed_session_state_shapes() {
         let source = include_str!("lib.rs");
         let removed_envelope = ["SessionState", "Envelope"].concat();
         let removed_persisted = ["PersistedSession", "Snapshot"].concat();
@@ -628,7 +629,8 @@ mod tests {
     }
 
     #[test]
-    fn root_runtime_exports_exclude_internal_runtime_records() {
+    // Architecture lint: lexical public-surface guard, not behavior proof.
+    fn lint_root_runtime_exports_exclude_internal_runtime_records() {
         let runtime_exports = public_reexport_block(include_str!("lib.rs"), "runtime");
         for removed in [
             "RuntimeEffectCommand",
@@ -653,7 +655,8 @@ mod tests {
     }
 
     #[test]
-    fn root_store_exports_exclude_wire_records() {
+    // Architecture lint: lexical public-surface guard, not behavior proof.
+    fn lint_root_store_exports_exclude_wire_records() {
         let store_exports = public_reexport_block(include_str!("lib.rs"), "store");
         for removed in [
             "SessionHead",
@@ -671,7 +674,8 @@ mod tests {
     }
 
     #[test]
-    fn removed_manager_and_host_trait_names_stay_removed() {
+    // Architecture lint: lexical retired-name guard, not behavior proof.
+    fn lint_removed_manager_and_host_trait_names_stay_removed() {
         let removed_manager = ["Runtime", "Session", "Manager"].concat();
         let removed_host = ["Runtime", "Session", "Host"].concat();
         let sources = [

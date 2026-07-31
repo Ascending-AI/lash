@@ -921,3 +921,159 @@ impl RuntimeEffectOutcome {
         }
     }
 }
+
+#[cfg(test)]
+mod rejection_tests {
+    use super::*;
+
+    fn invocation(kind: RuntimeEffectKind) -> RuntimeInvocation {
+        RuntimeInvocation::effect(RuntimeScope::new("session"), "effect", kind, "replay")
+    }
+
+    fn prepared_call(call_id: &str) -> crate::PreparedToolCall {
+        crate::PreparedToolCall::from_parts(
+            call_id,
+            "tool:test",
+            "test",
+            serde_json::json!({}),
+            None,
+            serde_json::Value::Null,
+        )
+    }
+
+    fn attempt(call_id: &str, attempt: u32, max_attempts: u32) -> RuntimeEffectCommand {
+        RuntimeEffectCommand::ToolAttempt {
+            call: prepared_call(call_id),
+            execution_grant: None,
+            attempt,
+            max_attempts,
+        }
+    }
+
+    fn batch() -> crate::PreparedToolBatch {
+        crate::PreparedToolBatch::new("batch", vec![prepared_call("call")])
+    }
+
+    fn assert_rejected(
+        invocation: RuntimeInvocation,
+        command: RuntimeEffectCommand,
+        expected_code: &str,
+    ) {
+        let error = RuntimeEffectEnvelope::try_new(invocation, command)
+            .expect_err("invalid envelope must be rejected");
+        assert_eq!(error.code, expected_code);
+    }
+
+    #[test]
+    fn rejects_non_effect_subject() {
+        let mut value = invocation(RuntimeEffectKind::Sleep);
+        value.subject = RuntimeSubject::Process {
+            process_id: "process".to_string(),
+        };
+        assert_rejected(
+            value,
+            RuntimeEffectCommand::Sleep { duration_ms: 1 },
+            "runtime_effect_invocation_subject",
+        );
+    }
+
+    #[test]
+    fn rejects_empty_effect_id() {
+        assert_rejected(
+            RuntimeInvocation::effect(
+                RuntimeScope::new("session"),
+                "  ",
+                RuntimeEffectKind::Sleep,
+                "replay",
+            ),
+            RuntimeEffectCommand::Sleep { duration_ms: 1 },
+            "runtime_effect_invocation_subject",
+        );
+    }
+
+    #[test]
+    fn rejects_invocation_command_kind_mismatch() {
+        assert_rejected(
+            invocation(RuntimeEffectKind::AwaitEvent),
+            RuntimeEffectCommand::Sleep { duration_ms: 1 },
+            "runtime_effect_invocation_kind",
+        );
+    }
+
+    #[test]
+    fn rejects_missing_or_empty_replay_key() {
+        for replay in [None, Some(RuntimeReplay { key: String::new() })] {
+            let mut value = invocation(RuntimeEffectKind::Sleep);
+            value.replay = replay;
+            assert_rejected(
+                value,
+                RuntimeEffectCommand::Sleep { duration_ms: 1 },
+                "runtime_effect_replay_required",
+            );
+        }
+    }
+
+    #[test]
+    fn rejects_empty_tool_attempt_call_id() {
+        assert_rejected(
+            invocation(RuntimeEffectKind::ToolAttempt),
+            attempt(" ", 1, 1),
+            "runtime_effect_tool_attempt_call_id",
+        );
+    }
+
+    #[test]
+    fn rejects_tool_attempt_indices_outside_one_through_max() {
+        for (attempt_index, max_attempts) in [(0, 1), (1, 0), (2, 1)] {
+            assert_rejected(
+                invocation(RuntimeEffectKind::ToolAttempt),
+                attempt("call", attempt_index, max_attempts),
+                "runtime_effect_tool_attempt_index",
+            );
+        }
+    }
+
+    #[test]
+    fn rejects_empty_tool_batch_id() {
+        let mut value = batch();
+        value.batch_id = " ".to_string();
+        assert_rejected(
+            invocation(RuntimeEffectKind::ToolBatch),
+            RuntimeEffectCommand::ToolBatch { batch: value },
+            "runtime_effect_tool_batch_id",
+        );
+    }
+
+    #[test]
+    fn rejects_empty_tool_batch() {
+        let mut value = batch();
+        value.calls.clear();
+        assert_rejected(
+            invocation(RuntimeEffectKind::ToolBatch),
+            RuntimeEffectCommand::ToolBatch { batch: value },
+            "runtime_effect_tool_batch_empty",
+        );
+    }
+
+    #[test]
+    fn rejects_empty_tool_batch_child_call_id() {
+        let mut value = batch();
+        value.calls[0].call.call_id = " ".to_string();
+        assert_rejected(
+            invocation(RuntimeEffectKind::ToolBatch),
+            RuntimeEffectCommand::ToolBatch { batch: value },
+            "runtime_effect_tool_batch_call_id",
+        );
+    }
+
+    #[test]
+    fn rejects_empty_tool_batch_child_replay_suffix() {
+        let mut value = batch();
+        value.calls[0].replay_suffix = " ".to_string();
+        assert_rejected(
+            invocation(RuntimeEffectKind::ToolBatch),
+            RuntimeEffectCommand::ToolBatch { batch: value },
+            "runtime_effect_tool_batch_call_replay",
+        );
+    }
+}

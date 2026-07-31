@@ -55,3 +55,76 @@ impl<'run> ToolDispatchClient<'run> {
             .await
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::Arc;
+
+    struct ControllerOwnedReplay;
+
+    impl crate::AwaitEventResolver for ControllerOwnedReplay {
+        fn replay_ownership(&self) -> crate::EffectReplayOwnership {
+            crate::EffectReplayOwnership::Controller
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl crate::RuntimeEffectController for ControllerOwnedReplay {
+        async fn execute_effect(
+            &self,
+            _envelope: crate::RuntimeEffectEnvelope,
+            _local_executor: crate::RuntimeEffectLocalExecutor<'_>,
+        ) -> Result<crate::RuntimeEffectOutcome, crate::RuntimeEffectControllerError> {
+            panic!("nested batch guard must reject before effect execution")
+        }
+    }
+
+    #[tokio::test]
+    async fn nested_batch_is_rejected_inside_controller_owned_atomic_tool_attempt() {
+        let manager = Arc::new(crate::testing::MockSessionManager::default());
+        let sessions: Arc<dyn crate::plugin::SessionStateService> = manager.clone();
+        let lifecycle: Arc<dyn crate::plugin::SessionLifecycleService> = manager.clone();
+        let graph: Arc<dyn crate::plugin::SessionGraphService> = manager;
+        let context = crate::ToolContext::builder(
+            "session".to_string(),
+            sessions,
+            lifecycle,
+            graph,
+            Arc::new(crate::UnavailableProcessService),
+            crate::runtime::RuntimeEffectControllerHandle::shared(Arc::new(ControllerOwnedReplay)),
+            Arc::new(crate::SessionAttachmentStore::in_memory()),
+            crate::DirectCompletionClient::unavailable("not used by nested batch guard"),
+        )
+        .parent_invocation(Some(crate::RuntimeInvocation::effect(
+            crate::RuntimeScope::new("session"),
+            "parent-tool-attempt",
+            crate::RuntimeEffectKind::ToolAttempt,
+            "parent-tool-attempt",
+        )))
+        .build();
+        let calls = vec![
+            ToolInvocation::new(
+                "one",
+                crate::ToolId::from("tool:one"),
+                serde_json::json!({}),
+            ),
+            ToolInvocation::new(
+                "two",
+                crate::ToolId::from("tool:two"),
+                serde_json::json!({}),
+            ),
+        ];
+
+        let replies = ToolDispatchClient { context }.batch(calls).await;
+
+        assert_eq!(replies.len(), 2);
+        for reply in replies {
+            assert_eq!(reply.output.status(), crate::ToolCallStatus::Failure);
+            assert!(reply.output.value_for_projection().to_string().contains(
+                "nested tool batch dispatch is unavailable inside an atomic tool attempt"
+            ));
+            assert!(reply.record.is_none());
+        }
+    }
+}

@@ -781,6 +781,18 @@ derive_mutation_jobs() {{
             ),
         )
 
+    def test_minio_ci_lane_requires_storage_configuration(self) -> None:
+        workflow = WORKFLOW.read_text(encoding="utf-8")
+        s3_store_job = workflow_job_block(workflow, "s3-store")
+
+        self.assertIn(
+            "run: cargo test -p lash-s3-store --locked", s3_store_job
+        )
+        self.assertIn(
+            "LASH_MINIO_ENDPOINT: http://127.0.0.1:9000", s3_store_job
+        )
+        self.assertIn('LASH_REQUIRE_MINIO: "1"', s3_store_job)
+
     def test_generated_postgres_dynamic_rerun_is_bounded_and_artifacted(self) -> None:
         workflow = WORKFLOW.read_text(encoding="utf-8")
         confidence_workflow = CONFIDENCE_WORKFLOW.read_text(encoding="utf-8")

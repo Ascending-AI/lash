@@ -604,18 +604,73 @@ mod tests {
     }
 
     #[test]
-    fn final_value_facts_require_semantic_channel() {
-        let facts = RuntimeFinalValueInvariantFacts {
-            outcome_kind: "assistant_message".to_string(),
-            semantic_value: None,
-            terminal_event_count: 0,
-            assistant_prose_delta_count: 1,
-            assistant_output_text: "looks final".to_string(),
-            semantic_channel_observed: false,
-            transcript_inference_required: true,
-            passed: false,
-        };
-        assert!(!facts.passed);
-        assert!(facts.transcript_inference_required);
+    fn final_value_builder_derives_pass_and_fail_from_real_outcomes_and_events() {
+        fn result(outcome: lash_core::TurnOutcome) -> lash::TurnResult {
+            lash::TurnResult {
+                state: Default::default(),
+                outcome,
+                cancellation: None,
+                assistant_output: lash_core::AssistantOutput {
+                    safe_text: "looks final".to_string(),
+                    raw_text: "looks final".to_string(),
+                    state: lash_core::OutputState::Usable,
+                },
+                usage: Default::default(),
+                children_usage: Vec::new(),
+                llm_calls: Vec::new(),
+                tool_calls: Vec::new(),
+                execution: Default::default(),
+                errors: Vec::new(),
+            }
+        }
+
+        let prose_only = result(lash_core::TurnOutcome::Finished(
+            lash_core::TurnFinish::AssistantMessage {
+                text: "looks final".to_string(),
+            },
+        ));
+        let failed = runtime_final_value_invariant_facts(
+            &prose_only,
+            &[lash::TurnActivity::independent(
+                lash::TurnEvent::AssistantProseDelta {
+                    text: "looks final".into(),
+                },
+            )],
+        );
+        assert!(!failed.passed);
+        assert!(failed.transcript_inference_required);
+
+        let value = serde_json::json!({"answer": 42});
+        let semantic = result(lash_core::TurnOutcome::Finished(
+            lash_core::TurnFinish::FinalValue {
+                value: value.clone(),
+            },
+        ));
+        let mismatched = runtime_final_value_invariant_facts(
+            &semantic,
+            &[lash::TurnActivity::independent(
+                lash::TurnEvent::FinalValue {
+                    value: serde_json::json!({"answer": 41}),
+                },
+            )],
+        );
+        assert!(!mismatched.passed);
+        assert_eq!(mismatched.terminal_event_count, 1);
+
+        let missing_terminal_event = runtime_final_value_invariant_facts(&semantic, &[]);
+        assert!(!missing_terminal_event.passed);
+        assert_eq!(missing_terminal_event.terminal_event_count, 0);
+
+        let passed = runtime_final_value_invariant_facts(
+            &semantic,
+            &[lash::TurnActivity::independent(
+                lash::TurnEvent::FinalValue {
+                    value: value.clone(),
+                },
+            )],
+        );
+        assert!(passed.passed);
+        assert_eq!(passed.semantic_value, Some(value));
+        assert!(!passed.transcript_inference_required);
     }
 }

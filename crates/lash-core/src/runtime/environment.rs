@@ -301,7 +301,8 @@ mod tests {
     }
 
     #[test]
-    fn runtime_environment_does_not_mirror_runtime_host_config_fields() {
+    // Architecture lint: lexical ownership guard, not behavior proof.
+    fn lint_runtime_environment_does_not_mirror_runtime_host_config_fields() {
         let source = std::fs::read_to_string(
             std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("src/runtime/environment.rs"),
         )
