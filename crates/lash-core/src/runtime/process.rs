@@ -64,7 +64,7 @@ pub use registry::{
     DEFAULT_WAKE_DELIVERY_EXPIRY_MS, ProcessContinuationStore, ProcessPruneReport, ProcessRegistry,
     ProjectionWatermark, WAKE_ENQUEUING_STALE_AFTER_MS, WakeDelivery, WakeDeliveryBlockedGroup,
     WakeDeliveryClaimOutcome, WakeDeliveryConfig, WakeDeliveryReport, WakeDeliveryState,
-    WakeDiscardReason,
+    WakeDiscardReason, reconcile_pruned_trigger_deliveries,
 };
 pub use service::{ProcessService, ProcessToolVisibilityFilter, UnavailableProcessService};
 #[cfg(any(test, feature = "testing"))]

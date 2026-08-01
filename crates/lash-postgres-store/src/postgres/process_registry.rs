@@ -1,7 +1,9 @@
 use crate::*;
 
+mod retention;
 mod wake_delivery;
 
+use retention::{filter_tombstoned_process_ids, filter_unregistered_process_ids};
 use wake_delivery::{
     claim_pending_wake_deliveries, decode_wake_delivery_row, load_wake_delivery_tx,
     update_wake_delivery_state, wake_delivery_report,
@@ -1209,22 +1211,14 @@ impl ProcessRegistry for PostgresProcessRegistry {
         &self,
         process_ids: &[String],
     ) -> Result<Vec<String>, PluginError> {
-        if process_ids.is_empty() {
-            return Ok(Vec::new());
-        }
-        sqlx::query_scalar(
-            "SELECT candidate.process_id
-             FROM UNNEST($1::TEXT[]) WITH ORDINALITY AS candidate(process_id, ordinal)
-             WHERE NOT EXISTS (
-                 SELECT 1 FROM lash_processes p
-                 WHERE p.process_id = candidate.process_id
-             )
-             ORDER BY candidate.ordinal ASC",
-        )
-        .bind(process_ids)
-        .fetch_all(&self.pool)
-        .await
-        .map_err(plugin_sqlx_error)
+        filter_unregistered_process_ids(&self.pool, process_ids).await
+    }
+
+    async fn filter_tombstoned_process_ids(
+        &self,
+        process_ids: &[String],
+    ) -> Result<Vec<String>, PluginError> {
+        filter_tombstoned_process_ids(&self.pool, process_ids).await
     }
 
     async fn live_reference_summary(

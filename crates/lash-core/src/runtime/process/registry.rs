@@ -658,20 +658,46 @@ pub trait ProcessRegistry: Send + Sync {
     /// `process_id`, so re-running them would be wasted work.
     async fn list_non_terminal(&self) -> Result<Vec<ProcessRecord>, PluginError>;
 
-    /// Return the candidate ids that have no persisted process row, preserving
-    /// input order. Durable backends override this with one `NOT EXISTS`
-    /// anti-join so recovery does not issue one point read per candidate.
+    /// Return the candidate ids that were never registered, preserving input
+    /// order. A terminal process retained only as a tombstone is registered
+    /// history and must not be offered back to recovery. Durable backends
+    /// override this with one anti-join so recovery does not issue one point
+    /// read per candidate.
     async fn filter_unregistered_process_ids(
         &self,
         process_ids: &[String],
     ) -> Result<Vec<String>, PluginError> {
         let mut missing = Vec::new();
         for process_id in process_ids {
-            if self.get_process(process_id).await?.is_none() {
-                missing.push(process_id.clone());
+            match self.get_process(process_id).await {
+                Ok(Some(_)) | Err(PluginError::ProcessNoLongerRetained { .. }) => {}
+                Ok(None) => missing.push(process_id.clone()),
+                Err(error) => return Err(error),
             }
         }
         Ok(missing)
+    }
+
+    /// Return the candidate ids retained as terminal-process tombstones,
+    /// preserving input order.
+    ///
+    /// Cross-store retention uses this to remove trigger deliveries only after
+    /// their deterministic process ids have been durably pruned.
+    async fn filter_tombstoned_process_ids(
+        &self,
+        process_ids: &[String],
+    ) -> Result<Vec<String>, PluginError> {
+        let mut tombstoned = Vec::new();
+        for process_id in process_ids {
+            match self.get_process(process_id).await {
+                Err(PluginError::ProcessNoLongerRetained { .. }) => {
+                    tombstoned.push(process_id.clone());
+                }
+                Ok(_) => {}
+                Err(error) => return Err(error),
+            }
+        }
+        Ok(tombstoned)
     }
 
     /// Count non-terminal process rows by their captured definition and
@@ -747,12 +773,13 @@ pub trait ProcessRegistry: Send + Sync {
     /// Physically delete terminal process rows whose `updated_at_ms` is older
     /// than `cutoff_epoch_ms`, match `filter` when one is supplied, and have a
     /// process change sequence allowed by the caller's explicit projection
-    /// `watermark`, together with their events, observer edges, lease rows, and
-    /// trigger-delivery reservations whose deterministic process id points at a
-    /// pruned row. Trigger-mutation idempotency receipts are owned by the
-    /// trigger store's explicit retention lever, not process retention. Durable
-    /// backends also release attachment intents and delete
-    /// the process-owned `process-env:<id>` and
+    /// `watermark`, together with their events, observer edges, and lease rows.
+    /// Callers with a separate trigger store use
+    /// [`reconcile_pruned_trigger_deliveries`] after this operation; co-located
+    /// backends may delete those delivery rows in the same transaction.
+    /// Trigger-mutation idempotency receipts are owned by the trigger store's
+    /// explicit retention lever, not process retention. Durable backends also
+    /// release attachment intents and delete the process-owned `process-env:<id>` and
     /// `process-session-turn:<id>` session stores before deleting the process
     /// row. Backends must fail toward retaining the terminal process if that
     /// cleanup cannot complete.
@@ -764,9 +791,10 @@ pub trait ProcessRegistry: Send + Sync {
     /// maximum waiter lifetime, so callers cannot validate this against a
     /// library-owned bound; retaining terminal rows beyond every still-replayable
     /// waiter is currently an explicit host operational responsibility.
-    /// Re-emitting the same trigger occurrence id after its process has aged out
-    /// of retention may reserve a fresh delivery process id; occurrence-level
-    /// idempotency still holds.
+    /// Once trigger-delivery reconciliation completes, re-emitting the same
+    /// trigger occurrence id after its process has aged out of retention may
+    /// reserve a fresh delivery process id; occurrence-level idempotency still
+    /// holds.
     ///
     /// ```no_run
     /// use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -796,4 +824,28 @@ pub trait ProcessRegistry: Send + Sync {
         filter: Option<ProcessListFilter>,
         watermark: ProjectionWatermark,
     ) -> Result<ProcessPruneReport, PluginError>;
+}
+
+/// Delete trigger deliveries whose deterministic process ids have been pruned.
+///
+/// Process and trigger state may live in separate durable stores. This
+/// coordinator preserves those ownership boundaries: the process registry
+/// identifies durable tombstones, while the trigger store owns deletion of its
+/// delivery rows. Re-running it repairs a prior partial cleanup safely.
+pub async fn reconcile_pruned_trigger_deliveries(
+    registry: &dyn ProcessRegistry,
+    trigger_store: &dyn crate::TriggerStore,
+) -> Result<usize, PluginError> {
+    let process_ids = trigger_store
+        .list_deliveries()
+        .await?
+        .into_iter()
+        .map(|delivery| delivery.process_id)
+        .collect::<std::collections::BTreeSet<_>>()
+        .into_iter()
+        .collect::<Vec<_>>();
+    let tombstoned = registry.filter_tombstoned_process_ids(&process_ids).await?;
+    trigger_store
+        .delete_deliveries_by_process_ids(&tombstoned)
+        .await
 }

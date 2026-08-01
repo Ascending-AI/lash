@@ -606,6 +606,26 @@ impl lash_core::TriggerStore for SqliteTriggerStore {
         self.list_deliveries_where("1 = 1", Vec::new()).await
     }
 
+    async fn delete_deliveries_by_process_ids(
+        &self,
+        process_ids: &[String],
+    ) -> Result<usize, lash_core::PluginError> {
+        if process_ids.is_empty() {
+            return Ok(0);
+        }
+        let process_ids_json = serde_json::to_string(process_ids).map_err(process_decode_error)?;
+        self.conn
+            .call(move |conn| {
+                conn.execute(
+                    "DELETE FROM trigger_deliveries
+                     WHERE process_id IN (SELECT value FROM json_each(?1))",
+                    params![process_ids_json],
+                )
+            })
+            .await
+            .map_err(process_sqlite_error)
+    }
+
     async fn prune_mutation_receipts(
         &self,
         cutoff_epoch_ms: u64,

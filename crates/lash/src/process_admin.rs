@@ -331,8 +331,10 @@ impl Processes {
 
     /// Host-scheduled retention lever (ADR 0017): physically delete terminal
     /// process rows (and their events, observer edges, leases) older than
-    /// `cutoff_epoch_ms`, returning what was reclaimed. Non-terminal rows are
-    /// never touched. Lash exposes no finite maximum waiter lifetime: the host
+    /// `cutoff_epoch_ms`, returning what was reclaimed. The configured trigger
+    /// store also removes delivery reservations for processes now represented
+    /// by tombstones; unrelated trigger rows are retained. Non-terminal rows
+    /// are never touched. Lash exposes no finite maximum waiter lifetime: the host
     /// must retain rows beyond every still-replayable await, and a later await
     /// after pruning receives the typed `ProcessNoLongerRetained` outcome. Pass
     /// either the projector's acknowledged
@@ -365,10 +367,17 @@ impl Processes {
                 ))
                 .await?;
         }
-        registry
+        let report = registry
             .prune_terminal_processes(cutoff_epoch_ms, None, watermark)
-            .await
-            .map_err(Into::into)
+            .await?;
+        if let Some(trigger_store) = self.core.env.trigger_store.as_ref() {
+            lash_core::reconcile_pruned_trigger_deliveries(
+                registry.as_ref(),
+                trigger_store.as_ref(),
+            )
+            .await?;
+        }
+        Ok(report)
     }
 
     /// List durable process-wake delivery rows, optionally filtered by state.

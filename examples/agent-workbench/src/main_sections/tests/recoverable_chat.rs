@@ -257,6 +257,15 @@ impl lash::triggers::TriggerStore for RetiringSubscriptionListTriggerStore {
         self.inner.list_deliveries().await
     }
 
+    async fn delete_deliveries_by_process_ids(
+        &self,
+        process_ids: &[String],
+    ) -> std::result::Result<usize, lash::plugins::PluginError> {
+        self.inner
+            .delete_deliveries_by_process_ids(process_ids)
+            .await
+    }
+
     async fn prune_mutation_receipts(
         &self,
         cutoff_epoch_ms: u64,

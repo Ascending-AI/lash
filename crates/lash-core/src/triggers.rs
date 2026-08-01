@@ -1048,6 +1048,15 @@ pub trait TriggerStore: Send + Sync {
     /// direct delivery-table view to close the reserve/start crash window.
     async fn list_deliveries(&self) -> Result<Vec<TriggerDeliveryReservation>, PluginError>;
 
+    /// Delete delivery reservations for the supplied deterministic process ids.
+    ///
+    /// Process-retention coordination calls this only for ids proven to have a
+    /// durable process tombstone. Repeating the deletion is harmless.
+    async fn delete_deliveries_by_process_ids(
+        &self,
+        process_ids: &[String],
+    ) -> Result<usize, PluginError>;
+
     /// Drop mutation idempotency receipts older than an explicit host-supplied
     /// cutoff. Process retention never prunes these receipts. List operations
     /// never create them.

@@ -230,10 +230,10 @@ pub use process::{
     process_event_payload_hash, process_registration_with_observers_hash,
     process_runtime_session_ids, process_signal_event_type, process_signal_name_from_event_type,
     process_signal_wait_key, process_wake_delivery, process_wake_input_from_event_payload,
-    process_wake_turn_cause, process_wake_turn_text, reconcile_session_process_observer_intents,
-    require_event_replay, system_time_from_epoch_ms, terminal_append_request,
-    terminal_event_type_name, validate_generic_process_event_append, validate_process_signal_name,
-    watch_process_registry, watch_process_registry_with_sink,
+    process_wake_turn_cause, process_wake_turn_text, reconcile_pruned_trigger_deliveries,
+    reconcile_session_process_observer_intents, require_event_replay, system_time_from_epoch_ms,
+    terminal_append_request, terminal_event_type_name, validate_generic_process_event_append,
+    validate_process_signal_name, watch_process_registry, watch_process_registry_with_sink,
 };
 #[cfg(any(test, feature = "testing"))]
 pub use process::{TestLocalProcessRegistry, TestProcessRegistryWriteExt};

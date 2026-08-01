@@ -5,8 +5,10 @@ use std::future::Future;
 use std::sync::Arc;
 
 use crate::{
-    ProcessIdentity, ProcessInput, ProcessOriginator, ProcessRegistry, ProjectionWatermark,
-    SessionScope, TriggerCommand, TriggerOwnerScope, TriggerStore, TriggerSubscriptionDraft,
+    ProcessAwaitOutput, ProcessCompletionAuthority, ProcessIdentity, ProcessInput,
+    ProcessOriginator, ProcessProvenance, ProcessRegistration, ProcessRegistry,
+    ProjectionWatermark, RecoveryDisposition, SessionScope, TriggerCommand, TriggerOwnerScope,
+    TriggerStore, TriggerSubscriptionDraft,
 };
 
 /// Fresh paired process and trigger stores for retention conformance.
@@ -22,6 +24,8 @@ where
     Fut: Future<Output = ProcessTriggerRetentionHandles>,
 {
     process_prune_preserves_trigger_mutation_receipts(make().await).await;
+    process_prune_only_deletes_deliveries_for_pruned_processes(make().await).await;
+    pruned_delivery_process_is_not_a_recovery_candidate(make().await).await;
 }
 
 fn owner(session_id: &str) -> TriggerOwnerScope {
@@ -126,5 +130,183 @@ async fn process_prune_preserves_trigger_mutation_receipts(
     assert_eq!(
         retried, committed,
         "process prune must preserve the original trigger mutation receipt"
+    );
+}
+
+async fn prune_with_trigger_cleanup(handles: &ProcessTriggerRetentionHandles) {
+    handles
+        .registry
+        .prune_terminal_processes(u64::MAX, None, ProjectionWatermark::NoProjector)
+        .await
+        .expect("prune terminal processes");
+    crate::reconcile_pruned_trigger_deliveries(
+        handles.registry.as_ref(),
+        handles.triggers.as_ref(),
+    )
+    .await
+    .expect("reconcile pruned trigger deliveries");
+}
+
+async fn process_prune_only_deletes_deliveries_for_pruned_processes(
+    handles: ProcessTriggerRetentionHandles,
+) {
+    const SESSION: &str = "process-prune-scope-session";
+    register_trigger(
+        &handles.triggers,
+        SESSION,
+        "process-prune-scope-key",
+        "process-prune-scope-source",
+        "process-prune-scope-register",
+    )
+    .await;
+    let first = handles
+        .triggers
+        .ingest_occurrence(crate::TriggerOccurrenceRequest::new(
+            "ui.button.pressed",
+            "process-prune-scope-source",
+            serde_json::json!({ "button": "Blue" }),
+            "process-prune-scope-first",
+        ))
+        .await
+        .expect("ingest first occurrence");
+    let second = handles
+        .triggers
+        .ingest_occurrence(crate::TriggerOccurrenceRequest::new(
+            "ui.button.pressed",
+            "process-prune-scope-source",
+            serde_json::json!({ "button": "Blue" }),
+            "process-prune-scope-second",
+        ))
+        .await
+        .expect("ingest second occurrence");
+    assert_eq!(first.reservations.len(), 1);
+    assert_eq!(second.reservations.len(), 1);
+    let pruned_id = first.reservations[0].process_id.clone();
+    let live_id = second.reservations[0].process_id.clone();
+
+    for process_id in [&pruned_id, &live_id] {
+        handles
+            .registry
+            .register_process(
+                ProcessRegistration::new(
+                    process_id.clone(),
+                    ProcessInput::External {
+                        metadata: serde_json::Value::Null,
+                    },
+                    RecoveryDisposition::ExternallyOwned,
+                    ProcessProvenance::host(),
+                )
+                .with_identity(ProcessIdentity::new("test")),
+            )
+            .await
+            .expect("register delivery process");
+    }
+    handles
+        .registry
+        .complete_process(
+            &pruned_id,
+            ProcessAwaitOutput::Success {
+                value: serde_json::json!("done"),
+                control: None,
+            },
+            ProcessCompletionAuthority::external_owner(),
+        )
+        .await
+        .expect("complete prunable delivery process");
+
+    prune_with_trigger_cleanup(&handles).await;
+
+    assert!(
+        handles
+            .triggers
+            .list_deliveries_by_process_id(&pruned_id)
+            .await
+            .expect("list pruned deliveries")
+            .is_empty(),
+        "process prune must delete a pruned process's trigger delivery"
+    );
+    assert_eq!(
+        handles
+            .triggers
+            .list_deliveries_by_process_id(&live_id)
+            .await
+            .expect("list live deliveries")
+            .len(),
+        1,
+        "process prune must preserve deliveries for processes it did not prune"
+    );
+}
+
+async fn pruned_delivery_process_is_not_a_recovery_candidate(
+    handles: ProcessTriggerRetentionHandles,
+) {
+    const SESSION: &str = "process-prune-tombstone-session";
+    register_trigger(
+        &handles.triggers,
+        SESSION,
+        "process-prune-tombstone-key",
+        "process-prune-tombstone-source",
+        "process-prune-tombstone-register",
+    )
+    .await;
+    let ingress = handles
+        .triggers
+        .ingest_occurrence(crate::TriggerOccurrenceRequest::new(
+            "ui.button.pressed",
+            "process-prune-tombstone-source",
+            serde_json::json!({ "button": "Blue" }),
+            "process-prune-tombstone-occurrence",
+        ))
+        .await
+        .expect("ingest occurrence");
+    assert_eq!(ingress.reservations.len(), 1);
+    let process_id = ingress.reservations[0].process_id.clone();
+    handles
+        .registry
+        .register_process(
+            ProcessRegistration::new(
+                process_id.clone(),
+                ProcessInput::External {
+                    metadata: serde_json::Value::Null,
+                },
+                RecoveryDisposition::ExternallyOwned,
+                ProcessProvenance::host(),
+            )
+            .with_identity(ProcessIdentity::new("test")),
+        )
+        .await
+        .expect("register delivery process");
+    handles
+        .registry
+        .complete_process(
+            &process_id,
+            ProcessAwaitOutput::Success {
+                value: serde_json::json!("done"),
+                control: None,
+            },
+            ProcessCompletionAuthority::external_owner(),
+        )
+        .await
+        .expect("complete delivery process");
+
+    prune_with_trigger_cleanup(&handles).await;
+
+    assert!(
+        handles
+            .triggers
+            .list_deliveries_by_process_id(&process_id)
+            .await
+            .expect("list delivery after prune")
+            .is_empty(),
+        "pruned delivery must not survive"
+    );
+    assert!(
+        handles
+            .registry
+            .filter_unregistered_process_ids(std::slice::from_ref(&process_id))
+            .await
+            .expect("filter recovery candidates")
+            .is_empty(),
+        "a tombstoned process must not be offered back to the recovery sweep"
     );
 }

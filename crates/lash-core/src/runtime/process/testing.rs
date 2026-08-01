@@ -5,6 +5,7 @@ use std::sync::Arc;
 
 use tokio::sync::Mutex;
 
+use crate::TriggerStore;
 use crate::plugin::PluginError;
 
 use super::events::{
@@ -1484,7 +1485,10 @@ impl ProcessRegistry for TestLocalProcessRegistry {
             .await
             .retain(|(process_id, _), _| !prunable.contains(process_id));
         if let Some(trigger_store) = self.trigger_store.as_ref() {
-            trigger_store.delete_deliveries_by_process_ids(&prunable)?;
+            let process_ids = prunable.iter().cloned().collect::<Vec<_>>();
+            trigger_store
+                .delete_deliveries_by_process_ids(&process_ids)
+                .await?;
         }
         Ok(ProcessPruneReport {
             pruned_processes: prunable.len(),

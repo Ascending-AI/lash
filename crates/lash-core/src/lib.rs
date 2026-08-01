@@ -449,9 +449,9 @@ pub use runtime::{
     diff_token_ledger, diff_usage_reports, ensure_durable_effect_input, epoch_ms_from_system_time,
     fold_process_record, process_runtime_session_ids, process_signal_event_type,
     process_signal_name_from_event_type, process_signal_wait_key, process_wake_delivery,
-    process_wake_source_key, system_time_from_epoch_ms, terminal_append_request,
-    terminal_event_type_name, validate_generic_process_event_append, validate_process_signal_name,
-    watch_process_registry, watch_process_registry_with_sink,
+    process_wake_source_key, reconcile_pruned_trigger_deliveries, system_time_from_epoch_ms,
+    terminal_append_request, terminal_event_type_name, validate_generic_process_event_append,
+    validate_process_signal_name, watch_process_registry, watch_process_registry_with_sink,
 };
 pub use runtime::{DEFAULT_PROCESS_EXECUTION_CONCURRENCY, ProcessExecutionConcurrencyError};
 #[allow(unused_imports)]

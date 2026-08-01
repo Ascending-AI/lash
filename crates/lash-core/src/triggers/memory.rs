@@ -53,25 +53,6 @@ impl InMemoryTriggerStore {
         });
         Ok(deliveries)
     }
-
-    #[cfg(any(test, feature = "testing"))]
-    pub(crate) fn delete_deliveries_by_process_ids(
-        &self,
-        process_ids: &std::collections::HashSet<String>,
-    ) -> Result<usize, PluginError> {
-        if process_ids.is_empty() {
-            return Ok(0);
-        }
-        let mut state = self
-            .state
-            .lock()
-            .map_err(|_| PluginError::Session("trigger store lock poisoned".to_string()))?;
-        let before = state.deliveries.len();
-        state
-            .deliveries
-            .retain(|_, delivery| !process_ids.contains(&delivery.process_id));
-        Ok(before.saturating_sub(state.deliveries.len()))
-    }
 }
 
 impl Default for InMemoryTriggerStore {
@@ -311,6 +292,28 @@ impl TriggerStore for InMemoryTriggerStore {
 
     async fn list_deliveries(&self) -> Result<Vec<TriggerDeliveryReservation>, PluginError> {
         self.list_deliveries_matching(|_| true)
+    }
+
+    async fn delete_deliveries_by_process_ids(
+        &self,
+        process_ids: &[String],
+    ) -> Result<usize, PluginError> {
+        if process_ids.is_empty() {
+            return Ok(0);
+        }
+        let process_ids = process_ids
+            .iter()
+            .map(String::as_str)
+            .collect::<std::collections::HashSet<_>>();
+        let mut state = self
+            .state
+            .lock()
+            .map_err(|_| PluginError::Session("trigger store lock poisoned".to_string()))?;
+        let before = state.deliveries.len();
+        state
+            .deliveries
+            .retain(|_, delivery| !process_ids.contains(delivery.process_id.as_str()));
+        Ok(before.saturating_sub(state.deliveries.len()))
     }
 
     async fn prune_mutation_receipts(&self, cutoff_epoch_ms: u64) -> Result<usize, PluginError> {
