@@ -22,6 +22,7 @@ mod process_continuation_store;
 mod process_filters;
 mod process_references;
 mod process_registry;
+mod process_trigger_retention;
 mod runtime_persistence;
 mod session_graph_append;
 mod session_store_factory;
@@ -39,6 +40,7 @@ pub use helpers::*;
 pub use live_replay::*;
 pub use process_continuation_store::*;
 pub use process_registry::*;
+pub use process_trigger_retention::*;
 pub use runtime_persistence::*;
 pub use session_graph_append::*;
 pub use session_store_factory::*;
@@ -188,6 +190,19 @@ mod tests {
     async fn in_memory_process_registry_satisfies_conformance() {
         process_registry(|| {
             Arc::new(crate::TestLocalProcessRegistry::default()) as Arc<dyn ProcessRegistry>
+        })
+        .await;
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn in_memory_process_trigger_retention_satisfies_conformance() {
+        process_trigger_retention(|| async {
+            let triggers = Arc::new(crate::InMemoryTriggerStore::default());
+            let registry = Arc::new(
+                crate::TestLocalProcessRegistry::default()
+                    .with_trigger_store(Arc::clone(&triggers)),
+            );
+            ProcessTriggerRetentionHandles { registry, triggers }
         })
         .await;
     }

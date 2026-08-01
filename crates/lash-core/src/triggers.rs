@@ -1048,8 +1048,8 @@ pub trait TriggerStore: Send + Sync {
     /// direct delivery-table view to close the reserve/start crash window.
     async fn list_deliveries(&self) -> Result<Vec<TriggerDeliveryReservation>, PluginError>;
 
-    /// Drop mutation idempotency receipts older than the host's established
-    /// terminal-process retention cutoff. List operations never create these
-    /// receipts.
+    /// Drop mutation idempotency receipts older than an explicit host-supplied
+    /// cutoff. Process retention never prunes these receipts. List operations
+    /// never create them.
     async fn prune_mutation_receipts(&self, cutoff_epoch_ms: u64) -> Result<usize, PluginError>;
 }

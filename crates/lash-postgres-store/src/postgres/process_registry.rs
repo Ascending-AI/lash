@@ -1491,11 +1491,6 @@ impl ProcessRegistry for PostgresProcessRegistry {
                 .map_err(plugin_sqlx_error)?
                 .rows_affected() as usize;
         }
-        sqlx::query("DELETE FROM lash_trigger_mutation_receipts WHERE created_at_ms < $1")
-            .bind(cutoff)
-            .execute(&mut *tx)
-            .await
-            .map_err(plugin_sqlx_error)?;
         tx.commit().await.map_err(plugin_sqlx_error)?;
         Ok(ProcessPruneReport {
             pruned_processes,

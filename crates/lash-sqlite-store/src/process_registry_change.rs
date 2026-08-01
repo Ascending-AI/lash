@@ -71,16 +71,6 @@ pub(crate) fn prune_terminal_processes_conn(
         .optional()
         .map_err(process_sqlite_error)?
         .is_some();
-    let trigger_receipts_exist = conn
-        .query_row(
-            "SELECT 1 FROM sqlite_master
-             WHERE type = 'table' AND name = 'trigger_mutation_receipts'",
-            [],
-            |_| Ok(()),
-        )
-        .optional()
-        .map_err(process_sqlite_error)?
-        .is_some();
     let prunable = prunable_terminal_process_ids_conn(conn, cutoff, filter, max_change_seq)?;
 
     let mut pruned_events = 0;
@@ -141,13 +131,6 @@ pub(crate) fn prune_terminal_processes_conn(
                 params![process_id],
             )
             .map_err(process_sqlite_error)?;
-    }
-    if trigger_receipts_exist {
-        conn.execute(
-            "DELETE FROM trigger_mutation_receipts WHERE created_at_ms < ?1",
-            params![cutoff],
-        )
-        .map_err(process_sqlite_error)?;
     }
     Ok(ProcessPruneReport {
         pruned_processes,

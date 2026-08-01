@@ -747,12 +747,11 @@ pub trait ProcessRegistry: Send + Sync {
     /// Physically delete terminal process rows whose `updated_at_ms` is older
     /// than `cutoff_epoch_ms`, match `filter` when one is supplied, and have a
     /// process change sequence allowed by the caller's explicit projection
-    /// `watermark`,
-    /// together with their events, observer edges, lease rows, and
+    /// `watermark`, together with their events, observer edges, lease rows, and
     /// trigger-delivery reservations whose deterministic process id points at a
-    /// pruned row. The same cutoff also prunes trigger-mutation idempotency
-    /// receipts, bounding receipt retention under the host's existing cleanup
-    /// schedule. Durable backends also release attachment intents and delete
+    /// pruned row. Trigger-mutation idempotency receipts are owned by the
+    /// trigger store's explicit retention lever, not process retention. Durable
+    /// backends also release attachment intents and delete
     /// the process-owned `process-env:<id>` and
     /// `process-session-turn:<id>` session stores before deleting the process
     /// row. Backends must fail toward retaining the terminal process if that

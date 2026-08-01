@@ -1048,6 +1048,28 @@ async fn postgres_process_registry_satisfies_conformance_when_configured() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn postgres_process_trigger_retention_satisfies_conformance_when_configured() {
+    let Some((_database_lock, storage)) = storage().await else {
+        eprintln!(
+            "skipping Postgres process-trigger retention conformance: LASH_POSTGRES_DATABASE_URL is not set"
+        );
+        return;
+    };
+    let storage = Arc::new(storage);
+    lash_core::testing::conformance::process_trigger_retention(|| {
+        let storage = Arc::clone(&storage);
+        async move {
+            reset(&storage).await;
+            lash_core::testing::conformance::ProcessTriggerRetentionHandles {
+                registry: Arc::new(storage.process_registry()) as Arc<dyn ProcessRegistry>,
+                triggers: Arc::new(storage.trigger_store()) as Arc<dyn TriggerStore>,
+            }
+        }
+    })
+    .await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn postgres_store_contract_state_machine_properties_when_configured() {
     let Some((_database_lock, storage)) = storage().await else {
         eprintln!(

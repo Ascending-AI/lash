@@ -230,6 +230,33 @@ async fn sqlite_process_registry_satisfies_conformance() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn sqlite_process_trigger_retention_satisfies_conformance() {
+    let dirs = Arc::new(Mutex::new(Vec::new()));
+    lash_core::testing::conformance::process_trigger_retention(move || {
+        let dirs = Arc::clone(&dirs);
+        async move {
+            let dir = tempfile::tempdir().expect("process-trigger retention tempdir");
+            let registry = Arc::new(
+                SqliteProcessRegistry::open(
+                    &dir.path().join("processes.db"),
+                    dir.path().join("sessions"),
+                )
+                .await
+                .expect("process registry"),
+            ) as Arc<dyn ProcessRegistry>;
+            let triggers = Arc::new(
+                SqliteTriggerStore::open(&dir.path().join("triggers.db"))
+                    .await
+                    .expect("trigger store"),
+            ) as Arc<dyn TriggerStore>;
+            dirs.lock().expect("retention dirs lock").push(dir);
+            lash_core::testing::conformance::ProcessTriggerRetentionHandles { registry, triggers }
+        }
+    })
+    .await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn sqlite_store_contract_state_machine_properties() {
     let dirs = Arc::new(Mutex::new(Vec::new()));
     lash_core::testing::conformance::store_contract_state_machine("sqlite", move |seed| {
