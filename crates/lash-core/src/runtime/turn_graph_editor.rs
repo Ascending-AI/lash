@@ -234,7 +234,12 @@ impl TurnGraphEditor {
     fn active_path_nodes(&self) -> Vec<&SessionNodeRecord> {
         let mut path = Vec::new();
         let mut current = self.leaf_node_id();
+        let mut remaining = self.base_graph.nodes.len() + self.appended_nodes.len();
         while let Some(node_id) = current {
+            if remaining == 0 {
+                break;
+            }
+            remaining -= 1;
             let Some(node) = self
                 .appended_node_indices
                 .get(node_id.as_str())
@@ -342,5 +347,44 @@ mod tests {
                 .message_delta_if_current_preserved([&rewritten])
                 .is_none()
         );
+    }
+
+    #[test]
+    fn active_path_walk_is_bounded_on_a_parent_cycle() {
+        const CHILD_ENV: &str = "LASH_FIG843_TURN_GRAPH_PATH_CHILD";
+        if std::env::var_os(CHILD_ENV).is_some() {
+            active_path_walk_is_bounded_scenario();
+            return;
+        }
+
+        crate::test_watchdog::assert_exact_test_completes(
+            "runtime::turn_graph_editor::tests::active_path_walk_is_bounded_on_a_parent_cycle",
+            CHILD_ENV,
+            "turn-graph path cycle check",
+        );
+    }
+
+    fn active_path_walk_is_bounded_scenario() {
+        let plugin_node = |node_id: &str, parent_node_id: &str| SessionNodeRecord {
+            node_id: node_id.to_string(),
+            parent_node_id: Some(parent_node_id.to_string()),
+            timestamp: "2026-07-31T00:00:00Z".to_string(),
+            payload: crate::SessionNodePayload::Plugin {
+                plugin_type: "turn-graph-cycle-test".to_string(),
+                body: crate::session_graph::SharedJsonValue::new(serde_json::json!({
+                    "node": node_id
+                })),
+            },
+        };
+        let mut editor = editor();
+        editor.append_appended_nodes(vec![
+            plugin_node("turn-cycle-a", "turn-cycle-b"),
+            plugin_node("turn-cycle-b", "turn-cycle-a"),
+        ]);
+        editor
+            .append_builder
+            .set_leaf_node_id(Some("turn-cycle-b".to_string()));
+
+        assert_eq!(editor.active_path_nodes().len(), 2);
     }
 }
