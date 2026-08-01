@@ -50,11 +50,14 @@ impl CurrentSessionCapability {
         } else {
             Vec::new()
         };
+        // Branch liveness, not a head compare-and-swap: a head that merely
+        // advanced is accepted and the nodes re-parent onto the current leaf.
+        // See `AppendSessionNodesRequest::requires_ancestor_node_id`.
         if let Some(required) = request.requires_ancestor_node_id.as_deref()
             && !state.session_graph.active_path_contains(required)
         {
             return Ok(crate::AppendSessionNodesResult::StaleBranch {
-                current_leaf_node_id: state.session_graph.leaf_node_id.clone(),
+                required_node_id: required.to_string(),
             });
         }
         let operation = super::super::state::boundary_operation(

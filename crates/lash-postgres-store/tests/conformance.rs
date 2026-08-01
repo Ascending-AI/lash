@@ -168,6 +168,23 @@ async fn postgres_session_store_factory_satisfies_conformance_when_configured() 
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn postgres_session_graph_append_branch_liveness_when_configured() {
+    let Some((_database_lock, storage)) = storage().await else {
+        eprintln!(
+            "skipping Postgres session-graph append branch-liveness conformance: \
+             LASH_POSTGRES_DATABASE_URL is not set"
+        );
+        return;
+    };
+    reset(&storage).await;
+    lash_core::testing::conformance::session_graph_append_branch_liveness(Arc::new(
+        storage.session_store_factory(),
+    )
+        as Arc<dyn SessionStoreFactory>)
+    .await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn postgres_wake_delivery_crash_matrix_when_configured() {
     let Some((_database_lock, storage)) = storage().await else {
         eprintln!(

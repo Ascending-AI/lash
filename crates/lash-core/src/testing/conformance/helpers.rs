@@ -45,3 +45,47 @@ pub struct ReopenableTriggerStore {
     pub open: Arc<dyn crate::TriggerStore>,
     pub reopen: Arc<dyn crate::TriggerStore>,
 }
+
+/// Push an unpersisted event node onto `state`'s active path and make it the
+/// resident leaf. Pair with [`commit_conformance_state`] to advance a session's
+/// durable head from outside any runtime.
+pub(crate) fn append_conformance_event_node(
+    state: &mut crate::RuntimeSessionState,
+    id: &str,
+    content: &str,
+) {
+    let parent_node_id = state.session_graph.leaf_node_id.clone();
+    let node = crate::SessionNodeRecord {
+        node_id: id.to_string(),
+        parent_node_id,
+        timestamp: "2026-07-27T00:00:00Z".to_string(),
+        payload: crate::SessionNodePayload::Event {
+            event: crate::SessionHistoryRecord::Protocol(
+                crate::ProtocolEvent::typed(
+                    "conformance-event",
+                    serde_json::json!({ "content": content }),
+                )
+                .expect("conformance event"),
+            ),
+        },
+    };
+    state.session_graph.push_node_record(node);
+    state.session_graph.set_leaf_node_id(Some(id.to_string()));
+}
+
+pub(crate) async fn commit_conformance_state(
+    store: &Arc<dyn crate::RuntimePersistence>,
+    state: &mut crate::RuntimeSessionState,
+) -> Result<(), crate::StoreError> {
+    let operation = crate::OperationId::turn(
+        &state.session_id,
+        format!("conformance-commit-{}", state.head_revision),
+        "commit",
+    );
+    let (commit, new_node_ids) =
+        crate::RuntimeCommit::persisted_state_with_operation(state, &[], operation)?;
+    let result = store.commit_runtime_state(commit).await?;
+    state.apply_persisted_commit_result(result);
+    state.mark_node_ids_persisted(new_node_ids);
+    Ok(())
+}

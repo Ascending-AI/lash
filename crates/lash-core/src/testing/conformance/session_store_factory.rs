@@ -445,7 +445,7 @@ pub async fn attachment_ownership_isolation_with_store(
     );
 }
 
-fn session_store_request(
+pub(crate) fn session_store_request(
     session_id: &str,
     model_id: &str,
     relation: crate::SessionRelation,
@@ -990,8 +990,8 @@ async fn session_store_factory_fork_semantics(factory: Arc<dyn crate::SessionSto
     assert_eq!(pinned.config.model, state.policy.model);
     assert!(pinned.pinned);
 
-    append_fork_conformance_message(&mut state, "source-child", "source child");
-    commit_fork_conformance_state(&source, &mut state)
+    append_conformance_event_node(&mut state, "source-child", "source child");
+    commit_conformance_state(&source, &mut state)
         .await
         .expect("advance source past pinned root");
     let unpinned_past_node_id = state
@@ -999,8 +999,8 @@ async fn session_store_factory_fork_semantics(factory: Arc<dyn crate::SessionSto
         .leaf_node_id
         .clone()
         .expect("source child leaf");
-    append_fork_conformance_message(&mut state, "source-tip", "source tip");
-    commit_fork_conformance_state(&source, &mut state)
+    append_conformance_event_node(&mut state, "source-tip", "source tip");
+    commit_conformance_state(&source, &mut state)
         .await
         .expect("advance source past unpinned child");
     let source_tip_node_id = state
@@ -1126,8 +1126,8 @@ async fn session_store_factory_fork_semantics(factory: Arc<dyn crate::SessionSto
         .await
         .expect("load fork state")
         .expect("fork state exists");
-    append_fork_conformance_message(&mut branch_state, "branch-child", "branch child");
-    commit_fork_conformance_state(&branch, &mut branch_state)
+    append_conformance_event_node(&mut branch_state, "branch-child", "branch child");
+    commit_conformance_state(&branch, &mut branch_state)
         .await
         .expect("advance fork independently");
     let branch_leaf = branch_state
@@ -1201,47 +1201,6 @@ async fn session_store_factory_fork_semantics(factory: Arc<dyn crate::SessionSto
         .await
         .expect_err("forking must reject a previously deleted target session id");
     assert_session_id_was_used_and_deleted(fork_reuse_error, &source_request.session_id);
-}
-
-fn append_fork_conformance_message(
-    state: &mut crate::RuntimeSessionState,
-    id: &str,
-    content: &str,
-) {
-    let parent_node_id = state.session_graph.leaf_node_id.clone();
-    let node = crate::SessionNodeRecord {
-        node_id: id.to_string(),
-        parent_node_id,
-        timestamp: "2026-07-27T00:00:00Z".to_string(),
-        payload: crate::SessionNodePayload::Event {
-            event: crate::SessionHistoryRecord::Protocol(
-                crate::ProtocolEvent::typed(
-                    "fork-conformance",
-                    serde_json::json!({ "content": content }),
-                )
-                .expect("fork conformance event"),
-            ),
-        },
-    };
-    state.session_graph.push_node_record(node);
-    state.session_graph.set_leaf_node_id(Some(id.to_string()));
-}
-
-async fn commit_fork_conformance_state(
-    store: &Arc<dyn crate::RuntimePersistence>,
-    state: &mut crate::RuntimeSessionState,
-) -> Result<(), crate::StoreError> {
-    let operation = crate::OperationId::turn(
-        &state.session_id,
-        format!("fork-conformance-{}", state.head_revision),
-        "commit",
-    );
-    let (commit, new_node_ids) =
-        crate::RuntimeCommit::persisted_state_with_operation(state, &[], operation)?;
-    let result = store.commit_runtime_state(commit).await?;
-    state.apply_persisted_commit_result(result);
-    state.mark_node_ids_persisted(new_node_ids);
-    Ok(())
 }
 
 async fn session_store_factory_vacuums_organic_retained_tombstone(

@@ -98,6 +98,31 @@ relations, bounded reclaim surfaces, and the `holds_ref` deletion belong to the
 FIG-653 L7 retention work. Current attachment liveness still uses manifest rows
 and commit-receipt predicates.
 
+## Store leaf validation versus caller branch liveness
+
+The store's leaf validation is strict and unconditional: a commit carries the
+head revision it expects, and its first appended node must parent on the stored
+leaf. The runtime satisfies that fence by construction — it reloads the head and
+builds the append from the leaf it just read.
+
+The precondition a *caller* supplies is a different question and is answered
+differently on purpose. `AppendSessionNodesRequest::requires_ancestor_node_id`
+asks whether the branch the caller read is still the branch this session
+executes. It is accepted whenever the named node is anywhere on the active path
+and refused only once that node has left it. It is not a compare-and-swap on the
+head, and it does not report concurrent appends. That is what the
+derive-then-append pattern needs — read history up to a node, spend seconds
+deriving something from it, then append the result — because such a caller has
+to distinguish content merely arriving after its read (harmless: the derivation
+still describes the prefix it read) from its base leaving this session's line of
+execution (fatal: the base is gone). A strict head fence at that seam would
+discard expensive derived work every time an unrelated writer committed first.
+
+Graph position therefore carries no derivation claim. A node appended after an
+advanced head sits after content its author never read, so anything that needs
+to know what a node was derived from records that in the node's own payload and
+never infers it from position.
+
 ## ADR 0024 applies directly at deletion
 
 History retirement is the plain agreement required by
@@ -134,6 +159,9 @@ id directly. The shared-history and branch-as-session rulings are unchanged.
   different proposal under the same operation identity.
 - A missing leaf, parent, or frame ancestor is corruption, not a repair
   invitation. Append conflicts are typed and never become upserts.
+- Caller-supplied append preconditions are branch-liveness checks, not head
+  compare-and-swaps. A plugin needing exclusivity against concurrent appends
+  does not get it from `requires_ancestor_node_id`.
 - Reclamation remains host-scheduled. Effect-journal retirement is shipped and
   lifecycle-gated. The remaining L7 ruling gives `vacuum`, receipt pruning, and
   attachment reclamation explicit bounds and replaces inferred attachment

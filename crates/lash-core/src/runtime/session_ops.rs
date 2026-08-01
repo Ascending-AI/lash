@@ -64,11 +64,14 @@ impl LashRuntime {
             ));
         }
         self.refresh_session_graph_from_store().await?;
+        // Branch liveness, not a head compare-and-swap: a head that merely
+        // advanced is accepted and the nodes re-parent onto the current leaf.
+        // See `AppendSessionNodesRequest::requires_ancestor_node_id`.
         if let Some(required) = request.requires_ancestor_node_id.as_deref()
             && !self.state.session_graph.active_path_contains(required)
         {
             return Ok(crate::AppendSessionNodesResult::StaleBranch {
-                current_leaf_node_id: self.state.session_graph.leaf_node_id.clone(),
+                required_node_id: required.to_string(),
             });
         }
         let operation = boundary_operation(
