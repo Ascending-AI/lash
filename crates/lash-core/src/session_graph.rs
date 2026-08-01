@@ -411,25 +411,10 @@ struct SessionGraphCache {
 }
 
 impl SessionGraphCache {
-    fn build(graph: &SessionGraph) -> Self {
-        let by_id = graph
-            .nodes
-            .iter()
-            .enumerate()
-            .map(|(idx, node)| (node.node_id.clone(), idx))
-            .collect::<HashMap<_, _>>();
-        let mut active_path_indices = Vec::new();
-        let mut current = graph
-            .leaf_node_id
-            .as_ref()
-            .and_then(|node_id| by_id.get(node_id).copied());
-        while let Some(idx) = current {
-            active_path_indices.push(idx);
-            current = graph.nodes[idx]
-                .parent_node_id
-                .as_ref()
-                .and_then(|node_id| by_id.get(node_id).copied());
-        }
+    fn build(graph: &SessionGraph) -> Result<Self, crate::StoreError> {
+        let by_id = graph_node_indices(graph)?;
+        let mut active_path_indices =
+            ancestry_indices(graph, &by_id, graph.leaf_node_id.as_deref())?;
         active_path_indices.reverse();
 
         let mut cache = Self {
@@ -440,7 +425,7 @@ impl SessionGraphCache {
             prompt_render_cache: Arc::new(BaseRenderCache::new()),
         };
         cache.rebuild_read_model(graph);
-        cache
+        Ok(cache)
     }
 
     fn rebuild_read_model(&mut self, graph: &SessionGraph) {
@@ -525,6 +510,104 @@ impl SessionGraphCache {
             Arc::make_mut(&mut self.active_messages).reserve(additional_messages);
         }
     }
+}
+
+fn graph_node_indices(graph: &SessionGraph) -> Result<HashMap<String, usize>, crate::StoreError> {
+    let mut by_id = HashMap::with_capacity(graph.nodes.len());
+    for (idx, node) in graph.nodes.iter().enumerate() {
+        if by_id.insert(node.node_id.clone(), idx).is_some() {
+            return Err(crate::StoreError::NodeIdCollision {
+                node_id: node.node_id.clone(),
+            });
+        }
+    }
+    Ok(by_id)
+}
+
+fn ancestry_indices(
+    graph: &SessionGraph,
+    by_id: &HashMap<String, usize>,
+    node_id: Option<&str>,
+) -> Result<Vec<usize>, crate::StoreError> {
+    let mut path = Vec::new();
+    let mut visited = HashSet::with_capacity(graph.nodes.len());
+    let mut current = match node_id {
+        Some(node_id) => Some(by_id.get(node_id).copied().ok_or_else(|| {
+            crate::StoreError::InvalidGraphLeaf {
+                leaf_node_id: Some(node_id.to_string()),
+            }
+        })?),
+        None => None,
+    };
+    while let Some(idx) = current {
+        let node = &graph.nodes[idx];
+        if !visited.insert(idx) {
+            return Err(crate::StoreError::InvalidGraphParent {
+                node_id: node.node_id.clone(),
+                expected: None,
+                actual: node.parent_node_id.clone(),
+            });
+        }
+        path.push(idx);
+        current = node
+            .parent_node_id
+            .as_ref()
+            .and_then(|parent| by_id.get(parent).copied());
+    }
+    Ok(path)
+}
+
+fn validate_graph_parent_topology(
+    graph: &SessionGraph,
+    by_id: &HashMap<String, usize>,
+) -> Result<(), crate::StoreError> {
+    for node in &graph.nodes {
+        if let Some(parent_node_id) = node.parent_node_id.as_deref()
+            && !by_id.contains_key(parent_node_id)
+        {
+            return Err(crate::StoreError::InvalidGraphParent {
+                node_id: node.node_id.clone(),
+                expected: None,
+                actual: node.parent_node_id.clone(),
+            });
+        }
+    }
+
+    const UNVISITED: u8 = 0;
+    const VISITING: u8 = 1;
+    const RESOLVED: u8 = 2;
+    let mut state = vec![UNVISITED; graph.nodes.len()];
+    for start in 0..graph.nodes.len() {
+        if state[start] != UNVISITED {
+            continue;
+        }
+        let mut path = Vec::new();
+        let mut current = Some(start);
+        while let Some(idx) = current {
+            if state[idx] == RESOLVED {
+                break;
+            }
+            state[idx] = VISITING;
+            path.push(idx);
+            let node = &graph.nodes[idx];
+            let parent = node
+                .parent_node_id
+                .as_ref()
+                .and_then(|parent_node_id| by_id.get(parent_node_id).copied());
+            if parent.is_some_and(|parent_idx| state[parent_idx] == VISITING) {
+                return Err(crate::StoreError::InvalidGraphParent {
+                    node_id: node.node_id.clone(),
+                    expected: None,
+                    actual: node.parent_node_id.clone(),
+                });
+            }
+            current = parent;
+        }
+        for idx in path {
+            state[idx] = RESOLVED;
+        }
+    }
+    Ok(())
 }
 
 impl SessionNodeRecord {
@@ -648,6 +731,14 @@ impl SessionGraph {
         }
     }
 
+    pub(crate) fn validate_resident_integrity(&self) -> Result<(), crate::StoreError> {
+        if !self.nodes.is_empty() && self.leaf_node_id.is_none() {
+            return Err(crate::StoreError::InvalidGraphLeaf { leaf_node_id: None });
+        }
+        let cache = self.try_cache()?;
+        validate_graph_parent_topology(self, &cache.by_id)
+    }
+
     pub(crate) fn append_builder(&self) -> SessionGraphAppendBuilder {
         let namespace = self.leaf_node_id.as_deref().map_or_else(
             || "unscoped-root".to_string(),
@@ -746,8 +837,21 @@ impl SessionGraph {
         self.cache = Arc::new(lock);
     }
 
+    fn try_cache(&self) -> Result<&SessionGraphCache, crate::StoreError> {
+        if let Some(cache) = self.cache.get() {
+            return Ok(cache);
+        }
+        let cache = SessionGraphCache::build(self)?;
+        let _ = self.cache.set(cache);
+        Ok(self
+            .cache
+            .get()
+            .expect("session graph cache was initialized"))
+    }
+
     fn cache(&self) -> &SessionGraphCache {
-        self.cache.get_or_init(|| SessionGraphCache::build(self))
+        self.try_cache()
+            .unwrap_or_else(|err| panic!("invalid resident session graph: {err}"))
     }
 
     fn append_message_batch(&mut self, messages: Vec<Message>) {
@@ -816,6 +920,15 @@ impl SessionGraph {
             .collect()
     }
 
+    fn try_active_path_nodes(&self) -> Result<Vec<&SessionNodeRecord>, crate::StoreError> {
+        Ok(self
+            .try_cache()?
+            .active_path_indices
+            .iter()
+            .map(|idx| &self.nodes[*idx])
+            .collect())
+    }
+
     pub(crate) fn read_model(&self) -> SessionReadModel {
         let cache = self.cache();
         SessionReadModel {
@@ -837,22 +950,12 @@ impl SessionGraph {
     /// The head caches this answer for bounded reads, but ancestry remains the
     /// truth and is used to validate every stored pointer.
     pub fn nearest_frame_node_id(&self, leaf_node_id: Option<&str>) -> Option<&str> {
-        let by_id = self
-            .nodes
-            .iter()
-            .map(|node| (node.node_id.as_str(), node))
-            .collect::<HashMap<_, _>>();
-        let mut current = leaf_node_id.and_then(|node_id| by_id.get(node_id).copied());
-        while let Some(node) = current {
-            if matches!(node.payload, SessionNodePayload::FrameOpen { .. }) {
-                return Some(node.node_id.as_str());
-            }
-            current = node
-                .parent_node_id
-                .as_deref()
-                .and_then(|parent| by_id.get(parent).copied());
-        }
-        None
+        let idx = self
+            .nearest_ancestor_index(leaf_node_id, |node| {
+                matches!(node.payload, SessionNodePayload::FrameOpen { .. })
+            })
+            .ok()??;
+        Some(self.nodes[idx].node_id.as_str())
     }
 
     pub fn append_protocol_event(&mut self, event: ProtocolEvent) -> String {
@@ -900,9 +1003,17 @@ impl SessionGraph {
     }
 
     pub fn agent_frame_records(&self, session_id: &str) -> Vec<crate::AgentFrameRecord> {
+        self.try_agent_frame_records(session_id)
+            .unwrap_or_else(|err| panic!("invalid resident session graph: {err}"))
+    }
+
+    pub(crate) fn try_agent_frame_records(
+        &self,
+        session_id: &str,
+    ) -> Result<Vec<crate::AgentFrameRecord>, crate::StoreError> {
         let mut previous_frame_node_id = None;
         let mut frames = Vec::new();
-        for node in self.active_path_nodes() {
+        for node in self.try_active_path_nodes()? {
             let Some((reason, assignment, protocol_turn_options)) = node.frame_open() else {
                 continue;
             };
@@ -917,7 +1028,7 @@ impl SessionGraph {
             ));
             previous_frame_node_id = Some(node.node_id.clone());
         }
-        frames
+        Ok(frames)
     }
 
     pub(crate) fn append_node_drafts_at<I>(
@@ -998,9 +1109,19 @@ impl SessionGraph {
     }
 
     pub fn active_path_contains(&self, node_id: &str) -> bool {
-        self.active_path_nodes()
-            .into_iter()
-            .any(|node| node.node_id == node_id)
+        self.try_active_path_contains(node_id)
+            .unwrap_or_else(|err| panic!("invalid resident session graph: {err}"))
+    }
+
+    pub(crate) fn try_active_path_contains(
+        &self,
+        node_id: &str,
+    ) -> Result<bool, crate::StoreError> {
+        let cache = self.try_cache()?;
+        let Some(node_index) = cache.by_id.get(node_id) else {
+            return Ok(false);
+        };
+        Ok(cache.active_path_indices.contains(node_index))
     }
 
     /// Return a resident graph containing only the current ancestry path.
@@ -1109,23 +1230,52 @@ impl SessionGraph {
     }
 
     fn nearest_message_ancestor(&self, node_id: Option<&str>) -> Option<String> {
-        let by_id = self
-            .nodes
-            .iter()
-            .map(|node| (node.node_id.as_str(), node))
-            .collect::<HashMap<_, _>>();
-        let mut current = node_id.and_then(|id| by_id.get(id).copied());
-        while let Some(node) = current {
-            if node.message().is_some() {
-                return Some(node.node_id.clone());
-            }
-            current = node
-                .parent_node_id
-                .as_deref()
-                .and_then(|parent| by_id.get(parent).copied());
-        }
-        None
+        let idx = self
+            .nearest_ancestor_index(node_id, |node| node.message().is_some())
+            .ok()??;
+        Some(self.nodes[idx].node_id.clone())
     }
+
+    fn nearest_ancestor_index(
+        &self,
+        node_id: Option<&str>,
+        predicate: impl FnMut(&SessionNodeRecord) -> bool,
+    ) -> Result<Option<usize>, crate::StoreError> {
+        if let Some(cache) = self.cache.get() {
+            return nearest_ancestor_index(self, &cache.by_id, node_id, predicate);
+        }
+        let by_id = graph_node_indices(self)?;
+        nearest_ancestor_index(self, &by_id, node_id, predicate)
+    }
+}
+
+fn nearest_ancestor_index(
+    graph: &SessionGraph,
+    by_id: &HashMap<String, usize>,
+    node_id: Option<&str>,
+    mut predicate: impl FnMut(&SessionNodeRecord) -> bool,
+) -> Result<Option<usize>, crate::StoreError> {
+    let mut current = node_id.and_then(|node_id| by_id.get(node_id).copied());
+    let mut remaining = graph.nodes.len();
+    while let Some(idx) = current {
+        let node = &graph.nodes[idx];
+        if predicate(node) {
+            return Ok(Some(idx));
+        }
+        if remaining == 0 {
+            return Err(crate::StoreError::InvalidGraphParent {
+                node_id: node.node_id.clone(),
+                expected: None,
+                actual: node.parent_node_id.clone(),
+            });
+        }
+        remaining -= 1;
+        current = node
+            .parent_node_id
+            .as_ref()
+            .and_then(|parent| by_id.get(parent).copied());
+    }
+    Ok(None)
 }
 
 fn build_tree(mut nodes: Vec<SessionMessageTreeNode>) -> Vec<SessionMessageTreeNode> {
@@ -1276,195 +1426,5 @@ fn first_message_search_text(message: &Message) -> String {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::{Part, PartKind, PruneState, shared_parts};
-
-    fn text_message(id: &str, role: MessageRole, content: &str) -> Message {
-        Message {
-            id: id.to_string(),
-            role,
-            parts: shared_parts(vec![Part {
-                id: format!("{id}.p0"),
-                kind: PartKind::Text,
-                content: content.to_string(),
-                attachment: None,
-                tool_call_id: None,
-                tool_name: None,
-                tool_replay: None,
-                prune_state: PruneState::Intact,
-                reasoning_meta: None,
-                response_meta: None,
-            }]),
-            origin: None,
-        }
-    }
-
-    fn protocol_event() -> ProtocolEvent {
-        ProtocolEvent::typed("test_protocol", serde_json::json!({"step": "started"}))
-            .expect("protocol event serializes")
-    }
-
-    #[test]
-    fn draft_node_ids_are_opaque_distinct_and_ignore_message_ids() {
-        let mut graph = SessionGraph::default();
-
-        let message_id = graph.append_message(text_message("m1", MessageRole::User, "hello"));
-        let protocol_id = graph.append_protocol_event(protocol_event());
-        let plugin_id = graph.append_plugin("example", serde_json::json!({"ok": true}));
-
-        assert_ne!(message_id, "m1");
-        assert!(message_id.starts_with("draft-node/v2/"));
-        assert!(protocol_id.starts_with("draft-node/v2/"));
-        assert!(plugin_id.starts_with("draft-node/v2/"));
-        assert_ne!(message_id, protocol_id);
-        assert_ne!(protocol_id, plugin_id);
-    }
-
-    #[test]
-    fn draft_node_ids_are_stable_per_boundary_and_distinct_across_boundaries() {
-        let graph = SessionGraph::default();
-        let message = text_message("same-message", MessageRole::User, "hello");
-        let timestamp = "2026-07-26T10:00:00Z".to_string();
-
-        let mut first = graph.append_builder_in_namespace("turn:one");
-        let first_id = first.append_messages_at([message.clone()], timestamp.clone())[0]
-            .node_id
-            .clone();
-        let mut replay = graph.append_builder_in_namespace("turn:one");
-        let replay_id = replay.append_messages_at([message.clone()], timestamp.clone())[0]
-            .node_id
-            .clone();
-        let mut next_turn = graph.append_builder_in_namespace("turn:two");
-        let next_turn_id = next_turn.append_messages_at([message], timestamp)[0]
-            .node_id
-            .clone();
-
-        assert_eq!(first_id, replay_id);
-        assert_ne!(first_id, next_turn_id);
-    }
-
-    #[test]
-    fn read_model_preserves_distinct_nodes_with_identical_messages() {
-        let mut graph = SessionGraph::default();
-        let message = text_message("same-message-id", MessageRole::User, "same content");
-
-        let first = graph.append_message(message.clone());
-        let second = graph.append_message(message);
-
-        assert_ne!(first, second);
-        let read = graph.read_model();
-        assert_eq!(read.messages.len(), 2);
-        assert_eq!(read.messages[0].id, "same-message-id");
-        assert_eq!(read.messages[1].id, "same-message-id");
-    }
-
-    #[test]
-    fn storage_body_excludes_indexed_graph_identity_and_parent_edge() {
-        let node = SessionNodeRecord {
-            node_id: "node-2".to_string(),
-            parent_node_id: Some("node-1".to_string()),
-            timestamp: "2026-07-27T00:00:00Z".to_string(),
-            payload: SessionNodePayload::Event {
-                event: SessionHistoryRecord::Protocol(protocol_event()),
-            },
-        };
-
-        let encoded = node.encode_storage_body().expect("encode storage body");
-        assert!(!encoded.contains("node_id"));
-        assert!(!encoded.contains("parent_node_id"));
-        let decoded = SessionNodeRecord::decode_storage_body(
-            node.node_id.clone(),
-            node.parent_node_id.clone(),
-            &encoded,
-        )
-        .expect("decode storage body");
-
-        assert_eq!(decoded.node_id, node.node_id);
-        assert_eq!(decoded.parent_node_id, node.parent_node_id);
-        assert_eq!(decoded.timestamp, node.timestamp);
-        assert!(matches!(decoded.payload, SessionNodePayload::Event { .. }));
-    }
-
-    #[test]
-    fn nearest_frame_is_derived_from_ancestry() {
-        let assignment = crate::AgentFrameAssignment::from_policy(crate::SessionPolicy::default());
-        let mut graph = SessionGraph::default();
-        let first = frame_node_id("session", "first-frame");
-        assert!(graph.append_frame_open_with_id_at(
-            first.clone(),
-            "first-frame".to_string(),
-            crate::AgentFrameReason::initial(),
-            assignment.clone(),
-            crate::ProtocolTurnOptions::default(),
-            "2026-07-27T00:00:00Z".to_string(),
-        ));
-        let first_message = graph.append_message(text_message("m1", MessageRole::User, "first"));
-        let second = frame_node_id("session", "second-frame");
-        assert!(graph.append_frame_open_with_id_at(
-            second.clone(),
-            "second-frame".to_string(),
-            crate::AgentFrameReason::continue_as(),
-            assignment,
-            crate::ProtocolTurnOptions::default(),
-            "2026-07-27T00:00:01Z".to_string(),
-        ));
-        let second_message = graph.append_message(text_message("m2", MessageRole::User, "second"));
-
-        assert_eq!(
-            graph.nearest_frame_node_id(Some(&first_message)),
-            Some(first.as_str())
-        );
-        assert_eq!(
-            graph.nearest_frame_node_id(Some(&second_message)),
-            Some(second.as_str())
-        );
-        assert_eq!(
-            graph.nearest_frame_node_id(graph.leaf_node_id.as_deref()),
-            Some(second.as_str())
-        );
-    }
-
-    #[test]
-    fn message_tree_marks_active_nodes_without_using_message_identity() {
-        let mut graph = SessionGraph::default();
-        let message = text_message("same-message-id", MessageRole::User, "same content");
-        let root = graph.append_message(message.clone());
-        let inactive = graph.append_message(message.clone());
-        graph.set_leaf_node_id(Some(root));
-        let active = graph.append_message(message);
-
-        let tree = graph.message_tree();
-        assert_eq!(tree.len(), 1);
-        assert!(tree[0].active);
-        assert_eq!(tree[0].children.len(), 2);
-        assert_eq!(tree[0].children[0].node_id, inactive);
-        assert!(!tree[0].children[0].active);
-        assert_eq!(tree[0].children[1].node_id, active);
-        assert!(tree[0].children[1].active);
-    }
-
-    #[test]
-    fn active_read_replacement_persists_messages_only() {
-        let message = text_message("m1", MessageRole::User, "hello");
-        let graph = SessionGraph::from_active_read_state(&[message]);
-
-        assert_eq!(graph.nodes.len(), 1);
-        assert!(matches!(
-            graph.nodes[0].event(),
-            Some(SessionHistoryRecord::Conversation(_))
-        ));
-    }
-
-    #[test]
-    fn graph_writers_keep_payload_kind_out_of_draft_identity() {
-        let mut graph = SessionGraph::default();
-        graph.append_message(text_message("m1", MessageRole::User, "hello"));
-        graph.append_protocol_event(protocol_event());
-        graph.append_plugin("example", serde_json::json!({"ok": true}));
-
-        for node in &graph.nodes {
-            assert!(node.node_id.starts_with("draft-node/v2/"), "{:?}", node);
-        }
-    }
-}
+#[path = "session_graph_tests.rs"]
+mod tests;

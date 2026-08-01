@@ -6,6 +6,7 @@ struct AppendRollbackProtocolFactory {
     protocol_dirty: Arc<AtomicBool>,
     restore_called: Arc<AtomicBool>,
     fail_restore: Arc<AtomicBool>,
+    advance_store_head: bool,
 }
 
 impl crate::PluginFactory for AppendRollbackProtocolFactory {
@@ -22,6 +23,7 @@ impl crate::PluginFactory for AppendRollbackProtocolFactory {
             protocol_dirty: Arc::clone(&self.protocol_dirty),
             restore_called: Arc::clone(&self.restore_called),
             fail_restore: Arc::clone(&self.fail_restore),
+            advance_store_head: self.advance_store_head,
         }))
     }
 }
@@ -31,6 +33,7 @@ struct AppendRollbackProtocolPlugin {
     protocol_dirty: Arc<AtomicBool>,
     restore_called: Arc<AtomicBool>,
     fail_restore: Arc<AtomicBool>,
+    advance_store_head: bool,
 }
 
 impl crate::SessionPlugin for AppendRollbackProtocolPlugin {
@@ -45,6 +48,7 @@ impl crate::SessionPlugin for AppendRollbackProtocolPlugin {
                 protocol_dirty: Arc::clone(&self.protocol_dirty),
                 restore_called: Arc::clone(&self.restore_called),
                 fail_restore: Arc::clone(&self.fail_restore),
+                advance_store_head: self.advance_store_head,
             }))?;
         reg.protocol()
             .protocol_driver(Arc::new(UnusedAppendRollbackProtocolDriver))?;
@@ -57,6 +61,7 @@ struct AppendRollbackProtocolSession {
     protocol_dirty: Arc<AtomicBool>,
     restore_called: Arc<AtomicBool>,
     fail_restore: Arc<AtomicBool>,
+    advance_store_head: bool,
 }
 
 #[async_trait::async_trait]
@@ -67,14 +72,16 @@ impl crate::plugin::ProtocolSessionPlugin for AppendRollbackProtocolSession {
         _nodes: &[crate::SessionAppendNode],
     ) -> Result<(), crate::SessionError> {
         self.protocol_dirty.store(true, Ordering::SeqCst);
-        self.store
-            .save_session_head_meta(crate::SessionHeadMeta::assemble(
-                crate::SessionHeadPayload::default(),
-                1,
-                None,
-                None,
-            ))
-            .await;
+        if self.advance_store_head {
+            self.store
+                .save_session_head_meta(crate::SessionHeadMeta::assemble(
+                    crate::SessionHeadPayload::default(),
+                    1,
+                    None,
+                    None,
+                ))
+                .await;
+        }
         Ok(())
     }
 
@@ -399,6 +406,7 @@ async fn failed_append_restores_runtime_and_protocol_session_state() {
         protocol_dirty: Arc::clone(&protocol_dirty),
         restore_called: Arc::clone(&restore_called),
         fail_restore: Arc::new(AtomicBool::new(false)),
+        advance_store_head: true,
     })]);
     let plugins = plugin_host.build_session("root", None).expect("plugins");
     let mut runtime = LashRuntime::from_persistent_embedded_state(
@@ -443,6 +451,121 @@ async fn failed_append_restores_runtime_and_protocol_session_state() {
     ));
 }
 
+#[test]
+fn append_session_nodes_retry_after_head_advance_is_typed_and_bounded() {
+    const CHILD_ENV: &str = "LASH_FIG843_APPEND_RETRY_CHILD";
+    if std::env::var_os(CHILD_ENV).is_some() {
+        tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("FIG-843 child runtime")
+            .block_on(append_session_nodes_retry_after_head_advance_is_typed_scenario());
+        return;
+    }
+
+    crate::test_watchdog::assert_exact_test_completes(
+        "runtime::tests::projection::append_session_nodes_retry_after_head_advance_is_typed_and_bounded",
+        CHILD_ENV,
+        "append retry",
+    );
+}
+
+async fn append_session_nodes_retry_after_head_advance_is_typed_scenario() {
+    let store = Arc::new(RecordingStore::default());
+    let protocol_dirty = Arc::new(AtomicBool::new(false));
+    let restore_called = Arc::new(AtomicBool::new(false));
+    let plugin_host = crate::PluginHost::new(vec![Arc::new(AppendRollbackProtocolFactory {
+        store: Arc::clone(&store),
+        protocol_dirty: Arc::clone(&protocol_dirty),
+        restore_called: Arc::clone(&restore_called),
+        fail_restore: Arc::new(AtomicBool::new(false)),
+        advance_store_head: false,
+    })]);
+    let plugins = plugin_host.build_session("root", None).expect("plugins");
+    let mut runtime = LashRuntime::from_persistent_embedded_state(
+        standard_test_policy(),
+        test_host_config(),
+        crate::PersistentRuntimeServices::new(
+            plugins,
+            store as Arc<dyn crate::store::RuntimePersistence>,
+        ),
+        RuntimeSessionState::default(),
+    )
+    .await
+    .expect("runtime");
+    runtime
+        .append_session_nodes(crate::AppendSessionNodesRequest {
+            operation_id: "retry-after-advance-seed".to_string(),
+            nodes: vec![crate::SessionAppendNode::plugin(
+                "retry-test",
+                serde_json::json!({"value": 0}),
+            )],
+            requires_ancestor_node_id: None,
+        })
+        .await
+        .expect("persist the initial frame before the retried operation");
+    let request = crate::AppendSessionNodesRequest {
+        operation_id: "retry-after-advance".to_string(),
+        nodes: vec![crate::SessionAppendNode::plugin(
+            "retry-test",
+            serde_json::json!({"value": 1}),
+        )],
+        requires_ancestor_node_id: None,
+    };
+
+    let first = runtime
+        .append_session_nodes(request.clone())
+        .await
+        .expect("first append");
+    let crate::AppendSessionNodesResult::Appended { node_ids, .. } = first else {
+        panic!("first append must report its persisted node id");
+    };
+    let expected_collision = node_ids.into_iter().next().expect("persisted node id");
+    runtime
+        .append_session_nodes(crate::AppendSessionNodesRequest {
+            operation_id: "advance-head".to_string(),
+            nodes: vec![crate::SessionAppendNode::plugin(
+                "retry-test",
+                serde_json::json!({"value": 2}),
+            )],
+            requires_ancestor_node_id: None,
+        })
+        .await
+        .expect("head advance");
+    let state_after_advance = runtime.state.clone();
+    protocol_dirty.store(false, Ordering::SeqCst);
+    restore_called.store(false, Ordering::SeqCst);
+
+    let error = runtime
+        .append_session_nodes(request)
+        .await
+        .expect_err("the retry is not idempotent until durable receipts land");
+    assert!(matches!(
+        error,
+        crate::SessionError::Store {
+            source: crate::StoreError::NodeIdCollision { node_id },
+            ..
+        } if node_id == expected_collision
+    ));
+    assert!(
+        restore_called.load(Ordering::SeqCst),
+        "fallible identity derivation must restore the protocol session"
+    );
+    assert!(
+        !protocol_dirty.load(Ordering::SeqCst),
+        "the protocol session must match the rolled-back runtime state"
+    );
+    assert_eq!(
+        runtime.state.head_revision, state_after_advance.head_revision,
+        "the rejected retry must not commit"
+    );
+    assert_eq!(
+        serde_json::to_value(&runtime.state.session_graph).expect("encode rolled-back graph"),
+        serde_json::to_value(&state_after_advance.session_graph).expect("encode expected graph"),
+        "fallible identity derivation must roll back the resident graph"
+    );
+}
+
 #[tokio::test]
 async fn failed_append_rollback_preserves_a_deleted_session_cause() {
     let session_id = "deleted-during-append-rollback";
@@ -455,6 +578,7 @@ async fn failed_append_rollback_preserves_a_deleted_session_cause() {
         protocol_dirty,
         restore_called: Arc::clone(&restore_called),
         fail_restore: Arc::clone(&fail_restore),
+        advance_store_head: false,
     })]);
     let plugins = plugin_host.build_session("root", None).expect("plugins");
     let mut runtime = LashRuntime::from_persistent_embedded_state(

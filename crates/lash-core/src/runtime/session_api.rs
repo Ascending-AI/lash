@@ -175,6 +175,12 @@ impl LashRuntime {
         if !has_newer_graph {
             return Ok(());
         }
+        read.graph
+            .validate_resident_integrity()
+            .map_err(|source| SessionError::Store {
+                context: "failed to refresh session graph from store".to_string(),
+                source,
+            })?;
         let head = crate::store::SessionHead {
             session_id: read.session_id.clone(),
             head_revision: read.head_revision,

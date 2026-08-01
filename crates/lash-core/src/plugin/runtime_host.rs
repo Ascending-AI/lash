@@ -220,8 +220,9 @@ impl<'run> SessionTurnRequest<'run> {
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct AppendSessionNodesRequest {
-    /// Caller-stable identity for this logical append. Retries must reuse it
-    /// even when the session head has advanced.
+    /// Caller-stable identity for this logical append. Reusing it after the
+    /// session head advances currently returns a typed conflict or collision;
+    /// durable-receipt-based idempotent replay is tracked as FIG-850.
     pub operation_id: String,
     pub nodes: Vec<SessionAppendNode>,
     #[serde(default)]

@@ -105,8 +105,22 @@ impl LashRuntime {
             let requested_node_count = node_ids.len();
             let mut graph = self.state.pending_graph_commit();
             let persisted_node_ids =
-                derive_graph_commit_node_ids(&mut self.state, &mut graph, &operation)
-                    .map_err(|err| SessionError::Protocol(err.to_string()))?;
+                match derive_graph_commit_node_ids(&mut self.state, &mut graph, &operation) {
+                    Ok(node_ids) => node_ids,
+                    Err(source) => {
+                        let mut context =
+                            "failed to derive persisted session graph node identities".to_string();
+                        if let Err(rollback_err) = self
+                            .restore_protocol_session_after_failed_append(state_before_append)
+                            .await
+                        {
+                            context.push_str(&format!(
+                                "; failed to restore protocol session: {rollback_err}"
+                            ));
+                        }
+                        return Err(SessionError::Store { context, source });
+                    }
+                };
             let node_ids = persisted_node_ids[persisted_node_ids
                 .len()
                 .saturating_sub(requested_node_count)..]
@@ -512,13 +526,24 @@ impl LashRuntime {
         {
             let mut graph = self.state.pending_graph_commit();
             let persisted_node_ids =
-                derive_graph_commit_node_ids(&mut self.state, &mut graph, &operation).map_err(
-                    |err| {
-                        PluginOperationInvokeError::Failed(format!(
-                            "failed to derive plugin runtime event identity: {err}"
-                        ))
-                    },
-                )?;
+                match derive_graph_commit_node_ids(&mut self.state, &mut graph, &operation) {
+                    Ok(node_ids) => node_ids,
+                    Err(err) => {
+                        let mut context =
+                            format!("failed to derive plugin runtime event identity: {err}");
+                        if let Err(rollback_err) = self
+                            .restore_protocol_session_after_failed_append(
+                                state_before_append.clone(),
+                            )
+                            .await
+                        {
+                            context.push_str(&format!(
+                                "; failed to restore protocol session: {rollback_err}"
+                            ));
+                        }
+                        return Err(PluginOperationInvokeError::Failed(context));
+                    }
+                };
             let commit =
                 crate::store::RuntimeCommit::persisted_state_with_graph_commit_and_operation(
                     &self.state,

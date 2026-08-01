@@ -26,6 +26,8 @@ pub mod session_model;
 mod stable_hash;
 pub mod store;
 pub mod task;
+#[cfg(test)]
+mod test_watchdog;
 #[cfg(any(test, feature = "testing"))]
 pub mod testing;
 pub mod tool_dispatch;

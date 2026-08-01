@@ -734,7 +734,9 @@ pub(super) fn derive_graph_commit_node_ids(
     {
         *current = derived.clone();
     }
-    state.agent_frames = state.session_graph.agent_frame_records(&state.session_id);
+    state.agent_frames = state
+        .session_graph
+        .try_agent_frame_records(&state.session_id)?;
     Ok(mapping.into_iter().map(|(_, derived)| derived).collect())
 }
 
