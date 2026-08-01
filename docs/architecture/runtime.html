@@ -86,7 +86,7 @@ flowchart TD
                 <tr><td>Session snapshots and catalogs</td><td>Read current state and tool catalogs through stable projections.</td></tr>
                 <tr><td>Tool state</td><td>Read and mutate per-session Tool Catalog membership without exposing the inner registry.</td></tr>
                 <tr><td>Session lifecycle and turns</td><td>Create child sessions, fork sessions, append AgentFrames, and stream managed turns.</td></tr>
-                <tr><td>Session graph writes</td><td>Append plugin-authored nodes to a session graph through a guarded contract.</td></tr>
+                <tr><td>Session graph writes</td><td>Append plugin-authored nodes to a session graph through a guarded contract. The caller's optional <code>requires_ancestor_node_id</code> precondition is a branch-liveness check, not a compare-and-swap on the session head: a head that merely advanced is accepted and the new nodes re-parent onto the current leaf, while a base that has left the active path is refused with nothing written.</td></tr>
                 <tr><td>Processes</td><td>Register durable processes from typed start requests, record session observers, deliver wakeups, and route user-facing cancellation through the canonical process service.</td></tr>
                 <tr><td>Trace access</td><td>Expose trace sinks to hooks without exposing session internals. Human input is provided by host tools such as the CLI <code>ask</code> implementation, not by a runtime prompt event.</td></tr>
                 <tr><td>Direct completions</td><td>Run one-shot completions and account for their usage. Inside an atomic tool attempt, the provider call executes locally under that attempt rather than becoming a nested journal entry.</td></tr>

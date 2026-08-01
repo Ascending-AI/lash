@@ -23,6 +23,7 @@ mod process_filters;
 mod process_references;
 mod process_registry;
 mod runtime_persistence;
+mod session_graph_append;
 mod session_store_factory;
 mod store_contract_state_machine;
 mod trigger_store;
@@ -39,6 +40,7 @@ pub use live_replay::*;
 pub use process_continuation_store::*;
 pub use process_registry::*;
 pub use runtime_persistence::*;
+pub use session_graph_append::*;
 pub use session_store_factory::*;
 pub use store_contract_state_machine::*;
 pub use trigger_store::*;
@@ -230,6 +232,13 @@ mod tests {
                     as Arc<dyn crate::RuntimePersistence>
             },
         )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn in_memory_session_graph_append_branch_liveness() {
+        session_graph_append_branch_liveness(Arc::new(crate::InMemorySessionStoreFactory::new())
+            as Arc<dyn crate::SessionStoreFactory>)
         .await;
     }
 

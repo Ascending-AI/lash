@@ -331,6 +331,16 @@ async fn sqlite_session_store_factory_satisfies_conformance() {
     .await;
 }
 
+#[tokio::test]
+async fn sqlite_session_graph_append_branch_liveness_conformance() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    lash_core::testing::conformance::session_graph_append_branch_liveness(Arc::new(
+        SqliteSessionStoreFactory::new(dir.path()),
+    )
+        as Arc<dyn SessionStoreFactory>)
+    .await;
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn sqlite_attachment_owner_cold_replay_conformance() {
     let dir = tempfile::tempdir().expect("tempdir");
