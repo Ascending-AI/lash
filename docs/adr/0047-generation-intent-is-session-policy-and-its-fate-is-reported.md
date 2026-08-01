@@ -1,5 +1,10 @@
 # Generation intent is session policy, and its fate on the wire is reported
 
+> **Superseded note (2026-07-31, FIG-842):** Observational memory was removed
+> from Lash as a product option. Its workers and maintenance calls are described
+> below only as historical context for this decision; they are no longer part of
+> the runtime or plugin surface.
+
 `GenerationOptions` is caller intent, but only the one-shot direct path had a caller-owned
 slot for it. Agent sessions synthesized their options from provider configuration —
 copying `ProviderOptions.max_output_tokens` onto the request, where the adapter's own

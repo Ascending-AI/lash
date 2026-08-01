@@ -4,8 +4,6 @@ use std::sync::Arc;
 
 use lash_core::plugin::{PluginSpec, StaticPluginFactory};
 use lash_core::{PluginStack, ToolProvider};
-pub use lash_plugin_observational_memory::ObservationalMemoryConfig;
-use lash_plugin_observational_memory::ObservationalMemoryPluginFactory;
 use lash_plugin_process_controls::SessionProcessAdminPluginFactory;
 use lash_plugin_tool_output_budget::{ToolOutputBudgetPluginFactory, tool_output_budget_stack};
 use lash_tools::files::{edit_provider, glob_provider, read_file_provider, write_provider};
@@ -17,14 +15,12 @@ use rolling_history::RollingHistoryPluginFactory;
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum StandardContextApproachKind {
     RollingHistory,
-    ObservationalMemory,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum StandardContextApproach {
     RollingHistory(RollingHistoryConfig),
-    ObservationalMemory(ObservationalMemoryConfig),
 }
 
 impl Default for StandardContextApproach {
@@ -37,7 +33,6 @@ impl StandardContextApproach {
     pub fn kind(&self) -> StandardContextApproachKind {
         match self {
             Self::RollingHistory(_) => StandardContextApproachKind::RollingHistory,
-            Self::ObservationalMemory(_) => StandardContextApproachKind::ObservationalMemory,
         }
     }
 }
@@ -85,11 +80,6 @@ fn push_standard_context_tools(
     match standard_context_approach {
         Some(StandardContextApproach::RollingHistory(config)) => {
             stack.push(Arc::new(RollingHistoryPluginFactory::new(config.clone())));
-        }
-        Some(StandardContextApproach::ObservationalMemory(config)) => {
-            stack.push(Arc::new(ObservationalMemoryPluginFactory::new(
-                config.clone(),
-            )));
         }
         None => {}
     }
@@ -186,20 +176,6 @@ mod tests {
         let ids = stack_ids(&stack);
 
         assert!(ids.contains(&"rolling_history"));
-        assert!(!ids.contains(&"observational_memory"));
-    }
-
-    #[test]
-    fn observational_memory_context_installs_om_support() {
-        let stack = standard_tool_stack(StandardToolStackOptions {
-            standard_context_approach: Some(StandardContextApproach::ObservationalMemory(
-                Default::default(),
-            )),
-            tavily_api_key: None,
-            include_cancel_process: true,
-        });
-        let ids = stack_ids(&stack);
-        assert!(ids.contains(&"observational_memory"));
     }
 
     #[test]

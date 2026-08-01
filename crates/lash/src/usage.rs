@@ -48,10 +48,6 @@ pub mod sources {
     pub const SUBAGENT: &str = "subagent";
     /// Rolling-history compaction passes.
     pub const COMPACTION: &str = "compaction";
-    /// Async observational-memory observer runs.
-    pub const OBSERVER: &str = "observer";
-    /// Async observational-memory reflector runs.
-    pub const REFLECTOR: &str = "reflector";
     /// Default fallback when no `usage_source` is set on a child session.
     pub const CHILD: &str = "child";
 }
