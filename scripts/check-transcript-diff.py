@@ -15,7 +15,19 @@ from typing import NamedTuple
 DEFAULT_RANGE = "origin/main...HEAD"
 SNAPSHOT_OPEN = re.compile(r'@r(?P<hashes>#+)?"')
 REV_TRANSITION = re.compile(r"\brev=\S+->\S+")
-DURABLE_MARKERS = ("Checkpoint", "DurableEffect", "stored logical=", "ref (unchanged)")
+# The behavior-transcript vocabulary's durable-write event names plus its
+# component renderings, and the two legacy class tokens the pre-vocabulary
+# renderer emitted. Keep in sync with
+# `lash_core::testing::behavior_transcript::DURABLE_WRITE_EVENTS`.
+DURABLE_MARKERS = (
+    "checkpoint.commit",
+    "checkpoint.request",
+    "durable.effect",
+    "stored logical=",
+    "ref (unchanged)",
+    "Checkpoint",
+    "DurableEffect",
+)
 HUNK_HEADER = re.compile(r"^@@ -(?P<old>\d+)(?:,\d+)? \+(?P<new>\d+)(?:,\d+)? @@")
 # All Rust files: the `@r` snapshot-body requirement already suppresses noise,
 # and any path allowlist is a silent-decay surface — a snapshot added in an

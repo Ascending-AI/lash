@@ -2150,6 +2150,7 @@ name = "lash-protocol-standard"
 version = "0.0.0-dev"
 dependencies = [
  "async-trait",
+ "insta",
  "lash-core",
  "lash-plugin-process-controls",
  "lash-sqlite-store",
@@ -2317,6 +2318,7 @@ version = "0.0.0-dev"
 dependencies = [
  "async-trait",
  "futures-util",
+ "insta",
  "lash-core",
  "lash-lashlang-runtime",
  "lash-llm-tools",

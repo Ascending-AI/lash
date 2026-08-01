@@ -1,32 +1,37 @@
 use std::collections::{BTreeMap, BTreeSet};
-use std::fmt::Write as _;
+
+use lash_core::testing::behavior_transcript::{Actor, Attr, Component, Entry, Kind, Transcript};
 
 use crate::scheduler::{BoundaryKind, DeliveredBoundary};
 use crate::store::{CheckpointComponentWriteKind, CheckpointWriteEvent};
 use crate::trace::SimulationTrace;
 
+/// Simulator runs interleave many sessions and are the longest transcripts the
+/// repo renders; they are read as artifacts rather than as inline snapshots, so
+/// they get a wider budget than an expect test.
+const SIMULATION_REVIEW_BUDGET_LINES: usize = 4096;
+
 impl SimulationTrace {
-    /// Render the completed run as deterministic, review-oriented text.
+    /// Render the completed run as a behavior transcript.
     ///
-    /// The compact projection intentionally omits provider-wire `ProviderEvent`
-    /// fragments; those remain in `SimulationTrace::events`. Checkpoint lines
+    /// The projection intentionally omits provider-wire `ProviderEvent`
+    /// fragments; those remain in `SimulationTrace::events`. Durable-write lines
     /// cover commits made through observed session-store factories. Lash-core's
     /// `DurableProcessWorker` task body uses a bare in-memory store, so its
     /// internal checkpoint commits are not represented here.
     pub fn render_transcript(&self) -> String {
-        render(self, None)
+        build(self, None).render()
     }
 
-    /// Render one raw simulator session with the same stable alias used by the
+    /// Render one raw simulator session with the same stable aliases used by the
     /// whole-run transcript. The provider-wire and process-worker exclusions
     /// documented on [`SimulationTrace::render_transcript`] also apply.
     pub fn render_session_transcript(&self, session_id: &str) -> String {
-        render(self, Some(session_id))
+        build(self, Some(session_id)).render()
     }
 }
 
-fn render(trace: &SimulationTrace, session_filter: Option<&str>) -> String {
-    let show_session_column = session_filter.is_none();
+fn build(trace: &SimulationTrace, session_filter: Option<&str>) -> Transcript {
     let boundaries = trace
         .events
         .iter()
@@ -43,12 +48,23 @@ fn render(trace: &SimulationTrace, session_filter: Option<&str>) -> String {
         })
         .collect::<Vec<_>>();
 
-    let mut aliases = TranscriptAliases::new(trace);
-    for boundary in &boundaries {
-        aliases.alias(&boundary.actor_alias);
+    let mut transcript = Transcript::new().with_review_budget(SIMULATION_REVIEW_BUDGET_LINES);
+    // The simulator already owns run-stable actor aliases: `actor_alias` on a
+    // delivered boundary is the normalized name, and `trace.aliases` maps the
+    // raw session ids of separately executed contract proofs onto the same
+    // space. Pin both so the vocabulary keeps the simulator's identities instead
+    // of re-normalizing an already-normalized name.
+    for (session_id, alias) in &trace.aliases {
+        transcript.pin(session_id.clone(), alias.clone());
     }
-    for write in &writes {
-        aliases.alias(write.attributed_session());
+    for actor in boundaries
+        .iter()
+        .map(|boundary| boundary.actor_alias.as_str())
+        .chain(writes.iter().map(|write| write.attributed_session()))
+    {
+        if !trace.aliases.contains_key(actor) {
+            transcript.pin(actor.to_string(), actor.to_string());
+        }
     }
 
     let mut writes_by_turn = BTreeMap::<(&str, usize), Vec<&CheckpointWriteEvent>>::new();
@@ -67,21 +83,22 @@ fn render(trace: &SimulationTrace, session_filter: Option<&str>) -> String {
         }
     }
     let mut rendered_writes = BTreeSet::<(&str, usize)>::new();
-    let mut output = String::new();
-    let mut sequence = 0usize;
     let mut current_turn = BTreeMap::<&str, usize>::new();
 
     for boundary in boundaries {
-        let alias = aliases.alias(&boundary.actor_alias);
         let turn_index = boundary_turn_index(boundary);
-        if boundary.kind == BoundaryKind::Ingress {
-            current_turn.insert(&boundary.actor_alias, 1);
-            write_turn_header(&mut output, 1, &alias, show_session_column);
-        } else if boundary.kind == BoundaryKind::Provider
-            && current_turn.get(boundary.actor_alias.as_str()) != Some(&turn_index)
-        {
-            current_turn.insert(&boundary.actor_alias, turn_index);
-            write_turn_header(&mut output, turn_index, &alias, show_session_column);
+        let turn_changed = boundary.kind == BoundaryKind::Ingress
+            || (boundary.kind == BoundaryKind::Provider
+                && current_turn.get(boundary.actor_alias.as_str()) != Some(&turn_index));
+        if turn_changed {
+            current_turn.insert(
+                &boundary.actor_alias,
+                if boundary.kind == BoundaryKind::Ingress {
+                    1
+                } else {
+                    turn_index
+                },
+            );
         }
 
         let is_resume = boundary
@@ -90,16 +107,19 @@ fn render(trace: &SimulationTrace, session_filter: Option<&str>) -> String {
             .and_then(serde_json::Value::as_bool)
             .unwrap_or(false);
         if is_resume {
-            write_session_marker(&mut output, "resume", &alias, show_session_column);
+            transcript.record(Entry::new(
+                Kind::Resume,
+                actor_for(boundary),
+                "session.resume",
+            ));
         }
 
-        sequence += 1;
-        write_boundary_line(&mut output, sequence, boundary, &alias, show_session_column);
+        transcript.record(boundary_entry(boundary, turn_changed));
 
         if boundary.kind == BoundaryKind::Ingress
             && boundary.observed.get("runtime_suspend").is_some()
         {
-            write_session_marker(&mut output, "park", &alias, show_session_column);
+            transcript.record(Entry::new(Kind::Park, actor_for(boundary), "session.park"));
         }
 
         if (boundary.kind == BoundaryKind::Provider || is_resume)
@@ -107,88 +127,139 @@ fn render(trace: &SimulationTrace, session_filter: Option<&str>) -> String {
                 writes_by_turn.get(&(boundary.actor_alias.as_str(), turn_index))
         {
             for write in turn_writes {
-                if rendered_writes.contains(&(write.attributed_session(), write.commit_index)) {
-                    continue;
+                if rendered_writes.insert((write.attributed_session(), write.commit_index)) {
+                    transcript.record(commit_entry(write));
                 }
-                sequence += 1;
-                write_checkpoint(&mut output, sequence, write, &alias, show_session_column);
-                rendered_writes.insert((write.attributed_session(), write.commit_index));
             }
         }
         if let Some(boundary_writes) = writes_by_boundary.get(boundary.boundary_id.as_str()) {
             for write in boundary_writes {
-                if rendered_writes.contains(&(write.attributed_session(), write.commit_index)) {
-                    continue;
+                if rendered_writes.insert((write.attributed_session(), write.commit_index)) {
+                    transcript.record(commit_entry(write));
                 }
-                sequence += 1;
-                write_checkpoint(&mut output, sequence, write, &alias, show_session_column);
-                rendered_writes.insert((write.attributed_session(), write.commit_index));
             }
         }
     }
 
     for pending_writes in writes_by_turn.values().chain(writes_by_boundary.values()) {
         for write in pending_writes {
-            if rendered_writes.contains(&(write.attributed_session(), write.commit_index)) {
-                continue;
+            if rendered_writes.insert((write.attributed_session(), write.commit_index)) {
+                transcript
+                    .record(commit_entry(write).attr(Attr::int("turn", write.turn_index as u64)));
             }
-            let alias = aliases.alias(write.attributed_session());
-            write_turn_header(&mut output, write.turn_index, &alias, show_session_column);
-            sequence += 1;
-            write_checkpoint(&mut output, sequence, write, &alias, show_session_column);
         }
     }
 
-    output.trim_end().to_string()
+    transcript
 }
 
-struct TranscriptAliases {
-    aliases: BTreeMap<String, String>,
-    next: usize,
+fn actor_for(boundary: &DeliveredBoundary) -> Actor {
+    Actor::session(boundary.actor_alias.clone())
 }
 
-impl TranscriptAliases {
-    fn new(trace: &SimulationTrace) -> Self {
-        let next = trace
-            .aliases
-            .values()
-            .filter_map(|alias| alias.strip_prefix("session-"))
-            .filter_map(|suffix| suffix.parse::<usize>().ok())
-            .max()
-            .unwrap_or(0);
-        Self {
-            aliases: trace.aliases.clone(),
-            next,
-        }
+fn boundary_entry(boundary: &DeliveredBoundary, turn_changed: bool) -> Entry {
+    let mut entry = Entry::new(
+        boundary_kind(boundary.kind),
+        actor_for(boundary),
+        boundary_label(boundary),
+    );
+    if turn_changed {
+        entry = entry.attr(Attr::int("turn", boundary_turn_index(boundary) as u64));
     }
-
-    fn alias(&mut self, session_id: &str) -> String {
-        if let Some(alias) = self.aliases.get(session_id) {
-            return alias.clone();
+    match boundary.kind {
+        BoundaryKind::Provider => {
+            if let Some(provider) = observed_str(boundary, "provider_kind") {
+                entry = entry.attr(Attr::text("model", provider));
+            }
         }
-        if self.aliases.values().any(|alias| alias == session_id) {
-            return session_id.to_string();
+        BoundaryKind::Tool | BoundaryKind::ExecCode => {
+            if let Some(name) = observed_str(boundary, "tool_name").or_else(|| {
+                boundary
+                    .payload
+                    .get("tool")
+                    .and_then(serde_json::Value::as_str)
+            }) {
+                entry = entry.attr(Attr::text("name", name));
+            }
         }
-        self.next += 1;
-        let alias = format!("session-{:03}", self.next);
-        self.aliases.insert(session_id.to_string(), alias.clone());
-        alias
+        BoundaryKind::DurableEffect => {
+            if let Some(key) = observed_str(boundary, "durable_key") {
+                entry = entry.attr(Attr::text("key", key));
+            }
+        }
+        BoundaryKind::LeaseTime => {
+            if let Some(tick) = boundary
+                .observed
+                .get("lease_time_tick")
+                .and_then(serde_json::Value::as_u64)
+            {
+                entry = entry.attr(Attr::int("tick", tick));
+            }
+        }
+        BoundaryKind::ProcessWake => {
+            if let Some(reason) = observed_str(boundary, "discard_reason") {
+                entry = entry.attr(Attr::token("discard", reason));
+            }
+        }
+        BoundaryKind::ProcessLifecycle => {
+            if let Some(outcome) = observed_str(boundary, "outcome") {
+                entry = entry.attr(Attr::token("outcome", outcome));
+            }
+        }
+        BoundaryKind::Observer => {
+            if let Some(visibility) = observed_str(boundary, "visibility") {
+                entry = entry.attr(Attr::token("visibility", visibility));
+            }
+        }
+        _ => {}
     }
+    entry
 }
 
-fn write_turn_header(output: &mut String, turn_index: usize, alias: &str, show_session: bool) {
-    if show_session {
-        writeln!(output, "{alias:<11} turn {turn_index}").expect("write transcript");
-    } else {
-        writeln!(output, "turn {turn_index}  {alias}").expect("write transcript");
-    }
+fn observed_str<'event>(boundary: &'event DeliveredBoundary, field: &str) -> Option<&'event str> {
+    boundary
+        .observed
+        .get(field)
+        .and_then(serde_json::Value::as_str)
 }
 
-fn write_session_marker(output: &mut String, marker: &str, alias: &str, show_session: bool) {
-    if show_session {
-        writeln!(output, "{alias:<11} {marker}").expect("write transcript");
-    } else {
-        writeln!(output, "{marker:<6} {alias}").expect("write transcript");
+fn commit_entry(write: &CheckpointWriteEvent) -> Entry {
+    let mut entry = Entry::commit(
+        Actor::session(write.attributed_session().to_string()),
+        write.revision_before,
+        write.revision_after,
+    );
+    for component in &write.components {
+        entry = entry.component(match &component.kind {
+            CheckpointComponentWriteKind::Stored { logical_bytes } => {
+                Component::stored(component.component.as_str(), *logical_bytes)
+            }
+            CheckpointComponentWriteKind::UnchangedRef => {
+                Component::unchanged_ref(component.component.as_str())
+            }
+        });
+    }
+    entry
+}
+
+/// Boundary classes the simulator schedules, projected onto the shared
+/// vocabulary. `ProviderEvent` is filtered out before this point.
+fn boundary_kind(kind: BoundaryKind) -> Kind {
+    match kind {
+        BoundaryKind::Ingress | BoundaryKind::QueuedIngress | BoundaryKind::Trigger => {
+            Kind::Ingress
+        }
+        BoundaryKind::Provider | BoundaryKind::ProviderEvent => Kind::Provider,
+        BoundaryKind::Tool => Kind::Tool,
+        BoundaryKind::ExecCode => Kind::Exec,
+        BoundaryKind::DurableEffect => Kind::Effect,
+        BoundaryKind::ProcessWake => Kind::Wake,
+        BoundaryKind::ProcessLifecycle => Kind::Outcome,
+        BoundaryKind::Worker => Kind::Worker,
+        BoundaryKind::Observer => Kind::Observe,
+        BoundaryKind::Cancellation => Kind::Cancel,
+        BoundaryKind::BackendFailure | BoundaryKind::ProviderMutation => Kind::Fault,
+        BoundaryKind::LeaseTime => Kind::Lease,
     }
 }
 
@@ -201,168 +272,11 @@ fn boundary_turn_index(event: &DeliveredBoundary) -> usize {
         .unwrap_or(1) as usize
 }
 
-fn write_boundary_line(
-    output: &mut String,
-    sequence: usize,
-    event: &DeliveredBoundary,
-    alias: &str,
-    show_session: bool,
-) {
-    let class = boundary_class(event.kind);
-    let label = boundary_label(event);
-    if show_session {
-        write!(output, "{alias:<11} {sequence:04}  {class:<18} {label}").expect("write transcript");
-    } else {
-        write!(output, "  {sequence:04}  {class:<18} {label}").expect("write transcript");
-    }
-    match event.kind {
-        BoundaryKind::Provider => {
-            if let Some(provider) = event
-                .observed
-                .get("provider_kind")
-                .and_then(serde_json::Value::as_str)
-            {
-                write!(output, "  model={provider}").expect("write transcript");
-            }
-        }
-        BoundaryKind::Tool | BoundaryKind::ExecCode => {
-            if let Some(name) = event
-                .observed
-                .get("tool_name")
-                .or_else(|| event.payload.get("tool"))
-                .and_then(serde_json::Value::as_str)
-            {
-                write!(output, "  name={name}").expect("write transcript");
-            }
-        }
-        BoundaryKind::DurableEffect => {
-            if let Some(key) = event
-                .observed
-                .get("durable_key")
-                .and_then(serde_json::Value::as_str)
-            {
-                write!(output, "  key={key}").expect("write transcript");
-            }
-        }
-        BoundaryKind::LeaseTime => {
-            if let Some(tick) = event
-                .observed
-                .get("lease_time_tick")
-                .and_then(serde_json::Value::as_u64)
-            {
-                write!(output, "  tick={tick}").expect("write transcript");
-            }
-        }
-        BoundaryKind::ProcessWake => {
-            if let Some(reason) = event
-                .observed
-                .get("discard_reason")
-                .and_then(serde_json::Value::as_str)
-            {
-                write!(output, "  discard={reason}").expect("write transcript");
-            }
-        }
-        BoundaryKind::ProcessLifecycle => {
-            if let Some(outcome) = event
-                .observed
-                .get("outcome")
-                .and_then(serde_json::Value::as_str)
-            {
-                write!(output, "  outcome={outcome}").expect("write transcript");
-            }
-        }
-        BoundaryKind::Observer => {
-            if let Some(visibility) = event
-                .observed
-                .get("visibility")
-                .and_then(serde_json::Value::as_str)
-            {
-                write!(output, "  visibility={visibility}").expect("write transcript");
-            }
-        }
-        _ => {}
-    }
-    output.push('\n');
-}
-
-fn boundary_class(kind: BoundaryKind) -> &'static str {
-    match kind {
-        BoundaryKind::Ingress | BoundaryKind::QueuedIngress => "Ingress",
-        BoundaryKind::Provider | BoundaryKind::ProviderEvent => "Provider",
-        BoundaryKind::Tool => "Tool",
-        BoundaryKind::ExecCode => "ExecCode",
-        BoundaryKind::DurableEffect => "DurableEffect",
-        BoundaryKind::ProcessWake => "ProcessWake",
-        BoundaryKind::ProcessLifecycle => "ProcessLifecycle",
-        BoundaryKind::Worker => "Worker",
-        BoundaryKind::Observer => "Observer",
-        BoundaryKind::Cancellation => "Cancellation",
-        BoundaryKind::Trigger => "Trigger",
-        BoundaryKind::BackendFailure => "BackendFailure",
-        BoundaryKind::ProviderMutation => "ProviderMutation",
-        BoundaryKind::LeaseTime => "LeaseTime",
-    }
-}
-
 fn boundary_label(event: &DeliveredBoundary) -> &str {
     if event.kind == BoundaryKind::Provider {
         "provider.chat.stream"
     } else {
         &event.label
-    }
-}
-
-fn write_checkpoint(
-    output: &mut String,
-    sequence: usize,
-    write: &CheckpointWriteEvent,
-    alias: &str,
-    show_session: bool,
-) {
-    if show_session {
-        writeln!(
-            output,
-            "{alias:<11} {sequence:04}  {:<18} checkpoint.commit  rev={}->{}",
-            "Checkpoint", write.revision_before, write.revision_after
-        )
-        .expect("write transcript");
-    } else {
-        writeln!(
-            output,
-            "  {sequence:04}  {:<18} checkpoint.commit  rev={}->{}",
-            "Checkpoint", write.revision_before, write.revision_after
-        )
-        .expect("write transcript");
-    }
-    for component in &write.components {
-        let detail = match component_write_detail(&component.kind) {
-            Some(detail) => detail,
-            None => "ref (unchanged)".to_string(),
-        };
-        let component = component.component.as_str();
-        if show_session {
-            writeln!(
-                output,
-                "{alias:<11}                       {component:<17} {detail}"
-            )
-            .expect("write transcript");
-        } else {
-            writeln!(output, "                         {component:<17} {detail}")
-                .expect("write transcript");
-        }
-    }
-}
-
-fn component_write_detail(kind: &CheckpointComponentWriteKind) -> Option<String> {
-    match kind {
-        CheckpointComponentWriteKind::Stored { logical_bytes } => {
-            if let Some(bytes) = logical_bytes {
-                Some(format!("stored logical={}", format_bytes(*bytes)))
-            } else {
-                Some("stored logical=unknown".to_string())
-            }
-        }
-        CheckpointComponentWriteKind::UnchangedRef => None,
     }
 }
 
@@ -426,15 +340,6 @@ fn trace_with_events(
 }
 
 #[cfg(test)]
-fn lines_for_sequence(transcript: &str, sequence: usize) -> Vec<&str> {
-    let needle = format!("{sequence:04}");
-    transcript
-        .lines()
-        .filter(|line| line.contains(&needle))
-        .collect()
-}
-
-#[cfg(test)]
 mod attribution_tests {
     use super::*;
 
@@ -451,19 +356,25 @@ mod attribution_tests {
         );
 
         let transcript = trace.render_transcript();
-        for sequence in 1..=6 {
-            let lines = lines_for_sequence(&transcript, sequence);
-            assert_eq!(lines.len(), 1, "sequence {sequence}: {transcript}");
-            let expected = if matches!(sequence, 1 | 3 | 4) {
-                "session-001"
-            } else {
-                "session-002"
-            };
+        let lines = transcript.lines().collect::<Vec<_>>();
+        assert_eq!(lines.len(), 6, "{transcript}");
+        // Two sessions interleave; every line, boundary and commit alike, must
+        // name the actor it belongs to.
+        let expected_actors = ["alpha", "beta", "alpha", "alpha", "beta", "beta"];
+        for (line, actor) in lines.iter().zip(expected_actors) {
             assert!(
-                lines[0].starts_with(expected),
-                "sequence {sequence} was not attributed to {expected}: {transcript}"
+                line.starts_with(actor),
+                "line `{line}` was not attributed to {actor}: {transcript}"
             );
         }
+        assert_eq!(
+            lines
+                .iter()
+                .filter(|line| line.contains("checkpoint.commit"))
+                .count(),
+            2,
+            "both sessions must render their own commit: {transcript}"
+        );
     }
 
     #[test]
@@ -481,19 +392,13 @@ mod attribution_tests {
 
         let transcript = trace.render_transcript();
         let trigger = transcript.find("Trigger").expect("trigger line");
-        let checkpoint = transcript.find("Checkpoint").expect("checkpoint line");
+        let checkpoint = transcript
+            .find("checkpoint.commit")
+            .expect("checkpoint line");
         assert!(
             checkpoint > trigger,
             "contract checkpoint rendered before its cause:\n{transcript}"
         );
-    }
-}
-
-fn format_bytes(bytes: usize) -> String {
-    if bytes < 1024 {
-        format!("{bytes}B")
-    } else {
-        format!("{:.1}KB", bytes as f64 / 1024.0)
     }
 }
 
@@ -532,17 +437,26 @@ mod tests {
             "the real defect must change the transcript"
         );
         assert!(
-            correct.contains("tool_state        stored"),
+            correct
+                .lines()
+                .any(|line| line.contains("tool_state") && line.contains("stored logical=")),
             "control transcript must show the changed body was stored: {correct}"
         );
         assert!(
-            defect.contains("tool_state        ref (unchanged)"),
+            defect
+                .lines()
+                .any(|line| line.contains("tool_state") && line.contains("ref (unchanged)")),
             "mutated transcript must expose the missing body: {defect}"
         );
     }
 
+    /// The retarget/prune cutover is checked against the registry's own reported
+    /// facts. It deliberately does **not** snapshot a transcript: this test runs
+    /// no scheduler, so the only boundary events available to render would be
+    /// ones the test constructed itself, which ADR 0044 rules out. Transcript
+    /// coverage of real boundary shapes lives in the scenario harnesses.
     #[tokio::test]
-    async fn process_cutover_transcript_shows_retarget_and_retention_degradation() {
+    async fn process_cutover_reports_retarget_discard_and_pruned_await_as_information() {
         let registry = Arc::new(lash_core::TestLocalProcessRegistry::default());
         let process_id = "transcript-process";
         registry
@@ -593,6 +507,14 @@ mod tests {
                 delivery.discard_reason == Some(lash_core::WakeDiscardReason::Retargeted)
             })
             .expect("retargeted delivery");
+        assert_eq!(
+            retargeted
+                .discard_reason
+                .expect("retargeted delivery reason")
+                .as_str(),
+            "retargeted",
+            "a retarget must settle its stale wake delivery as retargeted"
+        );
         let retarget_event = registry
             .events_after(process_id, 0)
             .await
@@ -600,6 +522,7 @@ mod tests {
             .into_iter()
             .find(|event| event.event_type == "process.subscription_retargeted")
             .expect("retarget audit event");
+        assert_eq!(retarget_event.event_type, "process.subscription_retargeted");
 
         let terminal = registry
             .complete_process(
@@ -631,95 +554,25 @@ mod tests {
             output,
             ProcessAwaitOutput::NoLongerRetained { .. }
         ));
-        let rendered_output = output.clone().into_tool_output();
+        let rendered_output = output.into_tool_output();
         let rendered_value = match rendered_output.outcome {
             lash_core::ToolCallOutcome::Success(value) => value.to_json_value(),
             other => panic!("pruned await must render as information success, got {other:?}"),
         };
-        let rendered_type = rendered_value
-            .get("type")
-            .and_then(serde_json::Value::as_str)
-            .expect("rendered information type");
-        let rendered_code = rendered_value
-            .get("code")
-            .and_then(serde_json::Value::as_str)
-            .expect("rendered information code")
-            .strip_prefix("process_")
-            .expect("process information code");
-        let discard_reason = retargeted
-            .discard_reason
-            .expect("retargeted delivery reason")
-            .as_str();
-        let rendered_trace =
-            |retarget_label: &str, rendered_discard: &str, await_type: &str, await_code: &str| {
-                trace_with_events(
-                    vec![
-                        DeliveredBoundary {
-                            schema: crate::scheduler::BOUNDARY_EVENT_SCHEMA.to_string(),
-                            sequence: 1,
-                            scheduler: Default::default(),
-                            boundary_id: "retarget".to_string(),
-                            actor_alias: "source-session".to_string(),
-                            kind: BoundaryKind::ProcessWake,
-                            at: 1,
-                            label: retarget_label.to_string(),
-                            payload: serde_json::json!({"turn_index": 1}),
-                            observed: serde_json::json!({
-                                "turn_index": 1,
-                                "discard_reason": rendered_discard,
-                            }),
-                        },
-                        DeliveredBoundary {
-                            schema: crate::scheduler::BOUNDARY_EVENT_SCHEMA.to_string(),
-                            sequence: 2,
-                            scheduler: Default::default(),
-                            boundary_id: "pruned-await".to_string(),
-                            actor_alias: "branch-session".to_string(),
-                            kind: BoundaryKind::ProcessLifecycle,
-                            at: 2,
-                            label: format!("process.await.{await_type}"),
-                            payload: serde_json::json!({"turn_index": 1}),
-                            observed: serde_json::json!({
-                                "turn_index": 1,
-                                "outcome": await_code,
-                            }),
-                        },
-                    ],
-                    Vec::new(),
-                )
-                .render_transcript()
-            };
-        let transcript = rendered_trace(
-            &retarget_event.event_type,
-            discard_reason,
-            rendered_type,
-            rendered_code,
+        assert_eq!(
+            rendered_value
+                .get("type")
+                .and_then(serde_json::Value::as_str),
+            Some("information"),
+            "a pruned await must not be reported as a failure: {rendered_value}"
         );
-        assert_ne!(
-            transcript,
-            rendered_trace(
-                &retarget_event.event_type,
-                "enqueued",
-                rendered_type,
-                rendered_code,
-            ),
-            "a broken retarget settlement must change the transcript"
+        assert_eq!(
+            rendered_value
+                .get("code")
+                .and_then(serde_json::Value::as_str),
+            Some("process_no_longer_retained"),
+            "a pruned await must report retention loss by code: {rendered_value}"
         );
-        assert_ne!(
-            transcript,
-            rendered_trace(
-                &retarget_event.event_type,
-                discard_reason,
-                "failure",
-                "process_no_longer_retained",
-            ),
-            "rendering a pruned await as failure must change the transcript"
-        );
-
-        insta::assert_snapshot!(transcript, @r"
-session-001 0001  ProcessWake        process.subscription_retargeted  discard=retargeted
-session-002 0002  ProcessLifecycle   process.await.information  outcome=no_longer_retained
-");
     }
 
     async fn changed_component_commit(collector: CheckpointWriteCollector) -> CheckpointWriteEvent {

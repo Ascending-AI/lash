@@ -1,8 +1,14 @@
 pub(crate) use std::sync::Arc;
 
 pub(crate) use lash_core::sansio::{self, ChatContextProjector, ProtocolDriverHandle, Response};
+pub(crate) use lash_core::testing::behavior_transcript::{Actor, Entry, Kind, Transcript};
+pub(crate) use lash_core::testing::sansio_transcript::record_effects;
 pub(crate) use lash_core::{Effect, TurnMachine, TurnMachineConfig};
 pub(crate) use lash_protocol_rlm::RlmDriver;
+
+/// Actor name pinned on every RLM Protocol Scenario transcript. The harness drives
+/// one sans-io machine for one session.
+pub(crate) const RLM_TRANSCRIPT_ACTOR: &str = "rlm";
 pub(crate) use lash_rlm_types::{
     RlmCreateExtras, RlmProtocolEvent, RlmTermination, RlmTrajectoryEntry,
 };
@@ -449,18 +455,33 @@ impl RlmProtocolScenario {
         self
     }
 
+    /// Cross a real durable cell boundary: serialize the machine's
+    /// `TurnCheckpoint`, deserialize it, and continue on the restored machine.
+    ///
+    /// This is the only step that replaces the machine under test, so anything
+    /// the driver failed to carry in its checkpointed state is lost for real
+    /// rather than by simulation.
+    pub(crate) fn checkpoint_round_trip(mut self) -> Self {
+        self.steps.push(RlmProtocolStep::CheckpointRoundTrip);
+        self
+    }
+
     pub(crate) fn expect(mut self, expectations: RlmProtocolExpectations) -> Self {
         self.expectations = expectations;
         self
     }
 
-    pub(crate) fn run(self) {
-        let mut config = if let Some(options) = self.protocol_turn_options.clone() {
-            test_config_with_protocol_turn_options(options)
-        } else {
-            test_config_with_termination(self.termination)
+    pub(crate) fn run(self) -> RlmProtocolRun {
+        let build_config = || {
+            let mut config = if let Some(options) = self.protocol_turn_options.clone() {
+                test_config_with_protocol_turn_options(options)
+            } else {
+                test_config_with_termination(self.termination.clone())
+            };
+            config.max_turns = self.max_turns;
+            config
         };
-        config.max_turns = self.max_turns;
+        let config = build_config();
         let mut machine = TurnMachine::new(
             config,
             vec![user_message(self.user_message)],
@@ -468,8 +489,12 @@ impl RlmProtocolScenario {
             0,
         );
         let mut observed = RlmProtocolRun::default();
+        observed
+            .transcript
+            .pin(RLM_TRANSCRIPT_ACTOR, RLM_TRANSCRIPT_ACTOR);
         let mut effects = drain_effects(&mut machine);
         observed.record(&effects);
+        record_effects(&mut observed.transcript, RLM_TRANSCRIPT_ACTOR, &effects);
         observed.initial_request = find_llm_request(&effects).cloned();
 
         for step in &self.steps {
@@ -507,13 +532,30 @@ impl RlmProtocolScenario {
                         delivery: sansio::CheckpointDelivery::default(),
                     });
                 }
+                RlmProtocolStep::CheckpointRoundTrip => {
+                    observed.transcript.record(Entry::new(
+                        Kind::Park,
+                        Actor::session(RLM_TRANSCRIPT_ACTOR),
+                        "cell.checkpoint",
+                    ));
+                    let checkpoint = roundtrip_turn_checkpoint(machine.checkpoint());
+                    machine = TurnMachine::restore_from_checkpoint(build_config(), checkpoint);
+                    observed.round_trips += 1;
+                    observed.transcript.record(Entry::new(
+                        Kind::Resume,
+                        Actor::session(RLM_TRANSCRIPT_ACTOR),
+                        "cell.restore",
+                    ));
+                }
             }
 
             effects = drain_effects(&mut machine);
             observed.record(&effects);
+            record_effects(&mut observed.transcript, RLM_TRANSCRIPT_ACTOR, &effects);
         }
 
         self.expectations.assert(self.name, &observed, &machine);
+        observed
     }
 }
 
@@ -525,6 +567,7 @@ pub(crate) enum RlmProtocolStep {
     },
     ExecResult(lash_sansio::ExecResponse),
     Checkpoint,
+    CheckpointRoundTrip,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -758,6 +801,11 @@ pub(crate) struct RlmTrajectoryExpectation {
 
 #[derive(Default)]
 pub(crate) struct RlmProtocolRun {
+    /// Behavior transcript built from the machine's own effect stream, in drain
+    /// order. See `lash_core::testing::sansio_transcript`.
+    pub(crate) transcript: Transcript,
+    /// Real `TurnCheckpoint` serialize/deserialize/restore round trips performed.
+    pub(crate) round_trips: usize,
     pub(crate) initial_request: Option<LlmRequest>,
     pub(crate) exec_codes: Vec<String>,
     pub(crate) checkpoints: Vec<CheckpointKind>,

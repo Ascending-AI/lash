@@ -11,9 +11,7 @@ use crate::trace::{
     WorkerAbstractSummary, value_digest,
 };
 
-mod durable_writes;
-
-pub use durable_writes::{
+pub use lash_core::testing::checkpoint_observer::{
     CHECKPOINT_WRITE_EVENT_SCHEMA, CheckpointComponent, CheckpointComponentWrite,
     CheckpointComponentWriteKind, CheckpointWriteCollector, CheckpointWriteEvent,
     ObservedSessionStoreFactory,

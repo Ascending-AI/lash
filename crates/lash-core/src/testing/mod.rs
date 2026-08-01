@@ -10,6 +10,18 @@
 /// source of truth and the doubles cannot silently drift.
 pub mod conformance;
 
+/// The normalized behavior-transcript vocabulary every scenario harness renders
+/// into. See `docs/adr/0050-behavior-transcripts-are-one-normalized-vocabulary.md`.
+pub mod behavior_transcript;
+
+/// Store-factory decorator that observes real runtime-checkpoint commits, so a
+/// harness can render durable-write lines from facts the backend accepted.
+pub mod checkpoint_observer;
+
+/// Shared projection of a sans-io effect stream into the behavior-transcript
+/// vocabulary, used by the protocol scenario harnesses.
+pub mod sansio_transcript;
+
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::{Arc, Mutex};

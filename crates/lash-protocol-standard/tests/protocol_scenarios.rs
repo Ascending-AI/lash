@@ -2,6 +2,8 @@ use std::collections::BTreeSet;
 use std::sync::Arc;
 
 use lash_core::sansio::{self, ChatContextProjector, ProtocolDriverHandle, Response};
+use lash_core::testing::behavior_transcript::Transcript;
+use lash_core::testing::sansio_transcript::record_effects;
 use lash_core::{
     CheckpointKind, Effect, LlmCallError, LlmOutputPart, LlmRequest, LlmResponse,
     LlmTerminalReason, Message, MessageRole, Part, PartKind, PruneState, SessionStreamEvent,
@@ -9,6 +11,11 @@ use lash_core::{
     TurnStop,
 };
 use lash_protocol_standard::StandardDriver;
+
+/// Actor name pinned on every Standard Protocol Scenario transcript. The harness
+/// drives one sans-io machine for one session, so the whole transcript belongs to
+/// this actor.
+const STANDARD_TRANSCRIPT_ACTOR: &str = "standard";
 
 #[derive(Clone, Copy, Debug)]
 struct StandardProtocolScenarioCoverage {
@@ -162,7 +169,7 @@ impl StandardProtocolScenario {
         self
     }
 
-    fn run(self) {
+    fn run(self) -> StandardProtocolRun {
         let mut config = standard_config();
         config.max_turns = self.max_turns;
         let mut machine = TurnMachine::new(
@@ -172,8 +179,18 @@ impl StandardProtocolScenario {
             0,
         );
         let mut observed = StandardProtocolRun::default();
+        // One sans-io machine, one session: name the actor instead of letting it
+        // fall back to a positional alias.
+        observed
+            .transcript
+            .pin(STANDARD_TRANSCRIPT_ACTOR, STANDARD_TRANSCRIPT_ACTOR);
         let mut effects = drain_effects(&mut machine);
         observed.record(&effects);
+        record_effects(
+            &mut observed.transcript,
+            STANDARD_TRANSCRIPT_ACTOR,
+            &effects,
+        );
         observed.initial_request = find_llm_request(&effects).cloned();
 
         for step in &self.steps {
@@ -244,9 +261,15 @@ impl StandardProtocolScenario {
 
             effects = drain_effects(&mut machine);
             observed.record(&effects);
+            record_effects(
+                &mut observed.transcript,
+                STANDARD_TRANSCRIPT_ACTOR,
+                &effects,
+            );
         }
 
         self.expectations.assert(self.name, &observed, &machine);
+        observed
     }
 }
 
@@ -399,6 +422,9 @@ struct ExpectedToolCall {
 
 #[derive(Default)]
 struct StandardProtocolRun {
+    /// Behavior transcript built from the machine's own effect stream, in drain
+    /// order. See `lash_core::testing::sansio_transcript`.
+    transcript: Transcript,
     initial_request: Option<LlmRequest>,
     tool_calls: Vec<ExpectedToolCall>,
     checkpoints: Vec<CheckpointKind>,
@@ -658,7 +684,7 @@ fn standard_protocol_scenario_native_tool_loop_reenters_model_after_checkpoint()
 
 #[test]
 fn standard_protocol_scenario_parallel_tool_results_checkpoint_once() {
-    StandardProtocolScenario::new(PARALLEL_TOOL_CHECKPOINT.display_name)
+    let run = StandardProtocolScenario::new(PARALLEL_TOOL_CHECKPOINT.display_name)
         .user_message("read two files")
         .llm_response(
             false,
@@ -702,6 +728,19 @@ fn standard_protocol_scenario_parallel_tool_results_checkpoint_once() {
             ..StandardProtocolExpectations::default()
         })
         .run();
+    // Expect test: the reviewable artifact is the batch order and the single
+    // checkpoint between the tool results and model re-entry — the defect class
+    // ADR 0044 names (batch ordering reversed, serial tools run in parallel).
+    // The expectations above still own the invariants.
+    insta::assert_snapshot!(run.transcript.render(), @r#"
+    standard     provider  model.request           messages=1 tools=0
+    standard     tool      tool.call               name="read_file" call=call-001
+    standard     tool      tool.call               name="read_file" call=call-002
+    standard     tool      tool.result             name="read_file" outcome=success call=call-001
+    standard     tool      tool.result             name="read_file" outcome=success call=call-002
+    standard     commit    checkpoint.request      checkpoint=after_work
+    standard     provider  model.request           messages=3 tools=0
+    "#);
 }
 
 #[test]
