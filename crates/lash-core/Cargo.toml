@@ -19,7 +19,7 @@ default = []
 otel-trace = ["lash-trace/otel"]
 # Expose `lash::testing` for downstream plugin crates to share mock
 # session-manager/turn fixtures with lash's own tests.
-testing = []
+testing = ["dep:proptest"]
 
 [lints]
 workspace = true
@@ -43,6 +43,7 @@ sha2 = { workspace = true }
 chrono = { workspace = true }
 futures-util = { workspace = true }
 hmac = { workspace = true }
+proptest = { version = "1", optional = true }
 
 [dev-dependencies]
 proptest = "1"
