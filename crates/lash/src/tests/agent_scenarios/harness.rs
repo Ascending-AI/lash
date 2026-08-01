@@ -131,11 +131,16 @@ fn agent_scenario_session_id(name: &str) -> String {
 }
 
 pub(super) struct AgentScenarioRun {
+    pub(super) session_id: String,
     pub(super) turn_output: Option<TurnResult>,
     pub(super) streamed_events: Vec<TurnActivity>,
     pub(super) graph_snapshots: Vec<crate::tracing::TraceLashlangGraph>,
     pub(super) prompt_captures: Vec<LlmRequest>,
     pub(super) final_process_list: Vec<lash_core::ProcessHandleSummary>,
+    /// Runtime-checkpoint commits the session store actually accepted, in
+    /// commit order. Observed at the store seam, never reconstructed.
+    pub(super) checkpoint_writes:
+        Vec<lash_core::testing::checkpoint_observer::CheckpointWriteEvent>,
 }
 
 struct AgentScenarioSetup {
@@ -183,6 +188,8 @@ impl AgentScenarioSetup {
     }
 
     fn build(self) -> Result<AgentScenarioRuntime> {
+        let checkpoint_writes =
+            lash_core::testing::checkpoint_observer::CheckpointWriteCollector::default();
         let graph_store = Arc::new(crate::tracing::TraceLashlangGraphStore::default());
         let process_registry = Arc::new(TestLocalProcessRegistry::default());
         let prompt_captures = Arc::new(StdMutex::new(Vec::new()));
@@ -196,7 +203,12 @@ impl AgentScenarioSetup {
         let mut builder = explicit_ephemeral_facets(LashCore::rlm_builder(factory))
             .provider(provider)
             .model(mock_model_spec())
-            .store_factory(Arc::new(lash_core::InMemorySessionStoreFactory::new()))
+            .store_factory(Arc::new(
+                lash_core::testing::checkpoint_observer::ObservedSessionStoreFactory::new(
+                    Arc::new(lash_core::InMemorySessionStoreFactory::new()),
+                    checkpoint_writes.clone(),
+                ),
+            ))
             .process_registry(Arc::clone(&process_registry) as Arc<dyn ProcessRegistry>);
         if let Some(tools) = self.tool_provider {
             builder = builder.tools(tools);
@@ -215,6 +227,7 @@ impl AgentScenarioSetup {
             graph_store,
             process_registry,
             prompt_captures,
+            checkpoint_writes,
         })
     }
 }
@@ -224,6 +237,7 @@ struct AgentScenarioRuntime {
     graph_store: Arc<crate::tracing::TraceLashlangGraphStore>,
     process_registry: Arc<TestLocalProcessRegistry>,
     prompt_captures: Arc<StdMutex<Vec<LlmRequest>>>,
+    checkpoint_writes: lash_core::testing::checkpoint_observer::CheckpointWriteCollector,
 }
 
 impl AgentScenarioRuntime {
@@ -274,11 +288,13 @@ pub(super) async fn run_agent_turn_scenario_without_success_assertions(
     .await;
     assert_remote_process_summaries_round_trip(&final_process_list);
     let run = AgentScenarioRun {
+        session_id: case.session_id.clone(),
         turn_output: Some(turn_output),
         streamed_events: events.snapshot().await,
         graph_snapshots: runtime.graph_store.graphs(),
         prompt_captures: runtime.prompt_captures_snapshot(),
         final_process_list,
+        checkpoint_writes: runtime.checkpoint_writes.events(),
     };
 
     if let Some(expected) = &case.expected_final_value {
@@ -571,11 +587,13 @@ impl AgentSessionTurnProcessScenario {
         .await;
         assert_remote_process_summaries_round_trip(&final_process_list);
         let run = AgentScenarioRun {
+            session_id: self.session_id.to_string(),
             turn_output: None,
             streamed_events: Vec::new(),
             graph_snapshots: runtime.graph_store.graphs(),
             prompt_captures: runtime.prompt_captures_snapshot(),
             final_process_list,
+            checkpoint_writes: runtime.checkpoint_writes.events(),
         };
         assert_eq!(run.prompt_captures.len(), 1);
         assert_all_processes_terminal(&run.final_process_list);

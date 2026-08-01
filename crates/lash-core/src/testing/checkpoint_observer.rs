@@ -1,14 +1,14 @@
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
 
-use lash_core::runtime::{
+use crate::runtime::{
     QueuedWorkBatch, QueuedWorkBatchDraft, QueuedWorkClaim, QueuedWorkClaimBoundary,
 };
-use lash_core::store::{
+use crate::store::{
     AttachmentIntent, AttachmentManifest, AttachmentManifestEntry, PersistedSessionRead,
     RuntimeCommit, RuntimeCommitResult, RuntimePersistence, SessionCommitStore, StoreError,
 };
-use lash_core::{
+use crate::{
     AttachmentId, BlobRef, CheckpointKind, ForkPoint, ForkSessionRequest, ForkSessionResult,
     GcReport, LeaseOwnerIdentity, PendingTurnInput, PendingTurnInputCancelOutcome,
     PendingTurnInputCancelResult, PendingTurnInputCancelTarget, PendingTurnInputDraft,
@@ -19,6 +19,11 @@ use lash_core::{
 };
 use serde::{Deserialize, Serialize};
 
+/// Schema tag carried on every observed commit.
+///
+/// The value keeps its historical `lash.sim.` prefix because generated
+/// simulation trace artifacts embed it; the observer itself is no longer
+/// simulator-specific.
 pub const CHECKPOINT_WRITE_EVENT_SCHEMA: &str = "lash.sim.checkpoint-write-event.v1";
 
 /// One checkpoint component observed at the successful store-commit seam.
@@ -104,12 +109,11 @@ impl CheckpointWriteEvent {
 /// This observes commits made through decorated `SessionStoreFactory` handles.
 /// `DurableProcessWorker` task bodies currently construct a bare
 /// `InMemorySessionStore` inside lash-core and are therefore explicitly outside
-/// this collector's coverage; transcript consumers are warned at the renderer
+/// this collector's coverage; transcript consumers are warned at their emitter
 /// boundary too.
 #[derive(Clone, Debug, Default)]
 pub struct CheckpointWriteCollector {
     state: Arc<Mutex<CheckpointWriteCollectorState>>,
-    #[cfg(test)]
     ref_only_mutation: Option<RefOnlyCommitMutation>,
 }
 
@@ -119,7 +123,6 @@ struct CheckpointWriteCollectorState {
     next_commit_by_session: BTreeMap<String, usize>,
 }
 
-#[cfg(test)]
 #[derive(Clone, Debug)]
 struct RefOnlyCommitMutation {
     session_id: String,
@@ -130,7 +133,9 @@ impl CheckpointWriteCollector {
     /// Configure the regression-test mutation that reproduces the missing-body
     /// defect: when an updated component also carries its prior ref, drop the
     /// body before the backend sees the commit.
-    #[cfg(test)]
+    ///
+    /// This is the injected defect that proves a durable-write transcript can
+    /// still discriminate a missing component body (ADR 0044's mutation rule).
     pub fn with_ref_only_mutation(session_id: impl Into<String>, revision_before: u64) -> Self {
         Self {
             state: Arc::default(),
@@ -165,7 +170,11 @@ impl CheckpointWriteCollector {
         events
     }
 
-    pub(crate) fn push(&self, mut event: CheckpointWriteEvent) {
+    /// Record one observed commit, assigning its per-session commit index.
+    ///
+    /// Harnesses call this when re-attributing a commit that a separately
+    /// executed proof produced; the decorator calls it for every commit it sees.
+    pub fn push(&self, mut event: CheckpointWriteEvent) {
         let mut state = self.state.lock().expect("checkpoint-write collector lock");
         let session_id = event.attributed_session().to_string();
         let next = state.next_commit_by_session.entry(session_id).or_insert(0);
@@ -174,7 +183,6 @@ impl CheckpointWriteCollector {
         state.events.push(event);
     }
 
-    #[cfg(test)]
     fn apply_mutation(&self, commit: &mut RuntimeCommit) {
         let Some(mutation) = &self.ref_only_mutation else {
             return;
@@ -196,8 +204,10 @@ impl CheckpointWriteCollector {
     }
 }
 
-/// Simulator-only store factory decorator. It preserves the backend contract
-/// exactly and adds observation only after a real commit succeeds.
+/// Test-support store factory decorator. It preserves the backend contract
+/// exactly and adds observation only after a real commit succeeds, which is what
+/// makes the resulting durable-write transcript lines real facts rather than
+/// harness-constructed ones.
 pub struct ObservedSessionStoreFactory {
     inner: Arc<dyn SessionStoreFactory>,
     collector: CheckpointWriteCollector,
@@ -344,16 +354,14 @@ impl SessionCommitStore for ObservedSessionStore {
     async fn load_node(
         &self,
         node_id: &str,
-    ) -> Result<Option<lash_core::SessionNodeRecord>, StoreError> {
+    ) -> Result<Option<crate::SessionNodeRecord>, StoreError> {
         self.inner.load_node(node_id).await
     }
 
-    #[allow(unused_mut)]
     async fn commit_runtime_state(
         &self,
         mut commit: RuntimeCommit,
     ) -> Result<RuntimeCommitResult, StoreError> {
-        #[cfg(test)]
         self.collector.apply_mutation(&mut commit);
         let event = checkpoint_write_event(&commit);
         let result = self.inner.commit_runtime_state(commit).await?;
@@ -490,7 +498,7 @@ impl TurnInputStore for ObservedSessionStore {
         &self,
         session_id: &str,
         anchor: &PendingTurnInputCancelTarget,
-    ) -> Result<lash_core::PendingTurnInputSuffixCancelOutcome, StoreError> {
+    ) -> Result<crate::PendingTurnInputSuffixCancelOutcome, StoreError> {
         self.inner
             .cancel_pending_turn_input_suffix(session_id, anchor)
             .await
@@ -570,7 +578,7 @@ impl SessionExecutionLeaseStore for ObservedSessionStore {
 }
 
 #[async_trait::async_trait]
-impl lash_core::QueuedWorkStore for ObservedSessionStore {
+impl crate::QueuedWorkStore for ObservedSessionStore {
     async fn enqueue_queued_work(
         &self,
         batch: QueuedWorkBatchDraft,

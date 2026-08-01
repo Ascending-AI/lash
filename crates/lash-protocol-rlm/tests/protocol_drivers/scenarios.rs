@@ -113,6 +113,12 @@ const TYPED_SCHEMA_MISMATCH_ANY_OF: RlmProtocolScenarioCoverage = rlm_protocol_c
     "Typed schema validation checks anyOf mismatches."
 );
 
+const TYPED_SCHEMA_REPAIR_ACROSS_CELL_BOUNDARY: RlmProtocolScenarioCoverage = rlm_protocol_coverage!(
+    rlm_protocol_scenario_typed_schema_repair_survives_a_cell_checkpoint_boundary,
+    "typed schema repair survives a cell checkpoint boundary",
+    "Schema-mismatch repair feedback survives a real TurnCheckpoint round trip taken while the finish cell is still pending."
+);
+
 const RLM_PROTOCOL_SCENARIO_COVERAGE: &[RlmProtocolScenarioCoverage] = &[
     NATURAL_PROSE_CLASSIFICATION,
     FINISH_REQUIRED_PROSE_REQUESTS_FINISH,
@@ -132,11 +138,12 @@ const RLM_PROTOCOL_SCENARIO_COVERAGE: &[RlmProtocolScenarioCoverage] = &[
     NATURAL_FINAL_VALUE,
     TYPED_SCHEMA_MISMATCH_REPAIR,
     TYPED_SCHEMA_MISMATCH_ANY_OF,
+    TYPED_SCHEMA_REPAIR_ACROSS_CELL_BOUNDARY,
 ];
 
 #[test]
 fn rlm_protocol_scenario_coverage_metadata_is_unique_and_complete() {
-    assert_eq!(RLM_PROTOCOL_SCENARIO_COVERAGE.len(), 18);
+    assert_eq!(RLM_PROTOCOL_SCENARIO_COVERAGE.len(), 19);
     let mut names = BTreeSet::new();
     for coverage in RLM_PROTOCOL_SCENARIO_COVERAGE {
         let _declared_test = coverage.declared_test;
@@ -781,4 +788,65 @@ fn rlm_protocol_scenario_typed_schema_mismatch_checks_any_of() {
             ..RlmProtocolExpectations::default()
         })
         .run();
+}
+
+#[test]
+fn rlm_protocol_scenario_typed_schema_repair_survives_a_cell_checkpoint_boundary() {
+    // The boundary is real: `checkpoint_round_trip` serializes the machine's
+    // `TurnCheckpoint` while the `finish` cell is still pending, deserializes it,
+    // and continues on the restored machine. Anything the RLM driver failed to
+    // carry in its checkpointed cell state is genuinely lost here.
+    let run = RlmProtocolScenario::new(TYPED_SCHEMA_REPAIR_ACROSS_CELL_BOUNDARY.display_name)
+        .user_message("return typed data")
+        .termination(RlmTermination::FinishRequired {
+            schema: Some(serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "ok": { "type": "boolean" }
+                },
+                "required": ["ok"]
+            })),
+        })
+        .llm_response(vec![text_part(&lashlang_block("finish { missing: true }"))])
+        .checkpoint_round_trip()
+        .exec_result(exec_response(
+            &[],
+            None,
+            Some(serde_json::json!({ "missing": true })),
+        ))
+        .checkpoint()
+        .expect(RlmProtocolExpectations {
+            // The restored machine redrives the same pending cell, so the code is
+            // observed twice — once before the boundary and once after it.
+            exec_codes: vec!["finish { missing: true }", "finish { missing: true }"],
+            checkpoints: vec![CheckpointKind::AfterWork],
+            llm_call_count: Some(2),
+            system_message_contains: vec!["didn't match the required output schema"],
+            trajectory_last: Some(RlmTrajectoryExpectation {
+                code: "finish { missing: true }",
+                output: Vec::new(),
+                error: Some("\"ok\" is a required property".to_string()),
+                final_output: None,
+            }),
+            ..RlmProtocolExpectations::default()
+        })
+        .run();
+    assert_eq!(
+        run.round_trips, 1,
+        "the scenario must have crossed exactly one real checkpoint boundary"
+    );
+
+    // Expect test: the reviewable artifact is the ordering across the durable
+    // boundary — the pending cell redriven after restore, the repair message
+    // reaching the model, and exactly one checkpoint before re-entry.
+    insta::assert_snapshot!(run.transcript.render(), @r#"
+    rlm          provider  model.request           messages=1 tools=0
+    rlm          observe   message.lashlang_code   text="finish { missing: true }"
+    rlm          exec      cell.start              lang="lashlang"
+    rlm          park      cell.checkpoint
+    rlm          resume    cell.restore
+    rlm          exec      cell.start              lang="lashlang"
+    rlm          commit    checkpoint.request      checkpoint=after_work
+    rlm          provider  model.request           messages=2 tools=0
+    "#);
 }

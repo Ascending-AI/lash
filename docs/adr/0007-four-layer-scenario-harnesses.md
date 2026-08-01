@@ -49,6 +49,17 @@ Each index records the test name, scenario display name, and owned invariant/bou
 
 `lash-perf` uses `RuntimePerfScenario::METADATA` as the single source for scenario name, execution mode, scenario harness kind, classification rationale, and direct correctness coverage links when a measured path has an obvious scenario counterpart. The runtime-perf report tests include a golden projection for the four harness groups so the CLI-facing report shape cannot silently drop Runtime, Standard Protocol, RLM Protocol, or Agent Scenario grouping.
 
+## Behavior Transcripts
+
+When one of these harnesses ships an inline expect test, it renders into the
+shared behavior-transcript vocabulary of
+`lash_core::testing::behavior_transcript` (ADR 0050) rather than a private
+format. The Standard and RLM harnesses share one projection from the sans-io
+effect stream (`lash_core::testing::sansio_transcript`); the Agent harness
+projects streamed `TurnActivity`, observed checkpoint commits, and the terminal
+process fold. Ownership boundaries above are unchanged: a transcript is added
+alongside a scenario's assertions, never in place of them.
+
 ## Review Workflow
 
 When new scenario files are still untracked, use intent-to-add for review visibility without staging content for commit:

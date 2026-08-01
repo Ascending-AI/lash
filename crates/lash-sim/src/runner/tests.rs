@@ -400,17 +400,16 @@ async fn generated_park_resume_transcript_is_readable_and_logical_size_labeled()
             "park/resume transcript changed for seed {seed}"
         );
     }
-    insta::assert_snapshot!(transcript, @r"
-    turn 1  session-005
-      0001  Ingress            session.open.suspend
-    park   session-005
-    resume session-005
-      0002  Tool               suspend.tool.resume  name=await_tool
-      0003  Checkpoint         checkpoint.commit  rev=0->1
-                             turn_state        stored logical=210B
-                             tool_state        stored logical=2.2KB
-                             plugin_snapshot   stored logical=443B
-    ");
+    insta::assert_snapshot!(transcript, @r#"
+    suspend-tool  ingress   session.open.suspend    turn=1
+    suspend-tool  park      session.park
+    suspend-tool  resume    session.resume
+    suspend-tool  tool      suspend.tool.resume     name="await_tool"
+    suspend-tool  commit    checkpoint.commit       rev=0->1
+    suspend-tool              turn_state            stored logical=210B
+    suspend-tool              tool_state            stored logical=2.2KB
+    suspend-tool              plugin_snapshot       stored logical=443B
+    "#);
 }
 
 #[test]

@@ -4,6 +4,15 @@
 pub use lash_core::TestLocalProcessRegistry;
 pub use lash_core::testing::{TestProvider, TestProviderBuilder};
 
+/// The normalized behavior-transcript vocabulary. Render a scenario's real facts
+/// into it and pin the result with an inline `insta` snapshot; see
+/// `docs/adr/0050-behavior-transcripts-are-one-normalized-vocabulary.md`.
+pub use lash_core::testing::behavior_transcript;
+
+/// Store-factory decorator that observes accepted runtime-checkpoint commits, so
+/// a scenario can render durable-write transcript lines from real facts.
+pub use lash_core::testing::checkpoint_observer;
+
 /// Backend-agnostic conformance suites: validate a custom backend implementation
 /// against a contract by running the same suite the in-tree backends run.
 ///

@@ -11,6 +11,7 @@ use super::harness::{
     run_agent_session_turn_process_scenario, run_agent_turn_scenario,
     run_agent_turn_scenario_without_success_assertions,
 };
+use super::transcript::agent_scenario_transcript;
 use std::collections::BTreeSet;
 
 #[derive(Clone, Copy, Debug)]
@@ -389,6 +390,36 @@ finish result"#,
         )
         .await?;
 
+        // Expect test first: the failure path's shape is the review artifact —
+        // which cell failed, that the child's reason surfaced, and that the
+        // parent's processes still folded to a terminal state.
+        insta::assert_snapshot!(agent_scenario_transcript(&run, "root"), @r#"
+        root         ingress   turn.start
+        root         provider  model.request           iteration=0
+        root         exec      cell.start              lang="lashlang"
+        root         tool      tool.start              name="spawn_agent" call=call-001
+        root         tool      tool.result             name="spawn_agent" outcome=failure call=call-001
+        root         exec      cell.failed             calls=1 error="`?` unwrapped failed module operation: {"class":"execution","code":"tool…"
+        root         provider  model.request           iteration=1
+        root         exec      cell.start              lang="lashlang"
+        root         exec      cell.failed             calls=0 error="receiver for operation `fail` is not a module authority"
+        root         commit    checkpoint.commit       rev=0->1
+        root                     turn_state            stored logical=284B
+        root                     tool_state            stored logical=8.1KB
+        root                     plugin_snapshot       stored logical=429B
+        root                     execution_state       stored logical=1.4KB
+        session-001  commit    checkpoint.commit       rev=0->1
+        session-001              turn_state            stored logical=419B
+        session-001              tool_state            stored logical=8.9KB
+        session-001              plugin_snapshot       stored logical=429B
+        session-001  commit    checkpoint.commit       rev=1->2
+        session-001              turn_state            stored logical=419B
+        session-001              tool_state            ref (unchanged)
+        session-001              plugin_snapshot       ref (unchanged)
+        session-001              execution_state       stored logical=2.4KB
+        process-001  outcome   process.failed          label="spawn" kind="subagent" terminal=true
+        "#);
+
         assert_failed_code_block_present(&run.streamed_events);
         assert_no_forbidden_error_text(&run.streamed_events);
         assert!(
@@ -407,6 +438,7 @@ finish result"#,
         assert_no_duplicate_label_step(&contract, "Spawn failing subagent");
         assert_graph_lineage_connected(&contract, &run.final_process_list);
         assert_subagent_bridge_exec_graphs(&run, crate::tracing::TraceLashlangStatus::Completed);
+
         Ok(())
     })
 }
@@ -439,7 +471,25 @@ finish { joined: [left_value, right_value] }"#,
             .min_completed_process_graphs(2),
         )
         .await?;
+        // Expect test first: the reviewable artifact is the spawn -> await ->
+        // terminal fold plus what each turn actually committed, and a changed
+        // shape is easier to judge than the first assertion that trips on it.
+        insta::assert_snapshot!(agent_scenario_transcript(&run, "root"), @r#"
+        root         ingress   turn.start
+        root         provider  model.request           iteration=0
+        root         exec      cell.start              lang="lashlang"
+        root         exec      cell.ok                 calls=2
+        root         outcome   turn.final_value        value={"joined":["left","right"]}
+        root         commit    checkpoint.commit       rev=0->1
+        root                     turn_state            stored logical=284B
+        root                     tool_state            stored logical=3.3KB
+        root                     plugin_snapshot       stored logical=333B
+        root                     execution_state       stored logical=2.5KB
+        process-001  outcome   process.completed       label="child" kind="lashlang" terminal=true
+        process-002  outcome   process.completed       label="child" kind="lashlang" terminal=true
+        "#);
         assert_lashlang_process_ids_unique_for_labels(&run.final_process_list, ["child", "child"]);
+
         Ok(())
     })
 }

@@ -58,6 +58,7 @@ testing = ["lash-core/testing"]
 otel-trace = ["lash-core/otel-trace"]
 
 [dev-dependencies]
+insta = "1"
 lash-core = { workspace = true, features = ["testing"] }
 lash-llm-tools = { workspace = true }
 lash-subagents = { workspace = true }
