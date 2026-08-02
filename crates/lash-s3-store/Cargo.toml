@@ -16,6 +16,9 @@ categories = ["database", "asynchronous"]
 [lints]
 workspace = true
 
+[features]
+testing = []
+
 [dependencies]
 async-trait = { workspace = true }
 futures-util = { workspace = true }

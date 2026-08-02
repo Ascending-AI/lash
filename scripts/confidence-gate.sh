@@ -1132,6 +1132,17 @@ with open(path, "w", encoding="utf-8") as handle:
 PY
 }
 
+run_cross_backend_store_soak() {
+  local database_url="$1"
+  local cases="${LASH_CROSS_BACKEND_SOAK_CASES:-64}"
+  step "Cross-backend durable-store differential soak (${cases} cases)"
+  LASH_POSTGRES_DATABASE_URL="$database_url" \
+    LASH_REQUIRE_POSTGRES=1 \
+    LASH_CROSS_BACKEND_CASES="$cases" \
+    cargo test -p lash-sim --test cross_backend_store_differential --locked \
+      generated_cross_backend_surface_differential_agrees -- --nocapture
+}
+
 write_generated_postgres_dynamic_replay_skipped() {
   mkdir -p "${out_dir}/sim/postgres-generated-rerun"
   cat >"${out_dir}/sim/postgres-generated-rerun/summary.json" <<EOF
@@ -1148,6 +1159,7 @@ run_postgres_conformance() {
   step "Postgres backend conformance"
   if [ -n "${LASH_POSTGRES_DATABASE_URL:-}" ]; then
     LASH_REQUIRE_POSTGRES=1 cargo test -p lash-postgres-store --locked --test conformance
+    run_cross_backend_store_soak "$LASH_POSTGRES_DATABASE_URL"
     run_generated_postgres_dynamic_replay "$LASH_POSTGRES_DATABASE_URL" "env"
     run_model_replay_suite
     run_backend_contention_evidence
@@ -1198,6 +1210,7 @@ EOF
   LASH_POSTGRES_DATABASE_URL="postgres://lash:lash@127.0.0.1:${port}/lash" \
     LASH_REQUIRE_POSTGRES=1 \
     cargo test -p lash-postgres-store --locked --test conformance
+  run_cross_backend_store_soak "postgres://lash:lash@127.0.0.1:${port}/lash"
   run_generated_postgres_dynamic_replay "postgres://lash:lash@127.0.0.1:${port}/lash" "docker"
   run_model_replay_suite
   LASH_POSTGRES_DATABASE_URL="postgres://lash:lash@127.0.0.1:${port}/lash" \

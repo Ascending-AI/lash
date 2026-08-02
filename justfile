@@ -209,6 +209,11 @@ store-contract-soak cases='256':
   LASH_STORE_CONTRACT_PROPTEST_CASES="{{cases}}" cargo test -p lash-sqlite-store --locked --test conformance store_contract_state_machine_properties -- --nocapture
   LASH_STORE_CONTRACT_PROPTEST_CASES="{{cases}}" cargo test -p lash-postgres-store --locked --test conformance store_contract_state_machine_properties_when_configured -- --nocapture
 
+# Opt-in three-backend raw durable-state soak. Requires the standard Postgres
+# configuration and logs the operation kinds omitted by each bounded seed.
+cross-backend-store-soak cases='64' seed='852':
+  LASH_REQUIRE_POSTGRES=1 LASH_CROSS_BACKEND_CASES="{{cases}}" LASH_CROSS_BACKEND_SEED="{{seed}}" cargo test -p lash-sim --locked --test cross_backend_store_differential generated_cross_backend_surface_differential_agrees -- --nocapture
+
 perf-guard:
   python3 "{{repo}}/scripts/profile_runtime.py" --profile quick --release --enforce-budgets --out "{{repo}}/.benchmarks/perf-guard/runtime-local.json"
   python3 "{{repo}}/scripts/profile_lashlang.py" --iterations 500 --profile-iterations 500 --enforce-budgets --out "{{repo}}/.benchmarks/perf-guard/lashlang-local.json"

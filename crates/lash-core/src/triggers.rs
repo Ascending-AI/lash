@@ -10,6 +10,8 @@ mod mutation;
 mod router;
 
 pub use memory::InMemoryTriggerStore;
+#[cfg(any(test, feature = "testing"))]
+pub use memory::RawTriggerStateForTesting;
 use memory::{
     InMemoryTriggerDeliveryRecord, InMemoryTriggerEventState, apply_in_memory_trigger_command,
 };

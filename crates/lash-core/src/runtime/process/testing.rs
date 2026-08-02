@@ -26,6 +26,7 @@ use super::validation::{
 };
 
 mod continuation;
+mod raw_state;
 mod support;
 use support::ExecutionWritePause;
 pub use support::{ExecutionWritePauseHandle, TestProcessRegistryWriteExt};
@@ -47,6 +48,21 @@ pub struct TestLocalProcessRegistry {
     wake_delivery_config: super::WakeDeliveryConfig,
     wake_deliveries: Arc<Mutex<HashMap<String, super::WakeDelivery>>>,
     clock: Arc<dyn crate::Clock>,
+}
+
+/// Concrete in-memory registry rows exposed to raw differential readers.
+///
+/// This is intentionally not a `ProcessRegistry` read model: it snapshots the
+/// maps that the implementation mutates so a differential does not validate a
+/// write through the same public query path.
+#[doc(hidden)]
+pub struct RawProcessRegistryStateForTesting {
+    pub records: Vec<(ProcessRecord, u64)>,
+    pub events: Vec<(String, ProcessEvent)>,
+    pub observers: Vec<(String, String)>,
+    pub leases: Vec<ProcessLease>,
+    pub wake_deliveries: Vec<super::WakeDelivery>,
+    pub tombstones: Vec<ProcessTombstone>,
 }
 
 impl Default for TestLocalProcessRegistry {
