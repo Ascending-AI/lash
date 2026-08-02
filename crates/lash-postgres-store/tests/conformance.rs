@@ -1111,6 +1111,25 @@ async fn postgres_runtime_persistence_state_machine_properties_when_configured()
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn postgres_session_graph_state_machine_properties_when_configured() {
+    let Some((_database_lock, storage)) = storage().await else {
+        eprintln!(
+            "skipping Postgres session-graph properties: LASH_POSTGRES_DATABASE_URL is not set"
+        );
+        return;
+    };
+    let storage = Arc::new(storage);
+    lash_core::testing::conformance::session_graph_state_machine("postgres", move |_| {
+        let storage = Arc::clone(&storage);
+        async move {
+            reset(&storage).await;
+            Arc::new(storage.session_store_factory()) as Arc<dyn SessionStoreFactory>
+        }
+    })
+    .await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn postgres_process_continuation_store_satisfies_conformance_when_configured() {
     let Some((_database_lock, storage)) = storage().await else {
         eprintln!(

@@ -26,6 +26,7 @@ mod process_trigger_retention;
 mod runtime_persistence;
 mod runtime_persistence_state_machine;
 mod session_graph_append;
+mod session_graph_state_machine;
 mod session_store_factory;
 mod store_contract_state_machine;
 mod trigger_store;
@@ -45,6 +46,7 @@ pub use process_trigger_retention::*;
 pub use runtime_persistence::*;
 pub use runtime_persistence_state_machine::*;
 pub use session_graph_append::*;
+pub use session_graph_state_machine::*;
 pub use session_store_factory::*;
 pub use store_contract_state_machine::*;
 pub use trigger_store::*;
@@ -223,6 +225,15 @@ mod tests {
     async fn in_memory_runtime_persistence_state_machine_properties() {
         runtime_persistence_state_machine("in-memory", |_| async {
             Arc::new(crate::InMemorySessionStore::default()) as Arc<dyn RuntimePersistence>
+        })
+        .await;
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn in_memory_session_graph_state_machine_properties() {
+        session_graph_state_machine("in-memory", |_| async {
+            Arc::new(crate::InMemorySessionStoreFactory::new())
+                as Arc<dyn crate::SessionStoreFactory>
         })
         .await;
     }
