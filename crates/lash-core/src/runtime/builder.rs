@@ -2,9 +2,8 @@ use std::sync::Arc;
 
 use crate::plugin::{PluginFactory, PluginHost, PluginSession};
 use crate::{
-    EffectHost, EmbeddedRuntimeHost, LashRuntime, PluginStack, ProcessRegistry, RuntimeHostConfig,
+    EmbeddedRuntimeHost, LashRuntime, PluginStack, ProcessRegistry, RuntimeHostConfig,
     RuntimePersistence, RuntimeSessionState, SessionError, SessionPolicy, SessionStoreFactory,
-    TerminationPolicy,
 };
 
 enum PluginSource {
@@ -54,14 +53,6 @@ impl Default for EmbeddedRuntimeBuilder {
 impl EmbeddedRuntimeBuilder {
     pub fn new() -> Self {
         Self::default()
-    }
-
-    pub fn session_id(&self) -> Option<&str> {
-        self.session_id.as_deref()
-    }
-
-    pub fn policy(&self) -> Option<&SessionPolicy> {
-        self.policy.as_ref()
     }
 
     pub fn with_session_id(mut self, session_id: impl Into<String>) -> Self {
@@ -159,16 +150,6 @@ impl EmbeddedRuntimeBuilder {
 
     pub fn with_trace_context(mut self, context: lash_trace::TraceContext) -> Self {
         self.core.tracing.trace_context = context;
-        self
-    }
-
-    pub fn with_termination(mut self, termination: TerminationPolicy) -> Self {
-        self.core.control.termination = termination;
-        self
-    }
-
-    pub fn with_effect_host(mut self, effect_host: Arc<dyn EffectHost>) -> Self {
-        self.core.control.effect_host = effect_host;
         self
     }
 
@@ -344,29 +325,6 @@ impl EmbeddedRuntimeBuilder {
         runtime.host.process_work_driver = self.process_work_driver;
         runtime.host.queued_work_driver = self.queued_work_driver;
         Ok(runtime)
-    }
-
-    pub async fn build_ephemeral(mut self) -> Result<LashRuntime, SessionError> {
-        self.store = None;
-        self.build().await
-    }
-
-    pub async fn build_persistent(
-        mut self,
-        store: Arc<dyn RuntimePersistence>,
-    ) -> Result<LashRuntime, SessionError> {
-        self.store = Some(store);
-        self.build().await
-    }
-
-    pub async fn build_background_persistent(
-        mut self,
-        store: Arc<dyn RuntimePersistence>,
-        process_registry: Arc<dyn ProcessRegistry>,
-    ) -> Result<LashRuntime, SessionError> {
-        self.store = Some(store);
-        self = self.with_process_registry(process_registry);
-        self.build().await
     }
 }
 

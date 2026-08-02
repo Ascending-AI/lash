@@ -40934,14 +40934,6 @@ disposition = "unused-add"
 reason = "Add lash::runtime::LashRuntime::set_runtime_lease_owner to the agent-service persistence setup example and assert its externally observable result."
 
 [[api]]
-symbol = "lash::runtime::LashRuntime::set_session_id"
-kind = "function"
-availability = "default+all-features"
-area = "sessions-turns"
-disposition = "unused-add"
-reason = "Add lash::runtime::LashRuntime::set_session_id to the docs-snippets embedding/turns example and assert its externally observable result."
-
-[[api]]
 symbol = "lash::runtime::LashRuntime::snapshot_execution_state"
 kind = "function"
 availability = "default+all-features"
@@ -60218,56 +60210,16 @@ symbol = "lash_core::EmbeddedRuntimeBuilder::build"
 kind = "function"
 availability = "default+all-features"
 area = "sessions-turns"
-disposition = "unused-remove"
-reason = "No example or concrete unrepresented host class establishes a need for lash_core::EmbeddedRuntimeBuilder::build. Breaking: remove this export; downstream callers must own an equivalent local type or stop depending on the unexercised contract."
-
-[[api]]
-symbol = "lash_core::EmbeddedRuntimeBuilder::build_background_persistent"
-kind = "function"
-availability = "default+all-features"
-area = "sessions-turns"
-disposition = "unused-remove"
-reason = "No example or concrete unrepresented host class establishes a need for lash_core::EmbeddedRuntimeBuilder::build_background_persistent. Breaking: remove this export; downstream callers must own an equivalent local type or stop depending on the unexercised contract."
-
-[[api]]
-symbol = "lash_core::EmbeddedRuntimeBuilder::build_ephemeral"
-kind = "function"
-availability = "default+all-features"
-area = "sessions-turns"
-disposition = "unused-remove"
-reason = "No example or concrete unrepresented host class establishes a need for lash_core::EmbeddedRuntimeBuilder::build_ephemeral. Breaking: remove this export; downstream callers must own an equivalent local type or stop depending on the unexercised contract."
-
-[[api]]
-symbol = "lash_core::EmbeddedRuntimeBuilder::build_persistent"
-kind = "function"
-availability = "default+all-features"
-area = "sessions-turns"
-disposition = "unused-remove"
-reason = "No example or concrete unrepresented host class establishes a need for lash_core::EmbeddedRuntimeBuilder::build_persistent. Breaking: remove this export; downstream callers must own an equivalent local type or stop depending on the unexercised contract."
+disposition = "unused-justify"
+reason = "Concrete consumer: DurableProcessWorker reconstruction in crates/lash-core/src/runtime/process_worker/mod.rs and the standard protocol host calls lash_core::EmbeddedRuntimeBuilder::build; retain the exercised runtime contract."
 
 [[api]]
 symbol = "lash_core::EmbeddedRuntimeBuilder::new"
 kind = "function"
 availability = "default+all-features"
 area = "sessions-turns"
-disposition = "unused-remove"
-reason = "No example or concrete unrepresented host class establishes a need for lash_core::EmbeddedRuntimeBuilder::new. Breaking: remove this export; downstream callers must own an equivalent local type or stop depending on the unexercised contract."
-
-[[api]]
-symbol = "lash_core::EmbeddedRuntimeBuilder::policy"
-kind = "function"
-availability = "default+all-features"
-area = "sessions-turns"
-disposition = "unused-remove"
-reason = "No example or concrete unrepresented host class establishes a need for lash_core::EmbeddedRuntimeBuilder::policy. Breaking: remove this export; downstream callers must own an equivalent local type or stop depending on the unexercised contract."
-
-[[api]]
-symbol = "lash_core::EmbeddedRuntimeBuilder::session_id"
-kind = "function"
-availability = "default+all-features"
-area = "sessions-turns"
-disposition = "unused-remove"
-reason = "No example or concrete unrepresented host class establishes a need for lash_core::EmbeddedRuntimeBuilder::session_id. Breaking: remove this export; downstream callers must own an equivalent local type or stop depending on the unexercised contract."
+disposition = "unused-justify"
+reason = "Concrete consumer: DurableProcessWorker reconstruction in crates/lash-core/src/runtime/process_worker/mod.rs and the standard protocol host calls lash_core::EmbeddedRuntimeBuilder::new; retain the exercised runtime contract."
 
 [[api]]
 symbol = "lash_core::EmbeddedRuntimeBuilder::with_attachment_store"
@@ -60286,20 +60238,12 @@ disposition = "unused-justify"
 reason = "Concrete host class: third-party plugin, provider, or tool-source implementers implementing the extension contract."
 
 [[api]]
-symbol = "lash_core::EmbeddedRuntimeBuilder::with_effect_host"
-kind = "function"
-availability = "default+all-features"
-area = "sessions-turns"
-disposition = "unused-remove"
-reason = "No example or concrete unrepresented host class establishes a need for lash_core::EmbeddedRuntimeBuilder::with_effect_host. Breaking: remove this export; downstream callers must own an equivalent local type or stop depending on the unexercised contract."
-
-[[api]]
 symbol = "lash_core::EmbeddedRuntimeBuilder::with_initial_state"
 kind = "function"
 availability = "default+all-features"
 area = "sessions-turns"
-disposition = "unused-remove"
-reason = "No example or concrete unrepresented host class establishes a need for lash_core::EmbeddedRuntimeBuilder::with_initial_state. Breaking: remove this export; downstream callers must own an equivalent local type or stop depending on the unexercised contract."
+disposition = "unused-justify"
+reason = "Concrete consumer: the lash-restate reconstruction tests in crates/lash-restate/src/tests.rs calls lash_core::EmbeddedRuntimeBuilder::with_initial_state; retain the exercised runtime contract."
 
 [[api]]
 symbol = "lash_core::EmbeddedRuntimeBuilder::with_plugin_factories"
@@ -60346,8 +60290,8 @@ symbol = "lash_core::EmbeddedRuntimeBuilder::with_policy"
 kind = "function"
 availability = "default+all-features"
 area = "sessions-turns"
-disposition = "unused-remove"
-reason = "No example or concrete unrepresented host class establishes a need for lash_core::EmbeddedRuntimeBuilder::with_policy. Breaking: remove this export; downstream callers must own an equivalent local type or stop depending on the unexercised contract."
+disposition = "unused-justify"
+reason = "Concrete consumer: DurableProcessWorker reconstruction in crates/lash-core/src/runtime/process_worker/mod.rs and the standard protocol host calls lash_core::EmbeddedRuntimeBuilder::with_policy; retain the exercised runtime contract."
 
 [[api]]
 symbol = "lash_core::EmbeddedRuntimeBuilder::with_process_registry"
@@ -60410,8 +60354,8 @@ symbol = "lash_core::EmbeddedRuntimeBuilder::with_queued_work_driver"
 kind = "function"
 availability = "default+all-features"
 area = "sessions-turns"
-disposition = "unused-remove"
-reason = "No example or concrete unrepresented host class establishes a need for lash_core::EmbeddedRuntimeBuilder::with_queued_work_driver. Breaking: remove this export; downstream callers must own an equivalent local type or stop depending on the unexercised contract."
+disposition = "unused-justify"
+reason = "Concrete consumer: DurableProcessWorker reconstruction in crates/lash-core/src/runtime/process_worker/mod.rs and the standard protocol host calls lash_core::EmbeddedRuntimeBuilder::with_queued_work_driver; retain the exercised runtime contract."
 
 [[api]]
 symbol = "lash_core::EmbeddedRuntimeBuilder::with_replaced_prompt_slot"
@@ -60426,16 +60370,16 @@ symbol = "lash_core::EmbeddedRuntimeBuilder::with_runtime_host"
 kind = "function"
 availability = "default+all-features"
 area = "sessions-turns"
-disposition = "unused-remove"
-reason = "No example or concrete unrepresented host class establishes a need for lash_core::EmbeddedRuntimeBuilder::with_runtime_host. Breaking: remove this export; downstream callers must own an equivalent local type or stop depending on the unexercised contract."
+disposition = "unused-justify"
+reason = "Concrete consumer: DurableProcessWorker reconstruction in crates/lash-core/src/runtime/process_worker/mod.rs and the standard protocol host calls lash_core::EmbeddedRuntimeBuilder::with_runtime_host; retain the exercised runtime contract."
 
 [[api]]
 symbol = "lash_core::EmbeddedRuntimeBuilder::with_session_id"
 kind = "function"
 availability = "default+all-features"
 area = "sessions-turns"
-disposition = "unused-remove"
-reason = "No example or concrete unrepresented host class establishes a need for lash_core::EmbeddedRuntimeBuilder::with_session_id. Breaking: remove this export; downstream callers must own an equivalent local type or stop depending on the unexercised contract."
+disposition = "unused-justify"
+reason = "Concrete consumer: DurableProcessWorker reconstruction in crates/lash-core/src/runtime/process_worker/mod.rs and the standard protocol host calls lash_core::EmbeddedRuntimeBuilder::with_session_id; retain the exercised runtime contract."
 
 [[api]]
 symbol = "lash_core::EmbeddedRuntimeBuilder::with_session_store_factory"
@@ -60452,14 +60396,6 @@ availability = "default+all-features"
 area = "stores"
 disposition = "unused-justify"
 reason = "Concrete host class: custom durable store or attachment backend implementers; bundled examples use repository backends and do not implement this backend-facing contract."
-
-[[api]]
-symbol = "lash_core::EmbeddedRuntimeBuilder::with_termination"
-kind = "function"
-availability = "default+all-features"
-area = "sessions-turns"
-disposition = "unused-remove"
-reason = "No example or concrete unrepresented host class establishes a need for lash_core::EmbeddedRuntimeBuilder::with_termination. Breaking: remove this export; downstream callers must own an equivalent local type or stop depending on the unexercised contract."
 
 [[api]]
 symbol = "lash_core::EmbeddedRuntimeBuilder::with_trace_context"
@@ -62125,8 +62061,8 @@ symbol = "lash_core::LashRuntime::activate_managed_session"
 kind = "function"
 availability = "default+all-features"
 area = "sessions-turns"
-disposition = "unused-remove"
-reason = "No example or concrete unrepresented host class establishes a need for lash_core::LashRuntime::activate_managed_session. Breaking: remove this export; downstream callers must own an equivalent local type or stop depending on the unexercised contract."
+disposition = "unused-justify"
+reason = "Concrete consumer: the lash facade session admin calls lash_core::LashRuntime::activate_managed_session; retain the exercised runtime contract."
 
 [[api]]
 symbol = "lash_core::LashRuntime::add_prompt_contribution"
@@ -62141,8 +62077,8 @@ symbol = "lash_core::LashRuntime::append_session_nodes"
 kind = "function"
 availability = "default+all-features"
 area = "sessions-turns"
-disposition = "unused-remove"
-reason = "No example or concrete unrepresented host class establishes a need for lash_core::LashRuntime::append_session_nodes. Breaking: remove this export; downstream callers must own an equivalent local type or stop depending on the unexercised contract."
+disposition = "unused-justify"
+reason = "Concrete consumer: the RLM protocol session host calls lash_core::LashRuntime::append_session_nodes; retain the exercised runtime contract."
 
 [[api]]
 symbol = "lash_core::LashRuntime::apply_persistence_state"
@@ -62173,24 +62109,24 @@ symbol = "lash_core::LashRuntime::await_background_work"
 kind = "function"
 availability = "default+all-features"
 area = "sessions-turns"
-disposition = "unused-remove"
-reason = "No example or concrete unrepresented host class establishes a need for lash_core::LashRuntime::await_background_work. Breaking: remove this export; downstream callers must own an equivalent local type or stop depending on the unexercised contract."
+disposition = "unused-justify"
+reason = "Concrete consumer: the lash facade admin and performance harness calls lash_core::LashRuntime::await_background_work; retain the exercised runtime contract."
 
 [[api]]
 symbol = "lash_core::LashRuntime::builder"
 kind = "function"
 availability = "default+all-features"
 area = "sessions-turns"
-disposition = "unused-remove"
-reason = "No example or concrete unrepresented host class establishes a need for lash_core::LashRuntime::builder. Breaking: remove this export; downstream callers must own an equivalent local type or stop depending on the unexercised contract."
+disposition = "unused-justify"
+reason = "Concrete consumer: the standard protocol embedded host calls lash_core::LashRuntime::builder; retain the exercised runtime contract."
 
 [[api]]
 symbol = "lash_core::LashRuntime::cancel_queued_work_batch"
 kind = "function"
 availability = "default+all-features"
 area = "sessions-turns"
-disposition = "unused-remove"
-reason = "No example or concrete unrepresented host class establishes a need for lash_core::LashRuntime::cancel_queued_work_batch. Breaking: remove this export; downstream callers must own an equivalent local type or stop depending on the unexercised contract."
+disposition = "unused-justify"
+reason = "Concrete consumer: the bundled persistence backends calls lash_core::LashRuntime::cancel_queued_work_batch; retain the exercised runtime contract."
 
 [[api]]
 symbol = "lash_core::LashRuntime::clear_prompt_slot"
@@ -62213,8 +62149,8 @@ symbol = "lash_core::LashRuntime::compact_context"
 kind = "function"
 availability = "default+all-features"
 area = "sessions-turns"
-disposition = "unused-remove"
-reason = "No example or concrete unrepresented host class establishes a need for lash_core::LashRuntime::compact_context. Breaking: remove this export; downstream callers must own an equivalent local type or stop depending on the unexercised contract."
+disposition = "unused-justify"
+reason = "Concrete consumer: the lash facade compaction admin calls lash_core::LashRuntime::compact_context; retain the exercised runtime contract."
 
 [[api]]
 symbol = "lash_core::LashRuntime::configure_protocol_on_materialize"
@@ -62229,24 +62165,24 @@ symbol = "lash_core::LashRuntime::drain_next_session_command"
 kind = "function"
 availability = "default+all-features"
 area = "sessions-turns"
-disposition = "unused-remove"
-reason = "No example or concrete unrepresented host class establishes a need for lash_core::LashRuntime::drain_next_session_command. Breaking: remove this export; downstream callers must own an equivalent local type or stop depending on the unexercised contract."
+disposition = "unused-justify"
+reason = "Concrete consumer: the runtime turn loop calls lash_core::LashRuntime::drain_next_session_command; retain the exercised runtime contract."
 
 [[api]]
 symbol = "lash_core::LashRuntime::effect_host"
 kind = "function"
 availability = "default+all-features"
 area = "sessions-turns"
-disposition = "unused-remove"
-reason = "No example or concrete unrepresented host class establishes a need for lash_core::LashRuntime::effect_host. Breaking: remove this export; downstream callers must own an equivalent local type or stop depending on the unexercised contract."
+disposition = "unused-justify"
+reason = "Concrete consumer: the lash facade runtime host calls lash_core::LashRuntime::effect_host; retain the exercised runtime contract."
 
 [[api]]
 symbol = "lash_core::LashRuntime::enqueue_turn_input"
 kind = "function"
 availability = "default+all-features"
 area = "sessions-turns"
-disposition = "unused-remove"
-reason = "No example or concrete unrepresented host class establishes a need for lash_core::LashRuntime::enqueue_turn_input. Breaking: remove this export; downstream callers must own an equivalent local type or stop depending on the unexercised contract."
+disposition = "unused-justify"
+reason = "Concrete consumer: the runtime ingress path calls lash_core::LashRuntime::enqueue_turn_input; retain the exercised runtime contract."
 
 [[api]]
 symbol = "lash_core::LashRuntime::export_persisted_state"
@@ -62269,48 +62205,48 @@ symbol = "lash_core::LashRuntime::export_state"
 kind = "function"
 availability = "default+all-features"
 area = "sessions-turns"
-disposition = "unused-remove"
-reason = "No example or concrete unrepresented host class establishes a need for lash_core::LashRuntime::export_state. Breaking: remove this export; downstream callers must own an equivalent local type or stop depending on the unexercised contract."
+disposition = "unused-justify"
+reason = "Concrete consumer: the standard protocol embedded host tests calls lash_core::LashRuntime::export_state; retain the exercised runtime contract."
 
 [[api]]
 symbol = "lash_core::LashRuntime::from_background_state"
 kind = "function"
 availability = "default+all-features"
 area = "sessions-turns"
-disposition = "unused-remove"
-reason = "No example or concrete unrepresented host class establishes a need for lash_core::LashRuntime::from_background_state. Breaking: remove this export; downstream callers must own an equivalent local type or stop depending on the unexercised contract."
+disposition = "unused-justify"
+reason = "Concrete consumer: the subagent runtime host calls lash_core::LashRuntime::from_background_state; retain the exercised runtime contract."
 
 [[api]]
 symbol = "lash_core::LashRuntime::from_embedded_state"
 kind = "function"
 availability = "default+all-features"
 area = "sessions-turns"
-disposition = "unused-remove"
-reason = "No example or concrete unrepresented host class establishes a need for lash_core::LashRuntime::from_embedded_state. Breaking: remove this export; downstream callers must own an equivalent local type or stop depending on the unexercised contract."
+disposition = "unused-justify"
+reason = "Concrete consumer: the runtime conformance and child-session hosts calls lash_core::LashRuntime::from_embedded_state; retain the exercised runtime contract."
 
 [[api]]
 symbol = "lash_core::LashRuntime::from_environment"
 kind = "function"
 availability = "default+all-features"
 area = "sessions-turns"
-disposition = "unused-remove"
-reason = "No example or concrete unrepresented host class establishes a need for lash_core::LashRuntime::from_environment. Breaking: remove this export; downstream callers must own an equivalent local type or stop depending on the unexercised contract."
+disposition = "unused-justify"
+reason = "Concrete consumer: the canonical runtime lifecycle calls lash_core::LashRuntime::from_environment; retain the exercised runtime contract."
 
 [[api]]
 symbol = "lash_core::LashRuntime::from_persistent_background_state"
 kind = "function"
 availability = "default+all-features"
 area = "sessions-turns"
-disposition = "unused-remove"
-reason = "No example or concrete unrepresented host class establishes a need for lash_core::LashRuntime::from_persistent_background_state. Breaking: remove this export; downstream callers must own an equivalent local type or stop depending on the unexercised contract."
+disposition = "unused-justify"
+reason = "Concrete consumer: the child-session background host calls lash_core::LashRuntime::from_persistent_background_state; retain the exercised runtime contract."
 
 [[api]]
 symbol = "lash_core::LashRuntime::from_persistent_embedded_state"
 kind = "function"
 availability = "default+all-features"
 area = "sessions-turns"
-disposition = "unused-remove"
-reason = "No example or concrete unrepresented host class establishes a need for lash_core::LashRuntime::from_persistent_embedded_state. Breaking: remove this export; downstream callers must own an equivalent local type or stop depending on the unexercised contract."
+disposition = "unused-justify"
+reason = "Concrete consumer: the runtime lifecycle and projection hosts calls lash_core::LashRuntime::from_persistent_embedded_state; retain the exercised runtime contract."
 
 [[api]]
 symbol = "lash_core::LashRuntime::list_trigger_registrations"
@@ -62325,16 +62261,16 @@ symbol = "lash_core::LashRuntime::open_agent_frame"
 kind = "function"
 availability = "default+all-features"
 area = "sessions-turns"
-disposition = "unused-remove"
-reason = "No example or concrete unrepresented host class establishes a need for lash_core::LashRuntime::open_agent_frame. Breaking: remove this export; downstream callers must own an equivalent local type or stop depending on the unexercised contract."
+disposition = "unused-justify"
+reason = "Concrete consumer: the runtime session API calls lash_core::LashRuntime::open_agent_frame; retain the exercised runtime contract."
 
 [[api]]
 symbol = "lash_core::LashRuntime::park"
 kind = "function"
 availability = "default+all-features"
 area = "sessions-turns"
-disposition = "unused-remove"
-reason = "No example or concrete unrepresented host class establishes a need for lash_core::LashRuntime::park. Breaking: remove this export; downstream callers must own an equivalent local type or stop depending on the unexercised contract."
+disposition = "unused-justify"
+reason = "Concrete consumer: the canonical runtime lifecycle calls lash_core::LashRuntime::park; retain the exercised runtime contract."
 
 [[api]]
 symbol = "lash_core::LashRuntime::plugin_session"
@@ -62373,8 +62309,8 @@ symbol = "lash_core::LashRuntime::read_view"
 kind = "function"
 availability = "default+all-features"
 area = "sessions-turns"
-disposition = "unused-remove"
-reason = "No example or concrete unrepresented host class establishes a need for lash_core::LashRuntime::read_view. Breaking: remove this export; downstream callers must own an equivalent local type or stop depending on the unexercised contract."
+disposition = "unused-justify"
+reason = "Concrete consumer: the RLM and simulation hosts calls lash_core::LashRuntime::read_view; retain the exercised runtime contract."
 
 [[api]]
 symbol = "lash_core::LashRuntime::refresh_session_tool_catalog"
@@ -62413,8 +62349,8 @@ symbol = "lash_core::LashRuntime::resume"
 kind = "function"
 availability = "default+all-features"
 area = "sessions-turns"
-disposition = "unused-remove"
-reason = "No example or concrete unrepresented host class establishes a need for lash_core::LashRuntime::resume. Breaking: remove this export; downstream callers must own an equivalent local type or stop depending on the unexercised contract."
+disposition = "unused-justify"
+reason = "Concrete consumer: the canonical runtime lifecycle calls lash_core::LashRuntime::resume; retain the exercised runtime contract."
 
 [[api]]
 symbol = "lash_core::LashRuntime::run_plugin_command"
@@ -62437,8 +62373,8 @@ symbol = "lash_core::LashRuntime::run_turn_assembled"
 kind = "function"
 availability = "default+all-features"
 area = "sessions-turns"
-disposition = "unused-remove"
-reason = "No example or concrete unrepresented host class establishes a need for lash_core::LashRuntime::run_turn_assembled. Breaking: remove this export; downstream callers must own an equivalent local type or stop depending on the unexercised contract."
+disposition = "unused-justify"
+reason = "Concrete consumer: the runtime projection conformance suite calls lash_core::LashRuntime::run_turn_assembled; retain the exercised runtime contract."
 
 [[api]]
 symbol = "lash_core::LashRuntime::session_graph_service"
@@ -62453,24 +62389,24 @@ symbol = "lash_core::LashRuntime::session_id"
 kind = "function"
 availability = "default+all-features"
 area = "sessions-turns"
-disposition = "unused-remove"
-reason = "No example or concrete unrepresented host class establishes a need for lash_core::LashRuntime::session_id. Breaking: remove this export; downstream callers must own an equivalent local type or stop depending on the unexercised contract."
+disposition = "unused-justify"
+reason = "Concrete consumer: the lash facade session admin calls lash_core::LashRuntime::session_id; retain the exercised runtime contract."
 
 [[api]]
 symbol = "lash_core::LashRuntime::session_lifecycle_service"
 kind = "function"
 availability = "default+all-features"
 area = "sessions-turns"
-disposition = "unused-remove"
-reason = "No example or concrete unrepresented host class establishes a need for lash_core::LashRuntime::session_lifecycle_service. Breaking: remove this export; downstream callers must own an equivalent local type or stop depending on the unexercised contract."
+disposition = "unused-justify"
+reason = "Concrete consumer: the child-session host calls lash_core::LashRuntime::session_lifecycle_service; retain the exercised runtime contract."
 
 [[api]]
 symbol = "lash_core::LashRuntime::session_state_service"
 kind = "function"
 availability = "default+all-features"
 area = "sessions-turns"
-disposition = "unused-remove"
-reason = "No example or concrete unrepresented host class establishes a need for lash_core::LashRuntime::session_state_service. Breaking: remove this export; downstream callers must own an equivalent local type or stop depending on the unexercised contract."
+disposition = "unused-justify"
+reason = "Concrete consumer: the child-session host calls lash_core::LashRuntime::session_state_service; retain the exercised runtime contract."
 
 [[api]]
 symbol = "lash_core::LashRuntime::set_model"
@@ -62529,68 +62465,60 @@ disposition = "unused-justify"
 reason = "Concrete host class: custom durable store or attachment backend implementers; bundled examples use repository backends and do not implement this backend-facing contract."
 
 [[api]]
-symbol = "lash_core::LashRuntime::set_session_id"
-kind = "function"
-availability = "default+all-features"
-area = "sessions-turns"
-disposition = "unused-remove"
-reason = "No example or concrete unrepresented host class establishes a need for lash_core::LashRuntime::set_session_id. Breaking: remove this export; downstream callers must own an equivalent local type or stop depending on the unexercised contract."
-
-[[api]]
 symbol = "lash_core::LashRuntime::snapshot_execution_state"
 kind = "function"
 availability = "default+all-features"
 area = "sessions-turns"
-disposition = "unused-remove"
-reason = "No example or concrete unrepresented host class establishes a need for lash_core::LashRuntime::snapshot_execution_state. Breaking: remove this export; downstream callers must own an equivalent local type or stop depending on the unexercised contract."
+disposition = "unused-justify"
+reason = "Concrete consumer: the RLM executor calls lash_core::LashRuntime::snapshot_execution_state; retain the exercised runtime contract."
 
 [[api]]
 symbol = "lash_core::LashRuntime::stream_next_queued_work"
 kind = "function"
 availability = "default+all-features"
 area = "sessions-turns"
-disposition = "unused-remove"
-reason = "No example or concrete unrepresented host class establishes a need for lash_core::LashRuntime::stream_next_queued_work. Breaking: remove this export; downstream callers must own an equivalent local type or stop depending on the unexercised contract."
+disposition = "unused-justify"
+reason = "Concrete consumer: the queued-work runtime suite calls lash_core::LashRuntime::stream_next_queued_work; retain the exercised runtime contract."
 
 [[api]]
 symbol = "lash_core::LashRuntime::stream_prepared_turn"
 kind = "function"
 availability = "default+all-features"
 area = "sessions-turns"
-disposition = "unused-remove"
-reason = "No example or concrete unrepresented host class establishes a need for lash_core::LashRuntime::stream_prepared_turn. Breaking: remove this export; downstream callers must own an equivalent local type or stop depending on the unexercised contract."
+disposition = "unused-justify"
+reason = "Concrete consumer: the prepared-turn runtime suite calls lash_core::LashRuntime::stream_prepared_turn; retain the exercised runtime contract."
 
 [[api]]
 symbol = "lash_core::LashRuntime::stream_selected_queued_work"
 kind = "function"
 availability = "default+all-features"
 area = "sessions-turns"
-disposition = "unused-remove"
-reason = "No example or concrete unrepresented host class establishes a need for lash_core::LashRuntime::stream_selected_queued_work. Breaking: remove this export; downstream callers must own an equivalent local type or stop depending on the unexercised contract."
+disposition = "unused-justify"
+reason = "Concrete consumer: the lash facade queued-turn path calls lash_core::LashRuntime::stream_selected_queued_work; retain the exercised runtime contract."
 
 [[api]]
 symbol = "lash_core::LashRuntime::stream_turn"
 kind = "function"
 availability = "default+all-features"
 area = "sessions-turns"
-disposition = "unused-remove"
-reason = "No example or concrete unrepresented host class establishes a need for lash_core::LashRuntime::stream_turn. Breaking: remove this export; downstream callers must own an equivalent local type or stop depending on the unexercised contract."
+disposition = "unused-justify"
+reason = "Concrete consumer: the standard protocol and Restate hosts calls lash_core::LashRuntime::stream_turn; retain the exercised runtime contract."
 
 [[api]]
 symbol = "lash_core::LashRuntime::stream_turn_with_agent_frames"
 kind = "function"
 availability = "default+all-features"
 area = "sessions-turns"
-disposition = "unused-remove"
-reason = "No example or concrete unrepresented host class establishes a need for lash_core::LashRuntime::stream_turn_with_agent_frames. Breaking: remove this export; downstream callers must own an equivalent local type or stop depending on the unexercised contract."
+disposition = "unused-justify"
+reason = "Concrete consumer: the agent-frame runtime path calls lash_core::LashRuntime::stream_turn_with_agent_frames; retain the exercised runtime contract."
 
 [[api]]
 symbol = "lash_core::LashRuntime::submit_session_command"
 kind = "function"
 availability = "default+all-features"
 area = "sessions-turns"
-disposition = "unused-remove"
-reason = "No example or concrete unrepresented host class establishes a need for lash_core::LashRuntime::submit_session_command. Breaking: remove this export; downstream callers must own an equivalent local type or stop depending on the unexercised contract."
+disposition = "unused-justify"
+reason = "Concrete consumer: the lash facade command admin calls lash_core::LashRuntime::submit_session_command; retain the exercised runtime contract."
 
 [[api]]
 symbol = "lash_core::LashRuntime::tool_state"
@@ -62621,8 +62549,8 @@ symbol = "lash_core::LashRuntime::update_session_config"
 kind = "function"
 availability = "default+all-features"
 area = "sessions-turns"
-disposition = "unused-remove"
-reason = "No example or concrete unrepresented host class establishes a need for lash_core::LashRuntime::update_session_config. Breaking: remove this export; downstream callers must own an equivalent local type or stop depending on the unexercised contract."
+disposition = "unused-justify"
+reason = "Concrete consumer: the runtime configuration path calls lash_core::LashRuntime::update_session_config; retain the exercised runtime contract."
 
 [[api]]
 symbol = "lash_core::LashRuntime::usage_report"
