@@ -331,8 +331,10 @@ impl Processes {
 
     /// Host-scheduled retention lever (ADR 0017): physically delete terminal
     /// process rows (and their events, observer edges, leases) older than
-    /// `cutoff_epoch_ms`, returning what was reclaimed. Non-terminal rows are
-    /// never touched. Lash exposes no finite maximum waiter lifetime: the host
+    /// `cutoff_epoch_ms`, returning what was reclaimed. The configured trigger
+    /// store also removes delivery reservations for processes now represented
+    /// by tombstones; unrelated trigger rows are retained. Non-terminal rows
+    /// are never touched. Lash exposes no finite maximum waiter lifetime: the host
     /// must retain rows beyond every still-replayable await, and a later await
     /// after pruning receives the typed `ProcessNoLongerRetained` outcome. Pass
     /// either the projector's acknowledged
@@ -355,7 +357,8 @@ impl Processes {
             .into_iter()
             .filter(|process| process.is_terminal() && process.updated_at_ms < cutoff_epoch_ms)
         {
-            self.core
+            if let Err(err) = self
+                .core
                 .env
                 .core
                 .control
@@ -363,12 +366,136 @@ impl Processes {
                 .retire_effect_journal(lash_core::EffectJournalRetirement::process(
                     process.id.clone(),
                 ))
-                .await?;
+                .await
+            {
+                tracing::warn!(
+                    failure_stage = "retire_process_effect_journal",
+                    cutoff_epoch_ms,
+                    process_id = %process.id,
+                    error = %err,
+                    "process retention failed"
+                );
+                return Err(err.into());
+            }
         }
-        registry
+        let mut report = match registry
             .prune_terminal_processes(cutoff_epoch_ms, None, watermark)
             .await
-            .map_err(Into::into)
+        {
+            Ok(report) => report,
+            Err(err) => {
+                tracing::warn!(
+                    failure_stage = "prune_process_registry",
+                    cutoff_epoch_ms,
+                    error = %err,
+                    "process retention failed"
+                );
+                return Err(err.into());
+            }
+        };
+        if let Some(trigger_store) = self.core.env.trigger_store.as_ref() {
+            report.pruned_trigger_deliveries = match lash_core::reconcile_pruned_trigger_deliveries(
+                registry.as_ref(),
+                trigger_store.as_ref(),
+            )
+            .await
+            {
+                Ok(deleted) => deleted,
+                Err(err) => {
+                    tracing::warn!(
+                        failure_stage = "reconcile_trigger_deliveries_after_process_prune",
+                        cutoff_epoch_ms,
+                        pruned_processes = report.pruned_processes,
+                        pruned_events = report.pruned_events,
+                        error = %err,
+                        "process retention partially completed"
+                    );
+                    return Err(err.into());
+                }
+            };
+        }
+        Ok(report)
+    }
+
+    /// Compact payload-free process tombstones while structurally excluding
+    /// every process id referenced by an outstanding trigger delivery.
+    /// Reconciliation runs first, then the raw registry compaction lever surveys
+    /// the configured trigger store itself and refuses every matching tombstone.
+    /// A configured trigger store that cannot be surveyed or reconciled blocks
+    /// compaction, so tombstones accumulate until it recovers rather than
+    /// allowing recovery evidence to become orphaned. The caller supplies the
+    /// same explicit projection watermark required by the registry retention
+    /// contract.
+    pub async fn compact_tombstones(
+        &self,
+        cutoff_epoch_ms: u64,
+        watermark: lash_core::ProjectionWatermark,
+    ) -> Result<usize> {
+        let registry = self.registry()?;
+        let mut outstanding_trigger_delivery_process_ids = Vec::new();
+        if let Some(trigger_store) = self.core.env.trigger_store.as_ref() {
+            outstanding_trigger_delivery_process_ids =
+                match trigger_store.list_delivery_process_ids().await {
+                    Ok(process_ids) => process_ids,
+                    Err(err) => {
+                        tracing::warn!(
+                            failure_stage = "survey_outstanding_trigger_deliveries",
+                            cutoff_epoch_ms,
+                            error = %err,
+                            "process tombstone compaction blocked"
+                        );
+                        return Err(err.into());
+                    }
+                };
+            let reconciled_trigger_deliveries =
+                match lash_core::reconcile_pruned_trigger_deliveries(
+                    registry.as_ref(),
+                    trigger_store.as_ref(),
+                )
+                .await
+                {
+                    Ok(deleted) => deleted,
+                    Err(err) => {
+                        tracing::warn!(
+                            failure_stage = "reconcile_trigger_deliveries_before_compaction",
+                            cutoff_epoch_ms,
+                            protected_process_count = outstanding_trigger_delivery_process_ids.len(),
+                            error = %err,
+                            "process tombstone compaction blocked"
+                        );
+                        return Err(err.into());
+                    }
+                };
+            tracing::debug!(
+                protected_process_count = outstanding_trigger_delivery_process_ids.len(),
+                reconciled_trigger_deliveries,
+                "prepared delivery-aware process tombstone compaction"
+            );
+        }
+        match registry
+            .compact_process_tombstones(
+                cutoff_epoch_ms,
+                watermark,
+                self.core
+                    .env
+                    .trigger_store
+                    .as_deref()
+                    .map(|store| store as &dyn lash_core::TriggerStore),
+            )
+            .await
+        {
+            Ok(compacted) => Ok(compacted),
+            Err(err) => {
+                tracing::warn!(
+                    failure_stage = "compact_process_tombstones",
+                    cutoff_epoch_ms,
+                    protected_process_count = outstanding_trigger_delivery_process_ids.len(),
+                    error = %err,
+                    "process tombstone compaction failed"
+                );
+                Err(err.into())
+            }
+        }
     }
 
     /// List durable process-wake delivery rows, optionally filtered by state.

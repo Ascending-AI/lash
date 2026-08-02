@@ -1,5 +1,35 @@
 use super::*;
 
+pub(crate) fn max_change_sequence(watermark: lash_core::ProjectionWatermark) -> Option<i64> {
+    match watermark {
+        lash_core::ProjectionWatermark::UpTo(cursor) => Some(cursor.store_sequence() as i64),
+        lash_core::ProjectionWatermark::NoProjector => None,
+    }
+}
+
+pub(crate) fn compact_process_tombstones_conn(
+    conn: &Connection,
+    cutoff_epoch_ms: i64,
+    max_change_seq: Option<i64>,
+    outstanding_trigger_delivery_process_ids: &[String],
+) -> Result<usize, lash_core::PluginError> {
+    let outstanding_trigger_delivery_process_ids =
+        serde_json::to_string(outstanding_trigger_delivery_process_ids)
+            .map_err(process_decode_error)?;
+    conn.execute(
+        "DELETE FROM process_tombstones
+         WHERE pruned_at_ms < ?1
+           AND (?2 IS NULL OR pruned_change_seq <= ?2)
+           AND process_id NOT IN (SELECT value FROM json_each(?3))",
+        params![
+            cutoff_epoch_ms,
+            max_change_seq,
+            outstanding_trigger_delivery_process_ids
+        ],
+    )
+    .map_err(process_sqlite_error)
+}
+
 pub(crate) fn processes_changed_since_conn(
     conn: &Connection,
     cursor: ProcessChangeCursor,
@@ -62,25 +92,6 @@ pub(crate) fn prune_terminal_processes_conn(
     filter: Option<ProcessListFilter>,
     max_change_seq: Option<u64>,
 ) -> Result<ProcessPruneReport, lash_core::PluginError> {
-    let trigger_deliveries_exists = conn
-        .query_row(
-            "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'trigger_deliveries'",
-            [],
-            |_| Ok(()),
-        )
-        .optional()
-        .map_err(process_sqlite_error)?
-        .is_some();
-    let trigger_receipts_exist = conn
-        .query_row(
-            "SELECT 1 FROM sqlite_master
-             WHERE type = 'table' AND name = 'trigger_mutation_receipts'",
-            [],
-            |_| Ok(()),
-        )
-        .optional()
-        .map_err(process_sqlite_error)?
-        .is_some();
     let prunable = prunable_terminal_process_ids_conn(conn, cutoff, filter, max_change_seq)?;
 
     let mut pruned_events = 0;
@@ -108,13 +119,6 @@ pub(crate) fn prune_terminal_processes_conn(
             params![process_id],
         )
         .map_err(process_sqlite_error)?;
-        if trigger_deliveries_exists {
-            conn.execute(
-                "DELETE FROM trigger_deliveries WHERE process_id = ?1",
-                params![process_id],
-            )
-            .map_err(process_sqlite_error)?;
-        }
         let terminal_label: String = conn
             .query_row(
                 "SELECT status FROM processes WHERE process_id = ?1",
@@ -142,16 +146,10 @@ pub(crate) fn prune_terminal_processes_conn(
             )
             .map_err(process_sqlite_error)?;
     }
-    if trigger_receipts_exist {
-        conn.execute(
-            "DELETE FROM trigger_mutation_receipts WHERE created_at_ms < ?1",
-            params![cutoff],
-        )
-        .map_err(process_sqlite_error)?;
-    }
     Ok(ProcessPruneReport {
         pruned_processes,
         pruned_events,
+        pruned_trigger_deliveries: 0,
     })
 }
 

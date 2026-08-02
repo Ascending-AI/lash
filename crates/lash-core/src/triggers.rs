@@ -964,6 +964,17 @@ pub struct TriggerDeliveryReservation {
     pub reservation_status: TriggerDeliveryReservationStatus,
 }
 
+/// Stable identity of one trigger-delivery row considered for retention.
+///
+/// The process id is carried alongside the delivery table's composite primary
+/// key so a retention decision can delete only the exact row it observed.
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct TriggerDeliveryRetentionCandidate {
+    pub occurrence_id: String,
+    pub subscription_id: String,
+    pub process_id: String,
+}
+
 /// Orders delivery starts by the stable subscription identity fields captured
 /// in each reservation snapshot.
 ///
@@ -1048,8 +1059,34 @@ pub trait TriggerStore: Send + Sync {
     /// direct delivery-table view to close the reserve/start crash window.
     async fn list_deliveries(&self) -> Result<Vec<TriggerDeliveryReservation>, PluginError>;
 
-    /// Drop mutation idempotency receipts older than the host's established
-    /// terminal-process retention cutoff. List operations never create these
-    /// receipts.
+    /// List the distinct deterministic process ids currently referenced by
+    /// delivery rows, without materializing occurrence or subscription JSON.
+    /// Process-retention reconciliation uses this narrow worklist query.
+    async fn list_delivery_process_ids(&self) -> Result<Vec<String>, PluginError>;
+
+    /// List the stable row identities used by process-retention reconciliation.
+    ///
+    /// The returned identity is an observation token: later deletion must match
+    /// all three fields and must not expand to other rows that happen to carry
+    /// the same reusable process id.
+    async fn list_delivery_retention_candidates(
+        &self,
+    ) -> Result<Vec<TriggerDeliveryRetentionCandidate>, PluginError>;
+
+    /// Delete only the supplied, previously observed delivery rows.
+    ///
+    /// Every candidate must match both the delivery row's composite identity
+    /// and its observed process id. Repeating the deletion is harmless; a row
+    /// inserted or replaced after classification is never swept into the batch.
+    async fn delete_delivery_retention_candidates(
+        &self,
+        candidates: &[TriggerDeliveryRetentionCandidate],
+    ) -> Result<usize, PluginError>;
+
+    /// Low-level primitive for dropping mutation idempotency receipts older
+    /// than an explicit cutoff. Process retention never prunes these receipts,
+    /// and list operations never create them. Lash deliberately exposes no
+    /// public facade or production schedule until FIG-653 can prove terminal-
+    /// gated eligibility for each receipt.
     async fn prune_mutation_receipts(&self, cutoff_epoch_ms: u64) -> Result<usize, PluginError>;
 }

@@ -41,7 +41,6 @@ pub struct TestLocalProcessRegistry {
     tombstones: Arc<Mutex<HashMap<String, ProcessTombstone>>>,
     leases: Arc<Mutex<ManagedLeaseMap>>,
     handovers: Arc<Mutex<HashMap<(String, u64), crate::PersistedSegmentHandover>>>,
-    trigger_store: Option<Arc<crate::InMemoryTriggerStore>>,
     execution_write_pause: Arc<std::sync::Mutex<Option<ExecutionWritePause>>>,
     wake_mark_pause: Arc<std::sync::Mutex<Option<ExecutionWritePause>>>,
     append_outbox_pause: Arc<std::sync::Mutex<Option<ExecutionWritePause>>>,
@@ -62,7 +61,6 @@ impl Default for TestLocalProcessRegistry {
             tombstones: Arc::new(Mutex::new(HashMap::new())),
             leases: Arc::new(Mutex::new(HashMap::new())),
             handovers: Arc::new(Mutex::new(HashMap::new())),
-            trigger_store: None,
             execution_write_pause: Arc::new(std::sync::Mutex::new(None)),
             wake_mark_pause: Arc::new(std::sync::Mutex::new(None)),
             append_outbox_pause: Arc::new(std::sync::Mutex::new(None)),
@@ -156,11 +154,6 @@ impl TestLocalProcessRegistry {
 
     pub async fn set_process_read_error(&self, error: Option<PluginError>) {
         *self.process_read_error.lock().await = error;
-    }
-
-    pub fn with_trigger_store(mut self, trigger_store: Arc<crate::InMemoryTriggerStore>) -> Self {
-        self.trigger_store = Some(trigger_store);
-        self
     }
 
     async fn next_change_seq(&self) -> u64 {
@@ -1063,17 +1056,27 @@ impl ProcessRegistry for TestLocalProcessRegistry {
         &self,
         cutoff_epoch_ms: u64,
         watermark: ProjectionWatermark,
+        trigger_store: Option<&dyn crate::TriggerStore>,
     ) -> Result<usize, PluginError> {
         let max_change_seq = match watermark {
             ProjectionWatermark::UpTo(cursor) => Some(cursor.store_sequence()),
             ProjectionWatermark::NoProjector => None,
         };
+        let outstanding_trigger_delivery_process_ids = match trigger_store {
+            Some(trigger_store) => trigger_store.list_delivery_process_ids().await?,
+            None => Vec::new(),
+        };
+        let outstanding_trigger_delivery_process_ids = outstanding_trigger_delivery_process_ids
+            .iter()
+            .map(String::as_str)
+            .collect::<std::collections::HashSet<_>>();
         let mut tombstones = self.tombstones.lock().await;
         let before = tombstones.len();
         tombstones.retain(|_, tombstone| {
             tombstone.pruned_at_ms >= cutoff_epoch_ms
                 || max_change_seq
                     .is_some_and(|max_change_seq| tombstone.pruned_change_seq > max_change_seq)
+                || outstanding_trigger_delivery_process_ids.contains(tombstone.process_id.as_str())
         });
         Ok(before - tombstones.len())
     }
@@ -1483,12 +1486,10 @@ impl ProcessRegistry for TestLocalProcessRegistry {
             .lock()
             .await
             .retain(|(process_id, _), _| !prunable.contains(process_id));
-        if let Some(trigger_store) = self.trigger_store.as_ref() {
-            trigger_store.delete_deliveries_by_process_ids(&prunable)?;
-        }
         Ok(ProcessPruneReport {
             pruned_processes: prunable.len(),
             pruned_events,
+            pruned_trigger_deliveries: 0,
         })
     }
 }

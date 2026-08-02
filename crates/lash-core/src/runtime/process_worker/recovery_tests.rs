@@ -1334,9 +1334,7 @@ async fn sweep_recovers_reserved_v1_snapshot_after_tombstone_exactly_once() {
 #[tokio::test]
 async fn sweep_does_not_reconcile_trigger_delivery_pruned_with_terminal_process() {
     let trigger_store = Arc::new(crate::InMemoryTriggerStore::default());
-    let registry: Arc<dyn ProcessRegistry> = Arc::new(
-        TestLocalProcessRegistry::default().with_trigger_store(Arc::clone(&trigger_store)),
-    );
+    let registry: Arc<dyn ProcessRegistry> = Arc::new(TestLocalProcessRegistry::default());
     let trigger_store_dyn: Arc<dyn TriggerStore> = trigger_store.clone();
     let delivery = seed_reserved_trigger_delivery(&trigger_store_dyn).await;
     assert!(
@@ -1383,6 +1381,9 @@ async fn sweep_does_not_reconcile_trigger_delivery_pruned_with_terminal_process(
         .await
         .expect("prune completed trigger delivery process");
     assert_eq!(report.pruned_processes, 1);
+    crate::reconcile_pruned_trigger_deliveries(registry.as_ref(), trigger_store.as_ref())
+        .await
+        .expect("reconcile pruned trigger deliveries");
     assert!(
         matches!(
             registry.get_process(&delivery.process_id).await,

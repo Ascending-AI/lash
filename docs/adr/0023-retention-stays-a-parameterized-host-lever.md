@@ -43,3 +43,11 @@ the relevant revision, epoch, or change-sequence watermark.
 
 The producer still does not declare a retention class. Lash defines eligibility
 and the Host Application chooses how much eligible evidence to retain.
+
+Trigger mutation receipts follow the same ownership rule, but age alone does not establish that an
+operation id can never be retried. Lash therefore deliberately exposes no public receipt-pruning
+facade and has no production caller or maintenance schedule for the low-level
+`TriggerStore::prune_mutation_receipts` primitive. The low-rate receipt table remains unbounded in
+the safe interim: retaining idempotency evidence is preferable to re-evaluating a live retry with a
+changed disposition. FIG-653 owns terminal-gated `RetentionBound` eligibility and the future public
+lever; the unbounded growth is that work's explicit premise.

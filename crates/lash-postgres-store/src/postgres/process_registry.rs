@@ -1,7 +1,9 @@
 use crate::*;
 
+mod retention;
 mod wake_delivery;
 
+use retention::{filter_tombstoned_process_ids, filter_unregistered_process_ids};
 use wake_delivery::{
     claim_pending_wake_deliveries, decode_wake_delivery_row, load_wake_delivery_tx,
     update_wake_delivery_state, wake_delivery_report,
@@ -1039,19 +1041,26 @@ impl ProcessRegistry for PostgresProcessRegistry {
         &self,
         cutoff_epoch_ms: u64,
         watermark: lash_core::ProjectionWatermark,
+        trigger_store: Option<&dyn lash_core::TriggerStore>,
     ) -> Result<usize, PluginError> {
         let max_change_seq = match watermark {
             lash_core::ProjectionWatermark::UpTo(cursor) => Some(cursor.store_sequence() as i64),
             lash_core::ProjectionWatermark::NoProjector => None,
         };
+        let outstanding_trigger_delivery_process_ids = match trigger_store {
+            Some(trigger_store) => trigger_store.list_delivery_process_ids().await?,
+            None => Vec::new(),
+        };
         let cutoff_epoch_ms = i64::try_from(cutoff_epoch_ms).unwrap_or(i64::MAX);
         Ok(sqlx::query(
             "DELETE FROM lash_process_tombstones
                  WHERE pruned_at_ms < $1
-                   AND ($2::BIGINT IS NULL OR pruned_change_seq <= $2)",
+                   AND ($2::BIGINT IS NULL OR pruned_change_seq <= $2)
+                   AND NOT (process_id = ANY($3::TEXT[]))",
         )
         .bind(cutoff_epoch_ms)
         .bind(max_change_seq)
+        .bind(&outstanding_trigger_delivery_process_ids)
         .execute(&self.pool)
         .await
         .map_err(plugin_sqlx_error)?
@@ -1209,22 +1218,14 @@ impl ProcessRegistry for PostgresProcessRegistry {
         &self,
         process_ids: &[String],
     ) -> Result<Vec<String>, PluginError> {
-        if process_ids.is_empty() {
-            return Ok(Vec::new());
-        }
-        sqlx::query_scalar(
-            "SELECT candidate.process_id
-             FROM UNNEST($1::TEXT[]) WITH ORDINALITY AS candidate(process_id, ordinal)
-             WHERE NOT EXISTS (
-                 SELECT 1 FROM lash_processes p
-                 WHERE p.process_id = candidate.process_id
-             )
-             ORDER BY candidate.ordinal ASC",
-        )
-        .bind(process_ids)
-        .fetch_all(&self.pool)
-        .await
-        .map_err(plugin_sqlx_error)
+        filter_unregistered_process_ids(&self.pool, process_ids).await
+    }
+
+    async fn filter_tombstoned_process_ids(
+        &self,
+        process_ids: &[String],
+    ) -> Result<Vec<String>, PluginError> {
+        filter_tombstoned_process_ids(&self.pool, process_ids).await
     }
 
     async fn live_reference_summary(
@@ -1460,7 +1461,7 @@ impl ProcessRegistry for PostgresProcessRegistry {
                 .execute(&mut *tx)
                 .await
                 .map_err(plugin_sqlx_error)?;
-            sqlx::query("WITH deleted_handovers AS (DELETE FROM lash_process_segment_handovers WHERE process_id = $1) DELETE FROM lash_trigger_deliveries WHERE process_id = $1")
+            sqlx::query("DELETE FROM lash_process_segment_handovers WHERE process_id = $1")
                 .bind(&process_id)
                 .execute(&mut *tx)
                 .await
@@ -1491,15 +1492,11 @@ impl ProcessRegistry for PostgresProcessRegistry {
                 .map_err(plugin_sqlx_error)?
                 .rows_affected() as usize;
         }
-        sqlx::query("DELETE FROM lash_trigger_mutation_receipts WHERE created_at_ms < $1")
-            .bind(cutoff)
-            .execute(&mut *tx)
-            .await
-            .map_err(plugin_sqlx_error)?;
         tx.commit().await.map_err(plugin_sqlx_error)?;
         Ok(ProcessPruneReport {
             pruned_processes,
             pruned_events,
+            pruned_trigger_deliveries: 0,
         })
     }
 }

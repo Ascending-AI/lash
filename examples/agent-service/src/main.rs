@@ -342,7 +342,7 @@ async fn async_main() -> anyhow_like::Result<()> {
     // Host-scheduled retention for terminal process rows (ADR 0017). This runs
     // in both durability modes: whichever registry backs the deployment is the
     // one that accumulates rows.
-    spawn_process_retention(retention_processes);
+    spawn_retention(retention_processes);
 
     // Keep a state clone for the drain; the router consumes the original.
     let drain_state = state.clone();
@@ -399,10 +399,11 @@ async fn async_main() -> anyhow_like::Result<()> {
 /// it on the same maintenance cadence as the session-store `vacuum` /
 /// `gc_unreachable` reclamation (see docs/persistence.html).
 ///
-/// Retention is driven through the [`Processes::prune`](lash::process::Processes::prune)
-/// facade lever rather than the raw registry method, so the example uses the
-/// same host surface every embedder does.
-fn spawn_process_retention(processes: lash::process::Processes) {
+/// Retention is driven through the public process facade rather than the raw
+/// store, so the example uses the same host surface every embedder does.
+/// Trigger mutation receipts deliberately remain unbounded until FIG-653 adds
+/// terminal-gated eligibility for deleting idempotency evidence.
+fn spawn_retention(processes: lash::process::Processes) {
     use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
     // The window must be comfortably longer than any wait: a cutoff shorter than
@@ -422,14 +423,20 @@ fn spawn_process_retention(processes: lash::process::Processes) {
                 Err(_) => continue,
             };
             let cutoff = now_ms.saturating_sub(RETENTION_WINDOW.as_millis() as u64);
-            match processes
+            let process_result = processes
                 .prune(cutoff, lash::process::ProjectionWatermark::NoProjector)
-                .await
-            {
-                Ok(report) if report.pruned_processes > 0 || report.pruned_events > 0 => {
+                .await;
+            match process_result {
+                Ok(report)
+                    if report.pruned_processes > 0
+                        || report.pruned_events > 0
+                        || report.pruned_trigger_deliveries > 0 =>
+                {
                     println!(
-                        "agent-service pruned {} terminal processes and {} events (cutoff {cutoff}ms)",
-                        report.pruned_processes, report.pruned_events
+                        "agent-service pruned {} terminal processes, {} events, and {} trigger deliveries (cutoff {cutoff}ms)",
+                        report.pruned_processes,
+                        report.pruned_events,
+                        report.pruned_trigger_deliveries
                     );
                 }
                 Ok(_) => {}

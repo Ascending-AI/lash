@@ -893,23 +893,27 @@ impl ProcessRegistry for SqliteProcessRegistry {
         &self,
         cutoff_epoch_ms: u64,
         watermark: lash_core::ProjectionWatermark,
+        trigger_store: Option<&dyn lash_core::TriggerStore>,
     ) -> Result<usize, lash_core::PluginError> {
-        let max_change_seq = match watermark {
-            lash_core::ProjectionWatermark::UpTo(cursor) => Some(cursor.store_sequence() as i64),
-            lash_core::ProjectionWatermark::NoProjector => None,
-        };
+        let max_change_seq = crate::process_registry_change::max_change_sequence(watermark);
         let cutoff_epoch_ms = i64::try_from(cutoff_epoch_ms).unwrap_or(i64::MAX);
+        let outstanding_trigger_delivery_process_ids = match trigger_store {
+            Some(trigger_store) => trigger_store.list_delivery_process_ids().await?,
+            None => Vec::new(),
+        };
         self.conn
             .call(move |conn| {
-                conn.execute(
-                    "DELETE FROM process_tombstones
-                     WHERE pruned_at_ms < ?1
-                       AND (?2 IS NULL OR pruned_change_seq <= ?2)",
-                    params![cutoff_epoch_ms, max_change_seq],
+                Ok(
+                    crate::process_registry_change::compact_process_tombstones_conn(
+                        conn,
+                        cutoff_epoch_ms,
+                        max_change_seq,
+                        &outstanding_trigger_delivery_process_ids,
+                    ),
                 )
             })
             .await
-            .map_err(process_sqlite_error)
+            .map_err(process_sqlite_error)?
     }
 
     async fn claim_pending_wake_deliveries(
@@ -1168,6 +1172,47 @@ impl ProcessRegistry for SqliteProcessRegistry {
                             "SELECT candidate.value
                              FROM json_each(?1) AS candidate
                              WHERE NOT EXISTS (
+                                 SELECT 1 FROM processes p
+                                 WHERE p.process_id = candidate.value
+                             )
+                               AND NOT EXISTS (
+                                 SELECT 1 FROM process_tombstones t
+                                 WHERE t.process_id = candidate.value
+                             )
+                             ORDER BY candidate.key ASC",
+                        )
+                        .map_err(process_sqlite_error)?;
+                    let rows = stmt
+                        .query_map(params![process_ids_json], |row| row.get::<_, String>(0))
+                        .map_err(process_sqlite_error)?;
+                    rows.collect::<Result<Vec<_>, _>>()
+                        .map_err(process_sqlite_error)
+                })())
+            })
+            .await
+            .map_err(process_sqlite_error)?
+    }
+
+    async fn filter_tombstoned_process_ids(
+        &self,
+        process_ids: &[String],
+    ) -> Result<Vec<String>, lash_core::PluginError> {
+        if process_ids.is_empty() {
+            return Ok(Vec::new());
+        }
+        let process_ids_json = serde_json::to_string(process_ids).map_err(process_decode_error)?;
+        self.conn
+            .call(move |conn| {
+                Ok((|| {
+                    let mut stmt = conn
+                        .prepare(
+                            "SELECT candidate.value
+                             FROM json_each(?1) AS candidate
+                             WHERE EXISTS (
+                                 SELECT 1 FROM process_tombstones t
+                                 WHERE t.process_id = candidate.value
+                             )
+                               AND NOT EXISTS (
                                  SELECT 1 FROM processes p
                                  WHERE p.process_id = candidate.value
                              )

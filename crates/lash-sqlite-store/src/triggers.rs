@@ -606,6 +606,87 @@ impl lash_core::TriggerStore for SqliteTriggerStore {
         self.list_deliveries_where("1 = 1", Vec::new()).await
     }
 
+    async fn list_delivery_process_ids(&self) -> Result<Vec<String>, lash_core::PluginError> {
+        self.conn
+            .call(|conn| {
+                Ok((|| {
+                    let mut stmt = conn
+                        .prepare(
+                            "SELECT DISTINCT process_id
+                             FROM trigger_deliveries
+                             ORDER BY process_id ASC",
+                        )
+                        .map_err(process_sqlite_error)?;
+                    let rows = stmt
+                        .query_map([], |row| row.get::<_, String>(0))
+                        .map_err(process_sqlite_error)?;
+                    rows.collect::<Result<Vec<_>, _>>()
+                        .map_err(process_sqlite_error)
+                })())
+            })
+            .await
+            .map_err(process_sqlite_error)?
+    }
+
+    async fn list_delivery_retention_candidates(
+        &self,
+    ) -> Result<Vec<lash_core::TriggerDeliveryRetentionCandidate>, lash_core::PluginError> {
+        self.conn
+            .call(|conn| {
+                Ok((|| {
+                    let mut stmt = conn
+                        .prepare(
+                            "SELECT occurrence_id, subscription_id, process_id
+                             FROM trigger_deliveries
+                             ORDER BY occurrence_id ASC, subscription_id ASC",
+                        )
+                        .map_err(process_sqlite_error)?;
+                    let rows = stmt
+                        .query_map([], |row| {
+                            Ok(lash_core::TriggerDeliveryRetentionCandidate {
+                                occurrence_id: row.get(0)?,
+                                subscription_id: row.get(1)?,
+                                process_id: row.get(2)?,
+                            })
+                        })
+                        .map_err(process_sqlite_error)?;
+                    rows.collect::<Result<Vec<_>, _>>()
+                        .map_err(process_sqlite_error)
+                })())
+            })
+            .await
+            .map_err(process_sqlite_error)?
+    }
+
+    async fn delete_delivery_retention_candidates(
+        &self,
+        candidates: &[lash_core::TriggerDeliveryRetentionCandidate],
+    ) -> Result<usize, lash_core::PluginError> {
+        if candidates.is_empty() {
+            return Ok(0);
+        }
+        let candidates_json = serde_json::to_string(candidates).map_err(process_decode_error)?;
+        self.conn
+            .call(move |conn| {
+                conn.execute(
+                    "DELETE FROM trigger_deliveries
+                     WHERE EXISTS (
+                         SELECT 1
+                         FROM json_each(?1) AS candidate
+                         WHERE trigger_deliveries.occurrence_id =
+                                   json_extract(candidate.value, '$.occurrence_id')
+                           AND trigger_deliveries.subscription_id =
+                                   json_extract(candidate.value, '$.subscription_id')
+                           AND trigger_deliveries.process_id =
+                                   json_extract(candidate.value, '$.process_id')
+                     )",
+                    params![candidates_json],
+                )
+            })
+            .await
+            .map_err(process_sqlite_error)
+    }
+
     async fn prune_mutation_receipts(
         &self,
         cutoff_epoch_ms: u64,
