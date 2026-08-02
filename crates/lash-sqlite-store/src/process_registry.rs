@@ -1208,6 +1208,10 @@ impl ProcessRegistry for SqliteProcessRegistry {
                                  SELECT 1 FROM process_tombstones t
                                  WHERE t.process_id = candidate.value
                              )
+                               AND NOT EXISTS (
+                                 SELECT 1 FROM processes p
+                                 WHERE p.process_id = candidate.value
+                             )
                              ORDER BY candidate.key ASC",
                         )
                         .map_err(process_sqlite_error)?;

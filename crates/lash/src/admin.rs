@@ -30,19 +30,28 @@ pub struct CoreTriggerAdmin {
 }
 
 impl CoreTriggerAdmin {
+    fn store(&self) -> Result<Arc<dyn lash_core::TriggerStore>> {
+        self.core
+            .env
+            .trigger_store
+            .as_ref()
+            .cloned()
+            .ok_or_else(|| {
+                EmbedError::Plugin(lash_core::PluginError::Session(
+                    "trigger store is unavailable in this runtime".to_string(),
+                ))
+            })
+    }
+
     pub async fn emit(
         &self,
         request: lash_core::TriggerOccurrenceRequest,
         scoped_effect_controller: ScopedEffectController<'_>,
     ) -> Result<lash_core::TriggerEmitReport> {
-        let store = self.core.env.trigger_store.as_ref().ok_or_else(|| {
-            EmbedError::Plugin(lash_core::PluginError::Session(
-                "trigger store is unavailable in this runtime".to_string(),
-            ))
-        })?;
+        let store = self.store()?;
         let drivers = self.core.work_driver.drivers().await;
         let router = lash_core::TriggerRouter::new(
-            Arc::clone(store),
+            store,
             self.core.env.process_registry.clone(),
             drivers.process,
         );
@@ -56,16 +65,22 @@ impl CoreTriggerAdmin {
         &self,
         filter: lash_core::TriggerSubscriptionFilter,
     ) -> Result<Vec<lash_core::TriggerRegistration>> {
-        let store = self.core.env.trigger_store.as_ref().ok_or_else(|| {
-            EmbedError::Plugin(lash_core::PluginError::Session(
-                "trigger store is unavailable in this runtime".to_string(),
-            ))
-        })?;
+        let store = self.store()?;
         let records = store.list_subscriptions(filter).await?;
         Ok(records
             .iter()
             .map(lash_core::TriggerRegistration::from)
             .collect())
+    }
+
+    /// Drop trigger mutation idempotency receipts older than the caller's
+    /// explicit bound. Trigger retention is independent from process
+    /// retention; Lash does not infer or schedule a policy for either.
+    pub async fn prune_mutation_receipts(&self, cutoff_epoch_ms: u64) -> Result<usize> {
+        self.store()?
+            .prune_mutation_receipts(cutoff_epoch_ms)
+            .await
+            .map_err(Into::into)
     }
 }
 

@@ -649,6 +649,22 @@ impl ProcessRegistry for WatchedProcessRegistry {
         self.inner.processes_changed_since(cursor, limit).await
     }
 
+    async fn filter_unregistered_process_ids(
+        &self,
+        process_ids: &[String],
+    ) -> Result<Vec<String>, PluginError> {
+        self.inner
+            .filter_unregistered_process_ids(process_ids)
+            .await
+    }
+
+    async fn filter_tombstoned_process_ids(
+        &self,
+        process_ids: &[String],
+    ) -> Result<Vec<String>, PluginError> {
+        self.inner.filter_tombstoned_process_ids(process_ids).await
+    }
+
     async fn compact_process_tombstones(
         &self,
         cutoff_epoch_ms: u64,

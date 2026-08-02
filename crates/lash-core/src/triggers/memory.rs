@@ -294,6 +294,20 @@ impl TriggerStore for InMemoryTriggerStore {
         self.list_deliveries_matching(|_| true)
     }
 
+    async fn list_delivery_process_ids(&self) -> Result<Vec<String>, PluginError> {
+        let state = self
+            .state
+            .lock()
+            .map_err(|_| PluginError::Session("trigger store lock poisoned".to_string()))?;
+        Ok(state
+            .deliveries
+            .values()
+            .map(|delivery| delivery.process_id.clone())
+            .collect::<std::collections::BTreeSet<_>>()
+            .into_iter()
+            .collect())
+    }
+
     async fn delete_deliveries_by_process_ids(
         &self,
         process_ids: &[String],

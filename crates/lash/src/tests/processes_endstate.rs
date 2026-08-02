@@ -346,6 +346,68 @@ async fn sqlite_facade_prune_removes_tombstoned_process_delivery() -> Result<()>
             .is_empty(),
         "the tombstoned process is not a recovery candidate"
     );
+
+    let orphaned = trigger_store
+        .ingest_occurrence(lash_core::TriggerOccurrenceRequest::new(
+            "ui.button.pressed",
+            source_key,
+            serde_json::json!({ "button": "Blue" }),
+            "sqlite-facade-compact-occurrence",
+        ))
+        .await?;
+    assert_eq!(orphaned.reservations.len(), 1);
+    let orphaned_process_id = orphaned.reservations[0].process_id.clone();
+    registry
+        .register_process(
+            lash_core::ProcessRegistration::new(
+                orphaned_process_id.clone(),
+                lash_core::ProcessInput::External {
+                    metadata: serde_json::Value::Null,
+                },
+                lash_core::RecoveryDisposition::ExternallyOwned,
+                lash_core::ProcessProvenance::host(),
+            )
+            .with_identity(lash_core::ProcessIdentity::new("test")),
+        )
+        .await?;
+    registry
+        .complete_process(
+            &orphaned_process_id,
+            lash_core::ProcessAwaitOutput::Success {
+                value: serde_json::json!("done"),
+                control: None,
+            },
+            lash_core::ProcessCompletionAuthority::external_owner(),
+        )
+        .await?;
+    registry
+        .prune_terminal_processes(u64::MAX, None, lash_core::ProjectionWatermark::NoProjector)
+        .await?;
+    assert_eq!(
+        trigger_store
+            .list_deliveries_by_process_id(&orphaned_process_id)
+            .await?
+            .len(),
+        1,
+        "the raw process prune leaves a crash-window delivery for reconciliation"
+    );
+
+    let compacted = core
+        .processes()
+        .compact_tombstones(u64::MAX, lash_core::ProjectionWatermark::NoProjector)
+        .await?;
+    assert!(compacted >= 1, "the facade compacts retained tombstones");
+    assert!(
+        trigger_store
+            .list_deliveries_by_process_id(&orphaned_process_id)
+            .await?
+            .is_empty(),
+        "facade compaction reconciles the delivery before removing its tombstone"
+    );
+    assert!(
+        registry.get_process(&orphaned_process_id).await?.is_none(),
+        "the reconciled tombstone is compacted"
+    );
     Ok(())
 }
 

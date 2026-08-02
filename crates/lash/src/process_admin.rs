@@ -380,6 +380,31 @@ impl Processes {
         Ok(report)
     }
 
+    /// Compact payload-free process tombstones only after reconciling every
+    /// configured trigger delivery they guard. This ordering preserves the
+    /// recovery invariant that a surviving delivery can never become an
+    /// unregistered-process candidate merely because its tombstone was
+    /// compacted. The caller supplies the same explicit projection watermark
+    /// required by the registry retention contract.
+    pub async fn compact_tombstones(
+        &self,
+        cutoff_epoch_ms: u64,
+        watermark: lash_core::ProjectionWatermark,
+    ) -> Result<usize> {
+        let registry = self.registry()?;
+        if let Some(trigger_store) = self.core.env.trigger_store.as_ref() {
+            lash_core::reconcile_pruned_trigger_deliveries(
+                registry.as_ref(),
+                trigger_store.as_ref(),
+            )
+            .await?;
+        }
+        registry
+            .compact_process_tombstones(cutoff_epoch_ms, watermark)
+            .await
+            .map_err(Into::into)
+    }
+
     /// List durable process-wake delivery rows, optionally filtered by state.
     pub async fn wake_deliveries(
         &self,

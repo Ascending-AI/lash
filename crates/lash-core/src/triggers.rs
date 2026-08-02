@@ -1048,6 +1048,11 @@ pub trait TriggerStore: Send + Sync {
     /// direct delivery-table view to close the reserve/start crash window.
     async fn list_deliveries(&self) -> Result<Vec<TriggerDeliveryReservation>, PluginError>;
 
+    /// List the distinct deterministic process ids currently referenced by
+    /// delivery rows, without materializing occurrence or subscription JSON.
+    /// Process-retention reconciliation uses this narrow worklist query.
+    async fn list_delivery_process_ids(&self) -> Result<Vec<String>, PluginError>;
+
     /// Delete delivery reservations for the supplied deterministic process ids.
     ///
     /// Process-retention coordination calls this only for ids proven to have a

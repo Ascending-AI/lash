@@ -40,6 +40,10 @@ pub(super) async fn filter_tombstoned_process_ids(
              SELECT 1 FROM lash_process_tombstones t
              WHERE t.process_id = candidate.process_id
          )
+           AND NOT EXISTS (
+             SELECT 1 FROM lash_processes p
+             WHERE p.process_id = candidate.process_id
+         )
          ORDER BY candidate.ordinal ASC",
     )
     .bind(process_ids)

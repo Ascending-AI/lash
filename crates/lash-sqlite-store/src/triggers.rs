@@ -606,6 +606,28 @@ impl lash_core::TriggerStore for SqliteTriggerStore {
         self.list_deliveries_where("1 = 1", Vec::new()).await
     }
 
+    async fn list_delivery_process_ids(&self) -> Result<Vec<String>, lash_core::PluginError> {
+        self.conn
+            .call(|conn| {
+                Ok((|| {
+                    let mut stmt = conn
+                        .prepare(
+                            "SELECT DISTINCT process_id
+                             FROM trigger_deliveries
+                             ORDER BY process_id ASC",
+                        )
+                        .map_err(process_sqlite_error)?;
+                    let rows = stmt
+                        .query_map([], |row| row.get::<_, String>(0))
+                        .map_err(process_sqlite_error)?;
+                    rows.collect::<Result<Vec<_>, _>>()
+                        .map_err(process_sqlite_error)
+                })())
+            })
+            .await
+            .map_err(process_sqlite_error)?
+    }
+
     async fn delete_deliveries_by_process_ids(
         &self,
         process_ids: &[String],

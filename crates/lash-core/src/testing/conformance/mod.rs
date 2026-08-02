@@ -198,10 +198,7 @@ mod tests {
     async fn in_memory_process_trigger_retention_satisfies_conformance() {
         process_trigger_retention(|| async {
             let triggers = Arc::new(crate::InMemoryTriggerStore::default());
-            let registry = Arc::new(
-                crate::TestLocalProcessRegistry::default()
-                    .with_trigger_store(Arc::clone(&triggers)),
-            );
+            let registry = Arc::new(crate::TestLocalProcessRegistry::default());
             ProcessTriggerRetentionHandles { registry, triggers }
         })
         .await;

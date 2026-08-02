@@ -836,16 +836,32 @@ pub async fn reconcile_pruned_trigger_deliveries(
     registry: &dyn ProcessRegistry,
     trigger_store: &dyn crate::TriggerStore,
 ) -> Result<usize, PluginError> {
-    let process_ids = trigger_store
-        .list_deliveries()
-        .await?
-        .into_iter()
-        .map(|delivery| delivery.process_id)
-        .collect::<std::collections::BTreeSet<_>>()
-        .into_iter()
-        .collect::<Vec<_>>();
+    let process_ids = trigger_store.list_delivery_process_ids().await?;
+    tracing::info!(
+        candidate_count = process_ids.len(),
+        candidate_process_ids = ?process_ids,
+        "evaluating trigger deliveries for process-retention reconciliation"
+    );
     let tombstoned = registry.filter_tombstoned_process_ids(&process_ids).await?;
-    trigger_store
+    let preserved = process_ids
+        .iter()
+        .filter(|process_id| !tombstoned.contains(process_id))
+        .cloned()
+        .collect::<Vec<_>>();
+    tracing::info!(
+        tombstoned_count = tombstoned.len(),
+        tombstoned_process_ids = ?tombstoned,
+        preserved_process_ids = ?preserved,
+        deletion_choice = "delete_tombstoned_only",
+        "classified trigger-delivery retention candidates"
+    );
+    let deleted = trigger_store
         .delete_deliveries_by_process_ids(&tombstoned)
-        .await
+        .await?;
+    tracing::info!(
+        deleted_deliveries = deleted,
+        deleted_process_ids = ?tombstoned,
+        "completed trigger-delivery retention reconciliation"
+    );
+    Ok(deleted)
 }

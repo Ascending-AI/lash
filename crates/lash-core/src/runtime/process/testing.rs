@@ -5,7 +5,6 @@ use std::sync::Arc;
 
 use tokio::sync::Mutex;
 
-use crate::TriggerStore;
 use crate::plugin::PluginError;
 
 use super::events::{
@@ -42,7 +41,6 @@ pub struct TestLocalProcessRegistry {
     tombstones: Arc<Mutex<HashMap<String, ProcessTombstone>>>,
     leases: Arc<Mutex<ManagedLeaseMap>>,
     handovers: Arc<Mutex<HashMap<(String, u64), crate::PersistedSegmentHandover>>>,
-    trigger_store: Option<Arc<crate::InMemoryTriggerStore>>,
     execution_write_pause: Arc<std::sync::Mutex<Option<ExecutionWritePause>>>,
     wake_mark_pause: Arc<std::sync::Mutex<Option<ExecutionWritePause>>>,
     append_outbox_pause: Arc<std::sync::Mutex<Option<ExecutionWritePause>>>,
@@ -63,7 +61,6 @@ impl Default for TestLocalProcessRegistry {
             tombstones: Arc::new(Mutex::new(HashMap::new())),
             leases: Arc::new(Mutex::new(HashMap::new())),
             handovers: Arc::new(Mutex::new(HashMap::new())),
-            trigger_store: None,
             execution_write_pause: Arc::new(std::sync::Mutex::new(None)),
             wake_mark_pause: Arc::new(std::sync::Mutex::new(None)),
             append_outbox_pause: Arc::new(std::sync::Mutex::new(None)),
@@ -157,11 +154,6 @@ impl TestLocalProcessRegistry {
 
     pub async fn set_process_read_error(&self, error: Option<PluginError>) {
         *self.process_read_error.lock().await = error;
-    }
-
-    pub fn with_trigger_store(mut self, trigger_store: Arc<crate::InMemoryTriggerStore>) -> Self {
-        self.trigger_store = Some(trigger_store);
-        self
     }
 
     async fn next_change_seq(&self) -> u64 {
@@ -1484,12 +1476,6 @@ impl ProcessRegistry for TestLocalProcessRegistry {
             .lock()
             .await
             .retain(|(process_id, _), _| !prunable.contains(process_id));
-        if let Some(trigger_store) = self.trigger_store.as_ref() {
-            let process_ids = prunable.iter().cloned().collect::<Vec<_>>();
-            trigger_store
-                .delete_deliveries_by_process_ids(&process_ids)
-                .await?;
-        }
         Ok(ProcessPruneReport {
             pruned_processes: prunable.len(),
             pruned_events,

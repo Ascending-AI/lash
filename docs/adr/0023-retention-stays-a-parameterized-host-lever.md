@@ -43,3 +43,9 @@ the relevant revision, epoch, or change-sequence watermark.
 
 The producer still does not declare a retention class. Lash defines eligibility
 and the Host Application chooses how much eligible evidence to retain.
+
+Trigger mutation receipts follow the same ownership rule. The public
+`LashCore::triggers().prune_mutation_receipts(cutoff_epoch_ms)` lever makes receipt
+reclamation reachable without coupling it to process retention; the host supplies the bound and
+schedules it. FIG-653 still owns evolving this raw cutoff into the shared `RetentionBound`
+contract.

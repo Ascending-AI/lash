@@ -404,6 +404,17 @@ impl TriggerStore for PostgresTriggerStore {
         list_deliveries_where(&self.pool, "TRUE", None).await
     }
 
+    async fn list_delivery_process_ids(&self) -> Result<Vec<String>, PluginError> {
+        sqlx::query_scalar(
+            "SELECT DISTINCT process_id
+             FROM lash_trigger_deliveries
+             ORDER BY process_id ASC",
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map_err(plugin_sqlx_error)
+    }
+
     async fn delete_deliveries_by_process_ids(
         &self,
         process_ids: &[String],

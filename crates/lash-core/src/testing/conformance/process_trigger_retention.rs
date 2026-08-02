@@ -26,6 +26,7 @@ where
     process_prune_preserves_trigger_mutation_receipts(make().await).await;
     process_prune_only_deletes_deliveries_for_pruned_processes(make().await).await;
     pruned_delivery_process_is_not_a_recovery_candidate(make().await).await;
+    reregistered_process_shadows_tombstone_and_preserves_delivery(make().await).await;
 }
 
 fn owner(session_id: &str) -> TriggerOwnerScope {
@@ -308,5 +309,118 @@ async fn pruned_delivery_process_is_not_a_recovery_candidate(
             .expect("filter recovery candidates")
             .is_empty(),
         "a tombstoned process must not be offered back to the recovery sweep"
+    );
+}
+
+async fn reregistered_process_shadows_tombstone_and_preserves_delivery(
+    handles: ProcessTriggerRetentionHandles,
+) {
+    const SESSION: &str = "process-prune-reuse-session";
+    register_trigger(
+        &handles.triggers,
+        SESSION,
+        "process-prune-reuse-key",
+        "process-prune-reuse-source",
+        "process-prune-reuse-register",
+    )
+    .await;
+    let ingress = handles
+        .triggers
+        .ingest_occurrence(crate::TriggerOccurrenceRequest::new(
+            "ui.button.pressed",
+            "process-prune-reuse-source",
+            serde_json::json!({ "button": "Blue" }),
+            "process-prune-reuse-occurrence",
+        ))
+        .await
+        .expect("ingest occurrence");
+    assert_eq!(ingress.reservations.len(), 1);
+    let process_id = ingress.reservations[0].process_id.clone();
+    let registration = || {
+        ProcessRegistration::new(
+            process_id.clone(),
+            ProcessInput::External {
+                metadata: serde_json::Value::Null,
+            },
+            RecoveryDisposition::ExternallyOwned,
+            ProcessProvenance::host(),
+        )
+        .with_identity(ProcessIdentity::new("test"))
+    };
+    handles
+        .registry
+        .register_process(registration())
+        .await
+        .expect("register delivery process");
+    handles
+        .registry
+        .complete_process(
+            &process_id,
+            ProcessAwaitOutput::Success {
+                value: serde_json::json!("done"),
+                control: None,
+            },
+            ProcessCompletionAuthority::external_owner(),
+        )
+        .await
+        .expect("complete delivery process");
+    handles
+        .registry
+        .prune_terminal_processes(u64::MAX, None, ProjectionWatermark::NoProjector)
+        .await
+        .expect("prune delivery process");
+    assert_eq!(
+        handles
+            .triggers
+            .list_deliveries_by_process_id(&process_id)
+            .await
+            .expect("list delivery after prune")
+            .len(),
+        1,
+        "the coordinator is the only process-trigger delivery reclamation path"
+    );
+
+    handles
+        .registry
+        .register_process(registration())
+        .await
+        .expect("re-register pruned process id");
+    assert!(
+        handles
+            .registry
+            .filter_tombstoned_process_ids(std::slice::from_ref(&process_id))
+            .await
+            .expect("filter tombstoned ids")
+            .is_empty(),
+        "a live process shadows its stale tombstone"
+    );
+    assert!(
+        handles
+            .registry
+            .filter_unregistered_process_ids(std::slice::from_ref(&process_id))
+            .await
+            .expect("filter unregistered ids")
+            .is_empty(),
+        "a re-registered process is live, not unregistered"
+    );
+    assert_eq!(
+        crate::reconcile_pruned_trigger_deliveries(
+            handles.registry.as_ref(),
+            handles.triggers.as_ref(),
+        )
+        .await
+        .expect("reconcile after process-id reuse"),
+        0,
+        "the coordinator must never delete a live process's delivery"
+    );
+    assert_eq!(
+        handles
+            .triggers
+            .list_deliveries_by_process_id(&process_id)
+            .await
+            .expect("list delivery after reconciliation")
+            .len(),
+        1,
+        "a re-registered process's delivery must survive reconciliation"
     );
 }
