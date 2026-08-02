@@ -53,6 +53,13 @@ cargo run -p lash-sim -- run --out target/lash-sim/search \
 - Selected generated traces replay through real Lash SQLite session
   persistence via `SqliteSessionStoreFactory`, with durable peer stores and
   reopened-session evidence in the replay report.
+- The real SQLite transaction wrapper has a production-absent, `testing`
+  feature-gated fault controller. `lash-sim sqlite-faults` deterministically
+  injects aborts after `BEGIN IMMEDIATE` and before commit, a commit-boundary
+  `SQLITE_IOERR`, and a mid-sequence close/reopen. Each seed checks typed error
+  return, retention of the preceding committed head, rollback of failed work,
+  and idempotent operation-receipt replay; oracle failures persist an exact-seed
+  reproduction package before the command exits.
 - Full-lane Postgres trace replay is implemented as `lash-sim replay-postgres
   <trace> --out <artifact-root>`, gated by `LASH_POSTGRES_DATABASE_URL` or the
   confidence gate's Docker bootstrap, and writes replay/divergence artifacts.
@@ -154,6 +161,10 @@ Each item below is landed and gated by `cargo test -p lash-sim`:
   `failures/seed-<hex>/` before the run aborts, in both evidence and search
   modes, and the run error names the failing oracle and the exact replay
   command (`generated_seed_failure_writes_reproducibility_package`).
+- Real SQLite substrate faults are gated in `scenario-harnesses`: four seeds
+  cover the complete point set per PR, while the full soak runs 256 seeds to
+  vary the deterministic 1-to-8-commit prefix. Reports explicitly list any
+  scenario omitted by a caller-supplied seed bound.
 
 ## Search fleet
 

@@ -102,12 +102,34 @@ fn is_busy(err: &rusqlite::Error) -> bool {
 #[derive(Clone)]
 pub(crate) struct SqliteConnection {
     inner: AsyncConnection,
+    #[cfg(feature = "testing")]
+    fault_injector: Option<crate::testing::SqliteFaultInjector>,
 }
 
 impl SqliteConnection {
     /// Open (or create) a file-backed database, applying WAL + busy-timeout
     /// PRAGMAs on the connection thread.
     pub(crate) async fn open(path: &std::path::Path) -> tokio_rusqlite::Result<Self> {
+        Self::open_configured(
+            path,
+            #[cfg(feature = "testing")]
+            None,
+        )
+        .await
+    }
+
+    #[cfg(feature = "testing")]
+    pub(crate) async fn open_with_fault_injector(
+        path: &std::path::Path,
+        fault_injector: Option<crate::testing::SqliteFaultInjector>,
+    ) -> tokio_rusqlite::Result<Self> {
+        Self::open_configured(path, fault_injector).await
+    }
+
+    async fn open_configured(
+        path: &std::path::Path,
+        #[cfg(feature = "testing")] fault_injector: Option<crate::testing::SqliteFaultInjector>,
+    ) -> tokio_rusqlite::Result<Self> {
         let inner = AsyncConnection::open(path).await?;
         let pragmas = open_pragmas();
         inner
@@ -122,7 +144,11 @@ impl SqliteConnection {
                 Ok(())
             })
             .await?;
-        Ok(Self { inner })
+        Ok(Self {
+            inner,
+            #[cfg(feature = "testing")]
+            fault_injector,
+        })
     }
 
     /// Open a private in-memory database (used by `Store::memory` and the test
@@ -138,7 +164,11 @@ impl SqliteConnection {
                 Ok(())
             })
             .await?;
-        Ok(Self { inner })
+        Ok(Self {
+            inner,
+            #[cfg(feature = "testing")]
+            fault_injector: None,
+        })
     }
 
     /// Open a file-backed database read-only. Used by the export/resume call
@@ -157,7 +187,11 @@ impl SqliteConnection {
                 Ok(())
             })
             .await?;
-        Ok(Self { inner })
+        Ok(Self {
+            inner,
+            #[cfg(feature = "testing")]
+            fault_injector: None,
+        })
     }
 
     /// Run `f` against the raw `rusqlite::Connection` on its own thread. The
@@ -180,11 +214,35 @@ impl SqliteConnection {
         T: Send + 'static,
         F: FnOnce(&Transaction<'_>) -> rusqlite::Result<T> + Send + 'static,
     {
+        #[cfg(feature = "testing")]
+        let fault_injector = self.fault_injector.clone();
         flatten(
             self.inner
                 .call(move |c| {
                     let tx = c.transaction_with_behavior(TransactionBehavior::Immediate)?;
+                    #[cfg(feature = "testing")]
+                    let write_transaction_ordinal = fault_injector
+                        .as_ref()
+                        .map_or(0, crate::testing::SqliteFaultInjector::begin_write);
+                    #[cfg(feature = "testing")]
+                    if let Some(injector) = fault_injector.as_ref() {
+                        injector.inject(
+                            crate::testing::SqliteFaultPoint::AfterBegin,
+                            write_transaction_ordinal,
+                        )?;
+                    }
                     let value = f(&tx)?;
+                    #[cfg(feature = "testing")]
+                    if let Some(injector) = fault_injector.as_ref() {
+                        injector.inject(
+                            crate::testing::SqliteFaultPoint::BeforeCommit,
+                            write_transaction_ordinal,
+                        )?;
+                        injector.inject(
+                            crate::testing::SqliteFaultPoint::CommitIo,
+                            write_transaction_ordinal,
+                        )?;
+                    }
                     tx.commit()?;
                     Ok(Ok(value))
                 })
@@ -201,13 +259,37 @@ impl SqliteConnection {
         T: Send + 'static,
         F: FnOnce(&Transaction<'_>) -> rusqlite::Result<TxOutcome<T>> + Send + 'static,
     {
+        #[cfg(feature = "testing")]
+        let fault_injector = self.fault_injector.clone();
         flatten(
             self.inner
                 .call(move |c| {
                     let tx = c.transaction_with_behavior(TransactionBehavior::Immediate)?;
+                    #[cfg(feature = "testing")]
+                    let write_transaction_ordinal = fault_injector
+                        .as_ref()
+                        .map_or(0, crate::testing::SqliteFaultInjector::begin_write);
+                    #[cfg(feature = "testing")]
+                    if let Some(injector) = fault_injector.as_ref() {
+                        injector.inject(
+                            crate::testing::SqliteFaultPoint::AfterBegin,
+                            write_transaction_ordinal,
+                        )?;
+                    }
                     let outcome = f(&tx)?;
                     let value = match outcome {
                         TxOutcome::Commit(value) => {
+                            #[cfg(feature = "testing")]
+                            if let Some(injector) = fault_injector.as_ref() {
+                                injector.inject(
+                                    crate::testing::SqliteFaultPoint::BeforeCommit,
+                                    write_transaction_ordinal,
+                                )?;
+                                injector.inject(
+                                    crate::testing::SqliteFaultPoint::CommitIo,
+                                    write_transaction_ordinal,
+                                )?;
+                            }
                             tx.commit()?;
                             value
                         }
