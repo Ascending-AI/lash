@@ -444,10 +444,10 @@ impl TurnInput {
 /// This is an `Any`-keyed map of live Rust values handed to plugins for a
 /// single turn. It is deliberately **not** serializable: the values never
 /// survive a process boundary, so durable effect-host runs explicitly reject a
-/// turn that carries any live inputs (see
-/// [`LiveTurnInputs::durable_effect_rejection`]). Durable callers must instead
-/// encode replayable data in
-/// `protocol_turn_options` or persisted plugin state.
+/// turn that carries any live inputs with
+/// [`RuntimeErrorCode::DurableEffectLivePluginInput`]. Durable callers must
+/// instead encode replayable data in `protocol_turn_options` or persisted
+/// plugin state.
 #[derive(Clone, Default)]
 pub struct LiveTurnInputs {
     inputs: HashMap<&'static str, Arc<dyn Any + Send + Sync>>,

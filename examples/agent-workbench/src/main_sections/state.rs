@@ -83,6 +83,9 @@ enum WorkbenchAuthorizationAction {
     EnqueueTurnInput { session_id: String },
     CancelTurn { session_id: String },
     ManageQueuedWork { session_id: String },
+    /// Destructive, deployment-wide maintenance. It is deliberately not
+    /// session-scoped: no chat participant should ever be able to reach it.
+    PruneTriggerMutationReceipts,
 }
 
 trait WorkbenchAuthorizer: Send + Sync {
@@ -120,6 +123,7 @@ impl WorkbenchAuthorizer for AllowAllWorkbenchAuthorizer {
             | WorkbenchAuthorizationAction::ManageQueuedWork { session_id } => {
                 let _ = session_id;
             }
+            WorkbenchAuthorizationAction::PruneTriggerMutationReceipts => {}
         }
         Ok(())
     }

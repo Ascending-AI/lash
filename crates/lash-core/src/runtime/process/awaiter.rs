@@ -30,7 +30,8 @@ const AWAIT_BACKOFF_MAX: Duration = Duration::from_secs(1);
 ///
 /// # Contract
 ///
-/// - **Best-effort freshness, never truth.** [`WatchedProcessRegistry`] calls
+/// - **Best-effort freshness, never truth.** The decorator installed by
+///   [`watch_process_registry_with_sink`] calls
 ///   [`emit`](Self::emit) after a successful `append_event`, in that pod's
 ///   per-process append order. There is no buffering, no retry, and no
 ///   delivery guarantee across pod crashes or restarts: an event that was
@@ -90,7 +91,7 @@ struct WatchedProcessRegistry {
     event_paths: Mutex<HashMap<String, Weak<tokio::sync::Mutex<()>>>>,
 }
 
-/// Wrap `inner` in a [`WatchedProcessRegistry`] with no event sink.
+/// Wrap `inner` in a change-publishing registry decorator with no event sink.
 ///
 /// The decorated handle publishes change ticks to the returned
 /// [`ProcessChangeHub`]. Use [`watch_process_registry_with_sink`] to also feed a
@@ -101,8 +102,8 @@ pub fn watch_process_registry(
     watch_process_registry_with_sink(inner, None)
 }
 
-/// Wrap `inner` in a [`WatchedProcessRegistry`], optionally installing a
-/// [`ProcessEventSink`] that receives every appended event.
+/// Wrap `inner` in a change-publishing registry decorator, optionally
+/// installing a [`ProcessEventSink`] that receives every appended event.
 ///
 /// The sink is best-effort freshness, not truth — see [`ProcessEventSink`].
 pub fn watch_process_registry_with_sink(
@@ -177,8 +178,8 @@ pub struct ProcessAwaiter {
 
 impl ProcessAwaiter {
     /// Hub-backed awaiter: local mutations published to `hub` wake waiters
-    /// without database polling. This is what a [`WatchedProcessRegistry`]
-    /// wrapping provides via [`watch_process_registry`].
+    /// without database polling. This is what [`watch_process_registry`]
+    /// wraps `registry` to provide.
     pub fn new(registry: Arc<dyn ProcessRegistry>, hub: ProcessChangeHub) -> Self {
         Self {
             registry,

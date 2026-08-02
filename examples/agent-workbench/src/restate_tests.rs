@@ -441,3 +441,114 @@ async fn cron_occurrence_redrive_reemits_the_reserved_process_start() {
         "the repeated cron occurrence still owns one deterministic delivery"
     );
 }
+
+/// The workbench runs the same session code from two places: the foreground
+/// process, where Lash owns effect execution, and a Restate handler, where the
+/// controller journals and replays it. `EffectReplayOwnership` is how a host
+/// tells those two apart, and it is a *mechanical* property of the installed
+/// effect controller — not a statement that anything is durable. Both cores
+/// below persist to the same durable SQLite store; only the controller
+/// differs, and that difference alone decides who may drive a foreground turn.
+#[tokio::test]
+async fn effect_replay_ownership_decides_who_may_drive_a_foreground_turn() {
+    let data_dir = tempfile::tempdir().expect("effect replay ownership tempdir");
+
+    let inline_host: Arc<dyn lash::durability::EffectHost> =
+        Arc::new(lash::durability::InlineEffectHost::default());
+    let durable_host: Arc<dyn lash::durability::EffectHost> =
+        lash_restate::RestateTurnDeployment::new(lash_restate::RestateConnection::new(
+            "http://127.0.0.1:8080",
+        ))
+        .effect_host();
+    assert_eq!(
+        inline_host.replay_ownership(),
+        lash::EffectReplayOwnership::Runtime,
+        "the workbench's foreground host executes effects itself"
+    );
+    assert_eq!(
+        durable_host.replay_ownership(),
+        lash::EffectReplayOwnership::Controller,
+        "the Restate host hands effect replay to the controller"
+    );
+
+    let provider_calls = Arc::new(AtomicUsize::new(0));
+    let ownership_core = |effect_host: Arc<dyn lash::durability::EffectHost>, name: &str| {
+        let provider_calls = Arc::clone(&provider_calls);
+        let provider = lash::testing::TestProvider::builder()
+            .kind("workbench-effect-replay-ownership")
+            .complete(move |_| {
+                let provider_calls = Arc::clone(&provider_calls);
+                async move {
+                    provider_calls.fetch_add(1, Ordering::SeqCst);
+                    Ok(crate::tests::text_response(
+                        "<lashlang>\nfinish \"ownership answer\"\n</lashlang>",
+                    ))
+                }
+            })
+            .build()
+            .into_handle();
+        crate::tests::explicit_durable_test_facets(data_dir.path())
+            .provider(provider)
+            .model(
+                lash::ModelSpec::from_token_limits("test-model", Default::default(), 4096, None)
+                    .expect("model spec"),
+            )
+            .store_factory(Arc::new(lash_sqlite_store::SqliteSessionStoreFactory::new(
+                data_dir.path().join("lash-sessions"),
+            )))
+            .effect_host(effect_host)
+            .build()
+            .unwrap_or_else(|error| panic!("build {name} ownership core: {error:?}"))
+    };
+
+    let controller_owned = ownership_core(durable_host.clone(), "controller-owned");
+    let session = controller_owned
+        .session("workbench-controller-owned-replay")
+        .open()
+        .await
+        .expect("open the controller-owned session");
+    let refusal = session
+        .turn(lash::TurnInput::text("drive me from the foreground"))
+        .run()
+        .await
+        .expect_err("a controller-owned host must refuse a foreground turn");
+    assert!(
+        matches!(
+            refusal,
+            lash::EmbedError::DurableEffectHostRequiresHandlerContext { operation: "turn" }
+        ),
+        "the refusal must name the operation that needs a handler context: {refusal:?}"
+    );
+    assert_eq!(
+        provider_calls.load(Ordering::SeqCst),
+        0,
+        "ownership is decided before any work starts, so the refused turn must \
+         not have reached the provider"
+    );
+    assert!(
+        session.read_view().messages().is_empty(),
+        "a refused turn is a mechanical pre-flight refusal, not a failed \
+         attempt: nothing may have been written"
+    );
+    session.close().await.expect("close the refused session");
+
+    // Same store, same durability, same session id: swapping only the effect
+    // controller is what makes the identical call run.
+    let runtime_owned = ownership_core(Arc::clone(&inline_host), "runtime-owned");
+    let session = runtime_owned
+        .session("workbench-controller-owned-replay")
+        .open()
+        .await
+        .expect("reopen the session under runtime-owned replay");
+    session
+        .turn(lash::TurnInput::text("drive me from the foreground"))
+        .run()
+        .await
+        .expect("a runtime-owned host executes the same foreground turn");
+    assert_eq!(
+        provider_calls.load(Ordering::SeqCst),
+        1,
+        "runtime-owned replay runs the turn the controller-owned host refused"
+    );
+    session.close().await.expect("close the executed session");
+}

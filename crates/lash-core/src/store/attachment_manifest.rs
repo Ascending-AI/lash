@@ -74,7 +74,7 @@ pub struct AttachmentManifestEntry {
 /// crash-safety story.
 ///
 /// Backends with no attachment story (in-memory tests, mock stores)
-/// paste no-op impls via [`impl_noop_attachment_manifest!`] and
+/// paste no-op impls via [`impl_noop_attachment_manifest!`](crate::impl_noop_attachment_manifest) and
 /// participate transparently — `record_intent` is a no-op, the
 /// scoped wrapper still works, and GC sweeps return empty.
 pub trait AttachmentManifest: Send + Sync {

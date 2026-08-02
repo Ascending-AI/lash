@@ -123,7 +123,7 @@ pub struct SessionMeta {
 
 impl SessionMeta {
     /// Returns the parent session id, if any, derived from the canonical
-    /// [`SessionRelation`] field.
+    /// [`SessionRelation`](crate::SessionRelation) field.
     pub fn parent_session_id(&self) -> Option<&str> {
         self.relation.parent_session_id()
     }
@@ -1046,7 +1046,8 @@ impl Default for SessionHeadPayload {
 /// any persistence backend with a
 /// [`SessionAttachmentStore`](crate::SessionAttachmentStore)
 /// without dual-trait casting. Backends with no attachment-write story can
-/// paste no-op manifest impls via [`impl_noop_attachment_manifest!`].
+/// paste no-op manifest impls via
+/// [`impl_noop_attachment_manifest!`](crate::impl_noop_attachment_manifest).
 ///
 /// Checkpoint components have one backend-independent durable shape. When a
 /// commit supplies a tool-state, plugin-snapshot, or execution-state body, the

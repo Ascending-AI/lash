@@ -293,3 +293,169 @@
         );
         let _ = std::fs::remove_dir_all(data_dir);
     }
+
+    /// Pins what the operator is actually buying when they call the admin
+    /// prune route.
+    ///
+    /// A mutation receipt is the only thing that makes a redriven trigger
+    /// command a replay instead of a second evaluation. While the receipt
+    /// exists, Restate can redrive the register handler forever and it keeps
+    /// answering exactly what it answered the first time, even after the
+    /// subscription it created was deliberately deleted. Prune the receipt and
+    /// the same redrive is re-evaluated against current state — where the
+    /// tombstone now makes it a hard, terminal conflict. A retry that was a
+    /// safe no-op becomes a permanent handler failure, and nothing about the
+    /// call site changed.
+    ///
+    /// This is the cost the route's contract makes its caller own, written
+    /// down as a behavior rather than a warning.
+    #[tokio::test]
+    async fn pruning_a_mutation_receipt_turns_a_safe_redrive_into_a_terminal_conflict() {
+        let data_dir = tempfile::tempdir().expect("receipt prune tempdir");
+        let trigger_store = Arc::new(lash_core::InMemoryTriggerStore::default());
+        let state = recoverable_chat_test_state_with_trigger_store(
+            data_dir.path(),
+            Arc::clone(&trigger_store) as Arc<dyn lash::triggers::TriggerStore>,
+        )
+        .await;
+        let session_id = state.current_session_id();
+        let register = workbench_receipt_register_command(&session_id);
+        // Restate redrives this handler under one stable operation id.
+        let register_operation_id = "workbench-receipt-register";
+
+        let created = workbench_trigger_mutation(
+            trigger_store.as_ref(),
+            register_operation_id,
+            register.clone(),
+        )
+        .await
+        .expect("first register");
+        assert_eq!(
+            created.disposition,
+            lash::triggers::TriggerMutationDisposition::Created
+        );
+        workbench_trigger_mutation(
+            trigger_store.as_ref(),
+            "workbench-receipt-delete",
+            lash::triggers::TriggerCommand::Delete {
+                owner_scope: lash::triggers::TriggerOwnerScope::session(&session_id),
+                actor: lash_core::ProcessOriginator::session(lash_core::SessionScope::new(
+                    &session_id,
+                )),
+                subscription_key: created.subscription_key.clone(),
+                expected_revision: created.revision,
+            },
+        )
+        .await
+        .expect("operator deletes the subscription");
+        assert!(
+            workbench_live_trigger_keys(&state).await.is_empty(),
+            "the operator deleted the subscription"
+        );
+
+        let replayed = workbench_trigger_mutation(
+            trigger_store.as_ref(),
+            register_operation_id,
+            register.clone(),
+        )
+        .await
+        .expect("a receipted redrive replays its recorded outcome");
+        assert_eq!(
+            replayed.disposition,
+            lash::triggers::TriggerMutationDisposition::Created,
+            "the retained receipt answers the redrive with the outcome the \
+             handler already observed"
+        );
+        assert!(
+            workbench_live_trigger_keys(&state).await.is_empty(),
+            "and the replay writes nothing, so the delete stands"
+        );
+
+        let Json(pruned) = prune_trigger_mutation_receipts(
+            State(state.clone()),
+            Json(PruneTriggerMutationReceiptsRequest {
+                before_epoch_ms: u64::MAX,
+            }),
+        )
+        .await
+        .expect("operator-invoked receipt prune");
+        assert!(
+            pruned.pruned >= 1,
+            "the prune must report the receipts it destroyed: {pruned:?}"
+        );
+
+        let refused =
+            workbench_trigger_mutation(trigger_store.as_ref(), register_operation_id, register)
+                .await
+                .expect_err("the unreceipted redrive is evaluated afresh");
+        assert!(
+            matches!(
+                &refused,
+                lash::triggers::TriggerOperationError::Conflict { subscription_key, .. }
+                    if *subscription_key == created.subscription_key
+            ),
+            "this is the cost the route's caller owns: with the receipt gone, \
+             a redrive that was a safe no-op fails terminally against the \
+             tombstone it originally created: {refused:?}"
+        );
+    }
+
+    async fn workbench_trigger_mutation(
+        trigger_store: &dyn lash::triggers::TriggerStore,
+        operation_id: &str,
+        command: lash::triggers::TriggerCommand,
+    ) -> Result<
+        lash::triggers::TriggerMutationReceipt,
+        lash::triggers::TriggerOperationError,
+    > {
+        let outcome = trigger_store
+            .execute_command(operation_id, command)
+            .await
+            .expect("workbench trigger mutation reaches the store");
+        match outcome? {
+            lash::triggers::TriggerCommandOutcome::Mutation { receipt } => Ok(*receipt),
+            other => panic!("expected a mutation outcome for `{operation_id}`: {other:?}"),
+        }
+    }
+
+    async fn workbench_live_trigger_keys(state: &AppState) -> Vec<String> {
+        let Json(records) = list_triggers(State(state.clone()), Query(SessionQuery::default()))
+            .await
+            .expect("list workbench triggers");
+        records
+            .iter()
+            .map(|record| record.registration.subscription_key.clone())
+            .collect()
+    }
+
+    fn workbench_receipt_register_command(session_id: &str) -> lash::triggers::TriggerCommand {
+        lash::triggers::TriggerCommand::Register {
+            owner_scope: lash::triggers::TriggerOwnerScope::session(session_id),
+            actor: lash_core::ProcessOriginator::session(lash_core::SessionScope::new(session_id)),
+            draft: lash::triggers::TriggerSubscriptionDraft {
+                subscription_key: "workbench-receipt-prune".to_string(),
+                env_ref: lash_core::ProcessExecutionEnvRef::new(format!(
+                    "process-env:{session_id}"
+                )),
+                wake_target: Some(lash_core::SessionScope::new(session_id)),
+                name: Some("receipt prune demo".to_string()),
+                source_type: BUTTON_TRIGGER_EVENT.to_string(),
+                source_key: "workbench-receipt-prune-source".to_string(),
+                source: json!({ "button": "Blue" }),
+                payload_schema: button_trigger_payload_schema(),
+                target: lash::process::ProcessInput::Engine {
+                    kind: "test".to_string(),
+                    payload: json!({ "process": "receipt_prune_demo" }),
+                },
+                target_identity: lash_core::ProcessIdentity::new("test")
+                    .with_label(Some("receipt prune demo".to_string()))
+                    .with_definition(Some(json!({ "process_name": "receipt_prune_demo" }))),
+                event_types: Vec::new(),
+                input_template: std::collections::BTreeMap::from([(
+                    "event".to_string(),
+                    lash_core::TriggerInputBinding::Event,
+                )]),
+                target_label: Some("receipt prune demo".to_string()),
+            },
+        }
+    }

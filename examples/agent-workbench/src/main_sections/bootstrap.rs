@@ -276,6 +276,11 @@ async fn async_main() -> AnyhowResult<()> {
             "/api/triggers/{subscription_key}",
             delete(delete_trigger),
         )
+        // Deliberately absent from the UI: see the handler's contract.
+        .route(
+            "/api/admin/trigger-mutation-receipts/prune",
+            post(prune_trigger_mutation_receipts),
+        )
         .route("/api/accounts", get(list_accounts).post(add_account))
         .route("/api/accounts/{slug}", delete(delete_account))
         .route("/api/accounts/{slug}/messages", post(inject_message))

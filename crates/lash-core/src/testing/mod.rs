@@ -4,22 +4,14 @@
 //! providing a configurable mock implementation plus a couple of small
 //! builders for common policy / turn fixtures.
 
-/// Backend-agnostic conformance suites for durable-backend traits
-/// (`ProcessRegistry`, …). Run the same suite against every implementation —
-/// production and in-memory double alike — so the trait contract has a single
-/// source of truth and the doubles cannot silently drift.
-pub mod conformance;
-
-/// The normalized behavior-transcript vocabulary every scenario harness renders
-/// into. See `docs/adr/0050-behavior-transcripts-are-one-normalized-vocabulary.md`.
+// Each submodule documents itself in its own file. Adding an outer doc comment
+// here as well would merge two fragments written in different scopes, and
+// rustdoc then resolves the whole merged doc — including the submodule's own
+// intra-doc links — against *this* module's scope, where none of the linked
+// items exist.
 pub mod behavior_transcript;
-
-/// Store-factory decorator that observes real runtime-checkpoint commits, so a
-/// harness can render durable-write lines from facts the backend accepted.
 pub mod checkpoint_observer;
-
-/// Shared projection of a sans-io effect stream into the behavior-transcript
-/// vocabulary, used by the protocol scenario harnesses.
+pub mod conformance;
 pub mod sansio_transcript;
 
 use std::future::Future;

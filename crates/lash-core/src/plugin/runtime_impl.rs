@@ -116,7 +116,7 @@ impl PluginHost {
         )
     }
 
-    /// Variant of [`build_session`] that records the caller as the
+    /// Variant of [`build_session`](Self::build_session) that records the caller as the
     /// parent of the new session. Plugin factories read
     /// [`PluginSessionContext::is_root_session`] to gate root-only
     /// behavior; anything that goes through the plain `build_session`

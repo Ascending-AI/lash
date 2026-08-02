@@ -1,4 +1,5 @@
-//! The normalized behavior-transcript vocabulary.
+//! The normalized behavior-transcript vocabulary every scenario harness
+//! renders into.
 //!
 //! A **behavior transcript** is the review artifact named by
 //! `docs/agents/way-of-working.md` ("Expect tests versus conformance

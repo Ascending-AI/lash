@@ -1141,8 +1141,9 @@ impl LashCoreBuilder {
     /// queued-work claims, and process leases.
     ///
     /// This is the failover-latency vs false-takeover-risk knob. Like
-    /// [`residency`](Self::residency) it is an operational deployment decision,
-    /// so it lives on the main builder tier rather than behind
+    /// [`process_execution_concurrency`](Self::process_execution_concurrency)
+    /// it is an operational deployment decision, so it lives on the main
+    /// builder tier rather than behind
     /// [`advanced`](Self::advanced). Construct the value with
     /// [`LeaseTimings::new`](lash_core::LeaseTimings::new), which enforces
     /// `ttl >= 3 * renew_interval`. Effect hosts accept the same type at

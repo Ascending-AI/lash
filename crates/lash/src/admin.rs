@@ -978,13 +978,15 @@ pub struct SessionProcessAdmin {
     control: SessionAdmin,
 }
 
-/// Session-scoped view of the global process surface ([`Processes`]).
+/// Session-scoped view of the global process surface
+/// ([`Processes`](crate::process::Processes)).
 ///
 /// This is thin sugar, not a parallel surface (ADR 0019 grill): every read is
 /// the global observer pre-filtered by this session's observer scope (what the
 /// session may address), and every mutation delegates to the same runtime
-/// process path the global surface uses. It speaks the same [`ObservedProcess`]
-/// vocabulary as [`Processes`]; [`start`](Self::start) returns the
+/// process path the global surface uses. It speaks the same
+/// [`ObservedProcess`](lash_core::ObservedProcess) vocabulary as
+/// [`Processes`](crate::process::Processes); [`start`](Self::start) returns the
 /// model-facing handle summary ([`lash_core::ProcessHandleSummary`]), the one row
 /// type retained for the model/handle contract.
 impl SessionProcessAdmin {

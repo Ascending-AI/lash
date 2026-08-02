@@ -361,6 +361,43 @@ fn targeted_workbench_drain_preserves_earlier_wake_and_absorbs_live_redelivery()
             "live-row absorption must preserve the skipped earlier wake"
         );
 
+        // The operator's queue view is a snapshot. "Run this one" can arrive
+        // after something else already drained that batch, so a selection can
+        // name a batch that is no longer claimable. It must then claim
+        // *nothing*: the earlier ready wake the operator did not select stays
+        // queued. Widening an unmatched selection into an ordinary
+        // drain-everything would run work nobody asked for, and the operator
+        // would see it as the one batch they clicked.
+        let stale_selection = restate::WorkbenchQueuedTurnWorkflowRequest {
+            turn_id: "workbench-stale-selection".to_string(),
+            session_id: session_id.clone(),
+            reason: "test_stale_selection".to_string(),
+            batch_ids: vec![later.batch_id.clone()],
+            drain_id: Some("workbench-stale-selection-drain".to_string()),
+        };
+        assert!(
+            stale_selection
+                .queued_turn(&session)
+                .run()
+                .await
+                .expect("a selection naming an already-drained batch is a no-op, not an error")
+                .is_none(),
+            "a selection with no claimable batch must not produce a turn"
+        );
+        let Json(still_queued) =
+            list_queued_work(State(state.clone()), Query(SessionQuery::default()))
+                .await
+                .expect("workbench queue projection after the stale selection");
+        assert_eq!(
+            still_queued
+                .iter()
+                .map(|batch| batch.batch_id.as_str())
+                .collect::<Vec<_>>(),
+            vec![earlier.batch_id.as_str()],
+            "an unmatched batch selection must not fall back to draining the \
+             ready work the operator did not select"
+        );
+
         let earlier_request = restate::WorkbenchQueuedTurnWorkflowRequest {
             turn_id: "workbench-targeted-earlier".to_string(),
             session_id: session_id.clone(),
