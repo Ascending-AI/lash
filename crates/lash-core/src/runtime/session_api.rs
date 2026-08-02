@@ -60,7 +60,8 @@ impl LashRuntime {
 
     /// Run the protocol plugin's materialization hook against this runtime.
     ///
-    /// Fires the [`ProtocolSessionPlugin::configure_runtime_on_materialize`]
+    /// Fires the
+    /// [`ProtocolSessionPlugin::configure_runtime_on_materialize`](crate::plugin::ProtocolSessionPlugin::configure_runtime_on_materialize)
     /// hook, so both the child-create path and the root/builder-open path
     /// converge on one seam. `plugin_options` are the plugin-keyed options that
     /// reached this materialization (builder options for root opens, request

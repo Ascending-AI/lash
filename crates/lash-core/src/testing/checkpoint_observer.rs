@@ -1,3 +1,6 @@
+//! Store-factory decorator that observes real runtime-checkpoint commits, so a
+//! harness can render durable-write lines from facts the backend accepted.
+
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
 

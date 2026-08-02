@@ -13,15 +13,19 @@ pub use lash_core::testing::behavior_transcript;
 /// a scenario can render durable-write transcript lines from real facts.
 pub use lash_core::testing::checkpoint_observer;
 
-/// Backend-agnostic conformance suites: validate a custom backend implementation
-/// against a contract by running the same suite the in-tree backends run.
-///
-/// Re-exports the lash-core trait suites ([`process_registry`], [`runtime_persistence`])
-/// and adds [`runtime_rebuild_and_worker_recovery`] — a runtime-level suite
-/// that proves cold session rebuild and durable worker recovery use the same
-/// reconstructed runtime surface.
 #[cfg(feature = "rlm")]
 pub mod conformance {
+    //! Backend-agnostic conformance suites: validate a custom backend
+    //! implementation against a contract by running the same suite the in-tree
+    //! backends run.
+    //!
+    //! Re-exports the lash-core trait suites
+    //! ([`process_registry`],
+    //! [`runtime_persistence`])
+    //! and adds [`runtime_rebuild_and_worker_recovery`] — a runtime-level suite
+    //! that proves cold session rebuild and durable worker recovery use the
+    //! same reconstructed runtime surface.
+
     pub use lash_core::testing::conformance::*;
 
     use std::sync::Arc;

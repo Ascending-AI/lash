@@ -1,4 +1,4 @@
-//! Projection of a sans-io [`Effect`](lash_sansio::Effect) stream into the
+//! Projection of a sans-io [`Effect`] stream into the
 //! shared behavior-transcript vocabulary.
 //!
 //! The protocol scenario harnesses each drive a `TurnMachine` and drain effects,
@@ -10,8 +10,8 @@
 //! - Text and reasoning deltas, token usage, `LlmRequest`/`LlmResponse`
 //!   observation events, `ToolCallStart`, plugin events and `Done` are dropped as
 //!   provider-wire and bookkeeping volume. The outbound
-//!   [`Effect::LlmCall`](lash_sansio::Effect::LlmCall) and
-//!   [`Effect::ToolCalls`](lash_sansio::Effect::ToolCalls) lines already carry
+//!   [`Effect::LlmCall`] and
+//!   [`Effect::ToolCalls`] lines already carry
 //!   the model and dispatch facts, and cannot be faked away by an observation
 //!   regression.
 //! - `Progress` / `Done` history deltas are not rendered. They are one append per

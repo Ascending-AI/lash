@@ -11,8 +11,8 @@ pub trait Provider: Send + Sync + std::fmt::Debug {
     fn set_options(&mut self, options: ProviderOptions);
 
     /// Emit the provider-specific JSON body used by [`ProviderSpec`]. The
-    /// object must NOT contain a `type` field — [`ProviderSpec::Serialize`]
-    /// layers that on top.
+    /// object must NOT contain a `type` field — the [`ProviderSpec`]
+    /// `Serialize` impl layers that on top.
     fn serialize_config(&self) -> serde_json::Value;
 
     async fn complete(&mut self, request: LlmRequest) -> Result<LlmResponse, LlmTransportError>;

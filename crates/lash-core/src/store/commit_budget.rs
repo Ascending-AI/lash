@@ -3,7 +3,8 @@ use super::{RuntimeCommit, StoreError};
 impl RuntimeCommit {
     /// Maximum number of graph nodes a single commit may write.
     ///
-    /// This and [`MAX_COMMIT_BUDGET_BYTES`] bound work before any backend opens
+    /// This and [`MAX_COMMIT_BUDGET_BYTES`](Self::MAX_COMMIT_BUDGET_BYTES) bound
+    /// work before any backend opens
     /// a transaction. They were selected from the SQL commit-size benchmark at
     /// `lash-postgres-store/tests/commit_size_benchmark.rs`.
     pub const MAX_COMMIT_NODE_COUNT: usize = 512;

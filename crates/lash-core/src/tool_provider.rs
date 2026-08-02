@@ -820,7 +820,8 @@ pub struct ToolExecutionGrant {
     /// current Tool Catalog.
     pub contract: Box<ToolContract>,
     /// Explicit registry source route for registry-backed execution. Direct
-    /// non-registry providers may ignore this; [`ToolRegistry`] requires it.
+    /// non-registry providers may ignore this; [`ToolRegistry`](crate::ToolRegistry)
+    /// requires it.
     pub source_id: Option<String>,
     /// Opaque host routing payload passed to prepare and execute contexts.
     pub execution_binding: serde_json::Value,
