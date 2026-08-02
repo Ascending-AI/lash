@@ -55,6 +55,7 @@ struct StateSnapshot {
     product_events: ProductEventSnapshot,
     active_turns: Vec<lash::TurnAddress>,
     pending_turn_inputs: Vec<lash::PendingTurnInput>,
+    queued_work: Vec<lash::persistence::QueuedWorkBatch>,
     turn_input_applications:
         Vec<lash::remote::observations::RemoteTurnInputApplication>,
     usage: lash::usage::SessionUsageReport,
@@ -81,6 +82,7 @@ enum WorkbenchAuthorizationAction {
     EnqueueTurn { session_id: String },
     EnqueueTurnInput { session_id: String },
     CancelTurn { session_id: String },
+    ManageQueuedWork { session_id: String },
 }
 
 trait WorkbenchAuthorizer: Send + Sync {
@@ -114,7 +116,8 @@ impl WorkbenchAuthorizer for AllowAllWorkbenchAuthorizer {
             WorkbenchAuthorizationAction::Observe { session_id }
             | WorkbenchAuthorizationAction::EnqueueTurn { session_id }
             | WorkbenchAuthorizationAction::EnqueueTurnInput { session_id }
-            | WorkbenchAuthorizationAction::CancelTurn { session_id } => {
+            | WorkbenchAuthorizationAction::CancelTurn { session_id }
+            | WorkbenchAuthorizationAction::ManageQueuedWork { session_id } => {
                 let _ = session_id;
             }
         }
@@ -880,6 +883,8 @@ impl lash::runtime::QueuedWorkRunHandle for WorkbenchQueuedWorkSubmitter {
             turn_id: format!("workbench-queued-{}", uuid::Uuid::new_v4()),
             session_id: session_id.clone(),
             reason: request.reason,
+            batch_ids: Vec::new(),
+            drain_id: None,
         };
         self.active_turns
             .insert(&session_id, &workflow_request.turn_id);

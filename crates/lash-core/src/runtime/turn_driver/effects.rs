@@ -100,7 +100,7 @@ impl RuntimeTurnDriver<'_> {
                         &self.turn_id,
                         checkpoint,
                         64,
-                        64,
+                        self.turn_context.checkpoint_queued_work_limit(64),
                     )
                     .await
                 {

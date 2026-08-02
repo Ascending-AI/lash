@@ -1159,7 +1159,7 @@
       border-left: 1px solid var(--line);
       background: var(--form);
       display: grid;
-      grid-template-rows: auto auto minmax(0, 1fr);
+      grid-template-rows: auto auto auto minmax(0, 1fr);
       min-height: 0;
     }
 
@@ -1209,6 +1209,67 @@
     }
 
     .work-filter input { accent-color: var(--sodium); margin: 0; }
+
+    .queued-work-ledger {
+      max-height: 34vh;
+      overflow: auto;
+      padding: var(--space-sm) var(--space-lg);
+      border-bottom: 1px solid var(--line);
+      background: rgba(209, 169, 74, 0.035);
+    }
+
+    .queued-work-heading {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      gap: var(--space-sm);
+      margin-bottom: var(--space-xs);
+      font-family: var(--font-ui);
+      font-size: 0.72rem;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--ash-text);
+    }
+
+    .queued-work-list { display: grid; gap: var(--space-xs); }
+
+    .queued-work-batch {
+      display: grid;
+      gap: var(--space-xs);
+      padding: var(--space-sm);
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      background: var(--form-deep);
+    }
+
+    .queued-work-id {
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      font-family: var(--font-mono);
+      font-size: 0.72rem;
+      color: var(--chalk);
+    }
+
+    .queued-work-meta { font-size: 0.75rem; color: var(--ash-text); }
+    .queued-work-actions { display: flex; justify-content: flex-end; gap: var(--space-xs); }
+
+    .work-run {
+      min-height: 2rem;
+      padding: 0 var(--space-sm);
+      border: 1px solid var(--sodium);
+      border-radius: 4px;
+      background: var(--sodium-tint);
+      color: var(--sodium-soft);
+      font-family: var(--font-ui);
+      font-size: 0.68rem;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      cursor: pointer;
+    }
+    .work-run:hover { background: rgba(209, 169, 74, 0.18); }
+    .work-run:disabled { opacity: 0.5; cursor: wait; }
 
     .work-list {
       min-width: 0;
@@ -2086,6 +2147,13 @@
           <input type="checkbox" id="filterForeground" /> foreground
         </label>
       </div>
+      <section class="queued-work-ledger" aria-label="Pending queued work">
+        <div class="queued-work-heading">
+          <span>queued batches</span>
+          <span id="queuedWorkCount">0 pending</span>
+        </div>
+        <div id="queuedWorkList" class="queued-work-list"></div>
+      </section>
       <div id="workList" class="work-list"></div>
     </aside>
 
@@ -2128,6 +2196,8 @@
     const timelineEmpty = document.getElementById("timelineEmpty");
     const workList = document.getElementById("workList");
     const workCount = document.getElementById("workCount");
+    const queuedWorkList = document.getElementById("queuedWorkList");
+    const queuedWorkCount = document.getElementById("queuedWorkCount");
     const workFilterProcess = document.getElementById("filterProcess");
     const workFilterForeground = document.getElementById("filterForeground");
     // Processes are the durable, interesting work; foreground Lashlang is every
@@ -4167,6 +4237,7 @@
       markShellHydrated(shellAvailability);
       renderShellStatus();
       renderUsage(state.usage);
+      renderQueuedWork(state.queued_work || []);
       renderStateTranscript(state);
       for (const pending of state.pending_turn_inputs || []) {
         const textItem = (pending.input?.items || []).find(item => item.Text?.text);
@@ -4305,6 +4376,81 @@
     function shortId(value) {
       const text = String(value || "").replace(/^process:/, "");
       return text.length > 12 ? text.slice(0, 8) + "..." : text;
+    }
+
+    function renderQueuedWork(batches) {
+      queuedWorkList.innerHTML = "";
+      queuedWorkCount.textContent = batches.length + " pending";
+      if (!batches.length) {
+        const empty = document.createElement("div");
+        empty.className = "empty";
+        empty.textContent = "no pending queued work";
+        queuedWorkList.appendChild(empty);
+        return;
+      }
+      for (const batch of batches) {
+        const card = document.createElement("article");
+        card.className = "queued-work-batch";
+
+        const id = document.createElement("div");
+        id.className = "queued-work-id";
+        id.textContent = batch.batch_id;
+        id.title = batch.batch_id;
+
+        const payloadKind = batch.items?.[0]?.payload?.type || "queued_work";
+        const meta = document.createElement("div");
+        meta.className = "queued-work-meta";
+        meta.textContent = payloadKind.replaceAll("_", " ") + " · sequence " + batch.enqueue_seq;
+
+        const actions = document.createElement("div");
+        actions.className = "queued-work-actions";
+        const run = document.createElement("button");
+        run.className = "work-run";
+        run.type = "button";
+        run.textContent = "run";
+        run.title = "Run only this queued-work batch now";
+        run.setAttribute("aria-label", "Run queued-work batch " + batch.batch_id);
+        const cancel = document.createElement("button");
+        cancel.className = "work-cancel";
+        cancel.type = "button";
+        cancel.textContent = "cancel";
+        cancel.title = "Cancel this pending queued-work batch";
+        cancel.setAttribute("aria-label", "Cancel queued-work batch " + batch.batch_id);
+
+        async function act(kind, button) {
+          run.disabled = true;
+          cancel.disabled = true;
+          button.textContent = kind === "run" ? "starting" : "cancelling";
+          try {
+            const path = "/api/queued-work/" + encodeURIComponent(batch.batch_id)
+              + (kind === "run" ? "/run" : "");
+            const response = await fetch(path, { method: kind === "run" ? "POST" : "DELETE" });
+            if (!response.ok) throw new Error("queued-work action failed");
+            await refreshQueuedWork();
+            if (kind === "run") loadState().catch(() => {});
+          } catch (_) {
+            run.disabled = false;
+            cancel.disabled = false;
+            button.textContent = kind === "run" ? "retry run" : "retry cancel";
+            queuedWorkCount.textContent = kind + " failed — retry";
+          }
+        }
+        run.addEventListener("click", () => act("run", run));
+        cancel.addEventListener("click", () => act("cancel", cancel));
+        actions.append(run, cancel);
+        card.append(id, meta, actions);
+        queuedWorkList.appendChild(card);
+      }
+    }
+
+    async function refreshQueuedWork() {
+      try {
+        const response = await fetch("/api/queued-work");
+        if (!response.ok) throw new Error("queued-work request failed");
+        renderQueuedWork(await response.json());
+      } catch (_) {
+        queuedWorkCount.textContent = "updates paused";
+      }
     }
 
     function renderWork(items) {
@@ -5406,6 +5552,7 @@
       loadState().catch(() => {});
       restartEventStreams();
       refreshWork();
+      refreshQueuedWork();
     });
 
     /* Paint the pre-hydration state before any request is in flight: the shell
@@ -5416,10 +5563,12 @@
     renderShellStatus();
     loadState().catch(() => {}).finally(() => {
       refreshWork();
+      refreshQueuedWork();
       loadTriggers();
       restartEventStreams();
     });
     setInterval(refreshWork, 1400);
+    setInterval(refreshQueuedWork, 1400);
     setInterval(loadTriggers, 1400);
     setInterval(loadAccounts, 1500);
   </script>

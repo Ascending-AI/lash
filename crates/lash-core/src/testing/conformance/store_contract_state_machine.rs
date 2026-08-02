@@ -1818,9 +1818,27 @@ async fn assert_enqueued_wake_high_water_safety(
         .enqueue_queued_work_with_outcome(process_wake_batch_draft(rewound))
         .await
         .map_err(|error| TestCaseError::fail(error.to_string()))?;
-    prop_assert!(
-        matches!(retry, crate::QueuedWorkEnqueueOutcome::Existing(_)),
-        "Enqueued-wake allocation fence: live-row retry was not idempotent"
+    let crate::QueuedWorkEnqueueOutcome::Existing(retried_batch) = retry else {
+        return Err(TestCaseError::fail(
+            "Enqueued-wake allocation fence: live-row retry was not idempotent",
+        ));
+    };
+    prop_assert_eq!(
+        retried_batch.batch_id,
+        earlier.batch_id.clone(),
+        "Enqueued-wake allocation fence: floor-only suppression won before the live receiver row"
+    );
+    let after_live_retry = runtime
+        .list_queued_work(session)
+        .await
+        .map_err(|error| TestCaseError::fail(error.to_string()))?;
+    prop_assert_eq!(
+        after_live_retry
+            .iter()
+            .map(|batch| batch.batch_id.as_str())
+            .collect::<Vec<_>>(),
+        vec![earlier.batch_id.as_str()],
+        "Enqueued-wake allocation fence: live-row absorption changed pending receiver work"
     );
 
     let owner = LeaseOwnerIdentity::opaque(

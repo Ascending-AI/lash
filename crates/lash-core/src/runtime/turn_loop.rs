@@ -1057,6 +1057,12 @@ impl LashRuntime {
             return Ok(None);
         };
         let mut work = claim.materialize_for_turn();
+        if selected_batch_ids.is_some() {
+            // A host-selected drain is closed over the rendered batch set. Without this guard,
+            // an EarliestSafeBoundary checkpoint in the selected turn could pull unrelated
+            // pending batches into the same run after the exact initial claim.
+            work.input.turn_context.suppress_checkpoint_queued_work();
+        }
         if let Some(hint) = opts.local_cancel_origin_hint() {
             work.input.turn_context.set_local_cancel_origin_hint(hint);
         }
@@ -1287,7 +1293,11 @@ impl LashRuntime {
         if let Some(work) = pending_turn_input.as_ref()
             && input.items.is_empty()
         {
+            let turn_context = input.turn_context.clone();
             input = work.clone();
+            // Retain host controls installed on the initially materialized input. The claim is
+            // rematerialized here to refresh durable payloads, not to erase live run policy.
+            input.turn_context = turn_context;
             if input.trace_turn_id.is_none() {
                 input.trace_turn_id = input_trace_turn_id.clone();
             }
@@ -1295,7 +1305,9 @@ impl LashRuntime {
         if let Some(work) = queued_turn_work.as_ref()
             && input.items.is_empty()
         {
+            let turn_context = input.turn_context.clone();
             input = work.input.clone();
+            input.turn_context = turn_context;
             if input.trace_turn_id.is_none() {
                 input.trace_turn_id = input_trace_turn_id;
             }

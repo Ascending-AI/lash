@@ -2167,6 +2167,7 @@ finish initial
     }
 
     include!("tests/session_isolation.rs");
+    include!("tests/queued_work.rs");
     fn test_workbench_core(
         session_store_factory: Arc<dyn lash::persistence::SessionStoreFactory>,
         process_registry: Arc<dyn lash::process::ProcessRegistry>,
