@@ -56013,7 +56013,7 @@ kind = "struct"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "unused-justify"
-reason = "Concrete consumer: workspace and downstream hosts still import lash_core::AbandonEvidence directly; retain this low-level alias until those callers migrate to the lash facade."
+reason = "Concrete consumer: Lash workspace crate at crates/lash-core/src/runtime/process_worker/mod.rs:16 imports or uses lash_core::AbandonEvidence directly; retain this low-level alias until that caller migrates to the lash facade."
 
 [[api]]
 symbol = "lash_core::AbandonEvidence::epoch_ms"
@@ -56045,7 +56045,7 @@ kind = "struct"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "unused-justify"
-reason = "Concrete consumer: workspace and downstream hosts still import lash_core::AbandonRequest directly; retain this low-level alias until those callers migrate to the lash facade."
+reason = "Concrete consumer: Lash workspace crate at crates/lash-core/src/runtime/process/validation.rs:711 imports or uses lash_core::AbandonRequest directly; retain this low-level alias until that caller migrates to the lash facade."
 
 [[api]]
 symbol = "lash_core::AbandonRequest::reason"
@@ -56077,7 +56077,7 @@ kind = "enum"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "unused-justify"
-reason = "Concrete consumer: workspace and downstream hosts still import lash_core::AbandonWriter directly; retain this low-level alias until those callers migrate to the lash facade."
+reason = "Concrete consumer: Lash workspace crate at crates/lash-core/src/runtime/process_worker/mod.rs:16 imports or uses lash_core::AbandonWriter directly; retain this low-level alias until that caller migrates to the lash facade."
 
 [[api]]
 symbol = "lash_core::AbandonWriter::EngineGaveUp"
@@ -56117,7 +56117,7 @@ kind = "struct"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "unused-justify"
-reason = "Concrete consumer: workspace and downstream hosts still import lash_core::AcceptedInjectedTurnInput directly; retain this low-level alias until those callers migrate to the lash facade."
+reason = "Concrete consumer: Lash workspace crate at crates/lash-core/src/runtime/turn_input_ingress.rs:203 imports or uses lash_core::AcceptedInjectedTurnInput directly; retain this low-level alias until that caller migrates to the lash facade."
 
 [[api]]
 symbol = "lash_core::AcceptedInjectedTurnInput::id"
@@ -56461,7 +56461,7 @@ kind = "struct"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "unused-justify"
-reason = "Concrete consumer: workspace and downstream hosts still import lash_core::AssembledTurn directly; retain this low-level alias until those callers migrate to the lash facade."
+reason = "Concrete consumer: Lash workspace crate at crates/lash-core/src/runtime/session_manager/process_runners/session.rs:148 imports or uses lash_core::AssembledTurn directly; retain this low-level alias until that caller migrates to the lash facade."
 
 [[api]]
 symbol = "lash_core::AssembledTurn::assistant_output"
@@ -56549,7 +56549,7 @@ kind = "struct"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "unused-justify"
-reason = "Concrete consumer: workspace and downstream hosts still import lash_core::AssistantOutput directly; retain this low-level alias until those callers migrate to the lash facade."
+reason = "Concrete consumer: Lash workspace crate at crates/lash-core/src/testing/mod.rs:34 imports or uses lash_core::AssistantOutput directly; retain this low-level alias until that caller migrates to the lash facade."
 
 [[api]]
 symbol = "lash_core::AssistantOutput::raw_text"
@@ -56581,7 +56581,7 @@ kind = "struct"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "unused-justify"
-reason = "Concrete consumer: workspace and downstream hosts still import lash_core::AssistantResponseTransform directly; retain this low-level alias until those callers migrate to the lash facade."
+reason = "Concrete consumer: Lash workspace crate at crates/lash/src/tests.rs:1384 imports or uses lash_core::AssistantResponseTransform directly; retain this low-level alias until that caller migrates to the lash facade."
 
 [[api]]
 symbol = "lash_core::AssistantResponseTransform::events"
@@ -57664,7 +57664,7 @@ kind = "struct"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "unused-justify"
-reason = "Concrete consumer: workspace and downstream hosts still import lash_core::AwaitEventKey directly; retain this low-level alias until those callers migrate to the lash facade."
+reason = "Concrete consumer: Lash workspace crate at crates/lash-core/src/runtime/effect/envelope.rs:383 imports or uses lash_core::AwaitEventKey directly; retain this low-level alias until that caller migrates to the lash facade."
 
 [[api]]
 symbol = "lash_core::AwaitEventKey::key_id"
@@ -57784,7 +57784,7 @@ kind = "enum"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "unused-justify"
-reason = "Concrete consumer: workspace and downstream hosts still import lash_core::AwaitEventWaitIdentity directly; retain this low-level alias until those callers migrate to the lash facade."
+reason = "Concrete consumer: Lash workspace crate at crates/lash-core/src/runtime/session_manager/process_runners/control.rs:152 imports or uses lash_core::AwaitEventWaitIdentity directly; retain this low-level alias until that caller migrates to the lash facade."
 
 [[api]]
 symbol = "lash_core::AwaitEventWaitIdentity::Custom"
@@ -58759,7 +58759,7 @@ kind = "struct"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "unused-justify"
-reason = "Concrete consumer: workspace and downstream hosts still import lash_core::CompactionContext directly; retain this low-level alias until those callers migrate to the lash facade."
+reason = "Concrete consumer: Lash workspace crate at crates/lash-core/src/runtime/session_api.rs:317 imports or uses lash_core::CompactionContext directly; retain this low-level alias until that caller migrates to the lash facade."
 
 [[api]]
 symbol = "lash_core::CompactionContext::instructions"
@@ -58823,7 +58823,7 @@ kind = "struct"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "unused-justify"
-reason = "Concrete consumer: workspace and downstream hosts still import lash_core::ContextCompaction directly; retain this low-level alias until those callers migrate to the lash facade."
+reason = "Concrete consumer: Lash workspace crate at crates/lash/src/tests/control_admin.rs:49 imports or uses lash_core::ContextCompaction directly; retain this low-level alias until that caller migrates to the lash facade."
 
 [[api]]
 symbol = "lash_core::ContextCompaction::initial_nodes"
@@ -58879,7 +58879,7 @@ kind = "enum"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "unused-justify"
-reason = "Concrete consumer: workspace and downstream hosts still import lash_core::ContextError directly; retain this low-level alias until those callers migrate to the lash facade."
+reason = "Concrete consumer: Lash workspace crate at crates/lash/src/tests/control_admin.rs:49 imports or uses lash_core::ContextError directly; retain this low-level alias until that caller migrates to the lash facade."
 
 [[api]]
 symbol = "lash_core::ContextError::Pipeline"
@@ -59007,7 +59007,7 @@ kind = "enum"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "unused-justify"
-reason = "Concrete consumer: workspace and downstream hosts still import lash_core::DeliveryPolicy directly; retain this low-level alias until those callers migrate to the lash facade."
+reason = "Concrete consumer: Lash workspace crate at crates/lash-core/src/runtime/in_memory_store.rs:742 imports or uses lash_core::DeliveryPolicy directly; retain this low-level alias until that caller migrates to the lash facade."
 
 [[api]]
 symbol = "lash_core::DeliveryPolicy::AfterCurrentTurnCommit"
@@ -60299,7 +60299,7 @@ kind = "struct"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "unused-justify"
-reason = "Concrete consumer: workspace and downstream hosts still import lash_core::EmbeddedRuntimeHost directly; retain this low-level alias until those callers migrate to the lash facade."
+reason = "Concrete consumer: Lash workspace crate at crates/lash-core/src/runtime/builder.rs:4 imports or uses lash_core::EmbeddedRuntimeHost directly; retain this low-level alias until that caller migrates to the lash facade."
 
 [[api]]
 symbol = "lash_core::EmbeddedRuntimeHost::core"
@@ -60611,7 +60611,7 @@ kind = "struct"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "unused-justify"
-reason = "Concrete consumer: workspace and downstream hosts still import lash_core::ExecutionEvidence directly; retain this low-level alias until those callers migrate to the lash facade."
+reason = "Concrete consumer: Lash workspace crate at crates/lash-protocol-rlm/src/stream_mask.rs:514 imports or uses lash_core::ExecutionEvidence directly; retain this low-level alias until that caller migrates to the lash facade."
 
 [[api]]
 symbol = "lash_core::ExecutionEvidence::provider_finish_reason"
@@ -60855,7 +60855,7 @@ kind = "struct"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "unused-justify"
-reason = "Concrete consumer: workspace and downstream hosts still import lash_core::ExecutionSummary directly; retain this low-level alias until those callers migrate to the lash facade."
+reason = "Concrete consumer: Lash workspace crate at crates/lash-core/src/runtime/turn_loop.rs:92 imports or uses lash_core::ExecutionSummary directly; retain this low-level alias until that caller migrates to the lash facade."
 
 [[api]]
 symbol = "lash_core::ExecutionSummary::duration_ms"
@@ -60923,7 +60923,7 @@ kind = "struct"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "unused-justify"
-reason = "Concrete consumer: workspace and downstream hosts still import lash_core::ForkPoint directly; retain this low-level alias until those callers migrate to the lash facade."
+reason = "Concrete consumer: Lash workspace crate at crates/lash-core/src/runtime/in_memory_store/factory.rs:162 imports or uses lash_core::ForkPoint directly; retain this low-level alias until that caller migrates to the lash facade."
 
 [[api]]
 symbol = "lash_core::ForkPoint::checkpoint_ref"
@@ -60971,7 +60971,7 @@ kind = "struct"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "unused-justify"
-reason = "Concrete consumer: workspace and downstream hosts still import lash_core::ForkSessionRequest directly; retain this low-level alias until those callers migrate to the lash facade."
+reason = "Concrete consumer: Lash workspace crate at crates/lash-core/src/runtime/in_memory_store/factory.rs:337 imports or uses lash_core::ForkSessionRequest directly; retain this low-level alias until that caller migrates to the lash facade."
 
 [[api]]
 symbol = "lash_core::ForkSessionRequest::node_id"
@@ -61011,7 +61011,7 @@ kind = "struct"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "unused-justify"
-reason = "Concrete consumer: workspace and downstream hosts still import lash_core::ForkSessionResult directly; retain this low-level alias until those callers migrate to the lash facade."
+reason = "Concrete consumer: Lash workspace crate at crates/lash-core/src/runtime/in_memory_store/factory.rs:338 imports or uses lash_core::ForkSessionResult directly; retain this low-level alias until that caller migrates to the lash facade."
 
 [[api]]
 symbol = "lash_core::ForkSessionResult::node_id"
@@ -61043,7 +61043,7 @@ kind = "struct"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "unused-justify"
-reason = "Concrete consumer: workspace and downstream hosts still import lash_core::GcReport directly; retain this low-level alias until those callers migrate to the lash facade."
+reason = "Concrete consumer: Lash workspace crate at crates/lash-core/src/attachments.rs:211 imports or uses lash_core::GcReport directly; retain this low-level alias until that caller migrates to the lash facade."
 
 [[api]]
 symbol = "lash_core::GcReport::deleted_blob_count"
@@ -61753,7 +61753,7 @@ kind = "struct"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "unused-justify"
-reason = "Concrete consumer: workspace and downstream hosts still import lash_core::InlineRuntimeEffectController directly; retain this low-level alias until those callers migrate to the lash facade."
+reason = "Concrete consumer: Lash workspace crate at crates/lash-core/src/runtime/process/service.rs:433 imports or uses lash_core::InlineRuntimeEffectController directly; retain this low-level alias until that caller migrates to the lash facade."
 
 [[api]]
 symbol = "lash_core::InlineRuntimeEffectController::allow_process_lifetime_completion_keys"
@@ -61769,7 +61769,7 @@ kind = "enum"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "unused-justify"
-reason = "Concrete consumer: workspace and downstream hosts still import lash_core::InputItem directly; retain this low-level alias until those callers migrate to the lash facade."
+reason = "Concrete consumer: downstream Figments app at /workspace/code/figments/apps/lash-runtime/src/main.rs:122 imports or uses lash_core::InputItem directly; retain this low-level alias until that caller migrates to the lash facade."
 
 [[api]]
 symbol = "lash_core::InputItem::Attachment"
@@ -61910,7 +61910,7 @@ kind = "struct"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "unused-justify"
-reason = "Concrete consumer: workspace and downstream hosts still import lash_core::LashRuntime directly; retain this low-level alias until those callers migrate to the lash facade."
+reason = "Concrete consumer: Lash workspace crate at crates/lash-core/src/runtime/builder.rs:4 imports or uses lash_core::LashRuntime directly; retain this low-level alias until that caller migrates to the lash facade."
 
 [[api]]
 symbol = "lash_core::LashRuntime::activate_managed_session"
@@ -62648,7 +62648,7 @@ kind = "struct"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "unused-justify"
-reason = "Concrete consumer: workspace and downstream hosts still import lash_core::LiveReplayGap directly; retain this low-level alias until those callers migrate to the lash facade."
+reason = "Concrete consumer: Lash workspace crate at crates/lash-remote-protocol/src/core_conversions/observations.rs:162 imports or uses lash_core::LiveReplayGap directly; retain this low-level alias until that caller migrates to the lash facade."
 
 [[api]]
 symbol = "lash_core::LiveReplayGap::latest_cursor"
@@ -62696,7 +62696,7 @@ kind = "enum"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "unused-justify"
-reason = "Concrete consumer: workspace and downstream hosts still import lash_core::LiveReplayGapReason directly; retain this low-level alias until those callers migrate to the lash facade."
+reason = "Concrete consumer: Lash workspace crate at crates/lash-core/src/testing/conformance/mod.rs:60 imports or uses lash_core::LiveReplayGapReason directly; retain this low-level alias until that caller migrates to the lash facade."
 
 [[api]]
 symbol = "lash_core::LiveReplayGapReason::Trimmed"
@@ -63747,7 +63747,7 @@ kind = "enum"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "unused-justify"
-reason = "Concrete consumer: workspace and downstream hosts still import lash_core::MergeKey directly; retain this low-level alias until those callers migrate to the lash facade."
+reason = "Concrete consumer: Lash workspace crate at crates/lash-core/src/runtime/in_memory_store/test_support.rs:52 imports or uses lash_core::MergeKey directly; retain this low-level alias until that caller migrates to the lash facade."
 
 [[api]]
 symbol = "lash_core::MergeKey::Group"
@@ -64479,7 +64479,7 @@ kind = "struct"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "unused-justify"
-reason = "Concrete consumer: workspace and downstream hosts still import lash_core::NonNegativeFiniteF64 directly; retain this low-level alias until those callers migrate to the lash facade."
+reason = "Concrete consumer: Lash workspace crate at crates/lash-core/src/model.rs:280 imports or uses lash_core::NonNegativeFiniteF64 directly; retain this low-level alias until that caller migrates to the lash facade."
 
 [[api]]
 symbol = "lash_core::NonNegativeFiniteF64::get"
@@ -64976,7 +64976,7 @@ kind = "struct"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "unused-justify"
-reason = "Concrete consumer: workspace and downstream hosts still import lash_core::OperationId directly; retain this low-level alias until those callers migrate to the lash facade."
+reason = "Concrete consumer: Lash workspace crate at crates/lash-core/src/runtime/lifecycle.rs:20 imports or uses lash_core::OperationId directly; retain this low-level alias until that caller migrates to the lash facade."
 
 [[api]]
 symbol = "lash_core::OperationId::key"
@@ -65430,7 +65430,7 @@ kind = "struct"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "unused-justify"
-reason = "Concrete consumer: workspace and downstream hosts still import lash_core::PendingTurnInput directly; retain this low-level alias until those callers migrate to the lash facade."
+reason = "Concrete consumer: downstream Figments app at /workspace/code/figments/apps/lash-runtime/src/sessions.rs:121 imports or uses lash_core::PendingTurnInput directly; retain this low-level alias until that caller migrates to the lash facade."
 
 [[api]]
 symbol = "lash_core::PendingTurnInput::accepted_input"
@@ -65629,7 +65629,7 @@ kind = "struct"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "unused-justify"
-reason = "Concrete consumer: workspace and downstream hosts still import lash_core::PendingTurnInputCancelResult directly; retain this low-level alias until those callers migrate to the lash facade."
+reason = "Concrete consumer: Lash workspace crate at crates/lash-core/src/runtime/in_memory_store/turn_input.rs:144 imports or uses lash_core::PendingTurnInputCancelResult directly; retain this low-level alias until that caller migrates to the lash facade."
 
 [[api]]
 symbol = "lash_core::PendingTurnInputCancelResult::outcome"
@@ -65712,7 +65712,7 @@ kind = "struct"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "unused-justify"
-reason = "Concrete consumer: workspace and downstream hosts still import lash_core::PendingTurnInputClaimDiagnostics directly; retain this low-level alias until those callers migrate to the lash facade."
+reason = "Concrete consumer: Lash workspace crate at crates/lash-core/src/runtime/in_memory_store.rs:61 imports or uses lash_core::PendingTurnInputClaimDiagnostics directly; retain this low-level alias until that caller migrates to the lash facade."
 
 [[api]]
 symbol = "lash_core::PendingTurnInputClaimDiagnostics::claim_fencing_token"
@@ -65760,7 +65760,7 @@ kind = "struct"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "unused-justify"
-reason = "Concrete consumer: workspace and downstream hosts still import lash_core::PendingTurnInputDraft directly; retain this low-level alias until those callers migrate to the lash facade."
+reason = "Concrete consumer: downstream Figments app at /workspace/code/figments/apps/lash-runtime/src/sessions.rs:189 imports or uses lash_core::PendingTurnInputDraft directly; retain this low-level alias until that caller migrates to the lash facade."
 
 [[api]]
 symbol = "lash_core::PendingTurnInputDraft::ingress"
@@ -66012,7 +66012,7 @@ kind = "struct"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "unused-justify"
-reason = "Concrete consumer: workspace and downstream hosts still import lash_core::PersistentRuntimeServices directly; retain this low-level alias until those callers migrate to the lash facade."
+reason = "Concrete consumer: Lash workspace crate at crates/lash-core/src/runtime/lifecycle.rs:626 imports or uses lash_core::PersistentRuntimeServices directly; retain this low-level alias until that caller migrates to the lash facade."
 
 [[api]]
 symbol = "lash_core::PersistentRuntimeServices::new"
@@ -76590,7 +76590,7 @@ kind = "struct"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "unused-justify"
-reason = "Concrete consumer: workspace and downstream hosts still import lash_core::QueuedWorkRunRequest directly; retain this low-level alias until those callers migrate to the lash facade."
+reason = "Concrete consumer: Lash workspace crate at crates/lash-core/src/testing/conformance/wake_delivery.rs:53 imports or uses lash_core::QueuedWorkRunRequest directly; retain this low-level alias until that caller migrates to the lash facade."
 
 [[api]]
 symbol = "lash_core::QueuedWorkRunRequest::reason"
@@ -76861,7 +76861,7 @@ kind = "enum"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "unused-justify"
-reason = "Concrete consumer: workspace and downstream hosts still import lash_core::ReasoningDisableEncoding directly; retain this low-level alias until those callers migrate to the lash facade."
+reason = "Concrete consumer: downstream Figments crate at /workspace/code/figments/crates/figment-model-registry/src/lib.rs:673 imports or uses lash_core::ReasoningDisableEncoding directly; retain this low-level alias until that caller migrates to the lash facade."
 
 [[api]]
 symbol = "lash_core::ReasoningDisableEncoding::Budget"
@@ -77133,7 +77133,7 @@ kind = "enum"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "unused-justify"
-reason = "Concrete consumer: workspace and downstream hosts still import lash_core::Resolution directly; retain this low-level alias until those callers migrate to the lash facade."
+reason = "Concrete consumer: Lash workspace crate at crates/lash-core/src/runtime/effect/envelope.rs:644 imports or uses lash_core::Resolution directly; retain this low-level alias until that caller migrates to the lash facade."
 
 [[api]]
 symbol = "lash_core::Resolution::Cancelled"
@@ -77189,7 +77189,7 @@ kind = "enum"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "unused-justify"
-reason = "Concrete consumer: workspace and downstream hosts still import lash_core::ResolveOutcome directly; retain this low-level alias until those callers migrate to the lash facade."
+reason = "Concrete consumer: Lash workspace crate at crates/lash-core/src/runtime/turn_loop.rs:2443 imports or uses lash_core::ResolveOutcome directly; retain this low-level alias until that caller migrates to the lash facade."
 
 [[api]]
 symbol = "lash_core::ResolveOutcome::Accepted"
@@ -78040,7 +78040,7 @@ kind = "struct"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "unused-justify"
-reason = "Concrete consumer: workspace and downstream hosts still import lash_core::RuntimeEffectControllerError directly; retain this low-level alias until those callers migrate to the lash facade."
+reason = "Concrete consumer: Lash workspace crate at crates/lash-core/src/plugin/error.rs:15 imports or uses lash_core::RuntimeEffectControllerError directly; retain this low-level alias until that caller migrates to the lash facade."
 
 [[api]]
 symbol = "lash_core::RuntimeEffectControllerError::cause"
@@ -78096,7 +78096,7 @@ kind = "struct"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "unused-justify"
-reason = "Concrete consumer: workspace and downstream hosts still import lash_core::RuntimeEffectEnvelope directly; retain this low-level alias until those callers migrate to the lash facade."
+reason = "Concrete consumer: Lash workspace crate at crates/lash-core/src/runtime/session_manager/direct.rs:200 imports or uses lash_core::RuntimeEffectEnvelope directly; retain this low-level alias until that caller migrates to the lash facade."
 
 [[api]]
 symbol = "lash_core::RuntimeEffectEnvelope::canonical_form"
@@ -78152,7 +78152,7 @@ kind = "enum"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "unused-justify"
-reason = "Concrete consumer: workspace and downstream hosts still import lash_core::RuntimeEffectKind directly; retain this low-level alias until those callers migrate to the lash facade."
+reason = "Concrete consumer: Lash workspace crate at crates/lash-core/src/runtime/causal.rs:4 imports or uses lash_core::RuntimeEffectKind directly; retain this low-level alias until that caller migrates to the lash facade."
 
 [[api]]
 symbol = "lash_core::RuntimeEffectKind::AwaitEvent"
@@ -78264,7 +78264,7 @@ kind = "struct"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "unused-justify"
-reason = "Concrete consumer: workspace and downstream hosts still import lash_core::RuntimeEffectLocalExecutor directly; retain this low-level alias until those callers migrate to the lash facade."
+reason = "Concrete consumer: Lash workspace crate at crates/lash-core/src/runtime/session_manager/direct.rs:290 imports or uses lash_core::RuntimeEffectLocalExecutor directly; retain this low-level alias until that caller migrates to the lash facade."
 
 [[api]]
 symbol = "lash_core::RuntimeEffectLocalExecutor::await_event"
@@ -78400,7 +78400,7 @@ kind = "enum"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "unused-justify"
-reason = "Concrete consumer: workspace and downstream hosts still import lash_core::RuntimeEffectOutcome directly; retain this low-level alias until those callers migrate to the lash facade."
+reason = "Concrete consumer: Lash workspace crate at crates/lash-core/src/session/execution_context.rs:655 imports or uses lash_core::RuntimeEffectOutcome directly; retain this low-level alias until that caller migrates to the lash facade."
 
 [[api]]
 symbol = "lash_core::RuntimeEffectOutcome::AwaitEvent"
@@ -78752,7 +78752,7 @@ kind = "struct"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "unused-justify"
-reason = "Concrete consumer: workspace and downstream hosts still import lash_core::RuntimeEnvironment directly; retain this low-level alias until those callers migrate to the lash facade."
+reason = "Concrete consumer: Lash workspace crate at crates/lash/src/support.rs:9 imports or uses lash_core::RuntimeEnvironment directly; retain this low-level alias until that caller migrates to the lash facade."
 
 [[api]]
 symbol = "lash_core::RuntimeEnvironment::builder"
@@ -79594,7 +79594,7 @@ kind = "struct"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "unused-justify"
-reason = "Concrete consumer: workspace and downstream hosts still import lash_core::RuntimeHandle directly; retain this low-level alias until those callers migrate to the lash facade."
+reason = "Concrete consumer: Lash workspace crate at crates/lash/src/support.rs:9 imports or uses lash_core::RuntimeHandle directly; retain this low-level alias until that caller migrates to the lash facade."
 
 [[api]]
 symbol = "lash_core::RuntimeHandle::abandon_queued_work_claim"
@@ -79900,7 +79900,7 @@ kind = "struct"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "unused-justify"
-reason = "Concrete consumer: workspace and downstream hosts still import lash_core::RuntimeInvocation directly; retain this low-level alias until those callers migrate to the lash facade."
+reason = "Concrete consumer: Lash workspace crate at crates/lash-core/src/plugin/protocol.rs:127 imports or uses lash_core::RuntimeInvocation directly; retain this low-level alias until that caller migrates to the lash facade."
 
 [[api]]
 symbol = "lash_core::RuntimeInvocation::causal_ref"
@@ -80220,7 +80220,7 @@ kind = "struct"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "unused-justify"
-reason = "Concrete consumer: workspace and downstream hosts still import lash_core::RuntimeScope directly; retain this low-level alias until those callers migrate to the lash facade."
+reason = "Concrete consumer: Lash workspace crate at crates/lash-core/src/runtime/causal.rs:4 imports or uses lash_core::RuntimeScope directly; retain this low-level alias until that caller migrates to the lash facade."
 
 [[api]]
 symbol = "lash_core::RuntimeScope::for_turn"
@@ -80372,7 +80372,7 @@ kind = "struct"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "unused-justify"
-reason = "Concrete consumer: workspace and downstream hosts still import lash_core::RuntimeSessionState directly; retain this low-level alias until those callers migrate to the lash facade."
+reason = "Concrete consumer: Lash workspace crate at crates/lash-core/src/runtime/builder.rs:4 imports or uses lash_core::RuntimeSessionState directly; retain this low-level alias until that caller migrates to the lash facade."
 
 [[api]]
 symbol = "lash_core::RuntimeSessionState::agent_frames"
@@ -81499,7 +81499,7 @@ kind = "enum"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "unused-justify"
-reason = "Concrete consumer: workspace and downstream hosts still import lash_core::SessionAdmission directly; retain this low-level alias until those callers migrate to the lash facade."
+reason = "Concrete consumer: Lash workspace crate at crates/lash-core/src/runtime/in_memory_store.rs:1377 imports or uses lash_core::SessionAdmission directly; retain this low-level alias until that caller migrates to the lash facade."
 
 [[api]]
 symbol = "lash_core::SessionAdmission::Created"
@@ -81699,7 +81699,7 @@ kind = "struct"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "unused-justify"
-reason = "Concrete consumer: workspace and downstream hosts still import lash_core::SessionBinding directly; retain this low-level alias until those callers migrate to the lash facade."
+reason = "Concrete consumer: Lash workspace crate at crates/lash-core/src/runtime/in_memory_store.rs:1376 imports or uses lash_core::SessionBinding directly; retain this low-level alias until that caller migrates to the lash facade."
 
 [[api]]
 symbol = "lash_core::SessionBinding::cwd"
@@ -81763,7 +81763,7 @@ kind = "enum"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "unused-justify"
-reason = "Concrete consumer: workspace and downstream hosts still import lash_core::SessionCommand directly; retain this low-level alias until those callers migrate to the lash facade."
+reason = "Concrete consumer: Lash workspace crate at crates/lash-core/src/runtime/in_memory_store/testing_access.rs:266 imports or uses lash_core::SessionCommand directly; retain this low-level alias until that caller migrates to the lash facade."
 
 [[api]]
 symbol = "lash_core::SessionCommand::RefreshToolCatalog"
@@ -81803,7 +81803,7 @@ kind = "struct"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "unused-justify"
-reason = "Concrete consumer: workspace and downstream hosts still import lash_core::SessionCommandReceipt directly; retain this low-level alias until those callers migrate to the lash facade."
+reason = "Concrete consumer: Lash workspace crate at crates/lash-core/src/runtime/session_api.rs:432 imports or uses lash_core::SessionCommandReceipt directly; retain this low-level alias until that caller migrates to the lash facade."
 
 [[api]]
 symbol = "lash_core::SessionCommandReceipt::batch_id"
@@ -82697,7 +82697,7 @@ kind = "struct"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "unused-justify"
-reason = "Concrete consumer: workspace and downstream hosts still import lash_core::SessionGraph directly; retain this low-level alias until those callers migrate to the lash facade."
+reason = "Concrete consumer: Lash workspace crate at crates/lash-core/src/plugin/history.rs:75 imports or uses lash_core::SessionGraph directly; retain this low-level alias until that caller migrates to the lash facade."
 
 [[api]]
 symbol = "lash_core::SessionGraph::active_path_contains"
@@ -82881,7 +82881,7 @@ kind = "struct"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "unused-justify"
-reason = "Concrete consumer: workspace and downstream hosts still import lash_core::SessionHandle directly; retain this low-level alias until those callers migrate to the lash facade."
+reason = "Concrete consumer: Lash workspace crate at crates/lash-core/src/runtime/mod.rs:65 imports or uses lash_core::SessionHandle directly; retain this low-level alias until that caller migrates to the lash facade."
 
 [[api]]
 symbol = "lash_core::SessionHandle::observed_processes"
@@ -82985,7 +82985,7 @@ kind = "type_alias"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "unused-justify"
-reason = "Concrete consumer: workspace and downstream hosts still import lash_core::SessionHistoryRecord directly; retain this low-level alias until those callers migrate to the lash facade."
+reason = "Concrete consumer: Lash workspace crate at crates/lash-core/src/plugin/history.rs:111 imports or uses lash_core::SessionHistoryRecord directly; retain this low-level alias until that caller migrates to the lash facade."
 
 [[api]]
 symbol = "lash_core::SessionId"
@@ -83089,7 +83089,7 @@ kind = "struct"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "unused-justify"
-reason = "Concrete consumer: workspace and downstream hosts still import lash_core::SessionMeta directly; retain this low-level alias until those callers migrate to the lash facade."
+reason = "Concrete consumer: Lash workspace crate at crates/lash-core/src/runtime/in_memory_store.rs:166 imports or uses lash_core::SessionMeta directly; retain this low-level alias until that caller migrates to the lash facade."
 
 [[api]]
 symbol = "lash_core::SessionMeta::created_at"
@@ -83241,7 +83241,7 @@ kind = "struct"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "unused-justify"
-reason = "Concrete consumer: workspace and downstream hosts still import lash_core::SessionNodeRecord directly; retain this low-level alias until those callers migrate to the lash facade."
+reason = "Concrete consumer: Lash workspace crate at crates/lash-core/src/runtime/in_memory_store.rs:816 imports or uses lash_core::SessionNodeRecord directly; retain this low-level alias until that caller migrates to the lash facade."
 
 [[api]]
 symbol = "lash_core::SessionNodeRecord::decode_storage_body"
@@ -83856,7 +83856,7 @@ kind = "struct"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "unused-justify"
-reason = "Concrete consumer: workspace and downstream hosts still import lash_core::SessionPolicy directly; retain this low-level alias until those callers migrate to the lash facade."
+reason = "Concrete consumer: downstream Figments app at /workspace/code/figments/apps/lash-runtime/src/sessions.rs:178 imports or uses lash_core::SessionPolicy directly; retain this low-level alias until that caller migrates to the lash facade."
 
 [[api]]
 symbol = "lash_core::SessionPolicy::autonomous"
@@ -83976,7 +83976,7 @@ kind = "enum"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "unused-justify"
-reason = "Concrete consumer: workspace and downstream hosts still import lash_core::SessionQueueEventKind directly; retain this low-level alias until those callers migrate to the lash facade."
+reason = "Concrete consumer: Lash workspace crate at crates/lash-core/src/testing/conformance/mod.rs:60 imports or uses lash_core::SessionQueueEventKind directly; retain this low-level alias until that caller migrates to the lash facade."
 
 [[api]]
 symbol = "lash_core::SessionQueueEventKind::Cancelled"
@@ -84298,7 +84298,7 @@ kind = "struct"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "unused-justify"
-reason = "Concrete consumer: workspace and downstream hosts still import lash_core::SessionRevision directly; retain this low-level alias until those callers migrate to the lash facade."
+reason = "Concrete consumer: downstream Figments app at /workspace/code/figments/apps/lash-runtime/src/main.rs:113 imports or uses lash_core::SessionRevision directly; retain this low-level alias until that caller migrates to the lash facade."
 
 [[api]]
 symbol = "lash_core::SessionRevision::0"
@@ -84390,7 +84390,7 @@ kind = "struct"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "unused-justify"
-reason = "Concrete consumer: workspace and downstream hosts still import lash_core::SessionScopeId directly; retain this low-level alias until those callers migrate to the lash facade."
+reason = "Concrete consumer: Lash workspace crate at crates/lash-core/src/runtime/mod.rs:310 imports or uses lash_core::SessionScopeId directly; retain this low-level alias until that caller migrates to the lash facade."
 
 [[api]]
 symbol = "lash_core::SessionScopeId::as_str"
@@ -84414,7 +84414,7 @@ kind = "struct"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "unused-justify"
-reason = "Concrete consumer: workspace and downstream hosts still import lash_core::SessionSnapshot directly; retain this low-level alias until those callers migrate to the lash facade."
+reason = "Concrete consumer: Lash workspace crate at crates/lash-core/src/plugin/history.rs:9 imports or uses lash_core::SessionSnapshot directly; retain this low-level alias until that caller migrates to the lash facade."
 
 [[api]]
 symbol = "lash_core::SessionSnapshot::agent_frames"
@@ -85687,7 +85687,7 @@ kind = "enum"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "unused-justify"
-reason = "Concrete consumer: workspace and downstream hosts still import lash_core::SlotPolicy directly; retain this low-level alias until those callers migrate to the lash facade."
+reason = "Concrete consumer: Lash workspace crate at crates/lash-core/src/runtime/in_memory_store/test_support.rs:52 imports or uses lash_core::SlotPolicy directly; retain this low-level alias until that caller migrates to the lash facade."
 
 [[api]]
 symbol = "lash_core::SlotPolicy::Exclusive"
@@ -86504,7 +86504,7 @@ kind = "enum"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "unused-justify"
-reason = "Concrete consumer: workspace and downstream hosts still import lash_core::StreamTermination directly; retain this low-level alias until those callers migrate to the lash facade."
+reason = "Concrete consumer: downstream Figments crate at /workspace/code/figments/crates/figment-model-registry/src/lib.rs:719 imports or uses lash_core::StreamTermination directly; retain this low-level alias until that caller migrates to the lash facade."
 
 [[api]]
 symbol = "lash_core::StreamTermination::EofTolerated"
@@ -86576,7 +86576,7 @@ kind = "struct"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "unused-justify"
-reason = "Concrete consumer: workspace and downstream hosts still import lash_core::TerminationPolicy directly; retain this low-level alias until those callers migrate to the lash facade."
+reason = "Concrete consumer: Lash workspace crate at crates/lash/src/support.rs:24 imports or uses lash_core::TerminationPolicy directly; retain this low-level alias until that caller migrates to the lash facade."
 
 [[api]]
 symbol = "lash_core::TerminationPolicy::treat_missing_done_as_failure"
@@ -86720,7 +86720,7 @@ kind = "struct"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "unused-justify"
-reason = "Concrete consumer: workspace and downstream hosts still import lash_core::TokenLedgerEntry directly; retain this low-level alias until those callers migrate to the lash facade."
+reason = "Concrete consumer: Lash workspace crate at crates/lash-core/src/plugin/session_types.rs:71 imports or uses lash_core::TokenLedgerEntry directly; retain this low-level alias until that caller migrates to the lash facade."
 
 [[api]]
 symbol = "lash_core::TokenLedgerEntry::model"
@@ -94575,7 +94575,7 @@ kind = "struct"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "unused-justify"
-reason = "Concrete consumer: workspace and downstream hosts still import lash_core::TurnCancellationEvidence directly; retain this low-level alias until those callers migrate to the lash facade."
+reason = "Concrete consumer: Lash workspace crate at crates/lash-core/src/runtime/turn_loop.rs:2443 imports or uses lash_core::TurnCancellationEvidence directly; retain this low-level alias until that caller migrates to the lash facade."
 
 [[api]]
 symbol = "lash_core::TurnCancellationEvidence::origin"
@@ -94607,7 +94607,7 @@ kind = "struct"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "unused-justify"
-reason = "Concrete consumer: workspace and downstream hosts still import lash_core::TurnCause directly; retain this low-level alias until those callers migrate to the lash facade."
+reason = "Concrete consumer: Lash workspace crate at crates/lash-core/src/runtime/logical_turn.rs:90 imports or uses lash_core::TurnCause directly; retain this low-level alias until that caller migrates to the lash facade."
 
 [[api]]
 symbol = "lash_core::TurnCause::event_type"
@@ -94655,7 +94655,7 @@ kind = "struct"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "unused-justify"
-reason = "Concrete consumer: workspace and downstream hosts still import lash_core::TurnContext directly; retain this low-level alias until those callers migrate to the lash facade."
+reason = "Concrete consumer: Lash workspace crate at crates/lash-core/src/plugin/hooks.rs:46 imports or uses lash_core::TurnContext directly; retain this low-level alias until that caller migrates to the lash facade."
 
 [[api]]
 symbol = "lash_core::TurnContext::add_prompt_contribution"
@@ -95494,7 +95494,7 @@ kind = "struct"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "unused-justify"
-reason = "Concrete consumer: workspace and downstream hosts still import lash_core::TurnHookContext directly; retain this low-level alias until those callers migrate to the lash facade."
+reason = "Concrete consumer: Lash workspace crate at crates/lash-plugin-plan-mode/tests/integration.rs:17 imports or uses lash_core::TurnHookContext directly; retain this low-level alias until that caller migrates to the lash facade."
 
 [[api]]
 symbol = "lash_core::TurnHookContext::session_id"
@@ -95634,7 +95634,7 @@ kind = "struct"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "unused-justify"
-reason = "Concrete consumer: workspace and downstream hosts still import lash_core::TurnInputAcceptanceReceipt directly; retain this low-level alias until those callers migrate to the lash facade."
+reason = "Concrete consumer: Lash workspace crate at crates/lash-perf/src/runtime_perf/harness.rs:247 imports or uses lash_core::TurnInputAcceptanceReceipt directly; retain this low-level alias until that caller migrates to the lash facade."
 
 [[api]]
 symbol = "lash_core::TurnInputAcceptanceReceipt::ingress"
@@ -95674,7 +95674,7 @@ kind = "struct"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "unused-justify"
-reason = "Concrete consumer: workspace and downstream hosts still import lash_core::TurnInputApplication directly; retain this low-level alias until those callers migrate to the lash facade."
+reason = "Concrete consumer: Lash workspace crate at crates/lash-core/src/runtime/in_memory_store/turn_input.rs:118 imports or uses lash_core::TurnInputApplication directly; retain this low-level alias until that caller migrates to the lash facade."
 
 [[api]]
 symbol = "lash_core::TurnInputApplication::checkpoint"
@@ -95756,7 +95756,7 @@ kind = "struct"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "unused-justify"
-reason = "Concrete consumer: workspace and downstream hosts still import lash_core::TurnInputClaim directly; retain this low-level alias until those callers migrate to the lash facade."
+reason = "Concrete consumer: Lash workspace crate at crates/lash-core/src/runtime/effect/executor.rs:230 imports or uses lash_core::TurnInputClaim directly; retain this low-level alias until that caller migrates to the lash facade."
 
 [[api]]
 symbol = "lash_core::TurnInputClaim::accepted_turn_inputs"
@@ -95924,7 +95924,7 @@ kind = "struct"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "unused-justify"
-reason = "Concrete consumer: workspace and downstream hosts still import lash_core::TurnInputCompletion directly; retain this low-level alias until those callers migrate to the lash facade."
+reason = "Concrete consumer: Lash workspace crate at crates/lash-core/src/runtime/in_memory_store/test_support.rs:52 imports or uses lash_core::TurnInputCompletion directly; retain this low-level alias until that caller migrates to the lash facade."
 
 [[api]]
 symbol = "lash_core::TurnInputCompletion::applications"
@@ -96215,7 +96215,7 @@ kind = "struct"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "unused-justify"
-reason = "Concrete consumer: workspace and downstream hosts still import lash_core::TurnIssue directly; retain this low-level alias until those callers migrate to the lash facade."
+reason = "Concrete consumer: Lash workspace crate at crates/lash-remote-protocol/src/core_conversions/turn_result.rs:223 imports or uses lash_core::TurnIssue directly; retain this low-level alias until that caller migrates to the lash facade."
 
 [[api]]
 symbol = "lash_core::TurnIssue::code"
@@ -96412,7 +96412,7 @@ kind = "struct"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "unused-justify"
-reason = "Concrete consumer: workspace and downstream hosts still import lash_core::TurnResultHookContext directly; retain this low-level alias until those callers migrate to the lash facade."
+reason = "Concrete consumer: Lash workspace crate at crates/lash-plugin-plan-mode/tests/integration.rs:17 imports or uses lash_core::TurnResultHookContext directly; retain this low-level alias until that caller migrates to the lash facade."
 
 [[api]]
 symbol = "lash_core::TurnResultHookContext::session_id"
@@ -97770,7 +97770,7 @@ kind = "function"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "unused-justify"
-reason = "Concrete consumer: workspace and downstream hosts still import lash_core::diff_token_ledger directly; retain this low-level alias until those callers migrate to the lash facade."
+reason = "Concrete consumer: Lash workspace crate at crates/lash/src/usage.rs:34 imports or uses lash_core::diff_token_ledger directly; retain this low-level alias until that caller migrates to the lash facade."
 
 [[api]]
 symbol = "lash_core::diff_usage_reports"
