@@ -1,0 +1,50 @@
+[
+  {
+    "seed": 857,
+    "operations": [
+      { "op": "claim_lease", "owner": 0 },
+      { "op": "enqueue_work", "slot": 0, "value": 0, "coalesce": false },
+      { "op": "enqueue_work", "slot": 1, "value": 1, "coalesce": false },
+      { "op": "claim_work", "selected": true, "selection": 1 },
+      {
+        "op": "commit",
+        "component_mode": 1,
+        "value": 1,
+        "settle_work": true,
+        "settle_inputs": false,
+        "stale_head": false
+      },
+      { "op": "claim_work", "selected": false, "selection": 0 },
+      { "op": "crash" },
+      { "op": "claim_lease", "owner": 1 },
+      { "op": "settle_stale_work" },
+      { "op": "claim_work", "selected": false, "selection": 0 },
+      {
+        "op": "commit",
+        "component_mode": 0,
+        "value": 0,
+        "settle_work": true,
+        "settle_inputs": false,
+        "stale_head": false
+      }
+    ]
+  },
+  {
+    "seed": 858,
+    "operations": [
+      { "op": "claim_lease", "owner": 0 },
+      { "op": "enqueue_turn_input", "slot": 0, "value": 0 },
+      { "op": "claim_turn_inputs", "max_inputs": 1 },
+      {
+        "op": "commit",
+        "component_mode": 0,
+        "value": 0,
+        "settle_work": false,
+        "settle_inputs": true,
+        "stale_head": false
+      },
+      { "op": "enqueue_turn_input", "slot": 0, "value": 0 },
+      { "op": "enqueue_turn_input", "slot": 0, "value": 1 }
+    ]
+  }
+]

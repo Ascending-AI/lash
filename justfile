@@ -209,6 +209,13 @@ store-contract-soak cases='256':
   LASH_STORE_CONTRACT_PROPTEST_CASES="{{cases}}" cargo test -p lash-sqlite-store --locked --test conformance store_contract_state_machine_properties -- --nocapture
   LASH_STORE_CONTRACT_PROPTEST_CASES="{{cases}}" cargo test -p lash-postgres-store --locked --test conformance store_contract_state_machine_properties_when_configured -- --nocapture
 
+# Opt-in runtime-persistence property soak. PostgreSQL executes when its
+# standard LASH_POSTGRES_DATABASE_URL configuration is present.
+runtime-persistence-soak cases='256':
+  LASH_RUNTIME_PERSISTENCE_PROPTEST_CASES="{{cases}}" cargo test -p lash-core --locked runtime_persistence_state_machine_properties -- --nocapture
+  LASH_RUNTIME_PERSISTENCE_PROPTEST_CASES="{{cases}}" cargo test -p lash-sqlite-store --locked --test conformance runtime_persistence_state_machine_properties -- --nocapture
+  LASH_RUNTIME_PERSISTENCE_PROPTEST_CASES="{{cases}}" cargo test -p lash-postgres-store --locked --test conformance runtime_persistence_state_machine_properties_when_configured -- --nocapture
+
 # Opt-in three-backend raw durable-state soak. Requires the standard Postgres
 # configuration and logs the operation kinds omitted by each bounded seed.
 cross-backend-store-soak cases='64' seed='852':

@@ -135,7 +135,7 @@ class ConfidenceGateCiContractTest(unittest.TestCase):
         self.assertGreaterEqual(min_seeds, 4)
         self.assertGreaterEqual(min_boundaries, 256)
 
-    def test_store_contract_properties_have_reproducible_pr_and_soak_budgets(self) -> None:
+    def test_store_properties_have_reproducible_pr_and_soak_budgets(self) -> None:
         gate = GATE.read_text(encoding="utf-8")
         justfile = JUSTFILE.read_text(encoding="utf-8")
         scenario_harnesses = shell_function_body(gate, "run_scenario_harnesses")
@@ -150,6 +150,15 @@ class ConfidenceGateCiContractTest(unittest.TestCase):
             3,
         )
         self.assertIn("store-contract-soak cases='256':", justfile)
+        self.assertIn("default_runtime_persistence_cases=32", scenario_harnesses)
+        self.assertIn("default_runtime_persistence_cases=256", scenario_harnesses)
+        self.assertEqual(
+            scenario_harnesses.count(
+                'LASH_RUNTIME_PERSISTENCE_PROPTEST_CASES="$runtime_persistence_cases"'
+            ),
+            3,
+        )
+        self.assertIn("runtime-persistence-soak cases='256':", justfile)
         cross_backend_soak = shell_function_body(gate, "run_cross_backend_store_soak")
         self.assertIn('LASH_CROSS_BACKEND_SOAK_CASES:-64', cross_backend_soak)
         self.assertIn('LASH_CROSS_BACKEND_CASES="$cases"', cross_backend_soak)
