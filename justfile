@@ -202,12 +202,15 @@ confidence-broad:
 confidence-full:
   bash "{{repo}}/scripts/confidence-gate.sh" full
 
-# Opt-in durable-store property soak. PostgreSQL executes when its standard
-# LASH_POSTGRES_DATABASE_URL configuration is present.
+# Opt-in durable-store and session-graph property soak. PostgreSQL executes
+# when its standard LASH_POSTGRES_DATABASE_URL configuration is present.
 store-contract-soak cases='256':
   LASH_STORE_CONTRACT_PROPTEST_CASES="{{cases}}" cargo test -p lash-core --locked store_contract_state_machine_properties -- --nocapture
   LASH_STORE_CONTRACT_PROPTEST_CASES="{{cases}}" cargo test -p lash-sqlite-store --locked --test conformance store_contract_state_machine_properties -- --nocapture
   LASH_STORE_CONTRACT_PROPTEST_CASES="{{cases}}" cargo test -p lash-postgres-store --locked --test conformance store_contract_state_machine_properties_when_configured -- --nocapture
+  LASH_SESSION_GRAPH_PROPTEST_CASES="{{cases}}" cargo test -p lash-core --locked session_graph_state_machine_properties -- --nocapture
+  LASH_SESSION_GRAPH_PROPTEST_CASES="{{cases}}" cargo test -p lash-sqlite-store --locked --test conformance session_graph_state_machine_properties -- --nocapture
+  LASH_SESSION_GRAPH_PROPTEST_CASES="{{cases}}" cargo test -p lash-postgres-store --locked --test conformance session_graph_state_machine_properties_when_configured -- --nocapture
 
 # Opt-in runtime-persistence property soak. PostgreSQL executes when its
 # standard LASH_POSTGRES_DATABASE_URL configuration is present.
