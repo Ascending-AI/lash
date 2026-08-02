@@ -254,10 +254,6 @@ impl RuntimeSessionPolicy {
     pub fn provider(&self) -> &ProviderHandle {
         &self.binding.provider
     }
-
-    pub fn into_policy(self) -> SessionPolicy {
-        self.policy
-    }
 }
 
 impl std::ops::Deref for RuntimeSessionPolicy {
@@ -343,10 +339,6 @@ impl SessionSpec {
         }
     }
 
-    pub fn inherits(&self) -> bool {
-        self.inherit
-    }
-
     pub fn provider_id(mut self, provider_id: impl Into<String>) -> Self {
         self.provider_id = Some(provider_id.into());
         self
@@ -359,11 +351,6 @@ impl SessionSpec {
 
     pub fn max_turns(mut self, max_turns: usize) -> Self {
         self.max_turns = Some(Some(max_turns));
-        self
-    }
-
-    pub fn clear_max_turns(mut self) -> Self {
-        self.max_turns = Some(None);
         self
     }
 

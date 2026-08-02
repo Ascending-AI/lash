@@ -248,25 +248,6 @@ pub struct AgentFrameRecord {
 }
 
 impl AgentFrameRecord {
-    pub fn new(
-        frame_node_id: impl Into<String>,
-        session_id: impl Into<String>,
-        previous_frame_node_id: Option<String>,
-        reason: AgentFrameReason,
-        assignment: AgentFrameAssignment,
-        protocol_turn_options: ProtocolTurnOptions,
-    ) -> Self {
-        Self::new_at(
-            frame_node_id,
-            session_id,
-            previous_frame_node_id,
-            reason,
-            assignment,
-            protocol_turn_options,
-            <crate::SystemClock as crate::Clock>::timestamp_rfc3339(&crate::SystemClock),
-        )
-    }
-
     #[allow(clippy::too_many_arguments)]
     pub fn new_at(
         frame_node_id: impl Into<String>,
@@ -476,17 +457,6 @@ impl SessionCreateRequest {
         }
     }
 
-    pub fn root_with_policy(
-        start: SessionStartPoint,
-        policy: SessionPolicy,
-        plugin_options: PluginOptions,
-    ) -> Self {
-        Self {
-            policy: Some(policy),
-            ..Self::root(start, plugin_options)
-        }
-    }
-
     pub fn child_session(
         parent_session_id: impl Into<String>,
         start: SessionStartPoint,
@@ -511,18 +481,6 @@ impl SessionCreateRequest {
         }
     }
 
-    pub fn child_session_with_policy(
-        parent_session_id: impl Into<String>,
-        start: SessionStartPoint,
-        policy: SessionPolicy,
-        plugin_options: PluginOptions,
-    ) -> Self {
-        Self {
-            policy: Some(policy),
-            ..Self::child_session(parent_session_id, start, plugin_options)
-        }
-    }
-
     pub fn child(
         parent_session_id: impl Into<String>,
         start: SessionStartPoint,
@@ -537,24 +495,6 @@ impl SessionCreateRequest {
             },
             start,
             Some(policy),
-            plugin_options,
-            usage_source,
-        )
-    }
-
-    pub fn child_inheriting_policy(
-        parent_session_id: impl Into<String>,
-        start: SessionStartPoint,
-        plugin_options: PluginOptions,
-        usage_source: impl Into<String>,
-    ) -> Self {
-        Self::related(
-            SessionRelation::Child {
-                parent_session_id: parent_session_id.into(),
-                caused_by: None,
-            },
-            start,
-            None,
             plugin_options,
             usage_source,
         )

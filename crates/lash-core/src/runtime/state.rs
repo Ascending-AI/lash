@@ -145,16 +145,6 @@ impl RuntimeSessionState {
         self.checkpoint_ref = snapshot.checkpoint_ref.clone();
     }
 
-    pub fn stamp_runtime_state(
-        &mut self,
-        tool_state: Option<&crate::ToolState>,
-        plugin_snapshot: Option<&crate::PluginSessionSnapshot>,
-    ) {
-        self.tool_state_snapshot = tool_state.cloned();
-        self.tool_state_generation = tool_state.map(|snapshot| snapshot.generation());
-        self.plugin_snapshot = plugin_snapshot.cloned();
-    }
-
     pub fn usage_report(&self) -> super::usage::SessionUsageReport {
         super::usage::SessionUsageReport::from_entries(&self.token_ledger)
     }
@@ -219,10 +209,6 @@ impl RuntimeSessionState {
             last_prompt_usage: self.last_prompt_usage.clone(),
             protocol_turn_options: self.protocol_turn_options.clone(),
         }
-    }
-
-    pub fn token_ledger(&self) -> &[TokenLedgerEntry] {
-        &self.token_ledger
     }
 
     pub fn apply_persisted_commit_result(&mut self, result: crate::store::RuntimeCommitResult) {
@@ -408,18 +394,6 @@ impl RuntimeSessionState {
         );
         self.current_frame_node_id = Some(frame_node_id);
         self.agent_frames = self.session_graph.agent_frame_records(&self.session_id);
-    }
-
-    pub fn reset_initial_agent_frame(
-        &mut self,
-        assignment: crate::AgentFrameAssignment,
-        protocol_turn_options: crate::ProtocolTurnOptions,
-    ) {
-        self.reset_initial_agent_frame_with_clock(
-            assignment,
-            protocol_turn_options,
-            &crate::SystemClock,
-        );
     }
 
     pub fn reset_initial_agent_frame_with_clock(

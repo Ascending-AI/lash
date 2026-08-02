@@ -51,12 +51,6 @@ impl LashRuntime {
         self.state.policy.provider_id = self.policy.provider_id.clone();
     }
 
-    /// Update session ID metadata on the runtime config.
-    pub fn set_session_id(&mut self, session_id: Option<String>) {
-        self.policy.session_id = session_id;
-        self.state.policy.session_id = self.policy.session_id.clone();
-    }
-
     /// Apply a mid-run configuration change; see [`SessionConfigPatch`] for
     /// what each field leaves alone and what it replaces.
     pub async fn update_session_config(&mut self, patch: SessionConfigPatch) {
