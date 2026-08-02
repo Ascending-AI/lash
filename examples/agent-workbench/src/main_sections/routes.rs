@@ -68,6 +68,7 @@ async fn app_state(
         .await
         // Audited: this facade read lowers TurnInputStore failures to RuntimeError::StoreCommitFailed without a typed cause.
         .map_err(AppError::internal)?;
+    let queued_work = session.queued_work().await.map_err(AppError::internal)?;
     let turn_input_applications = session
         .remote_turn_input_applications()
         .await
@@ -111,6 +112,7 @@ async fn app_state(
             product_events,
             active_turns,
             pending_turn_inputs,
+            queued_work,
             turn_input_applications,
             usage,
         },
@@ -957,6 +959,7 @@ async fn reset_chat(
         product_events: ProductEventSnapshot::default(),
         active_turns: Vec::new(),
         pending_turn_inputs: Vec::new(),
+        queued_work: Vec::new(),
         turn_input_applications: Vec::new(),
         usage: session.usage_report(),
     }))
@@ -999,6 +1002,139 @@ async fn list_work(
         }),
     );
     Ok(Json(work))
+}
+
+#[derive(Debug, Serialize)]
+struct QueuedWorkBatchAction {
+    accepted: bool,
+    batch_id: String,
+}
+
+async fn list_queued_work(
+    State(state): State<AppState>,
+    Query(query): Query<SessionQuery>,
+) -> Result<Json<Vec<lash::persistence::QueuedWorkBatch>>, AppError> {
+    let session_id = query.resolve(&state)?;
+    state
+        .authorization
+        .authorize(WorkbenchAuthorizationAction::Observe {
+            session_id: session_id.clone(),
+        })?;
+    let session = state
+        .core
+        .session(session_id.clone())
+        .open()
+        .await
+        .map_err(|error| {
+            state.session_admission_error(&session_id, "api.queued_work.list", error)
+        })?;
+    Ok(Json(session.queued_work().await.map_err(AppError::internal)?))
+}
+
+async fn run_queued_work_batch(
+    AxumPath(batch_id): AxumPath<String>,
+    State(state): State<AppState>,
+    Query(query): Query<SessionQuery>,
+) -> Result<Json<QueuedWorkBatchAction>, AppError> {
+    let session_id = query.resolve(&state)?;
+    state
+        .authorization
+        .authorize(WorkbenchAuthorizationAction::ManageQueuedWork {
+            session_id: session_id.clone(),
+        })?;
+    if !state.active_turns.for_session(&session_id).is_empty() {
+        return Err(AppError::conflict(
+            "queued work cannot be run while this session has an active turn",
+        ));
+    }
+    let session = state
+        .core
+        .session(session_id.clone())
+        .open()
+        .await
+        .map_err(|error| {
+            state.session_admission_error(&session_id, "api.queued_work.run", error)
+        })?;
+    if !session
+        .queued_work()
+        .await
+        .map_err(AppError::internal)?
+        .iter()
+        .any(|batch| batch.batch_id == batch_id)
+    {
+        return Err(AppError::not_found(format!(
+            "queued-work batch `{batch_id}` is not pending"
+        )));
+    }
+
+    let turn_id = format!("workbench-queued-{}", uuid::Uuid::new_v4());
+    let request = restate::WorkbenchQueuedTurnWorkflowRequest {
+        turn_id: turn_id.clone(),
+        session_id: session_id.clone(),
+        reason: "workbench_manual_batch_run".to_string(),
+        batch_ids: vec![batch_id.clone()],
+        drain_id: Some(format!("workbench-queued-batch:{batch_id}")),
+    };
+    state.active_turns.insert(&session_id, &turn_id);
+    if let Err(error) = restate::submit_queued_turn_request(
+        &state.restate_http,
+        &state.restate_ingress_url,
+        &request,
+    )
+    .await
+    {
+        state.active_turns.remove(&session_id, &turn_id);
+        return Err(error);
+    }
+    state.trace_for_session(
+        &session_id,
+        "api.queued_work.run_submitted",
+        json!({ "batch_id": batch_id, "turn_id": turn_id }),
+    );
+    Ok(Json(QueuedWorkBatchAction {
+        accepted: true,
+        batch_id,
+    }))
+}
+
+async fn cancel_queued_work_batch(
+    AxumPath(batch_id): AxumPath<String>,
+    State(state): State<AppState>,
+    Query(query): Query<SessionQuery>,
+) -> Result<Json<QueuedWorkBatchAction>, AppError> {
+    let session_id = query.resolve(&state)?;
+    state
+        .authorization
+        .authorize(WorkbenchAuthorizationAction::ManageQueuedWork {
+            session_id: session_id.clone(),
+        })?;
+    let session = state
+        .core
+        .session(session_id.clone())
+        .open()
+        .await
+        .map_err(|error| {
+            state.session_admission_error(&session_id, "api.queued_work.cancel", error)
+        })?;
+    if session
+        .cancel_queued_work_batch(&batch_id)
+        .await
+        .map_err(AppError::internal)?
+        .is_none()
+    {
+        return Err(AppError::conflict(format!(
+            "queued-work batch `{batch_id}` was already claimed, completed, or cancelled"
+        )));
+    }
+    state.trace_for_session(
+        &session_id,
+        "api.queued_work.cancelled",
+        json!({ "batch_id": batch_id }),
+    );
+    Ok(Json(QueuedWorkBatchAction {
+        accepted: true,
+        batch_id,
+    }))
 }
 
 async fn cancel_work(

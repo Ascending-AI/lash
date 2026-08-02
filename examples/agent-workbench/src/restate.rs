@@ -50,6 +50,23 @@ pub(crate) struct WorkbenchQueuedTurnWorkflowRequest {
     pub turn_id: String,
     pub session_id: String,
     pub reason: String,
+    #[serde(default)]
+    pub batch_ids: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub drain_id: Option<String>,
+}
+
+impl WorkbenchQueuedTurnWorkflowRequest {
+    pub(crate) fn queued_turn(&self, session: &lash::LashSession) -> lash::QueuedTurnBuilder {
+        session
+            .queued_turn()
+            .batch_ids(self.batch_ids.iter().cloned())
+            .drain_id(
+                self.drain_id
+                    .clone()
+                    .unwrap_or_else(|| self.turn_id.clone()),
+            )
+    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -967,9 +984,8 @@ async fn run_queued_turn(
             "model": serde_json::to_value(&selected_model).unwrap_or(Value::Null),
         }),
     );
-    let Some(output) = session
-        .queued_turn()
-        .drain_id(request.turn_id.clone())
+    let Some(output) = request
+        .queued_turn(&session)
         .effects(controller)
         .stream_to(&ui_events)
         .await

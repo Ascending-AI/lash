@@ -491,12 +491,25 @@ impl LiveTurnInputs {
     }
 }
 
-#[derive(Clone, Default)]
+#[derive(Clone)]
 pub struct TurnContext {
     plugin_inputs: LiveTurnInputs,
     provider: Option<crate::ProviderHandle>,
     prompt: crate::PromptLayer,
     local_cancel_origin: TurnCancelOriginHint,
+    claim_checkpoint_queued_work: bool,
+}
+
+impl Default for TurnContext {
+    fn default() -> Self {
+        Self {
+            plugin_inputs: LiveTurnInputs::default(),
+            provider: None,
+            prompt: crate::PromptLayer::default(),
+            local_cancel_origin: TurnCancelOriginHint::default(),
+            claim_checkpoint_queued_work: true,
+        }
+    }
 }
 
 impl TurnContext {
@@ -526,6 +539,18 @@ impl TurnContext {
 
     pub(crate) fn local_cancel_origin_hint(&self) -> TurnCancelOriginHint {
         self.local_cancel_origin.clone()
+    }
+
+    pub(crate) fn suppress_checkpoint_queued_work(&mut self) {
+        self.claim_checkpoint_queued_work = false;
+    }
+
+    pub(crate) fn checkpoint_queued_work_limit(&self, default_limit: usize) -> usize {
+        if self.claim_checkpoint_queued_work {
+            default_limit
+        } else {
+            0
+        }
     }
 
     pub fn plugin_input<T>(&self, plugin_id: &'static str) -> Option<&T>

@@ -282,6 +282,15 @@ async fn async_main() -> AnyhowResult<()> {
         .route("/api/accounts/{slug}/messages/{id}", delete(delete_message))
         .route("/api/accounts/{slug}/inbox", get(account_inbox))
         .route("/api/work", get(list_work))
+        .route("/api/queued-work", get(list_queued_work))
+        .route(
+            "/api/queued-work/{batch_id}",
+            delete(cancel_queued_work_batch),
+        )
+        .route(
+            "/api/queued-work/{batch_id}/run",
+            post(run_queued_work_batch),
+        )
         .route("/api/work/{process_id}/cancel", post(cancel_work))
         .route("/api/work/{process_id}/await", get(await_work))
         .route("/api/lashlang-graphs", get(list_lashlang_graphs))
