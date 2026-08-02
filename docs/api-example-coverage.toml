@@ -56156,8 +56156,8 @@ symbol = "lash_core::AbandonEvidence"
 kind = "struct"
 availability = "default+all-features"
 area = "sessions-turns"
-disposition = "unused-remove"
-reason = "No example or concrete unrepresented host class establishes a need for lash_core::AbandonEvidence. Breaking: remove this export; downstream callers must own an equivalent local type or stop depending on the unexercised contract."
+disposition = "unused-justify"
+reason = "Concrete consumer: workspace and downstream hosts still import lash_core::AbandonEvidence directly; retain this low-level alias until those callers migrate to the lash facade."
 
 [[api]]
 symbol = "lash_core::AbandonEvidence::epoch_ms"
@@ -56188,8 +56188,8 @@ symbol = "lash_core::AbandonRequest"
 kind = "struct"
 availability = "default+all-features"
 area = "sessions-turns"
-disposition = "unused-remove"
-reason = "No example or concrete unrepresented host class establishes a need for lash_core::AbandonRequest. Breaking: remove this export; downstream callers must own an equivalent local type or stop depending on the unexercised contract."
+disposition = "unused-justify"
+reason = "Concrete consumer: workspace and downstream hosts still import lash_core::AbandonRequest directly; retain this low-level alias until those callers migrate to the lash facade."
 
 [[api]]
 symbol = "lash_core::AbandonRequest::reason"
@@ -56220,8 +56220,8 @@ symbol = "lash_core::AbandonWriter"
 kind = "enum"
 availability = "default+all-features"
 area = "sessions-turns"
-disposition = "unused-remove"
-reason = "No example or concrete unrepresented host class establishes a need for lash_core::AbandonWriter. Breaking: remove this export; downstream callers must own an equivalent local type or stop depending on the unexercised contract."
+disposition = "unused-justify"
+reason = "Concrete consumer: workspace and downstream hosts still import lash_core::AbandonWriter directly; retain this low-level alias until those callers migrate to the lash facade."
 
 [[api]]
 symbol = "lash_core::AbandonWriter::EngineGaveUp"
@@ -56260,8 +56260,8 @@ symbol = "lash_core::AcceptedInjectedTurnInput"
 kind = "struct"
 availability = "default+all-features"
 area = "sessions-turns"
-disposition = "unused-remove"
-reason = "No example or concrete unrepresented host class establishes a need for lash_core::AcceptedInjectedTurnInput. Breaking: remove this export; downstream callers must own an equivalent local type or stop depending on the unexercised contract."
+disposition = "unused-justify"
+reason = "Concrete consumer: workspace and downstream hosts still import lash_core::AcceptedInjectedTurnInput directly; retain this low-level alias until those callers migrate to the lash facade."
 
 [[api]]
 symbol = "lash_core::AcceptedInjectedTurnInput::id"
@@ -56612,8 +56612,8 @@ symbol = "lash_core::AssembledTurn"
 kind = "struct"
 availability = "default+all-features"
 area = "sessions-turns"
-disposition = "unused-remove"
-reason = "No example or concrete unrepresented host class establishes a need for lash_core::AssembledTurn. Breaking: remove this export; downstream callers must own an equivalent local type or stop depending on the unexercised contract."
+disposition = "unused-justify"
+reason = "Concrete consumer: workspace and downstream hosts still import lash_core::AssembledTurn directly; retain this low-level alias until those callers migrate to the lash facade."
 
 [[api]]
 symbol = "lash_core::AssembledTurn::assistant_output"
@@ -56700,8 +56700,8 @@ symbol = "lash_core::AssistantOutput"
 kind = "struct"
 availability = "default+all-features"
 area = "sessions-turns"
-disposition = "unused-remove"
-reason = "No example or concrete unrepresented host class establishes a need for lash_core::AssistantOutput. Breaking: remove this export; downstream callers must own an equivalent local type or stop depending on the unexercised contract."
+disposition = "unused-justify"
+reason = "Concrete consumer: workspace and downstream hosts still import lash_core::AssistantOutput directly; retain this low-level alias until those callers migrate to the lash facade."
 
 [[api]]
 symbol = "lash_core::AssistantOutput::raw_text"
@@ -56728,36 +56728,12 @@ disposition = "unused-remove"
 reason = "No example or concrete unrepresented host class establishes a need for lash_core::AssistantOutput::state. Breaking: remove this export; downstream callers must own an equivalent local type or stop depending on the unexercised contract."
 
 [[api]]
-symbol = "lash_core::AssistantResponseHookContext"
-kind = "struct"
-availability = "default+all-features"
-area = "sessions-turns"
-disposition = "unused-remove"
-reason = "No example or concrete unrepresented host class establishes a need for lash_core::AssistantResponseHookContext. Breaking: remove this export; downstream callers must own an equivalent local type or stop depending on the unexercised contract."
-
-[[api]]
-symbol = "lash_core::AssistantResponseHookContext::response"
-kind = "field"
-availability = "default+all-features"
-area = "sessions-turns"
-disposition = "unused-remove"
-reason = "No example or concrete unrepresented host class establishes a need for lash_core::AssistantResponseHookContext::response. Breaking: remove this export; downstream callers must own an equivalent local type or stop depending on the unexercised contract."
-
-[[api]]
-symbol = "lash_core::AssistantResponseHookContext::session_id"
-kind = "field"
-availability = "default+all-features"
-area = "sessions-turns"
-disposition = "unused-remove"
-reason = "No example or concrete unrepresented host class establishes a need for lash_core::AssistantResponseHookContext::session_id. Breaking: remove this export; downstream callers must own an equivalent local type or stop depending on the unexercised contract."
-
-[[api]]
 symbol = "lash_core::AssistantResponseTransform"
 kind = "struct"
 availability = "default+all-features"
 area = "sessions-turns"
-disposition = "unused-remove"
-reason = "No example or concrete unrepresented host class establishes a need for lash_core::AssistantResponseTransform. Breaking: remove this export; downstream callers must own an equivalent local type or stop depending on the unexercised contract."
+disposition = "unused-justify"
+reason = "Concrete consumer: workspace and downstream hosts still import lash_core::AssistantResponseTransform directly; retain this low-level alias until those callers migrate to the lash facade."
 
 [[api]]
 symbol = "lash_core::AssistantResponseTransform::events"
@@ -56774,70 +56750,6 @@ availability = "default+all-features"
 area = "sessions-turns"
 disposition = "unused-remove"
 reason = "No example or concrete unrepresented host class establishes a need for lash_core::AssistantResponseTransform::response. Breaking: remove this export; downstream callers must own an equivalent local type or stop depending on the unexercised contract."
-
-[[api]]
-symbol = "lash_core::AssistantStreamHookContext"
-kind = "struct"
-availability = "default+all-features"
-area = "sessions-turns"
-disposition = "unused-remove"
-reason = "No example or concrete unrepresented host class establishes a need for lash_core::AssistantStreamHookContext. Breaking: remove this export; downstream callers must own an equivalent local type or stop depending on the unexercised contract."
-
-[[api]]
-symbol = "lash_core::AssistantStreamHookContext::chunk"
-kind = "field"
-availability = "default+all-features"
-area = "sessions-turns"
-disposition = "unused-remove"
-reason = "No example or concrete unrepresented host class establishes a need for lash_core::AssistantStreamHookContext::chunk. Breaking: remove this export; downstream callers must own an equivalent local type or stop depending on the unexercised contract."
-
-[[api]]
-symbol = "lash_core::AssistantStreamHookContext::session_id"
-kind = "field"
-availability = "default+all-features"
-area = "sessions-turns"
-disposition = "unused-remove"
-reason = "No example or concrete unrepresented host class establishes a need for lash_core::AssistantStreamHookContext::session_id. Breaking: remove this export; downstream callers must own an equivalent local type or stop depending on the unexercised contract."
-
-[[api]]
-symbol = "lash_core::AssistantStreamTransform"
-kind = "struct"
-availability = "default+all-features"
-area = "sessions-turns"
-disposition = "unused-remove"
-reason = "No example or concrete unrepresented host class establishes a need for lash_core::AssistantStreamTransform. Breaking: remove this export; downstream callers must own an equivalent local type or stop depending on the unexercised contract."
-
-[[api]]
-symbol = "lash_core::AssistantStreamTransform::abort_stream"
-kind = "field"
-availability = "default+all-features"
-area = "sessions-turns"
-disposition = "unused-remove"
-reason = "No example or concrete unrepresented host class establishes a need for lash_core::AssistantStreamTransform::abort_stream. Breaking: remove this export; downstream callers must own an equivalent local type or stop depending on the unexercised contract."
-
-[[api]]
-symbol = "lash_core::AssistantStreamTransform::chunk"
-kind = "field"
-availability = "default+all-features"
-area = "sessions-turns"
-disposition = "unused-remove"
-reason = "No example or concrete unrepresented host class establishes a need for lash_core::AssistantStreamTransform::chunk. Breaking: remove this export; downstream callers must own an equivalent local type or stop depending on the unexercised contract."
-
-[[api]]
-symbol = "lash_core::AssistantStreamTransform::events"
-kind = "field"
-availability = "default+all-features"
-area = "sessions-turns"
-disposition = "unused-remove"
-reason = "No example or concrete unrepresented host class establishes a need for lash_core::AssistantStreamTransform::events. Breaking: remove this export; downstream callers must own an equivalent local type or stop depending on the unexercised contract."
-
-[[api]]
-symbol = "lash_core::AssistantStreamTransform::reasoning_deltas"
-kind = "field"
-availability = "default+all-features"
-area = "sessions-turns"
-disposition = "unused-remove"
-reason = "No example or concrete unrepresented host class establishes a need for lash_core::AssistantStreamTransform::reasoning_deltas. Breaking: remove this export; downstream callers must own an equivalent local type or stop depending on the unexercised contract."
 
 [[api]]
 symbol = "lash_core::AttachmentCreateMeta"
@@ -57903,8 +57815,8 @@ symbol = "lash_core::AwaitEventKey"
 kind = "struct"
 availability = "default+all-features"
 area = "sessions-turns"
-disposition = "unused-remove"
-reason = "No example or concrete unrepresented host class establishes a need for lash_core::AwaitEventKey. Breaking: remove this export; downstream callers must own an equivalent local type or stop depending on the unexercised contract."
+disposition = "unused-justify"
+reason = "Concrete consumer: workspace and downstream hosts still import lash_core::AwaitEventKey directly; retain this low-level alias until those callers migrate to the lash facade."
 
 [[api]]
 symbol = "lash_core::AwaitEventKey::key_id"
@@ -58023,8 +57935,8 @@ symbol = "lash_core::AwaitEventWaitIdentity"
 kind = "enum"
 availability = "default+all-features"
 area = "sessions-turns"
-disposition = "unused-remove"
-reason = "No example or concrete unrepresented host class establishes a need for lash_core::AwaitEventWaitIdentity. Breaking: remove this export; downstream callers must own an equivalent local type or stop depending on the unexercised contract."
+disposition = "unused-justify"
+reason = "Concrete consumer: workspace and downstream hosts still import lash_core::AwaitEventWaitIdentity directly; retain this low-level alias until those callers migrate to the lash facade."
 
 [[api]]
 symbol = "lash_core::AwaitEventWaitIdentity::Custom"
@@ -58998,8 +58910,8 @@ symbol = "lash_core::CompactionContext"
 kind = "struct"
 availability = "default+all-features"
 area = "sessions-turns"
-disposition = "unused-remove"
-reason = "No example or concrete unrepresented host class establishes a need for lash_core::CompactionContext. Breaking: remove this export; downstream callers must own an equivalent local type or stop depending on the unexercised contract."
+disposition = "unused-justify"
+reason = "Concrete consumer: workspace and downstream hosts still import lash_core::CompactionContext directly; retain this low-level alias until those callers migrate to the lash facade."
 
 [[api]]
 symbol = "lash_core::CompactionContext::instructions"
@@ -59062,8 +58974,8 @@ symbol = "lash_core::ContextCompaction"
 kind = "struct"
 availability = "default+all-features"
 area = "sessions-turns"
-disposition = "unused-remove"
-reason = "No example or concrete unrepresented host class establishes a need for lash_core::ContextCompaction. Breaking: remove this export; downstream callers must own an equivalent local type or stop depending on the unexercised contract."
+disposition = "unused-justify"
+reason = "Concrete consumer: workspace and downstream hosts still import lash_core::ContextCompaction directly; retain this low-level alias until those callers migrate to the lash facade."
 
 [[api]]
 symbol = "lash_core::ContextCompaction::initial_nodes"
@@ -59118,8 +59030,8 @@ symbol = "lash_core::ContextError"
 kind = "enum"
 availability = "default+all-features"
 area = "sessions-turns"
-disposition = "unused-remove"
-reason = "No example or concrete unrepresented host class establishes a need for lash_core::ContextError. Breaking: remove this export; downstream callers must own an equivalent local type or stop depending on the unexercised contract."
+disposition = "unused-justify"
+reason = "Concrete consumer: workspace and downstream hosts still import lash_core::ContextError directly; retain this low-level alias until those callers migrate to the lash facade."
 
 [[api]]
 symbol = "lash_core::ContextError::Pipeline"
@@ -59246,8 +59158,8 @@ symbol = "lash_core::DeliveryPolicy"
 kind = "enum"
 availability = "default+all-features"
 area = "sessions-turns"
-disposition = "unused-remove"
-reason = "No example or concrete unrepresented host class establishes a need for lash_core::DeliveryPolicy. Breaking: remove this export; downstream callers must own an equivalent local type or stop depending on the unexercised contract."
+disposition = "unused-justify"
+reason = "Concrete consumer: workspace and downstream hosts still import lash_core::DeliveryPolicy directly; retain this low-level alias until those callers migrate to the lash facade."
 
 [[api]]
 symbol = "lash_core::DeliveryPolicy::AfterCurrentTurnCommit"
@@ -60594,8 +60506,8 @@ symbol = "lash_core::EmbeddedRuntimeHost"
 kind = "struct"
 availability = "default+all-features"
 area = "sessions-turns"
-disposition = "unused-remove"
-reason = "No example or concrete unrepresented host class establishes a need for lash_core::EmbeddedRuntimeHost. Breaking: remove this export; downstream callers must own an equivalent local type or stop depending on the unexercised contract."
+disposition = "unused-justify"
+reason = "Concrete consumer: workspace and downstream hosts still import lash_core::EmbeddedRuntimeHost directly; retain this low-level alias until those callers migrate to the lash facade."
 
 [[api]]
 symbol = "lash_core::EmbeddedRuntimeHost::core"
@@ -60906,8 +60818,8 @@ symbol = "lash_core::ExecutionEvidence"
 kind = "struct"
 availability = "default+all-features"
 area = "sessions-turns"
-disposition = "unused-remove"
-reason = "No example or concrete unrepresented host class establishes a need for lash_core::ExecutionEvidence. Breaking: remove this export; downstream callers must own an equivalent local type or stop depending on the unexercised contract."
+disposition = "unused-justify"
+reason = "Concrete consumer: workspace and downstream hosts still import lash_core::ExecutionEvidence directly; retain this low-level alias until those callers migrate to the lash facade."
 
 [[api]]
 symbol = "lash_core::ExecutionEvidence::provider_finish_reason"
@@ -61150,8 +61062,8 @@ symbol = "lash_core::ExecutionSummary"
 kind = "struct"
 availability = "default+all-features"
 area = "sessions-turns"
-disposition = "unused-remove"
-reason = "No example or concrete unrepresented host class establishes a need for lash_core::ExecutionSummary. Breaking: remove this export; downstream callers must own an equivalent local type or stop depending on the unexercised contract."
+disposition = "unused-justify"
+reason = "Concrete consumer: workspace and downstream hosts still import lash_core::ExecutionSummary directly; retain this low-level alias until those callers migrate to the lash facade."
 
 [[api]]
 symbol = "lash_core::ExecutionSummary::duration_ms"
@@ -61186,46 +61098,6 @@ disposition = "unused-remove"
 reason = "No example or concrete unrepresented host class establishes a need for lash_core::ExecutionSummary::started_at_ms. Breaking: remove this export; downstream callers must own an equivalent local type or stop depending on the unexercised contract."
 
 [[api]]
-symbol = "lash_core::ExternalCompletionError"
-kind = "struct"
-availability = "default+all-features"
-area = "sessions-turns"
-disposition = "unused-remove"
-reason = "No example or concrete unrepresented host class establishes a need for lash_core::ExternalCompletionError. Breaking: remove this export; downstream callers must own an equivalent local type or stop depending on the unexercised contract."
-
-[[api]]
-symbol = "lash_core::ExternalCompletionError::code"
-kind = "field"
-availability = "default+all-features"
-area = "sessions-turns"
-disposition = "unused-remove"
-reason = "No example or concrete unrepresented host class establishes a need for lash_core::ExternalCompletionError::code. Breaking: remove this export; downstream callers must own an equivalent local type or stop depending on the unexercised contract."
-
-[[api]]
-symbol = "lash_core::ExternalCompletionError::message"
-kind = "field"
-availability = "default+all-features"
-area = "sessions-turns"
-disposition = "unused-remove"
-reason = "No example or concrete unrepresented host class establishes a need for lash_core::ExternalCompletionError::message. Breaking: remove this export; downstream callers must own an equivalent local type or stop depending on the unexercised contract."
-
-[[api]]
-symbol = "lash_core::ExternalCompletionError::new"
-kind = "function"
-availability = "default+all-features"
-area = "sessions-turns"
-disposition = "unused-remove"
-reason = "No example or concrete unrepresented host class establishes a need for lash_core::ExternalCompletionError::new. Breaking: remove this export; downstream callers must own an equivalent local type or stop depending on the unexercised contract."
-
-[[api]]
-symbol = "lash_core::ExternalCompletionError::raw"
-kind = "field"
-availability = "default+all-features"
-area = "sessions-turns"
-disposition = "unused-remove"
-reason = "No example or concrete unrepresented host class establishes a need for lash_core::ExternalCompletionError::raw. Breaking: remove this export; downstream callers must own an equivalent local type or stop depending on the unexercised contract."
-
-[[api]]
 symbol = "lash_core::FileAttachmentStore"
 kind = "struct"
 availability = "default+all-features"
@@ -61258,8 +61130,8 @@ symbol = "lash_core::ForkPoint"
 kind = "struct"
 availability = "default+all-features"
 area = "sessions-turns"
-disposition = "unused-remove"
-reason = "No example or concrete unrepresented host class establishes a need for lash_core::ForkPoint. Breaking: remove this export; downstream callers must own an equivalent local type or stop depending on the unexercised contract."
+disposition = "unused-justify"
+reason = "Concrete consumer: workspace and downstream hosts still import lash_core::ForkPoint directly; retain this low-level alias until those callers migrate to the lash facade."
 
 [[api]]
 symbol = "lash_core::ForkPoint::checkpoint_ref"
@@ -61306,8 +61178,8 @@ symbol = "lash_core::ForkSessionRequest"
 kind = "struct"
 availability = "default+all-features"
 area = "sessions-turns"
-disposition = "unused-remove"
-reason = "No example or concrete unrepresented host class establishes a need for lash_core::ForkSessionRequest. Breaking: remove this export; downstream callers must own an equivalent local type or stop depending on the unexercised contract."
+disposition = "unused-justify"
+reason = "Concrete consumer: workspace and downstream hosts still import lash_core::ForkSessionRequest directly; retain this low-level alias until those callers migrate to the lash facade."
 
 [[api]]
 symbol = "lash_core::ForkSessionRequest::node_id"
@@ -61346,8 +61218,8 @@ symbol = "lash_core::ForkSessionResult"
 kind = "struct"
 availability = "default+all-features"
 area = "sessions-turns"
-disposition = "unused-remove"
-reason = "No example or concrete unrepresented host class establishes a need for lash_core::ForkSessionResult. Breaking: remove this export; downstream callers must own an equivalent local type or stop depending on the unexercised contract."
+disposition = "unused-justify"
+reason = "Concrete consumer: workspace and downstream hosts still import lash_core::ForkSessionResult directly; retain this low-level alias until those callers migrate to the lash facade."
 
 [[api]]
 symbol = "lash_core::ForkSessionResult::node_id"
@@ -61378,8 +61250,8 @@ symbol = "lash_core::GcReport"
 kind = "struct"
 availability = "default+all-features"
 area = "sessions-turns"
-disposition = "unused-remove"
-reason = "No example or concrete unrepresented host class establishes a need for lash_core::GcReport. Breaking: remove this export; downstream callers must own an equivalent local type or stop depending on the unexercised contract."
+disposition = "unused-justify"
+reason = "Concrete consumer: workspace and downstream hosts still import lash_core::GcReport directly; retain this low-level alias until those callers migrate to the lash facade."
 
 [[api]]
 symbol = "lash_core::GcReport::deleted_blob_count"
@@ -62088,8 +61960,8 @@ symbol = "lash_core::InlineRuntimeEffectController"
 kind = "struct"
 availability = "default+all-features"
 area = "sessions-turns"
-disposition = "unused-remove"
-reason = "No example or concrete unrepresented host class establishes a need for lash_core::InlineRuntimeEffectController. Breaking: remove this export; downstream callers must own an equivalent local type or stop depending on the unexercised contract."
+disposition = "unused-justify"
+reason = "Concrete consumer: workspace and downstream hosts still import lash_core::InlineRuntimeEffectController directly; retain this low-level alias until those callers migrate to the lash facade."
 
 [[api]]
 symbol = "lash_core::InlineRuntimeEffectController::allow_process_lifetime_completion_keys"
@@ -62104,8 +61976,8 @@ symbol = "lash_core::InputItem"
 kind = "enum"
 availability = "default+all-features"
 area = "sessions-turns"
-disposition = "unused-remove"
-reason = "No example or concrete unrepresented host class establishes a need for lash_core::InputItem. Breaking: remove this export; downstream callers must own an equivalent local type or stop depending on the unexercised contract."
+disposition = "unused-justify"
+reason = "Concrete consumer: workspace and downstream hosts still import lash_core::InputItem directly; retain this low-level alias until those callers migrate to the lash facade."
 
 [[api]]
 symbol = "lash_core::InputItem::Attachment"
@@ -62245,8 +62117,8 @@ symbol = "lash_core::LashRuntime"
 kind = "struct"
 availability = "default+all-features"
 area = "sessions-turns"
-disposition = "unused-remove"
-reason = "No example or concrete unrepresented host class establishes a need for lash_core::LashRuntime. Breaking: remove this export; downstream callers must own an equivalent local type or stop depending on the unexercised contract."
+disposition = "unused-justify"
+reason = "Concrete consumer: workspace and downstream hosts still import lash_core::LashRuntime directly; retain this low-level alias until those callers migrate to the lash facade."
 
 [[api]]
 symbol = "lash_core::LashRuntime::activate_managed_session"
@@ -62991,8 +62863,8 @@ symbol = "lash_core::LiveReplayGap"
 kind = "struct"
 availability = "default+all-features"
 area = "sessions-turns"
-disposition = "unused-remove"
-reason = "No example or concrete unrepresented host class establishes a need for lash_core::LiveReplayGap. Breaking: remove this export; downstream callers must own an equivalent local type or stop depending on the unexercised contract."
+disposition = "unused-justify"
+reason = "Concrete consumer: workspace and downstream hosts still import lash_core::LiveReplayGap directly; retain this low-level alias until those callers migrate to the lash facade."
 
 [[api]]
 symbol = "lash_core::LiveReplayGap::latest_cursor"
@@ -63039,8 +62911,8 @@ symbol = "lash_core::LiveReplayGapReason"
 kind = "enum"
 availability = "default+all-features"
 area = "sessions-turns"
-disposition = "unused-remove"
-reason = "No example or concrete unrepresented host class establishes a need for lash_core::LiveReplayGapReason. Breaking: remove this export; downstream callers must own an equivalent local type or stop depending on the unexercised contract."
+disposition = "unused-justify"
+reason = "Concrete consumer: workspace and downstream hosts still import lash_core::LiveReplayGapReason directly; retain this low-level alias until those callers migrate to the lash facade."
 
 [[api]]
 symbol = "lash_core::LiveReplayGapReason::Trimmed"
@@ -64090,8 +63962,8 @@ symbol = "lash_core::MergeKey"
 kind = "enum"
 availability = "default+all-features"
 area = "sessions-turns"
-disposition = "unused-remove"
-reason = "No example or concrete unrepresented host class establishes a need for lash_core::MergeKey. Breaking: remove this export; downstream callers must own an equivalent local type or stop depending on the unexercised contract."
+disposition = "unused-justify"
+reason = "Concrete consumer: workspace and downstream hosts still import lash_core::MergeKey directly; retain this low-level alias until those callers migrate to the lash facade."
 
 [[api]]
 symbol = "lash_core::MergeKey::Group"
@@ -64830,8 +64702,8 @@ symbol = "lash_core::NonNegativeFiniteF64"
 kind = "struct"
 availability = "default+all-features"
 area = "sessions-turns"
-disposition = "unused-remove"
-reason = "No example or concrete unrepresented host class establishes a need for lash_core::NonNegativeFiniteF64. Breaking: remove this export; downstream callers must own an equivalent local type or stop depending on the unexercised contract."
+disposition = "unused-justify"
+reason = "Concrete consumer: workspace and downstream hosts still import lash_core::NonNegativeFiniteF64 directly; retain this low-level alias until those callers migrate to the lash facade."
 
 [[api]]
 symbol = "lash_core::NonNegativeFiniteF64::get"
@@ -64850,36 +64722,12 @@ disposition = "unused-remove"
 reason = "No example or concrete unrepresented host class establishes a need for lash_core::NonNegativeFiniteF64::new. Breaking: remove this export; downstream callers must own an equivalent local type or stop depending on the unexercised contract."
 
 [[api]]
-symbol = "lash_core::NonNegativeFiniteF64Error"
-kind = "struct"
-availability = "default+all-features"
-area = "sessions-turns"
-disposition = "unused-remove"
-reason = "No example or concrete unrepresented host class establishes a need for lash_core::NonNegativeFiniteF64Error. Breaking: remove this export; downstream callers must own an equivalent local type or stop depending on the unexercised contract."
-
-[[api]]
-symbol = "lash_core::NonNegativeFiniteF64Error::message"
-kind = "field"
-availability = "default+all-features"
-area = "sessions-turns"
-disposition = "unused-remove"
-reason = "No example or concrete unrepresented host class establishes a need for lash_core::NonNegativeFiniteF64Error::message. Breaking: remove this export; downstream callers must own an equivalent local type or stop depending on the unexercised contract."
-
-[[api]]
 symbol = "lash_core::NoopAttachmentManifest"
 kind = "struct"
 availability = "default+all-features"
 area = "attachments"
 disposition = "unused-justify"
 reason = "Concrete host class: custom durable store or attachment backend implementers; bundled examples use repository backends and do not implement this backend-facing contract."
-
-[[api]]
-symbol = "lash_core::NoopEventSink"
-kind = "struct"
-availability = "default+all-features"
-area = "sessions-turns"
-disposition = "unused-remove"
-reason = "No example or concrete unrepresented host class establishes a need for lash_core::NoopEventSink. Breaking: remove this export; downstream callers must own an equivalent local type or stop depending on the unexercised contract."
 
 [[api]]
 symbol = "lash_core::NoopTurnActivitySink"
@@ -65351,8 +65199,8 @@ symbol = "lash_core::OperationId"
 kind = "struct"
 availability = "default+all-features"
 area = "sessions-turns"
-disposition = "unused-remove"
-reason = "No example or concrete unrepresented host class establishes a need for lash_core::OperationId. Breaking: remove this export; downstream callers must own an equivalent local type or stop depending on the unexercised contract."
+disposition = "unused-justify"
+reason = "Concrete consumer: workspace and downstream hosts still import lash_core::OperationId directly; retain this low-level alias until those callers migrate to the lash facade."
 
 [[api]]
 symbol = "lash_core::OperationId::key"
@@ -65805,8 +65653,8 @@ symbol = "lash_core::PendingTurnInput"
 kind = "struct"
 availability = "default+all-features"
 area = "sessions-turns"
-disposition = "unused-remove"
-reason = "No example or concrete unrepresented host class establishes a need for lash_core::PendingTurnInput. Breaking: remove this export; downstream callers must own an equivalent local type or stop depending on the unexercised contract."
+disposition = "unused-justify"
+reason = "Concrete consumer: workspace and downstream hosts still import lash_core::PendingTurnInput directly; retain this low-level alias until those callers migrate to the lash facade."
 
 [[api]]
 symbol = "lash_core::PendingTurnInput::accepted_input"
@@ -66004,8 +65852,8 @@ symbol = "lash_core::PendingTurnInputCancelResult"
 kind = "struct"
 availability = "default+all-features"
 area = "sessions-turns"
-disposition = "unused-remove"
-reason = "No example or concrete unrepresented host class establishes a need for lash_core::PendingTurnInputCancelResult. Breaking: remove this export; downstream callers must own an equivalent local type or stop depending on the unexercised contract."
+disposition = "unused-justify"
+reason = "Concrete consumer: workspace and downstream hosts still import lash_core::PendingTurnInputCancelResult directly; retain this low-level alias until those callers migrate to the lash facade."
 
 [[api]]
 symbol = "lash_core::PendingTurnInputCancelResult::outcome"
@@ -66087,8 +65935,8 @@ symbol = "lash_core::PendingTurnInputClaimDiagnostics"
 kind = "struct"
 availability = "default+all-features"
 area = "sessions-turns"
-disposition = "unused-remove"
-reason = "No example or concrete unrepresented host class establishes a need for lash_core::PendingTurnInputClaimDiagnostics. Breaking: remove this export; downstream callers must own an equivalent local type or stop depending on the unexercised contract."
+disposition = "unused-justify"
+reason = "Concrete consumer: workspace and downstream hosts still import lash_core::PendingTurnInputClaimDiagnostics directly; retain this low-level alias until those callers migrate to the lash facade."
 
 [[api]]
 symbol = "lash_core::PendingTurnInputClaimDiagnostics::claim_fencing_token"
@@ -66135,8 +65983,8 @@ symbol = "lash_core::PendingTurnInputDraft"
 kind = "struct"
 availability = "default+all-features"
 area = "sessions-turns"
-disposition = "unused-remove"
-reason = "No example or concrete unrepresented host class establishes a need for lash_core::PendingTurnInputDraft. Breaking: remove this export; downstream callers must own an equivalent local type or stop depending on the unexercised contract."
+disposition = "unused-justify"
+reason = "Concrete consumer: workspace and downstream hosts still import lash_core::PendingTurnInputDraft directly; retain this low-level alias until those callers migrate to the lash facade."
 
 [[api]]
 symbol = "lash_core::PendingTurnInputDraft::ingress"
@@ -66387,8 +66235,8 @@ symbol = "lash_core::PersistentRuntimeServices"
 kind = "struct"
 availability = "default+all-features"
 area = "sessions-turns"
-disposition = "unused-remove"
-reason = "No example or concrete unrepresented host class establishes a need for lash_core::PersistentRuntimeServices. Breaking: remove this export; downstream callers must own an equivalent local type or stop depending on the unexercised contract."
+disposition = "unused-justify"
+reason = "Concrete consumer: workspace and downstream hosts still import lash_core::PersistentRuntimeServices directly; retain this low-level alias until those callers migrate to the lash facade."
 
 [[api]]
 symbol = "lash_core::PersistentRuntimeServices::new"
@@ -76935,30 +76783,6 @@ usage = "examples/agent-workbench/src/main_sections/state.rs:900#return Err(lash
 evidence = "source-qualified"
 
 [[api]]
-symbol = "lash_core::QueuedWorkRunErrorClass"
-kind = "enum"
-availability = "default+all-features"
-area = "sessions-turns"
-disposition = "unused-remove"
-reason = "No example or concrete unrepresented host class establishes a need for lash_core::QueuedWorkRunErrorClass. Breaking: remove this export; downstream callers must own an equivalent local type or stop depending on the unexercised contract."
-
-[[api]]
-symbol = "lash_core::QueuedWorkRunErrorClass::Terminal"
-kind = "variant"
-availability = "default+all-features"
-area = "sessions-turns"
-disposition = "unused-remove"
-reason = "No example or concrete unrepresented host class establishes a need for lash_core::QueuedWorkRunErrorClass::Terminal. Breaking: remove this export; downstream callers must own an equivalent local type or stop depending on the unexercised contract."
-
-[[api]]
-symbol = "lash_core::QueuedWorkRunErrorClass::Transient"
-kind = "variant"
-availability = "default+all-features"
-area = "sessions-turns"
-disposition = "unused-remove"
-reason = "No example or concrete unrepresented host class establishes a need for lash_core::QueuedWorkRunErrorClass::Transient. Breaking: remove this export; downstream callers must own an equivalent local type or stop depending on the unexercised contract."
-
-[[api]]
 symbol = "lash_core::QueuedWorkRunHandle"
 kind = "trait"
 availability = "default+all-features"
@@ -76989,8 +76813,8 @@ symbol = "lash_core::QueuedWorkRunRequest"
 kind = "struct"
 availability = "default+all-features"
 area = "sessions-turns"
-disposition = "unused-remove"
-reason = "No example or concrete unrepresented host class establishes a need for lash_core::QueuedWorkRunRequest. Breaking: remove this export; downstream callers must own an equivalent local type or stop depending on the unexercised contract."
+disposition = "unused-justify"
+reason = "Concrete consumer: workspace and downstream hosts still import lash_core::QueuedWorkRunRequest directly; retain this low-level alias until those callers migrate to the lash facade."
 
 [[api]]
 symbol = "lash_core::QueuedWorkRunRequest::reason"
@@ -77260,8 +77084,8 @@ symbol = "lash_core::ReasoningDisableEncoding"
 kind = "enum"
 availability = "default+all-features"
 area = "sessions-turns"
-disposition = "unused-remove"
-reason = "No example or concrete unrepresented host class establishes a need for lash_core::ReasoningDisableEncoding. Breaking: remove this export; downstream callers must own an equivalent local type or stop depending on the unexercised contract."
+disposition = "unused-justify"
+reason = "Concrete consumer: workspace and downstream hosts still import lash_core::ReasoningDisableEncoding directly; retain this low-level alias until those callers migrate to the lash facade."
 
 [[api]]
 symbol = "lash_core::ReasoningDisableEncoding::Budget"
@@ -77528,44 +77352,12 @@ disposition = "unused-justify"
 reason = "Concrete host class: third-party plugin, provider, or tool-source implementers implementing the extension contract."
 
 [[api]]
-symbol = "lash_core::RequestTimeout"
-kind = "enum"
-availability = "default+all-features"
-area = "sessions-turns"
-disposition = "unused-remove"
-reason = "No example or concrete unrepresented host class establishes a need for lash_core::RequestTimeout. Breaking: remove this export; downstream callers must own an equivalent local type or stop depending on the unexercised contract."
-
-[[api]]
-symbol = "lash_core::RequestTimeout::Disabled"
-kind = "variant"
-availability = "default+all-features"
-area = "sessions-turns"
-disposition = "unused-remove"
-reason = "No example or concrete unrepresented host class establishes a need for lash_core::RequestTimeout::Disabled. Breaking: remove this export; downstream callers must own an equivalent local type or stop depending on the unexercised contract."
-
-[[api]]
-symbol = "lash_core::RequestTimeout::Millis"
-kind = "variant"
-availability = "default+all-features"
-area = "sessions-turns"
-disposition = "unused-remove"
-reason = "No example or concrete unrepresented host class establishes a need for lash_core::RequestTimeout::Millis. Breaking: remove this export; downstream callers must own an equivalent local type or stop depending on the unexercised contract."
-
-[[api]]
-symbol = "lash_core::RequestTimeout::Millis::0"
-kind = "field"
-availability = "default+all-features"
-area = "sessions-turns"
-disposition = "unused-remove"
-reason = "No example or concrete unrepresented host class establishes a need for lash_core::RequestTimeout::Millis::0. Breaking: remove this export; downstream callers must own an equivalent local type or stop depending on the unexercised contract."
-
-[[api]]
 symbol = "lash_core::Resolution"
 kind = "enum"
 availability = "default+all-features"
 area = "sessions-turns"
-disposition = "unused-remove"
-reason = "No example or concrete unrepresented host class establishes a need for lash_core::Resolution. Breaking: remove this export; downstream callers must own an equivalent local type or stop depending on the unexercised contract."
+disposition = "unused-justify"
+reason = "Concrete consumer: workspace and downstream hosts still import lash_core::Resolution directly; retain this low-level alias until those callers migrate to the lash facade."
 
 [[api]]
 symbol = "lash_core::Resolution::Cancelled"
@@ -77620,8 +77412,8 @@ symbol = "lash_core::ResolveOutcome"
 kind = "enum"
 availability = "default+all-features"
 area = "sessions-turns"
-disposition = "unused-remove"
-reason = "No example or concrete unrepresented host class establishes a need for lash_core::ResolveOutcome. Breaking: remove this export; downstream callers must own an equivalent local type or stop depending on the unexercised contract."
+disposition = "unused-justify"
+reason = "Concrete consumer: workspace and downstream hosts still import lash_core::ResolveOutcome directly; retain this low-level alias until those callers migrate to the lash facade."
 
 [[api]]
 symbol = "lash_core::ResolveOutcome::Accepted"
@@ -78471,8 +78263,8 @@ symbol = "lash_core::RuntimeEffectControllerError"
 kind = "struct"
 availability = "default+all-features"
 area = "sessions-turns"
-disposition = "unused-remove"
-reason = "No example or concrete unrepresented host class establishes a need for lash_core::RuntimeEffectControllerError. Breaking: remove this export; downstream callers must own an equivalent local type or stop depending on the unexercised contract."
+disposition = "unused-justify"
+reason = "Concrete consumer: workspace and downstream hosts still import lash_core::RuntimeEffectControllerError directly; retain this low-level alias until those callers migrate to the lash facade."
 
 [[api]]
 symbol = "lash_core::RuntimeEffectControllerError::cause"
@@ -78527,8 +78319,8 @@ symbol = "lash_core::RuntimeEffectEnvelope"
 kind = "struct"
 availability = "default+all-features"
 area = "sessions-turns"
-disposition = "unused-remove"
-reason = "No example or concrete unrepresented host class establishes a need for lash_core::RuntimeEffectEnvelope. Breaking: remove this export; downstream callers must own an equivalent local type or stop depending on the unexercised contract."
+disposition = "unused-justify"
+reason = "Concrete consumer: workspace and downstream hosts still import lash_core::RuntimeEffectEnvelope directly; retain this low-level alias until those callers migrate to the lash facade."
 
 [[api]]
 symbol = "lash_core::RuntimeEffectEnvelope::canonical_form"
@@ -78583,8 +78375,8 @@ symbol = "lash_core::RuntimeEffectKind"
 kind = "enum"
 availability = "default+all-features"
 area = "sessions-turns"
-disposition = "unused-remove"
-reason = "No example or concrete unrepresented host class establishes a need for lash_core::RuntimeEffectKind. Breaking: remove this export; downstream callers must own an equivalent local type or stop depending on the unexercised contract."
+disposition = "unused-justify"
+reason = "Concrete consumer: workspace and downstream hosts still import lash_core::RuntimeEffectKind directly; retain this low-level alias until those callers migrate to the lash facade."
 
 [[api]]
 symbol = "lash_core::RuntimeEffectKind::AwaitEvent"
@@ -78695,8 +78487,8 @@ symbol = "lash_core::RuntimeEffectLocalExecutor"
 kind = "struct"
 availability = "default+all-features"
 area = "sessions-turns"
-disposition = "unused-remove"
-reason = "No example or concrete unrepresented host class establishes a need for lash_core::RuntimeEffectLocalExecutor. Breaking: remove this export; downstream callers must own an equivalent local type or stop depending on the unexercised contract."
+disposition = "unused-justify"
+reason = "Concrete consumer: workspace and downstream hosts still import lash_core::RuntimeEffectLocalExecutor directly; retain this low-level alias until those callers migrate to the lash facade."
 
 [[api]]
 symbol = "lash_core::RuntimeEffectLocalExecutor::await_event"
@@ -78831,8 +78623,8 @@ symbol = "lash_core::RuntimeEffectOutcome"
 kind = "enum"
 availability = "default+all-features"
 area = "sessions-turns"
-disposition = "unused-remove"
-reason = "No example or concrete unrepresented host class establishes a need for lash_core::RuntimeEffectOutcome. Breaking: remove this export; downstream callers must own an equivalent local type or stop depending on the unexercised contract."
+disposition = "unused-justify"
+reason = "Concrete consumer: workspace and downstream hosts still import lash_core::RuntimeEffectOutcome directly; retain this low-level alias until those callers migrate to the lash facade."
 
 [[api]]
 symbol = "lash_core::RuntimeEffectOutcome::AwaitEvent"
@@ -79183,8 +78975,8 @@ symbol = "lash_core::RuntimeEnvironment"
 kind = "struct"
 availability = "default+all-features"
 area = "sessions-turns"
-disposition = "unused-remove"
-reason = "No example or concrete unrepresented host class establishes a need for lash_core::RuntimeEnvironment. Breaking: remove this export; downstream callers must own an equivalent local type or stop depending on the unexercised contract."
+disposition = "unused-justify"
+reason = "Concrete consumer: workspace and downstream hosts still import lash_core::RuntimeEnvironment directly; retain this low-level alias until those callers migrate to the lash facade."
 
 [[api]]
 symbol = "lash_core::RuntimeEnvironment::builder"
@@ -80025,8 +79817,8 @@ symbol = "lash_core::RuntimeHandle"
 kind = "struct"
 availability = "default+all-features"
 area = "sessions-turns"
-disposition = "unused-remove"
-reason = "No example or concrete unrepresented host class establishes a need for lash_core::RuntimeHandle. Breaking: remove this export; downstream callers must own an equivalent local type or stop depending on the unexercised contract."
+disposition = "unused-justify"
+reason = "Concrete consumer: workspace and downstream hosts still import lash_core::RuntimeHandle directly; retain this low-level alias until those callers migrate to the lash facade."
 
 [[api]]
 symbol = "lash_core::RuntimeHandle::abandon_queued_work_claim"
@@ -80331,8 +80123,8 @@ symbol = "lash_core::RuntimeInvocation"
 kind = "struct"
 availability = "default+all-features"
 area = "sessions-turns"
-disposition = "unused-remove"
-reason = "No example or concrete unrepresented host class establishes a need for lash_core::RuntimeInvocation. Breaking: remove this export; downstream callers must own an equivalent local type or stop depending on the unexercised contract."
+disposition = "unused-justify"
+reason = "Concrete consumer: workspace and downstream hosts still import lash_core::RuntimeInvocation directly; retain this low-level alias until those callers migrate to the lash facade."
 
 [[api]]
 symbol = "lash_core::RuntimeInvocation::causal_ref"
@@ -80651,8 +80443,8 @@ symbol = "lash_core::RuntimeScope"
 kind = "struct"
 availability = "default+all-features"
 area = "sessions-turns"
-disposition = "unused-remove"
-reason = "No example or concrete unrepresented host class establishes a need for lash_core::RuntimeScope. Breaking: remove this export; downstream callers must own an equivalent local type or stop depending on the unexercised contract."
+disposition = "unused-justify"
+reason = "Concrete consumer: workspace and downstream hosts still import lash_core::RuntimeScope directly; retain this low-level alias until those callers migrate to the lash facade."
 
 [[api]]
 symbol = "lash_core::RuntimeScope::for_turn"
@@ -80811,8 +80603,8 @@ symbol = "lash_core::RuntimeSessionState"
 kind = "struct"
 availability = "default+all-features"
 area = "sessions-turns"
-disposition = "unused-remove"
-reason = "No example or concrete unrepresented host class establishes a need for lash_core::RuntimeSessionState. Breaking: remove this export; downstream callers must own an equivalent local type or stop depending on the unexercised contract."
+disposition = "unused-justify"
+reason = "Concrete consumer: workspace and downstream hosts still import lash_core::RuntimeSessionState directly; retain this low-level alias until those callers migrate to the lash facade."
 
 [[api]]
 symbol = "lash_core::RuntimeSessionState::agent_frames"
@@ -81962,8 +81754,8 @@ symbol = "lash_core::SessionAdmission"
 kind = "enum"
 availability = "default+all-features"
 area = "sessions-turns"
-disposition = "unused-remove"
-reason = "No example or concrete unrepresented host class establishes a need for lash_core::SessionAdmission. Breaking: remove this export; downstream callers must own an equivalent local type or stop depending on the unexercised contract."
+disposition = "unused-justify"
+reason = "Concrete consumer: workspace and downstream hosts still import lash_core::SessionAdmission directly; retain this low-level alias until those callers migrate to the lash facade."
 
 [[api]]
 symbol = "lash_core::SessionAdmission::Created"
@@ -82162,8 +81954,8 @@ symbol = "lash_core::SessionBinding"
 kind = "struct"
 availability = "default+all-features"
 area = "sessions-turns"
-disposition = "unused-remove"
-reason = "No example or concrete unrepresented host class establishes a need for lash_core::SessionBinding. Breaking: remove this export; downstream callers must own an equivalent local type or stop depending on the unexercised contract."
+disposition = "unused-justify"
+reason = "Concrete consumer: workspace and downstream hosts still import lash_core::SessionBinding directly; retain this low-level alias until those callers migrate to the lash facade."
 
 [[api]]
 symbol = "lash_core::SessionBinding::cwd"
@@ -82234,8 +82026,8 @@ symbol = "lash_core::SessionCommand"
 kind = "enum"
 availability = "default+all-features"
 area = "sessions-turns"
-disposition = "unused-remove"
-reason = "No example or concrete unrepresented host class establishes a need for lash_core::SessionCommand. Breaking: remove this export; downstream callers must own an equivalent local type or stop depending on the unexercised contract."
+disposition = "unused-justify"
+reason = "Concrete consumer: workspace and downstream hosts still import lash_core::SessionCommand directly; retain this low-level alias until those callers migrate to the lash facade."
 
 [[api]]
 symbol = "lash_core::SessionCommand::RefreshToolCatalog"
@@ -82274,8 +82066,8 @@ symbol = "lash_core::SessionCommandReceipt"
 kind = "struct"
 availability = "default+all-features"
 area = "sessions-turns"
-disposition = "unused-remove"
-reason = "No example or concrete unrepresented host class establishes a need for lash_core::SessionCommandReceipt. Breaking: remove this export; downstream callers must own an equivalent local type or stop depending on the unexercised contract."
+disposition = "unused-justify"
+reason = "Concrete consumer: workspace and downstream hosts still import lash_core::SessionCommandReceipt directly; retain this low-level alias until those callers migrate to the lash facade."
 
 [[api]]
 symbol = "lash_core::SessionCommandReceipt::batch_id"
@@ -83192,8 +82984,8 @@ symbol = "lash_core::SessionGraph"
 kind = "struct"
 availability = "default+all-features"
 area = "sessions-turns"
-disposition = "unused-remove"
-reason = "No example or concrete unrepresented host class establishes a need for lash_core::SessionGraph. Breaking: remove this export; downstream callers must own an equivalent local type or stop depending on the unexercised contract."
+disposition = "unused-justify"
+reason = "Concrete consumer: workspace and downstream hosts still import lash_core::SessionGraph directly; retain this low-level alias until those callers migrate to the lash facade."
 
 [[api]]
 symbol = "lash_core::SessionGraph::active_path_contains"
@@ -83392,8 +83184,8 @@ symbol = "lash_core::SessionHandle"
 kind = "struct"
 availability = "default+all-features"
 area = "sessions-turns"
-disposition = "unused-remove"
-reason = "No example or concrete unrepresented host class establishes a need for lash_core::SessionHandle. Breaking: remove this export; downstream callers must own an equivalent local type or stop depending on the unexercised contract."
+disposition = "unused-justify"
+reason = "Concrete consumer: workspace and downstream hosts still import lash_core::SessionHandle directly; retain this low-level alias until those callers migrate to the lash facade."
 
 [[api]]
 symbol = "lash_core::SessionHandle::observed_processes"
@@ -83496,8 +83288,8 @@ symbol = "lash_core::SessionHistoryRecord"
 kind = "type_alias"
 availability = "default+all-features"
 area = "sessions-turns"
-disposition = "unused-remove"
-reason = "No example or concrete unrepresented host class establishes a need for lash_core::SessionHistoryRecord. Breaking: remove this export; downstream callers must own an equivalent local type or stop depending on the unexercised contract."
+disposition = "unused-justify"
+reason = "Concrete consumer: workspace and downstream hosts still import lash_core::SessionHistoryRecord directly; retain this low-level alias until those callers migrate to the lash facade."
 
 [[api]]
 symbol = "lash_core::SessionId"
@@ -83600,8 +83392,8 @@ symbol = "lash_core::SessionMeta"
 kind = "struct"
 availability = "default+all-features"
 area = "sessions-turns"
-disposition = "unused-remove"
-reason = "No example or concrete unrepresented host class establishes a need for lash_core::SessionMeta. Breaking: remove this export; downstream callers must own an equivalent local type or stop depending on the unexercised contract."
+disposition = "unused-justify"
+reason = "Concrete consumer: workspace and downstream hosts still import lash_core::SessionMeta directly; retain this low-level alias until those callers migrate to the lash facade."
 
 [[api]]
 symbol = "lash_core::SessionMeta::created_at"
@@ -83752,8 +83544,8 @@ symbol = "lash_core::SessionNodeRecord"
 kind = "struct"
 availability = "default+all-features"
 area = "sessions-turns"
-disposition = "unused-remove"
-reason = "No example or concrete unrepresented host class establishes a need for lash_core::SessionNodeRecord. Breaking: remove this export; downstream callers must own an equivalent local type or stop depending on the unexercised contract."
+disposition = "unused-justify"
+reason = "Concrete consumer: workspace and downstream hosts still import lash_core::SessionNodeRecord directly; retain this low-level alias until those callers migrate to the lash facade."
 
 [[api]]
 symbol = "lash_core::SessionNodeRecord::decode_storage_body"
@@ -84367,8 +84159,8 @@ symbol = "lash_core::SessionPolicy"
 kind = "struct"
 availability = "default+all-features"
 area = "sessions-turns"
-disposition = "unused-remove"
-reason = "No example or concrete unrepresented host class establishes a need for lash_core::SessionPolicy. Breaking: remove this export; downstream callers must own an equivalent local type or stop depending on the unexercised contract."
+disposition = "unused-justify"
+reason = "Concrete consumer: workspace and downstream hosts still import lash_core::SessionPolicy directly; retain this low-level alias until those callers migrate to the lash facade."
 
 [[api]]
 symbol = "lash_core::SessionPolicy::autonomous"
@@ -84487,8 +84279,8 @@ symbol = "lash_core::SessionQueueEventKind"
 kind = "enum"
 availability = "default+all-features"
 area = "sessions-turns"
-disposition = "unused-remove"
-reason = "No example or concrete unrepresented host class establishes a need for lash_core::SessionQueueEventKind. Breaking: remove this export; downstream callers must own an equivalent local type or stop depending on the unexercised contract."
+disposition = "unused-justify"
+reason = "Concrete consumer: workspace and downstream hosts still import lash_core::SessionQueueEventKind directly; retain this low-level alias until those callers migrate to the lash facade."
 
 [[api]]
 symbol = "lash_core::SessionQueueEventKind::Cancelled"
@@ -84809,8 +84601,8 @@ symbol = "lash_core::SessionRevision"
 kind = "struct"
 availability = "default+all-features"
 area = "sessions-turns"
-disposition = "unused-remove"
-reason = "No example or concrete unrepresented host class establishes a need for lash_core::SessionRevision. Breaking: remove this export; downstream callers must own an equivalent local type or stop depending on the unexercised contract."
+disposition = "unused-justify"
+reason = "Concrete consumer: workspace and downstream hosts still import lash_core::SessionRevision directly; retain this low-level alias until those callers migrate to the lash facade."
 
 [[api]]
 symbol = "lash_core::SessionRevision::0"
@@ -84901,8 +84693,8 @@ symbol = "lash_core::SessionScopeId"
 kind = "struct"
 availability = "default+all-features"
 area = "sessions-turns"
-disposition = "unused-remove"
-reason = "No example or concrete unrepresented host class establishes a need for lash_core::SessionScopeId. Breaking: remove this export; downstream callers must own an equivalent local type or stop depending on the unexercised contract."
+disposition = "unused-justify"
+reason = "Concrete consumer: workspace and downstream hosts still import lash_core::SessionScopeId directly; retain this low-level alias until those callers migrate to the lash facade."
 
 [[api]]
 symbol = "lash_core::SessionScopeId::as_str"
@@ -84925,8 +84717,8 @@ symbol = "lash_core::SessionSnapshot"
 kind = "struct"
 availability = "default+all-features"
 area = "sessions-turns"
-disposition = "unused-remove"
-reason = "No example or concrete unrepresented host class establishes a need for lash_core::SessionSnapshot. Breaking: remove this export; downstream callers must own an equivalent local type or stop depending on the unexercised contract."
+disposition = "unused-justify"
+reason = "Concrete consumer: workspace and downstream hosts still import lash_core::SessionSnapshot directly; retain this low-level alias until those callers migrate to the lash facade."
 
 [[api]]
 symbol = "lash_core::SessionSnapshot::agent_frames"
@@ -86214,8 +86006,8 @@ symbol = "lash_core::SlotPolicy"
 kind = "enum"
 availability = "default+all-features"
 area = "sessions-turns"
-disposition = "unused-remove"
-reason = "No example or concrete unrepresented host class establishes a need for lash_core::SlotPolicy. Breaking: remove this export; downstream callers must own an equivalent local type or stop depending on the unexercised contract."
+disposition = "unused-justify"
+reason = "Concrete consumer: workspace and downstream hosts still import lash_core::SlotPolicy directly; retain this low-level alias until those callers migrate to the lash facade."
 
 [[api]]
 symbol = "lash_core::SlotPolicy::Exclusive"
@@ -87031,8 +86823,8 @@ symbol = "lash_core::StreamTermination"
 kind = "enum"
 availability = "default+all-features"
 area = "sessions-turns"
-disposition = "unused-remove"
-reason = "No example or concrete unrepresented host class establishes a need for lash_core::StreamTermination. Breaking: remove this export; downstream callers must own an equivalent local type or stop depending on the unexercised contract."
+disposition = "unused-justify"
+reason = "Concrete consumer: workspace and downstream hosts still import lash_core::StreamTermination directly; retain this low-level alias until those callers migrate to the lash facade."
 
 [[api]]
 symbol = "lash_core::StreamTermination::EofTolerated"
@@ -87103,8 +86895,8 @@ symbol = "lash_core::TerminationPolicy"
 kind = "struct"
 availability = "default+all-features"
 area = "sessions-turns"
-disposition = "unused-remove"
-reason = "No example or concrete unrepresented host class establishes a need for lash_core::TerminationPolicy. Breaking: remove this export; downstream callers must own an equivalent local type or stop depending on the unexercised contract."
+disposition = "unused-justify"
+reason = "Concrete consumer: workspace and downstream hosts still import lash_core::TerminationPolicy directly; retain this low-level alias until those callers migrate to the lash facade."
 
 [[api]]
 symbol = "lash_core::TerminationPolicy::treat_missing_done_as_failure"
@@ -87247,8 +87039,8 @@ symbol = "lash_core::TokenLedgerEntry"
 kind = "struct"
 availability = "default+all-features"
 area = "sessions-turns"
-disposition = "unused-remove"
-reason = "No example or concrete unrepresented host class establishes a need for lash_core::TokenLedgerEntry. Breaking: remove this export; downstream callers must own an equivalent local type or stop depending on the unexercised contract."
+disposition = "unused-justify"
+reason = "Concrete consumer: workspace and downstream hosts still import lash_core::TokenLedgerEntry directly; retain this low-level alias until those callers migrate to the lash facade."
 
 [[api]]
 symbol = "lash_core::TokenLedgerEntry::model"
@@ -95102,8 +94894,8 @@ symbol = "lash_core::TurnCancellationEvidence"
 kind = "struct"
 availability = "default+all-features"
 area = "sessions-turns"
-disposition = "unused-remove"
-reason = "No example or concrete unrepresented host class establishes a need for lash_core::TurnCancellationEvidence. Breaking: remove this export; downstream callers must own an equivalent local type or stop depending on the unexercised contract."
+disposition = "unused-justify"
+reason = "Concrete consumer: workspace and downstream hosts still import lash_core::TurnCancellationEvidence directly; retain this low-level alias until those callers migrate to the lash facade."
 
 [[api]]
 symbol = "lash_core::TurnCancellationEvidence::origin"
@@ -95134,8 +94926,8 @@ symbol = "lash_core::TurnCause"
 kind = "struct"
 availability = "default+all-features"
 area = "sessions-turns"
-disposition = "unused-remove"
-reason = "No example or concrete unrepresented host class establishes a need for lash_core::TurnCause. Breaking: remove this export; downstream callers must own an equivalent local type or stop depending on the unexercised contract."
+disposition = "unused-justify"
+reason = "Concrete consumer: workspace and downstream hosts still import lash_core::TurnCause directly; retain this low-level alias until those callers migrate to the lash facade."
 
 [[api]]
 symbol = "lash_core::TurnCause::event_type"
@@ -95182,8 +94974,8 @@ symbol = "lash_core::TurnContext"
 kind = "struct"
 availability = "default+all-features"
 area = "sessions-turns"
-disposition = "unused-remove"
-reason = "No example or concrete unrepresented host class establishes a need for lash_core::TurnContext. Breaking: remove this export; downstream callers must own an equivalent local type or stop depending on the unexercised contract."
+disposition = "unused-justify"
+reason = "Concrete consumer: workspace and downstream hosts still import lash_core::TurnContext directly; retain this low-level alias until those callers migrate to the lash facade."
 
 [[api]]
 symbol = "lash_core::TurnContext::add_prompt_contribution"
@@ -96021,8 +95813,8 @@ symbol = "lash_core::TurnHookContext"
 kind = "struct"
 availability = "default+all-features"
 area = "sessions-turns"
-disposition = "unused-remove"
-reason = "No example or concrete unrepresented host class establishes a need for lash_core::TurnHookContext. Breaking: remove this export; downstream callers must own an equivalent local type or stop depending on the unexercised contract."
+disposition = "unused-justify"
+reason = "Concrete consumer: workspace and downstream hosts still import lash_core::TurnHookContext directly; retain this low-level alias until those callers migrate to the lash facade."
 
 [[api]]
 symbol = "lash_core::TurnHookContext::session_id"
@@ -96161,8 +95953,8 @@ symbol = "lash_core::TurnInputAcceptanceReceipt"
 kind = "struct"
 availability = "default+all-features"
 area = "sessions-turns"
-disposition = "unused-remove"
-reason = "No example or concrete unrepresented host class establishes a need for lash_core::TurnInputAcceptanceReceipt. Breaking: remove this export; downstream callers must own an equivalent local type or stop depending on the unexercised contract."
+disposition = "unused-justify"
+reason = "Concrete consumer: workspace and downstream hosts still import lash_core::TurnInputAcceptanceReceipt directly; retain this low-level alias until those callers migrate to the lash facade."
 
 [[api]]
 symbol = "lash_core::TurnInputAcceptanceReceipt::ingress"
@@ -96201,8 +95993,8 @@ symbol = "lash_core::TurnInputApplication"
 kind = "struct"
 availability = "default+all-features"
 area = "sessions-turns"
-disposition = "unused-remove"
-reason = "No example or concrete unrepresented host class establishes a need for lash_core::TurnInputApplication. Breaking: remove this export; downstream callers must own an equivalent local type or stop depending on the unexercised contract."
+disposition = "unused-justify"
+reason = "Concrete consumer: workspace and downstream hosts still import lash_core::TurnInputApplication directly; retain this low-level alias until those callers migrate to the lash facade."
 
 [[api]]
 symbol = "lash_core::TurnInputApplication::checkpoint"
@@ -96283,8 +96075,8 @@ symbol = "lash_core::TurnInputClaim"
 kind = "struct"
 availability = "default+all-features"
 area = "sessions-turns"
-disposition = "unused-remove"
-reason = "No example or concrete unrepresented host class establishes a need for lash_core::TurnInputClaim. Breaking: remove this export; downstream callers must own an equivalent local type or stop depending on the unexercised contract."
+disposition = "unused-justify"
+reason = "Concrete consumer: workspace and downstream hosts still import lash_core::TurnInputClaim directly; retain this low-level alias until those callers migrate to the lash facade."
 
 [[api]]
 symbol = "lash_core::TurnInputClaim::accepted_turn_inputs"
@@ -96451,8 +96243,8 @@ symbol = "lash_core::TurnInputCompletion"
 kind = "struct"
 availability = "default+all-features"
 area = "sessions-turns"
-disposition = "unused-remove"
-reason = "No example or concrete unrepresented host class establishes a need for lash_core::TurnInputCompletion. Breaking: remove this export; downstream callers must own an equivalent local type or stop depending on the unexercised contract."
+disposition = "unused-justify"
+reason = "Concrete consumer: workspace and downstream hosts still import lash_core::TurnInputCompletion directly; retain this low-level alias until those callers migrate to the lash facade."
 
 [[api]]
 symbol = "lash_core::TurnInputCompletion::applications"
@@ -96742,8 +96534,8 @@ symbol = "lash_core::TurnIssue"
 kind = "struct"
 availability = "default+all-features"
 area = "sessions-turns"
-disposition = "unused-remove"
-reason = "No example or concrete unrepresented host class establishes a need for lash_core::TurnIssue. Breaking: remove this export; downstream callers must own an equivalent local type or stop depending on the unexercised contract."
+disposition = "unused-justify"
+reason = "Concrete consumer: workspace and downstream hosts still import lash_core::TurnIssue directly; retain this low-level alias until those callers migrate to the lash facade."
 
 [[api]]
 symbol = "lash_core::TurnIssue::code"
@@ -96939,8 +96731,8 @@ symbol = "lash_core::TurnResultHookContext"
 kind = "struct"
 availability = "default+all-features"
 area = "sessions-turns"
-disposition = "unused-remove"
-reason = "No example or concrete unrepresented host class establishes a need for lash_core::TurnResultHookContext. Breaking: remove this export; downstream callers must own an equivalent local type or stop depending on the unexercised contract."
+disposition = "unused-justify"
+reason = "Concrete consumer: workspace and downstream hosts still import lash_core::TurnResultHookContext directly; retain this low-level alias until those callers migrate to the lash facade."
 
 [[api]]
 symbol = "lash_core::TurnResultHookContext::session_id"
@@ -98297,8 +98089,8 @@ symbol = "lash_core::diff_token_ledger"
 kind = "function"
 availability = "default+all-features"
 area = "sessions-turns"
-disposition = "unused-remove"
-reason = "No example or concrete unrepresented host class establishes a need for lash_core::diff_token_ledger. Breaking: remove this export; downstream callers must own an equivalent local type or stop depending on the unexercised contract."
+disposition = "unused-justify"
+reason = "Concrete consumer: workspace and downstream hosts still import lash_core::diff_token_ledger directly; retain this low-level alias until those callers migrate to the lash facade."
 
 [[api]]
 symbol = "lash_core::diff_usage_reports"

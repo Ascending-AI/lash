@@ -42,17 +42,18 @@ pub use crate::turn::{
     QueuedTurnBuilder, TurnActivityFanout, TurnBuilder, TurnOutput, TurnResult, TurnStream,
     message_role, message_text,
 };
+pub use lash_core::runtime::ExternalCompletionError;
 pub use lash_core::{
     AwaitEventKey, AwaitEventWaitIdentity, EffectReplayOwnership, ExecutionSummary,
-    ExternalCompletionError, GenerationOverlay, InputItem, LlmCallRecord, ModelLimits, ModelSpec,
-    PendingTurnInput, PendingTurnInputCancelOutcome, PendingTurnInputCancelResult,
-    PendingTurnInputCancelTarget, PendingTurnInputSuffixCancelOutcome, PluginStack, Resolution,
-    ResolveOutcome, SessionCommand, SessionCommandReceipt, SessionConfigPatch,
-    SessionCreateRequest, SessionError, SessionSpec, SessionStartPoint, TurnActivity,
-    TurnActivityId, TurnActivitySink, TurnAddress, TurnAttach, TurnCancelOriginHint,
-    TurnCancelOutcome, TurnCancelReceipt, TurnCancelRequest, TurnCancellationEvidence, TurnCause,
-    TurnEvent, TurnFinish, TurnInput, TurnInputAcceptanceReceipt, TurnInputApplication,
-    TurnOutcome, TurnStop, TurnTerminal, TurnWorkDriver,
+    GenerationOverlay, InputItem, LlmCallRecord, ModelLimits, ModelSpec, PendingTurnInput,
+    PendingTurnInputCancelOutcome, PendingTurnInputCancelResult, PendingTurnInputCancelTarget,
+    PendingTurnInputSuffixCancelOutcome, PluginStack, Resolution, ResolveOutcome, SessionCommand,
+    SessionCommandReceipt, SessionConfigPatch, SessionCreateRequest, SessionError, SessionSpec,
+    SessionStartPoint, TurnActivity, TurnActivityId, TurnActivitySink, TurnAddress, TurnAttach,
+    TurnCancelOriginHint, TurnCancelOutcome, TurnCancelReceipt, TurnCancelRequest,
+    TurnCancellationEvidence, TurnCause, TurnEvent, TurnFinish, TurnInput,
+    TurnInputAcceptanceReceipt, TurnInputApplication, TurnOutcome, TurnStop, TurnTerminal,
+    TurnWorkDriver,
 };
 /// Cooperative cancellation handle accepted by
 /// [`TurnBuilder::cancel`](crate::TurnBuilder::cancel); re-exported so
@@ -447,13 +448,13 @@ pub mod provider {
     /// [`TurnIssue`](crate::turn::TurnIssue) and session error envelopes.
     pub use lash_core::ProviderFailureKind;
     pub use lash_core::provider::{
-        ProviderRateLimitPolicy, ProviderReliability, ProviderRetryPolicy,
+        ProviderRateLimitPolicy, ProviderReliability, ProviderRetryPolicy, RequestTimeout,
     };
     pub use lash_core::{
         CacheControlDialect, LlmTimeouts, ModelCapability, Provider, ProviderComponents,
         ProviderFactory, ProviderHandle, ProviderOptions, ProviderSpec, ReasoningCapability,
-        ReasoningDisableEncoding, ReasoningEncoding, ReasoningSelection, RequestTimeout,
-        SamplingCapability, StreamTermination,
+        ReasoningDisableEncoding, ReasoningEncoding, ReasoningSelection, SamplingCapability,
+        StreamTermination,
     };
     /// Request/response/error vocabulary of [`Provider::complete`],
     /// re-exported so hosts can implement provider decorators (admission
