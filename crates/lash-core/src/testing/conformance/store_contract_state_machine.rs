@@ -1007,7 +1007,7 @@ async fn apply_operation(
             };
             handles
                 .registry
-                .compact_process_tombstones(u64::MAX, watermark)
+                .compact_process_tombstones(u64::MAX, watermark, None)
                 .await
                 .map_err(|error| error.to_string())?;
         }
@@ -1877,7 +1877,7 @@ async fn assert_prune_tombstone_watermark_safety(
         "Prune/tombstone/watermark safety: pruned id was indistinguishable from never-existing id"
     );
     registry
-        .compact_process_tombstones(u64::MAX, ProjectionWatermark::UpTo(terminal_cursor))
+        .compact_process_tombstones(u64::MAX, ProjectionWatermark::UpTo(terminal_cursor), None)
         .await
         .map_err(|error| TestCaseError::fail(error.to_string()))?;
     prop_assert!(
@@ -1909,7 +1909,7 @@ async fn assert_prune_tombstone_watermark_safety(
         "Prune/tombstone/watermark safety: tombstone retained payload"
     );
     registry
-        .compact_process_tombstones(u64::MAX, ProjectionWatermark::UpTo(deletion_cursor))
+        .compact_process_tombstones(u64::MAX, ProjectionWatermark::UpTo(deletion_cursor), None)
         .await
         .map_err(|error| TestCaseError::fail(error.to_string()))?;
     prop_assert!(
@@ -2018,7 +2018,7 @@ async fn assert_prune_reregister_registry_state_is_fresh(
     );
 
     let compacted = registry
-        .compact_process_tombstones(u64::MAX, ProjectionWatermark::UpTo(deletion_cursor))
+        .compact_process_tombstones(u64::MAX, ProjectionWatermark::UpTo(deletion_cursor), None)
         .await
         .map_err(|error| TestCaseError::fail(error.to_string()))?;
     prop_assert_eq!(

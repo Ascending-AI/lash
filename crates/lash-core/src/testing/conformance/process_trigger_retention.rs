@@ -24,9 +24,225 @@ where
     Fut: Future<Output = ProcessTriggerRetentionHandles>,
 {
     process_prune_preserves_trigger_mutation_receipts(make().await).await;
+    delivery_delete_is_bound_to_observed_row_identity(make().await).await;
     process_prune_only_deletes_deliveries_for_pruned_processes(make().await).await;
     pruned_delivery_process_is_not_a_recovery_candidate(make().await).await;
-    reregistered_process_shadows_tombstone_and_preserves_delivery(make().await).await;
+    reregistered_between_classification_and_delete_preserves_delivery(make().await).await;
+    outstanding_delivery_blocks_interleaved_tombstone_compaction(make().await).await;
+}
+
+async fn delivery_delete_is_bound_to_observed_row_identity(
+    handles: ProcessTriggerRetentionHandles,
+) {
+    const SESSION: &str = "delivery-retention-identity-session";
+    register_trigger(
+        &handles.triggers,
+        SESSION,
+        "delivery-retention-identity-key",
+        "delivery-retention-identity-source",
+        "delivery-retention-identity-register",
+    )
+    .await;
+    for occurrence in ["first", "second"] {
+        let ingress = handles
+            .triggers
+            .ingest_occurrence(crate::TriggerOccurrenceRequest::new(
+                "ui.button.pressed",
+                "delivery-retention-identity-source",
+                serde_json::json!({ "button": "Blue" }),
+                format!("delivery-retention-identity-{occurrence}"),
+            ))
+            .await
+            .expect("ingest identity-law occurrence");
+        assert_eq!(ingress.reservations.len(), 1);
+    }
+    let candidates = handles
+        .triggers
+        .list_delivery_retention_candidates()
+        .await
+        .expect("list delivery retention candidates");
+    assert_eq!(candidates.len(), 2);
+
+    // Model a row replacement between classification and deletion: the row key
+    // now identifies the second row while the stale plan still carries the
+    // first row's process id. No current row matches the complete observation.
+    let mut stale_observation = candidates[0].clone();
+    stale_observation.occurrence_id = candidates[1].occurrence_id.clone();
+    stale_observation.subscription_id = candidates[1].subscription_id.clone();
+    assert_eq!(
+        handles
+            .triggers
+            .delete_delivery_retention_candidates(&[stale_observation])
+            .await
+            .expect("apply stale row observation"),
+        0,
+        "a stale classification must not expand into a process-wide delete"
+    );
+    assert_eq!(
+        handles
+            .triggers
+            .list_delivery_retention_candidates()
+            .await
+            .expect("list rows after stale delete")
+            .len(),
+        2,
+        "both the original and replacement rows survive a mismatched observation"
+    );
+
+    assert_eq!(
+        handles
+            .triggers
+            .delete_delivery_retention_candidates(std::slice::from_ref(&candidates[0]))
+            .await
+            .expect("delete exact observed row"),
+        1,
+        "the exact observed row remains reclaimable"
+    );
+    assert_eq!(
+        handles
+            .triggers
+            .list_delivery_retention_candidates()
+            .await
+            .expect("list rows after exact delete"),
+        vec![candidates[1].clone()],
+        "an exact delete preserves every unlisted row"
+    );
+}
+
+async fn outstanding_delivery_blocks_interleaved_tombstone_compaction(
+    handles: ProcessTriggerRetentionHandles,
+) {
+    const SESSION: &str = "process-compact-interleave-session";
+    register_trigger(
+        &handles.triggers,
+        SESSION,
+        "process-compact-interleave-key",
+        "process-compact-interleave-source",
+        "process-compact-interleave-register",
+    )
+    .await;
+    let ingress = handles
+        .triggers
+        .ingest_occurrence(crate::TriggerOccurrenceRequest::new(
+            "ui.button.pressed",
+            "process-compact-interleave-source",
+            serde_json::json!({ "button": "Blue" }),
+            "process-compact-interleave-occurrence",
+        ))
+        .await
+        .expect("ingest occurrence");
+    assert_eq!(ingress.reservations.len(), 1);
+    let process_id = ingress.reservations[0].process_id.clone();
+    handles
+        .registry
+        .register_process(
+            ProcessRegistration::new(
+                process_id.clone(),
+                ProcessInput::External {
+                    metadata: serde_json::Value::Null,
+                },
+                RecoveryDisposition::ExternallyOwned,
+                ProcessProvenance::host(),
+            )
+            .with_identity(ProcessIdentity::new("test")),
+        )
+        .await
+        .expect("register delivery process");
+    handles
+        .registry
+        .complete_process(
+            &process_id,
+            ProcessAwaitOutput::Success {
+                value: serde_json::json!("done"),
+                control: None,
+            },
+            ProcessCompletionAuthority::external_owner(),
+        )
+        .await
+        .expect("complete delivery process");
+
+    // Compaction's preceding reconciliation observes the process as live and
+    // preserves its delivery. A concurrent retention writer then prunes the
+    // process before raw compaction starts. The raw lever must perform its own
+    // complete delivery survey and refuse the new tombstone.
+    assert_eq!(
+        crate::reconcile_pruned_trigger_deliveries(
+            handles.registry.as_ref(),
+            handles.triggers.as_ref(),
+        )
+        .await
+        .expect("reconcile while process is live"),
+        0
+    );
+    handles
+        .registry
+        .prune_terminal_processes(u64::MAX, None, ProjectionWatermark::NoProjector)
+        .await
+        .expect("interleaved process prune");
+    assert_eq!(
+        handles
+            .registry
+            .compact_process_tombstones(
+                u64::MAX,
+                ProjectionWatermark::NoProjector,
+                Some(handles.triggers.as_ref()),
+            )
+            .await
+            .expect("delivery-aware tombstone compaction"),
+        0,
+        "compaction must refuse a tombstone guarded by an outstanding delivery"
+    );
+    assert_eq!(
+        handles
+            .registry
+            .filter_tombstoned_process_ids(std::slice::from_ref(&process_id))
+            .await
+            .expect("classify guarded tombstone"),
+        vec![process_id.clone()],
+        "the outstanding delivery's tombstone must remain durable"
+    );
+    assert_eq!(
+        handles
+            .triggers
+            .list_deliveries_by_process_id(&process_id)
+            .await
+            .expect("list guarded delivery")
+            .len(),
+        1,
+        "refusing compaction preserves the delivery beside its tombstone"
+    );
+
+    assert_eq!(
+        crate::reconcile_pruned_trigger_deliveries(
+            handles.registry.as_ref(),
+            handles.triggers.as_ref(),
+        )
+        .await
+        .expect("reconcile guarded delivery"),
+        1
+    );
+    assert_eq!(
+        handles
+            .registry
+            .compact_process_tombstones(
+                u64::MAX,
+                ProjectionWatermark::NoProjector,
+                Some(handles.triggers.as_ref()),
+            )
+            .await
+            .expect("compact reconciled tombstone"),
+        1,
+        "a later cycle may compact after the delivery is gone"
+    );
+    assert!(
+        handles
+            .triggers
+            .list_deliveries_by_process_id(&process_id)
+            .await
+            .expect("list delivery after compaction")
+            .is_empty(),
+        "compaction can never orphan the delivery"
+    );
 }
 
 fn owner(session_id: &str) -> TriggerOwnerScope {
@@ -312,7 +528,7 @@ async fn pruned_delivery_process_is_not_a_recovery_candidate(
     );
 }
 
-async fn reregistered_process_shadows_tombstone_and_preserves_delivery(
+async fn reregistered_between_classification_and_delete_preserves_delivery(
     handles: ProcessTriggerRetentionHandles,
 ) {
     const SESSION: &str = "process-prune-reuse-session";
@@ -380,17 +596,49 @@ async fn reregistered_process_shadows_tombstone_and_preserves_delivery(
         "the coordinator is the only process-trigger delivery reclamation path"
     );
 
-    handles
-        .registry
-        .register_process(registration())
+    assert_eq!(
+        handles
+            .registry
+            .filter_tombstoned_process_ids(std::slice::from_ref(&process_id))
+            .await
+            .expect("classify tombstoned id before interleaving"),
+        vec![process_id.clone()],
+        "the reconciliation plan must first classify the retained tombstone"
+    );
+    let registry = Arc::clone(&handles.registry);
+    let interleaved_process_id = process_id.clone();
+    assert_eq!(
+        crate::runtime::reconcile_pruned_trigger_deliveries_interleaved(
+            handles.registry.as_ref(),
+            handles.triggers.as_ref(),
+            move || async move {
+                registry
+                    .register_process(
+                        ProcessRegistration::new(
+                            interleaved_process_id,
+                            ProcessInput::External {
+                                metadata: serde_json::Value::Null,
+                            },
+                            RecoveryDisposition::ExternallyOwned,
+                            ProcessProvenance::host(),
+                        )
+                        .with_identity(ProcessIdentity::new("test")),
+                    )
+                    .await
+                    .expect("re-register after classification and before delete");
+            },
+        )
         .await
-        .expect("re-register pruned process id");
+        .expect("reconcile across process-id reuse interleaving"),
+        0,
+        "stale classification must not delete a re-registered process's delivery"
+    );
     assert!(
         handles
             .registry
             .filter_tombstoned_process_ids(std::slice::from_ref(&process_id))
             .await
-            .expect("filter tombstoned ids")
+            .expect("filter tombstoned ids after re-registration")
             .is_empty(),
         "a live process shadows its stale tombstone"
     );
@@ -402,16 +650,6 @@ async fn reregistered_process_shadows_tombstone_and_preserves_delivery(
             .expect("filter unregistered ids")
             .is_empty(),
         "a re-registered process is live, not unregistered"
-    );
-    assert_eq!(
-        crate::reconcile_pruned_trigger_deliveries(
-            handles.registry.as_ref(),
-            handles.triggers.as_ref(),
-        )
-        .await
-        .expect("reconcile after process-id reuse"),
-        0,
-        "the coordinator must never delete a live process's delivery"
     );
     assert_eq!(
         handles

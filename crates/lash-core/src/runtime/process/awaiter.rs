@@ -669,9 +669,10 @@ impl ProcessRegistry for WatchedProcessRegistry {
         &self,
         cutoff_epoch_ms: u64,
         watermark: ProjectionWatermark,
+        trigger_store: Option<&dyn crate::TriggerStore>,
     ) -> Result<usize, PluginError> {
         self.inner
-            .compact_process_tombstones(cutoff_epoch_ms, watermark)
+            .compact_process_tombstones(cutoff_epoch_ms, watermark, trigger_store)
             .await
     }
 

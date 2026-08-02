@@ -284,7 +284,6 @@ async fn async_main() -> anyhow_like::Result<()> {
     // state, so host-scheduled retention runs through the same
     // `Processes::prune` lever every embedder uses.
     let retention_processes = core.processes();
-    let retention_triggers = core.triggers();
     #[cfg(feature = "restate")]
     let restate_ingress_url =
         (durability == AgentServiceDurability::Restate).then_some(restate_ingress_url);
@@ -343,7 +342,7 @@ async fn async_main() -> anyhow_like::Result<()> {
     // Host-scheduled retention for terminal process rows (ADR 0017). This runs
     // in both durability modes: whichever registry backs the deployment is the
     // one that accumulates rows.
-    spawn_retention(retention_processes, retention_triggers);
+    spawn_retention(retention_processes);
 
     // Keep a state clone for the drain; the router consumes the original.
     let drain_state = state.clone();
@@ -390,8 +389,7 @@ async fn async_main() -> anyhow_like::Result<()> {
     Ok(())
 }
 
-/// Host-scheduled retention for terminal process rows and trigger mutation
-/// receipts (ADRs 0017 and 0023). The process
+/// Host-scheduled retention for terminal process rows (ADR 0017). The process
 /// registry keeps a row — plus its events, wake deliveries, observer edges, and leases
 /// — for every process this service ever started; once a run is terminal and
 /// its outcome has been consumed, those rows have no remaining reader and would
@@ -401,11 +399,11 @@ async fn async_main() -> anyhow_like::Result<()> {
 /// it on the same maintenance cadence as the session-store `vacuum` /
 /// `gc_unreachable` reclamation (see docs/persistence.html).
 ///
-/// Retention is driven through the public process and trigger facade levers
-/// rather than raw stores, so the example uses the same host surface every
-/// embedder does. Each lever receives the host's explicit bound; neither
-/// subsystem infers a policy from the other.
-fn spawn_retention(processes: lash::process::Processes, triggers: lash::admin::CoreTriggerAdmin) {
+/// Retention is driven through the public process facade rather than the raw
+/// store, so the example uses the same host surface every embedder does.
+/// Trigger mutation receipts deliberately remain unbounded until FIG-653 adds
+/// terminal-gated eligibility for deleting idempotency evidence.
+fn spawn_retention(processes: lash::process::Processes) {
     use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
     // The window must be comfortably longer than any wait: a cutoff shorter than
@@ -429,23 +427,20 @@ fn spawn_retention(processes: lash::process::Processes, triggers: lash::admin::C
                 .prune(cutoff, lash::process::ProjectionWatermark::NoProjector)
                 .await;
             match process_result {
-                Ok(report) if report.pruned_processes > 0 || report.pruned_events > 0 => {
+                Ok(report)
+                    if report.pruned_processes > 0
+                        || report.pruned_events > 0
+                        || report.pruned_trigger_deliveries > 0 =>
+                {
                     println!(
-                        "agent-service pruned {} terminal processes and {} events (cutoff {cutoff}ms)",
-                        report.pruned_processes, report.pruned_events
+                        "agent-service pruned {} terminal processes, {} events, and {} trigger deliveries (cutoff {cutoff}ms)",
+                        report.pruned_processes,
+                        report.pruned_events,
+                        report.pruned_trigger_deliveries
                     );
                 }
                 Ok(_) => {}
                 Err(err) => eprintln!("agent-service: process retention prune failed: {err}"),
-            }
-            match triggers.prune_mutation_receipts(cutoff).await {
-                Ok(pruned) if pruned > 0 => println!(
-                    "agent-service pruned {pruned} trigger mutation receipts (cutoff {cutoff}ms)"
-                ),
-                Ok(_) => {}
-                Err(err) => {
-                    eprintln!("agent-service: trigger receipt retention prune failed: {err}")
-                }
             }
         }
     });

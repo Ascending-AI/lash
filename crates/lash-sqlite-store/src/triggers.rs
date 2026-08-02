@@ -628,20 +628,59 @@ impl lash_core::TriggerStore for SqliteTriggerStore {
             .map_err(process_sqlite_error)?
     }
 
-    async fn delete_deliveries_by_process_ids(
+    async fn list_delivery_retention_candidates(
         &self,
-        process_ids: &[String],
+    ) -> Result<Vec<lash_core::TriggerDeliveryRetentionCandidate>, lash_core::PluginError> {
+        self.conn
+            .call(|conn| {
+                Ok((|| {
+                    let mut stmt = conn
+                        .prepare(
+                            "SELECT occurrence_id, subscription_id, process_id
+                             FROM trigger_deliveries
+                             ORDER BY occurrence_id ASC, subscription_id ASC",
+                        )
+                        .map_err(process_sqlite_error)?;
+                    let rows = stmt
+                        .query_map([], |row| {
+                            Ok(lash_core::TriggerDeliveryRetentionCandidate {
+                                occurrence_id: row.get(0)?,
+                                subscription_id: row.get(1)?,
+                                process_id: row.get(2)?,
+                            })
+                        })
+                        .map_err(process_sqlite_error)?;
+                    rows.collect::<Result<Vec<_>, _>>()
+                        .map_err(process_sqlite_error)
+                })())
+            })
+            .await
+            .map_err(process_sqlite_error)?
+    }
+
+    async fn delete_delivery_retention_candidates(
+        &self,
+        candidates: &[lash_core::TriggerDeliveryRetentionCandidate],
     ) -> Result<usize, lash_core::PluginError> {
-        if process_ids.is_empty() {
+        if candidates.is_empty() {
             return Ok(0);
         }
-        let process_ids_json = serde_json::to_string(process_ids).map_err(process_decode_error)?;
+        let candidates_json = serde_json::to_string(candidates).map_err(process_decode_error)?;
         self.conn
             .call(move |conn| {
                 conn.execute(
                     "DELETE FROM trigger_deliveries
-                     WHERE process_id IN (SELECT value FROM json_each(?1))",
-                    params![process_ids_json],
+                     WHERE EXISTS (
+                         SELECT 1
+                         FROM json_each(?1) AS candidate
+                         WHERE trigger_deliveries.occurrence_id =
+                                   json_extract(candidate.value, '$.occurrence_id')
+                           AND trigger_deliveries.subscription_id =
+                                   json_extract(candidate.value, '$.subscription_id')
+                           AND trigger_deliveries.process_id =
+                                   json_extract(candidate.value, '$.process_id')
+                     )",
+                    params![candidates_json],
                 )
             })
             .await

@@ -415,21 +415,61 @@ impl TriggerStore for PostgresTriggerStore {
         .map_err(plugin_sqlx_error)
     }
 
-    async fn delete_deliveries_by_process_ids(
+    async fn list_delivery_retention_candidates(
         &self,
-        process_ids: &[String],
+    ) -> Result<Vec<lash_core::TriggerDeliveryRetentionCandidate>, PluginError> {
+        let rows = sqlx::query(
+            "SELECT occurrence_id, subscription_id, process_id
+             FROM lash_trigger_deliveries
+             ORDER BY occurrence_id ASC, subscription_id ASC",
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map_err(plugin_sqlx_error)?;
+        Ok(rows
+            .into_iter()
+            .map(|row| lash_core::TriggerDeliveryRetentionCandidate {
+                occurrence_id: row.get(0),
+                subscription_id: row.get(1),
+                process_id: row.get(2),
+            })
+            .collect())
+    }
+
+    async fn delete_delivery_retention_candidates(
+        &self,
+        candidates: &[lash_core::TriggerDeliveryRetentionCandidate],
     ) -> Result<usize, PluginError> {
-        if process_ids.is_empty() {
+        if candidates.is_empty() {
             return Ok(0);
         }
-        Ok(
-            sqlx::query("DELETE FROM lash_trigger_deliveries WHERE process_id = ANY($1::TEXT[])")
-                .bind(process_ids)
-                .execute(&self.pool)
-                .await
-                .map_err(plugin_sqlx_error)?
-                .rows_affected() as usize,
+        let occurrence_ids = candidates
+            .iter()
+            .map(|candidate| candidate.occurrence_id.clone())
+            .collect::<Vec<_>>();
+        let subscription_ids = candidates
+            .iter()
+            .map(|candidate| candidate.subscription_id.clone())
+            .collect::<Vec<_>>();
+        let process_ids = candidates
+            .iter()
+            .map(|candidate| candidate.process_id.clone())
+            .collect::<Vec<_>>();
+        Ok(sqlx::query(
+            "DELETE FROM lash_trigger_deliveries AS delivery
+                 USING UNNEST($1::TEXT[], $2::TEXT[], $3::TEXT[])
+                       AS candidate(occurrence_id, subscription_id, process_id)
+                 WHERE delivery.occurrence_id = candidate.occurrence_id
+                   AND delivery.subscription_id = candidate.subscription_id
+                   AND delivery.process_id = candidate.process_id",
         )
+        .bind(occurrence_ids)
+        .bind(subscription_ids)
+        .bind(process_ids)
+        .execute(&self.pool)
+        .await
+        .map_err(plugin_sqlx_error)?
+        .rows_affected() as usize)
     }
 
     async fn prune_mutation_receipts(&self, cutoff_epoch_ms: u64) -> Result<usize, PluginError> {

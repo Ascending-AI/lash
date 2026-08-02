@@ -47,7 +47,9 @@ Retention is an explicit host lever, not an automatic policy.
 physically deletes
 terminal process rows older than the cutoff — together with their events, wake
 acks, observer edges, and lease rows — and never touches non-terminal rows. It
-returns a `ProcessPruneReport { pruned_processes, pruned_events }`.
+returns a `ProcessPruneReport { pruned_processes, pruned_events,
+pruned_trigger_deliveries }`; low-level registries report zero trigger rows and
+the public process facade fills that field after cross-store reconciliation.
 
 ## Why
 

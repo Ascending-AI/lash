@@ -31,9 +31,13 @@ The original same-transaction ruling assumed the process registry and trigger st
 transaction boundary. That is not a valid substrate contract: SQLite deliberately permits the
 two stores to occupy separate databases, and other embedders may provide independently durable
 implementations. Process retention therefore commits its process tombstone first. A coordinator
-then asks the process registry which process ids are tombstoned and asks the trigger store to
-delete only those delivery rows. The process store remains the authority for terminal-history
-classification; the trigger store remains the authority for deleting delivery rows.
+first snapshots each delivery row's `(occurrence_id, subscription_id, process_id)` identity, then
+asks the process registry which process ids are tombstoned, revalidates that classification at the
+action boundary, and asks the trigger store to delete only the exact observed rows whose complete
+identity still matches. The process store remains the authority for terminal-history
+classification; the trigger store remains the authority for deleting delivery rows. A stale
+classification can therefore neither expand into a process-wide delete nor sweep in a replacement
+delivery inserted after the survey.
 
 The protocol guarantees that a delivery for a live process is retained, including when a legally
 re-registered process row shadows a stale tombstone. All backends implement that live-row
@@ -43,17 +47,23 @@ history. Each trigger-store batch delete is atomic and idempotent, so a failure 
 result is repaired by re-running the coordinator. There is no distributed transaction and no
 claim that both commits become visible simultaneously.
 
-Recovery by re-run depends on the tombstone outliving the delivery. The public
-`Processes::compact_tombstones` facade therefore runs delivery reconciliation before tombstone
-compaction and aborts compaction if reconciliation fails. Hosts should use that facade rather
-than compacting the raw registry when a trigger store is configured. This ordering ensures a
-compacted tombstone cannot leave a delivery that recovery would later mistake for never-started
-work.
+Recovery by re-run depends on the tombstone outliving the delivery. Tombstone compaction therefore
+takes the trigger store's complete outstanding-delivery process-id survey and structurally excludes
+every matching tombstone inside the process registry's delete. The public
+`Processes::compact_tombstones` facade reconciles first, then passes the configured trigger store to
+the raw registry lever. The raw lever performs a fresh complete survey itself, so a process pruned
+by another writer between reconciliation and compaction is protected by its still-outstanding
+delivery. A tombstone may compact in the same cycle once its delivery is absent. This is a local
+compaction invariant, not a call-order convention: a tombstone guarded by an outstanding delivery
+is refused by the raw registry lever as well.
 
-Process ids are legally reusable after pruning. Once an id is reused, a delivery from the prior
-incarnation and one associated with the new incarnation are indistinguishable by process id
-alone. The contract consequently fails toward retention: the live process row shadows the stale
-tombstone, reconciliation deletes nothing for that id, and any stale delivery may remain until
-the live incarnation itself reaches a later terminal-retention cycle. Leaving that row is safe;
-deleting a live incarnation's recovery evidence is not. No schema or identity change is required
-for this conservative contract.
+The invariant fails toward retention. If a configured trigger store cannot be surveyed or
+reconciled, the facade aborts compaction and tombstones accumulate until the trigger store recovers.
+Proceeding would knowingly orphan recovery evidence, so there is no proceed-and-log escape hatch.
+
+Process ids are legally reusable after pruning. The live process row shadows the stale tombstone,
+and reconciliation revalidates that state immediately before action. Delivery deletion is also
+bound to the row identity captured before classification rather than process id alone. The contract
+consequently fails toward retention: a reused id or changed row preserves recovery evidence, and a
+later retention cycle may reconsider it from fresh state. Leaving a stale row is safe; deleting a
+live incarnation's recovery evidence is not.

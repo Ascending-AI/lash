@@ -237,8 +237,8 @@ best-effort — freshness over the durable log, never truth. It makes no deliver
 guarantee, so a consumer that needs completeness reconciles from `events_after`,
 and terminal events deliberately do not ride the sink (they ride
 `await_terminal`). Because the decorator awaits `emit` inline on the append path,
-a sink must return fast and offload any I/O. Retention is
-`ProcessRegistry::prune_terminal_processes(cutoff_epoch_ms, filter, watermark)`:
+a sink must return fast and offload any I/O. Host retention is
+`core.processes().prune(cutoff_epoch_ms, watermark)`:
 a host that has
 projected a process's outcome into its own store calls it on the maintenance
 cadence to replace eligible terminal rows with payload-free tombstones after
@@ -246,6 +246,11 @@ the projection watermark advances — removing their events, wakes, observer edg
 only once host policy has retained them beyond every still-replayable
 `await_terminal`. Lash exposes no finite maximum waiter lifetime to validate a
 cutoff against; a later await after pruning receives `ProcessNoLongerRetained`.
+The facade reconciles exact trigger-delivery rows after pruning. Tombstone
+reclamation uses `core.processes().compact_tombstones(cutoff_epoch_ms, watermark)`,
+which structurally retains any tombstone referenced by the trigger store's
+outstanding-delivery survey and blocks while a configured trigger store is
+unhealthy.
 
 ## Host policy and configuration surface
 

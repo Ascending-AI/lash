@@ -1134,6 +1134,7 @@ async fn tombstones_make_pruned_processes_distinguishable(registry: Arc<dyn Proc
             .compact_process_tombstones(
                 u64::MAX,
                 crate::ProjectionWatermark::UpTo(projection_cursor),
+                None,
             )
             .await
             .expect("compact behind projector"),
@@ -1153,6 +1154,7 @@ async fn tombstones_make_pruned_processes_distinguishable(registry: Arc<dyn Proc
             .compact_process_tombstones(
                 u64::MAX,
                 crate::ProjectionWatermark::UpTo(deletion_cursor),
+                None,
             )
             .await
             .expect("compact after projector catches up")

@@ -332,6 +332,7 @@ async fn sqlite_facade_prune_removes_tombstoned_process_delivery() -> Result<()>
         .prune(u64::MAX, lash_core::ProjectionWatermark::NoProjector)
         .await?;
     assert_eq!(report.pruned_processes, 1);
+    assert_eq!(report.pruned_trigger_deliveries, 1);
     assert!(
         trigger_store
             .list_deliveries_by_process_id(&process_id)
@@ -396,7 +397,10 @@ async fn sqlite_facade_prune_removes_tombstoned_process_delivery() -> Result<()>
         .processes()
         .compact_tombstones(u64::MAX, lash_core::ProjectionWatermark::NoProjector)
         .await?;
-    assert!(compacted >= 1, "the facade compacts retained tombstones");
+    assert!(
+        compacted >= 1,
+        "the facade may compact unrelated, already-reconciled tombstones"
+    );
     assert!(
         trigger_store
             .list_deliveries_by_process_id(&orphaned_process_id)

@@ -197,6 +197,8 @@ pub use observation::{
     SessionObservationSubscription, SessionProcessEventKind, SessionQueueEventKind, SessionResume,
     SessionRevision,
 };
+#[cfg(any(test, feature = "testing"))]
+pub(crate) use process::reconcile_pruned_trigger_deliveries_interleaved;
 pub use process::{
     AbandonEvidence, AbandonRequest, AbandonWriter, DEFAULT_WAKE_DELIVERY_EXPIRY_MS,
     InMemoryProcessExecutionEnvStore, ObservedProcess, ObservedProcessEvent, ObservedWorkItem,

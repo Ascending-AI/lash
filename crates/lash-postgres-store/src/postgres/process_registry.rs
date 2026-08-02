@@ -1041,19 +1041,26 @@ impl ProcessRegistry for PostgresProcessRegistry {
         &self,
         cutoff_epoch_ms: u64,
         watermark: lash_core::ProjectionWatermark,
+        trigger_store: Option<&dyn lash_core::TriggerStore>,
     ) -> Result<usize, PluginError> {
         let max_change_seq = match watermark {
             lash_core::ProjectionWatermark::UpTo(cursor) => Some(cursor.store_sequence() as i64),
             lash_core::ProjectionWatermark::NoProjector => None,
         };
+        let outstanding_trigger_delivery_process_ids = match trigger_store {
+            Some(trigger_store) => trigger_store.list_delivery_process_ids().await?,
+            None => Vec::new(),
+        };
         let cutoff_epoch_ms = i64::try_from(cutoff_epoch_ms).unwrap_or(i64::MAX);
         Ok(sqlx::query(
             "DELETE FROM lash_process_tombstones
                  WHERE pruned_at_ms < $1
-                   AND ($2::BIGINT IS NULL OR pruned_change_seq <= $2)",
+                   AND ($2::BIGINT IS NULL OR pruned_change_seq <= $2)
+                   AND NOT (process_id = ANY($3::TEXT[]))",
         )
         .bind(cutoff_epoch_ms)
         .bind(max_change_seq)
+        .bind(&outstanding_trigger_delivery_process_ids)
         .execute(&self.pool)
         .await
         .map_err(plugin_sqlx_error)?
@@ -1489,6 +1496,7 @@ impl ProcessRegistry for PostgresProcessRegistry {
         Ok(ProcessPruneReport {
             pruned_processes,
             pruned_events,
+            pruned_trigger_deliveries: 0,
         })
     }
 }

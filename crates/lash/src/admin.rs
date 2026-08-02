@@ -72,16 +72,6 @@ impl CoreTriggerAdmin {
             .map(lash_core::TriggerRegistration::from)
             .collect())
     }
-
-    /// Drop trigger mutation idempotency receipts older than the caller's
-    /// explicit bound. Trigger retention is independent from process
-    /// retention; Lash does not infer or schedule a policy for either.
-    pub async fn prune_mutation_receipts(&self, cutoff_epoch_ms: u64) -> Result<usize> {
-        self.store()?
-            .prune_mutation_receipts(cutoff_epoch_ms)
-            .await
-            .map_err(Into::into)
-    }
 }
 
 #[derive(Clone)]

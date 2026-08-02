@@ -118,12 +118,18 @@ impl lash::triggers::TriggerStore for OccurrenceFailureTriggerStore {
         self.inner.list_delivery_process_ids().await
     }
 
-    async fn delete_deliveries_by_process_ids(
+    async fn list_delivery_retention_candidates(
         &self,
-        process_ids: &[String],
+    ) -> Result<Vec<lash_core::TriggerDeliveryRetentionCandidate>, lash::plugins::PluginError> {
+        self.inner.list_delivery_retention_candidates().await
+    }
+
+    async fn delete_delivery_retention_candidates(
+        &self,
+        candidates: &[lash_core::TriggerDeliveryRetentionCandidate],
     ) -> Result<usize, lash::plugins::PluginError> {
         self.inner
-            .delete_deliveries_by_process_ids(process_ids)
+            .delete_delivery_retention_candidates(candidates)
             .await
     }
 

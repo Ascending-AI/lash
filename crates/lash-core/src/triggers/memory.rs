@@ -308,25 +308,53 @@ impl TriggerStore for InMemoryTriggerStore {
             .collect())
     }
 
-    async fn delete_deliveries_by_process_ids(
+    async fn list_delivery_retention_candidates(
         &self,
-        process_ids: &[String],
+    ) -> Result<Vec<TriggerDeliveryRetentionCandidate>, PluginError> {
+        let state = self
+            .state
+            .lock()
+            .map_err(|_| PluginError::Session("trigger store lock poisoned".to_string()))?;
+        Ok(state
+            .deliveries
+            .values()
+            .map(|delivery| TriggerDeliveryRetentionCandidate {
+                occurrence_id: delivery.occurrence_id.clone(),
+                subscription_id: delivery.subscription_id.clone(),
+                process_id: delivery.process_id.clone(),
+            })
+            .collect())
+    }
+
+    async fn delete_delivery_retention_candidates(
+        &self,
+        candidates: &[TriggerDeliveryRetentionCandidate],
     ) -> Result<usize, PluginError> {
-        if process_ids.is_empty() {
+        if candidates.is_empty() {
             return Ok(0);
         }
-        let process_ids = process_ids
+        let candidates = candidates
             .iter()
-            .map(String::as_str)
+            .map(|candidate| {
+                (
+                    candidate.occurrence_id.as_str(),
+                    candidate.subscription_id.as_str(),
+                    candidate.process_id.as_str(),
+                )
+            })
             .collect::<std::collections::HashSet<_>>();
         let mut state = self
             .state
             .lock()
             .map_err(|_| PluginError::Session("trigger store lock poisoned".to_string()))?;
         let before = state.deliveries.len();
-        state
-            .deliveries
-            .retain(|_, delivery| !process_ids.contains(delivery.process_id.as_str()));
+        state.deliveries.retain(|_, delivery| {
+            !candidates.contains(&(
+                delivery.occurrence_id.as_str(),
+                delivery.subscription_id.as_str(),
+                delivery.process_id.as_str(),
+            ))
+        });
         Ok(before.saturating_sub(state.deliveries.len()))
     }
 

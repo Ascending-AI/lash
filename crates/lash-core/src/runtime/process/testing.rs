@@ -1056,17 +1056,27 @@ impl ProcessRegistry for TestLocalProcessRegistry {
         &self,
         cutoff_epoch_ms: u64,
         watermark: ProjectionWatermark,
+        trigger_store: Option<&dyn crate::TriggerStore>,
     ) -> Result<usize, PluginError> {
         let max_change_seq = match watermark {
             ProjectionWatermark::UpTo(cursor) => Some(cursor.store_sequence()),
             ProjectionWatermark::NoProjector => None,
         };
+        let outstanding_trigger_delivery_process_ids = match trigger_store {
+            Some(trigger_store) => trigger_store.list_delivery_process_ids().await?,
+            None => Vec::new(),
+        };
+        let outstanding_trigger_delivery_process_ids = outstanding_trigger_delivery_process_ids
+            .iter()
+            .map(String::as_str)
+            .collect::<std::collections::HashSet<_>>();
         let mut tombstones = self.tombstones.lock().await;
         let before = tombstones.len();
         tombstones.retain(|_, tombstone| {
             tombstone.pruned_at_ms >= cutoff_epoch_ms
                 || max_change_seq
                     .is_some_and(|max_change_seq| tombstone.pruned_change_seq > max_change_seq)
+                || outstanding_trigger_delivery_process_ids.contains(tombstone.process_id.as_str())
         });
         Ok(before - tombstones.len())
     }
@@ -1479,6 +1489,7 @@ impl ProcessRegistry for TestLocalProcessRegistry {
         Ok(ProcessPruneReport {
             pruned_processes: prunable.len(),
             pruned_events,
+            pruned_trigger_deliveries: 0,
         })
     }
 }

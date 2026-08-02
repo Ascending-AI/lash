@@ -1,5 +1,35 @@
 use super::*;
 
+pub(crate) fn max_change_sequence(watermark: lash_core::ProjectionWatermark) -> Option<i64> {
+    match watermark {
+        lash_core::ProjectionWatermark::UpTo(cursor) => Some(cursor.store_sequence() as i64),
+        lash_core::ProjectionWatermark::NoProjector => None,
+    }
+}
+
+pub(crate) fn compact_process_tombstones_conn(
+    conn: &Connection,
+    cutoff_epoch_ms: i64,
+    max_change_seq: Option<i64>,
+    outstanding_trigger_delivery_process_ids: &[String],
+) -> Result<usize, lash_core::PluginError> {
+    let outstanding_trigger_delivery_process_ids =
+        serde_json::to_string(outstanding_trigger_delivery_process_ids)
+            .map_err(process_decode_error)?;
+    conn.execute(
+        "DELETE FROM process_tombstones
+         WHERE pruned_at_ms < ?1
+           AND (?2 IS NULL OR pruned_change_seq <= ?2)
+           AND process_id NOT IN (SELECT value FROM json_each(?3))",
+        params![
+            cutoff_epoch_ms,
+            max_change_seq,
+            outstanding_trigger_delivery_process_ids
+        ],
+    )
+    .map_err(process_sqlite_error)
+}
+
 pub(crate) fn processes_changed_since_conn(
     conn: &Connection,
     cursor: ProcessChangeCursor,
@@ -119,6 +149,7 @@ pub(crate) fn prune_terminal_processes_conn(
     Ok(ProcessPruneReport {
         pruned_processes,
         pruned_events,
+        pruned_trigger_deliveries: 0,
     })
 }
 
