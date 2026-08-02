@@ -1567,6 +1567,21 @@ async fn live_restate_ingress_owner_restart_resumes_and_remains_cancellable_inne
     }
 }
 
+/// Session-lease timings this deployment chooses through
+/// [`lash::LashCoreBuilder::lease_timings`].
+///
+/// The whole point of the knob is failover latency: a dead ingress owner's
+/// session-execution lease cannot be superseded until it expires, so the TTL
+/// *is* the floor on how long a replacement waits before it can resume the
+/// turn. The workbench trades a wider false-takeover window for a fast
+/// restart, and the recovery assertion below is written against that trade —
+/// it demands a takeover strictly faster than the stock 30s TTL, which only
+/// the configured timings can deliver.
+fn recovery_e2e_lease_timings() -> lash::durability::LeaseTimings {
+    lash::durability::LeaseTimings::new(Duration::from_millis(300), Duration::from_millis(100))
+        .expect("valid recovery E2E lease timings")
+}
+
 async fn live_restate_ingress_owner_restart_for_store(backend: &'static str) {
     let ingress_url = std::env::var("RESTATE_INGRESS_URL")
         .expect("RESTATE_INGRESS_URL must be set by the workbench Restate E2E recipe");
@@ -1636,9 +1651,17 @@ async fn live_restate_ingress_owner_restart_for_store(backend: &'static str) {
         Duration::from_secs(10),
     )
     .await;
+    // The dead owner's lease has to *expire* before anything may supersede it,
+    // so this elapsed time is a direct reading of the configured TTL. Stock
+    // timings would hold the turn hostage for the full 30s default; dropping
+    // `lease_timings` from the workbench core reddens this line.
+    let takeover_latency = restart_started.elapsed();
+    let default_ttl = lash::durability::LeaseTimings::default().ttl();
     assert!(
-        restart_started.elapsed() < Duration::from_secs(10),
-        "replacement exceeded the configured session-lease recovery budget"
+        takeover_latency < default_ttl,
+        "the configured {:?} session-lease TTL must recover the turn faster \
+         than the stock {default_ttl:?} default; takeover took {takeover_latency:?}",
+        recovery_e2e_lease_timings().ttl(),
     );
     assert_eq!(
         session_lease_generation(&data_dir, backend, &session_id).await,
@@ -1806,11 +1829,7 @@ async fn live_restate_recovery_child() {
         .expect("open child active-turn routing");
     let session_ids = WorkbenchSessionIds::persistent(data_dir.join("session-id"))
         .expect("open child session id");
-    let lease_timings = lash::durability::LeaseTimings::new(
-        Duration::from_millis(300),
-        Duration::from_millis(100),
-    )
-    .expect("valid recovery E2E lease timings");
+    let lease_timings = recovery_e2e_lease_timings();
     let harness = live_workbench_restate_state_with_provider_and_database(
         &data_dir,
         ingress_url,

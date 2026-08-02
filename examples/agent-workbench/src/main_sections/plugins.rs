@@ -1,6 +1,7 @@
 struct WorkbenchPluginFactory {
     tavily_api_key: String,
     mail_world: mail::MailWorld,
+    derived_notes: WorkbenchDerivedNotes,
 }
 
 impl WorkbenchPluginFactory {
@@ -8,12 +9,20 @@ impl WorkbenchPluginFactory {
         Self {
             tavily_api_key: tavily_api_key.into(),
             mail_world: mail::MailWorld::new(),
+            derived_notes: WorkbenchDerivedNotes::default(),
         }
     }
 
     fn with_mail_world(mut self, mail_world: mail::MailWorld) -> Self {
         self.mail_world = mail_world;
         self
+    }
+
+    /// Handle on the annotator's decision log, so a harness can read what the
+    /// append fence did with each derived note.
+    #[cfg(test)]
+    fn derived_notes(&self) -> WorkbenchDerivedNotes {
+        self.derived_notes.clone()
     }
 }
 
@@ -40,6 +49,7 @@ impl PluginFactory for WorkbenchPluginFactory {
         Ok(Arc::new(WorkbenchSessionPlugin {
             tavily_api_key: self.tavily_api_key.clone(),
             mail_world: self.mail_world.clone(),
+            derived_notes: self.derived_notes.clone(),
         }))
     }
 }
@@ -47,6 +57,7 @@ impl PluginFactory for WorkbenchPluginFactory {
 struct WorkbenchSessionPlugin {
     tavily_api_key: String,
     mail_world: mail::MailWorld,
+    derived_notes: WorkbenchDerivedNotes,
 }
 
 impl SessionPlugin for WorkbenchSessionPlugin {
@@ -91,8 +102,183 @@ impl SessionPlugin for WorkbenchSessionPlugin {
         reg.tools().provider(Arc::new(mail::MockMailProvider::new(
             self.mail_world.clone(),
         )))?;
+        let derived_notes = self.derived_notes.clone();
+        reg.session().on_event(Arc::new(move |event| {
+            let derived_notes = derived_notes.clone();
+            Box::pin(async move {
+                if let lash_core::PluginLifecycleEvent::TurnPersisted(ctx) = event {
+                    derived_notes.on_turn_persisted(&ctx).await;
+                }
+                Ok(())
+            })
+        }));
         Ok(())
     }
+}
+
+/// The workbench's derive-then-append annotator: a background worker that
+/// summarizes a committed turn and writes the summary back into the session's
+/// own history, so it survives a restart and travels with the branch.
+///
+/// Deriving a summary is slow — in a real deployment it is a model call — so a
+/// note is always written back *after* the commit it describes, into a session
+/// whose head has already moved on. That is the whole reason each note carries
+/// [`lash_core::AppendSessionNodesRequest::requires_ancestor_node_id`]: the
+/// worker keeps no session bookkeeping at all (session ids change when an
+/// operator rewinds a branch, and the queue would be wrong the moment they
+/// did), and instead lets the append itself decide. A head that merely moved
+/// on keeps the note; a base that is no longer on the session's active path
+/// throws it away, because the conversation it summarizes is not the one this
+/// session is having.
+#[derive(Clone, Default)]
+struct WorkbenchDerivedNotes {
+    inner: Arc<WorkbenchDerivedNotesState>,
+}
+
+#[derive(Default)]
+struct WorkbenchDerivedNotesState {
+    pending: Mutex<Vec<WorkbenchPendingNote>>,
+    settled: Mutex<Vec<WorkbenchSettledNote>>,
+}
+
+#[derive(Clone, Debug)]
+struct WorkbenchPendingNote {
+    /// The node the summary was read at. Not where the note lands.
+    base_node_id: String,
+    summary: String,
+}
+
+/// What the append fence decided about one derived note.
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum WorkbenchSettledNote {
+    /// Kept: `node_id` is where it actually landed, which is the leaf as of
+    /// the append and generally *not* `base_node_id`.
+    Written {
+        base_node_id: String,
+        node_id: String,
+        leaf_node_id: String,
+    },
+    /// Dropped: the branch `base_node_id` sat on is not the one this session
+    /// executes any more, so the summary describes history that is gone.
+    AbandonedBranch { base_node_id: String },
+}
+
+impl WorkbenchDerivedNotes {
+    async fn on_turn_persisted(&self, ctx: &lash_core::SessionStateChangedContext<'_>) {
+        for note in self.take_pending() {
+            self.write_back(ctx, note).await;
+        }
+        // Start the next derivation from the head this turn just committed.
+        if let Some(base_node_id) = ctx.state.session_graph().leaf_node_id.clone() {
+            let summary = workbench_note_summary(&ctx.state);
+            self.inner
+                .pending
+                .lock()
+                .expect("workbench derived notes lock")
+                .push(WorkbenchPendingNote {
+                    base_node_id,
+                    summary,
+                });
+        }
+    }
+
+    async fn write_back(
+        &self,
+        ctx: &lash_core::SessionStateChangedContext<'_>,
+        note: WorkbenchPendingNote,
+    ) {
+        let request = lash_core::AppendSessionNodesRequest {
+            operation_id: format!("workbench-derived-note:{}", note.base_node_id),
+            nodes: vec![lash_core::SessionAppendNode::plugin(
+                WORKBENCH_DERIVED_NOTE_PLUGIN_TYPE,
+                json!({
+                    // The base rides in the payload: the note's position in the
+                    // graph says nothing about what it was derived from.
+                    "derived_from_node_id": note.base_node_id,
+                    "summary": note.summary,
+                }),
+            )],
+            requires_ancestor_node_id: Some(note.base_node_id.clone()),
+        };
+        let settled = match ctx
+            .session_graph
+            .append_session_nodes(&ctx.session_id, request)
+            .await
+        {
+            Ok(lash_core::AppendSessionNodesResult::Appended {
+                node_ids,
+                leaf_node_id,
+            }) => WorkbenchSettledNote::Written {
+                base_node_id: note.base_node_id,
+                node_id: node_ids
+                    .into_iter()
+                    .next()
+                    .unwrap_or_else(|| leaf_node_id.clone()),
+                leaf_node_id,
+            },
+            Ok(lash_core::AppendSessionNodesResult::StaleBranch { required_node_id }) => {
+                WorkbenchSettledNote::AbandonedBranch {
+                    base_node_id: required_node_id,
+                }
+            }
+            Err(error) => {
+                // A store or plugin failure is not a verdict about the branch;
+                // keep the note and let the next persisted turn retry it.
+                eprintln!("workbench derived note write-back failed: {error}");
+                self.inner
+                    .pending
+                    .lock()
+                    .expect("workbench derived notes lock")
+                    .push(note);
+                return;
+            }
+        };
+        if let WorkbenchSettledNote::AbandonedBranch { base_node_id } = &settled {
+            println!(
+                "workbench derived note dropped: `{base_node_id}` is no longer on \
+                 session `{}`'s active path",
+                ctx.session_id
+            );
+        }
+        let mut log = self
+            .inner
+            .settled
+            .lock()
+            .expect("workbench derived notes lock");
+        log.push(settled);
+        // The decision log is a rolling operator aid, not a record: a long-lived
+        // workbench must not accumulate one entry per turn forever.
+        let overflow = log.len().saturating_sub(WORKBENCH_DERIVED_NOTE_LOG_LIMIT);
+        log.drain(..overflow);
+    }
+
+    fn take_pending(&self) -> Vec<WorkbenchPendingNote> {
+        std::mem::take(
+            &mut *self
+                .inner
+                .pending
+                .lock()
+                .expect("workbench derived notes lock"),
+        )
+    }
+
+    #[cfg(test)]
+    fn settled(&self) -> Vec<WorkbenchSettledNote> {
+        self.inner
+            .settled
+            .lock()
+            .expect("workbench derived notes lock")
+            .clone()
+    }
+}
+
+const WORKBENCH_DERIVED_NOTE_PLUGIN_TYPE: &str = "workbench.turn_note";
+const WORKBENCH_DERIVED_NOTE_LOG_LIMIT: usize = 64;
+
+/// Stand-in for the expensive derivation: in a deployment this is a model call
+/// over the transcript, which is exactly why the write-back lands a commit late.
+fn workbench_note_summary(state: &lash_core::SessionReadView) -> String {
+    format!("{} messages after turn {}", state.messages().len(), state.turn_index())
 }
 
 fn workbench_lashlang_resources() -> lashlang::LashlangHostCatalog {
