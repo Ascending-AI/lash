@@ -175,9 +175,9 @@ impl InMemorySessionStore {
             .lock()
             .expect("lock session execution leases")
             .clear();
-        self.consumed_wake_high_water
+        self.wake_redelivery_fences
             .lock()
-            .expect("lock consumed wake high water")
+            .expect("lock wake redelivery fences")
             .retain(|(target_session_id, _), _| target_session_id != session_id);
         Ok(())
     }

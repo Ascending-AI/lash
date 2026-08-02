@@ -240,17 +240,21 @@ mod tests {
 
     #[tokio::test]
     async fn in_memory_wake_delivery_crash_matrix() {
+        let clock = Arc::new(WakeDeliveryConformanceClock::new(1_800_000_000_000));
         let registry = Arc::new(
-            crate::TestLocalProcessRegistry::default().with_wake_delivery_config(
-                crate::WakeDeliveryConfig::new(10_000)
-                    .expect("valid wake expiry")
-                    .with_enqueuing_stale_after_ms(25)
-                    .expect("valid short stale-claim age"),
-            ),
+            crate::TestLocalProcessRegistry::default()
+                .with_clock(Arc::clone(&clock) as Arc<dyn crate::Clock>)
+                .with_wake_delivery_config(
+                    crate::WakeDeliveryConfig::new(10_000)
+                        .expect("valid wake expiry")
+                        .with_enqueuing_stale_after_ms(25)
+                        .expect("valid short stale-claim age"),
+                ),
         ) as Arc<dyn ProcessRegistry>;
-        let factory = Arc::new(crate::InMemorySessionStoreFactory::new())
-            as Arc<dyn crate::SessionStoreFactory>;
-        wake_delivery_crash_matrix(factory, registry).await;
+        let factory = Arc::new(crate::InMemorySessionStoreFactory::with_clock(
+            Arc::clone(&clock) as Arc<dyn crate::Clock>,
+        )) as Arc<dyn crate::SessionStoreFactory>;
+        wake_delivery_crash_matrix(factory, registry, clock).await;
     }
 
     #[tokio::test]

@@ -1,5 +1,96 @@
 use super::{InMemoryQueuedWorkClaimKind, InMemorySessionStore};
 
+impl InMemorySessionStore {
+    pub(super) fn enqueue_queued_work_in_memory(
+        &self,
+        batch: crate::QueuedWorkBatchDraft,
+    ) -> Result<crate::QueuedWorkEnqueueOutcome, crate::store::StoreError> {
+        let mut queued = self.queued_work.lock().expect("lock queued work");
+        let fences = self
+            .wake_redelivery_fences
+            .lock()
+            .expect("lock wake redelivery fences");
+        let mut next_seq = self
+            .queued_work_next_seq
+            .lock()
+            .expect("lock queued work seq");
+        Self::enqueue_queued_work_for_state(
+            &mut queued,
+            &fences,
+            &mut next_seq,
+            batch,
+            self.clock.timestamp_ms(),
+        )
+    }
+
+    pub(super) fn enqueue_queued_work_for_state(
+        queued: &mut Vec<super::InMemoryQueuedBatch>,
+        wake_redelivery_fences: &std::collections::HashMap<(String, String), u64>,
+        next_seq: &mut u64,
+        batch: crate::QueuedWorkBatchDraft,
+        enqueued_at_ms: u64,
+    ) -> Result<crate::QueuedWorkEnqueueOutcome, crate::store::StoreError> {
+        batch
+            .validate_process_wake_source()
+            .map_err(crate::store::StoreError::Backend)?;
+        if let Some(source_key) = batch.source_key.as_deref()
+            && let Some(existing) = queued.iter().find(|entry| {
+                entry.batch.session_id == batch.session_id
+                    && entry.batch.source_key.as_deref() == Some(source_key)
+            })
+        {
+            return Ok(crate::QueuedWorkEnqueueOutcome::Existing(
+                existing.batch.clone(),
+            ));
+        }
+        if let Some(wake_source) = batch.process_wake_source.as_ref()
+            && let Some(allocation_floor) = wake_redelivery_fences
+                .get(&(batch.session_id.clone(), wake_source.process_id.clone()))
+                .copied()
+            && wake_source.sequence <= allocation_floor
+        {
+            return Err(crate::StoreError::ProcessWakeSequenceRewound {
+                session_id: batch.session_id.clone(),
+                process_id: wake_source.process_id.clone(),
+                sequence: wake_source.sequence,
+                allocation_floor,
+            });
+        }
+        *next_seq = next_seq.saturating_add(1);
+        let batch_id = format!("recording-qwb-{next_seq}");
+        let stored = crate::QueuedWorkBatch {
+            batch_id: batch_id.clone(),
+            session_id: batch.session_id,
+            enqueue_seq: *next_seq,
+            source_key: batch.source_key,
+            delivery_policy: batch.delivery_policy,
+            slot_policy: batch.slot_policy,
+            merge_key: batch.merge_key,
+            available_at_ms: batch.available_at_ms,
+            enqueued_at_ms,
+            items: batch
+                .payloads
+                .into_iter()
+                .enumerate()
+                .map(|(index, payload)| crate::QueuedWorkItem {
+                    item_id: format!("{batch_id}:item:{index}"),
+                    payload,
+                })
+                .collect(),
+        };
+        queued.push(super::InMemoryQueuedBatch {
+            batch: stored.clone(),
+            claim_id: None,
+            claim_token: None,
+            claim_owner: None,
+            claim_fencing_token: 0,
+            claim_session_lease_generation: 0,
+        });
+        queued.sort_by_key(|entry| entry.batch.enqueue_seq);
+        Ok(crate::QueuedWorkEnqueueOutcome::Inserted(stored))
+    }
+}
+
 #[async_trait::async_trait]
 impl crate::store::QueuedWorkStore for InMemorySessionStore {
     async fn enqueue_queued_work(
@@ -7,9 +98,22 @@ impl crate::store::QueuedWorkStore for InMemorySessionStore {
         batch: crate::QueuedWorkBatchDraft,
     ) -> Result<crate::QueuedWorkBatch, crate::store::StoreError> {
         // This is the in-memory counterpart of the SQL transaction/advisory
-        // source lock: evidence lookup, live-row lookup, and insertion all run
+        // source lock: floor lookup, live-row lookup, and insertion all run
         // while the single write-transaction mutex is held. Queue completion
-        // takes the same mutex before inserting evidence and deleting the row.
+        // takes the same mutex before advancing the floor and deleting the row.
+        let _transaction = self
+            .write_transaction
+            .lock()
+            .expect("lock in-memory write transaction");
+        self.ensure_session_not_deleted(&batch.session_id)?;
+        self.enqueue_queued_work_in_memory(batch)
+            .map(crate::QueuedWorkEnqueueOutcome::into_batch)
+    }
+
+    async fn enqueue_queued_work_with_outcome(
+        &self,
+        batch: crate::QueuedWorkBatchDraft,
+    ) -> Result<crate::QueuedWorkEnqueueOutcome, crate::store::StoreError> {
         let _transaction = self
             .write_transaction
             .lock()

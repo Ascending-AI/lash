@@ -1,7 +1,23 @@
 use super::*;
 
 #[derive(Debug)]
-struct WakeDeliveryConformanceClock(u64);
+pub struct WakeDeliveryConformanceClock(std::sync::atomic::AtomicU64);
+
+impl WakeDeliveryConformanceClock {
+    pub fn new(timestamp_ms: u64) -> Self {
+        Self(std::sync::atomic::AtomicU64::new(timestamp_ms))
+    }
+
+    pub fn set(&self, timestamp_ms: u64) {
+        self.0
+            .store(timestamp_ms, std::sync::atomic::Ordering::SeqCst);
+    }
+
+    pub fn advance(&self, duration_ms: u64) {
+        self.0
+            .fetch_add(duration_ms, std::sync::atomic::Ordering::SeqCst);
+    }
+}
 
 #[async_trait::async_trait]
 impl crate::Clock for WakeDeliveryConformanceClock {
@@ -10,7 +26,7 @@ impl crate::Clock for WakeDeliveryConformanceClock {
     }
 
     fn timestamp_ms(&self) -> u64 {
-        self.0
+        self.0.load(std::sync::atomic::Ordering::SeqCst)
     }
 
     fn timestamp_rfc3339(&self) -> String {
@@ -18,7 +34,9 @@ impl crate::Clock for WakeDeliveryConformanceClock {
     }
 
     fn timestamp_datetime(&self) -> chrono::DateTime<chrono::Utc> {
-        chrono::DateTime::from(std::time::UNIX_EPOCH + std::time::Duration::from_millis(self.0))
+        chrono::DateTime::from(
+            std::time::UNIX_EPOCH + std::time::Duration::from_millis(self.timestamp_ms()),
+        )
     }
 
     async fn sleep(&self, duration: std::time::Duration) {
@@ -30,6 +48,45 @@ impl crate::Clock for WakeDeliveryConformanceClock {
     }
 }
 
+#[derive(Default)]
+struct RecordingWakeTurnHandle {
+    runs: tokio::sync::Mutex<Vec<crate::QueuedWorkRunRequest>>,
+    notify: tokio::sync::Notify,
+}
+
+#[async_trait::async_trait]
+impl crate::QueuedWorkRunHandle for RecordingWakeTurnHandle {
+    async fn run_queued_work(
+        &self,
+        request: crate::QueuedWorkRunRequest,
+    ) -> Result<(), crate::QueuedWorkRunError> {
+        self.runs.lock().await.push(request);
+        self.notify.notify_one();
+        Ok(())
+    }
+}
+
+impl RecordingWakeTurnHandle {
+    async fn wait_for_process_wake(&self, session_id: &str, prior_runs: usize) {
+        tokio::time::timeout(std::time::Duration::from_secs(5), async {
+            loop {
+                if self.runs.lock().await.iter().skip(prior_runs).any(|run| {
+                    run.session_id.as_deref() == Some(session_id) && run.reason == "process_wake"
+                }) {
+                    return;
+                }
+                self.notify.notified().await;
+            }
+        })
+        .await
+        .expect("process wake must fire the queued-work turn driver");
+    }
+
+    async fn len(&self) -> usize {
+        self.runs.lock().await.len()
+    }
+}
+
 /// Cross-backend wake-delivery crash contract.
 ///
 /// A process append owns the outbox insertion. Delivery may happen on a later
@@ -37,6 +94,7 @@ impl crate::Clock for WakeDeliveryConformanceClock {
 pub async fn wake_delivery_crash_matrix(
     factory: Arc<dyn crate::SessionStoreFactory>,
     registry: Arc<dyn crate::ProcessRegistry>,
+    clock: Arc<WakeDeliveryConformanceClock>,
 ) {
     let target_session_id = "wake-crash-target";
     let request = crate::SessionStoreCreateRequest {
@@ -107,7 +165,7 @@ pub async fn wake_delivery_crash_matrix(
         Arc::clone(&registry),
         Arc::clone(&factory),
         None,
-        Arc::new(crate::SystemClock),
+        Arc::clone(&clock) as Arc<dyn crate::Clock>,
         32,
     )
     .await
@@ -130,7 +188,7 @@ pub async fn wake_delivery_crash_matrix(
         Arc::clone(&registry),
         Arc::clone(&factory),
         None,
-        Arc::new(crate::SystemClock),
+        Arc::clone(&clock) as Arc<dyn crate::Clock>,
         32,
     )
     .await
@@ -148,6 +206,36 @@ pub async fn wake_delivery_crash_matrix(
         before, after,
         "wake outbox and delivery transitions changed lifecycle bytes"
     );
+
+    prune_reregister_sender_floor_delivers_through_driver(
+        Arc::clone(&factory),
+        Arc::clone(&registry),
+        Arc::clone(&clock),
+        Arc::clone(&target),
+        target_session_id,
+    )
+    .await;
+    replay_and_same_millisecond_allocation_are_deterministic(
+        Arc::clone(&registry),
+        Arc::clone(&clock),
+    )
+    .await;
+    mixed_era_floor_and_ordering(
+        Arc::clone(&factory),
+        Arc::clone(&registry),
+        Arc::clone(&clock),
+        Arc::clone(&target),
+        target_session_id,
+    )
+    .await;
+    rewound_fresh_delivery_is_discarded_without_blocking(
+        Arc::clone(&factory),
+        Arc::clone(&registry),
+        Arc::clone(&clock),
+        Arc::clone(&target),
+        target_session_id,
+    )
+    .await;
 
     let coalesced_process_id = "wake-coalesced-sender";
     registry
@@ -186,7 +274,7 @@ pub async fn wake_delivery_crash_matrix(
             Arc::clone(&registry),
             Arc::clone(&factory),
             None,
-            Arc::new(crate::SystemClock),
+            Arc::clone(&clock) as Arc<dyn crate::Clock>,
             &coalesce_policy,
             32,
         )
@@ -334,7 +422,7 @@ pub async fn wake_delivery_crash_matrix(
         .claim_token()
         .expect("first claim token")
         .to_string();
-    tokio::time::sleep(std::time::Duration::from_millis(40)).await;
+    clock.advance(40);
     let recovered_claim = registry
         .claim_pending_wake_deliveries(1)
         .await
@@ -388,6 +476,131 @@ pub async fn wake_delivery_crash_matrix(
             .count(),
         1,
         "a stale enqueuing claim must recover to exactly one queued turn"
+    );
+
+    let settled_crash_process_id = "wake-crashed-after-live-receiver-enqueue";
+    registry
+        .register_process(
+            process_registry::registration(settled_crash_process_id)
+                .with_extra_event_types([process_registry::wake_event_type("producer.wake")])
+                .with_wake_session_id(Some(target_session_id.to_string())),
+        )
+        .await
+        .expect("register live-row retry producer");
+    let settled_crash_wake = registry
+        .append_event(
+            settled_crash_process_id,
+            crate::ProcessEventAppendRequest::new(
+                "producer.wake",
+                serde_json::json!({"wake_input": "live receiver row before sender mark"}),
+            ),
+        )
+        .await
+        .expect("append settled crash-window wake")
+        .wake_delivery
+        .expect("settled crash-window delivery");
+    let settled_crash_claim = registry
+        .claim_pending_wake_deliveries(1)
+        .await
+        .expect("claim settled crash-window wake")
+        .into_iter()
+        .next()
+        .expect("settled crash-window wake is claimable");
+    let receiver_batch = target
+        .enqueue_queued_work(crate::process_wake_batch_draft(
+            settled_crash_claim.wake.clone(),
+        ))
+        .await
+        .expect("receiver accepts settled crash-window wake");
+    assert!(receiver_batch.enqueue_seq > 0);
+    clock.advance(40);
+    let settled_crash_report = crate::WakeDeliveryDriver::drive_pending_once(
+        Arc::clone(&registry),
+        Arc::clone(&factory),
+        None,
+        Arc::clone(&clock) as Arc<dyn crate::Clock>,
+        32,
+    )
+    .await
+    .expect("recover sender claim against live receiver row");
+    assert_eq!(settled_crash_report.enqueued, 1);
+    assert_eq!(settled_crash_report.floor_absorbed, 1);
+    assert_eq!(settled_crash_report.discarded_sequence_rewound, 0);
+    let settled_sender = registry
+        .list_wake_deliveries(None)
+        .await
+        .expect("list settled crash-window sender row")
+        .into_iter()
+        .find(|delivery| delivery.wake.process_id == settled_crash_process_id)
+        .expect("settled crash-window sender row remains");
+    assert_eq!(settled_sender.wake.sequence, settled_crash_wake.sequence);
+    assert_eq!(settled_sender.state, crate::WakeDeliveryState::Enqueued);
+
+    let deferred_process_id = "wake-deferred-before-first-receiver-attempt";
+    registry
+        .register_process(
+            process_registry::registration(deferred_process_id)
+                .with_extra_event_types([process_registry::wake_event_type("producer.wake")])
+                .with_wake_session_id(Some(target_session_id.to_string())),
+        )
+        .await
+        .expect("register deferred-first-attempt producer");
+    registry
+        .append_event(
+            deferred_process_id,
+            crate::ProcessEventAppendRequest::new(
+                "producer.wake",
+                serde_json::json!({"wake_input": "deferred before receiver call"}),
+            ),
+        )
+        .await
+        .expect("append deferred-first-attempt wake");
+    let deferred = registry
+        .claim_pending_wake_deliveries(1)
+        .await
+        .expect("claim deferred-first-attempt wake")
+        .into_iter()
+        .next()
+        .expect("deferred-first-attempt wake is claimable");
+    assert_eq!(deferred.attempts, 1);
+    let retry_at = crate::Clock::timestamp_ms(clock.as_ref()).saturating_add(50);
+    assert_eq!(
+        registry
+            .defer_wake_delivery(
+                &deferred.delivery_id,
+                deferred.claim_token().expect("deferred claim token"),
+                retry_at,
+            )
+            .await
+            .expect("defer before the first receiver call"),
+        crate::WakeDeliveryClaimOutcome::Applied
+    );
+    clock.advance(50);
+    let deferred_report = crate::WakeDeliveryDriver::drive_pending_once(
+        Arc::clone(&registry),
+        Arc::clone(&factory),
+        None,
+        Arc::clone(&clock) as Arc<dyn crate::Clock>,
+        32,
+    )
+    .await
+    .expect("retry deferred fresh wake");
+    assert_eq!(deferred_report.enqueued, 1);
+    assert_eq!(deferred_report.floor_absorbed, 0);
+    assert_eq!(deferred_report.discarded_sequence_rewound, 0);
+    assert!(
+        target
+            .list_queued_work(target_session_id)
+            .await
+            .expect("list receiver rows after deferred fresh retry")
+            .iter()
+            .any(|batch| {
+                batch
+                    .source_key
+                    .as_deref()
+                    .is_some_and(|source_key| source_key.contains(deferred_process_id))
+            }),
+        "deferred first receiver attempt must eventually create a live receiver row"
     );
 
     let blocked_process_id = "wake-discarded-group-head";
@@ -476,13 +689,663 @@ pub async fn wake_delivery_crash_matrix(
         "redriving the named head must clear the blocked-group report"
     );
 
-    target_gone_is_a_typed_discard(Arc::clone(&factory), Arc::clone(&registry)).await;
-    expired_is_a_typed_discard(factory, registry).await;
+    sender_floor_lifetime(
+        Arc::clone(&factory),
+        Arc::clone(&registry),
+        Arc::clone(&clock),
+    )
+    .await;
+
+    target_gone_is_a_typed_discard(
+        Arc::clone(&factory),
+        Arc::clone(&registry),
+        Arc::clone(&clock),
+    )
+    .await;
+    expired_is_a_typed_discard(factory, registry, clock).await;
+}
+
+async fn sender_floor_lifetime(
+    factory: Arc<dyn crate::SessionStoreFactory>,
+    registry: Arc<dyn crate::ProcessRegistry>,
+    clock: Arc<WakeDeliveryConformanceClock>,
+) {
+    let target_session_id = "wake-allocation-floor-lifetime-target";
+    let target = factory
+        .create_store(&crate::SessionStoreCreateRequest {
+            session_id: target_session_id.to_string(),
+            relation: crate::SessionRelation::Root,
+            policy: crate::SessionPolicy::default(),
+        })
+        .await
+        .expect("create sender-floor lifetime target");
+    let process_id = "wake-allocation-floor-lifetime-process";
+    registry
+        .register_process(
+            process_registry::registration(process_id)
+                .with_extra_event_types([process_registry::wake_event_type("producer.wake")])
+                .with_wake_session_id(Some(target_session_id.to_string())),
+        )
+        .await
+        .expect("register sender-floor lifetime process");
+    let wake = registry
+        .append_event(
+            process_id,
+            crate::ProcessEventAppendRequest::new(
+                "producer.wake",
+                serde_json::json!({"wake_input": "floor lifetime"}),
+            ),
+        )
+        .await
+        .expect("append sender-floor lifetime wake")
+        .wake_delivery
+        .expect("sender-floor lifetime wake delivery");
+    let report = crate::WakeDeliveryDriver::drive_pending_once(
+        Arc::clone(&registry),
+        Arc::clone(&factory),
+        None,
+        clock as Arc<dyn crate::Clock>,
+        32,
+    )
+    .await
+    .expect("deliver sender-floor lifetime wake");
+    assert!(
+        report.enqueued >= 1,
+        "unexpected delivery report: {report:?}"
+    );
+    let batch = target
+        .list_queued_work(target_session_id)
+        .await
+        .expect("list sender-floor lifetime receiver row")
+        .into_iter()
+        .find(|batch| {
+            batch.source_key.as_deref()
+                == Some(crate::process_wake_source_key(process_id, wake.sequence).as_str())
+        })
+        .expect("sender-floor lifetime wake reached receiver");
+    settle_queued_batch(&target, target_session_id, &batch.batch_id).await;
+    complete_and_prune(&registry, process_id).await;
+    let retained_floor = registry
+        .wake_allocation_floor_for_testing(target_session_id, process_id)
+        .await
+        .expect("read sender floor after process prune")
+        .expect("process prune must retain sender floor");
+    assert!(retained_floor > wake.sequence);
+    registry
+        .compact_process_tombstones(u64::MAX, crate::ProjectionWatermark::NoProjector, None)
+        .await
+        .expect("compact process tombstone");
+    assert_eq!(
+        registry
+            .wake_allocation_floor_for_testing(target_session_id, process_id)
+            .await
+            .expect("read sender floor after tombstone compaction"),
+        Some(retained_floor),
+        "tombstone compaction must retain sender floor"
+    );
+    registry
+        .delete_session_process_state(target_session_id)
+        .await
+        .expect("delete target-owned process state");
+    factory
+        .delete_session(target_session_id)
+        .await
+        .expect("delete sender-floor lifetime target");
+    assert_eq!(
+        registry
+            .wake_allocation_floor_for_testing(target_session_id, process_id)
+            .await
+            .expect("read sender floor after target deletion"),
+        None,
+        "target deletion must remove sender and receiver fences together"
+    );
+}
+
+async fn settle_queued_batch(
+    target: &Arc<dyn crate::RuntimePersistence>,
+    session_id: &str,
+    batch_id: &str,
+) {
+    let owner = crate::LeaseOwnerIdentity::opaque(
+        format!("{batch_id}:owner"),
+        format!("{batch_id}:incarnation"),
+    );
+    let lease = target
+        .try_claim_session_execution_lease(session_id, &owner, 60_000)
+        .await
+        .expect("claim target session lease")
+        .acquired()
+        .expect("target session lease available");
+    let claim = target
+        .claim_ready_queued_work_by_batch_ids(
+            session_id,
+            &lease.fence(),
+            &owner,
+            crate::QueuedWorkClaimBoundary::Idle,
+            &[batch_id.to_string()],
+        )
+        .await
+        .expect("claim target wake batch")
+        .expect("target wake batch remains live");
+    let head_revision = target
+        .load_session()
+        .await
+        .expect("load target session before wake settlement")
+        .map_or(0, |read| read.head_revision);
+    let (commit, _) = crate::RuntimeCommit::persisted_state_for_test(
+        &crate::RuntimeSessionState {
+            session_id: session_id.to_string(),
+            head_revision,
+            ..crate::RuntimeSessionState::default()
+        },
+        &[],
+    )
+    .with_operation(crate::OperationId::new(
+        crate::ExecutionScope::runtime_operation(format!("settle-wake:{batch_id}")),
+        "commit",
+    ))
+    .expect("stamp unique wake-settlement operation");
+    target
+        .commit_runtime_state(
+            commit
+                .releasing_session_execution_lease(lease.completion())
+                .completing_queue_claim(claim.completion()),
+        )
+        .await
+        .expect("settle target wake batch");
+}
+
+async fn complete_and_prune(registry: &Arc<dyn crate::ProcessRegistry>, process_id: &str) {
+    registry
+        .complete_process(
+            process_id,
+            crate::ProcessAwaitOutput::Success {
+                value: serde_json::json!("done"),
+                control: None,
+            },
+            crate::ProcessCompletionAuthority::external_owner(),
+        )
+        .await
+        .expect("complete old process incarnation");
+    let (_, cursor) = registry
+        .processes_changed_since(crate::ProcessChangeCursor::initial(), 10_000)
+        .await
+        .expect("read terminal process cursor");
+    let report = registry
+        .prune_terminal_processes(u64::MAX, None, crate::ProjectionWatermark::UpTo(cursor))
+        .await
+        .expect("prune old process incarnation");
+    assert_eq!(report.pruned_processes, 1);
+}
+
+async fn prune_reregister_sender_floor_delivers_through_driver(
+    factory: Arc<dyn crate::SessionStoreFactory>,
+    registry: Arc<dyn crate::ProcessRegistry>,
+    clock: Arc<WakeDeliveryConformanceClock>,
+    target: Arc<dyn crate::RuntimePersistence>,
+    target_session_id: &str,
+) {
+    clock.set(1_800_000_010_000);
+    let process_id = "wake-floor-prune-reregister";
+    let registration = || {
+        process_registry::registration(process_id)
+            .with_extra_event_types([process_registry::wake_event_type("producer.wake")])
+            .with_wake_session_id(Some(target_session_id.to_string()))
+    };
+    registry
+        .register_process(registration())
+        .await
+        .expect("register old sender-floor wake producer");
+    let old_wake = registry
+        .append_event(
+            process_id,
+            crate::ProcessEventAppendRequest::new(
+                "producer.wake",
+                serde_json::json!({"wake_input": "old incarnation"}),
+            )
+            .with_replay_key("wake-floor-prune-reregister:old"),
+        )
+        .await
+        .expect("append old sender-floor wake")
+        .wake_delivery
+        .expect("old sender-floor wake delivery");
+    let old_report = crate::WakeDeliveryDriver::drive_pending_once(
+        Arc::clone(&registry),
+        Arc::clone(&factory),
+        None,
+        Arc::clone(&clock) as Arc<dyn crate::Clock>,
+        32,
+    )
+    .await
+    .expect("deliver old sender-floor wake");
+    assert_eq!(old_report.enqueued, 1);
+    let old_sender_id = registry
+        .list_wake_deliveries(None)
+        .await
+        .expect("list old sender-floor row")
+        .into_iter()
+        .find(|delivery| {
+            delivery.wake.process_id == process_id && delivery.wake.sequence == old_wake.sequence
+        })
+        .expect("old sender-floor row")
+        .delivery_id;
+    let old_batch = target
+        .list_queued_work(target_session_id)
+        .await
+        .expect("list old sender-floor wake")
+        .into_iter()
+        .find(|batch| {
+            batch.source_key.as_deref()
+                == Some(crate::process_wake_source_key(process_id, old_wake.sequence).as_str())
+        })
+        .expect("old sender-floor wake reached receiver");
+    settle_queued_batch(&target, target_session_id, &old_batch.batch_id).await;
+    complete_and_prune(&registry, process_id).await;
+    assert!(
+        registry
+            .list_wake_deliveries(None)
+            .await
+            .expect("list sender rows after process prune")
+            .iter()
+            .all(|delivery| delivery.delivery_id != old_sender_id),
+        "process prune must cascade every old-incarnation sender row"
+    );
+
+    registry
+        .register_process(registration())
+        .await
+        .expect("re-register wake producer under frozen clock");
+    let new_wake = registry
+        .append_event(
+            process_id,
+            crate::ProcessEventAppendRequest::new(
+                "producer.wake",
+                serde_json::json!({"wake_input": "new incarnation"}),
+            )
+            .with_replay_key("wake-floor-prune-reregister:new"),
+        )
+        .await
+        .expect("append new-incarnation wake under frozen clock")
+        .wake_delivery
+        .expect("new-incarnation sender-floor wake delivery");
+    assert!(new_wake.sequence > old_wake.sequence);
+    let new_sender = registry
+        .list_wake_deliveries(None)
+        .await
+        .expect("list sender outbox")
+        .into_iter()
+        .find(|delivery| {
+            delivery.wake.process_id == process_id && delivery.wake.sequence == new_wake.sequence
+        })
+        .expect("new wake must create a sender outbox row");
+    assert_ne!(
+        new_sender.delivery_id, old_sender_id,
+        "new wake must not collide with the old-incarnation delivery id"
+    );
+    assert_eq!(new_sender.state, crate::WakeDeliveryState::Pending);
+
+    let turn_handle = Arc::new(RecordingWakeTurnHandle::default());
+    let prior_runs = turn_handle.len().await;
+    let queued_work_driver = crate::QueuedWorkDriver::new(
+        Arc::clone(&turn_handle) as Arc<dyn crate::QueuedWorkRunHandle>
+    );
+    let report = crate::WakeDeliveryDriver::drive_pending_once(
+        Arc::clone(&registry),
+        factory,
+        Some(queued_work_driver.clone()),
+        Arc::clone(&clock) as Arc<dyn crate::Clock>,
+        32,
+    )
+    .await
+    .expect("deliver re-registered sender-floor wake");
+    assert_eq!(
+        report.enqueued, 1,
+        "new-incarnation wake must enqueue: {report:?}"
+    );
+    turn_handle
+        .wait_for_process_wake(target_session_id, prior_runs)
+        .await;
+    assert!(
+        target
+            .list_queued_work(target_session_id)
+            .await
+            .expect("list new-incarnation receiver queue")
+            .iter()
+            .any(|batch| {
+                batch.source_key.as_deref()
+                    == Some(crate::process_wake_source_key(process_id, new_wake.sequence).as_str())
+            }),
+        "new-incarnation wake must survive sender and receiver dedupe doors"
+    );
+}
+
+async fn replay_and_same_millisecond_allocation_are_deterministic(
+    registry: Arc<dyn crate::ProcessRegistry>,
+    clock: Arc<WakeDeliveryConformanceClock>,
+) {
+    clock.set(1_800_000_020_000);
+    let process_id = "wake-floor-replay";
+    registry
+        .register_process(
+            process_registry::registration(process_id)
+                .with_extra_event_types([process_registry::plain_event_type("producer.progress")]),
+        )
+        .await
+        .expect("register replay-allocation process");
+    let request =
+        crate::ProcessEventAppendRequest::new("producer.progress", serde_json::json!({"value": 1}))
+            .with_replay_key("wake-floor-replay:stable");
+    let first = registry
+        .append_event(process_id, request.clone())
+        .await
+        .expect("append replay-allocation event");
+    let same_ms = registry
+        .append_event(
+            process_id,
+            crate::ProcessEventAppendRequest::new(
+                "producer.progress",
+                serde_json::json!({"value": 2}),
+            )
+            .with_replay_key("wake-floor-replay:same-ms"),
+        )
+        .await
+        .expect("append second event under frozen clock");
+    assert_eq!(same_ms.event.sequence, first.event.sequence + 1);
+    clock.advance(10_000);
+    let replay = registry
+        .append_event(process_id, request)
+        .await
+        .expect("replay event after clock advance");
+    assert_eq!(
+        serde_json::to_value(replay.event).expect("encode replayed event"),
+        serde_json::to_value(first.event).expect("encode first event"),
+        "replay must return the journaled sequence"
+    );
+}
+
+async fn mixed_era_floor_and_ordering(
+    factory: Arc<dyn crate::SessionStoreFactory>,
+    registry: Arc<dyn crate::ProcessRegistry>,
+    clock: Arc<WakeDeliveryConformanceClock>,
+    target: Arc<dyn crate::RuntimePersistence>,
+    target_session_id: &str,
+) {
+    let process_id = "wake-floor-mixed-era";
+    let mut dense_batches = Vec::new();
+    for sequence in 1..=3 {
+        let wake = crate::ProcessWakeDelivery {
+            wake_id: format!("wake:mixed-era:{sequence}"),
+            target_session_id: target_session_id.to_string(),
+            process_id: process_id.to_string(),
+            sequence,
+            event_type: "producer.wake".to_string(),
+            event_invocation: crate::RuntimeInvocation::effect(
+                crate::RuntimeScope::new(target_session_id),
+                format!("wake:mixed-era:{sequence}"),
+                crate::RuntimeEffectKind::Process,
+                format!("wake:mixed-era:{sequence}"),
+            ),
+            process_caused_by: None,
+            input: format!("old dense wake {sequence}"),
+            created_at_ms: sequence,
+        };
+        dense_batches.push(
+            target
+                .enqueue_queued_work(crate::process_wake_batch_draft(wake))
+                .await
+                .expect("enqueue old dense wake"),
+        );
+    }
+    settle_queued_batch(&target, target_session_id, &dense_batches[2].batch_id).await;
+    let settled_redelivery = target
+        .enqueue_queued_work(crate::process_wake_batch_draft(
+            crate::ProcessWakeDelivery {
+                wake_id: "wake:mixed-era:3".to_string(),
+                target_session_id: target_session_id.to_string(),
+                process_id: process_id.to_string(),
+                sequence: 3,
+                event_type: "producer.wake".to_string(),
+                event_invocation: crate::RuntimeInvocation::effect(
+                    crate::RuntimeScope::new(target_session_id),
+                    "wake:mixed-era:3",
+                    crate::RuntimeEffectKind::Process,
+                    "wake:mixed-era:3",
+                ),
+                process_caused_by: None,
+                input: "old dense wake 3".to_string(),
+                created_at_ms: 3,
+            },
+        ))
+        .await
+        .expect_err("settled no-live-row wake must trip the receiver floor");
+    assert!(
+        matches!(
+            settled_redelivery,
+            crate::StoreError::ProcessWakeSequenceRewound {
+                sequence: 3,
+                allocation_floor: 3,
+                ..
+            }
+        ),
+        "settled floor returned the wrong typed error: {settled_redelivery}"
+    );
+    let live_redelivery = target
+        .enqueue_queued_work(crate::process_wake_batch_draft(
+            crate::ProcessWakeDelivery {
+                wake_id: "wake:mixed-era:2".to_string(),
+                target_session_id: target_session_id.to_string(),
+                process_id: process_id.to_string(),
+                sequence: 2,
+                event_type: "producer.wake".to_string(),
+                event_invocation: crate::RuntimeInvocation::effect(
+                    crate::RuntimeScope::new(target_session_id),
+                    "wake:mixed-era:2",
+                    crate::RuntimeEffectKind::Process,
+                    "wake:mixed-era:2",
+                ),
+                process_caused_by: None,
+                input: "old dense wake 2".to_string(),
+                created_at_ms: 2,
+            },
+        ))
+        .await
+        .expect("dedupe live old dense wake");
+    assert_eq!(live_redelivery.batch_id, dense_batches[1].batch_id);
+
+    clock.set(1_800_000_030_000);
+    registry
+        .register_process(
+            process_registry::registration(process_id)
+                .with_extra_event_types([
+                    process_registry::plain_event_type("producer.progress"),
+                    process_registry::wake_event_type("producer.wake"),
+                ])
+                .with_wake_session_id(Some(target_session_id.to_string())),
+        )
+        .await
+        .expect("register mixed-era process");
+    for value in 1..=3 {
+        registry
+            .append_event(
+                process_id,
+                crate::ProcessEventAppendRequest::new(
+                    "producer.progress",
+                    serde_json::json!({"value": value}),
+                ),
+            )
+            .await
+            .expect("append dense sender-floor predecessor");
+    }
+    let sender_floor_wake = registry
+        .append_event(
+            process_id,
+            crate::ProcessEventAppendRequest::new(
+                "producer.wake",
+                serde_json::json!({"wake_input": "timestamp era"}),
+            ),
+        )
+        .await
+        .expect("append small sender-floor wake")
+        .wake_delivery
+        .expect("small sender-floor wake delivery");
+    assert_eq!(sender_floor_wake.sequence, 4);
+    let report = crate::WakeDeliveryDriver::drive_pending_once(
+        registry,
+        factory,
+        None,
+        clock as Arc<dyn crate::Clock>,
+        32,
+    )
+    .await
+    .expect("deliver small sender-floor wake");
+    assert_eq!(report.enqueued, 1);
+    let queued_sequences = target
+        .list_queued_work(target_session_id)
+        .await
+        .expect("list mixed-era receiver queue")
+        .into_iter()
+        .filter_map(|batch| {
+            batch.items.into_iter().find_map(|item| match item.payload {
+                crate::QueuedWorkPayload::ProcessWake { wake } if wake.process_id == process_id => {
+                    Some(wake.sequence)
+                }
+                _ => None,
+            })
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(queued_sequences, vec![1, 2, sender_floor_wake.sequence]);
+}
+
+async fn rewound_fresh_delivery_is_discarded_without_blocking(
+    factory: Arc<dyn crate::SessionStoreFactory>,
+    registry: Arc<dyn crate::ProcessRegistry>,
+    clock: Arc<WakeDeliveryConformanceClock>,
+    target: Arc<dyn crate::RuntimePersistence>,
+    target_session_id: &str,
+) {
+    let process_id = "wake-store-rewind-poison";
+    let old = crate::ProcessWakeDelivery {
+        wake_id: "wake:store-rewind:10".to_string(),
+        target_session_id: target_session_id.to_string(),
+        process_id: process_id.to_string(),
+        sequence: 10,
+        event_type: "producer.wake".to_string(),
+        event_invocation: crate::RuntimeInvocation::effect(
+            crate::RuntimeScope::new(target_session_id),
+            "wake:store-rewind:10",
+            crate::RuntimeEffectKind::Process,
+            "wake:store-rewind:10",
+        ),
+        process_caused_by: None,
+        input: "receiver state surviving a sender-store rewind".to_string(),
+        created_at_ms: 10,
+    };
+    let old_batch = target
+        .enqueue_queued_work(crate::process_wake_batch_draft(old.clone()))
+        .await
+        .expect("seed receiver floor above restored sender state");
+    settle_queued_batch(&target, target_session_id, &old_batch.batch_id).await;
+    registry
+        .register_process(
+            process_registry::registration(process_id)
+                .with_extra_event_types([
+                    process_registry::plain_event_type("producer.progress"),
+                    process_registry::wake_event_type("producer.wake"),
+                ])
+                .with_wake_session_id(Some(target_session_id.to_string())),
+        )
+        .await
+        .expect("register restored sender process");
+    let poison = registry
+        .append_event(
+            process_id,
+            crate::ProcessEventAppendRequest::new(
+                "producer.wake",
+                serde_json::json!({"wake_input": "rewound fresh wake"}),
+            ),
+        )
+        .await
+        .expect("append rewound fresh wake")
+        .wake_delivery
+        .expect("rewound fresh outbox row");
+    assert_eq!(poison.sequence, 1);
+    for value in 2..=10 {
+        registry
+            .append_event(
+                process_id,
+                crate::ProcessEventAppendRequest::new(
+                    "producer.progress",
+                    serde_json::json!({"value": value}),
+                ),
+            )
+            .await
+            .expect("advance restored sender beyond receiver floor");
+    }
+    let healthy = registry
+        .append_event(
+            process_id,
+            crate::ProcessEventAppendRequest::new(
+                "producer.wake",
+                serde_json::json!({"wake_input": "healthy wake after rewind"}),
+            ),
+        )
+        .await
+        .expect("append healthy post-rewind wake")
+        .wake_delivery
+        .expect("healthy post-rewind outbox row");
+    assert_eq!(healthy.sequence, old.sequence + 1);
+
+    let poison_report = crate::WakeDeliveryDriver::drive_pending_once(
+        Arc::clone(&registry),
+        Arc::clone(&factory),
+        None,
+        Arc::clone(&clock) as Arc<dyn crate::Clock>,
+        32,
+    )
+    .await
+    .expect("drive rewound poison wake");
+    assert_eq!(poison_report.discarded_sequence_rewound, 1);
+    assert_eq!(poison_report.retryable_failures, 0);
+    let delivery_report = registry
+        .wake_delivery_report()
+        .await
+        .expect("report rewound discard");
+    assert_eq!(delivery_report.sequence_rewound, 1);
+    assert!(
+        delivery_report
+            .blocked_groups
+            .iter()
+            .all(|group| group.process_id != process_id),
+        "sequence-rewound discard must not block its ordering group"
+    );
+
+    let healthy_report = crate::WakeDeliveryDriver::drive_pending_once(
+        Arc::clone(&registry),
+        factory,
+        None,
+        clock as Arc<dyn crate::Clock>,
+        32,
+    )
+    .await
+    .expect("drive healthy wake behind rewound discard");
+    assert_eq!(healthy_report.enqueued, 1);
+    assert!(
+        target
+            .list_queued_work(target_session_id)
+            .await
+            .expect("list healthy post-rewind queue")
+            .iter()
+            .any(|batch| {
+                batch.source_key.as_deref()
+                    == Some(crate::process_wake_source_key(process_id, healthy.sequence).as_str())
+            })
+    );
 }
 
 async fn target_gone_is_a_typed_discard(
     factory: Arc<dyn crate::SessionStoreFactory>,
     registry: Arc<dyn crate::ProcessRegistry>,
+    clock: Arc<WakeDeliveryConformanceClock>,
 ) {
     let target_session_id = "wake-target-gone-session";
     let target_request = crate::SessionStoreCreateRequest {
@@ -524,7 +1387,7 @@ async fn target_gone_is_a_typed_discard(
         Arc::clone(&registry),
         factory,
         None,
-        Arc::new(crate::SystemClock),
+        clock as Arc<dyn crate::Clock>,
         32,
     )
     .await
@@ -549,6 +1412,7 @@ async fn target_gone_is_a_typed_discard(
 async fn expired_is_a_typed_discard(
     factory: Arc<dyn crate::SessionStoreFactory>,
     registry: Arc<dyn crate::ProcessRegistry>,
+    clock: Arc<WakeDeliveryConformanceClock>,
 ) {
     let target_session_id = "wake-crash-target";
     let process_id = "wake-expired-sender";
@@ -582,11 +1446,12 @@ async fn expired_is_a_typed_discard(
         })
         .expect("expiring wake remains pending")
         .expires_at_ms;
+    clock.set(expires_at_ms);
     let report = crate::WakeDeliveryDriver::drive_pending_once(
         Arc::clone(&registry),
         factory,
         None,
-        Arc::new(WakeDeliveryConformanceClock(expires_at_ms)),
+        clock as Arc<dyn crate::Clock>,
         32,
     )
     .await

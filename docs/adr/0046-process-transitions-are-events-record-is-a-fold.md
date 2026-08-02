@@ -143,10 +143,12 @@ flight. If a driver crashes after claiming, bounded stale-claim recovery mints
 a new ownership token. The old claimant can no longer settle or defer that
 delivery. Recovery may still truthfully deliver the reclaimed wake to the
 retargeted-away target: retargeting bounds deliveries that were not already in
-flight, and receiver high-water deduplication absorbs any retry.
+flight, and receiver allocation-floor deduplication absorbs any retry.
 
-A discarded group head remains an ordering barrier: skipping it would let the
-receiver high-water mark absorb a gap. `wake_delivery_report` therefore names
+A discarded group head normally remains an ordering barrier: skipping it could
+discard delivery intent without an explicit host decision. The one exception is
+the typed `sequence_rewound` discard, which is permanent-by-construction and
+does not block later, higher sequences. `wake_delivery_report` therefore names
 each blocked `(target_session_id, process_id)` group, the discarded head and
 reason, and the delivery id to pass to `redrive_wake_delivery`. A
 retargeted-away group receives no new deliveries, so any block there is moot.

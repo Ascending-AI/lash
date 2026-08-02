@@ -53,6 +53,37 @@ pub enum ProcessStartPlan {
     AttemptsExhausted { attempts: u32, max_attempts: u32 },
 }
 
+/// Allocate the next process-event sequence from the live event tail and the
+/// durable sender floor retained for the wake target.
+///
+/// Event sequences are small ordered identifiers. The sender floor survives
+/// process pruning, so a reused process id cannot issue a sequence already
+/// observed by the same target session.
+pub fn allocate_process_event_sequence(
+    last_sequence: Option<u64>,
+    sender_floor: Option<u64>,
+) -> Result<u64, PluginError> {
+    let next_event = last_sequence
+        .unwrap_or(0)
+        .checked_add(1)
+        .ok_or_else(|| PluginError::Session("process event sequence exhausted".to_string()))?;
+    let next_floor = sender_floor
+        .map(|floor| {
+            floor.checked_add(1).ok_or_else(|| {
+                PluginError::Session("process wake allocation floor exhausted".to_string())
+            })
+        })
+        .transpose()?
+        .unwrap_or(1);
+    let sequence = next_event.max(next_floor);
+    if sequence > i64::MAX as u64 {
+        return Err(PluginError::Session(
+            "process event sequence exceeds the signed 64-bit persistence domain".to_string(),
+        ));
+    }
+    Ok(sequence)
+}
+
 pub fn prepare_process_start(
     record: &ProcessRecord,
     started: &ProcessStarted,
@@ -312,6 +343,7 @@ pub fn prepare_process_event_append(
     record: &ProcessRecord,
     request: ProcessEventAppendRequest,
     sequence: u64,
+    last_event_sequence: Option<u64>,
     replay_lookup: Option<(String, ProcessEvent)>,
     occurred_at_ms: u64,
     wake_session_id: Option<&str>,
@@ -323,7 +355,7 @@ pub fn prepare_process_event_append(
     {
         if existing_hash == payload_hash {
             let occurred_at_ms = epoch_ms_from_system_time(existing.occurred_at);
-            let repair_record = if existing.sequence.saturating_add(1) == sequence {
+            let repair_record = if last_event_sequence == Some(existing.sequence) {
                 let mut projected = record.clone();
                 apply_process_event_projection(&mut projected, &existing)?;
                 let projected_value = serde_json::to_value(&projected).map_err(|err| {
@@ -816,9 +848,16 @@ mod tests {
         ];
         for (index, request) in requests.into_iter().enumerate() {
             let sequence = index as u64 + 1;
-            let plan =
-                prepare_process_event_append(&record, request, sequence, None, sequence + 10, None)
-                    .expect("runtime-owned lifecycle append must validate");
+            let plan = prepare_process_event_append(
+                &record,
+                request,
+                sequence,
+                (sequence > 1).then_some(sequence - 1),
+                None,
+                sequence + 10,
+                None,
+            )
+            .expect("runtime-owned lifecycle append must validate");
             let ProcessEventAppendPlan::Insert {
                 projected_record, ..
             } = plan

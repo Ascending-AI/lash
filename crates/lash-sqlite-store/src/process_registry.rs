@@ -1,24 +1,11 @@
-//! SQLite-backed [`ProcessRegistry`] (`SqliteProcessRegistry`).
-//!
-//! First-party SQLite implementation of the public async process-registry
-//! surface. Every DB body is a *synchronous* rusqlite closure handed
-//! to [`SqliteConnection::call`] (reads) or [`SqliteConnection::write_flow`]
-//! (read-then-write).
-//!
-//! Transactional methods use `write_flow` so logical [`lash_core::PluginError`]
-//! failures roll back instead of committing partial writes through rusqlite's
-//! error channel. The `*_conn` helpers are synchronous and accept
-//! `&rusqlite::Connection`, so they compose inside connection and transaction
-//! closures.
-
 use super::*;
 
 mod segment_handover;
 mod support;
 mod wake_delivery;
 
-use support::process_status_label;
 pub(crate) use support::tx_outcome;
+use support::{process_status_label, wake_allocation_floor_for_testing};
 use wake_delivery::{load_wake_delivery_conn, update_wake_delivery_state, wake_delivery_report};
 
 #[async_trait::async_trait]
@@ -373,6 +360,12 @@ impl ProcessRegistry for SqliteProcessRegistry {
                                 params![session_id],
                             )
                             .map_err(process_sqlite_error)?;
+                        tx.execute(
+                            "DELETE FROM wake_allocation_floors
+                             WHERE target_session_id = ?1",
+                            params![session_id],
+                        )
+                        .map_err(process_sqlite_error)?;
                         Ok((
                             removed_observer_count,
                             discarded_wake_delivery_count,
@@ -388,6 +381,14 @@ impl ProcessRegistry for SqliteProcessRegistry {
             discarded_wake_delivery_count,
             cleared_subscription_count,
         })
+    }
+
+    async fn wake_allocation_floor_for_testing(
+        &self,
+        target_session_id: &str,
+        process_id: &str,
+    ) -> Result<Option<u64>, lash_core::PluginError> {
+        wake_allocation_floor_for_testing(self, target_session_id, process_id).await
     }
 
     async fn append_event(
@@ -946,6 +947,7 @@ impl ProcessRegistry for SqliteProcessRegistry {
                                        SELECT 1
                                        FROM process_wake_deliveries AS earlier
                                        WHERE earlier.state <> 'enqueued'
+                                         AND NOT (earlier.state = 'discarded' AND earlier.discard_reason = 'sequence_rewound')
                                          AND earlier.target_session_id =
                                              candidate.target_session_id
                                          AND earlier.process_id = candidate.process_id

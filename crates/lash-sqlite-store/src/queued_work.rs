@@ -185,23 +185,31 @@ pub(crate) fn enqueue_queued_work_conn(
     now: u64,
     nonce: u64,
 ) -> Result<QueuedWorkBatch, StoreError> {
+    enqueue_queued_work_conn_with_outcome(conn, batch, now, nonce)
+        .map(QueuedWorkEnqueueOutcome::into_batch)
+}
+
+pub(crate) fn enqueue_queued_work_conn_with_outcome(
+    conn: &Connection,
+    batch: &QueuedWorkBatchDraft,
+    now: u64,
+    nonce: u64,
+) -> Result<QueuedWorkEnqueueOutcome, StoreError> {
     batch
         .validate_process_wake_source()
         .map_err(StoreError::Backend)?;
-    if let Some(wake_source) = batch.process_wake_source.as_ref() {
-        let high_sequence = conn
-            .query_row(
-                "SELECT high_sequence FROM consumed_wake_high_water
+    let allocation_floor = if let Some(wake_source) = batch.process_wake_source.as_ref() {
+        conn.query_row(
+            "SELECT allocation_floor FROM wake_redelivery_fences
                  WHERE session_id = ?1 AND process_id = ?2",
-                params![batch.session_id, wake_source.process_id],
-                |row| row.get::<_, i64>(0),
-            )
-            .optional()
-            .map_err(sqlite_error)?;
-        if high_sequence.is_some_and(|high| wake_source.sequence <= high as u64) {
-            return Ok(lash_core::runtime::consumed_queued_work_batch(batch));
-        }
-    }
+            params![batch.session_id, wake_source.process_id],
+            |row| row.get::<_, i64>(0),
+        )
+        .optional()
+        .map_err(sqlite_error)?
+    } else {
+        None
+    };
     if let Some(source_key) = batch.source_key.as_deref() {
         let existing_id: Option<String> = conn
             .query_row(
@@ -213,10 +221,22 @@ pub(crate) fn enqueue_queued_work_conn(
             .optional()
             .map_err(sqlite_error)?;
         if let Some(batch_id) = existing_id {
-            return load_queued_batch_by_id_conn(conn, &batch_id)?.ok_or_else(|| {
+            let existing = load_queued_batch_by_id_conn(conn, &batch_id)?.ok_or_else(|| {
                 StoreError::Backend("queued work source row disappeared".to_string())
-            });
+            })?;
+            return Ok(QueuedWorkEnqueueOutcome::Existing(existing));
         }
+    }
+    if let (Some(wake_source), Some(allocation_floor)) =
+        (batch.process_wake_source.as_ref(), allocation_floor)
+        && wake_source.sequence <= allocation_floor as u64
+    {
+        return Err(StoreError::ProcessWakeSequenceRewound {
+            session_id: batch.session_id.clone(),
+            process_id: wake_source.process_id.clone(),
+            sequence: wake_source.sequence,
+            allocation_floor: allocation_floor as u64,
+        });
     }
     let batch_id = derive_batch_id(
         &batch.session_id,
@@ -251,8 +271,9 @@ pub(crate) fn enqueue_queued_work_conn(
         )
         .map_err(sqlite_error)?;
     }
-    load_queued_batch_by_id_conn(conn, &batch_id)?
-        .ok_or_else(|| StoreError::Backend("queued work insert disappeared".to_string()))
+    let inserted = load_queued_batch_by_id_conn(conn, &batch_id)?
+        .ok_or_else(|| StoreError::Backend("queued work insert disappeared".to_string()))?;
+    Ok(QueuedWorkEnqueueOutcome::Inserted(inserted))
 }
 
 pub(crate) fn ensure_queued_work_completion_conn(

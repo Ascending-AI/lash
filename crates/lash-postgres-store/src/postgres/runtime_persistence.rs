@@ -167,26 +167,34 @@ async fn enqueue_queued_work_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     batch: &QueuedWorkBatchDraft,
 ) -> Result<QueuedWorkBatch, StoreError> {
+    enqueue_queued_work_with_outcome_tx(tx, batch)
+        .await
+        .map(QueuedWorkEnqueueOutcome::into_batch)
+}
+
+async fn enqueue_queued_work_with_outcome_tx(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    batch: &QueuedWorkBatchDraft,
+) -> Result<QueuedWorkEnqueueOutcome, StoreError> {
     batch
         .validate_process_wake_source()
         .map_err(StoreError::Backend)?;
-    if let Some(wake_source) = batch.process_wake_source.as_ref() {
+    let allocation_floor = if let Some(wake_source) = batch.process_wake_source.as_ref() {
         if let Some(source_key) = batch.source_key.as_deref() {
             lock_process_wake_source_tx(tx, &batch.session_id, source_key).await?;
         }
-        let high_sequence = sqlx::query_scalar::<_, i64>(
-            "SELECT high_sequence FROM lash_consumed_wake_high_water
+        sqlx::query_scalar::<_, i64>(
+            "SELECT allocation_floor FROM lash_wake_redelivery_fences
              WHERE session_id = $1 AND process_id = $2",
         )
         .bind(&batch.session_id)
         .bind(&wake_source.process_id)
         .fetch_optional(&mut **tx)
         .await
-        .map_err(store_sqlx_error)?;
-        if high_sequence.is_some_and(|high| wake_source.sequence <= high as u64) {
-            return Ok(lash_core::runtime::consumed_queued_work_batch(batch));
-        }
-    }
+        .map_err(store_sqlx_error)?
+    } else {
+        None
+    };
     if let Some(source_key) = batch.source_key.as_deref() {
         let existing_id: Option<String> = sqlx::query_scalar(
             "SELECT batch_id FROM lash_queued_work_batches
@@ -198,10 +206,22 @@ async fn enqueue_queued_work_tx(
         .await
         .map_err(store_sqlx_error)?;
         if let Some(batch_id) = existing_id {
-            return load_queued_batch(tx, &batch_id).await?.ok_or_else(|| {
+            let existing = load_queued_batch(tx, &batch_id).await?.ok_or_else(|| {
                 StoreError::Backend("queued work source row disappeared".to_string())
-            });
+            })?;
+            return Ok(QueuedWorkEnqueueOutcome::Existing(existing));
         }
+    }
+    if let (Some(wake_source), Some(allocation_floor)) =
+        (batch.process_wake_source.as_ref(), allocation_floor)
+        && wake_source.sequence <= allocation_floor as u64
+    {
+        return Err(StoreError::ProcessWakeSequenceRewound {
+            session_id: batch.session_id.clone(),
+            process_id: wake_source.process_id.clone(),
+            sequence: wake_source.sequence,
+            allocation_floor: allocation_floor as u64,
+        });
     }
     let now = current_epoch_ms();
     let enqueue_seq: i64 = sqlx::query_scalar(
@@ -256,11 +276,11 @@ async fn enqueue_queued_work_tx(
         .await?
         .ok_or_else(|| StoreError::Backend("queued work insert disappeared".to_string()))?;
     debug_assert_eq!(queued.enqueue_seq, enqueue_seq as u64);
-    Ok(queued)
+    Ok(QueuedWorkEnqueueOutcome::Inserted(queued))
 }
 
 /// Serialize queue insertion and queue consumption for one process-wake source
-/// across their otherwise separate live-row and evidence relations.
+/// across their otherwise separate live-row and allocation-fence relations.
 ///
 /// The 64-bit hash may collide, which only adds harmless serialization; it
 /// cannot permit two equal `(session_id, source_key)` pairs to use different
@@ -970,13 +990,13 @@ async fn complete_queued_work_claims_tx(
             }
             if let Some((process_id, sequence)) = wake_source {
                 sqlx::query(
-                    "INSERT INTO lash_consumed_wake_high_water (
-                        session_id, process_id, high_sequence
+                    "INSERT INTO lash_wake_redelivery_fences (
+                        session_id, process_id, allocation_floor
                      ) VALUES ($1, $2, $3)
                      ON CONFLICT (session_id, process_id) DO UPDATE
-                     SET high_sequence = GREATEST(
-                         lash_consumed_wake_high_water.high_sequence,
-                         EXCLUDED.high_sequence
+                     SET allocation_floor = GREATEST(
+                         lash_wake_redelivery_fences.allocation_floor,
+                         EXCLUDED.allocation_floor
                      )",
                 )
                 .bind(&completed.session_id)
@@ -1183,6 +1203,17 @@ impl QueuedWorkStore for PostgresSessionStore {
         let mut tx = self.pool.begin().await.map_err(store_sqlx_error)?;
         ensure_session_not_deleted_tx(&mut tx, &batch.session_id).await?;
         let queued = enqueue_queued_work_tx(&mut tx, &batch).await?;
+        tx.commit().await.map_err(store_sqlx_error)?;
+        Ok(queued)
+    }
+
+    async fn enqueue_queued_work_with_outcome(
+        &self,
+        batch: QueuedWorkBatchDraft,
+    ) -> Result<QueuedWorkEnqueueOutcome, StoreError> {
+        let mut tx = self.pool.begin().await.map_err(store_sqlx_error)?;
+        ensure_session_not_deleted_tx(&mut tx, &batch.session_id).await?;
+        let queued = enqueue_queued_work_with_outcome_tx(&mut tx, &batch).await?;
         tx.commit().await.map_err(store_sqlx_error)?;
         Ok(queued)
     }

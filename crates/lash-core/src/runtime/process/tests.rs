@@ -211,7 +211,7 @@ fn replayed_terminal_event_repairs_non_terminal_status_projection() {
         }),
     )
     .with_replay_key("process-repair-terminal");
-    let first = prepare_process_event_append(&record, request.clone(), 1, None, 42, None)
+    let first = prepare_process_event_append(&record, request.clone(), 1, None, None, 42, None)
         .expect("prepare first terminal event");
     let ProcessEventAppendPlan::Insert {
         event: first_event,
@@ -226,6 +226,7 @@ fn replayed_terminal_event_repairs_non_terminal_status_projection() {
         &record,
         request,
         99,
+        Some(1),
         Some((first_payload_hash, first_event)),
         100,
         None,
@@ -253,6 +254,52 @@ fn replayed_terminal_event_repairs_non_terminal_status_projection() {
     ));
 }
 
+#[test]
+fn replayed_generic_tail_repairs_projection_across_sender_floor_gap() {
+    let registration =
+        registration("process-generic-repair").with_extra_event_types([ProcessEventType {
+            name: "producer.progress".to_string(),
+            payload_schema: crate::LashSchema::any(),
+            semantics: ProcessEventSemanticsSpec::default(),
+        }]);
+    let mut stale_record = ProcessRecord::from_registration(registration);
+    stale_record.updated_at_ms = 0;
+    let request =
+        ProcessEventAppendRequest::new("producer.progress", serde_json::json!({"value": 1}))
+            .with_replay_key("process-generic-repair:progress");
+    let first =
+        prepare_process_event_append(&stale_record, request.clone(), 7, None, None, 42, None)
+            .expect("prepare generic event at a sender-floor boundary");
+    let ProcessEventAppendPlan::Insert {
+        event,
+        payload_hash,
+        ..
+    } = first
+    else {
+        panic!("first generic event should insert")
+    };
+
+    let replay = prepare_process_event_append(
+        &stale_record,
+        request,
+        100,
+        Some(event.sequence),
+        Some((payload_hash, event)),
+        100,
+        None,
+    )
+    .expect("replay generic tail across a sender-floor gap");
+    let ProcessEventAppendPlan::Replay { repair_record, .. } = replay else {
+        panic!("generic keyed append should replay")
+    };
+    assert_eq!(
+        repair_record
+            .expect("generic tail replay must repair the stale projection")
+            .updated_at_ms,
+        42
+    );
+}
+
 // Contract invariants (registration idempotency, event/wake materialization,
 // ack suppression, terminal/await, observer edges, session deletion) live in the
 // backend-agnostic conformance suite so the in-memory and Sqlite registries are
@@ -262,6 +309,224 @@ async fn test_local_process_registry_satisfies_conformance() {
     crate::testing::conformance::process_registry(|| {
         Arc::new(TestLocalProcessRegistry::default()) as Arc<dyn ProcessRegistry>
     })
+    .await;
+}
+
+fn wake_registration(id: &str, target_session_id: &str) -> ProcessRegistration {
+    registration(id)
+        .with_wake_session_id(Some(target_session_id.to_string()))
+        .with_extra_event_types([ProcessEventType {
+            name: "producer.wake".to_string(),
+            payload_schema: crate::LashSchema::any(),
+            semantics: ProcessEventSemanticsSpec {
+                wake: Some(ProcessWakeSpec {
+                    when: Some(ProcessValueSelector::Present("/wake_input".to_string())),
+                    input: ProcessValueSelector::Pointer("/wake_input".to_string()),
+                }),
+                ..ProcessEventSemanticsSpec::default()
+            },
+        }])
+}
+
+#[tokio::test]
+async fn prune_serializes_same_id_reregistration_and_fresh_wake_cleanup() {
+    let registry = Arc::new(TestLocalProcessRegistry::default());
+    let process_id = "prune-reregister-race";
+    let target_session_id = "prune-reregister-target";
+    registry
+        .register_process(wake_registration(process_id, target_session_id))
+        .await
+        .expect("register old process incarnation");
+    registry
+        .append_event(
+            process_id,
+            ProcessEventAppendRequest::new(
+                "producer.wake",
+                serde_json::json!({"wake_input": "old"}),
+            )
+            .with_replay_key("prune-reregister:old"),
+        )
+        .await
+        .expect("append old wake");
+    let claimed = registry
+        .claim_pending_wake_deliveries(1)
+        .await
+        .expect("claim old wake delivery")
+        .pop()
+        .expect("old wake delivery");
+    registry
+        .mark_wake_enqueued(
+            &claimed.delivery_id,
+            claimed.claim_token.as_deref().expect("wake claim token"),
+        )
+        .await
+        .expect("settle old wake delivery");
+    registry
+        .complete_process(
+            process_id,
+            ProcessAwaitOutput::Success {
+                value: serde_json::json!("old done"),
+                control: None,
+            },
+            ProcessCompletionAuthority::external_owner(),
+        )
+        .await
+        .expect("complete old process incarnation");
+
+    let pause = registry.pause_next_prune_after_managed_removal();
+    let prune_registry = Arc::clone(&registry);
+    let prune = crate::task::spawn(async move {
+        prune_registry
+            .prune_terminal_processes(u64::MAX, None, ProjectionWatermark::NoProjector)
+            .await
+    });
+    pause.wait_until_validated().await;
+
+    let registration_registry = Arc::clone(&registry);
+    let fresh = crate::task::spawn(async move {
+        registration_registry
+            .register_process(wake_registration(process_id, target_session_id))
+            .await
+            .expect("re-register process");
+        registration_registry
+            .append_event(
+                process_id,
+                ProcessEventAppendRequest::new(
+                    "producer.wake",
+                    serde_json::json!({"wake_input": "fresh"}),
+                )
+                .with_replay_key("prune-reregister:fresh"),
+            )
+            .await
+            .expect("append fresh wake")
+            .wake_delivery
+            .expect("fresh wake delivery")
+    });
+
+    if registry.transaction_is_locked_for_testing() {
+        pause.resume();
+        prune
+            .await
+            .expect("join serialized prune")
+            .expect("serialized prune");
+    } else {
+        let fresh_wake = fresh.await.expect("join racing fresh wake");
+        pause.resume();
+        prune
+            .await
+            .expect("join racing prune")
+            .expect("racing prune");
+        assert!(
+            registry
+                .list_wake_deliveries(None)
+                .await
+                .expect("list fresh deliveries after racing prune")
+                .iter()
+                .any(|delivery| delivery.wake.wake_id == fresh_wake.wake_id),
+            "prune deleted the concurrently registered incarnation's fresh wake"
+        );
+        return;
+    }
+
+    let fresh_wake = fresh.await.expect("join serialized fresh wake");
+    assert!(
+        registry
+            .list_wake_deliveries(None)
+            .await
+            .expect("list fresh deliveries after serialized prune")
+            .iter()
+            .any(|delivery| delivery.wake.wake_id == fresh_wake.wake_id),
+        "fresh wake must survive the old incarnation's complete prune"
+    );
+}
+
+#[tokio::test]
+async fn lifecycle_append_serializes_target_cleanup_and_cannot_recreate_sender_floor() {
+    let registry = Arc::new(TestLocalProcessRegistry::default());
+    let process_id = "lifecycle-target-cleanup-race";
+    let target_session_id = "lifecycle-target-cleanup-session";
+    registry
+        .register_process(wake_registration(process_id, target_session_id))
+        .await
+        .expect("register lifecycle process");
+    registry
+        .append_event(
+            process_id,
+            ProcessEventAppendRequest::new(
+                "producer.wake",
+                serde_json::json!({"wake_input": "seed floor"}),
+            )
+            .with_replay_key("lifecycle-target-cleanup:seed"),
+        )
+        .await
+        .expect("seed sender floor");
+
+    let pause = registry.pause_next_append_after_target_snapshot();
+    let append_registry = Arc::clone(&registry);
+    let append = crate::task::spawn(async move {
+        append_registry
+            .set_external_ref(
+                process_id,
+                ProcessExternalRef {
+                    backend: "test".to_string(),
+                    id: "external".to_string(),
+                    metadata: None,
+                },
+            )
+            .await
+    });
+    pause.wait_until_validated().await;
+
+    let cleanup_registry = Arc::clone(&registry);
+    let cleanup = crate::task::spawn(async move {
+        cleanup_registry
+            .delete_session_process_state(target_session_id)
+            .await
+    });
+    if registry.transaction_is_locked_for_testing() {
+        pause.resume();
+        append
+            .await
+            .expect("join serialized lifecycle append")
+            .expect("serialized lifecycle append");
+        cleanup
+            .await
+            .expect("join serialized target cleanup")
+            .expect("serialized target cleanup");
+    } else {
+        cleanup
+            .await
+            .expect("join racing target cleanup")
+            .expect("racing target cleanup");
+        pause.resume();
+        append
+            .await
+            .expect("join racing lifecycle append")
+            .expect("racing lifecycle append");
+    }
+
+    assert_eq!(
+        registry
+            .wake_allocation_floor_for_testing(target_session_id, process_id)
+            .await
+            .expect("read sender floor after target cleanup"),
+        None,
+        "a lifecycle append must not recreate sender state after target cleanup"
+    );
+}
+
+#[tokio::test]
+async fn in_memory_leased_completion_replay_repairs_projection() {
+    let registry = Arc::new(TestLocalProcessRegistry::default());
+    let registry_for_corruption = Arc::clone(&registry);
+    crate::testing::conformance::leased_completion_replay_repairs_projection(
+        registry as Arc<dyn ProcessRegistry>,
+        move |stale| async move {
+            registry_for_corruption
+                .replace_process_projection_for_testing(stale)
+                .await;
+        },
+    )
     .await;
 }
 

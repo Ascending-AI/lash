@@ -2064,6 +2064,7 @@ fn normalized_store_error(backend: &str, error: &StoreError) -> String {
         StoreError::MissingRecordSchemaVersion { .. } => "MissingRecordSchemaVersion".to_string(),
         StoreError::InvalidRecordSchemaVersion { .. } => "InvalidRecordSchemaVersion".to_string(),
         StoreError::CheckpointComponentMissing { .. } => "CheckpointComponentMissing".to_string(),
+        StoreError::ProcessWakeSequenceRewound { .. } => "ProcessWakeSequenceRewound".to_string(),
         StoreError::NodeIdDerivationMismatch { .. } => "NodeIdDerivationMismatch".to_string(),
         StoreError::NodeIdCollision { .. } => "NodeIdCollision".to_string(),
         StoreError::InvalidGraphLeaf { .. } => "InvalidGraphLeaf".to_string(),

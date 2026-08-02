@@ -104,13 +104,13 @@ impl InMemorySessionStore {
             .collect()
     }
 
-    /// Return the monotone receiver-side process-wake evidence directly from
+    /// Return the receiver-side process-wake allocation fences directly from
     /// the in-memory durable map.
-    pub fn raw_consumed_wake_high_water_for_testing(&self) -> Vec<(String, String, u64)> {
+    pub fn raw_wake_redelivery_fences_for_testing(&self) -> Vec<(String, String, u64)> {
         let mut rows = self
-            .consumed_wake_high_water
+            .wake_redelivery_fences
             .lock()
-            .expect("lock consumed wake high water")
+            .expect("lock wake redelivery fences")
             .iter()
             .map(|((session_id, process_id), sequence)| {
                 (session_id.clone(), process_id.clone(), *sequence)

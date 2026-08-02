@@ -63,6 +63,16 @@ impl TestLocalProcessRegistry {
             .cloned()
             .collect::<Vec<_>>();
         tombstones.sort_by(|left, right| left.process_id.cmp(&right.process_id));
+        let mut wake_allocation_floors = self
+            .wake_allocation_floors
+            .lock()
+            .await
+            .iter()
+            .map(|((session_id, process_id), sequence)| {
+                (session_id.clone(), process_id.clone(), *sequence)
+            })
+            .collect::<Vec<_>>();
+        wake_allocation_floors.sort();
 
         RawProcessRegistryStateForTesting {
             records,
@@ -70,6 +80,7 @@ impl TestLocalProcessRegistry {
             observers: observer_rows,
             leases,
             wake_deliveries,
+            wake_allocation_floors,
             tombstones,
         }
     }

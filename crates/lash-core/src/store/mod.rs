@@ -1268,6 +1268,19 @@ pub trait QueuedWorkStore: Send + Sync {
         batch: crate::QueuedWorkBatchDraft,
     ) -> Result<crate::QueuedWorkBatch, StoreError>;
 
+    /// Persist a queued-work batch and expose whether receiver idempotency
+    /// absorbed it. The wake driver uses this for delivery evidence; stores
+    /// with no richer receipt may retain the default inserted outcome.
+    #[doc(hidden)]
+    async fn enqueue_queued_work_with_outcome(
+        &self,
+        batch: crate::QueuedWorkBatchDraft,
+    ) -> Result<crate::QueuedWorkEnqueueOutcome, StoreError> {
+        self.enqueue_queued_work(batch)
+            .await
+            .map(crate::QueuedWorkEnqueueOutcome::Inserted)
+    }
+
     /// Claim a leading ready session-command batch for `owner_id`.
     ///
     /// A command claim is returned only when the earliest ready claimable batch

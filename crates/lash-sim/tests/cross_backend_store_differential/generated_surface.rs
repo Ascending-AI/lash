@@ -120,6 +120,7 @@ struct ProcessRows {
     observers: Vec<(String, String)>,
     leases: Vec<ProcessLeaseObservation>,
     wake_deliveries: Vec<serde_json::Value>,
+    wake_allocation_floors: Vec<(String, String, u64)>,
     tombstones: Vec<serde_json::Value>,
 }
 
@@ -134,7 +135,7 @@ struct TriggerRows {
 #[derive(Clone, Debug, PartialEq, serde::Serialize)]
 struct SurfaceState {
     processes: ProcessRows,
-    consumed_wake_high_water: Vec<(String, String, u64)>,
+    wake_redelivery_fences: Vec<(String, String, u64)>,
     triggers: TriggerRows,
     effect_journal: Option<Vec<serde_json::Value>>,
     await_journal: Option<Vec<serde_json::Value>>,
@@ -332,7 +333,7 @@ impl SurfaceReader {
                 triggers,
             } => SurfaceState {
                 processes: process_rows_from_memory(registry).await,
-                consumed_wake_high_water: runtime.raw_consumed_wake_high_water_for_testing(),
+                wake_redelivery_fences: runtime.raw_wake_redelivery_fences_for_testing(),
                 triggers: trigger_rows_from_memory(triggers),
                 effect_journal: None,
                 await_journal: None,
@@ -391,6 +392,7 @@ async fn process_rows_from_memory(registry: &TestLocalProcessRegistry) -> Proces
             .into_iter()
             .map(|delivery| normalized_json(serde_json::to_value(delivery).expect("encode wake")))
             .collect(),
+        wake_allocation_floors: raw.wake_allocation_floors,
         tombstones: raw
             .tombstones
             .into_iter()
@@ -689,6 +691,20 @@ fn read_sqlite_surface(
             Ok(normalized_json(value))
         },
     );
+    let wake_allocation_floors = {
+        let mut stmt = process
+            .prepare(
+                "SELECT target_session_id, process_id, allocation_floor
+                 FROM wake_allocation_floors ORDER BY target_session_id, process_id",
+            )
+            .unwrap();
+        stmt.query_map([], |row| {
+            Ok((row.get(0)?, row.get(1)?, row.get::<_, i64>(2)? as u64))
+        })
+        .unwrap()
+        .collect::<Result<Vec<_>, _>>()
+        .unwrap()
+    };
     let tombstones = sqlite_simple_json_rows(
         &process,
         "SELECT process_id, terminal_label, pruned_at_ms, pruned_change_seq
@@ -702,11 +718,11 @@ fn read_sqlite_surface(
             })))
         },
     );
-    let consumed_wake_high_water = {
+    let wake_redelivery_fences = {
         let mut stmt = runtime
             .prepare(
-                "SELECT session_id, process_id, high_sequence
-             FROM consumed_wake_high_water ORDER BY session_id, process_id",
+                "SELECT session_id, process_id, allocation_floor
+             FROM wake_redelivery_fences ORDER BY session_id, process_id",
             )
             .unwrap();
         stmt.query_map([], |row| {
@@ -723,9 +739,10 @@ fn read_sqlite_surface(
             observers,
             leases,
             wake_deliveries,
+            wake_allocation_floors,
             tombstones,
         },
-        consumed_wake_high_water,
+        wake_redelivery_fences,
         triggers: read_sqlite_triggers(&trigger),
         effect_journal: Some(sqlite_simple_json_rows(
             &effect,
@@ -932,10 +949,21 @@ async fn read_postgres_surface(pool: &PgPool) -> SurfaceState {
             },
         )
         .collect();
+    let allocation_rows: Vec<(String, String, i64)> = sqlx::query_as(
+        "SELECT target_session_id, process_id, allocation_floor
+         FROM lash_wake_allocation_floors ORDER BY target_session_id, process_id",
+    )
+    .fetch_all(pool)
+    .await
+    .unwrap();
+    let wake_allocation_floors = allocation_rows
+        .into_iter()
+        .map(|(session, process, sequence)| (session, process, sequence as u64))
+        .collect();
     let tombstone_rows: Vec<(String, String, i64, i64)> = sqlx::query_as("SELECT process_id, terminal_label, pruned_at_ms, pruned_change_seq FROM lash_process_tombstones ORDER BY process_id").fetch_all(pool).await.unwrap();
     let tombstones = tombstone_rows.into_iter().map(|(process_id, terminal_label, pruned_at_ms, pruned_change_seq)| normalized_json(serde_json::json!({"process_id": process_id, "terminal_label": terminal_label, "pruned_at_ms": pruned_at_ms, "pruned_change_seq": pruned_change_seq}))).collect();
-    let high_water_rows: Vec<(String, String, i64)> = sqlx::query_as("SELECT session_id, process_id, high_sequence FROM lash_consumed_wake_high_water ORDER BY session_id, process_id").fetch_all(pool).await.unwrap();
-    let consumed_wake_high_water = high_water_rows
+    let fence_rows: Vec<(String, String, i64)> = sqlx::query_as("SELECT session_id, process_id, allocation_floor FROM lash_wake_redelivery_fences ORDER BY session_id, process_id").fetch_all(pool).await.unwrap();
+    let wake_redelivery_fences = fence_rows
         .into_iter()
         .map(|(session, process, sequence)| (session, process, sequence as u64))
         .collect();
@@ -946,9 +974,10 @@ async fn read_postgres_surface(pool: &PgPool) -> SurfaceState {
             observers,
             leases,
             wake_deliveries,
+            wake_allocation_floors,
             tombstones,
         },
-        consumed_wake_high_water,
+        wake_redelivery_fences,
         triggers: read_postgres_triggers(pool).await,
         effect_journal: Some(read_postgres_effects(pool).await),
         await_journal: Some(read_postgres_await(pool).await),
@@ -1130,7 +1159,7 @@ async fn surface_runners(
 fn states_agree(observations: &[(&str, SurfaceState)]) -> bool {
     let common = observations.windows(2).all(|pair| {
         pair[0].1.processes == pair[1].1.processes
-            && pair[0].1.consumed_wake_high_water == pair[1].1.consumed_wake_high_water
+            && pair[0].1.wake_redelivery_fences == pair[1].1.wake_redelivery_fences
             && pair[0].1.triggers == pair[1].1.triggers
     });
     let sqlite = observations

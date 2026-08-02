@@ -234,6 +234,78 @@ mod tests {
         );
     }
 
+    #[tokio::test]
+    async fn rewound_commit_outbox_is_rejected_before_any_state_is_published() {
+        let store = super::InMemorySessionStore::new();
+        let session_id = "rewound-commit-atomic";
+        let process_id = "rewound-commit-process";
+        store
+            .wake_redelivery_fences
+            .lock()
+            .expect("lock receiver floors")
+            .insert((session_id.to_string(), process_id.to_string()), 7);
+        let wake = crate::ProcessWakeDelivery {
+            wake_id: "rewound-commit-wake".to_string(),
+            target_session_id: session_id.to_string(),
+            process_id: process_id.to_string(),
+            sequence: 7,
+            event_type: "producer.wake".to_string(),
+            event_invocation: crate::RuntimeInvocation {
+                scope: crate::RuntimeScope::new(session_id),
+                subject: crate::RuntimeSubject::ProcessEvent {
+                    process_id: process_id.to_string(),
+                    sequence: 7,
+                    event_type: "producer.wake".to_string(),
+                },
+                caused_by: None,
+                replay: None,
+            },
+            process_caused_by: None,
+            input: "rewound".to_string(),
+            created_at_ms: 1,
+        };
+        let state = RuntimeSessionState {
+            session_id: session_id.to_string(),
+            ..RuntimeSessionState::default()
+        };
+        let mut commit = RuntimeCommit::persisted_state_for_test(&state, &[]);
+        commit.enqueued_queue_batches = vec![crate::process_wake_batch_draft(wake)];
+
+        let error = store
+            .commit_runtime_state(commit)
+            .await
+            .expect_err("rewound wake must reject the complete commit");
+
+        assert!(matches!(
+            error,
+            StoreError::ProcessWakeSequenceRewound { .. }
+        ));
+        assert!(
+            store
+                .load_session()
+                .await
+                .expect("load rejected commit")
+                .is_none(),
+            "a rejected rewound outbox must not publish a session head"
+        );
+        assert_eq!(
+            *store
+                .runtime_commit_count
+                .lock()
+                .expect("lock runtime commit count"),
+            0,
+            "a rejected rewound outbox must not increment the commit counter"
+        );
+        assert!(
+            store
+                .runtime_turn_commits
+                .lock()
+                .expect("lock runtime turn commits")
+                .is_empty(),
+            "a rejected rewound outbox must not publish a turn receipt"
+        );
+    }
+
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
     async fn delete_racing_four_creates_never_resurrects_a_session_in_5000_rounds() {
         const ROUNDS: usize = 5_000;

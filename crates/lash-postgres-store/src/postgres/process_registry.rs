@@ -9,32 +9,6 @@ use wake_delivery::{
     update_wake_delivery_state, wake_delivery_report,
 };
 
-async fn require_process_tx(
-    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
-    process_id: &str,
-) -> Result<ProcessRecord, PluginError> {
-    if let Some(record) = load_process_tx(tx, process_id).await? {
-        return Ok(record);
-    }
-    let row = sqlx::query(
-        "SELECT terminal_label, pruned_at_ms
-         FROM lash_process_tombstones WHERE process_id = $1",
-    )
-    .bind(process_id)
-    .fetch_optional(&mut **tx)
-    .await
-    .map_err(plugin_sqlx_error)?;
-    match row {
-        Some(row) => Err(PluginError::ProcessNoLongerRetained {
-            terminal_label: row.get(0),
-            pruned_at_ms: row.get::<i64, _>(1) as u64,
-        }),
-        None => Err(PluginError::Session(format!(
-            "unknown process `{process_id}`"
-        ))),
-    }
-}
-
 #[async_trait::async_trait]
 impl ProcessRegistry for PostgresProcessRegistry {
     fn wake_delivery_config(&self) -> lash_core::WakeDeliveryConfig {
@@ -408,6 +382,11 @@ impl ProcessRegistry for PostgresProcessRegistry {
         .await
         .map_err(plugin_sqlx_error)?
         .rows_affected() as usize;
+        sqlx::query("DELETE FROM lash_wake_allocation_floors WHERE target_session_id = $1")
+            .bind(session_id)
+            .execute(&mut *tx)
+            .await
+            .map_err(plugin_sqlx_error)?;
         tx.commit().await.map_err(plugin_sqlx_error)?;
         Ok(lash_core::ProcessSessionDeleteReport {
             session_id: session_id.to_string(),
@@ -415,6 +394,23 @@ impl ProcessRegistry for PostgresProcessRegistry {
             discarded_wake_delivery_count,
             cleared_subscription_count,
         })
+    }
+
+    async fn wake_allocation_floor_for_testing(
+        &self,
+        target_session_id: &str,
+        process_id: &str,
+    ) -> Result<Option<u64>, PluginError> {
+        sqlx::query_scalar::<_, i64>(
+            "SELECT allocation_floor FROM lash_wake_allocation_floors
+             WHERE target_session_id = $1 AND process_id = $2",
+        )
+        .bind(target_session_id)
+        .bind(process_id)
+        .fetch_optional(&self.pool)
+        .await
+        .map(|value| value.map(|value| value as u64))
+        .map_err(plugin_sqlx_error)
     }
 
     async fn append_event(
@@ -579,19 +575,15 @@ impl ProcessRegistry for PostgresProcessRegistry {
             } else {
                 None
             };
-        let sequence: i64 = sqlx::query_scalar(
-            "SELECT COALESCE(MAX(sequence), 0) + 1 FROM lash_process_events WHERE process_id = $1",
-        )
-        .bind(process_id)
-        .fetch_one(&mut *tx)
-        .await
-        .map_err(plugin_sqlx_error)?;
         let occurred_at_ms = self.clock.timestamp_ms();
         let wake_session_id = wake_session_id_tx(&mut tx, process_id).await?;
+        let (last_sequence, sequence) =
+            next_process_event_sequence_tx(&mut tx, process_id, wake_session_id.as_deref()).await?;
         let prepared = lash_core::runtime::prepare_process_event_append(
             &record,
             request,
-            sequence as u64,
+            sequence,
+            last_sequence,
             replay_lookup,
             occurred_at_ms,
             wake_session_id.as_deref(),
@@ -626,7 +618,7 @@ impl ProcessRegistry for PostgresProcessRegistry {
                      VALUES ($1, $2, $3, $4, $5, $6, $7)",
                 )
                 .bind(process_id)
-                .bind(sequence)
+                .bind(sequence as i64)
                 .bind(event.event_type.as_str())
                 .bind(&payload_hash)
                 .bind(event.invocation.replay_key())
@@ -639,6 +631,13 @@ impl ProcessRegistry for PostgresProcessRegistry {
                 save_process_tx(&mut tx, &record).await?;
                 insert_wake_delivery_tx(&mut tx, wake_delivery.as_ref(), self.wake_delivery_config)
                     .await?;
+                advance_wake_allocation_floor_tx(
+                    &mut tx,
+                    wake_session_id.as_deref(),
+                    process_id,
+                    sequence,
+                )
+                .await?;
                 tx.commit().await.map_err(plugin_sqlx_error)?;
                 Ok(lash_core::ProcessCompletionOutcome::Committed(record))
             }
@@ -667,26 +666,28 @@ impl ProcessRegistry for PostgresProcessRegistry {
             } else {
                 None
             };
-        let sequence: i64 = sqlx::query_scalar(
-            "SELECT COALESCE(MAX(sequence), 0) + 1 FROM lash_process_events WHERE process_id = $1",
-        )
-        .bind(process_id)
-        .fetch_one(&mut *tx)
-        .await
-        .map_err(plugin_sqlx_error)?;
         let now = process_lease_now_epoch_ms_tx(&mut tx).await?;
         let wake_session_id = wake_session_id_tx(&mut tx, process_id).await?;
+        let (last_sequence, sequence) =
+            next_process_event_sequence_tx(&mut tx, process_id, wake_session_id.as_deref()).await?;
         let prepared = lash_core::runtime::prepare_process_event_append(
             &record,
             request,
-            sequence as u64,
+            sequence,
+            last_sequence,
             replay_lookup,
             now,
             wake_session_id.as_deref(),
         )?;
-        if let lash_core::ProcessEventAppendPlan::Replay { wake_delivery, .. } = &prepared {
+        if let lash_core::ProcessEventAppendPlan::Replay {
+            repair_record,
+            wake_delivery,
+            ..
+        } = prepared
+        {
             insert_wake_delivery_tx(&mut tx, wake_delivery.as_ref(), self.wake_delivery_config)
                 .await?;
+            apply_process_replay_repair_tx(&mut tx, &mut record, repair_record).await?;
             tx.commit().await.map_err(plugin_sqlx_error)?;
             return Ok(lash_core::ProcessCompletionOutcome::AlreadyApplied { stored: record });
         }
@@ -718,7 +719,7 @@ impl ProcessRegistry for PostgresProcessRegistry {
              ) VALUES ($1, $2, $3, $4, $5, $6, $7)",
         )
         .bind(process_id)
-        .bind(sequence)
+        .bind(sequence as i64)
         .bind(event.event_type.as_str())
         .bind(&payload_hash)
         .bind(event.invocation.replay_key())
@@ -730,6 +731,8 @@ impl ProcessRegistry for PostgresProcessRegistry {
         record = projected_record;
         save_process_tx(&mut tx, &record).await?;
         insert_wake_delivery_tx(&mut tx, wake_delivery.as_ref(), self.wake_delivery_config).await?;
+        advance_wake_allocation_floor_tx(&mut tx, wake_session_id.as_deref(), process_id, sequence)
+            .await?;
         let released = sqlx::query(
             "UPDATE lash_process_leases
              SET lease_owner_id = NULL,

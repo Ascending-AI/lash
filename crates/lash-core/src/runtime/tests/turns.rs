@@ -4437,7 +4437,10 @@ async fn durable_process_wake_drains_as_committed_event_history_and_acknowledges
     )
     .await;
     let expected_wake_id = wake.wake_id.clone();
-    let expected_text = "Background process wake\nProcess: wake-proc\nEvent: process.wake #1\nWake input:\ndeploy complete";
+    let expected_sequence = wake.sequence;
+    let expected_text = format!(
+        "Background process wake\nProcess: wake-proc\nEvent: process.wake #{expected_sequence}\nWake input:\ndeploy complete"
+    );
 
     let sink = RecordingSink::default();
     let turn_events = RecordingTurnEvents::default();
@@ -4478,11 +4481,12 @@ async fn durable_process_wake_drains_as_committed_event_history_and_acknowledges
                 crate::MessageOrigin::Process {
                     process_id,
                     event_type,
-                    sequence: 1,
+                    sequence,
                     wake_id,
                     caused_by,
                 } if process_id == "wake-proc"
                     && event_type == "process.wake"
+                    && *sequence == expected_sequence
                     && wake_id.as_deref() == Some(expected_wake_id.as_str())
                     && caused_by.as_ref() == Some(&process_caused_by)
             )
@@ -4524,7 +4528,7 @@ async fn durable_process_wake_drains_as_committed_event_history_and_acknowledges
             caused_by,
         }) if process_id == "wake-proc"
             && event_type == "process.wake"
-            && sequence == 1
+            && sequence == expected_sequence
             && wake_id.as_deref() == Some(expected_wake_id.as_str())
             && caused_by.as_ref() == Some(&process_caused_by)
     ));

@@ -12,11 +12,11 @@ use super::events::{
     ProcessEventAppendResult, terminal_append_request,
 };
 use super::model::{
-    AbandonRequest, PROCESS_LEASE_SCHEMA_VERSION, ProcessChange, ProcessChangeCursor,
-    ProcessCompletionOutcome, ProcessExecutionWriteAuthority, ProcessExternalRef, ProcessLease,
-    ProcessLeaseClaimOutcome, ProcessLeaseCompletion, ProcessListFilter, ProcessObserverBy,
-    ProcessRecord, ProcessRegistration, ProcessSessionDeleteReport, ProcessStartOutcome,
-    ProcessStarted, ProcessTombstone, SessionId, WaitState,
+    AbandonRequest, ProcessChange, ProcessChangeCursor, ProcessCompletionOutcome,
+    ProcessExecutionWriteAuthority, ProcessExternalRef, ProcessLease, ProcessLeaseClaimOutcome,
+    ProcessLeaseCompletion, ProcessListFilter, ProcessObserverBy, ProcessRecord,
+    ProcessRegistration, ProcessSessionDeleteReport, ProcessStartOutcome, ProcessStarted,
+    ProcessTombstone, SessionId, WaitState,
 };
 use super::references::ProcessLiveReferenceSummary;
 use super::registry::{ProcessPruneReport, ProcessRegistry, ProjectionWatermark};
@@ -28,8 +28,11 @@ use super::validation::{
 mod continuation;
 mod raw_state;
 mod support;
-use support::ExecutionWritePause;
-pub use support::{ExecutionWritePauseHandle, TestProcessRegistryWriteExt};
+pub use support::TestProcessRegistryWriteExt;
+use support::{
+    ExecutionWritePause, acquire_test_lease, process_external_ref_conflict, process_lease_expired,
+    validate_in_memory_execution_authority,
+};
 
 /// In-memory process registry for core tests.
 pub struct TestLocalProcessRegistry {
@@ -44,9 +47,12 @@ pub struct TestLocalProcessRegistry {
     handovers: Arc<Mutex<HashMap<(String, u64), crate::PersistedSegmentHandover>>>,
     execution_write_pause: Arc<std::sync::Mutex<Option<ExecutionWritePause>>>,
     wake_mark_pause: Arc<std::sync::Mutex<Option<ExecutionWritePause>>>,
+    append_target_snapshot_pause: Arc<std::sync::Mutex<Option<ExecutionWritePause>>>,
     append_outbox_pause: Arc<std::sync::Mutex<Option<ExecutionWritePause>>>,
+    prune_managed_removal_pause: Arc<std::sync::Mutex<Option<ExecutionWritePause>>>,
     wake_delivery_config: super::WakeDeliveryConfig,
     wake_deliveries: Arc<Mutex<HashMap<String, super::WakeDelivery>>>,
+    wake_allocation_floors: Arc<Mutex<HashMap<(SessionId, String), u64>>>,
     clock: Arc<dyn crate::Clock>,
 }
 
@@ -62,29 +68,8 @@ pub struct RawProcessRegistryStateForTesting {
     pub observers: Vec<(String, String)>,
     pub leases: Vec<ProcessLease>,
     pub wake_deliveries: Vec<super::WakeDelivery>,
+    pub wake_allocation_floors: Vec<(SessionId, String, u64)>,
     pub tombstones: Vec<ProcessTombstone>,
-}
-
-impl Default for TestLocalProcessRegistry {
-    fn default() -> Self {
-        Self {
-            transaction: Arc::new(Mutex::new(())),
-            managed: Arc::new(Mutex::new(HashMap::new())),
-            process_read_error: Arc::new(Mutex::new(None)),
-            next_change_seq: Arc::new(Mutex::new(0)),
-            observers: Arc::new(Mutex::new(HashMap::new())),
-            wake_targets: Arc::new(Mutex::new(HashMap::new())),
-            tombstones: Arc::new(Mutex::new(HashMap::new())),
-            leases: Arc::new(Mutex::new(HashMap::new())),
-            handovers: Arc::new(Mutex::new(HashMap::new())),
-            execution_write_pause: Arc::new(std::sync::Mutex::new(None)),
-            wake_mark_pause: Arc::new(std::sync::Mutex::new(None)),
-            append_outbox_pause: Arc::new(std::sync::Mutex::new(None)),
-            wake_delivery_config: super::WakeDeliveryConfig::default(),
-            wake_deliveries: Arc::new(Mutex::new(HashMap::new())),
-            clock: Arc::new(crate::SystemClock),
-        }
-    }
 }
 
 type ManagedProcessMap = HashMap<String, ManagedProcessRecord>;
@@ -99,75 +84,6 @@ struct ManagedProcessRecord {
 }
 
 impl TestLocalProcessRegistry {
-    #[doc(hidden)]
-    pub fn pause_next_execution_write_after_validation(&self) -> ExecutionWritePauseHandle {
-        let pause = ExecutionWritePause {
-            validated: Arc::new(tokio::sync::Notify::new()),
-            resume: Arc::new(tokio::sync::Notify::new()),
-        };
-        *self
-            .execution_write_pause
-            .lock()
-            .expect("execution write pause lock") = Some(pause.clone());
-        ExecutionWritePauseHandle {
-            validated: pause.validated,
-            resume: pause.resume,
-        }
-    }
-
-    #[doc(hidden)]
-    pub fn pause_next_wake_mark(&self) -> ExecutionWritePauseHandle {
-        let pause = ExecutionWritePause {
-            validated: Arc::new(tokio::sync::Notify::new()),
-            resume: Arc::new(tokio::sync::Notify::new()),
-        };
-        *self.wake_mark_pause.lock().expect("wake mark pause lock") = Some(pause.clone());
-        ExecutionWritePauseHandle {
-            validated: pause.validated,
-            resume: pause.resume,
-        }
-    }
-
-    #[doc(hidden)]
-    pub fn pause_next_append_after_outbox(&self) -> ExecutionWritePauseHandle {
-        let pause = ExecutionWritePause {
-            validated: Arc::new(tokio::sync::Notify::new()),
-            resume: Arc::new(tokio::sync::Notify::new()),
-        };
-        *self
-            .append_outbox_pause
-            .lock()
-            .expect("append outbox pause lock") = Some(pause.clone());
-        ExecutionWritePauseHandle {
-            validated: pause.validated,
-            resume: pause.resume,
-        }
-    }
-
-    async fn pause_append_after_outbox(&self) {
-        let pause = self
-            .append_outbox_pause
-            .lock()
-            .expect("append outbox pause lock")
-            .take();
-        if let Some(pause) = pause {
-            pause.validated.notify_one();
-            pause.resume.notified().await;
-        }
-    }
-
-    async fn pause_execution_write_after_validation(&self) {
-        let pause = self
-            .execution_write_pause
-            .lock()
-            .expect("execution write pause lock")
-            .take();
-        if let Some(pause) = pause {
-            pause.validated.notify_one();
-            pause.resume.notified().await;
-        }
-    }
-
     pub async fn set_process_read_error(&self, error: Option<PluginError>) {
         *self.process_read_error.lock().await = error;
     }
@@ -252,19 +168,32 @@ impl TestLocalProcessRegistry {
             .as_ref()
             .and_then(|replay| record.keyed_events.get(replay.key.as_str()))
             .map(|(hash, event)| (hash.clone(), event.clone()));
-        let sequence = record.events.len() as u64 + 1;
+        let last_sequence = record.events.last().map(|event| event.sequence);
         let wake_session_id = self
             .wake_targets
             .lock()
             .await
             .get(&record.record.id)
             .cloned();
+        let sender_floor = match wake_session_id.as_ref() {
+            Some(target_session_id) => self
+                .wake_allocation_floors
+                .lock()
+                .await
+                .get(&(target_session_id.clone(), record.record.id.clone()))
+                .copied(),
+            None => None,
+        };
+        self.pause_append_after_target_snapshot().await;
+        let sequence = super::allocate_process_event_sequence(last_sequence, sender_floor)?;
+        let now = self.clock.timestamp_ms();
         let prepared = prepare_process_event_append(
             &record.record,
             request,
             sequence,
+            last_sequence,
             replay_lookup,
-            self.clock.timestamp_ms(),
+            now,
             wake_session_id.as_deref(),
         )?;
         match prepared {
@@ -292,6 +221,12 @@ impl TestLocalProcessRegistry {
                 ..
             } => {
                 self.insert_wake_delivery(wake_delivery.as_ref()).await?;
+                self.advance_wake_allocation_floor(
+                    wake_session_id.as_deref(),
+                    &record.record.id,
+                    sequence,
+                )
+                .await;
                 self.pause_append_after_outbox().await;
                 record.record = projected_record;
                 record.change_seq = self.next_change_seq().await;
@@ -323,6 +258,21 @@ impl TestLocalProcessRegistry {
             .entry(delivery.delivery_id.clone())
             .or_insert(delivery);
         Ok(())
+    }
+
+    async fn advance_wake_allocation_floor(
+        &self,
+        target_session_id: Option<&str>,
+        process_id: &str,
+        sequence: u64,
+    ) {
+        let Some(target_session_id) = target_session_id else {
+            return;
+        };
+        self.wake_allocation_floors.lock().await.insert(
+            (target_session_id.to_string(), process_id.to_string()),
+            sequence,
+        );
     }
 }
 
@@ -375,6 +325,7 @@ impl ProcessRegistry for TestLocalProcessRegistry {
         process_id: &str,
         external_ref: ProcessExternalRef,
     ) -> Result<ProcessRecord, PluginError> {
+        let _transaction = self.transaction.lock().await;
         let mut managed = self.managed.lock().await;
         let Some(record) = managed.get_mut(process_id) else {
             return Err(self.process_miss(process_id).await);
@@ -619,6 +570,10 @@ impl ProcessRegistry for TestLocalProcessRegistry {
             .lock()
             .await
             .retain(|_, target| target != session_id);
+        self.wake_allocation_floors
+            .lock()
+            .await
+            .retain(|(target_session_id, _), _| target_session_id != session_id);
         let mut discarded_wake_delivery_count = 0;
         for delivery in self.wake_deliveries.lock().await.values_mut() {
             if delivery.state == super::WakeDeliveryState::Pending
@@ -635,6 +590,19 @@ impl ProcessRegistry for TestLocalProcessRegistry {
             discarded_wake_delivery_count,
             cleared_subscription_count: cleared_processes.len(),
         })
+    }
+
+    async fn wake_allocation_floor_for_testing(
+        &self,
+        target_session_id: &str,
+        process_id: &str,
+    ) -> Result<Option<u64>, PluginError> {
+        Ok(self
+            .wake_allocation_floors
+            .lock()
+            .await
+            .get(&(target_session_id.to_string(), process_id.to_string()))
+            .copied())
     }
 
     async fn append_event(
@@ -723,14 +691,26 @@ impl ProcessRegistry for TestLocalProcessRegistry {
             .as_ref()
             .and_then(|replay| record.keyed_events.get(replay.key.as_str()))
             .map(|(hash, event)| (hash.clone(), event.clone()));
-        let sequence = record.events.len() as u64 + 1;
+        let last_sequence = record.events.last().map(|event| event.sequence);
         let wake_session_id = self.wake_targets.lock().await.get(process_id).cloned();
+        let sender_floor = match wake_session_id.as_ref() {
+            Some(target_session_id) => self
+                .wake_allocation_floors
+                .lock()
+                .await
+                .get(&(target_session_id.clone(), process_id.to_string()))
+                .copied(),
+            None => None,
+        };
+        let sequence = super::allocate_process_event_sequence(last_sequence, sender_floor)?;
+        let now = self.clock.timestamp_ms();
         let prepared = prepare_process_event_append(
             &record.record,
             request,
             sequence,
+            last_sequence,
             replay_lookup,
-            self.clock.timestamp_ms(),
+            now,
             wake_session_id.as_deref(),
         )?;
         let outcome = match prepared {
@@ -756,6 +736,12 @@ impl ProcessRegistry for TestLocalProcessRegistry {
                 ..
             } => {
                 self.insert_wake_delivery(wake_delivery.as_ref()).await?;
+                self.advance_wake_allocation_floor(
+                    wake_session_id.as_deref(),
+                    process_id,
+                    sequence,
+                )
+                .await;
                 record.record = projected_record;
                 record.change_seq = self.next_change_seq().await;
                 if let Some(replay) = event.invocation.replay.clone() {
@@ -793,23 +779,43 @@ impl ProcessRegistry for TestLocalProcessRegistry {
             .as_ref()
             .and_then(|replay| record.keyed_events.get(replay.key.as_str()))
             .map(|(hash, event)| (hash.clone(), event.clone()));
-        let sequence = record.events.len() as u64 + 1;
+        let last_sequence = record.events.last().map(|event| event.sequence);
         let wake_session_id = self
             .wake_targets
             .lock()
             .await
             .get(&lease.process_id)
             .cloned();
+        let sender_floor = match wake_session_id.as_ref() {
+            Some(target_session_id) => self
+                .wake_allocation_floors
+                .lock()
+                .await
+                .get(&(target_session_id.clone(), lease.process_id.clone()))
+                .copied(),
+            None => None,
+        };
+        let sequence = super::allocate_process_event_sequence(last_sequence, sender_floor)?;
         let prepared = prepare_process_event_append(
             &record.record,
             request,
             sequence,
+            last_sequence,
             replay_lookup,
             now,
             wake_session_id.as_deref(),
         )?;
-        if let super::ProcessEventAppendPlan::Replay { wake_delivery, .. } = &prepared {
+        if let super::ProcessEventAppendPlan::Replay {
+            repair_record,
+            wake_delivery,
+            ..
+        } = prepared
+        {
             self.insert_wake_delivery(wake_delivery.as_ref()).await?;
+            if let Some(repaired) = repair_record {
+                record.record = repaired;
+                record.change_seq = self.next_change_seq().await;
+            }
             return Ok(ProcessCompletionOutcome::AlreadyApplied {
                 stored: record.record.clone(),
             });
@@ -836,6 +842,12 @@ impl ProcessRegistry for TestLocalProcessRegistry {
                 ..
             } => {
                 self.insert_wake_delivery(wake_delivery.as_ref()).await?;
+                self.advance_wake_allocation_floor(
+                    wake_session_id.as_deref(),
+                    &lease.process_id,
+                    sequence,
+                )
+                .await;
                 record.record = projected_record;
                 if let Some(replay) = event.invocation.replay.clone() {
                     record
@@ -859,6 +871,7 @@ impl ProcessRegistry for TestLocalProcessRegistry {
         started: ProcessStarted,
         authority: &ProcessExecutionWriteAuthority,
     ) -> Result<ProcessStartOutcome, PluginError> {
+        let _transaction = self.transaction.lock().await;
         let mut managed = self.managed.lock().await;
         let Some(record) = managed.get_mut(process_id) else {
             return Err(self.process_miss(process_id).await);
@@ -911,6 +924,7 @@ impl ProcessRegistry for TestLocalProcessRegistry {
         process_id: &str,
         request: AbandonRequest,
     ) -> Result<ProcessRecord, PluginError> {
+        let _transaction = self.transaction.lock().await;
         let mut managed = self.managed.lock().await;
         let Some(record) = managed.get_mut(process_id) else {
             return Err(self.process_miss(process_id).await);
@@ -934,6 +948,7 @@ impl ProcessRegistry for TestLocalProcessRegistry {
         wait: WaitState,
         authority: &ProcessExecutionWriteAuthority,
     ) -> Result<ProcessRecord, PluginError> {
+        let _transaction = self.transaction.lock().await;
         let mut managed = self.managed.lock().await;
         let Some(record) = managed.get_mut(process_id) else {
             return Err(self.process_miss(process_id).await);
@@ -966,6 +981,7 @@ impl ProcessRegistry for TestLocalProcessRegistry {
         process_id: &str,
         authority: &ProcessExecutionWriteAuthority,
     ) -> Result<ProcessRecord, PluginError> {
+        let _transaction = self.transaction.lock().await;
         let mut managed = self.managed.lock().await;
         let Some(record) = managed.get_mut(process_id) else {
             return Err(self.process_miss(process_id).await);
@@ -1122,6 +1138,9 @@ impl ProcessRegistry for TestLocalProcessRegistry {
             .filter(|candidate| {
                 !deliveries.values().any(|earlier| {
                     earlier.state != super::WakeDeliveryState::Enqueued
+                        && !(earlier.state == super::WakeDeliveryState::Discarded
+                            && earlier.discard_reason
+                                == Some(super::WakeDiscardReason::SequenceRewound))
                         && earlier.wake.target_session_id == candidate.wake.target_session_id
                         && earlier.wake.process_id == candidate.wake.process_id
                         && earlier.wake.sequence < candidate.wake.sequence
@@ -1309,6 +1328,7 @@ impl ProcessRegistry for TestLocalProcessRegistry {
         owner: &crate::LeaseOwnerIdentity,
         lease_ttl_ms: u64,
     ) -> Result<ProcessLeaseClaimOutcome, PluginError> {
+        let _transaction = self.transaction.lock().await;
         let mut leases = self.leases.lock().await;
         let now = self.clock.timestamp_ms();
         if let Some(current) = leases.get_mut(process_id)
@@ -1344,6 +1364,7 @@ impl ProcessRegistry for TestLocalProcessRegistry {
         observed_holder: &ProcessLease,
         lease_ttl_ms: u64,
     ) -> Result<ProcessLeaseClaimOutcome, PluginError> {
+        let _transaction = self.transaction.lock().await;
         let mut leases = self.leases.lock().await;
         let now = self.clock.timestamp_ms();
         let Some(current) = leases.get(process_id) else {
@@ -1431,6 +1452,7 @@ impl ProcessRegistry for TestLocalProcessRegistry {
         filter: Option<ProcessListFilter>,
         watermark: ProjectionWatermark,
     ) -> Result<ProcessPruneReport, PluginError> {
+        let _transaction = self.transaction.lock().await;
         let max_change_seq = match watermark {
             ProjectionWatermark::UpTo(cursor) => Some(cursor.store_sequence()),
             ProjectionWatermark::NoProjector => None,
@@ -1483,6 +1505,7 @@ impl ProcessRegistry for TestLocalProcessRegistry {
             }
             prunable.into_iter().collect()
         };
+        self.pause_prune_after_managed_removal().await;
         {
             let mut observers = self.observers.lock().await;
             for process_ids in observers.values_mut() {
@@ -1502,89 +1525,18 @@ impl ProcessRegistry for TestLocalProcessRegistry {
             .lock()
             .await
             .retain(|(process_id, _), _| !prunable.contains(process_id));
+        // Match the SQL process FK's ON DELETE CASCADE exactly. Allocation
+        // floors intentionally survive because they are not process-owned.
+        self.wake_deliveries
+            .lock()
+            .await
+            .retain(|_, delivery| !prunable.contains(&delivery.wake.process_id));
         Ok(ProcessPruneReport {
             pruned_processes: prunable.len(),
             pruned_events,
             pruned_trigger_deliveries: 0,
         })
     }
-}
-
-fn acquire_test_lease(
-    process_id: &str,
-    owner: &crate::LeaseOwnerIdentity,
-    fencing_token: u64,
-    now: u64,
-    lease_ttl_ms: u64,
-) -> ProcessLease {
-    ProcessLease {
-        schema_version: PROCESS_LEASE_SCHEMA_VERSION,
-        process_id: process_id.to_string(),
-        owner: owner.clone(),
-        lease_token: format!(
-            "{process_id}:{}:{}:{now}:{fencing_token}",
-            owner.owner_id, owner.incarnation_id
-        ),
-        fencing_token,
-        claimed_at_epoch_ms: now,
-        expires_at_epoch_ms: now.saturating_add(lease_ttl_ms),
-    }
-}
-
-/// Loud, stable error for a superseded or expired process lease.
-fn process_lease_expired(process_id: &str) -> PluginError {
-    PluginError::ProcessLeaseSuperseded {
-        process_id: process_id.to_string(),
-    }
-}
-
-fn validate_in_memory_execution_authority(
-    leases: &ManagedLeaseMap,
-    process_id: &str,
-    record: &ProcessRecord,
-    authority: &ProcessExecutionWriteAuthority,
-    start: Option<&ProcessStarted>,
-    now: u64,
-) -> Result<(), PluginError> {
-    match authority {
-        ProcessExecutionWriteAuthority::Invocation { .. } => {
-            if let Some(started) = start {
-                authority.validate_invocation_for_start(
-                    process_id,
-                    started,
-                    record.first_started.as_deref(),
-                )
-            } else {
-                authority.validate_invocation_for_write(process_id, record)
-            }
-        }
-        ProcessExecutionWriteAuthority::Lease(lease) => {
-            if lease.process_id != process_id {
-                return Err(process_lease_expired(process_id));
-            }
-            if leases.get(process_id).is_some_and(|current| {
-                !current.lease_token.is_empty()
-                    && current.owner.same_incarnation(&lease.owner)
-                    && current.lease_token == lease.lease_token
-                    && current.fencing_token == lease.fencing_token
-                    && current.expires_at_epoch_ms > now
-            }) {
-                Ok(())
-            } else {
-                Err(process_lease_expired(process_id))
-            }
-        }
-    }
-}
-
-fn process_external_ref_conflict(
-    process_id: &str,
-    existing: &ProcessExternalRef,
-    new: &ProcessExternalRef,
-) -> PluginError {
-    PluginError::Session(format!(
-        "process `{process_id}` external ref conflict: existing {existing:?}, new {new:?}"
-    ))
 }
 
 #[cfg(test)]

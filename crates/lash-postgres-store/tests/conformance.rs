@@ -193,17 +193,26 @@ async fn postgres_wake_delivery_crash_matrix_when_configured() {
         return;
     };
     reset(&storage).await;
-    let factory = Arc::new(storage.session_store_factory()) as Arc<dyn SessionStoreFactory>;
+    let clock = Arc::new(
+        lash_core::testing::conformance::WakeDeliveryConformanceClock::new(1_800_000_000_000),
+    );
+    let factory = Arc::new(
+        storage
+            .session_store_factory()
+            .with_clock(Arc::clone(&clock) as Arc<dyn lash_core::Clock>),
+    ) as Arc<dyn SessionStoreFactory>;
     let registry = Arc::new(
-        storage.process_registry_with_wake_delivery_config(
-            lash_core::WakeDeliveryConfig::new(10_000)
-                .expect("valid test retention")
-                .with_enqueuing_stale_after_ms(25)
-                .expect("valid short stale-claim age"),
-        ),
+        storage
+            .process_registry_with_wake_delivery_config(
+                lash_core::WakeDeliveryConfig::new(10_000)
+                    .expect("valid test retention")
+                    .with_enqueuing_stale_after_ms(25)
+                    .expect("valid short stale-claim age"),
+            )
+            .with_clock(Arc::clone(&clock) as Arc<dyn lash_core::Clock>),
     ) as Arc<dyn ProcessRegistry>;
     Box::pin(lash_core::testing::conformance::wake_delivery_crash_matrix(
-        factory, registry,
+        factory, registry, clock,
     ))
     .await;
 }
@@ -359,10 +368,18 @@ async fn postgres_wake_enqueue_serializes_with_consumption_when_configured() {
             .all(|batch| batch.source_key.as_deref() != draft.source_key.as_deref()),
         "forced evidence-check/drain/live-check interleaving must not recreate the wake"
     );
-    store
+    let late_redelivery = store
         .enqueue_queued_work(draft.clone())
         .await
-        .expect("late redelivery resolves against consumed high water");
+        .expect_err("a no-live-row wake at the receiver floor is a typed rewind");
+    assert!(matches!(
+        late_redelivery,
+        lash_core::StoreError::ProcessWakeSequenceRewound {
+            sequence: 1,
+            allocation_floor: 1,
+            ..
+        }
+    ));
     assert!(
         store
             .list_queued_work(session_id)
@@ -461,41 +478,64 @@ async fn postgres_wake_enqueue_serializes_with_consumption_when_configured() {
         )
         .await
         .expect("consume second wake sequence");
-    let high_water_rows: i64 = sqlx::query_scalar(
-        "SELECT COUNT(*) FROM lash_consumed_wake_high_water WHERE session_id = $1",
+    let fence_rows: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM lash_wake_redelivery_fences WHERE session_id = $1",
     )
     .bind(session_id)
     .fetch_one(storage.pool())
     .await
     .expect("count receiver high-water rows");
     assert_eq!(
-        high_water_rows, 1,
-        "two consumed sequences for one process must occupy one high-water row"
+        fence_rows, 1,
+        "two consumed sequences for one process must occupy one allocation-fence row"
     );
-    let high_sequence: i64 = sqlx::query_scalar(
-        "SELECT high_sequence FROM lash_consumed_wake_high_water
+    let allocation_floor: i64 = sqlx::query_scalar(
+        "SELECT allocation_floor FROM lash_wake_redelivery_fences
          WHERE session_id = $1 AND process_id = $2",
     )
     .bind(session_id)
     .bind("wake-source-lock-process")
     .fetch_one(storage.pool())
     .await
-    .expect("read receiver high-water sequence");
-    assert_eq!(high_sequence, 2);
+    .expect("read receiver allocation floor");
+    assert_eq!(allocation_floor, 2);
+    sqlx::query(
+        "INSERT INTO lash_wake_allocation_floors (
+            target_session_id, process_id, allocation_floor
+         ) VALUES ($1, $2, $3)",
+    )
+    .bind(session_id)
+    .bind("wake-source-lock-process")
+    .bind(2_i64)
+    .execute(storage.pool())
+    .await
+    .expect("seed matching sender allocation floor");
     factory
         .delete_session(session_id)
         .await
         .expect("delete high-water target session");
-    let high_water_rows: i64 = sqlx::query_scalar(
-        "SELECT COUNT(*) FROM lash_consumed_wake_high_water WHERE session_id = $1",
+    let fence_rows: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM lash_wake_redelivery_fences WHERE session_id = $1",
     )
     .bind(session_id)
     .fetch_one(storage.pool())
     .await
     .expect("count receiver high-water rows after session delete");
     assert_eq!(
-        high_water_rows, 0,
-        "session deletion must remove its receiver high-water rows"
+        fence_rows, 0,
+        "session deletion must remove its receiver allocation-fence rows"
+    );
+    let sender_floor_rows: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM lash_wake_allocation_floors
+         WHERE target_session_id = $1",
+    )
+    .bind(session_id)
+    .fetch_one(storage.pool())
+    .await
+    .expect("count sender allocation floors after session delete");
+    assert_eq!(
+        sender_floor_rows, 0,
+        "session deletion must remove sender and receiver floors together"
     );
 }
 
@@ -666,7 +706,7 @@ async fn postgres_from_pool_enforces_schema_version_gate_when_configured() {
     .fetch_one(&pool)
     .await
     .expect("read current schema version");
-    assert_eq!(current_version, 34, "Postgres component schema pin");
+    assert_eq!(current_version, 35, "Postgres component schema pin");
     let stale_version = current_version - 1;
     // Force the recorded component version to a stale value.
     sqlx::query(
@@ -1044,6 +1084,32 @@ async fn postgres_process_registry_satisfies_conformance_when_configured() {
             ReopenableProcessRegistry { open, reopen }
         })
     })
+    .await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn postgres_leased_completion_replay_repairs_projection_when_configured() {
+    let Some((_database_lock, storage)) = storage().await else {
+        eprintln!("skipping Postgres leased replay repair: LASH_POSTGRES_DATABASE_URL is not set");
+        return;
+    };
+    reset(&storage).await;
+    let pool = storage.pool().clone();
+    let registry = Arc::new(storage.process_registry()) as Arc<dyn ProcessRegistry>;
+    lash_core::testing::conformance::leased_completion_replay_repairs_projection(
+        registry,
+        move |stale| async move {
+            let changed =
+                sqlx::query("UPDATE lash_processes SET record_json = $2 WHERE process_id = $1")
+                    .bind(&stale.id)
+                    .bind(serde_json::to_string(&stale).expect("encode stale process projection"))
+                    .execute(&pool)
+                    .await
+                    .expect("corrupt Postgres process projection")
+                    .rows_affected();
+            assert_eq!(changed, 1);
+        },
+    )
     .await;
 }
 

@@ -24,6 +24,81 @@ where
     reopen_conformance(handles).await;
 }
 
+/// Prove that leased terminal replay repairs a stale record projection from
+/// the persisted tail event on the backend under test.
+pub async fn leased_completion_replay_repairs_projection<C, Fut>(
+    registry: Arc<dyn ProcessRegistry>,
+    corrupt_projection: C,
+) where
+    C: FnOnce(ProcessRecord) -> Fut,
+    Fut: std::future::Future<Output = ()>,
+{
+    let process_id = "leased-completion-replay-repair";
+    let base = registry
+        .register_process(ProcessRegistration::new(
+            process_id,
+            ProcessInput::External {
+                metadata: serde_json::Value::Null,
+            },
+            RecoveryDisposition::Rerunnable,
+            ProcessProvenance::host(),
+        ))
+        .await
+        .expect("register leased replay repair process");
+    let lease = registry
+        .claim_process_lease(
+            process_id,
+            &crate::LeaseOwnerIdentity::opaque("repair-owner", "repair-incarnation"),
+            60_000,
+        )
+        .await
+        .expect("claim leased replay repair process")
+        .acquired()
+        .expect("leased replay repair lease acquired");
+    let output = ProcessAwaitOutput::Success {
+        value: serde_json::json!({"repaired": true}),
+        control: None,
+    };
+    let committed = registry
+        .complete_process_with_lease(&lease, output.clone())
+        .await
+        .expect("commit leased terminal event");
+    assert!(matches!(
+        committed,
+        crate::ProcessCompletionOutcome::Committed(ref stored) if stored.is_terminal()
+    ));
+
+    corrupt_projection(base).await;
+    assert!(
+        !registry
+            .get_process(process_id)
+            .await
+            .expect("read deliberately stale projection")
+            .expect("stale process exists")
+            .is_terminal(),
+        "fixture must expose a stale non-terminal projection before replay"
+    );
+
+    let replayed = registry
+        .complete_process_with_lease(&lease, output)
+        .await
+        .expect("replay leased terminal event");
+    assert!(matches!(
+        replayed,
+        crate::ProcessCompletionOutcome::AlreadyApplied { ref stored }
+            if stored.is_terminal()
+    ));
+    assert!(
+        registry
+            .get_process(process_id)
+            .await
+            .expect("read repaired leased replay projection")
+            .expect("repaired process exists")
+            .is_terminal(),
+        "leased completion replay must persist the repaired terminal projection"
+    );
+}
+
 pub(super) fn registration(id: &str) -> ProcessRegistration {
     ProcessRegistration::new(
         id,
