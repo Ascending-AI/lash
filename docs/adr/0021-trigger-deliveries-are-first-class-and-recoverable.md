@@ -55,13 +55,21 @@ the raw registry lever. The raw lever performs a fresh complete survey itself, s
 by another writer between reconciliation and compaction is protected by its still-outstanding
 delivery. A tombstone may compact in the same cycle once its delivery is absent. This is a local
 compaction invariant, not a call-order convention: a tombstone guarded by an outstanding delivery
-is refused by the raw registry lever as well.
+is refused by the raw registry lever as well. The one exception is a caller that passes no trigger
+store to the raw lever from a runtime that has one: the survey is then empty and nothing is
+excluded. The `Processes::compact_tombstones` facade always passes the configured store, so the
+invariant holds for every route a host reaches through the public surface.
 
 The invariant fails toward retention. If a configured trigger store cannot be surveyed or
 reconciled, the facade aborts compaction and tombstones accumulate until the trigger store recovers.
 Proceeding would knowingly orphan recovery evidence, so there is no proceed-and-log escape hatch.
 
-Process ids are legally reusable after pruning. The live process row shadows the stale tombstone,
+This retention contract tolerates process-id reuse rather than endorsing it. Hosts must still
+mint fresh process ids: the receiver's consumed high-water mark survives sender-side pruning while
+event sequences restart per registration, so a re-registered pruned id emits wakes at or below the
+retained mark and has them absorbed as duplicates. See
+`docs/architecture/durable-background-processes.md`. What is settled here is narrower — reuse must
+never cost recovery evidence. The live process row shadows the stale tombstone,
 and reconciliation revalidates that state immediately before action. Delivery deletion is also
 bound to the row identity captured before classification rather than process id alone. The contract
 consequently fails toward retention: a reused id or changed row preserves recovery evidence, and a

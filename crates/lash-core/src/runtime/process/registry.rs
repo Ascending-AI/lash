@@ -801,10 +801,10 @@ pub trait ProcessRegistry: Send + Sync {
     /// maximum waiter lifetime, so callers cannot validate this against a
     /// library-owned bound; retaining terminal rows beyond every still-replayable
     /// waiter is currently an explicit host operational responsibility.
-    /// Once trigger-delivery reconciliation completes, re-emitting the same
-    /// trigger occurrence id after its process has aged out of retention may
-    /// reserve a fresh delivery process id; occurrence-level idempotency still
-    /// holds.
+    /// Occurrence-level idempotency survives retention: re-emitting the same
+    /// trigger occurrence id after its process has aged out reserves nothing
+    /// new, because the occurrence record — not the delivery row — carries that
+    /// identity.
     ///
     /// ```no_run
     /// use std::time::{Duration, SystemTime, UNIX_EPOCH};
