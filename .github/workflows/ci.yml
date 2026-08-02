@@ -81,6 +81,9 @@ jobs:
           python3 scripts/test_confidence_gate_ci_contract.py
           python3 scripts/test_release_notes.py
 
+      - name: Check public API example coverage
+        run: python3 scripts/check_api_example_coverage.py
+
       # Compiles every target of every workspace crate — libs, bins, tests,
       # examples, and benches. This subsumes the old standalone checks for
       # docs-snippets and the runtime perf harness, which would otherwise only break post-merge. It also warms the
