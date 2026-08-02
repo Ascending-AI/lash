@@ -400,19 +400,33 @@ fn checkpoint_write_event(commit: &RuntimeCommit) -> CheckpointWriteEvent {
         &mut components,
         CheckpointComponent::ToolState,
         checkpoint.tool_state_ref.as_ref(),
-        checkpoint.tool_state.as_ref().map(logical_encoded_len),
+        checkpoint
+            .tool_state
+            .as_ref()
+            .map(|state| logical_encoded_len(state).ok()),
     );
     record_component(
         &mut components,
         CheckpointComponent::PluginSnapshot,
         checkpoint.plugin_snapshot_ref.as_ref(),
-        checkpoint.plugin_snapshot.as_ref().map(logical_encoded_len),
+        checkpoint
+            .plugin_snapshot
+            .as_ref()
+            .map(|snapshot| logical_encoded_len(snapshot).ok()),
     );
+    // Execution state is an opaque `Vec<u8>` the engine owns, so it is recorded
+    // as written without a size. Measuring it the way typed components are
+    // measured would serialize the bytes as a JSON decimal array, which reports
+    // roughly 3.5x the real length and — because digits per byte depend on the
+    // byte's value — shifts whenever an embedded identifier changes. That made
+    // transcripts flaky on cosmetic churn while staying blind to real payload
+    // differences, since genuinely different execution states round to the same
+    // rendered size. `lash-sim`'s contract support omits it for the same reason.
     record_component(
         &mut components,
         CheckpointComponent::ExecutionState,
         checkpoint.execution_state_ref.as_ref(),
-        checkpoint.execution_state.as_ref().map(logical_encoded_len),
+        checkpoint.execution_state.as_ref().map(|_| None),
     );
     CheckpointWriteEvent {
         schema: CHECKPOINT_WRITE_EVENT_SCHEMA.to_string(),
@@ -431,16 +445,16 @@ fn logical_encoded_len(value: &impl Serialize) -> Result<usize, serde_json::Erro
     serde_json::to_vec(value).map(|bytes| bytes.len())
 }
 
+/// `logical_bytes` presence marks the component as written this commit; the
+/// inner value is its rendered size, which callers omit for opaque blobs.
 fn record_component(
     components: &mut Vec<CheckpointComponentWrite>,
     component: CheckpointComponent,
     component_ref: Option<&BlobRef>,
-    logical_bytes: Option<Result<usize, serde_json::Error>>,
+    logical_bytes: Option<Option<usize>>,
 ) {
     let kind = if let Some(logical_bytes) = logical_bytes {
-        Some(CheckpointComponentWriteKind::Stored {
-            logical_bytes: logical_bytes.ok(),
-        })
+        Some(CheckpointComponentWriteKind::Stored { logical_bytes })
     } else if component_ref.is_some() {
         Some(CheckpointComponentWriteKind::UnchangedRef)
     } else {
@@ -737,7 +751,7 @@ mod tests {
             &mut components,
             CheckpointComponent::ToolState,
             None,
-            Some(size),
+            Some(size.ok()),
         );
         assert_eq!(
             components,

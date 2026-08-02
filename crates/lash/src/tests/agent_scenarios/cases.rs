@@ -407,7 +407,7 @@ finish result"#,
         root                     turn_state            stored logical=284B
         root                     tool_state            stored logical=8.1KB
         root                     plugin_snapshot       stored logical=429B
-        root                     execution_state       stored logical=1.4KB
+        root                     execution_state       stored logical=unknown
         session-001  commit    checkpoint.commit       rev=0->1
         session-001              turn_state            stored logical=419B
         session-001              tool_state            stored logical=8.9KB
@@ -416,7 +416,7 @@ finish result"#,
         session-001              turn_state            stored logical=419B
         session-001              tool_state            ref (unchanged)
         session-001              plugin_snapshot       ref (unchanged)
-        session-001              execution_state       stored logical=2.4KB
+        session-001              execution_state       stored logical=unknown
         process-001  outcome   process.failed          label="spawn" kind="subagent" terminal=true
         "#);
 
@@ -484,7 +484,7 @@ finish { joined: [left_value, right_value] }"#,
         root                     turn_state            stored logical=284B
         root                     tool_state            stored logical=3.3KB
         root                     plugin_snapshot       stored logical=333B
-        root                     execution_state       stored logical=2.5KB
+        root                     execution_state       stored logical=unknown
         process-001  outcome   process.completed       label="child" kind="lashlang" terminal=true
         process-002  outcome   process.completed       label="child" kind="lashlang" terminal=true
         "#);
