@@ -485,10 +485,13 @@ run_cargo_tests() {
 
 run_scenario_harnesses() {
   local default_store_contract_cases=32
+  local default_runtime_persistence_cases=32
   if [ "$lane" = "full" ]; then
     default_store_contract_cases=256
+    default_runtime_persistence_cases=256
   fi
   local store_contract_cases="${LASH_STORE_CONTRACT_PROPTEST_CASES:-$default_store_contract_cases}"
+  local runtime_persistence_cases="${LASH_RUNTIME_PERSISTENCE_PROPTEST_CASES:-$default_runtime_persistence_cases}"
 
   step "Durable store-contract state-machine properties"
   LASH_STORE_CONTRACT_PROPTEST_CASES="$store_contract_cases" \
@@ -509,6 +512,16 @@ run_scenario_harnesses() {
   cargo run -p lash-sim --locked -- sqlite-faults \
     --out "${out_dir}/sim/sqlite-substrate-faults" \
     --seeds "$sqlite_fault_seeds"
+
+  step "Runtime-persistence state-machine properties"
+  LASH_RUNTIME_PERSISTENCE_PROPTEST_CASES="$runtime_persistence_cases" \
+    run_cargo_tests -p lash-core --locked runtime_persistence_state_machine_properties
+  LASH_RUNTIME_PERSISTENCE_PROPTEST_CASES="$runtime_persistence_cases" \
+    run_cargo_tests -p lash-sqlite-store --locked --test conformance \
+    runtime_persistence_state_machine_properties
+  LASH_RUNTIME_PERSISTENCE_PROPTEST_CASES="$runtime_persistence_cases" \
+    run_cargo_tests -p lash-postgres-store --locked --test conformance \
+    runtime_persistence_state_machine_properties_when_configured
 
   step "Runtime Scenario harness"
   run_cargo_tests -p lash-core --locked runtime_scenario

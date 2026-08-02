@@ -284,6 +284,26 @@ async fn sqlite_store_contract_state_machine_properties() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn sqlite_runtime_persistence_state_machine_properties() {
+    let dirs = Arc::new(Mutex::new(Vec::new()));
+    lash_core::testing::conformance::runtime_persistence_state_machine("sqlite", move |seed| {
+        let dirs = Arc::clone(&dirs);
+        async move {
+            let dir = tempfile::tempdir().expect("runtime-persistence property tempdir");
+            let path = dir.path().join(format!("runtime-{seed}.db"));
+            let runtime = Arc::new(
+                Store::open(&path)
+                    .await
+                    .expect("open property runtime store"),
+            ) as Arc<dyn RuntimePersistence>;
+            dirs.lock().expect("property tempdirs lock").push(dir);
+            runtime
+        }
+    })
+    .await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn sqlite_process_continuation_store_satisfies_conformance() {
     let storage = Arc::new(
         SqliteProcessRegistry::memory()
