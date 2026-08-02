@@ -27,6 +27,10 @@ pub(super) async fn claim_pending_wake_deliveries(
                SELECT 1
                FROM lash_process_wake_deliveries AS earlier
                WHERE earlier.state <> 'enqueued'
+                 AND NOT (
+                     earlier.state = 'discarded'
+                     AND earlier.discard_reason = 'sequence_rewound'
+                 )
                  AND earlier.target_session_id = candidate.target_session_id
                  AND earlier.process_id = candidate.process_id
                  AND earlier.sequence < candidate.sequence
@@ -107,6 +111,7 @@ pub(super) fn decode_wake_delivery_row(
         Some("expired") => Some(lash_core::WakeDiscardReason::Expired),
         Some("target_gone") => Some(lash_core::WakeDiscardReason::TargetGone),
         Some("retargeted") => Some(lash_core::WakeDiscardReason::Retargeted),
+        Some("sequence_rewound") => Some(lash_core::WakeDiscardReason::SequenceRewound),
         Some(reason) => {
             return Err(PluginError::Session(format!(
                 "wake delivery `{delivery_id}` has unknown discard reason `{reason}`"

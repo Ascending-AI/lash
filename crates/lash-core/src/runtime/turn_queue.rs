@@ -263,37 +263,28 @@ impl QueuedWorkBatch {
     }
 }
 
-#[doc(hidden)]
-pub fn consumed_queued_work_batch(draft: &QueuedWorkBatchDraft) -> QueuedWorkBatch {
-    let source_key = draft
-        .source_key
-        .as_deref()
-        .expect("consumed queued-work receipt requires a source key");
-    let batch_id = format!(
-        "consumed:{}",
-        crate::stable_hash::sha256_hex(format!("{}:{source_key}", draft.session_id).as_bytes())
-    );
-    QueuedWorkBatch {
-        batch_id: batch_id.clone(),
-        session_id: draft.session_id.clone(),
-        enqueue_seq: 0,
-        source_key: draft.source_key.clone(),
-        delivery_policy: draft.delivery_policy,
-        slot_policy: draft.slot_policy,
-        merge_key: draft.merge_key.clone(),
-        available_at_ms: draft.available_at_ms,
-        // This is a synthetic idempotency receipt, not a live queue row.
-        enqueued_at_ms: 0,
-        items: draft
-            .payloads
-            .iter()
-            .cloned()
-            .enumerate()
-            .map(|(index, payload)| QueuedWorkItem {
-                item_id: format!("{batch_id}:item:{index}"),
-                payload,
-            })
-            .collect(),
+/// Receiver-side result of an idempotent queued-work enqueue.
+#[derive(Clone, Debug)]
+pub enum QueuedWorkEnqueueOutcome {
+    Inserted(QueuedWorkBatch),
+    Existing(QueuedWorkBatch),
+}
+
+impl QueuedWorkEnqueueOutcome {
+    pub fn batch(&self) -> &QueuedWorkBatch {
+        match self {
+            Self::Inserted(batch) | Self::Existing(batch) => batch,
+        }
+    }
+
+    pub fn into_batch(self) -> QueuedWorkBatch {
+        match self {
+            Self::Inserted(batch) | Self::Existing(batch) => batch,
+        }
+    }
+
+    pub fn process_wake_was_absorbed(&self) -> bool {
+        matches!(self, Self::Existing(_))
     }
 }
 
@@ -304,9 +295,9 @@ pub struct QueuedWorkBatchDraft {
     pub source_key: Option<String>,
     /// Structural producer identity for a process wake.
     ///
-    /// Stores use this tuple for consumed high-water dedupe. It deliberately
-    /// duplicates the human-readable source key so correctness never depends
-    /// on parsing that string.
+    /// Stores use this tuple for the receiver allocation-floor fence. It
+    /// deliberately duplicates the human-readable source key so
+    /// correctness never depends on parsing that string.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub process_wake_source: Option<ProcessWakeSource>,
     pub delivery_policy: DeliveryPolicy,

@@ -487,6 +487,10 @@ where
     })
     .await?;
     assert_on_fresh_handles(make, seed, |handles| async move {
+        assert_prune_reregister_wake_fence(&handles).await
+    })
+    .await?;
+    assert_on_fresh_handles(make, seed, |handles| async move {
         assert_prune_tombstone_watermark_safety(&handles.registry).await
     })
     .await?;
@@ -621,8 +625,8 @@ async fn apply_operation(
                 .await;
             if let Ok(record) = result {
                 let entry = model.process_mut(&id);
-                // The store permits registry-row reuse after prune, although hosts must not
-                // reuse ids across prune horizons because receiver wake high-water survives.
+                // The store permits registry-row reuse after prune. The wake layer separately
+                // rejects an unrecorded sequence at or below its surviving allocation floor.
                 // Keep this generated registry lifecycle to pin the narrower store behavior.
                 if entry.base.is_none() || entry.tombstoned {
                     entry.install_fresh(record);
@@ -1637,19 +1641,27 @@ async fn assert_wake_group_order_and_claim_ownership(
         ))
         .await
         .map_err(|error| TestCaseError::fail(error.to_string()))?;
-    for sequence in 1..=2 {
-        registry
+    let mut sequences = Vec::new();
+    for wake_input in 1..=2 {
+        let result = registry
             .append_event(
                 id,
                 ProcessEventAppendRequest::new(
                     "property.wake",
-                    serde_json::json!({"wake_input": sequence}),
+                    serde_json::json!({"wake_input": wake_input}),
                 )
-                .with_replay_key(format!("law:wake:{sequence}")),
+                .with_replay_key(format!("law:wake:{wake_input}")),
             )
             .await
             .map_err(|error| TestCaseError::fail(error.to_string()))?;
+        sequences.push(
+            result
+                .wake_delivery
+                .ok_or_else(|| TestCaseError::fail("wake append omitted delivery"))?
+                .sequence,
+        );
     }
+    prop_assert_eq!(sequences[1], sequences[0] + 1);
     let first = registry
         .claim_pending_wake_deliveries(2)
         .await
@@ -1659,7 +1671,7 @@ async fn assert_wake_group_order_and_claim_ownership(
         1,
         "Wake group order + claim ownership: later group member claimed while head unsettled"
     );
-    prop_assert_eq!(first[0].wake.sequence, 1);
+    prop_assert_eq!(first[0].wake.sequence, sequences[0]);
     let competing = registry
         .claim_pending_wake_deliveries(2)
         .await
@@ -1689,7 +1701,7 @@ async fn assert_wake_group_order_and_claim_ownership(
         .await
         .map_err(|error| TestCaseError::fail(error.to_string()))?;
     prop_assert_eq!(second.len(), 1);
-    prop_assert_eq!(second[0].wake.sequence, 2);
+    prop_assert_eq!(second[0].wake.sequence, sequences[1]);
     Ok(())
 }
 
@@ -1700,8 +1712,11 @@ async fn assert_enqueued_wake_high_water_safety(
     let process = "law-high-water-process";
     // Consumption is intentionally not required to be contiguous: the public selected-batch
     // drain contracts safe out-of-order settlement. The production precondition is contiguous
-    // enqueue, and the law is that MAX high-water advancement never removes an already-enqueued
-    // lower row; literal contiguous-consumption assertions would reject that supported behavior.
+    // enqueue, and the law is that MAX floor advancement never removes an already-enqueued lower
+    // row; literal contiguous-consumption assertions would reject that supported behavior. This
+    // Sender-floor allocation keeps normal process sequences dense and makes each value unique
+    // across prune/re-register lifetimes. The receiver fence remains defense in depth for a
+    // sender store restored behind surviving receiver state.
     let earlier = runtime
         .enqueue_queued_work(process_wake_batch_draft(runtime_wake_for(
             session, process, 1,
@@ -1762,16 +1777,22 @@ async fn assert_enqueued_wake_high_water_safety(
         "Enqueued-wake high-water safety: consuming sequence 2 removed or disturbed live sequence 1"
     );
 
-    let redelivery = runtime
+    let redelivery_error = runtime
         .enqueue_queued_work(process_wake_batch_draft(runtime_wake_for(
             session, process, 2,
         )))
         .await
-        .map_err(|error| TestCaseError::fail(error.to_string()))?;
-    prop_assert_eq!(
-        redelivery.enqueue_seq,
-        0,
-        "Enqueued-wake high-water safety: consumed sequence redelivery was not deduped"
+        .expect_err("a no-live-row wake at the receiver floor is a typed rewind");
+    prop_assert!(
+        matches!(
+            redelivery_error,
+            StoreError::ProcessWakeSequenceRewound {
+                sequence: 2,
+                allocation_floor: 2,
+                ..
+            }
+        ),
+        "Enqueued-wake allocation fence returned the wrong typed error: {redelivery_error}"
     );
     let after_redelivery = runtime
         .list_queued_work(session)
@@ -1783,7 +1804,23 @@ async fn assert_enqueued_wake_high_water_safety(
             .map(|batch| batch.batch_id.as_str())
             .collect::<Vec<_>>(),
         vec![earlier.batch_id.as_str()],
-        "Enqueued-wake high-water safety: synthetic redelivery receipt disturbed live sequence 1"
+        "Enqueued-wake allocation fence disturbed live sequence 1"
+    );
+
+    // A retry whose receiver row is still live remains idempotent even when its sequence is below
+    // the receiver floor. The live row is the durable evidence that this exact semantic source was
+    // accepted; only the no-live-row case above is a restored-sender rewind.
+    let mut rewound = runtime_wake_for(session, process, 1);
+    rewound.wake_id = "wake:law-high-water-process:rewound:1".to_string();
+    rewound.input = "retry while receiver row remains live".to_string();
+    rewound.created_at_ms = 2;
+    let retry = runtime
+        .enqueue_queued_work_with_outcome(process_wake_batch_draft(rewound))
+        .await
+        .map_err(|error| TestCaseError::fail(error.to_string()))?;
+    prop_assert!(
+        matches!(retry, crate::QueuedWorkEnqueueOutcome::Existing(_)),
+        "Enqueued-wake allocation fence: live-row retry was not idempotent"
     );
 
     let owner = LeaseOwnerIdentity::opaque(
@@ -1828,6 +1865,158 @@ async fn assert_enqueued_wake_high_water_safety(
             .map_err(|error| TestCaseError::fail(error.to_string()))?
             .is_empty(),
         "Enqueued-wake high-water safety: sequence 1 did not consume exactly once"
+    );
+    Ok(())
+}
+
+async fn assert_prune_reregister_wake_fence(
+    handles: &StoreContractHandles,
+) -> Result<(), TestCaseError> {
+    let session = "law-prune-reregister-wake-session";
+    let process = "law-prune-reregister-wake-process";
+    handles
+        .registry
+        .register_process(registration(
+            process,
+            RecoveryDisposition::ExternallyOwned,
+            1,
+            Some(session.to_string()),
+        ))
+        .await
+        .map_err(|error| TestCaseError::fail(error.to_string()))?;
+    let original = handles
+        .registry
+        .append_event(
+            process,
+            ProcessEventAppendRequest::new(
+                "property.wake",
+                serde_json::json!({"wake_input": "old incarnation"}),
+            )
+            .with_replay_key("law:prune-reregister-wake:old"),
+        )
+        .await
+        .map_err(|error| TestCaseError::fail(error.to_string()))?
+        .wake_delivery
+        .ok_or_else(|| TestCaseError::fail("old incarnation did not materialize a wake"))?;
+    let original_sequence = original.sequence;
+    let queued = handles
+        .runtime
+        .enqueue_queued_work(process_wake_batch_draft(original))
+        .await
+        .map_err(|error| TestCaseError::fail(error.to_string()))?;
+    let claimed_delivery = handles
+        .registry
+        .claim_pending_wake_deliveries(1)
+        .await
+        .map_err(|error| TestCaseError::fail(error.to_string()))?
+        .into_iter()
+        .next()
+        .ok_or_else(|| TestCaseError::fail("old-incarnation delivery was not claimable"))?;
+    let marked = handles
+        .registry
+        .mark_wake_enqueued(
+            &claimed_delivery.delivery_id,
+            claimed_delivery
+                .claim_token()
+                .map_err(|error| TestCaseError::fail(error.to_string()))?,
+        )
+        .await
+        .map_err(|error| TestCaseError::fail(error.to_string()))?;
+    prop_assert!(matches!(marked, WakeDeliveryClaimOutcome::Applied));
+    let owner = LeaseOwnerIdentity::opaque(
+        "law-prune-reregister-wake-owner",
+        "law-prune-reregister-wake-incarnation",
+    );
+    let lease = handles
+        .runtime
+        .try_claim_session_execution_lease(session, &owner, 60_000)
+        .await
+        .map_err(|error| TestCaseError::fail(error.to_string()))?
+        .acquired()
+        .ok_or_else(|| TestCaseError::fail("prune/re-register wake lease unexpectedly busy"))?;
+    let claim = handles
+        .runtime
+        .claim_ready_queued_work_by_batch_ids(
+            session,
+            &lease.fence(),
+            &owner,
+            QueuedWorkClaimBoundary::Idle,
+            std::slice::from_ref(&queued.batch_id),
+        )
+        .await
+        .map_err(|error| TestCaseError::fail(error.to_string()))?
+        .ok_or_else(|| TestCaseError::fail("old-incarnation wake was not claimable"))?;
+    handles
+        .runtime
+        .commit_runtime_state(
+            RuntimeCommit::persisted_state_for_test(
+                &RuntimeSessionState {
+                    session_id: session.to_string(),
+                    ..RuntimeSessionState::default()
+                },
+                &[],
+            )
+            .releasing_session_execution_lease(lease.completion())
+            .completing_queue_claim(claim.completion()),
+        )
+        .await
+        .map_err(|error| TestCaseError::fail(error.to_string()))?;
+
+    handles
+        .registry
+        .complete_process(
+            process,
+            ProcessAwaitOutput::Success {
+                value: serde_json::json!("old incarnation done"),
+                control: None,
+            },
+            ProcessCompletionAuthority::external_owner(),
+        )
+        .await
+        .map_err(|error| TestCaseError::fail(error.to_string()))?;
+    let (_, terminal_cursor) = handles
+        .registry
+        .processes_changed_since(ProcessChangeCursor::initial(), 1_000)
+        .await
+        .map_err(|error| TestCaseError::fail(error.to_string()))?;
+    handles
+        .registry
+        .prune_terminal_processes(u64::MAX, None, ProjectionWatermark::UpTo(terminal_cursor))
+        .await
+        .map_err(|error| TestCaseError::fail(error.to_string()))?;
+    handles
+        .registry
+        .register_process(registration(
+            process,
+            RecoveryDisposition::ExternallyOwned,
+            1,
+            Some(session.to_string()),
+        ))
+        .await
+        .map_err(|error| TestCaseError::fail(error.to_string()))?;
+    let replacement = handles
+        .registry
+        .append_event(
+            process,
+            ProcessEventAppendRequest::new(
+                "property.wake",
+                serde_json::json!({"wake_input": "new incarnation"}),
+            )
+            .with_replay_key("law:prune-reregister-wake:new"),
+        )
+        .await
+        .map_err(|error| TestCaseError::fail(error.to_string()))?
+        .wake_delivery
+        .ok_or_else(|| TestCaseError::fail("new incarnation did not materialize a wake"))?;
+    prop_assert!(replacement.sequence > original_sequence);
+    let receipt = handles
+        .runtime
+        .enqueue_queued_work(process_wake_batch_draft(replacement))
+        .await
+        .map_err(|error| TestCaseError::fail(error.to_string()))?;
+    prop_assert!(
+        receipt.enqueue_seq > 0,
+        "prune/re-register sender-floor wake was suppressed instead of enqueued"
     );
     Ok(())
 }
@@ -1980,8 +2169,8 @@ async fn assert_prune_tombstone_watermark_safety(
 /// Pin only the registry-row behavior accepted by the store surface.
 ///
 /// This is not a claim that a reused process id is globally fresh: the receiver's
-/// consumed wake high-water survives sender pruning, so `ProcessRegistry` explicitly
-/// instructs hosts to mint unique ids across prune horizons.
+/// allocation floor survives sender pruning, and the wake layer rejects an unrecorded
+/// rewound sequence even though the registry row itself is fresh.
 async fn assert_prune_reregister_registry_state_is_fresh(
     registry: &Arc<dyn ProcessRegistry>,
 ) -> Result<(), TestCaseError> {

@@ -17,6 +17,8 @@ pub fn process_wake_input_from_event_payload(payload: &serde_json::Value) -> Str
 
 /// Renders a durable process wake as model-visible chronological context.
 pub fn process_wake_turn_text(wake: &ProcessWakeDelivery) -> String {
+    // Sender-floor allocation keeps sequences small ordered identifiers, so
+    // the model-facing `#<sequence>` remains a useful event label.
     format!(
         "Background process wake\nProcess: {}\nEvent: {} #{}\nWake input:\n{}",
         wake.process_id, wake.event_type, wake.sequence, wake.input

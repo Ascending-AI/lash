@@ -153,6 +153,7 @@ fn store_error_variant(error: &StoreError) -> &'static str {
         StoreError::UnsettledQueuedWorkClaim { .. } => "UnsettledQueuedWorkClaim",
         StoreError::UnsettledTurnInputClaim { .. } => "UnsettledTurnInputClaim",
         StoreError::PendingTurnInputSourceKeyConflict { .. } => "PendingTurnInputSourceKeyConflict",
+        StoreError::ProcessWakeSequenceRewound { .. } => "ProcessWakeSequenceRewound",
         StoreError::SessionExecutionLeaseExpired { .. } => "SessionExecutionLeaseExpired",
         StoreError::UnsupportedRecordSchemaVersion { .. } => "UnsupportedRecordSchemaVersion",
         StoreError::MissingRecordSchemaVersion { .. } => "MissingRecordSchemaVersion",

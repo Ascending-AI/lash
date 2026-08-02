@@ -12,9 +12,10 @@ pub(super) struct AgentContractExecution {
     pub(super) checkpoint_writes: Vec<CheckpointWriteEvent>,
 }
 
-fn contract_store_factory() -> Arc<dyn SessionStoreFactory> {
-    let inner: Arc<dyn SessionStoreFactory> =
-        Arc::new(lash::persistence::InMemorySessionStoreFactory::new());
+fn contract_store_factory(clock: Arc<dyn lash_core::Clock>) -> Arc<dyn SessionStoreFactory> {
+    let inner: Arc<dyn SessionStoreFactory> = Arc::new(
+        lash::persistence::InMemorySessionStoreFactory::with_clock(clock),
+    );
     CONTRACT_CHECKPOINT_COLLECTOR.with(|slot| {
         slot.borrow().as_ref().map_or(inner.clone(), |collector| {
             Arc::new(ObservedSessionStoreFactory::new(inner, collector.clone()))
@@ -630,6 +631,7 @@ async fn facade_final_value_execution_inner(
     expected_final_value: Value,
     tools: Option<Arc<dyn lash_core::ToolProvider>>,
 ) -> Result<Value, FixedScriptRunnerError> {
+    let clock = crate::clock::SimClock::new();
     let events = Arc::new(RuntimeProofRecordingEvents::default());
     let factory = lash_protocol_rlm::RlmProtocolPluginFactory::new(
         lash_protocol_rlm::RlmProtocolPluginConfig::default(),
@@ -644,9 +646,12 @@ async fn facade_final_value_execution_inner(
         .process_env_store(Arc::new(
             lash::persistence::InMemoryProcessExecutionEnvStore::new(),
         ))
-        .store_factory(contract_store_factory())
-        .process_registry(Arc::new(lash_core::TestLocalProcessRegistry::default())
-            as Arc<dyn lash_core::ProcessRegistry>)
+        .store_factory(contract_store_factory(clock.clone()))
+        .clock(clock.clone())
+        .process_registry(
+            Arc::new(lash_core::TestLocalProcessRegistry::default().with_clock(clock))
+                as Arc<dyn lash_core::ProcessRegistry>,
+        )
         .provider(fixed_texts_provider(provider_kind, provider_responses))
         .model(
             lash_core::ModelSpec::from_token_limits(
@@ -951,6 +956,7 @@ fn agent_process_contract_core_with_options_and_effect_host(
     max_turns: Option<usize>,
     effect_host: Arc<dyn lash_core::EffectHost>,
 ) -> Result<(lash::LashCore, Arc<lash::tracing::TraceLashlangGraphStore>), FixedScriptRunnerError> {
+    let clock = crate::clock::SimClock::new();
     let graph_store = Arc::new(lash::tracing::TraceLashlangGraphStore::default());
     let factory = lash_protocol_rlm::RlmProtocolPluginFactory::new(
         lash_protocol_rlm::RlmProtocolPluginConfig::default(),
@@ -964,9 +970,12 @@ fn agent_process_contract_core_with_options_and_effect_host(
         .process_env_store(Arc::new(
             lash::persistence::InMemoryProcessExecutionEnvStore::new(),
         ))
-        .store_factory(contract_store_factory())
-        .process_registry(Arc::new(lash_core::TestLocalProcessRegistry::default())
-            as Arc<dyn lash_core::ProcessRegistry>)
+        .store_factory(contract_store_factory(clock.clone()))
+        .clock(clock.clone())
+        .process_registry(
+            Arc::new(lash_core::TestLocalProcessRegistry::default().with_clock(clock))
+                as Arc<dyn lash_core::ProcessRegistry>,
+        )
         .provider(fixed_texts_provider(provider_kind, provider_responses))
         .model(
             lash_core::ModelSpec::from_token_limits(

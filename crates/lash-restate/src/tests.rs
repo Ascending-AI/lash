@@ -10015,13 +10015,18 @@ async fn restate_deployment_sink_funnel_feeds_appended_events() {
         .await
         .expect("complete");
 
+    let events = sink.events.lock().expect("sink lock").clone();
     assert_eq!(
-        sink.events.lock().expect("sink lock").clone(),
-        vec![
-            ("producer.tick".to_string(), 1),
-            ("process.completed".to_string(), 2),
-        ],
+        events
+            .iter()
+            .map(|(event_type, _)| event_type.as_str())
+            .collect::<Vec<_>>(),
+        vec!["producer.tick", "process.completed"],
         "the deployment-wrapped registry feeds every append to the sink"
+    );
+    assert!(
+        events[0].1 < events[1].1,
+        "the deployment sink preserves strictly ordered event sequences"
     );
 }
 

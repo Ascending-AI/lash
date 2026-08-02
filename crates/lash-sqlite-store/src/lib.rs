@@ -53,8 +53,8 @@ use flate2::read::ZlibDecoder;
 use flate2::write::ZlibEncoder;
 use lash_core::runtime::{
     QueuedWorkBatch, QueuedWorkBatchDraft, QueuedWorkClaim, QueuedWorkClaimBoundary,
-    QueuedWorkCompletion, QueuedWorkItem, QueuedWorkPayload, prepare_process_event_append,
-    prepare_process_registration,
+    QueuedWorkCompletion, QueuedWorkEnqueueOutcome, QueuedWorkItem, QueuedWorkPayload,
+    prepare_process_event_append, prepare_process_registration,
 };
 use lash_core::store::queued_work::{
     ClaimCandidate, QueuedWorkClaimLease, claim_scan_limit, derive_batch_id,
@@ -587,7 +587,12 @@ impl SessionStoreFactory for SqliteSessionStoreFactory {
     }
 
     async fn delete_session(&self, session_id: &str) -> Result<(), String> {
-        delete_session_from_catalog(&self.root, session_id, true).await
+        delete_session_from_catalog(&self.root, session_id, true).await?;
+        if let Some(process_registry_path) = self.process_registry_path.as_deref() {
+            delete_wake_allocation_floors_from_process_registry(process_registry_path, session_id)
+                .await?;
+        }
+        Ok(())
     }
 
     async fn pin(&self, node_id: &str) -> Result<lash_core::ForkPoint, lash_core::StoreError> {
@@ -767,7 +772,7 @@ async fn delete_session_from_catalog(
             )
             .map_err(sqlite_error)?;
             tx.execute(
-                "DELETE FROM consumed_wake_high_water WHERE session_id = ?1",
+                "DELETE FROM wake_redelivery_fences WHERE session_id = ?1",
                 params![session_id],
             )
             .map_err(sqlite_error)?;
@@ -808,6 +813,38 @@ async fn delete_session_from_catalog(
         Ok(match outcome {
             Ok(value) => TxOutcome::Commit(Ok(value)),
             Err(err) => TxOutcome::Rollback(Err(err)),
+        })
+    })
+    .await
+    .map_err(|err| err.to_string())?
+    .map_err(|err| err.to_string())
+}
+
+async fn delete_wake_allocation_floors_from_process_registry(
+    process_registry_path: &Path,
+    target_session_id: &str,
+) -> Result<(), String> {
+    if !process_registry_path.exists() {
+        return Ok(());
+    }
+    let conn = SqliteConnection::open(process_registry_path)
+        .await
+        .map_err(|err| err.to_string())?;
+    ensure_process_schema(&conn)
+        .await
+        .map_err(|err| err.to_string())?;
+    let target_session_id = target_session_id.to_string();
+    conn.write_flow(move |tx| {
+        let outcome = tx
+            .execute(
+                "DELETE FROM wake_allocation_floors WHERE target_session_id = ?1",
+                params![target_session_id],
+            )
+            .map(|_| ())
+            .map_err(sqlite_error);
+        Ok(match outcome {
+            Ok(()) => TxOutcome::Commit(Ok(())),
+            Err(error) => TxOutcome::Rollback(Err(error)),
         })
     })
     .await

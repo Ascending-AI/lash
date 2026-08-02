@@ -44,6 +44,7 @@ pub(super) fn load_wake_delivery_conn(
         Some("expired") => Some(lash_core::WakeDiscardReason::Expired),
         Some("target_gone") => Some(lash_core::WakeDiscardReason::TargetGone),
         Some("retargeted") => Some(lash_core::WakeDiscardReason::Retargeted),
+        Some("sequence_rewound") => Some(lash_core::WakeDiscardReason::SequenceRewound),
         Some(reason) => {
             return Err(lash_core::PluginError::Session(format!(
                 "wake delivery `{delivery_id}` has unknown discard reason `{reason}`"

@@ -64,14 +64,18 @@ The invariant fails toward retention. If a configured trigger store cannot be su
 reconciled, the facade aborts compaction and tombstones accumulate until the trigger store recovers.
 Proceeding would knowingly orphan recovery evidence, so there is no proceed-and-log escape hatch.
 
-This retention contract tolerates process-id reuse rather than endorsing it. Hosts must still
-mint fresh process ids: the receiver's consumed high-water mark survives sender-side pruning while
-event sequences restart per registration, so a re-registered pruned id emits wakes at or below the
-retained mark and has them absorbed as duplicates. See
-`docs/architecture/durable-background-processes.md`. What is settled here is narrower — reuse must
-never cost recovery evidence. The live process row shadows the stale tombstone,
-and reconciliation revalidates that state immediately before action. Delivery deletion is also
-bound to the row identity captured before classification rather than process id alone. The contract
-consequently fails toward retention: a reused id or changed row preserves recovery evidence, and a
-later retention cycle may reconsider it from fresh state. Leaving a stale row is safe; deleting a
-live incarnation's recovery evidence is not.
+Process-id reuse after terminal pruning is safe. Process-event sequence allocation is
+`max(MAX(events) + 1, sender_floor + 1)`. The sender floor is one durable row per
+`(target_session_id, process_id)`, advances in the same transaction as an event append, survives
+process pruning and tombstone compaction, and is deleted with the target session. Sequences remain
+small and ordered within an incarnation, while reuse always starts above the surviving floor. A
+live process row still shadows its stale tombstone so retention never destroys recovery evidence,
+and reconciliation revalidates that state immediately before action. Delivery deletion remains
+bound to the row identity captured before classification rather than process id alone.
+
+The receiver allocation fence is defense in depth for restoring or rewinding a sender store behind
+the receiver. A wake with no live receiver row at or below the retained floor returns
+`ProcessWakeSequenceRewound`; `WakeDeliveryDriver` terminalizes it as a typed
+`sequence_rewound` discard with sequence and floor evidence, then continues the ordering group.
+Receiver retries with a surviving live source row settle idempotently. See
+`docs/architecture/durable-background-processes.md`.

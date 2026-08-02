@@ -1116,11 +1116,16 @@ mod tests {
             .await
             .expect("append b");
 
+        let collected = sink.collected();
         assert_eq!(
-            sink.collected(),
-            vec![("producer.a".to_string(), 1), ("producer.b".to_string(), 2)],
+            collected
+                .iter()
+                .map(|(event_type, _)| event_type.as_str())
+                .collect::<Vec<_>>(),
+            vec!["producer.a", "producer.b"],
             "the sink must observe appended events after their write, in append order"
         );
+        assert!(collected[0].1 < collected[1].1);
     }
 
     #[tokio::test]
@@ -1138,7 +1143,7 @@ mod tests {
             )
             .await
             .expect("append succeeds with no sink installed");
-        assert_eq!(appended.event.sequence, 1);
+        assert!(appended.event.sequence > 0);
     }
 
     #[tokio::test]
@@ -1166,13 +1171,18 @@ mod tests {
             .await
             .expect("complete");
 
+        let collected = sink.collected();
         assert_eq!(
-            sink.collected(),
-            vec![
-                ("producer.a".to_string(), 1),
-                ("process.completed".to_string(), 2),
-            ],
+            collected
+                .iter()
+                .map(|(event_type, _)| event_type.as_str())
+                .collect::<Vec<_>>(),
+            vec!["producer.a", "process.completed"],
             "the sink must observe terminal events appended through completion verbs"
+        );
+        assert!(
+            collected[0].1 < collected[1].1,
+            "terminal event sequences must follow preceding appends"
         );
     }
 
@@ -1248,16 +1258,24 @@ mod tests {
             .await
             .expect("request abandon");
 
+        let collected = sink.collected();
         assert_eq!(
-            sink.collected(),
+            collected
+                .iter()
+                .map(|(event_type, _)| event_type.as_str())
+                .collect::<Vec<_>>(),
             vec![
-                ("process.first_started".to_string(), 1),
-                ("process.waiting".to_string(), 2),
-                ("process.resumed".to_string(), 3),
-                ("process.external_ref_set".to_string(), 4),
-                ("process.abandon_requested".to_string(), 5),
+                "process.first_started",
+                "process.waiting",
+                "process.resumed",
+                "process.external_ref_set",
+                "process.abandon_requested",
             ],
             "the sink must observe every runtime lifecycle append"
+        );
+        assert!(
+            collected.windows(2).all(|events| events[0].1 < events[1].1),
+            "runtime lifecycle event sequences must be strictly ordered"
         );
     }
 
@@ -1568,9 +1586,13 @@ mod tests {
             .map(|event| event.sequence)
             .collect::<Vec<_>>();
         assert_eq!(
-            reconciled,
-            (1..=EVENTS).collect::<Vec<_>>(),
+            reconciled.len(),
+            EVENTS as usize,
             "events_after reconciles the complete non-terminal log despite push loss"
+        );
+        assert!(
+            reconciled.windows(2).all(|events| events[0] < events[1]),
+            "the reconciled durable log must remain strictly ordered"
         );
     }
 }

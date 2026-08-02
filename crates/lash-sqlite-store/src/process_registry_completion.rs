@@ -25,8 +25,7 @@ pub(super) async fn complete_process(
         .conn
         .write_flow(move |tx| {
             Ok(tx_outcome((|| {
-                let mut record =
-                    SqliteProcessRegistry::require_process_conn(tx, &process_id)?;
+                let mut record = SqliteProcessRegistry::require_process_conn(tx, &process_id)?;
                 if record.is_terminal() {
                     return Ok(lash_core::ProcessCompletionOutcome::from_stored(
                         record,
@@ -38,8 +37,11 @@ pub(super) async fn complete_process(
                 // complete→prune→re-register with a different disposition cannot
                 // slip between the check and the append.
                 authority.validate(&process_id, record.disposition, &await_output)?;
-                let request =
-                    lash_core::terminal_append_request(&process_id, &await_output, Some(&authority));
+                let request = lash_core::terminal_append_request(
+                    &process_id,
+                    &await_output,
+                    Some(&authority),
+                );
                 let replay_lookup = request
                     .replay
                     .as_ref()
@@ -52,19 +54,17 @@ pub(super) async fn complete_process(
                     })
                     .transpose()?
                     .flatten();
-                let sequence = tx
-                    .query_row(
-                        "SELECT COALESCE(MAX(sequence), 0) + 1 FROM process_events WHERE process_id = ?1",
-                        params![process_id],
-                        |row| row.get::<_, i64>(0),
-                    )
-                    .map_err(process_sqlite_error)? as u64;
-                let wake_session_id =
-                    SqliteProcessRegistry::wake_session_id_conn(tx, &process_id)?;
+                let wake_session_id = SqliteProcessRegistry::wake_session_id_conn(tx, &process_id)?;
+                let (last_sequence, sequence) = SqliteProcessRegistry::next_event_sequence_conn(
+                    tx,
+                    &process_id,
+                    wake_session_id.as_deref(),
+                )?;
                 let prepared = prepare_process_event_append(
                     &record,
                     request,
                     sequence,
+                    last_sequence,
                     replay_lookup,
                     now,
                     wake_session_id.as_deref(),
@@ -84,9 +84,7 @@ pub(super) async fn complete_process(
                             record = repaired;
                             SqliteProcessRegistry::save_process_conn(tx, &record)?;
                         }
-                        Ok(lash_core::ProcessCompletionOutcome::AlreadyApplied {
-                            stored: record,
-                        })
+                        Ok(lash_core::ProcessCompletionOutcome::AlreadyApplied { stored: record })
                     }
                     lash_core::ProcessEventAppendPlan::Insert {
                         event,
@@ -118,6 +116,12 @@ pub(super) async fn complete_process(
                             wake_delivery.as_ref(),
                             wake_delivery_config,
                         )?;
+                        SqliteProcessRegistry::advance_wake_allocation_floor_conn(
+                            tx,
+                            wake_session_id.as_deref(),
+                            &process_id,
+                            sequence,
+                        )?;
                         Ok(lash_core::ProcessCompletionOutcome::Committed(record))
                     }
                 }
@@ -135,7 +139,8 @@ pub(super) async fn complete_process_with_lease(
     let lease = lease.clone();
     let now = registry.clock.timestamp_ms();
     let wake_delivery_config = registry.wake_delivery_config;
-    registry.conn
+    registry
+        .conn
         .write_flow(move |tx| {
             Ok(tx_outcome((|| {
                 let process_id = lease.process_id.as_str();
@@ -151,37 +156,45 @@ pub(super) async fn complete_process_with_lease(
                     .replay
                     .as_ref()
                     .map(|replay| {
-                        SqliteProcessRegistry::load_event_by_key_conn(tx, process_id, replay.key.as_str())
+                        SqliteProcessRegistry::load_event_by_key_conn(
+                            tx,
+                            process_id,
+                            replay.key.as_str(),
+                        )
                     })
                     .transpose()?
                     .flatten();
-                let sequence = tx
-                    .query_row(
-                        "SELECT COALESCE(MAX(sequence), 0) + 1 FROM process_events WHERE process_id = ?1",
-                        params![process_id],
-                        |row| row.get::<_, i64>(0),
-                    )
-                    .map_err(process_sqlite_error)? as u64;
+                let wake_session_id = SqliteProcessRegistry::wake_session_id_conn(tx, process_id)?;
+                let (last_sequence, sequence) = SqliteProcessRegistry::next_event_sequence_conn(
+                    tx,
+                    process_id,
+                    wake_session_id.as_deref(),
+                )?;
                 // A successful prior terminal append is replay-idempotent even
                 // though that transaction already cleared the lease.
                 let prepared = prepare_process_event_append(
                     &record,
                     request,
                     sequence,
+                    last_sequence,
                     replay_lookup,
                     now,
-                    SqliteProcessRegistry::wake_session_id_conn(tx, process_id)?.as_deref(),
+                    wake_session_id.as_deref(),
                 )?;
-                if matches!(prepared, lash_core::ProcessEventAppendPlan::Replay { .. }) {
-                    if let lash_core::ProcessEventAppendPlan::Replay {
-                        wake_delivery, ..
-                    } = &prepared
-                    {
-                        SqliteProcessRegistry::insert_wake_delivery_conn(
-                            tx,
-                            wake_delivery.as_ref(),
-                            wake_delivery_config,
-                        )?;
+                if let lash_core::ProcessEventAppendPlan::Replay {
+                    repair_record,
+                    wake_delivery,
+                    ..
+                } = prepared
+                {
+                    SqliteProcessRegistry::insert_wake_delivery_conn(
+                        tx,
+                        wake_delivery.as_ref(),
+                        wake_delivery_config,
+                    )?;
+                    if let Some(repaired) = repair_record {
+                        record = repaired;
+                        SqliteProcessRegistry::save_process_conn(tx, &record)?;
                     }
                     return Ok(lash_core::ProcessCompletionOutcome::AlreadyApplied {
                         stored: record,
@@ -230,6 +243,12 @@ pub(super) async fn complete_process_with_lease(
                     tx,
                     wake_delivery.as_ref(),
                     wake_delivery_config,
+                )?;
+                SqliteProcessRegistry::advance_wake_allocation_floor_conn(
+                    tx,
+                    wake_session_id.as_deref(),
+                    process_id,
+                    sequence,
                 )?;
                 tx.execute(
                     "UPDATE process_leases

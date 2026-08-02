@@ -7,8 +7,8 @@ use tokio_util::task::TaskTracker;
 
 use crate::{
     Clock, PluginError, ProcessRegistry, QueuedWorkDriver, SessionPolicy, SessionRelation,
-    SessionStoreCreateRequest, SessionStoreFactory, WakeDeliveryClaimOutcome, WakeDiscardReason,
-    WakeTurnPolicy, process_wake_batch_draft_with_policy,
+    SessionStoreCreateRequest, SessionStoreFactory, StoreError, WakeDeliveryClaimOutcome,
+    WakeDiscardReason, WakeTurnPolicy, process_wake_batch_draft_with_policy,
 };
 
 const DELIVERY_BATCH_SIZE: usize = 32;
@@ -30,6 +30,8 @@ pub struct WakeDeliveryDriveReport {
     pub enqueued: usize,
     pub discarded_expired: usize,
     pub discarded_target_gone: usize,
+    pub discarded_sequence_rewound: usize,
+    pub floor_absorbed: usize,
     pub retryable_failures: usize,
 }
 
@@ -296,25 +298,38 @@ impl WakeDeliveryDriver {
             };
 
             match store
-                .enqueue_queued_work(process_wake_batch_draft_with_policy(
+                .enqueue_queued_work_with_outcome(process_wake_batch_draft_with_policy(
                     delivery.wake.clone(),
                     wake_turn_policy,
                 ))
                 .await
             {
-                Ok(enqueued) => {
-                    tracing::info!(
-                        delivery_id = %delivery.delivery_id,
-                        target_session_id = %target_session_id,
-                        batch_id = %enqueued.batch_id,
-                        source_key = ?enqueued.source_key,
-                        delivery_policy = wake_turn_policy.delivery().as_str(),
-                        wake_mode = ?wake_turn_policy.mode(),
-                        slot_policy = enqueued.slot_policy.as_str(),
-                        merge_key = ?enqueued.merge_key,
-                        outcome = "enqueued",
-                        "process wake enqueued"
-                    );
+                Ok(enqueue_outcome) => {
+                    let enqueued = enqueue_outcome.batch();
+                    if enqueue_outcome.process_wake_was_absorbed() {
+                        tracing::info!(
+                            delivery_id = %delivery.delivery_id,
+                            target_session_id = %target_session_id,
+                            batch_id = %enqueued.batch_id,
+                            source_key = ?enqueued.source_key,
+                            outcome = "floor_absorbed",
+                            "process wake delivery absorbed by receiver idempotency"
+                        );
+                        report.floor_absorbed += 1;
+                    } else {
+                        tracing::info!(
+                            delivery_id = %delivery.delivery_id,
+                            target_session_id = %target_session_id,
+                            batch_id = %enqueued.batch_id,
+                            source_key = ?enqueued.source_key,
+                            delivery_policy = wake_turn_policy.delivery().as_str(),
+                            wake_mode = ?wake_turn_policy.mode(),
+                            slot_policy = enqueued.slot_policy.as_str(),
+                            merge_key = ?enqueued.merge_key,
+                            outcome = "enqueued",
+                            "process wake enqueued"
+                        );
+                    }
                     match registry
                         .mark_wake_enqueued(&delivery.delivery_id, claim_token)
                         .await
@@ -342,6 +357,50 @@ impl WakeDeliveryDriver {
                                 delivery_id = %delivery.delivery_id,
                                 error = %error,
                                 "process wake terminal mark failed; delivery deferred"
+                            );
+                            Self::defer_retry(registry.as_ref(), &delivery, clock.as_ref()).await?;
+                            report.retryable_failures += 1;
+                        }
+                    }
+                }
+                Err(StoreError::ProcessWakeSequenceRewound {
+                    session_id,
+                    process_id,
+                    sequence,
+                    allocation_floor,
+                }) => {
+                    match registry
+                        .discard_wake_delivery(
+                            &delivery.delivery_id,
+                            claim_token,
+                            WakeDiscardReason::SequenceRewound,
+                        )
+                        .await
+                    {
+                        Ok(WakeDeliveryClaimOutcome::Applied) => {
+                            tracing::info!(
+                                delivery_id = %delivery.delivery_id,
+                                target_session_id = %session_id,
+                                process_id = %process_id,
+                                sequence,
+                                allocation_floor,
+                                reason = "sequence_rewound",
+                                "process wake delivery discarded"
+                            );
+                            report.discarded_sequence_rewound += 1;
+                        }
+                        Ok(WakeDeliveryClaimOutcome::ClaimLost { state }) => {
+                            tracing::debug!(
+                                delivery_id = %delivery.delivery_id,
+                                ?state,
+                                "concurrent process wake transition won before sequence-rewind discard"
+                            );
+                        }
+                        Err(error) => {
+                            tracing::warn!(
+                                delivery_id = %delivery.delivery_id,
+                                error = %error,
+                                "process wake sequence-rewind transition failed; delivery deferred"
                             );
                             Self::defer_retry(registry.as_ref(), &delivery, clock.as_ref()).await?;
                             report.retryable_failures += 1;
@@ -407,8 +466,11 @@ impl WakeDeliveryDriver {
                     }
                 }
             };
-            let made_progress =
-                report.enqueued + report.discarded_expired + report.discarded_target_gone > 0;
+            let made_progress = report.enqueued
+                + report.discarded_expired
+                + report.discarded_target_gone
+                + report.discarded_sequence_rewound
+                > 0;
             let delay = if made_progress
                 && report.retryable_failures == 0
                 && report.inspected >= DELIVERY_BATCH_SIZE

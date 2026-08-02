@@ -183,7 +183,9 @@ pub struct InMemorySessionStore {
     session_execution_leases: Mutex<HashMap<String, InMemorySessionExecutionLease>>,
     queued_work: Mutex<Vec<InMemoryQueuedBatch>>,
     queued_work_next_seq: Mutex<u64>,
-    consumed_wake_high_water: Mutex<HashMap<(String, String), u64>>,
+    /// Receiver-side sender allocation floor. This is a redelivery fence, not
+    /// a consumption watermark: selected-batch settlement may be out of order.
+    wake_redelivery_fences: Mutex<HashMap<(String, String), u64>>,
     pending_turn_inputs: Mutex<Vec<InMemoryPendingTurnInput>>,
     pending_turn_input_next_seq: Mutex<u64>,
     attachment_manifest:
@@ -275,7 +277,7 @@ impl InMemorySessionStore {
             session_execution_leases: Mutex::new(HashMap::new()),
             queued_work: Mutex::new(Vec::new()),
             queued_work_next_seq: Mutex::new(0),
-            consumed_wake_high_water: Mutex::new(HashMap::new()),
+            wake_redelivery_fences: Mutex::new(HashMap::new()),
             pending_turn_inputs: Mutex::new(Vec::new()),
             pending_turn_input_next_seq: Mutex::new(0),
             attachment_manifest: Mutex::new(HashMap::new()),
@@ -455,70 +457,6 @@ impl InMemorySessionStore {
                 batch.batch_id
             ))
         })
-    }
-
-    fn enqueue_queued_work_in_memory(
-        &self,
-        batch: crate::QueuedWorkBatchDraft,
-    ) -> Result<crate::QueuedWorkBatch, crate::store::StoreError> {
-        batch
-            .validate_process_wake_source()
-            .map_err(crate::store::StoreError::Backend)?;
-        if let Some(wake_source) = batch.process_wake_source.as_ref()
-            && self
-                .consumed_wake_high_water
-                .lock()
-                .expect("lock consumed wake high water")
-                .get(&(batch.session_id.clone(), wake_source.process_id.clone()))
-                .is_some_and(|high_sequence| wake_source.sequence <= *high_sequence)
-        {
-            return Ok(crate::runtime::consumed_queued_work_batch(&batch));
-        }
-        let mut queued = self.queued_work.lock().expect("lock queued work");
-        if let Some(source_key) = batch.source_key.as_deref()
-            && let Some(existing) = queued.iter().find(|entry| {
-                entry.batch.session_id == batch.session_id
-                    && entry.batch.source_key.as_deref() == Some(source_key)
-            })
-        {
-            return Ok(existing.batch.clone());
-        }
-        let mut next_seq = self
-            .queued_work_next_seq
-            .lock()
-            .expect("lock queued work seq");
-        *next_seq = next_seq.saturating_add(1);
-        let batch_id = format!("recording-qwb-{next_seq}");
-        let stored = crate::QueuedWorkBatch {
-            batch_id: batch_id.clone(),
-            session_id: batch.session_id,
-            enqueue_seq: *next_seq,
-            source_key: batch.source_key,
-            delivery_policy: batch.delivery_policy,
-            slot_policy: batch.slot_policy,
-            merge_key: batch.merge_key,
-            available_at_ms: batch.available_at_ms,
-            enqueued_at_ms: self.clock.timestamp_ms(),
-            items: batch
-                .payloads
-                .into_iter()
-                .enumerate()
-                .map(|(index, payload)| crate::QueuedWorkItem {
-                    item_id: format!("{batch_id}:item:{index}"),
-                    payload,
-                })
-                .collect(),
-        };
-        queued.push(InMemoryQueuedBatch {
-            batch: stored.clone(),
-            claim_id: None,
-            claim_token: None,
-            claim_owner: None,
-            claim_fencing_token: 0,
-            claim_session_lease_generation: 0,
-        });
-        queued.sort_by_key(|entry| entry.batch.enqueue_seq);
-        Ok(stored)
     }
 
     fn claim_ready_queued_work_in_memory(
@@ -1207,12 +1145,36 @@ impl crate::store::SessionCommitStore for InMemorySessionStore {
                 }
             }
         }
-        {
-            let mut queued = self.queued_work.lock().expect("lock queued work");
-            let mut consumed = self
-                .consumed_wake_high_water
+        let manifest = crate::store::SessionCheckpoint::new(
+            hydrated_checkpoint.turn_state.clone(),
+            hydrated_checkpoint.tool_state_ref.clone(),
+            hydrated_checkpoint.plugin_snapshot_ref.clone(),
+            hydrated_checkpoint.plugin_snapshot_revision,
+            hydrated_checkpoint.execution_state_ref.clone(),
+        );
+        let checkpoint_bytes = rmp_serde::to_vec_named(&manifest).map_err(|err| {
+            crate::store::StoreError::Backend(format!(
+                "failed to encode in-memory checkpoint manifest: {err}"
+            ))
+        })?;
+        let checkpoint_ref = crate::BlobRef(crate::stable_hash::sha256_hex(&checkpoint_bytes));
+        let operation_key = commit.turn_commit.operation.storage_key()?;
+        let (
+            staged_queued_work,
+            staged_wake_redelivery_fences,
+            staged_queued_work_next_seq,
+            staged_enqueued_queue_batches,
+        ) = {
+            let mut queued = self.queued_work.lock().expect("lock queued work").clone();
+            let mut fences = self
+                .wake_redelivery_fences
                 .lock()
-                .expect("lock consumed wake high water");
+                .expect("lock wake redelivery fences")
+                .clone();
+            let mut next_seq = *self
+                .queued_work_next_seq
+                .lock()
+                .expect("lock queued work seq");
             for completed in &commit.completed_queue_claims {
                 for entry in queued.iter().filter(|entry| {
                     entry.batch.session_id == completed.session_id
@@ -1232,10 +1194,10 @@ impl crate::store::SessionCommitStore for InMemorySessionStore {
                                 _ => None,
                             })
                     {
-                        consumed
+                        fences
                             .entry((entry.batch.session_id.clone(), process_id))
-                            .and_modify(|high_sequence| {
-                                *high_sequence = (*high_sequence).max(sequence);
+                            .and_modify(|allocation_floor| {
+                                *allocation_floor = (*allocation_floor).max(sequence);
                             })
                             .or_insert(sequence);
                     }
@@ -1247,12 +1209,30 @@ impl crate::store::SessionCommitStore for InMemorySessionStore {
                         && completed.batch_ids.contains(&entry.batch.batch_id))
                 });
             }
-        }
-        {
+            let enqueued_at_ms = self.clock.timestamp_ms();
+            let enqueued = commit
+                .enqueued_queue_batches
+                .iter()
+                .cloned()
+                .map(|batch| {
+                    Self::enqueue_queued_work_for_state(
+                        &mut queued,
+                        &fences,
+                        &mut next_seq,
+                        batch,
+                        enqueued_at_ms,
+                    )
+                    .map(crate::QueuedWorkEnqueueOutcome::into_batch)
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+            (queued, fences, next_seq, enqueued)
+        };
+        let staged_pending_turn_inputs = {
             let mut pending = self
                 .pending_turn_inputs
                 .lock()
-                .expect("lock pending turn input");
+                .expect("lock pending turn input")
+                .clone();
             for completed in &commit.completed_turn_input_claims {
                 for entry in pending.iter_mut() {
                     if entry.input.session_id == completed.session_id
@@ -1265,30 +1245,41 @@ impl crate::store::SessionCommitStore for InMemorySessionStore {
                     }
                 }
             }
-        }
-        if let Some(turn_id) = commit.interrupted_turn_input_turn_id.as_deref() {
-            let mut pending = self
-                .pending_turn_inputs
-                .lock()
-                .expect("lock pending turn input");
-            for entry in pending.iter_mut() {
-                if entry.input.session_id == commit.session_id
-                    && entry.input.state == crate::TurnInputState::PendingActive
-                    && entry
-                        .input
-                        .ingress
-                        .active_turn_id()
-                        .is_some_and(|active| active == turn_id)
-                {
-                    entry.input.state = crate::TurnInputState::DeferredNextTurn;
-                    entry.input.ingress = crate::TurnInputIngress::NextTurn;
-                    entry.claim_id = None;
-                    entry.claim_token = None;
-                    entry.claim_owner = None;
-                    entry.claim_session_lease_generation = 0;
+            if let Some(turn_id) = commit.interrupted_turn_input_turn_id.as_deref() {
+                for entry in pending.iter_mut() {
+                    if entry.input.session_id == commit.session_id
+                        && entry.input.state == crate::TurnInputState::PendingActive
+                        && entry
+                            .input
+                            .ingress
+                            .active_turn_id()
+                            .is_some_and(|active| active == turn_id)
+                    {
+                        entry.input.state = crate::TurnInputState::DeferredNextTurn;
+                        entry.input.ingress = crate::TurnInputIngress::NextTurn;
+                        entry.claim_id = None;
+                        entry.claim_token = None;
+                        entry.claim_owner = None;
+                        entry.claim_session_lease_generation = 0;
+                    }
                 }
             }
-        }
+            pending
+        };
+
+        *self.queued_work.lock().expect("lock queued work") = staged_queued_work;
+        *self
+            .wake_redelivery_fences
+            .lock()
+            .expect("lock wake redelivery fences") = staged_wake_redelivery_fences;
+        *self
+            .queued_work_next_seq
+            .lock()
+            .expect("lock queued work seq") = staged_queued_work_next_seq;
+        *self
+            .pending_turn_inputs
+            .lock()
+            .expect("lock pending turn input") = staged_pending_turn_inputs;
         let mut global_graph = self.global_session_graph.lock().expect("lock global graph");
         global_graph.extend_node_records(commit.graph.nodes.iter().cloned());
         let leaf_node_id = commit.graph.leaf_node_id.clone();
@@ -1313,19 +1304,6 @@ impl crate::store::SessionCommitStore for InMemorySessionStore {
             .lock()
             .expect("lock usage deltas")
             .extend(commit.usage_deltas.iter().cloned());
-        let manifest = crate::store::SessionCheckpoint::new(
-            hydrated_checkpoint.turn_state.clone(),
-            hydrated_checkpoint.tool_state_ref.clone(),
-            hydrated_checkpoint.plugin_snapshot_ref.clone(),
-            hydrated_checkpoint.plugin_snapshot_revision,
-            hydrated_checkpoint.execution_state_ref.clone(),
-        );
-        let checkpoint_bytes = rmp_serde::to_vec_named(&manifest).map_err(|err| {
-            crate::store::StoreError::Backend(format!(
-                "failed to encode in-memory checkpoint manifest: {err}"
-            ))
-        })?;
-        let checkpoint_ref = crate::BlobRef(crate::stable_hash::sha256_hex(&checkpoint_bytes));
         if let (Some(blob_ref), Some(body)) = (
             hydrated_checkpoint.tool_state_ref.clone(),
             hydrated_checkpoint.tool_state.clone(),
@@ -1377,14 +1355,9 @@ impl crate::store::SessionCommitStore for InMemorySessionStore {
             checkpoint_ref,
             manifest,
             realized_node_timestamps,
-            enqueued_queue_batches: commit
-                .enqueued_queue_batches
-                .into_iter()
-                .map(|batch| self.enqueue_queued_work_in_memory(batch))
-                .collect::<Result<_, _>>()?,
+            enqueued_queue_batches: staged_enqueued_queue_batches,
             turn_input_applications,
         };
-        let operation_key = commit.turn_commit.operation.storage_key()?;
         self.runtime_turn_commits
             .lock()
             .expect("lock runtime turn commits")

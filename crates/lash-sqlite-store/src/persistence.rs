@@ -565,8 +565,8 @@ impl SessionCommitStore for Store {
                     for completed in &commit.completed_queue_claims {
                         for batch_id in &completed.batch_ids {
                             tx.execute(
-                                "INSERT INTO consumed_wake_high_water (
-                                    session_id, process_id, high_sequence
+                                "INSERT INTO wake_redelivery_fences (
+                                    session_id, process_id, allocation_floor
                                  )
                                  SELECT batch.session_id,
                                         json_extract(item.payload_json, '$.wake.process_id'),
@@ -580,9 +580,9 @@ impl SessionCommitStore for Store {
                                    AND batch.claim_token = ?4
                                    AND json_extract(item.payload_json, '$.type') = 'process_wake'
                                  ON CONFLICT(session_id, process_id) DO UPDATE SET
-                                   high_sequence = MAX(
-                                       consumed_wake_high_water.high_sequence,
-                                       excluded.high_sequence
+                                   allocation_floor = MAX(
+                                       wake_redelivery_fences.allocation_floor,
+                                       excluded.allocation_floor
                                    )",
                                 params![
                                     completed.session_id,
@@ -992,6 +992,25 @@ impl QueuedWorkStore for Store {
                     .and_then(|()| enqueue_queued_work_conn(tx, &batch, now, nonce));
                 // Roll back the partially-inserted batch/items on a
                 // `StoreError` while still returning the typed error.
+                match outcome {
+                    Ok(value) => Ok(TxOutcome::Commit(Ok(value))),
+                    Err(err) => Ok(TxOutcome::Rollback(Err(err))),
+                }
+            })
+            .await
+            .map_err(sqlite_error)?
+    }
+
+    async fn enqueue_queued_work_with_outcome(
+        &self,
+        batch: QueuedWorkBatchDraft,
+    ) -> Result<QueuedWorkEnqueueOutcome, StoreError> {
+        let nonce = self.commit_count.fetch_add(1, AtomicOrdering::Relaxed);
+        let now = self.clock.timestamp_ms();
+        self.conn
+            .write_flow(move |tx| {
+                let outcome = ensure_session_not_deleted_conn(tx, &batch.session_id)
+                    .and_then(|()| enqueue_queued_work_conn_with_outcome(tx, &batch, now, nonce));
                 match outcome {
                     Ok(value) => Ok(TxOutcome::Commit(Ok(value))),
                     Err(err) => Ok(TxOutcome::Rollback(Err(err))),

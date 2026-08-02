@@ -137,10 +137,10 @@ CREATE TABLE IF NOT EXISTS queued_work_items (
     FOREIGN KEY (batch_id) REFERENCES queued_work_batches(batch_id) ON DELETE CASCADE
 );
 
-CREATE TABLE IF NOT EXISTS consumed_wake_high_water (
-    session_id    TEXT NOT NULL,
-    process_id    TEXT NOT NULL,
-    high_sequence INTEGER NOT NULL,
+CREATE TABLE IF NOT EXISTS wake_redelivery_fences (
+    session_id       TEXT NOT NULL,
+    process_id       TEXT NOT NULL,
+    allocation_floor INTEGER NOT NULL,
     PRIMARY KEY (session_id, process_id)
 );
 
@@ -260,7 +260,11 @@ CREATE INDEX IF NOT EXISTS idx_attachment_manifest_owner
 /// high-water marks. Pre-22 durable-core catalogs are rejected and recreated.
 ///
 /// Bumped to 23 for the session-create and process-identity cutover.
-pub(crate) const SCHEMA_VERSION: i32 = 23;
+///
+/// Bumped to 24 to rename consumed wake high-water marks as receiver allocation
+/// fences and add durable sender allocation floors. Process-event sequences
+/// remain small and monotone across pruned incarnations.
+pub(crate) const SCHEMA_VERSION: i32 = 24;
 
 pub(crate) const PROCESS_SCHEMA: &str = "
 CREATE TABLE IF NOT EXISTS processes (
@@ -317,6 +321,13 @@ CREATE TABLE IF NOT EXISTS process_events (
 CREATE UNIQUE INDEX IF NOT EXISTS idx_process_events_key
     ON process_events(process_id, idempotency_key)
     WHERE idempotency_key IS NOT NULL;
+
+CREATE TABLE IF NOT EXISTS wake_allocation_floors (
+    target_session_id TEXT NOT NULL,
+    process_id        TEXT NOT NULL,
+    allocation_floor INTEGER NOT NULL,
+    PRIMARY KEY (target_session_id, process_id)
+);
 
 CREATE TABLE IF NOT EXISTS process_wake_deliveries (
     delivery_id       TEXT PRIMARY KEY,

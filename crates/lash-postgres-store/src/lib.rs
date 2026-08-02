@@ -10,7 +10,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use lash_core::runtime::{
     QueuedWorkBatch, QueuedWorkBatchDraft, QueuedWorkClaim, QueuedWorkClaimBoundary,
-    QueuedWorkCompletion, QueuedWorkItem,
+    QueuedWorkCompletion, QueuedWorkEnqueueOutcome, QueuedWorkItem,
 };
 use lash_core::store::queued_work::{
     ClaimCandidate, QueuedWorkClaimLease, claim_scan_limit, derive_batch_id,
@@ -114,7 +114,10 @@ const SCHEMA_COMPONENT: &str = "lash-postgres-store";
 // Bumped to 32 for the FIG-661 observer, indexed wake, and tombstone cutover.
 // Bumped to 33 for enqueuing wake claims and raw session originator ids.
 // Bumped to 34 for per-attempt wake-delivery claim tokens.
-const SCHEMA_VERSION: i32 = 34;
+// Bumped to 35 to replace the consumed-watermark vocabulary with receiver
+// allocation fences and add durable sender allocation floors. Process-event
+// sequences remain small and monotone across pruned incarnations.
+const SCHEMA_VERSION: i32 = 35;
 const PROCESS_LEASE_SCHEMA_VERSION: u32 = lash_core::PROCESS_LEASE_SCHEMA_VERSION;
 
 #[derive(Clone)]

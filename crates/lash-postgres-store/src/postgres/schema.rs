@@ -132,10 +132,10 @@ pub(crate) async fn ensure_schema(pool: &PgPool) -> Result<Vec<u8>, StoreError> 
             PRIMARY KEY (batch_id, item_index)
         );
 
-        CREATE TABLE IF NOT EXISTS lash_consumed_wake_high_water (
+        CREATE TABLE IF NOT EXISTS lash_wake_redelivery_fences (
             session_id TEXT NOT NULL,
             process_id TEXT NOT NULL,
-            high_sequence BIGINT NOT NULL,
+            allocation_floor BIGINT NOT NULL,
             PRIMARY KEY (session_id, process_id)
         );
 
@@ -232,6 +232,13 @@ pub(crate) async fn ensure_schema(pool: &PgPool) -> Result<Vec<u8>, StoreError> 
         CREATE UNIQUE INDEX IF NOT EXISTS idx_lash_process_events_key
             ON lash_process_events(process_id, idempotency_key)
             WHERE idempotency_key IS NOT NULL;
+
+        CREATE TABLE IF NOT EXISTS lash_wake_allocation_floors (
+            target_session_id TEXT NOT NULL,
+            process_id TEXT NOT NULL,
+            allocation_floor BIGINT NOT NULL,
+            PRIMARY KEY (target_session_id, process_id)
+        );
 
         CREATE TABLE IF NOT EXISTS lash_process_wake_deliveries (
             delivery_id TEXT PRIMARY KEY,

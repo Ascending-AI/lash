@@ -230,6 +230,36 @@ async fn sqlite_process_registry_satisfies_conformance() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn sqlite_leased_completion_replay_repairs_projection() {
+    let dir = tempfile::tempdir().expect("leased replay repair tempdir");
+    let path = dir.path().join("processes.db");
+    let registry = Arc::new(
+        SqliteProcessRegistry::open(&path, dir.path().join("sessions"))
+            .await
+            .expect("open leased replay repair registry"),
+    );
+    let corruption_path = path.clone();
+    lash_core::testing::conformance::leased_completion_replay_repairs_projection(
+        registry as Arc<dyn ProcessRegistry>,
+        move |stale| async move {
+            let conn = rusqlite::Connection::open(corruption_path)
+                .expect("open projection corruption connection");
+            let changed = conn
+                .execute(
+                    "UPDATE processes SET record_json = ?2 WHERE process_id = ?1",
+                    rusqlite::params![
+                        stale.id,
+                        serde_json::to_string(&stale).expect("encode stale process projection")
+                    ],
+                )
+                .expect("corrupt SQLite process projection");
+            assert_eq!(changed, 1);
+        },
+    )
+    .await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn sqlite_process_trigger_retention_satisfies_conformance() {
     let dirs = Arc::new(Mutex::new(Vec::new()));
     lash_core::testing::conformance::process_trigger_retention(move || {
@@ -334,9 +364,14 @@ async fn sqlite_process_continuation_store_satisfies_conformance() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn sqlite_wake_delivery_crash_matrix() {
     let dir = tempfile::tempdir().expect("tempdir");
+    let process_registry_path = dir.path().join("processes.db");
+    let clock = Arc::new(
+        lash_core::testing::conformance::WakeDeliveryConformanceClock::new(1_800_000_000_000),
+    );
     let registry = Arc::new(
-        SqliteProcessRegistry::open(
-            &dir.path().join("processes.db"),
+        SqliteProcessRegistry::open_with_clock(
+            &process_registry_path,
+            Arc::clone(&clock) as Arc<dyn lash_core::Clock>,
             dir.path().join("sessions"),
         )
         .await
@@ -348,10 +383,12 @@ async fn sqlite_wake_delivery_crash_matrix() {
                 .expect("valid short stale-claim age"),
         ),
     ) as Arc<dyn ProcessRegistry>;
-    let factory =
-        Arc::new(SqliteSessionStoreFactory::new(dir.path())) as Arc<dyn SessionStoreFactory>;
+    let factory = Arc::new(
+        SqliteSessionStoreFactory::new_with_process_registry(dir.path(), process_registry_path)
+            .with_clock(Arc::clone(&clock) as Arc<dyn lash_core::Clock>),
+    ) as Arc<dyn SessionStoreFactory>;
     Box::pin(lash_core::testing::conformance::wake_delivery_crash_matrix(
-        factory, registry,
+        factory, registry, clock,
     ))
     .await;
 }

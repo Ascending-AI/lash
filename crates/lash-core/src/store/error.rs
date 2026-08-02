@@ -101,6 +101,15 @@ pub enum StoreError {
         source_key: String,
         existing_input_id: String,
     },
+    #[error(
+        "process wake `{process_id}` sequence {sequence} for session `{session_id}` has no live receiver row and is at or below the receiver allocation floor {allocation_floor}; the sender store may have been restored or rewound"
+    )]
+    ProcessWakeSequenceRewound {
+        session_id: String,
+        process_id: String,
+        sequence: u64,
+        allocation_floor: u64,
+    },
     #[error("session execution lease for session `{session_id}` is missing or expired")]
     SessionExecutionLeaseExpired { session_id: String },
     #[error(

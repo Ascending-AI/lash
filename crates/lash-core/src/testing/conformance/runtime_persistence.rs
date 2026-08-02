@@ -2959,18 +2959,17 @@ async fn wake_turn_policy_controls_coalescing(store: Arc<dyn RuntimePersistence>
         "merged settlement must delete every claimed receiver row"
     );
     for wake in merged_wakes {
-        let receipt = store
+        let error = store
             .enqueue_queued_work(crate::process_wake_batch_draft_with_policy(
                 wake,
                 &merge_policy,
             ))
             .await
-            .expect("replay settled wake");
-        assert_eq!(
-            receipt.enqueue_seq, 0,
-            "receiver high-water must consume every settled sequence"
-        );
-        assert!(receipt.batch_id.starts_with("consumed:"));
+            .expect_err("settled wake without a live row must trip the receiver floor");
+        assert!(matches!(
+            error,
+            StoreError::ProcessWakeSequenceRewound { .. }
+        ));
     }
 }
 
@@ -4599,8 +4598,11 @@ async fn queued_wake_delivery_is_source_key_idempotent_and_claimed_once(
     let consumed_replay = store
         .enqueue_queued_work(crate::process_wake_batch_draft(wake))
         .await
-        .expect("late wake redelivery resolves against consumed high water");
-    assert_eq!(consumed_replay.enqueue_seq, 0);
+        .expect_err("late no-live-row wake must trip the receiver floor");
+    assert!(matches!(
+        consumed_replay,
+        StoreError::ProcessWakeSequenceRewound { .. }
+    ));
     assert!(
         store
             .list_queued_work("root")

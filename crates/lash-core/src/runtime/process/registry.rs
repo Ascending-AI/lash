@@ -42,12 +42,15 @@ pub const WAKE_ENQUEUING_STALE_AFTER_MS: u64 = 30_000;
 ///
 /// Exactly-once delivery does not depend on comparing clocks across the
 /// process registry and target session store. Receiver completion advances one
-/// monotone consumed high-water mark per `(session_id, process_id)`. F7
-/// guarantees in-sequence enqueue within each target/process group, so every
-/// consumed sequence is a contiguous prefix: stale drivers, retries, and host
-/// redrives can only reproduce a sequence at or below that prefix and dedupe
-/// forever. `delivery_expiry_ms` is only a pending-delivery liveness bound,
-/// evaluated with the runtime's injected clock.
+/// monotone receiver allocation floor per `(session_id, process_id)`. Because
+/// selected-batch settlement may be out of order, this is a redelivery fence,
+/// not a consumption watermark. The process registry separately retains one
+/// sender allocation floor per wake target and process, so sequences stay
+/// strictly monotone across pruned incarnations without consulting a clock.
+/// A live receiver row is idempotent; a no-live-row wake at or below the
+/// receiver floor returns the typed store-rewind error.
+/// `delivery_expiry_ms` is only a pending-delivery liveness bound, evaluated
+/// with the runtime's injected clock.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct WakeDeliveryConfig {
     pub delivery_expiry_ms: u64,
@@ -120,6 +123,7 @@ pub enum WakeDiscardReason {
     Expired,
     TargetGone,
     Retargeted,
+    SequenceRewound,
 }
 
 impl WakeDiscardReason {
@@ -128,6 +132,7 @@ impl WakeDiscardReason {
             Self::Expired => "expired",
             Self::TargetGone => "target_gone",
             Self::Retargeted => "retargeted",
+            Self::SequenceRewound => "sequence_rewound",
         }
     }
 }
@@ -219,6 +224,7 @@ pub struct WakeDeliveryReport {
     pub expired: usize,
     pub target_gone: usize,
     pub retargeted: usize,
+    pub sequence_rewound: usize,
     /// Ordering groups stopped by a discarded head while later work remains.
     pub blocked_groups: Vec<WakeDeliveryBlockedGroup>,
 }
@@ -238,6 +244,7 @@ impl WakeDeliveryReport {
                         Some(WakeDiscardReason::Expired) => report.expired += 1,
                         Some(WakeDiscardReason::TargetGone) => report.target_gone += 1,
                         Some(WakeDiscardReason::Retargeted) => report.retargeted += 1,
+                        Some(WakeDiscardReason::SequenceRewound) => report.sequence_rewound += 1,
                         None => {}
                     }
                 }
@@ -265,7 +272,10 @@ impl WakeDeliveryReport {
                 continue;
             };
             if let Some(delivery) = group[..last_active_index].iter().find(|delivery| {
-                delivery.state == WakeDeliveryState::Discarded && delivery.discard_reason.is_some()
+                delivery.state == WakeDeliveryState::Discarded
+                    && delivery
+                        .discard_reason
+                        .is_some_and(|reason| reason != WakeDiscardReason::SequenceRewound)
             }) {
                 let reason = delivery
                     .discard_reason
@@ -344,13 +354,13 @@ pub trait ProcessRegistry: Send + Sync {
         None
     }
 
-    /// Process ids must be unique across prune horizons. A receiver's consumed
-    /// wake high-water mark deliberately survives sender-side pruning, and event
-    /// sequences restart for a re-registered id, so re-registering a previously
-    /// pruned process id would have its wakes silently absorbed below the
-    /// retained mark. Hosts mint fresh process ids rather than reusing pruned
-    /// ones (the ADR 0049 single-use rule for sessions applies to process ids
-    /// at the prune horizon).
+    /// Process ids may be registered again after their terminal incarnation is
+    /// pruned. A durable sender floor retained per `(target_session_id,
+    /// process_id)` makes a later incarnation continue above every sequence
+    /// allocated to that target, so reuse is safe without a clock precondition.
+    /// A sender store restored behind an already-settled receiver floor is
+    /// rejected and terminalized by the delivery driver as the typed
+    /// `sequence_rewound` discard instead of being silently absorbed.
     async fn register_process(
         &self,
         registration: ProcessRegistration,
@@ -443,6 +453,17 @@ pub trait ProcessRegistry: Send + Sync {
         &self,
         session_id: &str,
     ) -> Result<ProcessSessionDeleteReport, PluginError>;
+
+    /// Raw sender-floor probe for cross-backend conformance tests.
+    #[doc(hidden)]
+    async fn wake_allocation_floor_for_testing(
+        &self,
+        target_session_id: &str,
+        process_id: &str,
+    ) -> Result<Option<u64>, PluginError> {
+        let _ = (target_session_id, process_id);
+        Ok(None)
+    }
 
     /// Append a host-owned event that is not emitted by the process execution.
     ///

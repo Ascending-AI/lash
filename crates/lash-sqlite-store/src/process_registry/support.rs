@@ -4,6 +4,31 @@ pub(super) fn process_status_label(record: &ProcessRecord) -> &'static str {
     record.status.label()
 }
 
+pub(super) async fn wake_allocation_floor_for_testing(
+    registry: &SqliteProcessRegistry,
+    target_session_id: &str,
+    process_id: &str,
+) -> Result<Option<u64>, lash_core::PluginError> {
+    let target_session_id = target_session_id.to_string();
+    let process_id = process_id.to_string();
+    registry
+        .conn
+        .call(move |conn| {
+            Ok(conn
+                .query_row(
+                    "SELECT allocation_floor FROM wake_allocation_floors
+                     WHERE target_session_id = ?1 AND process_id = ?2",
+                    params![target_session_id, process_id],
+                    |row| row.get::<_, i64>(0),
+                )
+                .optional()
+                .map(|value| value.map(|value| value as u64))
+                .map_err(process_sqlite_error))
+        })
+        .await
+        .map_err(process_sqlite_error)?
+}
+
 impl SqliteProcessRegistry {
     pub(crate) fn require_process_conn(
         conn: &rusqlite::Connection,
@@ -299,12 +324,14 @@ impl SqliteProcessRegistry {
             } else {
                 None
             };
-        let sequence = Self::next_event_sequence_conn(conn, &process_id)?;
         let wake_session_id = Self::wake_session_id_conn(conn, &process_id)?;
+        let (last_sequence, sequence) =
+            Self::next_event_sequence_conn(conn, &process_id, wake_session_id.as_deref())?;
         let prepared = prepare_process_event_append(
             record,
             request,
             sequence,
+            last_sequence,
             replay_lookup,
             occurred_at_ms,
             wake_session_id.as_deref(),
@@ -367,6 +394,12 @@ impl SqliteProcessRegistry {
                     wake_delivery.as_ref(),
                     wake_delivery_config,
                 )?;
+                Self::advance_wake_allocation_floor_conn(
+                    conn,
+                    wake_session_id.as_deref(),
+                    &process_id,
+                    sequence,
+                )?;
                 Ok((
                     ProcessEventAppendResult {
                         event,
@@ -410,14 +443,57 @@ impl SqliteProcessRegistry {
     pub(crate) fn next_event_sequence_conn(
         conn: &Connection,
         process_id: &str,
-    ) -> Result<u64, lash_core::PluginError> {
-        conn.query_row(
-            "SELECT COALESCE(MAX(sequence), 0) + 1 FROM process_events WHERE process_id = ?1",
-            params![process_id],
-            |row| row.get::<_, i64>(0),
+        target_session_id: Option<&str>,
+    ) -> Result<(Option<u64>, u64), lash_core::PluginError> {
+        let last_sequence = conn
+            .query_row(
+                "SELECT MAX(sequence) FROM process_events WHERE process_id = ?1",
+                params![process_id],
+                |row| row.get::<_, Option<i64>>(0),
+            )
+            .map_err(process_sqlite_error)?;
+        let last_sequence = last_sequence.map(|sequence| sequence as u64);
+        let sender_floor = target_session_id
+            .map(|target_session_id| {
+                conn.query_row(
+                    "SELECT allocation_floor FROM wake_allocation_floors
+                     WHERE target_session_id = ?1 AND process_id = ?2",
+                    params![target_session_id, process_id],
+                    |row| row.get::<_, i64>(0),
+                )
+                .optional()
+                .map_err(process_sqlite_error)
+            })
+            .transpose()?
+            .flatten()
+            .map(|floor| floor as u64);
+        let sequence =
+            lash_core::runtime::allocate_process_event_sequence(last_sequence, sender_floor)?;
+        Ok((last_sequence, sequence))
+    }
+
+    pub(crate) fn advance_wake_allocation_floor_conn(
+        conn: &Connection,
+        target_session_id: Option<&str>,
+        process_id: &str,
+        sequence: u64,
+    ) -> Result<(), lash_core::PluginError> {
+        let Some(target_session_id) = target_session_id else {
+            return Ok(());
+        };
+        conn.execute(
+            "INSERT INTO wake_allocation_floors (
+                target_session_id, process_id, allocation_floor
+             ) VALUES (?1, ?2, ?3)
+             ON CONFLICT (target_session_id, process_id) DO UPDATE SET
+                allocation_floor = MAX(
+                    wake_allocation_floors.allocation_floor,
+                    excluded.allocation_floor
+                )",
+            params![target_session_id, process_id, sequence as i64],
         )
-        .map(|sequence| sequence as u64)
-        .map_err(process_sqlite_error)
+        .map_err(process_sqlite_error)?;
+        Ok(())
     }
 
     pub(crate) fn load_process_lease_conn(
