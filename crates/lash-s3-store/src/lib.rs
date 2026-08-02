@@ -176,6 +176,40 @@ impl S3AttachmentStore {
             AttachmentStoreError::Backend(format!("invalid S3 attachment list prefix: {err}"))
         })
     }
+
+    /// Read concrete object keys and bytes without using the
+    /// `AttachmentStore` facade that wrote them.
+    #[doc(hidden)]
+    #[cfg(any(test, feature = "testing"))]
+    pub async fn raw_blobs_for_testing(
+        &self,
+    ) -> Result<Vec<(AttachmentId, Vec<u8>)>, AttachmentStoreError> {
+        let prefix = self.content_prefix()?;
+        let metas: Vec<object_store::ObjectMeta> = self
+            .store
+            .list(Some(&prefix))
+            .try_collect()
+            .await
+            .map_err(|err| AttachmentStoreError::Backend(err.to_string()))?;
+        let mut rows = Vec::with_capacity(metas.len());
+        for meta in metas {
+            let Some(id) = meta.location.parts().next_back() else {
+                continue;
+            };
+            let bytes = self
+                .store
+                .get(&meta.location)
+                .await
+                .map_err(|err| AttachmentStoreError::Backend(err.to_string()))?
+                .bytes()
+                .await
+                .map_err(|err| AttachmentStoreError::Backend(err.to_string()))?
+                .to_vec();
+            rows.push((AttachmentId::new(id.as_ref().to_string()), bytes));
+        }
+        rows.sort_by(|left, right| left.0.cmp(&right.0));
+        Ok(rows)
+    }
 }
 
 #[async_trait::async_trait]

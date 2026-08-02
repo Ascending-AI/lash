@@ -73,18 +73,9 @@ impl RawDurableReader {
                         .await
                         .expect("read in-memory session-owned artifact refs"),
                 );
-                let checkpoint = match store.raw_checkpoint_for_testing() {
-                    Some(checkpoint) => {
-                        let checkpoint_ref = store
-                            .load_session()
-                            .await
-                            .ok()
-                            .flatten()
-                            .and_then(|session| session.checkpoint_ref);
-                        Some(checkpoint_observation(checkpoint_ref, checkpoint))
-                    }
-                    None => None,
-                };
+                let checkpoint = store.raw_checkpoint_for_testing().map(|checkpoint| {
+                    checkpoint_observation(store.raw_checkpoint_ref_for_testing(), checkpoint)
+                });
                 let runtime_turn_commits = store
                     .raw_runtime_turn_commits_for_testing()
                     .into_iter()
@@ -199,7 +190,7 @@ impl RawDurableReader {
                         )
                     },
                 );
-                let checkpoint = read_checkpoint_observation(store, checkpoint_ref).await;
+                let checkpoint = read_postgres_checkpoint_observation(pool, checkpoint_ref).await;
                 let rows: Vec<(i64, String, Option<String>, String)> = sqlx::query_as(
                     "SELECT seq, node_id, parent_node_id, node_json
                      FROM lash_graph_nodes
@@ -312,7 +303,7 @@ impl RawDurableReader {
                         )
                     })
                     .collect();
-                let session_meta = read_session_meta_observation(store).await;
+                let session_meta = read_postgres_session_meta_observation(pool, session_id).await;
                 let lease_rows: Vec<LeaseRow> = sqlx::query_as(
                     "SELECT lease_owner_id, lease_owner_incarnation_id,
                             lease_owner_liveness_json, lease_token,

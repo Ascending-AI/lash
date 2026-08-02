@@ -29,15 +29,17 @@ use lash_core::{
     InMemorySessionStoreFactory, LeaseOwnerIdentity, MergeKey, PendingTurnInputDraft,
     PluginSessionSnapshot, PluginSnapshotArtifact, PluginSnapshotEntry, PluginSnapshotMeta,
     ProtocolEvent, RuntimeCommit, RuntimePersistence, RuntimeSessionState, RuntimeTurnCommitStamp,
-    SessionCommitStore, SessionHistoryRecord, SessionMeta, SessionNodePayload, SessionNodeRecord,
-    SessionRelation, SessionStoreCreateRequest, SessionStoreFactory, SlotPolicy, StoreError,
-    StoreMaintenance, TokenLedgerEntry, TokenUsage, ToolState, TriggerOwnerScope, TurnInput,
-    TurnInputApplication, TurnInputClaim, TurnInputIngress, TurnInputState,
+    SessionHistoryRecord, SessionMeta, SessionNodePayload, SessionNodeRecord, SessionRelation,
+    SessionStoreCreateRequest, SessionStoreFactory, SlotPolicy, StoreError, StoreMaintenance,
+    TokenLedgerEntry, TokenUsage, ToolState, TriggerOwnerScope, TurnInput, TurnInputApplication,
+    TurnInputClaim, TurnInputIngress, TurnInputState,
 };
 use lash_postgres_store::PostgresStorage;
 use rusqlite::OptionalExtension;
 use sqlx::{Connection, PgConnection, PgPool};
 
+#[path = "cross_backend_store_differential/generated_surface.rs"]
+mod generated_surface;
 #[path = "cross_backend_store_differential/observations.rs"]
 mod observations;
 #[path = "cross_backend_store_differential/raw_durable_reader.rs"]
@@ -830,25 +832,85 @@ fn checkpoint_observation(
     }
 }
 
-async fn read_checkpoint_observation(
-    store: &Arc<dyn RuntimePersistence>,
+fn read_sqlite_checkpoint_observation(
+    path: &Path,
     raw_checkpoint_ref: Option<BlobRef>,
 ) -> Option<CheckpointObservation> {
     let raw_checkpoint_ref = raw_checkpoint_ref?;
-    let read = store
-        .load_session()
-        .await
-        .expect("hydrate durable checkpoint")
-        .expect("checkpoint ref implies session head");
+    let checkpoint =
+        lash_sqlite_store::Store::raw_checkpoint_from_path_for_testing(path, &raw_checkpoint_ref)
+            .expect("decode SQLite checkpoint through raw durable reader")
+            .expect("checkpoint ref must address a SQLite checkpoint manifest");
+    Some(checkpoint_observation(Some(raw_checkpoint_ref), checkpoint))
+}
+
+async fn read_postgres_checkpoint_observation(
+    pool: &PgPool,
+    raw_checkpoint_ref: Option<BlobRef>,
+) -> Option<CheckpointObservation> {
+    let raw_checkpoint_ref = raw_checkpoint_ref?;
+    let manifest_bytes: Vec<u8> =
+        sqlx::query_scalar("SELECT content FROM lash_blobs WHERE hash = $1")
+            .bind(raw_checkpoint_ref.as_str())
+            .fetch_one(pool)
+            .await
+            .expect("read PostgreSQL checkpoint manifest blob");
+    let manifest: lash_core::store::SessionCheckpoint =
+        rmp_serde::from_slice(&manifest_bytes).expect("decode PostgreSQL checkpoint manifest");
     assert_eq!(
-        read.checkpoint_ref.as_ref(),
-        Some(&raw_checkpoint_ref),
-        "typed load must preserve the raw checkpoint ref"
+        manifest.schema_version,
+        lash_core::store::SESSION_CHECKPOINT_SCHEMA_VERSION,
+        "PostgreSQL checkpoint manifest schema version"
     );
+    let tool_state = read_postgres_checkpoint_component::<ToolState>(
+        pool,
+        "tool-state",
+        manifest.tool_state_ref.as_ref(),
+    )
+    .await;
+    let plugin_snapshot = read_postgres_checkpoint_component::<PluginSessionSnapshot>(
+        pool,
+        "plugin-snapshot",
+        manifest.plugin_snapshot_ref.as_ref(),
+    )
+    .await;
+    let execution_state = read_postgres_checkpoint_component::<Vec<u8>>(
+        pool,
+        "execution-state",
+        manifest.execution_state_ref.as_ref(),
+    )
+    .await;
     Some(checkpoint_observation(
         Some(raw_checkpoint_ref),
-        read.checkpoint.expect("checkpoint ref must hydrate"),
+        HydratedSessionCheckpoint {
+            turn_state: manifest.turn_state,
+            tool_state_ref: manifest.tool_state_ref,
+            tool_state,
+            plugin_snapshot_ref: manifest.plugin_snapshot_ref,
+            plugin_snapshot,
+            plugin_snapshot_revision: manifest.plugin_snapshot_revision,
+            execution_state_ref: manifest.execution_state_ref,
+            execution_state,
+        },
     ))
+}
+
+async fn read_postgres_checkpoint_component<T: serde::de::DeserializeOwned>(
+    pool: &PgPool,
+    component: &str,
+    blob_ref: Option<&BlobRef>,
+) -> Option<T> {
+    let blob_ref = blob_ref?;
+    let bytes: Vec<u8> = sqlx::query_scalar("SELECT content FROM lash_blobs WHERE hash = $1")
+        .bind(blob_ref.as_str())
+        .fetch_one(pool)
+        .await
+        .unwrap_or_else(|error| panic!("read PostgreSQL {component} blob `{blob_ref}`: {error}"));
+    Some(
+        rmp_serde::from_slice(&bytes).unwrap_or_else(|error| {
+            panic!("decode PostgreSQL {component} blob `{blob_ref}`: {error}")
+        }),
+    )
 }
 
 fn attachment_manifest_observation(
@@ -890,14 +952,47 @@ fn session_meta_observation(meta: SessionMeta) -> SessionMetaObservation {
     }
 }
 
-async fn read_session_meta_observation(
-    store: &Arc<dyn RuntimePersistence>,
+fn read_sqlite_session_meta_observation(
+    connection: &rusqlite::Connection,
+    session_id: &str,
 ) -> Option<SessionMetaObservation> {
-    store
-        .load_session_meta()
-        .await
-        .expect("load session metadata")
-        .map(session_meta_observation)
+    connection
+        .query_row(
+            "SELECT session_name, created_at, model, cwd, relation_json
+             FROM session_meta WHERE session_id = ?1",
+            [session_id],
+            |row| {
+                let relation_json: Option<String> = row.get(4)?;
+                Ok(SessionMetaObservation {
+                    session_name: row.get(0)?,
+                    created_at: row.get(1)?,
+                    model: row.get(2)?,
+                    cwd: row.get(3)?,
+                    relation: relation_json
+                        .map(|json| serde_json::from_str(&json).expect("decode SQLite relation"))
+                        .unwrap_or_default(),
+                })
+            },
+        )
+        .optional()
+        .expect("read SQLite session metadata")
+}
+
+async fn read_postgres_session_meta_observation(
+    pool: &PgPool,
+    session_id: &str,
+) -> Option<SessionMetaObservation> {
+    let meta_json: Option<String> =
+        sqlx::query_scalar("SELECT meta_json FROM lash_session_meta WHERE session_id = $1")
+            .bind(session_id)
+            .fetch_optional(pool)
+            .await
+            .expect("read PostgreSQL session metadata");
+    meta_json.map(|json| {
+        session_meta_observation(
+            serde_json::from_str(&json).expect("decode PostgreSQL session metadata"),
+        )
+    })
 }
 
 fn decode_lease_owner(
@@ -973,7 +1068,7 @@ async fn read_sqlite_durable_state(
             )
         },
     );
-    let checkpoint = read_checkpoint_observation(store, checkpoint_ref).await;
+    let checkpoint = read_sqlite_checkpoint_observation(path, checkpoint_ref);
     let durable_nodes = {
         let mut statement = connection
             .prepare(
@@ -1132,7 +1227,7 @@ async fn read_sqlite_durable_state(
             .collect::<Result<Vec<_>, _>>()
             .expect("decode SQLite usage deltas")
     };
-    let session_meta = read_session_meta_observation(store).await;
+    let session_meta = read_sqlite_session_meta_observation(&connection, session_id);
     let session_execution_leases = {
         let mut statement = connection
             .prepare(

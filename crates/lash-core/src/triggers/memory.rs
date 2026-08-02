@@ -5,6 +5,16 @@ pub struct InMemoryTriggerStore {
     state: Mutex<InMemoryTriggerEventState>,
 }
 
+/// Concrete in-memory trigger rows exposed to raw differential readers.
+#[doc(hidden)]
+#[cfg(any(test, feature = "testing"))]
+pub struct RawTriggerStateForTesting {
+    pub subscriptions: Vec<TriggerSubscriptionRecord>,
+    pub mutation_receipts: Vec<(String, String, TriggerEffectResult, u64)>,
+    pub occurrences: Vec<(TriggerOccurrenceRecord, String)>,
+    pub deliveries: Vec<(String, String, String, u64, TriggerSubscriptionRecord)>,
+}
+
 impl InMemoryTriggerStore {
     pub fn new() -> Self {
         Self::with_clock(Arc::new(crate::SystemClock))
@@ -14,6 +24,57 @@ impl InMemoryTriggerStore {
         Self {
             clock,
             state: Mutex::new(InMemoryTriggerEventState::default()),
+        }
+    }
+
+    #[doc(hidden)]
+    #[cfg(any(test, feature = "testing"))]
+    pub fn raw_state_for_testing(&self) -> RawTriggerStateForTesting {
+        let state = self.state.lock().expect("trigger store lock");
+        let subscriptions = state.subscriptions.values().cloned().collect();
+        let mutation_receipts = state
+            .mutation_receipts
+            .iter()
+            .map(|(operation_id, (request_hash, result, created_at_ms))| {
+                (
+                    operation_id.clone(),
+                    request_hash.clone(),
+                    result.clone(),
+                    *created_at_ms,
+                )
+            })
+            .collect();
+        let occurrences = state
+            .occurrences
+            .values()
+            .cloned()
+            .map(|occurrence| {
+                let request_hash = state
+                    .occurrence_hashes
+                    .get(&occurrence.occurrence_id)
+                    .cloned()
+                    .unwrap_or_default();
+                (occurrence, request_hash)
+            })
+            .collect();
+        let deliveries = state
+            .deliveries
+            .values()
+            .map(|delivery| {
+                (
+                    delivery.occurrence_id.clone(),
+                    delivery.subscription_id.clone(),
+                    delivery.process_id.clone(),
+                    delivery.created_at_ms,
+                    delivery.subscription_snapshot.clone(),
+                )
+            })
+            .collect();
+        RawTriggerStateForTesting {
+            subscriptions,
+            mutation_receipts,
+            occurrences,
+            deliveries,
         }
     }
 

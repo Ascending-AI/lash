@@ -425,6 +425,7 @@ jobs:
         env:
           LASH_POSTGRES_DATABASE_URL: postgres://lash:lash@localhost:5432/lash
           LASH_REQUIRE_POSTGRES: "1"
+          LASH_CROSS_BACKEND_CASES: "4"
 
   s3-store:
     name: Test S3 store against MinIO
@@ -472,6 +473,15 @@ jobs:
 
       - name: Test S3 store conformance
         run: cargo test -p lash-s3-store --locked
+        env:
+          LASH_MINIO_ENDPOINT: http://127.0.0.1:9000
+          LASH_REQUIRE_MINIO: "1"
+
+      - name: Test attachment blob-store differential
+        run: >-
+          cargo test -p lash-sim
+          --test cross_backend_store_differential
+          --locked attachment_blob_store_differential_agrees -- --nocapture
         env:
           LASH_MINIO_ENDPOINT: http://127.0.0.1:9000
           LASH_REQUIRE_MINIO: "1"

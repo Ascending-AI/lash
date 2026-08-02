@@ -16,6 +16,18 @@ fn blob_content_hash(content: &[u8]) -> String {
 }
 
 impl Store {
+    /// Decode a checkpoint from a fresh durable connection without calling
+    /// the `RuntimePersistence` session read path.
+    #[doc(hidden)]
+    #[cfg(any(test, feature = "testing"))]
+    pub fn raw_checkpoint_from_path_for_testing(
+        path: &std::path::Path,
+        blob_ref: &BlobRef,
+    ) -> Result<Option<HydratedSessionCheckpoint>, StoreError> {
+        let connection = Connection::open(path).map_err(sqlite_error)?;
+        Self::get_checkpoint_conn(&connection, blob_ref)
+    }
+
     pub(crate) fn insert_artifact_blob_conn(
         conn: &Connection,
         descriptor: BlobArtifactDescriptor,

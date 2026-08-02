@@ -31,6 +31,7 @@ lash-protocol-standard = { workspace = true }
 lash-postgres-store = { workspace = true }
 lash-rlm-types = { workspace = true }
 lash-sqlite-store = { workspace = true, features = ["testing"] }
+lash-s3-store = { workspace = true, features = ["testing"] }
 lash-subagents = { workspace = true }
 lash-tools = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
@@ -42,5 +43,6 @@ tokio = { workspace = true, features = ["macros", "rt", "rt-multi-thread", "sync
 [dev-dependencies]
 insta = "1"
 lash-provider-auth = { workspace = true }
+rmp-serde = { workspace = true }
 rusqlite = { version = "0.37", features = ["bundled"] }
 tempfile = { workspace = true }

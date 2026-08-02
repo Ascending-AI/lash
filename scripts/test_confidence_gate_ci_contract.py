@@ -150,6 +150,10 @@ class ConfidenceGateCiContractTest(unittest.TestCase):
             3,
         )
         self.assertIn("store-contract-soak cases='256':", justfile)
+        cross_backend_soak = shell_function_body(gate, "run_cross_backend_store_soak")
+        self.assertIn('LASH_CROSS_BACKEND_SOAK_CASES:-64', cross_backend_soak)
+        self.assertIn('LASH_CROSS_BACKEND_CASES="$cases"', cross_backend_soak)
+        self.assertIn("cross-backend-store-soak cases='64' seed='852':", justfile)
 
     def test_failure_artifacts_are_attempt_qualified_and_quarantines_are_checked(
         self,
@@ -778,8 +782,15 @@ derive_mutation_jobs() {{
     def test_postgres_ci_lane_requires_database_configuration(self) -> None:
         workflow = WORKFLOW.read_text(encoding="utf-8")
         gate = GATE.read_text(encoding="utf-8")
+        push_gate = PUSH_GATE.read_text(encoding="utf-8")
+        postgres_store_job = workflow_job_block(workflow, "postgres-store")
 
         self.assertIn('LASH_REQUIRE_POSTGRES: "1"', workflow)
+        self.assertIn('LASH_CROSS_BACKEND_CASES: "4"', postgres_store_job)
+        self.assertIn(
+            'LASH_CROSS_BACKEND_CASES="${LASH_CROSS_BACKEND_PR_CASES:-4}"',
+            push_gate,
+        )
         conformance_calls = [
             command
             for command in shell_logical_commands(gate)
@@ -808,6 +819,7 @@ derive_mutation_jobs() {{
             "LASH_MINIO_ENDPOINT: http://127.0.0.1:9000", s3_store_job
         )
         self.assertIn('LASH_REQUIRE_MINIO: "1"', s3_store_job)
+        self.assertIn("attachment_blob_store_differential_agrees", s3_store_job)
 
     def test_generated_postgres_dynamic_rerun_is_bounded_and_artifacted(self) -> None:
         workflow = WORKFLOW.read_text(encoding="utf-8")

@@ -147,12 +147,14 @@ run_postgres_conformance() {
   if cargo nextest --version >/dev/null 2>&1; then
     LASH_POSTGRES_DATABASE_URL="$database_url" \
       LASH_REQUIRE_POSTGRES=1 \
+      LASH_CROSS_BACKEND_CASES="${LASH_CROSS_BACKEND_PR_CASES:-4}" \
       cargo nextest run -p lash-sim \
         --test cross_backend_store_differential \
         --locked -j1 --no-capture
   else
     LASH_POSTGRES_DATABASE_URL="$database_url" \
       LASH_REQUIRE_POSTGRES=1 \
+      LASH_CROSS_BACKEND_CASES="${LASH_CROSS_BACKEND_PR_CASES:-4}" \
       cargo test -p lash-sim \
         --test cross_backend_store_differential \
         --locked -- --nocapture --test-threads=1
@@ -189,6 +191,11 @@ run_minio_conformance() {
   LASH_MINIO_ENDPOINT="$endpoint" \
     LASH_REQUIRE_MINIO=1 \
     cargo test -p lash-s3-store --locked
+
+  LASH_MINIO_ENDPOINT="$endpoint" \
+    LASH_REQUIRE_MINIO=1 \
+    cargo test -p lash-sim --test cross_backend_store_differential --locked \
+      attachment_blob_store_differential_agrees -- --nocapture
 }
 
 configure_bindgen_headers

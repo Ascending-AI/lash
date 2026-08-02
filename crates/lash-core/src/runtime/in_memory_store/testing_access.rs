@@ -40,6 +40,15 @@ impl InMemorySessionStore {
             .map(|meta| meta.head_revision)
     }
 
+    /// Return the durable checkpoint ref without constructing a session read model.
+    pub fn raw_checkpoint_ref_for_testing(&self) -> Option<crate::BlobRef> {
+        self.session_head_meta
+            .lock()
+            .expect("lock store")
+            .as_ref()
+            .and_then(|meta| meta.checkpoint_ref.clone())
+    }
+
     /// Return raw pending-input lifecycle state for differential tests.
     pub fn raw_pending_turn_inputs_for_testing(
         &self,
@@ -93,6 +102,22 @@ impl InMemorySessionStore {
                 )
             })
             .collect()
+    }
+
+    /// Return the monotone receiver-side process-wake evidence directly from
+    /// the in-memory durable map.
+    pub fn raw_consumed_wake_high_water_for_testing(&self) -> Vec<(String, String, u64)> {
+        let mut rows = self
+            .consumed_wake_high_water
+            .lock()
+            .expect("lock consumed wake high water")
+            .iter()
+            .map(|((session_id, process_id), sequence)| {
+                (session_id.clone(), process_id.clone(), *sequence)
+            })
+            .collect::<Vec<_>>();
+        rows.sort();
+        rows
     }
 
     /// Return the current checkpoint exactly as held by the in-memory durable

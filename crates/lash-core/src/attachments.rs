@@ -414,6 +414,22 @@ impl InMemoryAttachmentStore {
     pub fn new() -> Self {
         Self::default()
     }
+
+    /// Snapshot concrete blob bytes without calling the `AttachmentStore`
+    /// read path. Intended for cross-backend durable-state differentials.
+    #[doc(hidden)]
+    #[cfg(any(test, feature = "testing"))]
+    pub fn raw_blobs_for_testing(&self) -> Vec<(AttachmentId, Vec<u8>)> {
+        let mut rows = self
+            .attachments
+            .lock()
+            .expect("attachment store lock")
+            .iter()
+            .map(|(id, blob)| (id.clone(), blob.stored.bytes.clone()))
+            .collect::<Vec<_>>();
+        rows.sort_by(|left, right| left.0.cmp(&right.0));
+        rows
+    }
 }
 
 #[async_trait::async_trait]

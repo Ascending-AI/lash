@@ -11,6 +11,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use proptest::prelude::*;
+use proptest::strategy::ValueTree;
 use proptest::test_runner::{Config, RngSeed, TestError, TestRunner};
 
 use super::*;
@@ -37,7 +38,7 @@ pub struct StoreContractHandles {
 }
 
 /// The generated operation alphabet shared by every durable store backend.
-#[derive(Clone, Debug, serde::Deserialize)]
+#[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
 #[serde(tag = "op", rename_all = "snake_case")]
 pub enum StoreContractOp {
     Register {
@@ -122,6 +123,33 @@ pub enum StoreContractOp {
     CompactTombstones {
         caught_up: bool,
     },
+}
+
+/// Stateful driver for the shared generated store-contract operation language.
+///
+/// This deliberately performs only the operation semantics and the small
+/// amount of bookkeeping needed by later operations (current authorities,
+/// leases, wake claims, and queue selections). The property harness layers its
+/// reference-model laws on top; cross-backend differential tests use the same
+/// driver but provide their own backend-agreement oracle.
+pub struct StoreContractScenario {
+    handles: StoreContractHandles,
+    model: ReferenceModel,
+    shape: RunShape,
+}
+
+impl StoreContractScenario {
+    pub fn new(handles: StoreContractHandles) -> Self {
+        Self {
+            handles,
+            model: ReferenceModel::default(),
+            shape: RunShape::default(),
+        }
+    }
+
+    pub async fn apply(&mut self, operation: &StoreContractOp) -> Result<(), String> {
+        apply_operation(&self.handles, &mut self.model, &mut self.shape, operation).await
+    }
 }
 
 #[derive(Clone, Debug, serde::Deserialize)]
@@ -290,6 +318,35 @@ fn generated_case() -> impl Strategy<Value = GeneratedCase> {
         })
 }
 
+/// Deterministically sample the shared store-contract operation alphabet.
+///
+/// The required prefix prevents small differential budgets from starving the
+/// process, lease, wake-delivery, queue, and prune surfaces. Remaining steps
+/// come from the exact strategy used by the property-law harness.
+pub fn sample_store_contract_operations(runner_seed: u64, max_ops: usize) -> Vec<StoreContractOp> {
+    let mut operations = generated_prefix();
+    operations.truncate(max_ops);
+    if operations.len() == max_ops {
+        return operations;
+    }
+
+    let mut runner = TestRunner::new(Config {
+        cases: 1,
+        failure_persistence: None,
+        rng_seed: RngSeed::Fixed(runner_seed),
+        ..Config::default()
+    });
+    while operations.len() < max_ops {
+        operations.push(
+            operation()
+                .new_tree(&mut runner)
+                .expect("store-contract operation strategy must generate")
+                .current(),
+        );
+    }
+    operations
+}
+
 fn generated_prefix() -> Vec<StoreContractOp> {
     vec![
         StoreContractOp::Register {
@@ -370,24 +427,21 @@ async fn replay_case(
     handles: StoreContractHandles,
     operations: &[StoreContractOp],
 ) -> Result<RunShape, TestCaseError> {
-    let mut model = ReferenceModel::default();
-    let mut shape = RunShape::default();
+    let mut scenario = StoreContractScenario::new(handles);
     for (step, operation) in operations.iter().enumerate() {
-        apply_operation(&handles, &mut model, &mut shape, operation)
-            .await
-            .map_err(|reason| {
-                TestCaseError::fail(format!("step {step} {operation:?}: {reason}"))
-            })?;
-        assert_fold_law(&handles.registry, &model)
+        scenario.apply(operation).await.map_err(|reason| {
+            TestCaseError::fail(format!("step {step} {operation:?}: {reason}"))
+        })?;
+        assert_fold_law(&scenario.handles.registry, &scenario.model)
             .await
             .map_err(|reason| TestCaseError::fail(format!("Fold at step {step}: {reason}")))?;
-        assert_model_agreement(&handles, &model)
+        assert_model_agreement(&scenario.handles, &scenario.model)
             .await
             .map_err(|reason| {
                 TestCaseError::fail(format!("model agreement at step {step}: {reason}"))
             })?;
     }
-    Ok(shape)
+    Ok(scenario.shape)
 }
 
 async fn replay_regression_corpus<F, Fut>(make: &F) -> Result<(), TestCaseError>
