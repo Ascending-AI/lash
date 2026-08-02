@@ -500,6 +500,16 @@ run_scenario_harnesses() {
     run_cargo_tests -p lash-postgres-store --locked --test conformance \
     store_contract_state_machine_properties_when_configured
 
+  local sqlite_fault_seeds=4
+  if [ "$lane" = "full" ]; then
+    sqlite_fault_seeds=256
+  fi
+  sqlite_fault_seeds="${LASH_SQLITE_FAULT_SEEDS:-$sqlite_fault_seeds}"
+  step "Real SQLite substrate faults (${sqlite_fault_seeds} deterministic seeds)"
+  cargo run -p lash-sim --locked -- sqlite-faults \
+    --out "${out_dir}/sim/sqlite-substrate-faults" \
+    --seeds "$sqlite_fault_seeds"
+
   step "Runtime Scenario harness"
   run_cargo_tests -p lash-core --locked runtime_scenario
 
@@ -2070,6 +2080,7 @@ write_fast_shard_summary() {
   "shard": "${shard}",
   "status": "passed",
   "duration_seconds": $((SECONDS - script_started_at)),
+  "sqlite_substrate_faults": "$([ -f "${out_dir}/sim/sqlite-substrate-faults/sqlite-faults.json" ] && echo "sim/sqlite-substrate-faults/sqlite-faults.json" || echo "not_in_${shard}_shard")",
   "artifacts_root": "${out_dir}"
 }
 EOF

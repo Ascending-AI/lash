@@ -21,12 +21,15 @@ impl Store {
         options: StoreOptions,
         clock: Arc<dyn lash_core::Clock>,
         process_registry_path: Option<&Path>,
+        #[cfg(feature = "testing")] fault_injector: Option<crate::testing::SqliteFaultInjector>,
     ) -> tokio_rusqlite::Result<Self> {
         let store = Self::open_with_options_clock_and_process_registry(
             path,
             options,
             clock,
             process_registry_path,
+            #[cfg(feature = "testing")]
+            fault_injector,
         )
         .await?;
         store
@@ -59,7 +62,15 @@ impl Store {
         options: StoreOptions,
         clock: Arc<dyn lash_core::Clock>,
     ) -> tokio_rusqlite::Result<Self> {
-        Self::open_with_options_clock_and_process_registry(path, options, clock, None).await
+        Self::open_with_options_clock_and_process_registry(
+            path,
+            options,
+            clock,
+            None,
+            #[cfg(feature = "testing")]
+            None,
+        )
+        .await
     }
 
     pub(crate) async fn open_with_options_clock_and_process_registry(
@@ -67,7 +78,11 @@ impl Store {
         options: StoreOptions,
         clock: Arc<dyn lash_core::Clock>,
         process_registry_path: Option<&Path>,
+        #[cfg(feature = "testing")] fault_injector: Option<crate::testing::SqliteFaultInjector>,
     ) -> tokio_rusqlite::Result<Self> {
+        #[cfg(feature = "testing")]
+        let conn = SqliteConnection::open_with_fault_injector(path, fault_injector).await?;
+        #[cfg(not(feature = "testing"))]
         let conn = SqliteConnection::open(path).await?;
         ensure_schema(&conn).await?;
         apply_pragmas(&conn, StoreBacking::File).await?;

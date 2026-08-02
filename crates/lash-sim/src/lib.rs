@@ -23,6 +23,7 @@ pub mod runtime_boundaries;
 pub mod runtime_contracts;
 pub mod runtime_providers;
 pub mod scheduler;
+pub mod sqlite_faults;
 pub mod sqlite_replay;
 pub mod stack_policy;
 pub mod store;

@@ -303,6 +303,49 @@ async fn run() -> Result<(), String> {
             println!("{}", report.report_path.display());
             Ok(())
         }
+        "sqlite-faults" => {
+            let mut out = None;
+            let mut seed_count = None;
+            let mut explicit_seeds = Vec::new();
+            while let Some(arg) = args.next() {
+                match arg.as_str() {
+                    "--out" => out = args.next().map(PathBuf::from),
+                    "--seeds" => {
+                        let raw = args
+                            .next()
+                            .ok_or_else(|| format!("missing --seeds value\n\n{}", usage()))?;
+                        seed_count = Some(parse_usize("--seeds", &raw)?);
+                    }
+                    "--seed" => {
+                        let raw = args
+                            .next()
+                            .ok_or_else(|| format!("missing --seed value\n\n{}", usage()))?;
+                        explicit_seeds.push(parse_u64("--seed", &raw)?);
+                    }
+                    "-h" | "--help" => return Err(usage()),
+                    other => return Err(format!("unknown argument `{other}`\n\n{}", usage())),
+                }
+            }
+            let Some(out) = out else {
+                return Err(format!("missing --out\n\n{}", usage()));
+            };
+            if seed_count.is_some() && !explicit_seeds.is_empty() {
+                return Err(format!(
+                    "--seeds and --seed are mutually exclusive\n\n{}",
+                    usage()
+                ));
+            }
+            let seeds = if explicit_seeds.is_empty() {
+                lash_sim::sqlite_faults::sqlite_fault_seeds(seed_count.unwrap_or(4))
+            } else {
+                explicit_seeds
+            };
+            let report = lash_sim::sqlite_faults::run_sqlite_fault_profile(&out, &seeds)
+                .await
+                .map_err(|err| err.to_string())?;
+            println!("{}", report.report_path.display());
+            Ok(())
+        }
         "stack-probe" => {
             let Some(kind) = args.next() else {
                 return Err(format!("missing stack-probe kind\n\n{}", usage()));
@@ -399,6 +442,7 @@ fn usage() -> String {
   lash-sim replay-sqlite <trace> --out <artifact-root>
   lash-sim replay-postgres <trace> --out <artifact-root>
   lash-sim backend-contention --out <artifact-root>
+  lash-sim sqlite-faults --out <artifact-root> [--seeds N | --seed U64 ...]
   lash-sim stack-probe agent-contract --contract <semantic-oracle> --stack-bytes <bytes>
   lash-sim minimize <trace> --out <artifact-root>"
         .to_string()

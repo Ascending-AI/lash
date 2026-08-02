@@ -100,6 +100,8 @@ mod process_registry_change;
 mod process_registry_completion;
 mod queued_work;
 mod schema;
+#[cfg(feature = "testing")]
+pub mod testing;
 mod triggers;
 
 use conn::TxOutcome;
@@ -379,6 +381,8 @@ pub struct SqliteSessionStoreFactory {
     process_registry_path: Option<PathBuf>,
     options: StoreOptions,
     clock: Arc<dyn lash_core::Clock>,
+    #[cfg(feature = "testing")]
+    fault_injector: Option<testing::SqliteFaultInjector>,
 }
 
 impl SqliteSessionStoreFactory {
@@ -390,6 +394,8 @@ impl SqliteSessionStoreFactory {
             process_registry_path: None,
             options: StoreOptions::default(),
             clock: Arc::new(lash_core::SystemClock),
+            #[cfg(feature = "testing")]
+            fault_injector: None,
         }
     }
 
@@ -401,6 +407,8 @@ impl SqliteSessionStoreFactory {
             process_registry_path: None,
             options,
             clock: Arc::new(lash_core::SystemClock),
+            #[cfg(feature = "testing")]
+            fault_injector: None,
         }
     }
 
@@ -416,6 +424,8 @@ impl SqliteSessionStoreFactory {
             process_registry_path: Some(process_registry_path.into()),
             options: StoreOptions::default(),
             clock: Arc::new(lash_core::SystemClock),
+            #[cfg(feature = "testing")]
+            fault_injector: None,
         }
     }
 
@@ -429,11 +439,22 @@ impl SqliteSessionStoreFactory {
             process_registry_path: Some(process_registry_path.into()),
             options,
             clock: Arc::new(lash_core::SystemClock),
+            #[cfg(feature = "testing")]
+            fault_injector: None,
         }
     }
 
     pub fn with_clock(mut self, clock: Arc<dyn lash_core::Clock>) -> Self {
         self.clock = clock;
+        self
+    }
+
+    /// Install a per-factory substrate fault injector for simulation/tests.
+    ///
+    /// The method and backing field do not exist without the `testing` feature.
+    #[cfg(feature = "testing")]
+    pub fn with_fault_injector(mut self, injector: testing::SqliteFaultInjector) -> Self {
+        self.fault_injector = Some(injector);
         self
     }
 
@@ -460,6 +481,8 @@ impl SessionStoreFactory for SqliteSessionStoreFactory {
                 self.options,
                 Arc::clone(&self.clock),
                 None,
+                #[cfg(feature = "testing")]
+                self.fault_injector.clone(),
             )
             .await
             .map_err(|err| StoreError::Backend(err.to_string()))?,
@@ -528,6 +551,8 @@ impl SessionStoreFactory for SqliteSessionStoreFactory {
                 self.options,
                 Arc::clone(&self.clock),
                 None,
+                #[cfg(feature = "testing")]
+                self.fault_injector.clone(),
             )
             .await
             .map_err(|err| err.to_string())?,
@@ -597,6 +622,8 @@ impl SessionStoreFactory for SqliteSessionStoreFactory {
             self.options,
             Arc::clone(&self.clock),
             self.process_registry_path.as_deref(),
+            #[cfg(feature = "testing")]
+            self.fault_injector.clone(),
         )
         .await
         .map_err(|err| {
@@ -628,6 +655,8 @@ impl SessionStoreFactory for SqliteSessionStoreFactory {
             self.options,
             Arc::clone(&self.clock),
             self.process_registry_path.as_deref(),
+            #[cfg(feature = "testing")]
+            self.fault_injector.clone(),
         )
         .await
         .map_err(|err| {
