@@ -173,11 +173,6 @@ impl Part {
 }
 
 impl Message {
-    /// Total character count of all parts (rendered).
-    pub fn char_count(&self) -> usize {
-        self.parts.iter().map(Part::prompt_char_count).sum()
-    }
-
     pub fn is_transient(&self) -> bool {
         matches!(
             self.origin,

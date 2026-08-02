@@ -165,15 +165,6 @@ impl SessionBinding {
         }
     }
 
-    pub fn from_meta(meta: &SessionMeta) -> Self {
-        Self {
-            session_id: meta.session_id.clone(),
-            relation: meta.relation.clone(),
-            model_id: meta.model.clone(),
-            cwd: meta.cwd.clone(),
-        }
-    }
-
     pub fn validate(&self) -> Result<(), StoreError> {
         validate_session_id(&self.session_id)
     }

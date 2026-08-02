@@ -1097,17 +1097,6 @@ impl SessionGraph {
         self.data_mut().nodes.extend(nodes);
     }
 
-    /// Append nodes that extend the current active path, advancing the
-    /// leaf to the last node and updating the cache incrementally
-    /// instead of invalidating it. Use this when the appended nodes are
-    /// genuinely new descendants of the current leaf — e.g. the
-    /// turn-driver merging turn-local graph editor deltas into the base graph.
-    /// Use `extend_node_records` + `set_leaf_node_id` for store-side
-    /// replay paths that don't follow the active-path append shape.
-    pub fn extend_active_path(&mut self, nodes: Vec<SessionNodeRecord>) {
-        self.append_prebuilt_nodes(nodes);
-    }
-
     pub fn active_path_contains(&self, node_id: &str) -> bool {
         self.try_active_path_contains(node_id)
             .unwrap_or_else(|err| panic!("invalid resident session graph: {err}"))
@@ -1141,10 +1130,6 @@ impl SessionGraph {
             .by_id
             .get(node_id)
             .and_then(|idx| self.nodes.get(*idx))
-    }
-
-    pub fn node_index(&self, node_id: &str) -> Option<usize> {
-        self.cache().by_id.get(node_id).copied()
     }
 
     pub fn replace_active_read_state(&mut self, messages: &[Message]) {
