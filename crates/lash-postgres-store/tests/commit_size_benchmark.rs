@@ -97,32 +97,6 @@ fn realistic_commit(
         .0
 }
 
-fn measured_budget_bytes(commit: &RuntimeCommit) -> (usize, usize, usize, usize) {
-    let graph_delta_bytes = commit.graph.nodes.iter().fold(0usize, |total, node| {
-        total.saturating_add(
-            serde_json::to_vec(node)
-                .expect("serialize graph node")
-                .len(),
-        )
-    });
-    let checkpoint_bytes = rmp_serde::to_vec_named(&commit.checkpoint)
-        .expect("serialize hydrated checkpoint")
-        .len();
-    let attachment_manifest_bytes = commit
-        .committed_attachment_ids
-        .iter()
-        .fold(0usize, |total, id| total.saturating_add(id.as_str().len()));
-    let total_bytes = graph_delta_bytes
-        .saturating_add(checkpoint_bytes)
-        .saturating_add(attachment_manifest_bytes);
-    (
-        graph_delta_bytes,
-        checkpoint_bytes,
-        attachment_manifest_bytes,
-        total_bytes,
-    )
-}
-
 fn record_attachment_intents(store: &dyn RuntimePersistence, commit: &RuntimeCommit) {
     for attachment_id in &commit.committed_attachment_ids {
         store
@@ -169,12 +143,8 @@ fn measured_bytes_match_validate_budget_components() {
         RuntimeCommit::MAX_COMMIT_BUDGET_BYTES + 1,
         0,
     );
-    let (
-        expected_graph_delta_bytes,
-        expected_checkpoint_bytes,
-        expected_attachment_manifest_bytes,
-        expected_total_bytes,
-    ) = measured_budget_bytes(&commit);
+    let expected = lash_core::testing::measure_runtime_commit_budget(&commit)
+        .expect("measure benchmark commit with production accounting");
 
     assert!(matches!(
         commit.validate_budget(),
@@ -184,10 +154,10 @@ fn measured_bytes_match_validate_budget_components() {
             attachment_manifest_bytes,
             total_bytes,
             max_bytes,
-        }) if graph_delta_bytes == expected_graph_delta_bytes
-            && checkpoint_bytes == expected_checkpoint_bytes
-            && attachment_manifest_bytes == expected_attachment_manifest_bytes
-            && total_bytes == expected_total_bytes
+        }) if graph_delta_bytes == expected.graph_delta_bytes
+            && checkpoint_bytes == expected.checkpoint_bytes
+            && attachment_manifest_bytes == expected.attachment_manifest_bytes
+            && total_bytes == expected.total_bytes
             && max_bytes == RuntimeCommit::MAX_COMMIT_BUDGET_BYTES
     ));
 }
@@ -210,7 +180,7 @@ async fn measured_commit_size_curve() {
         for &checkpoint_payload_bytes in CHECKPOINT_PAYLOAD_BYTES {
             for backend in ["sqlite", "postgres"] {
                 let mut elapsed = Vec::with_capacity(SAMPLES);
-                let mut measured_bytes = (0, 0, 0, 0);
+                let mut measured_bytes = None;
                 for sample in 0..SAMPLES {
                     let session_id =
                         format!("bench-{backend}-{node_count}-{checkpoint_payload_bytes}-{sample}");
@@ -229,7 +199,10 @@ async fn measured_commit_size_curve() {
                     };
                     let commit =
                         realistic_commit(&session_id, node_count, checkpoint_payload_bytes, sample);
-                    measured_bytes = measured_budget_bytes(&commit);
+                    measured_bytes = Some(
+                        lash_core::testing::measure_runtime_commit_budget(&commit)
+                            .expect("measure benchmark commit with production accounting"),
+                    );
                     commit
                         .validate_budget()
                         .expect("benchmark case must fit the production commit budget");
@@ -237,10 +210,13 @@ async fn measured_commit_size_curve() {
                 }
                 let median = percentile(&mut elapsed, 0.5);
                 let p95 = percentile(&mut elapsed, 0.95);
-                let (graph_delta_bytes, checkpoint_bytes, attachment_manifest_bytes, budget_bytes) =
-                    measured_bytes;
+                let measured_bytes = measured_bytes.expect("benchmark records at least one sample");
                 println!(
-                    "{backend},{node_count},{checkpoint_payload_bytes},{graph_delta_bytes},{checkpoint_bytes},{attachment_manifest_bytes},{budget_bytes},{:.3},{:.3},{SAMPLES}",
+                    "{backend},{node_count},{checkpoint_payload_bytes},{},{},{},{},{:.3},{:.3},{SAMPLES}",
+                    measured_bytes.graph_delta_bytes,
+                    measured_bytes.checkpoint_bytes,
+                    measured_bytes.attachment_manifest_bytes,
+                    measured_bytes.total_bytes,
                     median.as_secs_f64() * 1_000.0,
                     p95.as_secs_f64() * 1_000.0,
                 );

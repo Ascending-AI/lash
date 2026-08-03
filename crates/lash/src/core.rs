@@ -649,7 +649,9 @@ impl LashCore {
     /// Unpinned past turns are ordinarily not retained. That normal outcome is
     /// returned as
     /// `EmbedError::Store(StoreError::ForkPointNotRetained { .. })`; Lash never
-    /// silently substitutes a different checkpoint.
+    /// silently substitutes a different checkpoint. An explicit pin remains
+    /// forkable after its source session is deleted because the retained frame
+    /// carries the provider and model needed to create the branch.
     pub async fn fork_at(
         &self,
         node_id: impl Into<String>,

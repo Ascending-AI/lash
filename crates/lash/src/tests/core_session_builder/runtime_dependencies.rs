@@ -367,9 +367,15 @@ async fn fork_distinguishes_collected_point_from_retained_orphaned_source() -> R
         .await
         .expect("delete pinned source session");
 
-    core.fork_at(&retained_node_id, "orphaned-fork-branch")
+    let forked = core
+        .fork_at(&retained_node_id, "orphaned-fork-branch")
         .await
         .expect("retained graph frame must resolve policy after source deletion");
+    assert_eq!(forked.node_id, retained_node_id);
+    assert_eq!(
+        forked.source_session_id, source_request.session_id,
+        "a successful orphaned-pin fork preserves deleted-source provenance"
+    );
     let branch = factory
         .open_existing_store(&lash_core::SessionStoreCreateRequest {
             session_id: "orphaned-fork-branch".to_string(),

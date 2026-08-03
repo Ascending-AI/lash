@@ -1,5 +1,12 @@
 use super::{RuntimeCommit, StoreError};
 
+pub(crate) struct RuntimeCommitBudgetMeasurement {
+    pub(crate) graph_delta_bytes: usize,
+    pub(crate) checkpoint_bytes: usize,
+    pub(crate) attachment_manifest_bytes: usize,
+    pub(crate) total_bytes: usize,
+}
+
 impl RuntimeCommit {
     /// Maximum number of graph nodes a single commit may write.
     ///
@@ -36,6 +43,20 @@ impl RuntimeCommit {
             });
         }
 
+        let measurement = self.measure_budget()?;
+        if measurement.total_bytes > Self::MAX_COMMIT_BUDGET_BYTES {
+            return Err(StoreError::CommitByteBudgetExceeded {
+                graph_delta_bytes: measurement.graph_delta_bytes,
+                checkpoint_bytes: measurement.checkpoint_bytes,
+                attachment_manifest_bytes: measurement.attachment_manifest_bytes,
+                total_bytes: measurement.total_bytes,
+                max_bytes: Self::MAX_COMMIT_BUDGET_BYTES,
+            });
+        }
+        Ok(())
+    }
+
+    pub(crate) fn measure_budget(&self) -> Result<RuntimeCommitBudgetMeasurement, StoreError> {
         let measure_json = |result: Result<Vec<u8>, serde_json::Error>| {
             result.map(|bytes| bytes.len()).map_err(|err| {
                 StoreError::Backend(format!(
@@ -63,16 +84,12 @@ impl RuntimeCommit {
         let total_bytes = graph_delta_bytes
             .saturating_add(checkpoint_bytes)
             .saturating_add(attachment_manifest_bytes);
-        if total_bytes > Self::MAX_COMMIT_BUDGET_BYTES {
-            return Err(StoreError::CommitByteBudgetExceeded {
-                graph_delta_bytes,
-                checkpoint_bytes,
-                attachment_manifest_bytes,
-                total_bytes,
-                max_bytes: Self::MAX_COMMIT_BUDGET_BYTES,
-            });
-        }
-        Ok(())
+        Ok(RuntimeCommitBudgetMeasurement {
+            graph_delta_bytes,
+            checkpoint_bytes,
+            attachment_manifest_bytes,
+            total_bytes,
+        })
     }
 }
 

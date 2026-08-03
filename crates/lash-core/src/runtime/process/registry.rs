@@ -931,7 +931,10 @@ async fn apply_pruned_trigger_delivery_reconciliation(
     // Classification and deletion live in separate stores. Revalidate at the
     // action boundary so a process id reused after the survey fails toward
     // retaining its delivery; the exact row keys below independently prevent a
-    // replacement row from being swept into this stale decision.
+    // replacement row from being swept into this stale decision. If the process
+    // is re-registered after this revalidation, deleting the observed delivery
+    // is still safe: the new live row is itself recovery evidence through
+    // `list_non_terminal`, so recovery cannot lose the re-registered process.
     let process_ids = plan
         .candidates
         .iter()

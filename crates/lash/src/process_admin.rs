@@ -12,6 +12,160 @@
 
 use crate::support::*;
 
+struct SurveyedTriggerStore<'a> {
+    inner: &'a dyn lash_core::TriggerStore,
+    retention_candidates: std::sync::Mutex<Vec<lash_core::TriggerDeliveryRetentionCandidate>>,
+}
+
+impl<'a> SurveyedTriggerStore<'a> {
+    fn new(
+        inner: &'a dyn lash_core::TriggerStore,
+        retention_candidates: Vec<lash_core::TriggerDeliveryRetentionCandidate>,
+    ) -> Self {
+        Self {
+            inner,
+            retention_candidates: std::sync::Mutex::new(retention_candidates),
+        }
+    }
+
+    fn delivery_process_ids(&self) -> Vec<String> {
+        self.retention_candidates
+            .lock()
+            .expect("lock compaction delivery survey")
+            .iter()
+            .map(|candidate| candidate.process_id.clone())
+            .collect::<std::collections::BTreeSet<_>>()
+            .into_iter()
+            .collect()
+    }
+
+    fn protected_process_count(&self) -> usize {
+        self.delivery_process_ids().len()
+    }
+}
+
+#[async_trait::async_trait]
+impl lash_core::TriggerStore for SurveyedTriggerStore<'_> {
+    async fn execute_command(
+        &self,
+        operation_id: &str,
+        command: lash_core::TriggerCommand,
+    ) -> std::result::Result<lash_core::TriggerEffectResult, lash_core::PluginError> {
+        self.inner.execute_command(operation_id, command).await
+    }
+
+    async fn list_subscriptions(
+        &self,
+        filter: lash_core::TriggerSubscriptionFilter,
+    ) -> std::result::Result<Vec<lash_core::TriggerSubscriptionRecord>, lash_core::PluginError>
+    {
+        self.inner.list_subscriptions(filter).await
+    }
+
+    async fn delete_session_subscriptions(
+        &self,
+        session_id: &str,
+    ) -> std::result::Result<usize, lash_core::PluginError> {
+        self.inner.delete_session_subscriptions(session_id).await
+    }
+
+    async fn ingest_occurrence(
+        &self,
+        request: lash_core::TriggerOccurrenceRequest,
+    ) -> std::result::Result<lash_core::TriggerIngressResult, lash_core::PluginError> {
+        self.inner.ingest_occurrence(request).await
+    }
+
+    async fn list_occurrences(
+        &self,
+        filter: lash_core::TriggerOccurrenceFilter,
+    ) -> std::result::Result<Vec<lash_core::TriggerOccurrenceRecord>, lash_core::PluginError> {
+        self.inner.list_occurrences(filter).await
+    }
+
+    async fn list_deliveries_by_occurrence_id(
+        &self,
+        occurrence_id: &str,
+    ) -> std::result::Result<Vec<lash_core::TriggerDeliveryReservation>, lash_core::PluginError>
+    {
+        self.inner
+            .list_deliveries_by_occurrence_id(occurrence_id)
+            .await
+    }
+
+    async fn list_deliveries_by_subscription_id(
+        &self,
+        subscription_id: &str,
+    ) -> std::result::Result<Vec<lash_core::TriggerDeliveryReservation>, lash_core::PluginError>
+    {
+        self.inner
+            .list_deliveries_by_subscription_id(subscription_id)
+            .await
+    }
+
+    async fn list_deliveries_by_process_id(
+        &self,
+        process_id: &str,
+    ) -> std::result::Result<Vec<lash_core::TriggerDeliveryReservation>, lash_core::PluginError>
+    {
+        self.inner.list_deliveries_by_process_id(process_id).await
+    }
+
+    async fn list_deliveries(
+        &self,
+    ) -> std::result::Result<Vec<lash_core::TriggerDeliveryReservation>, lash_core::PluginError>
+    {
+        self.inner.list_deliveries().await
+    }
+
+    async fn list_delivery_process_ids(
+        &self,
+    ) -> std::result::Result<Vec<String>, lash_core::PluginError> {
+        Ok(self.delivery_process_ids())
+    }
+
+    async fn list_delivery_retention_candidates(
+        &self,
+    ) -> std::result::Result<
+        Vec<lash_core::TriggerDeliveryRetentionCandidate>,
+        lash_core::PluginError,
+    > {
+        Ok(self
+            .retention_candidates
+            .lock()
+            .expect("lock compaction delivery survey")
+            .clone())
+    }
+
+    async fn delete_delivery_retention_candidates(
+        &self,
+        candidates: &[lash_core::TriggerDeliveryRetentionCandidate],
+    ) -> std::result::Result<usize, lash_core::PluginError> {
+        let deleted = self
+            .inner
+            .delete_delivery_retention_candidates(candidates)
+            .await?;
+        if deleted == candidates.len() {
+            let deleted_candidates = candidates
+                .iter()
+                .cloned()
+                .collect::<std::collections::HashSet<_>>();
+            self.retention_candidates
+                .lock()
+                .expect("lock compaction delivery survey")
+                .retain(|candidate| !deleted_candidates.contains(candidate));
+        }
+        Ok(deleted)
+    }
+
+    async fn prune_mutation_receipts(
+        &self,
+        cutoff_epoch_ms: u64,
+    ) -> std::result::Result<usize, lash_core::PluginError> {
+        self.inner.prune_mutation_receipts(cutoff_epoch_ms).await
+    }
+}
+
 #[derive(Clone)]
 pub struct Processes {
     pub(crate) core: LashCore,
@@ -438,11 +592,12 @@ impl Processes {
         watermark: lash_core::ProjectionWatermark,
     ) -> Result<usize> {
         let registry = self.registry()?;
-        let mut outstanding_trigger_delivery_process_ids = Vec::new();
-        if let Some(trigger_store) = self.core.env.trigger_store.as_ref() {
-            outstanding_trigger_delivery_process_ids =
-                match trigger_store.list_delivery_process_ids().await {
-                    Ok(process_ids) => process_ids,
+        let surveyed_trigger_store = if let Some(trigger_store) =
+            self.core.env.trigger_store.as_ref()
+        {
+            let retention_candidates =
+                match trigger_store.list_delivery_retention_candidates().await {
+                    Ok(candidates) => candidates,
                     Err(err) => {
                         tracing::warn!(
                             failure_stage = "survey_outstanding_trigger_deliveries",
@@ -453,10 +608,12 @@ impl Processes {
                         return Err(err.into());
                     }
                 };
+            let surveyed_trigger_store =
+                SurveyedTriggerStore::new(trigger_store.as_ref(), retention_candidates);
             let reconciled_trigger_deliveries =
                 match lash_core::facade_support::reconcile_pruned_trigger_deliveries(
                     registry.as_ref(),
-                    trigger_store.as_ref(),
+                    &surveyed_trigger_store,
                 )
                 .await
                 {
@@ -465,7 +622,7 @@ impl Processes {
                         tracing::warn!(
                             failure_stage = "reconcile_trigger_deliveries_before_compaction",
                             cutoff_epoch_ms,
-                            protected_process_count = outstanding_trigger_delivery_process_ids.len(),
+                            protected_process_count = surveyed_trigger_store.protected_process_count(),
                             error = %err,
                             "process tombstone compaction blocked"
                         );
@@ -473,19 +630,20 @@ impl Processes {
                     }
                 };
             tracing::debug!(
-                protected_process_count = outstanding_trigger_delivery_process_ids.len(),
+                protected_process_count = surveyed_trigger_store.protected_process_count(),
                 reconciled_trigger_deliveries,
                 "prepared delivery-aware process tombstone compaction"
             );
-        }
+            Some(surveyed_trigger_store)
+        } else {
+            None
+        };
         match registry
             .compact_process_tombstones(
                 cutoff_epoch_ms,
                 watermark,
-                self.core
-                    .env
-                    .trigger_store
-                    .as_deref()
+                surveyed_trigger_store
+                    .as_ref()
                     .map(|store| store as &dyn lash_core::TriggerStore),
             )
             .await
@@ -495,7 +653,9 @@ impl Processes {
                 tracing::warn!(
                     failure_stage = "compact_process_tombstones",
                     cutoff_epoch_ms,
-                    protected_process_count = outstanding_trigger_delivery_process_ids.len(),
+                    protected_process_count = surveyed_trigger_store
+                        .as_ref()
+                        .map_or(0, SurveyedTriggerStore::protected_process_count),
                     error = %err,
                     "process tombstone compaction failed"
                 );
