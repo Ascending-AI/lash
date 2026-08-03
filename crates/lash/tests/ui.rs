@@ -16,6 +16,7 @@ fn model_selection_requires_model_and_variant_together() {
     t.compile_fail("tests/ui/children_start_turn_is_not_public.rs");
     t.compile_fail("tests/ui/tool_state_generation_is_sealed.rs");
     t.compile_fail("tests/ui/session_head_meta_is_not_serializable.rs");
+    t.compile_fail("tests/ui/session_head_meta_requires_assemble.rs");
     t.pass("tests/ui/facade_boundary_types_are_public.rs");
     t.pass("tests/ui/prompt_types_are_public.rs");
     t.pass("tests/ui/remote_protocol_types_are_public.rs");
