@@ -527,6 +527,12 @@ pub trait PluginFactory: Send + Sync {
 /// [`PluginHost::extensions`](super::PluginHost::extensions) returns), the
 /// runtime trace context, and whether process lifecycle is available on this
 /// deployment (i.e. a process registry is wired).
+///
+/// Integrator class (ADR 0051): **protocol and process-engine implementors**.
+/// This is the argument of the only method that yields
+/// [`ProcessEngine`](crate::ProcessEngine)s, so it is named by whoever ships an
+/// engine — never by a host, which acquires engines by installing the plugin
+/// that contributes them. It therefore has no facade home by design.
 pub struct ProcessEngineContributionContext<'a> {
     extensions: &'a PluginExtensions,
     trace_context: &'a crate::TraceContext,
