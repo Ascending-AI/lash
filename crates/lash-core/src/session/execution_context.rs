@@ -430,6 +430,8 @@ impl<'run> RuntimeExecutionContext<'run> {
         pending.get_or_insert(error);
     }
 
+    /// Shares the session-scoped attachment store with code-executor implementors so code-produced
+    /// artifacts follow the same durable ownership contract as turn input.
     pub fn attachment_store(&self) -> Arc<crate::SessionAttachmentStore> {
         Arc::clone(&self.attachment_store)
     }

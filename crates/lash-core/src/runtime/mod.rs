@@ -386,6 +386,8 @@ impl InputItem {
         Self::Text { text: text.into() }
     }
 
+    /// Constructs an attachment item for protocol implementors while preserving the source variant
+    /// until runtime attachment resolution.
     pub fn attachment(source: crate::AttachmentSource) -> Self {
         Self::Attachment { source }
     }
@@ -432,6 +434,8 @@ impl TurnInput {
         }
     }
 
+    /// Appends an attachment after existing turn items for protocol implementors, preserving
+    /// mixed-input source order.
     pub fn with_attachment(mut self, source: crate::AttachmentSource) -> Self {
         self.items.push(InputItem::attachment(source));
         self

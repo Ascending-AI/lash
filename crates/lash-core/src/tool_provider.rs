@@ -486,6 +486,8 @@ impl<'run> ToolContext<'run> {
         }
     }
 
+    /// Provides session-scoped attachment operations to tool implementors so tool-produced blobs
+    /// participate in durable intent and retention tracking.
     pub fn attachments(&self) -> ToolAttachmentClient {
         ToolAttachmentClient {
             store: Arc::clone(&self.attachment_store),

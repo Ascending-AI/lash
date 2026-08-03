@@ -17,6 +17,8 @@ pub enum AttachmentOwnerKind {
 }
 
 impl AttachmentOwnerKind {
+    /// Exposes the stable snake-case owner class that attachment-manifest implementors persist with
+    /// an intent.
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::Turn => "turn",
