@@ -25,6 +25,10 @@ path = "src/bin/frame_crash.rs"
 name = "lash-e2e-await-event-helper"
 path = "src/bin/await_event_helper.rs"
 
+[[bin]]
+name = "lash-e2e-process-operations-worker"
+path = "src/bin/process_operations_worker.rs"
+
 [lints]
 workspace = true
 

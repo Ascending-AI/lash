@@ -264,4 +264,12 @@ step "Restate/Postgres/MinIO workers e2e"
 LASH_E2E_MINIO_PORT="$((port_base + 40))" \
   bash scripts/restate-postgres-workers-e2e.sh
 
+step "Process operations e2e"
+LASH_PROCESS_OPERATIONS_MINIO_PORT="$((port_base + 41))" \
+LASH_PROCESS_OPERATIONS_MINIO_CONSOLE_PORT="$((port_base + 42))" \
+LASH_PROCESS_OPERATIONS_RESTATE_ADMIN_PORT="$((port_base + 43))" \
+LASH_PROCESS_OPERATIONS_RESTATE_INGRESS_PORT="$((port_base + 44))" \
+LASH_PROCESS_OPERATIONS_RESTATE_NODE_PORT="$((port_base + 45))" \
+  bash scripts/process-operations-e2e.sh
+
 step "Push gate passed"
