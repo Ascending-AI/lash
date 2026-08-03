@@ -6,7 +6,34 @@ cd "$repo"
 
 export PATH="$HOME/.cargo/bin:$PATH"
 
-requested_lane="${1:-default}"
+dry_run=0
+requested_selector=""
+for argument in "$@"; do
+  case "$argument" in
+    --dry-run) dry_run=1 ;;
+    -h|--help) requested_selector="$argument" ;;
+    *)
+      if [ -n "$requested_selector" ]; then
+        echo "Expected one confidence selector, got: $*" >&2
+        exit 2
+      fi
+      requested_selector="$argument"
+      ;;
+  esac
+done
+requested_selector="${requested_selector:-default}"
+requested_lane="${requested_selector%%+*}"
+area="all"
+if [[ "$requested_selector" == *+* ]]; then
+  area_selector="${requested_selector#*+}"
+  if [[ "$area_selector" != area:* ]] || [[ "$area_selector" == *+* ]]; then
+    echo "Invalid confidence selector '${requested_selector}'." >&2
+    echo "Expected <lane>[+area:<surface>]; run with --help for the full vocabulary." >&2
+    exit 2
+  fi
+  area="${area_selector#area:}"
+fi
+
 lane="$requested_lane"
 fast_shard="all"
 sim_search_shard=""
@@ -18,6 +45,25 @@ if [[ "$requested_lane" == sim-search:* ]]; then
   lane="full"
   sim_search_shard="${requested_lane#sim-search:}"
 fi
+
+areas=(store process trigger effect-host protocol provider sim)
+area_is_known=0
+for known_area in "${areas[@]}"; do
+  if [ "$area" = "$known_area" ]; then
+    area_is_known=1
+    break
+  fi
+done
+if [ "$area" != "all" ] && [ "$area_is_known" -ne 1 ]; then
+  echo "Unknown confidence area '${area}'." >&2
+  echo "Areas: store, process, trigger, effect-host, protocol, provider, sim" >&2
+  exit 2
+fi
+if [ -n "$sim_search_shard" ] && [ "$area" != "all" ] && [ "$area" != "sim" ]; then
+  echo "sim-search shards may only compose with area:sim, got area:${area}." >&2
+  exit 2
+fi
+
 out_root="${LASH_CONFIDENCE_OUT_DIR:-$repo/target/confidence}"
 if [ -n "$sim_search_shard" ]; then
   out_dir="${out_root}/sim-search/${sim_search_shard//\//-of-}"
@@ -30,6 +76,9 @@ elif [ "$lane" = "fast" ] && [ "$fast_shard" != "all" ]; then
 else
   out_dir="${out_root}/${lane}"
 fi
+if [ "$area" != "all" ]; then
+  out_dir="${out_dir}/areas/${area}"
+fi
 ci_features="${LASH_CI_FEATURES:-}"
 critical_packages=(
   lash-core
@@ -39,6 +88,55 @@ critical_packages=(
   lash-sqlite-store
   lash-postgres-store
 )
+selected_packages=()
+area_mutation_file_args=()
+if [ "$area" = "all" ]; then
+  selected_packages=("${critical_packages[@]}")
+else
+  case "$area" in
+    store) selected_packages=(lash-sqlite-store lash-postgres-store) ;;
+    process|trigger|effect-host|provider) selected_packages=(lash-core) ;;
+    protocol) selected_packages=(lashlang lash-protocol-rlm lash-protocol-standard) ;;
+    sim) selected_packages=(lash-sim) ;;
+  esac
+  case "$area" in
+    process)
+      area_mutation_file_args=(
+        --file 'crates/lash-core/src/runtime/process.rs'
+        --file 'crates/lash-core/src/runtime/process/*.rs'
+        --file 'crates/lash-core/src/runtime/process_worker/*.rs'
+        --file 'crates/lash-core/src/runtime/process_work_driver.rs'
+        --file 'crates/lash-core/src/runtime/queued_work_driver.rs'
+        --file 'crates/lash-core/src/runtime/wake_delivery_driver.rs'
+        --file 'crates/lash-core/src/session/process_handles.rs'
+        --file 'crates/lash-core/src/tool_provider/process*.rs'
+      )
+      ;;
+    trigger)
+      area_mutation_file_args=(
+        --file 'crates/lash-core/src/triggers.rs'
+        --file 'crates/lash-core/src/triggers/*.rs'
+        --file 'crates/lash-core/src/plugin/trigger_registry.rs'
+        --file 'crates/lash-core/src/tool_provider/triggers.rs'
+      )
+      ;;
+    effect-host)
+      area_mutation_file_args=(
+        --file 'crates/lash-core/src/runtime/effect/*.rs'
+        --file 'crates/lash-core/src/testing/conformance/await_event_cold.rs'
+        --file 'crates/lash-core/src/testing/conformance/effect_host.rs'
+      )
+      ;;
+    provider)
+      area_mutation_file_args=(
+        --file 'crates/lash-core/src/direct.rs'
+        --file 'crates/lash-core/src/model.rs'
+        --file 'crates/lash-core/src/llm/*.rs'
+        --file 'crates/lash-core/src/provider/*.rs'
+      )
+      ;;
+  esac
+fi
 # The two micro lanes (deterministic sim unit/oracle suite + perf-guard
 # identity checks) share one shard: sequentially they finish well under the
 # fault-matrix lane, so a separate runner each just burned scheduling overhead.
@@ -91,8 +189,7 @@ mutation_postgres_database_url=""
 script_started_at="$SECONDS"
 current_step=""
 current_step_started_at=0
-
-mkdir -p "$out_dir"
+mutation_commands_run=0
 
 step() {
   if [ -n "$current_step" ]; then
@@ -128,7 +225,30 @@ trap finish_confidence_gate EXIT
 
 usage() {
   cat <<'USAGE'
-Usage: scripts/confidence-gate.sh [fast|default|broad|full|fast:<shard>|sim-search:<i>/<n>]
+Usage: scripts/confidence-gate.sh [--dry-run] [<lane-or-shard>[+area:<surface>]]
+
+Selectors:
+  Lanes:       fast, default, broad, full
+  Fast shards: fast:scenario-harnesses, fast:fault-matrix,
+               fast:sim-unit-perf-guards, fast:sim-generated,
+               fast:minimizer-fixtures, fast:summary
+  Full shards: sim-search:<i>/<n>
+  Areas:       store, process, trigger, effect-host, protocol, provider, sim
+
+Composition:
+  Append exactly one area to a depth lane, for example fast+area:store or
+  full+area:effect-host. The depth still controls budgets and mutation scope;
+  the area explicitly filters conformance, differential, coverage, and
+  mutation work to that surface. Existing unscoped lanes retain their full
+  effective scope. Fast shards may also be area-qualified when the shard owns
+  that surface, for example fast:fault-matrix+area:trigger. sim-search is a
+  full-depth shard and may only compose with area:sim.
+  Area-qualified artifacts are isolated below the selected lane or shard at
+  areas/<surface>/, so they cannot overwrite evidence from an unscoped run.
+
+  --dry-run validates the selector and prints the execution plan without
+  creating artifacts, bootstrapping tools, starting containers, or running
+  commands.
 
 Lanes:
   fast     deterministic scenario harnesses, state-machine/property checks,
@@ -177,6 +297,18 @@ Sim search shards:
 USAGE
 }
 
+area_selected() {
+  [ "$area" = "all" ] || [ "$area" = "$1" ]
+}
+
+plan_item() {
+  local item_area="$1"
+  shift
+  if area_selected "$item_area"; then
+    printf '  %-11s %s\n' "${item_area}" "$*"
+  fi
+}
+
 write_confidence_prerequisite_failure() {
   local prerequisite="$1"
   local detail="$2"
@@ -192,8 +324,8 @@ write_confidence_prerequisite_failure() {
   "prerequisite": "${prerequisite}",
   "detail": "${detail}",
   "install_command": "${install_command}",
-  "bootstrap_command": "LASH_CONFIDENCE_BOOTSTRAP=1 LASH_CONFIDENCE_OUT_DIR=${out_root} scripts/confidence-gate.sh ${requested_lane}",
-  "exact_retry_command": "LASH_CONFIDENCE_OUT_DIR=${out_root} scripts/confidence-gate.sh ${requested_lane}"
+  "bootstrap_command": "LASH_CONFIDENCE_BOOTSTRAP=1 LASH_CONFIDENCE_OUT_DIR=${out_root} scripts/confidence-gate.sh ${requested_selector}",
+  "exact_retry_command": "LASH_CONFIDENCE_OUT_DIR=${out_root} scripts/confidence-gate.sh ${requested_selector}"
 }
 EOF
   cat >"${out_dir}/confidence-summary.json" <<EOF
@@ -219,15 +351,26 @@ case "$lane" in
     exit 0
     ;;
   *)
+    echo "Unknown confidence lane or shard '${requested_lane}'." >&2
     usage >&2
     exit 2
     ;;
 esac
 
+if [ -n "$sim_search_shard" ]; then
+  if ! [[ "$sim_search_shard" =~ ^([1-9][0-9]*)/([1-9][0-9]*)$ ]] \
+    || ((10#${BASH_REMATCH[1]} > 10#${BASH_REMATCH[2]})); then
+    echo "Invalid sim-search shard '${sim_search_shard}'; expected sim-search:<i>/<n> with 1 <= i <= n." >&2
+    usage >&2
+    exit 2
+  fi
+fi
+
 if [ "$lane" = "fast" ]; then
   case "$fast_shard" in
     all|summary|scenario-harnesses|fault-matrix|sim-unit-perf-guards|sim-generated|minimizer-fixtures) ;;
     *)
+      echo "Unknown fast shard '${fast_shard}'." >&2
       usage >&2
       exit 2
       ;;
@@ -237,6 +380,38 @@ elif [ "$fast_shard" != "all" ]; then
   exit 2
 fi
 
+if [ "$lane" = "fast" ] && [ "$area" != "all" ]; then
+  case "$fast_shard" in
+    all) ;;
+    scenario-harnesses)
+      [[ "$area" =~ ^(store|process|protocol)$ ]] || {
+        echo "fast:scenario-harnesses has no area:${area} work." >&2
+        exit 2
+      }
+      ;;
+    fault-matrix)
+      [[ "$area" =~ ^(store|process|trigger|effect-host|protocol|provider)$ ]] || {
+        echo "fast:fault-matrix has no area:${area} work." >&2
+        exit 2
+      }
+      ;;
+    sim-unit-perf-guards|sim-generated|minimizer-fixtures)
+      [ "$area" = "sim" ] || {
+        echo "fast:${fast_shard} may only compose with area:sim." >&2
+        exit 2
+      }
+      ;;
+    summary)
+      echo "fast:summary cannot be area-qualified; summarize the unscoped CI shard matrix." >&2
+      exit 2
+      ;;
+  esac
+fi
+
+if [ "$dry_run" -eq 0 ]; then
+  mkdir -p "$out_dir"
+fi
+
 case "$coverage_scope" in
   run|none) ;;
   *)
@@ -244,6 +419,15 @@ case "$coverage_scope" in
     exit 2
     ;;
 esac
+
+if [ "$dry_run" -eq 1 ] && [ "$lane" = "full" ] && [ "$mutation_scope" != "full" ]; then
+  echo "The full lane requires LASH_CONFIDENCE_MUTATION_SCOPE=full." >&2
+  exit 2
+fi
+if [ "$dry_run" -eq 1 ] && [ "$lane" = "full" ] && [ "$coverage_scope" != "run" ]; then
+  echo "The full lane requires coverage." >&2
+  exit 2
+fi
 
 if [ "$lane" = "full" ] && [ "$mutation_scope" != "full" ]; then
   cat >"${out_dir}/confidence-summary.json" <<EOF
@@ -315,7 +499,7 @@ Required tool '$tool' is not installed for the '$lane' confidence lane.
 Install with:
   cargo install ${crate} --version ${version} --locked
 or rerun with:
-  LASH_CONFIDENCE_BOOTSTRAP=1 scripts/confidence-gate.sh ${lane}
+  LASH_CONFIDENCE_BOOTSTRAP=1 scripts/confidence-gate.sh ${requested_selector}
 EOF
   write_confidence_prerequisite_failure \
     "$tool" \
@@ -328,6 +512,7 @@ run_mutants_recorded() {
   local name="$1"
   local artifact="$2"
   shift 2
+  mutation_commands_run=$((${mutation_commands_run:-0} + 1))
   mkdir -p "$artifact"
   set +e
   # cargo-mutants creates one scratch/build directory per concurrent job. Keep
@@ -451,7 +636,7 @@ Set compatible binaries explicitly:
   LLVM_COV=/path/to/llvm-cov LLVM_PROFDATA=/path/to/llvm-profdata
 
 Or let the gate build the matching Nix LLVM package inferred from rustc -vV:
-  LASH_CONFIDENCE_BOOTSTRAP=1 scripts/confidence-gate.sh ${lane}
+  LASH_CONFIDENCE_BOOTSTRAP=1 scripts/confidence-gate.sh ${requested_selector}
 EOF
     write_confidence_prerequisite_failure \
       "llvm-tools" \
@@ -464,7 +649,7 @@ Coverage requires llvm-tools-preview, or explicit LLVM_COV and LLVM_PROFDATA pat
 Install with:
   rustup component add llvm-tools-preview
 or rerun with:
-  LASH_CONFIDENCE_BOOTSTRAP=1 scripts/confidence-gate.sh ${lane}
+  LASH_CONFIDENCE_BOOTSTRAP=1 scripts/confidence-gate.sh ${requested_selector}
 If rustup is unavailable but Nix is installed, the bootstrap path builds
 nixpkgs#llvmPackages_\${rustc_llvm_major}.llvm and exports LLVM_COV/LLVM_PROFDATA.
 EOF
@@ -496,105 +681,117 @@ run_scenario_harnesses() {
   local runtime_persistence_cases="${LASH_RUNTIME_PERSISTENCE_PROPTEST_CASES:-$default_runtime_persistence_cases}"
   local session_graph_cases="${LASH_SESSION_GRAPH_PROPTEST_CASES:-$default_session_graph_cases}"
 
-  step "Durable store-contract state-machine properties"
-  LASH_STORE_CONTRACT_PROPTEST_CASES="$store_contract_cases" \
-    run_cargo_tests -p lash-core --locked store_contract_state_machine_properties
-  LASH_STORE_CONTRACT_PROPTEST_CASES="$store_contract_cases" \
-    run_cargo_tests -p lash-sqlite-store --locked --test conformance \
-    store_contract_state_machine_properties
-  LASH_STORE_CONTRACT_PROPTEST_CASES="$store_contract_cases" \
-    run_cargo_tests -p lash-postgres-store --locked --test conformance \
-    store_contract_state_machine_properties_when_configured
+  if area_selected store; then
+    step "Durable store-contract state-machine properties"
+    LASH_STORE_CONTRACT_PROPTEST_CASES="$store_contract_cases" \
+      run_cargo_tests -p lash-core --locked store_contract_state_machine_properties
+    LASH_STORE_CONTRACT_PROPTEST_CASES="$store_contract_cases" \
+      run_cargo_tests -p lash-sqlite-store --locked --test conformance \
+      store_contract_state_machine_properties
+    LASH_STORE_CONTRACT_PROPTEST_CASES="$store_contract_cases" \
+      run_cargo_tests -p lash-postgres-store --locked --test conformance \
+      store_contract_state_machine_properties_when_configured
 
-  local sqlite_fault_seeds=4
-  if [ "$lane" = "full" ]; then
-    sqlite_fault_seeds=256
+    local sqlite_fault_seeds=4
+    if [ "$lane" = "full" ]; then
+      sqlite_fault_seeds=256
+    fi
+    sqlite_fault_seeds="${LASH_SQLITE_FAULT_SEEDS:-$sqlite_fault_seeds}"
+    step "Real SQLite substrate faults (${sqlite_fault_seeds} deterministic seeds)"
+    cargo run -p lash-sim --locked -- sqlite-faults \
+      --out "${out_dir}/sim/sqlite-substrate-faults" \
+      --seeds "$sqlite_fault_seeds"
   fi
-  sqlite_fault_seeds="${LASH_SQLITE_FAULT_SEEDS:-$sqlite_fault_seeds}"
-  step "Real SQLite substrate faults (${sqlite_fault_seeds} deterministic seeds)"
-  cargo run -p lash-sim --locked -- sqlite-faults \
-    --out "${out_dir}/sim/sqlite-substrate-faults" \
-    --seeds "$sqlite_fault_seeds"
 
-  step "Runtime-persistence state-machine properties"
-  LASH_RUNTIME_PERSISTENCE_PROPTEST_CASES="$runtime_persistence_cases" \
-    run_cargo_tests -p lash-core --locked runtime_persistence_state_machine_properties
-  LASH_RUNTIME_PERSISTENCE_PROPTEST_CASES="$runtime_persistence_cases" \
-    run_cargo_tests -p lash-sqlite-store --locked --test conformance \
-    runtime_persistence_state_machine_properties
-  LASH_RUNTIME_PERSISTENCE_PROPTEST_CASES="$runtime_persistence_cases" \
-    run_cargo_tests -p lash-postgres-store --locked --test conformance \
-    runtime_persistence_state_machine_properties_when_configured
+  if area_selected process; then
+    step "Runtime-persistence state-machine properties"
+    LASH_RUNTIME_PERSISTENCE_PROPTEST_CASES="$runtime_persistence_cases" \
+      run_cargo_tests -p lash-core --locked runtime_persistence_state_machine_properties
+    LASH_RUNTIME_PERSISTENCE_PROPTEST_CASES="$runtime_persistence_cases" \
+      run_cargo_tests -p lash-sqlite-store --locked --test conformance \
+      runtime_persistence_state_machine_properties
+    LASH_RUNTIME_PERSISTENCE_PROPTEST_CASES="$runtime_persistence_cases" \
+      run_cargo_tests -p lash-postgres-store --locked --test conformance \
+      runtime_persistence_state_machine_properties_when_configured
 
-  step "Session graph state-machine property harness"
-  LASH_SESSION_GRAPH_PROPTEST_CASES="$session_graph_cases" \
-    run_cargo_tests -p lash-core --locked session_graph_state_machine_properties
-  LASH_SESSION_GRAPH_PROPTEST_CASES="$session_graph_cases" \
-    run_cargo_tests -p lash-sqlite-store --locked --test conformance \
-    session_graph_state_machine_properties
-  LASH_SESSION_GRAPH_PROPTEST_CASES="$session_graph_cases" \
-    run_cargo_tests -p lash-postgres-store --locked --test conformance \
-    session_graph_state_machine_properties_when_configured
+    step "Session graph state-machine property harness"
+    LASH_SESSION_GRAPH_PROPTEST_CASES="$session_graph_cases" \
+      run_cargo_tests -p lash-core --locked session_graph_state_machine_properties
+    LASH_SESSION_GRAPH_PROPTEST_CASES="$session_graph_cases" \
+      run_cargo_tests -p lash-sqlite-store --locked --test conformance \
+      session_graph_state_machine_properties
+    LASH_SESSION_GRAPH_PROPTEST_CASES="$session_graph_cases" \
+      run_cargo_tests -p lash-postgres-store --locked --test conformance \
+      session_graph_state_machine_properties_when_configured
 
-  step "Runtime Scenario harness"
-  run_cargo_tests -p lash-core --locked runtime_scenario
+    step "Runtime Scenario harness"
+    run_cargo_tests -p lash-core --locked runtime_scenario
 
-  step "Standard Protocol Scenario harness"
-  run_cargo_tests -p lash-protocol-standard --locked --test protocol_scenarios
-  run_cargo_tests -p lash-protocol-standard --locked standard_scenario_contract_metadata
+    step "Agent Scenario harness"
+    run_cargo_tests -p lash-runtime --locked --features rlm,testing agent_scenarios
+    run_cargo_tests -p lash-runtime --locked --features rlm,testing agent_scenario_contract_metadata
+  fi
 
-  step "RLM Protocol Scenario harness"
-  run_cargo_tests -p lash-protocol-rlm --locked --test protocol_drivers
-  run_cargo_tests -p lash-protocol-rlm --locked rlm_scenario_contract_metadata
+  if area_selected protocol; then
+    step "Standard Protocol Scenario harness"
+    run_cargo_tests -p lash-protocol-standard --locked --test protocol_scenarios
+    run_cargo_tests -p lash-protocol-standard --locked standard_scenario_contract_metadata
 
-  step "Agent Scenario harness"
-  run_cargo_tests -p lash-runtime --locked --features rlm,testing agent_scenarios
-  run_cargo_tests -p lash-runtime --locked --features rlm,testing agent_scenario_contract_metadata
+    step "RLM Protocol Scenario harness"
+    run_cargo_tests -p lash-protocol-rlm --locked --test protocol_drivers
+    run_cargo_tests -p lash-protocol-rlm --locked rlm_scenario_contract_metadata
+  fi
 }
 
 run_state_machine_and_fault_matrix() {
-  step "Runtime state-machine property runner"
-  run_cargo_tests -p lash-core --locked runtime_state_machine_property
+  if area_selected process; then
+    step "Runtime state-machine property runner"
+    run_cargo_tests -p lash-core --locked runtime_state_machine_property
+    step "Durable fault matrix metadata"
+    run_cargo_tests -p lash-core --locked durable_fault_matrix
+    step "Durable process fault-matrix evidence"
+    run_cargo_tests -p lash-runtime --locked --features rlm,testing \
+      runtime_rebuild_and_worker_recovery_with_durable_stores
+    run_cargo_tests -p lash-core --locked \
+      queued_work_claims_supersede_across_session_lease_generations
+    run_cargo_tests -p lash-core --locked \
+      turn_input_claims_supersede_across_session_lease_generations
+    run_cargo_tests -p lash-core --locked \
+      same_generation_claim_scans_reach_rows_beyond_the_scan_surplus
+  fi
 
-  step "Lashlang property suite"
-  run_cargo_tests -p lashlang --locked --test property
+  if area_selected protocol; then
+    step "Lashlang property suite"
+    run_cargo_tests -p lashlang --locked --test property
+  fi
 
-  step "LLM transport SSE framing property suite"
-  run_cargo_tests -p lash-llm-transport --locked --test property
-  run_cargo_tests -p lash-provider-anthropic --locked --test property
-  run_cargo_tests -p lash-provider-google --locked --test property
+  if area_selected provider; then
+    step "LLM transport SSE framing property suite"
+    run_cargo_tests -p lash-llm-transport --locked --test property
+    run_cargo_tests -p lash-provider-anthropic --locked --test property
+    run_cargo_tests -p lash-provider-google --locked --test property
+    step "Provider retry fault-matrix evidence"
+    run_cargo_tests -p lash-core --locked retryable_llm_failures_exhaust_and_fail_turn
+    run_cargo_tests -p lash-protocol-standard --locked --test protocol_scenarios \
+      standard_protocol_scenario_provider_error_stops_without_checkpoint
+  fi
 
-  step "Inline effect-host await-event session-cancel conformance"
-  run_cargo_tests -p lash-core --locked inline_effect_host_satisfies_conformance
+  if area_selected effect-host; then
+    step "Inline effect-host await-event session-cancel conformance"
+    run_cargo_tests -p lash-core --locked inline_effect_host_satisfies_conformance
+  fi
 
-  step "Durable fault matrix metadata"
-  run_cargo_tests -p lash-core --locked durable_fault_matrix
+  if area_selected trigger; then
+    step "Durable trigger fault-matrix evidence"
+    run_cargo_tests -p lash-core --locked sweep_reconciles_reserved_trigger_delivery_without_process
+    run_cargo_tests -p lash-core --locked \
+      sweep_does_not_reconcile_trigger_delivery_pruned_with_terminal_process
+  fi
 
-  step "Durable fault matrix executable evidence"
-  # durable-fault-matrix: crash-reopen-runtime-rebuild
-  run_cargo_tests -p lash-runtime --locked --features rlm,testing \
-    runtime_rebuild_and_worker_recovery_with_durable_stores
-  # durable-fault-matrix: provider-retry-exhaustion
-  run_cargo_tests -p lash-core --locked retryable_llm_failures_exhaust_and_fail_turn
-  # durable-fault-matrix: queued-work-claim-generation-supersession
-  run_cargo_tests -p lash-core --locked \
-    queued_work_claims_supersede_across_session_lease_generations
-  # durable-fault-matrix: deferred-next-turn-generation-reclaim
-  run_cargo_tests -p lash-core --locked \
-    turn_input_claims_supersede_across_session_lease_generations
-  # durable-fault-matrix: same-generation-claim-bounded-scan
-  run_cargo_tests -p lash-core --locked \
-    same_generation_claim_scans_reach_rows_beyond_the_scan_surplus
-  # durable-fault-matrix: trigger-delivery-reserve-start-crash-window
-  run_cargo_tests -p lash-core --locked sweep_reconciles_reserved_trigger_delivery_without_process
-  # durable-fault-matrix: trigger-delivery-prune-orphan-retention
-  run_cargo_tests -p lash-core --locked \
-    sweep_does_not_reconcile_trigger_delivery_pruned_with_terminal_process
-  # durable-fault-matrix: protocol-provider-failure
-  run_cargo_tests -p lash-protocol-standard --locked --test protocol_scenarios \
-    standard_protocol_scenario_provider_error_stops_without_checkpoint
-  # durable-fault-matrix: sqlite-backend-conformance
-  cargo test -p lash-sqlite-store --locked --test conformance conformance
+  if area_selected store; then
+    step "SQLite backend fault-matrix conformance"
+    cargo test -p lash-sqlite-store --locked --test conformance conformance
+  fi
 }
 
 run_sim_unit_suite() {
@@ -1197,7 +1394,9 @@ run_postgres_conformance() {
     LASH_REQUIRE_POSTGRES=1 cargo test -p lash-postgres-store --locked --test conformance
     run_cross_backend_store_soak "$LASH_POSTGRES_DATABASE_URL"
     run_generated_postgres_dynamic_replay "$LASH_POSTGRES_DATABASE_URL" "env"
-    run_model_replay_suite
+    if area_selected sim; then
+      run_model_replay_suite
+    fi
     run_backend_contention_evidence
     mkdir -p "${out_dir}/sim"
     cat >"${out_dir}/sim/postgres-conformance.json" <<EOF
@@ -1248,7 +1447,9 @@ EOF
     cargo test -p lash-postgres-store --locked --test conformance
   run_cross_backend_store_soak "postgres://lash:lash@127.0.0.1:${port}/lash"
   run_generated_postgres_dynamic_replay "postgres://lash:lash@127.0.0.1:${port}/lash" "docker"
-  run_model_replay_suite
+  if area_selected sim; then
+    run_model_replay_suite
+  fi
   LASH_POSTGRES_DATABASE_URL="postgres://lash:lash@127.0.0.1:${port}/lash" \
     run_backend_contention_evidence
   mkdir -p "${out_dir}/sim"
@@ -1336,7 +1537,9 @@ run_broad_postgres_evidence() {
   if [ -n "${LASH_POSTGRES_DATABASE_URL:-}" ]; then
     LASH_REQUIRE_POSTGRES=1 cargo test -p lash-postgres-store --locked --test conformance
     run_generated_postgres_dynamic_replay "$LASH_POSTGRES_DATABASE_URL" "env"
-    run_model_replay_suite
+    if area_selected sim; then
+      run_model_replay_suite
+    fi
     run_backend_contention_evidence
     mkdir -p "${out_dir}/sim"
     cat >"${out_dir}/sim/postgres-conformance.json" <<EOF
@@ -1351,7 +1554,9 @@ EOF
   fi
 
   if ! command -v docker >/dev/null 2>&1; then
-    run_model_replay_suite
+    if area_selected sim; then
+      run_model_replay_suite
+    fi
     write_generated_postgres_dynamic_replay_skipped
     mkdir -p "${out_dir}/sim"
     cat >"${out_dir}/sim/postgres-conformance.json" <<EOF
@@ -1396,7 +1601,9 @@ EOF
     LASH_REQUIRE_POSTGRES=1 \
     cargo test -p lash-postgres-store --locked --test conformance
   run_generated_postgres_dynamic_replay "postgres://lash:lash@127.0.0.1:${port}/lash" "docker"
-  run_model_replay_suite
+  if area_selected sim; then
+    run_model_replay_suite
+  fi
   LASH_POSTGRES_DATABASE_URL="postgres://lash:lash@127.0.0.1:${port}/lash" \
     run_backend_contention_evidence
   mkdir -p "${out_dir}/sim"
@@ -1652,7 +1859,7 @@ EOF
   cargo llvm-cov clean --workspace
   local coverage_package_args=()
   local package
-  for package in "${critical_packages[@]}"; do
+  for package in "${selected_packages[@]}"; do
     coverage_package_args+=(-p "$package")
   done
   cargo llvm-cov --locked \
@@ -1665,7 +1872,7 @@ EOF
   cargo llvm-cov report --json --summary-only \
     --output-path "${coverage_dir}/summary.json"
   local critical_package_regex
-  critical_package_regex="$(IFS='|'; printf '%s' "${critical_packages[*]}")"
+  critical_package_regex="$(IFS='|'; printf '%s' "${selected_packages[*]}")"
   awk -v critical_package_regex="$critical_package_regex" '
     /^SF:/ {
       file = substr($0, 4)
@@ -1709,11 +1916,12 @@ run_mutation_smoke() {
   require_tool cargo-mutants cargo-mutants 27.1.0
   local shard="${LASH_MUTATION_SMOKE_SHARD:-1/64}"
   local timeout="${LASH_MUTATION_TIMEOUT_SECONDS:-180}"
-  for package in "${critical_packages[@]}"; do
+  for package in "${selected_packages[@]}"; do
     if [ "$package" = "lash-postgres-store" ]; then
       run_postgres_mutants_recorded "$package smoke shard" "${out_dir}/mutants-${package}-smoke" \
         cargo mutants \
         -p "$package" \
+        "${area_mutation_file_args[@]}" \
         --cargo-arg=--locked \
         --test-tool cargo \
         --shard "$shard" \
@@ -1724,6 +1932,7 @@ run_mutation_smoke() {
       run_mutants_recorded "$package smoke shard" "${out_dir}/mutants-${package}-smoke" \
         cargo mutants \
         -p "$package" \
+        "${area_mutation_file_args[@]}" \
         --cargo-arg=--locked \
         --test-tool cargo \
         --shard "$shard" \
@@ -1731,6 +1940,41 @@ run_mutation_smoke() {
         --timeout "$timeout" \
         --minimum-test-timeout 30 \
         --output "${out_dir}/mutants-${package}-smoke"
+    fi
+  done
+}
+
+run_area_targeted_mutation_evidence() {
+  step "Area-targeted ${area} mutation shards (${mutation_jobs} concurrent jobs)"
+  require_tool cargo-mutants cargo-mutants 27.1.0
+  local shard="${LASH_AREA_MUTATION_SHARD:-1/64}"
+  local timeout="${LASH_MUTATION_TIMEOUT_SECONDS:-180}"
+  local package artifact
+  for package in "${selected_packages[@]}"; do
+    artifact="${out_dir}/mutants-${package}-area-${area}-targeted"
+    if [ "$package" = "lash-postgres-store" ]; then
+      run_postgres_mutants_recorded "$package area:${area} targeted shard" "$artifact" \
+        cargo mutants \
+        -p "$package" \
+        "${area_mutation_file_args[@]}" \
+        --cargo-arg=--locked \
+        --test-tool cargo \
+        --shard "$shard" \
+        --timeout "$timeout" \
+        --minimum-test-timeout 30 \
+        --output "$artifact"
+    else
+      run_mutants_recorded "$package area:${area} targeted shard" "$artifact" \
+        cargo mutants \
+        -p "$package" \
+        "${area_mutation_file_args[@]}" \
+        --cargo-arg=--locked \
+        --test-tool cargo \
+        --shard "$shard" \
+        --jobs "$mutation_jobs" \
+        --timeout "$timeout" \
+        --minimum-test-timeout 30 \
+        --output "$artifact"
     fi
   done
 }
@@ -1806,11 +2050,12 @@ run_mutation_full() {
   step "Full mutation suites (${mutation_jobs} concurrent jobs)"
   require_tool cargo-mutants cargo-mutants 27.1.0
   local timeout="${LASH_MUTATION_TIMEOUT_SECONDS:-600}"
-  for package in "${critical_packages[@]}"; do
+  for package in "${selected_packages[@]}"; do
     if [ "$package" = "lash-postgres-store" ]; then
       run_postgres_mutants_recorded "$package full mutation" "${out_dir}/mutants-${package}-full" \
         cargo mutants \
         -p "$package" \
+        "${area_mutation_file_args[@]}" \
         --cargo-arg=--locked \
         --test-tool cargo \
         --timeout "$timeout" \
@@ -1820,6 +2065,7 @@ run_mutation_full() {
       run_mutants_recorded "$package full mutation" "${out_dir}/mutants-${package}-full" \
         cargo mutants \
         -p "$package" \
+        "${area_mutation_file_args[@]}" \
         --cargo-arg=--locked \
         --test-tool cargo \
         --jobs "$mutation_jobs" \
@@ -1878,7 +2124,7 @@ mutation_artifact_json() {
 
 full_mutation_suites_complete() {
   local package
-  for package in "${critical_packages[@]}"; do
+  for package in "${selected_packages[@]}"; do
     if [ ! -f "${out_dir}/mutants-${package}-full/confidence-status.json" ]; then
       return 1
     fi
@@ -1910,6 +2156,10 @@ mutation_evidence_status() {
     echo "not_run_by_scope"
     return
   fi
+  if [ "$mutation_commands_run" -eq 0 ]; then
+    echo "required_not_run"
+    return
+  fi
   if [ "$lane" = "full" ] \
     && [ "$mutation_scope" = "full" ] \
     && ! full_mutation_suites_complete; then
@@ -1925,7 +2175,7 @@ mutation_evidence_status() {
 
 finalize_mutation_gate() {
   write_mutation_evidence_summary
-  if [ "$mutation_failures" -ne 0 ]; then
+  if [ "$mutation_failures" -ne 0 ] || [ "$(mutation_evidence_status)" = "required_not_run" ]; then
     write_confidence_summary "failed"
     return 1
   fi
@@ -1933,7 +2183,9 @@ finalize_mutation_gate() {
 }
 
 coverage_evidence_status() {
-  if [ "$coverage_scope" = "none" ]; then
+  if [ "$lane" = "fast" ]; then
+    echo "not_in_fast_lane"
+  elif [ "$coverage_scope" = "none" ]; then
     echo "not_run_by_scope"
   elif [ -f "${out_dir}/coverage/summary.json" ]; then
     echo "present"
@@ -1972,8 +2224,15 @@ write_mutation_evidence_summary() {
     return
   fi
   local path="${out_dir}/mutation-evidence.json"
-  local evidence_status
+  local evidence_status mutation_semantics
   evidence_status="$(mutation_evidence_status)"
+  if [ "$lane" = "full" ] && [ "$area" = "all" ]; then
+    mutation_semantics="true full lane requires targeted, smoke, and full critical-package cargo-mutants artifacts; not_run shards are never counted as passed"
+  elif [ "$lane" = "full" ]; then
+    mutation_semantics="explicit area-scoped full depth requires targeted, smoke, and full cargo-mutants artifacts for the selected packages and source filters; it does not claim global full confidence"
+  else
+    mutation_semantics="bounded cargo-mutants evidence; not_run shards are explicitly outside the configured mutation scope and are not counted as passed"
+  fi
   {
     cat <<EOF
 {
@@ -1981,7 +2240,8 @@ write_mutation_evidence_summary() {
   "lane": "${lane}",
   "status": "${evidence_status}",
   "scope": "${mutation_scope}",
-  "semantics": "$([ "$lane" = "full" ] && echo "true full lane requires targeted, smoke, and full critical-package cargo-mutants artifacts; not_run shards are never counted as passed" || echo "bounded cargo-mutants evidence; not_run shards are explicitly outside the configured mutation scope and are not counted as passed")",
+  "area": "${area}",
+  "semantics": "${mutation_semantics}",
   "targeted_regressions": [
     $(mutation_artifact_json "lash-core direct provider/direct request survivors" "${out_dir}/mutants-lash-core-direct-targeted"),
     $(mutation_artifact_json "lash-core model token-limit survivors" "${out_dir}/mutants-lash-core-model-targeted"),
@@ -1989,10 +2249,28 @@ write_mutation_evidence_summary() {
     $(mutation_artifact_json "lash-sim scheduler-owned and mini-oracles" "${out_dir}/mutants-lash-sim-oracles-runtime-completion-targeted"),
     $(mutation_artifact_json "lash-sim runtime completion readiness" "${out_dir}/mutants-lash-sim-runner-runtime-completion-targeted")
   ],
+  "area_targeted_shards": [
+EOF
+    local package
+    first=1
+    if [ "$area" != "all" ]; then
+      for package in "${selected_packages[@]}"; do
+        if [ "$first" = "1" ]; then
+          first=0
+        else
+          printf ',\n'
+        fi
+        printf '    '
+        mutation_artifact_json "$package area:${area} targeted shard" "${out_dir}/mutants-${package}-area-${area}-targeted"
+      done
+    fi
+    cat <<EOF
+
+  ],
   "critical_package_smoke_shards": [
 EOF
-    local first=1
-    for package in "${critical_packages[@]}"; do
+    first=1
+    for package in "${selected_packages[@]}"; do
       if [ "$first" = "1" ]; then
         first=0
       else
@@ -2007,7 +2285,7 @@ EOF
   "full_mutation_suites": [
 EOF
     first=1
-    for package in "${critical_packages[@]}"; do
+    for package in "${selected_packages[@]}"; do
       if [ "$first" = "1" ]; then
         first=0
       else
@@ -2029,18 +2307,34 @@ EOF
   } >"$path"
 }
 
+confidence_class() {
+  case "$lane:$area" in
+    broad:all) echo "bounded_broad" ;;
+    broad:*) echo "area_scoped_bounded_broad" ;;
+    full:all) echo "true_full" ;;
+    full:*) echo "area_scoped_full" ;;
+    default:all) echo "default_targeted" ;;
+    default:*) echo "area_scoped_default_targeted" ;;
+    fast:all) echo "fast" ;;
+    fast:*) echo "area_scoped_fast" ;;
+  esac
+}
+
 write_confidence_summary() {
   local status="${1:-passed}"
   cat >"${out_dir}/confidence-summary.json" <<EOF
 {
   "schema": "lash.confidence.summary.v1",
   "lane": "${lane}",
+  "selector": "${requested_selector}",
+  "area": "${area}",
   "status": "${status}",
   "sim_summary": "sim/summary.json",
   "env_gated_lanes": "sim/env-gated-lanes.json",
   "full_lane_prerequisites": "sim/full-lane-prerequisites.json",
   "failing_minimizer_fixtures": "sim/failing-minimizer-fixtures.json",
-  "confidence_class": "$(case "$lane" in broad) echo "bounded_broad" ;; full) echo "true_full" ;; default) echo "default_targeted" ;; fast) echo "fast" ;; esac)",
+  "confidence_class": "$(confidence_class)",
+  "global_full_confidence_claim": "$([ "$lane" = "full" ] && [ "$area" = "all" ] && echo "true" || echo "false")",
   "coverage_summary": "$([ -f "${out_dir}/coverage/summary.json" ] && echo "coverage/summary.json" || echo "not_run")",
   "coverage_scope": "${coverage_scope}",
   "coverage_evidence_status": "$(coverage_evidence_status)",
@@ -2050,7 +2344,7 @@ write_confidence_summary() {
   "mutation_evidence_status": "$(mutation_evidence_status)",
   "mutation_scope": "${mutation_scope}",
   "full_mutation_status": "$(full_mutation_status)",
-  "postgres_backend_conformance": "$([[ "$lane" = "broad" || "$lane" = "full" ]] && echo "included_or_explicitly_skipped_in_postgres_conformance_artifact" || echo "env_gated_broad_or_full_lane_only")",
+  "postgres_backend_conformance": "$([[ "$lane" = "broad" || "$lane" = "full" ]] && area_selected store && echo "included_or_explicitly_skipped_in_postgres_conformance_artifact" || echo "not_in_selected_lane_or_area")",
   "postgres_current_trace_replay": "$([ "$lane" = "default" ] && echo "sim/postgres-current/status.json" || echo "not_in_lane")",
   "postgres_current_trace_replay_report": "$([ -f "${out_dir}/sim/postgres-replay/postgres-replay.json" ] && echo "sim/postgres-replay/postgres-replay.json" || echo "not_run")",
   "generated_postgres_dynamic_replay": "$([ -f "${out_dir}/sim/postgres-generated-rerun/summary.json" ] && echo "sim/postgres-generated-rerun/summary.json" || echo "not_run")",
@@ -2063,7 +2357,9 @@ write_confidence_summary() {
   "artifact_contract": {
     "schema": "lash.confidence.summary-artifact-contract.v1",
     "full_lane": {
-      "confidence_class": "true_full",
+      "confidence_class": "$(confidence_class)",
+      "selected_area": "${area}",
+      "global_full_confidence_claim": "$([ "$area" = "all" ] && echo "true" || echo "false")",
       "required_coverage_scope": "run",
       "effective_coverage_scope": "${coverage_scope}",
       "coverage_evidence_status": "$(coverage_evidence_status)",
@@ -2072,7 +2368,7 @@ write_confidence_summary() {
       "mutation_evidence": "$(mutation_evidence_path)",
       "mutation_evidence_status": "$(mutation_evidence_status)",
       "full_mutation_status": "$(full_mutation_status)",
-      "required_restate_postgres_workers_e2e": "sim/restate-postgres-workers-e2e.json",
+      "required_restate_postgres_workers_e2e": "$(area_selected process && echo "sim/restate-postgres-workers-e2e.json" || echo "not_in_selected_area")",
       "restate_postgres_workers_e2e_status": "$(restate_postgres_workers_e2e_status)"
     },
     "bounded_broad_confidence": {
@@ -2088,7 +2384,7 @@ write_confidence_summary() {
       "full_confidence_claim": "false"
     }
   },
-  "mutation_testing": "$(case "$lane" in fast) echo "not_in_fast_lane" ;; default) echo "configured_${mutation_scope}_scope_lash_core_direct_model_and_lash_sim_scheduler_oracle_targets" ;; broad) echo "bounded_broad_configured_${mutation_scope}_scope_targeted_regressions_without_full_mutation_claim" ;; full) echo "true_full_configured_full_scope_targeted_smoke_and_full_mutation" ;; esac)",
+  "mutation_testing": "$(if [ "$area" != "all" ]; then echo "area_${area}_configured_${mutation_scope}_scope_explicitly_scoped_mutation"; else case "$lane" in fast) echo "not_in_fast_lane" ;; default) echo "configured_${mutation_scope}_scope_lash_core_direct_model_and_lash_sim_scheduler_oracle_targets" ;; broad) echo "bounded_broad_configured_${mutation_scope}_scope_targeted_regressions_without_full_mutation_claim" ;; full) echo "true_full_configured_full_scope_targeted_smoke_and_full_mutation" ;; esac; fi)",
   "true_full_command": "LASH_CONFIDENCE_OUT_DIR=${out_root} LASH_CONFIDENCE_MUTATION_SCOPE=full scripts/confidence-gate.sh full",
   "bounded_broad_command": "LASH_CONFIDENCE_OUT_DIR=${out_root} scripts/confidence-gate.sh broad",
   "artifacts_root": "${out_dir}"
@@ -2192,7 +2488,9 @@ run_fast_shard() {
       ;;
     sim-generated)
       run_sim_generated_lane
-      run_focused_sqlite_seed_tail_repro
+      if area_selected store; then
+        run_focused_sqlite_seed_tail_repro
+      fi
       write_provider_transport_exclusion_evidence
       write_sim_lane_declarations
       write_full_lane_prerequisites
@@ -2222,6 +2520,85 @@ run_fast_aggregate() {
   LASH_CONFIDENCE_OUT_DIR="$out_root" "$0" fast:summary
 }
 
+print_plan() {
+  printf 'Confidence selector: %s\n' "$requested_selector"
+  printf 'Depth: %s\n' "$lane"
+  printf 'Area: %s\n' "$area"
+  printf 'Mutation scope: %s\n' "$mutation_scope"
+  printf 'Coverage scope: %s\n' "$coverage_scope"
+  printf 'Would run:\n'
+
+  if [ -n "$sim_search_shard" ]; then
+    plan_item sim "deterministic simulation search shard ${sim_search_shard} at full budgets"
+    return
+  fi
+
+  if [ "$lane" = "fast" ]; then
+    case "$fast_shard" in
+      all|scenario-harnesses)
+        plan_item store "store contracts and SQLite substrate conformance"
+        plan_item process "runtime persistence, session graph, runtime, and agent scenarios"
+        plan_item protocol "Standard and RLM protocol scenarios"
+        ;;
+    esac
+    case "$fast_shard" in
+      all|fault-matrix)
+        plan_item process "runtime state machine and durable process fault matrix"
+        plan_item trigger "trigger delivery fault matrix"
+        plan_item effect-host "inline await-event cancellation conformance"
+        plan_item protocol "Lashlang property suite"
+        plan_item provider "transport properties and provider failure evidence"
+        plan_item store "SQLite backend fault-matrix conformance"
+        ;;
+    esac
+    case "$fast_shard" in
+      all|sim-unit-perf-guards) plan_item sim "simulation unit/oracle and performance-guard identity suites" ;;
+      sim-generated) plan_item sim "generated deterministic simulation lane" ;;
+      minimizer-fixtures) plan_item sim "simulation minimizer fixtures" ;;
+      summary) printf '  matrix      validate all unscoped fast shard summaries\n' ;;
+    esac
+    if [ "$fast_shard" = "all" ]; then
+      plan_item sim "generated deterministic simulation and minimizer evidence"
+    fi
+    return
+  fi
+
+  plan_item store "store contracts, SQLite faults, local backend conformance, contention, and Postgres replay"
+  plan_item process "runtime persistence, session graph, runtime scenarios, and process fault matrix"
+  plan_item trigger "trigger delivery fault matrix"
+  plan_item effect-host "inline await-event cancellation conformance"
+  plan_item protocol "protocol scenarios and property suites"
+  plan_item provider "provider transport, failure, and exclusion evidence"
+  plan_item sim "simulation unit, generated, search, minimizer, and replay evidence"
+  if [ "$coverage_scope" = "run" ]; then
+    printf '  coverage    packages: %s\n' "${selected_packages[*]}"
+  else
+    printf '  coverage    record explicit not_run (scope=none)\n'
+  fi
+  if [ "$mutation_scope" != "none" ]; then
+    if [ "$area" = "all" ]; then
+      printf '  mutation    existing %s mutation evidence\n' "$mutation_scope"
+    else
+      printf '  mutation    area:%s targeted shard for: %s\n' "$area" "${selected_packages[*]}"
+      if [ "${#area_mutation_file_args[@]}" -gt 0 ]; then
+        printf '  mutation    source filters: %s\n' "${area_mutation_file_args[*]}"
+      fi
+    fi
+  fi
+  if [ "$lane" = "broad" ]; then
+    plan_item store "bounded Postgres conformance and dynamic backend differential"
+  elif [ "$lane" = "full" ]; then
+    plan_item store "full Postgres conformance and dynamic backend differential"
+    plan_item process "Restate/Postgres/MinIO worker e2e"
+    printf '  mutation    full suites for: %s\n' "${selected_packages[*]}"
+  fi
+}
+
+if [ "$dry_run" -eq 1 ]; then
+  print_plan
+  exit 0
+fi
+
 bootstrap_tools
 
 if [ -n "$sim_search_shard" ]; then
@@ -2232,6 +2609,17 @@ if [ -n "$sim_search_shard" ]; then
 fi
 
 if [ "$lane" = "fast" ]; then
+  if [ "$area" != "all" ] && [ "$fast_shard" = "all" ]; then
+    run_scenario_harnesses
+    run_state_machine_and_fault_matrix
+    if area_selected sim; then
+      run_sim_provider_scripts
+    fi
+    write_confidence_summary "passed"
+    step "Confidence gate '${requested_selector}' passed"
+    printf 'Artifacts: %s\n' "$out_dir"
+    exit 0
+  fi
   case "$fast_shard" in
     all)
       run_fast_aggregate
@@ -2255,23 +2643,35 @@ fi
 
 run_scenario_harnesses
 run_state_machine_and_fault_matrix
-run_sim_provider_scripts
-run_focused_sqlite_seed_tail_repro
-write_provider_transport_exclusion_evidence
+if area_selected sim; then
+  run_sim_provider_scripts
+fi
+if area_selected store; then
+  run_focused_sqlite_seed_tail_repro
+fi
+if area_selected sim; then
+  write_provider_transport_exclusion_evidence
+fi
 write_sim_lane_declarations
 write_full_lane_prerequisites
 write_postgres_effect_history_status
 write_restate_postgres_workers_e2e_lane_status
 
 if [ "$lane" = "default" ] || [ "$lane" = "broad" ] || [ "$lane" = "full" ]; then
-  run_local_backend_conformance
-  run_backend_contention_evidence
-  run_current_postgres_trace_replay_evidence
+  if area_selected store; then
+    run_local_backend_conformance
+    run_backend_contention_evidence
+    run_current_postgres_trace_replay_evidence
+  fi
   run_coverage_blind_spots
   case "$mutation_scope" in
     targeted|smoke|full)
-      run_lash_core_direct_model_mutation_evidence
-      run_lash_sim_runtime_completion_mutation_evidence
+      if [ "$area" = "all" ]; then
+        run_lash_core_direct_model_mutation_evidence
+        run_lash_sim_runtime_completion_mutation_evidence
+      else
+        run_area_targeted_mutation_evidence
+      fi
       ;;
     none) ;;
     *)
@@ -2285,12 +2685,18 @@ if [ "$lane" = "default" ] || [ "$lane" = "broad" ] || [ "$lane" = "full" ]; the
 fi
 
 if [ "$lane" = "broad" ]; then
-  run_broad_postgres_evidence
+  if area_selected store; then
+    run_broad_postgres_evidence
+  fi
 fi
 
 if [ "$lane" = "full" ]; then
-  run_postgres_conformance
-  run_restate_postgres_workers_e2e
+  if area_selected store; then
+    run_postgres_conformance
+  fi
+  if area_selected process; then
+    run_restate_postgres_workers_e2e
+  fi
   run_mutation_full
 fi
 
@@ -2302,5 +2708,5 @@ fi
 
 write_confidence_summary "passed"
 
-step "Confidence gate '${lane}' passed"
+step "Confidence gate '${requested_selector}' passed"
 printf 'Artifacts: %s\n' "$out_dir"

@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import datetime as dt
 import json
+import os
 import pathlib
 import re
 import runpy
@@ -495,11 +496,15 @@ class ConfidenceGateCiContractTest(unittest.TestCase):
         confidence_workflow = CONFIDENCE_WORKFLOW.read_text(encoding="utf-8")
         gate = GATE.read_text(encoding="utf-8")
 
-        self.assertIn("- fast", confidence_workflow)
-        self.assertIn("- default", confidence_workflow)
-        self.assertIn("- broad", confidence_workflow)
-        self.assertIn("- full", confidence_workflow)
-        self.assertIn("run: bash scripts/confidence-gate.sh", confidence_workflow)
+        self.assertIn('type: string', confidence_workflow)
+        self.assertNotIn('type: choice', confidence_workflow)
+        self.assertNotIn('options:', confidence_workflow)
+        self.assertIn('default: "full"', confidence_workflow)
+        self.assertIn('CONFIDENCE_SELECTOR: ${{', confidence_workflow)
+        self.assertIn(
+            'run: bash scripts/confidence-gate.sh "$CONFIDENCE_SELECTOR"',
+            confidence_workflow,
+        )
         self.assertIn("inputs.lane || 'full'", confidence_workflow)
         self.assertIn("schedule:", confidence_workflow)
         self.assertNotIn("bash scripts/confidence-gate.sh broad", workflow)
@@ -514,6 +519,79 @@ class ConfidenceGateCiContractTest(unittest.TestCase):
         )
         self.assertIn('"full_confidence_claim": "false"', gate)
 
+    def test_confidence_selector_vocabulary_and_area_plans_are_executable(self) -> None:
+        confidence_workflow = CONFIDENCE_WORKFLOW.read_text(encoding="utf-8")
+        gate = GATE.read_text(encoding="utf-8")
+
+        for snippet in (
+            "fast+area:store",
+            "full+area:effect-host",
+            "fast:fault-matrix+area:trigger",
+            "sim-search:<i>/<n>",
+            "store, process, trigger, effect-host, protocol, provider, sim",
+        ):
+            self.assertIn(snippet, gate)
+        self.assertIn("full+area:<surface>", confidence_workflow)
+        self.assertIn("fast:<shard>+area:<surface>", confidence_workflow)
+
+        with tempfile.TemporaryDirectory() as directory:
+            env = {"LASH_CONFIDENCE_OUT_DIR": directory}
+            store_plan = subprocess.run(
+                ["bash", str(GATE), "--dry-run", "fast+area:store"],
+                cwd=ROOT,
+                env={**os.environ, **env},
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(store_plan.returncode, 0, store_plan.stderr)
+            self.assertIn("Area: store", store_plan.stdout)
+            self.assertIn("store contracts", store_plan.stdout)
+            self.assertNotIn("runtime persistence", store_plan.stdout)
+            self.assertEqual(list(pathlib.Path(directory).iterdir()), [])
+
+            shard_plan = subprocess.run(
+                [
+                    "bash",
+                    str(GATE),
+                    "sim-search:3/9+area:sim",
+                    "--dry-run",
+                ],
+                cwd=ROOT,
+                env={**os.environ, **env},
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(shard_plan.returncode, 0, shard_plan.stderr)
+            self.assertIn("search shard 3/9", shard_plan.stdout)
+
+            trigger_plan = subprocess.run(
+                ["bash", str(GATE), "--dry-run", "full+area:trigger"],
+                cwd=ROOT,
+                env={**os.environ, **env},
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(trigger_plan.returncode, 0, trigger_plan.stderr)
+            self.assertIn("source filters:", trigger_plan.stdout)
+            self.assertIn("crates/lash-core/src/triggers", trigger_plan.stdout)
+
+            invalid = subprocess.run(
+                ["bash", str(GATE), "--dry-run", "fast+area:unknown"],
+                cwd=ROOT,
+                env={**os.environ, **env},
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(invalid.returncode, 2)
+            self.assertIn(
+                "Areas: store, process, trigger, effect-host, protocol, provider, sim",
+                invalid.stderr,
+            )
+
     def test_full_lane_artifact_contract_requires_true_full_evidence(self) -> None:
         gate = GATE.read_text(encoding="utf-8")
 
@@ -527,7 +605,9 @@ class ConfidenceGateCiContractTest(unittest.TestCase):
             '"artifact_contract": {',
             '"schema": "lash.confidence.summary-artifact-contract.v1"',
             '"full_lane": {',
-            '"confidence_class": "true_full"',
+            'full:all) echo "true_full"',
+            'full:*) echo "area_scoped_full"',
+            '"global_full_confidence_claim":',
             '"required_coverage_scope": "run"',
             '"effective_coverage_scope": "${coverage_scope}"',
             '"coverage_evidence_status": "$(coverage_evidence_status)"',
@@ -536,7 +616,7 @@ class ConfidenceGateCiContractTest(unittest.TestCase):
             '"mutation_evidence": "$(mutation_evidence_path)"',
             '"mutation_evidence_status": "$(mutation_evidence_status)"',
             '"full_mutation_status": "$(full_mutation_status)"',
-            '"required_restate_postgres_workers_e2e": "sim/restate-postgres-workers-e2e.json"',
+            '"required_restate_postgres_workers_e2e": "$(area_selected process',
             '"restate_postgres_workers_e2e_status": "$(restate_postgres_workers_e2e_status)"',
             "run_restate_postgres_workers_e2e",
             '"status": "not_run"',
@@ -724,7 +804,7 @@ finalize_mutation_gate
             loop_headers = re.findall(
                 r"^\s*for\s+package\s+in\s+(.+);\s*do\s*$", body, re.MULTILINE
             )
-            self.assertEqual(['"${critical_packages[@]}"'], loop_headers)
+            self.assertEqual(['"${selected_packages[@]}"'], loop_headers)
             self.assertIn('if [ "$package" = "lash-postgres-store" ]; then', body)
             self.assertIn("run_postgres_mutants_recorded", body)
 
@@ -770,10 +850,10 @@ derive_mutation_jobs() {{
             coverage_body,
             re.MULTILINE,
         )
-        self.assertEqual(['"${critical_packages[@]}"'], coverage_loops)
+        self.assertEqual(['"${selected_packages[@]}"'], coverage_loops)
         self.assertIn('coverage_package_args+=(-p "$package")', coverage_body)
         self.assertIn(
-            '''critical_package_regex="$(IFS='|'; printf '%s' "${critical_packages[*]}")"''',
+            '''critical_package_regex="$(IFS='|'; printf '%s' "${selected_packages[*]}")"''',
             coverage_body,
         )
         self.assertIn(
@@ -848,7 +928,7 @@ derive_mutation_jobs() {{
         for snippet in required_snippets:
             self.assertIn(snippet, gate)
 
-        self.assertIn("- broad", confidence_workflow)
+        self.assertIn('type: string', confidence_workflow)
         self.assertIn("inputs.lane || 'full'", confidence_workflow)
         self.assertNotIn("LASH_POSTGRES_GENERATED_PROFILE", workflow)
         self.assertNotIn("LASH_POSTGRES_GENERATED_MAX_BOUNDARIES", workflow)
