@@ -57,9 +57,9 @@ async fn cancel_before_start_duplicate_replay_and_terminal_attach(host: Arc<dyn 
         }) if request_id == "request-1" && origin == "conformance-user"
     ));
 
-    // Recreating this bridge models a new lease generation after owner loss;
-    // store-side generation fencing remains responsible for rejecting a stale
-    // owner's final commit.
+    // Recreating this bridge models a new owner after lease loss. The durable
+    // cancellation remains visible; the session-head CAS and any re-claimed
+    // batch ownership decide whether an old owner's final commit can land.
     let recovered = ActiveTurnControl::new(host.as_ref(), address.clone())
         .await
         .expect("recreate active control");

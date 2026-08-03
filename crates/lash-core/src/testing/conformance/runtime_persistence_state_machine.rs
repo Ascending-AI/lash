@@ -20,6 +20,8 @@ use crate::{
     TurnInputIngress,
 };
 
+mod claim_honesty;
+
 const SESSION_ID: &str = "runtime-persistence-property";
 const DEFAULT_CASES: u32 = 32;
 const DEFAULT_RUNNER_SEED: u64 = 857;
@@ -219,6 +221,11 @@ where
         .await
         .unwrap_or_else(|error| {
             panic!("{backend} dedicated runtime-persistence law failed: {error}")
+        });
+    claim_honesty::non_law_pre_reclaim_commit_symmetry(&make, DEDICATED_LAW_SEED + 10)
+        .await
+        .unwrap_or_else(|error| {
+            panic!("{backend} runtime-persistence NON-LAW demonstration failed: {error}")
         });
     replay_regression_corpus(&make)
         .await
@@ -1660,30 +1667,34 @@ where
     })
     .await?;
     assert_on_fresh_store(make, seed + 3, |store| async move {
-        law_head_cas_serializes_competing_commits(store).await
+        claim_honesty::law_reclaimed_predecessor_rejection_survives_successor_head_advance(store)
+            .await
     })
     .await?;
     assert_on_fresh_store(make, seed + 4, |store| async move {
-        law_stale_settlement_cannot_damage_successor(store).await
+        law_head_cas_serializes_competing_commits(store).await
     })
     .await?;
     assert_on_fresh_store(make, seed + 5, |store| async move {
-        law_selected_batch_out_of_order_never_loses_work(store).await
+        law_stale_settlement_cannot_damage_successor(store).await
     })
     .await?;
     assert_on_fresh_store(make, seed + 6, |store| async move {
-        law_turn_inputs_apply_once_in_order(store).await
+        law_selected_batch_out_of_order_never_loses_work(store).await
     })
     .await?;
     assert_on_fresh_store(make, seed + 7, |store| async move {
-        law_commit_atomicity_and_stale_head_non_mutation(store).await
+        law_turn_inputs_apply_once_in_order(store).await
     })
     .await?;
     assert_on_fresh_store(make, seed + 8, |store| async move {
-        law_checkpoint_refs_track_content(store).await
+        law_commit_atomicity_and_stale_head_non_mutation(store).await
     })
     .await?;
-    law_superseded_generation_commit_symmetry(make, seed + 9).await
+    assert_on_fresh_store(make, seed + 9, |store| async move {
+        law_checkpoint_refs_track_content(store).await
+    })
+    .await
 }
 
 async fn assert_on_fresh_store<F, Fut, Law, LawFut>(
@@ -1897,6 +1908,32 @@ async fn law_reclaim_mediates_supersession(
     )
     .await
     .map_err(TestCaseError::fail)?;
+    let pending_while_successor_holds = store
+        .list_pending_queued_work(SESSION_ID)
+        .await
+        .map_err(|error| TestCaseError::fail(error.to_string()))?;
+    prop_assert_eq!(
+        pending_while_successor_holds
+            .iter()
+            .map(|batch| batch.batch_id.as_str())
+            .collect::<BTreeSet<_>>(),
+        BTreeSet::from([second.batch_id.as_str()]),
+        "the rejected predecessor commit did not preserve the first batch under the successor claim"
+    );
+    prop_assert!(
+        store
+            .claim_ready_queued_work_by_batch_ids(
+                SESSION_ID,
+                &successor_lease.fence(),
+                &successor_owner,
+                QueuedWorkClaimBoundary::Idle,
+                std::slice::from_ref(&first.batch_id),
+            )
+            .await
+            .map_err(|error| TestCaseError::fail(error.to_string()))?
+            .is_none(),
+        "the rejected predecessor commit released the successor-owned batch"
+    );
     store
         .release_session_execution_lease(&successor_lease.completion())
         .await
@@ -2127,86 +2164,6 @@ async fn law_stale_settlement_cannot_damage_successor(
             .is_empty(),
         "successor could not settle its preserved claim"
     );
-    Ok(())
-}
-
-async fn law_superseded_generation_commit_symmetry<F, Fut>(
-    make: &F,
-    seed: u64,
-) -> Result<(), TestCaseError>
-where
-    F: Fn(u64) -> Fut,
-    Fut: Future<Output = Arc<dyn RuntimePersistence>>,
-{
-    // Explicit non-law: a superseded generation's commit need not fail. FIG-460 / ADR
-    // 0045 make the lease advisory and CAS authoritative; ADR 0029:62-66 makes
-    // supersession reclaim-mediated, so both commit shapes share authorization.
-    async fn run(store: Arc<dyn RuntimePersistence>, carrying_claim: bool) -> Result<u64, String> {
-        let batch = store
-            .enqueue_queued_work(queued_draft(0, 0, false))
-            .await
-            .map_err(|error| error.to_string())?;
-        let stale_owner = owner(0);
-        let stale_lease = store
-            .try_claim_session_execution_lease(SESSION_ID, &stale_owner, 60_000)
-            .await
-            .map_err(|error| error.to_string())?
-            .acquired()
-            .ok_or_else(|| "stale-owner lease busy".to_string())?;
-        let claim = store
-            .claim_ready_queued_work_by_batch_ids(
-                SESSION_ID,
-                &stale_lease.fence(),
-                &stale_owner,
-                QueuedWorkClaimBoundary::Idle,
-                std::slice::from_ref(&batch.batch_id),
-            )
-            .await
-            .map_err(|error| error.to_string())?
-            .ok_or_else(|| "queued work absent".to_string())?;
-        store
-            .release_session_execution_lease(&stale_lease.completion())
-            .await
-            .map_err(|error| error.to_string())?;
-        let successor_owner = owner(1);
-        let _successor_lease = store
-            .try_claim_session_execution_lease(SESSION_ID, &successor_owner, 60_000)
-            .await
-            .map_err(|error| error.to_string())?
-            .acquired()
-            .ok_or_else(|| "successor lease busy".to_string())?;
-        let state = RuntimeSessionState {
-            session_id: SESSION_ID.to_string(),
-            tool_state_snapshot: Some(ToolState::default().with_generation(61)),
-            ..RuntimeSessionState::default()
-        };
-        let mut commit = RuntimeCommit::persisted_state_for_test(&state, &[])
-            .releasing_session_execution_lease(stale_lease.completion());
-        if carrying_claim {
-            commit = commit.completing_queue_claim(claim.completion());
-        }
-        let result = store
-            .commit_runtime_state(commit)
-            .await
-            .map_err(|error| error.to_string())?;
-        let remaining = store
-            .list_queued_work(SESSION_ID)
-            .await
-            .map_err(|error| error.to_string())?;
-        if remaining.is_empty() != carrying_claim {
-            return Err("claim settlement did not match the commit shape".to_string());
-        }
-        Ok(result.head_revision)
-    }
-
-    let claim_free = run(make(seed).await, false)
-        .await
-        .map_err(TestCaseError::fail)?;
-    let claim_carrying = run(make(seed + 1).await, true)
-        .await
-        .map_err(TestCaseError::fail)?;
-    prop_assert_eq!(claim_free, 1);
-    prop_assert_eq!(claim_carrying, 1);
     Ok(())
 }
 

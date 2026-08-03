@@ -1,4 +1,7 @@
-# Queued-work and turn-input claims are generation-fenced under the session lease
+# Claim supersession is reclaim-mediated under the session lease
+
+The historical filename is retained to preserve inbound links; the title above
+is authoritative.
 
 ## Status
 
@@ -32,15 +35,17 @@ latent shape via the failed-turn-then-idle-retry path.
 
 ## Decision
 
-Claims pin the **session-execution-lease generation** they were taken under and
-are live exactly while that generation still holds the session lease. The
-generation is the lease's `fencing_token`, which is generation-stable in exactly
-the right way: renewal preserves it (renewal only extends expiry),
-same-incarnation extension of a live lease preserves it, and every fresh
-acquisition after TTL expiry bumps it (`previous + 1`).
+Claims pin the **session-execution-lease generation** they were taken under. The
+generation is the lease's `fencing_token`: renewal and same-incarnation extension
+preserve it, while every fresh acquisition after release or TTL expiry bumps it
+(`previous + 1`). The pinned generation controls claimability and lease-less host
+views; it is not an eager settlement fence.
 
-**Core rule: a claim is live iff the session-lease generation it pins is the
-currently-live lease generation.** Concretely:
+**Core rule: claim supersession is reclaim-mediated.** The session lease provides
+advisory serialization, liveness, and handoff: while a generation holds it, that
+generation cannot re-claim its own rows; after release, expiry, or takeover, a
+successor generation may re-claim them. Commit authority remains the session-head
+CAS plus the batch-ownership check described below. Concretely:
 
 - Claim rows record `claim_session_lease_generation` (the caller's validated-live
   `fence.fencing_token` at claim time) instead of a `claim_expires_at_ms`.
@@ -59,22 +64,43 @@ currently-live lease generation.** Concretely:
   equals the row's `claim_session_lease_generation`. The SQL backends evaluate
   this with a correlated subquery against the lease row; the in-memory and perf
   stores read the live generation once and compare.
-- Completion validation is unchanged. Completions still validate `claim_id` +
-  `claim_token` row ownership; the per-batch `claim_fencing_token` bump per
-  re-claim and the `qwc:{seq}:{fencing}` claim-id format stay. A stale claim's
-  completion is rejected with the renamed `QueuedWorkClaimSuperseded` /
-  `TurnInputClaimSuperseded` error.
+- Completion validation is unchanged. Completions validate `claim_id` +
+  `claim_token` row ownership, not the session-lease generation; the per-batch
+  `claim_fencing_token` bump per re-claim and the `qwc:{seq}:{fencing}` claim-id
+  format stay. Once a successor re-claims a batch, the predecessor completion no
+  longer owns it and is rejected with `QueuedWorkClaimSuperseded` /
+  `TurnInputClaimSuperseded`.
 - The host handback levers `abandon_queued_work_claim` /
   `abandon_turn_input_claim` remain (per ADR 0014), now without expiry columns.
 - The turn-input state machine (ADR 0010) is untouched: claim paths still claim
   only pending states and keep the `Accepted` lockout as admission evidence.
-  Generation fencing is added on top for both wanted-state scopes.
+  Generation-pinned reclaim eligibility is added on top for both wanted-state
+  scopes.
 
 `renew_queued_work_claim`, the shared `renewed_claim` helper, and the
 `lease_ttl_ms` parameter on every claim call are deleted. `LeaseTimings` and its
 survive-two-missed-renewals invariant are unchanged, but now govern only the
 session-execution, process, and durable effect-replay lease lanes, which still
 renew on cadence.
+
+The conformance contract distinguishes law from demonstrated current behavior:
+
+- **LAW (all backends):** after a successor generation re-claims a batch, the
+  superseded predecessor commit **must fail and must mutate nothing**. When its
+  head CAS is otherwise current, it fails with `QueuedWorkClaimSuperseded` (or
+  the turn-input counterpart). When the successor has also advanced the head, a
+  backend may reject it earlier with `HeadRevisionConflict`; either error
+  satisfies the law.
+- **NON-LAW (current backends only):** before the successor re-claims, a
+  predecessor claim-carrying commit is accepted by every current backend. The
+  demonstration cases pin PRESENT behavior as executable documentation and are
+  required for today's backends; a future deliberate tightening REVISES those
+  demonstration cases alongside the behavior change — that is a suite revision,
+  not a LAW breach.
+
+This distinction is deliberate: the current suite rejects an eagerly fencing
+backend because its executable demonstration would be stale, while demoting the
+reclaim-mediated rejection LAW would be a contract break.
 
 ## Consequences
 
@@ -83,15 +109,14 @@ renew on cadence.
   but healthy turn keeps its claim for the whole turn and commits.
 - The failed-turn idle-retry reclaims naturally: a failed turn's lease is released
   or taken over, the next acquisition mints a new generation, and the previously
-  claimed rows become claimable by that generation while the old claim's
-  completion is rejected as superseded.
+  claimed rows become claimable. Re-claiming them supersedes the old completion.
 - Claim liveness for lease-less callers is derived from the lease row join, so a
   released or superseded generation immediately makes its claims pending and
-  cancellable again — a claim is never live under a lease its owner no longer
-  holds.
+  cancellable again — a claim is never shown as live to a lease-less reader under
+  a lease its owner no longer holds.
 - The abandon levers stay for immediate handback but are no longer load-bearing
-  for correctness: once an owner loses the lease its claims are already
-  superseded by generation.
+  for correctness: once an owner loses the lease its claims are eligible for
+  successor re-claim, and that re-claim supersedes the old completion.
 
 ## Cross-version consequences
 

@@ -37,7 +37,7 @@
             <li><code>load_session</code>, <code>load_node</code>: rehydrate working state.</li>
             <li><code>try_claim_session_execution_lease</code>, <code>renew_session_execution_lease</code>, <code>release_session_execution_lease</code>: the durable single-writer execution lane for a session. Foreground turns, pending user input dispatch, wake delivery, and mutating session commands must hold this lease before touching session work.</li>
             <li><code>commit_runtime_state</code>: operation-stamped session-head commit. The head revision CAS is the exclusive commit authority; the session execution lease only coordinates who should spend work.</li>
-            <li><code>enqueue_queued_work</code>, <code>claim_ready_queued_work</code>, <code>renew_/abandon_/cancel_*</code>: a durable work queue with <code>claim_id</code>, owner identity plus incarnation, <code>claim_token</code>, and <code>claim_fencing_token</code>. Claims are also fenced by the current session execution lease.</li>
+            <li><code>enqueue_queued_work</code>, <code>claim_ready_queued_work</code>, <code>renew_/abandon_/cancel_*</code>: a durable work queue with <code>claim_id</code>, owner identity plus incarnation, <code>claim_token</code>, and <code>claim_fencing_token</code>. Claims pin the session-lease generation for reclaim eligibility; settlement validates claim ownership.</li>
             <li><code>save_/load_session_meta</code>, <code>vacuum</code>, <code>gc_unreachable</code>.</li>
           </ul>
           <p>Any backend that satisfies this trait (and the <code>ProcessRegistry</code> / <code>LashlangArtifactStore</code> traits) is a valid store. The backend-agnostic conformance suite (<code>lash_core::testing::conformance</code>) is what guarantees a new backend behaves identically.</p>
@@ -46,7 +46,7 @@
         <div class="section">
           <div class="section-header">
             <h2>The Model: A Durable Object Per Session</h2>
-            <p>A request for <code>session_id</code> routes to any worker. The worker first claims the session execution lease, then rehydrates the session from the store, runs the turn (pure <code>lash-sansio</code> compute + replayed effects), and commits with the lease fence plus head CAS. Workers are identical and hold no durable state, so the fleet scales by adding replicas.</p>
+            <p>A request for <code>session_id</code> routes to any worker. The worker first claims the advisory session execution lease, then rehydrates the session from the store, runs the turn (pure <code>lash-sansio</code> compute + replayed effects), and commits under the head CAS plus any claim-ownership checks. Workers are identical and hold no durable state, so the fleet scales by adding replicas.</p>
           </div>
           <div class="diagram">
             <div class="diagram-title">Horizontal topology</div>
@@ -68,7 +68,7 @@ flowchart TB
             </div>
           </div>
           <p>The store box is shared by the whole fleet, so it must be a <strong>networked backend</strong> every worker can reach. <code>lash-postgres-store</code> supplies the distributed <code>RuntimePersistence</code>, <code>ProcessRegistry</code>, <code>TriggerStore</code>, and <code>LashlangArtifactStore</code>; <code>lash-s3-store</code> supplies the shared attachment byte store. The local-file SQLite store remains right for embedded and single-host deployments.</p>
-          <p>Concurrent writers are prevented before effects: the session execution lease lets exactly one runtime owner execute mutating work for a session at a time. <code>commit_runtime_state</code> still performs head CAS in the same transaction as lease-fence verification, so stale writers fail safely if a lease is lost or a backend violates the single-lane contract.</p>
+            <p>Concurrent writers are normally prevented before effects: the advisory session execution lease lets one runtime owner execute mutating work for a session at a time. <code>commit_runtime_state</code> performs head CAS and any claim-ownership checks in the same transaction, so stale writers fail without partial mutation even after lease handoff.</p>
           <p>By default every opened runtime gets a fresh owner id and incarnation id. A durable workflow engine that already serializes retries for one invocation can set <code>SessionBuilder::session_execution_owner(LeaseOwnerIdentity::opaque(...))</code> with a stable owner plus incarnation when it intentionally wants reentry. A new incarnation must not reenter by owner id alone; local-process liveness permits fenced fast reclaim only when the previous holder is definitely dead. Choosing owner identity and lease timings for failover latency is host policy; see <a href="../operations.html">running in production</a>.</p>
           <div class="diagram">
             <div class="diagram-title">Per-session request lifecycle</div>
@@ -77,9 +77,9 @@ flowchart LR
   Req["request for<br/>session_id"] --> Lease["claim session<br/>execution lease"]
   Lease --> Load["load_session<br/>rehydrate working copy"]
   Load --> Turn["run turn<br/>sans-io compute + replayed effects"]
-  Turn --> Commit{"commit_runtime_state<br/>lease fence + CAS"}
+  Turn --> Commit{"commit_runtime_state<br/>head CAS + claim ownership"}
   Commit -->|wins| Done["committed<br/>release lease"]
-  Commit -->|stale fence / loses CAS| Stop["runtime error<br/>reload before retry"]
+  Commit -->|claim superseded / loses CAS| Stop["runtime error<br/>reload before retry"]
             </div>
           </div>
           <p>You scale <strong>across sessions</strong> (shard/route by <code>session_id</code>), not within one (see Inherent Limits).</p>
@@ -97,7 +97,7 @@ flowchart LR
                 <tr><td><code>lash-sansio</code> pure <code>TurnMachine</code></td><td>compute is deterministic <code>(state, input) → (state, effects)</code></td><td><code>crates/lash-sansio</code></td></tr>
                 <tr><td><code>RuntimePersistence</code></td><td>the single durable store seam; backend-swappable</td><td><code>store/mod.rs</code>, conformance suite</td></tr>
                 <tr><td>session execution lease</td><td>single durable execution lane for every mutating session path</td><td><code>store/mod.rs</code>, <code>session_execution_leases</code></td></tr>
-                <tr><td><code>commit_runtime_state</code> fence + CAS on <code>session_head</code></td><td>atomic session-head write and stale-writer backstop</td><td><code>store/mod.rs</code></td></tr>
+                <tr><td><code>commit_runtime_state</code> CAS on <code>session_head</code> plus claim ownership</td><td>atomic session-head write and stale-writer rejection</td><td><code>store/mod.rs</code></td></tr>
                 <tr><td>queue with claim + fencing tokens</td><td>exactly-once work pickup by any lease-holding session runner</td><td><code>queued_work_batches</code></td></tr>
                 <tr><td>effect replay keys + <code>lash-restate</code></td><td>re-run a turn on another worker, replay effects</td><td><code>crates/lash-restate</code></td></tr>
                 <tr><td><code>lash-postgres-store</code> + <code>lash-s3-store</code></td><td>networked runtime/process/trigger/artifact state plus content-addressed attachment bytes</td><td><code>crates/lash-postgres-store</code>, <code>crates/lash-s3-store</code></td></tr>
@@ -139,7 +139,7 @@ flowchart LR
             </article>
             <article class="panel">
               <h3>The store is the ceiling</h3>
-              <p>Whatever networked backend is chosen must sustain lease claims, renewals, fenced commits, and queue claims at fleet scale. The store choice <em>is</em> the scaling story.</p>
+              <p>Whatever networked backend is chosen must sustain lease claims, renewals, head-CAS commits, claim-ownership checks, and queue claims at fleet scale. The store choice <em>is</em> the scaling story.</p>
             </article>
             <article class="panel">
               <h3>Long LLM turns</h3>

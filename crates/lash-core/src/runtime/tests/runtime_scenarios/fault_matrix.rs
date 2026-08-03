@@ -109,7 +109,7 @@ const DURABLE_FAULT_MATRIX: &[DurableFaultMatrixRow] = &[
     DurableFaultMatrixRow {
         id: "queued-work-claim-generation-supersession",
         kind: DurableFaultKind::LeaseLoss,
-        contract: "A queued-work claim superseded by a new session-lease generation is rejected at commit.",
+        contract: "After a successor generation re-claims queued work, the predecessor claim is rejected at commit without mutation.",
         evidence: FaultEvidence::CargoTest(CargoTestEvidence {
             package: "lash-core",
             test_target: None,

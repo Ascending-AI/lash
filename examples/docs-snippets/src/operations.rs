@@ -18,7 +18,7 @@ fn configure_lease_timings(
     // session execution, effect replay, and process execution. `new` enforces
     // `ttl >= 3 * renew_interval`, so a live owner can miss two renewals before
     // a peer may treat the lease as expired. Queued-work and turn-input claims
-    // are generation-fenced under the session lease and carry no timing.
+    // pin the session-lease generation and carry no timing of their own.
     let lease_timings = LeaseTimings::new(
         Duration::from_secs(15), // ttl
         Duration::from_secs(5),  // renew_interval
@@ -102,9 +102,10 @@ async fn graceful_drain(
     // 4. If you stopped an external queued-work or turn-input driver mid-claim,
     //    hand its claims back for immediate reuse with
     //    `session.abandon_queued_work_claim(&claim)` and
-    //    `session.abandon_turn_input_claim(&claim)`. Losing the session lease
-    //    also supersedes those generation-fenced claims. Resolve outstanding
-    //    durable waits as `Cancelled` with `session.revoke_durable_waits()`.
+    //    `session.abandon_turn_input_claim(&claim)`. Lease loss makes the claims
+    //    eligible for successor re-claim; only re-claim or explicit abandon
+    //    invalidates the old completion. Resolve outstanding durable waits as
+    //    `Cancelled` with `session.revoke_durable_waits()`.
 
     // 5. Release provider transports. The default `close()` is a no-op; the
     //    Codex provider sends WebSocket Close frames on its cached sessions.
@@ -136,8 +137,9 @@ async fn run_turn_with_retry(session: &LashSession, text: &str) -> lash::Result<
                 }
                 return Ok(output);
             }
-            // SessionExecutionBusy / SessionExecutionLeaseLost: another owner
-            // holds or fenced the lease, so the attempt committed nothing.
+            // Busy rejects before the turn starts; LeaseLost means an operation
+            // observed handoff. Reload durable state before retrying: lease loss
+            // alone neither proves no commit landed nor releases claims.
             Err(err) if err.is_retryable() => continue, // back off in real code
             // Wiring/config a retry can never repair (missing facet, provider
             // unconfigured). Surface it to an operator.

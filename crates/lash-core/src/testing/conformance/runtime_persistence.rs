@@ -2138,8 +2138,8 @@ pub async fn queued_work_claims_supersede_across_session_lease_generations(
         "a live claim must not be re-claimable under its own session-lease generation"
     );
 
-    // (b) Release + re-acquire mints a new generation; the batch is claimable by
-    // it and the old generation's completion is superseded.
+    // (b) Release + re-acquire mints a new generation. Re-claiming the batch
+    // replaces its ownership and supersedes the old generation's completion.
     release_session_execution_lease_for_test(&store, &lease_a).await;
     let lease_b = claim_session_execution_lease_for_test(&store, "root", "gen-owner-b").await;
     assert!(
@@ -2164,6 +2164,14 @@ pub async fn queued_work_claims_supersede_across_session_lease_generations(
         session_id: "root".to_string(),
         ..RuntimeSessionState::default()
     };
+    let head_before_stale = store
+        .load_session()
+        .await
+        .expect("load head before stale completion");
+    let queue_before_stale = store
+        .list_queued_work("root")
+        .await
+        .expect("load queue before stale completion");
     let stale_err = store
         .commit_runtime_state(
             RuntimeCommit::persisted_state_for_test(&stale_state, &[])
@@ -2175,10 +2183,31 @@ pub async fn queued_work_claims_supersede_across_session_lease_generations(
         stale_err,
         StoreError::QueuedWorkClaimSuperseded { .. }
     ));
+    assert_eq!(
+        persisted_session_read_snapshot(
+            store
+                .load_session()
+                .await
+                .expect("load head after stale completion")
+        ),
+        persisted_session_read_snapshot(head_before_stale),
+        "superseded completion must not mutate the durable head"
+    );
+    assert_eq!(
+        serde_json::to_value(
+            store
+                .list_queued_work("root")
+                .await
+                .expect("load queue after stale completion")
+        )
+        .expect("serialize queue after stale completion"),
+        serde_json::to_value(queue_before_stale).expect("serialize queue before stale completion"),
+        "superseded completion must not mutate queued work"
+    );
     release_session_execution_lease_for_test(&store, &lease_b).await;
 
-    // (c) A TTL takeover mints a new generation without any release, so
-    // the pre-takeover claim is superseded the same way.
+    // (c) A TTL takeover mints a new generation without any release. The
+    // successor's re-claim below is what supersedes the pre-takeover claim.
     let dead_owner = lease_owner("gen-stale");
     let dead_lease = store
         .try_claim_session_execution_lease("root", &dead_owner, 50)
@@ -2229,6 +2258,32 @@ pub async fn queued_work_claims_supersede_across_session_lease_generations(
         takeover_err,
         StoreError::QueuedWorkClaimSuperseded { .. }
     ));
+}
+
+fn persisted_session_read_snapshot(
+    loaded: Option<crate::store::PersistedSessionRead>,
+) -> serde_json::Value {
+    loaded.map_or(serde_json::Value::Null, |loaded| {
+        let checkpoint = loaded.checkpoint.map(|checkpoint| {
+            serde_json::json!({
+                "tool_state_ref": checkpoint.tool_state_ref,
+                "tool_state": checkpoint.tool_state,
+                "plugin_snapshot_ref": checkpoint.plugin_snapshot_ref,
+                "plugin_snapshot": checkpoint.plugin_snapshot,
+                "plugin_snapshot_revision": checkpoint.plugin_snapshot_revision,
+                "execution_state_ref": checkpoint.execution_state_ref,
+                "execution_state": checkpoint.execution_state,
+            })
+        });
+        serde_json::json!({
+            "head_revision": loaded.head_revision,
+            "current_frame_node_id": loaded.current_frame_node_id,
+            "graph": loaded.graph,
+            "checkpoint_ref": loaded.checkpoint_ref,
+            "checkpoint": checkpoint,
+            "token_ledger": loaded.token_ledger,
+        })
+    })
 }
 
 async fn claim_both_generation_fenced_lanes(

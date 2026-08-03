@@ -320,9 +320,9 @@ pub struct TurnInputClaim {
     pub owner: crate::LeaseOwnerIdentity,
     pub lease_token: String,
     pub fencing_token: u64,
-    /// The session-execution-lease generation this claim pins. The claim is
-    /// live exactly while this generation still holds the session lease
-    /// (ADR 0029).
+    /// The session-execution-lease generation this claim pins. It controls when
+    /// another generation may re-claim the rows, not settlement authority
+    /// before that re-claim (ADR 0029).
     pub session_lease_generation: u64,
     pub mode: TurnInputClaimMode,
     pub inputs: Vec<PendingTurnInput>,

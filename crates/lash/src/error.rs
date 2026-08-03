@@ -89,10 +89,10 @@ impl EmbedError {
     ///   turn was rejected before any state changed, so retrying after a
     ///   backoff is safe.
     /// - [`SessionExecutionLeaseLost`](lash_core::RuntimeErrorCode::SessionExecutionLeaseLost):
-    ///   the lease was fenced away mid-turn. The final commit is fenced on
-    ///   the same lease, so the failed attempt committed nothing and its
-    ///   queued-work/turn-input claims were released; a fresh attempt can
-    ///   re-claim safely.
+    ///   an operation observed lease handoff. Lease loss alone neither proves
+    ///   that no current-head commit landed nor releases queued-work/turn-input
+    ///   claims; reload durable state before retrying under the head CAS and
+    ///   claim-ownership checks.
     /// - [`StoreCommitContended`](lash_core::RuntimeErrorCode::StoreCommitContended):
     ///   the backend aborted before publication because transactional write
     ///   authority was unavailable; retry the identical operation unchanged.

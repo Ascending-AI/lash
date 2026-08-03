@@ -5,9 +5,10 @@ state exists — a turn mid-stream, watch hubs, caches — but none of it may be
 load-bearing across an effect boundary. Every committed step lives in the
 store or the engine journal, and any instance can resume from committed state.
 Sticky sessions are an affinity optimisation, never a correctness requirement:
-generation fencing (ADR 0029) already guarantees that a stale instance's
-writes are rejected, which is what makes resumption-anywhere safe rather than
-merely hopeful.
+the session-head CAS rejects stale history while commit-time claim ownership
+rejects work a successor already re-claimed (ADR 0029). Those authorities make
+resumption-anywhere safe rather than merely hopeful; the advisory lease itself
+does not reject a current-head tail from an owner that lost it.
 
 Statelessness has a floor. A turn actively streaming from a provider is
 irreducibly in memory until its next commit point. Crashing there costs

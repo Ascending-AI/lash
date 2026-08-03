@@ -173,8 +173,11 @@ id directly. The shared-history and branch-as-session rulings are unchanged.
   Removing component-declared durability is its host-supplied-capability
   doctrine reaching the last runtime exception.
 - [ADR-0029](0029-claims-are-generation-fenced-under-the-session-lease.md)
-  needs no amendment. Its ruling remains correct; FIG-641 tracks the missing
-  store enforcement.
+  defines reclaim-mediated claim supersession. A newer lease generation makes
+  old claims reclaimable. After a successor re-claims a batch, a superseded
+  commit fails without mutation: with a current head it reports the claim's
+  supersession, while a successor-advanced head may report a head conflict
+  first.
 - [ADR-0046](0046-process-transitions-are-events-record-is-a-fold.md) needs no
   amendment. Process event folding and weak observation are orthogonal to
   immutable session history, and processes remain outside stored history

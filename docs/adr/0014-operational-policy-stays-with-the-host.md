@@ -5,8 +5,8 @@
 accepted. The *Lease Timings* bullet is superseded in part by
 [ADR 0029](0029-claims-are-generation-fenced-under-the-session-lease.md):
 queued-work and turn-input claims are no longer TTL leases with a renewal API —
-they are generation-fenced under the session execution lease. `LeaseTimings`
-governs only the true lease lanes.
+they pin a session-execution-lease generation for claimability and handoff.
+`LeaseTimings` governs only the true lease lanes.
 
 ## Decision
 
@@ -23,9 +23,9 @@ trace buffers) lives inside lash. The capability set:
   host-configurable `LeaseTimings` on the core builder, validated against the
   survive-two-missed-renewals invariant (`ttl >= 3 * renew_interval`). The former
   hardcoded 30s constants are gone. Queued-work and turn-input **claims** are not
-  leases: they carry no TTL and are generation-fenced under the session execution
-  lease (ADR 0029), so they inherit their liveness from that lane rather than
-  from `LeaseTimings`.
+  leases: they carry no TTL and pin the session execution lease generation for
+  claimability and lease-less host views (ADR 0029), rather than inheriting a
+  renewal deadline from `LeaseTimings`.
 - **Quiesce and handoff**: `LashSession::park(self)` flushes dirty state
   through a fresh-lease commit and returns a resumable `ParkedSession`;
   `LashCore::resume` rebuilds it. `LashSession::close(self)` is park-without-
@@ -37,8 +37,9 @@ trace buffers) lives inside lash. The capability set:
   `TraceSink::flush()` (default no-op; the OTel sink documents that span-export
   durability is the host provider's duty).
 - **Claim and wait handback**: host-facing `abandon_queued_work_claim` /
-  `abandon_turn_input_claim` return claimed work immediately instead of waiting
-  out the claim TTL, and `revoke_durable_waits` resolves a session's
+  `abandon_turn_input_claim` return claimed work immediately instead of leaving
+  the batch held, and hidden from pending views, until this owner's generation
+  stops holding the session lease; `revoke_durable_waits` resolves a session's
   outstanding Durable Waits as `Cancelled` without deleting the session.
 - **Failover parity**: process leases carry `LeaseOwnerIdentity` and support
   the same fenced, TTL-gated acquisition as session execution leases. Neither
