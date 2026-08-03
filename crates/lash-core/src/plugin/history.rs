@@ -139,6 +139,8 @@ impl SessionReadView {
         }))
     }
 
+    /// Builds a `SessionReadView` from persisted state data for store and durable-substrate
+    /// implementors while validating and applying durable session transitions.
     pub fn from_persisted_state(state: &RuntimeSessionState) -> Self {
         let graph = state.session_graph.clone();
         let read_model = state.read_model();
@@ -194,6 +196,8 @@ impl SessionReadView {
         )
     }
 
+    /// Exposes session graph to store and durable-substrate implementors while validating and
+    /// applying durable session transitions.
     pub fn session_graph(&self) -> &crate::SessionGraph {
         match &self.0.graph {
             SessionReadGraph::Owned(graph) => graph,

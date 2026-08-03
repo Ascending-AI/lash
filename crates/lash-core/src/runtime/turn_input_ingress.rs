@@ -39,6 +39,8 @@ impl TurnInputIngress {
         }
     }
 
+    /// Lets turn-input store implementors admit only active-turn ingress whose minimum boundary has
+    /// been reached; next-turn ingress never enters a running turn.
     pub fn admits_checkpoint(&self, checkpoint: CheckpointKind) -> bool {
         match self {
             Self::ActiveTurn { min_boundary, .. } => min_boundary.admits(checkpoint),
@@ -58,6 +60,8 @@ pub enum TurnInputCheckpointBoundary {
 }
 
 impl TurnInputCheckpointBoundary {
+    /// Treats `AfterWork` as admitting both checkpoints and `BeforeCompletion` as admitting only
+    /// that final checkpoint for turn-input store implementors.
     pub fn admits(self, checkpoint: CheckpointKind) -> bool {
         match self {
             Self::AfterWork => true,
@@ -400,6 +404,8 @@ impl TurnInputClaim {
             .collect();
     }
 
+    /// Records application evidence only for claimed inputs whose deterministic ingress message IDs
+    /// appear in the committed checkpoint messages.
     pub fn record_checkpoint_applications(
         &mut self,
         turn_id: &str,
@@ -437,6 +443,8 @@ impl TurnInputClaim {
             .collect()
     }
 
+    /// Materializes claimed inputs in claim order for turn-input store implementors, resolving
+    /// attachments and omitting inputs that produce no committed message.
     pub async fn materialize_for_checkpoint(
         &self,
         attachment_store: &crate::SessionAttachmentStore,

@@ -209,6 +209,8 @@ impl RuntimeSessionState {
         crate::SessionReadView::from_persisted_state(self)
     }
 
+    /// Exposes session graph to protocol and process-engine implementors while materializing or
+    /// restoring protocol session state.
     pub fn session_graph(&self) -> &crate::SessionGraph {
         &self.session_graph
     }
@@ -219,6 +221,9 @@ impl RuntimeSessionState {
         self.effective_policy()
     }
 
+    /// Advances resident state to a store's committed head revision and realized timestamps, adopts
+    /// durable artifact references, and clears transient snapshots so protocol and store
+    /// implementors cannot reuse stale bytes.
     pub fn apply_persisted_commit_result(&mut self, result: crate::store::RuntimeCommitResult) {
         self.head_revision = result.head_revision;
         self.checkpoint_ref = Some(result.checkpoint_ref);

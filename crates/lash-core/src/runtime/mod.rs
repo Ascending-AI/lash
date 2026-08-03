@@ -1189,6 +1189,8 @@ pub struct SessionStoreCreateRequest {
 }
 
 impl SessionStoreCreateRequest {
+    /// Exposes the parent session ID to session-store factories for child and fork relations,
+    /// returning `None` for a root session.
     pub fn parent_session_id(&self) -> Option<&str> {
         self.relation.parent_session_id()
     }
