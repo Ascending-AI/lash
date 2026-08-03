@@ -4,15 +4,13 @@ on:
   workflow_dispatch:
     inputs:
       lane:
-        description: "Confidence lane to run"
+        # Free text is intentional: the gate validates the complete selector
+        # vocabulary, including full+area:<surface>, fast:<shard>+area:<surface>,
+        # and full-depth sim-search:<i>/<n> shards.
+        description: "Selector: lane/shard, optionally +area:<surface>"
         required: true
         default: "full"
-        type: choice
-        options:
-          - fast
-          - default
-          - broad
-          - full
+        type: string
   schedule:
     - cron: "29 4 * * 0"
 
@@ -34,10 +32,10 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 360
     env:
-      # The full lane's sim search seed space is partitioned across this job
+      # The unscoped full lane's sim search seed space is partitioned across this job
       # (shard 1/9) and the eight sim-search matrix jobs (shards 2/9..9/9), so
-      # the weekly fleet covers every configured seed exactly once. Non-full
-      # lanes run their search lane unsharded.
+      # the weekly fleet covers every configured seed exactly once. Area-qualified
+      # selectors and other lanes run their selected work unsharded.
       LASH_SIM_SHARD: ${{ (github.event_name != 'workflow_dispatch' || inputs.lane == 'full') && '1/9' || '1/1' }}
 
     steps:
@@ -60,7 +58,9 @@ jobs:
           tool: protoc
 
       - name: Run confidence gate
-        run: bash scripts/confidence-gate.sh "${{ github.event_name == 'workflow_dispatch' && inputs.lane || 'full' }}"
+        env:
+          CONFIDENCE_SELECTOR: ${{ github.event_name == 'workflow_dispatch' && inputs.lane || 'full' }}
+        run: bash scripts/confidence-gate.sh "$CONFIDENCE_SELECTOR"
 
       - name: Upload confidence artifacts
         if: always()
