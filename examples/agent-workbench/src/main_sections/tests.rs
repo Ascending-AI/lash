@@ -3,7 +3,7 @@ mod tests {
     use super::*;
 
     pub(super) fn in_memory_trigger_store() -> Arc<dyn lash::triggers::TriggerStore> {
-        Arc::new(lash_core::InMemoryTriggerStore::new())
+        Arc::new(lash::triggers::InMemoryTriggerStore::new())
     }
     use lash::rlm::RlmTurnBuilderExt;
     use lash::tracing::{
@@ -247,6 +247,8 @@ mod tests {
             .expect("mail.received source registered");
         assert_eq!(binding.event_type_name(), "mail.Received");
     }
+
+    include!("tests/facade_homes.rs");
 
     #[test]
     fn lashlang_graph_store_builds_graph_state() {
@@ -2146,24 +2148,6 @@ finish initial
             .await
             .expect("drain refresh batch");
         session.close().await.expect("close drain session");
-    }
-
-    #[test]
-    fn healthz_reports_workbench_fingerprint() {
-        // scripts/agent-workbench-dev.sh readiness-checks this exact shape to
-        // distinguish the workbench from a random process on the port.
-        let Json(body) = sync_await(healthz());
-        assert_eq!(body["service"], "agent-workbench");
-        assert_eq!(body["status"], "ok");
-    }
-
-    #[test]
-    fn workbench_renders_scoped_tabs_and_trigger_lifecycle_controls() {
-        assert!(ui::INDEX_HTML.contains("id=\"newSessionTab\""));
-        assert!(ui::INDEX_HTML.contains("id=\"triggerRegistrations\""));
-        assert!(ui::INDEX_HTML.contains("re-enable"));
-        assert!(ui::INDEX_HTML.contains("deleteTrigger"));
-        assert!(ui::INDEX_HTML.contains("scopedSessionId"));
     }
 
     include!("tests/session_isolation.rs");

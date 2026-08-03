@@ -134,7 +134,7 @@ async fn upload_attachment(
             "attachment name must be at most 200 characters",
         ));
     }
-    let media_type = lash_core::MediaType::parse(&request.mime).map_err(|_| {
+    let media_type = lash::attachments::MediaType::parse(&request.mime).map_err(|_| {
         AppError::bad_request(
             "the workbench turn contract currently accepts PNG image attachments only",
         )
@@ -156,11 +156,18 @@ async fn upload_attachment(
             MAX_WORKBENCH_ATTACHMENT_BYTES
         )));
     }
+    let type_metadata = png_dimensions(&bytes).map(|(width, height)| {
+        lash::attachments::AttachmentTypeMetadata::image(Some(width), Some(height))
+    });
     let attachment = state
         .attachment_store
         .put(
             bytes,
-            lash_core::AttachmentCreateMeta::new(media_type, None, Some(name.to_string())),
+            lash::attachments::AttachmentCreateMeta::new(
+                media_type,
+                type_metadata,
+                Some(name.to_string()),
+            ),
         )
         .await
         // Audited: the content-addressed attachment store has no session identity or tombstone error variant.
@@ -191,11 +198,11 @@ async fn retrieve_attachment(
     }
     let stored = match state
         .attachment_store
-        .get(&lash_core::AttachmentId::new(attachment_id))
+        .get(&lash::attachments::AttachmentId::new(attachment_id))
         .await
     {
         Ok(stored) => stored,
-        Err(lash_core::AttachmentStoreError::NotFound(_)) => {
+        Err(lash::persistence::AttachmentStoreError::NotFound(_)) => {
             return Err(AppError::not_found(format!(
                 "attachment `{attachment_id}` was not found"
             )));
@@ -232,12 +239,12 @@ fn transcript_rows_from_committed(
         .into_entries()
         .into_iter()
         .filter_map(|entry| match entry.payload {
-            lash_core::ChronologicalPayload::Message(message) => {
+            lash::persistence::ChronologicalPayload::Message(message) => {
                 Some(TranscriptRow::Message {
                     message: chat_message_from_committed(&message),
                 })
             }
-            lash_core::ChronologicalPayload::ProtocolEvent(event) => {
+            lash::persistence::ChronologicalPayload::ProtocolEvent(event) => {
                 match lash_protocol_rlm::decode_rlm_protocol_event(&event) {
                     Some(lash_rlm_types::RlmProtocolEvent::RlmAssistantContent(content))
                         if !content.reasoning.trim().is_empty() =>
@@ -387,11 +394,11 @@ async fn send_turn(
     if let Some(attachment_id) = attachment_id.as_deref() {
         match state
             .attachment_store
-            .get(&lash_core::AttachmentId::new(attachment_id))
+            .get(&lash::attachments::AttachmentId::new(attachment_id))
             .await
         {
             Ok(_) => {}
-            Err(lash_core::AttachmentStoreError::NotFound(_)) => {
+            Err(lash::persistence::AttachmentStoreError::NotFound(_)) => {
                 return Err(AppError::not_found(format!(
                     "attachment `{attachment_id}` was not found"
                 )));
@@ -632,14 +639,14 @@ async fn set_trigger_enabled(
     let command = if request.enabled {
         lash::triggers::TriggerCommand::Enable {
             owner_scope: record.owner_scope.clone(),
-            actor: lash_core::ProcessOriginator::session(lash_core::SessionScope::new(&session_id)),
+            actor: lash::process::ProcessOriginator::session(lash::process::SessionScope::new(&session_id)),
             subscription_key: record.subscription_key.clone(),
             expected_revision: record.revision,
         }
     } else {
         lash::triggers::TriggerCommand::Disable {
             owner_scope: record.owner_scope.clone(),
-            actor: lash_core::ProcessOriginator::session(lash_core::SessionScope::new(&session_id)),
+            actor: lash::process::ProcessOriginator::session(lash::process::SessionScope::new(&session_id)),
             subscription_key: record.subscription_key.clone(),
             expected_revision: record.revision,
         }
@@ -688,7 +695,7 @@ async fn delete_trigger(
             &format!("workbench-trigger-delete-{}", uuid::Uuid::new_v4()),
             lash::triggers::TriggerCommand::Delete {
                 owner_scope: record.owner_scope.clone(),
-                actor: lash_core::ProcessOriginator::session(lash_core::SessionScope::new(&session_id)),
+                actor: lash::process::ProcessOriginator::session(lash::process::SessionScope::new(&session_id)),
                 subscription_key: record.subscription_key.clone(),
                 expected_revision: record.revision,
             },
@@ -1154,8 +1161,8 @@ async fn cancel_work(
         )));
     }
     let session_id = match &process.originator {
-        lash_core::ProcessOriginator::Session { session_id } => session_id.clone(),
-        lash_core::ProcessOriginator::Host { .. } => state.current_session_id(),
+        lash::process::ProcessOriginator::Session { session_id } => session_id.clone(),
+        lash::process::ProcessOriginator::Host { .. } => state.current_session_id(),
     };
     let operation_id = format!("workbench-process-cancel-{}", uuid::Uuid::new_v4());
     restate::submit_process_cancel(

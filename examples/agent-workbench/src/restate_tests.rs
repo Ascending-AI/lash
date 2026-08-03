@@ -11,19 +11,20 @@ struct CountingProcessEffectController {
     process_starts: AtomicUsize,
 }
 
-impl lash_core::AwaitEventResolver for CountingProcessEffectController {}
+impl lash::runtime::AwaitEventResolver for CountingProcessEffectController {}
 
 #[async_trait::async_trait]
-impl lash_core::RuntimeEffectController for CountingProcessEffectController {
+impl lash::runtime::RuntimeEffectController for CountingProcessEffectController {
     async fn execute_effect(
         &self,
-        envelope: lash_core::RuntimeEffectEnvelope,
-        local_executor: lash_core::RuntimeEffectLocalExecutor<'_>,
-    ) -> Result<lash_core::RuntimeEffectOutcome, lash_core::RuntimeEffectControllerError> {
+        envelope: lash::runtime::RuntimeEffectEnvelope,
+        local_executor: lash::runtime::RuntimeEffectLocalExecutor<'_>,
+    ) -> Result<lash::runtime::RuntimeEffectOutcome, lash::runtime::RuntimeEffectControllerError>
+    {
         if matches!(
             &envelope.command,
-            lash_core::RuntimeEffectCommand::Process { command }
-                if matches!(command.as_ref(), lash_core::ProcessCommand::Start { .. })
+            lash::runtime::RuntimeEffectCommand::Process { command }
+                if matches!(command.as_ref(), lash::runtime::ProcessCommand::Start { .. })
         ) {
             self.process_starts.fetch_add(1, Ordering::SeqCst);
         }
@@ -32,14 +33,14 @@ impl lash_core::RuntimeEffectController for CountingProcessEffectController {
 }
 
 struct OccurrenceFailureTriggerStore {
-    inner: lash_core::InMemoryTriggerStore,
+    inner: lash::triggers::InMemoryTriggerStore,
     failure: lash::plugins::PluginError,
 }
 
 impl OccurrenceFailureTriggerStore {
     fn new(failure: lash::plugins::PluginError) -> Self {
         Self {
-            inner: lash_core::InMemoryTriggerStore::new(),
+            inner: lash::triggers::InMemoryTriggerStore::new(),
             failure,
         }
     }
@@ -189,8 +190,8 @@ fn cron_sync_classifies_permanent_errors_terminal_and_unknown_errors_retryable()
 #[test]
 fn runtime_shape_uses_the_shared_terminal_classifier() {
     let error = AppError::runtime(lash::EmbedError::Runtime(
-        lash_core::RuntimeError::new("runtime_store", "retired controller-owned session")
-            .with_cause(lash_core::RuntimeErrorCause::SessionDeleted {
+        lash::runtime::RuntimeError::new("runtime_store", "retired controller-owned session")
+            .with_cause(lash::runtime::RuntimeErrorCause::SessionDeleted {
                 session_id: "retired-session".to_string(),
             }),
     ));
@@ -209,7 +210,7 @@ fn nested_deleted_session_details_preserve_controller_store_context() {
         session_id: "retired-nested-context".to_string(),
     };
     let error = lash::EmbedError::Plugin(lash::plugins::PluginError::RuntimeEffectController(
-        lash_core::RuntimeEffectControllerError::from(source),
+        lash::runtime::RuntimeEffectControllerError::from(source),
     ));
 
     assert_eq!(
@@ -295,7 +296,7 @@ async fn cron_occurrence_call_site_terminalizes_typed_refusals_and_retries_unkno
         (
             "typed permanent refusal",
             lash::plugins::PluginError::RuntimeEffectController(
-                lash_core::RuntimeEffectControllerError::from(
+                lash::runtime::RuntimeEffectControllerError::from(
                     lash::persistence::StoreError::SessionDeleted {
                         session_id: session_id.to_string(),
                     },
@@ -364,7 +365,7 @@ async fn cron_occurrence_call_site_terminalizes_typed_refusals_and_retries_unkno
 #[tokio::test]
 async fn cron_occurrence_redrive_reemits_the_reserved_process_start() {
     let data_dir = tempfile::tempdir().expect("tempdir");
-    let trigger_store = Arc::new(lash_core::InMemoryTriggerStore::default());
+    let trigger_store = Arc::new(lash::triggers::InMemoryTriggerStore::default());
     let state = crate::tests::recoverable_chat_test_state_with_trigger_store(
         data_dir.path(),
         Arc::clone(&trigger_store) as Arc<dyn lash::triggers::TriggerStore>,
@@ -376,21 +377,21 @@ async fn cron_occurrence_redrive_reemits_the_reserved_process_start() {
         "fig806-cron-register",
         lash::triggers::TriggerCommand::Register {
             owner_scope: lash::triggers::TriggerOwnerScope::session("fig806-cron-session"),
-            actor: lash_core::ProcessOriginator::session(lash_core::SessionScope::new(
+            actor: lash::process::ProcessOriginator::session(lash::process::SessionScope::new(
                 "fig806-cron-session",
             )),
             draft: lash::triggers::TriggerSubscriptionDraft::for_process(
                 "fig806/cron",
-                lash_core::ProcessExecutionEnvRef::new("process-env:fig806-cron"),
+                lash::process::ProcessExecutionEnvRef::new("process-env:fig806-cron"),
                 crate::CRON_SCHEDULE_SOURCE_TYPE,
                 source_key,
-                lash_core::ProcessInput::Engine {
+                lash::process::ProcessInput::Engine {
                     kind: "fig806-cron-engine".to_string(),
                     payload: serde_json::json!({}),
                 },
-                lash_core::ProcessIdentity::new("fig806-cron-engine"),
+                lash::process::ProcessIdentity::new("fig806-cron-engine"),
             )
-            .with_payload_schema(lash_core::LashSchema::any()),
+            .with_payload_schema(lash::triggers::LashSchema::any()),
         },
     )
     .await
@@ -411,9 +412,9 @@ async fn cron_occurrence_redrive_reemits_the_reserved_process_start() {
     let fired_at = "2026-07-30T12:00:00+00:00".to_string();
 
     for attempt in 0..2 {
-        let scoped = lash_core::ScopedEffectController::borrowed(
+        let scoped = lash::runtime::ScopedEffectController::borrowed(
             &controller,
-            lash_core::ExecutionScope::runtime_operation("fig806-cron-redrive"),
+            lash::runtime::ExecutionScope::runtime_operation("fig806-cron-redrive"),
         )
         .expect("scope cron trigger emission");
         emit_cron_occurrence_with_effect_controller(

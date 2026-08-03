@@ -95,12 +95,90 @@
         )
         .await
         .expect("replay first assistant transcript after a later turn");
+        let committed = first_session.read_view();
+        let committed_sequence: lash::messages::MessageSequence =
+            committed.messages().to_vec().into();
+        let committed_sequence: lash::messages::MessageSequence = serde_json::from_value(
+            serde_json::to_value(&committed_sequence).expect("serialize committed message sequence"),
+        )
+        .expect("deserialize committed message sequence");
         assert_eq!(
-            first_session.read_view().messages().len(),
+            committed_sequence.len(),
             4,
             "turn replay must not append a duplicate assistant message"
         );
-        assert_eq!(first_session.read_view().turn_index(), 2);
+        assert_eq!(
+            committed_sequence
+                .iter()
+                .map(|message| message.role)
+                .collect::<Vec<_>>(),
+            vec![
+                lash::messages::MessageRole::User,
+                lash::messages::MessageRole::Assistant,
+                lash::messages::MessageRole::User,
+                lash::messages::MessageRole::Assistant,
+            ]
+        );
+        let projection: lash::persistence::ChronologicalProjection =
+            committed.chronological_projection();
+        let entries: &[lash::persistence::ChronologicalEntry] = projection.entries();
+        assert_eq!(
+            entries.iter().map(|entry| entry.index).collect::<Vec<_>>(),
+            vec![0, 1, 2, 3, 4, 5, 6, 7]
+        );
+        let projected_kinds = entries
+            .iter()
+            .map(|entry| match &entry.payload {
+                lash::persistence::ChronologicalPayload::Message(message) => match message.role {
+                    lash::messages::MessageRole::User => "user",
+                    lash::messages::MessageRole::Assistant => "assistant",
+                    lash::messages::MessageRole::System => "system",
+                    lash::messages::MessageRole::Event => "event",
+                },
+                lash::persistence::ChronologicalPayload::ProtocolEvent(event) => {
+                    assert_eq!(event.plugin_id, "rlm_protocol");
+                    if event.payload.get("RlmDiagnostic").is_some() {
+                        "rlm_diagnostic"
+                    } else if event.payload.get("RlmTrajectoryEntry").is_some() {
+                        "rlm_trajectory"
+                    } else {
+                        panic!("unexpected RLM protocol payload: {:?}", event.payload);
+                    }
+                }
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            projected_kinds,
+            vec![
+                "user",
+                "rlm_diagnostic",
+                "rlm_trajectory",
+                "assistant",
+                "user",
+                "rlm_diagnostic",
+                "rlm_trajectory",
+                "assistant",
+            ]
+        );
+        let projected_messages = entries
+            .iter()
+            .filter_map(|entry| match &entry.payload {
+                lash::persistence::ChronologicalPayload::Message(message) => {
+                    Some((message.role, lash::message_text(message)))
+                }
+                lash::persistence::ChronologicalPayload::ProtocolEvent(_) => None,
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            projected_messages,
+            vec![
+                (lash::messages::MessageRole::User, "resume question one".to_string()),
+                (lash::messages::MessageRole::Assistant, "resume answer one".to_string()),
+                (lash::messages::MessageRole::User, "resume question two".to_string()),
+                (lash::messages::MessageRole::Assistant, "resume answer two".to_string()),
+            ]
+        );
+        assert_eq!(committed.turn_index(), 2);
         first_session.close().await.expect("close first session");
         drop(first_core);
         drop(first_registry);

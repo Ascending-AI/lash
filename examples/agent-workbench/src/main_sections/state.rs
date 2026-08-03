@@ -185,7 +185,7 @@ struct AttachmentUploadRequest {
 
 #[derive(Clone, Debug, Serialize)]
 struct AttachmentUploadResponse {
-    attachment: lash_core::AttachmentRef,
+    attachment: lash::attachments::AttachmentRef,
     retrieve_url: String,
 }
 
@@ -919,15 +919,15 @@ impl WorkbenchQueuedWorkSubmitter {
                 policy: lash::runtime::SessionPolicy::default(),
             })
             .await
-            .map_err(lash_core::RuntimeEffectControllerError::from)?;
+            .map_err(lash::runtime::RuntimeEffectControllerError::from)?;
         let queued = store
             .list_queued_work(session_id)
             .await
-            .map_err(lash_core::RuntimeEffectControllerError::from)?;
+            .map_err(lash::runtime::RuntimeEffectControllerError::from)?;
         let next_turn_inputs = store
             .list_pending_turn_inputs(session_id)
             .await
-            .map_err(lash_core::RuntimeEffectControllerError::from)?
+            .map_err(lash::runtime::RuntimeEffectControllerError::from)?
             .into_iter()
             .any(|input| {
                 matches!(

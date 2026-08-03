@@ -18,7 +18,7 @@ fn queued_work_test_draft(
 fn workbench_process_wake_draft(
     wake: lash::process::ProcessWakeDelivery,
 ) -> lash::persistence::QueuedWorkBatchDraft {
-    let source_key = lash_core::process_wake_source_key(&wake.process_id, wake.sequence);
+    let source_key = lash::process::process_wake_source_key(&wake.process_id, wake.sequence);
     let process_id = wake.process_id.clone();
     let sequence = wake.sequence;
     lash::persistence::QueuedWorkBatchDraft::new(
@@ -152,8 +152,8 @@ fn workbench_lists_and_controls_individual_queued_batches() {
         };
         assert!(events.iter().any(|event| matches!(
             &event.payload,
-            lash_core::SessionObservationEventPayload::QueueChanged { kind, batch_ids }
-                if *kind == lash_core::SessionQueueEventKind::Cancelled
+            lash::observe::SessionObservationEventPayload::QueueChanged { kind, batch_ids }
+                if *kind == lash::observe::SessionQueueEventKind::Cancelled
                     && batch_ids.as_slice() == std::slice::from_ref(&first.batch_id)
         )));
 
@@ -209,19 +209,20 @@ fn targeted_workbench_drain_preserves_earlier_wake_and_absorbs_live_redelivery()
             .expect("open targeted wake receiver");
 
         let clock = Arc::new(
-            lash_core::testing::conformance::WakeDeliveryConformanceClock::new(
+            lash::testing::conformance::WakeDeliveryConformanceClock::new(
                 1_800_000_000_000,
             ),
         );
+        let wake_delivery_config = lash::process::WakeDeliveryConfig::new(10_000)
+            .expect("valid wake expiry")
+            .with_enqueuing_stale_after_ms(25)
+            .expect("valid stale claim age");
+        assert_eq!(wake_delivery_config.delivery_expiry_ms, 10_000);
+        assert_eq!(wake_delivery_config.enqueuing_stale_after_ms, 25);
         let registry = Arc::new(
-            lash_core::TestLocalProcessRegistry::default()
-                .with_clock(Arc::clone(&clock) as Arc<dyn lash_core::Clock>)
-                .with_wake_delivery_config(
-                    lash_core::WakeDeliveryConfig::new(10_000)
-                        .expect("valid wake expiry")
-                        .with_enqueuing_stale_after_ms(25)
-                        .expect("valid stale claim age"),
-                ),
+            lash::testing::TestLocalProcessRegistry::default()
+                .with_clock(Arc::clone(&clock) as Arc<dyn lash::runtime::Clock>)
+                .with_wake_delivery_config(wake_delivery_config),
         ) as Arc<dyn lash::process::ProcessRegistry>;
         let process_id = "workbench-targeted-wake-process";
         registry
@@ -236,17 +237,17 @@ fn targeted_workbench_drain_preserves_earlier_wake_and_absorbs_live_redelivery()
                 )
                 .with_extra_event_types([lash::process::ProcessEventType {
                     name: "producer.wake".to_string(),
-                    payload_schema: lash_core::LashSchema::any(),
-                    semantics: lash_core::ProcessEventSemanticsSpec {
+                    payload_schema: lash::triggers::LashSchema::any(),
+                    semantics: lash::process::ProcessEventSemanticsSpec {
                         wake: Some(lash::process::ProcessWakeSpec {
-                            when: Some(lash_core::ProcessValueSelector::Present(
+                            when: Some(lash::process::ProcessValueSelector::Present(
                                 "/wake_input".to_string(),
                             )),
-                            input: lash_core::ProcessValueSelector::Pointer(
+                            input: lash::process::ProcessValueSelector::Pointer(
                                 "/wake_input".to_string(),
                             ),
                         }),
-                        ..lash_core::ProcessEventSemanticsSpec::default()
+                        ..lash::process::ProcessEventSemanticsSpec::default()
                     },
                 }])
                 .with_wake_session_id(Some(session_id.clone())),
@@ -335,17 +336,33 @@ fn targeted_workbench_drain_preserves_earlier_wake_and_absorbs_live_redelivery()
             "removing selected-drain settlement must leave the wrong receiver evidence"
         );
 
-        clock.advance(26);
-        let redelivery = lash_core::WakeDeliveryDriver::drive_pending_once(
+        clock.advance(24);
+        let before_stale_boundary = lash::process::WakeDeliveryDriver::drive_pending_once(
             Arc::clone(&registry),
             Arc::clone(&store_factory),
             None,
-            Arc::clone(&clock) as Arc<dyn lash_core::Clock>,
+            Arc::clone(&clock) as Arc<dyn lash::runtime::Clock>,
+            32,
+        )
+        .await
+        .expect("claimed wake stays unavailable before configured stale age");
+        assert_eq!(before_stale_boundary.inspected, 0);
+
+        clock.advance(1);
+        let redelivery: lash::process::WakeDeliveryDriveReport =
+            lash::process::WakeDeliveryDriver::drive_pending_once(
+            Arc::clone(&registry),
+            Arc::clone(&store_factory),
+            None,
+            Arc::clone(&clock) as Arc<dyn lash::runtime::Clock>,
             32,
         )
         .await
         .expect("redeliver earlier wake through host driver");
+        assert_eq!(redelivery.inspected, 1);
         assert_eq!(redelivery.enqueued, 1);
+        assert_eq!(redelivery.discarded_expired, 0);
+        assert_eq!(redelivery.discarded_target_gone, 0);
         assert_eq!(redelivery.floor_absorbed, 1);
         assert_eq!(redelivery.discarded_sequence_rewound, 0);
         assert_eq!(redelivery.retryable_failures, 0);
@@ -360,6 +377,166 @@ fn targeted_workbench_drain_preserves_earlier_wake_and_absorbs_live_redelivery()
             vec![earlier.batch_id.as_str()],
             "live-row absorption must preserve the skipped earlier wake"
         );
+
+        let expiry_clock = Arc::new(
+            lash::testing::conformance::WakeDeliveryConformanceClock::new(
+                1_900_000_000_000,
+            ),
+        );
+        let expiry_config = lash::process::WakeDeliveryConfig::new(50)
+            .expect("valid boundary wake expiry")
+            .with_enqueuing_stale_after_ms(25)
+            .expect("valid boundary stale age");
+        let expiry_registry = Arc::new(
+            lash::testing::TestLocalProcessRegistry::default()
+                .with_clock(Arc::clone(&expiry_clock) as Arc<dyn lash::runtime::Clock>)
+                .with_wake_delivery_config(expiry_config),
+        ) as Arc<dyn lash::process::ProcessRegistry>;
+        expiry_registry
+            .register_process(
+                lash::process::ProcessRegistration::new(
+                    "workbench-expiring-wake-process",
+                    lash::process::ProcessInput::External {
+                        metadata: Value::Null,
+                    },
+                    lash::process::RecoveryDisposition::ExternallyOwned,
+                    lash::process::ProcessProvenance::host(),
+                )
+                .with_extra_event_types([lash::process::ProcessEventType {
+                    name: "producer.wake".to_string(),
+                    payload_schema: lash::triggers::LashSchema::any(),
+                    semantics: lash::process::ProcessEventSemanticsSpec {
+                        wake: Some(lash::process::ProcessWakeSpec {
+                            when: Some(lash::process::ProcessValueSelector::Present(
+                                "/wake_input".to_string(),
+                            )),
+                            input: lash::process::ProcessValueSelector::Pointer(
+                                "/wake_input".to_string(),
+                            ),
+                        }),
+                        ..lash::process::ProcessEventSemanticsSpec::default()
+                    },
+                }])
+                .with_wake_session_id(Some("workbench-never-created-target".to_string())),
+            )
+            .await
+            .expect("register expiring wake producer");
+        expiry_registry
+            .append_event(
+                "workbench-expiring-wake-process",
+                lash::process::ProcessEventAppendRequest::new(
+                    "producer.wake",
+                    json!({"wake_input": "expires"}),
+                ),
+            )
+            .await
+            .expect("append expiring wake");
+        let first_expiry_attempt = lash::process::WakeDeliveryDriver::drive_pending_once(
+            Arc::clone(&expiry_registry),
+            Arc::clone(&store_factory),
+            None,
+            Arc::clone(&expiry_clock) as Arc<dyn lash::runtime::Clock>,
+            32,
+        )
+        .await
+        .expect("defer wake for a target that has never existed");
+        assert_eq!(first_expiry_attempt.inspected, 1);
+        assert_eq!(first_expiry_attempt.retryable_failures, 1);
+        assert_eq!(first_expiry_attempt.discarded_target_gone, 0);
+        expiry_clock.advance(49);
+        let before_expiry_boundary = lash::process::WakeDeliveryDriver::drive_pending_once(
+            Arc::clone(&expiry_registry),
+            Arc::clone(&store_factory),
+            None,
+            Arc::clone(&expiry_clock) as Arc<dyn lash::runtime::Clock>,
+            32,
+        )
+        .await
+        .expect("wake remains deferred before configured expiry");
+        assert_eq!(before_expiry_boundary.inspected, 0);
+        expiry_clock.advance(1);
+        let at_expiry_boundary = lash::process::WakeDeliveryDriver::drive_pending_once(
+            expiry_registry,
+            Arc::clone(&store_factory),
+            None,
+            expiry_clock as Arc<dyn lash::runtime::Clock>,
+            32,
+        )
+        .await
+        .expect("discard wake at configured expiry");
+        assert_eq!(at_expiry_boundary.inspected, 1);
+        assert_eq!(at_expiry_boundary.discarded_expired, 1);
+        assert_eq!(at_expiry_boundary.discarded_target_gone, 0);
+
+        let deleted_target_id = "workbench-deleted-wake-target";
+        store_factory
+            .create_store(&lash::persistence::SessionStoreCreateRequest {
+                session_id: deleted_target_id.to_string(),
+                relation: lash::persistence::SessionRelation::Root,
+                policy: session.policy_snapshot(),
+            })
+            .await
+            .expect("create wake target before deletion");
+        store_factory
+            .delete_session(deleted_target_id)
+            .await
+            .expect("delete wake target before delivery");
+        let target_gone_registry = Arc::new(
+            lash::testing::TestLocalProcessRegistry::default()
+                .with_clock(Arc::clone(&clock) as Arc<dyn lash::runtime::Clock>)
+                .with_wake_delivery_config(wake_delivery_config),
+        ) as Arc<dyn lash::process::ProcessRegistry>;
+        target_gone_registry
+            .register_process(
+                lash::process::ProcessRegistration::new(
+                    "workbench-target-gone-wake-process",
+                    lash::process::ProcessInput::External {
+                        metadata: Value::Null,
+                    },
+                    lash::process::RecoveryDisposition::ExternallyOwned,
+                    lash::process::ProcessProvenance::host(),
+                )
+                .with_extra_event_types([lash::process::ProcessEventType {
+                    name: "producer.wake".to_string(),
+                    payload_schema: lash::triggers::LashSchema::any(),
+                    semantics: lash::process::ProcessEventSemanticsSpec {
+                        wake: Some(lash::process::ProcessWakeSpec {
+                            when: Some(lash::process::ProcessValueSelector::Present(
+                                "/wake_input".to_string(),
+                            )),
+                            input: lash::process::ProcessValueSelector::Pointer(
+                                "/wake_input".to_string(),
+                            ),
+                        }),
+                        ..lash::process::ProcessEventSemanticsSpec::default()
+                    },
+                }])
+                .with_wake_session_id(Some(deleted_target_id.to_string())),
+            )
+            .await
+            .expect("register target-gone wake producer");
+        target_gone_registry
+            .append_event(
+                "workbench-target-gone-wake-process",
+                lash::process::ProcessEventAppendRequest::new(
+                    "producer.wake",
+                    json!({"wake_input": "target gone"}),
+                ),
+            )
+            .await
+            .expect("append target-gone wake");
+        let target_gone = lash::process::WakeDeliveryDriver::drive_pending_once(
+            target_gone_registry,
+            Arc::clone(&store_factory),
+            None,
+            Arc::clone(&clock) as Arc<dyn lash::runtime::Clock>,
+            32,
+        )
+        .await
+        .expect("discard wake for deleted target");
+        assert_eq!(target_gone.inspected, 1);
+        assert_eq!(target_gone.discarded_expired, 0);
+        assert_eq!(target_gone.discarded_target_gone, 1);
 
         // The operator's queue view is a snapshot. "Run this one" can arrive
         // after something else already drained that batch, so a selection can

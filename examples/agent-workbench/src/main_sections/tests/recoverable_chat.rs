@@ -134,7 +134,7 @@ async fn recoverable_chat_test_state_with_dependencies(
 }
 
 struct RetiringSubscriptionListTriggerStore {
-    inner: lash_core::InMemoryTriggerStore,
+    inner: lash::triggers::InMemoryTriggerStore,
     store_factory: Arc<dyn lash::persistence::SessionStoreFactory>,
     session_to_retire: Mutex<Option<String>>,
 }
@@ -142,7 +142,7 @@ struct RetiringSubscriptionListTriggerStore {
 impl RetiringSubscriptionListTriggerStore {
     fn new(store_factory: Arc<dyn lash::persistence::SessionStoreFactory>) -> Self {
         Self {
-            inner: lash_core::InMemoryTriggerStore::new(),
+            inner: lash::triggers::InMemoryTriggerStore::new(),
             store_factory,
             session_to_retire: Mutex::new(None),
         }
@@ -1001,7 +1001,7 @@ async fn send_turn_state_projection_stays_readable_and_settles_to_durable_truth(
                         );
                         response.parts.insert(
                             0,
-                            lash_core::LlmOutputPart::Reasoning {
+                            lash::direct::LlmOutputPart::Reasoning {
                                 text: "durable reasoning disclosure".to_string(),
                                 replay: None,
                             },

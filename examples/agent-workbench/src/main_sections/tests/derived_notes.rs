@@ -178,7 +178,7 @@ mod derived_notes_tests {
             .unwrap_or_else(|error| panic!("run derived-notes turn `{text}`: {error:?}"));
     }
 
-    async fn derived_notes_graph(session: &lash::LashSession) -> lash_core::SessionGraph {
+    async fn derived_notes_graph(session: &lash::LashSession) -> lash::persistence::SessionGraph {
         session.admin().state().export().await.session_graph
     }
 
@@ -190,7 +190,7 @@ mod derived_notes_tests {
             .expect("the session has a committed leaf")
     }
 
-    fn derived_note_base(node: &lash_core::SessionNodeRecord) -> Option<&str> {
+    fn derived_note_base(node: &lash::persistence::SessionNodeRecord) -> Option<&str> {
         let (plugin_type, body) = node.plugin()?;
         if plugin_type != WORKBENCH_DERIVED_NOTE_PLUGIN_TYPE {
             return None;

@@ -2,6 +2,8 @@ struct WorkbenchPluginFactory {
     tavily_api_key: String,
     mail_world: mail::MailWorld,
     derived_notes: WorkbenchDerivedNotes,
+    config_changes: WorkbenchConfigChanges,
+    context_budget: WorkbenchContextBudget,
 }
 
 impl WorkbenchPluginFactory {
@@ -10,6 +12,8 @@ impl WorkbenchPluginFactory {
             tavily_api_key: tavily_api_key.into(),
             mail_world: mail::MailWorld::new(),
             derived_notes: WorkbenchDerivedNotes::default(),
+            config_changes: WorkbenchConfigChanges::default(),
+            context_budget: WorkbenchContextBudget::default(),
         }
     }
 
@@ -23,6 +27,18 @@ impl WorkbenchPluginFactory {
     #[cfg(test)]
     fn derived_notes(&self) -> WorkbenchDerivedNotes {
         self.derived_notes.clone()
+    }
+
+    #[cfg(test)]
+    fn config_changes(&self) -> WorkbenchConfigChanges {
+        self.config_changes.clone()
+    }
+
+    /// Handle on what the per-turn context transform actually saw, so a harness
+    /// can check the prepared context the runtime handed it.
+    #[cfg(test)]
+    fn context_budget(&self) -> WorkbenchContextBudget {
+        self.context_budget.clone()
     }
 }
 
@@ -50,6 +66,8 @@ impl PluginFactory for WorkbenchPluginFactory {
             tavily_api_key: self.tavily_api_key.clone(),
             mail_world: self.mail_world.clone(),
             derived_notes: self.derived_notes.clone(),
+            config_changes: self.config_changes.clone(),
+            context_budget: self.context_budget.clone(),
         }))
     }
 }
@@ -58,6 +76,8 @@ struct WorkbenchSessionPlugin {
     tavily_api_key: String,
     mail_world: mail::MailWorld,
     derived_notes: WorkbenchDerivedNotes,
+    config_changes: WorkbenchConfigChanges,
+    context_budget: WorkbenchContextBudget,
 }
 
 impl SessionPlugin for WorkbenchSessionPlugin {
@@ -102,17 +122,155 @@ impl SessionPlugin for WorkbenchSessionPlugin {
         reg.tools().provider(Arc::new(mail::MockMailProvider::new(
             self.mail_world.clone(),
         )))?;
+        reg.context()
+            .prepare_turn(0, Arc::new(self.context_budget.clone()));
         let derived_notes = self.derived_notes.clone();
+        let config_changes = self.config_changes.clone();
         reg.session().on_event(Arc::new(move |event| {
             let derived_notes = derived_notes.clone();
+            let config_changes = config_changes.clone();
             Box::pin(async move {
-                if let lash_core::PluginLifecycleEvent::TurnPersisted(ctx) = event {
-                    derived_notes.on_turn_persisted(&ctx).await;
+                match event {
+                    lash::plugins::PluginLifecycleEvent::TurnPersisted(ctx) => {
+                        derived_notes.on_turn_persisted(&ctx).await;
+                    }
+                    lash::plugins::PluginLifecycleEvent::SessionConfigChanged(ctx) => {
+                        config_changes.observe(&ctx).await?;
+                    }
+                    _ => {}
                 }
                 Ok(())
             })
         }));
         Ok(())
+    }
+}
+
+/// The workbench's per-turn context budgeter: a [`TurnContextTransform`] that
+/// reads the prepared context the runtime assembled and states the shape of it
+/// back to the model.
+///
+/// This is the seam a rolling-context strategy uses. It is deliberately
+/// read-mostly here: durable compaction is an explicit Agent Frame transition,
+/// not a rewrite of the prepared context, so the transform annotates rather
+/// than truncates. The annotation is load-bearing evidence — it is rendered
+/// into the prompt the provider actually receives, so a harness can prove the
+/// transform ran against the real assembled context and not a fabricated one.
+#[derive(Clone, Default)]
+struct WorkbenchContextBudget {
+    observed: Arc<Mutex<Option<WorkbenchContextObservation>>>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct WorkbenchContextObservation {
+    session_id: String,
+    message_count: usize,
+    contribution_count: usize,
+    tool_provider_count: usize,
+    include_base_tools: bool,
+    committed_message_count: usize,
+    max_context_tokens: Option<usize>,
+    last_prompt_context_tokens: Option<usize>,
+}
+
+impl WorkbenchContextBudget {
+    #[cfg(test)]
+    fn observation(&self) -> Option<WorkbenchContextObservation> {
+        self.observed
+            .lock()
+            .expect("workbench context budget lock")
+            .clone()
+    }
+}
+
+#[async_trait]
+impl lash::plugins::TurnContextTransform for WorkbenchContextBudget {
+    fn id(&self) -> &'static str {
+        "agent_workbench.context_budget"
+    }
+
+    async fn transform(
+        &self,
+        ctx: &lash::plugins::TurnTransformContext<'_>,
+        input: lash::plugins::PreparedContext,
+    ) -> Result<lash::plugins::PreparedContext, lash::plugins::ContextError> {
+        let observation = WorkbenchContextObservation {
+            session_id: ctx.session_id.clone(),
+            message_count: input.messages.len(),
+            contribution_count: input.prompt_contributions.len(),
+            tool_provider_count: input.tool_providers.len(),
+            include_base_tools: input.include_base_tools,
+            committed_message_count: ctx.state.messages().len(),
+            max_context_tokens: ctx.max_context_tokens,
+            last_prompt_context_tokens: ctx
+                .prompt_usage
+                .as_ref()
+                .map(|usage: &lash::runtime::PromptUsage| usage.prompt_context_tokens),
+        };
+        *self
+            .observed
+            .lock()
+            .expect("workbench context budget lock") = Some(observation.clone());
+
+        let mut output = input;
+        output.prompt_contributions.push(
+            lash::prompt::PromptContribution::new(
+                lash::prompt::PromptSlot::Environment,
+                "Context budget",
+                format!(
+                    "prepared {} message(s) from {} committed; base tools {}",
+                    observation.message_count,
+                    observation.committed_message_count,
+                    if observation.include_base_tools {
+                        "on"
+                    } else {
+                        "off"
+                    }
+                ),
+            )
+            .with_priority(-100),
+        );
+        Ok(output)
+    }
+}
+
+#[derive(Clone, Default)]
+struct WorkbenchConfigChanges {
+    latest: Arc<Mutex<Option<WorkbenchConfigChange>>>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct WorkbenchConfigChange {
+    session_id: String,
+    previous_model_id: String,
+    current_model_id: String,
+    service_model_id: String,
+}
+
+impl WorkbenchConfigChanges {
+    async fn observe(
+        &self,
+        ctx: &lash::plugins::SessionConfigChangedContext,
+    ) -> Result<(), PluginError> {
+        let snapshot = ctx.sessions.snapshot_current().await?;
+        *self
+            .latest
+            .lock()
+            .expect("workbench config change lock") = Some(WorkbenchConfigChange {
+            session_id: ctx.session_id.clone(),
+            previous_model_id: ctx.previous.model_id().to_string(),
+            current_model_id: ctx.current.model_id().to_string(),
+            service_model_id: snapshot.policy.model_id().to_string(),
+        });
+        Ok(())
+    }
+
+    #[cfg(test)]
+    fn latest(&self) -> Option<WorkbenchConfigChange> {
+        self.latest
+            .lock()
+            .expect("workbench config change lock")
+            .clone()
     }
 }
 
@@ -123,7 +281,7 @@ impl SessionPlugin for WorkbenchSessionPlugin {
 /// Deriving a summary is slow — in a real deployment it is a model call — so a
 /// note is always written back *after* the commit it describes, into a session
 /// whose head has already moved on. That is the whole reason each note carries
-/// [`lash_core::AppendSessionNodesRequest::requires_ancestor_node_id`]: the
+/// [`lash::plugins::AppendSessionNodesRequest::requires_ancestor_node_id`]: the
 /// worker keeps no session bookkeeping at all (session ids change when an
 /// operator rewinds a branch, and the queue would be wrong the moment they
 /// did), and instead lets the append itself decide. A head that merely moved
@@ -164,7 +322,7 @@ enum WorkbenchSettledNote {
 }
 
 impl WorkbenchDerivedNotes {
-    async fn on_turn_persisted(&self, ctx: &lash_core::SessionStateChangedContext<'_>) {
+    async fn on_turn_persisted(&self, ctx: &lash::plugins::SessionStateChangedContext<'_>) {
         for note in self.take_pending() {
             self.write_back(ctx, note).await;
         }
@@ -184,12 +342,12 @@ impl WorkbenchDerivedNotes {
 
     async fn write_back(
         &self,
-        ctx: &lash_core::SessionStateChangedContext<'_>,
+        ctx: &lash::plugins::SessionStateChangedContext<'_>,
         note: WorkbenchPendingNote,
     ) {
-        let request = lash_core::AppendSessionNodesRequest {
+        let request = lash::plugins::AppendSessionNodesRequest {
             operation_id: format!("workbench-derived-note:{}", note.base_node_id),
-            nodes: vec![lash_core::SessionAppendNode::plugin(
+            nodes: vec![lash::plugins::SessionAppendNode::plugin(
                 WORKBENCH_DERIVED_NOTE_PLUGIN_TYPE,
                 json!({
                     // The base rides in the payload: the note's position in the
@@ -205,7 +363,7 @@ impl WorkbenchDerivedNotes {
             .append_session_nodes(&ctx.session_id, request)
             .await
         {
-            Ok(lash_core::AppendSessionNodesResult::Appended {
+            Ok(lash::plugins::AppendSessionNodesResult::Appended {
                 node_ids,
                 leaf_node_id,
             }) => WorkbenchSettledNote::Written {
@@ -216,7 +374,7 @@ impl WorkbenchDerivedNotes {
                     .unwrap_or_else(|| leaf_node_id.clone()),
                 leaf_node_id,
             },
-            Ok(lash_core::AppendSessionNodesResult::StaleBranch { required_node_id }) => {
+            Ok(lash::plugins::AppendSessionNodesResult::StaleBranch { required_node_id }) => {
                 WorkbenchSettledNote::AbandonedBranch {
                     base_node_id: required_node_id,
                 }
@@ -277,7 +435,7 @@ const WORKBENCH_DERIVED_NOTE_LOG_LIMIT: usize = 64;
 
 /// Stand-in for the expensive derivation: in a deployment this is a model call
 /// over the transcript, which is exactly why the write-back lands a commit late.
-fn workbench_note_summary(state: &lash_core::SessionReadView) -> String {
+fn workbench_note_summary(state: &lash::persistence::SessionReadView) -> String {
     format!("{} messages after turn {}", state.messages().len(), state.turn_index())
 }
 

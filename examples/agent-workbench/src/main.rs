@@ -73,6 +73,7 @@ const TURN_TERMINAL_ATTACH_TIMEOUT: Duration = Duration::from_millis(250);
 include!("main_sections/bootstrap.rs");
 include!("main_sections/stores.rs");
 include!("main_sections/state.rs");
+include!("main_sections/attachment_media.rs");
 include!("main_sections/routes.rs");
 include!("main_sections/admin.rs");
 include!("main_sections/app_state.rs");
