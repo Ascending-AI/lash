@@ -1,4 +1,22 @@
 #[test]
+fn healthz_reports_workbench_fingerprint() {
+    // scripts/agent-workbench-dev.sh readiness-checks this exact shape to
+    // distinguish the workbench from a random process on the port.
+    let Json(body) = sync_await(healthz());
+    assert_eq!(body["service"], "agent-workbench");
+    assert_eq!(body["status"], "ok");
+}
+
+#[test]
+fn workbench_renders_scoped_tabs_and_trigger_lifecycle_controls() {
+    assert!(ui::INDEX_HTML.contains("id=\"newSessionTab\""));
+    assert!(ui::INDEX_HTML.contains("id=\"triggerRegistrations\""));
+    assert!(ui::INDEX_HTML.contains("re-enable"));
+    assert!(ui::INDEX_HTML.contains("deleteTrigger"));
+    assert!(ui::INDEX_HTML.contains("scopedSessionId"));
+}
+
+#[test]
 fn workbench_ui_renders_accounts_panel() {
     assert!(ui::INDEX_HTML.contains("id=\"accountsView\""));
     assert!(ui::INDEX_HTML.contains("data-view=\"accounts\""));

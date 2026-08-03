@@ -206,6 +206,10 @@ pub mod persistence {
 pub mod plugins {
     pub use lash_core::PluginDirective;
     pub use lash_core::PluginOptions;
+    /// Durable session-lifecycle operations a hook context carries, alongside
+    /// [`SessionStateService`] and [`SessionGraphService`]. Named by
+    /// [`TurnTransformContext`] and [`CompactionContext`]; runtime-implemented.
+    pub use lash_core::SessionLifecycleService;
     pub use lash_core::plugin::{
         AfterToolCallHook, AfterTurnHook, AssistantResponseHook, AssistantResponseHookContext,
         AssistantResponseTransform, AssistantStreamHook, AssistantStreamHookContext,
@@ -237,8 +241,8 @@ pub mod plugins {
     };
     /// Per-turn context assembly: the prepared messages, prompt contributions,
     /// and tool providers a [`TurnContextTransform`] may rewrite before the
-    /// model call.
-    pub use lash_core::{PreparedContext, TurnContextTransform};
+    /// model call, and the read-only context the transform is handed.
+    pub use lash_core::{PreparedContext, TurnContextTransform, TurnTransformContext};
     pub use lash_plugin_tool_output_budget::{
         ToolOutputBudgetConfig, ToolOutputBudgetMode, ToolOutputBudgetPluginFactory,
         tool_output_budget_stack as runtime_plugin_stack,
@@ -457,6 +461,9 @@ pub mod durability {
 
 pub mod runtime {
     pub use crate::core::AdvancedLashCoreBuilder;
+    /// Prompt-token accounting a [`TurnContextTransform`](crate::plugins::TurnContextTransform)
+    /// is handed so a rolling strategy can budget against the last render.
+    pub use lash_core::PromptUsage;
     /// Structured cause attached to a [`RuntimeError`] via
     /// [`RuntimeError::with_cause`], so a host distinguishes an expected
     /// retirement (a deleted session) from a real fault.

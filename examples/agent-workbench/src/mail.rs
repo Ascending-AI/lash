@@ -24,7 +24,7 @@ use crate::MAIL_RECEIVED_SOURCE_TYPE;
 use async_trait::async_trait;
 use lash::tools::{
     LashlangToolBinding, ToolCall, ToolContract, ToolDefinition, ToolDefinitionLashlangExt,
-    ToolManifest, ToolProvider, ToolResult,
+    ToolManifest, ToolProvider, ToolResult, ToolRetryPolicy,
 };
 use lash::triggers::{TriggerOccurrenceRequest, empty_trigger_source_key};
 use serde::{Deserialize, Serialize};
@@ -323,6 +323,15 @@ fn definition_for(slug: &str, display_name: &str, operation: &str) -> ToolDefini
     let name = tool_name(slug, operation);
     let (input_schema, summary) = operation_schemas(operation);
     let description = format!("{summary} Account `{display_name}` (inbox.{slug}).");
+    let retry_policy = match operation {
+        "list" => ToolRetryPolicy::safe(3, 25, 250),
+        "delete" => ToolRetryPolicy::Idempotent {
+            max_attempts: 3,
+            base_delay_ms: 25,
+            max_delay_ms: 250,
+        },
+        _ => ToolRetryPolicy::Never,
+    };
     ToolDefinition::raw(
         format!("tool:{name}"),
         name,
@@ -330,6 +339,7 @@ fn definition_for(slug: &str, display_name: &str, operation: &str) -> ToolDefini
         input_schema,
         json!({ "type": "object" }),
     )
+    .with_retry_policy(retry_policy)
     .with_lashlang_binding(
         LashlangToolBinding::new(["inbox", slug], operation).with_authority_type("Inbox"),
     )
@@ -509,14 +519,45 @@ mod tests {
         world.add_account("Personal").expect("add personal");
         let provider = MockMailProvider::new(world);
 
-        let names: Vec<String> = provider
-            .tool_manifests()
-            .into_iter()
-            .map(|manifest| manifest.name)
+        let manifests = provider.tool_manifests();
+        let names: Vec<String> = manifests
+            .iter()
+            .map(|manifest| manifest.name.clone())
             .collect();
         assert!(names.contains(&"inbox__work__send".to_string()));
         assert!(names.contains(&"inbox__personal__delete".to_string()));
         assert_eq!(names.len(), 6);
+
+        let send = manifests
+            .iter()
+            .find(|manifest| manifest.name == "inbox__work__send")
+            .expect("resolve non-retryable send manifest");
+        assert_eq!(send.retry_policy, ToolRetryPolicy::Never);
+        let list = manifests
+            .iter()
+            .find(|manifest| manifest.name == "inbox__work__list")
+            .expect("resolve safely retryable list manifest");
+        assert_eq!(
+            list.retry_policy,
+            ToolRetryPolicy::Safe {
+                max_attempts: 3,
+                base_delay_ms: 25,
+                max_delay_ms: 250,
+            }
+        );
+        let delete = manifests
+            .iter()
+            .find(|manifest| manifest.name == "inbox__work__delete")
+            .expect("resolve idempotent delete manifest");
+        assert_eq!(
+            delete.retry_policy,
+            ToolRetryPolicy::Idempotent {
+                max_attempts: 3,
+                base_delay_ms: 25,
+                max_delay_ms: 250,
+            }
+        );
+        assert!(provider.resolve_contract("inbox__work__delete").is_some());
 
         let manifest = provider
             .tool_manifests()

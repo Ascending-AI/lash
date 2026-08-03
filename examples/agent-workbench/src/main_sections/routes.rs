@@ -156,11 +156,18 @@ async fn upload_attachment(
             MAX_WORKBENCH_ATTACHMENT_BYTES
         )));
     }
+    let type_metadata = png_dimensions(&bytes).map(|(width, height)| {
+        lash::attachments::AttachmentTypeMetadata::image(Some(width), Some(height))
+    });
     let attachment = state
         .attachment_store
         .put(
             bytes,
-            lash::attachments::AttachmentCreateMeta::new(media_type, None, Some(name.to_string())),
+            lash::attachments::AttachmentCreateMeta::new(
+                media_type,
+                type_metadata,
+                Some(name.to_string()),
+            ),
         )
         .await
         // Audited: the content-addressed attachment store has no session identity or tombstone error variant.

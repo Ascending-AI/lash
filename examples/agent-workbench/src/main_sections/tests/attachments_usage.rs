@@ -102,6 +102,23 @@ async fn run_attachment_usage_gate(
     let attachment_store = Arc::new(lash::persistence::FileAttachmentStore::new(
         data_dir.join("attachments"),
     )) as Arc<dyn lash::persistence::AttachmentStore>;
+    assert_eq!(
+        attachment_store.persistence(),
+        lash::persistence::AttachmentStorePersistence::Durable
+    );
+    let normalized_media_type = lash::attachments::MediaType::parse(" IMAGE/PNG ")
+        .expect("normalize host-supplied media type");
+    assert!(normalized_media_type.is_image());
+    assert_eq!(normalized_media_type.family(), "image");
+    assert_eq!(normalized_media_type.as_str(), "image/png");
+    assert!(lash::attachments::MediaType::parse("image//png").is_err());
+    let missing_id = lash::attachments::AttachmentId::new("missing-workbench-attachment");
+    match attachment_store.get(&missing_id).await {
+        Err(lash::persistence::AttachmentStoreError::NotFound(id)) => {
+            assert_eq!(id, missing_id);
+        }
+        other => panic!("missing attachment must return NotFound, got {other:?}"),
+    }
     let provider_requests = Arc::new(Mutex::new(Vec::new()));
     let provider_requests_for_call = Arc::clone(&provider_requests);
     let provider = lash::testing::TestProvider::builder()
@@ -118,11 +135,13 @@ async fn run_attachment_usage_gate(
         })
         .build()
         .into_handle();
+    let system_clock = Arc::new(lash::runtime::SystemClock);
     let core = attachment_usage_gate_core(
         data_dir,
         first_factory,
         Arc::clone(&process_registry),
         Arc::clone(&attachment_store),
+        Arc::clone(&system_clock) as Arc<dyn lash::runtime::Clock>,
         provider,
         Some(Arc::new(JsonlTraceSink::new(trace_path.clone())) as Arc<dyn TraceSink>),
     );
@@ -146,13 +165,45 @@ async fn run_attachment_usage_gate(
     )
     .await
     .expect("upload attachment through workbench API handler");
+    let uploaded_ref: &lash::attachments::AttachmentRef = &uploaded.attachment;
+    assert_eq!(uploaded_ref.media_type().as_str(), "image/png");
     assert_eq!(uploaded.attachment.byte_len, png_bytes.len() as u64);
+    assert_eq!(uploaded.attachment.label.as_deref(), Some("usage-gate.png"));
+    match uploaded.attachment.type_metadata.as_ref() {
+        Some(lash::attachments::AttachmentTypeMetadata::Image { width, height }) => {
+            assert_eq!((*width, *height), (Some(1), Some(1)));
+        }
+        other => panic!("uploaded PNG must retain image dimensions, got {other:?}"),
+    }
+    let stored: lash::persistence::StoredAttachment = attachment_store
+        .get(&uploaded.attachment.id)
+        .await
+        .expect("read uploaded bytes from workbench attachment store");
+    assert_eq!(stored.bytes, png_bytes);
+    let metadata = lash::attachments::AttachmentMeta::new(
+        uploaded.attachment.id.clone(),
+        uploaded.attachment.media_type.clone(),
+        uploaded.attachment.byte_len,
+        uploaded.attachment.type_metadata.clone(),
+        uploaded.attachment.label.clone(),
+    );
+    let metadata: lash::attachments::AttachmentMeta = serde_json::from_value(
+        serde_json::to_value(metadata).expect("serialize uploaded attachment metadata"),
+    )
+    .expect("deserialize uploaded attachment metadata");
+    assert_eq!(metadata.id, uploaded.attachment.id);
+    assert_eq!(metadata.media_type.as_str(), "image/png");
+    assert_eq!(metadata.byte_len, png_bytes.len() as u64);
+    assert_eq!(metadata.type_metadata, uploaded.attachment.type_metadata);
+    assert_eq!(metadata.label.as_deref(), Some("usage-gate.png"));
+    assert_eq!(metadata.as_ref(), uploaded.attachment);
     assert_eq!(
         uploaded.retrieve_url,
         format!("/api/attachments/{}", uploaded.attachment.id)
     );
     assert_retrieved_attachment(&state, &uploaded.attachment.id, &png_bytes).await;
 
+    let runtime_window_start_ms = lash::runtime::Clock::timestamp_ms(system_clock.as_ref());
     let turn_id = format!("attachment-usage-gate-{}", uuid::Uuid::new_v4());
     let request = restate::WorkbenchTurnWorkflowRequest {
         turn_id: turn_id.clone(),
@@ -183,6 +234,19 @@ async fn run_attachment_usage_gate(
         .await
         .expect("run deterministic attachment turn");
     assert_eq!(output.final_value(), Some(&json!("attachment accounted")));
+    let runtime_window_end_ms = lash::runtime::Clock::timestamp_ms(system_clock.as_ref());
+    let latest_node_ms = session
+        .read_view()
+        .session_graph()
+        .active_path_nodes()
+        .last()
+        .and_then(|node| chrono::DateTime::parse_from_rfc3339(&node.timestamp).ok())
+        .map(|timestamp| timestamp.timestamp_millis() as u64)
+        .expect("runtime-stamped graph node timestamp");
+    assert!(
+        (runtime_window_start_ms..=runtime_window_end_ms).contains(&latest_node_ms),
+        "runtime timestamp {latest_node_ms} must come from the injected SystemClock window {runtime_window_start_ms}..={runtime_window_end_ms}"
+    );
     session.close().await.expect("close gate session");
 
     {
@@ -226,6 +290,7 @@ async fn run_attachment_usage_gate(
         resumed_factory,
         Arc::clone(&process_registry),
         Arc::clone(&resumed_attachment_store),
+        Arc::new(lash::runtime::SystemClock),
         resumed_provider,
         None,
     );
@@ -257,6 +322,7 @@ fn attachment_usage_gate_core(
     store_factory: Arc<dyn lash::persistence::SessionStoreFactory>,
     process_registry: Arc<dyn lash::process::ProcessRegistry>,
     attachment_store: Arc<dyn lash::persistence::AttachmentStore>,
+    clock: Arc<dyn lash::runtime::Clock>,
     provider: ProviderHandle,
     trace_sink: Option<Arc<dyn TraceSink>>,
 ) -> LashCore {
@@ -270,6 +336,7 @@ fn attachment_usage_gate_core(
         .store_factory(store_factory)
         .process_registry(process_registry)
         .attachment_store(attachment_store)
+        .clock(clock)
         .disable_queued_work_driver();
     if let Some(trace_sink) = trace_sink {
         builder = builder.trace_sink(trace_sink).trace_level(TraceLevel::Extended);
