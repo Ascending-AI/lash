@@ -2,7 +2,6 @@
 //! reopen, delete, and session metadata.
 
 use super::*;
-use crate::facade_support::SessionBindingFacadeOps;
 
 /// Run the [`SessionStoreFactory`](crate::SessionStoreFactory) conformance
 /// suite against the backend produced by `make`. `make` must return a fresh,

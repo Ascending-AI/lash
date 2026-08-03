@@ -1,5 +1,3 @@
-use lash_core::facade_support::SessionGraphFacadeOps;
-
 const ATTACHMENT_USAGE_GATE_PNG_BASE64: &str =
     "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=";
 
@@ -237,11 +235,12 @@ async fn run_attachment_usage_gate(
         .expect("run deterministic attachment turn");
     assert_eq!(output.final_value(), Some(&json!("attachment accounted")));
     let runtime_window_end_ms = lash::runtime::Clock::timestamp_ms(system_clock.as_ref());
-    let latest_node_ms = session
-        .read_view()
-        .session_graph()
-        .active_path_nodes()
-        .last()
+    let read_view = session.read_view();
+    let graph = read_view.session_graph();
+    let latest_node_ms = graph
+        .leaf_node_id
+        .as_deref()
+        .and_then(|node_id| graph.find_node(node_id))
         .and_then(|node| chrono::DateTime::parse_from_rfc3339(&node.timestamp).ok())
         .map(|timestamp| timestamp.timestamp_millis() as u64)
         .expect("runtime-stamped graph node timestamp");

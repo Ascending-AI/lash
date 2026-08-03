@@ -1,6 +1,6 @@
 pub(crate) mod replay;
 
-use crate::facade_support::{ProcessRecordProjection, SessionScopeFacadeOps, ToolStateFacadeOps};
+use crate::facade_support::ToolStateFacadeOps;
 use arc_swap::ArcSwap;
 use std::sync::Arc;
 use tokio::sync::Mutex;

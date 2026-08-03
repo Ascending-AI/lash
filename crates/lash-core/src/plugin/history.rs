@@ -265,20 +265,6 @@ impl SessionReadView {
     }
 }
 
-/// Facade-internal operations for [`SessionReadView`].
-///
-/// This is not integrator surface, carries no stability promise, and exists
-/// only for the `lash` facade. See [ADR 0051](https://github.com/Ascending-AI/lash/blob/main/docs/adr/0051-the-facade-is-the-host-api-core-is-integrator-seams.md).
-pub trait SessionReadViewFacadeOps {
-    fn materialized_session_graph(&self) -> crate::SessionGraph;
-}
-
-impl SessionReadViewFacadeOps for SessionReadView {
-    fn materialized_session_graph(&self) -> crate::SessionGraph {
-        self.session_graph().clone()
-    }
-}
-
 /// Context passed to a turn-context transform.
 #[derive(Clone)]
 pub struct TurnTransformContext<'run> {

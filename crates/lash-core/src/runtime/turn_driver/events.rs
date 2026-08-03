@@ -142,7 +142,12 @@ async fn send_independent_turn_event(
     event_tx: &mpsc::Sender<RuntimeStreamEvent>,
     event: TurnEvent,
 ) {
-    send_turn_activity(event_tx, TurnActivityId::fresh(), event).await;
+    send_turn_activity(
+        event_tx,
+        TurnActivityId::new(uuid::Uuid::new_v4().to_string()),
+        event,
+    )
+    .await;
 }
 
 pub(in crate::runtime) async fn emit_semantic_response_parts(
@@ -176,7 +181,7 @@ pub(in crate::runtime) async fn emit_semantic_response_parts(
                     .as_ref()
                     .and_then(|meta| meta.id.clone())
                     .map(TurnActivityId::new)
-                    .unwrap_or_else(TurnActivityId::fresh);
+                    .unwrap_or_else(|| TurnActivityId::new(uuid::Uuid::new_v4().to_string()));
                 send_turn_activity(
                     event_tx,
                     correlation_id,
@@ -189,7 +194,7 @@ pub(in crate::runtime) async fn emit_semantic_response_parts(
                     .as_ref()
                     .and_then(|meta| meta.item_id.clone())
                     .map(TurnActivityId::new)
-                    .unwrap_or_else(TurnActivityId::fresh);
+                    .unwrap_or_else(|| TurnActivityId::new(uuid::Uuid::new_v4().to_string()));
                 send_turn_activity(
                     event_tx,
                     correlation_id,

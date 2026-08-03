@@ -384,58 +384,64 @@ impl RuntimeSessionState {
     }
 }
 
-/// Facade-internal operations for [`RuntimeSessionState`].
-///
-/// This is not integrator surface, carries no stability promise, and exists
-/// only for the `lash` facade. See [ADR 0051](https://github.com/Ascending-AI/lash/blob/main/docs/adr/0051-the-facade-is-the-host-api-core-is-integrator-seams.md).
-pub trait RuntimeSessionStateFacadeOps {
-    fn turn_state(&self) -> PersistedTurnState;
+pub(crate) mod facade_ops {
+    use super::*;
 
-    fn turn_scope(&self, turn_id: impl Into<String>) -> crate::ExecutionScope;
+    /// Facade-internal operations for [`RuntimeSessionState`].
+    ///
+    /// This is not integrator surface, carries no stability promise, and exists
+    /// only for the `lash` facade. See [ADR 0051](https://github.com/Ascending-AI/lash/blob/main/docs/adr/0051-the-facade-is-the-host-api-core-is-integrator-seams.md).
+    pub trait RuntimeSessionStateFacadeOps {
+        fn turn_state(&self) -> PersistedTurnState;
 
-    fn queue_drain_scope(&self, drain_id: impl Into<String>) -> crate::ExecutionScope;
+        // APIT is intentionally non-dyn-compatible; this trait has one static-dispatch impl.
+        fn turn_scope(&self, turn_id: impl Into<String>) -> crate::ExecutionScope;
 
-    fn process_execution_env_spec(
-        &self,
-        fallback_policy: &SessionPolicy,
-    ) -> crate::ProcessExecutionEnvSpec;
-}
+        // APIT is intentionally non-dyn-compatible; this trait has one static-dispatch impl.
+        fn queue_drain_scope(&self, drain_id: impl Into<String>) -> crate::ExecutionScope;
 
-impl RuntimeSessionStateFacadeOps for RuntimeSessionState {
-    fn turn_state(&self) -> PersistedTurnState {
-        PersistedTurnState {
-            turn_index: self.turn_index,
-            token_usage: self.token_usage.clone(),
-            last_prompt_usage: self.last_prompt_usage.clone(),
-            protocol_turn_options: self.protocol_turn_options.clone(),
+        fn process_execution_env_spec(
+            &self,
+            fallback_policy: &SessionPolicy,
+        ) -> crate::ProcessExecutionEnvSpec;
+    }
+
+    impl RuntimeSessionStateFacadeOps for RuntimeSessionState {
+        fn turn_state(&self) -> PersistedTurnState {
+            PersistedTurnState {
+                turn_index: self.turn_index,
+                token_usage: self.token_usage.clone(),
+                last_prompt_usage: self.last_prompt_usage.clone(),
+                protocol_turn_options: self.protocol_turn_options.clone(),
+            }
         }
-    }
 
-    fn turn_scope(&self, turn_id: impl Into<String>) -> crate::ExecutionScope {
-        crate::ExecutionScope::turn(&self.session_id, turn_id)
-    }
+        fn turn_scope(&self, turn_id: impl Into<String>) -> crate::ExecutionScope {
+            crate::ExecutionScope::turn(&self.session_id, turn_id)
+        }
 
-    fn queue_drain_scope(&self, drain_id: impl Into<String>) -> crate::ExecutionScope {
-        crate::ExecutionScope::queue_drain(&self.session_id, drain_id)
-    }
+        fn queue_drain_scope(&self, drain_id: impl Into<String>) -> crate::ExecutionScope {
+            crate::ExecutionScope::queue_drain(&self.session_id, drain_id)
+        }
 
-    fn process_execution_env_spec(
-        &self,
-        fallback_policy: &SessionPolicy,
-    ) -> crate::ProcessExecutionEnvSpec {
-        self.current_agent_frame()
-            .map(|frame| {
-                crate::ProcessExecutionEnvSpec::new(
-                    frame.assignment.plugin_options.clone(),
-                    self.policy.clone(),
-                )
-            })
-            .unwrap_or_else(|| {
-                crate::ProcessExecutionEnvSpec::new(
-                    crate::PluginOptions::default(),
-                    fallback_policy.clone(),
-                )
-            })
+        fn process_execution_env_spec(
+            &self,
+            fallback_policy: &SessionPolicy,
+        ) -> crate::ProcessExecutionEnvSpec {
+            self.current_agent_frame()
+                .map(|frame| {
+                    crate::ProcessExecutionEnvSpec::new(
+                        frame.assignment.plugin_options.clone(),
+                        self.policy.clone(),
+                    )
+                })
+                .unwrap_or_else(|| {
+                    crate::ProcessExecutionEnvSpec::new(
+                        crate::PluginOptions::default(),
+                        fallback_policy.clone(),
+                    )
+                })
+        }
     }
 }
 

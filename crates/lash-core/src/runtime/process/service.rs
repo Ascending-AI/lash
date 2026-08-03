@@ -1,4 +1,3 @@
-use crate::facade_support::ProcessRecordProjection;
 use crate::plugin::PluginError;
 
 use super::events::{ProcessAwaitOutput, ProcessEvent};

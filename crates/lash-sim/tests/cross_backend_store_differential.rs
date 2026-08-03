@@ -18,6 +18,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
+use lash_core::facade_support::ToolStateFacadeOps;
 use lash_core::runtime::{
     QueuedWorkBatch, QueuedWorkBatchDraft, QueuedWorkClaim, QueuedWorkClaimBoundary,
     QueuedWorkPayload,
@@ -2442,4 +2443,3 @@ async fn cross_backend_store_differential_agrees() {
          compared_backends=[in-memory,sqlite,postgres]"
     );
 }
-use lash_core::facade_support::{SessionBindingFacadeOps, ToolStateFacadeOps};

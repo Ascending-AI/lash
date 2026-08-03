@@ -156,33 +156,19 @@ impl SessionBinding {
         }
     }
 
+    pub fn from_create_request(request: &crate::SessionStoreCreateRequest) -> Self {
+        Self {
+            session_id: request.session_id.clone(),
+            relation: request.relation.clone(),
+            model_id: request.policy.model.id.clone(),
+            cwd: std::env::current_dir()
+                .ok()
+                .and_then(|path| path.to_str().map(str::to_string)),
+        }
+    }
+
     pub fn validate(&self) -> Result<(), StoreError> {
         validate_session_id(&self.session_id)
-    }
-}
-
-pub(crate) mod session_binding_facade_ops {
-    use super::*;
-
-    /// Facade-internal operations for [`SessionBinding`].
-    ///
-    /// This is not integrator surface, carries no stability promise, and exists
-    /// only for the `lash` facade. See [ADR 0051](https://github.com/Ascending-AI/lash/blob/main/docs/adr/0051-the-facade-is-the-host-api-core-is-integrator-seams.md).
-    pub trait SessionBindingFacadeOps {
-        fn from_create_request(request: &crate::SessionStoreCreateRequest) -> Self;
-    }
-
-    impl SessionBindingFacadeOps for SessionBinding {
-        fn from_create_request(request: &crate::SessionStoreCreateRequest) -> Self {
-            Self {
-                session_id: request.session_id.clone(),
-                relation: request.relation.clone(),
-                model_id: request.policy.model.id.clone(),
-                cwd: std::env::current_dir()
-                    .ok()
-                    .and_then(|path| path.to_str().map(str::to_string)),
-            }
-        }
     }
 }
 
@@ -566,24 +552,6 @@ impl SessionExecutionLease {
             owner: self.owner.clone(),
             lease_token: self.lease_token.clone(),
             fencing_token: self.fencing_token,
-        }
-    }
-}
-
-pub(crate) mod session_execution_lease_completion_facade_ops {
-    use super::*;
-
-    /// Facade-internal operations for [`SessionExecutionLeaseCompletion`].
-    ///
-    /// This is not integrator surface, carries no stability promise, and exists
-    /// only for the `lash` facade. See [ADR 0051](https://github.com/Ascending-AI/lash/blob/main/docs/adr/0051-the-facade-is-the-host-api-core-is-integrator-seams.md).
-    pub trait SessionExecutionLeaseCompletionFacadeOps {
-        fn from_lease(lease: &SessionExecutionLease) -> Self;
-    }
-
-    impl SessionExecutionLeaseCompletionFacadeOps for SessionExecutionLeaseCompletion {
-        fn from_lease(lease: &SessionExecutionLease) -> Self {
-            lease.completion()
         }
     }
 }

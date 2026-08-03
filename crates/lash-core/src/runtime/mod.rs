@@ -7,15 +7,15 @@ pub use config_ops::SessionConfigPatch;
 pub(crate) mod effect;
 pub use effect::promise_semantics;
 mod environment;
-pub(crate) mod error;
+mod error;
 mod event_pump;
 mod host;
 mod in_memory_store;
 mod io;
 mod lifecycle;
 mod logical_turn;
-pub(crate) mod observation;
-pub(crate) mod process;
+mod observation;
+mod process;
 mod process_work_driver;
 mod process_worker;
 pub(crate) use process_worker::release_process_execution_permit_while;
@@ -33,7 +33,7 @@ mod turn_commit_draft;
 pub(crate) mod turn_control;
 mod turn_driver;
 mod turn_graph_editor;
-pub(crate) mod turn_input_ingress;
+mod turn_input_ingress;
 mod turn_loop;
 mod turn_queue;
 mod usage;
@@ -69,9 +69,8 @@ use crate::{
 };
 use crate::{Effect, TurnMachine};
 
-use self::turn_activity_id_facade_ops::TurnActivityIdFacadeOps;
 #[cfg(test)]
-use self::turn_context_facade_ops::TurnContextFacadeOps;
+use self::facade_ops::TurnContextFacadeOps;
 use host::*;
 use session_execution_lease::*;
 use session_manager::*;
@@ -586,7 +585,7 @@ impl TurnContext {
     }
 }
 
-pub(crate) mod turn_context_facade_ops {
+pub(crate) mod facade_ops {
     use super::*;
 
     /// Facade-internal operations for [`TurnContext`].
@@ -600,6 +599,7 @@ pub(crate) mod turn_context_facade_ops {
 
         fn add_prompt_contribution(&mut self, contribution: crate::PromptContribution);
 
+        // APIT is intentionally non-dyn-compatible; this trait has one static-dispatch impl.
         fn replace_prompt_slot(
             &mut self,
             slot: crate::PromptSlot,
@@ -883,24 +883,6 @@ impl TurnActivityId {
     }
 }
 
-pub(crate) mod turn_activity_id_facade_ops {
-    use super::*;
-
-    /// Facade-internal operations for [`TurnActivityId`].
-    ///
-    /// This is not integrator surface, carries no stability promise, and exists
-    /// only for the `lash` facade. See [ADR 0051](https://github.com/Ascending-AI/lash/blob/main/docs/adr/0051-the-facade-is-the-host-api-core-is-integrator-seams.md).
-    pub trait TurnActivityIdFacadeOps {
-        fn fresh() -> Self;
-    }
-
-    impl TurnActivityIdFacadeOps for TurnActivityId {
-        fn fresh() -> Self {
-            Self(Arc::from(uuid::Uuid::new_v4().to_string()))
-        }
-    }
-}
-
 /// App-facing semantic activity emitted during a turn.
 ///
 /// `id` is unique per emitted activity event. `correlation_id` groups related
@@ -917,14 +899,14 @@ pub struct TurnActivity {
 impl TurnActivity {
     pub fn new(correlation_id: TurnActivityId, event: TurnEvent) -> Self {
         Self {
-            id: TurnActivityId::fresh(),
+            id: TurnActivityId::new(uuid::Uuid::new_v4().to_string()),
             correlation_id,
             event,
         }
     }
 
     pub fn independent(event: TurnEvent) -> Self {
-        let correlation_id = TurnActivityId::fresh();
+        let correlation_id = TurnActivityId::new(uuid::Uuid::new_v4().to_string());
         Self::new(correlation_id, event)
     }
 }

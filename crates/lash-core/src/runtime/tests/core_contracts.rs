@@ -1,5 +1,4 @@
 use super::*;
-use crate::facade_support::SessionScopeFacadeOps;
 use std::sync::{Arc, Mutex as StdMutex};
 
 #[derive(Default)]

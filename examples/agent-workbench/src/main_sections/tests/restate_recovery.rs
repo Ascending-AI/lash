@@ -1,4 +1,3 @@
-use lash_core::facade_support::LiveReplaySubscriptionFacadeOps;
 
 #[test]
 #[ignore = "requires a running Restate server; use `just agent-workbench-restate-e2e`"]
@@ -644,9 +643,13 @@ async fn live_restate_rate_limit_retry_converges_observers_to_one_copy_inner() {
         let mut events = Vec::new();
         let mut saw_turn_activity = false;
         loop {
-            let event = tokio::time::timeout(Duration::from_secs(20), subscription.next_event())
+            let event = tokio::time::timeout(
+                Duration::from_secs(20),
+                futures_util::StreamExt::next(&mut subscription),
+            )
                 .await
                 .expect("retry observer event timeout")
+                .expect("retry observer subscription closed")
                 .expect("retry observer event");
             saw_turn_activity |= matches!(
                 event.payload,

@@ -1,5 +1,4 @@
 use crate::PluginError;
-use crate::facade_support::RuntimeErrorFacadeOps;
 use crate::runtime::RuntimeError;
 
 use serde::{Deserialize, Serialize};

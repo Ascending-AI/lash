@@ -1,6 +1,5 @@
 use std::sync::Arc;
 
-use crate::facade_support::ProcessRecordProjection;
 use crate::plugin::PluginError;
 
 #[derive(Clone)]

@@ -1,4 +1,3 @@
-use lash_core::facade_support::LiveReplaySubscriptionFacadeOps;
 
 const LIVE_REPLAY_EVENTS_PER_TURN: usize = 96;
 const LIVE_REPLAY_MAIN_CAPACITY: usize = 256;
@@ -107,9 +106,13 @@ async fn run_once_live_replay_pressure(chat_turns: usize) -> anyhow::Result<Runt
                 };
                 let mut buffered_count = 0usize;
                 for _ in 1..LIVE_REPLAY_EVENTS_PER_TURN {
-                    tokio::time::timeout(Duration::from_secs(1), subscription.next_event())
+                    tokio::time::timeout(
+                        Duration::from_secs(1),
+                        futures_util::StreamExt::next(&mut subscription),
+                    )
                         .await
-                        .context("timed out reading buffered live replay event")??;
+                        .context("timed out reading buffered live replay event")?
+                        .context("live replay subscription closed")??;
                     buffered_count += 1;
                 }
                 store.append(
@@ -118,9 +121,13 @@ async fn run_once_live_replay_pressure(chat_turns: usize) -> anyhow::Result<Runt
                     Some(&turn_id),
                     live_replay_text_payload(format!("turn-{turn_index}-live-event")),
                 )?;
-                tokio::time::timeout(Duration::from_secs(1), subscription.next_event())
+                tokio::time::timeout(
+                    Duration::from_secs(1),
+                    futures_util::StreamExt::next(&mut subscription),
+                )
                     .await
-                    .context("timed out reading live replay event")??;
+                    .context("timed out reading live replay event")?
+                    .context("live replay subscription closed")??;
                 Ok((buffered_count, 1usize))
             })
             .await?;

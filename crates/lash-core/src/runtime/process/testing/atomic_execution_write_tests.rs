@@ -1,5 +1,4 @@
 use super::*;
-use crate::facade_support::ProcessLeaseCompletionFacadeOps;
 
 #[tokio::test]
 async fn claim_cannot_interleave_between_authority_validation_and_append() {

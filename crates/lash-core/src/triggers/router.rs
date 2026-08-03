@@ -1,6 +1,4 @@
 use super::*;
-#[cfg(test)]
-use crate::facade_support::ProcessOriginatorFacadeOps;
 
 pub fn deterministic_subscription_id(
     owner_scope: &TriggerOwnerScope,

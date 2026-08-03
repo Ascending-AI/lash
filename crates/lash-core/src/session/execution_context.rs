@@ -1,8 +1,6 @@
 use std::sync::Arc;
 
-#[cfg(test)]
-use crate::facade_support::ProcessOriginatorFacadeOps;
-use crate::facade_support::{ScopedEffectControllerFacadeOps, SessionScopeFacadeOps};
+use crate::facade_support::ScopedEffectControllerFacadeOps;
 use tokio::sync::mpsc::Sender;
 use tokio_util::sync::CancellationToken;
 

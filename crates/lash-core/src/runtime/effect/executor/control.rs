@@ -399,17 +399,21 @@ impl<'run> ScopedEffectController<'run> {
     }
 }
 
-/// Facade-internal operations for [`ScopedEffectController`].
-///
-/// This is not integrator surface, carries no stability promise, and exists
-/// only for the `lash` facade. See [ADR 0051](https://github.com/Ascending-AI/lash/blob/main/docs/adr/0051-the-facade-is-the-host-api-core-is-integrator-seams.md).
-pub trait ScopedEffectControllerFacadeOps {
-    fn execution_scope(&self) -> &ExecutionScope;
-}
+pub(crate) mod facade_ops {
+    use super::*;
 
-impl ScopedEffectControllerFacadeOps for ScopedEffectController<'_> {
-    fn execution_scope(&self) -> &ExecutionScope {
-        &self.scope
+    /// Facade-internal operations for [`ScopedEffectController`].
+    ///
+    /// This is not integrator surface, carries no stability promise, and exists
+    /// only for the `lash` facade. See [ADR 0051](https://github.com/Ascending-AI/lash/blob/main/docs/adr/0051-the-facade-is-the-host-api-core-is-integrator-seams.md).
+    pub trait ScopedEffectControllerFacadeOps {
+        fn execution_scope(&self) -> &ExecutionScope;
+    }
+
+    impl ScopedEffectControllerFacadeOps for ScopedEffectController<'_> {
+        fn execution_scope(&self) -> &ExecutionScope {
+            &self.scope
+        }
     }
 }
 

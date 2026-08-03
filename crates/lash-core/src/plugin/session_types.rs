@@ -142,6 +142,7 @@ pub struct AgentFrameReason(String);
 impl AgentFrameReason {
     pub(crate) const INITIAL: &'static str = "initial";
     pub(crate) const CONTINUE_AS: &'static str = "continue_as";
+    pub(crate) const COMPACTION: &'static str = "compaction";
     pub(crate) fn new(label: impl Into<String>) -> Self {
         Self(label.into())
     }
@@ -159,21 +160,21 @@ impl AgentFrameReason {
     }
 }
 
-/// Facade-internal operations for [`AgentFrameReason`].
-///
-/// This is not integrator surface, carries no stability promise, and exists
-/// only for the `lash` facade. See [ADR 0051](https://github.com/Ascending-AI/lash/blob/main/docs/adr/0051-the-facade-is-the-host-api-core-is-integrator-seams.md).
-pub trait AgentFrameReasonFacadeOps {
-    const COMPACTION: &'static str;
+pub(crate) mod facade_ops {
+    use super::*;
 
-    fn continue_as() -> Self;
-}
+    /// Facade-internal operations for [`AgentFrameReason`].
+    ///
+    /// This is not integrator surface, carries no stability promise, and exists
+    /// only for the `lash` facade. See [ADR 0051](https://github.com/Ascending-AI/lash/blob/main/docs/adr/0051-the-facade-is-the-host-api-core-is-integrator-seams.md).
+    pub trait AgentFrameReasonFacadeOps {
+        fn continue_as() -> Self;
+    }
 
-impl AgentFrameReasonFacadeOps for AgentFrameReason {
-    const COMPACTION: &'static str = "compaction";
-
-    fn continue_as() -> Self {
-        Self::new(Self::CONTINUE_AS)
+    impl AgentFrameReasonFacadeOps for AgentFrameReason {
+        fn continue_as() -> Self {
+            Self::new(Self::CONTINUE_AS)
+        }
     }
 }
 
@@ -554,6 +555,14 @@ impl SessionCreateRequest {
         self
     }
 
+    pub fn with_observed_processes(
+        mut self,
+        process_ids: impl IntoIterator<Item = impl Into<crate::ProcessId>>,
+    ) -> Self {
+        self.observed_processes = process_ids.into_iter().map(Into::into).collect();
+        self
+    }
+
     pub fn with_tool_access(mut self, tool_access: SessionToolAccess) -> Self {
         self.tool_access = tool_access;
         self
@@ -581,27 +590,6 @@ impl SessionCreateRequest {
 
     pub fn with_usage_source(mut self, usage_source: impl Into<String>) -> Self {
         self.usage_source = Some(usage_source.into());
-        self
-    }
-}
-
-/// Facade-internal operations for [`SessionCreateRequest`].
-///
-/// This is not integrator surface, carries no stability promise, and exists
-/// only for the `lash` facade. See [ADR 0051](https://github.com/Ascending-AI/lash/blob/main/docs/adr/0051-the-facade-is-the-host-api-core-is-integrator-seams.md).
-pub trait SessionCreateRequestFacadeOps {
-    fn with_observed_processes(
-        self,
-        process_ids: impl IntoIterator<Item = impl Into<crate::ProcessId>>,
-    ) -> Self;
-}
-
-impl SessionCreateRequestFacadeOps for SessionCreateRequest {
-    fn with_observed_processes(
-        mut self,
-        process_ids: impl IntoIterator<Item = impl Into<crate::ProcessId>>,
-    ) -> Self {
-        self.observed_processes = process_ids.into_iter().map(Into::into).collect();
         self
     }
 }

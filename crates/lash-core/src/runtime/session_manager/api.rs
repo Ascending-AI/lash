@@ -1,5 +1,4 @@
 use super::*;
-use crate::facade_support::ProcessRecordProjection;
 
 #[async_trait::async_trait]
 impl crate::plugin::SessionReadService for RuntimeSessionStateService {

@@ -243,34 +243,7 @@ impl PluginOptions {
         Ok(options)
     }
 
-    pub fn decode<T>(&self, plugin_id: &str) -> Result<Option<T>, serde_json::Error>
-    where
-        T: DeserializeOwned,
-    {
-        self.plugins
-            .get(plugin_id)
-            .cloned()
-            .map(serde_json::from_value)
-            .transpose()
-    }
-}
-
-/// Facade-internal operations for [`PluginOptions`].
-///
-/// This is not integrator surface, carries no stability promise, and exists
-/// only for the `lash` facade. See [ADR 0051](https://github.com/Ascending-AI/lash/blob/main/docs/adr/0051-the-facade-is-the-host-api-core-is-integrator-seams.md).
-pub trait PluginOptionsFacadeOps {
-    fn insert_typed<T>(
-        &mut self,
-        plugin_id: impl Into<String>,
-        extras: T,
-    ) -> Result<(), serde_json::Error>
-    where
-        T: Serialize;
-}
-
-impl PluginOptionsFacadeOps for PluginOptions {
-    fn insert_typed<T>(
+    pub fn insert_typed<T>(
         &mut self,
         plugin_id: impl Into<String>,
         extras: T,
@@ -281,5 +254,16 @@ impl PluginOptionsFacadeOps for PluginOptions {
         self.plugins
             .insert(plugin_id.into(), serde_json::to_value(extras)?);
         Ok(())
+    }
+
+    pub fn decode<T>(&self, plugin_id: &str) -> Result<Option<T>, serde_json::Error>
+    where
+        T: DeserializeOwned,
+    {
+        self.plugins
+            .get(plugin_id)
+            .cloned()
+            .map(serde_json::from_value)
+            .transpose()
     }
 }

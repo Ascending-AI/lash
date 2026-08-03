@@ -285,23 +285,6 @@ impl LiveReplaySubscription {
     }
 }
 
-/// Facade-internal operations for [`LiveReplaySubscription`].
-///
-/// This is not integrator surface, carries no stability promise, and exists
-/// only for the `lash` facade. See [ADR 0051](https://github.com/Ascending-AI/lash/blob/main/docs/adr/0051-the-facade-is-the-host-api-core-is-integrator-seams.md).
-#[allow(async_fn_in_trait)]
-pub trait LiveReplaySubscriptionFacadeOps {
-    async fn next_event(&mut self) -> Result<Arc<SessionObservationEvent>, LiveReplayStoreError>;
-}
-
-impl LiveReplaySubscriptionFacadeOps for LiveReplaySubscription {
-    async fn next_event(&mut self) -> Result<Arc<SessionObservationEvent>, LiveReplayStoreError> {
-        futures_util::StreamExt::next(self)
-            .await
-            .unwrap_or(Err(LiveReplayStoreError::Closed))
-    }
-}
-
 async fn live_replay_recv(
     mut receiver: broadcast::Receiver<Arc<SessionObservationEvent>>,
 ) -> LiveReplayRecvResult {
@@ -835,12 +818,18 @@ mod tests {
         else {
             panic!("expected subscription");
         };
-        let first = subscription.next_event().await.expect("replay");
+        let first = futures_util::StreamExt::next(&mut subscription)
+            .await
+            .expect("subscription open")
+            .expect("replay");
         assert_eq!(first.session_id, "s");
         store
             .append("s", SessionRevision(0), None, activity("b"))
             .expect("append b");
-        let second = subscription.next_event().await.expect("live");
+        let second = futures_util::StreamExt::next(&mut subscription)
+            .await
+            .expect("subscription open")
+            .expect("live");
         match &second.payload {
             SessionObservationEventPayload::TurnActivity(activity) => match &activity.event {
                 crate::TurnEvent::AssistantProseDelta { text } => assert_eq!(text.as_ref(), "b"),
@@ -875,7 +864,10 @@ mod tests {
                     activity(&format!("token-{ordinal}")),
                 )
                 .expect("append token event");
-            let live = subscription.next_event().await.expect("receive live event");
+            let live = futures_util::StreamExt::next(&mut subscription)
+                .await
+                .expect("subscription open")
+                .expect("receive live event");
             assert_eq!(live.cursor, event.cursor);
             let LiveReplayResult::Replayed(replayed) = store
                 .replay_after_cursor(&cursor)

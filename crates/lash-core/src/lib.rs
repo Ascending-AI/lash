@@ -83,6 +83,7 @@ pub mod facade_support {
     pub use crate::direct::DirectPart;
     pub use crate::direct::DirectRequest;
     pub use crate::direct::DirectRole;
+    pub use crate::facade_ops::ProtocolTurnOptionsFacadeOps;
     pub use crate::llm::transport::LlmTransportError;
     pub use crate::llm::transport::ProviderFailure;
     pub use crate::plugin::AssistantResponseTransform;
@@ -135,13 +136,8 @@ pub mod facade_support {
     pub use crate::plugin::TurnResultHookContext;
     pub use crate::plugin::TurnResultSummary;
     pub use crate::plugin::TurnTransformContext;
-    pub use crate::plugin::history::SessionReadViewFacadeOps;
-    pub use crate::plugin::protocol::PluginOptionsFacadeOps;
-    pub use crate::plugin::session_types::{
-        AgentFrameReasonFacadeOps, SessionCreateRequestFacadeOps,
-    };
+    pub use crate::plugin::session_types::facade_ops::AgentFrameReasonFacadeOps;
     pub use crate::plugin_stack::PluginStack;
-    pub use crate::protocol_turn_options_facade_ops::ProtocolTurnOptionsFacadeOps;
     pub use crate::provider::CacheRetention;
     pub use crate::provider::LlmTimeouts;
     pub use crate::provider::ModelEffortValidationCategory;
@@ -248,15 +244,10 @@ pub mod facade_support {
     pub use crate::runtime::current_epoch_ms;
     pub use crate::runtime::diff_token_ledger;
     pub use crate::runtime::diff_usage_reports;
-    pub use crate::runtime::effect::executor::control::ScopedEffectControllerFacadeOps;
+    pub use crate::runtime::effect::executor::control::facade_ops::ScopedEffectControllerFacadeOps;
     pub use crate::runtime::ensure_durable_effect_input;
     pub use crate::runtime::epoch_ms_from_system_time;
-    pub use crate::runtime::error::RuntimeErrorFacadeOps;
-    pub use crate::runtime::observation::replay::LiveReplaySubscriptionFacadeOps;
-    pub use crate::runtime::process::model::{
-        ProcessExecutionEnvSpecFacadeOps, ProcessLeaseCompletionFacadeOps,
-        ProcessOriginatorFacadeOps, ProcessRecordProjection, SessionScopeFacadeOps,
-    };
+    pub use crate::runtime::facade_ops::TurnContextFacadeOps;
     pub use crate::runtime::process_runtime_session_ids;
     pub use crate::runtime::process_signal_event_type;
     pub use crate::runtime::process_signal_wait_key;
@@ -264,12 +255,9 @@ pub mod facade_support {
     pub use crate::runtime::process_wake_source_key;
     pub use crate::runtime::promise_semantics;
     pub use crate::runtime::reconcile_pruned_trigger_deliveries;
-    pub use crate::runtime::state::RuntimeSessionStateFacadeOps;
+    pub use crate::runtime::state::facade_ops::RuntimeSessionStateFacadeOps;
     pub use crate::runtime::system_time_from_epoch_ms;
     pub use crate::runtime::terminal_append_request;
-    pub use crate::runtime::turn_activity_id_facade_ops::TurnActivityIdFacadeOps;
-    pub use crate::runtime::turn_context_facade_ops::TurnContextFacadeOps;
-    pub use crate::runtime::turn_input_ingress::PendingTurnInputCancelTargetFacadeOps;
     pub use crate::runtime::validate_generic_process_event_append;
     pub use crate::runtime::validate_replayed_effect_envelope;
     pub use crate::runtime::watch_process_registry;
@@ -287,8 +275,6 @@ pub mod facade_support {
     pub use crate::store::LeaseTimingsError;
     pub use crate::store::SessionHead;
     pub use crate::store::SessionPickerInfo;
-    pub use crate::store::session_binding_facade_ops::SessionBindingFacadeOps;
-    pub use crate::store::session_execution_lease_completion_facade_ops::SessionExecutionLeaseCompletionFacadeOps;
     pub use crate::tool_provider::ToolChildExecutionTraceHook;
     pub use crate::tool_provider::ToolSessionProcessAdmin;
     pub use crate::tool_provider::ToolTriggerClient;
@@ -297,8 +283,7 @@ pub mod facade_support {
     pub use crate::tool_registry::ToolRestoreReport;
     pub use crate::tool_registry::ToolSourceHandle;
     pub use crate::tool_registry::ToolStateEntry;
-    pub use crate::tool_registry::tool_registry_facade_ops::ToolRegistryFacadeOps;
-    pub use crate::tool_registry::tool_state_facade_ops::ToolStateFacadeOps;
+    pub use crate::tool_registry::facade_ops::{ToolRegistryFacadeOps, ToolStateFacadeOps};
     pub use crate::triggers::InMemoryTriggerStore;
     pub use crate::triggers::TriggerDeliveryEmitOutcome;
     pub use crate::triggers::TriggerDeliveryEmitReport;
@@ -588,7 +573,17 @@ impl ProtocolTurnOptions {
     }
 }
 
-pub(crate) mod protocol_turn_options_facade_ops {
+impl ProtocolTurnOptions {
+    pub fn decode<T>(&self) -> Result<T, ProtocolTurnOptionsError>
+    where
+        T: serde::de::DeserializeOwned,
+    {
+        ensure_protocol_turn_options_schema_version(self.schema_version)?;
+        serde_json::from_value(self.payload.clone()).map_err(ProtocolTurnOptionsError::Decode)
+    }
+}
+
+pub(crate) mod facade_ops {
     use super::{PROTOCOL_TURN_OPTIONS_SCHEMA_VERSION, ProtocolTurnOptions};
 
     /// Facade-internal operations for [`ProtocolTurnOptions`].
@@ -613,16 +608,6 @@ pub(crate) mod protocol_turn_options_facade_ops {
                 _ => override_options.clone(),
             }
         }
-    }
-}
-
-impl ProtocolTurnOptions {
-    pub fn decode<T>(&self) -> Result<T, ProtocolTurnOptionsError>
-    where
-        T: serde::de::DeserializeOwned,
-    {
-        ensure_protocol_turn_options_schema_version(self.schema_version)?;
-        serde_json::from_value(self.payload.clone()).map_err(ProtocolTurnOptionsError::Decode)
     }
 }
 

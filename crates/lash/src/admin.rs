@@ -1,8 +1,6 @@
 use crate::support::*;
 pub(crate) use lash_core::facade_support::SessionConfigPatch;
-use lash_core::facade_support::{
-    ProcessRecordProjection, ToolRegistryFacadeOps, ToolStateFacadeOps, TurnActivityIdFacadeOps,
-};
+use lash_core::facade_support::{ToolRegistryFacadeOps, ToolStateFacadeOps};
 pub use lash_core::{
     facade_support::AcceptedInjectedTurnInput, facade_support::PluginCommand,
     facade_support::PluginQuery, facade_support::PluginTask,
@@ -466,7 +464,7 @@ impl SessionAdmin {
         let mut runtime = writer.lock().await;
         let operation_scope = lash_core::ExecutionScope::runtime_operation(format!(
             "{session_id}:plugin_command:{name}:{}",
-            lash_core::TurnActivityId::fresh().0
+            lash_core::TurnActivityId::new(uuid::Uuid::new_v4().to_string()).0
         ));
         let receipt = runtime
             .run_plugin_command(name, args, Some(session_id), operation_scope)
@@ -487,7 +485,7 @@ impl SessionAdmin {
         let mut runtime = writer.lock().await;
         let scope_id = format!(
             "{session_id}:plugin_task:{name}:{}",
-            lash_core::TurnActivityId::fresh().0
+            lash_core::TurnActivityId::new(uuid::Uuid::new_v4().to_string()).0
         );
         let scoped_effect_controller = runtime
             .effect_host()

@@ -7,9 +7,7 @@
 //! [`StoreMaintenance`](crate::StoreMaintenance).
 
 use super::*;
-use crate::facade_support::{
-    PendingTurnInputCancelTargetFacadeOps, SessionGraphFacadeOps, ToolStateFacadeOps,
-};
+use crate::facade_support::{SessionGraphFacadeOps, ToolStateFacadeOps};
 
 /// Run the [`RuntimePersistence`] durability conformance suite against the
 /// backend produced by `make`. `make` must return a fresh, empty,

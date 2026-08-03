@@ -4,7 +4,6 @@ use super::process_change_feed::process_change_feed_never_misses_concurrent_term
 use super::process_filters::list_processes_filters_by_enriched_fields;
 use super::process_references::live_reference_summary_tracks_non_terminal_reference_counts;
 use super::*;
-use crate::facade_support::ProcessLeaseCompletionFacadeOps;
 use crate::{ProcessRecord, TestProcessRegistryWriteExt};
 
 /// Run the process-registry contract against a fresh backend.

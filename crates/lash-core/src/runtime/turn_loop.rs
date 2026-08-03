@@ -224,7 +224,7 @@ pub(in crate::runtime) async fn send_queued_work_started_event(
 ) {
     send_turn_activity(
         event_tx,
-        TurnActivityId::fresh(),
+        TurnActivityId::new(uuid::Uuid::new_v4().to_string()),
         TurnEvent::QueuedWorkStarted {
             boundary,
             batch_ids: queued_work_batch_ids(claim),

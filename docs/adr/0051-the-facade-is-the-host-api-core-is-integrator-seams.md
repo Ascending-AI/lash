@@ -62,9 +62,11 @@ surface exactly when the direction it serves makes it load-bearing:
 
 Direct-use scanning is as non-normative here as it is for types, and more
 dangerous: a member can have no caller in this repository and still be the one
-thing an implementor must call. `TurnContext`'s prompt mutators have no
-first-party caller, and they are the entire purpose of the
-`TurnContextTransform` hook.
+thing an implementor must call. `TurnContext`'s prompt mutators remain on the
+facade turn builder; `TurnContextTransform::transform` receives and returns a
+`PreparedContext` and never sees `&mut TurnContext`. `set_prompt_layer` remains
+inherent for `lash-remote-protocol`, while the other prompt mutators belong to
+the facade seam.
 
 Members that are not integrator surface get one of two homes, chosen by who
 holds the receiver:
@@ -122,7 +124,7 @@ authoritative.
   notes naming the facade or seam replacement.
 - New public items in `lash-core` must name their integrator class in rustdoc.
   An item that cannot name one belongs behind the facade.
-- FIG-863's measured facade-seam floor is 3,181 `lash-core` rows, replacing
+- FIG-863's measured facade-seam floor is 3,193 `lash-core` rows, replacing
   wave D's 3,050–3,150 forecast; the count is an outcome of applying the rule,
   not a goal. Measured against the member-level closure above,
   455 of the 561 inherent members on retained `lash-core` root exports have a

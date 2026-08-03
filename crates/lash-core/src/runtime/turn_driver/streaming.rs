@@ -835,7 +835,7 @@ impl RuntimeTurnDriver<'_> {
                 {
                     send_turn_activity(
                         event_tx,
-                        TurnActivityId::fresh(),
+                        TurnActivityId::new(uuid::Uuid::new_v4().to_string()),
                         TurnEvent::ModelAttemptReset {
                             assistant_prose_correlation_ids,
                             reasoning_correlation_ids,
@@ -1122,7 +1122,7 @@ fn stream_correlation_id(
         return TurnActivityId::new(provider_item_id.to_string());
     }
     fallback_slot
-        .get_or_insert_with(TurnActivityId::fresh)
+        .get_or_insert_with(|| TurnActivityId::new(uuid::Uuid::new_v4().to_string()))
         .clone()
 }
 

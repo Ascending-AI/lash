@@ -126,60 +126,6 @@ impl ToolState {
     }
 }
 
-pub(crate) mod tool_state_facade_ops {
-    use super::*;
-
-    /// Facade-internal operations for [`ToolState`].
-    ///
-    /// This is not integrator surface, carries no stability promise, and exists
-    /// only for the `lash` facade. See [ADR 0051](https://github.com/Ascending-AI/lash/blob/main/docs/adr/0051-the-facade-is-the-host-api-core-is-integrator-seams.md).
-    pub trait ToolStateFacadeOps {
-        fn generation(&self) -> u64;
-
-        fn tool_manifests(&self) -> Vec<ToolManifest>;
-
-        fn get(&self, id: &ToolId) -> Option<&ToolStateEntry>;
-
-        fn contains(&self, id: &ToolId) -> bool;
-
-        fn set_membership(&mut self, id: &ToolId, present: bool) -> Result<(), ReconfigureError>;
-    }
-
-    impl ToolStateFacadeOps for ToolState {
-        fn generation(&self) -> u64 {
-            self.generation
-        }
-
-        /// Manifests for current Tool Catalog members. Orphaned and host-removed
-        /// entries are excluded (non-membership) but kept in state for rebind.
-        fn tool_manifests(&self) -> Vec<ToolManifest> {
-            self.tools
-                .values()
-                .filter(|entry| entry.is_member())
-                .map(ToolStateEntry::manifest)
-                .collect()
-        }
-
-        fn get(&self, id: &ToolId) -> Option<&ToolStateEntry> {
-            self.tools.get(id)
-        }
-
-        fn contains(&self, id: &ToolId) -> bool {
-            self.tools.contains_key(id)
-        }
-
-        fn set_membership(&mut self, id: &ToolId, present: bool) -> Result<(), ReconfigureError> {
-            let Some(entry) = Arc::make_mut(&mut self.tools).get_mut(id) else {
-                return Err(ReconfigureError::Validation(format!(
-                    "unknown tool id `{id}`"
-                )));
-            };
-            entry.member = present;
-            Ok(())
-        }
-    }
-}
-
 impl Serialize for ToolState {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where

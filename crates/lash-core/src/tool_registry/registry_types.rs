@@ -85,48 +85,6 @@ pub struct ToolRegistry {
     hidden_tool_names: Arc<BTreeSet<String>>,
 }
 
-pub(crate) mod tool_registry_facade_ops {
-    use super::*;
-
-    /// Facade-internal operations for [`ToolRegistry`].
-    ///
-    /// This is not integrator surface, carries no stability promise, and exists
-    /// only for the `lash` facade. See [ADR 0051](https://github.com/Ascending-AI/lash/blob/main/docs/adr/0051-the-facade-is-the-host-api-core-is-integrator-seams.md).
-    pub trait ToolRegistryFacadeOps {
-        fn add_tool_provider(
-            &self,
-            provider: Arc<dyn ToolProvider>,
-        ) -> Result<ToolSourceHandle, ReconfigureError>;
-
-        fn remove_source(&self, handle: &ToolSourceHandle) -> Result<u64, ReconfigureError>;
-    }
-
-    impl ToolRegistryFacadeOps for ToolRegistry {
-        fn add_tool_provider(
-            &self,
-            provider: Arc<dyn ToolProvider>,
-        ) -> Result<ToolSourceHandle, ReconfigureError> {
-            let source_id = {
-                let mut state = self
-                    .state
-                    .write()
-                    .expect("tool registry state lock poisoned");
-                state.next_live_source_id += 1;
-                format!("live:{}", state.next_live_source_id)
-            };
-            self.upsert_source(Arc::new(ToolProviderSource::new(
-                source_id.clone(),
-                provider,
-            )))?;
-            Ok(ToolSourceHandle::new(source_id))
-        }
-
-        fn remove_source(&self, handle: &ToolSourceHandle) -> Result<u64, ReconfigureError> {
-            self.remove_source_id(handle.as_str())
-        }
-    }
-}
-
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum SourceReconcilePolicy {
     RejectExternalConflicts,

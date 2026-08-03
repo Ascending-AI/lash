@@ -1,4 +1,3 @@
-use lash_core::facade_support::RuntimeErrorFacadeOps;
 
 impl AppState {
     fn current_session_id(&self) -> String {

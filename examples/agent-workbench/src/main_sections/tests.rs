@@ -1,7 +1,6 @@
 #[cfg(test)]
 mod tests {
     use super::*;
-    use lash_core::facade_support::ToolStateFacadeOps;
 
     pub(super) fn in_memory_trigger_store() -> Arc<dyn lash::triggers::TriggerStore> {
         Arc::new(lash::triggers::InMemoryTriggerStore::new())
@@ -1127,7 +1126,8 @@ finish initial
         let tool_state = reopened.tools().state().await.expect("tool state");
         let send_tool_id = lash::tools::ToolId::from("tool:inbox__late_account__send");
         let send_entry = tool_state
-            .get(&send_tool_id)
+            .iter()
+            .find_map(|(id, entry)| (id == &send_tool_id).then_some(entry))
             .expect("removed account tool is kept as an orphan");
         assert!(
             send_entry.is_orphaned(),
@@ -1153,7 +1153,8 @@ finish initial
             .expect("reopen session after account re-add");
         let tool_state = reopened.tools().state().await.expect("tool state");
         let send_entry = tool_state
-            .get(&send_tool_id)
+            .iter()
+            .find_map(|(id, entry)| (id == &send_tool_id).then_some(entry))
             .expect("re-added account tool is present");
         assert!(
             !send_entry.is_orphaned(),
