@@ -145,6 +145,8 @@ pub struct SessionBinding {
 }
 
 impl SessionBinding {
+    /// Builds a root binding for store implementors from session policy and the current working
+    /// directory when it is representable as UTF-8.
     pub fn root(session_id: impl Into<String>, policy: &crate::SessionPolicy) -> Self {
         Self {
             session_id: session_id.into(),
@@ -156,6 +158,8 @@ impl SessionBinding {
         }
     }
 
+    /// Projects the durable binding fields store implementors need from a create request, capturing
+    /// the current UTF-8 working directory when available.
     pub fn from_create_request(request: &crate::SessionStoreCreateRequest) -> Self {
         Self {
             session_id: request.session_id.clone(),
@@ -167,6 +171,8 @@ impl SessionBinding {
         }
     }
 
+    /// Rejects an empty session ID before store implementors admit the binding; relation, model,
+    /// and working directory do not affect admission validity.
     pub fn validate(&self) -> Result<(), StoreError> {
         validate_session_id(&self.session_id)
     }
@@ -212,6 +218,8 @@ impl SessionPickerInfo {
 pub struct BlobRef(pub String);
 
 impl BlobRef {
+    /// Exposes the opaque durable blob reference to store implementors for backend round-tripping
+    /// without imposing path or URL semantics.
     pub fn as_str(&self) -> &str {
         &self.0
     }
@@ -476,6 +484,8 @@ pub struct LeaseOwnerIdentity {
 }
 
 impl LeaseOwnerIdentity {
+    /// Constructs explicit owner and incarnation identity for store implementors; equality and
+    /// fencing depend on both components, not a display-form concatenation.
     pub fn opaque(
         owner_id: impl Into<String>,
         incarnation_id: impl Into<String>,
@@ -505,6 +515,8 @@ impl LeaseOwnerIdentity {
             .then_some(self.incarnation_id.as_str())
     }
 
+    /// Reports the same lease incarnation to store implementors only when both owner ID and
+    /// incarnation ID match exactly.
     pub fn same_incarnation(&self, other: &LeaseOwnerIdentity) -> bool {
         self.owner_id == other.owner_id && self.incarnation_id == other.incarnation_id
     }
@@ -537,6 +549,8 @@ pub struct SessionExecutionLeaseCompletion {
 }
 
 impl SessionExecutionLease {
+    /// Captures session, owner, lease token, and fencing generation that store implementors must
+    /// verify before accepting execution writes.
     pub fn fence(&self) -> SessionExecutionLeaseFence {
         SessionExecutionLeaseFence {
             session_id: self.session_id.clone(),
@@ -546,6 +560,8 @@ impl SessionExecutionLease {
         }
     }
 
+    /// Captures session, owner, lease token, and fencing generation that store implementors must
+    /// verify before releasing the execution lease.
     pub fn completion(&self) -> SessionExecutionLeaseCompletion {
         SessionExecutionLeaseCompletion {
             session_id: self.session_id.clone(),
@@ -563,6 +579,8 @@ pub enum SessionExecutionLeaseClaimOutcome {
 }
 
 impl SessionExecutionLeaseClaimOutcome {
+    /// Returns the newly acquired session lease to store implementors and `None` when another
+    /// holder remains busy; the observed busy holder is discarded only by this projection.
     pub fn acquired(self) -> Option<SessionExecutionLease> {
         match self {
             Self::Acquired(lease) => Some(lease),
@@ -635,6 +653,8 @@ pub struct RuntimeTurnCommitStamp {
 }
 
 impl RuntimeTurnCommitStamp {
+    /// Binds one operation identity to a runtime commit for store implementors enforcing replay and
+    /// idempotency at the atomic commit boundary.
     pub fn new(operation: OperationId) -> Self {
         Self { operation }
     }
@@ -665,6 +685,8 @@ fn build_checkpoint_from_persisted_state(
 }
 
 impl RuntimeCommit {
+    /// Rejects an invalid or empty operation identity and any session-scoped operation whose
+    /// session differs from the commit before store implementors write it.
     pub fn validate_operation_session(&self) -> Result<(), StoreError> {
         let completed = &self.turn_commit;
         completed
@@ -691,6 +713,8 @@ impl RuntimeCommit {
         Ok(())
     }
 
+    /// Re-derives every appended node ID by ordinal for store implementors, using frame keys for
+    /// frame-open nodes and operation identity for all other nodes.
     pub fn validate_node_derivation(&self) -> Result<(), StoreError> {
         let completed = &self.turn_commit;
         for (ordinal, node) in self.graph.nodes.iter().enumerate() {
@@ -712,6 +736,8 @@ impl RuntimeCommit {
         Ok(())
     }
 
+    /// Rejects duplicate node IDs within one append batch before store implementors mutate durable
+    /// graph state.
     pub fn validate_append_node_ids_unique(&self) -> Result<(), StoreError> {
         let mut seen = std::collections::HashSet::with_capacity(self.graph.nodes.len());
         for node in &self.graph.nodes {
@@ -724,6 +750,8 @@ impl RuntimeCommit {
         Ok(())
     }
 
+    /// Flattens application evidence from completed turn-input claims in completion and per-claim
+    /// order for store implementors returning commit results.
     pub fn turn_input_applications(&self) -> Vec<crate::TurnInputApplication> {
         self.completed_turn_input_claims
             .iter()
@@ -761,6 +789,8 @@ impl RuntimeCommit {
         Ok(())
     }
 
+    /// Computes the canonical semantic commit hash store implementors use to distinguish idempotent
+    /// replay from a conflicting operation reuse.
     pub fn turn_commit_hash(&self) -> Result<String, StoreError> {
         commit_identity::turn_commit_hash(self)
     }
@@ -884,6 +914,8 @@ impl RuntimeCommit {
         Ok((self, node_id_mapping))
     }
 
+    /// Adds exact lease-completion evidence for store implementors to release atomically with the
+    /// runtime commit rather than in a separate raceable write.
     pub fn releasing_session_execution_lease(
         mut self,
         completion: SessionExecutionLeaseCompletion,
@@ -892,6 +924,8 @@ impl RuntimeCommit {
         self
     }
 
+    /// Adds one queued-work completion for store implementors to settle atomically with the runtime
+    /// commit.
     pub fn completing_queue_claim(
         mut self,
         completed_queue_claim: crate::QueuedWorkCompletion,
@@ -900,6 +934,8 @@ impl RuntimeCommit {
         self
     }
 
+    /// Adds queued-work completions in caller order for store implementors to settle atomically
+    /// with the runtime commit.
     pub fn completing_queue_claims(
         mut self,
         completed_queue_claims: impl IntoIterator<Item = crate::QueuedWorkCompletion>,
@@ -908,6 +944,8 @@ impl RuntimeCommit {
         self
     }
 
+    /// Adds one turn-input completion for store implementors to settle atomically with the runtime
+    /// commit.
     pub fn completing_turn_input_claim(
         mut self,
         completed_turn_input_claim: crate::TurnInputCompletion,
@@ -917,6 +955,8 @@ impl RuntimeCommit {
         self
     }
 
+    /// Adds turn-input completions in caller order for store implementors to settle atomically with
+    /// the runtime commit.
     pub fn completing_turn_input_claims(
         mut self,
         completed_turn_input_claims: impl IntoIterator<Item = crate::TurnInputCompletion>,
@@ -926,11 +966,15 @@ impl RuntimeCommit {
         self
     }
 
+    /// Marks one interrupted turn so store implementors atomically defer its unsettled active-turn
+    /// inputs instead of losing or prematurely completing them.
     pub fn deferring_interrupted_turn_inputs(mut self, turn_id: impl Into<String>) -> Self {
         self.interrupted_turn_input_turn_id = Some(turn_id.into());
         self
     }
 
+    /// Replaces the attachment-ID set that manifest implementors must promote atomically with this
+    /// runtime commit; caller order is preserved.
     pub fn with_committed_attachments(
         mut self,
         attachment_ids: impl IntoIterator<Item = crate::AttachmentId>,
