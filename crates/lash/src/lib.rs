@@ -7,7 +7,7 @@
 //!
 //! Every public name has exactly one home. The crate root carries the daily
 //! core/session/turn path; each domain module ([`tools`], [`persistence`],
-//! [`plugins`], [`observe`], [`triggers`], ...) carries its own
+//! [`plugins`], [`observe`], [`triggers`], [`attachments`], ...) carries its own
 //! vocabulary. [`prelude`] is the curated daily-use subset of that root.
 
 pub mod admin;
@@ -99,6 +99,10 @@ pub mod observe {
 /// and inspecting trigger subscriptions. Entry points:
 /// [`LashCore::triggers`] and [`LashSession::triggers`].
 pub mod triggers {
+    /// Process-free [`TriggerStore`] for tests and single-process hosts, matching
+    /// the in-memory backends [`persistence`](crate::persistence) and
+    /// [`observe`](crate::observe) offer for their own store contracts.
+    pub use lash_core::InMemoryTriggerStore;
     pub use lash_core::{
         LashSchema, TriggerCommand, TriggerCommandOutcome, TriggerDeliveryEmitOutcome,
         TriggerDeliveryEmitReport, TriggerDeliveryReservation, TriggerDeliveryReservationStatus,
@@ -112,6 +116,8 @@ pub mod triggers {
 }
 
 pub mod tools {
+    /// Per-tool retry policy carried by [`ToolDefinition::with_retry_policy`].
+    pub use lash_core::ToolRetryPolicy;
     pub use lash_core::{
         CancelHint, PendingCompletion, PreparedToolCall, TimeoutBehavior, ToolActivation,
         ToolArgumentProjectionPolicy, ToolCall, ToolCallOutput, ToolCallRecord, ToolContext,
@@ -177,9 +183,10 @@ pub mod persistence {
         commit_runtime_state_verified, load_persisted_session_state,
     };
     pub use lash_core::{
-        AttachmentReclamationReport, AttachmentRootSet, AttachmentStore, InMemoryAttachmentStore,
-        InMemoryProcessExecutionEnvStore, ProcessExecutionEnvStore, SessionAttachmentStore,
-        StoredBlobRef, reclaim_unreferenced_attachments,
+        AttachmentReclamationReport, AttachmentRootSet, AttachmentStore, AttachmentStoreError,
+        AttachmentStorePersistence, InMemoryAttachmentStore, InMemoryProcessExecutionEnvStore,
+        ProcessExecutionEnvStore, SessionAttachmentStore, StoredAttachment, StoredBlobRef,
+        reclaim_unreferenced_attachments,
     };
     pub use lash_core::{
         BlobRef, GcReport, LeaseOwnerIdentity, PersistedSessionConfig, PersistedTurnState,
@@ -189,6 +196,9 @@ pub mod persistence {
         SessionGraph, SessionHistoryRecord, SessionMeta, SessionNodeRecord, SessionReadView,
         SessionRelation, StoreError, StoreMaintenance, TurnInputStore, VacuumReport,
     };
+    /// Committed session history flattened into presentation order, as returned
+    /// by [`SessionReadView::chronological_projection`].
+    pub use lash_core::{ChronologicalEntry, ChronologicalPayload, ChronologicalProjection};
     #[cfg(feature = "rlm")]
     pub use lash_lashlang_runtime::{InMemoryLashlangArtifactStore, LashlangArtifactStore};
 }
@@ -204,11 +214,31 @@ pub mod plugins {
         ContextError, PluginExtensionContribution, PluginSpecBuilder, StaticPluginFactory,
         ToolCallHookContext, ToolResultHookContext,
     };
+    /// The session services a hook context hands a plugin: read-through state
+    /// access ([`SessionStateService`]) and durable graph appends
+    /// ([`SessionGraphService`]), plus the append request/result vocabulary.
+    /// Both are runtime-implemented — a plugin receives one, never writes one.
+    pub use lash_core::{
+        AppendSessionNodesRequest, AppendSessionNodesResult, SessionAppendNode,
+        SessionGraphService, SessionStateService,
+    };
     pub use lash_core::{
         PluginError, PluginFactory, PluginHost, PluginMessage, PluginRegistrar, PluginRuntimeEvent,
         PluginSession, PluginSessionContext, PluginSpec, PluginSpecFactory, PromptHookContext,
         SessionPlugin, ToolCatalogContribution, TurnHookContext, TurnResultHookContext,
     };
+    /// Lifecycle observation: what a `reg.session().on_event(..)` hook receives
+    /// once durable session state has advanced, and the contexts each event
+    /// carries. [`PluginLifecycleEvent::TurnPersisted`] fires after the commit it
+    /// describes, so a hook observes a session whose head may already have moved
+    /// on.
+    pub use lash_core::{
+        PluginLifecycleEvent, SessionConfigChangedContext, SessionStateChangedContext,
+    };
+    /// Per-turn context assembly: the prepared messages, prompt contributions,
+    /// and tool providers a [`TurnContextTransform`] may rewrite before the
+    /// model call.
+    pub use lash_core::{PreparedContext, TurnContextTransform};
     pub use lash_plugin_tool_output_budget::{
         ToolOutputBudgetConfig, ToolOutputBudgetMode, ToolOutputBudgetPluginFactory,
         tool_output_budget_stack as runtime_plugin_stack,
@@ -216,7 +246,23 @@ pub mod plugins {
 }
 
 pub mod messages {
-    pub use lash_core::{Message, MessageRole};
+    pub use lash_core::{Message, MessageRole, MessageSequence};
+}
+
+/// Attachment values: identity, media type, and the metadata that travels with
+/// bytes. This is the vocabulary shared by the three places a host meets an
+/// attachment — [`InputItem::attachment`](crate::InputItem), the direct-LLM
+/// [`AttachmentSource`](crate::direct::AttachmentSource), and the
+/// [`AttachmentStore`](crate::persistence::AttachmentStore) contract — so it
+/// has its own home rather than being duplicated into each.
+///
+/// Where the bytes live is a persistence concern:
+/// [`persistence`] carries the store trait, its errors, and reclamation.
+pub mod attachments {
+    pub use lash_core::{
+        AttachmentCreateMeta, AttachmentId, AttachmentMeta, AttachmentRef, AttachmentTypeMetadata,
+        MediaType,
+    };
 }
 
 /// Wire-format DTOs for driving lash across a process boundary, sub-namespaced
@@ -366,14 +412,27 @@ pub mod process {
         ProcessExecutionEnvRef, ProcessExecutionEnvSpec, ProcessExternalRef, ProcessHandleSummary,
         ProcessIdentity, ProcessInput, ProcessLease, ProcessLeaseClaimOutcome,
         ProcessLeaseCompletion, ProcessListFilter, ProcessListMode, ProcessLiveReferenceSummary,
-        ProcessObserverBy, ProcessOpScope, ProcessProvenance, ProcessPruneReport, ProcessRecord,
-        ProcessRegistration, ProcessRegistry, ProcessRunHandle, ProcessRuntimeHost, ProcessService,
-        ProcessSessionDeleteReport, ProcessStartOptions, ProcessStartRequest, ProcessStarted,
-        ProcessStatus, ProcessStatusFilter, ProcessToolVisibilityFilter, ProcessWake,
-        ProcessWakeDelivery, ProcessWakeSpec, ProcessWorkDriver, ProcessWorkObserver,
-        ProcessWorkSnapshot, ProjectionWatermark, RecoveryDisposition, SessionScope,
-        SessionScopeId, ToolSessionProcessAdmin, WakeCoalescingKey, WakeTurnMode, WakeTurnPolicy,
-        watch_process_registry, watch_process_registry_with_sink,
+        ProcessObserverBy, ProcessOpScope, ProcessOriginator, ProcessProvenance,
+        ProcessPruneReport, ProcessRecord, ProcessRegistration, ProcessRegistry, ProcessRunHandle,
+        ProcessRuntimeHost, ProcessService, ProcessSessionDeleteReport, ProcessStartOptions,
+        ProcessStartRequest, ProcessStarted, ProcessStatus, ProcessStatusFilter,
+        ProcessToolVisibilityFilter, ProcessWake, ProcessWakeDelivery, ProcessWakeSpec,
+        ProcessWorkDriver, ProcessWorkObserver, ProcessWorkSnapshot, ProjectionWatermark,
+        RecoveryDisposition, SessionScope, SessionScopeId, ToolSessionProcessAdmin,
+        WakeCoalescingKey, WakeTurnMode, WakeTurnPolicy, watch_process_registry,
+        watch_process_registry_with_sink,
+    };
+    /// Event semantics a registration declares for its extra event types: which
+    /// occurrences wake the process ([`ProcessWakeSpec`]) and how a payload is
+    /// projected into the wake input ([`ProcessValueSelector`]).
+    pub use lash_core::{ProcessEventSemanticsSpec, ProcessValueSelector};
+    /// Wake redelivery. A host that owns its own [`ProcessRegistry`] also owns
+    /// the redelivery loop that turns pending wakes into queued work; an
+    /// embedded core drives one for you.
+    /// [`process_wake_source_key`] is the queued-work source key a delivered
+    /// wake lands under, so a host can correlate the two.
+    pub use lash_core::{
+        WakeDeliveryConfig, WakeDeliveryDriveReport, WakeDeliveryDriver, process_wake_source_key,
     };
     #[cfg(feature = "rlm")]
     pub use lash_lashlang_runtime::{
@@ -383,6 +442,12 @@ pub mod process {
 }
 
 pub mod durability {
+    /// Reject a [`TurnInput`](crate::TurnInput) that a durable
+    /// [`EffectHost`] cannot replay — live protocol extensions and live plugin
+    /// inputs have no journalled form. The embedded enqueue path applies this
+    /// itself; a host that accepts turn input at its own edge calls it there to
+    /// fail the request instead of the turn.
+    pub use lash_core::ensure_durable_effect_input;
     pub use lash_core::{
         DurableProcessWorker, DurableProcessWorkerConfig, EffectHost, InlineEffectHost,
         LeaseTimings, LeaseTimingsError, ProcessDrainReport, RuntimeEnvironment, RuntimeHostConfig,
@@ -404,6 +469,12 @@ pub mod runtime {
         RuntimeInvocation, RuntimeObservation, RuntimeScope, RuntimeTurnPhase,
         RuntimeTurnPhaseProbe, ScopedEffectController, TurnContext,
     };
+    /// The host clock accepted by
+    /// [`LashCoreBuilder::clock`](crate::LashCoreBuilder::clock), used for
+    /// runtime sleeps and embedded
+    /// store timestamps. [`SystemClock`] is the wall-clock default; tests supply
+    /// their own to make expiry deterministic.
+    pub use lash_core::{Clock, SystemClock};
     pub use lash_core::{
         PersistentRuntimeServices, ProtocolSessionExtensionHandle, ProtocolTurnOptions,
         SessionHandle, SessionPolicy, SessionSnapshot, render_turn_causes_prompt,
@@ -444,9 +515,14 @@ pub mod tracing {
 pub mod testing;
 
 pub mod provider {
+    /// Why a host-supplied [`ModelCapability`] rejected a reasoning-effort
+    /// selection. The snake_case [`ModelEffortValidationCategory`] codes are a
+    /// stable contract a capability catalog can branch on.
+    pub use lash_core::ModelEffortValidationCategory;
     /// Typed provider-failure classification surfaced on
     /// [`TurnIssue`](crate::turn::TurnIssue) and session error envelopes.
     pub use lash_core::ProviderFailureKind;
+    pub use lash_core::provider::ModelEffortValidationError;
     pub use lash_core::provider::{
         ProviderRateLimitPolicy, ProviderReliability, ProviderRetryPolicy, RequestTimeout,
     };
