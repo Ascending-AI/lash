@@ -347,4 +347,181 @@ mod asserted_examples {
         );
         assert_eq!(dynamic.manifest.activation, ToolActivation::Always);
     }
+
+    #[test]
+    fn tool_results_expose_host_visible_completion_modes_and_failure_details() {
+        use std::time::Duration;
+
+        use lash::tools::{
+            CancelHint, PendingCompletion, TimeoutBehavior, ToolCallOutput, ToolFailure,
+            ToolFailureClass, ToolFailureSource, ToolResult, ToolValue,
+        };
+
+        let success: ToolResult = ToolResult::ok(serde_json::json!({ "saved": true }));
+        assert!(ToolResult::is_success(&success));
+        assert!(!ToolResult::is_pending(&success));
+        assert_eq!(
+            ToolResult::value_for_projection(&success),
+            serde_json::json!({ "saved": true })
+        );
+        let output = ToolResult::as_done_output(&success).expect("success must be complete");
+        assert_eq!(
+            serde_json::to_value(ToolCallOutput::status(output))
+                .expect("tool status must serialize"),
+            serde_json::json!("success")
+        );
+        assert!(ToolCallOutput::is_success(output));
+        assert_eq!(
+            ToolCallOutput::value_for_projection(output),
+            serde_json::json!({ "saved": true })
+        );
+        assert!(output.control.is_none());
+        assert_eq!(
+            serde_json::to_value(&output.outcome).expect("tool outcome must serialize")["status"],
+            "success"
+        );
+        let ToolResult::Done(done) = success.clone() else {
+            panic!("an inline success must use the completed result mode");
+        };
+        assert_eq!(
+            serde_json::to_value(done.status()).expect("tool status must serialize"),
+            serde_json::json!("success")
+        );
+        let consumed = ToolResult::into_done_output(success).expect("success must unwrap");
+        assert_eq!(
+            ToolCallOutput::into_value_for_projection(consumed),
+            serde_json::json!({ "saved": true })
+        );
+
+        let direct_output = ToolCallOutput::success(serde_json::json!({ "generation": 7 }));
+        let wrapped = ToolResult::from_output(direct_output);
+        assert_eq!(
+            ToolResult::as_output(&wrapped).value_for_projection(),
+            serde_json::json!({ "generation": 7 })
+        );
+        let json_error = ToolResult::err(serde_json::json!({ "path": "missing.md" }));
+        assert_eq!(
+            ToolResult::value_for_projection(&json_error),
+            serde_json::json!({ "path": "missing.md" })
+        );
+        let formatted_error = ToolResult::err_fmt("provider unavailable");
+        assert_eq!(
+            ToolResult::value_for_projection(&formatted_error),
+            serde_json::json!("provider unavailable")
+        );
+
+        let mut tool_failure = ToolFailure::tool(
+            ToolFailureClass::InvalidRequest,
+            "invalid_path",
+            "path leaves the workspace",
+        );
+        tool_failure.raw = Some(ToolValue::from(serde_json::json!({ "path": "../secret" })));
+        assert_eq!(tool_failure.class, ToolFailureClass::InvalidRequest);
+        assert_eq!(tool_failure.code, "invalid_path");
+        assert_eq!(tool_failure.message, "path leaves the workspace");
+        assert_eq!(
+            tool_failure.raw.as_ref().map(ToolValue::to_json_value),
+            Some(serde_json::json!({ "path": "../secret" }))
+        );
+        assert_eq!(ToolFailure::to_json_value(&tool_failure)["source"], "tool");
+        let failed = ToolResult::failure(tool_failure.clone());
+        assert_eq!(
+            serde_json::to_value(ToolResult::as_output(&failed).status())
+                .expect("tool status must serialize"),
+            serde_json::json!("failure")
+        );
+        let direct_failure = ToolCallOutput::failure(tool_failure);
+        assert_eq!(
+            serde_json::to_value(direct_failure.status()).expect("tool status must serialize"),
+            serde_json::json!("failure")
+        );
+
+        let runtime_failure = ToolFailure::runtime(
+            ToolFailureClass::Internal,
+            "runtime_fault",
+            "runtime could not dispatch the tool",
+        );
+        assert_eq!(
+            ToolFailure::to_json_value(&runtime_failure)["source"],
+            "runtime"
+        );
+        let retryable = ToolResult::retryable_failure(
+            ToolFailureClass::Unavailable,
+            "service_busy",
+            "try again",
+            Some(250),
+        );
+        assert_eq!(
+            ToolResult::as_output(&retryable).value_for_projection()["retry"]["after_ms"],
+            250
+        );
+
+        let cancelled = ToolResult::cancelled("operator stopped the tool");
+        assert_eq!(
+            serde_json::to_value(ToolResult::as_output(&cancelled).status())
+                .expect("tool status must serialize"),
+            serde_json::json!("cancelled")
+        );
+        let cancelled_with_raw = ToolResult::cancelled_with_raw(
+            "operator stopped the tool",
+            serde_json::json!({ "checkpoint": 4 }),
+        );
+        assert_eq!(
+            ToolResult::value_for_projection(&cancelled_with_raw),
+            serde_json::json!({ "checkpoint": 4 })
+        );
+        let default_pending = PendingCompletion::new();
+        assert_eq!(default_pending.deadline, None);
+        assert_eq!(default_pending.on_timeout, TimeoutBehavior::ErrorAsResult);
+        assert_eq!(default_pending.on_cancel, CancelHint::CancelExternalWork);
+        let pending_spec = PendingCompletion::fail_turn_on_timeout(
+            PendingCompletion::with_deadline(default_pending, Duration::from_secs(30)),
+        );
+        assert_eq!(pending_spec.deadline, Some(Duration::from_secs(30)));
+        assert_eq!(pending_spec.on_timeout, TimeoutBehavior::FailTurn);
+        let pending = ToolResult::pending(pending_spec.clone());
+        assert!(ToolResult::is_pending(&pending));
+        let ToolResult::Pending(observed_pending) = pending.clone() else {
+            panic!("a deferred completion must use the pending result mode");
+        };
+        assert_eq!(observed_pending, pending_spec);
+        assert_eq!(
+            ToolResult::into_done_output(pending).expect_err("pending must not unwrap"),
+            pending_spec
+        );
+
+        let failure_classes = [
+            ToolFailureClass::InvalidRequest,
+            ToolFailureClass::Unavailable,
+            ToolFailureClass::PermissionDenied,
+            ToolFailureClass::Timeout,
+            ToolFailureClass::Execution,
+            ToolFailureClass::External,
+            ToolFailureClass::ResourceLimit,
+            ToolFailureClass::Internal,
+        ];
+        assert_eq!(
+            serde_json::to_value(failure_classes).expect("failure classes must serialize"),
+            serde_json::json!([
+                "invalid_request",
+                "unavailable",
+                "permission_denied",
+                "timeout",
+                "execution",
+                "external",
+                "resource_limit",
+                "internal"
+            ])
+        );
+        let host_failure_sources = [
+            ToolFailureSource::Runtime,
+            ToolFailureSource::Plugin,
+            ToolFailureSource::Policy,
+            ToolFailureSource::Cancellation,
+        ];
+        assert_eq!(
+            serde_json::to_value(host_failure_sources).expect("failure sources must serialize"),
+            serde_json::json!(["runtime", "plugin", "policy", "cancellation"])
+        );
+    }
 }
