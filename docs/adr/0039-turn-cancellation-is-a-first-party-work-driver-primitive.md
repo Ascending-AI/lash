@@ -15,7 +15,8 @@ later requests to report `CompletionWonRace`. A second reserved promise publishe
 evidence after the commit so an external caller can attach without polling storage. The promise
 key uses semantic session/turn identity rather than lease generation: cancellation survives owner
 loss. The final commit remains governed by the session-head CAS and any claim-ownership checks
-(ADR 0029); lease loss alone does not reject a current-head commit.
+(ADR 0029), after the owner reads and settles the pre-commit cancellation gate;
+lease loss alone does not reject a current-head commit.
 
 The cancellation receipt reports only the outcome of addressing the keyed promise. Delivery
 geometry is a property of the `TurnWorkDriver` and effect controller the Host Application

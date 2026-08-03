@@ -143,8 +143,8 @@ fn record_turn_claim_decision(
 /// an opaque proof-of-ownership digest the backend stamps on every claimed
 /// row. `session_lease_generation` is the caller's live session-execution-lease
 /// fencing token; the backend records it to decide when another generation may
-/// re-claim the row. Settlement remains keyed by claim id + lease token until
-/// that re-claim occurs (see ADR 0029).
+/// re-claim the row. Settlement is always keyed by claim id + lease token; a
+/// re-claim replaces those ownership values (see ADR 0029).
 #[derive(Clone, Debug)]
 pub struct QueuedWorkClaimLease {
     pub claim_id: String,

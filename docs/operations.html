@@ -77,7 +77,7 @@ let session = core
     .await?;</code></pre>
       <aside class="gotcha">
         <strong>Gotcha</strong>
-        <p>An explicit identity is stable within a boot, so a durable retry of the same logical execution lane reenters its own lease instead of being rejected as busy. That is the point for a workflow engine that serializes one invocation. A host that does <em>not</em> serialize one logical lane per session should keep the default per-open identity, or a second concurrent turn on the same session will reenter rather than see <code>session_execution_busy</code>. The fenced head commit remains the last-resort single-writer backstop either way.</p>
+        <p>An explicit identity is stable within a boot, so a durable retry of the same logical execution lane reenters its own lease instead of being rejected as busy. That is the point for a workflow engine that serializes one invocation. A host that does <em>not</em> serialize one logical lane per session should keep the default per-open identity, or a second concurrent turn on the same session will reenter rather than see <code>session_execution_busy</code>. The head CAS remains the last-resort single-writer backstop either way.</p>
       </aside>
     </div>
 
@@ -107,13 +107,13 @@ let session = core
           </tbody>
         </table>
       </div>
-      <p>Queued-work and turn-input claims are not timed lanes. Each claim pins the session-execution-lease generation under which it was taken and stays live exactly while that generation holds the session lease. Renewing the session lease preserves the generation; release or takeover supersedes its claims immediately.</p>
+      <p>Queued-work and turn-input claims are not timed lanes. Each claim pins the session-execution-lease generation under which it was taken. Renewing the session lease preserves the generation; release or takeover makes the claim eligible for successor re-claim and hides it from lease-less live-claim views. Its completion remains valid until successor re-claim or explicit abandon, while the session-head CAS separately governs publication.</p>
       <p>The default is a 30 second TTL with a 10 second renew interval. The constructor enforces <code>ttl &gt;= 3 * renew_interval</code>, so a healthy owner can miss two consecutive renewals — a scheduler stall, a transient store error — before a peer may treat the lease as expired. A shorter TTL reclaims a crashed owner's work sooner but widens the window in which a slow-but-alive owner is falsely taken over; a longer TTL does the reverse. Choosing that number is the trade, and it is now a host decision instead of a constant baked into lash.</p>
       <pre data-lang="rust" data-snippet="operations#lease-timings"><code>// One timing decision governs the three durable lease lanes:
 // session execution, effect replay, and process execution. `new` enforces
 // `ttl &gt;= 3 * renew_interval`, so a live owner can miss two renewals before
 // a peer may treat the lease as expired. Queued-work and turn-input claims
-// are generation-fenced under the session lease and carry no timing.
+// pin the session-lease generation and carry no timing of their own.
 let lease_timings = LeaseTimings::new(
     Duration::from_secs(15), // ttl
     Duration::from_secs(5),  // renew_interval
@@ -169,9 +169,10 @@ for session in idle_sessions {
 // 4. If you stopped an external queued-work or turn-input driver mid-claim,
 //    hand its claims back for immediate reuse with
 //    `session.abandon_queued_work_claim(&amp;claim)` and
-//    `session.abandon_turn_input_claim(&amp;claim)`. Losing the session lease
-//    also supersedes those generation-fenced claims. Resolve outstanding
-//    durable waits as `Cancelled` with `session.revoke_durable_waits()`.
+//    `session.abandon_turn_input_claim(&amp;claim)`. Lease loss makes the claims
+//    eligible for successor re-claim; only re-claim or explicit abandon
+//    invalidates the old completion. Resolve outstanding durable waits as
+//    `Cancelled` with `session.revoke_durable_waits()`.
 
 // 5. Release provider transports. The default `close()` is a no-op; the
 //    Codex provider sends WebSocket Close frames on its cached sessions.
@@ -293,8 +294,9 @@ for p in live {
             }
             return Ok(output);
         }
-        // SessionExecutionBusy / SessionExecutionLeaseLost: another owner
-        // holds or fenced the lease, so the attempt committed nothing.
+        // Busy rejects before the turn starts; LeaseLost means an operation
+        // observed handoff. Reload durable state before retrying: lease loss
+        // alone neither proves no commit landed nor releases claims.
         Err(err) if err.is_retryable() =&gt; continue, // back off in real code
         // Wiring/config a retry can never repair (missing facet, provider
         // unconfigured). Surface it to an operator.
@@ -306,7 +308,7 @@ for p in live {
       <div class="listing">
         <div class="listing__row">
           <div class="listing__label">is_retryable</div>
-          <div class="listing__body"><p>True only for a typed retryable signal: <code>session_execution_busy</code> (another owner holds the lease; nothing changed) and <code>session_execution_lease_lost</code> (the lease was fenced away mid-turn; the fenced commit means the attempt committed nothing and its claims were released). Both are safe to re-run after a backoff.</p></div>
+          <div class="listing__body"><p>True only for a typed retryable signal: <code>session_execution_busy</code> (another owner rejected the turn before it started) and <code>session_execution_lease_lost</code> (an operation observed lease handoff). Lease loss alone neither proves that no current-head commit landed nor releases generation-pinned claims; reload durable state before retrying after a backoff.</p></div>
         </div>
         <div class="listing__row">
           <div class="listing__label">is_terminal</div>

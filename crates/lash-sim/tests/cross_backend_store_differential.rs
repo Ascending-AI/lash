@@ -59,7 +59,7 @@ enum CaseName {
     NodelessLeafMove,
     StaleExpectedHeadRevision,
     IdenticalAndMutatedTurnCommitReplay,
-    SettleClaimAfterLeaseGenerationSuperseded,
+    SettleClaimBeforeSuccessorReclaim,
     CheckpointBodiesThenRefOnly,
     MissingCheckpointComponentRef,
     PinForkUnpin,
@@ -78,8 +78,8 @@ impl CaseName {
             Self::NodelessLeafMove => "nodeless_commit_cannot_move_leaf",
             Self::StaleExpectedHeadRevision => "stale_expected_head_revision",
             Self::IdenticalAndMutatedTurnCommitReplay => "identical_and_mutated_turn_commit_replay",
-            Self::SettleClaimAfterLeaseGenerationSuperseded => {
-                "settle_claim_after_session_lease_generation_superseded_before_reclaim"
+            Self::SettleClaimBeforeSuccessorReclaim => {
+                "settle_claim_after_session_lease_handoff_before_reclaim"
             }
             Self::CheckpointBodiesThenRefOnly => "checkpoint_bodies_then_ref_only",
             Self::MissingCheckpointComponentRef => "missing_checkpoint_component_ref",
@@ -450,7 +450,7 @@ fn generated_cases() -> Vec<GeneratedCase> {
             ],
         },
         GeneratedCase {
-            name: CaseName::SettleClaimAfterLeaseGenerationSuperseded,
+            name: CaseName::SettleClaimBeforeSuccessorReclaim,
             // FIG-641 / ADR 0029: supersession is reclaim-mediated by design.
             // All three backends currently accept this pre-reclaim settlement;
             // this differential demonstrates agreement, not a conformance law.
@@ -2331,7 +2331,7 @@ fn generated_catalog_covers_required_adversarial_shapes() {
             "nodeless_commit_cannot_move_leaf",
             "stale_expected_head_revision",
             "identical_and_mutated_turn_commit_replay",
-            "settle_claim_after_session_lease_generation_superseded_before_reclaim",
+            "settle_claim_after_session_lease_handoff_before_reclaim",
             "checkpoint_bodies_then_ref_only",
             "missing_checkpoint_component_ref",
             "pin_fork_unpin_moves_node_anchor",

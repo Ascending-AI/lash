@@ -60,8 +60,8 @@ structure rather than exact assistant wording.
   `turn_input.completed`.
 - The deterministic companion gate is `just agent-workbench-restate-e2e`. It proves the
   active input id completes exactly once under the in-flight turn, the queued draft
-  dispatches only after settle, and runs Lash core's ADR 0029 session-lease-generation
-  fencing test.
+  dispatches only after settle, and runs Lash core's ADR 0029 reclaim-mediated
+  claim-supersession test.
 
 ## Phase 0 — Boot and pre-flight
 

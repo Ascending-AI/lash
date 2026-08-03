@@ -34,7 +34,7 @@
             <dt>Durable session graph</dt>
             <dd>Conversation records, tool events, protocol events, and plugin nodes live in one <code>SessionGraph</code> per session. <code>SessionReadView</code> and <code>ChronologicalProjection</code> read it; persistence writes stay behind the runtime store.</dd>
             <dt>Per-turn atomic commit</dt>
-            <dd><code>RuntimeCommit</code> writes graph delta, checkpoint blobs, usage deltas, and head revision in one atomic store commit fenced by the session execution lease, with optimistic CAS on <code>expected_head_revision</code> as the stale-writer backstop. Partial turn = no commit.</dd>
+            <dd><code>RuntimeCommit</code> writes graph delta, checkpoint blobs, usage deltas, and head revision in one atomic store commit authorized by the optimistic CAS on <code>expected_head_revision</code> plus any queued-work or turn-input claim ownership. The session execution lease provides advisory serialization, not a settlement fence. Partial turn = no commit.</dd>
             <dt>Typed plugin capabilities</dt>
             <dd>Tools see a named <code>ToolContext</code> surface at execute (<code>processes()</code>, <code>sessions()</code>, <code>direct_completions()</code>, attachments) plus <code>tool_catalog()</code> and snapshot reads on the <code>ToolPrepareContext</code> at prepare time, not a general host handle. The surface exposes no <code>ToolContext::host()</code> escape hatch.</dd>
             <dt>Sandboxed code load, ready</dt>

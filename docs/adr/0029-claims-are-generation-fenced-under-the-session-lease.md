@@ -1,5 +1,8 @@
 # Claim supersession is reclaim-mediated under the session lease
 
+The historical filename is retained to preserve inbound links; the title above
+is authoritative.
+
 ## Status
 
 accepted
@@ -83,17 +86,21 @@ renew on cadence.
 The conformance contract distinguishes law from demonstrated current behavior:
 
 - **LAW (all backends):** after a successor generation re-claims a batch, the
-  predecessor's claim-carrying commit must fail with
-  `QueuedWorkClaimSuperseded` (or the turn-input counterpart) and mutate nothing.
+  superseded predecessor commit **must fail and must mutate nothing**. When its
+  head CAS is otherwise current, it fails with `QueuedWorkClaimSuperseded` (or
+  the turn-input counterpart). When the successor has also advanced the head, a
+  backend may reject it earlier with `HeadRevisionConflict`; either error
+  satisfies the law.
 - **NON-LAW (current backends only):** before the successor re-claims, a
   predecessor claim-carrying commit is accepted by every current backend. The
-  suite demonstrates this so no caller infers a generation check in settlement,
-  but it is not a compatibility promise. A future backend may add eager fencing
-  without breaching conformance.
+  demonstration cases pin PRESENT behavior as executable documentation and are
+  required for today's backends; a future deliberate tightening REVISES those
+  demonstration cases alongside the behavior change — that is a suite revision,
+  not a LAW breach.
 
-This option asymmetry is deliberate: promoting the demonstrated NON-LAW to LAW
-later is non-breaking, while demoting the reclaim-mediated rejection LAW would be
-a contract break.
+This distinction is deliberate: the current suite rejects an eagerly fencing
+backend because its executable demonstration would be stale, while demoting the
+reclaim-mediated rejection LAW would be a contract break.
 
 ## Consequences
 
@@ -105,8 +112,8 @@ a contract break.
   claimed rows become claimable. Re-claiming them supersedes the old completion.
 - Claim liveness for lease-less callers is derived from the lease row join, so a
   released or superseded generation immediately makes its claims pending and
-  cancellable again — a claim is never live under a lease its owner no longer
-  holds.
+  cancellable again — a claim is never shown as live to a lease-less reader under
+  a lease its owner no longer holds.
 - The abandon levers stay for immediate handback but are no longer load-bearing
   for correctness: once an owner loses the lease its claims are eligible for
   successor re-claim, and that re-claim supersedes the old completion.

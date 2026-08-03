@@ -37,8 +37,9 @@ trace buffers) lives inside lash. The capability set:
   `TraceSink::flush()` (default no-op; the OTel sink documents that span-export
   durability is the host provider's duty).
 - **Claim and wait handback**: host-facing `abandon_queued_work_claim` /
-  `abandon_turn_input_claim` return claimed work immediately instead of waiting
-  for successor re-claim, and `revoke_durable_waits` resolves a session's
+  `abandon_turn_input_claim` return claimed work immediately instead of leaving
+  the batch held, and hidden from pending views, until this owner's generation
+  stops holding the session lease; `revoke_durable_waits` resolves a session's
   outstanding Durable Waits as `Cancelled` without deleting the session.
 - **Failover parity**: process leases carry `LeaseOwnerIdentity` and support
   the same fenced, TTL-gated acquisition as session execution leases. Neither

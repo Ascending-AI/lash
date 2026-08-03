@@ -306,10 +306,10 @@ impl LashRuntime {
         }
     }
 
-    // Prompt handback after an operation observes lease loss. Correctness rests
-    // on commit-time claim ownership: the old completion remains acceptable
-    // until a peer reclaims the batch, after which it is superseded (ADR 0029).
-    // Abandoning eagerly makes the rows immediately claimable without a reclaim.
+    // Prompt handback after an operation observes lease loss. Abandon clears
+    // claim ownership, which both frees the rows for a peer and invalidates this
+    // owner's pending completion. That is safe here because the turn is already
+    // failing on the observed lease loss (ADR 0029).
     async fn abandon_queued_work_claims_after_lease_loss(
         &self,
         err: &RuntimeError,

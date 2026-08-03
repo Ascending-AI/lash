@@ -1,3 +1,6 @@
+//! Executable documentation for the current pre-reclaim settlement shape.
+//! The paired reclaim-mediated LAW remains in the parent state-machine module.
+
 use super::*;
 
 /// NON-LAW: demonstrates current backend behavior before successor re-claim;
@@ -105,5 +108,101 @@ where
         .map_err(TestCaseError::fail)?;
     prop_assert_eq!(claim_free, 1);
     prop_assert_eq!(claim_carrying, 1);
+    Ok(())
+}
+
+/// LAW: successor head advancement may change rejection precedence, never the
+/// requirement that a superseded predecessor fails without durable mutation.
+pub(super) async fn law_reclaimed_predecessor_rejection_survives_successor_head_advance(
+    store: Arc<dyn RuntimePersistence>,
+) -> Result<(), TestCaseError> {
+    let batch = store
+        .enqueue_queued_work(queued_draft(0, 0, false))
+        .await
+        .map_err(|error| TestCaseError::fail(error.to_string()))?;
+    let predecessor_owner = owner(0);
+    let predecessor_lease = store
+        .try_claim_session_execution_lease(SESSION_ID, &predecessor_owner, 60_000)
+        .await
+        .map_err(|error| TestCaseError::fail(error.to_string()))?
+        .acquired()
+        .ok_or_else(|| TestCaseError::fail("predecessor lease busy"))?;
+    let predecessor_claim = store
+        .claim_ready_queued_work_by_batch_ids(
+            SESSION_ID,
+            &predecessor_lease.fence(),
+            &predecessor_owner,
+            QueuedWorkClaimBoundary::Idle,
+            std::slice::from_ref(&batch.batch_id),
+        )
+        .await
+        .map_err(|error| TestCaseError::fail(error.to_string()))?
+        .ok_or_else(|| TestCaseError::fail("predecessor queued work absent"))?;
+    store
+        .release_session_execution_lease(&predecessor_lease.completion())
+        .await
+        .map_err(|error| TestCaseError::fail(error.to_string()))?;
+
+    let successor_owner = owner(1);
+    let successor_lease = store
+        .try_claim_session_execution_lease(SESSION_ID, &successor_owner, 60_000)
+        .await
+        .map_err(|error| TestCaseError::fail(error.to_string()))?
+        .acquired()
+        .ok_or_else(|| TestCaseError::fail("successor lease busy"))?;
+    let successor_claim = store
+        .claim_ready_queued_work_by_batch_ids(
+            SESSION_ID,
+            &successor_lease.fence(),
+            &successor_owner,
+            QueuedWorkClaimBoundary::Idle,
+            std::slice::from_ref(&batch.batch_id),
+        )
+        .await
+        .map_err(|error| TestCaseError::fail(error.to_string()))?
+        .ok_or_else(|| TestCaseError::fail("successor did not reclaim queued work"))?;
+    let successor_state = RuntimeSessionState {
+        session_id: SESSION_ID.to_string(),
+        tool_state_snapshot: Some(ToolState::default().with_generation(32)),
+        ..RuntimeSessionState::default()
+    };
+    let successor_result = store
+        .commit_runtime_state(
+            RuntimeCommit::persisted_state_for_test(&successor_state, &[])
+                .completing_queue_claim(successor_claim.completion()),
+        )
+        .await
+        .map_err(|error| TestCaseError::fail(error.to_string()))?;
+    prop_assert_eq!(successor_result.head_revision, 1);
+
+    let before_predecessor = session_snapshot(store.as_ref())
+        .await
+        .map_err(TestCaseError::fail)?;
+    let predecessor_state = RuntimeSessionState {
+        session_id: SESSION_ID.to_string(),
+        tool_state_snapshot: Some(ToolState::default().with_generation(33)),
+        ..RuntimeSessionState::default()
+    };
+    let predecessor_result = store
+        .commit_runtime_state(
+            RuntimeCommit::persisted_state_for_test(&predecessor_state, &[])
+                .completing_queue_claim(predecessor_claim.completion()),
+        )
+        .await;
+    prop_assert!(
+        matches!(
+            predecessor_result,
+            Err(StoreError::QueuedWorkClaimSuperseded { .. })
+                | Err(StoreError::HeadRevisionConflict { .. })
+        ),
+        "superseded predecessor with a stale head was not rejected: {predecessor_result:?}"
+    );
+    assert_snapshot_unchanged(
+        store.as_ref(),
+        before_predecessor,
+        "reclaimed predecessor after successor head advance",
+    )
+    .await
+    .map_err(TestCaseError::fail)?;
     Ok(())
 }

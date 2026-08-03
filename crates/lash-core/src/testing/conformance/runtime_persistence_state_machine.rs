@@ -222,7 +222,7 @@ where
         .unwrap_or_else(|error| {
             panic!("{backend} dedicated runtime-persistence law failed: {error}")
         });
-    claim_honesty::non_law_pre_reclaim_commit_symmetry(&make, DEDICATED_LAW_SEED + 9)
+    claim_honesty::non_law_pre_reclaim_commit_symmetry(&make, DEDICATED_LAW_SEED + 10)
         .await
         .unwrap_or_else(|error| {
             panic!("{backend} runtime-persistence NON-LAW demonstration failed: {error}")
@@ -1667,26 +1667,31 @@ where
     })
     .await?;
     assert_on_fresh_store(make, seed + 3, |store| async move {
-        law_head_cas_serializes_competing_commits(store).await
+        claim_honesty::law_reclaimed_predecessor_rejection_survives_successor_head_advance(store)
+            .await
     })
     .await?;
     assert_on_fresh_store(make, seed + 4, |store| async move {
-        law_stale_settlement_cannot_damage_successor(store).await
+        law_head_cas_serializes_competing_commits(store).await
     })
     .await?;
     assert_on_fresh_store(make, seed + 5, |store| async move {
-        law_selected_batch_out_of_order_never_loses_work(store).await
+        law_stale_settlement_cannot_damage_successor(store).await
     })
     .await?;
     assert_on_fresh_store(make, seed + 6, |store| async move {
-        law_turn_inputs_apply_once_in_order(store).await
+        law_selected_batch_out_of_order_never_loses_work(store).await
     })
     .await?;
     assert_on_fresh_store(make, seed + 7, |store| async move {
-        law_commit_atomicity_and_stale_head_non_mutation(store).await
+        law_turn_inputs_apply_once_in_order(store).await
     })
     .await?;
     assert_on_fresh_store(make, seed + 8, |store| async move {
+        law_commit_atomicity_and_stale_head_non_mutation(store).await
+    })
+    .await?;
+    assert_on_fresh_store(make, seed + 9, |store| async move {
         law_checkpoint_refs_track_content(store).await
     })
     .await

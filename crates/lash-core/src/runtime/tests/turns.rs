@@ -2133,15 +2133,15 @@ async fn process_wake_claimed_at_checkpoint_is_completed_when_turn_is_cancelled(
 // Regression (ADR 0029): a long-running turn must keep the queued-work claim it
 // already holds alive across a stall, no matter how short the lease TTL is.
 // Queued-work batches are claimed at active-turn checkpoints under the session
-// execution lease's generation; the claim carries no TTL of its own and is live
-// exactly while that generation still holds the session lease. So a turn that
-// claims a batch at one checkpoint, stalls past the (tiny) lease TTL -- here a
-// slow provider call, while the session lease keeps renewing on its background
-// cadence and preserves its generation -- then crosses another checkpoint
-// re-runs `claim_ready_queued_work` under the *same* live generation, which can
-// never self-steal its own rows. At finalization the original claim still owns
-// its rows and the commit succeeds. Before generation fencing this failed with
-// `QueuedWorkClaimExpired` because the claim expired under the stalled owner.
+// execution lease's generation; the claim carries no TTL of its own. So a turn
+// that claims a batch at one checkpoint, stalls past the (tiny) lease TTL --
+// here a slow provider call, while the session lease keeps renewing on its
+// background cadence and preserves its generation -- then crosses another
+// checkpoint re-runs `claim_ready_queued_work` under the *same* live generation,
+// which can never self-steal its own rows. At finalization the original claim
+// still owns its rows and the commit succeeds. Before generation fencing this
+// failed with `QueuedWorkClaimExpired` because the claim expired under the
+// stalled owner.
 //
 // This test must FAIL if anyone reintroduces time- or renewal-based claim
 // invalidation. The turn is driven with an in-process `TurnInput` (not a
@@ -3864,6 +3864,12 @@ async fn idle_queued_work_claim_lease_expiry_surfaces_session_execution_lease_lo
     assert_eq!(err.code, crate::RuntimeErrorCode::SessionExecutionLeaseLost);
 }
 
+// Regression (FIG-862): lease serialization is advisory; a foreground turn that
+// has not observed takeover may still publish its current-head tail afterward.
+// ManualClock advances store time only, while its sleep uses real Tokio time, so
+// the default 10s renewal never fires in this millisecond-scale test. The
+// observed-loss path is covered by
+// `renewal_failure_mid_turn_does_not_select_a_durable_branch`.
 #[tokio::test]
 async fn advisory_lease_loss_does_not_stop_foreground_turn_before_final_commit() {
     let clock = Arc::new(ManualClock::new(1_000));
@@ -4012,12 +4018,14 @@ async fn advisory_lease_loss_does_not_stop_foreground_turn_before_final_commit()
         )
         .await
         .expect("the successor should continue from the newly committed head");
-    assert!(
+    assert_eq!(
         active_conversation_messages(&successor_turn.state)
             .iter()
             .flat_map(|message| message.parts.iter())
-            .any(|part| part.content == "committed under head CAS"),
-        "the successor must reload and observe the predecessor tail that landed after takeover"
+            .filter(|part| part.content == "committed under head CAS")
+            .count(),
+        1,
+        "the successor must reload exactly one predecessor tail that landed after takeover"
     );
     assert_eq!(
         successor_turn.assistant_output.safe_text,
