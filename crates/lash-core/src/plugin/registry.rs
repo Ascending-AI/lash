@@ -53,6 +53,8 @@ pub struct PluginExtensions {
 }
 
 impl PluginExtensions {
+    /// Builds a `PluginExtensions` from contributions data for protocol and process-engine
+    /// implementors while preparing or executing plugin and tool work.
     pub fn from_contributions(
         contributions: impl IntoIterator<Item = PluginExtensionContribution>,
     ) -> Self {
@@ -63,6 +65,7 @@ impl PluginExtensions {
         extensions
     }
 
+    /// Adds one extension payload for protocol implementors composing a shared extension set.
     pub fn insert(&mut self, contribution: PluginExtensionContribution) {
         self.contributions
             .entry(contribution.extension_id)
@@ -70,6 +73,8 @@ impl PluginExtensions {
             .push(contribution.payload);
     }
 
+    /// Borrows every payload registered under an extension ID for protocol implementors applying
+    /// that extension; an unknown ID yields an empty slice.
     pub fn payloads(&self, extension_id: &str) -> &[serde_json::Value] {
         self.contributions
             .get(extension_id)

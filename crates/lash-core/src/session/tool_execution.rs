@@ -751,6 +751,8 @@ impl RuntimeExecutionContext<'_> {
         .await
     }
 
+    /// Executes a source-ordered tool batch for code-executor implementors and returns replies in
+    /// the same order even though individual calls may run concurrently.
     pub async fn call_tool_batch(&self, calls: Vec<ToolInvocation>) -> Vec<ToolInvocationReply> {
         if calls.is_empty() {
             return Vec::new();
@@ -963,6 +965,7 @@ impl RuntimeExecutionContext<'_> {
             .collect()
     }
 
+    /// Executes one catalog-authorized tool by stable ID for code-executor implementors.
     pub async fn call_tool_by_id(
         &self,
         call_id: String,
@@ -977,6 +980,7 @@ impl RuntimeExecutionContext<'_> {
         reply.with_record(executed.record)
     }
 
+    /// Delivers cancellation to a deferred tool handle for code-executor implementors.
     pub async fn cancel_tool_handle(
         &self,
         call_id: String,
@@ -985,6 +989,7 @@ impl RuntimeExecutionContext<'_> {
         self.cancel_process_handle(call_id, handle).await
     }
 
+    /// Awaits a deferred tool handle for code-executor implementors without re-executing the call.
     pub async fn await_tool_handle(
         &self,
         call_id: String,
@@ -993,6 +998,8 @@ impl RuntimeExecutionContext<'_> {
         self.await_process_handle(call_id, handle).await
     }
 
+    /// Executes one catalog-authorized tool for code-executor implementors and reports nested child
+    /// execution through the supplied trace hook.
     pub async fn call_tool_by_id_with_child_execution_trace_hook(
         &self,
         call_id: String,
@@ -1154,6 +1161,8 @@ impl RuntimeExecutionContext<'_> {
         .await
     }
 
+    /// Executes one explicitly granted, potentially out-of-catalog tool for code-executor
+    /// implementors.
     pub async fn call_tool_with_execution_grant(
         &self,
         call_id: String,
@@ -1168,6 +1177,8 @@ impl RuntimeExecutionContext<'_> {
         reply.with_record(executed.record)
     }
 
+    /// Executes one explicitly granted tool for code-executor implementors and reports nested child
+    /// execution through the supplied trace hook.
     pub async fn call_tool_with_execution_grant_and_child_execution_trace_hook(
         &self,
         call_id: String,
@@ -1183,6 +1194,8 @@ impl RuntimeExecutionContext<'_> {
         reply.with_record(executed.record)
     }
 
+    /// Delivers a named signal and JSON payload to a deferred tool handle for code-executor
+    /// implementors.
     pub async fn signal_tool_handle(
         &self,
         call_id: String,

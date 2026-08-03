@@ -1,4 +1,6 @@
 impl ToolRegistry {
+    /// Builds a `ToolRegistry` from tool provider data for protocol and process-engine implementors
+    /// while preparing or executing plugin and tool work.
     pub fn from_tool_provider(provider: Arc<dyn ToolProvider>) -> Result<Self, ReconfigureError> {
         let registry = Self::empty();
         registry.upsert_source(Arc::new(ToolProviderSource::new(

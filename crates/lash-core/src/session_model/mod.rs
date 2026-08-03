@@ -138,6 +138,8 @@ pub struct SessionPolicy {
 }
 
 impl SessionPolicy {
+    /// Exposes the provider ID captured in policy for protocol implementors restoring the same
+    /// provider/model assignment on replay.
     pub fn recorded_provider_id(&self) -> &str {
         self.provider_id.trim()
     }

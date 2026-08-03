@@ -752,6 +752,8 @@ impl SessionNodeRecord {
         })
     }
 
+    /// Decodes a plugin node body for store and protocol implementors, returning `None` when the
+    /// node is not a plugin node or its body does not match the requested type.
     pub fn plugin_body<T>(&self) -> Option<T>
     where
         T: for<'de> serde::Deserialize<'de>,
@@ -970,6 +972,8 @@ impl SessionGraph {
         self.append_node_draft(SessionNodeDraft::message(message))
     }
 
+    /// Appends a plugin payload after the active leaf for protocol implementors extending session
+    /// history, returning the content-derived node ID.
     pub fn append_plugin(
         &mut self,
         plugin_type: impl Into<String>,

@@ -252,6 +252,8 @@ impl SessionReadView {
         &self.0.meta.token_usage
     }
 
+    /// Exposes last prompt usage to protocol and process-engine implementors while preparing or
+    /// executing plugin and tool work. Returns `None` when no last prompt usage is present.
     pub fn last_prompt_usage(&self) -> Option<&crate::runtime::PromptUsage> {
         self.0.meta.last_prompt_usage.as_ref()
     }

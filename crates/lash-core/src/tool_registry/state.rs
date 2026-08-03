@@ -100,14 +100,20 @@ impl ToolState {
             .map(|entry| &mut entry.manifest)
     }
 
+    /// Lets store and durable-substrate implementors test whether this `ToolState` is empty while
+    /// snapshotting or restoring durable session state.
     pub fn is_empty(&self) -> bool {
         self.tools.is_empty()
     }
 
+    /// Reports the number of entries to store and durable-substrate implementors while snapshotting
+    /// or restoring durable session state.
     pub fn len(&self) -> usize {
         self.tools.len()
     }
 
+    /// Iterates over the entries in the order consumed by store and durable-substrate implementors
+    /// while snapshotting or restoring durable session state.
     pub fn iter(&self) -> impl Iterator<Item = (&ToolId, &ToolStateEntry)> {
         self.tools.iter()
     }

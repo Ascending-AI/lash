@@ -406,14 +406,20 @@ impl<'run> ToolContext<'run> {
         ToolContextBuilder::from_dispatch(dispatch)
     }
 
+    /// Exposes session id to protocol and process-engine implementors while preparing or executing
+    /// an authorized tool call.
     pub fn session_id(&self) -> &str {
         &self.session_id
     }
 
+    /// Exposes agent frame id to protocol and process-engine implementors while preparing or
+    /// executing an authorized tool call.
     pub fn agent_frame_id(&self) -> &str {
         &self.agent_frame_id
     }
 
+    /// Exposes sessions to protocol and process-engine implementors while preparing or executing an
+    /// authorized tool call.
     pub fn sessions(&self) -> ToolSessionAdmin<'run> {
         ToolSessionAdmin {
             session_id: self.session_id.clone(),
@@ -423,6 +429,8 @@ impl<'run> ToolContext<'run> {
         }
     }
 
+    /// Exposes dispatch to protocol and process-engine implementors while preparing or executing an
+    /// authorized tool call.
     pub fn dispatch(&self) -> ToolDispatchClient<'run> {
         ToolDispatchClient {
             context: self.clone(),
@@ -461,6 +469,8 @@ impl<'run> ToolContext<'run> {
         });
     }
 
+    /// Exposes direct completions to protocol and process-engine implementors while preparing or
+    /// executing an authorized tool call.
     pub fn direct_completions(&self) -> ToolDirectCompletionClient<'run> {
         ToolDirectCompletionClient {
             session_id: self.session_id.clone(),
@@ -482,6 +492,8 @@ impl<'run> ToolContext<'run> {
         }
     }
 
+    /// Exposes cooperative cancellation to tool implementors, returning `None` when the execution
+    /// boundary supplied no cancellation scope.
     pub fn cancellation_token(&self) -> Option<&tokio_util::sync::CancellationToken> {
         self.cancellation_token.as_ref()
     }
@@ -509,18 +521,26 @@ impl<'run> ToolContext<'run> {
             })
     }
 
+    /// Exposes tool call id to protocol and process-engine implementors while preparing or
+    /// executing an authorized tool call. Returns `None` when no tool call id is present.
     pub fn tool_call_id(&self) -> Option<&str> {
         self.tool_call_id.as_deref()
     }
 
+    /// Exposes prepared payload to protocol and process-engine implementors while preparing or
+    /// executing an authorized tool call.
     pub fn prepared_payload(&self) -> &serde_json::Value {
         &self.prepared_payload
     }
 
+    /// Exposes tool execution binding to protocol and process-engine implementors while preparing
+    /// or executing an authorized tool call.
     pub fn tool_execution_binding(&self) -> &serde_json::Value {
         &self.tool_execution_binding
     }
 
+    /// Deserializes the frozen prepared payload for tool implementors without consulting mutable
+    /// plugin or provider state.
     pub fn decode_prepared_payload<T>(&self) -> Result<T, serde_json::Error>
     where
         T: serde::de::DeserializeOwned,
@@ -533,10 +553,14 @@ impl<'run> ToolContext<'run> {
         self.attempt_number
     }
 
+    /// Exposes max attempts to protocol and process-engine implementors while preparing or
+    /// executing an authorized tool call.
     pub fn max_attempts(&self) -> u32 {
         self.max_attempts
     }
 
+    /// Exposes the durable replay key to tool implementors, returning `None` for calls that are not
+    /// replay-scoped.
     pub fn replay_key(&self) -> Option<&str> {
         self.replay_key.as_deref()
     }
@@ -713,6 +737,8 @@ pub struct PreparedToolCall {
 }
 
 impl PreparedToolCall {
+    /// Freezes an identity preparation for protocol and process-engine implementors without
+    /// rewriting the model-supplied call arguments or provider metadata.
     pub fn identity(tool_id: ToolId, call: crate::sansio::PendingToolCall) -> Self {
         Self {
             call_id: call.call_id,
@@ -724,6 +750,8 @@ impl PreparedToolCall {
         }
     }
 
+    /// Reconstructs a fully prepared call for protocol and process-engine implementors crossing an
+    /// effect or process boundary, preserving the supplied replay metadata and prepared payload.
     pub fn from_parts(
         call_id: impl Into<String>,
         tool_id: impl Into<ToolId>,
@@ -767,6 +795,8 @@ pub struct PreparedToolBatch {
 }
 
 impl PreparedToolBatch {
+    /// Freezes source-order prepared calls for protocol and process-engine implementors; execution
+    /// may be concurrent, but launch and completion projection retain this order.
     pub fn new(batch_id: impl Into<String>, calls: Vec<PreparedToolCall>) -> Self {
         let batch_id = batch_id.into();
         let calls = calls
@@ -822,6 +852,8 @@ pub struct ToolExecutionGrant {
 }
 
 impl ToolExecutionGrant {
+    /// Constructs explicit out-of-catalog execution authority for protocol and process-engine
+    /// implementors handling deferred-resolution flows.
     pub fn new(manifest: ToolManifest, contract: ToolContract) -> Self {
         Self {
             manifest,
@@ -831,15 +863,21 @@ impl ToolExecutionGrant {
         }
     }
 
+    /// Constructs out-of-catalog execution authority from one tool definition for protocol and
+    /// process-engine implementors handling deferred-resolution flows.
     pub fn from_definition(definition: ToolDefinition) -> Self {
         Self::new(definition.manifest(), definition.contract())
     }
 
+    /// Sets the source id carried by a `ToolExecutionGrant` for protocol and process-engine
+    /// implementors while preparing or executing an authorized tool call.
     pub fn with_source_id(mut self, source_id: impl Into<String>) -> Self {
         self.source_id = Some(source_id.into());
         self
     }
 
+    /// Sets the execution binding carried by a `ToolExecutionGrant` for protocol and process-engine
+    /// implementors while preparing or executing an authorized tool call.
     pub fn with_execution_binding(mut self, execution_binding: serde_json::Value) -> Self {
         self.execution_binding = execution_binding;
         self
@@ -872,22 +910,32 @@ impl ToolPrepareContext {
         }
     }
 
+    /// Exposes session id to protocol and process-engine implementors while preparing or executing
+    /// plugin and tool work.
     pub fn session_id(&self) -> &str {
         &self.session_id
     }
 
+    /// Exposes tool call id to protocol and process-engine implementors while preparing or
+    /// executing plugin and tool work. Returns `None` when no tool call id is present.
     pub fn tool_call_id(&self) -> Option<&str> {
         self.tool_call_id.as_deref()
     }
 
+    /// Exposes tool execution binding to protocol and process-engine implementors while preparing
+    /// or executing plugin and tool work.
     pub fn tool_execution_binding(&self) -> &serde_json::Value {
         &self.tool_execution_binding
     }
 
+    /// Exposes turn context to protocol and process-engine implementors while preparing or
+    /// executing plugin and tool work.
     pub fn turn_context(&self) -> &crate::TurnContext {
         &self.turn_context
     }
 
+    /// Exposes plugin input to protocol and process-engine implementors while preparing or
+    /// executing plugin and tool work. Returns `None` when no plugin input is present.
     pub fn plugin_input<T>(&self, plugin_id: &'static str) -> Option<&T>
     where
         T: 'static,
@@ -895,14 +943,20 @@ impl ToolPrepareContext {
         self.turn_context.plugin_input::<T>(plugin_id)
     }
 
+    /// Snapshots the current session for protocol and tool implementors preparing an authorized
+    /// call; failures preserve the plugin error contract.
     pub async fn session_snapshot(&self) -> Result<SessionSnapshot, PluginError> {
         self.sessions.snapshot_session(&self.session_id).await
     }
 
+    /// Exposes tool catalog to protocol and process-engine implementors while preparing or
+    /// executing plugin and tool work.
     pub async fn tool_catalog(&self) -> Result<Vec<serde_json::Value>, PluginError> {
         self.sessions.tool_catalog(&self.session_id).await
     }
 
+    /// Returns the shared canonical catalog snapshot for protocol and tool implementors that
+    /// prepare multiple calls without rebuilding the projection.
     pub async fn shared_tool_catalog(
         &self,
     ) -> Result<std::sync::Arc<Vec<serde_json::Value>>, PluginError> {

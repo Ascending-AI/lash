@@ -268,6 +268,8 @@ impl RuntimeSessionState {
         self.execution_state_snapshot.as_deref()
     }
 
+    /// Updates plugin snapshots state for protocol and process-engine implementors while
+    /// materializing or restoring protocol session state.
     pub fn refresh_plugin_snapshots(&mut self, plugins: &crate::PluginSession) {
         let tool_registry = plugins.tool_registry();
         let generation = tool_registry.generation();

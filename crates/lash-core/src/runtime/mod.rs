@@ -519,6 +519,8 @@ impl TurnContext {
         Self::default()
     }
 
+    /// Updates plugin input state for protocol and process-engine implementors while preparing or
+    /// executing plugin and tool work.
     pub fn insert_plugin_input<T>(&mut self, plugin_id: &'static str, input: T)
     where
         T: Send + Sync + 'static,
@@ -526,10 +528,14 @@ impl TurnContext {
         self.plugin_inputs.insert(plugin_id, input);
     }
 
+    /// Updates provider state for protocol and process-engine implementors while preparing or
+    /// executing plugin and tool work.
     pub fn set_provider(&mut self, provider: crate::ProviderHandle) {
         self.provider = Some(provider);
     }
 
+    /// Exposes provider to protocol and process-engine implementors while preparing or executing
+    /// plugin and tool work. Returns `None` when no provider is present.
     pub fn provider(&self) -> Option<&crate::ProviderHandle> {
         self.provider.as_ref()
     }
@@ -555,6 +561,8 @@ impl TurnContext {
         }
     }
 
+    /// Exposes plugin input to protocol and process-engine implementors while preparing or
+    /// executing plugin and tool work. Returns `None` when no plugin input is present.
     pub fn plugin_input<T>(&self, plugin_id: &'static str) -> Option<&T>
     where
         T: 'static,
@@ -562,10 +570,14 @@ impl TurnContext {
         self.plugin_inputs.get(plugin_id)
     }
 
+    /// Lets protocol implementors detect type-erased live plugin inputs that cannot cross a durable
+    /// serialization boundary.
     pub fn has_live_plugin_inputs(&self) -> bool {
         !self.plugin_inputs.inputs.is_empty()
     }
 
+    /// Lists only type-erased live plugin inputs for protocol implementors that must reject
+    /// non-persistable turn extensions before a durable boundary.
     pub fn live_plugin_input_ids(&self) -> Vec<&'static str> {
         self.plugin_inputs.plugin_ids()
     }
@@ -576,10 +588,14 @@ impl TurnContext {
         &self.plugin_inputs
     }
 
+    /// Updates prompt layer state for protocol and process-engine implementors while preparing or
+    /// executing plugin and tool work.
     pub fn set_prompt_layer(&mut self, prompt: crate::PromptLayer) {
         self.prompt = prompt;
     }
 
+    /// Exposes prompt layer to protocol and process-engine implementors while preparing or
+    /// executing plugin and tool work.
     pub fn prompt_layer(&self) -> &crate::PromptLayer {
         &self.prompt
     }
@@ -658,6 +674,8 @@ impl ProtocolTurnExtensionHandle {
         self.0.as_any()
     }
 
+    /// Exposes prompt contributions to protocol and process-engine implementors while materializing
+    /// or restoring protocol session state.
     pub fn prompt_contributions(&self) -> Vec<crate::PromptContribution> {
         self.0.prompt_contributions()
     }

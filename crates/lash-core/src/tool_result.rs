@@ -106,18 +106,26 @@ pub enum ToolResult {
 }
 
 impl ToolResult {
+    /// Builds a `ToolResult` from output data for protocol and process-engine implementors while
+    /// preparing or executing an authorized tool call.
     pub fn from_output(output: crate::ToolCallOutput) -> Self {
         Self::Done(Box::new(output))
     }
 
+    /// Constructs the deferred outcome that protocol and process-engine implementors return when an
+    /// authorized tool call will finish out of band.
     pub fn pending(pending: PendingCompletion) -> Self {
         Self::Pending(pending)
     }
 
+    /// Constructs a successful JSON outcome for protocol and process-engine implementors returning
+    /// from an authorized tool call.
     pub fn ok(result: serde_json::Value) -> Self {
         Self::from_output(crate::ToolCallOutput::success(result))
     }
 
+    /// Constructs an error-as-result JSON outcome for protocol and process-engine implementors
+    /// returning from an authorized tool call.
     pub fn err(result: serde_json::Value) -> Self {
         let message = result
             .as_str()
@@ -133,14 +141,20 @@ impl ToolResult {
         }))
     }
 
+    /// Formats an error-as-result outcome for protocol and process-engine implementors returning
+    /// from an authorized tool call.
     pub fn err_fmt(msg: impl std::fmt::Display) -> Self {
         Self::err(serde_json::json!(msg.to_string()))
     }
 
+    /// Constructs a structured failure for protocol and process-engine implementors returning from
+    /// an authorized tool call.
     pub fn failure(failure: crate::ToolFailure) -> Self {
         Self::from_output(crate::ToolCallOutput::failure(failure))
     }
 
+    /// Constructs a retryable structured failure, including an optional backoff hint, for protocol
+    /// and process-engine implementors returning from an authorized tool call.
     pub fn retryable_failure(
         class: crate::ToolFailureClass,
         code: impl Into<String>,
@@ -152,18 +166,24 @@ impl ToolResult {
         ))
     }
 
+    /// Constructs a cancellation outcome for protocol and process-engine implementors whose
+    /// authorized tool call did not complete.
     pub fn cancelled(message: impl Into<String>) -> Self {
         Self::from_output(crate::ToolCallOutput::cancelled(
             crate::ToolCancellation::runtime(message),
         ))
     }
 
+    /// Constructs a cancellation outcome that retains provider evidence for protocol and
+    /// process-engine implementors whose tool call did not complete.
     pub fn cancelled_with_raw(message: impl Into<String>, raw: serde_json::Value) -> Self {
         let mut cancellation = crate::ToolCancellation::runtime(message);
         cancellation.raw = Some(crate::ToolValue::from(raw));
         Self::from_output(crate::ToolCallOutput::cancelled(cancellation))
     }
 
+    /// Sets the control carried by a `ToolResult` for protocol and process-engine implementors
+    /// while preparing or executing an authorized tool call.
     pub fn with_control(mut self, control: crate::ToolControl) -> Self {
         if let Self::Done(output) = &mut self {
             output.as_mut().control = Some(control);
@@ -171,14 +191,20 @@ impl ToolResult {
         self
     }
 
+    /// Lets protocol and process-engine implementors distinguish successful completed tool output
+    /// from failures and deferred completion.
     pub fn is_success(&self) -> bool {
         matches!(self, Self::Done(output) if output.is_success())
     }
 
+    /// Lets protocol and process-engine implementors detect a deferred tool outcome that must be
+    /// resolved through the durable wait contract.
     pub fn is_pending(&self) -> bool {
         matches!(self, Self::Pending(_))
     }
 
+    /// Projects a stable JSON value for protocol and process-engine implementors that expose tool
+    /// outcomes to later protocol stages.
     pub fn value_for_projection(&self) -> serde_json::Value {
         match &self
             .as_done_output()
@@ -199,6 +225,8 @@ impl ToolResult {
         }
     }
 
+    /// Borrows completed tool output for protocol and process-engine implementors, returning `None`
+    /// for deferred completion.
     pub fn as_done_output(&self) -> Option<&crate::ToolCallOutput> {
         match self {
             Self::Done(output) => Some(output.as_ref()),
@@ -206,11 +234,15 @@ impl ToolResult {
         }
     }
 
+    /// Borrows the immediate tool output for protocol and process-engine implementors; calling it
+    /// on deferred completion is a contract violation and panics.
     pub fn as_output(&self) -> &crate::ToolCallOutput {
         self.as_done_output()
             .expect("pending tool result cannot be viewed as completed output")
     }
 
+    /// Consumes a tool result for protocol and process-engine implementors, returning the
+    /// pending-completion configuration instead of output when the call was deferred.
     pub fn into_done_output(self) -> Result<crate::ToolCallOutput, PendingCompletion> {
         match self {
             Self::Done(output) => Ok(*output),

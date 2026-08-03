@@ -230,10 +230,13 @@ pub struct PluginOptions {
 }
 
 impl PluginOptions {
+    /// Constructs an empty `PluginOptions` for protocol and process-engine implementors while
+    /// preparing or executing plugin and tool work.
     pub fn empty() -> Self {
         Self::default()
     }
 
+    /// Serializes one plugin's typed options for protocol implementors assembling session input.
     pub fn typed<T>(plugin_id: impl Into<String>, extras: T) -> Result<Self, serde_json::Error>
     where
         T: Serialize,
@@ -243,6 +246,7 @@ impl PluginOptions {
         Ok(options)
     }
 
+    /// Inserts one plugin's typed options for protocol implementors composing a shared option map.
     pub fn insert_typed<T>(
         &mut self,
         plugin_id: impl Into<String>,
@@ -256,6 +260,8 @@ impl PluginOptions {
         Ok(())
     }
 
+    /// Decodes one plugin's typed options for protocol and process-engine implementors, returning
+    /// `None` when that plugin supplied no entry.
     pub fn decode<T>(&self, plugin_id: &str) -> Result<Option<T>, serde_json::Error>
     where
         T: DeserializeOwned,

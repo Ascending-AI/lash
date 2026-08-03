@@ -237,6 +237,8 @@ pub enum AwaitEventWaitIdentity {
 }
 
 impl AwaitEventWaitIdentity {
+    /// Constructs the stable wait identity effect-host implementors use to resolve a deferred tool
+    /// call by its call ID.
     pub fn tool_completion(tool_call_id: impl Into<String>) -> Self {
         Self::ToolCompletion {
             tool_call_id: tool_call_id.into(),

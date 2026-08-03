@@ -616,6 +616,9 @@ impl<'run> RuntimeExecutionContext<'run> {
         }
     }
 
+    /// Exposes callable tool manifest by id to protocol and process-engine implementors while
+    /// executing code against the session runtime. Returns `None` when no callable tool manifest by
+    /// id is present.
     pub fn callable_tool_manifest_by_id(&self, id: &crate::ToolId) -> Option<crate::ToolManifest> {
         crate::tool_dispatch::resolve_callable_manifest_by_id(&self.dispatch, id)
     }
@@ -827,6 +830,8 @@ impl<'run> RuntimeExecutionContext<'run> {
         &self.session_id
     }
 
+    /// Exposes tool catalog to protocol and process-engine implementors while executing code
+    /// against the session runtime.
     pub fn tool_catalog(&self) -> Arc<crate::ToolCatalog> {
         Arc::clone(&self.dispatch.tool_catalog)
     }

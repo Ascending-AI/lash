@@ -540,6 +540,8 @@ impl SessionCreateRequest {
         }
     }
 
+    /// Sets the plugin source carried by a `SessionCreateRequest` for protocol and process-engine
+    /// implementors while preparing or executing plugin and tool work.
     pub fn with_plugin_source(mut self, plugin_source: SessionPluginSource) -> Self {
         self.plugin_source = plugin_source;
         self
@@ -563,6 +565,8 @@ impl SessionCreateRequest {
         self
     }
 
+    /// Sets the tool access carried by a `SessionCreateRequest` for protocol and process-engine
+    /// implementors while preparing or executing plugin and tool work.
     pub fn with_tool_access(mut self, tool_access: SessionToolAccess) -> Self {
         self.tool_access = tool_access;
         self
@@ -603,6 +607,7 @@ pub struct SessionToolAccess {
 }
 
 impl SessionToolAccess {
+    /// Lets protocol implementors apply the session's persisted tool-hiding policy by exact name.
     pub fn hides(&self, name: &str) -> bool {
         self.hidden_tools.contains(name)
     }
