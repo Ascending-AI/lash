@@ -4,6 +4,13 @@
 
 use super::*;
 
+pub(crate) fn assert_fresh_instances<T: ?Sized>(left: &Arc<T>, right: &Arc<T>, suite: &str) {
+    assert!(
+        !Arc::ptr_eq(left, right),
+        "{suite} factory reused one Arc across conformance roles"
+    );
+}
+
 pub(crate) fn durable_turn_scope(
     session_id: impl Into<String>,
     turn_id: impl Into<String>,
@@ -25,11 +32,19 @@ pub struct ReopenableProcessRegistry {
     pub reopen: Arc<dyn ProcessRegistry>,
 }
 
-/// A pair of [`RuntimePersistence`] handles opened against the same durable
+/// Three independent [`RuntimePersistence`] handles opened against one durable
 /// backing store.
+///
+/// `open` performs the first write, `reopen` performs the ref-only successor
+/// write after `open` is dropped, and `cold_reopen` proves the resulting state
+/// from a handle that participated in neither write.
+///
+/// Integrator class: conformance-suite embedders (ADR 0051 class 4).
 pub struct ReopenableRuntimePersistence {
     pub open: Arc<dyn RuntimePersistence>,
     pub reopen: Arc<dyn RuntimePersistence>,
+    /// Final independent reader used only after both writer handles are gone.
+    pub cold_reopen: Arc<dyn RuntimePersistence>,
 }
 
 /// A pair of [`AttachmentStore`](crate::AttachmentStore) handles opened against

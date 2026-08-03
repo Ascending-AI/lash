@@ -7,6 +7,10 @@ pub async fn trigger_store<F>(make: F)
 where
     F: Fn() -> Arc<dyn crate::TriggerStore>,
 {
+    let first = make();
+    let second = make();
+    assert_fresh_instances(&first, &second, "trigger_store");
+    drop((first, second));
     trigger_source_key_and_subscription_identity_are_stable();
     same_owner_key_definition_is_idempotent(make()).await;
     changed_register_conflicts_and_update_is_cas(make()).await;
@@ -27,6 +31,8 @@ pub async fn trigger_store_reopenable<F>(make: F)
 where
     F: Fn() -> ReopenableTriggerStore,
 {
+    let probe = make();
+    assert_fresh_instances(&probe.open, &probe.reopen, "trigger_store_reopenable");
     trigger_store(|| make().open).await;
     same_identity_and_receipt_survive_store_reopen(make()).await;
 }

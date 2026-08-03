@@ -682,6 +682,7 @@ async fn sqlite_store_satisfies_runtime_persistence_conformance() {
         ReopenableRuntimePersistence {
             open: open_store(&path),
             reopen: open_store(&path),
+            cold_reopen: open_store(&path),
         }
     })
     .await;

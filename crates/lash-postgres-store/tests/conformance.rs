@@ -111,7 +111,13 @@ async fn postgres_runtime_persistence_satisfies_conformance_when_configured() {
             reset(&storage).await;
             let open = Arc::new(storage.unbound_session_store()) as Arc<dyn RuntimePersistence>;
             let reopen = Arc::new(storage.unbound_session_store()) as Arc<dyn RuntimePersistence>;
-            ReopenableRuntimePersistence { open, reopen }
+            let cold_reopen =
+                Arc::new(storage.unbound_session_store()) as Arc<dyn RuntimePersistence>;
+            ReopenableRuntimePersistence {
+                open,
+                reopen,
+                cold_reopen,
+            }
         })
     })
     .await;

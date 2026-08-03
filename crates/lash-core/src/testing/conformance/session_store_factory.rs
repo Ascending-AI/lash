@@ -11,6 +11,10 @@ where
     F: Fn() -> Arc<dyn crate::SessionStoreFactory>,
     S: Fn() -> Arc<dyn crate::RuntimePersistence>,
 {
+    let first = make();
+    let second = make();
+    assert_fresh_instances(&first, &second, "session_store_factory");
+    drop((first, second));
     session_admission_contract(make(), make_unbound_store()).await;
     session_store_factory_open_missing_returns_none(make()).await;
     session_store_factory_create_seeds_and_reopens_meta(make()).await;

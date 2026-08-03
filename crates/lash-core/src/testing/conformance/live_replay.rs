@@ -15,6 +15,10 @@ pub async fn live_replay_store<F>(make: F)
 where
     F: Fn() -> Arc<dyn LiveReplayStore>,
 {
+    let first = make();
+    let second = make();
+    assert_fresh_instances(&first, &second, "live_replay_store");
+    drop((first, second));
     live_replay_store_appends_replays_and_isolates_sessions(make()).await;
     live_replay_store_cursor_preserves_newer_revisions(make()).await;
     live_replay_store_subscribe_replays_then_yields_live_events(make()).await;
@@ -31,6 +35,10 @@ pub async fn live_replay_store_capacity_trim<F>(make: F)
 where
     F: Fn() -> Arc<dyn LiveReplayStore>,
 {
+    let first = make();
+    let second = make();
+    assert_fresh_instances(&first, &second, "live_replay_store_capacity_trim");
+    drop((first, second));
     let store = make();
     let revision = SessionRevision::new(1);
     let start = store.current_cursor("capacity-session", revision);
@@ -77,6 +85,10 @@ pub async fn live_replay_store_ttl_trim<F>(make: F, expiration_wait: Duration)
 where
     F: Fn() -> Arc<dyn LiveReplayStore>,
 {
+    let first = make();
+    let second = make();
+    assert_fresh_instances(&first, &second, "live_replay_store_ttl_trim");
+    drop((first, second));
     let store = make();
     let revision = SessionRevision::new(1);
     let start = store.current_cursor("ttl-session", revision);

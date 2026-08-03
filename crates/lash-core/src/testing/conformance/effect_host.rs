@@ -163,6 +163,10 @@ pub async fn effect_host<F>(make: F)
 where
     F: Fn() -> Arc<dyn EffectHost>,
 {
+    let first = make();
+    let second = make();
+    assert_fresh_instances(&first, &second, "effect_host");
+    drop((first, second));
     effect_host_preserves_scope_metadata(make()).await;
     effect_host_rejects_missing_scope_ids(make()).await;
     effect_host_static_scope_preserves_metadata_when_available(make()).await;
@@ -178,6 +182,10 @@ pub async fn effect_host_await_events<F>(make: F)
 where
     F: Fn() -> Arc<dyn EffectHost>,
 {
+    let first = make();
+    let second = make();
+    assert_fresh_instances(&first, &second, "effect_host_await_events");
+    drop((first, second));
     effect_host_await_event_key_is_stable(make()).await;
     effect_host_await_event_accepts_early_resolution(make()).await;
     effect_host_await_event_duplicate_resolution_is_terminal(make()).await;

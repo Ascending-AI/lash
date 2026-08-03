@@ -10,6 +10,10 @@ pub async fn attachment_store<F>(make: F, expected_persistence: AttachmentStoreP
 where
     F: Fn() -> Arc<dyn AttachmentStore>,
 {
+    let first = make();
+    let second = make();
+    assert_fresh_instances(&first, &second, "attachment_store");
+    drop((first, second));
     attachment_put_get_round_trips_bytes_and_meta(make()).await;
     attachment_is_content_addressed(make()).await;
     attachment_get_unknown_is_not_found(make()).await;
@@ -25,6 +29,8 @@ pub async fn attachment_store_reopenable<F>(
 ) where
     F: Fn() -> ReopenableAttachmentStore,
 {
+    let probe = make();
+    assert_fresh_instances(&probe.open, &probe.reopen, "attachment_store_reopenable");
     attachment_store(|| make().open, expected_persistence).await;
     attachment_store_survives_reopen(make()).await;
 }

@@ -28,6 +28,10 @@ pub async fn process_execution_env_store<F>(make: F)
 where
     F: Fn() -> Arc<dyn crate::ProcessExecutionEnvStore>,
 {
+    let first = make();
+    let second = make();
+    assert_fresh_instances(&first, &second, "process_execution_env_store");
+    drop((first, second));
     process_env_round_trips(make()).await;
     process_env_overwrite(make()).await;
 }
@@ -38,6 +42,12 @@ pub async fn process_execution_env_store_reopenable<F>(make: F)
 where
     F: Fn() -> ReopenableProcessExecutionEnvStore,
 {
+    let probe = make();
+    assert_fresh_instances(
+        &probe.open,
+        &probe.reopen,
+        "process_execution_env_store_reopenable",
+    );
     process_execution_env_store(|| make().open).await;
     process_env_survives_reopen(make()).await;
 }

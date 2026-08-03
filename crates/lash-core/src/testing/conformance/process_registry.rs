@@ -11,6 +11,10 @@ pub async fn process_registry<F>(make: F)
 where
     F: Fn() -> Arc<dyn ProcessRegistry>,
 {
+    let first = make();
+    let second = make();
+    assert_fresh_instances(&first, &second, "process_registry");
+    drop((first, second));
     process_registry_conformance(make()).await;
 }
 
@@ -20,6 +24,11 @@ where
     F: Fn() -> ReopenableProcessRegistry,
 {
     let handles = make();
+    assert_fresh_instances(
+        &handles.open,
+        &handles.reopen,
+        "process_registry_reopenable",
+    );
     process_registry_conformance(Arc::clone(&handles.open)).await;
     reopen_conformance(handles).await;
 }

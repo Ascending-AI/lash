@@ -46735,6 +46735,14 @@ disposition = "unused-add"
 reason = "Add lash::testing::conformance::ReopenableRuntimePersistence to the agent-service persistence setup example and assert its externally observable result."
 
 [[api]]
+symbol = "lash::testing::conformance::ReopenableRuntimePersistence::cold_reopen"
+kind = "field"
+availability = "all-features"
+area = "stores"
+disposition = "unused-add"
+reason = "Add lash::testing::conformance::ReopenableRuntimePersistence::cold_reopen to the agent-service persistence setup example and assert its externally observable result."
+
+[[api]]
 symbol = "lash::testing::conformance::ReopenableRuntimePersistence::open"
 kind = "field"
 availability = "all-features"
