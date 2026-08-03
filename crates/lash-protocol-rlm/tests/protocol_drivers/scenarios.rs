@@ -724,7 +724,7 @@ fn rlm_protocol_scenario_natural_allows_finish_value() {
 
 #[test]
 fn rlm_protocol_scenario_typed_schema_mismatch_loops_with_feedback() {
-    RlmProtocolScenario::new(TYPED_SCHEMA_MISMATCH_REPAIR.display_name)
+    let run = RlmProtocolScenario::new(TYPED_SCHEMA_MISMATCH_REPAIR.display_name)
         .user_message("return typed data")
         .termination(RlmTermination::FinishRequired {
             schema: Some(serde_json::json!({
@@ -742,20 +742,44 @@ fn rlm_protocol_scenario_typed_schema_mismatch_loops_with_feedback() {
             Some(serde_json::json!({ "missing": true })),
         ))
         .checkpoint()
+        .llm_response(vec![text_part(&lashlang_block("finish { ok: true }"))])
+        .exec_result(exec_response(
+            &[],
+            None,
+            Some(serde_json::json!({ "ok": true })),
+        ))
+        .checkpoint()
         .expect(RlmProtocolExpectations {
-            exec_codes: vec!["finish { missing: true }"],
-            checkpoints: vec![CheckpointKind::AfterWork],
+            exec_codes: vec!["finish { missing: true }", "finish { ok: true }"],
+            checkpoints: vec![CheckpointKind::AfterWork, CheckpointKind::BeforeCompletion],
             llm_call_count: Some(2),
+            done: Some(true),
             system_message_contains: vec!["didn't match the required output schema"],
+            turn_outcome: Some(lash_sansio::TurnOutcome::Finished(
+                lash_sansio::TurnFinish::FinalValue {
+                    value: serde_json::json!({ "ok": true }),
+                },
+            )),
             trajectory_last: Some(RlmTrajectoryExpectation {
-                code: "finish { missing: true }",
+                code: "finish { ok: true }",
                 output: Vec::new(),
-                error: Some("\"ok\" is a required property".to_string()),
-                final_output: None,
+                error: None,
+                final_output: Some(serde_json::json!({ "ok": true })),
             }),
             ..RlmProtocolExpectations::default()
         })
         .run();
+    insta::assert_snapshot!(run.transcript.render(), @r#"
+    rlm          provider  model.request           messages=1 tools=0
+    rlm          observe   message.lashlang_code   text="finish { missing: true }"
+    rlm          exec      cell.start              lang="lashlang"
+    rlm          commit    checkpoint.request      checkpoint=after_work
+    rlm          provider  model.request           messages=2 tools=0
+    rlm          observe   message.lashlang_code   text="finish { ok: true }"
+    rlm          exec      cell.start              lang="lashlang"
+    rlm          commit    checkpoint.request      checkpoint=before_completion
+    rlm          outcome   turn.final_value        value={"ok":true}
+    "#);
 }
 
 #[test]

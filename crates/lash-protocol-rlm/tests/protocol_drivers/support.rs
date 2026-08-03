@@ -12,7 +12,9 @@ pub(crate) const RLM_TRANSCRIPT_ACTOR: &str = "rlm";
 pub(crate) use lash_rlm_types::{
     RlmCreateExtras, RlmProtocolEvent, RlmTermination, RlmTrajectoryEntry,
 };
-pub(crate) use lash_sansio::llm::types::{LlmOutputPart, LlmRequest, LlmResponse};
+pub(crate) use lash_sansio::llm::types::{
+    LlmContentBlock, LlmOutputPart, LlmRequest, LlmResponse, LlmRole,
+};
 pub(crate) use lash_sansio::{
     CheckpointKind, Message, MessageRole, Part, PartKind, PruneState, SessionStreamEvent,
 };
@@ -671,7 +673,15 @@ impl RlmProtocolExpectations {
                             .parts
                             .iter()
                             .any(|part| part.content.contains(expected))
-                }),
+                }) || run
+                    .llm_requests
+                    .iter()
+                    .flat_map(|request| request.messages.iter())
+                    .filter(|message| message.role == LlmRole::System)
+                    .flat_map(|message| message.blocks.iter())
+                    .any(|block| {
+                        matches!(block, LlmContentBlock::Text { text, .. } if text.contains(expected))
+                    }),
                 "{scenario_name} missing system repair feedback containing `{expected}`"
             );
         }
@@ -807,6 +817,7 @@ pub(crate) struct RlmProtocolRun {
     /// Real `TurnCheckpoint` serialize/deserialize/restore round trips performed.
     pub(crate) round_trips: usize,
     pub(crate) initial_request: Option<LlmRequest>,
+    pub(crate) llm_requests: Vec<LlmRequest>,
     pub(crate) exec_codes: Vec<String>,
     pub(crate) checkpoints: Vec<CheckpointKind>,
     pub(crate) llm_call_count: usize,
@@ -820,7 +831,10 @@ impl RlmProtocolRun {
     pub(crate) fn record(&mut self, effects: &[Effect]) {
         for effect in effects {
             match effect {
-                Effect::LlmCall { .. } => self.llm_call_count += 1,
+                Effect::LlmCall { request, .. } => {
+                    self.llm_call_count += 1;
+                    self.llm_requests.push(request.as_ref().clone());
+                }
                 Effect::ExecCode { code, .. } => {
                     self.exec_codes.push(code.clone());
                 }

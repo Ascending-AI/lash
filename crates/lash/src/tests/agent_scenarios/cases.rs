@@ -162,7 +162,7 @@ finish value"#,
 #[test]
 fn agent_scenario_started_process_labeled_tool_call() -> Result<()> {
     run_async_test_on_stack_budget("agent-scenario-started-process-tool", || async {
-        run_agent_turn_scenario(
+        let run = run_agent_turn_scenario(
             AgentScenario::new(
                 STARTED_PROCESS_LABELED_TOOL_CALL.scenario_name,
                 "Start a process that calls the app lookup tool.",
@@ -185,6 +185,19 @@ finish result"#,
             .min_completed_process_graphs(1),
         )
         .await?;
+        insta::assert_snapshot!(agent_scenario_transcript(&run, "root"), @r#"
+        root         ingress   turn.start
+        root         provider  model.request           iteration=0
+        root         exec      cell.start              lang="lashlang"
+        root         exec      cell.ok                 calls=1
+        root         outcome   turn.final_value        value={"ok":true}
+        root         commit    checkpoint.commit       rev=0->1
+        root                     turn_state            stored logical=284B
+        root                     tool_state            stored logical=3.6KB
+        root                     plugin_snapshot       stored logical=433B
+        root                     execution_state       stored logical=unknown
+        process-001  outcome   process.completed       label="lookup" kind="lashlang" terminal=true
+        "#);
         Ok(())
     })
 }
@@ -284,7 +297,7 @@ finish {
 #[test]
 fn agent_scenario_started_process_labeled_subagent_spawn() -> Result<()> {
     run_async_test_on_stack_budget("agent-scenario-started-process-subagent", || async {
-        run_agent_turn_scenario(
+        let run = run_agent_turn_scenario(
             AgentScenario::new(
                 STARTED_PROCESS_SUBAGENT.scenario_name,
                 "Run a Lashlang process that spawns a subagent and returns its value.",
@@ -316,6 +329,29 @@ finish result"#,
             .min_completed_process_graphs(1),
         )
         .await?;
+        insta::assert_snapshot!(agent_scenario_transcript(&run, "root"), @r#"
+        root         ingress   turn.start
+        root         provider  model.request           iteration=0
+        root         exec      cell.start              lang="lashlang"
+        root         exec      cell.ok                 calls=1
+        root         outcome   turn.final_value        value={"len":2}
+        root         commit    checkpoint.commit       rev=0->1
+        root                     turn_state            stored logical=284B
+        root                     tool_state            stored logical=8.1KB
+        root                     plugin_snapshot       stored logical=429B
+        root                     execution_state       stored logical=unknown
+        session-001  commit    checkpoint.commit       rev=0->1
+        session-001              turn_state            stored logical=414B
+        session-001              tool_state            stored logical=8.9KB
+        session-001              plugin_snapshot       stored logical=429B
+        session-001  commit    checkpoint.commit       rev=1->2
+        session-001              turn_state            stored logical=414B
+        session-001              tool_state            ref (unchanged)
+        session-001              plugin_snapshot       ref (unchanged)
+        session-001              execution_state       stored logical=unknown
+        process-001  outcome   process.completed       label="spawn" kind="subagent" terminal=true
+        process-002  outcome   process.completed       label="spawn_child" kind="lashlang" terminal=true
+        "#);
         Ok(())
     })
 }
@@ -350,6 +386,20 @@ finish result"#,
             .min_completed_process_graphs(2),
         )
         .await?;
+        insta::assert_snapshot!(agent_scenario_transcript(&run, "root"), @r#"
+        root         ingress   turn.start
+        root         provider  model.request           iteration=0
+        root         exec      cell.start              lang="lashlang"
+        root         exec      cell.ok                 calls=1
+        root         outcome   turn.final_value        value={"parent":"done"}
+        root         commit    checkpoint.commit       rev=0->1
+        root                     turn_state            stored logical=284B
+        root                     tool_state            stored logical=3.3KB
+        root                     plugin_snapshot       stored logical=333B
+        root                     execution_state       stored logical=unknown
+        process-001  outcome   process.completed       label="child" kind="lashlang" terminal=true
+        process-002  outcome   process.completed       label="parent" kind="lashlang" terminal=true
+        "#);
         assert_lashlang_process_ids_unique_for_labels(&run.final_process_list, ["parent", "child"]);
         Ok(())
     })
