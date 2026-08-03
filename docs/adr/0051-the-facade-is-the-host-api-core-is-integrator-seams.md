@@ -38,6 +38,45 @@ removable but that the closure proves are load-bearing for implementors; the
 closure rule is therefore normative, and any future tooling that classifies
 surface must apply it.
 
+The closure decides **members**, not only types. A type enters the closure in a
+direction: an implementor either *produces* it (it appears in return position,
+so the implementor must construct one) or *consumes* it (it appears in argument
+position, so the implementor must read one), and a type reached through a field
+inherits its owner's direction. A member of a closure type is integrator
+surface exactly when the direction it serves makes it load-bearing:
+
+- **Produce-side** — the constructors and builders an implementor needs to
+  return a value of the type, including on types with public fields, because a
+  struct literal is not a promise we can extend. Direction is per class, not per
+  type: `RuntimeCommit` is consume-side for a store, which is handed one by
+  `SessionCommitStore::commit_runtime_state`, and produce-side for a conformance
+  embedder, which assembles one to hold that store to the contract — so its
+  builders are integrator surface.
+- **Consume-side** — the accessors an implementor needs to read the value it
+  was handed. On an opaque type they are the *only* interface, so every one of
+  them is load-bearing: `ProcessEngineRunContext` is what
+  `ProcessEngine::run` receives, so its accessors are the engine contract.
+- **Neither** — a member that only projects a value the implementor produces,
+  or only mutates state the runtime owns, serves no direction. It is not
+  integrator surface even when it sits on a closure type.
+
+Direct-use scanning is as non-normative here as it is for types, and more
+dangerous: a member can have no caller in this repository and still be the one
+thing an implementor must call. `TurnContext`'s prompt mutators have no
+first-party caller, and they are the entire purpose of the
+`TurnContextTransform` hook.
+
+Members that are not integrator surface get one of two homes, chosen by who
+holds the receiver:
+
+- `pub(crate)`, or a seam trait re-exported through `lash_core::facade_support`
+  when the facade needs it across the crate boundary, for receivers only the
+  runtime and the facade ever hold.
+- A public `lash::<domain>::<Type>Ext` extension trait, example-covered from
+  birth, for receivers a *host* holds where the behavior is host convenience
+  the core contract does not need. Same-named trait methods keep existing call
+  sites compiling, so the migration is an import, not a rewrite.
+
 The package-version constants (`lash_core::VERSION`, `SANSIO_VERSION`) are not
 integrator surface. Compatibility between an integrator and the runtime is
 expressed through trait contracts, data shapes, and the schema-version
@@ -83,3 +122,15 @@ authoritative.
   notes naming the facade or seam replacement.
 - New public items in `lash-core` must name their integrator class in rustdoc.
   An item that cannot name one belongs behind the facade.
+- The narrowing's own row target was set from a member-level direct-use scan
+  and is therefore not a goal. Measured against the member-level closure above,
+  455 of the 561 inherent members on retained `lash-core` root exports have a
+  proven caller outside `lash-core`, and most of the remainder are load-bearing
+  in a direction no in-repo crate exercises yet. A wave that moved them to hit
+  a number would delete integrator ergonomics, not unkept promises. The core
+  row count is an outcome of applying the rule, never the input.
+- `lash-remote-protocol` converts wire DTOs to and from core types and cannot
+  depend on the facade, because the facade depends on it. Its `core-conversions`
+  feature is therefore a fifth seeding point for the closure alongside the four
+  classes. It reaches 70 inherent members on retained root exports, 52 of them
+  as the sole caller outside `lash-core`; all are retained core surface.
