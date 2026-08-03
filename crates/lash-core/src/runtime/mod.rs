@@ -1135,6 +1135,8 @@ impl SessionStoreCreateRequest {
 pub struct ForkPoint {
     pub node_id: String,
     pub checkpoint_ref: crate::BlobRef,
+    /// Provenance of the node, which may name a session that has since been
+    /// deleted and is not required to remain readable for a fork.
     pub source_session_id: String,
     /// Provider and model captured by the nearest retained frame boundary.
     pub config: crate::PersistedSessionConfig,
