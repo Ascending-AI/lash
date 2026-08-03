@@ -99,14 +99,11 @@ mod derived_notes_tests {
              its graph position carries no claim about what it was derived from"
         );
         assert_eq!(
-            note.plugin()
-                .and_then(|(_, body)| body.get("derived_from_node_id"))
-                .and_then(Value::as_str),
+            derived_note_base(note),
             Some(first_leaf.as_str()),
             "which is why the base rides in the payload instead"
         );
-        let active_path = graph
-            .active_path_nodes()
+        let active_path = active_path_nodes(&graph)
             .iter()
             .map(|node| node.node_id.clone())
             .collect::<Vec<_>>();
@@ -158,8 +155,7 @@ mod derived_notes_tests {
             "the rewound session really did abandon the note's base"
         );
         assert!(
-            rewound_graph
-                .active_path_nodes()
+            active_path_nodes(&rewound_graph)
                 .iter()
                 .all(|node| derived_note_base(node) != Some(second_leaf.as_str())),
             "and nothing derived from it was written: a refused append writes \
@@ -191,10 +187,28 @@ mod derived_notes_tests {
     }
 
     fn derived_note_base(node: &lash::persistence::SessionNodeRecord) -> Option<&str> {
-        let (plugin_type, body) = node.plugin()?;
+        let lash_core::SessionNodePayload::Plugin { plugin_type, body } = &node.payload else {
+            return None;
+        };
         if plugin_type != WORKBENCH_DERIVED_NOTE_PLUGIN_TYPE {
             return None;
         }
-        body.get("derived_from_node_id").and_then(Value::as_str)
+        body.as_ref()
+            .get("derived_from_node_id")
+            .and_then(Value::as_str)
+    }
+
+    fn active_path_nodes(
+        graph: &lash::persistence::SessionGraph,
+    ) -> Vec<&lash::persistence::SessionNodeRecord> {
+        let mut path = Vec::new();
+        let mut node_id = graph.leaf_node_id.as_deref();
+        while let Some(id) = node_id {
+            let node = graph.find_node(id).expect("active path node exists");
+            path.push(node);
+            node_id = node.parent_node_id.as_deref();
+        }
+        path.reverse();
+        path
     }
 }

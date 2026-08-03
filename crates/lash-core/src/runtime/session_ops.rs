@@ -3,6 +3,7 @@
 //! Extracted from `runtime/mod.rs`. This file re-opens `impl LashRuntime`;
 //! no types live here and no public API is changed.
 
+use crate::facade_support::ScopedEffectControllerFacadeOps;
 use std::sync::Arc;
 
 use crate::{PluginOperationInvokeError, SessionError};

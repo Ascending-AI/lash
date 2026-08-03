@@ -1280,11 +1280,14 @@ async fn session_observation_retracts_two_retried_visible_attempts_live_and_on_r
     let live_collector = tokio::spawn(async move {
         let mut events = Vec::new();
         loop {
-            let event =
-                tokio::time::timeout(std::time::Duration::from_secs(2), subscription.next_event())
-                    .await
-                    .expect("timed out waiting for live observation")
-                    .expect("live observation event");
+            let event = tokio::time::timeout(
+                std::time::Duration::from_secs(2),
+                futures_util::StreamExt::next(&mut subscription),
+            )
+            .await
+            .expect("timed out waiting for live observation")
+            .expect("live observation subscription closed")
+            .expect("live observation event");
             let committed = matches!(
                 event.payload,
                 lash_core::SessionObservationEventPayload::Committed { .. }
@@ -1364,11 +1367,14 @@ async fn session_observation_subscription_replays_buffered_events_before_live_ev
     };
 
     loop {
-        let event =
-            tokio::time::timeout(std::time::Duration::from_secs(2), subscription.next_event())
-                .await
-                .expect("timed out waiting for replayed event")
-                .expect("replayed event");
+        let event = tokio::time::timeout(
+            std::time::Duration::from_secs(2),
+            futures_util::StreamExt::next(&mut subscription),
+        )
+        .await
+        .expect("timed out waiting for replayed event")
+        .expect("replay subscription closed")
+        .expect("replayed event");
         if observation_assistant_delta(&event).as_deref() == Some("echo: first observed") {
             break;
         }
@@ -1379,11 +1385,14 @@ async fn session_observation_subscription_replays_buffered_events_before_live_ev
         .run()
         .await?;
     loop {
-        let event =
-            tokio::time::timeout(std::time::Duration::from_secs(2), subscription.next_event())
-                .await
-                .expect("timed out waiting for live event")
-                .expect("live event");
+        let event = tokio::time::timeout(
+            std::time::Duration::from_secs(2),
+            futures_util::StreamExt::next(&mut subscription),
+        )
+        .await
+        .expect("timed out waiting for live event")
+        .expect("live subscription closed")
+        .expect("live event");
         if observation_assistant_delta(&event).as_deref() == Some("echo: second observed") {
             break;
         }
@@ -3679,7 +3688,8 @@ finish "done""#,
     );
     assert_eq!(
         read_view
-            .materialized_session_graph()
+            .session_graph()
+            .clone()
             .active_path_nodes()
             .into_iter()
             .filter_map(|node| node.event())

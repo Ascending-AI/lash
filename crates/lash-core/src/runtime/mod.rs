@@ -4,7 +4,7 @@ pub(crate) mod causal;
 mod clock;
 mod config_ops;
 pub use config_ops::SessionConfigPatch;
-mod effect;
+pub(crate) mod effect;
 pub use effect::promise_semantics;
 mod environment;
 mod error;
@@ -25,7 +25,7 @@ mod session_api;
 mod session_execution_lease;
 mod session_manager;
 mod session_ops;
-mod state;
+pub(crate) mod state;
 #[cfg(test)]
 pub(crate) mod tests;
 mod turn_boundary;
@@ -69,6 +69,8 @@ use crate::{
 };
 use crate::{Effect, TurnMachine};
 
+#[cfg(test)]
+use self::facade_ops::TurnContextFacadeOps;
 use host::*;
 use session_execution_lease::*;
 use session_manager::*;
@@ -560,10 +562,6 @@ impl TurnContext {
         self.plugin_inputs.get(plugin_id)
     }
 
-    pub fn has_plugin_input(&self, plugin_id: &'static str) -> bool {
-        self.plugin_inputs.contains(plugin_id)
-    }
-
     pub fn has_live_plugin_inputs(&self) -> bool {
         !self.plugin_inputs.inputs.is_empty()
     }
@@ -578,32 +576,63 @@ impl TurnContext {
         &self.plugin_inputs
     }
 
-    pub fn set_prompt_template(&mut self, template: crate::PromptTemplate) {
-        self.prompt.template = Some(template);
-    }
-
-    pub fn add_prompt_contribution(&mut self, contribution: crate::PromptContribution) {
-        self.prompt.add_contribution(contribution);
-    }
-
-    pub fn replace_prompt_slot(
-        &mut self,
-        slot: crate::PromptSlot,
-        contributions: impl IntoIterator<Item = crate::PromptContribution>,
-    ) {
-        self.prompt.replace_slot(slot, contributions);
-    }
-
-    pub fn clear_prompt_slot(&mut self, slot: crate::PromptSlot) {
-        self.prompt.clear_slot(slot);
-    }
-
     pub fn set_prompt_layer(&mut self, prompt: crate::PromptLayer) {
         self.prompt = prompt;
     }
 
     pub fn prompt_layer(&self) -> &crate::PromptLayer {
         &self.prompt
+    }
+}
+
+pub(crate) mod facade_ops {
+    use super::*;
+
+    /// Facade-internal operations for [`TurnContext`].
+    ///
+    /// This is not integrator surface, carries no stability promise, and exists
+    /// only for the `lash` facade. See [ADR 0051](https://github.com/Ascending-AI/lash/blob/main/docs/adr/0051-the-facade-is-the-host-api-core-is-integrator-seams.md).
+    pub trait TurnContextFacadeOps {
+        fn has_plugin_input(&self, plugin_id: &'static str) -> bool;
+
+        fn set_prompt_template(&mut self, template: crate::PromptTemplate);
+
+        fn add_prompt_contribution(&mut self, contribution: crate::PromptContribution);
+
+        // APIT is intentionally non-dyn-compatible; this trait has one static-dispatch impl.
+        fn replace_prompt_slot(
+            &mut self,
+            slot: crate::PromptSlot,
+            contributions: impl IntoIterator<Item = crate::PromptContribution>,
+        );
+
+        fn clear_prompt_slot(&mut self, slot: crate::PromptSlot);
+    }
+
+    impl TurnContextFacadeOps for TurnContext {
+        fn has_plugin_input(&self, plugin_id: &'static str) -> bool {
+            self.plugin_inputs.contains(plugin_id)
+        }
+
+        fn set_prompt_template(&mut self, template: crate::PromptTemplate) {
+            self.prompt.template = Some(template);
+        }
+
+        fn add_prompt_contribution(&mut self, contribution: crate::PromptContribution) {
+            self.prompt.add_contribution(contribution);
+        }
+
+        fn replace_prompt_slot(
+            &mut self,
+            slot: crate::PromptSlot,
+            contributions: impl IntoIterator<Item = crate::PromptContribution>,
+        ) {
+            self.prompt.replace_slot(slot, contributions);
+        }
+
+        fn clear_prompt_slot(&mut self, slot: crate::PromptSlot) {
+            self.prompt.clear_slot(slot);
+        }
     }
 }
 
@@ -852,10 +881,6 @@ impl TurnActivityId {
     pub fn new(id: impl Into<Arc<str>>) -> Self {
         Self(id.into())
     }
-
-    pub fn fresh() -> Self {
-        Self(Arc::from(uuid::Uuid::new_v4().to_string()))
-    }
 }
 
 /// App-facing semantic activity emitted during a turn.
@@ -874,14 +899,14 @@ pub struct TurnActivity {
 impl TurnActivity {
     pub fn new(correlation_id: TurnActivityId, event: TurnEvent) -> Self {
         Self {
-            id: TurnActivityId::fresh(),
+            id: TurnActivityId::new(uuid::Uuid::new_v4().to_string()),
             correlation_id,
             event,
         }
     }
 
     pub fn independent(event: TurnEvent) -> Self {
-        let correlation_id = TurnActivityId::fresh();
+        let correlation_id = TurnActivityId::new(uuid::Uuid::new_v4().to_string());
         Self::new(correlation_id, event)
     }
 }

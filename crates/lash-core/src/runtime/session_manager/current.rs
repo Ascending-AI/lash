@@ -1,4 +1,5 @@
 use super::*;
+use crate::facade_support::RuntimeSessionStateFacadeOps;
 
 impl CurrentSessionCapability {
     pub(in crate::runtime::session_manager) async fn turn_scope_by_id(

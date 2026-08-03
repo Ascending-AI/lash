@@ -3,6 +3,7 @@
 //! Split out of `plugin/mod.rs` purely for file size. All types keep
 //! their original module path via `pub use` in `plugin/mod.rs`.
 
+use crate::facade_support::SessionGraphFacadeOps;
 use lash_sansio::core_support::*;
 use std::sync::{Arc, OnceLock};
 
@@ -217,10 +218,6 @@ impl SessionReadView {
 
     pub fn policy(&self) -> &SessionPolicy {
         &self.0.meta.policy
-    }
-
-    pub fn materialized_session_graph(&self) -> crate::SessionGraph {
-        self.session_graph().clone()
     }
 
     pub fn messages(&self) -> &[crate::Message] {

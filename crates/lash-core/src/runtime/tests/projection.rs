@@ -1,5 +1,6 @@
 use super::*;
 use crate::SessionCommitStore as _;
+use crate::facade_support::RuntimeSessionStateFacadeOps;
 use lash_sansio::core_support::*;
 
 struct AppendRollbackProtocolFactory {

@@ -1,4 +1,5 @@
 use super::*;
+use crate::facade_support::SessionGraphFacadeOps;
 
 /// Session-id-keyed factory: the same in-memory store is returned for a given
 /// session across opens (so a worker rebuild sees the session's state), and a

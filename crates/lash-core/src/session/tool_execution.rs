@@ -1,4 +1,5 @@
 use super::execution_context::RuntimeExecutionContext;
+use crate::facade_support::ScopedEffectControllerFacadeOps;
 use crate::tool_dispatch::{
     ToolAttemptEffectIdentity, ToolCallLaunch, ToolDispatchOutcome, ToolPreparationOutcome,
     coordinate_tool_invocation, finalize_tool_result_with_execution_context,

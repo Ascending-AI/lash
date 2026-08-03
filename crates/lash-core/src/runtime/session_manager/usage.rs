@@ -56,7 +56,7 @@ impl ChildUsageEventRelay {
         } = &event
         {
             let activity = TurnActivity::new(
-                TurnActivityId::fresh(),
+                TurnActivityId::new(uuid::Uuid::new_v4().to_string()),
                 TurnEvent::ChildUsage {
                     session_id: session_id.clone(),
                     source: source.clone(),

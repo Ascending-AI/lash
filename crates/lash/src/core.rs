@@ -1,5 +1,6 @@
 use crate::support::*;
 use lash_core::facade_support;
+use lash_core::facade_support::{RuntimeSessionStateFacadeOps, ScopedEffectControllerFacadeOps};
 use lash_core::runtime::{
     ProcessCommand, ProcessEffectOutcome, RuntimeEffectCommand, RuntimeEffectEnvelope,
     RuntimeEffectKind, RuntimeEffectLocalExecutor, RuntimeEffectOutcome, RuntimeInvocation,

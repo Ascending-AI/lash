@@ -1,3 +1,4 @@
+use lash_core::facade_support::SessionGraphFacadeOps;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};

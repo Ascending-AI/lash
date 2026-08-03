@@ -2,6 +2,7 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Condvar, Mutex};
 
 use async_trait::async_trait;
+use lash_core::facade_support::SessionGraphFacadeOps;
 use lash_core::runtime::{RuntimeTurnPhase, RuntimeTurnPhaseProbe};
 use lash_core::{
     InputItem, LlmOutputPart, LlmResponse, SessionAppendNode, SessionNodePayload, ToolCall,

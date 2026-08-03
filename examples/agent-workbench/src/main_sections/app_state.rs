@@ -1,3 +1,4 @@
+
 impl AppState {
     fn current_session_id(&self) -> String {
         self.session_ids.current()

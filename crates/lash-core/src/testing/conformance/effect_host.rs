@@ -1,6 +1,7 @@
 //! [`EffectHost`] scope-factory and effect-controller replay conformance.
 
 use super::*;
+use crate::facade_support::ScopedEffectControllerFacadeOps;
 
 /// One scope selected by an [`EffectHost`] and one effect envelope executed
 /// through the scoped controller.

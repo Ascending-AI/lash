@@ -5,6 +5,9 @@ use super::logical_turn::{
 };
 use super::turn_control::ActiveTurnControl;
 use super::*;
+use crate::facade_support::{
+    ProtocolTurnOptionsFacadeOps, RuntimeSessionStateFacadeOps, ScopedEffectControllerFacadeOps,
+};
 use lash_sansio::core_support::*;
 use std::pin::Pin;
 
@@ -221,7 +224,7 @@ pub(in crate::runtime) async fn send_queued_work_started_event(
 ) {
     send_turn_activity(
         event_tx,
-        TurnActivityId::fresh(),
+        TurnActivityId::new(uuid::Uuid::new_v4().to_string()),
         TurnEvent::QueuedWorkStarted {
             boundary,
             batch_ids: queued_work_batch_ids(claim),

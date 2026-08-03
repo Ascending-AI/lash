@@ -83,6 +83,7 @@ pub mod facade_support {
     pub use crate::direct::DirectPart;
     pub use crate::direct::DirectRequest;
     pub use crate::direct::DirectRole;
+    pub use crate::facade_ops::ProtocolTurnOptionsFacadeOps;
     pub use crate::llm::transport::LlmTransportError;
     pub use crate::llm::transport::ProviderFailure;
     pub use crate::plugin::AssistantResponseTransform;
@@ -135,6 +136,7 @@ pub mod facade_support {
     pub use crate::plugin::TurnResultHookContext;
     pub use crate::plugin::TurnResultSummary;
     pub use crate::plugin::TurnTransformContext;
+    pub use crate::plugin::session_types::facade_ops::AgentFrameReasonFacadeOps;
     pub use crate::plugin_stack::PluginStack;
     pub use crate::provider::CacheRetention;
     pub use crate::provider::LlmTimeouts;
@@ -242,8 +244,10 @@ pub mod facade_support {
     pub use crate::runtime::current_epoch_ms;
     pub use crate::runtime::diff_token_ledger;
     pub use crate::runtime::diff_usage_reports;
+    pub use crate::runtime::effect::executor::control::facade_ops::ScopedEffectControllerFacadeOps;
     pub use crate::runtime::ensure_durable_effect_input;
     pub use crate::runtime::epoch_ms_from_system_time;
+    pub use crate::runtime::facade_ops::TurnContextFacadeOps;
     pub use crate::runtime::process_runtime_session_ids;
     pub use crate::runtime::process_signal_event_type;
     pub use crate::runtime::process_signal_wait_key;
@@ -251,6 +255,7 @@ pub mod facade_support {
     pub use crate::runtime::process_wake_source_key;
     pub use crate::runtime::promise_semantics;
     pub use crate::runtime::reconcile_pruned_trigger_deliveries;
+    pub use crate::runtime::state::facade_ops::RuntimeSessionStateFacadeOps;
     pub use crate::runtime::system_time_from_epoch_ms;
     pub use crate::runtime::terminal_append_request;
     pub use crate::runtime::validate_generic_process_event_append;
@@ -260,6 +265,7 @@ pub mod facade_support {
     pub use crate::session::InjectedTurnInput;
     pub use crate::session::ToolInvocation;
     pub use crate::session::ToolInvocationReply;
+    pub use crate::session_graph::facade_ops::{SessionGraphFacadeOps, SessionNodeRecordFacadeOps};
     pub use crate::session_graph::frame_node_id;
     pub use crate::session_model::ConversationRecord;
     pub use crate::session_model::GenerationOverlay;
@@ -277,6 +283,7 @@ pub mod facade_support {
     pub use crate::tool_registry::ToolRestoreReport;
     pub use crate::tool_registry::ToolSourceHandle;
     pub use crate::tool_registry::ToolStateEntry;
+    pub use crate::tool_registry::facade_ops::{ToolRegistryFacadeOps, ToolStateFacadeOps};
     pub use crate::triggers::InMemoryTriggerStore;
     pub use crate::triggers::TriggerDeliveryEmitOutcome;
     pub use crate::triggers::TriggerDeliveryEmitReport;
@@ -555,20 +562,6 @@ impl ProtocolTurnOptions {
         }
     }
 
-    pub fn merged_with_override(&self, override_options: &Self) -> Self {
-        match (&self.payload, &override_options.payload) {
-            (serde_json::Value::Object(base), serde_json::Value::Object(overrides)) => {
-                let mut payload = base.clone();
-                payload.extend(overrides.clone());
-                Self {
-                    schema_version: PROTOCOL_TURN_OPTIONS_SCHEMA_VERSION,
-                    payload: serde_json::Value::Object(payload),
-                }
-            }
-            _ => override_options.clone(),
-        }
-    }
-
     pub fn typed<T>(value: T) -> Result<Self, serde_json::Error>
     where
         T: serde::Serialize,
@@ -578,13 +571,43 @@ impl ProtocolTurnOptions {
             payload: serde_json::to_value(value)?,
         })
     }
+}
 
+impl ProtocolTurnOptions {
     pub fn decode<T>(&self) -> Result<T, ProtocolTurnOptionsError>
     where
         T: serde::de::DeserializeOwned,
     {
         ensure_protocol_turn_options_schema_version(self.schema_version)?;
         serde_json::from_value(self.payload.clone()).map_err(ProtocolTurnOptionsError::Decode)
+    }
+}
+
+pub(crate) mod facade_ops {
+    use super::{PROTOCOL_TURN_OPTIONS_SCHEMA_VERSION, ProtocolTurnOptions};
+
+    /// Facade-internal operations for [`ProtocolTurnOptions`].
+    ///
+    /// This is not integrator surface, carries no stability promise, and exists
+    /// only for the `lash` facade. See [ADR 0051](https://github.com/Ascending-AI/lash/blob/main/docs/adr/0051-the-facade-is-the-host-api-core-is-integrator-seams.md).
+    pub trait ProtocolTurnOptionsFacadeOps {
+        fn merged_with_override(&self, override_options: &Self) -> Self;
+    }
+
+    impl ProtocolTurnOptionsFacadeOps for ProtocolTurnOptions {
+        fn merged_with_override(&self, override_options: &Self) -> Self {
+            match (&self.payload, &override_options.payload) {
+                (serde_json::Value::Object(base), serde_json::Value::Object(overrides)) => {
+                    let mut payload = base.clone();
+                    payload.extend(overrides.clone());
+                    Self {
+                        schema_version: PROTOCOL_TURN_OPTIONS_SCHEMA_VERSION,
+                        payload: serde_json::Value::Object(payload),
+                    }
+                }
+                _ => override_options.clone(),
+            }
+        }
     }
 }
 

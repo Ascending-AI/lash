@@ -2029,6 +2029,7 @@ dependencies = [
  "chrono",
  "clap",
  "dhat",
+ "futures-util",
  "lash-core",
  "lash-lashlang-runtime",
  "lash-llm-tools",
@@ -2044,6 +2045,7 @@ dependencies = [
  "stats_alloc",
  "tokio",
  "tokio-util",
+ "uuid",
 ]
 
 [[package]]

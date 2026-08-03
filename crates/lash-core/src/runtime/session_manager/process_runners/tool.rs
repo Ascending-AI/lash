@@ -1,4 +1,5 @@
 use super::*;
+use crate::facade_support::ScopedEffectControllerFacadeOps;
 use std::sync::Arc;
 
 impl RuntimeSessionServices {

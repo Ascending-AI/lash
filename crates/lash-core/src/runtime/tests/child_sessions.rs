@@ -1,6 +1,7 @@
 use super::*;
 use crate::AttachmentStore as _;
 use crate::ToolProvider as _;
+use crate::facade_support::ToolStateFacadeOps;
 
 struct AttachmentWritingTool;
 

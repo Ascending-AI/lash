@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use crate::facade_support::ScopedEffectControllerFacadeOps;
 use tokio::sync::mpsc::Sender;
 use tokio_util::sync::CancellationToken;
 

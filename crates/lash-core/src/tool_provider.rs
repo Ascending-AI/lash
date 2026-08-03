@@ -1,5 +1,6 @@
 use std::sync::{Arc, Mutex};
 
+use crate::facade_support::ScopedEffectControllerFacadeOps;
 use lash_sansio::llm::types::ProviderReplayMeta;
 use serde::{Deserialize, Serialize};
 
@@ -527,6 +528,7 @@ impl<'run> ToolContext<'run> {
         serde_json::from_value(self.prepared_payload.clone())
     }
 
+    /// Current one-based attempt number for tool implementors handling this call.
     pub fn attempt_number(&self) -> u32 {
         self.attempt_number
     }

@@ -84,28 +84,10 @@ impl ToolState {
         }
     }
 
-    pub fn generation(&self) -> u64 {
-        self.generation
-    }
-
     #[cfg(any(test, feature = "testing"))]
     pub(crate) fn with_generation(mut self, generation: u64) -> Self {
         self.generation = generation;
         self
-    }
-
-    /// Manifests for current Tool Catalog members. Orphaned and host-removed
-    /// entries are excluded (non-membership) but kept in state for rebind.
-    pub fn tool_manifests(&self) -> Vec<ToolManifest> {
-        self.tools
-            .values()
-            .filter(|entry| entry.is_member())
-            .map(ToolStateEntry::manifest)
-            .collect()
-    }
-
-    pub fn get(&self, id: &ToolId) -> Option<&ToolStateEntry> {
-        self.tools.get(id)
     }
 
     /// Edit a manifest in an explicit `ToolRegistry::apply_state` delta.
@@ -118,10 +100,6 @@ impl ToolState {
             .map(|entry| &mut entry.manifest)
     }
 
-    pub fn contains(&self, id: &ToolId) -> bool {
-        self.tools.contains_key(id)
-    }
-
     pub fn is_empty(&self) -> bool {
         self.tools.is_empty()
     }
@@ -132,19 +110,6 @@ impl ToolState {
 
     pub fn iter(&self) -> impl Iterator<Item = (&ToolId, &ToolStateEntry)> {
         self.tools.iter()
-    }
-
-    /// Toggle Tool Catalog membership for a tool. `present == false` removes
-    /// the tool from the catalog (non-membership) while keeping its state entry;
-    /// `present == true` restores membership.
-    pub fn set_membership(&mut self, id: &ToolId, present: bool) -> Result<(), ReconfigureError> {
-        let Some(entry) = Arc::make_mut(&mut self.tools).get_mut(id) else {
-            return Err(ReconfigureError::Validation(format!(
-                "unknown tool id `{id}`"
-            )));
-        };
-        entry.member = present;
-        Ok(())
     }
 
     /// Delete a tool in an explicit `ToolRegistry::apply_state` delta.

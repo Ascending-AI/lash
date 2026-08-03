@@ -5,6 +5,7 @@ use serde::{Deserialize, Serialize};
 
 use super::*;
 use crate::SessionAppendNode;
+use crate::facade_support::SessionGraphFacadeOps;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct SessionHandle {
@@ -141,8 +142,7 @@ pub struct AgentFrameReason(String);
 impl AgentFrameReason {
     pub(crate) const INITIAL: &'static str = "initial";
     pub(crate) const CONTINUE_AS: &'static str = "continue_as";
-    pub const COMPACTION: &'static str = "compaction";
-
+    pub(crate) const COMPACTION: &'static str = "compaction";
     pub(crate) fn new(label: impl Into<String>) -> Self {
         Self(label.into())
     }
@@ -151,16 +151,30 @@ impl AgentFrameReason {
         Self::new(Self::INITIAL)
     }
 
-    pub fn continue_as() -> Self {
-        Self::new(Self::CONTINUE_AS)
-    }
-
     pub(crate) fn compaction() -> Self {
         Self::new(Self::COMPACTION)
     }
 
     pub fn as_str(&self) -> &str {
         &self.0
+    }
+}
+
+pub(crate) mod facade_ops {
+    use super::*;
+
+    /// Facade-internal operations for [`AgentFrameReason`].
+    ///
+    /// This is not integrator surface, carries no stability promise, and exists
+    /// only for the `lash` facade. See [ADR 0051](https://github.com/Ascending-AI/lash/blob/main/docs/adr/0051-the-facade-is-the-host-api-core-is-integrator-seams.md).
+    pub trait AgentFrameReasonFacadeOps {
+        fn continue_as() -> Self;
+    }
+
+    impl AgentFrameReasonFacadeOps for AgentFrameReason {
+        fn continue_as() -> Self {
+            Self::new(Self::CONTINUE_AS)
+        }
     }
 }
 

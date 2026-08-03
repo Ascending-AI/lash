@@ -1,4 +1,5 @@
 use super::*;
+use crate::facade_support::SessionGraphFacadeOps;
 use crate::llm::types::{AttachmentSource, LlmContentBlock, LlmMessage, LlmRole, LlmToolChoice};
 use crate::plugin::{ProtocolDriverPlugin, ProtocolSessionPlugin};
 

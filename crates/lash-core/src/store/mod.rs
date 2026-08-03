@@ -1,5 +1,7 @@
 //! The runtime's settled-session persistence contract and shared store types.
 
+use crate::facade_support::{SessionGraphFacadeOps, ToolStateFacadeOps};
+
 mod attachment_manifest;
 mod commit_budget;
 mod commit_identity;
@@ -551,12 +553,6 @@ impl SessionExecutionLease {
             lease_token: self.lease_token.clone(),
             fencing_token: self.fencing_token,
         }
-    }
-}
-
-impl SessionExecutionLeaseCompletion {
-    pub fn from_lease(lease: &SessionExecutionLease) -> Self {
-        lease.completion()
     }
 }
 

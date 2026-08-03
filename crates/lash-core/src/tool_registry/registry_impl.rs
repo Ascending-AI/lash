@@ -142,25 +142,6 @@ impl ToolRegistry {
         })
     }
 
-    pub fn add_tool_provider(
-        &self,
-        provider: Arc<dyn ToolProvider>,
-    ) -> Result<ToolSourceHandle, ReconfigureError> {
-        let source_id = {
-            let mut state = self
-                .state
-                .write()
-                .expect("tool registry state lock poisoned");
-            state.next_live_source_id += 1;
-            format!("live:{}", state.next_live_source_id)
-        };
-        self.upsert_source(Arc::new(ToolProviderSource::new(
-            source_id.clone(),
-            provider,
-        )))?;
-        Ok(ToolSourceHandle::new(source_id))
-    }
-
     pub(crate) fn compose_session_catalog(
         &self,
         include_base_tools: bool,
@@ -184,10 +165,6 @@ impl ToolRegistry {
         source: Arc<dyn ToolSourceExecutor>,
     ) -> Result<u64, ReconfigureError> {
         self.reconcile_source(source, SourceReconcilePolicy::RejectExternalConflicts)
-    }
-
-    pub fn remove_source(&self, handle: &ToolSourceHandle) -> Result<u64, ReconfigureError> {
-        self.remove_source_id(handle.as_str())
     }
 
     pub(crate) fn remove_source_id(&self, source_id: &str) -> Result<u64, ReconfigureError> {

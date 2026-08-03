@@ -1,4 +1,8 @@
 use crate::support::*;
+use lash_core::facade_support::{
+    AgentFrameReasonFacadeOps, RuntimeSessionStateFacadeOps, SessionGraphFacadeOps,
+    SessionNodeRecordFacadeOps, ToolStateFacadeOps,
+};
 use std::collections::{HashMap, VecDeque};
 use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -1816,7 +1820,9 @@ fn inline_scope(scope: lash_core::ExecutionScope) -> lash_core::ScopedEffectCont
 fn turn_scope(session_id: &str) -> lash_core::ScopedEffectController<'static> {
     inline_scope(lash_core::ExecutionScope::turn(
         session_id,
-        lash_core::TurnActivityId::fresh().0.to_string(),
+        lash_core::TurnActivityId::new(uuid::Uuid::new_v4().to_string())
+            .0
+            .to_string(),
     ))
 }
 

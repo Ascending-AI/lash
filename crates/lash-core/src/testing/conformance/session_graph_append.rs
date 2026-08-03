@@ -10,6 +10,7 @@
 //! [`SessionGraphService`](crate::plugin::SessionGraphService)).
 
 use super::*;
+use crate::facade_support::SessionGraphFacadeOps;
 
 /// Run the session-graph append branch-liveness suite against `factory`.
 pub async fn session_graph_append_branch_liveness(factory: Arc<dyn crate::SessionStoreFactory>) {

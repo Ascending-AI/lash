@@ -2,7 +2,7 @@ mod awaiter;
 mod engine;
 mod events;
 mod materialization;
-mod model;
+pub(crate) mod model;
 #[cfg(test)]
 mod model_filter_tests;
 mod observation;

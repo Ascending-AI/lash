@@ -1,3 +1,4 @@
+
 #[derive(Clone, Copy)]
 struct PhaseStart {
     started_at: Instant,
@@ -297,7 +298,7 @@ pub(crate) async fn run_once(
         prepare_turn(&mut runtime, scenario, turn_index).await?;
 
         let deep_turn_id = matches!(scenario, RuntimePerfScenario::DeepTurnComposition)
-            .then(|| format!("runtime-perf-deep-turn-{}", lash_core::TurnActivityId::fresh().0));
+            .then(|| format!("runtime-perf-deep-turn-{}", lash_core::TurnActivityId::new(uuid::Uuid::new_v4().to_string()).0));
         if let Some(turn_id) = deep_turn_id.as_deref() {
             runtime
                 .enqueue_active_turn_input(
@@ -348,7 +349,7 @@ pub(crate) async fn run_once(
         } else if matches!(scenario, RuntimePerfScenario::TurnCancelRoundTrip) {
             let turn_id = format!(
                 "runtime-perf-cancel-round-trip-{}",
-                lash_core::TurnActivityId::fresh().0
+                lash_core::TurnActivityId::new(uuid::Uuid::new_v4().to_string()).0
             );
             let (turn, duration) = runtime_perf_timed(
                 scenario,
@@ -376,7 +377,7 @@ pub(crate) async fn run_once(
         } else if matches!(scenario, RuntimePerfScenario::IngressClaimProjection) {
             let turn_id = format!(
                 "runtime-perf-ingress-projection-{}",
-                lash_core::TurnActivityId::fresh().0
+                lash_core::TurnActivityId::new(uuid::Uuid::new_v4().to_string()).0
             );
             let (turn, duration) = runtime_perf_timed(
                 scenario,

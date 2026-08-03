@@ -1,4 +1,5 @@
 use super::*;
+use lash_core::facade_support::RuntimeSessionStateFacadeOps;
 
 use lash_core::{EffectReplayOwnership, ToolCall, ToolProvider};
 use std::sync::atomic::{AtomicUsize, Ordering};

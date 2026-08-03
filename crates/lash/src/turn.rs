@@ -3,6 +3,9 @@ use std::task::{Context, Poll};
 
 use crate::support::*;
 use futures_util::Stream;
+use lash_core::facade_support::{
+    RuntimeSessionStateFacadeOps, ScopedEffectControllerFacadeOps, TurnContextFacadeOps,
+};
 
 pub use lash_core::{facade_support::AssistantOutput, facade_support::TurnIssue};
 
@@ -734,7 +737,9 @@ impl AdvancedQueuedTurn {
 }
 
 fn fresh_turn_id() -> String {
-    lash_core::TurnActivityId::fresh().0.to_string()
+    lash_core::TurnActivityId::new(uuid::Uuid::new_v4().to_string())
+        .0
+        .to_string()
 }
 
 fn fresh_queue_drain_id() -> String {

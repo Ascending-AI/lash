@@ -188,10 +188,7 @@ async fn compact_context_opens_compaction_frame_and_preserves_prior_frame() -> R
         .iter()
         .find(|frame| Some(&frame.frame_node_id) == after.current_frame_node_id.as_ref())
         .expect("current frame");
-    assert_eq!(
-        current.reason.as_str(),
-        lash_core::AgentFrameReason::COMPACTION
-    );
+    assert_eq!(current.reason.as_str(), "compaction");
     assert_eq!(
         current.previous_frame_node_id.as_deref(),
         previous_frame_node_id.as_deref()

@@ -148,6 +148,7 @@ pub(crate) fn llm_call_error_from_transport(err: LlmTransportError) -> LlmCallEr
 /// session and yields the raw provider response. Both the text-only
 /// (`DirectCompletion`) and full-output (`DirectLlmCompletion`) client methods
 /// project from this single result.
+#[allow(private_interfaces)]
 pub(crate) async fn apply_direct_outcome(
     current: &CurrentSessionCapability,
     usage_capability: &UsageCapability,
