@@ -59,9 +59,9 @@ pub struct RuntimeControlConfig {
     /// Lease timing capability for every durable single-writer *lease* lane this
     /// runtime renews on a cadence: session execution leases, process leases,
     /// and durable effect-replay leases. Queued-work and turn-input claims are
-    /// not leases and carry no TTL — they are generation-fenced under the
-    /// session execution lease (ADR 0029). Defaults to [`LeaseTimings::default`]
-    /// (30s TTL / 10s renew).
+    /// not leases and carry no TTL; they pin a session execution lease generation
+    /// for claimability and handoff (ADR 0029). Defaults to
+    /// [`LeaseTimings::default`] (30s TTL / 10s renew).
     pub lease_timings: crate::LeaseTimings,
 }
 

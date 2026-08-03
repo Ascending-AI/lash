@@ -578,8 +578,8 @@ impl RuntimeHandle {
     /// batches to the pending queue immediately.
     ///
     /// This is the host lever behind stopping an external queued-work driver
-    /// mid-claim: instead of letting the claim age out over its lease TTL, the
-    /// host hands the claim back and the work becomes claimable again at once.
+    /// mid-claim: the host clears its ownership and the work becomes claimable
+    /// at once, without waiting for a successor generation to re-claim it.
     pub async fn abandon_queued_work_claim(
         &self,
         claim: &crate::QueuedWorkClaim,

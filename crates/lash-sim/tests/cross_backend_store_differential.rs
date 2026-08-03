@@ -451,10 +451,9 @@ fn generated_cases() -> Vec<GeneratedCase> {
         },
         GeneratedCase {
             name: CaseName::SettleClaimAfterLeaseGenerationSuperseded,
-            // FIG-641: all three backends currently consume this superseded
-            // claim, so this is an agreement test only. Its green result cannot
-            // establish correctness because a differential cannot detect
-            // uniform wrongness.
+            // FIG-641 / ADR 0029: supersession is reclaim-mediated by design.
+            // All three backends currently accept this pre-reclaim settlement;
+            // this differential demonstrates agreement, not a conformance law.
             operations: vec![
                 StoreOperation::EnqueueNextTurnInput,
                 StoreOperation::AcquireSessionLease {

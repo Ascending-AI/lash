@@ -14,8 +14,8 @@ the live session-execution lease. A normal completion seals the same gate before
 later requests to report `CompletionWonRace`. A second reserved promise publishes terminal
 evidence after the commit so an external caller can attach without polling storage. The promise
 key uses semantic session/turn identity rather than lease generation: cancellation survives owner
-loss, while ADR 0029's normal
-generation fence prevents the stale owner from committing.
+loss. The final commit remains governed by the session-head CAS and any claim-ownership checks
+(ADR 0029); lease loss alone does not reject a current-head commit.
 
 The cancellation receipt reports only the outcome of addressing the keyed promise. Delivery
 geometry is a property of the `TurnWorkDriver` and effect controller the Host Application
