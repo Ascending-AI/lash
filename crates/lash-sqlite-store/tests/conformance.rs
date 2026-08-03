@@ -720,6 +720,28 @@ async fn sqlite_checkpoint_component_refs_survive_cold_reopens() {
 }
 
 #[tokio::test]
+async fn sqlite_append_receipt_replays_after_ancestor_superseded() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let path = dir.path().join("append-receipt-ancestor.db");
+    let store = Arc::new(Store::open(&path).await.expect("open store"));
+    let mutation_path = path.clone();
+    lash_core::testing::conformance::append_request_receipt_replays_after_ancestor_superseded(
+        store as Arc<dyn RuntimePersistence>,
+        move |leaf_node_id| async move {
+            let conn = rusqlite::Connection::open(mutation_path).expect("open raw sqlite");
+            conn.execute(
+                "UPDATE session_head
+                 SET leaf_node_id = ?1, head_revision = head_revision + 1
+                 WHERE session_id = 'root'",
+                rusqlite::params![leaf_node_id],
+            )
+            .expect("switch sqlite active branch");
+        },
+    )
+    .await;
+}
+
+#[tokio::test]
 async fn sqlite_store_schema_excludes_embedded_turn_replay_tables() {
     let dir = tempfile::tempdir().expect("tempdir");
     let path = dir.path().join("schema.db");
@@ -742,6 +764,32 @@ async fn sqlite_store_schema_excludes_embedded_turn_replay_tables() {
         "runtime_turn_commits",
     );
     assert_eq!(turn_commits, 1);
+}
+
+#[tokio::test]
+async fn sqlite_runtime_turn_receipt_identity_columns_are_nullable() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let path = dir.path().join("receipt-schema.db");
+    drop(Store::open(&path).await.expect("open store"));
+    let conn = rusqlite::Connection::open(path).expect("open raw sqlite");
+    let mut stmt = conn
+        .prepare("PRAGMA table_info(runtime_turn_commits)")
+        .expect("prepare receipt schema query");
+    let columns = stmt
+        .query_map([], |row| {
+            Ok((row.get::<_, String>(1)?, row.get::<_, i64>(3)?))
+        })
+        .expect("query receipt schema")
+        .collect::<Result<std::collections::BTreeMap<_, _>, _>>()
+        .expect("collect receipt schema");
+    for column in [
+        "request_identity_hash",
+        "requested_node_count",
+        "requested_ancestor_node_id",
+        "identity_encoding_version",
+    ] {
+        assert_eq!(columns.get(column), Some(&0), "{column} must allow NULL");
+    }
 }
 
 fn raw_count(conn: &rusqlite::Connection, sql: &str, name: &str) -> i64 {

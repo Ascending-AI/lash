@@ -4,6 +4,174 @@
 schema_version = 1
 
 [[api]]
+symbol = "lash::testing::conformance::append_request_receipt_replays_after_ancestor_superseded"
+kind = "function"
+availability = "all-features"
+area = "stores"
+disposition = "unused-justify"
+reason = "Concrete integrator class under ADR 0051: custom durable store conformance embedders provide the backend-specific branch-switch test hook."
+
+[[api]]
+symbol = "lash::persistence::RuntimeCommitResult::committed_leaf_node_id"
+kind = "field"
+availability = "default+all-features"
+area = "stores"
+disposition = "unused-add"
+reason = "Add the durable append receipt replay to the agent-service persistence example and assert that it returns the first committed leaf."
+
+[[api]]
+symbol = "lash::persistence::RuntimeCommitResult::receipt_replayed"
+kind = "field"
+availability = "default+all-features"
+area = "stores"
+disposition = "unused-add"
+reason = "Add the durable append receipt replay to the agent-service persistence example and assert that the runtime refreshes resident state."
+
+[[api]]
+symbol = "lash::persistence::RuntimeTurnCommitStamp::identity_encoding_version"
+kind = "field"
+availability = "default+all-features"
+area = "stores"
+disposition = "unused-add"
+reason = "Add an append request receipt construction example once hosts can construct this runtime-owned stamp through the facade."
+
+[[api]]
+symbol = "lash::persistence::RuntimeTurnCommitStamp::request_identity_hash"
+kind = "field"
+availability = "default+all-features"
+area = "stores"
+disposition = "unused-add"
+reason = "Add an append request receipt construction example once hosts can construct this runtime-owned stamp through the facade."
+
+[[api]]
+symbol = "lash::persistence::RuntimeTurnCommitStamp::requested_ancestor_node_id"
+kind = "field"
+availability = "default+all-features"
+area = "stores"
+disposition = "unused-add"
+reason = "Add an append request receipt construction example once hosts can construct this runtime-owned stamp through the facade."
+
+[[api]]
+symbol = "lash::persistence::RuntimeTurnCommitStamp::requested_node_count"
+kind = "field"
+availability = "default+all-features"
+area = "stores"
+disposition = "unused-add"
+reason = "Add an append request receipt construction example once hosts can construct this runtime-owned stamp through the facade."
+
+[[api]]
+symbol = "lash::persistence::StoreError::AppendAncestorNotActive"
+kind = "variant"
+availability = "default+all-features"
+area = "stores"
+disposition = "unused-add"
+reason = "Add the fresh append ancestor-fence rejection to the agent-service persistence example and assert its StaleBranch translation."
+
+[[api]]
+symbol = "lash::persistence::StoreError::AppendAncestorNotActive::required_node_id"
+kind = "field"
+availability = "default+all-features"
+area = "stores"
+disposition = "unused-add"
+reason = "Add the fresh append ancestor-fence rejection to the agent-service persistence example and assert the refused ancestor id."
+
+[[api]]
+symbol = "lash::persistence::StoreError::AppendOperationIdentityConflict"
+kind = "variant"
+availability = "default+all-features"
+area = "stores"
+disposition = "unused-add"
+reason = "Add operation-id reuse with changed append content to the agent-service persistence example and assert the typed conflict."
+
+[[api]]
+symbol = "lash::persistence::StoreError::AppendOperationIdentityConflict::operation_key"
+kind = "field"
+availability = "default+all-features"
+area = "stores"
+disposition = "unused-add"
+reason = "Add operation-id reuse with changed append content to the agent-service persistence example and assert the conflicting storage key."
+
+[[api]]
+symbol = "lash::persistence::StoreError::AppendOperationIdentityConflict::session_id"
+kind = "field"
+availability = "default+all-features"
+area = "stores"
+disposition = "unused-add"
+reason = "Add operation-id reuse with changed append content to the agent-service persistence example and assert the conflicting session id."
+
+[[api]]
+symbol = "lash_core::RuntimeTurnCommitStamp::identity_encoding_version"
+kind = "field"
+availability = "default+all-features"
+area = "stores"
+disposition = "unused-justify"
+reason = "Concrete integrator class under ADR 0051: custom durable store implementors consume versioned append request receipt metadata."
+
+[[api]]
+symbol = "lash_core::RuntimeTurnCommitStamp::request_identity_hash"
+kind = "field"
+availability = "default+all-features"
+area = "stores"
+disposition = "unused-justify"
+reason = "Concrete integrator class under ADR 0051: custom durable store implementors consume append request identity hashes."
+
+[[api]]
+symbol = "lash_core::RuntimeTurnCommitStamp::requested_ancestor_node_id"
+kind = "field"
+availability = "default+all-features"
+area = "stores"
+disposition = "unused-justify"
+reason = "Concrete integrator class under ADR 0051: custom durable store implementors enforce fresh append ancestor fences after receipt lookup."
+
+[[api]]
+symbol = "lash_core::RuntimeTurnCommitStamp::requested_node_count"
+kind = "field"
+availability = "default+all-features"
+area = "stores"
+disposition = "unused-justify"
+reason = "Concrete integrator class under ADR 0051: custom durable store implementors persist append receipt observability metadata."
+
+[[api]]
+symbol = "lash_core::StoreError::AppendAncestorNotActive"
+kind = "variant"
+availability = "default+all-features"
+area = "stores"
+disposition = "unused-justify"
+reason = "Concrete integrator class under ADR 0051: custom durable store implementors reject a fresh append whose requested ancestor is inactive."
+
+[[api]]
+symbol = "lash_core::StoreError::AppendAncestorNotActive::required_node_id"
+kind = "field"
+availability = "default+all-features"
+area = "stores"
+disposition = "unused-justify"
+reason = "Concrete integrator class under ADR 0051: custom durable store implementors identify the inactive append ancestor."
+
+[[api]]
+symbol = "lash_core::StoreError::AppendOperationIdentityConflict"
+kind = "variant"
+availability = "default+all-features"
+area = "stores"
+disposition = "unused-justify"
+reason = "Concrete integrator class under ADR 0051: custom durable store implementors distinguish append operation-id reuse from generic commit conflicts."
+
+[[api]]
+symbol = "lash_core::StoreError::AppendOperationIdentityConflict::operation_key"
+kind = "field"
+availability = "default+all-features"
+area = "stores"
+disposition = "unused-justify"
+reason = "Concrete integrator class under ADR 0051: custom durable store implementors report the conflicting append operation storage key."
+
+[[api]]
+symbol = "lash_core::StoreError::AppendOperationIdentityConflict::session_id"
+kind = "field"
+availability = "default+all-features"
+area = "stores"
+disposition = "unused-justify"
+reason = "Concrete integrator class under ADR 0051: custom durable store implementors report the session owning the conflicting append receipt."
+
+[[api]]
 symbol = "lash::AdvancedToolAdmin"
 kind = "struct"
 availability = "default+all-features"

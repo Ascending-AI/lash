@@ -197,6 +197,59 @@ async fn postgres_checkpoint_component_refs_survive_cold_reopens_when_configured
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn postgres_runtime_turn_receipt_identity_columns_are_nullable_when_configured() {
+    let Some((_database_lock, storage)) = storage().await else {
+        eprintln!("skipping Postgres receipt-schema test: database is not configured");
+        return;
+    };
+    let rows: Vec<(String, String)> = sqlx::query_as(
+        "SELECT column_name, is_nullable
+         FROM information_schema.columns
+         WHERE table_schema = 'public'
+           AND table_name = 'lash_runtime_turn_commits'
+           AND column_name = ANY($1)",
+    )
+    .bind(
+        &[
+            "request_identity_hash",
+            "requested_node_count",
+            "requested_ancestor_node_id",
+            "identity_encoding_version",
+        ][..],
+    )
+    .fetch_all(storage.pool())
+    .await
+    .expect("read Postgres receipt schema");
+    assert_eq!(rows.len(), 4);
+    assert!(rows.iter().all(|(_, nullable)| nullable == "YES"));
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn postgres_append_receipt_replays_after_ancestor_superseded_when_configured() {
+    let Some((_database_lock, storage)) = storage().await else {
+        eprintln!("skipping Postgres append-receipt conformance: database is not configured");
+        return;
+    };
+    reset(&storage).await;
+    let pool = storage.pool().clone();
+    lash_core::testing::conformance::append_request_receipt_replays_after_ancestor_superseded(
+        Arc::new(storage.unbound_session_store()) as Arc<dyn RuntimePersistence>,
+        move |leaf_node_id| async move {
+            sqlx::query(
+                "UPDATE lash_sessions
+                 SET leaf_node_id = $1, head_revision = head_revision + 1
+                 WHERE session_id = 'root'",
+            )
+            .bind(leaf_node_id)
+            .execute(&pool)
+            .await
+            .expect("switch Postgres active branch");
+        },
+    )
+    .await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn postgres_artifact_store_satisfies_conformance_when_configured() {
     let Some((_database_lock, storage)) = storage().await else {
         eprintln!(
@@ -821,7 +874,7 @@ async fn postgres_from_pool_enforces_schema_version_gate_when_configured() {
     .fetch_one(&pool)
     .await
     .expect("read current schema version");
-    assert_eq!(current_version, 35, "Postgres component schema pin");
+    assert_eq!(current_version, 36, "Postgres component schema pin");
     let stale_version = current_version - 1;
     // Force the recorded component version to a stale value.
     sqlx::query(

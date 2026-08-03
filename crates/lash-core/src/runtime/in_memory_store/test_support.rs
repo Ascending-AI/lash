@@ -111,6 +111,21 @@ impl InMemorySessionStore {
         self.commit_write_transaction_count
             .load(std::sync::atomic::Ordering::SeqCst)
     }
+
+    pub(crate) fn force_active_leaf_for_testing(&self, leaf_node_id: String) {
+        let _transaction = self
+            .write_transaction
+            .lock()
+            .expect("lock in-memory test branch switch");
+        let mut meta = self.session_head_meta.lock().expect("lock session head");
+        let meta = meta.as_mut().expect("branch switch requires session head");
+        meta.head_revision += 1;
+        meta.leaf_node_id = Some(leaf_node_id.clone());
+        self.session_graph
+            .lock()
+            .expect("lock resident graph")
+            .set_leaf_node_id(Some(leaf_node_id));
+    }
 }
 
 #[cfg(test)]

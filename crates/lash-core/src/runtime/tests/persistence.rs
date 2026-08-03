@@ -12,6 +12,19 @@ async fn recording_store_satisfies_runtime_persistence_conformance() {
     .await;
 }
 
+#[tokio::test]
+async fn in_memory_append_receipt_replays_after_ancestor_superseded() {
+    let store = Arc::new(RecordingStore::default());
+    let mutation_store = Arc::clone(&store);
+    crate::testing::conformance::append_request_receipt_replays_after_ancestor_superseded(
+        Arc::clone(&store) as Arc<dyn crate::RuntimePersistence>,
+        move |leaf_node_id| async move {
+            mutation_store.force_active_leaf_for_testing(leaf_node_id);
+        },
+    )
+    .await;
+}
+
 fn recording_runtime_persistence() -> Arc<dyn crate::RuntimePersistence> {
     Arc::new(RecordingStore::default())
 }
