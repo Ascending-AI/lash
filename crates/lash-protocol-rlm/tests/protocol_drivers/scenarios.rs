@@ -286,8 +286,8 @@ fn rlm_protocol_scenario_finish_required_prose_at_max_turns_stops_without_retry_
             llm_call_count: Some(1),
             done: Some(true),
             system_message_omits: vec!["explicit final value", "finish <value>"],
-            turn_outcome: Some(lash_core::TurnOutcome::Stopped(
-                lash_core::TurnStop::MaxTurns,
+            turn_outcome: Some(lash_core::facade_support::TurnOutcome::Stopped(
+                lash_core::facade_support::TurnStop::MaxTurns,
             )),
             ..RlmProtocolExpectations::default()
         })
@@ -310,8 +310,8 @@ fn rlm_protocol_scenario_finish_required_exec_error_at_max_turns_stops_without_r
             exec_codes: vec!["missing_name"],
             llm_call_count: Some(1),
             done: Some(true),
-            turn_outcome: Some(lash_core::TurnOutcome::Stopped(
-                lash_core::TurnStop::MaxTurns,
+            turn_outcome: Some(lash_core::facade_support::TurnOutcome::Stopped(
+                lash_core::facade_support::TurnStop::MaxTurns,
             )),
             trajectory_last: Some(RlmTrajectoryExpectation {
                 code: "missing_name",

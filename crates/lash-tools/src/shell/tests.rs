@@ -158,7 +158,7 @@ mod tests {
             _scope: lash_core::ProcessOpScope<'_>,
         ) -> Result<lash_core::ProcessAwaitOutput, PluginError> {
             let registry: Arc<dyn lash_core::ProcessRegistry> = self.registry.clone();
-            lash_core::ProcessAwaiter::polling(registry)
+            lash_core::facade_support::ProcessAwaiter::polling(registry)
                 .await_terminal(process_id)
                 .await
         }
@@ -245,7 +245,7 @@ mod tests {
                     "process handle `{process_id}` is not live or visible in this session"
                 )));
             }
-            let event_type = lash_core::process_signal_event_type(&signal_name)?;
+            let event_type = lash_core::facade_support::process_signal_event_type(&signal_name)?;
             self.registry
                 .append_event(
                     process_id,
@@ -281,8 +281,8 @@ mod tests {
             host.clone(),
             host,
             processes,
-            Arc::new(lash_core::SessionAttachmentStore::in_memory()),
-            lash_core::DirectCompletionClient::from_fn(|_, _| {
+            Arc::new(lash_core::facade_support::SessionAttachmentStore::in_memory()),
+            lash_core::facade_support::DirectCompletionClient::from_fn(|_, _| {
                 Err(lash_core::PluginError::Session(
                     "direct completions are unavailable in shell tests".to_string(),
                 ))

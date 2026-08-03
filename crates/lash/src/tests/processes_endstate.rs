@@ -148,7 +148,8 @@ fn signal_request(
     signal_id: &str,
     payload: serde_json::Value,
 ) -> lash_core::ProcessEventAppendRequest {
-    let event_type = lash_core::process_signal_event_type(signal_name).expect("signal event type");
+    let event_type = lash_core::facade_support::process_signal_event_type(signal_name)
+        .expect("signal event type");
     lash_core::ProcessEventAppendRequest::new(event_type, payload).with_replay_key(format!(
         "process:{process_id}:signal.{signal_name}:{signal_id}"
     ))
@@ -158,8 +159,8 @@ async fn wait_for_process(
     core: &LashCore,
     process_id: &str,
     label: &str,
-    matches: impl Fn(&lash_core::ObservedProcess) -> bool,
-) -> lash_core::ObservedProcess {
+    matches: impl Fn(&lash_core::facade_support::ObservedProcess) -> bool,
+) -> lash_core::facade_support::ObservedProcess {
     tokio::time::timeout(std::time::Duration::from_secs(3), async {
         loop {
             if let Some(process) = core.processes().get(process_id).await.expect("get process")
@@ -183,7 +184,7 @@ async fn wait_for_waiting_signal(
     core: &LashCore,
     process_id: &str,
     signal_name: &str,
-) -> lash_core::ObservedProcess {
+) -> lash_core::facade_support::ObservedProcess {
     wait_for_process(core, process_id, "process signal wait", |process| {
         matches!(
             process.wait.as_ref().map(|wait| &wait.kind),
@@ -197,7 +198,7 @@ async fn wait_for_terminal(
     core: &LashCore,
     process_id: &str,
     status: lash_core::ProcessStatus,
-) -> lash_core::ObservedProcess {
+) -> lash_core::facade_support::ObservedProcess {
     wait_for_process(core, process_id, "terminal process", |process| {
         process.lifecycle == status
     })
@@ -218,12 +219,14 @@ fn process_test_core(
     ))
     .provider(mock_provider())
     .model(mock_model_spec())
-    .store_factory(Arc::new(lash_core::InMemorySessionStoreFactory::new()))
+    .store_factory(Arc::new(
+        lash_core::facade_support::InMemorySessionStoreFactory::new(),
+    ))
     .trigger_store(trigger_store)
     .process_registry(registry)
     .advanced()
     .runtime_host_config({
-        let mut config = lash_core::RuntimeHostConfig::in_memory();
+        let mut config = lash_core::facade_support::RuntimeHostConfig::in_memory();
         config.durability.process_env_store = process_env_store;
         config
     })
@@ -231,7 +234,7 @@ fn process_test_core(
 }
 
 fn in_memory_process_env_store() -> Arc<dyn lash_core::ProcessExecutionEnvStore> {
-    Arc::new(lash_core::InMemoryProcessExecutionEnvStore::new())
+    Arc::new(lash_core::facade_support::InMemoryProcessExecutionEnvStore::new())
 }
 
 #[tokio::test]
@@ -420,7 +423,7 @@ async fn host_owned_processes_run_without_application_session() -> Result<()> {
     let artifact_store: Arc<dyn lash_lashlang_runtime::LashlangArtifactStore> =
         Arc::new(lash_lashlang_runtime::InMemoryLashlangArtifactStore::new());
     let trigger_store: Arc<dyn lash_core::TriggerStore> =
-        Arc::new(lash_core::InMemoryTriggerStore::default());
+        Arc::new(lash_core::facade_support::InMemoryTriggerStore::default());
     let registry: Arc<dyn lash_core::ProcessRegistry> =
         Arc::new(TestLocalProcessRegistry::default());
     let process_env_store = in_memory_process_env_store();
@@ -476,7 +479,8 @@ async fn host_owned_processes_run_without_application_session() -> Result<()> {
     .await;
 
     let source_type = "timer.tick";
-    let source_key = lash_core::default_trigger_source_key(source_type, &serde_json::json!({}))?;
+    let source_key =
+        lash_core::facade_support::default_trigger_source_key(source_type, &serde_json::json!({}))?;
     let env_ref = persist_process_env_ref(process_env_store.as_ref()).await;
     trigger_store
         .execute_command(
@@ -545,7 +549,7 @@ async fn signal_validation_rejects_undeclared_names_and_mistyped_payloads() -> R
     let artifact_store: Arc<dyn lash_lashlang_runtime::LashlangArtifactStore> =
         Arc::new(lash_lashlang_runtime::InMemoryLashlangArtifactStore::new());
     let trigger_store: Arc<dyn lash_core::TriggerStore> =
-        Arc::new(lash_core::InMemoryTriggerStore::default());
+        Arc::new(lash_core::facade_support::InMemoryTriggerStore::default());
     let registry: Arc<dyn lash_core::ProcessRegistry> =
         Arc::new(TestLocalProcessRegistry::default());
     let core = process_test_core(
@@ -644,7 +648,7 @@ async fn repeated_waits_on_one_signal_consume_in_order() -> Result<()> {
     let artifact_store: Arc<dyn lash_lashlang_runtime::LashlangArtifactStore> =
         Arc::new(lash_lashlang_runtime::InMemoryLashlangArtifactStore::new());
     let trigger_store: Arc<dyn lash_core::TriggerStore> =
-        Arc::new(lash_core::InMemoryTriggerStore::default());
+        Arc::new(lash_core::facade_support::InMemoryTriggerStore::default());
     let registry: Arc<dyn lash_core::ProcessRegistry> =
         Arc::new(TestLocalProcessRegistry::default());
     let core = process_test_core(
@@ -737,7 +741,7 @@ async fn process_starts_and_awaits_child_process() -> Result<()> {
     let artifact_store: Arc<dyn lash_lashlang_runtime::LashlangArtifactStore> =
         Arc::new(lash_lashlang_runtime::InMemoryLashlangArtifactStore::new());
     let trigger_store: Arc<dyn lash_core::TriggerStore> =
-        Arc::new(lash_core::InMemoryTriggerStore::default());
+        Arc::new(lash_core::facade_support::InMemoryTriggerStore::default());
     let registry: Arc<dyn lash_core::ProcessRegistry> =
         Arc::new(TestLocalProcessRegistry::default());
     let core = process_test_core(
@@ -811,7 +815,7 @@ async fn process_children_inherit_session_chain_provenance() -> Result<()> {
     let artifact_store: Arc<dyn lash_lashlang_runtime::LashlangArtifactStore> =
         Arc::new(lash_lashlang_runtime::InMemoryLashlangArtifactStore::new());
     let trigger_store: Arc<dyn lash_core::TriggerStore> =
-        Arc::new(lash_core::InMemoryTriggerStore::default());
+        Arc::new(lash_core::facade_support::InMemoryTriggerStore::default());
     let registry: Arc<dyn lash_core::ProcessRegistry> =
         Arc::new(TestLocalProcessRegistry::default());
     let core = process_test_core(
@@ -891,7 +895,7 @@ async fn process_outlives_deleted_session_and_resumes_from_host_signal() -> Resu
     let artifact_store: Arc<dyn lash_lashlang_runtime::LashlangArtifactStore> =
         Arc::new(lash_lashlang_runtime::InMemoryLashlangArtifactStore::new());
     let trigger_store: Arc<dyn lash_core::TriggerStore> =
-        Arc::new(lash_core::InMemoryTriggerStore::default());
+        Arc::new(lash_core::facade_support::InMemoryTriggerStore::default());
     let registry: Arc<dyn lash_core::ProcessRegistry> =
         Arc::new(TestLocalProcessRegistry::default());
     let core = process_test_core(
@@ -1007,7 +1011,7 @@ impl CollectingProcessEventSink {
 }
 
 #[async_trait::async_trait]
-impl lash_core::ProcessEventSink for CollectingProcessEventSink {
+impl lash_core::facade_support::ProcessEventSink for CollectingProcessEventSink {
     async fn emit(&self, event: &lash_core::ProcessEvent) {
         self.events
             .lock()
@@ -1021,7 +1025,7 @@ fn process_test_core_with_sink(
     trigger_store: Arc<dyn lash_core::TriggerStore>,
     registry: Arc<dyn lash_core::ProcessRegistry>,
     process_env_store: Arc<dyn lash_core::ProcessExecutionEnvStore>,
-    sink: Arc<dyn lash_core::ProcessEventSink>,
+    sink: Arc<dyn lash_core::facade_support::ProcessEventSink>,
 ) -> Result<LashCore> {
     explicit_ephemeral_facets(LashCore::rlm_builder(
         lash_protocol_rlm::RlmProtocolPluginFactory::new(
@@ -1031,13 +1035,15 @@ fn process_test_core_with_sink(
     ))
     .provider(mock_provider())
     .model(mock_model_spec())
-    .store_factory(Arc::new(lash_core::InMemorySessionStoreFactory::new()))
+    .store_factory(Arc::new(
+        lash_core::facade_support::InMemorySessionStoreFactory::new(),
+    ))
     .trigger_store(trigger_store)
     .process_registry(registry)
     .process_event_sink(sink)
     .advanced()
     .runtime_host_config({
-        let mut config = lash_core::RuntimeHostConfig::in_memory();
+        let mut config = lash_core::facade_support::RuntimeHostConfig::in_memory();
         config.durability.process_env_store = process_env_store;
         config
     })
@@ -1054,7 +1060,7 @@ async fn inline_process_await_sink_and_prune_end_to_end() -> Result<()> {
     let artifact_store: Arc<dyn lash_lashlang_runtime::LashlangArtifactStore> =
         Arc::new(lash_lashlang_runtime::InMemoryLashlangArtifactStore::new());
     let trigger_store: Arc<dyn lash_core::TriggerStore> =
-        Arc::new(lash_core::InMemoryTriggerStore::default());
+        Arc::new(lash_core::facade_support::InMemoryTriggerStore::default());
     let registry: Arc<dyn lash_core::ProcessRegistry> =
         Arc::new(TestLocalProcessRegistry::default());
     let process_env_store = in_memory_process_env_store();
@@ -1204,12 +1210,12 @@ fn recovery_local_owner(
 fn recovery_process_worker(
     registry: Arc<dyn lash_core::ProcessRegistry>,
     owner: lash_core::LeaseOwnerIdentity,
-) -> lash_core::DurableProcessWorker {
-    lash_core::DurableProcessWorker::new(
-        lash_core::DurableProcessWorkerConfig::new(
-            Arc::new(lash_core::PluginHost::new(Vec::new())),
-            lash_core::RuntimeHostConfig::in_memory(),
-            Arc::new(lash_core::InMemorySessionStoreFactory::new()),
+) -> lash_core::facade_support::DurableProcessWorker {
+    lash_core::facade_support::DurableProcessWorker::new(
+        lash_core::facade_support::DurableProcessWorkerConfig::new(
+            Arc::new(lash_core::facade_support::PluginHost::new(Vec::new())),
+            lash_core::facade_support::RuntimeHostConfig::in_memory(),
+            Arc::new(lash_core::facade_support::InMemorySessionStoreFactory::new()),
             registry,
         )
         .with_lease_owner(owner),
@@ -1236,7 +1242,7 @@ async fn owner_bound_graceful_drain_resolves_awaiter_and_prunes_end_to_end() -> 
     let artifact_store: Arc<dyn lash_lashlang_runtime::LashlangArtifactStore> =
         Arc::new(lash_lashlang_runtime::InMemoryLashlangArtifactStore::new());
     let trigger_store: Arc<dyn lash_core::TriggerStore> =
-        Arc::new(lash_core::InMemoryTriggerStore::default());
+        Arc::new(lash_core::facade_support::InMemoryTriggerStore::default());
     let registry: Arc<dyn lash_core::ProcessRegistry> =
         Arc::new(TestLocalProcessRegistry::default());
     let core = process_test_core(
@@ -1357,7 +1363,7 @@ async fn silent_owner_stays_running_then_abandon_request_reconciles_end_to_end()
     let artifact_store: Arc<dyn lash_lashlang_runtime::LashlangArtifactStore> =
         Arc::new(lash_lashlang_runtime::InMemoryLashlangArtifactStore::new());
     let trigger_store: Arc<dyn lash_core::TriggerStore> =
-        Arc::new(lash_core::InMemoryTriggerStore::default());
+        Arc::new(lash_core::facade_support::InMemoryTriggerStore::default());
     let registry: Arc<dyn lash_core::ProcessRegistry> =
         Arc::new(TestLocalProcessRegistry::default());
     let core = process_test_core(

@@ -43,18 +43,18 @@ struct ReconciliationTransformProbe {
 }
 
 struct ReconciliationProbeFactory {
-    transform: Arc<dyn lash_core::TurnContextTransform>,
+    transform: Arc<dyn lash_core::facade_support::TurnContextTransform>,
 }
 
-impl lash_core::PluginFactory for ReconciliationProbeFactory {
+impl lash_core::facade_support::PluginFactory for ReconciliationProbeFactory {
     fn id(&self) -> &'static str {
         "session-model-reconciliation-probe"
     }
 
     fn build(
         &self,
-        _ctx: &lash_core::PluginSessionContext,
-    ) -> std::result::Result<Arc<dyn lash_core::SessionPlugin>, lash_core::PluginError> {
+        _ctx: &lash_core::facade_support::PluginSessionContext,
+    ) -> std::result::Result<Arc<dyn lash_core::facade_support::SessionPlugin>, lash_core::PluginError> {
         Ok(Arc::new(ReconciliationProbePlugin {
             transform: Arc::clone(&self.transform),
         }))
@@ -62,17 +62,17 @@ impl lash_core::PluginFactory for ReconciliationProbeFactory {
 }
 
 struct ReconciliationProbePlugin {
-    transform: Arc<dyn lash_core::TurnContextTransform>,
+    transform: Arc<dyn lash_core::facade_support::TurnContextTransform>,
 }
 
-impl lash_core::SessionPlugin for ReconciliationProbePlugin {
+impl lash_core::facade_support::SessionPlugin for ReconciliationProbePlugin {
     fn id(&self) -> &'static str {
         "session-model-reconciliation-probe"
     }
 
     fn register(
         &self,
-        reg: &mut lash_core::PluginRegistrar,
+        reg: &mut lash_core::facade_support::PluginRegistrar,
     ) -> std::result::Result<(), lash_core::PluginError> {
         reg.context().prepare_turn(0, Arc::clone(&self.transform));
         Ok(())
@@ -80,16 +80,16 @@ impl lash_core::SessionPlugin for ReconciliationProbePlugin {
 }
 
 #[async_trait]
-impl lash_core::TurnContextTransform for ReconciliationTransformProbe {
+impl lash_core::facade_support::TurnContextTransform for ReconciliationTransformProbe {
     fn id(&self) -> &'static str {
         "session-model-reconciliation-probe"
     }
 
     async fn transform(
         &self,
-        ctx: &lash_core::TurnTransformContext<'_>,
-        input: lash_core::PreparedContext,
-    ) -> std::result::Result<lash_core::PreparedContext, lash_core::ContextError> {
+        ctx: &lash_core::facade_support::TurnTransformContext<'_>,
+        input: lash_core::facade_support::PreparedContext,
+    ) -> std::result::Result<lash_core::facade_support::PreparedContext, lash_core::facade_support::ContextError> {
         let snapshot = ctx.sessions.snapshot_session(&ctx.session_id).await?;
         self.observations
             .lock()
@@ -164,15 +164,15 @@ impl CompileSurfaceToolFactory {
     }
 }
 
-impl lash_core::PluginFactory for CompileSurfaceToolFactory {
+impl lash_core::facade_support::PluginFactory for CompileSurfaceToolFactory {
     fn id(&self) -> &'static str {
         self.id
     }
 
     fn build(
         &self,
-        ctx: &lash_core::PluginSessionContext,
-    ) -> std::result::Result<Arc<dyn lash_core::SessionPlugin>, lash_core::PluginError> {
+        ctx: &lash_core::facade_support::PluginSessionContext,
+    ) -> std::result::Result<Arc<dyn lash_core::facade_support::SessionPlugin>, lash_core::PluginError> {
         let config = ctx
             .plugin_options
             .decode::<CompileSurfaceToolConfig>(self.id)
@@ -192,14 +192,14 @@ struct CompileSurfaceToolPlugin {
     tool_name: String,
 }
 
-impl lash_core::SessionPlugin for CompileSurfaceToolPlugin {
+impl lash_core::facade_support::SessionPlugin for CompileSurfaceToolPlugin {
     fn id(&self) -> &'static str {
         self.plugin_id
     }
 
     fn register(
         &self,
-        reg: &mut lash_core::PluginRegistrar,
+        reg: &mut lash_core::facade_support::PluginRegistrar,
     ) -> std::result::Result<(), lash_core::PluginError> {
         reg.tools().provider(Arc::new(CompileSurfaceToolProvider {
             tool_name: self.tool_name.clone(),
@@ -259,7 +259,7 @@ async fn standard_core_runs_mock_turn() -> Result<()> {
 
     assert!(matches!(
         result.outcome,
-        TurnOutcome::Finished(lash_core::TurnFinish::AssistantMessage { .. })
+        TurnOutcome::Finished(lash_core::facade_support::TurnFinish::AssistantMessage { .. })
     ));
     let events = events.snapshot().await;
     assert!(
@@ -290,7 +290,7 @@ async fn commit_byte_budget_failure_reaches_the_host_as_terminal_and_actionable(
     let core = explicit_ephemeral_facets(LashCore::standard_builder())
         .provider(provider)
         .model(mock_model_spec())
-        .store_factory(Arc::new(lash_core::InMemorySessionStoreFactory::new()))
+        .store_factory(Arc::new(lash_core::facade_support::InMemorySessionStoreFactory::new()))
         .build()?;
     let session = core.session("commit-budget-surface").open().await?;
 
@@ -594,7 +594,7 @@ async fn rlm_protocol_config_lashlang_abilities_drive_prompt_surface() -> Result
         .process_env_store(Arc::new(
             crate::persistence::InMemoryProcessExecutionEnvStore::new(),
         ))
-        .store_factory(Arc::new(lash_core::InMemorySessionStoreFactory::new()))
+        .store_factory(Arc::new(lash_core::facade_support::InMemorySessionStoreFactory::new()))
         .process_registry(Arc::new(TestLocalProcessRegistry::default()))
         .build()?;
     let session = core.session("rlm-abilities-prompt").open().await?;
@@ -795,7 +795,7 @@ async fn rlm_compile_surface_uses_core_plugins_extra_plugins_and_request_options
         lash_protocol_rlm::RlmProtocolPluginConfig::default(),
         artifact_store.clone(),
     ));
-    let plugin_host = lash_core::PluginHost::new(vec![
+    let plugin_host = lash_core::facade_support::PluginHost::new(vec![
         Arc::clone(&factory) as Arc<dyn PluginFactory>,
         Arc::new(CompileSurfaceToolFactory::new(
             "compile-core-tool",
@@ -1024,7 +1024,7 @@ async fn park_then_resume_preserves_session_transcript() -> Result<()> {
     let core = explicit_ephemeral_facets(LashCore::standard_builder())
         .provider(mock_provider())
         .model(mock_model_spec())
-        .store_factory(Arc::new(lash_core::InMemorySessionStoreFactory::new()))
+        .store_factory(Arc::new(lash_core::facade_support::InMemorySessionStoreFactory::new()))
         .build()?;
 
     let session = core.session("parked").open().await?;
@@ -1072,7 +1072,7 @@ async fn park_with_a_live_handle_reports_session_still_in_use() -> Result<()> {
     let core = explicit_ephemeral_facets(LashCore::standard_builder())
         .provider(mock_provider())
         .model(mock_model_spec())
-        .store_factory(Arc::new(lash_core::InMemorySessionStoreFactory::new()))
+        .store_factory(Arc::new(lash_core::facade_support::InMemorySessionStoreFactory::new()))
         .build()?;
 
     let session = core.session("busy").open().await?;
@@ -1372,7 +1372,7 @@ async fn core_delete_session_retires_the_deleted_session_effect_journal() -> Res
 
 #[tokio::test]
 async fn public_session_state_appends_preserve_concurrent_retirement_refusals() -> Result<()> {
-    let factory = Arc::new(lash_core::InMemorySessionStoreFactory::new());
+    let factory = Arc::new(lash_core::facade_support::InMemorySessionStoreFactory::new());
     let core = explicit_ephemeral_facets(LashCore::standard_builder())
         .provider(mock_provider())
         .model(mock_model_spec())
@@ -1641,7 +1641,7 @@ async fn reopen_reconciles_builder_model_across_all_runtime_consumers() -> Resul
         lash_subagents::TierPluginSource::CurrentSessionFork,
     );
     let parent_snapshot = state.to_snapshot();
-    let session_spec = lash_core::SessionSpec::inherit();
+    let session_spec = lash_core::facade_support::SessionSpec::inherit();
     let tool_access = lash_core::SessionToolAccess::default();
     let child = tier
         .build_session_request(lash_subagents::SubagentSpawnContext {
@@ -1937,7 +1937,7 @@ async fn explicit_session_store_takes_precedence_over_core_store_factory() -> Re
 #[test]
 fn turn_result_total_usage_sums_parent_and_children() {
     use lash_core::{
-        ExecutionSummary, OutputState, SessionPolicy, SessionSnapshot, TurnFinish, TurnOutcome,
+        facade_support::ExecutionSummary, facade_support::OutputState, SessionPolicy, SessionSnapshot, facade_support::TurnFinish, facade_support::TurnOutcome,
     };
 
     let result = TurnResult {

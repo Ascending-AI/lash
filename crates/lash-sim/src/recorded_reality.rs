@@ -7,7 +7,7 @@ use lash_core::llm::types::{
     LlmTerminalReason, LlmToolChoice,
 };
 use lash_core::provider::{DefaultProviderFailureClassifier, Provider, ProviderFailureClassifier};
-use lash_core::{ProviderFailure, ProviderFailureKind};
+use lash_core::{ProviderFailureKind, facade_support::ProviderFailure};
 use lash_llm_transport::{LlmHttpRequest, LlmHttpTransport, read_http_body_text};
 use lash_provider_anthropic::AnthropicProvider;
 use lash_provider_auth::{

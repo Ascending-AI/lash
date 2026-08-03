@@ -6,9 +6,8 @@ fn event(kind: BoundaryKind, id: &str, payload: Value) -> BoundaryEvent {
 
 fn harness() -> RuntimeBoundaryHarness {
     let clock = crate::clock::SimClock::new();
-    let factory: Arc<dyn SessionStoreFactory> = Arc::new(
-        lash_core::InMemorySessionStoreFactory::with_clock(clock.clone()),
-    );
+    let factory: Arc<dyn SessionStoreFactory> =
+        Arc::new(lash_core::facade_support::InMemorySessionStoreFactory::with_clock(clock.clone()));
     RuntimeBoundaryHarness::new(factory, RuntimeEffectReplayStore::Memory, clock)
 }
 
@@ -607,7 +606,7 @@ async fn sqlite_seeded_segment_crash_matrix_preserves_results_and_effect_identit
             .await
             .expect("complete real terminal");
         assert_eq!(
-            lash_core::ProcessAwaiter::polling(Arc::clone(&registry))
+            lash_core::facade_support::ProcessAwaiter::polling(Arc::clone(&registry))
                 .await_terminal(&process_id)
                 .await
                 .expect("terminal after crash matrix"),

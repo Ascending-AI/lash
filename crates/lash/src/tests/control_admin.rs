@@ -3,7 +3,7 @@ use super::*;
 struct NoopProcessRunHandle;
 
 #[async_trait]
-impl lash_core::ProcessRunHandle for NoopProcessRunHandle {
+impl lash_core::facade_support::ProcessRunHandle for NoopProcessRunHandle {
     async fn claim_and_run_pending(&self) -> std::result::Result<(), lash_core::PluginError> {
         Ok(())
     }
@@ -13,7 +13,7 @@ struct NonblockingObservationQuery;
 
 struct HideAllProcessTools;
 
-impl lash_core::ProcessToolVisibilityFilter for HideAllProcessTools {
+impl lash_core::facade_support::ProcessToolVisibilityFilter for HideAllProcessTools {
     fn narrow(
         &self,
         _session: &lash_core::SessionId,
@@ -23,30 +23,34 @@ impl lash_core::ProcessToolVisibilityFilter for HideAllProcessTools {
     }
 }
 
-impl lash_core::PluginOperation for NonblockingObservationQuery {
+impl lash_core::facade_support::PluginOperation for NonblockingObservationQuery {
     const NAME: &'static str = "test.nonblocking_observation_query";
     const DESCRIPTION: &'static str =
         "Return a static value through observation-backed query dispatch.";
-    const SESSION_PARAM: lash_core::SessionParam = lash_core::SessionParam::Optional;
+    const SESSION_PARAM: lash_core::facade_support::SessionParam =
+        lash_core::facade_support::SessionParam::Optional;
 
     type Args = serde_json::Value;
     type Output = serde_json::Value;
 }
 
-impl lash_core::PluginQuery for NonblockingObservationQuery {}
+impl lash_core::facade_support::PluginQuery for NonblockingObservationQuery {}
 
 struct FixedCompactor;
 
 #[async_trait]
-impl lash_core::ContextCompactor for FixedCompactor {
+impl lash_core::facade_support::ContextCompactor for FixedCompactor {
     fn id(&self) -> &'static str {
         "test.fixed_compactor"
     }
 
     async fn compact(
         &self,
-        ctx: &lash_core::CompactionContext<'_>,
-    ) -> std::result::Result<Option<lash_core::ContextCompaction>, lash_core::ContextError> {
+        ctx: &lash_core::facade_support::CompactionContext<'_>,
+    ) -> std::result::Result<
+        Option<lash_core::facade_support::ContextCompaction>,
+        lash_core::facade_support::ContextError,
+    > {
         assert_eq!(
             ctx.instructions.as_deref(),
             Some("focus on durable summary")
@@ -57,8 +61,8 @@ impl lash_core::ContextCompactor for FixedCompactor {
                 .iter()
                 .any(|message| message.parts[0].content.contains("old durable request"))
         );
-        Ok(Some(lash_core::ContextCompaction::new(vec![
-            lash_core::SessionAppendNode::message(
+        Ok(Some(lash_core::facade_support::ContextCompaction::new(
+            vec![lash_core::SessionAppendNode::message(
                 lash_core::PluginMessage::text(
                     lash_core::MessageRole::Assistant,
                     "Compaction summary:\nold durable request summarized",
@@ -67,8 +71,8 @@ impl lash_core::ContextCompactor for FixedCompactor {
                     plugin_id: "test_compactor".to_string(),
                     transient: false,
                 }),
-            ),
-        ])))
+            )],
+        )))
     }
 }
 
@@ -117,7 +121,8 @@ async fn compact_context_opens_compaction_frame_and_preserves_prior_frame() -> R
         .model(mock_model_spec())
         .plugin(Arc::new(StaticPluginFactory::new(
             "test-compactor",
-            lash_core::PluginSpec::new().with_context_compactor(100, Arc::new(FixedCompactor)),
+            lash_core::facade_support::PluginSpec::new()
+                .with_context_compactor(100, Arc::new(FixedCompactor)),
         )))
         .build()?;
     let session = core.session("compact-context").open().await?;
@@ -233,7 +238,9 @@ async fn session_commands_enqueue_idempotently_by_source_key() -> Result<()> {
     let core = explicit_ephemeral_facets(LashCore::standard_builder())
         .provider(mock_provider())
         .model(mock_model_spec())
-        .store_factory(Arc::new(lash_core::InMemorySessionStoreFactory::new()))
+        .store_factory(Arc::new(
+            lash_core::facade_support::InMemorySessionStoreFactory::new(),
+        ))
         .disable_queued_work_driver()
         .build()?;
     let session = core.session("command-idempotency").open().await?;
@@ -266,7 +273,9 @@ async fn queue_enqueue_and_cancel_emit_typed_observation_events() -> Result<()> 
     let core = explicit_ephemeral_facets(LashCore::standard_builder())
         .provider(mock_provider())
         .model(mock_model_spec())
-        .store_factory(Arc::new(lash_core::InMemorySessionStoreFactory::new()))
+        .store_factory(Arc::new(
+            lash_core::facade_support::InMemorySessionStoreFactory::new(),
+        ))
         .disable_queued_work_driver()
         .build()?;
     let session = core.session("queue-observation-events").open().await?;
@@ -314,7 +323,9 @@ async fn pending_turn_input_facade_cancels_bulk_and_suffix_by_source_key() -> Re
     let core = explicit_ephemeral_facets(LashCore::standard_builder())
         .provider(mock_provider())
         .model(mock_model_spec())
-        .store_factory(Arc::new(lash_core::InMemorySessionStoreFactory::new()))
+        .store_factory(Arc::new(
+            lash_core::facade_support::InMemorySessionStoreFactory::new(),
+        ))
         .disable_queued_work_driver()
         .build()?;
     let session = core.session("pending-input-facade-cancel").open().await?;
@@ -394,7 +405,9 @@ async fn process_start_and_cancel_emit_typed_observation_events() -> Result<()> 
     let core = explicit_ephemeral_facets(LashCore::standard_builder())
         .provider(mock_provider())
         .model(mock_model_spec())
-        .store_factory(Arc::new(lash_core::InMemorySessionStoreFactory::new()))
+        .store_factory(Arc::new(
+            lash_core::facade_support::InMemorySessionStoreFactory::new(),
+        ))
         .process_registry(Arc::new(TestLocalProcessRegistry::default()))
         .build()?;
     let session = core.session("process-observation-events").open().await?;
@@ -443,7 +456,7 @@ async fn process_start_and_cancel_emit_typed_observation_events() -> Result<()> 
 
 #[tokio::test]
 async fn trigger_emit_does_not_append_session_node_or_queue_work() -> Result<()> {
-    let trigger = lash_core::TriggerEvent::new(
+    let trigger = lash_core::facade_support::TriggerEvent::new(
         "Button",
         "ui.button",
         "pressed",
@@ -454,16 +467,18 @@ async fn trigger_emit_does_not_append_session_node_or_queue_work() -> Result<()>
         .model(mock_model_spec())
         .plugin(Arc::new(StaticPluginFactory::new(
             "button-triggers",
-            lash_core::PluginSpec::new().with_trigger_event(trigger),
+            lash_core::facade_support::PluginSpec::new().with_trigger_event(trigger),
         )))
-        .store_factory(Arc::new(lash_core::InMemorySessionStoreFactory::new()))
+        .store_factory(Arc::new(
+            lash_core::facade_support::InMemorySessionStoreFactory::new(),
+        ))
         .build()?;
     let session = core.session("command-trigger").open().await?;
     let before = session.admin().state().persist_current().await?;
 
-    let source_key = lash_core::empty_trigger_source_key("ui.button.pressed")?;
+    let source_key = lash_core::facade_support::empty_trigger_source_key("ui.button.pressed")?;
     let scoped_effect_controller = lash_core::ScopedEffectController::shared(
-        Arc::new(lash_core::InlineRuntimeEffectController::default()),
+        Arc::new(lash_core::facade_support::InlineRuntimeEffectController::default()),
         lash_core::ExecutionScope::runtime_operation("trigger:button-press-1"),
     )?;
     let report = core
@@ -511,16 +526,18 @@ async fn observation_reads_do_not_wait_for_active_turn() -> Result<()> {
         .tools(Arc::new(AppTools))
         .plugin(Arc::new(StaticPluginFactory::new(
             "nonblocking-observation-query",
-            lash_core::PluginSpec::new()
+            lash_core::facade_support::PluginSpec::new()
                 .with_plugin_query_typed::<NonblockingObservationQuery, _, _>(
                     |_ctx, _args| async move {
-                        Ok::<_, lash_core::PluginOperationFailure>(
+                        Ok::<_, lash_core::facade_support::PluginOperationFailure>(
                             serde_json::json!({ "ok": true }),
                         )
                     },
                 ),
         )))
-        .store_factory(Arc::new(lash_core::InMemorySessionStoreFactory::new()))
+        .store_factory(Arc::new(
+            lash_core::facade_support::InMemorySessionStoreFactory::new(),
+        ))
         .process_registry(Arc::new(TestLocalProcessRegistry::default()))
         .build()?;
     let session = core.session("nonblocking-observation").open().await?;
@@ -546,7 +563,7 @@ async fn observation_reads_do_not_wait_for_active_turn() -> Result<()> {
         let (_plugin_id, query_output) = session
             .plugin_operations()
             .query_raw(
-                <NonblockingObservationQuery as lash_core::PluginOperation>::NAME,
+                <NonblockingObservationQuery as lash_core::facade_support::PluginOperation>::NAME,
                 serde_json::json!({}),
             )
             .await?;
@@ -572,7 +589,9 @@ async fn processes_cancel_cancels_visible_process() -> Result<()> {
     let core = explicit_ephemeral_facets(LashCore::standard_builder())
         .provider(mock_provider())
         .model(mock_model_spec())
-        .store_factory(Arc::new(lash_core::InMemorySessionStoreFactory::new()))
+        .store_factory(Arc::new(
+            lash_core::facade_support::InMemorySessionStoreFactory::new(),
+        ))
         .process_registry(Arc::new(TestLocalProcessRegistry::default()))
         .advanced()
         .runtime_host_config(runtime_host)
@@ -621,7 +640,9 @@ async fn process_admin_list_signal_and_cancel_bypass_model_tool_filter() -> Resu
     let core = explicit_ephemeral_facets(LashCore::standard_builder())
         .provider(mock_provider())
         .model(mock_model_spec())
-        .store_factory(Arc::new(lash_core::InMemorySessionStoreFactory::new()))
+        .store_factory(Arc::new(
+            lash_core::facade_support::InMemorySessionStoreFactory::new(),
+        ))
         .process_registry(Arc::new(TestLocalProcessRegistry::default()))
         .process_tool_visibility_filter(Arc::new(HideAllProcessTools))
         .advanced()
@@ -696,12 +717,16 @@ async fn processes_cancel_all_cancels_visible_processes() -> Result<()> {
     let runtime_host = RuntimeHostConfig::in_memory();
     let registry =
         Arc::new(TestLocalProcessRegistry::default()) as Arc<dyn lash_core::ProcessRegistry>;
-    let driver =
-        lash_core::ProcessWorkDriver::new(Arc::clone(&registry), Arc::new(NoopProcessRunHandle));
+    let driver = lash_core::facade_support::ProcessWorkDriver::new(
+        Arc::clone(&registry),
+        Arc::new(NoopProcessRunHandle),
+    );
     let core = explicit_ephemeral_facets(LashCore::standard_builder())
         .provider(mock_provider())
         .model(mock_model_spec())
-        .store_factory(Arc::new(lash_core::InMemorySessionStoreFactory::new()))
+        .store_factory(Arc::new(
+            lash_core::facade_support::InMemorySessionStoreFactory::new(),
+        ))
         .process_work_driver(driver)
         .advanced()
         .runtime_host_config(runtime_host)
@@ -833,7 +858,9 @@ async fn managed_create_publishes_create_and_fork_observers_before_returning() -
     let cases: Vec<(&str, Option<Arc<dyn lash_core::SessionStoreFactory>>)> = vec![
         (
             "in-memory",
-            Some(Arc::new(lash_core::InMemorySessionStoreFactory::new())),
+            Some(Arc::new(
+                lash_core::facade_support::InMemorySessionStoreFactory::new(),
+            )),
         ),
         (
             "sqlite",
@@ -851,8 +878,10 @@ async fn managed_create_publishes_create_and_fork_observers_before_returning() -
         let fork_process_id = format!("managed-fork-process-{case}");
         let missing_fork_process_id = format!("managed-missing-fork-process-{case}");
         let registry = Arc::new(TestLocalProcessRegistry::default());
-        let driver =
-            lash_core::ProcessWorkDriver::new(registry.clone(), Arc::new(NoopProcessRunHandle));
+        let driver = lash_core::facade_support::ProcessWorkDriver::new(
+            registry.clone(),
+            Arc::new(NoopProcessRunHandle),
+        );
         let mut builder = explicit_ephemeral_facets(LashCore::standard_builder())
             .provider(mock_provider())
             .model(mock_model_spec())
@@ -897,9 +926,9 @@ async fn managed_create_publishes_create_and_fork_observers_before_returning() -
         assert_eq!(child.session_id, child_session_id);
         assert_eq!(
             child.observed_processes,
-            vec![lash_core::SessionObservedProcessResult {
+            vec![lash_core::facade_support::SessionObservedProcessResult {
                 process_id: create_process_id.clone(),
-                outcome: lash_core::SessionObservedProcessOutcome::Observed,
+                outcome: lash_core::facade_support::SessionObservedProcessOutcome::Observed,
             }]
         );
         assert!(

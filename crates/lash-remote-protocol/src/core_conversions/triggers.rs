@@ -110,9 +110,9 @@ impl From<RemoteTriggerOccurrenceRecord> for lash_core::TriggerOccurrenceRecord 
     }
 }
 
-impl From<lash_core::TriggerEmitReport> for RemoteTriggerEmitReport {
-    fn from(value: lash_core::TriggerEmitReport) -> Self {
-        let lash_core::TriggerEmitReport {
+impl From<lash_core::facade_support::TriggerEmitReport> for RemoteTriggerEmitReport {
+    fn from(value: lash_core::facade_support::TriggerEmitReport) -> Self {
+        let lash_core::facade_support::TriggerEmitReport {
             occurrence_id,
             deliveries,
         } = value;
@@ -124,7 +124,7 @@ impl From<lash_core::TriggerEmitReport> for RemoteTriggerEmitReport {
     }
 }
 
-impl TryFrom<RemoteTriggerEmitReport> for lash_core::TriggerEmitReport {
+impl TryFrom<RemoteTriggerEmitReport> for lash_core::facade_support::TriggerEmitReport {
     type Error = RemoteProtocolError;
 
     fn try_from(value: RemoteTriggerEmitReport) -> Result<Self, Self::Error> {
@@ -141,17 +141,17 @@ impl TryFrom<RemoteTriggerEmitReport> for lash_core::TriggerEmitReport {
     }
 }
 
-impl From<lash_core::TriggerDeliveryEmitOutcome> for RemoteTriggerDeliveryEmitOutcome {
-    fn from(value: lash_core::TriggerDeliveryEmitOutcome) -> Self {
+impl From<lash_core::facade_support::TriggerDeliveryEmitOutcome> for RemoteTriggerDeliveryEmitOutcome {
+    fn from(value: lash_core::facade_support::TriggerDeliveryEmitOutcome) -> Self {
         match value {
-            lash_core::TriggerDeliveryEmitOutcome::Started => Self::Started,
-            lash_core::TriggerDeliveryEmitOutcome::AlreadyReserved => Self::AlreadyReserved,
-            lash_core::TriggerDeliveryEmitOutcome::Failed { reason } => Self::Failed { reason },
+            lash_core::facade_support::TriggerDeliveryEmitOutcome::Started => Self::Started,
+            lash_core::facade_support::TriggerDeliveryEmitOutcome::AlreadyReserved => Self::AlreadyReserved,
+            lash_core::facade_support::TriggerDeliveryEmitOutcome::Failed { reason } => Self::Failed { reason },
         }
     }
 }
 
-impl From<RemoteTriggerDeliveryEmitOutcome> for lash_core::TriggerDeliveryEmitOutcome {
+impl From<RemoteTriggerDeliveryEmitOutcome> for lash_core::facade_support::TriggerDeliveryEmitOutcome {
     fn from(value: RemoteTriggerDeliveryEmitOutcome) -> Self {
         match value {
             RemoteTriggerDeliveryEmitOutcome::Started => Self::Started,
@@ -161,9 +161,9 @@ impl From<RemoteTriggerDeliveryEmitOutcome> for lash_core::TriggerDeliveryEmitOu
     }
 }
 
-impl From<lash_core::TriggerDeliveryEmitReport> for RemoteTriggerDeliveryEmitReport {
-    fn from(value: lash_core::TriggerDeliveryEmitReport) -> Self {
-        let lash_core::TriggerDeliveryEmitReport {
+impl From<lash_core::facade_support::TriggerDeliveryEmitReport> for RemoteTriggerDeliveryEmitReport {
+    fn from(value: lash_core::facade_support::TriggerDeliveryEmitReport) -> Self {
+        let lash_core::facade_support::TriggerDeliveryEmitReport {
             occurrence_id,
             subscription_id,
             process_id,
@@ -178,7 +178,7 @@ impl From<lash_core::TriggerDeliveryEmitReport> for RemoteTriggerDeliveryEmitRep
     }
 }
 
-impl From<RemoteTriggerDeliveryEmitReport> for lash_core::TriggerDeliveryEmitReport {
+impl From<RemoteTriggerDeliveryEmitReport> for lash_core::facade_support::TriggerDeliveryEmitReport {
     fn from(value: RemoteTriggerDeliveryEmitReport) -> Self {
         let RemoteTriggerDeliveryEmitReport {
             occurrence_id,
@@ -250,9 +250,9 @@ impl From<lash_core::TriggerSubscriptionFilter> for RemoteTriggerSubscriptionFil
     }
 }
 
-impl From<lash_core::TriggerRegistration> for RemoteTriggerRegistration {
-    fn from(value: lash_core::TriggerRegistration) -> Self {
-        let lash_core::TriggerRegistration {
+impl From<lash_core::facade_support::TriggerRegistration> for RemoteTriggerRegistration {
+    fn from(value: lash_core::facade_support::TriggerRegistration) -> Self {
+        let lash_core::facade_support::TriggerRegistration {
             subscription_key,
             incarnation,
             revision,
@@ -265,7 +265,7 @@ impl From<lash_core::TriggerRegistration> for RemoteTriggerRegistration {
             target,
             enabled,
         } = value;
-        let lash_core::TriggerTargetSummary {
+        let lash_core::facade_support::TriggerTargetSummary {
             label,
             identity,
             input,
@@ -277,13 +277,13 @@ impl From<lash_core::TriggerRegistration> for RemoteTriggerRegistration {
             revision,
             registrant: registrant.into(),
             manifest_membership: match manifest_membership {
-                lash_core::TriggerManifestMembership::PresentInCurrentArtifact => {
+                lash_core::facade_support::TriggerManifestMembership::PresentInCurrentArtifact => {
                     RemoteTriggerManifestMembership::PresentInCurrentArtifact
                 }
-                lash_core::TriggerManifestMembership::Orphaned => {
+                lash_core::facade_support::TriggerManifestMembership::Orphaned => {
                     RemoteTriggerManifestMembership::Orphaned
                 }
-                lash_core::TriggerManifestMembership::Unknown => {
+                lash_core::facade_support::TriggerManifestMembership::Unknown => {
                     RemoteTriggerManifestMembership::Unknown
                 }
             },
@@ -302,7 +302,7 @@ impl From<lash_core::TriggerRegistration> for RemoteTriggerRegistration {
     }
 }
 
-impl TryFrom<RemoteTriggerRegistration> for lash_core::TriggerRegistration {
+impl TryFrom<RemoteTriggerRegistration> for lash_core::facade_support::TriggerRegistration {
     type Error = RemoteProtocolError;
 
     fn try_from(value: RemoteTriggerRegistration) -> Result<Self, Self::Error> {
@@ -332,20 +332,20 @@ impl TryFrom<RemoteTriggerRegistration> for lash_core::TriggerRegistration {
             registrant: registrant.into(),
             manifest_membership: match manifest_membership {
                 RemoteTriggerManifestMembership::PresentInCurrentArtifact => {
-                    lash_core::TriggerManifestMembership::PresentInCurrentArtifact
+                    lash_core::facade_support::TriggerManifestMembership::PresentInCurrentArtifact
                 }
                 RemoteTriggerManifestMembership::Orphaned => {
-                    lash_core::TriggerManifestMembership::Orphaned
+                    lash_core::facade_support::TriggerManifestMembership::Orphaned
                 }
                 RemoteTriggerManifestMembership::Unknown => {
-                    lash_core::TriggerManifestMembership::Unknown
+                    lash_core::facade_support::TriggerManifestMembership::Unknown
                 }
             },
             source_key,
             name,
-            source_type: lash_core::TriggerEventType::new(source_type),
+            source_type: lash_core::facade_support::TriggerEventType::new(source_type),
             source,
-            target: lash_core::TriggerTargetSummary {
+            target: lash_core::facade_support::TriggerTargetSummary {
                 label,
                 identity: identity.into(),
                 input: input.try_into()?,

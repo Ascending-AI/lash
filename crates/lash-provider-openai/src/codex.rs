@@ -25,7 +25,7 @@ use lash_core::provider::{
     ProviderFactory, ProviderFailureClassifier, ProviderOptions, ProviderReliability,
     StreamTermination, resolve_generation_policy,
 };
-use lash_core::{ProviderSchemaCapabilities, SchemaPurpose};
+use lash_core::{facade_support::ProviderSchemaCapabilities, facade_support::SchemaPurpose};
 use lash_llm_transport::streaming::{drive_sse_response, emit_stream_progress};
 use lash_llm_transport::timeouts::response_start_timeout;
 use lash_llm_transport::util::{emit_provider_request_trace, emit_provider_trace};
@@ -1985,7 +1985,7 @@ fn default_codex_options() -> ProviderOptions {
 }
 
 /// Factory that materializes [`CodexProvider`] from a host-owned
-/// [`ProviderSpec`](lash_core::ProviderSpec).
+/// [`ProviderSpec`](lash_core::facade_support::ProviderSpec).
 pub struct CodexProviderFactory;
 
 impl ProviderFactory for CodexProviderFactory {

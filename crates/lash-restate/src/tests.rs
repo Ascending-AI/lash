@@ -500,11 +500,11 @@ struct Fig806TriggerRedriveInput {
 trait Fig806TriggerRedrive {
     async fn run(
         input: Json<Fig806TriggerRedriveInput>,
-    ) -> HandlerResult<Json<lash_core::TriggerEmitReport>>;
+    ) -> HandlerResult<Json<lash_core::facade_support::TriggerEmitReport>>;
 }
 
 struct Fig806TriggerRedriveImpl {
-    router: lash_core::TriggerRouter,
+    router: lash_core::facade_support::TriggerRouter,
 }
 
 impl Fig806TriggerRedrive for Fig806TriggerRedriveImpl {
@@ -512,7 +512,7 @@ impl Fig806TriggerRedrive for Fig806TriggerRedriveImpl {
         &self,
         ctx: WorkflowContext<'_>,
         Json(input): Json<Fig806TriggerRedriveInput>,
-    ) -> HandlerResult<Json<lash_core::TriggerEmitReport>> {
+    ) -> HandlerResult<Json<lash_core::facade_support::TriggerEmitReport>> {
         let controller = RestateRuntimeEffectController::new(ctx);
         let report = self
             .router
@@ -1215,8 +1215,9 @@ async fn fig788_cancel_landing_after_segment_send_preserves_the_deployed_prefix(
 
 #[tokio::test]
 async fn fig806_reserved_trigger_redrive_replays_the_process_start_prefix() {
-    let store = Arc::new(lash_core::InMemoryTriggerStore::default());
-    let source_key = lash_core::empty_trigger_source_key("ui.button.pressed").expect("source key");
+    let store = Arc::new(lash_core::facade_support::InMemoryTriggerStore::default());
+    let source_key = lash_core::facade_support::empty_trigger_source_key("ui.button.pressed")
+        .expect("source key");
     let registration = store
         .execute_command(
             "fig806-register",
@@ -1245,7 +1246,7 @@ async fn fig806_reserved_trigger_redrive_replays_the_process_start_prefix() {
         lash_core::TriggerCommandOutcome::Mutation { .. }
     ));
     let registry = process_registry();
-    let router = lash_core::TriggerRouter::new(
+    let router = lash_core::facade_support::TriggerRouter::new(
         Arc::clone(&store) as Arc<dyn lash_core::TriggerStore>,
         Some(Arc::clone(&registry)),
         None,
@@ -1290,7 +1291,7 @@ async fn fig806_reserved_trigger_redrive_replays_the_process_start_prefix() {
     .await
     .expect("reserved trigger redrive must preserve the process-start prefix");
 
-    let report = restate_output_json::<lash_core::TriggerEmitReport>(&output)
+    let report = restate_output_json::<lash_core::facade_support::TriggerEmitReport>(&output)
         .expect("decode trigger emit report");
     assert_eq!(report.deliveries.len(), 1);
     assert_eq!(
@@ -1357,7 +1358,8 @@ async fn fig811_two_subscription_sqlite_redrive_preserves_canonical_start_order(
             .await
             .expect("open SQLite trigger store"),
     );
-    let source_key = lash_core::empty_trigger_source_key("ui.button.pressed").expect("source key");
+    let source_key = lash_core::facade_support::empty_trigger_source_key("ui.button.pressed")
+        .expect("source key");
     let alpha_id = register_fig811_subscription(
         store.as_ref(),
         "fig811-register-alpha",
@@ -1374,7 +1376,7 @@ async fn fig811_two_subscription_sqlite_redrive_preserves_canonical_start_order(
     );
 
     let registry = process_registry();
-    let router = lash_core::TriggerRouter::new(
+    let router = lash_core::facade_support::TriggerRouter::new(
         Arc::clone(&store) as Arc<dyn lash_core::TriggerStore>,
         Some(Arc::clone(&registry)),
         None,
@@ -1427,8 +1429,8 @@ async fn fig811_two_subscription_sqlite_redrive_preserves_canonical_start_order(
     let output = invoke_endpoint_body(&endpoint, "Fig806TriggerRedrive", "run", replay)
         .await
         .expect("multi-subscription redrive must preserve process-start ordering");
-    let report =
-        restate_output_json::<lash_core::TriggerEmitReport>(&output).unwrap_or_else(|| {
+    let report = restate_output_json::<lash_core::facade_support::TriggerEmitReport>(&output)
+        .unwrap_or_else(|| {
             panic!(
                 "decode multi-subscription replay report; endpoint error={:?}, output failure={:?}",
                 restate_error_message(&output),
@@ -1447,11 +1449,11 @@ async fn fig811_two_subscription_sqlite_redrive_preserves_canonical_start_order(
         vec![
             (
                 alpha_id.as_str(),
-                &lash_core::TriggerDeliveryEmitOutcome::AlreadyReserved,
+                &lash_core::facade_support::TriggerDeliveryEmitOutcome::AlreadyReserved,
             ),
             (
                 beta_id.as_str(),
-                &lash_core::TriggerDeliveryEmitOutcome::AlreadyReserved,
+                &lash_core::facade_support::TriggerDeliveryEmitOutcome::AlreadyReserved,
             ),
         ]
     );
@@ -1468,8 +1470,9 @@ async fn fig811_two_subscription_sqlite_redrive_preserves_canonical_start_order(
 
 #[tokio::test]
 async fn fig811_independent_client_retry_reports_duplicate_without_a_second_process() {
-    let store = Arc::new(lash_core::InMemoryTriggerStore::default());
-    let source_key = lash_core::empty_trigger_source_key("ui.button.pressed").expect("source key");
+    let store = Arc::new(lash_core::facade_support::InMemoryTriggerStore::default());
+    let source_key = lash_core::facade_support::empty_trigger_source_key("ui.button.pressed")
+        .expect("source key");
     register_fig811_subscription(
         store.as_ref(),
         "fig811-register-client-retry",
@@ -1478,7 +1481,7 @@ async fn fig811_independent_client_retry_reports_duplicate_without_a_second_proc
     )
     .await;
     let registry = process_registry();
-    let router = lash_core::TriggerRouter::new(
+    let router = lash_core::facade_support::TriggerRouter::new(
         Arc::clone(&store) as Arc<dyn lash_core::TriggerStore>,
         Some(Arc::clone(&registry)),
         None,
@@ -1507,12 +1510,12 @@ async fn fig811_independent_client_retry_reports_duplicate_without_a_second_proc
     )
     .await
     .expect("first independent client invocation");
-    let first = restate_output_json::<lash_core::TriggerEmitReport>(&first)
+    let first = restate_output_json::<lash_core::facade_support::TriggerEmitReport>(&first)
         .expect("decode first client report");
     assert!(matches!(
         first.deliveries.as_slice(),
-        [lash_core::TriggerDeliveryEmitReport {
-            outcome: lash_core::TriggerDeliveryEmitOutcome::Started,
+        [lash_core::facade_support::TriggerDeliveryEmitReport {
+            outcome: lash_core::facade_support::TriggerDeliveryEmitOutcome::Started,
             ..
         }]
     ));
@@ -1528,12 +1531,12 @@ async fn fig811_independent_client_retry_reports_duplicate_without_a_second_proc
     )
     .await
     .expect("second independent client invocation");
-    let second = restate_output_json::<lash_core::TriggerEmitReport>(&second)
+    let second = restate_output_json::<lash_core::facade_support::TriggerEmitReport>(&second)
         .expect("decode second client report");
     assert!(matches!(
         second.deliveries.as_slice(),
-        [lash_core::TriggerDeliveryEmitReport {
-            outcome: lash_core::TriggerDeliveryEmitOutcome::AlreadyReserved,
+        [lash_core::facade_support::TriggerDeliveryEmitReport {
+            outcome: lash_core::facade_support::TriggerDeliveryEmitOutcome::AlreadyReserved,
             ..
         }]
     ));
@@ -1871,10 +1874,12 @@ impl Fig790ProcessAwaitRedrive for Fig790ProcessAwaitRedriveImpl {
                 }),
             ),
             RuntimeEffectLocalExecutor::processes(Arc::clone(&self.registry), None)
-                .with_process_turn_cancellation(lash_core::ProcessTurnCancellation::new(
-                    cancellation.clone(),
-                    durable_turn_scope("session", "turn"),
-                )),
+                .with_process_turn_cancellation(
+                    lash_core::facade_support::ProcessTurnCancellation::new(
+                        cancellation.clone(),
+                        durable_turn_scope("session", "turn"),
+                    ),
+                ),
         );
         let outcome = if input.cancel_on_suspend_wake {
             CancelOnWakeFuture {
@@ -2783,8 +2788,8 @@ async fn restate_handler_controller_journals_typed_trigger_execution() {
             }),
         },
     );
-    let store =
-        Arc::new(lash_core::InMemoryTriggerStore::new()) as Arc<dyn lash_core::TriggerStore>;
+    let store = Arc::new(lash_core::facade_support::InMemoryTriggerStore::new())
+        as Arc<dyn lash_core::TriggerStore>;
 
     let outcome = controller
         .execute_effect(envelope, RuntimeEffectLocalExecutor::triggers(store))
@@ -3093,7 +3098,7 @@ fn lashlang_process_input(input: lash_lashlang_runtime::LashlangProcessInput) ->
 
 #[derive(Default)]
 struct DurableMemoryAttachmentStore {
-    inner: lash_core::InMemoryAttachmentStore,
+    inner: lash_core::facade_support::InMemoryAttachmentStore,
 }
 
 #[async_trait::async_trait]
@@ -3131,7 +3136,7 @@ impl lash_core::AttachmentStore for DurableMemoryAttachmentStore {
 
 #[derive(Default)]
 struct DurableMemoryProcessEnvStore {
-    inner: lash_core::InMemoryProcessExecutionEnvStore,
+    inner: lash_core::facade_support::InMemoryProcessExecutionEnvStore,
 }
 
 #[async_trait::async_trait]
@@ -5019,13 +5024,13 @@ struct PostCommitFailingQueuedWorkRunHandle {
 }
 
 #[async_trait::async_trait]
-impl lash_core::QueuedWorkRunHandle for PostCommitFailingQueuedWorkRunHandle {
+impl lash_core::facade_support::QueuedWorkRunHandle for PostCommitFailingQueuedWorkRunHandle {
     async fn run_queued_work(
         &self,
-        _request: lash_core::QueuedWorkRunRequest,
-    ) -> Result<(), lash_core::QueuedWorkRunError> {
+        _request: lash_core::facade_support::QueuedWorkRunRequest,
+    ) -> Result<(), lash_core::facade_support::QueuedWorkRunError> {
         if self.attempts.fetch_add(1, Ordering::SeqCst) == 0 {
-            return Err(lash_core::QueuedWorkRunError::transient(
+            return Err(lash_core::facade_support::QueuedWorkRunError::transient(
                 PluginError::Session(
                     "FIG-430 deterministic post-commit dispatch failure".to_string(),
                 ),
@@ -5065,7 +5070,9 @@ async fn restate_enqueue_never_errors_after_commit() {
         .effect_host(Arc::new(lash::durability::InlineEffectHost::default()))
         .attachment_store(Arc::new(DurableMemoryAttachmentStore::default()))
         .process_env_store(Arc::new(DurableMemoryProcessEnvStore::default()))
-        .queued_work_driver(lash_core::QueuedWorkDriver::new(queued_work.clone()))
+        .queued_work_driver(lash_core::facade_support::QueuedWorkDriver::new(
+            queued_work.clone(),
+        ))
         .build()
         .expect("build FIG-430 core");
     let session = core
@@ -5161,9 +5168,9 @@ async fn replay_test_runtime(
     session_id: &str,
     policy: lash_core::SessionPolicy,
     initial_state: lash_core::RuntimeSessionState,
-    host: lash_core::RuntimeHostConfig,
+    host: lash_core::facade_support::RuntimeHostConfig,
     store: Arc<dyn lash_core::RuntimePersistence>,
-) -> lash_core::LashRuntime {
+) -> lash_core::facade_support::LashRuntime {
     Box::pin(replay_test_runtime_with_plugins(
         session_id,
         policy,
@@ -5179,10 +5186,10 @@ async fn replay_test_runtime_with_plugins(
     session_id: &str,
     policy: lash_core::SessionPolicy,
     initial_state: lash_core::RuntimeSessionState,
-    host: lash_core::RuntimeHostConfig,
+    host: lash_core::facade_support::RuntimeHostConfig,
     store: Arc<dyn lash_core::RuntimePersistence>,
-    plugin_factories: Vec<Arc<dyn lash_core::PluginFactory>>,
-) -> lash_core::LashRuntime {
+    plugin_factories: Vec<Arc<dyn lash_core::facade_support::PluginFactory>>,
+) -> lash_core::facade_support::LashRuntime {
     Box::pin(replay_test_runtime_with_plugins_and_registry(
         session_id,
         policy,
@@ -5200,12 +5207,12 @@ async fn replay_test_runtime_with_plugins_and_registry(
     session_id: &str,
     policy: lash_core::SessionPolicy,
     initial_state: lash_core::RuntimeSessionState,
-    host: lash_core::RuntimeHostConfig,
+    host: lash_core::facade_support::RuntimeHostConfig,
     store: Arc<dyn lash_core::RuntimePersistence>,
-    plugin_factories: Vec<Arc<dyn lash_core::PluginFactory>>,
+    plugin_factories: Vec<Arc<dyn lash_core::facade_support::PluginFactory>>,
     process_registry: Option<Arc<dyn ProcessRegistry>>,
-) -> lash_core::LashRuntime {
-    let mut builder = lash_core::LashRuntime::builder()
+) -> lash_core::facade_support::LashRuntime {
+    let mut builder = lash_core::facade_support::LashRuntime::builder()
         .with_session_id(session_id)
         .with_policy(policy)
         .with_initial_state(initial_state)
@@ -5219,11 +5226,11 @@ async fn replay_test_runtime_with_plugins_and_registry(
 }
 
 async fn run_restate_replay_turn(
-    runtime: &mut lash_core::LashRuntime,
+    runtime: &mut lash_core::facade_support::LashRuntime,
     context: Arc<ReplayableRecordingContext>,
     session_id: &str,
     turn_id: &str,
-) -> lash_core::AssembledTurn {
+) -> lash_core::facade_support::AssembledTurn {
     let controller = RestateRuntimeEffectController::new(context);
     let scoped_effect_controller = controller
         .scoped_effect_controller(durable_turn_scope(session_id, turn_id))
@@ -5231,7 +5238,7 @@ async fn run_restate_replay_turn(
     runtime
         .stream_turn(
             replay_test_input(turn_id),
-            lash_core::TurnOptions::new(
+            lash_core::facade_support::TurnOptions::new(
                 tokio_util::sync::CancellationToken::new(),
                 scoped_effect_controller,
             ),
@@ -5272,11 +5279,15 @@ async fn restate_handler_replay_retries_final_lash_commit_idempotently() {
         })
         .build()
         .into_handle();
-    let mut host = lash_core::RuntimeHostConfig::in_memory();
-    host.providers.provider_resolver = Arc::new(lash_core::SingleProviderResolver::new(provider));
-    host.durability.attachment_store = Arc::new(lash_core::SessionAttachmentStore::ephemeral(
-        Arc::new(DurableMemoryAttachmentStore::default()),
-    ));
+    let mut host = lash_core::facade_support::RuntimeHostConfig::in_memory();
+    host.providers.provider_resolver = Arc::new(
+        lash_core::facade_support::SingleProviderResolver::new(provider),
+    );
+    host.durability.attachment_store = Arc::new(
+        lash_core::facade_support::SessionAttachmentStore::ephemeral(Arc::new(
+            DurableMemoryAttachmentStore::default(),
+        )),
+    );
     host.durability.process_env_store = Arc::new(DurableMemoryProcessEnvStore::default());
     let store = Arc::new(
         lash_sqlite_store::Store::open(&dir.path().join("session.db"))
@@ -5300,7 +5311,7 @@ async fn restate_handler_replay_retries_final_lash_commit_idempotently() {
         run_restate_replay_turn(&mut first, Arc::clone(&context), session_id, turn_id).await;
     assert!(matches!(
         first_turn.outcome,
-        lash_core::TurnOutcome::Finished(_)
+        lash_core::facade_support::TurnOutcome::Finished(_)
     ));
     let first_runs = context.runs();
     assert!(!first_runs.is_empty());
@@ -5326,7 +5337,7 @@ async fn restate_handler_replay_retries_final_lash_commit_idempotently() {
         run_restate_replay_turn(&mut replay, Arc::clone(&context), session_id, turn_id).await;
     assert!(matches!(
         replay_turn.outcome,
-        lash_core::TurnOutcome::Finished(_)
+        lash_core::facade_support::TurnOutcome::Finished(_)
     ));
     assert_eq!(first_turn.llm_calls.len(), 1);
     assert_eq!(replay_turn.llm_calls, first_turn.llm_calls);
@@ -5388,11 +5399,15 @@ async fn restate_replay_lease_acquisition_takes_recorded_branch() {
         })
         .build()
         .into_handle();
-    let mut host = lash_core::RuntimeHostConfig::in_memory();
-    host.providers.provider_resolver = Arc::new(lash_core::SingleProviderResolver::new(provider));
-    host.durability.attachment_store = Arc::new(lash_core::SessionAttachmentStore::ephemeral(
-        Arc::new(DurableMemoryAttachmentStore::default()),
-    ));
+    let mut host = lash_core::facade_support::RuntimeHostConfig::in_memory();
+    host.providers.provider_resolver = Arc::new(
+        lash_core::facade_support::SingleProviderResolver::new(provider),
+    );
+    host.durability.attachment_store = Arc::new(
+        lash_core::facade_support::SessionAttachmentStore::ephemeral(Arc::new(
+            DurableMemoryAttachmentStore::default(),
+        )),
+    );
     host.durability.process_env_store = Arc::new(DurableMemoryProcessEnvStore::default());
 
     let store = Arc::new(
@@ -5451,7 +5466,7 @@ async fn restate_replay_lease_acquisition_takes_recorded_branch() {
     let replay_turn = fresh_worker
         .stream_turn(
             replay_test_input(turn_id),
-            lash_core::TurnOptions::new(
+            lash_core::facade_support::TurnOptions::new(
                 tokio_util::sync::CancellationToken::new(),
                 scoped_effect_controller,
             ),
@@ -5467,7 +5482,7 @@ async fn restate_replay_lease_acquisition_takes_recorded_branch() {
     });
     assert!(matches!(
         replay_turn.outcome,
-        lash_core::TurnOutcome::Finished(_)
+        lash_core::facade_support::TurnOutcome::Finished(_)
     ));
     assert_eq!(
         replay_turn.assistant_output.safe_text,
@@ -5598,14 +5613,14 @@ async fn restate_replay_does_not_reexecute_scalar_lashlang_tool_before_pending_w
         scalar_invocations: Arc::clone(&scalar_invocations),
         completion_key_tx: Mutex::new(Some(completion_key_tx)),
     });
-    let tool_plugin: Arc<dyn lash_core::PluginFactory> =
+    let tool_plugin: Arc<dyn lash_core::facade_support::PluginFactory> =
         Arc::new(lash_core::plugin::StaticPluginFactory::new(
             "restate-scalar-replay-tools",
-            lash_core::PluginSpec::new().with_tool_provider(tools),
+            lash_core::facade_support::PluginSpec::new().with_tool_provider(tools),
         ));
     let artifact_store: Arc<dyn lashlang::LashlangArtifactStore> =
         Arc::new(lashlang::InMemoryLashlangArtifactStore::new());
-    let rlm_plugin: Arc<dyn lash_core::PluginFactory> = Arc::new(
+    let rlm_plugin: Arc<dyn lash_core::facade_support::PluginFactory> = Arc::new(
         lash_protocol_rlm::RlmProtocolPluginFactory::new(
             lash_protocol_rlm::RlmProtocolPluginConfig::default(),
             Arc::clone(&artifact_store),
@@ -5645,11 +5660,15 @@ finish (await handle)?
         })
         .build()
         .into_handle();
-    let mut host = lash_core::RuntimeHostConfig::in_memory();
-    host.providers.provider_resolver = Arc::new(lash_core::SingleProviderResolver::new(provider));
-    host.durability.attachment_store = Arc::new(lash_core::SessionAttachmentStore::ephemeral(
-        Arc::new(DurableMemoryAttachmentStore::default()),
-    ));
+    let mut host = lash_core::facade_support::RuntimeHostConfig::in_memory();
+    host.providers.provider_resolver = Arc::new(
+        lash_core::facade_support::SingleProviderResolver::new(provider),
+    );
+    host.durability.attachment_store = Arc::new(
+        lash_core::facade_support::SessionAttachmentStore::ephemeral(Arc::new(
+            DurableMemoryAttachmentStore::default(),
+        )),
+    );
     let process_env_store: Arc<dyn lash_core::ProcessExecutionEnvStore> =
         Arc::new(DurableMemoryProcessEnvStore::default());
     host.durability.process_env_store = Arc::clone(&process_env_store);
@@ -5667,12 +5686,15 @@ finish (await handle)?
     let initial_state = replay_test_state(session_id, &policy);
     let context = Arc::new(ReplayableRecordingContext::default());
     let process_registry = process_registry();
-    let process_worker = DurableProcessWorker::new(lash_core::DurableProcessWorkerConfig::new(
-        Arc::new(lash_core::PluginHost::new(plugin_factories.clone())),
-        host.clone(),
-        Arc::new(lash_core::InMemorySessionStoreFactory::new()),
-        Arc::clone(&process_registry),
-    ));
+    let process_worker =
+        DurableProcessWorker::new(lash_core::facade_support::DurableProcessWorkerConfig::new(
+            Arc::new(lash_core::facade_support::PluginHost::new(
+                plugin_factories.clone(),
+            )),
+            host.clone(),
+            Arc::new(lash_core::facade_support::InMemorySessionStoreFactory::new()),
+            Arc::clone(&process_registry),
+        ));
     context.install_process_worker(process_worker);
 
     let mut first = Box::pin(replay_test_runtime_with_plugins_and_registry(
@@ -5711,7 +5733,7 @@ finish (await handle)?
     let first_turn = first_turn.await.expect("first turn task");
     assert!(matches!(
         first_turn.outcome,
-        lash_core::TurnOutcome::Finished(_)
+        lash_core::facade_support::TurnOutcome::Finished(_)
     ));
     assert_eq!(scalar_invocations.load(Ordering::SeqCst), 1);
     let first_recorded_envelopes = context.recorded_runtime_effect_envelopes();
@@ -5776,7 +5798,7 @@ finish (await handle)?
         run_restate_replay_turn(&mut replay, Arc::clone(&context), session_id, turn_id).await;
     assert!(matches!(
         replay_turn.outcome,
-        lash_core::TurnOutcome::Finished(_)
+        lash_core::facade_support::TurnOutcome::Finished(_)
     ));
     assert_eq!(llm_provider_calls.load(Ordering::SeqCst), 1);
     assert_eq!(
@@ -6692,7 +6714,7 @@ impl RestateProcessRunner for SegmentedRecordingRunner {
 
 fn inline_process_scope(process_id: &str) -> lash_core::ScopedEffectController<'static> {
     lash_core::ScopedEffectController::shared(
-        Arc::new(lash_core::InlineRuntimeEffectController::default()),
+        Arc::new(lash_core::facade_support::InlineRuntimeEffectController::default()),
         lash_core::ExecutionScope::process(process_id.to_string()),
     )
     .expect("inline process scope")
@@ -6949,7 +6971,7 @@ async fn durable_segment_handover_resumes_once_and_terminalizes_once() {
         1,
         "only the true terminal is process-visible"
     );
-    let awaited = lash_core::ProcessAwaiter::polling(registry)
+    let awaited = lash_core::facade_support::ProcessAwaiter::polling(registry)
         .await_terminal("segmented-durable")
         .await
         .expect("await true terminal");
@@ -7179,7 +7201,8 @@ async fn restate_segment_transition_replay_matrix_preserves_lineage_invariants()
             )
             .await
             .expect("write root terminal");
-        let attach_after_retention = lash_core::ProcessAwaiter::polling(Arc::clone(&registry));
+        let attach_after_retention =
+            lash_core::facade_support::ProcessAwaiter::polling(Arc::clone(&registry));
         assert_eq!(
             attach_after_retention
                 .await_terminal(&process_id)
@@ -7602,7 +7625,7 @@ fn snapshot_recovery_tool_options(snapshot_ref: &str) -> lash_core::PluginOption
     .expect("snapshot recovery plugin options")
 }
 
-fn snapshot_recovery_tool_factory() -> Arc<dyn lash_core::PluginFactory> {
+fn snapshot_recovery_tool_factory() -> Arc<dyn lash_core::facade_support::PluginFactory> {
     Arc::new(lash_core::plugin::PluginSpecFactory::new(
         "snapshot-recovery-tool",
         Arc::new(|ctx| {
@@ -7616,9 +7639,10 @@ fn snapshot_recovery_tool_factory() -> Arc<dyn lash_core::PluginFactory> {
                 })?
                 .is_some_and(|options| options.snapshot_ref == "tool-authority:sha256:ok");
             let spec = if snapshot_available {
-                lash_core::PluginSpec::new().with_tool_provider(Arc::new(SnapshotRecoveryTool))
+                lash_core::facade_support::PluginSpec::new()
+                    .with_tool_provider(Arc::new(SnapshotRecoveryTool))
             } else {
-                lash_core::PluginSpec::new()
+                lash_core::facade_support::PluginSpec::new()
             };
             Ok(spec)
         }),
@@ -7635,22 +7659,22 @@ fn recovery_worker(
 fn recovery_worker_with_plugins(
     registry: Arc<dyn ProcessRegistry>,
     store_factory: Arc<dyn lash_core::SessionStoreFactory>,
-    extra_plugins: Vec<Arc<dyn lash_core::PluginFactory>>,
+    extra_plugins: Vec<Arc<dyn lash_core::facade_support::PluginFactory>>,
 ) -> DurableProcessWorker {
     let tools: Arc<dyn lash_core::ToolProvider> = Arc::new(RecoveryProcessTool);
     let mut plugins = vec![
         Arc::new(lash_protocol_standard::StandardProtocolPluginFactory::new())
-            as Arc<dyn lash_core::PluginFactory>,
+            as Arc<dyn lash_core::facade_support::PluginFactory>,
         Arc::new(lash_core::plugin::StaticPluginFactory::new(
             "recovery-tool",
-            lash_core::PluginSpec::new().with_tool_provider(tools),
+            lash_core::facade_support::PluginSpec::new().with_tool_provider(tools),
         )),
     ];
     plugins.extend(extra_plugins);
-    let plugin_host = lash_core::PluginHost::new(plugins);
+    let plugin_host = lash_core::facade_support::PluginHost::new(plugins);
     let process_env_store: Arc<dyn lash_core::ProcessExecutionEnvStore> =
         RECOVERY_PROCESS_ENV_STORE.clone();
-    let runtime_host = lash_core::RuntimeHostConfig::in_memory()
+    let runtime_host = lash_core::facade_support::RuntimeHostConfig::in_memory()
         .with_process_env_store(process_env_store)
         .with_process_engine(Arc::new(
             lash_lashlang_runtime::LashlangProcessEngine::in_memory(
@@ -7658,7 +7682,7 @@ fn recovery_worker_with_plugins(
             ),
         ));
     DurableProcessWorker::new(
-        lash_core::DurableProcessWorkerConfig::new(
+        lash_core::facade_support::DurableProcessWorkerConfig::new(
             Arc::new(plugin_host),
             runtime_host,
             store_factory,
@@ -7869,7 +7893,7 @@ async fn sqlite_process_recovery_reopens_registry_worker_observers_wakes_and_can
     assert_eq!(observed.len(), 1);
     assert_eq!(observed[0].id, "recover-tool");
     assert_eq!(
-        lash_core::ProcessAwaiter::polling(Arc::clone(&registry_b))
+        lash_core::facade_support::ProcessAwaiter::polling(Arc::clone(&registry_b))
             .await_terminal("recover-tool")
             .await
             .expect("await recovered terminal process"),
@@ -7985,7 +8009,7 @@ async fn sqlite_process_recovery_rebuilds_snapshot_plugin_options_after_worker_r
         .expect("recover snapshot-backed process");
 
     assert_eq!(
-        lash_core::ProcessAwaiter::polling(Arc::clone(&registry_b))
+        lash_core::facade_support::ProcessAwaiter::polling(Arc::clone(&registry_b))
             .await_terminal("snapshot-ok")
             .await
             .expect("await recovered snapshot-backed process"),
@@ -8036,7 +8060,7 @@ async fn sqlite_process_recovery_terminalizes_revoked_snapshot_plugin_options() 
         .await
         .expect("recover revoked snapshot-backed process");
 
-    let await_output = lash_core::ProcessAwaiter::polling(Arc::clone(&registry_b))
+    let await_output = lash_core::facade_support::ProcessAwaiter::polling(Arc::clone(&registry_b))
         .await_terminal("snapshot-revoked")
         .await
         .expect("await terminal revoked snapshot-backed process");
@@ -8211,7 +8235,7 @@ async fn sqlite_trigger_started_process_recovered_after_worker_registry_reopen()
         .expect("recover non-terminal trigger-started process");
 
     assert_eq!(
-        lash_core::ProcessAwaiter::polling(Arc::clone(&registry_b))
+        lash_core::facade_support::ProcessAwaiter::polling(Arc::clone(&registry_b))
             .await_terminal("trigger-notify")
             .await
             .expect("await recovered trigger-started process"),
@@ -8237,7 +8261,7 @@ async fn sqlite_trigger_started_process_recovered_after_worker_registry_reopen()
         .await
         .expect("second recovery sweep is idempotent");
     assert_eq!(
-        lash_core::ProcessAwaiter::polling(Arc::clone(&registry_b))
+        lash_core::facade_support::ProcessAwaiter::polling(Arc::clone(&registry_b))
             .await_terminal("trigger-notify")
             .await
             .expect("await after idempotent re-sweep"),
@@ -8292,10 +8316,12 @@ impl lash_core::ToolProvider for CountingProcessTool {
     }
 }
 
-fn counting_tool_plugin(executions: Arc<AtomicUsize>) -> Arc<dyn lash_core::PluginFactory> {
+fn counting_tool_plugin(
+    executions: Arc<AtomicUsize>,
+) -> Arc<dyn lash_core::facade_support::PluginFactory> {
     Arc::new(lash_core::plugin::StaticPluginFactory::new(
         "counting-process-tool",
-        lash_core::PluginSpec::new()
+        lash_core::facade_support::PluginSpec::new()
             .with_tool_provider(Arc::new(CountingProcessTool { executions })),
     ))
 }
@@ -8528,10 +8554,10 @@ async fn process_deployment_driver_and_workflow_share_registry() {
     assert!(Arc::ptr_eq(&driver.process_registry(), &driver_registry));
 
     let worker = DurableProcessWorker::new(
-        lash_core::DurableProcessWorkerConfig::new(
-            Arc::new(lash_core::PluginHost::empty()),
-            lash_core::RuntimeHostConfig::in_memory(),
-            Arc::new(lash_core::InMemorySessionStoreFactory::new()),
+        lash_core::facade_support::DurableProcessWorkerConfig::new(
+            Arc::new(lash_core::facade_support::PluginHost::empty()),
+            lash_core::facade_support::RuntimeHostConfig::in_memory(),
+            Arc::new(lash_core::facade_support::InMemorySessionStoreFactory::new()),
             Arc::clone(&driver_registry),
         )
         .with_change_hub(driver.change_hub()),
@@ -8591,7 +8617,7 @@ async fn process_workflow_impl_runs_and_cancels_through_runner() {
             registration,
             execution_context,
             lash_core::ScopedEffectController::shared(
-                Arc::new(lash_core::InlineRuntimeEffectController::default()),
+                Arc::new(lash_core::facade_support::InlineRuntimeEffectController::default()),
                 lash_core::ExecutionScope::process("task-workflow"),
             )
             .expect("inline process scope"),
@@ -9038,7 +9064,7 @@ async fn run_registration_abandons_restarted_owner_bound_without_running() {
             registration,
             ProcessExecutionContext::default(),
             lash_core::ScopedEffectController::shared(
-                Arc::new(lash_core::InlineRuntimeEffectController::default()),
+                Arc::new(lash_core::facade_support::InlineRuntimeEffectController::default()),
                 lash_core::ExecutionScope::process("ob-restart"),
             )
             .expect("inline process scope"),
@@ -9095,7 +9121,7 @@ async fn run_registration_runs_fresh_owner_bound() {
             registration,
             ProcessExecutionContext::default(),
             lash_core::ScopedEffectController::shared(
-                Arc::new(lash_core::InlineRuntimeEffectController::default()),
+                Arc::new(lash_core::facade_support::InlineRuntimeEffectController::default()),
                 lash_core::ExecutionScope::process("ob-fresh"),
             )
             .expect("inline process scope"),
@@ -9962,7 +9988,7 @@ struct RecordingProcessEventSink {
 }
 
 #[async_trait::async_trait]
-impl lash_core::ProcessEventSink for RecordingProcessEventSink {
+impl lash_core::facade_support::ProcessEventSink for RecordingProcessEventSink {
     async fn emit(&self, event: &lash_core::ProcessEvent) {
         self.events
             .lock()

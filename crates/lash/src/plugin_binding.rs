@@ -5,7 +5,7 @@ use crate::support::*;
 /// A binding is not a second plugin implementation model. It gives embed hosts
 /// typed session configuration and typed per-turn input while still building
 /// a normal [`PluginFactory`] whose session plugin registers capabilities
-/// through `lash_core::PluginRegistrar`.
+/// through `lash_core::facade_support::PluginRegistrar`.
 ///
 /// Plugin crates should expose a small domain extension trait over
 /// [`TurnBuilder`] for their turn input instead of asking app route code to

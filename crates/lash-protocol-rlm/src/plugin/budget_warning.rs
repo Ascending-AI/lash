@@ -1,4 +1,4 @@
-use lash_core::PreparedContext;
+use lash_core::facade_support::PreparedContext;
 use lash_core::plugin::{ContextError, TurnContextTransform, TurnTransformContext};
 
 use crate::driver::SharedPromptUsage;

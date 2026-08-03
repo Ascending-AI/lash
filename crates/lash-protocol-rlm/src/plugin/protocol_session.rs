@@ -211,7 +211,8 @@ mod tests {
         async fn create_session(
             &self,
             _request: lash_core::SessionCreateRequest,
-        ) -> Result<lash_core::SessionHandle, lash_core::plugin::PluginError> {
+        ) -> Result<lash_core::facade_support::SessionHandle, lash_core::plugin::PluginError>
+        {
             Err(lash_core::plugin::PluginError::Session(
                 "not used".to_string(),
             ))

@@ -37,7 +37,7 @@ pub fn response_start_timeout(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use lash_core::LlmTransportError;
+    use lash_core::facade_support::LlmTransportError;
 
     #[test]
     fn streaming_response_start_timeout_prefers_chunk_deadline() {

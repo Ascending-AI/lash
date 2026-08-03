@@ -13,7 +13,7 @@ pub struct SqliteTriggerStore {
 
 impl SqliteTriggerStore {
     pub async fn open(path: &Path) -> tokio_rusqlite::Result<Self> {
-        Self::open_with_clock(path, Arc::new(lash_core::SystemClock)).await
+        Self::open_with_clock(path, Arc::new(lash_core::facade_support::SystemClock)).await
     }
 
     pub async fn open_with_clock(
@@ -27,7 +27,7 @@ impl SqliteTriggerStore {
     }
 
     pub async fn memory() -> tokio_rusqlite::Result<Self> {
-        Self::memory_with_clock(Arc::new(lash_core::SystemClock)).await
+        Self::memory_with_clock(Arc::new(lash_core::facade_support::SystemClock)).await
     }
 
     pub async fn memory_with_clock(
@@ -156,13 +156,17 @@ impl lash_core::TriggerStore for SqliteTriggerStore {
                 .map(|records| Ok(lash_core::TriggerCommandOutcome::List { records }));
         }
         let public_operation_id = operation_id.to_string();
-        let operation_id =
-            lash_core::trigger_operation_receipt_id(command.owner_scope(), operation_id)?;
-        let request_hash = lash_core::trigger_command_hash(&command)?;
+        let operation_id = lash_core::facade_support::trigger_operation_receipt_id(
+            command.owner_scope(),
+            operation_id,
+        )?;
+        let request_hash = lash_core::facade_support::trigger_command_hash(&command)?;
         let owner_scope = command.owner_scope().clone();
         let subscription_key = command.subscription_key().unwrap_or_default().to_string();
-        let subscription_id =
-            lash_core::deterministic_subscription_id(&owner_scope, &subscription_key)?;
+        let subscription_id = lash_core::facade_support::deterministic_subscription_id(
+            &owner_scope,
+            &subscription_key,
+        )?;
         let now = self.clock.timestamp_ms();
         self.conn
             .write_flow(move |tx| {
@@ -218,7 +222,7 @@ impl lash_core::TriggerStore for SqliteTriggerStore {
                             )?);
                         }
                         drop(stmt);
-                        lash_core::evaluate_trigger_prune(
+                        lash_core::facade_support::evaluate_trigger_prune(
                             records,
                             owner_scope.clone(),
                             actor.clone(),
@@ -237,7 +241,7 @@ impl lash_core::TriggerStore for SqliteTriggerStore {
                             .map_err(process_sqlite_error)?
                             .map(Self::decode_subscription)
                             .transpose()?;
-                        lash_core::evaluate_trigger_mutation(current, command, now)?
+                        lash_core::facade_support::evaluate_trigger_mutation(current, command, now)?
                     };
                     let records = match &result {
                         Ok(lash_core::TriggerCommandOutcome::Mutation { receipt }) => {
@@ -443,9 +447,9 @@ impl lash_core::TriggerStore for SqliteTriggerStore {
         &self,
         request: lash_core::TriggerOccurrenceRequest,
     ) -> Result<lash_core::TriggerIngressResult, lash_core::PluginError> {
-        lash_core::validate_trigger_occurrence_request(&request)?;
-        let request_hash = lash_core::trigger_occurrence_request_hash(&request)?;
-        let occurrence_id = lash_core::deterministic_occurrence_id(&request)?;
+        lash_core::facade_support::validate_trigger_occurrence_request(&request)?;
+        let request_hash = lash_core::facade_support::trigger_occurrence_request_hash(&request)?;
+        let occurrence_id = lash_core::facade_support::deterministic_occurrence_id(&request)?;
         let occurred_at_ms = self.clock.timestamp_ms();
         self.conn
             .write_flow(move |tx| {
@@ -747,7 +751,7 @@ fn reserve_sqlite_deliveries(
 
     let mut reservations = Vec::with_capacity(subscriptions.len());
     for subscription in subscriptions {
-        let process_id = lash_core::deterministic_delivery_process_id(
+        let process_id = lash_core::facade_support::deterministic_delivery_process_id(
             &occurrence.occurrence_id,
             &subscription.subscription_id,
             &subscription.incarnation,
@@ -777,7 +781,7 @@ fn reserve_sqlite_deliveries(
             reservation_status: lash_core::TriggerDeliveryReservationStatus::Reserved,
         });
     }
-    lash_core::sort_trigger_delivery_reservations(&mut reservations);
+    lash_core::facade_support::sort_trigger_delivery_reservations(&mut reservations);
     Ok(reservations)
 }
 
@@ -813,6 +817,6 @@ fn sqlite_delivery_snapshots(
             reservation_status: reservation_status.clone(),
         });
     }
-    lash_core::sort_trigger_delivery_reservations(&mut reservations);
+    lash_core::facade_support::sort_trigger_delivery_reservations(&mut reservations);
     Ok(reservations)
 }

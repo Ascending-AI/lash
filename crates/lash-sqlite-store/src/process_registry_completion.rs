@@ -37,7 +37,7 @@ pub(super) async fn complete_process(
                 // complete→prune→re-register with a different disposition cannot
                 // slip between the check and the append.
                 authority.validate(&process_id, record.disposition, &await_output)?;
-                let request = lash_core::terminal_append_request(
+                let request = lash_core::facade_support::terminal_append_request(
                     &process_id,
                     &await_output,
                     Some(&authority),
@@ -70,7 +70,7 @@ pub(super) async fn complete_process(
                     wake_session_id.as_deref(),
                 )?;
                 match prepared {
-                    lash_core::ProcessEventAppendPlan::Replay {
+                    lash_core::facade_support::ProcessEventAppendPlan::Replay {
                         repair_record,
                         wake_delivery,
                         ..
@@ -86,7 +86,7 @@ pub(super) async fn complete_process(
                         }
                         Ok(lash_core::ProcessCompletionOutcome::AlreadyApplied { stored: record })
                     }
-                    lash_core::ProcessEventAppendPlan::Insert {
+                    lash_core::facade_support::ProcessEventAppendPlan::Insert {
                         event,
                         payload_hash,
                         projected_record,
@@ -151,7 +151,11 @@ pub(super) async fn complete_process_with_lease(
                         &await_output,
                     ));
                 }
-                let request = lash_core::terminal_append_request(process_id, &await_output, None);
+                let request = lash_core::facade_support::terminal_append_request(
+                    process_id,
+                    &await_output,
+                    None,
+                );
                 let replay_lookup = request
                     .replay
                     .as_ref()
@@ -181,7 +185,7 @@ pub(super) async fn complete_process_with_lease(
                     now,
                     wake_session_id.as_deref(),
                 )?;
-                if let lash_core::ProcessEventAppendPlan::Replay {
+                if let lash_core::facade_support::ProcessEventAppendPlan::Replay {
                     repair_record,
                     wake_delivery,
                     ..
@@ -211,7 +215,7 @@ pub(super) async fn complete_process_with_lease(
                     return Err(process_lease_expired(process_id));
                 }
 
-                let lash_core::ProcessEventAppendPlan::Insert {
+                let lash_core::facade_support::ProcessEventAppendPlan::Insert {
                     event,
                     payload_hash,
                     projected_record,

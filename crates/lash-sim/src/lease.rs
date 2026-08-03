@@ -5,8 +5,8 @@ use std::time::Duration;
 /// cannot turn into an accidental lease-loss scenario.
 const SIM_RUNTIME_LEASE_TTL: Duration = Duration::from_secs(100 * 365 * 24 * 60 * 60);
 
-pub(crate) fn sim_runtime_lease_timings() -> lash_core::LeaseTimings {
-    lash_core::LeaseTimings::from_ttl(SIM_RUNTIME_LEASE_TTL)
+pub(crate) fn sim_runtime_lease_timings() -> lash_core::facade_support::LeaseTimings {
+    lash_core::facade_support::LeaseTimings::from_ttl(SIM_RUNTIME_LEASE_TTL)
         .expect("the simulation runtime lease policy is valid")
 }
 
@@ -23,7 +23,7 @@ mod tests {
     #[tokio::test]
     async fn runtime_lease_survives_starvation_while_deliberate_lease_expires() {
         let clock = SimClock::new();
-        let store = lash_core::InMemorySessionStore::with_clock(clock.clone());
+        let store = lash_core::facade_support::InMemorySessionStore::with_clock(clock.clone());
         let owner = LeaseOwnerIdentity::opaque("sim-owner", "sim-owner:001");
         let runtime_timings = sim_runtime_lease_timings();
         let runtime_lease = match store
@@ -39,7 +39,7 @@ mod tests {
 
         // No renewal task runs in this test. Crossing several production TTL
         // windows therefore models complete renewal-task starvation directly.
-        let production_ttl_ms = lash_core::LeaseTimings::default().ttl_ms();
+        let production_ttl_ms = lash_core::facade_support::LeaseTimings::default().ttl_ms();
         clock.advance_by(3 * production_ttl_ms + 1).await;
         store
             .renew_session_execution_lease(&runtime_lease.fence(), runtime_timings.ttl_ms())

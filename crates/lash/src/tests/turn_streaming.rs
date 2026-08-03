@@ -59,7 +59,7 @@ impl lash_core::RuntimeEffectController for RecordingDurableEffectController {
 #[derive(Default)]
 struct RecordingInlineEffectController {
     invocations: StdMutex<Vec<DurableEffectInvocation>>,
-    inline: lash_core::InlineRuntimeEffectController,
+    inline: lash_core::facade_support::InlineRuntimeEffectController,
 }
 
 impl RecordingInlineEffectController {
@@ -152,7 +152,7 @@ impl lash_core::RuntimeEffectController for RecordingInlineEffectController {
 
 #[derive(Default)]
 struct DurableInMemoryProcessEnvStore {
-    inner: lash_core::InMemoryProcessExecutionEnvStore,
+    inner: lash_core::facade_support::InMemoryProcessExecutionEnvStore,
 }
 
 #[async_trait]
@@ -188,7 +188,7 @@ impl lash_core::EffectHost for DurableNoopEffectHost {
         scope: lash_core::ExecutionScope,
     ) -> std::result::Result<lash_core::ScopedEffectController<'run>, lash_core::RuntimeError> {
         lash_core::ScopedEffectController::shared(
-            Arc::new(lash_core::InlineRuntimeEffectController::default()),
+            Arc::new(lash_core::facade_support::InlineRuntimeEffectController::default()),
             scope,
         )
     }
@@ -201,7 +201,7 @@ impl lash_core::EffectHost for DurableNoopEffectHost {
         lash_core::RuntimeError,
     > {
         Ok(Some(lash_core::ScopedEffectController::shared(
-            Arc::new(lash_core::InlineRuntimeEffectController::default()),
+            Arc::new(lash_core::facade_support::InlineRuntimeEffectController::default()),
             scope,
         )?))
     }
@@ -376,7 +376,7 @@ async fn execute_runtime_batch_tool(
         };
         invocations.push((
             index,
-            lash_core::ToolInvocation::new(
+            lash_core::facade_support::ToolInvocation::new(
                 format!("runtime-batch:{index}"),
                 manifest.id,
                 item.get("parameters")
@@ -460,7 +460,7 @@ async fn turn_run_uses_configured_inline_effect_host_without_explicit_effects() 
     let recorder = Arc::new(RecordingInlineEffectController::default());
     let effect_controller: Arc<dyn lash_core::RuntimeEffectController> = recorder.clone();
     let core = explicit_ephemeral_facets(LashCore::standard_builder())
-        .effect_host(Arc::new(lash_core::InlineEffectHost::new(
+        .effect_host(Arc::new(lash_core::facade_support::InlineEffectHost::new(
             effect_controller,
         )))
         .provider(mock_provider())
@@ -518,7 +518,7 @@ async fn turn_id_sets_execution_scope_and_trace_identity() -> Result<()> {
     let recorder = Arc::new(RecordingInlineEffectController::default());
     let effect_controller: Arc<dyn lash_core::RuntimeEffectController> = recorder.clone();
     let core = explicit_ephemeral_facets(LashCore::standard_builder())
-        .effect_host(Arc::new(lash_core::InlineEffectHost::new(
+        .effect_host(Arc::new(lash_core::facade_support::InlineEffectHost::new(
             effect_controller,
         )))
         .provider(mock_provider())
@@ -592,7 +592,9 @@ async fn queued_turn_run_drains_ready_work_and_returns_none_when_idle() -> Resul
     let core = explicit_ephemeral_facets(LashCore::standard_builder())
         .provider(provider)
         .model(mock_model_spec())
-        .store_factory(Arc::new(lash_core::InMemorySessionStoreFactory::new()))
+        .store_factory(Arc::new(
+            lash_core::facade_support::InMemorySessionStoreFactory::new(),
+        ))
         .disable_queued_work_driver()
         .build()?;
     let session = core.session("queued-turn-run").open().await?;
@@ -627,7 +629,9 @@ async fn idle_queued_input_emits_typed_remote_application_and_durable_identity()
     let core = explicit_ephemeral_facets(LashCore::standard_builder())
         .provider(mock_provider())
         .model(mock_model_spec())
-        .store_factory(Arc::new(lash_core::InMemorySessionStoreFactory::new()))
+        .store_factory(Arc::new(
+            lash_core::facade_support::InMemorySessionStoreFactory::new(),
+        ))
         .disable_queued_work_driver()
         .build()?;
     let session = core.session("idle-input-application").open().await?;
@@ -705,13 +709,17 @@ async fn durable_application_read_survives_a_trimmed_live_replay_window() -> Res
     let core = explicit_ephemeral_facets(LashCore::standard_builder())
         .provider(mock_provider())
         .model(mock_model_spec())
-        .store_factory(Arc::new(lash_core::InMemorySessionStoreFactory::new()))
-        .live_replay_store(Arc::new(lash_core::InMemoryLiveReplayStore::new(
-            lash_core::InMemoryLiveReplayStoreConfig {
-                max_events_per_session: 1,
-                ..lash_core::InMemoryLiveReplayStoreConfig::default()
-            },
-        )))
+        .store_factory(Arc::new(
+            lash_core::facade_support::InMemorySessionStoreFactory::new(),
+        ))
+        .live_replay_store(Arc::new(
+            lash_core::facade_support::InMemoryLiveReplayStore::new(
+                lash_core::facade_support::InMemoryLiveReplayStoreConfig {
+                    max_events_per_session: 1,
+                    ..lash_core::facade_support::InMemoryLiveReplayStoreConfig::default()
+                },
+            ),
+        ))
         .disable_queued_work_driver()
         .build()?;
     let session = core.session("durable-input-application-gap").open().await?;
@@ -763,7 +771,9 @@ async fn queued_turn_explicit_effects_create_queue_drain_scope_internally() -> R
     let core = explicit_ephemeral_facets(LashCore::standard_builder())
         .provider(mock_provider())
         .model(mock_model_spec())
-        .store_factory(Arc::new(lash_core::InMemorySessionStoreFactory::new()))
+        .store_factory(Arc::new(
+            lash_core::facade_support::InMemorySessionStoreFactory::new(),
+        ))
         .disable_queued_work_driver()
         .build()?;
     let session = core.session("queued-explicit-effects").open().await?;
@@ -804,7 +814,7 @@ async fn turn_builder_stream_emits_activities_and_finishes() -> Result<()> {
 
     assert!(matches!(
         result.outcome,
-        TurnOutcome::Finished(lash_core::TurnFinish::AssistantMessage { .. })
+        TurnOutcome::Finished(lash_core::facade_support::TurnFinish::AssistantMessage { .. })
     ));
     assert_eq!(assistant_prose(&activities), "echo: stream me");
     assert!(
@@ -852,12 +862,12 @@ fn retrying_visible_stream_provider() -> ProviderHandle {
     crate::testing::TestProvider::builder()
         .kind("retrying-visible-stream")
         .requires_streaming(true)
-        .options(lash_core::ProviderOptions {
+        .options(lash_core::facade_support::ProviderOptions {
             reliability: lash_core::provider::ProviderReliability::default()
                 .max_attempts(3)
                 .base_delay_ms(0)
                 .max_delay_ms(0),
-            ..lash_core::ProviderOptions::default()
+            ..lash_core::facade_support::ProviderOptions::default()
         })
         .complete(move |request| {
             let attempts = Arc::clone(&attempts);
@@ -896,12 +906,12 @@ fn retrying_rlm_prose_provider(
     crate::testing::TestProvider::builder()
         .kind("retrying-rlm-prose")
         .requires_streaming(true)
-        .options(lash_core::ProviderOptions {
+        .options(lash_core::facade_support::ProviderOptions {
             reliability: lash_core::provider::ProviderReliability::default()
                 .max_attempts(2)
                 .base_delay_ms(0)
                 .max_delay_ms(0),
-            ..lash_core::ProviderOptions::default()
+            ..lash_core::facade_support::ProviderOptions::default()
         })
         .complete(move |request| {
             let transport_calls = Arc::clone(&transport_calls);
@@ -972,7 +982,9 @@ fn rlm_provider_retry_commits_only_surviving_prose() -> Result<()> {
                 Arc::clone(&requests),
             ))
             .model(mock_model_spec())
-            .store_factory(Arc::new(lash_core::InMemorySessionStoreFactory::new()))
+            .store_factory(Arc::new(
+                lash_core::facade_support::InMemorySessionStoreFactory::new(),
+            ))
             .process_registry(Arc::new(TestLocalProcessRegistry::default()))
             .build()?;
         let session = core.session("rlm-provider-retry-prose").open().await?;
@@ -1183,7 +1195,7 @@ async fn session_observation_envelopes_scope_activity_and_commit_to_the_turn() -
         .run()
         .await?;
 
-    let lash_core::SessionResume::Replayed { events } =
+    let lash_core::facade_support::SessionResume::Replayed { events } =
         session.observe().resume_from_cursor(&cursor)?
     else {
         panic!("fresh turn observation cursor should remain replayable");
@@ -1226,7 +1238,7 @@ async fn session_observation_retracts_two_retried_visible_attempts_live_and_on_r
         .build()?;
     let session = core.session("retry-visible-observation").open().await?;
     let cursor = session.observe().current_observation().cursor;
-    let lash_core::SessionObservationSubscription::Subscribed(mut subscription) =
+    let lash_core::facade_support::SessionObservationSubscription::Subscribed(mut subscription) =
         session.observe().subscribe_from_cursor(&cursor)?
     else {
         panic!("fresh cursor should subscribe without a gap");
@@ -1258,7 +1270,7 @@ async fn session_observation_retracts_two_retried_visible_attempts_live_and_on_r
     assert_eq!(output.assistant_message(), Some("prose-3"));
     let live_events = live_collector.await.expect("live collector task");
 
-    let lash_core::SessionResume::Replayed {
+    let lash_core::facade_support::SessionResume::Replayed {
         events: replay_events,
     } = session.observe().resume_from_cursor(&cursor)?
     else {
@@ -1439,12 +1451,14 @@ async fn session_observation_remote_recovery_stream_yields_dto_gap() -> Result<(
     let core = explicit_ephemeral_facets(LashCore::standard_builder())
         .provider(mock_provider())
         .model(mock_model_spec())
-        .live_replay_store(Arc::new(lash_core::InMemoryLiveReplayStore::new(
-            lash_core::InMemoryLiveReplayStoreConfig {
-                max_events_per_session: 1,
-                ..lash_core::InMemoryLiveReplayStoreConfig::default()
-            },
-        )))
+        .live_replay_store(Arc::new(
+            lash_core::facade_support::InMemoryLiveReplayStore::new(
+                lash_core::facade_support::InMemoryLiveReplayStoreConfig {
+                    max_events_per_session: 1,
+                    ..lash_core::facade_support::InMemoryLiveReplayStoreConfig::default()
+                },
+            ),
+        ))
         .build()?;
     let session = core
         .session("session-observation-remote-gap")
@@ -1481,12 +1495,14 @@ async fn session_observation_recovery_stream_yields_gap_for_trimmed_cursor() -> 
     let core = explicit_ephemeral_facets(LashCore::standard_builder())
         .provider(mock_provider())
         .model(mock_model_spec())
-        .live_replay_store(Arc::new(lash_core::InMemoryLiveReplayStore::new(
-            lash_core::InMemoryLiveReplayStoreConfig {
-                max_events_per_session: 1,
-                ..lash_core::InMemoryLiveReplayStoreConfig::default()
-            },
-        )))
+        .live_replay_store(Arc::new(
+            lash_core::facade_support::InMemoryLiveReplayStore::new(
+                lash_core::facade_support::InMemoryLiveReplayStoreConfig {
+                    max_events_per_session: 1,
+                    ..lash_core::facade_support::InMemoryLiveReplayStoreConfig::default()
+                },
+            ),
+        ))
         .build()?;
     let session = core
         .session("session-observation-recovered-gap")
@@ -1555,7 +1571,7 @@ async fn recoverable_chat_conformance_snapshot_subscription_and_terminal_replace
 
 #[derive(Debug)]
 struct PausedCommitReplayStore {
-    inner: lash_core::InMemoryLiveReplayStore,
+    inner: lash_core::facade_support::InMemoryLiveReplayStore,
     commit_appended: std::sync::atomic::AtomicBool,
     release_commit: std::sync::atomic::AtomicBool,
     pause_lock: StdMutex<()>,
@@ -1565,7 +1581,7 @@ struct PausedCommitReplayStore {
 impl PausedCommitReplayStore {
     fn new() -> Self {
         Self {
-            inner: lash_core::InMemoryLiveReplayStore::default(),
+            inner: lash_core::facade_support::InMemoryLiveReplayStore::default(),
             commit_appended: std::sync::atomic::AtomicBool::new(false),
             release_commit: std::sync::atomic::AtomicBool::new(false),
             pause_lock: StdMutex::new(()),
@@ -1761,7 +1777,7 @@ async fn recoverable_chat_conformance_deduplicates_redelivery_identity() -> Resu
 #[tokio::test]
 async fn recoverable_chat_restart_identity_does_not_depend_on_gap_clearing() -> Result<()> {
     let session_id = "recoverable-chat-restart-cursor";
-    let store_factory = Arc::new(lash_core::InMemorySessionStoreFactory::new());
+    let store_factory = Arc::new(lash_core::facade_support::InMemorySessionStoreFactory::new());
     let bootstrap_core = explicit_ephemeral_facets(LashCore::standard_builder())
         .provider(mock_provider())
         .model(mock_model_spec())
@@ -1779,7 +1795,9 @@ async fn recoverable_chat_restart_identity_does_not_depend_on_gap_clearing() -> 
         .provider(mock_provider())
         .model(mock_model_spec())
         .store_factory(store_factory.clone())
-        .live_replay_store(Arc::new(lash_core::InMemoryLiveReplayStore::default()))
+        .live_replay_store(Arc::new(
+            lash_core::facade_support::InMemoryLiveReplayStore::default(),
+        ))
         .build()?;
     let first_session = first_core.session(session_id).open().await?;
     let initial_cursor = first_session.observe().recoverable_chat_snapshot().cursor;
@@ -1805,7 +1823,9 @@ async fn recoverable_chat_restart_identity_does_not_depend_on_gap_clearing() -> 
         .provider(mock_provider())
         .model(mock_model_spec())
         .store_factory(store_factory)
-        .live_replay_store(Arc::new(lash_core::InMemoryLiveReplayStore::default()))
+        .live_replay_store(Arc::new(
+            lash_core::facade_support::InMemoryLiveReplayStore::default(),
+        ))
         .build()?;
     let second_session = second_core.session(session_id).open().await?;
     let restarted_at = second_session.observe().recoverable_chat_snapshot().cursor;
@@ -1821,7 +1841,7 @@ async fn recoverable_chat_restart_identity_does_not_depend_on_gap_clearing() -> 
     assert!(matches!(
         gap,
         crate::recoverable_chat::RecoverableChatUpdate::ReplayGap {
-            gap: lash_core::LiveReplayGap {
+            gap: lash_core::facade_support::LiveReplayGap {
                 reason: lash_core::LiveReplayGapReason::Unavailable,
                 ..
             },
@@ -1882,12 +1902,14 @@ async fn recoverable_chat_conformance_forwards_trimmed_gap_and_continues() -> Re
     let core = explicit_ephemeral_facets(LashCore::standard_builder())
         .provider(mock_provider())
         .model(mock_model_spec())
-        .live_replay_store(Arc::new(lash_core::InMemoryLiveReplayStore::new(
-            lash_core::InMemoryLiveReplayStoreConfig {
-                max_events_per_session: 1,
-                ..lash_core::InMemoryLiveReplayStoreConfig::default()
-            },
-        )))
+        .live_replay_store(Arc::new(
+            lash_core::facade_support::InMemoryLiveReplayStore::new(
+                lash_core::facade_support::InMemoryLiveReplayStoreConfig {
+                    max_events_per_session: 1,
+                    ..lash_core::facade_support::InMemoryLiveReplayStoreConfig::default()
+                },
+            ),
+        ))
         .build()?;
     let session = core.session("recoverable-chat-gap").open().await?;
     let cursor = session.observe().recoverable_chat_snapshot().cursor;
@@ -2072,7 +2094,7 @@ async fn retry_status_streams_as_semantic_turn_event() -> Result<()> {
 
     assert!(matches!(
         result.outcome,
-        TurnOutcome::Finished(lash_core::TurnFinish::AssistantMessage { .. })
+        TurnOutcome::Finished(lash_core::facade_support::TurnFinish::AssistantMessage { .. })
     ));
     let retry = events
         .snapshot()
@@ -2116,7 +2138,9 @@ async fn queued_input_acceptance_streams_semantic_ack_with_id() -> Result<()> {
     let core = explicit_ephemeral_facets(LashCore::standard_builder())
         .provider(checkpoint_gated_provider(entered_tx, release_rx))
         .model(mock_model_spec())
-        .store_factory(Arc::new(lash_core::InMemorySessionStoreFactory::new()))
+        .store_factory(Arc::new(
+            lash_core::facade_support::InMemorySessionStoreFactory::new(),
+        ))
         .build()?;
     let session = core.session("queued-input").open().await?;
     let events = Arc::new(RecordingEvents::default());
@@ -2145,7 +2169,7 @@ async fn queued_input_acceptance_streams_semantic_ack_with_id() -> Result<()> {
 
     assert!(matches!(
         result.outcome,
-        TurnOutcome::Finished(lash_core::TurnFinish::AssistantMessage { .. })
+        TurnOutcome::Finished(lash_core::facade_support::TurnFinish::AssistantMessage { .. })
     ));
     let events = events.snapshot().await;
     assert!(events.iter().any(|event| matches!(
@@ -2187,7 +2211,7 @@ async fn pre_cancelled_token_yields_cancelled_outcome() -> Result<()> {
 
     assert!(matches!(
         output.result.outcome,
-        TurnOutcome::Stopped(lash_core::TurnStop::Cancelled)
+        TurnOutcome::Stopped(lash_core::facade_support::TurnStop::Cancelled)
     ));
     let evidence = output
         .result
@@ -2213,7 +2237,7 @@ async fn local_cancel_token_preserves_explicit_origin_hint() -> Result<()> {
 
     assert!(matches!(
         output.result.cancellation,
-        Some(lash_core::TurnCancellationEvidence {
+        Some(lash_core::facade_support::TurnCancellationEvidence {
             origin: Some(ref origin),
             ..
         }) if origin == "shutdown"
@@ -2258,11 +2282,11 @@ async fn cancel_running_turns_stops_inflight_turn() -> Result<()> {
     let result = stream.finish().await?;
     assert!(matches!(
         result.outcome,
-        TurnOutcome::Stopped(lash_core::TurnStop::Cancelled)
+        TurnOutcome::Stopped(lash_core::facade_support::TurnStop::Cancelled)
     ));
     assert!(matches!(
         result.cancellation,
-        Some(lash_core::TurnCancellationEvidence {
+        Some(lash_core::facade_support::TurnCancellationEvidence {
             origin: Some(ref origin),
             ..
         }) if origin == "user"
@@ -2320,11 +2344,11 @@ async fn cancel_running_turns_sweeps_lock_queued_turns() -> Result<()> {
     let second = second.finish().await?;
     assert!(matches!(
         first.outcome,
-        TurnOutcome::Stopped(lash_core::TurnStop::Cancelled)
+        TurnOutcome::Stopped(lash_core::facade_support::TurnStop::Cancelled)
     ));
     assert!(matches!(
         second.outcome,
-        TurnOutcome::Stopped(lash_core::TurnStop::Cancelled)
+        TurnOutcome::Stopped(lash_core::facade_support::TurnStop::Cancelled)
     ));
     assert_eq!(session.cancel_running_turns(), 0);
     Ok(())
@@ -2339,7 +2363,9 @@ async fn cancel_running_turns_does_not_cross_separately_opened_handles() -> Resu
     let core = explicit_ephemeral_facets(LashCore::standard_builder())
         .provider(provider)
         .model(mock_model_spec())
-        .store_factory(Arc::new(lash_core::InMemorySessionStoreFactory::new()))
+        .store_factory(Arc::new(
+            lash_core::facade_support::InMemorySessionStoreFactory::new(),
+        ))
         .build()
         .expect("core");
     let handle_a = core.session("cancel-scope").open().await?;
@@ -2355,7 +2381,7 @@ async fn cancel_running_turns_does_not_cross_separately_opened_handles() -> Resu
     let result = hanging.finish().await?;
     assert!(matches!(
         result.outcome,
-        TurnOutcome::Stopped(lash_core::TurnStop::Cancelled)
+        TurnOutcome::Stopped(lash_core::facade_support::TurnStop::Cancelled)
     ));
 
     // The untouched handle keeps working.
@@ -2373,7 +2399,9 @@ async fn cancel_running_turns_reaches_queued_turn_drains() -> Result<()> {
     let core = explicit_ephemeral_facets(LashCore::standard_builder())
         .provider(provider)
         .model(mock_model_spec())
-        .store_factory(Arc::new(lash_core::InMemorySessionStoreFactory::new()))
+        .store_factory(Arc::new(
+            lash_core::facade_support::InMemorySessionStoreFactory::new(),
+        ))
         .disable_queued_work_driver()
         .build()
         .expect("core");
@@ -2397,11 +2425,11 @@ async fn cancel_running_turns_reaches_queued_turn_drains() -> Result<()> {
         .expect("queued drain should produce a turn");
     assert!(matches!(
         output.result.outcome,
-        TurnOutcome::Stopped(lash_core::TurnStop::Cancelled)
+        TurnOutcome::Stopped(lash_core::facade_support::TurnStop::Cancelled)
     ));
     assert!(matches!(
         output.result.cancellation,
-        Some(lash_core::TurnCancellationEvidence {
+        Some(lash_core::facade_support::TurnCancellationEvidence {
             origin: Some(ref origin),
             ..
         }) if origin == "user"
@@ -2444,7 +2472,9 @@ async fn active_steer_after_last_call_defers_to_next_turn_first_call() -> Result
     let core = explicit_ephemeral_facets(LashCore::standard_builder())
         .provider(provider)
         .model(mock_model_spec())
-        .store_factory(Arc::new(lash_core::InMemorySessionStoreFactory::new()))
+        .store_factory(Arc::new(
+            lash_core::facade_support::InMemorySessionStoreFactory::new(),
+        ))
         .disable_queued_work_driver()
         .build()?;
     let session = core.session("active-steer-interrupt-cancel").open().await?;
@@ -2486,7 +2516,7 @@ async fn active_steer_after_last_call_defers_to_next_turn_first_call() -> Result
     let interrupted = turn.await.expect("turn task")?;
     assert!(matches!(
         interrupted.outcome,
-        TurnOutcome::Stopped(lash_core::TurnStop::Cancelled)
+        TurnOutcome::Stopped(lash_core::facade_support::TurnStop::Cancelled)
     ));
 
     let pending = session.pending_turn_inputs().await?;
@@ -2590,7 +2620,9 @@ async fn accepted_active_steer_interrupt_is_not_requeued() -> Result<()> {
     let core = explicit_ephemeral_facets(LashCore::standard_builder())
         .provider(provider)
         .model(mock_model_spec())
-        .store_factory(Arc::new(lash_core::InMemorySessionStoreFactory::new()))
+        .store_factory(Arc::new(
+            lash_core::facade_support::InMemorySessionStoreFactory::new(),
+        ))
         .disable_queued_work_driver()
         .build()?;
     let session = core
@@ -2632,7 +2664,7 @@ async fn accepted_active_steer_interrupt_is_not_requeued() -> Result<()> {
     let interrupted = turn.await.expect("turn task")?;
     assert!(matches!(
         interrupted.outcome,
-        TurnOutcome::Stopped(lash_core::TurnStop::Cancelled)
+        TurnOutcome::Stopped(lash_core::facade_support::TurnStop::Cancelled)
     ));
     assert!(
         session.pending_turn_inputs().await?.is_empty(),
@@ -2705,7 +2737,9 @@ fn rlm_active_input_reaches_the_next_provider_iteration() -> Result<()> {
         let core = explicit_ephemeral_facets(LashCore::rlm_builder(rlm_factory()))
             .provider(provider)
             .model(mock_model_spec())
-            .store_factory(Arc::new(lash_core::InMemorySessionStoreFactory::new()))
+            .store_factory(Arc::new(
+                lash_core::facade_support::InMemorySessionStoreFactory::new(),
+            ))
             .process_registry(Arc::new(TestLocalProcessRegistry::default()))
             .disable_queued_work_driver()
             .build()?;
@@ -2785,7 +2819,9 @@ async fn await_queued_work_batch_resolves_when_drained() -> Result<()> {
     let core = explicit_ephemeral_facets(LashCore::standard_builder())
         .provider(mock_provider())
         .model(mock_model_spec())
-        .store_factory(Arc::new(lash_core::InMemorySessionStoreFactory::new()))
+        .store_factory(Arc::new(
+            lash_core::facade_support::InMemorySessionStoreFactory::new(),
+        ))
         .disable_queued_work_driver()
         .build()
         .expect("core");
@@ -2821,7 +2857,9 @@ async fn await_queued_work_batch_resolves_immediately_for_unknown_batch() -> Res
     let core = explicit_ephemeral_facets(LashCore::standard_builder())
         .provider(mock_provider())
         .model(mock_model_spec())
-        .store_factory(Arc::new(lash_core::InMemorySessionStoreFactory::new()))
+        .store_factory(Arc::new(
+            lash_core::facade_support::InMemorySessionStoreFactory::new(),
+        ))
         .build()
         .expect("core");
     let session = core.session("await-unknown").open().await?;
@@ -2848,7 +2886,7 @@ async fn turn_stream_receives_semantic_activities() -> Result<()> {
 
     assert!(matches!(
         result.outcome,
-        TurnOutcome::Finished(lash_core::TurnFinish::AssistantMessage { .. })
+        TurnOutcome::Finished(lash_core::facade_support::TurnFinish::AssistantMessage { .. })
     ));
     assert!(
         turn_events
@@ -2888,7 +2926,7 @@ async fn run_collects_ordered_assistant_prose_activity() -> Result<()> {
     );
     assert!(matches!(
         result.result.outcome,
-        TurnOutcome::Finished(lash_core::TurnFinish::AssistantMessage { .. })
+        TurnOutcome::Finished(lash_core::facade_support::TurnFinish::AssistantMessage { .. })
     ));
     assert_eq!(result.result.usage.output_tokens, 2);
     Ok(())
@@ -2965,7 +3003,9 @@ async fn turn_event_fanout_streams_to_collector_and_live_sink() -> Result<()> {
         .provider(tool_roundtrip_provider())
         .model(mock_model_spec())
         .tools(Arc::new(AppTools))
-        .store_factory(Arc::new(lash_core::InMemorySessionStoreFactory::new()))
+        .store_factory(Arc::new(
+            lash_core::facade_support::InMemorySessionStoreFactory::new(),
+        ))
         .process_registry(Arc::new(TestLocalProcessRegistry::default()))
         .build()?;
     let session = core.session("fanout-tool-events").open().await?;
@@ -2978,7 +3018,7 @@ async fn turn_event_fanout_streams_to_collector_and_live_sink() -> Result<()> {
 
     assert!(matches!(
         output.result.outcome,
-        TurnOutcome::Finished(lash_core::TurnFinish::AssistantMessage { .. })
+        TurnOutcome::Finished(lash_core::facade_support::TurnFinish::AssistantMessage { .. })
     ));
     assert_eq!(
         serde_json::to_value(&output.activities).expect("recorded activities serialize"),
@@ -3009,7 +3049,9 @@ fn turn_run_batch_tool_runs_every_call_concurrently_and_preserves_order() -> Res
             .provider(runtime_batch_provider())
             .model(mock_model_spec())
             .tools(tool_provider)
-            .store_factory(Arc::new(lash_core::InMemorySessionStoreFactory::new()))
+            .store_factory(Arc::new(
+                lash_core::facade_support::InMemorySessionStoreFactory::new(),
+            ))
             .process_registry(Arc::new(TestLocalProcessRegistry::default()))
             .build()?;
         let session = core.session("runtime-batch-tool-order").open().await?;
@@ -3077,7 +3119,9 @@ fn batch_child_tool_calls_carry_parent_call_id_linkage() -> Result<()> {
                 .provider(runtime_batch_provider())
                 .model(mock_model_spec())
                 .tools(tool_provider)
-                .store_factory(Arc::new(lash_core::InMemorySessionStoreFactory::new()))
+                .store_factory(Arc::new(
+                    lash_core::facade_support::InMemorySessionStoreFactory::new(),
+                ))
                 .process_registry(Arc::new(TestLocalProcessRegistry::default()))
                 .build()?;
             let session = core.session("batch-child-parent-linkage").open().await?;
@@ -3163,7 +3207,9 @@ async fn pending_host_tool_completion_parks_turn_and_resolves_through_core_ingre
         .provider(tool_roundtrip_provider())
         .model(mock_model_spec())
         .tools(Arc::new(PendingAppTools::new(key_tx)))
-        .store_factory(Arc::new(lash_core::InMemorySessionStoreFactory::new()))
+        .store_factory(Arc::new(
+            lash_core::facade_support::InMemorySessionStoreFactory::new(),
+        ))
         .process_registry(Arc::new(TestLocalProcessRegistry::default()))
         .build()?;
     let session = core.session("pending-host-tool").open().await?;
@@ -3206,7 +3252,7 @@ async fn pending_host_tool_completion_parks_turn_and_resolves_through_core_ingre
     let result = turn.await.expect("turn task")?;
     assert!(matches!(
         result.outcome,
-        TurnOutcome::Finished(lash_core::TurnFinish::AssistantMessage { .. })
+        TurnOutcome::Finished(lash_core::facade_support::TurnFinish::AssistantMessage { .. })
     ));
     assert_eq!(result.assistant_message(), Some("done"));
     let events = events.snapshot().await;
@@ -3254,7 +3300,7 @@ async fn stream_returns_terminal_metadata_without_prose() -> Result<()> {
 
     assert!(matches!(
         result.outcome,
-        TurnOutcome::Finished(lash_core::TurnFinish::AssistantMessage { .. })
+        TurnOutcome::Finished(lash_core::facade_support::TurnFinish::AssistantMessage { .. })
     ));
     let prose = events
         .snapshot()
@@ -3279,7 +3325,9 @@ async fn stream_emits_chronological_tool_events_without_prose_pollution() -> Res
         .provider(tool_roundtrip_provider())
         .model(mock_model_spec())
         .tools(Arc::new(AppTools))
-        .store_factory(Arc::new(lash_core::InMemorySessionStoreFactory::new()))
+        .store_factory(Arc::new(
+            lash_core::facade_support::InMemorySessionStoreFactory::new(),
+        ))
         .process_registry(Arc::new(TestLocalProcessRegistry::default()))
         .build()?;
     let session = core.session("tool-events").open().await?;
@@ -3292,7 +3340,7 @@ async fn stream_emits_chronological_tool_events_without_prose_pollution() -> Res
 
     assert!(matches!(
         collected.outcome,
-        TurnOutcome::Finished(lash_core::TurnFinish::AssistantMessage { .. })
+        TurnOutcome::Finished(lash_core::facade_support::TurnFinish::AssistantMessage { .. })
     ));
     let events = events.snapshot().await;
     let started = events
@@ -3363,7 +3411,9 @@ fn rlm_streamed_lashlang_cell_uses_captured_body_when_final_text_is_raw() -> Res
         let core = explicit_ephemeral_facets(LashCore::rlm_builder(rlm_factory()))
             .provider(provider)
             .model(mock_model_spec())
-            .store_factory(Arc::new(lash_core::InMemorySessionStoreFactory::new()))
+            .store_factory(Arc::new(
+                lash_core::facade_support::InMemorySessionStoreFactory::new(),
+            ))
             .process_registry(Arc::new(TestLocalProcessRegistry::default()))
             .build()?;
         let session = core.session("rlm-streamed-raw-final-cell").open().await?;
@@ -3376,7 +3426,7 @@ fn rlm_streamed_lashlang_cell_uses_captured_body_when_final_text_is_raw() -> Res
 
         assert!(matches!(
             result.outcome,
-            TurnOutcome::Finished(lash_core::TurnFinish::FinalValue { .. })
+            TurnOutcome::Finished(lash_core::facade_support::TurnFinish::FinalValue { .. })
         ));
         assert_eq!(
             result.final_value(),
@@ -3438,7 +3488,9 @@ finish "done""#,
         )]))
         .model(mock_model_spec())
         .tools(Arc::new(AppTools))
-        .store_factory(Arc::new(lash_core::InMemorySessionStoreFactory::new()))
+        .store_factory(Arc::new(
+            lash_core::facade_support::InMemorySessionStoreFactory::new(),
+        ))
         .process_registry(Arc::new(TestLocalProcessRegistry::default()))
         .build()?;
     let session = core.session("rlm-live-tool-events").open().await?;
@@ -3451,7 +3503,7 @@ finish "done""#,
 
     assert!(matches!(
         result.outcome,
-        TurnOutcome::Finished(lash_core::TurnFinish::FinalValue { .. })
+        TurnOutcome::Finished(lash_core::facade_support::TurnFinish::FinalValue { .. })
     ));
     assert!(result.execution.had_tool_calls);
     assert_eq!(result.tool_calls.len(), 1);
@@ -3584,7 +3636,9 @@ finish "recovered""#,
             )]))
             .model(mock_model_spec())
             .tools(Arc::new(FailingAppTools))
-            .store_factory(Arc::new(lash_core::InMemorySessionStoreFactory::new()))
+            .store_factory(Arc::new(
+                lash_core::facade_support::InMemorySessionStoreFactory::new(),
+            ))
             .process_registry(Arc::new(TestLocalProcessRegistry::default()))
             .build()?;
         let session = core.session("rlm-recovered-tool-failure").open().await?;
@@ -3597,7 +3651,7 @@ finish "recovered""#,
 
         assert!(matches!(
             result.outcome,
-            TurnOutcome::Finished(lash_core::TurnFinish::FinalValue { .. })
+            TurnOutcome::Finished(lash_core::facade_support::TurnFinish::FinalValue { .. })
         ));
         assert_eq!(result.final_value(), Some(&serde_json::json!("recovered")));
         assert!(result.execution.had_tool_calls);
@@ -3624,7 +3678,9 @@ finish "done""#,
         )]))
         .model(mock_model_spec())
         .tools(Arc::new(AppTools))
-        .store_factory(Arc::new(lash_core::InMemorySessionStoreFactory::new()))
+        .store_factory(Arc::new(
+            lash_core::facade_support::InMemorySessionStoreFactory::new(),
+        ))
         .process_registry(Arc::new(TestLocalProcessRegistry::default()))
         .build()?;
     let session = core.session("rlm-aggregate-tool-ids").open().await?;
@@ -3636,7 +3692,7 @@ finish "done""#,
         .await?;
     assert!(matches!(
         result.outcome,
-        TurnOutcome::Finished(lash_core::TurnFinish::FinalValue { .. })
+        TurnOutcome::Finished(lash_core::facade_support::TurnFinish::FinalValue { .. })
     ));
     let events = events.snapshot().await;
 
@@ -3698,7 +3754,9 @@ finish "done""#,
         )]))
         .model(mock_model_spec())
         .tools(Arc::new(AppTools))
-        .store_factory(Arc::new(lash_core::InMemorySessionStoreFactory::new()))
+        .store_factory(Arc::new(
+            lash_core::facade_support::InMemorySessionStoreFactory::new(),
+        ))
         .process_registry(Arc::new(TestLocalProcessRegistry::default()))
         .trace_jsonl_path(trace_path.clone())
         .build()?;
@@ -3707,7 +3765,7 @@ finish "done""#,
     let result = session.turn(TurnInput::text("use tool")).run().await?;
     assert!(matches!(
         result.result.outcome,
-        TurnOutcome::Finished(lash_core::TurnFinish::FinalValue { .. })
+        TurnOutcome::Finished(lash_core::facade_support::TurnFinish::FinalValue { .. })
     ));
     core.flush_trace_sink()?;
 
@@ -3824,7 +3882,9 @@ async fn rlm_pending_host_tool_completion_resumes_lashlang_await_inner() -> Resu
         )]))
         .model(mock_model_spec())
         .tools(Arc::new(PendingAppTools::new(key_tx)))
-        .store_factory(Arc::new(lash_core::InMemorySessionStoreFactory::new()))
+        .store_factory(Arc::new(
+            lash_core::facade_support::InMemorySessionStoreFactory::new(),
+        ))
         .process_registry(Arc::new(TestLocalProcessRegistry::default()))
         .build()?;
     let session = core.session("rlm-pending-host-tool").open().await?;
@@ -3867,7 +3927,7 @@ async fn rlm_pending_host_tool_completion_resumes_lashlang_await_inner() -> Resu
     let result = turn.await.expect("turn task")?;
     assert!(matches!(
         result.outcome,
-        TurnOutcome::Finished(lash_core::TurnFinish::FinalValue { .. })
+        TurnOutcome::Finished(lash_core::facade_support::TurnFinish::FinalValue { .. })
     ));
     assert_eq!(result.final_value(), Some(&payload));
     let events = events.snapshot().await;
@@ -3905,7 +3965,9 @@ finish result"#,
         )]))
         .model(mock_model_spec())
         .tools(Arc::new(PendingAppTools::new(key_tx)))
-        .store_factory(Arc::new(lash_core::InMemorySessionStoreFactory::new()))
+        .store_factory(Arc::new(
+            lash_core::facade_support::InMemorySessionStoreFactory::new(),
+        ))
         .process_registry(Arc::new(TestLocalProcessRegistry::default()))
         .build()?;
     let session = core.session("rlm-process-pending-host-tool").open().await?;
@@ -3948,7 +4010,7 @@ finish result"#,
     let result = turn.await.expect("turn task")?;
     assert!(matches!(
         result.outcome,
-        TurnOutcome::Finished(lash_core::TurnFinish::FinalValue { .. })
+        TurnOutcome::Finished(lash_core::facade_support::TurnFinish::FinalValue { .. })
     ));
     assert_eq!(result.final_value(), Some(&payload));
     let events = events.snapshot().await;
@@ -3977,7 +4039,9 @@ async fn continue_as_observation_emits_frame_switch_then_commit_inner() -> Resul
             lashlang_block(r#"finish "done after continue_as""#),
         ]))
         .model(mock_model_spec())
-        .store_factory(Arc::new(lash_core::InMemorySessionStoreFactory::new()))
+        .store_factory(Arc::new(
+            lash_core::facade_support::InMemorySessionStoreFactory::new(),
+        ))
         .build()?;
     let session = core.session("continue-as-observation").open().await?;
     let cursor = session.observe().current_observation().cursor;
@@ -4033,7 +4097,9 @@ async fn durable_agent_frame_follow_through_uses_distinct_turn_scopes_and_commit
         .attachment_store(Arc::new(crate::persistence::FileAttachmentStore::new(
             dir.path().join("attachments"),
         )))
-        .effect_host(Arc::new(lash_core::InlineEffectHost::default()))
+        .effect_host(Arc::new(
+            lash_core::facade_support::InlineEffectHost::default(),
+        ))
         .process_env_store(Arc::new(DurableInMemoryProcessEnvStore::default()))
         .build()?;
     let session = core.session(session_id).open().await?;
@@ -4128,7 +4194,9 @@ finish value"#,
         // A started (`start lookup(...)`) process runs in the lease-protected
         // worker's rebuilt runtime, which needs a session store factory; the
         // explicit in-memory factory backs ephemeral process execution.
-        .store_factory(Arc::new(lash_core::InMemorySessionStoreFactory::new()))
+        .store_factory(Arc::new(
+            lash_core::facade_support::InMemorySessionStoreFactory::new(),
+        ))
         .process_registry(Arc::new(TestLocalProcessRegistry::default()))
         .build()?;
     let session = core.session("rlm-process-control-tool").open().await?;
@@ -4197,7 +4265,9 @@ finish value"#,
     )]))
     .model(mock_model_spec())
     .tools(Arc::new(BlockingAppTools::new(entered_tx, release_rx)))
-    .store_factory(Arc::new(lash_core::InMemorySessionStoreFactory::new()))
+    .store_factory(Arc::new(
+        lash_core::facade_support::InMemorySessionStoreFactory::new(),
+    ))
     .process_registry(Arc::new(TestLocalProcessRegistry::default()))
     .build()?;
     let session = core.session("rlm-lashlang-graph-store").open().await?;
@@ -4261,7 +4331,7 @@ async fn natural_rlm_completion_emits_no_terminal_output() -> Result<()> {
 
     assert!(matches!(
         result.outcome,
-        TurnOutcome::Finished(lash_core::TurnFinish::AssistantMessage { .. })
+        TurnOutcome::Finished(lash_core::facade_support::TurnFinish::AssistantMessage { .. })
     ));
     let events = events.snapshot().await;
     assert!(!events.iter().any(|event| matches!(
@@ -4302,7 +4372,7 @@ async fn finish_required_rlm_completion_emits_terminal_output() -> Result<()> {
 
     assert!(matches!(
         result.outcome,
-        TurnOutcome::Finished(lash_core::TurnFinish::FinalValue { .. })
+        TurnOutcome::Finished(lash_core::facade_support::TurnFinish::FinalValue { .. })
     ));
     assert_eq!(
         result.final_value(),

@@ -8,7 +8,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use hmac::{Hmac, Mac};
-use lash_core::promise_semantics;
+use lash_core::facade_support::promise_semantics;
 use lash_core::{
     AwaitEventKey, AwaitEventWaitIdentity, ExecutionScope, Resolution, ResolveOutcome, RuntimeError,
 };
@@ -180,8 +180,13 @@ impl PostgresAwaitEvents {
         cancel: CancellationToken,
         deadline: Option<Instant>,
     ) -> Result<Resolution, RuntimeError> {
-        self.await_resolution_with_clock(key, cancel, deadline, &lash_core::SystemClock)
-            .await
+        self.await_resolution_with_clock(
+            key,
+            cancel,
+            deadline,
+            &lash_core::facade_support::SystemClock,
+        )
+        .await
     }
 
     pub(crate) async fn await_resolution_with_clock(

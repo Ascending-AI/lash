@@ -295,7 +295,7 @@ mod tests {
 
     #[test]
     fn plugin_registers_cancel_when_configured_and_omits_it_otherwise() {
-        let standard_session = lash_core::PluginHost::new(
+        let standard_session = lash_core::facade_support::PluginHost::new(
             std::iter::once(
                 Arc::new(SessionProcessAdminPluginFactory::new()) as Arc<dyn PluginFactory>
             )
@@ -311,7 +311,7 @@ mod tests {
             .as_ref()
             .clone();
 
-        let rlm_session = lash_core::PluginHost::new(
+        let rlm_session = lash_core::facade_support::PluginHost::new(
             std::iter::once(
                 Arc::new(SessionProcessAdminPluginFactory::without_cancel_process())
                     as Arc<dyn PluginFactory>,

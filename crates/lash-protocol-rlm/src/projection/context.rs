@@ -2,7 +2,8 @@ use std::collections::{BTreeSet, HashMap, HashSet};
 use std::sync::Arc;
 
 use lash_core::{
-    AttachmentSource, ChronologicalPayload, Message, MessageRole, PartKind, RuntimeExecutionContext,
+    AttachmentSource, Message, MessageRole, PartKind, RuntimeExecutionContext,
+    facade_support::ChronologicalPayload,
 };
 use lash_rlm_types::{
     RlmAttachmentRef, RlmHistoryItem, RlmHistoryRole, RlmImageRef, RlmProtocolEvent,
@@ -38,7 +39,9 @@ pub struct RlmHistoryProjection {
 }
 
 impl RlmHistoryProjection {
-    pub fn from_chronological(projection: &lash_core::ChronologicalProjection) -> Self {
+    pub fn from_chronological(
+        projection: &lash_core::facade_support::ChronologicalProjection,
+    ) -> Self {
         let suppressed_chronological_indices =
             completed_turn_internal_indices(projection.entries());
         let mut history = Vec::with_capacity(projection.entries().len());
@@ -117,7 +120,9 @@ impl RlmHistoryProjection {
 /// compared. Intermediate trajectory entries remain available, while their
 /// prose is represented by the canonical transcript. A terminal step with no
 /// committed message remains unchanged.
-fn completed_turn_internal_indices(entries: &[lash_core::ChronologicalEntry]) -> HashSet<usize> {
+fn completed_turn_internal_indices(
+    entries: &[lash_core::facade_support::ChronologicalEntry],
+) -> HashSet<usize> {
     let mut suppressed = HashSet::new();
     let mut assistant_content_indices = Vec::new();
     let mut terminal_step = None;
@@ -155,7 +160,7 @@ fn completed_turn_internal_indices(entries: &[lash_core::ChronologicalEntry]) ->
 }
 
 pub fn rlm_history_projection(
-    projection: &lash_core::ChronologicalProjection,
+    projection: &lash_core::facade_support::ChronologicalProjection,
 ) -> RlmHistoryProjection {
     RlmHistoryProjection::from_chronological(projection)
 }
@@ -411,7 +416,7 @@ mod tests {
         Message {
             id: id.to_string(),
             role,
-            parts: lash_core::shared_parts(vec![lash_core::Part {
+            parts: lash_core::facade_support::shared_parts(vec![lash_core::Part {
                 id: format!("{id}.p0"),
                 kind: PartKind::Text,
                 content: text.to_string(),
@@ -427,7 +432,7 @@ mod tests {
         }
     }
 
-    fn step_projection(output: &str) -> lash_core::ChronologicalProjection {
+    fn step_projection(output: &str) -> lash_core::facade_support::ChronologicalProjection {
         let entry = RlmTrajectoryEntry {
             id: "lashlang_step_0".to_string(),
             protocol_iteration: 0,
@@ -440,9 +445,9 @@ mod tests {
         let events = [lash_core::SessionHistoryRecord::Protocol(
             rlm_protocol_event(RlmProtocolEvent::RlmTrajectoryEntry(entry)),
         )];
-        lash_core::ChronologicalProjection::from_turn_view(
+        lash_core::facade_support::ChronologicalProjection::from_turn_view(
             &events,
-            &lash_core::MessageSequence::default(),
+            &lash_core::facade_support::MessageSequence::default(),
         )
     }
 
@@ -509,7 +514,7 @@ mod tests {
         };
         let events = [
             lash_core::SessionHistoryRecord::Conversation(
-                lash_core::ConversationRecord::from_message(message(
+                lash_core::facade_support::ConversationRecord::from_message(message(
                     "u1",
                     MessageRole::User,
                     "first",
@@ -526,14 +531,14 @@ mod tests {
                 RlmProtocolEvent::RlmTrajectoryEntry(terminal),
             )),
             lash_core::SessionHistoryRecord::Conversation(
-                lash_core::ConversationRecord::from_message(message(
+                lash_core::facade_support::ConversationRecord::from_message(message(
                     "a1",
                     MessageRole::Assistant,
                     "committed answer",
                 )),
             ),
             lash_core::SessionHistoryRecord::Conversation(
-                lash_core::ConversationRecord::from_message(message(
+                lash_core::facade_support::ConversationRecord::from_message(message(
                     "u2",
                     MessageRole::User,
                     "second",
@@ -543,9 +548,9 @@ mod tests {
                 RlmProtocolEvent::RlmTrajectoryEntry(retained),
             )),
         ];
-        let chronological = lash_core::ChronologicalProjection::from_turn_view(
+        let chronological = lash_core::facade_support::ChronologicalProjection::from_turn_view(
             &events,
-            &lash_core::MessageSequence::default(),
+            &lash_core::facade_support::MessageSequence::default(),
         );
         let projection = rlm_history_projection(&chronological);
 
@@ -586,7 +591,7 @@ mod tests {
         };
         let events = [
             lash_core::SessionHistoryRecord::Conversation(
-                lash_core::ConversationRecord::from_message(message(
+                lash_core::facade_support::ConversationRecord::from_message(message(
                     "u1",
                     MessageRole::User,
                     "start",
@@ -606,16 +611,16 @@ mod tests {
                 RlmProtocolEvent::RlmTrajectoryEntry(terminal),
             )),
             lash_core::SessionHistoryRecord::Conversation(
-                lash_core::ConversationRecord::from_message(message(
+                lash_core::facade_support::ConversationRecord::from_message(message(
                     "a1",
                     MessageRole::Assistant,
                     "surviving prose\n\ndone",
                 )),
             ),
         ];
-        let chronological = lash_core::ChronologicalProjection::from_turn_view(
+        let chronological = lash_core::facade_support::ChronologicalProjection::from_turn_view(
             &events,
-            &lash_core::MessageSequence::default(),
+            &lash_core::facade_support::MessageSequence::default(),
         );
         let projection = rlm_history_projection(&chronological);
 

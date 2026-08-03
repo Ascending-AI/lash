@@ -10,8 +10,8 @@ use std::task::{Context, Poll};
 
 use futures_util::Stream;
 use lash_core::{
-    LiveReplayGap, SessionCursor, SessionObservationEvent, SessionObservationEventPayload,
-    SessionReadView,
+    SessionCursor, SessionObservationEvent, SessionObservationEventPayload, SessionReadView,
+    facade_support::LiveReplayGap,
 };
 
 use crate::Result;

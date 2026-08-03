@@ -44,7 +44,10 @@ use std::fmt::Write as _;
 use std::sync::Arc;
 
 use lash_core::llm::types::{AttachmentSource, LlmContentBlock, LlmMessage, LlmRole};
-use lash_core::{BorrowedChronologicalEntry, BorrowedChronologicalPayload, head_tail_truncate};
+use lash_core::{
+    facade_support::BorrowedChronologicalEntry, facade_support::BorrowedChronologicalPayload,
+    facade_support::head_tail_truncate,
+};
 use lash_rlm_types::{RlmAttachmentRef, RlmImageRef};
 use lashlang::{Value as FlowValue, ValueProjectionContext};
 
@@ -53,7 +56,7 @@ use crate::projection::{decode_rlm_protocol_event, json_to_flow_value, rlm_histo
 
 pub(super) struct RlmHistoryRenderInput<'a> {
     pub(super) events: &'a [lash_core::SessionHistoryRecord],
-    pub(super) turn_messages: &'a lash_core::MessageSequence,
+    pub(super) turn_messages: &'a lash_core::facade_support::MessageSequence,
     pub(super) turn_causes: &'a [lash_core::TurnCause],
     pub(super) max_output_chars: usize,
     pub(super) protocol_iteration: usize,
@@ -89,10 +92,12 @@ pub(super) fn build_rlm_history_messages_from_turn(
 ) -> Vec<LlmMessage> {
     let mut messages = render_history_messages(&input, attachments);
     let saw_history = !messages.is_empty();
-    let history_len = rlm_history_projection(&lash_core::ChronologicalProjection::from_turn_view(
-        input.events,
-        input.turn_messages,
-    ))
+    let history_len = rlm_history_projection(
+        &lash_core::facade_support::ChronologicalProjection::from_turn_view(
+            input.events,
+            input.turn_messages,
+        ),
+    )
     .len();
     if !saw_history {
         messages.push(LlmMessage::new(
@@ -128,8 +133,10 @@ pub(super) fn render_history_messages(
     attachments: &mut Vec<AttachmentSource>,
 ) -> Vec<LlmMessage> {
     let mut messages = Vec::new();
-    let chronological =
-        lash_core::ChronologicalProjection::from_turn_view(input.events, input.turn_messages);
+    let chronological = lash_core::facade_support::ChronologicalProjection::from_turn_view(
+        input.events,
+        input.turn_messages,
+    );
     let history_projection = rlm_history_projection(&chronological);
     let active_cause_ids = input
         .turn_causes
@@ -138,7 +145,7 @@ pub(super) fn render_history_messages(
         .collect::<HashSet<_>>();
     let mut pending: Option<PendingProse> = None;
 
-    lash_core::visit_turn_view(input.events, input.turn_messages, |entry| {
+    lash_core::facade_support::visit_turn_view(input.events, input.turn_messages, |entry| {
         if borrowed_entry_is_active_cause(entry, &active_cause_ids) {
             return;
         }
@@ -262,7 +269,9 @@ fn append_current_iteration_message(
         "\n\n\n=== CURRENT ITERATION: {} ===",
         input.protocol_iteration
     );
-    if let Some(turn_events) = lash_core::render_turn_causes_prompt(input.turn_causes) {
+    if let Some(turn_events) =
+        lash_core::facade_support::render_turn_causes_prompt(input.turn_causes)
+    {
         current_prompt.push_str("\n\n");
         current_prompt.push_str(&turn_events);
     }

@@ -1,5 +1,5 @@
 use super::*;
-
+use lash_core::facade_support;
 mod segment_handover;
 mod support;
 mod wake_delivery;
@@ -396,7 +396,7 @@ impl ProcessRegistry for SqliteProcessRegistry {
         process_id: &str,
         request: ProcessEventAppendRequest,
     ) -> Result<ProcessEventAppendResult, lash_core::PluginError> {
-        lash_core::validate_generic_process_event_append(&request)?;
+        facade_support::validate_generic_process_event_append(&request)?;
         let process_id = process_id.to_string();
         let occurred_at_ms = self.clock.timestamp_ms();
         let wake_delivery_config = self.wake_delivery_config;
@@ -1475,7 +1475,7 @@ impl ProcessRegistry for SqliteProcessRegistry {
             // the final transaction below revalidates eligibility before it
             // removes any process row.
             for process_id in prunable {
-                for session_id in lash_core::process_runtime_session_ids(&process_id) {
+                for session_id in facade_support::process_runtime_session_ids(&process_id) {
                     delete_session_from_catalog(root, &session_id, false)
                         .await
                         .map_err(lash_core::PluginError::Session)?;

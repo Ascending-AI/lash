@@ -33,8 +33,9 @@ use lash_core::llm::types::{
     LlmToolChoice, LlmUsage, ProviderReasoningReplay, ProviderReplayMeta, ResponseTextMeta,
 };
 use lash_core::{
-    ProviderSchemaCapabilities, SchemaContract, SchemaPurpose, SchemaResolutionError,
-    SchemaResolutionRequest, resolve_schema,
+    SchemaContract, facade_support::ProviderSchemaCapabilities, facade_support::SchemaPurpose,
+    facade_support::SchemaResolutionError, facade_support::SchemaResolutionRequest,
+    facade_support::resolve_schema,
 };
 use lash_llm_transport::{
     frame_sse_payload, merge_usage,
@@ -647,7 +648,7 @@ pub fn response_from_stream_state(
     let full_text = if !state.full_text.is_empty() {
         state.full_text.clone()
     } else {
-        lash_core::visible_response_text_from_parts(&parts)
+        lash_core::facade_support::visible_response_text_from_parts(&parts)
     };
     LlmResponse {
         full_text,
@@ -711,7 +712,9 @@ pub fn extract_text(value: &Value) -> String {
                 && !message_text_from_item(item).is_empty()
         })
     {
-        return lash_core::visible_response_text_from_parts(&response_parts_from_value(value));
+        return lash_core::facade_support::visible_response_text_from_parts(
+            &response_parts_from_value(value),
+        );
     }
     if let Some(s) = value.get("output_text").and_then(|v| v.as_str()) {
         return s.to_string();
@@ -1116,7 +1119,7 @@ impl ResponsesStreamState {
     }
 
     pub fn recompute_full_text(&mut self) {
-        self.full_text = lash_core::visible_response_text_from_parts(&self.parts);
+        self.full_text = lash_core::facade_support::visible_response_text_from_parts(&self.parts);
     }
 
     pub fn begin_reasoning_part(&mut self, output_index: Option<usize>) {

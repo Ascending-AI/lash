@@ -11,7 +11,10 @@ pub use capability::{
 pub use lash_rlm_types::RlmFinalAnswerFormat;
 
 use lash_core::plugin::{PluginError, PluginFactory, PluginSessionContext};
-use lash_core::{PluginSpec, PluginSpecFactory, SessionSpec, SessionToolAccess, ToolProvider};
+use lash_core::{
+    SessionToolAccess, ToolProvider, facade_support::PluginSpec, facade_support::PluginSpecFactory,
+    facade_support::SessionSpec,
+};
 
 pub use rlm::spawn_agent_tool_definition;
 
@@ -67,7 +70,7 @@ impl PluginFactory for SubagentsPluginFactory {
     fn build(
         &self,
         ctx: &PluginSessionContext,
-    ) -> Result<Arc<dyn lash_core::SessionPlugin>, PluginError> {
+    ) -> Result<Arc<dyn lash_core::facade_support::SessionPlugin>, PluginError> {
         let registry = Arc::clone(&self.registry);
         let session_spec = self.session_spec.clone();
         let tool_access = self.tool_access.clone();

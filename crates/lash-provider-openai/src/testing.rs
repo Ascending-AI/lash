@@ -16,7 +16,7 @@ pub struct CacheBreakpointReport {
 pub fn serialize_chat_request(
     request: &LlmRequest,
     retention: CacheRetention,
-) -> Result<(Value, CacheBreakpointReport), lash_core::LlmTransportError> {
+) -> Result<(Value, CacheBreakpointReport), lash_core::facade_support::LlmTransportError> {
     let provider = OpenAiCompatibleProvider::new("test", "https://provider.test").with_options(
         ProviderOptions {
             cache_retention: retention,
@@ -37,7 +37,7 @@ pub fn serialize_chat_request(
 pub fn serialize_responses_request(
     request: &LlmRequest,
     retention: CacheRetention,
-) -> Result<Value, lash_core::LlmTransportError> {
+) -> Result<Value, lash_core::facade_support::LlmTransportError> {
     OpenAiCompatibleProvider::new("test", OPENAI_BASE_URL)
         .with_compat(crate::OpenAiCompat {
             prompt_cache_key: Some(true),
@@ -54,7 +54,7 @@ pub fn serialize_responses_request(
 pub fn serialize_codex_request(
     request: &LlmRequest,
     retention: CacheRetention,
-) -> Result<Value, lash_core::LlmTransportError> {
+) -> Result<Value, lash_core::facade_support::LlmTransportError> {
     CodexProvider::new("access", "refresh", 0)
         .with_options(ProviderOptions {
             cache_retention: retention,

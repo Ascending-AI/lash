@@ -4,7 +4,7 @@ use std::task::{Context, Poll};
 use crate::support::*;
 use futures_util::Stream;
 
-pub use lash_core::{AssistantOutput, TurnIssue};
+pub use lash_core::{facade_support::AssistantOutput, facade_support::TurnIssue};
 
 /// The two internal event sinks threaded through the turn-execution helpers.
 ///
@@ -828,8 +828,8 @@ fn turn_options<'a>(
     turn_events: &'a dyn TurnActivitySink,
     scoped_effect_controller: ScopedEffectController<'a>,
     cancel: CancellationToken,
-) -> lash_core::TurnOptions<'a> {
-    let mut opts = lash_core::TurnOptions::new(cancel, scoped_effect_controller);
+) -> lash_core::facade_support::TurnOptions<'a> {
+    let mut opts = lash_core::facade_support::TurnOptions::new(cancel, scoped_effect_controller);
     if let Some(events) = events {
         opts = opts.with_events(events);
     }
@@ -934,7 +934,7 @@ pub(crate) async fn stream_prepared_agent_frame_run(
     sinks: TurnSinks<'_>,
     scoped_effect_controller: ScopedEffectController<'_>,
     cancel: CancellationToken,
-) -> Result<lash_core::AgentFrameRun> {
+) -> Result<lash_core::facade_support::AgentFrameRun> {
     let writer_handle = runtime.writer();
     let mut writer = writer_handle.lock().await;
     if let Some(extension) = input.protocol_extension.as_ref() {
@@ -967,7 +967,7 @@ pub struct TurnResult {
     pub outcome: TurnOutcome,
     /// Durable request evidence, present exactly when `outcome` is cancelled.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub cancellation: Option<lash_core::TurnCancellationEvidence>,
+    pub cancellation: Option<lash_core::facade_support::TurnCancellationEvidence>,
     pub assistant_output: AssistantOutput,
     /// Parent's own LLM tokens for this turn. Does **not** include child
     /// sessions; see [`children_usage`](Self::children_usage) and
@@ -991,7 +991,7 @@ pub struct TurnResult {
 }
 
 impl TurnResult {
-    fn from_assembled(turn: lash_core::AssembledTurn) -> Self {
+    fn from_assembled(turn: lash_core::facade_support::AssembledTurn) -> Self {
         Self {
             state: turn.state,
             outcome: turn.outcome,
@@ -1033,23 +1033,28 @@ impl TurnResult {
 
     pub fn assistant_message(&self) -> Option<&str> {
         match &self.outcome {
-            TurnOutcome::Finished(lash_core::TurnFinish::AssistantMessage { text }) => Some(text),
+            TurnOutcome::Finished(lash_core::facade_support::TurnFinish::AssistantMessage {
+                text,
+            }) => Some(text),
             _ => None,
         }
     }
 
     pub fn final_value(&self) -> Option<&serde_json::Value> {
         match &self.outcome {
-            TurnOutcome::Finished(lash_core::TurnFinish::FinalValue { value }) => Some(value),
+            TurnOutcome::Finished(lash_core::facade_support::TurnFinish::FinalValue { value }) => {
+                Some(value)
+            }
             _ => None,
         }
     }
 
     pub fn tool_value(&self) -> Option<(&str, &serde_json::Value)> {
         match &self.outcome {
-            TurnOutcome::Finished(lash_core::TurnFinish::ToolValue { tool_name, value }) => {
-                Some((tool_name.as_str(), value))
-            }
+            TurnOutcome::Finished(lash_core::facade_support::TurnFinish::ToolValue {
+                tool_name,
+                value,
+            }) => Some((tool_name.as_str(), value)),
             _ => None,
         }
     }

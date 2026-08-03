@@ -9,7 +9,7 @@
 //! wire-format parsing to these primitives directly.
 
 use lash_core::provider::ProviderOptions;
-use lash_core::{LlmTransportError, ProviderFailureKind};
+use lash_core::{ProviderFailureKind, facade_support::LlmTransportError};
 use lash_sansio::llm::types::{LlmOutputPart, LlmTerminalReason, LlmUsage};
 use serde_json::Value;
 

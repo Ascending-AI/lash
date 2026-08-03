@@ -7,12 +7,16 @@ pub(crate) use lash_core::runtime::{
     EffectHost, RuntimeEffectController, RuntimeSessionState, ScopedEffectController,
 };
 pub(crate) use lash_core::{
-    DurableProcessWorker, DurableProcessWorkerConfig, EffectReplayOwnership,
-    InMemoryLiveReplayStore, LashRuntime, LiveReplayStore, MessageRole, PluginHost, PluginSpec,
-    PluginStack, ProcessExecutionEnvStore, ProcessHandleSummary, ProcessWorkDriver,
-    QueuedWorkDriver, QueuedWorkRunHandle, QueuedWorkRunRequest, RuntimeEnvironment, RuntimeHandle,
-    RuntimeHostConfig, RuntimeObservation, SessionPolicy, SessionRelation, SessionSpec,
-    SessionStoreCreateRequest,
+    EffectReplayOwnership, LiveReplayStore, MessageRole, ProcessExecutionEnvStore,
+    ProcessHandleSummary, SessionPolicy, SessionRelation, SessionStoreCreateRequest,
+    facade_support::DurableProcessWorker, facade_support::DurableProcessWorkerConfig,
+    facade_support::InMemoryLiveReplayStore, facade_support::LashRuntime,
+    facade_support::PluginHost, facade_support::PluginSpec, facade_support::PluginStack,
+    facade_support::ProcessWorkDriver, facade_support::QueuedWorkDriver,
+    facade_support::QueuedWorkRunHandle, facade_support::QueuedWorkRunRequest,
+    facade_support::RuntimeEnvironment, facade_support::RuntimeHandle,
+    facade_support::RuntimeHostConfig, facade_support::RuntimeObservation,
+    facade_support::SessionSpec,
 };
 pub(crate) use tokio::sync::mpsc;
 pub(crate) use tokio::task::JoinHandle;
@@ -22,14 +26,18 @@ pub(crate) use tokio_util::sync::CancellationToken;
 pub(crate) use lash_core::TestLocalProcessRegistry;
 pub(crate) use lash_core::plugin::runtime_host::SessionStateService;
 pub(crate) use lash_core::{
-    AssembledTurn, AttachmentStore, EventSink, ExecutionSummary, LlmCallRecord, Message,
-    PluginFactory, PluginMessage, PluginOptions, ProcessRegistry, ProtocolTurnOptions,
-    ProviderHandle, RuntimeErrorCode, RuntimePersistence, SessionCreateRequest, SessionCursor,
-    SessionError, SessionHandle, SessionObservation, SessionObservationSubscription,
-    SessionProcessEventKind, SessionReadView, SessionResume, SessionScope, SessionSnapshot,
-    SessionStoreFactory, SessionUsageReport, TerminationPolicy, ToolCallRecord, ToolManifest,
-    ToolProvider, ToolRestoreReport, ToolSourceHandle, ToolState, TurnActivitySink,
-    TurnCancelOriginHint, TurnOutcome,
+    AttachmentStore, LlmCallRecord, Message, PluginMessage, PluginOptions, ProcessRegistry,
+    ProtocolTurnOptions, RuntimeErrorCode, RuntimePersistence, SessionCreateRequest, SessionCursor,
+    SessionError, SessionProcessEventKind, SessionReadView, SessionScope, SessionSnapshot,
+    SessionStoreFactory, ToolCallRecord, ToolManifest, ToolProvider, ToolState,
+    TurnCancelOriginHint, facade_support::AssembledTurn, facade_support::EventSink,
+    facade_support::ExecutionSummary, facade_support::PluginFactory,
+    facade_support::ProviderHandle, facade_support::SessionHandle,
+    facade_support::SessionObservation, facade_support::SessionObservationSubscription,
+    facade_support::SessionResume, facade_support::SessionUsageReport,
+    facade_support::TerminationPolicy, facade_support::ToolRestoreReport,
+    facade_support::ToolSourceHandle, facade_support::TurnActivitySink,
+    facade_support::TurnOutcome,
 };
 pub(crate) use lash_core::{InputItem, TokenLedgerEntry, TokenUsage};
 pub(crate) use lash_core::{PromptContribution, PromptLayer, PromptSlot, PromptTemplate};

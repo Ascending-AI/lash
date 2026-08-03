@@ -8,7 +8,7 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use bytes::Bytes;
-use lash_core::LlmTransportError;
+use lash_core::facade_support::LlmTransportError;
 use proptest::prelude::*;
 
 use crate::http::{LlmByteStream, LlmHttpBody, LlmHttpRequest, LlmHttpResponse, LlmHttpTransport};

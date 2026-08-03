@@ -8,13 +8,13 @@ use lash_core::runtime::{
     QueuedWorkClaim, QueuedWorkClaimBoundary, RuntimeReplay, RuntimeScope, RuntimeSubject,
 };
 use lash_core::{
-    ExecResponse, ExecutionScope, LeaseOwnerIdentity, MergeKey, PreparedToolCall,
-    ProcessAwaitOutput, ProcessInput, ProcessProvenance, ProcessRegistration, ProcessRegistry,
-    RecoveryDisposition, RuntimeCommit, RuntimeEffectCommand, RuntimeEffectController,
-    RuntimeEffectEnvelope, RuntimeEffectKind, RuntimeEffectLocalExecutor, RuntimeEffectOutcome,
-    RuntimeInvocation, RuntimePersistence, RuntimeSessionState, SessionExecutionLeaseClaimOutcome,
-    SessionRelation, SessionStoreCreateRequest, SessionStoreFactory, ToolAttemptLaunch,
-    ToolCallOutput, ToolCallRecord, ToolId,
+    ExecResponse, ExecutionScope, LeaseOwnerIdentity, PreparedToolCall, ProcessAwaitOutput,
+    ProcessInput, ProcessProvenance, ProcessRegistration, ProcessRegistry, RecoveryDisposition,
+    RuntimeCommit, RuntimeEffectCommand, RuntimeEffectController, RuntimeEffectEnvelope,
+    RuntimeEffectKind, RuntimeEffectLocalExecutor, RuntimeEffectOutcome, RuntimeInvocation,
+    RuntimePersistence, RuntimeSessionState, SessionExecutionLeaseClaimOutcome, SessionRelation,
+    SessionStoreCreateRequest, SessionStoreFactory, ToolAttemptLaunch, ToolCallOutput,
+    ToolCallRecord, ToolId, facade_support::MergeKey,
 };
 use serde_json::{Value, json};
 
@@ -485,34 +485,36 @@ impl RuntimeBoundaryHarness {
             .get("sequence")
             .and_then(Value::as_u64)
             .unwrap_or(1);
-        let source_key = lash_core::process_wake_source_key(&process_id, sequence);
+        let source_key = lash_core::facade_support::process_wake_source_key(&process_id, sequence);
         let replay_key = event
             .payload
             .get("replay_key")
             .and_then(Value::as_str)
             .unwrap_or(&source_key)
             .to_string();
-        let wake = lash_core::process_wake_delivery(lash_core::ProcessWakeDeliveryRequest {
-            target_session_id: session.clone(),
-            process_id: process_id.clone(),
-            sequence,
-            event_type: "process.wake".to_string(),
-            event_invocation: RuntimeInvocation {
-                scope: RuntimeScope::new(session.clone()),
-                subject: RuntimeSubject::ProcessEvent {
-                    process_id: process_id.clone(),
-                    sequence,
-                    event_type: "process.wake".to_string(),
+        let wake = lash_core::facade_support::process_wake_delivery(
+            lash_core::facade_support::ProcessWakeDeliveryRequest {
+                target_session_id: session.clone(),
+                process_id: process_id.clone(),
+                sequence,
+                event_type: "process.wake".to_string(),
+                event_invocation: RuntimeInvocation {
+                    scope: RuntimeScope::new(session.clone()),
+                    subject: RuntimeSubject::ProcessEvent {
+                        process_id: process_id.clone(),
+                        sequence,
+                        event_type: "process.wake".to_string(),
+                    },
+                    caused_by: None,
+                    replay: Some(RuntimeReplay { key: replay_key }),
                 },
-                caused_by: None,
-                replay: Some(RuntimeReplay { key: replay_key }),
+                process_caused_by: None,
+                wake: lash_core::facade_support::ProcessWake {
+                    input: format!("wake for {session}"),
+                },
+                occurred_at: std::time::UNIX_EPOCH + std::time::Duration::from_millis(event.at),
             },
-            process_caused_by: None,
-            wake: lash_core::ProcessWake {
-                input: format!("wake for {session}"),
-            },
-            occurred_at: std::time::UNIX_EPOCH + std::time::Duration::from_millis(event.at),
-        })
+        )
         .map_err(|err| RuntimeBoundaryError::new(format!("process wake failed: {err}")))?;
         let store = self.store_for_session(&session).await?;
         let owner = LeaseOwnerIdentity::opaque(
@@ -837,9 +839,9 @@ impl RuntimeBoundaryHarness {
             LeaseOwnerIdentity::opaque("sim-dead-owner", format!("before-the-crash:{session}"));
         let silent_owner =
             LeaseOwnerIdentity::opaque("sim-silent-owner", format!("sim-silent-owner:{session}"));
-        let mut runtime_host = lash_core::RuntimeHostConfig::in_memory();
-        runtime_host.process_engines =
-            lash_core::ProcessEngineRegistry::new().with_engine(Arc::new(LifecycleSuccessEngine));
+        let mut runtime_host = lash_core::facade_support::RuntimeHostConfig::in_memory();
+        runtime_host.process_engines = lash_core::facade_support::ProcessEngineRegistry::new()
+            .with_engine(Arc::new(LifecycleSuccessEngine));
         let policy = lash_core::SessionPolicy {
             provider_id: "sim-lifecycle".to_string(),
             model: lash_core::ModelSpec::from_token_limits(
@@ -919,7 +921,7 @@ impl RuntimeBoundaryHarness {
         worker.drive_pending_processes().await.map_err(|err| {
             RuntimeBoundaryError::new(format!("recovery sweep dispatch failed: {err}"))
         })?;
-        let awaiter = lash_core::ProcessAwaiter::polling(Arc::clone(&registry));
+        let awaiter = lash_core::facade_support::ProcessAwaiter::polling(Arc::clone(&registry));
 
         let ob_crashed = lifecycle_process_fact(
             &registry,
@@ -971,7 +973,8 @@ impl RuntimeBoundaryHarness {
         occurred_at_ms: u64,
     ) -> Result<WorkerOwnedWork, RuntimeBoundaryError> {
         let wake = worker_failover_work(session, occurred_at_ms)?;
-        let source_key = lash_core::process_wake_source_key(&wake.process_id, wake.sequence);
+        let source_key =
+            lash_core::facade_support::process_wake_source_key(&wake.process_id, wake.sequence);
         let batch = store
             .enqueue_queued_work(
                 lash_core::runtime::process_wake_batch_draft(wake).with_merge_key(MergeKey::Never),
@@ -1397,29 +1400,31 @@ fn worker_failover_work(
     occurred_at_ms: u64,
 ) -> Result<lash_core::ProcessWakeDelivery, RuntimeBoundaryError> {
     let process_id = format!("sim-worker-{session}");
-    lash_core::process_wake_delivery(lash_core::ProcessWakeDeliveryRequest {
-        target_session_id: session.to_string(),
-        process_id: process_id.clone(),
-        sequence: 1,
-        event_type: "process.wake".to_string(),
-        event_invocation: RuntimeInvocation {
-            scope: RuntimeScope::new(session.to_string()),
-            subject: RuntimeSubject::ProcessEvent {
-                process_id,
-                sequence: 1,
-                event_type: "process.wake".to_string(),
+    lash_core::facade_support::process_wake_delivery(
+        lash_core::facade_support::ProcessWakeDeliveryRequest {
+            target_session_id: session.to_string(),
+            process_id: process_id.clone(),
+            sequence: 1,
+            event_type: "process.wake".to_string(),
+            event_invocation: RuntimeInvocation {
+                scope: RuntimeScope::new(session.to_string()),
+                subject: RuntimeSubject::ProcessEvent {
+                    process_id,
+                    sequence: 1,
+                    event_type: "process.wake".to_string(),
+                },
+                caused_by: None,
+                replay: Some(RuntimeReplay {
+                    key: format!("worker-failover:{session}:work"),
+                }),
             },
-            caused_by: None,
-            replay: Some(RuntimeReplay {
-                key: format!("worker-failover:{session}:work"),
-            }),
+            process_caused_by: None,
+            wake: lash_core::facade_support::ProcessWake {
+                input: format!("worker-owned work for {session}"),
+            },
+            occurred_at: std::time::UNIX_EPOCH + std::time::Duration::from_millis(occurred_at_ms),
         },
-        process_caused_by: None,
-        wake: lash_core::ProcessWake {
-            input: format!("worker-owned work for {session}"),
-        },
-        occurred_at: std::time::UNIX_EPOCH + std::time::Duration::from_millis(occurred_at_ms),
-    })
+    )
     .map_err(|err| RuntimeBoundaryError::new(format!("build worker-owned work failed: {err}")))
 }
 

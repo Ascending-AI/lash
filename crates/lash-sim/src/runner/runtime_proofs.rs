@@ -378,7 +378,9 @@ pub(super) async fn prove_pending_tool_completion_through_turn()
     let assistant_message = result.assistant_message().unwrap_or_default().to_string();
     let final_ok = matches!(
         &result.outcome,
-        lash_core::TurnOutcome::Finished(lash_core::TurnFinish::AssistantMessage { .. })
+        lash_core::facade_support::TurnOutcome::Finished(
+            lash_core::facade_support::TurnFinish::AssistantMessage { .. }
+        )
     ) && assistant_message == "done"
         && completed_after > completed_before
         && completed_outputs

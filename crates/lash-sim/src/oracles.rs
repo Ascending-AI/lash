@@ -153,7 +153,7 @@ pub fn frame_switch_seeds(observations: &[FrameSwitchSeedObservation]) -> Oracle
 /// Match runtime claim/completion trace records by `(claim kind, claim id)` and
 /// require a single terminal settlement for every claimed ingress.
 pub fn logical_turn_claims_settle_exactly_once(
-    records: &[lash_core::TraceRecord],
+    records: &[lash_core::facade_support::TraceRecord],
 ) -> OracleVerdict {
     let mut claimed = BTreeMap::<(String, String), usize>::new();
     let mut completed = BTreeMap::<(String, String), usize>::new();
@@ -6012,7 +6012,9 @@ fn process_wake_source_key(event: &DeliveredBoundary) -> Option<String> {
         .observed
         .pointer("/runtime_process_wake/sequence")
         .and_then(Value::as_u64)?;
-    Some(lash_core::process_wake_source_key(process_id, sequence))
+    Some(lash_core::facade_support::process_wake_source_key(
+        process_id, sequence,
+    ))
 }
 
 fn durable_effect_replay_semantics(

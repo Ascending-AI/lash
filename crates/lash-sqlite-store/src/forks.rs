@@ -345,7 +345,9 @@ pub(super) async fn fork_at_in_catalog(
             let session_meta = lash_core::SessionMeta {
                 session_id: request.session_id.clone(),
                 session_name: request.session_id.clone(),
-                created_at: lash_core::Clock::timestamp_rfc3339(&lash_core::SystemClock),
+                created_at: lash_core::Clock::timestamp_rfc3339(
+                    &lash_core::facade_support::SystemClock,
+                ),
                 model: request.policy.model.id.clone(),
                 cwd: std::env::current_dir()
                     .ok()

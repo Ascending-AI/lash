@@ -78,16 +78,19 @@ use std::time::Duration;
 
 use lash_core::{
     AbandonEvidence, AbandonWriter, AwaitEventKey, AwaitEventResolver, AwaitEventWaitIdentity,
-    CanonicalRuntimeEffectEnvelope, DurableProcessWorker, EffectHost, ExecutionScope, PluginError,
-    ProcessAttach, ProcessAwaitOutput, ProcessCommand, ProcessCompletionAuthority,
-    ProcessEffectOutcome, ProcessEventSink, ProcessExecutionContext, ProcessExternalRef,
-    ProcessRecord, ProcessRegistration, ProcessRegistry, ProcessRunHandle, ProcessWorkDriver,
-    RecoveryDisposition, Resolution, ResolveOutcome, RuntimeAwaitEventOptions,
-    RuntimeEffectCommand, RuntimeEffectController, RuntimeEffectControllerError,
+    EffectHost, ExecutionScope, PluginError, ProcessAwaitOutput, ProcessCommand,
+    ProcessCompletionAuthority, ProcessEffectOutcome, ProcessExecutionContext, ProcessExternalRef,
+    ProcessRecord, ProcessRegistration, ProcessRegistry, RecoveryDisposition, Resolution,
+    ResolveOutcome, RuntimeEffectCommand, RuntimeEffectController, RuntimeEffectControllerError,
     RuntimeEffectEnvelope, RuntimeEffectKind, RuntimeEffectLocalExecutor, RuntimeEffectOutcome,
-    RuntimeError, RuntimeInvocation, RuntimeSleepOptions, ScopedEffectController, TurnAddress,
-    TurnAttach, TurnTerminal, TurnWorkDriver, validate_replayed_effect_envelope,
-    watch_process_registry_with_sink,
+    RuntimeError, RuntimeInvocation, ScopedEffectController,
+    facade_support::CanonicalRuntimeEffectEnvelope, facade_support::DurableProcessWorker,
+    facade_support::ProcessAttach, facade_support::ProcessEventSink,
+    facade_support::ProcessRunHandle, facade_support::ProcessWorkDriver,
+    facade_support::RuntimeAwaitEventOptions, facade_support::RuntimeSleepOptions,
+    facade_support::TurnAddress, facade_support::TurnAttach, facade_support::TurnTerminal,
+    facade_support::TurnWorkDriver, facade_support::validate_replayed_effect_envelope,
+    facade_support::watch_process_registry_with_sink,
 };
 use lash_http_transport::{
     HttpMethod, HttpRequest, HttpResponse, HttpTransport, HttpTransportError, ReqwestClient,
@@ -205,7 +208,7 @@ fn restate_await_event_key(
     scope: &ExecutionScope,
     wait: AwaitEventWaitIdentity,
 ) -> Result<AwaitEventKey, RuntimeError> {
-    let key_id = lash_core::promise_semantics::derive_key_id(scope, &wait)?;
+    let key_id = lash_core::facade_support::promise_semantics::derive_key_id(scope, &wait)?;
     Ok(AwaitEventKey {
         scope: scope.clone(),
         wait,
@@ -218,10 +221,10 @@ fn restate_await_event_key_is_valid(key: &AwaitEventKey) -> bool {
     let Ok(expected) = restate_await_event_key(&key.scope, key.wait.clone()) else {
         return false;
     };
-    lash_core::promise_semantics::constant_time_eq(
+    lash_core::facade_support::promise_semantics::constant_time_eq(
         expected.key_id.as_bytes(),
         key.key_id.as_bytes(),
-    ) && lash_core::promise_semantics::constant_time_eq(
+    ) && lash_core::facade_support::promise_semantics::constant_time_eq(
         expected.signature.as_bytes(),
         key.signature.as_bytes(),
     )
@@ -609,7 +612,7 @@ fn restate_turn_cancel_wait_request(
     Ok(Some(restate_durable_wait_request(
         &key,
         None,
-        &lash_core::SystemClock,
+        &lash_core::facade_support::SystemClock,
     )))
 }
 
@@ -1565,7 +1568,8 @@ async fn await_restate_await_event_via_ingress(
     deadline: Option<std::time::Instant>,
     effect_replay_key: Option<&str>,
 ) -> Result<Resolution, RuntimeError> {
-    let request = restate_durable_wait_request(key, deadline, &lash_core::SystemClock);
+    let request =
+        restate_durable_wait_request(key, deadline, &lash_core::facade_support::SystemClock);
     let workflow_key = request.address.workflow_key.clone();
     tokio::select! {
         result = async {
@@ -4485,7 +4489,7 @@ where
         {
             return Err(restate_unknown_or_revoked());
         }
-        let clock = lash_core::SystemClock;
+        let clock = lash_core::facade_support::SystemClock;
         self.context
             .await_event(restate_durable_wait_request(key, deadline, &clock), cancel)
             .await
@@ -5007,7 +5011,7 @@ fn restate_effect_name(invocation: &RuntimeInvocation) -> String {
 fn validate_recorded_effect_envelope(
     recorded: RecordedRuntimeEffect,
     reconstructed: &CanonicalRuntimeEffectEnvelope,
-    trace: Option<&lash_core::RuntimeEffectReplayTrace>,
+    trace: Option<&lash_core::facade_support::RuntimeEffectReplayTrace>,
 ) -> Result<Result<RuntimeEffectOutcome, RuntimeEffectControllerError>, RuntimeEffectControllerError>
 {
     validate_replayed_effect_envelope(

@@ -11,7 +11,7 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 
-use lash_core::PreparedContext;
+use lash_core::facade_support::PreparedContext;
 use lash_core::plugin::{
     CompactionContext, ContextCompaction, ContextCompactor, ContextError, PluginError,
     PluginFactory, PluginOptions, PluginRegistrar, PluginSessionContext, SessionContextOverlay,
@@ -278,7 +278,7 @@ async fn summarize_compaction_prefix(
         turn_scope,
     )
     .map_err(|err| ContextError::Session(err.to_string()))?;
-    let request = lash_core::SessionTurnRequest::new(
+    let request = lash_core::facade_support::SessionTurnRequest::new(
         &handle.session_id,
         &turn_id,
         TurnInput {
@@ -564,15 +564,17 @@ mod tests {
             session_lifecycle: manager.clone(),
             session_graph: manager,
             scoped_effect_controller: lash_core::ScopedEffectController::shared(
-                Arc::new(lash_core::InlineRuntimeEffectController::default()),
+                Arc::new(lash_core::facade_support::InlineRuntimeEffectController::default()),
                 lash_core::ExecutionScope::turn(session_id, "rolling-history-test-turn"),
             )
             .expect("test scoped effect controller"),
-            direct_completions: lash_core::DirectCompletionClient::from_fn(|_, _| {
-                Err(lash_core::PluginError::Session(
-                    "direct completions are unavailable in rolling history tests".to_string(),
-                ))
-            }),
+            direct_completions: lash_core::facade_support::DirectCompletionClient::from_fn(
+                |_, _| {
+                    Err(lash_core::PluginError::Session(
+                        "direct completions are unavailable in rolling history tests".to_string(),
+                    ))
+                },
+            ),
         }
     }
 
@@ -590,7 +592,7 @@ mod tests {
             session_lifecycle: manager.clone(),
             session_graph: manager,
             scoped_effect_controller: lash_core::ScopedEffectController::shared(
-                Arc::new(lash_core::InlineRuntimeEffectController::default()),
+                Arc::new(lash_core::facade_support::InlineRuntimeEffectController::default()),
                 lash_core::ExecutionScope::runtime_operation("rolling-history-compact-test"),
             )
             .expect("test scoped effect controller"),

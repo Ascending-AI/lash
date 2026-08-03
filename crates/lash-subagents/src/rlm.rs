@@ -7,9 +7,9 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use lash_core::{
-    PreparedToolCall, SessionSpec, SessionToolAccess, SubagentSessionContext,
-    ToolArgumentProjectionPolicy, ToolCall, ToolContext, ToolDefinition, ToolPrepareContext,
-    ToolResult, sansio::PendingToolCall,
+    PreparedToolCall, SessionToolAccess, SubagentSessionContext, ToolArgumentProjectionPolicy,
+    ToolCall, ToolContext, ToolDefinition, ToolPrepareContext, ToolResult,
+    facade_support::SessionSpec, sansio::PendingToolCall,
 };
 use lash_lashlang_runtime::ToolDefinitionLashlangExt;
 use lash_tool_support::{StaticToolExecute, StaticToolProvider};
@@ -174,7 +174,7 @@ struct PreparedSpawnAgent {
 fn child_task_result(output: lash_core::ProcessAwaitOutput) -> Result<Value, String> {
     match output {
         lash_core::ProcessAwaitOutput::Success { value, .. } => {
-            let turn: lash_core::AssembledTurn = value
+            let turn: lash_core::facade_support::AssembledTurn = value
                 .get("turn")
                 .cloned()
                 .map(serde_json::from_value)

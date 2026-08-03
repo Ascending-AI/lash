@@ -3,7 +3,7 @@ pub mod rolling_history;
 use std::sync::Arc;
 
 use lash_core::plugin::{PluginSpec, StaticPluginFactory};
-use lash_core::{PluginStack, ToolProvider};
+use lash_core::{ToolProvider, facade_support::PluginStack};
 use lash_plugin_process_controls::SessionProcessAdminPluginFactory;
 use lash_plugin_tool_output_budget::{ToolOutputBudgetPluginFactory, tool_output_budget_stack};
 use lash_tools::files::{edit_provider, glob_provider, read_file_provider, write_provider};
@@ -151,7 +151,7 @@ mod tests {
         })
         .into_factories();
         factories.extend(protocol_factories);
-        let host = lash_core::PluginHost::new(factories);
+        let host = lash_core::facade_support::PluginHost::new(factories);
         let session_id = "test".to_string();
         let session = host
             .build_session(session_id.clone(), None)

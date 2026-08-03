@@ -68,11 +68,12 @@ fn fresh_in_memory_backend() -> (
     Arc<dyn lash_core::TriggerStore>,
 ) {
     (
-        Arc::new(lash_core::InMemorySessionStoreFactory::new())
+        Arc::new(lash_core::facade_support::InMemorySessionStoreFactory::new())
             as Arc<dyn lash_core::SessionStoreFactory>,
         Arc::new(lash_core::TestLocalProcessRegistry::default())
             as Arc<dyn lash_core::ProcessRegistry>,
-        Arc::new(lash_core::InMemoryTriggerStore::default()) as Arc<dyn lash_core::TriggerStore>,
+        Arc::new(lash_core::facade_support::InMemoryTriggerStore::default())
+            as Arc<dyn lash_core::TriggerStore>,
     )
 }
 

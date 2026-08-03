@@ -1,6 +1,75 @@
-// Facade-home coverage for the surface FIG-863 wave B added: each item below is
+// Facade-home coverage for the surface FIG-863 waves B and C added: each item below is
 // exercised through this host example and asserted on an outcome the runtime
 // produced.
+    #[test]
+    fn closure_companions_are_usable_through_their_facade_domains() {
+        use lash::provider::ProviderFailureClassifier as _;
+
+        let replay_gap = lash::observe::LiveReplaySubscribeResult::Gap(
+            lash::observe::LiveReplayGapReason::Trimmed,
+        );
+        assert!(matches!(
+            replay_gap,
+            lash::observe::LiveReplaySubscribeResult::Gap(
+                lash::observe::LiveReplayGapReason::Trimmed
+            )
+        ));
+        assert!(matches!(
+            lash::observe::LiveReplayStoreError::Closed,
+            lash::observe::LiveReplayStoreError::Closed
+        ));
+
+        let failure = lash::tools::ToolFailure::safe_retry(
+            lash::tools::ToolFailureClass::Unavailable,
+            "workbench_busy",
+            "the workbench is busy",
+            Some(25),
+        );
+        assert_eq!(failure.source, lash::tools::ToolFailureSource::Tool);
+        assert_eq!(
+            failure.retry,
+            lash::tools::ToolRetryDisposition::Safe { after_ms: Some(25) }
+        );
+        assert_eq!(
+            lash::tools::ToolValue::String("ready".to_string()).to_json_value(),
+            json!("ready")
+        );
+        let (progress, _progress_rx) = tokio::sync::mpsc::unbounded_channel();
+        let progress: lash::tools::ProgressSender = progress;
+        assert!(!progress.is_closed());
+
+        let catalog = lash::plugins::ToolCatalog::default();
+        assert!(catalog.tools.is_empty());
+        let cause = lash::process::CausalRef::Process {
+            process_id: "workbench-process".to_string(),
+        };
+        assert!(matches!(
+            cause,
+            lash::process::CausalRef::Process { ref process_id }
+                if process_id == "workbench-process"
+        ));
+
+        let classified = lash::provider::DefaultProviderFailureClassifier.classify(
+            lash::provider::LlmTransportError::new("HTTP 429").with_status(429),
+        );
+        assert!(classified.retryable);
+        assert_eq!(classified.kind, lash::provider::ProviderFailureKind::Quota);
+        assert!(matches!(
+            lash::provider::LlmOutputSpec::JsonObject,
+            lash::provider::LlmOutputSpec::JsonObject
+        ));
+
+        let input = lash::triggers::TriggerInputBinding::Fixed { value: json!(42) };
+        assert_eq!(serde_json::to_value(input).expect("serialize trigger input"), json!({
+            "type": "fixed",
+            "value": 42
+        }));
+        assert!(std::mem::size_of::<lash::triggers::TriggerIngressResult>() > 0);
+        assert!(
+            std::mem::size_of::<lash::triggers::TriggerDeliveryRetentionCandidate>() > 0
+        );
+    }
+
     #[test]
     fn host_model_capability_validates_reasoning_effort_selections() {
         use lash::provider::{

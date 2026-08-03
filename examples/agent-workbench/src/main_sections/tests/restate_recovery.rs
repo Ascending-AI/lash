@@ -49,7 +49,7 @@ finish (await handle)?
                         assert!(request.stream_events.is_none());
                         assert!(matches!(
                             request.output_spec,
-                            Some(lash_core::llm::types::LlmOutputSpec::JsonSchema(_))
+                            Some(lash::provider::LlmOutputSpec::JsonSchema(_))
                         ));
                         Ok(text_response(
                             r#"{"kind":"value","value":{"category":"personal","confidence":0.98},"error":null}"#,

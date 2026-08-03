@@ -22,8 +22,9 @@ pub(crate) use lash_core::provider::{
     resolve_generation_policy,
 };
 pub(crate) use lash_core::{
-    ProviderSchemaCapabilities, SchemaPurpose, SchemaResolutionError, SchemaResolutionRequest,
-    resolve_schema,
+    facade_support::ProviderSchemaCapabilities, facade_support::SchemaPurpose,
+    facade_support::SchemaResolutionError, facade_support::SchemaResolutionRequest,
+    facade_support::resolve_schema,
 };
 pub(crate) use lash_llm_transport::normalize::{
     http_error_envelope, merge_usage, serialize_options_tail, terminal_reason_from_parts,

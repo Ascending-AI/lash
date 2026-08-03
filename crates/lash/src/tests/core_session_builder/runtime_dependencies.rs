@@ -77,7 +77,7 @@ async fn builder_rebinds_first_party_process_registry_to_runtime_clock() {
     let registry = lash_sqlite_store::SqliteProcessRegistry::memory()
         .await
         .expect("open SQLite process registry with its default clock");
-    let store_factory = Arc::new(lash_core::InMemorySessionStoreFactory::with_clock(
+    let store_factory = Arc::new(lash_core::facade_support::InMemorySessionStoreFactory::with_clock(
         clock.clone(),
     )) as Arc<dyn lash_core::SessionStoreFactory>;
     let core = LashCore::standard_builder()
@@ -93,7 +93,7 @@ async fn builder_rebinds_first_party_process_registry_to_runtime_clock() {
         .store_factory(store_factory)
         .process_registry(Arc::new(registry))
         .advanced()
-        .runtime_host_config(lash_core::RuntimeHostConfig::in_memory().with_clock(clock))
+        .runtime_host_config(lash_core::facade_support::RuntimeHostConfig::in_memory().with_clock(clock))
         .build()
         .expect("build core with SQLite process registry");
     let registry = core.process_registry().expect("built process registry");
@@ -148,8 +148,8 @@ async fn builder_rebinds_first_party_process_registry_to_runtime_clock() {
 #[tokio::test]
 async fn builder_requires_explicit_process_env_store_at_build() {
     let result = peer_coherence_builder(inline_artifact_store())
-        .effect_host(Arc::new(lash_core::InlineEffectHost::default()))
-        .attachment_store(Arc::new(lash_core::InMemoryAttachmentStore::new()))
+        .effect_host(Arc::new(lash_core::facade_support::InlineEffectHost::default()))
+        .attachment_store(Arc::new(lash_core::facade_support::InMemoryAttachmentStore::new()))
         .build();
     let err = expect_build_error(
         result,
@@ -174,7 +174,7 @@ async fn all_durable_stores_build_successfully() -> Result<()> {
         .expect("open durable registry"),
     );
     peer_coherence_builder(durable_artifact_store(dir.path()).await)
-        .effect_host(Arc::new(lash_core::InlineEffectHost::default()))
+        .effect_host(Arc::new(lash_core::facade_support::InlineEffectHost::default()))
         .store_factory(durable_session_store_factory(dir.path()))
         .attachment_store(durable_attachment_store(dir.path()))
         .process_env_store(durable_process_env_store(dir.path()).await)
@@ -198,7 +198,7 @@ async fn durable_registry_with_only_child_store_factory_builds() -> Result<()> {
         .expect("open durable registry"),
     );
     peer_coherence_builder(durable_artifact_store(dir.path()).await)
-        .effect_host(Arc::new(lash_core::InlineEffectHost::default()))
+        .effect_host(Arc::new(lash_core::facade_support::InlineEffectHost::default()))
         .child_store_factory(durable_session_store_factory(dir.path()))
         .attachment_store(durable_attachment_store(dir.path()))
         .process_env_store(durable_process_env_store(dir.path()).await)
@@ -213,7 +213,7 @@ async fn explicit_ephemeral_facets_build_successfully() -> Result<()> {
     // An all-in-memory build succeeds, including the explicit session store
     // factory that backs process execution.
     explicit_ephemeral_facets(peer_coherence_builder(inline_artifact_store()))
-        .store_factory(Arc::new(lash_core::InMemorySessionStoreFactory::new()))
+        .store_factory(Arc::new(lash_core::facade_support::InMemorySessionStoreFactory::new()))
         .process_registry(Arc::new(TestLocalProcessRegistry::default()))
         .build()?;
     Ok(())
@@ -222,7 +222,7 @@ async fn explicit_ephemeral_facets_build_successfully() -> Result<()> {
 struct NoopProcessRunHandle;
 
 #[async_trait]
-impl lash_core::ProcessRunHandle for NoopProcessRunHandle {
+impl lash_core::facade_support::ProcessRunHandle for NoopProcessRunHandle {
     async fn claim_and_run_pending(&self) -> std::result::Result<(), lash_core::PluginError> {
         Ok(())
     }
@@ -234,7 +234,7 @@ async fn process_work_driver_configures_external_runner_without_inline_store_fac
     let registry =
         Arc::new(TestLocalProcessRegistry::default()) as Arc<dyn lash_core::ProcessRegistry>;
     let driver =
-        lash_core::ProcessWorkDriver::new(Arc::clone(&registry), Arc::new(NoopProcessRunHandle));
+        lash_core::facade_support::ProcessWorkDriver::new(Arc::clone(&registry), Arc::new(NoopProcessRunHandle));
     let driver_registry = driver.process_registry();
     let core = explicit_ephemeral_facets(peer_coherence_builder(inline_artifact_store()))
         .process_work_driver(driver)
@@ -284,9 +284,9 @@ async fn durable_process_worker_config_uses_core_process_registry() -> Result<()
     let registry =
         Arc::new(TestLocalProcessRegistry::default()) as Arc<dyn lash_core::ProcessRegistry>;
     let trigger_store =
-        Arc::new(lash_core::InMemoryTriggerStore::default()) as Arc<dyn lash_core::TriggerStore>;
+        Arc::new(lash_core::facade_support::InMemoryTriggerStore::default()) as Arc<dyn lash_core::TriggerStore>;
     let core = explicit_ephemeral_facets(peer_coherence_builder(inline_artifact_store()))
-        .store_factory(Arc::new(lash_core::InMemorySessionStoreFactory::new()))
+        .store_factory(Arc::new(lash_core::facade_support::InMemorySessionStoreFactory::new()))
         .trigger_store(Arc::clone(&trigger_store))
         .process_registry(Arc::clone(&registry))
         .build()?;
@@ -300,7 +300,7 @@ async fn durable_process_worker_config_uses_core_process_registry() -> Result<()
     assert!(Arc::ptr_eq(&config.trigger_store, &trigger_store));
     assert_eq!(
         config.process_execution_concurrency(),
-        lash_core::DEFAULT_PROCESS_EXECUTION_CONCURRENCY
+        lash_core::facade_support::DEFAULT_PROCESS_EXECUTION_CONCURRENCY
     );
     Ok(())
 }
@@ -309,7 +309,7 @@ async fn durable_process_worker_config_uses_core_process_registry() -> Result<()
 async fn fork_distinguishes_collected_point_from_retained_orphaned_source() -> Result<()> {
     use lash_core::SessionStoreFactory as _;
 
-    let factory = Arc::new(lash_core::InMemorySessionStoreFactory::new());
+    let factory = Arc::new(lash_core::facade_support::InMemorySessionStoreFactory::new());
     let core = explicit_ephemeral_facets(LashCore::standard_builder())
         .provider(mock_provider())
         .model(mock_model_spec())
@@ -399,7 +399,7 @@ async fn fork_distinguishes_collected_point_from_retained_orphaned_source() -> R
 async fn fork_observer_inheritance_is_recoverable_selective_and_wake_independent() -> Result<()> {
     use lash_core::{ProcessRegistry as _, SessionStoreFactory as _};
 
-    let factory = Arc::new(lash_core::InMemorySessionStoreFactory::new());
+    let factory = Arc::new(lash_core::facade_support::InMemorySessionStoreFactory::new());
     let registry = Arc::new(TestLocalProcessRegistry::default());
     let core = explicit_ephemeral_facets(LashCore::standard_builder())
         .provider(mock_provider())
@@ -721,7 +721,7 @@ async fn session_create_observer_intent_replays_idempotently_on_open() -> Result
 
     let session_id = "session-create-observer-recovery";
     let process_id = "session-create-observed-process";
-    let factory = Arc::new(lash_core::InMemorySessionStoreFactory::new());
+    let factory = Arc::new(lash_core::facade_support::InMemorySessionStoreFactory::new());
     let registry = Arc::new(TestLocalProcessRegistry::default());
     registry
         .register_process(lash_core::ProcessRegistration::new(
@@ -808,7 +808,7 @@ async fn session_create_observer_intent_replays_idempotently_on_open() -> Result
 async fn nested_session_observer_intents_settle_every_layer_before_open_returns() -> Result<()> {
     use lash_core::{ProcessRegistry as _, SessionStoreFactory as _};
 
-    let factory = Arc::new(lash_core::InMemorySessionStoreFactory::new());
+    let factory = Arc::new(lash_core::facade_support::InMemorySessionStoreFactory::new());
     let registry = Arc::new(TestLocalProcessRegistry::default());
     let core = explicit_ephemeral_facets(LashCore::standard_builder())
         .provider(mock_provider())
@@ -939,7 +939,7 @@ fn builder_rejects_invalid_process_execution_concurrency() {
 #[tokio::test]
 async fn durable_process_worker_config_requires_core_process_registry() {
     let core = explicit_ephemeral_facets(peer_coherence_builder(inline_artifact_store()))
-        .store_factory(Arc::new(lash_core::InMemorySessionStoreFactory::new()))
+        .store_factory(Arc::new(lash_core::facade_support::InMemorySessionStoreFactory::new()))
         .build()
         .expect("build core without process support");
 
@@ -983,7 +983,7 @@ async fn a_fork_runs_under_the_hosts_generation_intent_not_the_branch_points() -
         temperature: Some(lash_core::NonNegativeFiniteF64::new(0.0).expect("finite temperature")),
         seed: Some(42),
     };
-    let factory = Arc::new(lash_core::InMemorySessionStoreFactory::new());
+    let factory = Arc::new(lash_core::facade_support::InMemorySessionStoreFactory::new());
     let core = explicit_ephemeral_facets(LashCore::standard_builder())
         .provider(mock_provider())
         .model(mock_model_spec())

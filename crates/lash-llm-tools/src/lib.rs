@@ -3,8 +3,10 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use lash_core::plugin::{PluginError, PluginFactory, PluginSessionContext};
 use lash_core::{
-    DirectJsonSchema, DirectMessage, DirectOutputSpec, DirectPart, DirectRequest, DirectRole,
-    PluginSpec, PluginSpecFactory, ToolCall, ToolContext, ToolDefinition, ToolProvider, ToolResult,
+    ToolCall, ToolContext, ToolDefinition, ToolProvider, ToolResult,
+    facade_support::DirectJsonSchema, facade_support::DirectMessage,
+    facade_support::DirectOutputSpec, facade_support::DirectPart, facade_support::DirectRequest,
+    facade_support::DirectRole, facade_support::PluginSpec, facade_support::PluginSpecFactory,
 };
 use lash_tool_support::{
     LashlangToolBinding, StaticToolExecute, StaticToolProvider, ToolDefinitionLashlangExt,
@@ -50,7 +52,7 @@ impl PluginFactory for LlmToolsPluginFactory {
     fn build(
         &self,
         ctx: &PluginSessionContext,
-    ) -> Result<Arc<dyn lash_core::SessionPlugin>, PluginError> {
+    ) -> Result<Arc<dyn lash_core::facade_support::SessionPlugin>, PluginError> {
         let provider: Arc<dyn ToolProvider> = Arc::new(llm_query_provider(
             self.model.clone(),
             self.model_variant.clone(),
@@ -343,7 +345,7 @@ mod tests {
     #[derive(Default)]
     struct DirectCompletionManager {
         snapshot: RuntimeSessionState,
-        requests: Mutex<Vec<(lash_core::DirectRequest, String)>>,
+        requests: Mutex<Vec<(lash_core::facade_support::DirectRequest, String)>>,
         response_text: String,
     }
 
@@ -387,7 +389,7 @@ mod tests {
     fn direct_completion_context(
         manager: Arc<DirectCompletionManager>,
     ) -> lash_core::ToolContext<'static> {
-        let completions = lash_core::DirectCompletionClient::from_fn({
+        let completions = lash_core::facade_support::DirectCompletionClient::from_fn({
             let manager = Arc::clone(&manager);
             move |request, usage_source| {
                 manager
@@ -395,7 +397,7 @@ mod tests {
                     .lock()
                     .expect("requests")
                     .push((request, usage_source));
-                Ok(lash_core::DirectCompletion {
+                Ok(lash_core::facade_support::DirectCompletion {
                     text: manager.response_text.clone(),
                     usage: lash_core::TokenUsage::default(),
                     llm_call: lash_core::LlmCallRecord {
@@ -485,15 +487,15 @@ mod tests {
         assert_eq!(request.model_variant.effort(), Some("fast"));
         assert!(matches!(
             request.output,
-            lash_core::DirectOutputSpec::JsonSchema(_)
+            lash_core::facade_support::DirectOutputSpec::JsonSchema(_)
         ));
         let prompt = request
             .messages
             .iter()
             .flat_map(|message| message.parts.iter())
             .filter_map(|part| match part {
-                lash_core::DirectPart::Text(text) => Some(text.as_str()),
-                lash_core::DirectPart::Attachment(_) => None,
+                lash_core::facade_support::DirectPart::Text(text) => Some(text.as_str()),
+                lash_core::facade_support::DirectPart::Attachment(_) => None,
             })
             .collect::<Vec<_>>()
             .join("\n");

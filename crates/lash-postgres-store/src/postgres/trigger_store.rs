@@ -19,12 +19,16 @@ impl TriggerStore for PostgresTriggerStore {
                 .map(|records| Ok(lash_core::TriggerCommandOutcome::List { records }));
         }
 
-        let request_hash = lash_core::trigger_command_hash(&command)?;
-        let receipt_id =
-            lash_core::trigger_operation_receipt_id(command.owner_scope(), operation_id)?;
+        let request_hash = lash_core::facade_support::trigger_command_hash(&command)?;
+        let receipt_id = lash_core::facade_support::trigger_operation_receipt_id(
+            command.owner_scope(),
+            operation_id,
+        )?;
         let subscription_key = command.subscription_key().unwrap_or_default().to_string();
-        let subscription_id =
-            lash_core::deterministic_subscription_id(command.owner_scope(), &subscription_key)?;
+        let subscription_id = lash_core::facade_support::deterministic_subscription_id(
+            command.owner_scope(),
+            &subscription_key,
+        )?;
         let mut tx = self.pool.begin().await.map_err(plugin_sqlx_error)?;
         sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))")
             .bind(&subscription_id)
@@ -80,7 +84,7 @@ impl TriggerStore for PostgresTriggerStore {
                     serde_json::from_str(&json).map_err(process_decode_error)
                 })
                 .collect::<Result<Vec<_>, _>>()?;
-            lash_core::evaluate_trigger_prune(
+            lash_core::facade_support::evaluate_trigger_prune(
                 records,
                 owner_scope.clone(),
                 actor.clone(),
@@ -99,7 +103,7 @@ impl TriggerStore for PostgresTriggerStore {
             let current = current_json
                 .map(|json| serde_json::from_str(&json).map_err(process_decode_error))
                 .transpose()?;
-            lash_core::evaluate_trigger_mutation(current, command, now)?
+            lash_core::facade_support::evaluate_trigger_mutation(current, command, now)?
         };
         let records = match &result {
             Ok(lash_core::TriggerCommandOutcome::Mutation { receipt }) => {
@@ -256,9 +260,9 @@ impl TriggerStore for PostgresTriggerStore {
         &self,
         request: TriggerOccurrenceRequest,
     ) -> Result<lash_core::TriggerIngressResult, PluginError> {
-        lash_core::validate_trigger_occurrence_request(&request)?;
-        let request_hash = lash_core::trigger_occurrence_request_hash(&request)?;
-        let occurrence_id = lash_core::deterministic_occurrence_id(&request)?;
+        lash_core::facade_support::validate_trigger_occurrence_request(&request)?;
+        let request_hash = lash_core::facade_support::trigger_occurrence_request_hash(&request)?;
+        let occurrence_id = lash_core::facade_support::deterministic_occurrence_id(&request)?;
         let mut tx = self.pool.begin().await.map_err(plugin_sqlx_error)?;
         sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))")
             .bind(&request.idempotency_key)
@@ -524,7 +528,7 @@ async fn reserve_postgres_deliveries(
                 continue;
             }
         };
-        let process_id = lash_core::deterministic_delivery_process_id(
+        let process_id = lash_core::facade_support::deterministic_delivery_process_id(
             &occurrence.occurrence_id,
             &subscription.subscription_id,
             &subscription.incarnation,
@@ -554,7 +558,7 @@ async fn reserve_postgres_deliveries(
             reservation_status: lash_core::TriggerDeliveryReservationStatus::Reserved,
         });
     }
-    lash_core::sort_trigger_delivery_reservations(&mut reservations);
+    lash_core::facade_support::sort_trigger_delivery_reservations(&mut reservations);
     Ok(reservations)
 }
 
@@ -583,7 +587,7 @@ async fn postgres_delivery_snapshots(
             })
         })
         .collect::<Result<Vec<_>, PluginError>>()?;
-    lash_core::sort_trigger_delivery_reservations(&mut reservations);
+    lash_core::facade_support::sort_trigger_delivery_reservations(&mut reservations);
     Ok(reservations)
 }
 

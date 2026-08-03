@@ -37,6 +37,293 @@ mod tool_result;
 mod trace;
 pub mod triggers;
 
+#[doc(hidden)]
+pub mod facade_support {
+    pub use crate::attachments::AttachmentProducer;
+    pub use crate::attachments::AttachmentReclamationReport;
+    pub use crate::attachments::AttachmentSourcePolicy;
+    pub use crate::attachments::AttachmentSourcePolicyError;
+    pub use crate::attachments::FileAttachmentStore;
+    pub use crate::attachments::InMemoryAttachmentStore;
+    pub use crate::attachments::OpenAttachmentSourcePolicy;
+    pub use crate::attachments::SessionAttachmentStore;
+    pub use crate::attachments::reclaim_unreferenced_attachments;
+    pub use crate::chronological::BorrowedChronologicalEntry;
+    pub use crate::chronological::BorrowedChronologicalMessage;
+    pub use crate::chronological::BorrowedChronologicalPayload;
+    pub use crate::chronological::ChronologicalEntry;
+    pub use crate::chronological::ChronologicalPayload;
+    pub use crate::chronological::ChronologicalProjection;
+    pub use crate::chronological::visit_turn_view;
+    pub use crate::direct::DirectJsonSchema;
+    pub use crate::direct::DirectLlmClient;
+    pub use crate::direct::DirectLlmError;
+    pub use crate::direct::DirectLlmResult;
+    pub use crate::direct::DirectMessage;
+    pub use crate::direct::DirectOutputSpec;
+    pub use crate::direct::DirectPart;
+    pub use crate::direct::DirectRequest;
+    pub use crate::direct::DirectRole;
+    pub use crate::llm::transport::LlmTransportError;
+    pub use crate::llm::transport::ProviderFailure;
+    pub use crate::plugin::AssistantResponseTransform;
+    pub use crate::plugin::CheckpointHookContext;
+    pub use crate::plugin::CompactionContext;
+    pub use crate::plugin::ContextCompaction;
+    pub use crate::plugin::ContextCompactor;
+    pub use crate::plugin::ContextError;
+    pub use crate::plugin::DirectCompletion;
+    pub use crate::plugin::DirectLlmCompletion;
+    pub use crate::plugin::PersistentRuntimeServices;
+    pub use crate::plugin::PluginCommand;
+    pub use crate::plugin::PluginCommandReceipt;
+    pub use crate::plugin::PluginDirective;
+    pub use crate::plugin::PluginExtensionContribution;
+    pub use crate::plugin::PluginFactory;
+    pub use crate::plugin::PluginHost;
+    pub use crate::plugin::PluginLifecycleEvent;
+    pub use crate::plugin::PluginLifecycleEventHook;
+    pub use crate::plugin::PluginOperation;
+    pub use crate::plugin::PluginOperationFailure;
+    pub use crate::plugin::PluginOperationInvokeError;
+    pub use crate::plugin::PluginOwned;
+    pub use crate::plugin::PluginQuery;
+    pub use crate::plugin::PluginRegistrar;
+    pub use crate::plugin::PluginSession;
+    pub use crate::plugin::PluginSessionContext;
+    pub use crate::plugin::PluginSpec;
+    pub use crate::plugin::PluginSpecFactory;
+    pub use crate::plugin::PluginTask;
+    pub use crate::plugin::PluginTaskReceipt;
+    pub use crate::plugin::PromptHookContext;
+    pub use crate::plugin::RuntimeServices;
+    pub use crate::plugin::SessionConfigChangedContext;
+    pub use crate::plugin::SessionHandle;
+    pub use crate::plugin::SessionLifecycleService;
+    pub use crate::plugin::SessionObservedProcessOutcome;
+    pub use crate::plugin::SessionObservedProcessResult;
+    pub use crate::plugin::SessionParam;
+    pub use crate::plugin::SessionPlugin;
+    pub use crate::plugin::SessionStateChangedContext;
+    pub use crate::plugin::SessionTurnRequest;
+    pub use crate::plugin::SnapshotReader;
+    pub use crate::plugin::SnapshotWriter;
+    pub use crate::plugin::ToolCatalogContribution;
+    pub use crate::plugin::ToolResultProjectionContext;
+    pub use crate::plugin::ToolResultProjector;
+    pub use crate::plugin::TurnContextTransform;
+    pub use crate::plugin::TurnHookContext;
+    pub use crate::plugin::TurnResultHookContext;
+    pub use crate::plugin::TurnResultSummary;
+    pub use crate::plugin::TurnTransformContext;
+    pub use crate::plugin_stack::PluginStack;
+    pub use crate::provider::CacheRetention;
+    pub use crate::provider::LlmTimeouts;
+    pub use crate::provider::ModelEffortValidationCategory;
+    pub use crate::provider::Provider;
+    pub use crate::provider::ProviderComponents;
+    pub use crate::provider::ProviderFactory;
+    pub use crate::provider::ProviderHandle;
+    pub use crate::provider::ProviderOptions;
+    pub use crate::provider::ProviderSpec;
+    pub use crate::provider::SingleProviderResolver;
+    pub use crate::runtime::AgentFrameRun;
+    pub use crate::runtime::AssembledTurn;
+    pub use crate::runtime::AssistantOutput;
+    pub use crate::runtime::CanonicalRuntimeEffectEnvelope;
+    pub use crate::runtime::DEFAULT_PROCESS_EXECUTION_CONCURRENCY;
+    pub use crate::runtime::DirectCompletionClient;
+    pub use crate::runtime::DurableProcessWorker;
+    pub use crate::runtime::DurableProcessWorkerConfig;
+    pub use crate::runtime::EmbeddedRuntimeHost;
+    pub use crate::runtime::EventSink;
+    pub use crate::runtime::ExecutionSummary;
+    pub use crate::runtime::InMemoryLiveReplayStore;
+    pub use crate::runtime::InMemoryLiveReplayStoreConfig;
+    pub use crate::runtime::InMemoryProcessExecutionEnvStore;
+    pub use crate::runtime::InMemorySessionStore;
+    pub use crate::runtime::InMemorySessionStoreFactory;
+    pub use crate::runtime::InlineEffectHost;
+    pub use crate::runtime::InlineProcessRunHandle;
+    pub use crate::runtime::InlineRuntimeEffectController;
+    pub use crate::runtime::LashRuntime;
+    pub use crate::runtime::LiveReplayGap;
+    pub use crate::runtime::MergeKey;
+    pub use crate::runtime::NoopTurnActivitySink;
+    pub use crate::runtime::ObservedProcess;
+    pub use crate::runtime::ObservedProcessEvent;
+    pub use crate::runtime::ObservedWorkItem;
+    pub use crate::runtime::OutputState;
+    pub use crate::runtime::PROCESS_LEASE_SCHEMA_VERSION;
+    pub use crate::runtime::ParkedSession;
+    pub use crate::runtime::ProcessAttach;
+    pub use crate::runtime::ProcessAwaiter;
+    pub use crate::runtime::ProcessChangeHub;
+    pub use crate::runtime::ProcessDrainReport;
+    pub use crate::runtime::ProcessEngineProcessContext;
+    pub use crate::runtime::ProcessEngineRegistry;
+    pub use crate::runtime::ProcessEventAppendPlan;
+    pub use crate::runtime::ProcessEventSink;
+    pub use crate::runtime::ProcessExecutionConcurrencyError;
+    pub use crate::runtime::ProcessRunHandle;
+    pub use crate::runtime::ProcessRuntimeHost;
+    pub use crate::runtime::ProcessStartPlan;
+    pub use crate::runtime::ProcessTerminalSemantics;
+    pub use crate::runtime::ProcessToolVisibilityFilter;
+    pub use crate::runtime::ProcessTurnCancellation;
+    pub use crate::runtime::ProcessWake;
+    pub use crate::runtime::ProcessWakeDeliveryRequest;
+    pub use crate::runtime::ProcessWorkDriver;
+    pub use crate::runtime::ProcessWorkObserver;
+    pub use crate::runtime::ProcessWorkSnapshot;
+    pub use crate::runtime::QueuedWorkDriver;
+    pub use crate::runtime::QueuedWorkRunError;
+    pub use crate::runtime::QueuedWorkRunHandle;
+    pub use crate::runtime::QueuedWorkRunRequest;
+    pub use crate::runtime::QueuedWorkWakeDisposition;
+    pub use crate::runtime::QueuedWorkWakeFailure;
+    pub use crate::runtime::RuntimeAwaitEventOptions;
+    pub use crate::runtime::RuntimeEffectReplayTrace;
+    pub use crate::runtime::RuntimeEnvironment;
+    pub use crate::runtime::RuntimeEnvironmentBuilder;
+    pub use crate::runtime::RuntimeHandle;
+    pub use crate::runtime::RuntimeHostConfig;
+    pub use crate::runtime::RuntimeObservation;
+    pub use crate::runtime::RuntimeSleepOptions;
+    pub use crate::runtime::SessionCommand;
+    pub use crate::runtime::SessionCommandReceipt;
+    pub use crate::runtime::SessionConfigPatch;
+    pub use crate::runtime::SessionObservation;
+    pub use crate::runtime::SessionObservationSubscription;
+    pub use crate::runtime::SessionResume;
+    pub use crate::runtime::SessionScopeId;
+    pub use crate::runtime::SessionUsageReport;
+    pub use crate::runtime::SystemClock;
+    pub use crate::runtime::TerminationPolicy;
+    pub use crate::runtime::TurnActivitySink;
+    pub use crate::runtime::TurnAddress;
+    pub use crate::runtime::TurnAttach;
+    pub use crate::runtime::TurnCancelOutcome;
+    pub use crate::runtime::TurnCancelReceipt;
+    pub use crate::runtime::TurnCancelRequest;
+    pub use crate::runtime::TurnCancellationEvidence;
+    pub use crate::runtime::TurnInputAcceptanceReceipt;
+    pub use crate::runtime::TurnIssue;
+    pub use crate::runtime::TurnOptions;
+    pub use crate::runtime::TurnTerminal;
+    pub use crate::runtime::TurnWorkDriver;
+    pub use crate::runtime::UnavailableProcessService;
+    pub use crate::runtime::UsageReportRow;
+    pub use crate::runtime::UsageTotals;
+    pub use crate::runtime::WakeCoalescingKey;
+    pub use crate::runtime::WakeDeliveryDriveReport;
+    pub use crate::runtime::WakeDeliveryDriver;
+    pub use crate::runtime::WakeTurnMode;
+    pub use crate::runtime::WakeTurnPolicy;
+    pub use crate::runtime::current_epoch_ms;
+    pub use crate::runtime::diff_token_ledger;
+    pub use crate::runtime::diff_usage_reports;
+    pub use crate::runtime::ensure_durable_effect_input;
+    pub use crate::runtime::epoch_ms_from_system_time;
+    pub use crate::runtime::process_runtime_session_ids;
+    pub use crate::runtime::process_signal_event_type;
+    pub use crate::runtime::process_signal_wait_key;
+    pub use crate::runtime::process_wake_delivery;
+    pub use crate::runtime::process_wake_source_key;
+    pub use crate::runtime::promise_semantics;
+    pub use crate::runtime::reconcile_pruned_trigger_deliveries;
+    pub use crate::runtime::system_time_from_epoch_ms;
+    pub use crate::runtime::terminal_append_request;
+    pub use crate::runtime::validate_generic_process_event_append;
+    pub use crate::runtime::validate_replayed_effect_envelope;
+    pub use crate::runtime::watch_process_registry;
+    pub use crate::runtime::watch_process_registry_with_sink;
+    pub use crate::session::InjectedTurnInput;
+    pub use crate::session::ToolInvocation;
+    pub use crate::session::ToolInvocationReply;
+    pub use crate::session_graph::frame_node_id;
+    pub use crate::session_model::ConversationRecord;
+    pub use crate::session_model::GenerationOverlay;
+    pub use crate::session_model::SessionSpec;
+    pub use crate::session_model::context::PreparedContext;
+    pub use crate::store::LeaseTimings;
+    pub use crate::store::LeaseTimingsError;
+    pub use crate::store::SessionHead;
+    pub use crate::store::SessionPickerInfo;
+    pub use crate::tool_provider::ToolChildExecutionTraceHook;
+    pub use crate::tool_provider::ToolSessionProcessAdmin;
+    pub use crate::tool_provider::ToolTriggerClient;
+    pub use crate::tool_registry::PLUGIN_TOOL_SOURCE_ID;
+    pub use crate::tool_registry::ReconfigureError;
+    pub use crate::tool_registry::ToolRestoreReport;
+    pub use crate::tool_registry::ToolSourceHandle;
+    pub use crate::tool_registry::ToolStateEntry;
+    pub use crate::triggers::InMemoryTriggerStore;
+    pub use crate::triggers::TriggerDeliveryEmitOutcome;
+    pub use crate::triggers::TriggerDeliveryEmitReport;
+    pub use crate::triggers::TriggerEmitReport;
+    pub use crate::triggers::TriggerEvent;
+    pub use crate::triggers::TriggerEventType;
+    pub use crate::triggers::TriggerManifestMembership;
+    pub use crate::triggers::TriggerRegistration;
+    pub use crate::triggers::TriggerRouter;
+    pub use crate::triggers::TriggerTargetSummary;
+    pub use crate::triggers::default_trigger_source_key;
+    pub use crate::triggers::deterministic_delivery_process_id;
+    pub use crate::triggers::deterministic_occurrence_id;
+    pub use crate::triggers::deterministic_subscription_id;
+    pub use crate::triggers::empty_trigger_source_key;
+    pub use crate::triggers::evaluate_trigger_mutation;
+    pub use crate::triggers::evaluate_trigger_prune;
+    pub use crate::triggers::sort_trigger_delivery_reservations;
+    pub use crate::triggers::trigger_command_hash;
+    pub use crate::triggers::trigger_occurrence_request_hash;
+    pub use crate::triggers::trigger_operation_receipt_id;
+    pub use crate::triggers::validate_trigger_occurrence_request;
+    pub use lash_sansio::AcceptedInjectedTurnInput;
+    pub use lash_sansio::AttachmentMeta;
+    pub use lash_sansio::EffectId;
+    pub use lash_sansio::ErrorEnvelope;
+    pub use lash_sansio::MessageSequence;
+    pub use lash_sansio::ModelToolReturn;
+    pub use lash_sansio::ModelToolReturnPart;
+    pub use lash_sansio::ProviderSchemaCapabilities;
+    pub use lash_sansio::ResolvedSchema;
+    pub use lash_sansio::Response;
+    pub use lash_sansio::SchemaDialect;
+    pub use lash_sansio::SchemaPurpose;
+    pub use lash_sansio::SchemaResolutionError;
+    pub use lash_sansio::SchemaResolutionRequest;
+    pub use lash_sansio::SessionStreamEvent;
+    pub use lash_sansio::ToolCatalogBuildInput;
+    pub use lash_sansio::TurnFinish;
+    pub use lash_sansio::TurnOutcome;
+    pub use lash_sansio::TurnStop;
+    pub use lash_sansio::append_assistant_text_part;
+    pub use lash_sansio::build_tool_catalog;
+    pub use lash_sansio::default_prompt_template;
+    pub use lash_sansio::head_tail_truncate;
+    pub use lash_sansio::normalized_response_parts;
+    pub use lash_sansio::reasoning_part;
+    pub use lash_sansio::render_turn_causes_prompt;
+    pub use lash_sansio::resolve_schema;
+    pub use lash_sansio::shared_parts;
+    pub use lash_sansio::validate_tool_input;
+    pub use lash_sansio::visible_response_text_from_parts;
+    pub use lash_trace::JsonlTraceSink;
+    pub use lash_trace::TraceBranchSelection;
+    pub use lash_trace::TraceLabelMetadata;
+    pub use lash_trace::TraceLevel;
+    pub use lash_trace::TraceRecord;
+    pub use lash_trace::TraceRuntimeScope;
+    pub use lash_trace::TraceRuntimeSubject;
+    pub use lash_trace::TraceSink;
+    pub use lash_trace::TraceSinkError;
+    pub use schemars::JsonSchema;
+}
+
+pub(crate) use facade_support::*;
+
 pub mod sansio {
     pub(crate) use lash_sansio::sansio::LogEvent;
     pub use lash_sansio::sansio::{
@@ -62,18 +349,8 @@ pub enum EffectReplayOwnership {
 
 // Re-exports
 pub use attachments::{
-    AttachmentProducer, AttachmentReclamationReport, AttachmentRootSet, AttachmentSourcePolicy,
-    AttachmentSourcePolicyError, AttachmentStore, AttachmentStoreError, AttachmentStorePersistence,
-    FileAttachmentStore, InMemoryAttachmentStore, OpenAttachmentSourcePolicy,
-    SessionAttachmentStore, StoredAttachment, StoredBlobRef, reclaim_unreferenced_attachments,
-};
-pub use chronological::{
-    BorrowedChronologicalEntry, BorrowedChronologicalMessage, BorrowedChronologicalPayload,
-    ChronologicalEntry, ChronologicalPayload, ChronologicalProjection, visit_turn_view,
-};
-pub use direct::{
-    DirectJsonSchema, DirectLlmClient, DirectLlmError, DirectLlmResult, DirectMessage,
-    DirectOutputSpec, DirectPart, DirectRequest, DirectRole,
+    AttachmentRootSet, AttachmentStore, AttachmentStoreError, AttachmentStorePersistence,
+    StoredAttachment, StoredBlobRef,
 };
 pub use lash_sansio::llm::types::{
     AttachmentSource, AttemptOutcome, AttemptRecord, ExecutionEvidence, GenerationDisposition,
@@ -82,24 +359,17 @@ pub use lash_sansio::llm::types::{
     NormalizedError, ProtocolPosition, ProviderFileScope, RetryDecision,
 };
 pub use lash_sansio::{
-    AcceptedInjectedTurnInput, AttachmentCreateMeta, AttachmentId, AttachmentMeta, AttachmentRef,
-    AttachmentTypeMetadata, CheckpointDelivery, CheckpointKind, CompactToolContract, EffectId,
-    ErrorEnvelope, ExecImage, ExecResponse, LashSchema, LlmCallError, MediaType, Message,
-    MessageOrigin, MessageRole, MessageSequence, ModelToolReturn, ModelToolReturnPart, Part,
-    PartKind, PluginMessage, PluginRuntimeEvent, ProjectionMode, PromptBuiltin, PromptContribution,
-    PromptContributionGate, PromptLayer, PromptSlot, PromptSlotLayer, PromptTemplate,
-    PromptTemplateEntry, PromptTemplateSection, ProviderSchemaCapabilities, PruneState,
-    ResolvedSchema, Response, SchemaContract, SchemaDialect, SchemaProjectionOverride,
-    SchemaProjectionPolicy, SchemaPurpose, SchemaResolutionError, SchemaResolutionRequest,
-    SessionAppendNode, SessionStreamEvent, TextProjectionMetadata, TokenUsage, ToolActivation,
+    AttachmentCreateMeta, AttachmentId, AttachmentRef, AttachmentTypeMetadata, CheckpointDelivery,
+    CheckpointKind, CompactToolContract, ExecImage, ExecResponse, LashSchema, LlmCallError,
+    MediaType, Message, MessageOrigin, MessageRole, Part, PartKind, PluginMessage,
+    PluginRuntimeEvent, ProjectionMode, PromptBuiltin, PromptContribution, PromptContributionGate,
+    PromptLayer, PromptSlot, PromptSlotLayer, PromptTemplate, PromptTemplateEntry,
+    PromptTemplateSection, PruneState, SchemaContract, SchemaProjectionOverride,
+    SchemaProjectionPolicy, SessionAppendNode, TextProjectionMetadata, TokenUsage, ToolActivation,
     ToolArgumentProjectionPolicy, ToolCallOutcome, ToolCallOutput, ToolCallRecord,
-    ToolCancellation, ToolCatalog, ToolCatalogBuildInput, ToolCatalogEntry, ToolContract,
-    ToolControl, ToolDefinition, ToolFailure, ToolFailureClass, ToolFailureSource, ToolId,
-    ToolManifest, ToolOutputContract, ToolRetryDisposition, ToolRetryPolicy, ToolValue, TurnCause,
-    TurnFinish, TurnOutcome, TurnStop, append_assistant_text_part, build_tool_catalog,
-    default_prompt_template, head_tail_truncate, normalized_response_parts, reasoning_part,
-    render_turn_causes_prompt, resolve_schema, shared_parts, validate_tool_input,
-    visible_response_text_from_parts,
+    ToolCancellation, ToolCatalog, ToolCatalogEntry, ToolContract, ToolControl, ToolDefinition,
+    ToolFailure, ToolFailureClass, ToolFailureSource, ToolId, ToolManifest, ToolOutputContract,
+    ToolRetryDisposition, ToolRetryPolicy, ToolValue, TurnCause,
 };
 pub(crate) use lash_sansio::{
     BaseRenderCache, PromptBuildInput, build_turn, messages_are_prompt_resume_safe,
@@ -112,6 +382,11 @@ pub use store::AttachmentOwnerKind;
 ///
 /// Agent-frame seeds are typed at their serde boundary, so a terminal outcome
 /// can never advertise nodes that the commit materializer would have to drop.
+///
+/// # Integrator class
+///
+/// Protocol-engine implementors use this shared projection to preserve the
+/// host's terminal-outcome semantics.
 pub fn turn_outcome_from_tool_control(
     tool_name: &str,
     control: &ToolControl,
@@ -140,27 +415,17 @@ pub fn turn_outcome_from_tool_control(
     }
 }
 pub use protocol_build::ProtocolBuildInput;
-pub use tool_registry::{
-    PLUGIN_TOOL_SOURCE_ID, ReconfigureError, ToolRegistry, ToolRestoreReport, ToolSourceHandle,
-    ToolState, ToolStateEntry,
-};
+pub use tool_registry::{ToolRegistry, ToolState};
 pub use tool_result::{CancelHint, PendingCompletion, TimeoutBehavior, ToolResult};
 pub use triggers::{
-    InMemoryTriggerStore, TriggerCommand, TriggerCommandOutcome, TriggerDeliveryEmitOutcome,
-    TriggerDeliveryEmitReport, TriggerDeliveryReservation, TriggerDeliveryReservationStatus,
-    TriggerDeliveryRetentionCandidate, TriggerEffectResult, TriggerEmitReport, TriggerEvent,
-    TriggerEventCatalog, TriggerEventType, TriggerIngressResult, TriggerInputBinding,
-    TriggerManifestMembership, TriggerMutationDisposition, TriggerMutationReceipt,
-    TriggerOccurrenceFilter, TriggerOccurrenceRecord, TriggerOccurrenceRequest,
-    TriggerOperationError, TriggerOwnerScope, TriggerRegistration, TriggerRouter, TriggerStore,
+    TriggerCommand, TriggerCommandOutcome, TriggerDeliveryReservation,
+    TriggerDeliveryReservationStatus, TriggerDeliveryRetentionCandidate, TriggerEffectResult,
+    TriggerEventCatalog, TriggerIngressResult, TriggerInputBinding, TriggerMutationDisposition,
+    TriggerMutationReceipt, TriggerOccurrenceFilter, TriggerOccurrenceRecord,
+    TriggerOccurrenceRequest, TriggerOperationError, TriggerOwnerScope, TriggerStore,
     TriggerSubscriptionDraft, TriggerSubscriptionFilter, TriggerSubscriptionRecord,
-    TriggerTargetSummary, default_trigger_source_key, deterministic_delivery_process_id,
-    deterministic_occurrence_id, deterministic_subscription_id, empty_trigger_source_key,
-    evaluate_trigger_mutation, evaluate_trigger_prune, sort_trigger_delivery_reservations,
-    trigger_command_hash, trigger_occurrence_request_hash, trigger_operation_receipt_id,
-    validate_trigger_occurrence_request,
 };
-pub const PROTOCOL_TURN_OPTIONS_SCHEMA_VERSION: u32 = 1;
+pub(crate) const PROTOCOL_TURN_OPTIONS_SCHEMA_VERSION: u32 = 1;
 
 #[derive(Clone, Debug, serde::Serialize)]
 pub struct ProtocolTurnOptions {
@@ -305,6 +570,12 @@ impl ProtocolTurnOptions {
 }
 
 #[derive(Clone, Debug, Default, serde::Serialize, serde::Deserialize)]
+/// Durable protocol-driver state owned by protocol-engine implementors.
+///
+/// # Integrator class
+///
+/// Protocol-engine implementors persist this envelope while the facade owns
+/// orchestration and lifecycle policy.
 pub struct ProtocolDriverState {
     pub plugin_id: String,
     pub payload: serde_json::Value,
@@ -328,59 +599,93 @@ impl lash_sansio::TurnProtocol for HostTurnProtocol {
     type DriverState = ProtocolDriverState;
 }
 
+/// Host-specialized effect vocabulary for protocol-engine implementors.
+///
+/// # Integrator class
+///
+/// Protocol-engine implementors drive these effects; applications use the facade.
 pub type Effect = lash_sansio::Effect<HostTurnProtocol>;
+/// Host-specialized driver action for protocol-engine implementors.
+///
+/// # Integrator class
+///
+/// Protocol-engine implementors return these actions; applications use the facade.
 pub type DriverAction = lash_sansio::DriverAction<HostTurnProtocol>;
+/// Borrowed host driver context for protocol-engine implementors.
+///
+/// # Integrator class
+///
+/// Protocol-engine implementors inspect this view while advancing a turn.
 pub type DriverContextView<'a> = lash_sansio::DriverContextView<'a, HostTurnProtocol>;
+/// Host driver configuration consumed by protocol-engine implementors.
+///
+/// # Integrator class
+///
+/// Protocol-engine implementors configure their driver through this type.
 pub type TurnDriverConfig = lash_sansio::TurnDriverConfig<HostTurnProtocol>;
+/// Host driver preamble produced by protocol-engine implementors.
+///
+/// # Integrator class
+///
+/// Protocol-engine implementors use this while preparing a turn.
 pub type TurnDriverPreamble = lash_sansio::TurnDriverPreamble<HostTurnProtocol>;
+/// Host projector context for protocol-engine implementors.
+///
+/// # Integrator class
+///
+/// Protocol-engine implementors use this context to project protocol state.
 pub type ProjectorContext<'a> = lash_sansio::ProjectorContext<'a, HostTurnProtocol>;
+/// Prepared host turn machine handed to protocol-engine implementors.
+///
+/// # Integrator class
+///
+/// Protocol-engine implementors complete preparation before driving the machine.
 pub type PreparedTurnMachine = lash_sansio::PreparedTurnMachine<HostTurnProtocol>;
+/// Host-specialized input for Sans-I/O protocol-engine implementors.
+///
+/// # Integrator class
+///
+/// Protocol-engine implementors accept this typed boundary input.
 pub type SansIoTurnInput = lash_sansio::SansIoTurnInput<HostTurnProtocol>;
+/// Host-specialized state machine for protocol-engine implementors.
+///
+/// # Integrator class
+///
+/// Protocol-engine implementors drive this machine; applications use the facade.
 pub type TurnMachine = lash_sansio::TurnMachine<HostTurnProtocol>;
+/// Host turn-machine configuration for protocol-engine implementors.
+///
+/// # Integrator class
+///
+/// Protocol-engine implementors construct this configuration at their boundary.
 pub type TurnMachineConfig = lash_sansio::TurnMachineConfig<HostTurnProtocol>;
 #[cfg(feature = "otel-trace")]
 pub use lash_trace::otel::{OtelTraceOptions, OtelTraceSink};
 pub use lash_trace::{
-    JsonlTraceSink, TraceAttachment, TraceBranchSelection, TraceContentBlock, TraceContext,
-    TraceEffectEnvelopeDiffEntry, TraceEffectEnvelopeDiffEvent, TraceEffectEnvelopeDiffValue,
-    TraceError, TraceEvent, TraceLabelMetadata, TraceLevel, TraceLlmMessage, TraceLlmRequest,
-    TraceLlmResponse, TracePromptComponent, TraceProviderRequestEvent, TraceProviderStreamEvent,
-    TraceRecord, TraceRuntimeScope, TraceRuntimeStreamEvent, TraceRuntimeSubject, TraceSink,
-    TraceSinkError, TraceTokenUsage, TraceToolSpec,
+    TraceAttachment, TraceContentBlock, TraceContext, TraceEffectEnvelopeDiffEntry,
+    TraceEffectEnvelopeDiffEvent, TraceEffectEnvelopeDiffValue, TraceError, TraceEvent,
+    TraceLlmMessage, TraceLlmRequest, TraceLlmResponse, TracePromptComponent,
+    TraceProviderRequestEvent, TraceProviderStreamEvent, TraceRuntimeStreamEvent, TraceTokenUsage,
+    TraceToolSpec,
 };
-pub use llm::transport::{LlmTransportError, ProviderFailure, ProviderFailureKind};
+pub use llm::transport::ProviderFailureKind;
 pub use model::{ModelLimits, ModelSpec};
 pub use plugin::{
     AgentFrameAssignment, AgentFrameId, AgentFrameReason, AgentFrameRecord,
-    AppendSessionNodesRequest, AppendSessionNodesResult, AssistantResponseTransform,
-    CheckpointHookContext, CompactionContext, ContextCompaction, ContextCompactor, ContextError,
-    DirectCompletion, DirectLlmCompletion, PersistentRuntimeServices, PluginCommand,
-    PluginCommandReceipt, PluginDirective, PluginError, PluginExtensionContribution,
-    PluginExtensions, PluginFactory, PluginHost, PluginLifecycleEvent, PluginLifecycleEventHook,
-    PluginOperation, PluginOperationFailure, PluginOperationInvokeError, PluginOptions,
-    PluginOwned, PluginQuery, PluginRegistrar, PluginSession, PluginSessionContext,
-    PluginSessionSnapshot, PluginSnapshotArtifact, PluginSnapshotEntry, PluginSnapshotMeta,
-    PluginSpec, PluginSpecFactory, PluginTask, PluginTaskReceipt, ProcessEngineContributionContext,
-    PromptHookContext, ProtocolBeforeLlmCallContext, ProtocolLlmCallAction, RuntimeServices,
-    SessionConfigChangedContext, SessionContextOverlay, SessionCreateRequest, SessionGraphService,
-    SessionHandle, SessionLifecycleService, SessionObservedProcessOutcome,
-    SessionObservedProcessResult, SessionParam, SessionPlugin, SessionPluginSource,
-    SessionReadView, SessionRelation, SessionSnapshot, SessionStartPoint,
-    SessionStateChangedContext, SessionStateService, SessionToolAccess, SessionTurnRequest,
-    SnapshotReader, SnapshotWriter, SubagentSessionContext, ToolCatalogContribution,
-    ToolResultProjectionContext, ToolResultProjector, TurnContextTransform, TurnHookContext,
-    TurnResultHookContext, TurnResultSummary, TurnTransformContext,
+    AppendSessionNodesRequest, AppendSessionNodesResult, PluginError, PluginExtensions,
+    PluginOptions, PluginSessionSnapshot, PluginSnapshotArtifact, PluginSnapshotEntry,
+    PluginSnapshotMeta, ProcessEngineContributionContext, ProtocolBeforeLlmCallContext,
+    ProtocolLlmCallAction, SessionContextOverlay, SessionCreateRequest, SessionGraphService,
+    SessionPluginSource, SessionReadView, SessionRelation, SessionSnapshot, SessionStartPoint,
+    SessionStateService, SessionToolAccess, SubagentSessionContext,
 };
 pub(crate) use plugin::{
     OpenAgentFrameRequest, OpenAgentFrameResult, PluginRuntimeDirective, SessionTurnInput,
 };
-pub use plugin_stack::PluginStack;
+
 pub use provider::{
-    CacheControlDialect, CacheRetention, LlmTimeouts, ModelCapability,
-    ModelEffortValidationCategory, Provider, ProviderComponents, ProviderFactory, ProviderHandle,
-    ProviderOptions, ProviderSpec, ReasoningCapability, ReasoningDisableEncoding,
-    ReasoningEncoding, ReasoningSelection, SamplingCapability, SingleProviderResolver,
-    StreamTermination,
+    CacheControlDialect, ModelCapability, ReasoningCapability, ReasoningDisableEncoding,
+    ReasoningEncoding, ReasoningSelection, SamplingCapability, StreamTermination,
 };
 pub(crate) use provider::{
     EmptyProviderResolver, ProviderBinding, ProviderCompletion, ProviderCompletionError,
@@ -392,67 +697,42 @@ pub use runtime::TestLocalProcessRegistry;
 pub use runtime::TestProcessRegistryWriteExt;
 #[doc(hidden)]
 pub use runtime::drive_with_event_pump;
-pub use runtime::promise_semantics;
+
 pub use runtime::{
-    AbandonEvidence, AbandonRequest, AbandonWriter, AgentFrameRun, AssembledTurn, AssistantOutput,
-    AwaitEventKey, AwaitEventResolver, AwaitEventWaitIdentity, BoundaryReason, CausalRef, Clock,
-    DeliveryPolicy, DirectCompletionClient, DurableProcessWorker, DurableProcessWorkerConfig,
-    EffectHost, EffectJournalRetirement, EmbeddedRuntimeHost, EventSink, ExecutionScope,
-    ExecutionSummary, ForkPoint, ForkSessionRequest, ForkSessionResult, InMemoryLiveReplayStore,
-    InMemoryLiveReplayStoreConfig, InMemoryProcessExecutionEnvStore, InMemorySessionStore,
-    InMemorySessionStoreFactory, InlineEffectHost, InlineProcessRunHandle,
-    InlineRuntimeEffectController, InputItem, LashRuntime, LiveReplayGap, LiveReplayGapReason,
-    LiveReplayResult, LiveReplayStore, LiveReplayStoreError, LiveReplaySubscribeResult,
-    LiveReplaySubscription, MergeKey, NoopTurnActivitySink, ObservedProcess, ObservedProcessEvent,
-    ObservedWorkItem, ObserverInheritance, OutputState, PROCESS_LEASE_SCHEMA_VERSION,
-    ParkedSession, PendingTurnInput, PendingTurnInputCancelOutcome, PendingTurnInputCancelResult,
-    PendingTurnInputCancelTarget, PendingTurnInputClaimDiagnostics, PendingTurnInputDraft,
-    PendingTurnInputSuffixCancelOutcome, PersistedSegmentHandover, ProcessAttach,
-    ProcessAwaitOutput, ProcessAwaiter, ProcessCancelSummary, ProcessChange, ProcessChangeCursor,
-    ProcessChangeHub, ProcessCompletionAuthority, ProcessCompletionOutcome,
-    ProcessContinuationStore, ProcessDrainReport, ProcessEngine, ProcessEngineProcessContext,
-    ProcessEngineRegistry, ProcessEngineRunContext, ProcessEngineValidationContext, ProcessEvent,
-    ProcessEventAppendPlan, ProcessEventAppendRequest, ProcessEventAppendResult, ProcessEventSink,
-    ProcessEventType, ProcessExecutionContext, ProcessExecutionEnvRef, ProcessExecutionEnvSpec,
-    ProcessExecutionEnvStore, ProcessExecutionWriteAuthority, ProcessExternalRef,
-    ProcessHandleSummary, ProcessId, ProcessIdentity, ProcessInfraError, ProcessInput,
-    ProcessLease, ProcessLeaseClaimOutcome, ProcessLeaseCompletion, ProcessListFilter,
-    ProcessListMode, ProcessLiveReferenceSummary, ProcessObserverBy, ProcessOpScope,
-    ProcessOriginator, ProcessOutcome, ProcessProvenance, ProcessPruneReport, ProcessRecord,
-    ProcessRegistration, ProcessRegistry, ProcessRunHandle, ProcessRunOutcome, ProcessRuntimeHost,
-    ProcessService, ProcessSessionDeleteReport, ProcessSpawnProvenance, ProcessStartOptions,
-    ProcessStartOutcome, ProcessStartPlan, ProcessStartRequest, ProcessStarted, ProcessStatus,
-    ProcessStatusFilter, ProcessTerminalSemantics, ProcessTerminalSpec, ProcessTombstone,
-    ProcessToolVisibilityFilter, ProcessTurnCancellation, ProcessValueSelector, ProcessWake,
-    ProcessWakeDelivery, ProcessWakeDeliveryRequest, ProcessWakeSpec, ProcessWorkDriver,
-    ProcessWorkObserver, ProcessWorkSnapshot, ProjectionWatermark, PromptUsage,
-    ProtocolSessionExtension, ProtocolSessionExtensionHandle, ProtocolTurnExtension,
-    ProtocolTurnExtensionHandle, QueuedWorkDriver, QueuedWorkRunError, QueuedWorkRunHandle,
-    QueuedWorkRunRequest, QueuedWorkWakeDisposition, QueuedWorkWakeFailure, RecoveryDisposition,
-    Resolution, ResolveOutcome, RuntimeEnvironment, RuntimeEnvironmentBuilder, RuntimeError,
-    RuntimeErrorCause, RuntimeErrorCode, RuntimeHandle, RuntimeHostConfig, RuntimeObservation,
-    ScopedEffectController, SegmentHandover, SegmentProgress, SessionCommand,
-    SessionCommandReceipt, SessionCursor, SessionCursorError, SessionId, SessionObservation,
-    SessionObservationEvent, SessionObservationEventPayload, SessionObservationSubscription,
-    SessionProcessEventKind, SessionQueueEventKind, SessionResume, SessionRevision, SessionScope,
-    SessionScopeId, SessionStoreCreateRequest, SessionStoreFactory, SessionUsageReport, SlotPolicy,
-    SystemClock, TerminationPolicy, TokenLedgerEntry, ToolCallLaunch, TurnActivity, TurnActivityId,
-    TurnActivitySink, TurnAddress, TurnAttach, TurnCancelOriginHint, TurnCancelOutcome,
-    TurnCancelReceipt, TurnCancelRequest, TurnCancellationEvidence, TurnContext, TurnEvent,
-    TurnInput, TurnInputAcceptanceReceipt, TurnInputApplication, TurnInputCheckpointBoundary,
-    TurnInputClaim, TurnInputClaimMode, TurnInputCompletion, TurnInputIngress, TurnInputState,
-    TurnIssue, TurnOptions, TurnTerminal, TurnWorkDriver, UnavailableProcessService,
-    UsageReportRow, UsageTotals, WaitKind, WaitState, WakeCoalescingKey, WakeDelivery,
-    WakeDeliveryBlockedGroup, WakeDeliveryClaimOutcome, WakeDeliveryConfig,
-    WakeDeliveryDriveReport, WakeDeliveryDriver, WakeDeliveryReport, WakeDeliveryState,
-    WakeDiscardReason, WakeTurnMode, WakeTurnPolicy, current_epoch_ms, diff_token_ledger,
-    diff_usage_reports, ensure_durable_effect_input, epoch_ms_from_system_time,
-    process_runtime_session_ids, process_signal_event_type, process_signal_wait_key,
-    process_wake_delivery, process_wake_source_key, reconcile_pruned_trigger_deliveries,
-    system_time_from_epoch_ms, terminal_append_request, validate_generic_process_event_append,
-    watch_process_registry, watch_process_registry_with_sink,
+    AbandonEvidence, AbandonRequest, AbandonWriter, AwaitEventKey, AwaitEventResolver,
+    AwaitEventWaitIdentity, BoundaryReason, CausalRef, Clock, DeliveryPolicy, EffectHost,
+    EffectJournalRetirement, ExecutionScope, ForkPoint, ForkSessionRequest, ForkSessionResult,
+    InputItem, LiveReplayGapReason, LiveReplayResult, LiveReplayStore, LiveReplayStoreError,
+    LiveReplaySubscribeResult, LiveReplaySubscription, ObserverInheritance, PendingTurnInput,
+    PendingTurnInputCancelOutcome, PendingTurnInputCancelResult, PendingTurnInputCancelTarget,
+    PendingTurnInputClaimDiagnostics, PendingTurnInputDraft, PendingTurnInputSuffixCancelOutcome,
+    PersistedSegmentHandover, ProcessAwaitOutput, ProcessCancelSummary, ProcessChange,
+    ProcessChangeCursor, ProcessCompletionAuthority, ProcessCompletionOutcome,
+    ProcessContinuationStore, ProcessEngine, ProcessEngineRunContext,
+    ProcessEngineValidationContext, ProcessEvent, ProcessEventAppendRequest,
+    ProcessEventAppendResult, ProcessEventType, ProcessExecutionContext, ProcessExecutionEnvRef,
+    ProcessExecutionEnvSpec, ProcessExecutionEnvStore, ProcessExecutionWriteAuthority,
+    ProcessExternalRef, ProcessHandleSummary, ProcessId, ProcessIdentity, ProcessInfraError,
+    ProcessInput, ProcessLease, ProcessLeaseClaimOutcome, ProcessLeaseCompletion,
+    ProcessListFilter, ProcessListMode, ProcessLiveReferenceSummary, ProcessObserverBy,
+    ProcessOpScope, ProcessOriginator, ProcessOutcome, ProcessProvenance, ProcessPruneReport,
+    ProcessRecord, ProcessRegistration, ProcessRegistry, ProcessRunOutcome, ProcessService,
+    ProcessSessionDeleteReport, ProcessSpawnProvenance, ProcessStartOptions, ProcessStartOutcome,
+    ProcessStartRequest, ProcessStarted, ProcessStatus, ProcessStatusFilter, ProcessTerminalSpec,
+    ProcessTombstone, ProcessValueSelector, ProcessWakeDelivery, ProcessWakeSpec,
+    ProjectionWatermark, PromptUsage, ProtocolSessionExtension, ProtocolSessionExtensionHandle,
+    ProtocolTurnExtension, ProtocolTurnExtensionHandle, RecoveryDisposition, Resolution,
+    ResolveOutcome, RuntimeError, RuntimeErrorCause, RuntimeErrorCode, ScopedEffectController,
+    SegmentHandover, SegmentProgress, SessionCursor, SessionCursorError, SessionId,
+    SessionObservationEvent, SessionObservationEventPayload, SessionProcessEventKind,
+    SessionQueueEventKind, SessionRevision, SessionScope, SessionStoreCreateRequest,
+    SessionStoreFactory, SlotPolicy, TokenLedgerEntry, ToolCallLaunch, TurnActivity,
+    TurnActivityId, TurnCancelOriginHint, TurnContext, TurnEvent, TurnInput, TurnInputApplication,
+    TurnInputCheckpointBoundary, TurnInputClaim, TurnInputClaimMode, TurnInputCompletion,
+    TurnInputIngress, TurnInputState, WaitKind, WaitState, WakeDelivery, WakeDeliveryBlockedGroup,
+    WakeDeliveryClaimOutcome, WakeDeliveryConfig, WakeDeliveryReport, WakeDeliveryState,
+    WakeDiscardReason,
 };
-pub use runtime::{DEFAULT_PROCESS_EXECUTION_CONCURRENCY, ProcessExecutionConcurrencyError};
 #[allow(unused_imports)]
 pub(crate) use runtime::{
     LlmAttachmentSpec, ProcessEventSemantics, QueuedCheckpointTurnInput, QueuedCheckpointWork,
@@ -474,52 +754,43 @@ pub(crate) use session_model::plugin_runtime_protocol_event;
 // Effect / process-control types consumed by external effect hosts (e.g.
 // lash-restate's workflows) and their integration tests. Kept on the public
 // surface; the rest of the runtime block above stays crate-internal.
-pub use runtime::SessionConfigPatch;
+
 pub use runtime::{
-    CanonicalRuntimeEffectEnvelope, LlmRequestSpec, ProcessCommand, ProcessEffectOutcome,
-    ProcessEventSemanticsSpec, RuntimeAwaitEventOptions, RuntimeEffectCommand,
-    RuntimeEffectController, RuntimeEffectControllerError, RuntimeEffectEnvelope,
-    RuntimeEffectKind, RuntimeEffectLocalExecutor, RuntimeEffectOutcome,
-    RuntimeEffectReplayMismatchSummary, RuntimeEffectReplayTrace, RuntimeInvocation, RuntimeScope,
-    RuntimeSessionState, RuntimeSleepOptions, ToolAttemptLaunch, validate_replayed_effect_envelope,
+    LlmRequestSpec, ProcessCommand, ProcessEffectOutcome, ProcessEventSemanticsSpec,
+    RuntimeEffectCommand, RuntimeEffectController, RuntimeEffectControllerError,
+    RuntimeEffectEnvelope, RuntimeEffectKind, RuntimeEffectLocalExecutor, RuntimeEffectOutcome,
+    RuntimeEffectReplayMismatchSummary, RuntimeInvocation, RuntimeScope, RuntimeSessionState,
+    ToolAttemptLaunch,
 };
 pub(crate) use runtime::{ToolAttemptEffectOutcome, ToolBatchEffectOutcome};
-pub use schemars::JsonSchema;
+
 pub(crate) use session::RuntimeExecutionTracing;
 pub(crate) use session::Session;
-pub use session::{
-    ExecRequest, InjectedTurnInput, RuntimeExecutionContext, SessionError, ToolInvocation,
-    ToolInvocationReply,
-};
+pub use session::{ExecRequest, RuntimeExecutionContext, SessionError};
 pub(crate) use session_graph::SessionMessageTreeNode;
 pub use session_graph::{
-    PersistedSessionConfig, PersistedTurnState, SessionGraph, SessionNodePayload,
-    SessionNodeRecord, frame_node_id,
+    PersistedSessionConfig, PersistedTurnState, SessionGraph, SessionNodePayload, SessionNodeRecord,
 };
 pub(crate) use session_model::RuntimeSessionPolicy;
-pub use session_model::context::PreparedContext;
-pub use session_model::{ConversationRecord, ProtocolEvent, SessionHistoryRecord};
-pub use session_model::{GenerationOverlay, SessionPolicy, SessionSpec};
+
+pub use session_model::SessionPolicy;
+pub use session_model::{ProtocolEvent, SessionHistoryRecord};
 pub use store::{
     AttachmentIntent, AttachmentManifest, AttachmentManifestEntry, BlobRef, GcReport,
-    LeaseOwnerIdentity, LeaseTimings, LeaseTimingsError, QueuedWorkStore, RuntimePersistence,
-    SessionAdmission, SessionBinding, SessionCommitStore, SessionExecutionLease,
-    SessionExecutionLeaseClaimOutcome, SessionExecutionLeaseCompletion, SessionExecutionLeaseFence,
-    SessionExecutionLeaseStore, SessionMeta, SessionPickerInfo, StoreError, StoreMaintenance,
-    TurnInputStore, VacuumReport,
+    LeaseOwnerIdentity, QueuedWorkStore, RuntimePersistence, SessionAdmission, SessionBinding,
+    SessionCommitStore, SessionExecutionLease, SessionExecutionLeaseClaimOutcome,
+    SessionExecutionLeaseCompletion, SessionExecutionLeaseFence, SessionExecutionLeaseStore,
+    SessionMeta, StoreError, StoreMaintenance, TurnInputStore, VacuumReport,
 };
 #[allow(unused_imports)]
 pub(crate) use store::{
     GraphAppend, PersistedSessionRead, RuntimeCommitResult, SessionCheckpoint, SessionHeadMeta,
     SessionHeadPayload, ensure_supported_schema_version, load_persisted_session_state,
 };
-pub use store::{
-    HydratedSessionCheckpoint, OperationId, RuntimeCommit, RuntimeTurnCommitStamp, SessionHead,
-};
+pub use store::{HydratedSessionCheckpoint, OperationId, RuntimeCommit, RuntimeTurnCommitStamp};
 pub use tool_provider::{
     PreparedToolBatch, PreparedToolBatchCall, PreparedToolCall, ProgressSender, SandboxMessage,
-    ToolCall, ToolChildExecutionTraceHook, ToolContext, ToolExecutionGrant, ToolPrepareCall,
-    ToolPrepareContext, ToolProvider, ToolSessionProcessAdmin, ToolTriggerClient,
+    ToolCall, ToolContext, ToolExecutionGrant, ToolPrepareCall, ToolPrepareContext, ToolProvider,
 };
 
 #[cfg(test)]

@@ -409,11 +409,12 @@ mod tests {
 
     use lash_core::store::RuntimeCommit;
     use lash_core::{
-        InMemorySessionStoreFactory, PluginSessionSnapshot, ProcessAwaitOutput, ProcessChangeHub,
-        ProcessCompletionAuthority, ProcessEventAppendRequest, ProcessEventSemanticsSpec,
-        ProcessEventType, ProcessRegistry as _, ProcessValueSelector, ProcessWakeSpec,
-        ProjectionWatermark, RecoveryDisposition, RuntimeSessionState, SessionRelation,
-        SessionStoreCreateRequest, SessionStoreFactory as _, ToolState,
+        PluginSessionSnapshot, ProcessAwaitOutput, ProcessCompletionAuthority,
+        ProcessEventAppendRequest, ProcessEventSemanticsSpec, ProcessEventType,
+        ProcessRegistry as _, ProcessValueSelector, ProcessWakeSpec, ProjectionWatermark,
+        RecoveryDisposition, RuntimeSessionState, SessionRelation, SessionStoreCreateRequest,
+        SessionStoreFactory as _, ToolState, facade_support::InMemorySessionStoreFactory,
+        facade_support::ProcessChangeHub,
     };
 
     use super::*;
@@ -543,7 +544,7 @@ mod tests {
             )
             .await
             .expect("prune transcript process");
-        let output = lash_core::ProcessAwaiter::new(
+        let output = lash_core::facade_support::ProcessAwaiter::new(
             registry as Arc<dyn lash_core::ProcessRegistry>,
             ProcessChangeHub::new(),
         )

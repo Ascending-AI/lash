@@ -16,7 +16,7 @@ use lash_core::{
     SessionCommitStore, SessionExecutionLease, SessionExecutionLeaseClaimOutcome,
     SessionExecutionLeaseCompletion, SessionExecutionLeaseFence, SessionExecutionLeaseStore,
     SessionGraph, SessionNodeRecord, SessionStoreCreateRequest, SessionStoreFactory, StoreError,
-    StoreMaintenance, TurnInputStore, VacuumReport, current_epoch_ms,
+    StoreMaintenance, TurnInputStore, VacuumReport, facade_support::current_epoch_ms,
 };
 
 #[derive(Clone)]

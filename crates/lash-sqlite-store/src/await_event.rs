@@ -8,7 +8,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use hmac::{Hmac, Mac};
-use lash_core::promise_semantics::{self, PromiseState, PromiseTransition};
+use lash_core::facade_support::promise_semantics::{self, PromiseState, PromiseTransition};
 use lash_core::{
     AwaitEventKey, AwaitEventWaitIdentity, ExecutionScope, Resolution, ResolveOutcome, RuntimeError,
 };

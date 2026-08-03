@@ -3,9 +3,9 @@ use std::time::{Duration, Instant};
 
 use lash_core::store::load_persisted_session_state;
 use lash_core::{
-    ForkSessionRequest, InMemorySessionStoreFactory, OperationId, RuntimeCommit,
-    RuntimePersistence, RuntimeSessionState, SessionRelation, SessionStoreCreateRequest,
-    SessionStoreFactory,
+    ForkSessionRequest, OperationId, RuntimeCommit, RuntimePersistence, RuntimeSessionState,
+    SessionRelation, SessionStoreCreateRequest, SessionStoreFactory,
+    facade_support::InMemorySessionStoreFactory,
 };
 use lash_postgres_store::PostgresStorage;
 use lash_sqlite_store::SqliteSessionStoreFactory;

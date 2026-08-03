@@ -579,7 +579,7 @@ pub(super) fn contract_turn_limit_final_message(
     lash_core::Message {
         id: message_id.clone(),
         role: lash_core::MessageRole::System,
-        parts: lash_core::shared_parts(vec![lash_core::Part {
+        parts: lash_core::facade_support::shared_parts(vec![lash_core::Part {
             id: format!("{message_id}.p0"),
             kind: lash_core::PartKind::Error,
             content: format!("Turn limit reached ({max_turns}) before a final test response."),
@@ -635,25 +635,31 @@ pub(super) fn find_contract_llm_call(
     })
 }
 
-pub(super) fn turn_outcome_contract_json(outcome: &lash_core::TurnOutcome) -> Value {
+pub(super) fn turn_outcome_contract_json(
+    outcome: &lash_core::facade_support::TurnOutcome,
+) -> Value {
     match outcome {
-        lash_core::TurnOutcome::Stopped(lash_core::TurnStop::MaxTurns) => json!({
+        lash_core::facade_support::TurnOutcome::Stopped(
+            lash_core::facade_support::TurnStop::MaxTurns,
+        ) => json!({
             "kind": "stopped",
             "stop_reason": "max_turns",
         }),
-        lash_core::TurnOutcome::Stopped(other) => json!({
+        lash_core::facade_support::TurnOutcome::Stopped(other) => json!({
             "kind": "stopped",
             "stop_reason": format!("{other:?}"),
         }),
-        lash_core::TurnOutcome::Finished(lash_core::TurnFinish::FinalValue { value }) => json!({
+        lash_core::facade_support::TurnOutcome::Finished(
+            lash_core::facade_support::TurnFinish::FinalValue { value },
+        ) => json!({
             "kind": "final_value",
             "value": value,
         }),
-        lash_core::TurnOutcome::Finished(other) => json!({
+        lash_core::facade_support::TurnOutcome::Finished(other) => json!({
             "kind": "finished",
             "finish": format!("{other:?}"),
         }),
-        lash_core::TurnOutcome::AgentFrameSwitch {
+        lash_core::facade_support::TurnOutcome::AgentFrameSwitch {
             frame_id,
             initial_nodes,
             task,

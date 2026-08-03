@@ -8,8 +8,10 @@ use crate::rlm_support::{
 use lash_core::llm::types::{LlmContentBlock, LlmOutputPart, LlmRequest, LlmResponse, LlmRole};
 use lash_core::runtime::RuntimeSessionState;
 use lash_core::{
-    LashRuntime, PluginFactory, PluginHost, ProcessRuntimeHost, RuntimeHostConfig, RuntimeServices,
-    SessionPolicy, TestLocalProcessRegistry, TraceRuntimeSubject,
+    SessionPolicy, TestLocalProcessRegistry, facade_support::LashRuntime,
+    facade_support::PluginFactory, facade_support::PluginHost, facade_support::ProcessRuntimeHost,
+    facade_support::RuntimeHostConfig, facade_support::RuntimeServices,
+    facade_support::TraceRuntimeSubject,
 };
 use lash_core::{ToolArgumentProjectionPolicy, ToolOutputContract, TurnInput};
 use lash_lashlang_runtime::{
@@ -296,7 +298,7 @@ fn lint_subagents_source_does_not_reintroduce_retired_lifecycle_api() {
 fn single_capability_spawn_can_omit_capability_field() {
     let registry = CapabilityRegistry::new().with(Arc::new(StaticCapability::new(
         "explore",
-        lash_core::SessionSpec::inherit(),
+        lash_core::facade_support::SessionSpec::inherit(),
     )));
     let rlm_spawn = rlm::spawn_agent_tool_definition(&registry.names());
 
@@ -434,9 +436,11 @@ finish result
 
     assert_eq!(
         outcome,
-        lash_core::TurnOutcome::Finished(lash_core::TurnFinish::FinalValue {
-            value: json!({ "len": 2 })
-        })
+        lash_core::facade_support::TurnOutcome::Finished(
+            lash_core::facade_support::TurnFinish::FinalValue {
+                value: json!({ "len": 2 })
+            }
+        )
     );
     assert!(
         prompt_advertises_bound_variable(&prompt, "chunk"),
@@ -463,9 +467,11 @@ finish direct
 
     assert_eq!(
         outcome,
-        lash_core::TurnOutcome::Finished(lash_core::TurnFinish::FinalValue {
-            value: json!({ "len": 2 })
-        })
+        lash_core::facade_support::TurnOutcome::Finished(
+            lash_core::facade_support::TurnFinish::FinalValue {
+                value: json!({ "len": 2 })
+            }
+        )
     );
 }
 
@@ -492,9 +498,11 @@ finish result
 
     assert_eq!(
         outcome,
-        lash_core::TurnOutcome::Finished(lash_core::TurnFinish::FinalValue {
-            value: json!({ "len": 2 })
-        })
+        lash_core::facade_support::TurnOutcome::Finished(
+            lash_core::facade_support::TurnFinish::FinalValue {
+                value: json!({ "len": 2 })
+            }
+        )
     );
     assert!(
         prompt_advertises_bound_variable(&prompt, "chunk"),
@@ -526,9 +534,11 @@ finish result
 
     assert_eq!(
         outcome,
-        lash_core::TurnOutcome::Finished(lash_core::TurnFinish::FinalValue {
-            value: json!({ "len": 2 })
-        })
+        lash_core::facade_support::TurnOutcome::Finished(
+            lash_core::facade_support::TurnFinish::FinalValue {
+                value: json!({ "len": 2 })
+            }
+        )
     );
     assert!(
         prompt_advertises_bound_variable(&prompt, "chunk"),
@@ -559,9 +569,11 @@ finish result
 
     assert_eq!(
         outcome,
-        lash_core::TurnOutcome::Finished(lash_core::TurnFinish::FinalValue {
-            value: json!({ "len": 2 })
-        })
+        lash_core::facade_support::TurnOutcome::Finished(
+            lash_core::facade_support::TurnFinish::FinalValue {
+                value: json!({ "len": 2 })
+            }
+        )
     );
     assert!(
         prompt_advertises_bound_variable(&prompt, "chunk"),
@@ -589,9 +601,11 @@ finish result
 
     assert_eq!(
         outcome,
-        lash_core::TurnOutcome::Finished(lash_core::TurnFinish::FinalValue {
-            value: json!({ "len": 2 })
-        })
+        lash_core::facade_support::TurnOutcome::Finished(
+            lash_core::facade_support::TurnFinish::FinalValue {
+                value: json!({ "len": 2 })
+            }
+        )
     );
     let graphs = graph_store.graphs();
     let parent = graphs
@@ -639,9 +653,11 @@ finish result
 
     assert_eq!(
         outcome,
-        lash_core::TurnOutcome::Finished(lash_core::TurnFinish::FinalValue {
-            value: json!({ "len": 2 })
-        })
+        lash_core::facade_support::TurnOutcome::Finished(
+            lash_core::facade_support::TurnFinish::FinalValue {
+                value: json!({ "len": 2 })
+            }
+        )
     );
     assert!(
         prompt.contains("Subagent capability: default. Depth: 1/5."),
@@ -688,9 +704,11 @@ finish result
 
     assert_eq!(
         outcome,
-        lash_core::TurnOutcome::Finished(lash_core::TurnFinish::FinalValue {
-            value: json!({ "len": 2 })
-        })
+        lash_core::facade_support::TurnOutcome::Finished(
+            lash_core::facade_support::TurnFinish::FinalValue {
+                value: json!({ "len": 2 })
+            }
+        )
     );
     assert!(
         prompt_advertises_bound_variable(&prompt, "chunk"),
@@ -745,7 +763,7 @@ async fn complete_seed_probe_request(
 async fn run_seed_probe(
     parent_response: &'static str,
     input: TurnInput,
-) -> (lash_core::TurnOutcome, String) {
+) -> (lash_core::facade_support::TurnOutcome, String) {
     run_seed_probe_with_graph_store(parent_response, input, None).await
 }
 
@@ -753,7 +771,7 @@ async fn run_seed_probe_with_graph_store(
     parent_response: &'static str,
     input: TurnInput,
     graph_store: Option<Arc<TraceLashlangGraphStore>>,
-) -> (lash_core::TurnOutcome, String) {
+) -> (lash_core::facade_support::TurnOutcome, String) {
     let parent_response = parent_response.to_string();
     let (tx, rx) = tokio::sync::oneshot::channel();
     std::thread::Builder::new()
@@ -776,19 +794,20 @@ async fn run_seed_probe_inner(
     parent_response: String,
     input: TurnInput,
     graph_store: Option<Arc<TraceLashlangGraphStore>>,
-) -> (lash_core::TurnOutcome, String) {
+) -> (lash_core::facade_support::TurnOutcome, String) {
     let captured_child_prompt: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
     let state = Arc::new(SeedProbeState {
         parent_response,
         captured_child_prompt: Arc::clone(&captured_child_prompt),
     });
     let provider = seed_probe_provider(Arc::clone(&state)).into_handle();
-    let execution_sink: Option<Arc<dyn lash_core::TraceSink>> = graph_store
+    let execution_sink: Option<Arc<dyn lash_core::facade_support::TraceSink>> = graph_store
         .as_ref()
-        .map(|store| Arc::clone(store) as Arc<dyn lash_core::TraceSink>);
+        .map(|store| Arc::clone(store) as Arc<dyn lash_core::facade_support::TraceSink>);
     let trace_context = lash_core::TraceContext::default();
     let language_features = LashlangLanguageFeatures::default().with_label_annotations();
-    let process_env_store = Arc::new(lash_core::InMemoryProcessExecutionEnvStore::new());
+    let process_env_store =
+        Arc::new(lash_core::facade_support::InMemoryProcessExecutionEnvStore::new());
     // The RLM protocol plugin (which compiles + stores the parent turn's process
     // artifacts) and the process engine that the worker runs those artifacts
     // through must share ONE artifact store; otherwise the worker cannot load the
@@ -813,7 +832,7 @@ async fn run_seed_probe_inner(
         Arc::new(SubagentsPluginFactory::new(Arc::new(
             CapabilityRegistry::new().with(Arc::new(StaticCapability::new(
                 "default",
-                lash_core::SessionSpec::inherit(),
+                lash_core::facade_support::SessionSpec::inherit(),
             ))),
         ))),
     ];
@@ -825,7 +844,7 @@ async fn run_seed_probe_inner(
         .with_process_signals();
     let mut extensions = host_plugins.extensions().clone();
     extensions.insert(
-        lash_core::PluginExtensionContribution::new(
+        lash_core::facade_support::PluginExtensionContribution::new(
             LASHLANG_SURFACE_EXTENSION_ID,
             LashlangSurfaceContribution::new(
                 process_abilities,
@@ -851,10 +870,11 @@ async fn run_seed_probe_inner(
         .build_session("root", None)
         .expect("plugin session");
     let host = ProcessRuntimeHost::new(
-        lash_core::EmbeddedRuntimeHost::new({
+        lash_core::facade_support::EmbeddedRuntimeHost::new({
             let mut config = RuntimeHostConfig::in_memory();
-            config.providers.provider_resolver =
-                Arc::new(lash_core::SingleProviderResolver::new(provider.clone()));
+            config.providers.provider_resolver = Arc::new(
+                lash_core::facade_support::SingleProviderResolver::new(provider.clone()),
+            );
             config = config
                 .with_process_env_store(process_env_store.clone())
                 .with_process_engine(process_engine.clone());
@@ -875,24 +895,25 @@ async fn run_seed_probe_inner(
     // nested case here (`handle = start spawn_child` then `await handle`) because
     // the worker runs each process on its own task, so the parent's await never
     // parks the runner away from the child.
-    let worker = lash_core::DurableProcessWorker::new(
-        lash_core::DurableProcessWorkerConfig::from_plugin_factories(
+    let worker = lash_core::facade_support::DurableProcessWorker::new(
+        lash_core::facade_support::DurableProcessWorkerConfig::from_plugin_factories(
             factories,
             {
                 let mut config = RuntimeHostConfig::in_memory();
-                config.providers.provider_resolver =
-                    Arc::new(lash_core::SingleProviderResolver::new(provider.clone()));
+                config.providers.provider_resolver = Arc::new(
+                    lash_core::facade_support::SingleProviderResolver::new(provider.clone()),
+                );
                 config = config
                     .with_process_env_store(process_env_store)
                     .with_process_engine(process_engine);
                 config
             },
-            Arc::new(lash_core::InMemorySessionStoreFactory::new()),
+            Arc::new(lash_core::facade_support::InMemorySessionStoreFactory::new()),
             Arc::clone(&registry) as Arc<dyn lash_core::ProcessRegistry>,
         )
         .with_session_policy(policy.clone()),
     );
-    let process_driver = lash_core::ProcessWorkDriver::inline(
+    let process_driver = lash_core::facade_support::ProcessWorkDriver::inline(
         Arc::clone(&registry) as Arc<dyn lash_core::ProcessRegistry>,
         worker,
     );
@@ -911,7 +932,7 @@ async fn run_seed_probe_inner(
     .expect("runtime");
 
     let scoped_effect_controller = lash_core::ScopedEffectController::shared(
-        Arc::new(lash_core::InlineRuntimeEffectController::default()),
+        Arc::new(lash_core::facade_support::InlineRuntimeEffectController::default()),
         lash_core::ExecutionScope::turn("root", "subagent-test-turn"),
     )
     .expect("test execution scope");

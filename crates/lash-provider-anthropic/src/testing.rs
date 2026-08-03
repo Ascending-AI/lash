@@ -9,7 +9,7 @@ use crate::AnthropicProvider;
 pub fn serialize_request(
     request: &LlmRequest,
     retention: CacheRetention,
-) -> Result<Value, lash_core::LlmTransportError> {
+) -> Result<Value, lash_core::facade_support::LlmTransportError> {
     AnthropicProvider::new("test")
         .with_options(ProviderOptions {
             cache_retention: retention,

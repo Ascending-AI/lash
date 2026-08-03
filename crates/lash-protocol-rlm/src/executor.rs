@@ -12,7 +12,8 @@ use std::sync::Arc;
 
 use lash_core::{
     ExecRequest, ExecResponse, RuntimeEffectKind, RuntimeExecutionContext, SessionError,
-    TraceContext, TraceRuntimeScope, TraceRuntimeSubject, TraceSink,
+    TraceContext, facade_support::TraceRuntimeScope, facade_support::TraceRuntimeSubject,
+    facade_support::TraceSink,
 };
 use lash_lashlang_runtime::{
     LashlangSurface, TraceLashlangExecutionEvent, TraceLashlangExecutionIdentity, TraceLashlangMap,
@@ -688,7 +689,7 @@ mod tests {
         let state = RlmExecutionState::new().expect("state");
         let ctx = if abilities.triggers {
             lash_core::testing::code_execution_context_with_trigger_store(Arc::new(
-                lash_core::InMemoryTriggerStore::default(),
+                lash_core::facade_support::InMemoryTriggerStore::default(),
             ))
         } else {
             lash_core::testing::code_execution_context()
@@ -1303,7 +1304,7 @@ mod tests {
         let state = RlmExecutionState::new().expect("state");
         let ctx =
             lash_core::testing::code_execution_context_with_trigger_store_and_effect_controller(
-                Arc::new(lash_core::InMemoryTriggerStore::default()),
+                Arc::new(lash_core::facade_support::InMemoryTriggerStore::default()),
                 Arc::new(controller),
             );
         let surface = LashlangSurface::new(
@@ -1401,7 +1402,7 @@ mod tests {
     #[test]
     fn keyless_trigger_registration_reaches_effect_and_owner_scoped_store() {
         block_on(async {
-            let store = Arc::new(lash_core::InMemoryTriggerStore::default());
+            let store = Arc::new(lash_core::facade_support::InMemoryTriggerStore::default());
             let controller = CapturingTriggerEffectController::default();
             let ctx =
                 lash_core::testing::code_execution_context_with_trigger_store_and_effect_controller(
@@ -1557,7 +1558,8 @@ mod tests {
     #[test]
     fn regenerated_trigger_manifest_warns_and_list_marks_the_orphan() {
         block_on(async {
-            let trigger_store = Arc::new(lash_core::InMemoryTriggerStore::default());
+            let trigger_store =
+                Arc::new(lash_core::facade_support::InMemoryTriggerStore::default());
             let artifact_store = Arc::new(lashlang::InMemoryLashlangArtifactStore::new());
             let surface = LashlangSurface::new(
                 lashlang::LashlangAbilities::default()

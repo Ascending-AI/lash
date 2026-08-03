@@ -32,11 +32,11 @@ impl RemoteTurnResult {
     pub fn from_core(
         session_id: impl Into<String>,
         turn_id: impl Into<String>,
-        turn: lash_core::AssembledTurn,
+        turn: lash_core::facade_support::AssembledTurn,
         activities: impl IntoIterator<Item = RemoteTurnActivity>,
     ) -> Self {
         // `state` is the local session snapshot; it never crosses the wire.
-        let lash_core::AssembledTurn {
+        let lash_core::facade_support::AssembledTurn {
             state: _,
             outcome,
             cancellation,
@@ -97,55 +97,55 @@ impl From<&RemoteTurnOutcome> for RemoteTurnStatus {
     }
 }
 
-impl From<lash_core::TurnOutcome> for RemoteTurnOutcome {
-    fn from(value: lash_core::TurnOutcome) -> Self {
+impl From<lash_core::facade_support::TurnOutcome> for RemoteTurnOutcome {
+    fn from(value: lash_core::facade_support::TurnOutcome) -> Self {
         match value {
-            lash_core::TurnOutcome::Finished(finish) => Self::Finished {
+            lash_core::facade_support::TurnOutcome::Finished(finish) => Self::Finished {
                 finish: finish.into(),
             },
-            lash_core::TurnOutcome::AgentFrameSwitch { frame_id, task, .. } => {
+            lash_core::facade_support::TurnOutcome::AgentFrameSwitch { frame_id, task, .. } => {
                 // Frame seeds are deliberately omitted from this lean result projection.
                 Self::AgentFrameSwitch { frame_id, task }
             }
-            lash_core::TurnOutcome::Stopped(stop) => Self::Stopped { stop: stop.into() },
+            lash_core::facade_support::TurnOutcome::Stopped(stop) => Self::Stopped { stop: stop.into() },
         }
     }
 }
 
-impl From<lash_core::TurnFinish> for RemoteTurnFinish {
-    fn from(value: lash_core::TurnFinish) -> Self {
+impl From<lash_core::facade_support::TurnFinish> for RemoteTurnFinish {
+    fn from(value: lash_core::facade_support::TurnFinish) -> Self {
         match value {
-            lash_core::TurnFinish::AssistantMessage { text } => Self::AssistantMessage { text },
-            lash_core::TurnFinish::FinalValue { value } => Self::FinalValue { value },
-            lash_core::TurnFinish::ToolValue { tool_name, value } => {
+            lash_core::facade_support::TurnFinish::AssistantMessage { text } => Self::AssistantMessage { text },
+            lash_core::facade_support::TurnFinish::FinalValue { value } => Self::FinalValue { value },
+            lash_core::facade_support::TurnFinish::ToolValue { tool_name, value } => {
                 Self::ToolValue { tool_name, value }
             }
         }
     }
 }
 
-impl From<lash_core::TurnStop> for RemoteTurnStop {
-    fn from(value: lash_core::TurnStop) -> Self {
+impl From<lash_core::facade_support::TurnStop> for RemoteTurnStop {
+    fn from(value: lash_core::facade_support::TurnStop) -> Self {
         match value {
-            lash_core::TurnStop::Cancelled => Self::Cancelled,
-            lash_core::TurnStop::Incomplete => Self::Incomplete,
-            lash_core::TurnStop::InvalidInput => Self::InvalidInput,
-            lash_core::TurnStop::MaxTurns => Self::MaxTurns,
-            lash_core::TurnStop::ToolFailure => Self::ToolFailure,
-            lash_core::TurnStop::ProviderError => Self::ProviderError,
-            lash_core::TurnStop::PluginAbort => Self::PluginAbort,
-            lash_core::TurnStop::RuntimeError => Self::RuntimeError,
-            lash_core::TurnStop::SubmittedError { value } => Self::SubmittedError { value },
-            lash_core::TurnStop::ToolError { tool_name, value } => {
+            lash_core::facade_support::TurnStop::Cancelled => Self::Cancelled,
+            lash_core::facade_support::TurnStop::Incomplete => Self::Incomplete,
+            lash_core::facade_support::TurnStop::InvalidInput => Self::InvalidInput,
+            lash_core::facade_support::TurnStop::MaxTurns => Self::MaxTurns,
+            lash_core::facade_support::TurnStop::ToolFailure => Self::ToolFailure,
+            lash_core::facade_support::TurnStop::ProviderError => Self::ProviderError,
+            lash_core::facade_support::TurnStop::PluginAbort => Self::PluginAbort,
+            lash_core::facade_support::TurnStop::RuntimeError => Self::RuntimeError,
+            lash_core::facade_support::TurnStop::SubmittedError { value } => Self::SubmittedError { value },
+            lash_core::facade_support::TurnStop::ToolError { tool_name, value } => {
                 Self::ToolError { tool_name, value }
             }
         }
     }
 }
 
-impl From<lash_core::AssistantOutput> for RemoteAssistantOutput {
-    fn from(value: lash_core::AssistantOutput) -> Self {
-        let lash_core::AssistantOutput {
+impl From<lash_core::facade_support::AssistantOutput> for RemoteAssistantOutput {
+    fn from(value: lash_core::facade_support::AssistantOutput) -> Self {
+        let lash_core::facade_support::AssistantOutput {
             safe_text,
             raw_text,
             state,
@@ -158,20 +158,20 @@ impl From<lash_core::AssistantOutput> for RemoteAssistantOutput {
     }
 }
 
-impl From<lash_core::OutputState> for RemoteAssistantOutputState {
-    fn from(value: lash_core::OutputState) -> Self {
+impl From<lash_core::facade_support::OutputState> for RemoteAssistantOutputState {
+    fn from(value: lash_core::facade_support::OutputState) -> Self {
         match value {
-            lash_core::OutputState::Usable => Self::Usable,
-            lash_core::OutputState::EmptyOutput => Self::EmptyOutput,
-            lash_core::OutputState::TracebackOnly => Self::TracebackOnly,
-            lash_core::OutputState::RecoveredFromError => Self::RecoveredFromError,
+            lash_core::facade_support::OutputState::Usable => Self::Usable,
+            lash_core::facade_support::OutputState::EmptyOutput => Self::EmptyOutput,
+            lash_core::facade_support::OutputState::TracebackOnly => Self::TracebackOnly,
+            lash_core::facade_support::OutputState::RecoveredFromError => Self::RecoveredFromError,
         }
     }
 }
 
-impl From<lash_core::ExecutionSummary> for RemoteExecutionSummary {
-    fn from(value: lash_core::ExecutionSummary) -> Self {
-        let lash_core::ExecutionSummary {
+impl From<lash_core::facade_support::ExecutionSummary> for RemoteExecutionSummary {
+    fn from(value: lash_core::facade_support::ExecutionSummary) -> Self {
+        let lash_core::facade_support::ExecutionSummary {
             had_tool_calls,
             had_code_execution,
             started_at_ms,
@@ -220,9 +220,9 @@ impl From<lash_core::ToolCallOutput> for RemoteToolCallOutcome {
     }
 }
 
-impl From<lash_core::TurnIssue> for RemoteTurnIssue {
-    fn from(value: lash_core::TurnIssue) -> Self {
-        let lash_core::TurnIssue {
+impl From<lash_core::facade_support::TurnIssue> for RemoteTurnIssue {
+    fn from(value: lash_core::facade_support::TurnIssue) -> Self {
+        let lash_core::facade_support::TurnIssue {
             kind,
             code,
             terminal_reason,

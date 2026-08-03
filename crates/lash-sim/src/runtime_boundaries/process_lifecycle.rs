@@ -35,16 +35,16 @@ impl lash_core::ProcessEngine for LifecycleSuccessEngine {
 pub(super) fn lifecycle_worker(
     registry: Arc<dyn ProcessRegistry>,
     owner: LeaseOwnerIdentity,
-    runtime_host: lash_core::RuntimeHostConfig,
+    runtime_host: lash_core::facade_support::RuntimeHostConfig,
     policy: lash_core::SessionPolicy,
-) -> lash_core::DurableProcessWorker {
-    lash_core::DurableProcessWorker::new(
-        lash_core::DurableProcessWorkerConfig::new(
-            Arc::new(lash_core::PluginHost::new(vec![Arc::new(
+) -> lash_core::facade_support::DurableProcessWorker {
+    lash_core::facade_support::DurableProcessWorker::new(
+        lash_core::facade_support::DurableProcessWorkerConfig::new(
+            Arc::new(lash_core::facade_support::PluginHost::new(vec![Arc::new(
                 lash_protocol_standard::StandardProtocolPluginFactory::new(),
             )])),
             runtime_host,
-            Arc::new(lash_core::InMemorySessionStoreFactory::new()),
+            Arc::new(lash_core::facade_support::InMemorySessionStoreFactory::new()),
             registry,
         )
         .with_session_policy(policy)
@@ -122,7 +122,7 @@ pub(super) async fn record_lifecycle_started(
 /// against ground truth rather than trusting it.
 pub(super) async fn lifecycle_process_fact(
     registry: &Arc<dyn ProcessRegistry>,
-    awaiter: &lash_core::ProcessAwaiter,
+    awaiter: &lash_core::facade_support::ProcessAwaiter,
     id: &str,
     disposition: RecoveryDisposition,
     expected_holder: Option<&LeaseOwnerIdentity>,

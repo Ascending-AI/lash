@@ -3,7 +3,7 @@ use std::{sync::Arc, time::Duration};
 use anyhow::{Context, Result};
 use lash::TurnInput;
 use lash_core::runtime::{RuntimeTurnPhase, RuntimeTurnPhaseProbe};
-use lash_core::{LeaseOwnerIdentity, LeaseTimings, ProcessRegistry};
+use lash_core::{LeaseOwnerIdentity, ProcessRegistry, facade_support::LeaseTimings};
 use lash_postgres_store::PostgresStorage;
 use lash_provider_openai::OpenAiCompatibleProvider;
 use serde_json::json;
@@ -58,7 +58,7 @@ async fn run(mode: &str) -> Result<()> {
     let storage = PostgresStorage::connect(&database_url)
         .await
         .context("connect frame-crash Postgres storage")?;
-    let provider = lash_core::ProviderHandle::new(
+    let provider = lash_core::facade_support::ProviderHandle::new(
         OpenAiCompatibleProvider::new(
             "e2e-key",
             format!(

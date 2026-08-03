@@ -93,7 +93,8 @@ impl ProcessWorkDriver {
     ///
     /// ```no_run
     /// use std::time::Duration;
-    /// use lash_core::{PluginError, ProcessWorkDriver};
+    /// use lash_core::PluginError;
+    /// use lash_core::runtime::ProcessWorkDriver;
     ///
     /// async fn wait(driver: &ProcessWorkDriver, process_id: &str) -> Result<(), PluginError> {
     ///     match tokio::time::timeout(Duration::from_secs(30), driver.await_terminal(process_id)).await {

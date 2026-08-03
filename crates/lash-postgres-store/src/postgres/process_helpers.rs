@@ -220,7 +220,7 @@ pub(crate) async fn append_process_event_tx(
         wake_session_id.as_deref(),
     )?;
     match prepared {
-        lash_core::ProcessEventAppendPlan::Replay {
+        lash_core::facade_support::ProcessEventAppendPlan::Replay {
             event,
             repair_record,
             wake_delivery,
@@ -236,7 +236,7 @@ pub(crate) async fn append_process_event_tx(
                 wake_delivery,
             })
         }
-        lash_core::ProcessEventAppendPlan::Insert {
+        lash_core::facade_support::ProcessEventAppendPlan::Insert {
             event,
             payload_hash,
             projected_record,

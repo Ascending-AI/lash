@@ -22,7 +22,9 @@ finish {
             )]))
             .model(mock_model_spec())
             .tools(Arc::new(AppTools))
-            .store_factory(Arc::new(lash_core::InMemorySessionStoreFactory::new()))
+            .store_factory(Arc::new(
+                lash_core::facade_support::InMemorySessionStoreFactory::new(),
+            ))
             .process_registry(Arc::new(TestLocalProcessRegistry::default()))
             .build()?;
         let session = core.session("stack-budget-rlm-lashlang").open().await?;

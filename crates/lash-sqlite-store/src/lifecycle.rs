@@ -54,7 +54,12 @@ impl Store {
         path: &Path,
         options: StoreOptions,
     ) -> tokio_rusqlite::Result<Self> {
-        Self::open_with_options_and_clock(path, options, Arc::new(lash_core::SystemClock)).await
+        Self::open_with_options_and_clock(
+            path,
+            options,
+            Arc::new(lash_core::facade_support::SystemClock),
+        )
+        .await
     }
 
     pub async fn open_with_options_and_clock(
@@ -162,7 +167,7 @@ impl Store {
         Ok(Self {
             conn,
             session_id: OnceLock::new(),
-            clock: Arc::new(lash_core::SystemClock),
+            clock: Arc::new(lash_core::facade_support::SystemClock),
             artifact_cache: Mutex::new(BTreeMap::new()),
             options: StoreOptions::default(),
             commit_count: AtomicU64::new(0),
@@ -263,7 +268,11 @@ impl Store {
     }
 
     pub async fn memory_with_options(options: StoreOptions) -> tokio_rusqlite::Result<Self> {
-        Self::memory_with_options_and_clock(options, Arc::new(lash_core::SystemClock)).await
+        Self::memory_with_options_and_clock(
+            options,
+            Arc::new(lash_core::facade_support::SystemClock),
+        )
+        .await
     }
 
     pub async fn memory_with_options_and_clock(

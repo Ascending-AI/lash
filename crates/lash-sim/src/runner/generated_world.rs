@@ -975,7 +975,9 @@ impl GeneratedRuntimeWorld {
         let resumed_after_completion = completed_after > completed_before
             && matches!(
                 &result.outcome,
-                lash_core::TurnOutcome::Finished(lash_core::TurnFinish::AssistantMessage { .. })
+                lash_core::facade_support::TurnOutcome::Finished(
+                    lash_core::facade_support::TurnFinish::AssistantMessage { .. }
+                )
             );
         let resolve_accepted = matches!(accepted, lash_core::ResolveOutcome::Accepted);
         Ok(json!({
@@ -1240,14 +1242,14 @@ impl SimProviderMutationHarness {
 }
 
 struct SimTriggerHarness {
-    store: Arc<lash_core::InMemoryTriggerStore>,
+    store: Arc<lash_core::facade_support::InMemoryTriggerStore>,
     registered_source_keys: BTreeSet<String>,
 }
 
 impl Default for SimTriggerHarness {
     fn default() -> Self {
         Self {
-            store: Arc::new(lash_core::InMemoryTriggerStore::default()),
+            store: Arc::new(lash_core::facade_support::InMemoryTriggerStore::default()),
             registered_source_keys: BTreeSet::new(),
         }
     }

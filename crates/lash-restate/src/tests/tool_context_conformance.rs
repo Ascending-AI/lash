@@ -61,10 +61,10 @@ struct ProductionToolCell {
     turn_id: String,
     policy: lash_core::SessionPolicy,
     initial_state: lash_core::RuntimeSessionState,
-    host: lash_core::RuntimeHostConfig,
+    host: lash_core::facade_support::RuntimeHostConfig,
     runtime_store: Arc<dyn lash_core::RuntimePersistence>,
     replay_store: Arc<dyn lash_core::RuntimePersistence>,
-    plugin_factories: Vec<Arc<dyn lash_core::PluginFactory>>,
+    plugin_factories: Vec<Arc<dyn lash_core::facade_support::PluginFactory>>,
     tool_executions: Arc<AtomicUsize>,
     llm_provider_calls: Arc<AtomicUsize>,
 }
@@ -85,14 +85,14 @@ impl ProductionToolCell {
             inner: first_party,
             executions: Arc::clone(&tool_executions),
         });
-        let tool_plugin: Arc<dyn lash_core::PluginFactory> =
+        let tool_plugin: Arc<dyn lash_core::facade_support::PluginFactory> =
             Arc::new(lash_core::plugin::StaticPluginFactory::new(
                 "tool-context-first-party",
-                lash_core::PluginSpec::new().with_tool_provider(counting_provider),
+                lash_core::facade_support::PluginSpec::new().with_tool_provider(counting_provider),
             ));
         let artifact_store: Arc<dyn lashlang::LashlangArtifactStore> =
             Arc::new(lashlang::InMemoryLashlangArtifactStore::new());
-        let rlm_plugin: Arc<dyn lash_core::PluginFactory> = Arc::new(
+        let rlm_plugin: Arc<dyn lash_core::facade_support::PluginFactory> = Arc::new(
             lash_protocol_rlm::RlmProtocolPluginFactory::new(
                 lash_protocol_rlm::RlmProtocolPluginConfig::default(),
                 artifact_store,
@@ -134,12 +134,15 @@ impl ProductionToolCell {
             })
             .build()
             .into_handle();
-        let mut host = lash_core::RuntimeHostConfig::in_memory();
-        host.providers.provider_resolver =
-            Arc::new(lash_core::SingleProviderResolver::new(provider));
-        host.durability.attachment_store = Arc::new(lash_core::SessionAttachmentStore::ephemeral(
-            Arc::new(DurableMemoryAttachmentStore::default()),
-        ));
+        let mut host = lash_core::facade_support::RuntimeHostConfig::in_memory();
+        host.providers.provider_resolver = Arc::new(
+            lash_core::facade_support::SingleProviderResolver::new(provider),
+        );
+        host.durability.attachment_store = Arc::new(
+            lash_core::facade_support::SessionAttachmentStore::ephemeral(Arc::new(
+                DurableMemoryAttachmentStore::default(),
+            )),
+        );
         host.durability.process_env_store = Arc::new(DurableMemoryProcessEnvStore::default());
 
         let store = Arc::new(
@@ -172,9 +175,9 @@ impl ProductionToolCell {
 
     async fn run_once(
         &self,
-        runtime: &mut lash_core::LashRuntime,
+        runtime: &mut lash_core::facade_support::LashRuntime,
         controller: &dyn RuntimeEffectController,
-    ) -> lash_core::AssembledTurn {
+    ) -> lash_core::facade_support::AssembledTurn {
         let turn_scope = runtime.export_persistence_state().turn_scope(&self.turn_id);
         let scoped_effect_controller =
             lash_core::ScopedEffectController::borrowed(controller, turn_scope)
@@ -182,7 +185,7 @@ impl ProductionToolCell {
         runtime
             .stream_turn(
                 replay_test_input(&self.turn_id),
-                lash_core::TurnOptions::new(
+                lash_core::facade_support::TurnOptions::new(
                     tokio_util::sync::CancellationToken::new(),
                     scoped_effect_controller,
                 ),
@@ -204,7 +207,7 @@ impl ProductionToolCell {
         let live_turn = self.run_once(&mut live, controller).await;
         assert!(matches!(
             live_turn.outcome,
-            lash_core::TurnOutcome::Finished(_)
+            lash_core::facade_support::TurnOutcome::Finished(_)
         ));
         assert_eq!(
             self.tool_executions.load(Ordering::SeqCst),
@@ -225,7 +228,7 @@ impl ProductionToolCell {
         let replay_turn = self.run_once(&mut replay, controller).await;
         assert!(matches!(
             replay_turn.outcome,
-            lash_core::TurnOutcome::Finished(_)
+            lash_core::facade_support::TurnOutcome::Finished(_)
         ));
         assert_eq!(
             self.tool_executions.load(Ordering::SeqCst),

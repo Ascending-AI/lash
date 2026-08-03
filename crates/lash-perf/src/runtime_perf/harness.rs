@@ -244,7 +244,7 @@ impl BenchmarkRuntime {
         turn_id: &str,
         input: lash::TurnInput,
         source_id: &str,
-    ) -> anyhow::Result<lash_core::TurnInputAcceptanceReceipt> {
+    ) -> anyhow::Result<lash_core::facade_support::TurnInputAcceptanceReceipt> {
         self.session
             .as_ref()
             .expect("benchmark session")
@@ -289,11 +289,18 @@ impl BenchmarkRuntime {
         let round_trip_started = std::time::Instant::now();
         let receipt = driver
             .request_cancel(
-                lash_core::TurnCancelRequest::new(address, request_id, Some("runtime-perf".into()))
-                    .with_reason("measure request-to-token-to-seal"),
+                lash_core::facade_support::TurnCancelRequest::new(
+                    address,
+                    request_id,
+                    Some("runtime-perf".into()),
+                )
+                .with_reason("measure request-to-token-to-seal"),
             )
             .await?;
-        if !matches!(receipt.outcome, lash_core::TurnCancelOutcome::Requested(_)) {
+        if !matches!(
+            receipt.outcome,
+            lash_core::facade_support::TurnCancelOutcome::Requested(_)
+        ) {
             anyhow::bail!(
                 "cancel round-trip request did not win the gate: {:?}",
                 receipt.outcome
@@ -645,12 +652,15 @@ pub(crate) async fn build_runtime_with_store(
     let effect_host: Arc<dyn lash_core::EffectHost> =
         if matches!(scenario, RuntimePerfScenario::TurnStartGate) {
             Arc::new(
-                lash_core::InlineEffectHost::new(Arc::new(RetryingStartGateController::default()))
-                    .allow_process_lifetime_completion_keys(),
+                lash_core::facade_support::InlineEffectHost::new(Arc::new(
+                    RetryingStartGateController::default(),
+                ))
+                .allow_process_lifetime_completion_keys(),
             )
         } else {
             Arc::new(
-                lash_core::InlineEffectHost::default().allow_process_lifetime_completion_keys(),
+                lash_core::facade_support::InlineEffectHost::default()
+                    .allow_process_lifetime_completion_keys(),
             )
         };
     let store = store.unwrap_or_else(|| Arc::new(RuntimePerfStore::default()));
@@ -675,7 +685,10 @@ pub(crate) async fn build_runtime_with_store(
     ) {
         plugin_stack.push(Arc::new(lash_subagents::SubagentsPluginFactory::new(
             Arc::new(lash_subagents::CapabilityRegistry::new().with(Arc::new(
-                lash_subagents::StaticCapability::new("default", lash_core::SessionSpec::inherit()),
+                lash_subagents::StaticCapability::new(
+                    "default",
+                    lash_core::facade_support::SessionSpec::inherit(),
+                ),
             ))),
         )));
     }
@@ -773,14 +786,14 @@ pub(crate) async fn build_runtime_with_store(
 
 struct RetryingStartGateController {
     attempts_by_key: Mutex<HashMap<String, usize>>,
-    delegate: lash_core::InlineRuntimeEffectController,
+    delegate: lash_core::facade_support::InlineRuntimeEffectController,
 }
 
 impl Default for RetryingStartGateController {
     fn default() -> Self {
         Self {
             attempts_by_key: Mutex::new(HashMap::new()),
-            delegate: lash_core::InlineRuntimeEffectController::default(),
+            delegate: lash_core::facade_support::InlineRuntimeEffectController::default(),
         }
     }
 }
@@ -901,21 +914,22 @@ impl SessionPlugin for BenchmarkWorkbenchTriggerPlugin {
     }
 
     fn register(&self, reg: &mut PluginRegistrar) -> Result<(), PluginError> {
-        reg.triggers().declare(lash_core::TriggerEvent::new(
-            BENCHMARK_MAIL_RESOURCE,
-            BENCHMARK_MAIL_ALIAS,
-            BENCHMARK_MAIL_EVENT,
-            lash_core::LashSchema::new(serde_json::json!({
-                "type": "object",
-                "properties": {
-                    "account": { "type": "string" },
-                    "title": { "type": "string" },
-                    "text": { "type": "string" }
-                },
-                "required": ["account", "title", "text"],
-                "additionalProperties": false
-            })),
-        ))?;
+        reg.triggers()
+            .declare(lash_core::facade_support::TriggerEvent::new(
+                BENCHMARK_MAIL_RESOURCE,
+                BENCHMARK_MAIL_ALIAS,
+                BENCHMARK_MAIL_EVENT,
+                lash_core::LashSchema::new(serde_json::json!({
+                    "type": "object",
+                    "properties": {
+                        "account": { "type": "string" },
+                        "title": { "type": "string" },
+                        "text": { "type": "string" }
+                    },
+                    "required": ["account", "title", "text"],
+                    "additionalProperties": false
+                })),
+            ))?;
         reg.tools().provider(Arc::new(BenchmarkWorkbenchMailTool))?;
         Ok(())
     }

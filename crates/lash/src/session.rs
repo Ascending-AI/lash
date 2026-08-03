@@ -8,7 +8,7 @@ use lash_core::runtime::{
     PendingTurnInputCancelTarget, PendingTurnInputSuffixCancelOutcome, QueuedWorkBatch,
     QueuedWorkClaim, TurnInputAcceptanceReceipt, TurnInputClaim, TurnInputIngress,
 };
-use lash_core::{LiveReplayGap, LiveReplayStoreError, SessionObservationEvent};
+use lash_core::{LiveReplayStoreError, SessionObservationEvent, facade_support::LiveReplayGap};
 use lash_remote_protocol::{
     RemoteLiveReplayGap, RemoteSessionCursor, RemoteSessionObservation,
     RemoteSessionObservationEvent,
@@ -298,8 +298,9 @@ impl SessionBuilder {
         let session_id = state.session_id.clone();
         let mut env = self.core.env.clone();
         if let Some(provider) = self.provider.clone().or_else(|| self.core.provider.clone()) {
-            env.core.providers.provider_resolver =
-                Arc::new(lash_core::SingleProviderResolver::new(provider));
+            env.core.providers.provider_resolver = Arc::new(
+                lash_core::facade_support::SingleProviderResolver::new(provider),
+            );
         }
         let plugin_host = build_plugin_host(
             self.core.protocol_factory.as_ref(),
@@ -419,7 +420,7 @@ pub(crate) async fn load_state_from_store(
 /// reconciled before the runtime starts. So this is deliberately wholesale —
 /// model, prompt, turn budget and generation options all come from the host,
 /// and a mid-run
-/// [`LashRuntime::update_session_config`](lash_core::LashRuntime::update_session_config)
+/// [`LashRuntime::update_session_config`](lash_core::facade_support::LashRuntime::update_session_config)
 /// change lasts until the host reopens with a spec that says otherwise, for
 /// every one of them alike. A session opened at a fork point is a reopen like
 /// any other; branching history does not branch configuration.
@@ -472,7 +473,7 @@ pub struct LashSession {
 /// resume path stays a facade capability rather than exposing `lash-core`
 /// environment plumbing to hosts.
 pub struct ParkedSession {
-    pub(crate) inner: lash_core::ParkedSession,
+    pub(crate) inner: lash_core::facade_support::ParkedSession,
 }
 
 impl ParkedSession {
@@ -580,9 +581,12 @@ impl LashSession {
     }
 
     /// Build the cancellation and terminal-observation address for a turn.
-    pub fn turn_address(&self, turn_id: impl Into<String>) -> lash_core::TurnAddress {
+    pub fn turn_address(
+        &self,
+        turn_id: impl Into<String>,
+    ) -> lash_core::facade_support::TurnAddress {
         let observation = self.runtime.observe();
-        lash_core::TurnAddress::new(observation.session_id(), turn_id)
+        lash_core::facade_support::TurnAddress::new(observation.session_id(), turn_id)
     }
 
     pub fn policy_snapshot(&self) -> SessionPolicy {
@@ -645,14 +649,14 @@ impl LashSession {
         request_id: impl Into<String>,
         origin: Option<String>,
         reason: Option<String>,
-    ) -> Result<lash_core::TurnCancelReceipt> {
-        let mut request = lash_core::TurnCancelRequest::new(
-            lash_core::TurnAddress::new(self.session_id(), turn_id),
+    ) -> Result<lash_core::facade_support::TurnCancelReceipt> {
+        let mut request = lash_core::facade_support::TurnCancelRequest::new(
+            lash_core::facade_support::TurnAddress::new(self.session_id(), turn_id),
             request_id,
             origin,
         );
         request.reason = reason;
-        lash_core::TurnWorkDriver::new(self.effect_host())
+        lash_core::facade_support::TurnWorkDriver::new(self.effect_host())
             .request_cancel(request)
             .await
             .map_err(EmbedError::Runtime)

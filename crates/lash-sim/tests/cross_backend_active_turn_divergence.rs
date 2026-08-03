@@ -19,10 +19,10 @@ use lash::persistence::{
 use lash::{LashCore, PendingTurnInputCancelOutcome, TurnInput};
 use lash_core::{
     AwaitEventKey, AwaitEventResolver, AwaitEventWaitIdentity, EffectHost, ExecutionScope,
-    InlineRuntimeEffectController, Resolution, ResolveOutcome, RuntimeEffectController,
-    RuntimeEffectControllerError, RuntimeEffectEnvelope, RuntimeEffectLocalExecutor,
-    RuntimeEffectOutcome, RuntimeError, ScopedEffectController, SessionStoreFactory,
-    TurnInputCheckpointBoundary, TurnInputIngress,
+    Resolution, ResolveOutcome, RuntimeEffectController, RuntimeEffectControllerError,
+    RuntimeEffectEnvelope, RuntimeEffectLocalExecutor, RuntimeEffectOutcome, RuntimeError,
+    ScopedEffectController, SessionStoreFactory, TurnInputCheckpointBoundary, TurnInputIngress,
+    facade_support::InlineRuntimeEffectController,
 };
 use lash_sim::ProviderWireScript;
 use lash_sim::ScriptedLlmHttpTransport;

@@ -5,8 +5,9 @@ use async_trait::async_trait;
 use lash_core::runtime::{RuntimeTurnPhase, RuntimeTurnPhaseProbe};
 use lash_core::{
     InputItem, LlmOutputPart, LlmResponse, SessionAppendNode, SessionNodePayload, ToolCall,
-    ToolContract, ToolControl, ToolDefinition, ToolManifest, ToolProvider, ToolResult, TraceRecord,
-    TraceSink, TraceSinkError, TurnInput, TurnStop,
+    ToolContract, ToolControl, ToolDefinition, ToolManifest, ToolProvider, ToolResult, TurnInput,
+    facade_support::TraceRecord, facade_support::TraceSink, facade_support::TraceSinkError,
+    facade_support::TurnStop,
 };
 use lash_sim::oracles::{
     FrameSwitchCommitObservation, FrameSwitchSeedObservation,
@@ -158,7 +159,7 @@ fn model() -> lash_core::ModelSpec {
 }
 
 fn standard_core(
-    provider: lash_core::ProviderHandle,
+    provider: lash_core::facade_support::ProviderHandle,
     tools: Arc<dyn ToolProvider>,
     trace: Arc<RecordingTraceSink>,
 ) -> lash::LashCore {
@@ -166,15 +167,15 @@ fn standard_core(
         provider,
         tools,
         trace,
-        Arc::new(lash_core::OpenAttachmentSourcePolicy),
+        Arc::new(lash_core::facade_support::OpenAttachmentSourcePolicy),
     )
 }
 
 fn standard_core_with_attachment_policy(
-    provider: lash_core::ProviderHandle,
+    provider: lash_core::facade_support::ProviderHandle,
     tools: Arc<dyn ToolProvider>,
     trace: Arc<RecordingTraceSink>,
-    attachment_source_policy: Arc<dyn lash_core::AttachmentSourcePolicy>,
+    attachment_source_policy: Arc<dyn lash_core::facade_support::AttachmentSourcePolicy>,
 ) -> lash::LashCore {
     lash::LashCore::standard_builder()
         .effect_host(Arc::new(lash::durability::InlineEffectHost::default()))
@@ -192,7 +193,7 @@ fn standard_core_with_attachment_policy(
         .disable_queued_work_driver()
         .advanced()
         .runtime_host_config(
-            lash_core::RuntimeHostConfig::in_memory()
+            lash_core::facade_support::RuntimeHostConfig::in_memory()
                 .with_attachment_source_policy(attachment_source_policy),
         )
         .build()
@@ -492,13 +493,13 @@ async fn claims_settle_for_finish_cancel_error_and_chain_bound() {
     #[derive(Debug)]
     struct DenyAttachments;
 
-    impl lash_core::AttachmentSourcePolicy for DenyAttachments {
+    impl lash_core::facade_support::AttachmentSourcePolicy for DenyAttachments {
         fn authorize(
             &self,
-            producer: &lash_core::AttachmentProducer,
+            producer: &lash_core::facade_support::AttachmentProducer,
             _source: &lash_core::AttachmentSource,
-        ) -> Result<(), lash_core::AttachmentSourcePolicyError> {
-            Err(lash_core::AttachmentSourcePolicyError {
+        ) -> Result<(), lash_core::facade_support::AttachmentSourcePolicyError> {
+            Err(lash_core::facade_support::AttachmentSourcePolicyError {
                 producer: producer.clone(),
                 reason: "attachment denied for logical-turn settlement test".to_string(),
             })
@@ -576,7 +577,7 @@ async fn claims_settle_for_finish_cancel_error_and_chain_bound() {
         .expect("cancel input runs");
     assert!(matches!(
         cancelled.result.outcome,
-        lash_core::TurnOutcome::Stopped(TurnStop::Cancelled)
+        lash_core::facade_support::TurnOutcome::Stopped(TurnStop::Cancelled)
     ));
     let cancel_verdict = logical_turn_claims_settle_exactly_once(&cancel_trace.snapshot());
     assert!(cancel_verdict.is_passed(), "{cancel_verdict:?}");
@@ -616,7 +617,7 @@ async fn claims_settle_for_finish_cancel_error_and_chain_bound() {
         .expect("invalid input terminalizes");
     assert!(matches!(
         invalid.result.outcome,
-        lash_core::TurnOutcome::Stopped(TurnStop::InvalidInput)
+        lash_core::facade_support::TurnOutcome::Stopped(TurnStop::InvalidInput)
     ));
     let error_verdict = logical_turn_claims_settle_exactly_once(&error_trace.snapshot());
     assert!(error_verdict.is_passed(), "{error_verdict:?}");
@@ -672,7 +673,7 @@ async fn claims_settle_for_finish_cancel_error_and_chain_bound() {
         .expect("bounded chain terminalizes");
     assert!(matches!(
         bounded.result.outcome,
-        lash_core::TurnOutcome::Stopped(TurnStop::RuntimeError)
+        lash_core::facade_support::TurnOutcome::Stopped(TurnStop::RuntimeError)
     ));
     assert!(
         bounded
