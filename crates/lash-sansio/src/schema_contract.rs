@@ -22,11 +22,6 @@ impl SchemaContract {
         }
     }
 
-    pub fn with_projection(mut self, projection: SchemaProjectionPolicy) -> Self {
-        self.projection = projection;
-        self
-    }
-
     pub fn with_override(mut self, dialect: impl Into<String>, schema: Value) -> Self {
         self.projection
             .set_override(SchemaProjectionOverride::new(dialect, schema));
@@ -59,11 +54,11 @@ pub struct SchemaProjectionPolicy {
 }
 
 impl SchemaProjectionPolicy {
-    pub fn is_default(&self) -> bool {
+    pub(crate) fn is_default(&self) -> bool {
         self.mode == ProjectionMode::Auto && self.overrides.is_empty()
     }
 
-    pub fn set_override(&mut self, override_schema: SchemaProjectionOverride) {
+    pub(crate) fn set_override(&mut self, override_schema: SchemaProjectionOverride) {
         self.overrides
             .retain(|projection| projection.dialect != override_schema.dialect);
         self.overrides.push(override_schema);
@@ -101,7 +96,7 @@ pub struct SchemaProjectionOverride {
 }
 
 impl SchemaProjectionOverride {
-    pub fn new(dialect: impl Into<String>, schema: Value) -> Self {
+    pub(crate) fn new(dialect: impl Into<String>, schema: Value) -> Self {
         Self {
             dialect: dialect.into(),
             schema,

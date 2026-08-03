@@ -2,12 +2,16 @@ use serde_json::json;
 
 use super::execution_context::RuntimeExecutionContext;
 use super::tool_execution::ToolInvocationReply;
+#[cfg(test)]
 use crate::tool_dispatch::ToolPreparationOutcome;
-use crate::{ProcessInput, ProcessRegistration, ToolCallOutput, ToolCallRecord};
+#[cfg(test)]
+use crate::{ProcessInput, ProcessRegistration};
+use crate::{ToolCallOutput, ToolCallRecord};
 
 const PROCESS_HANDLE_KIND: &str = "process";
 
 impl RuntimeExecutionContext<'_> {
+    #[cfg(test)]
     pub(super) fn process_handle_value(id: &str, tool_name: &str) -> serde_json::Value {
         let _ = tool_name;
         Self::process_handle_json(id)
@@ -49,6 +53,7 @@ impl RuntimeExecutionContext<'_> {
         Ok((id.to_string(), tool_name))
     }
 
+    #[cfg(test)]
     pub(super) async fn start_tool_process(
         &self,
         call_id: String,

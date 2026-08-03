@@ -97,11 +97,11 @@ pub struct TriggerEventCatalog {
 }
 
 impl TriggerEventCatalog {
-    pub fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Self::default()
     }
 
-    pub fn declare(&mut self, event: TriggerEvent) -> Result<(), String> {
+    pub(crate) fn declare(&mut self, event: TriggerEvent) -> Result<(), String> {
         let key = event.key();
         if self.events.contains_key(&key) {
             return Err(format!(
@@ -129,7 +129,9 @@ impl TriggerEventCatalog {
         Ok(())
     }
 
-    pub fn from_events(events: impl IntoIterator<Item = TriggerEvent>) -> Result<Self, String> {
+    pub(crate) fn from_events(
+        events: impl IntoIterator<Item = TriggerEvent>,
+    ) -> Result<Self, String> {
         let mut catalog = Self::new();
         for event in events {
             catalog.declare(event)?;
@@ -137,17 +139,15 @@ impl TriggerEventCatalog {
         Ok(catalog)
     }
 
-    pub fn get(&self, resource_type: &str, alias: &str, event: &str) -> Option<&TriggerEvent> {
+    #[cfg(test)]
+    pub(crate) fn get(
+        &self,
+        resource_type: &str,
+        alias: &str,
+        event: &str,
+    ) -> Option<&TriggerEvent> {
         self.events
             .get(&TriggerEventKey::new(resource_type, alias, event))
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.events.is_empty()
-    }
-
-    pub fn events(&self) -> impl Iterator<Item = &TriggerEvent> {
-        self.events.values()
     }
 }
 

@@ -178,7 +178,7 @@ impl ToolValue {
         }
     }
 
-    pub fn into_json_value(self) -> Value {
+    pub(crate) fn into_json_value(self) -> Value {
         match self {
             Self::Null => Value::Null,
             Self::Bool(value) => Value::Bool(value),
@@ -192,7 +192,7 @@ impl ToolValue {
         }
     }
 
-    pub fn from_json_value(value: Value) -> serde_json::Result<Self> {
+    pub(crate) fn from_json_value(value: Value) -> serde_json::Result<Self> {
         serde_json::from_value(value)
     }
 
@@ -202,7 +202,7 @@ impl ToolValue {
         attachments
     }
 
-    pub fn model_parts(&self) -> Vec<ModelToolReturnPart> {
+    pub(crate) fn model_parts(&self) -> Vec<ModelToolReturnPart> {
         let mut parts = Vec::new();
         match self {
             Self::String(text) => push_text_part(&mut parts, text.clone()),
@@ -535,7 +535,7 @@ pub struct ToolFailure {
 }
 
 impl ToolFailure {
-    pub fn new(
+    pub(crate) fn new(
         class: ToolFailureClass,
         code: impl Into<String>,
         message: impl Into<String>,
@@ -578,11 +578,6 @@ impl ToolFailure {
         let mut failure = Self::tool(class, code, message);
         failure.retry = ToolRetryDisposition::Safe { after_ms };
         failure
-    }
-
-    pub fn with_retry(mut self, retry: ToolRetryDisposition) -> Self {
-        self.retry = retry;
-        self
     }
 
     pub fn to_json_value(&self) -> Value {
@@ -683,7 +678,7 @@ impl ModelToolReturn {
         }
     }
 
-    pub fn text(call_id: String, tool_name: String, content: impl Into<String>) -> Self {
+    pub(crate) fn text(call_id: String, tool_name: String, content: impl Into<String>) -> Self {
         Self {
             call_id,
             tool_name,

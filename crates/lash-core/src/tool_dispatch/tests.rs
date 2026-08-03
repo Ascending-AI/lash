@@ -5,6 +5,7 @@ use crate::{
     ToolCall, ToolCallOutcome, ToolContext, ToolProvider, ToolResult, ToolRetryDisposition,
     ToolRetryPolicy,
 };
+use lash_sansio::core_support::*;
 use serde_json::json;
 use std::collections::BTreeMap;
 use std::sync::Arc;

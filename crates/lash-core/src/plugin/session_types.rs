@@ -139,11 +139,11 @@ pub type AgentFrameId = String;
 pub struct AgentFrameReason(String);
 
 impl AgentFrameReason {
-    pub const INITIAL: &'static str = "initial";
-    pub const CONTINUE_AS: &'static str = "continue_as";
+    pub(crate) const INITIAL: &'static str = "initial";
+    pub(crate) const CONTINUE_AS: &'static str = "continue_as";
     pub const COMPACTION: &'static str = "compaction";
 
-    pub fn new(label: impl Into<String>) -> Self {
+    pub(crate) fn new(label: impl Into<String>) -> Self {
         Self(label.into())
     }
 
@@ -155,7 +155,7 @@ impl AgentFrameReason {
         Self::new(Self::CONTINUE_AS)
     }
 
-    pub fn compaction() -> Self {
+    pub(crate) fn compaction() -> Self {
         Self::new(Self::COMPACTION)
     }
 
@@ -216,7 +216,10 @@ pub struct AgentFrameAssignment {
 }
 
 impl AgentFrameAssignment {
-    pub fn from_session_request(request: &SessionCreateRequest, policy: SessionPolicy) -> Self {
+    pub(crate) fn from_session_request(
+        request: &SessionCreateRequest,
+        policy: SessionPolicy,
+    ) -> Self {
         Self {
             policy,
             plugin_options: request.plugin_options.clone(),
@@ -249,7 +252,7 @@ pub struct AgentFrameRecord {
 
 impl AgentFrameRecord {
     #[allow(clippy::too_many_arguments)]
-    pub fn new_at(
+    pub(crate) fn new_at(
         frame_node_id: impl Into<String>,
         session_id: impl Into<String>,
         previous_frame_node_id: Option<String>,

@@ -55,7 +55,7 @@ struct ToolRegistryState {
     next_live_source_id: u64,
 }
 
-/// Outcome of [`ToolRegistry::restore_state`]: the adopted generation plus the
+/// Outcome of `ToolRegistry::restore_state`: the adopted generation plus the
 /// ids of persisted tools that no registered source currently resolves.
 /// Hosts should surface a non-empty `orphaned` list to the user — the session
 /// opened, but those tools are non-members until their source returns.

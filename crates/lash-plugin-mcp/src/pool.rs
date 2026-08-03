@@ -472,7 +472,7 @@ async fn connect_service(
 ) -> Result<RunningService<RoleClient, ClientInfo>, McpError> {
     let mut implementation = Implementation::default();
     implementation.name = "lash".to_string();
-    implementation.version = lash_core::VERSION.to_string();
+    implementation.version = env!("CARGO_PKG_VERSION").to_string();
     let mut client_info = ClientInfo::default();
     client_info.client_info = implementation;
 

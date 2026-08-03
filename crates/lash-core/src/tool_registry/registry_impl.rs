@@ -43,14 +43,14 @@ impl ToolRegistry {
         }
     }
 
-    pub fn generation(&self) -> u64 {
+    pub(crate) fn generation(&self) -> u64 {
         self.state
             .read()
             .expect("tool registry state lock poisoned")
             .generation
     }
 
-    pub fn export_state(&self) -> ToolState {
+    pub(crate) fn export_state(&self) -> ToolState {
         let state = self
             .state
             .read()
@@ -58,7 +58,7 @@ impl ToolRegistry {
         ToolState::new(state.generation, export_tool_state_entries(&state.tools))
     }
 
-    pub fn apply_state(&self, next: ToolState) -> Result<u64, ReconfigureError> {
+    pub(crate) fn apply_state(&self, next: ToolState) -> Result<u64, ReconfigureError> {
         let current_generation = self.generation();
         if next.generation != current_generation {
             return Err(ReconfigureError::GenerationMismatch {
@@ -115,7 +115,7 @@ impl ToolRegistry {
     /// replaces a tool with a new id, even if it reuses the same name. Multiple
     /// sources resolving the same id or advertised name still fail because
     /// execution authority and model-facing names must both be unambiguous.
-    pub fn restore_state(
+    pub(crate) fn restore_state(
         &self,
         snapshot: ToolState,
     ) -> Result<ToolRestoreReport, ReconfigureError> {
@@ -186,6 +186,28 @@ impl ToolRegistry {
         self.reconcile_source(source, SourceReconcilePolicy::RejectExternalConflicts)
     }
 
+    pub fn remove_source(&self, handle: &ToolSourceHandle) -> Result<u64, ReconfigureError> {
+        self.remove_source_id(handle.as_str())
+    }
+
+    pub(crate) fn remove_source_id(&self, source_id: &str) -> Result<u64, ReconfigureError> {
+        {
+            let mut sources = self.sources.write().expect("tool source lock poisoned");
+            if sources.remove(source_id).is_none() {
+                return Err(ReconfigureError::UnknownSource(source_id.to_string()));
+            }
+        }
+        let mut state = self
+            .state
+            .write()
+            .expect("tool registry state lock poisoned");
+        state
+            .tools
+            .retain(|_, entry| entry.binding.source_id() != Some(source_id));
+        state.generation += 1;
+        Ok(state.generation)
+    }
+
     fn upsert_overlay_source(
         &self,
         source: Arc<dyn ToolSourceExecutor>,
@@ -233,11 +255,7 @@ impl ToolRegistry {
         Ok(state.generation)
     }
 
-    pub fn remove_source(&self, handle: &ToolSourceHandle) -> Result<u64, ReconfigureError> {
-        self.remove_source_id(handle.as_str())
-    }
-
-    pub fn refresh_sources(&self) -> Result<u64, ReconfigureError> {
+    pub(crate) fn refresh_sources(&self) -> Result<u64, ReconfigureError> {
         let sources = self
             .sources
             .read()
@@ -261,24 +279,6 @@ impl ToolRegistry {
         if reconciled.changed {
             state.generation = reconciled_generation(state.generation, true)?;
         }
-        Ok(state.generation)
-    }
-
-    pub(crate) fn remove_source_id(&self, source_id: &str) -> Result<u64, ReconfigureError> {
-        {
-            let mut sources = self.sources.write().expect("tool source lock poisoned");
-            if sources.remove(source_id).is_none() {
-                return Err(ReconfigureError::UnknownSource(source_id.to_string()));
-            }
-        }
-        let mut state = self
-            .state
-            .write()
-            .expect("tool registry state lock poisoned");
-        state
-            .tools
-            .retain(|_, entry| entry.binding.source_id() != Some(source_id));
-        state.generation += 1;
         Ok(state.generation)
     }
 

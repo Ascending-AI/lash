@@ -184,10 +184,6 @@ impl WakeDelivery {
         })
     }
 
-    pub fn source_key(&self) -> String {
-        crate::process_wake_source_key(&self.wake.process_id, self.wake.sequence)
-    }
-
     pub fn claim_token(&self) -> Result<&str, PluginError> {
         self.claim_token.as_deref().ok_or_else(|| {
             PluginError::Session(format!(

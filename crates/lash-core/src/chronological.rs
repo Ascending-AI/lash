@@ -1,5 +1,6 @@
 use crate::session_model::{ConversationRecord, ProtocolEvent, SessionHistoryRecord};
 use crate::{Message, MessageOrigin, MessageRole, MessageSequence, Part};
+use lash_sansio::core_support::*;
 
 #[derive(Clone, Debug, Default, serde::Serialize, serde::Deserialize)]
 pub struct ChronologicalProjection {

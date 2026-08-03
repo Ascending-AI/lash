@@ -3,6 +3,7 @@
 //! Split out of `plugin/mod.rs` purely for file size. All types keep
 //! their original module path via `pub use` in `plugin/mod.rs`.
 
+use lash_sansio::core_support::*;
 use std::sync::{Arc, OnceLock};
 
 use crate::runtime::RuntimeSessionState;

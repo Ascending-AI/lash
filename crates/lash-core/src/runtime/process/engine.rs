@@ -7,8 +7,7 @@ use tokio_util::sync::CancellationToken;
 
 use super::events::ProcessAwaitOutput;
 use super::model::{
-    ProcessExecutionContext, ProcessExecutionEnvSpec, ProcessIdentity, ProcessInput,
-    ProcessRegistration,
+    ProcessExecutionContext, ProcessExecutionEnvSpec, ProcessIdentity, ProcessRegistration,
 };
 use super::registry::ProcessRegistry;
 
@@ -54,7 +53,7 @@ impl ProcessInfraError {
         Self { source }
     }
 
-    pub fn into_plugin_error(self) -> crate::PluginError {
+    pub(crate) fn into_plugin_error(self) -> crate::PluginError {
         self.source
     }
 }
@@ -489,7 +488,7 @@ impl ProcessEngineRegistry {
     /// [`ProcessEngine::kind`]. This is the single enforcement point for unique
     /// engine kinds across everything registered on a runtime host, whether the
     /// engine was wired directly or contributed through the plugin contract.
-    pub fn try_with_engine(
+    pub(crate) fn try_with_engine(
         self,
         engine: Arc<dyn ProcessEngine>,
     ) -> Result<Self, crate::PluginError> {
@@ -502,26 +501,13 @@ impl ProcessEngineRegistry {
         Ok(self.with_engine(engine))
     }
 
-    pub fn get(&self, kind: &str) -> Option<Arc<dyn ProcessEngine>> {
+    pub(crate) fn get(&self, kind: &str) -> Option<Arc<dyn ProcessEngine>> {
         self.engines.get(kind).cloned()
     }
 
-    /// Iterate over every registered engine.
-    pub fn engines(&self) -> impl Iterator<Item = &Arc<dyn ProcessEngine>> {
-        self.engines.values()
-    }
-
-    pub fn require(&self, kind: &str) -> Result<Arc<dyn ProcessEngine>, crate::PluginError> {
+    pub(crate) fn require(&self, kind: &str) -> Result<Arc<dyn ProcessEngine>, crate::PluginError> {
         self.get(kind).ok_or_else(|| {
             crate::PluginError::Session(format!("process engine `{kind}` is not configured"))
         })
-    }
-
-    pub fn validate_input(&self, input: &ProcessInput) -> Result<(), crate::PluginError> {
-        if let ProcessInput::Engine { kind, .. } = input {
-            self.require(kind).map(|_| ())
-        } else {
-            Ok(())
-        }
     }
 }

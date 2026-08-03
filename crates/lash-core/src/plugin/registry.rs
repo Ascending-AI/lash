@@ -76,10 +76,6 @@ impl PluginExtensions {
             .map(Vec::as_slice)
             .unwrap_or(&[])
     }
-
-    pub fn is_empty(&self) -> bool {
-        self.contributions.is_empty()
-    }
 }
 
 #[derive(Clone, Default)]

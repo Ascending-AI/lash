@@ -138,8 +138,7 @@ impl ToolCatalog {
         }
     }
 
-    /// All catalog members. Membership is callability; there is no filtering.
-    pub fn callable_tools_iter(&self) -> impl Iterator<Item = &ToolManifest> {
+    pub(crate) fn callable_tools_iter(&self) -> impl Iterator<Item = &ToolManifest> {
         self.tools.iter().map(|tool| &tool.manifest)
     }
 
@@ -198,7 +197,7 @@ impl ToolCatalog {
             .and_then(|resolve| resolve(tool_name))
     }
 
-    pub fn filter_prompt_contributions(
+    pub(crate) fn filter_prompt_contributions(
         &self,
         contributions: Vec<PromptContribution>,
     ) -> Vec<PromptContribution> {

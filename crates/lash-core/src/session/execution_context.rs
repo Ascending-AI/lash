@@ -118,6 +118,25 @@ impl<'run> RuntimeExecutionContext<'run> {
             .with_agent_frame_id(Some(self.dispatch.agent_frame_id.clone()))
     }
 
+    pub(super) fn record_started_process(&self, process_id: &str) {
+        self.started_process_ids
+            .lock()
+            .expect("started process ids lock")
+            .insert(process_id.to_string());
+    }
+
+    pub(crate) fn session_graph_service(&self) -> &dyn crate::plugin::SessionGraphService {
+        self.dispatch.session_graph.as_ref()
+    }
+
+    #[cfg(test)]
+    pub(crate) fn tool_argument_projection_policy(
+        &self,
+        name: &str,
+    ) -> crate::ToolArgumentProjectionPolicy {
+        crate::tool_dispatch::resolve_tool_argument_projection_policy(&self.dispatch, name)
+    }
+
     #[allow(
         clippy::too_many_arguments,
         reason = "code execution bridge carries explicit per-turn runtime dependencies"
@@ -162,10 +181,6 @@ impl<'run> RuntimeExecutionContext<'run> {
         }
     }
 
-    pub fn session_id(&self) -> &str {
-        &self.session_id
-    }
-
     pub(crate) fn to_static(&self) -> Option<RuntimeExecutionContext<'static>> {
         Some(RuntimeExecutionContext {
             session_id: self.session_id.clone(),
@@ -193,14 +208,6 @@ impl<'run> RuntimeExecutionContext<'run> {
             started_process_ids: Arc::clone(&self.started_process_ids),
             nested_effect_error: Arc::clone(&self.nested_effect_error),
         })
-    }
-
-    pub(crate) fn record_nested_effect_error(&self, error: crate::RuntimeEffectControllerError) {
-        let mut pending = self
-            .nested_effect_error
-            .lock()
-            .expect("nested runtime effect error lock poisoned");
-        pending.get_or_insert(error);
     }
 
     pub(crate) fn take_nested_effect_error(&self) -> Option<crate::RuntimeEffectControllerError> {
@@ -234,96 +241,6 @@ impl<'run> RuntimeExecutionContext<'run> {
             .trigger_router
             .as_ref()
             .map(crate::TriggerRouter::store)
-    }
-
-    pub fn trigger_actor(&self) -> crate::ProcessOriginator {
-        self.process_originator
-            .clone()
-            .unwrap_or_else(|| crate::ProcessOriginator::session(self.session_scope()))
-    }
-
-    pub fn trigger_owner_scope(&self) -> Result<crate::TriggerOwnerScope, crate::PluginError> {
-        resolve_trigger_owner_scope(&self.session_id, self.process_originator.as_ref())
-    }
-
-    pub async fn execute_trigger_effect(
-        &self,
-        effect_id: String,
-        command: crate::TriggerCommand,
-    ) -> Result<crate::TriggerEffectResult, crate::RuntimeEffectControllerError> {
-        let store = self.trigger_store().ok_or_else(|| {
-            crate::RuntimeEffectControllerError::new(
-                "trigger_store_unavailable",
-                "trigger store is unavailable in this runtime",
-            )
-        })?;
-        let scope = self
-            .parent_invocation
-            .as_ref()
-            .map(|invocation| invocation.scope.clone())
-            .unwrap_or_else(|| crate::RuntimeScope::new(self.session_id.clone()));
-        let invocation = crate::RuntimeInvocation::effect(
-            scope,
-            effect_id.clone(),
-            crate::RuntimeEffectKind::Trigger,
-            effect_id,
-        )
-        .with_caused_by(
-            self.parent_invocation
-                .as_ref()
-                .and_then(crate::RuntimeInvocation::causal_ref),
-        );
-        self.dispatch
-            .effect_controller
-            .controller()
-            .execute_effect(
-                crate::RuntimeEffectEnvelope::new(
-                    invocation,
-                    crate::RuntimeEffectCommand::Trigger {
-                        command: Box::new(command),
-                    },
-                ),
-                crate::RuntimeEffectLocalExecutor::triggers(store),
-            )
-            .await?
-            .into_trigger()
-    }
-
-    pub fn trigger_registration_wake_target(&self) -> Option<crate::SessionScope> {
-        self.process_wake_session_id
-            .as_ref()
-            .map(crate::SessionScope::new)
-            .or_else(|| Some(self.session_scope()))
-    }
-
-    pub fn attachment_store(&self) -> Arc<crate::SessionAttachmentStore> {
-        Arc::clone(&self.attachment_store)
-    }
-
-    pub fn process_env_store(&self) -> Arc<dyn crate::ProcessExecutionEnvStore> {
-        Arc::clone(&self.process_env_store)
-    }
-
-    pub fn chronological_projection(&self) -> Arc<crate::ChronologicalProjection> {
-        Arc::clone(&self.chronological_projection)
-    }
-
-    pub fn protocol_extension<T: 'static>(&self) -> Option<&T> {
-        self.protocol_extension
-            .as_ref()
-            .and_then(|extension| extension.as_any().downcast_ref::<T>())
-    }
-
-    pub fn turn_context(&self) -> &crate::TurnContext {
-        &self.turn_context
-    }
-
-    pub fn tool_catalog(&self) -> Arc<crate::ToolCatalog> {
-        Arc::clone(&self.dispatch.tool_catalog)
-    }
-
-    pub(crate) fn session_graph_service(&self) -> &dyn crate::plugin::SessionGraphService {
-        self.dispatch.session_graph.as_ref()
     }
 
     pub(super) async fn emit_turn_activity(
@@ -467,17 +384,50 @@ impl<'run> RuntimeExecutionContext<'run> {
         self
     }
 
-    /// Spawn provenance for children started by this context, present only
-    /// when this context executes a process: children inherit the chain's
-    /// originator and wake target instead of the ephemeral execution scope.
-    pub(super) fn record_started_process(&self, process_id: &str) {
-        self.started_process_ids
-            .lock()
-            .expect("started process ids lock")
-            .insert(process_id.to_string());
+    pub(crate) fn with_turn_phase_probe(
+        mut self,
+        probe: Option<Arc<dyn crate::runtime::RuntimeTurnPhaseProbe>>,
+    ) -> Self {
+        self.turn_phase_probe = probe;
+        self
     }
 
-    pub(super) fn is_run_local_process(&self, process_id: &str) -> bool {
+    #[doc(hidden)]
+    pub fn named_phase(&self, phase: &'static str) -> crate::runtime::RuntimeNamedPhase {
+        crate::runtime::RuntimeNamedPhase::begin(self.turn_phase_probe.clone(), phase)
+    }
+
+    pub(crate) fn with_cancellation_token(mut self, cancellation_token: CancellationToken) -> Self {
+        self.cancellation_token = Some(cancellation_token);
+        self
+    }
+
+    pub(crate) fn without_turn_cancel_observation(mut self) -> Self {
+        self.observe_turn_cancel = false;
+        self
+    }
+
+    pub(crate) fn with_process_work_driver(
+        mut self,
+        process_work_driver: Option<crate::ProcessWorkDriver>,
+    ) -> Self {
+        self.process_work_driver = process_work_driver;
+        self
+    }
+
+    pub(crate) fn record_nested_effect_error(&self, error: crate::RuntimeEffectControllerError) {
+        let mut pending = self
+            .nested_effect_error
+            .lock()
+            .expect("nested runtime effect error lock poisoned");
+        pending.get_or_insert(error);
+    }
+
+    pub fn attachment_store(&self) -> Arc<crate::SessionAttachmentStore> {
+        Arc::clone(&self.attachment_store)
+    }
+
+    pub(crate) fn is_run_local_process(&self, process_id: &str) -> bool {
         self.started_process_ids
             .lock()
             .expect("started process ids lock")
@@ -493,7 +443,7 @@ impl<'run> RuntimeExecutionContext<'run> {
             })
     }
 
-    pub(super) async fn attach_captured_process_execution_env(
+    pub(crate) async fn attach_captured_process_execution_env(
         &self,
         registration: crate::ProcessRegistration,
     ) -> Result<crate::ProcessRegistration, crate::PluginError> {
@@ -522,56 +472,6 @@ impl<'run> RuntimeExecutionContext<'run> {
             &self.execution_env_spec,
         )
         .await
-    }
-
-    pub(crate) fn with_turn_phase_probe(
-        mut self,
-        probe: Option<Arc<dyn crate::runtime::RuntimeTurnPhaseProbe>>,
-    ) -> Self {
-        self.turn_phase_probe = probe;
-        self
-    }
-
-    #[doc(hidden)]
-    pub fn named_phase(&self, phase: &'static str) -> crate::runtime::RuntimeNamedPhase {
-        crate::runtime::RuntimeNamedPhase::begin(self.turn_phase_probe.clone(), phase)
-    }
-
-    pub fn parent_invocation(&self) -> Option<&crate::RuntimeInvocation> {
-        self.parent_invocation.as_ref()
-    }
-
-    pub(crate) fn with_cancellation_token(mut self, cancellation_token: CancellationToken) -> Self {
-        self.cancellation_token = Some(cancellation_token);
-        self
-    }
-
-    pub(crate) fn without_turn_cancel_observation(mut self) -> Self {
-        self.observe_turn_cancel = false;
-        self
-    }
-
-    pub(crate) fn with_process_work_driver(
-        mut self,
-        process_work_driver: Option<crate::ProcessWorkDriver>,
-    ) -> Self {
-        self.process_work_driver = process_work_driver;
-        self
-    }
-
-    pub fn callable_tool_manifest(&self, name: &str) -> Option<crate::ToolManifest> {
-        crate::tool_dispatch::resolve_callable_manifest(&self.dispatch, name)
-    }
-
-    pub fn callable_tool_manifest_by_id(&self, id: &crate::ToolId) -> Option<crate::ToolManifest> {
-        crate::tool_dispatch::resolve_callable_manifest_by_id(&self.dispatch, id)
-    }
-
-    pub fn tool_argument_projection_policy(
-        &self,
-        name: &str,
-    ) -> crate::ToolArgumentProjectionPolicy {
-        crate::tool_dispatch::resolve_tool_argument_projection_policy(&self.dispatch, name)
     }
 
     pub async fn start_child_process(
@@ -615,49 +515,36 @@ impl<'run> RuntimeExecutionContext<'run> {
         }
     }
 
-    pub async fn sleep_process(
+    pub async fn append_process_event(
         &self,
-        scope: &str,
-        sequence: u64,
-        duration_ms: u64,
-    ) -> Result<(), crate::RuntimeEffectControllerError> {
-        let cancellation = self.cancellation_token.clone().unwrap_or_default();
-        let invocation = crate::runtime::causal::process_sleep_invocation(
-            &self.session_id,
-            self.parent_invocation.as_ref(),
-            scope,
-            sequence,
-        );
-        let outcome = self
-            .dispatch
-            .effect_controller
-            .controller()
-            .execute_effect(
-                crate::RuntimeEffectEnvelope::new(
-                    invocation,
-                    crate::RuntimeEffectCommand::Sleep { duration_ms },
-                ),
-                crate::RuntimeEffectLocalExecutor::sleep_with_clock(
-                    cancellation,
-                    std::sync::Arc::clone(&self.dispatch.clock),
-                )
-                .with_turn_cancel_observation(self.observe_turn_cancel)
-                .with_turn_cancel_scope(
-                    self.dispatch
-                        .effect_controller
-                        .scoped()
-                        .execution_scope()
-                        .clone(),
-                ),
+        request: crate::ProcessEventAppendRequest,
+    ) -> Result<crate::ProcessEvent, crate::PluginError> {
+        let context = self.process_event_context.as_ref().ok_or_else(|| {
+            crate::PluginError::Session(
+                "process event emission is unavailable outside a durable process execution"
+                    .to_string(),
+            )
+        })?;
+        let result = context
+            .registry
+            .append_event_with_authority(
+                &context.process_id,
+                request,
+                &context.execution_write_authority,
             )
             .await?;
-        match outcome {
-            crate::RuntimeEffectOutcome::Sleep => Ok(()),
-            other => Err(crate::RuntimeEffectControllerError::new(
-                "runtime_effect_wrong_outcome",
-                format!("expected sleep outcome, got {}", other.kind().as_str()),
-            )),
-        }
+        crate::tool_provider::process_events::enqueue_wake_delivery(
+            std::sync::Arc::clone(&context.registry),
+            context.store.clone(),
+            context.session_store_factory.as_ref(),
+            result.wake_delivery,
+            Some(self.session_graph_service()),
+            context.queued_work_driver.as_ref(),
+            Arc::clone(&context.clock),
+            &context.wake_turn_policy,
+        )
+        .await?;
+        Ok(result.event)
     }
 
     pub async fn await_process_signal_event(
@@ -726,6 +613,10 @@ impl<'run> RuntimeExecutionContext<'run> {
                 "process signal wait was cancelled",
             )),
         }
+    }
+
+    pub fn callable_tool_manifest_by_id(&self, id: &crate::ToolId) -> Option<crate::ToolManifest> {
+        crate::tool_dispatch::resolve_callable_manifest_by_id(&self.dispatch, id)
     }
 
     pub async fn signal_process_by_id(
@@ -835,41 +726,129 @@ impl<'run> RuntimeExecutionContext<'run> {
         }
     }
 
-    /// Emit an event owned by this process execution.
-    ///
-    /// The process id, registry, and write authority come from the installed
-    /// engine runtime context; callers cannot substitute an unfenced registry
-    /// path.
-    pub async fn append_process_event(
+    pub async fn sleep_process(
         &self,
-        request: crate::ProcessEventAppendRequest,
-    ) -> Result<crate::ProcessEvent, crate::PluginError> {
-        let context = self.process_event_context.as_ref().ok_or_else(|| {
-            crate::PluginError::Session(
-                "process event emission is unavailable outside a durable process execution"
-                    .to_string(),
-            )
-        })?;
-        let result = context
-            .registry
-            .append_event_with_authority(
-                &context.process_id,
-                request,
-                &context.execution_write_authority,
+        scope: &str,
+        sequence: u64,
+        duration_ms: u64,
+    ) -> Result<(), crate::RuntimeEffectControllerError> {
+        let cancellation = self.cancellation_token.clone().unwrap_or_default();
+        let invocation = crate::runtime::causal::process_sleep_invocation(
+            &self.session_id,
+            self.parent_invocation.as_ref(),
+            scope,
+            sequence,
+        );
+        let outcome = self
+            .dispatch
+            .effect_controller
+            .controller()
+            .execute_effect(
+                crate::RuntimeEffectEnvelope::new(
+                    invocation,
+                    crate::RuntimeEffectCommand::Sleep { duration_ms },
+                ),
+                crate::RuntimeEffectLocalExecutor::sleep_with_clock(
+                    cancellation,
+                    std::sync::Arc::clone(&self.dispatch.clock),
+                )
+                .with_turn_cancel_observation(self.observe_turn_cancel)
+                .with_turn_cancel_scope(
+                    self.dispatch
+                        .effect_controller
+                        .scoped()
+                        .execution_scope()
+                        .clone(),
+                ),
             )
             .await?;
-        crate::tool_provider::process_events::enqueue_wake_delivery(
-            std::sync::Arc::clone(&context.registry),
-            context.store.clone(),
-            context.session_store_factory.as_ref(),
-            result.wake_delivery,
-            Some(self.session_graph_service()),
-            context.queued_work_driver.as_ref(),
-            Arc::clone(&context.clock),
-            &context.wake_turn_policy,
+        match outcome {
+            crate::RuntimeEffectOutcome::Sleep => Ok(()),
+            other => Err(crate::RuntimeEffectControllerError::new(
+                "runtime_effect_wrong_outcome",
+                format!("expected sleep outcome, got {}", other.kind().as_str()),
+            )),
+        }
+    }
+
+    pub fn chronological_projection(&self) -> Arc<crate::ChronologicalProjection> {
+        Arc::clone(&self.chronological_projection)
+    }
+
+    pub async fn execute_trigger_effect(
+        &self,
+        effect_id: String,
+        command: crate::TriggerCommand,
+    ) -> Result<crate::TriggerEffectResult, crate::RuntimeEffectControllerError> {
+        let store = self.trigger_store().ok_or_else(|| {
+            crate::RuntimeEffectControllerError::new(
+                "trigger_store_unavailable",
+                "trigger store is unavailable in this runtime",
+            )
+        })?;
+        let scope = self
+            .parent_invocation
+            .as_ref()
+            .map(|invocation| invocation.scope.clone())
+            .unwrap_or_else(|| crate::RuntimeScope::new(self.session_id.clone()));
+        let invocation = crate::RuntimeInvocation::effect(
+            scope,
+            effect_id.clone(),
+            crate::RuntimeEffectKind::Trigger,
+            effect_id,
         )
-        .await?;
-        Ok(result.event)
+        .with_caused_by(
+            self.parent_invocation
+                .as_ref()
+                .and_then(crate::RuntimeInvocation::causal_ref),
+        );
+        self.dispatch
+            .effect_controller
+            .controller()
+            .execute_effect(
+                crate::RuntimeEffectEnvelope::new(
+                    invocation,
+                    crate::RuntimeEffectCommand::Trigger {
+                        command: Box::new(command),
+                    },
+                ),
+                crate::RuntimeEffectLocalExecutor::triggers(store),
+            )
+            .await?
+            .into_trigger()
+    }
+
+    pub fn parent_invocation(&self) -> Option<&crate::RuntimeInvocation> {
+        self.parent_invocation.as_ref()
+    }
+
+    pub fn session_id(&self) -> &str {
+        &self.session_id
+    }
+
+    pub fn tool_catalog(&self) -> Arc<crate::ToolCatalog> {
+        Arc::clone(&self.dispatch.tool_catalog)
+    }
+
+    pub fn trigger_actor(&self) -> crate::ProcessOriginator {
+        self.process_originator
+            .clone()
+            .unwrap_or_else(|| crate::ProcessOriginator::session(self.session_scope()))
+    }
+
+    pub fn trigger_owner_scope(&self) -> Result<crate::TriggerOwnerScope, crate::PluginError> {
+        resolve_trigger_owner_scope(&self.session_id, self.process_originator.as_ref())
+    }
+
+    pub fn trigger_registration_wake_target(&self) -> Option<crate::SessionScope> {
+        self.process_wake_session_id
+            .as_ref()
+            .map(crate::SessionScope::new)
+            .or_else(|| Some(self.session_scope()))
+    }
+
+    pub fn turn_context(&self) -> &crate::TurnContext {
+        &self.turn_context
     }
 }
 

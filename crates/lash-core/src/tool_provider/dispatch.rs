@@ -120,7 +120,7 @@ mod tests {
 
         assert_eq!(replies.len(), 2);
         for reply in replies {
-            assert_eq!(reply.output.status(), crate::ToolCallStatus::Failure);
+            assert_eq!(reply.output.status(), lash_sansio::ToolCallStatus::Failure);
             assert!(reply.output.value_for_projection().to_string().contains(
                 "nested tool batch dispatch is unavailable inside an atomic tool attempt"
             ));

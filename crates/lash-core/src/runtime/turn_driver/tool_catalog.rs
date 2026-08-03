@@ -1,3 +1,4 @@
+use lash_sansio::core_support::*;
 use lash_sansio::{PreparedPrompt, PromptCache, PromptContributionSet, PromptLayer};
 
 use super::*;
@@ -223,17 +224,6 @@ impl RuntimeTurnDriver<'_> {
         request: &LlmRequest,
     ) -> Result<Option<crate::ProtocolLlmCallAction>, PluginError> {
         let latest_prompt_usage = self.turn_pipeline.state_mut().last_prompt_usage.clone();
-        let effect_controller = crate::runtime::RuntimeEffectControllerHandle::borrowed(
-            self.scoped_effect_controller.clone(),
-        );
-        let direct_completions = self
-            .session_services
-            .direct_completion_client(effect_controller.clone_scoped(), Some(self.turn_id.clone()));
-        let process_parent_invocation = self.turn_effect_invocation(
-            machine,
-            crate::sansio::EffectId(u64::MAX),
-            RuntimeEffectKind::Process,
-        )?;
         self.session
             .plugins()
             .protocol_session()
@@ -248,9 +238,6 @@ impl RuntimeTurnDriver<'_> {
                         machine.protocol_iteration(),
                     ),
                     latest_prompt_usage,
-                    direct_completions,
-                    process_parent_invocation,
-                    effect_controller,
                 },
                 request,
             )

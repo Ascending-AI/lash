@@ -2,6 +2,7 @@ use crate::{
     PreparedToolCall, RuntimeEffectKind, RuntimeEffectLocalExecutor, RuntimeInvocation,
     ToolCallOutput, ToolCallRecord, ToolFailure, ToolFailureClass, ToolResult, ToolRetryPolicy,
 };
+use lash_sansio::core_support::*;
 
 use super::{
     PendingToolDispatchOutcome, ToolCallLaunch, ToolDispatchContext, ToolDispatchOutcome,
@@ -101,7 +102,8 @@ impl ToolAttemptEffectIdentity {
 
     fn parent(&self) -> Option<&RuntimeInvocation> {
         match self {
-            Self::Scalar { parent } | Self::Process { parent, .. } => parent.as_ref(),
+            Self::Scalar { parent } => parent.as_ref(),
+            Self::Process { parent, .. } => parent.as_ref(),
             Self::Batch { parent, .. } => Some(parent),
         }
     }
@@ -114,7 +116,14 @@ impl ToolAttemptEffectIdentity {
     ) -> u64 {
         match self {
             Self::Batch { .. } => attempt_duration_ms,
-            Self::Scalar { .. } | Self::Process { .. } => context
+            Self::Scalar { .. } => context
+                .clock
+                .now()
+                .duration_since(started_at)
+                .as_millis()
+                .try_into()
+                .unwrap_or(u64::MAX),
+            Self::Process { .. } => context
                 .clock
                 .now()
                 .duration_since(started_at)

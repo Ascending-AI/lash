@@ -260,6 +260,7 @@ pub(crate) fn resolve_callable_manifest_by_id(
     None
 }
 
+#[cfg(test)]
 pub(crate) fn resolve_tool_argument_projection_policy(
     context: &ToolDispatchContext<'_>,
     tool_name: &str,

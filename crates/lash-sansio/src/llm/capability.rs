@@ -145,7 +145,7 @@ pub enum ModelEffortValidationCategory {
 impl ModelEffortValidationCategory {
     /// Stable snake_case code, matching the serde representation. Turn-driver
     /// validation surfaces this as the turn-issue code.
-    pub fn code(&self) -> &'static str {
+    pub(crate) fn code(&self) -> &'static str {
         match self {
             Self::UnsupportedEffort => "unsupported_effort",
             Self::EffortNotConfigurable => "effort_not_configurable",

@@ -24,10 +24,11 @@ pub(crate) use execution::{
 pub(crate) use preparation::dispatch_tool_call;
 #[cfg(test)]
 pub(crate) use preparation::dispatch_tool_call_with_execution_context;
+#[cfg(test)]
+pub(crate) use preparation::resolve_tool_argument_projection_policy;
 pub(crate) use preparation::{
     prepare_granted_tool_call_with_context, prepare_tool_call_with_context,
     resolve_callable_manifest, resolve_callable_manifest_by_id,
-    resolve_tool_argument_projection_policy,
 };
 pub(crate) use retry::{mark_retry_exhausted, retry_after_ms};
 pub(crate) use scheduling::schedule_tool_batch;

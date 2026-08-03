@@ -129,7 +129,8 @@ pub enum PruneState {
 }
 
 impl Part {
-    pub fn prompt_char_count(&self) -> usize {
+    #[cfg(test)]
+    pub(crate) fn prompt_char_count(&self) -> usize {
         // Reasoning parts are not user-visible text and aren't sent to the
         // model as flat prompt content. Provider adapters may re-emit them
         // via structured replay metadata instead. Excluding them from the
@@ -325,7 +326,7 @@ impl std::ops::Deref for MessageSequence {
 }
 
 impl MessageSequence {
-    pub fn from_owned(messages: Vec<Message>) -> Self {
+    pub(crate) fn from_owned(messages: Vec<Message>) -> Self {
         Self {
             base: Arc::new(Vec::new()),
             delta: Vec::new(),
@@ -335,7 +336,7 @@ impl MessageSequence {
         }
     }
 
-    pub fn from_base(base: Arc<Vec<Message>>) -> Self {
+    pub(crate) fn from_base(base: Arc<Vec<Message>>) -> Self {
         Self {
             base,
             delta: Vec::new(),
@@ -345,7 +346,7 @@ impl MessageSequence {
         }
     }
 
-    pub fn from_base_and_delta(base: Arc<Vec<Message>>, delta: Vec<Message>) -> Self {
+    pub(crate) fn from_base_and_delta(base: Arc<Vec<Message>>, delta: Vec<Message>) -> Self {
         Self {
             base,
             delta,
@@ -359,30 +360,26 @@ impl MessageSequence {
     /// `render_prompt` calls will reuse the memoized `RenderedPrompt` for
     /// the base instead of rewalking it. The delta is always re-rendered
     /// because it changes per LLM iteration. Returns `self` for chaining.
-    pub fn with_base_render_cache(mut self, cache: Arc<BaseRenderCache>) -> Self {
+    pub(crate) fn with_base_render_cache(mut self, cache: Arc<BaseRenderCache>) -> Self {
         self.base_rendered = Some(cache);
         self
     }
 
-    pub fn len(&self) -> usize {
+    pub(crate) fn len(&self) -> usize {
         match &self.owned {
             Some(owned) => owned.len(),
             None => self.base.len() + self.delta.len(),
         }
     }
 
-    pub fn is_empty(&self) -> bool {
-        self.len() == 0
-    }
-
-    pub fn iter(&self) -> MessageSequenceIter<'_> {
+    pub(crate) fn iter(&self) -> MessageSequenceIter<'_> {
         match self.owned.as_ref() {
             Some(owned) => MessageSequenceIter::Owned(owned.iter()),
             None => MessageSequenceIter::Split(self.base.iter().chain(self.delta.iter())),
         }
     }
 
-    pub fn as_slice(&self) -> &[Message] {
+    pub(crate) fn as_slice(&self) -> &[Message] {
         if let Some(owned) = &self.owned {
             return owned.as_slice();
         }
@@ -399,7 +396,7 @@ impl MessageSequence {
             .as_slice()
     }
 
-    pub fn shared(&self) -> Arc<Vec<Message>> {
+    pub(crate) fn shared(&self) -> Arc<Vec<Message>> {
         if let Some(owned) = &self.owned {
             return Arc::clone(self.materialized.get_or_init(|| Arc::new(owned.clone())));
         }
@@ -434,7 +431,7 @@ impl MessageSequence {
         self.owned.as_mut().expect("message sequence owned state")
     }
 
-    pub fn push(&mut self, message: Message) {
+    pub(crate) fn push(&mut self, message: Message) {
         if let Some(owned) = self.owned.as_mut() {
             owned.push(message);
         } else {
@@ -443,7 +440,7 @@ impl MessageSequence {
         self.materialized = OnceLock::new();
     }
 
-    pub fn extend(&mut self, messages: Vec<Message>) {
+    pub(crate) fn extend(&mut self, messages: Vec<Message>) {
         if messages.is_empty() {
             return;
         }
@@ -462,23 +459,7 @@ impl MessageSequence {
         self.materialized = OnceLock::new();
     }
 
-    pub fn into_vec(self) -> Vec<Message> {
-        if let Some(owned) = self.owned {
-            return owned;
-        }
-        if self.delta.is_empty() {
-            return Arc::unwrap_or_clone(self.base);
-        }
-        if let Some(materialized) = self.materialized.into_inner() {
-            return Arc::unwrap_or_clone(materialized);
-        }
-        let mut combined = Vec::with_capacity(self.base.len() + self.delta.len());
-        combined.extend(self.base.iter().cloned());
-        combined.extend(self.delta);
-        combined
-    }
-
-    pub fn render_prompt(&self) -> RenderedPrompt {
+    pub(crate) fn render_prompt(&self) -> RenderedPrompt {
         if let Some(owned) = &self.owned {
             return render_prompt(owned.as_slice());
         }
