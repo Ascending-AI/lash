@@ -653,7 +653,7 @@ fn standard_protocol_scenario_provider_error_stops_without_checkpoint() {
 
 #[test]
 fn standard_protocol_scenario_native_tool_loop_reenters_model_after_checkpoint() {
-    StandardProtocolScenario::new(NATIVE_TOOL_LOOP.display_name)
+    let run = StandardProtocolScenario::new(NATIVE_TOOL_LOOP.display_name)
         .user_message("read file")
         .llm_response(
             false,
@@ -682,6 +682,13 @@ fn standard_protocol_scenario_native_tool_loop_reenters_model_after_checkpoint()
             ..StandardProtocolExpectations::default()
         })
         .run();
+    insta::assert_snapshot!(run.transcript.render(), @r#"
+    standard     provider  model.request           messages=1 tools=0
+    standard     tool      tool.call               name="read_file" call=call-001
+    standard     tool      tool.result             name="read_file" outcome=success call=call-001
+    standard     commit    checkpoint.request      checkpoint=after_work
+    standard     provider  model.request           messages=3 tools=0
+    "#);
 }
 
 #[test]
@@ -747,7 +754,7 @@ fn standard_protocol_scenario_parallel_tool_results_checkpoint_once() {
 
 #[test]
 fn standard_protocol_scenario_tool_failure_feedback_reenters_model_after_checkpoint() {
-    StandardProtocolScenario::new(TOOL_FAILURE_FEEDBACK.display_name)
+    let run = StandardProtocolScenario::new(TOOL_FAILURE_FEEDBACK.display_name)
         .user_message("search docs")
         .llm_response(
             false,
@@ -778,6 +785,13 @@ fn standard_protocol_scenario_tool_failure_feedback_reenters_model_after_checkpo
             ..StandardProtocolExpectations::default()
         })
         .run();
+    insta::assert_snapshot!(run.transcript.render(), @r#"
+    standard     provider  model.request           messages=1 tools=0
+    standard     tool      tool.call               name="search" call=call-001
+    standard     tool      tool.result             name="search" outcome=failure call=call-001
+    standard     commit    checkpoint.request      checkpoint=after_work
+    standard     provider  model.request           messages=3 tools=0
+    "#);
 }
 
 #[test]
