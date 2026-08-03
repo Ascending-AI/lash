@@ -39,6 +39,25 @@ pub mod triggers;
 
 #[doc(hidden)]
 pub mod facade_support {
+    /// Build the core-level tool-registry projection through the same plugin
+    /// composition path used for runtime sessions.
+    pub fn build_core_tool_registry(
+        host: &crate::plugin::PluginHost,
+    ) -> Result<std::sync::Arc<crate::ToolRegistry>, crate::PluginError> {
+        host.build_core_tool_registry()
+    }
+
+    pub fn tool_registry_manifests(registry: &crate::ToolRegistry) -> Vec<crate::ToolManifest> {
+        crate::ToolProvider::tool_manifests(registry)
+    }
+
+    pub fn resolve_tool_registry_contract(
+        registry: &crate::ToolRegistry,
+        name: &str,
+    ) -> Option<std::sync::Arc<crate::ToolContract>> {
+        registry.resolve_catalog_contract(name)
+    }
+
     pub use crate::attachments::AttachmentProducer;
     pub use crate::attachments::AttachmentReclamationReport;
     pub use crate::attachments::AttachmentSourcePolicy;

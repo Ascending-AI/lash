@@ -1,4 +1,18 @@
 impl ToolRegistry {
+    pub(crate) fn resolve_catalog_contract(&self, name: &str) -> Option<Arc<ToolContract>> {
+        let manifest = self.resolve_manifest(name)?;
+        let is_member = self
+            .state
+            .read()
+            .expect("tool registry state lock poisoned")
+            .tools
+            .get(&manifest.id)
+            .is_some_and(ToolRegistryEntry::is_member);
+        is_member
+            .then(|| self.resolve_contract_by_id(&manifest.id))
+            .flatten()
+    }
+
     /// Try to rebind an orphaned entry to a source that now resolves the same
     /// tool id. Returns the live manifest on success; the advertised name may
     /// differ from the persisted manifest because names are model-facing

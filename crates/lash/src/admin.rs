@@ -881,6 +881,25 @@ impl ToolAdmin {
         self.control.active_tool_manifests().await
     }
 
+    /// Resolve the full contract currently available to this session.
+    ///
+    /// Catalog membership is enforced: a known tool that has been removed
+    /// from this session's catalog produces the same typed miss as an unknown
+    /// name.
+    pub async fn resolve_contract(
+        &self,
+        name: &str,
+    ) -> std::result::Result<Arc<lash_core::ToolContract>, crate::ToolCatalogMiss> {
+        let registry = self
+            .control
+            .tool_registry()
+            .await
+            .map_err(|_| crate::ToolCatalogMiss {
+                name: name.to_string(),
+            })?;
+        crate::tool_catalog::resolve_catalog_contract(&registry, name)
+    }
+
     pub async fn add_provider(&self, provider: Arc<dyn ToolProvider>) -> Result<ToolSourceHandle> {
         self.control.add_tool_provider(provider).await
     }

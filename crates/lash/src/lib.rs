@@ -24,6 +24,7 @@ mod session;
 mod support;
 #[cfg(all(test, feature = "rlm"))]
 mod tests;
+mod tool_catalog;
 pub mod turn;
 pub mod usage;
 
@@ -38,6 +39,7 @@ pub use crate::prompt_layer::PromptLayerSink;
 pub use crate::session::{
     EnqueueTurnBuilder, LashSession, ObservableSession, ParkedSession, SessionBuilder,
 };
+pub use crate::tool_catalog::{ToolCatalogMiss, ToolCatalogView};
 pub use crate::turn::{
     QueuedTurnBuilder, TurnActivityFanout, TurnBuilder, TurnOutput, TurnResult, TurnStream,
     message_role, message_text,

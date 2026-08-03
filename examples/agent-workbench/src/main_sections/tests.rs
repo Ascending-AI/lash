@@ -31,6 +31,7 @@ mod tests {
     }
 
     include!("tests/recoverable_chat.rs");
+    include!("tests/tool_catalog.rs");
 
     pub(super) fn explicit_durable_test_facets(
         data_dir: &std::path::Path,
@@ -912,6 +913,7 @@ finish "gap source"
             tool_names.iter().any(|name| name == "inbox__test__send"),
             "inbox.test send tool should be active: {tool_names:?}"
         );
+        assert_tool_catalog_contract(&core, &session).await;
 
         let output = session
             .turn(lash::TurnInput::text("send a message"))
