@@ -8,7 +8,7 @@ pub fn lashlang_value_to_json(
 }
 
 pub fn protocol_tool_reply_to_lashlang_value(
-    reply: lash_core::ToolInvocationReply,
+    reply: lash_core::facade_support::ToolInvocationReply,
 ) -> Result<LashlangValue, ExecutionHostError> {
     let output = reply.output;
     let is_success = output.is_success();

@@ -55,7 +55,7 @@ async fn run_once_process_list_stress(chat_turns: usize) -> anyhow::Result<Runti
     // grows across turns, so the phases also expose append-cost growth with
     // log length (the durable-suspension hot path).
     let signal_process_id = "process-signal-stress";
-    let signal_event_type = lash_core::process_signal_event_type("stress")?;
+    let signal_event_type = lash_core::facade_support::process_signal_event_type("stress")?;
     registry
         .register_process(
             lash_core::ProcessRegistration::new(

@@ -689,9 +689,9 @@ impl From<RemoteAbandonRequest> for lash_core::AbandonRequest {
     }
 }
 
-impl From<lash_core::ProcessTerminalSemantics> for RemoteProcessTerminalSemantics {
-    fn from(value: lash_core::ProcessTerminalSemantics) -> Self {
-        let lash_core::ProcessTerminalSemantics {
+impl From<lash_core::facade_support::ProcessTerminalSemantics> for RemoteProcessTerminalSemantics {
+    fn from(value: lash_core::facade_support::ProcessTerminalSemantics) -> Self {
+        let lash_core::facade_support::ProcessTerminalSemantics {
             status,
             outcome,
         } = value;
@@ -702,7 +702,7 @@ impl From<lash_core::ProcessTerminalSemantics> for RemoteProcessTerminalSemantic
     }
 }
 
-impl TryFrom<RemoteProcessTerminalSemantics> for lash_core::ProcessTerminalSemantics {
+impl TryFrom<RemoteProcessTerminalSemantics> for lash_core::facade_support::ProcessTerminalSemantics {
     type Error = RemoteProtocolError;
 
     fn try_from(value: RemoteProcessTerminalSemantics) -> Result<Self, Self::Error> {
@@ -717,14 +717,14 @@ impl TryFrom<RemoteProcessTerminalSemantics> for lash_core::ProcessTerminalSeman
     }
 }
 
-impl From<lash_core::ProcessWake> for RemoteProcessWake {
-    fn from(value: lash_core::ProcessWake) -> Self {
-        let lash_core::ProcessWake { input } = value;
+impl From<lash_core::facade_support::ProcessWake> for RemoteProcessWake {
+    fn from(value: lash_core::facade_support::ProcessWake) -> Self {
+        let lash_core::facade_support::ProcessWake { input } = value;
         Self { input }
     }
 }
 
-impl From<RemoteProcessWake> for lash_core::ProcessWake {
+impl From<RemoteProcessWake> for lash_core::facade_support::ProcessWake {
     fn from(value: RemoteProcessWake) -> Self {
         let RemoteProcessWake { input } = value;
         Self { input }
@@ -1096,7 +1096,7 @@ impl From<lash_core::ProcessEvent> for RemoteProcessEvent {
             payload,
             invocation: Some(invocation.into()),
             semantics: semantics.into(),
-            occurred_at_ms: lash_core::epoch_ms_from_system_time(occurred_at),
+            occurred_at_ms: lash_core::facade_support::epoch_ms_from_system_time(occurred_at),
         }
     }
 }
@@ -1126,14 +1126,14 @@ impl TryFrom<RemoteProcessEvent> for lash_core::ProcessEvent {
             payload,
             invocation: invocation.into(),
             semantics: semantics.try_into()?,
-            occurred_at: lash_core::system_time_from_epoch_ms(occurred_at_ms),
+            occurred_at: lash_core::facade_support::system_time_from_epoch_ms(occurred_at_ms),
         })
     }
 }
 
-impl From<lash_core::ObservedProcessEvent> for RemoteObservedProcessEvent {
-    fn from(value: lash_core::ObservedProcessEvent) -> Self {
-        let lash_core::ObservedProcessEvent {
+impl From<lash_core::facade_support::ObservedProcessEvent> for RemoteObservedProcessEvent {
+    fn from(value: lash_core::facade_support::ObservedProcessEvent) -> Self {
+        let lash_core::facade_support::ObservedProcessEvent {
             sequence,
             event_type,
             occurred_at_ms,
@@ -1148,7 +1148,7 @@ impl From<lash_core::ObservedProcessEvent> for RemoteObservedProcessEvent {
     }
 }
 
-impl From<RemoteObservedProcessEvent> for lash_core::ObservedProcessEvent {
+impl From<RemoteObservedProcessEvent> for lash_core::facade_support::ObservedProcessEvent {
     fn from(value: RemoteObservedProcessEvent) -> Self {
         let RemoteObservedProcessEvent {
             sequence,
@@ -1310,11 +1310,11 @@ impl TryFrom<RemoteProcessRecord> for lash_core::ProcessRecord {
     }
 }
 
-impl TryFrom<lash_core::ObservedProcess> for RemoteObservedProcess {
+impl TryFrom<lash_core::facade_support::ObservedProcess> for RemoteObservedProcess {
     type Error = RemoteProtocolError;
 
-    fn try_from(value: lash_core::ObservedProcess) -> Result<Self, Self::Error> {
-        let lash_core::ObservedProcess {
+    fn try_from(value: lash_core::facade_support::ObservedProcess) -> Result<Self, Self::Error> {
+        let lash_core::facade_support::ObservedProcess {
             process_id,
             graph_key,
             kind,
@@ -1371,7 +1371,7 @@ impl TryFrom<lash_core::ObservedProcess> for RemoteObservedProcess {
     }
 }
 
-impl TryFrom<RemoteObservedProcess> for lash_core::ObservedProcess {
+impl TryFrom<RemoteObservedProcess> for lash_core::facade_support::ObservedProcess {
     type Error = RemoteProtocolError;
 
     fn try_from(value: RemoteObservedProcess) -> Result<Self, Self::Error> {
@@ -1433,11 +1433,11 @@ impl TryFrom<RemoteObservedProcess> for lash_core::ObservedProcess {
     }
 }
 
-impl TryFrom<lash_core::ObservedWorkItem> for RemoteProcessWorkItem {
+impl TryFrom<lash_core::facade_support::ObservedWorkItem> for RemoteProcessWorkItem {
     type Error = RemoteProtocolError;
 
-    fn try_from(value: lash_core::ObservedWorkItem) -> Result<Self, Self::Error> {
-        let lash_core::ObservedWorkItem {
+    fn try_from(value: lash_core::facade_support::ObservedWorkItem) -> Result<Self, Self::Error> {
+        let lash_core::facade_support::ObservedWorkItem {
             process,
             events,
             kind,
@@ -1452,7 +1452,7 @@ impl TryFrom<lash_core::ObservedWorkItem> for RemoteProcessWorkItem {
     }
 }
 
-impl TryFrom<RemoteProcessWorkItem> for lash_core::ObservedWorkItem {
+impl TryFrom<RemoteProcessWorkItem> for lash_core::facade_support::ObservedWorkItem {
     type Error = RemoteProtocolError;
 
     fn try_from(value: RemoteProcessWorkItem) -> Result<Self, Self::Error> {
@@ -1472,11 +1472,11 @@ impl TryFrom<RemoteProcessWorkItem> for lash_core::ObservedWorkItem {
     }
 }
 
-impl TryFrom<lash_core::ProcessWorkSnapshot> for RemoteProcessWorkSnapshot {
+impl TryFrom<lash_core::facade_support::ProcessWorkSnapshot> for RemoteProcessWorkSnapshot {
     type Error = RemoteProtocolError;
 
-    fn try_from(value: lash_core::ProcessWorkSnapshot) -> Result<Self, Self::Error> {
-        let lash_core::ProcessWorkSnapshot {
+    fn try_from(value: lash_core::facade_support::ProcessWorkSnapshot) -> Result<Self, Self::Error> {
+        let lash_core::facade_support::ProcessWorkSnapshot {
             session_id,
             visible_process_ids,
             items,
@@ -1493,7 +1493,7 @@ impl TryFrom<lash_core::ProcessWorkSnapshot> for RemoteProcessWorkSnapshot {
     }
 }
 
-impl TryFrom<RemoteProcessWorkSnapshot> for lash_core::ProcessWorkSnapshot {
+impl TryFrom<RemoteProcessWorkSnapshot> for lash_core::facade_support::ProcessWorkSnapshot {
     type Error = RemoteProtocolError;
 
     fn try_from(value: RemoteProcessWorkSnapshot) -> Result<Self, Self::Error> {
@@ -1738,10 +1738,10 @@ impl From<lash_core::ProcessListFilter> for RemoteProcessListFilter {
     }
 }
 
-impl TryFrom<Vec<lash_core::ObservedProcess>> for RemoteProcessListResponse {
+impl TryFrom<Vec<lash_core::facade_support::ObservedProcess>> for RemoteProcessListResponse {
     type Error = RemoteProtocolError;
 
-    fn try_from(value: Vec<lash_core::ObservedProcess>) -> Result<Self, Self::Error> {
+    fn try_from(value: Vec<lash_core::facade_support::ObservedProcess>) -> Result<Self, Self::Error> {
         Ok(Self {
             protocol_version: REMOTE_PROTOCOL_VERSION,
             records: value
@@ -1752,7 +1752,7 @@ impl TryFrom<Vec<lash_core::ObservedProcess>> for RemoteProcessListResponse {
     }
 }
 
-impl TryFrom<RemoteProcessListResponse> for Vec<lash_core::ObservedProcess> {
+impl TryFrom<RemoteProcessListResponse> for Vec<lash_core::facade_support::ObservedProcess> {
     type Error = RemoteProtocolError;
 
     fn try_from(value: RemoteProcessListResponse) -> Result<Self, Self::Error> {
@@ -1820,7 +1820,7 @@ impl TryFrom<RemoteProcessSignalRequest> for lash_core::ProcessEventAppendReques
             replay_key,
         } = value;
         let event_type =
-            lash_core::process_signal_event_type(&signal_name).map_err(|err| {
+            lash_core::facade_support::process_signal_event_type(&signal_name).map_err(|err| {
                 RemoteProtocolError::InvalidEnvelope {
                     type_name: "RemoteProcessSignalRequest",
                     message: err.to_string(),

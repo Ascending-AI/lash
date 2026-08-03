@@ -466,7 +466,7 @@ impl RlmContextProjector {
         let messages = render_history_messages(
             &RlmHistoryRenderInput {
                 events,
-                turn_messages: &lash_core::MessageSequence::default(),
+                turn_messages: &lash_core::facade_support::MessageSequence::default(),
                 turn_causes: &[],
                 max_output_chars: self.max_output_chars,
                 protocol_iteration: 0,
@@ -641,7 +641,7 @@ mod tests {
         };
         projector.project(ProjectorContext {
             config: &config,
-            messages: &lash_core::MessageSequence::default(),
+            messages: &lash_core::facade_support::MessageSequence::default(),
             events,
             turn_causes: &[],
             protocol_iteration,
@@ -703,7 +703,7 @@ mod tests {
         let messages = build_rlm_history_messages_from_turn(
             RlmHistoryRenderInput {
                 events: &events,
-                turn_messages: &lash_core::MessageSequence::default(),
+                turn_messages: &lash_core::facade_support::MessageSequence::default(),
                 turn_causes: &[],
                 max_output_chars: 1000,
                 protocol_iteration: 1,
@@ -767,7 +767,7 @@ mod tests {
         let messages = render_history_messages(
             &RlmHistoryRenderInput {
                 events: &events,
-                turn_messages: &lash_core::MessageSequence::default(),
+                turn_messages: &lash_core::facade_support::MessageSequence::default(),
                 turn_causes: &[],
                 max_output_chars: 1000,
                 protocol_iteration: 0,
@@ -853,7 +853,7 @@ mod tests {
         let messages = render_history_messages(
             &RlmHistoryRenderInput {
                 events: &events,
-                turn_messages: &lash_core::MessageSequence::default(),
+                turn_messages: &lash_core::facade_support::MessageSequence::default(),
                 turn_causes: &[],
                 max_output_chars: 1000,
                 protocol_iteration: 0,
@@ -891,7 +891,7 @@ mod tests {
         let messages = build_rlm_history_messages_from_turn(
             RlmHistoryRenderInput {
                 events: &events,
-                turn_messages: &lash_core::MessageSequence::default(),
+                turn_messages: &lash_core::facade_support::MessageSequence::default(),
                 turn_causes: &[],
                 max_output_chars: 1000,
                 protocol_iteration: 0,
@@ -1070,7 +1070,7 @@ mod tests {
         let messages = build_rlm_history_messages_from_turn(
             RlmHistoryRenderInput {
                 events: &events,
-                turn_messages: &lash_core::MessageSequence::default(),
+                turn_messages: &lash_core::facade_support::MessageSequence::default(),
                 turn_causes: &[],
                 max_output_chars: 1000,
                 protocol_iteration: 1,
@@ -1106,7 +1106,7 @@ mod tests {
             text: "Background process wake\nProcess: process-1\nEvent: process.wake #7\nWake input:\nblue button pressed".to_string(),
         };
         let event_message = cause.to_event_message();
-        let messages = lash_core::MessageSequence::from(vec![event_message]);
+        let messages = lash_core::facade_support::MessageSequence::from(vec![event_message]);
         let mut attachments = Vec::new();
 
         let rendered = build_rlm_history_messages_from_turn(
@@ -1174,7 +1174,7 @@ mod tests {
         let messages = build_rlm_history_messages_from_turn(
             RlmHistoryRenderInput {
                 events: &events,
-                turn_messages: &lash_core::MessageSequence::default(),
+                turn_messages: &lash_core::facade_support::MessageSequence::default(),
                 turn_causes: &[],
                 max_output_chars: 1000,
                 protocol_iteration: 1,
@@ -1212,7 +1212,7 @@ mod tests {
         let messages = build_rlm_history_messages_from_turn(
             RlmHistoryRenderInput {
                 events: &events,
-                turn_messages: &lash_core::MessageSequence::default(),
+                turn_messages: &lash_core::facade_support::MessageSequence::default(),
                 turn_causes: &[],
                 max_output_chars: 1000,
                 protocol_iteration: 2,
@@ -1349,7 +1349,7 @@ mod tests {
         let messages = build_rlm_history_messages_from_turn(
             RlmHistoryRenderInput {
                 events: &events,
-                turn_messages: &lash_core::MessageSequence::default(),
+                turn_messages: &lash_core::facade_support::MessageSequence::default(),
                 turn_causes: &[],
                 max_output_chars: 1000,
                 protocol_iteration: 1,

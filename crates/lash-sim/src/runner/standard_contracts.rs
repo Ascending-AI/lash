@@ -278,10 +278,12 @@ impl StandardContractToolResult {
             tool_name: self.tool_name.to_string(),
             args,
             output: self.output.clone(),
-            model_return: lash_core::ModelToolReturn {
+            model_return: lash_core::facade_support::ModelToolReturn {
                 call_id: self.call_id.to_string(),
                 tool_name: self.tool_name.to_string(),
-                parts: vec![lash_core::ModelToolReturnPart::text(self.model_return_text)],
+                parts: vec![lash_core::facade_support::ModelToolReturnPart::text(
+                    self.model_return_text,
+                )],
             },
             duration_ms: 1,
             replay: None,
@@ -310,7 +312,7 @@ struct StandardContractObserved {
     llm_call_count: usize,
     text_deltas: Vec<String>,
     errors: Vec<String>,
-    turn_outcomes: Vec<lash_core::TurnOutcome>,
+    turn_outcomes: Vec<lash_core::facade_support::TurnOutcome>,
 }
 
 impl StandardContractObserved {
@@ -335,15 +337,20 @@ impl StandardContractObserved {
                 lash_core::Effect::Checkpoint { checkpoint, .. } => {
                     self.checkpoints.push(checkpoint_kind_name(*checkpoint));
                 }
-                lash_core::Effect::Emit(lash_core::SessionStreamEvent::TextDelta { content }) => {
+                lash_core::Effect::Emit(
+                    lash_core::facade_support::SessionStreamEvent::TextDelta { content },
+                ) => {
                     self.text_deltas.push(content.clone());
                 }
-                lash_core::Effect::Emit(lash_core::SessionStreamEvent::Error {
-                    message, ..
+                lash_core::Effect::Emit(lash_core::facade_support::SessionStreamEvent::Error {
+                    message,
+                    ..
                 }) => {
                     self.errors.push(message.clone());
                 }
-                lash_core::Effect::Emit(lash_core::SessionStreamEvent::TurnOutcome { outcome }) => {
+                lash_core::Effect::Emit(
+                    lash_core::facade_support::SessionStreamEvent::TurnOutcome { outcome },
+                ) => {
                     self.turn_outcomes.push(outcome.clone());
                 }
                 _ => {}

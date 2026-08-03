@@ -15,9 +15,10 @@ use lash_core::plugin::{
 };
 use lash_core::runtime::RuntimeSessionState;
 use lash_core::{
-    AssembledTurn, MessageRole, PluginHost, SessionCreateRequest, SessionHandle, SessionPolicy,
-    SessionReadView, SessionSnapshot, ToolDefinition, ToolRegistry, ToolResult, TurnHookContext,
-    TurnResultHookContext,
+    MessageRole, SessionCreateRequest, SessionPolicy, SessionReadView, SessionSnapshot,
+    ToolDefinition, ToolRegistry, ToolResult, facade_support::AssembledTurn,
+    facade_support::PluginHost, facade_support::SessionHandle, facade_support::TurnHookContext,
+    facade_support::TurnResultHookContext,
 };
 
 use lash_core::testing::{MockSessionManager, mock_assembled_turn};
@@ -26,7 +27,7 @@ use lash_tool_support::{
 };
 
 fn unavailable_processes() -> Arc<dyn lash_core::ProcessService> {
-    Arc::new(lash_core::UnavailableProcessService)
+    Arc::new(lash_core::facade_support::UnavailableProcessService)
 }
 
 fn sessions<T>(manager: &Arc<T>) -> Arc<dyn SessionStateService>
@@ -270,7 +271,7 @@ fn plan_mode_host(plan_factory: PlanModePluginFactory) -> PluginHost {
 }
 
 async fn run_plan_command<T>(
-    session: &lash_core::PluginSession,
+    session: &lash_core::facade_support::PluginSession,
     name: &str,
     args: Value,
     manager: &Arc<T>,
@@ -579,7 +580,7 @@ async fn plan_mode_plugin_injects_guidance_and_blocks_implementation_tools() {
     run_plan_command(&session, "plan_mode.enable", json!({}), &manager).await;
 
     let checkpoint = session
-        .at_checkpoint(lash_core::CheckpointHookContext {
+        .at_checkpoint(lash_core::facade_support::CheckpointHookContext {
             session_id: "root".to_string(),
             checkpoint: lash_core::CheckpointKind::AfterWork,
             state: mock_read_view("run-session"),
@@ -602,9 +603,9 @@ async fn plan_mode_plugin_injects_guidance_and_blocks_implementation_tools() {
     session
         .after_turn(TurnResultHookContext {
             session_id: "root".to_string(),
-            turn: Arc::new(lash_core::TurnResultSummary::from_assembled(&empty_turn(
-                "root",
-            ))),
+            turn: Arc::new(
+                lash_core::facade_support::TurnResultSummary::from_assembled(&empty_turn("root")),
+            ),
             sessions: sessions(&manager),
         })
         .await
@@ -640,9 +641,9 @@ async fn plan_mode_does_not_reinject_entry_guidance_on_later_turns() {
     session
         .after_turn(TurnResultHookContext {
             session_id: "root".to_string(),
-            turn: Arc::new(lash_core::TurnResultSummary::from_assembled(&empty_turn(
-                "root",
-            ))),
+            turn: Arc::new(
+                lash_core::facade_support::TurnResultSummary::from_assembled(&empty_turn("root")),
+            ),
             sessions: sessions(&manager),
         })
         .await

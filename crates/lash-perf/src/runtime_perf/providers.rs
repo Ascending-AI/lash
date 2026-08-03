@@ -12,9 +12,9 @@ use lash_core::llm::types::{
 };
 use lash_core::testing::TestProvider;
 use lash_core::{
-    DirectJsonSchema, DirectRequest, Resolution, ToolContract, ToolDefinition, ToolManifest,
-    ToolOutputContract, ToolProvider, ToolResult, TriggerOccurrenceRequest,
-    empty_trigger_source_key,
+    Resolution, ToolContract, ToolDefinition, ToolManifest, ToolOutputContract, ToolProvider,
+    ToolResult, TriggerOccurrenceRequest, facade_support::DirectJsonSchema,
+    facade_support::DirectRequest, facade_support::empty_trigger_source_key,
 };
 #[cfg(test)]
 use lash_lashlang_runtime::tool_lashlang_binding;
@@ -1887,7 +1887,7 @@ fn empty_request() -> LlmRequest {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use lash_core::{ToolCatalogBuildInput, build_tool_catalog};
+    use lash_core::{facade_support::ToolCatalogBuildInput, facade_support::build_tool_catalog};
     use std::sync::Arc;
     use std::sync::atomic::{AtomicUsize, Ordering};
 

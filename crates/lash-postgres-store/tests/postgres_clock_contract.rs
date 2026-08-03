@@ -9,8 +9,9 @@ use lash_core::{
     PendingTurnInputCancelTarget, PendingTurnInputDraft, PendingTurnInputSuffixCancelOutcome,
     ProcessAwaitOutput, ProcessCompletionOutcome, ProcessInput, ProcessLeaseClaimOutcome,
     ProcessProvenance, ProcessRegistration, ProcessRegistry, RecoveryDisposition, RuntimeCommit,
-    RuntimeSessionState, SessionCommand, SessionRelation, SessionStoreCreateRequest,
-    SessionStoreFactory, SlotPolicy, TurnInput, TurnInputCheckpointBoundary, TurnInputIngress,
+    RuntimeSessionState, SessionRelation, SessionStoreCreateRequest, SessionStoreFactory,
+    SlotPolicy, TurnInput, TurnInputCheckpointBoundary, TurnInputIngress,
+    facade_support::SessionCommand,
 };
 use lash_postgres_store::PostgresStorage;
 

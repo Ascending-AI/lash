@@ -1,9 +1,10 @@
 //! Private helpers for the RLM subagent tool catalog.
 
 use lash_core::{
-    AssembledTurn, CausalRef, InputItem, SessionCreateRequest, SessionSnapshot, SessionSpec,
-    SessionToolAccess, SubagentSessionContext, ToolDefinition, ToolResult, TurnFinish, TurnInput,
-    TurnOutcome, TurnStop,
+    CausalRef, InputItem, SessionCreateRequest, SessionSnapshot, SessionToolAccess,
+    SubagentSessionContext, ToolDefinition, ToolResult, TurnInput, facade_support::AssembledTurn,
+    facade_support::SessionSpec, facade_support::TurnFinish, facade_support::TurnOutcome,
+    facade_support::TurnStop,
 };
 use lash_lashlang_runtime::ToolDefinitionLashlangExt;
 use serde_json::{Value, json};

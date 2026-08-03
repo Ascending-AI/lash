@@ -939,7 +939,7 @@ mod tests {
             ),
             Some(lash_core::BoundaryReason::JournalBudget)
         );
-        let inline = lash_core::InlineRuntimeEffectController::default();
+        let inline = lash_core::facade_support::InlineRuntimeEffectController::default();
         assert_eq!(
             lash_core::RuntimeEffectController::wants_segment_boundary(&inline, &progress,),
             None
@@ -1419,7 +1419,7 @@ mod tests {
             LashlangHostCatalog::tool_default(["lookup"]),
         );
         let extensions = lash_core::PluginExtensions::from_contributions([
-            lash_core::PluginExtensionContribution::new(
+            lash_core::facade_support::PluginExtensionContribution::new(
                 LASHLANG_SURFACE_EXTENSION_ID,
                 contribution,
             )

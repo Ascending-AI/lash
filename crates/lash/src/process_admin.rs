@@ -31,8 +31,10 @@ impl Processes {
             })
     }
 
-    fn make_observer(&self) -> Result<lash_core::ProcessWorkObserver> {
-        Ok(lash_core::ProcessWorkObserver::new(self.registry()?))
+    fn make_observer(&self) -> Result<lash_core::facade_support::ProcessWorkObserver> {
+        Ok(lash_core::facade_support::ProcessWorkObserver::new(
+            self.registry()?,
+        ))
     }
 
     fn process_invocation(command: &lash_core::ProcessCommand) -> lash_core::RuntimeInvocation {
@@ -113,7 +115,7 @@ impl Processes {
     pub async fn list(
         &self,
         filter: &lash_core::ProcessListFilter,
-    ) -> Result<Vec<lash_core::ObservedProcess>> {
+    ) -> Result<Vec<lash_core::facade_support::ObservedProcess>> {
         self.make_observer()?.list(filter).await.map_err(Into::into)
     }
 
@@ -125,7 +127,7 @@ impl Processes {
         &self,
         session_scope: &lash_core::SessionScope,
         filter: &lash_core::ProcessListFilter,
-    ) -> Result<Vec<lash_core::ObservedProcess>> {
+    ) -> Result<Vec<lash_core::facade_support::ObservedProcess>> {
         self.make_observer()?
             .list_observed_by(session_scope, filter)
             .await
@@ -141,14 +143,17 @@ impl Processes {
         &self,
         session_scope: &lash_core::SessionScope,
         filter: &lash_core::ProcessListFilter,
-    ) -> Result<Vec<lash_core::ObservedProcess>> {
+    ) -> Result<Vec<lash_core::facade_support::ObservedProcess>> {
         self.make_observer()?
             .list_originated_by(session_scope, filter)
             .await
             .map_err(Into::into)
     }
 
-    pub async fn get(&self, process_id: &str) -> Result<Option<lash_core::ObservedProcess>> {
+    pub async fn get(
+        &self,
+        process_id: &str,
+    ) -> Result<Option<lash_core::facade_support::ObservedProcess>> {
         self.make_observer()?
             .process(process_id)
             .await
@@ -159,7 +164,7 @@ impl Processes {
         &self,
         process_id: &str,
         after_sequence: u64,
-    ) -> Result<Vec<lash_core::ObservedProcessEvent>> {
+    ) -> Result<Vec<lash_core::facade_support::ObservedProcessEvent>> {
         self.make_observer()?
             .events_after(process_id, after_sequence)
             .await
@@ -170,7 +175,7 @@ impl Processes {
         if let Some(driver) = self.core.env.process_work_driver.as_ref() {
             return driver.await_terminal(process_id).await.map_err(Into::into);
         }
-        lash_core::ProcessAwaiter::polling(self.registry()?)
+        lash_core::facade_support::ProcessAwaiter::polling(self.registry()?)
             .await_terminal(process_id)
             .await
             .map_err(Into::into)
@@ -276,14 +281,14 @@ impl Processes {
     pub async fn session_snapshot(
         &self,
         session_id: impl Into<String>,
-    ) -> Result<lash_core::ProcessWorkSnapshot> {
+    ) -> Result<lash_core::facade_support::ProcessWorkSnapshot> {
         self.make_observer()?
             .snapshot_for_session(session_id)
             .await
             .map_err(Into::into)
     }
 
-    pub fn observer(&self) -> Result<lash_core::ProcessWorkObserver> {
+    pub fn observer(&self) -> Result<lash_core::facade_support::ProcessWorkObserver> {
         self.make_observer()
     }
 
@@ -394,25 +399,26 @@ impl Processes {
             }
         };
         if let Some(trigger_store) = self.core.env.trigger_store.as_ref() {
-            report.pruned_trigger_deliveries = match lash_core::reconcile_pruned_trigger_deliveries(
-                registry.as_ref(),
-                trigger_store.as_ref(),
-            )
-            .await
-            {
-                Ok(deleted) => deleted,
-                Err(err) => {
-                    tracing::warn!(
-                        failure_stage = "reconcile_trigger_deliveries_after_process_prune",
-                        cutoff_epoch_ms,
-                        pruned_processes = report.pruned_processes,
-                        pruned_events = report.pruned_events,
-                        error = %err,
-                        "process retention partially completed"
-                    );
-                    return Err(err.into());
-                }
-            };
+            report.pruned_trigger_deliveries =
+                match lash_core::facade_support::reconcile_pruned_trigger_deliveries(
+                    registry.as_ref(),
+                    trigger_store.as_ref(),
+                )
+                .await
+                {
+                    Ok(deleted) => deleted,
+                    Err(err) => {
+                        tracing::warn!(
+                            failure_stage = "reconcile_trigger_deliveries_after_process_prune",
+                            cutoff_epoch_ms,
+                            pruned_processes = report.pruned_processes,
+                            pruned_events = report.pruned_events,
+                            error = %err,
+                            "process retention partially completed"
+                        );
+                        return Err(err.into());
+                    }
+                };
         }
         Ok(report)
     }
@@ -448,7 +454,7 @@ impl Processes {
                     }
                 };
             let reconciled_trigger_deliveries =
-                match lash_core::reconcile_pruned_trigger_deliveries(
+                match lash_core::facade_support::reconcile_pruned_trigger_deliveries(
                     registry.as_ref(),
                     trigger_store.as_ref(),
                 )
@@ -526,7 +532,9 @@ impl Processes {
     }
 
     /// Run one bounded wake-delivery pass immediately.
-    pub async fn drive_wake_deliveries(&self) -> Result<lash_core::WakeDeliveryDriveReport> {
+    pub async fn drive_wake_deliveries(
+        &self,
+    ) -> Result<lash_core::facade_support::WakeDeliveryDriveReport> {
         let drivers = self.core.work_driver.drivers().await;
         let Some(driver) = drivers._wake else {
             return Err(EmbedError::Plugin(lash_core::PluginError::Session(
@@ -547,7 +555,7 @@ impl Processes {
         process_id: &str,
         requested_by: impl Into<String>,
         reason: Option<String>,
-    ) -> Result<lash_core::ObservedProcess> {
+    ) -> Result<lash_core::facade_support::ObservedProcess> {
         let request = lash_core::AbandonRequest {
             requested_by: requested_by.into(),
             requested_at_ms: now_epoch_ms(),

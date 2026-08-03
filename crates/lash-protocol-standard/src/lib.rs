@@ -35,9 +35,11 @@ pub mod scenario_contracts;
 use batch::batch_tool_definition;
 use lash_core::{
     CheckpointKind, DriverAction, DriverContextView, LlmOutputPart, LlmResponse,
-    ProtocolBuildInput, SessionError, ToolCall, ToolContract, ToolInvocation, ToolManifest,
-    ToolProvider, ToolResult, TurnDriverConfig, TurnDriverPreamble, TurnFinish, TurnOutcome,
-    TurnStop, append_assistant_text_part, normalized_response_parts, reasoning_part,
+    ProtocolBuildInput, SessionError, ToolCall, ToolContract, ToolManifest, ToolProvider,
+    ToolResult, TurnDriverConfig, TurnDriverPreamble, facade_support::ToolInvocation,
+    facade_support::TurnFinish, facade_support::TurnOutcome, facade_support::TurnStop,
+    facade_support::append_assistant_text_part, facade_support::normalized_response_parts,
+    facade_support::reasoning_part,
 };
 use serde_json::Value;
 
@@ -670,10 +672,13 @@ fn standard_message_id(turn_id: &str, protocol_iteration: usize, purpose: &str) 
     format!("m_standard_{turn_id}_{protocol_iteration}_{purpose}")
 }
 
-fn append_model_return_parts(parts: &mut Vec<Part>, model_return: lash_core::ModelToolReturn) {
+fn append_model_return_parts(
+    parts: &mut Vec<Part>,
+    model_return: lash_core::facade_support::ModelToolReturn,
+) {
     for part in model_return.parts {
         match part {
-            lash_core::ModelToolReturnPart::Text { text } => {
+            lash_core::facade_support::ModelToolReturnPart::Text { text } => {
                 if text.is_empty() {
                     continue;
                 }
@@ -690,7 +695,7 @@ fn append_model_return_parts(parts: &mut Vec<Part>, model_return: lash_core::Mod
                     response_meta: None,
                 });
             }
-            lash_core::ModelToolReturnPart::Attachment(source) => {
+            lash_core::facade_support::ModelToolReturnPart::Attachment(source) => {
                 parts.push(Part {
                     id: String::new(),
                     kind: PartKind::Attachment,
@@ -716,8 +721,8 @@ fn conversation_event(message: Message) -> SessionHistoryRecord {
 mod tests {
     use super::*;
     use lash_core::{
-        AttachmentId, AttachmentMeta, AttachmentSource, AttachmentTypeMetadata, MediaType,
-        ModelToolReturn, ToolCallOutput, ToolValue,
+        AttachmentId, AttachmentSource, AttachmentTypeMetadata, MediaType, ToolCallOutput,
+        ToolValue, facade_support::AttachmentMeta, facade_support::ModelToolReturn,
     };
     use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
     use tokio::sync::Barrier;
@@ -761,16 +766,16 @@ mod tests {
     }
 
     #[async_trait::async_trait]
-    impl lash_core::Provider for BatchRuntimeProvider {
+    impl lash_core::facade_support::Provider for BatchRuntimeProvider {
         fn kind(&self) -> &'static str {
             "stub"
         }
 
-        fn options(&self) -> lash_core::ProviderOptions {
-            lash_core::ProviderOptions::default()
+        fn options(&self) -> lash_core::facade_support::ProviderOptions {
+            lash_core::facade_support::ProviderOptions::default()
         }
 
-        fn set_options(&mut self, _options: lash_core::ProviderOptions) {}
+        fn set_options(&mut self, _options: lash_core::facade_support::ProviderOptions) {}
 
         fn serialize_config(&self) -> serde_json::Value {
             serde_json::json!({})
@@ -779,7 +784,7 @@ mod tests {
         async fn complete(
             &mut self,
             request: lash_core::LlmRequest,
-        ) -> Result<lash_core::LlmResponse, lash_core::LlmTransportError> {
+        ) -> Result<lash_core::LlmResponse, lash_core::facade_support::LlmTransportError> {
             let call_index = self.calls.fetch_add(1, Ordering::SeqCst);
             if call_index == 0 {
                 return Ok(lash_core::LlmResponse {
@@ -815,7 +820,7 @@ mod tests {
             })
         }
 
-        fn clone_boxed(&self) -> Box<dyn lash_core::Provider> {
+        fn clone_boxed(&self) -> Box<dyn lash_core::facade_support::Provider> {
             Box::new(self.clone())
         }
     }
@@ -893,7 +898,7 @@ mod tests {
 
     #[derive(Default)]
     struct DurableMemoryAttachmentStore {
-        inner: lash_core::InMemoryAttachmentStore,
+        inner: lash_core::facade_support::InMemoryAttachmentStore,
     }
 
     #[async_trait::async_trait]
@@ -933,7 +938,7 @@ mod tests {
 
     #[derive(Default)]
     struct DurableMemoryProcessEnvStore {
-        inner: lash_core::InMemoryProcessExecutionEnvStore,
+        inner: lash_core::facade_support::InMemoryProcessExecutionEnvStore,
     }
 
     #[async_trait::async_trait]
@@ -990,24 +995,30 @@ mod tests {
             calls: Arc::clone(&provider_calls),
             saw_batch_result: Arc::clone(&saw_batch_result),
         };
-        let provider_handle =
-            lash_core::ProviderHandle::new(lash_core::ProviderComponents::new(Box::new(provider)));
-        let mut host = lash_core::RuntimeHostConfig::in_memory();
-        host.providers.provider_resolver =
-            Arc::new(lash_core::SingleProviderResolver::new(provider_handle));
-        host.durability.attachment_store = Arc::new(lash_core::SessionAttachmentStore::ephemeral(
-            Arc::new(DurableMemoryAttachmentStore::default()),
-        ));
+        let provider_handle = lash_core::facade_support::ProviderHandle::new(
+            lash_core::facade_support::ProviderComponents::new(Box::new(provider)),
+        );
+        let mut host = lash_core::facade_support::RuntimeHostConfig::in_memory();
+        host.providers.provider_resolver = Arc::new(
+            lash_core::facade_support::SingleProviderResolver::new(provider_handle),
+        );
+        host.durability.attachment_store = Arc::new(
+            lash_core::facade_support::SessionAttachmentStore::ephemeral(Arc::new(
+                DurableMemoryAttachmentStore::default(),
+            )),
+        );
         host.durability.process_env_store = Arc::new(DurableMemoryProcessEnvStore::default());
         let started = Arc::new(AtomicUsize::new(0));
-        let factories: Vec<Arc<dyn lash_core::PluginFactory>> = vec![
+        let factories: Vec<Arc<dyn lash_core::facade_support::PluginFactory>> = vec![
             Arc::new(StandardProtocolPluginFactory::new()),
             Arc::new(lash_core::plugin::StaticPluginFactory::new(
                 "standard-batch-test-tools",
-                lash_core::PluginSpec::new().with_tool_provider(Arc::new(BatchRuntimeTools {
-                    barrier: Arc::new(Barrier::new(2)),
-                    started: Arc::clone(&started),
-                })),
+                lash_core::facade_support::PluginSpec::new().with_tool_provider(Arc::new(
+                    BatchRuntimeTools {
+                        barrier: Arc::new(Barrier::new(2)),
+                        started: Arc::clone(&started),
+                    },
+                )),
             )),
         ];
         let policy = lash_core::SessionPolicy {
@@ -1027,7 +1038,7 @@ mod tests {
             lash_core::ExecutionScope::turn("standard-batch-session", "turn-1"),
         )
         .expect("scoped controller");
-        let mut runtime = lash_core::LashRuntime::builder()
+        let mut runtime = lash_core::facade_support::LashRuntime::builder()
             .with_session_id("standard-batch-session")
             .with_policy(policy)
             .with_runtime_host(host)
@@ -1039,7 +1050,7 @@ mod tests {
         let turn = runtime
             .stream_turn(
                 lash_core::TurnInput::text("run the batch"),
-                lash_core::TurnOptions::new(
+                lash_core::facade_support::TurnOptions::new(
                     tokio_util::sync::CancellationToken::new(),
                     scoped_controller,
                 ),
@@ -1047,7 +1058,10 @@ mod tests {
             .await
             .expect("turn");
 
-        assert!(matches!(turn.outcome, lash_core::TurnOutcome::Finished(_)));
+        assert!(matches!(
+            turn.outcome,
+            lash_core::facade_support::TurnOutcome::Finished(_)
+        ));
         assert_eq!(provider_calls.load(Ordering::SeqCst), 2);
         assert_eq!(started.load(Ordering::SeqCst), 0);
         assert!(!saw_batch_result.load(Ordering::SeqCst));

@@ -16,11 +16,12 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
 use lash_core::{
-    AwaitEventKey, AwaitEventResolver, AwaitEventWaitIdentity, CanonicalRuntimeEffectEnvelope,
-    EffectHost, EffectJournalRetirement, ExecutionScope, LeaseTimings, Resolution, ResolveOutcome,
-    RuntimeAwaitEventOptions, RuntimeEffectCommand, RuntimeEffectController,
+    AwaitEventKey, AwaitEventResolver, AwaitEventWaitIdentity, EffectHost, EffectJournalRetirement,
+    ExecutionScope, Resolution, ResolveOutcome, RuntimeEffectCommand, RuntimeEffectController,
     RuntimeEffectControllerError, RuntimeEffectEnvelope, RuntimeEffectLocalExecutor,
-    RuntimeEffectOutcome, RuntimeError, ScopedEffectController, validate_replayed_effect_envelope,
+    RuntimeEffectOutcome, RuntimeError, ScopedEffectController,
+    facade_support::CanonicalRuntimeEffectEnvelope, facade_support::LeaseTimings,
+    facade_support::RuntimeAwaitEventOptions, facade_support::validate_replayed_effect_envelope,
 };
 use tokio_util::sync::CancellationToken;
 
@@ -111,7 +112,12 @@ impl SqliteEffectHost {
         path: &Path,
         options: SqliteEffectReplayOptions,
     ) -> tokio_rusqlite::Result<Self> {
-        Self::open_with_options_and_clock(path, options, Arc::new(lash_core::SystemClock)).await
+        Self::open_with_options_and_clock(
+            path,
+            options,
+            Arc::new(lash_core::facade_support::SystemClock),
+        )
+        .await
     }
 
     pub async fn open_with_options_and_clock(
@@ -267,8 +273,13 @@ impl SqliteRuntimeEffectController {
         scope: ExecutionScope,
         options: SqliteEffectReplayOptions,
     ) -> tokio_rusqlite::Result<Self> {
-        Self::open_with_options_and_clock(path, scope, options, Arc::new(lash_core::SystemClock))
-            .await
+        Self::open_with_options_and_clock(
+            path,
+            scope,
+            options,
+            Arc::new(lash_core::facade_support::SystemClock),
+        )
+        .await
     }
 
     pub async fn open_with_options_and_clock(
@@ -304,7 +315,12 @@ impl SqliteRuntimeEffectController {
         scope: ExecutionScope,
         options: SqliteEffectReplayOptions,
     ) -> tokio_rusqlite::Result<Self> {
-        Self::memory_with_options_and_clock(scope, options, Arc::new(lash_core::SystemClock)).await
+        Self::memory_with_options_and_clock(
+            scope,
+            options,
+            Arc::new(lash_core::facade_support::SystemClock),
+        )
+        .await
     }
 
     #[cfg(feature = "testing")]

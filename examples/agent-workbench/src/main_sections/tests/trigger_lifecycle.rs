@@ -454,7 +454,7 @@
                 event_types: Vec::new(),
                 input_template: std::collections::BTreeMap::from([(
                     "event".to_string(),
-                    lash_core::TriggerInputBinding::Event,
+                    lash::triggers::TriggerInputBinding::Event,
                 )]),
                 target_label: Some("receipt prune demo".to_string()),
             },

@@ -25,14 +25,14 @@ use lash_core::runtime::{
 use lash_core::store::{GraphAppend, RuntimeCommitResult};
 use lash_core::{
     AttachmentId, AttachmentIntent, AttachmentOwnerKind, BlobRef, Clock, DeliveryPolicy,
-    ForkSessionRequest, HydratedSessionCheckpoint, InMemorySessionStore,
-    InMemorySessionStoreFactory, LeaseOwnerIdentity, MergeKey, PendingTurnInputDraft,
+    ForkSessionRequest, HydratedSessionCheckpoint, LeaseOwnerIdentity, PendingTurnInputDraft,
     PluginSessionSnapshot, PluginSnapshotArtifact, PluginSnapshotEntry, PluginSnapshotMeta,
     ProtocolEvent, RuntimeCommit, RuntimePersistence, RuntimeSessionState, RuntimeTurnCommitStamp,
     SessionHistoryRecord, SessionMeta, SessionNodePayload, SessionNodeRecord, SessionRelation,
     SessionStoreCreateRequest, SessionStoreFactory, SlotPolicy, StoreError, StoreMaintenance,
     TokenLedgerEntry, TokenUsage, ToolState, TriggerOwnerScope, TurnInput, TurnInputApplication,
-    TurnInputClaim, TurnInputIngress, TurnInputState,
+    TurnInputClaim, TurnInputIngress, TurnInputState, facade_support::InMemorySessionStore,
+    facade_support::InMemorySessionStoreFactory, facade_support::MergeKey,
 };
 use lash_postgres_store::PostgresStorage;
 use rusqlite::OptionalExtension;
@@ -270,7 +270,7 @@ fn is_frame_alias(node_id: &str) -> bool {
 
 fn scoped_node_id(session_id: &str, node_id: &str) -> String {
     if is_frame_alias(node_id) {
-        lash_core::frame_node_id(session_id, &differential_frame_key(node_id))
+        lash_core::facade_support::frame_node_id(session_id, &differential_frame_key(node_id))
     } else {
         format!("{session_id}:{node_id}")
     }
@@ -1617,7 +1617,7 @@ impl BackendRunner {
                         DeliveryPolicy::EarliestSafeBoundary,
                         SlotPolicy::Exclusive,
                         vec![QueuedWorkPayload::session_command(
-                            lash_core::SessionCommand::RefreshToolCatalog {
+                            lash_core::facade_support::SessionCommand::RefreshToolCatalog {
                                 reason: "cross-backend delete observability".to_string(),
                             },
                         )],

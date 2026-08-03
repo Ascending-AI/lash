@@ -5,9 +5,11 @@ use std::sync::Mutex;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use lash_core::{
-    AttachmentRef, RuntimeExecutionContext, TextProjectionMetadata, ToolChildExecutionTraceHook,
-    ToolExecutionGrant, ToolInvocation, ToolInvocationReply, TraceBranchSelection, TraceContext,
-    TraceEvent, TraceRecord, TraceRuntimeSubject, TraceSink,
+    AttachmentRef, RuntimeExecutionContext, TextProjectionMetadata, ToolExecutionGrant,
+    TraceContext, TraceEvent, facade_support::ToolChildExecutionTraceHook,
+    facade_support::ToolInvocation, facade_support::ToolInvocationReply,
+    facade_support::TraceBranchSelection, facade_support::TraceRecord,
+    facade_support::TraceRuntimeSubject, facade_support::TraceSink,
 };
 use lash_lashlang_runtime::{
     LASHLANG_ENGINE_KIND, LashlangProcessInput, TraceLashlangChildExecution,
@@ -500,7 +502,7 @@ impl HostBridge<'_> {
             .map_err(|err| ExecutionHostError::new(err.to_string()))?;
         let subscription_key =
             materialized_trigger_subscription_key(request.subscription_key.as_deref())?;
-        let source_key = lash_core::default_trigger_source_key(
+        let source_key = lash_core::facade_support::default_trigger_source_key(
             &request.source.source_type,
             &request.source.value,
         )
@@ -706,7 +708,7 @@ impl HostBridge<'_> {
                 records
                     .iter()
                     .map(|record| {
-                        lash_core::TriggerRegistration::from_record_with_manifest(
+                        lash_core::facade_support::TriggerRegistration::from_record_with_manifest(
                             record,
                             Some(&self.trigger_key_manifest.subscription_keys),
                         )
@@ -1144,7 +1146,7 @@ pub(super) struct CollectedExecutionOutput {
 
 async fn collect_printed_images(
     value: &FlowValue,
-    attachment_store: &lash_core::SessionAttachmentStore,
+    attachment_store: &lash_core::facade_support::SessionAttachmentStore,
 ) -> Result<Vec<AttachmentRef>, ExecutionHostError> {
     let mut seen = HashSet::new();
     let mut images = Vec::new();
@@ -1154,7 +1156,7 @@ async fn collect_printed_images(
 
 fn collect_printed_images_inner<'a>(
     value: &'a FlowValue,
-    attachment_store: &'a lash_core::SessionAttachmentStore,
+    attachment_store: &'a lash_core::facade_support::SessionAttachmentStore,
     seen: &'a mut HashSet<String>,
     images: &'a mut Vec<AttachmentRef>,
 ) -> ProjectedFuture<'a, Result<(), ExecutionHostError>> {

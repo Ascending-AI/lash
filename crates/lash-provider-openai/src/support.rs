@@ -13,7 +13,9 @@ pub(crate) use lash_core::llm::types::{
     LlmOutputSpec, LlmProviderTraceSender, LlmRequest, LlmResponse, LlmRole, LlmStreamEvent,
     LlmTerminalReason, LlmUsage, ProviderReplayMeta,
 };
-pub(crate) use lash_core::{ProviderSchemaCapabilities, SchemaPurpose};
+pub(crate) use lash_core::{
+    facade_support::ProviderSchemaCapabilities, facade_support::SchemaPurpose,
+};
 // `ResponseTextMeta` is only referenced by the crate's `#[cfg(test)]`
 // assertions (the request/response shapes that exercise the shared Responses
 // input builder), so gate the re-export to test builds to keep the non-test

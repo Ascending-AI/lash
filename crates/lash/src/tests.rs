@@ -1115,7 +1115,7 @@ impl ToolProvider for RetryingDirectTools {
             .context
             .direct_completions()
             .complete(
-                lash_core::DirectRequest::text(
+                lash_core::facade_support::DirectRequest::text(
                     model.model,
                     format!(
                         "retrying direct completion attempt {}",
@@ -1355,33 +1355,36 @@ fn long_text_tool_definition() -> lash_core::ToolDefinition {
 
 struct SurfacePluginFactory;
 
-impl lash_core::PluginFactory for SurfacePluginFactory {
+impl lash_core::facade_support::PluginFactory for SurfacePluginFactory {
     fn id(&self) -> &'static str {
         "surface_test"
     }
 
     fn build(
         &self,
-        _ctx: &lash_core::PluginSessionContext,
-    ) -> std::result::Result<Arc<dyn lash_core::SessionPlugin>, lash_core::PluginError> {
+        _ctx: &lash_core::facade_support::PluginSessionContext,
+    ) -> std::result::Result<
+        Arc<dyn lash_core::facade_support::SessionPlugin>,
+        lash_core::PluginError,
+    > {
         Ok(Arc::new(SurfacePlugin))
     }
 }
 
 struct SurfacePlugin;
 
-impl lash_core::SessionPlugin for SurfacePlugin {
+impl lash_core::facade_support::SessionPlugin for SurfacePlugin {
     fn id(&self) -> &'static str {
         "surface_test"
     }
 
     fn register(
         &self,
-        reg: &mut lash_core::PluginRegistrar,
+        reg: &mut lash_core::facade_support::PluginRegistrar,
     ) -> std::result::Result<(), lash_core::PluginError> {
         reg.output().response(Arc::new(|ctx| {
             Box::pin(async move {
-                Ok(lash_core::AssistantResponseTransform {
+                Ok(lash_core::facade_support::AssistantResponseTransform {
                     response: ctx.response,
                     events: vec![lash_core::PluginRuntimeEvent::Status {
                         key: "surface".to_string(),
@@ -1710,12 +1713,12 @@ fn retry_once_provider() -> ProviderHandle {
     crate::testing::TestProvider::builder()
         .kind("retry-test")
         .requires_streaming(true)
-        .options(lash_core::ProviderOptions {
+        .options(lash_core::facade_support::ProviderOptions {
             reliability: lash_core::provider::ProviderReliability::default()
                 .max_attempts(2)
                 .base_delay_ms(0)
                 .max_delay_ms(0),
-            ..lash_core::ProviderOptions::default()
+            ..lash_core::facade_support::ProviderOptions::default()
         })
         .complete(move |_request| {
             let attempts = Arc::clone(&attempts);
@@ -1804,7 +1807,7 @@ fn rlm_core_builder() -> crate::core::LashCoreBuilder {
 
 fn inline_scope(scope: lash_core::ExecutionScope) -> lash_core::ScopedEffectController<'static> {
     lash_core::ScopedEffectController::shared(
-        Arc::new(lash_core::InlineRuntimeEffectController::default()),
+        Arc::new(lash_core::facade_support::InlineRuntimeEffectController::default()),
         scope,
     )
     .expect("inline execution scope")
@@ -1856,7 +1859,7 @@ fn text_message(role: lash_core::MessageRole, text: &str) -> lash_core::Message 
     lash_core::Message {
         id: id.clone(),
         role,
-        parts: lash_core::shared_parts(vec![lash_core::Part {
+        parts: lash_core::facade_support::shared_parts(vec![lash_core::Part {
             id: format!("{id}.p0"),
             kind: lash_core::PartKind::Text,
             content: text.to_string(),

@@ -568,7 +568,7 @@ mod tests {
     fn edit_contract_rejects_malformed_edit_item() {
         let definition = edit_tool_definition();
 
-        let error = lash_core::validate_tool_input(
+        let error = lash_core::facade_support::validate_tool_input(
             &definition.contract,
             &json!({
                 "path": "src/main.rs",

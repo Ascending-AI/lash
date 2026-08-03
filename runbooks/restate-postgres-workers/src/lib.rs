@@ -621,7 +621,7 @@ pub fn build_e2e_core(config: E2eCoreConfig) -> Result<lash::LashCore> {
         Arc::new(config.storage.session_store_factory()) as Arc<dyn SessionStoreFactory>;
     let trigger_store =
         Arc::new(config.storage.trigger_store()) as Arc<dyn lash_core::TriggerStore>;
-    let provider = lash_core::ProviderHandle::new(
+    let provider = lash_core::facade_support::ProviderHandle::new(
         OpenAiCompatibleProvider::new(
             "e2e-key",
             format!("{}/v1", config.mock_provider_base_url.trim_end_matches('/')),

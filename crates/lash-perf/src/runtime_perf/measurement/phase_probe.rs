@@ -428,7 +428,7 @@ pub(crate) async fn run_once(
             )
         })?;
         if matches!(scenario, RuntimePerfScenario::TurnCancelRoundTrip) {
-            if !matches!(turn.outcome, TurnOutcome::Stopped(lash_core::TurnStop::Cancelled)) {
+            if !matches!(turn.outcome, TurnOutcome::Stopped(lash_core::facade_support::TurnStop::Cancelled)) {
                 anyhow::bail!("cancel round-trip turn did not finish cancelled: {:?}", turn.outcome);
             }
         } else {
@@ -463,7 +463,7 @@ pub(crate) async fn run_once(
 
         let cumulative_usage = runtime.usage_report();
         let usage_delta_entries =
-            lash_core::diff_usage_reports(&before_turn_usage, &cumulative_usage)
+            lash_core::facade_support::diff_usage_reports(&before_turn_usage, &cumulative_usage)
                 .map_err(anyhow::Error::msg)?;
         let mut phase_profile = phase_probe.take_completed();
         phase_profile.extend(extra_phase_profile);

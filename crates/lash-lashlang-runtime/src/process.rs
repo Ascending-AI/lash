@@ -4,7 +4,7 @@ use std::pin::Pin;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use lash_core::ToolChildExecutionTraceHook;
+use lash_core::facade_support::ToolChildExecutionTraceHook;
 use lash_trace::{
     TraceBranchSelection, TraceContext, TraceEvent, TraceLabelMetadata,
     TraceLashlangChildExecution, TraceLashlangExecutionEvent, TraceLashlangExecutionIdentity,
@@ -426,7 +426,7 @@ struct LashlangProcessHost<'run> {
     ctx: lash_core::RuntimeExecutionContext<'run>,
     host_environment: lashlang::LashlangHostEnvironment,
     artifact_store: Arc<dyn lashlang::LashlangArtifactStore>,
-    processes: lash_core::ProcessEngineProcessContext,
+    processes: lash_core::facade_support::ProcessEngineProcessContext,
     process_id: String,
     lashlang_execution_trace: LashlangProcessExecutionTrace,
     sleep_sequence: AtomicU64,
@@ -482,7 +482,7 @@ impl LashlangProcessHost<'_> {
         args: Vec<lashlang::Value>,
         call_site: Option<lashlang::LashlangExecutionCallSite>,
         batch_index: Option<usize>,
-    ) -> Result<(String, lash_core::ToolInvocation), ExecutionHostError> {
+    ) -> Result<(String, lash_core::facade_support::ToolInvocation), ExecutionHostError> {
         let receiver = match &receiver {
             lashlang::Value::Resource(receiver) => receiver,
             _ => {
@@ -507,7 +507,8 @@ impl LashlangProcessHost<'_> {
             ))
         })?;
         let call_id = self.resource_tool_call_id(&host_operation, &call_site, batch_index);
-        let mut invocation = lash_core::ToolInvocation::new(call_id, manifest.id.clone(), payload);
+        let mut invocation =
+            lash_core::facade_support::ToolInvocation::new(call_id, manifest.id.clone(), payload);
         if let Some(hook) = self
             .lashlang_execution_trace
             .tool_child_execution_trace_hook(call_site)
@@ -526,7 +527,7 @@ impl LashlangProcessHost<'_> {
     ) -> Result<lashlang::Value, ExecutionHostError> {
         let (_, invocation) =
             self.prepare_resource_invocation(operation, receiver, args, call_site, None)?;
-        let lash_core::ToolInvocation {
+        let lash_core::facade_support::ToolInvocation {
             id,
             tool_id,
             args,
@@ -670,7 +671,7 @@ impl LashlangProcessHost<'_> {
     }
 
     async fn wait_signal(&self, name: String) -> Result<lashlang::Value, ExecutionHostError> {
-        let event_type = lash_core::process_signal_event_type(&name)
+        let event_type = lash_core::facade_support::process_signal_event_type(&name)
             .map_err(|err| ExecutionHostError::new(err.to_string()))?;
         let event_ordinal = {
             let mut ordinals = self.signal_wait_ordinals.lock().await;
@@ -678,7 +679,11 @@ impl LashlangProcessHost<'_> {
             *ordinal += 1;
             *ordinal
         };
-        let key = lash_core::process_signal_wait_key(&self.process_id, &name, event_ordinal);
+        let key = lash_core::facade_support::process_signal_wait_key(
+            &self.process_id,
+            &name,
+            event_ordinal,
+        );
         let since_ms = self
             .wait_since_ms(&key)
             .await
@@ -734,7 +739,7 @@ impl LashlangProcessHost<'_> {
                 return Ok(wait.since_ms);
             }
         }
-        Ok(lash_core::current_epoch_ms())
+        Ok(lash_core::facade_support::current_epoch_ms())
     }
 
     async fn signal_run(
@@ -1328,7 +1333,7 @@ pub fn lashlang_process_signal_event_types(
         .signals
         .iter()
         .map(|signal| lash_core::ProcessEventType {
-            name: lash_core::process_signal_event_type(signal.name.as_str())
+            name: lash_core::facade_support::process_signal_event_type(signal.name.as_str())
                 .expect("lashlang process signal declarations use parser-validated names"),
             payload_schema: lash_core::LashSchema::new(lashlang_type_expr_schema(&signal.ty)),
             semantics: lash_core::ProcessEventSemanticsSpec::default(),

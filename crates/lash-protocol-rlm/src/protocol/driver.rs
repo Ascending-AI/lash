@@ -10,8 +10,8 @@ use lash_core::session_model::{
 use lash_core::{
     CheckpointKind, DriverAction, DriverContextView, ExecResponse, LlmOutputPart, LlmResponse,
     ToolCallOutcome, ToolCallOutput, ToolCallRecord, ToolControl, ToolFailure, ToolFailureClass,
-    ToolValue, TurnFinish, TurnOutcome, TurnStop, append_assistant_text_part,
-    normalized_response_parts,
+    ToolValue, facade_support::TurnFinish, facade_support::TurnOutcome, facade_support::TurnStop,
+    facade_support::append_assistant_text_part, facade_support::normalized_response_parts,
 };
 use lash_rlm_types::{
     RlmAssistantContent, RlmDiagnosticEvent, RlmProtocolEvent, RlmTermination, RlmTrajectoryEntry,
@@ -696,8 +696,8 @@ fn termination_diagnostic_name(termination: &RlmTermination) -> &'static str {
 mod tests {
     use super::*;
     use lash_core::{
-        AttachmentId, AttachmentMeta, AttachmentSource, AttachmentTypeMetadata, MediaType,
-        ToolCancellation,
+        AttachmentId, AttachmentSource, AttachmentTypeMetadata, MediaType, ToolCancellation,
+        facade_support::AttachmentMeta,
     };
 
     fn image_ref(id: &str) -> AttachmentSource {

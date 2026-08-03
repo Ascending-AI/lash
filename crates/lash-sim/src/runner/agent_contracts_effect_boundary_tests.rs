@@ -46,7 +46,7 @@ impl ToolAttemptInvariantRecorder {
 
 struct RecordingInlineEffectController {
     recorder: Arc<ToolAttemptInvariantRecorder>,
-    delegate: lash_core::InlineRuntimeEffectController,
+    delegate: lash_core::facade_support::InlineRuntimeEffectController,
 }
 
 #[async_trait::async_trait]
@@ -141,10 +141,12 @@ fn recording_effect_host(
     recorder: Arc<ToolAttemptInvariantRecorder>,
 ) -> Arc<dyn lash_core::EffectHost> {
     Arc::new(
-        lash_core::InlineEffectHost::new(Arc::new(RecordingInlineEffectController {
-            recorder,
-            delegate: lash_core::InlineRuntimeEffectController::default(),
-        }))
+        lash_core::facade_support::InlineEffectHost::new(Arc::new(
+            RecordingInlineEffectController {
+                recorder,
+                delegate: lash_core::facade_support::InlineRuntimeEffectController::default(),
+            },
+        ))
         .allow_process_lifetime_completion_keys(),
     )
 }

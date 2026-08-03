@@ -6,9 +6,9 @@ use lash_core::testing::behavior_transcript::Transcript;
 use lash_core::testing::sansio_transcript::record_effects;
 use lash_core::{
     CheckpointKind, Effect, LlmCallError, LlmOutputPart, LlmRequest, LlmResponse,
-    LlmTerminalReason, Message, MessageRole, Part, PartKind, PruneState, SessionStreamEvent,
-    ToolCallOutput, ToolFailure, ToolFailureClass, TurnMachine, TurnMachineConfig, TurnOutcome,
-    TurnStop,
+    LlmTerminalReason, Message, MessageRole, Part, PartKind, PruneState, ToolCallOutput,
+    ToolFailure, ToolFailureClass, TurnMachine, TurnMachineConfig,
+    facade_support::SessionStreamEvent, facade_support::TurnOutcome, facade_support::TurnStop,
 };
 use lash_protocol_standard::StandardDriver;
 
@@ -332,10 +332,12 @@ impl StandardToolResult {
             tool_name: self.tool_name.to_string(),
             args,
             output: self.output.clone(),
-            model_return: lash_core::ModelToolReturn {
+            model_return: lash_core::facade_support::ModelToolReturn {
                 call_id: self.call_id.to_string(),
                 tool_name: self.tool_name.to_string(),
-                parts: vec![lash_core::ModelToolReturnPart::text(self.model_return_text)],
+                parts: vec![lash_core::facade_support::ModelToolReturnPart::text(
+                    self.model_return_text,
+                )],
             },
             duration_ms: 1,
             replay: None,
@@ -491,7 +493,7 @@ fn test_turn_limit_final_message(message_id: String, max_turns: usize) -> Messag
     Message {
         id: message_id.clone(),
         role: MessageRole::System,
-        parts: lash_core::shared_parts(vec![Part {
+        parts: lash_core::facade_support::shared_parts(vec![Part {
             id: format!("{message_id}.p0"),
             kind: PartKind::Error,
             content: format!("Turn limit reached ({max_turns}) before a final test response."),
@@ -791,7 +793,7 @@ fn standard_protocol_scenario_streamed_text_finishes_without_duplicate_delta() {
             done: Some(true),
             no_text_deltas: true,
             turn_outcome: Some(TurnOutcome::Finished(
-                lash_core::TurnFinish::AssistantMessage {
+                lash_core::facade_support::TurnFinish::AssistantMessage {
                     text: "streamed done".to_string(),
                 },
             )),

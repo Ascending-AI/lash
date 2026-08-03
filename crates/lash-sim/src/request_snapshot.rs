@@ -1,7 +1,9 @@
 use std::sync::Arc;
 
 use lash::PromptLayerSink as _;
-use lash_core::{PromptTemplate, PromptTemplateEntry, PromptTemplateSection, TraceLevel};
+use lash_core::{
+    PromptTemplate, PromptTemplateEntry, PromptTemplateSection, facade_support::TraceLevel,
+};
 use serde_json::{Value, json};
 
 use crate::provider::ScriptedLlmHttpTransport;

@@ -8,12 +8,12 @@ use lash_core::testing::conformance::{
 };
 use lash_core::{
     AttachmentCreateMeta, AttachmentStore, AwaitEventWaitIdentity, EffectHost, ExecutionScope,
-    InMemoryAttachmentStore, InMemoryTriggerStore, MediaType, ProcessExecutionEnvRef,
-    ProcessIdentity, ProcessInput, ProcessOriginator, Resolution, RuntimeEffectCommand,
-    RuntimeEffectEnvelope, RuntimeEffectKind, RuntimeEffectLocalExecutor, RuntimeEffectOutcome,
-    RuntimeInvocation, RuntimeScope, SessionScope, TestLocalProcessRegistry, TriggerCommand,
-    TriggerInputBinding, TriggerOccurrenceRequest, TriggerOwnerScope, TriggerStore,
-    TriggerSubscriptionDraft,
+    MediaType, ProcessExecutionEnvRef, ProcessIdentity, ProcessInput, ProcessOriginator,
+    Resolution, RuntimeEffectCommand, RuntimeEffectEnvelope, RuntimeEffectKind,
+    RuntimeEffectLocalExecutor, RuntimeEffectOutcome, RuntimeInvocation, RuntimeScope,
+    SessionScope, TestLocalProcessRegistry, TriggerCommand, TriggerInputBinding,
+    TriggerOccurrenceRequest, TriggerOwnerScope, TriggerStore, TriggerSubscriptionDraft,
+    facade_support::InMemoryAttachmentStore, facade_support::InMemoryTriggerStore,
 };
 use lash_s3_store::{S3AttachmentStore, S3AttachmentStoreConfig};
 use lash_sqlite_store::{
@@ -500,7 +500,7 @@ fn normalized_trigger_delivery_json(
         .get("revision")
         .and_then(serde_json::Value::as_u64)
         .expect("trigger delivery subscription revision");
-    let expected_process_id = lash_core::deterministic_delivery_process_id(
+    let expected_process_id = lash_core::facade_support::deterministic_delivery_process_id(
         occurrence_id,
         subscription_id,
         incarnation,
@@ -1079,7 +1079,7 @@ async fn surface_runners(
     let memory_registry =
         Arc::new(TestLocalProcessRegistry::default().with_clock(Arc::clone(&clock)));
     let memory_triggers = Arc::new(InMemoryTriggerStore::with_clock(Arc::clone(&clock)));
-    let memory_effect = Arc::new(lash_core::InlineEffectHost::default());
+    let memory_effect = Arc::new(lash_core::facade_support::InlineEffectHost::default());
 
     let sqlite_runtime_path = root.join("runtime.db");
     let sqlite_process_path = root.join("process.db");
@@ -1386,7 +1386,7 @@ async fn attachment_blob_store_differential_agrees() {
     };
     let memory = InMemoryAttachmentStore::new();
     let root = tempfile::tempdir().unwrap();
-    let file = lash_core::FileAttachmentStore::new(root.path());
+    let file = lash_core::facade_support::FileAttachmentStore::new(root.path());
     let s3 = S3AttachmentStore::from_config(S3AttachmentStoreConfig {
         endpoint_url: Some(endpoint),
         region: "us-east-1".to_string(),

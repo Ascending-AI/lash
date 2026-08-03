@@ -1,5 +1,5 @@
 use crate::*;
-
+use lash_core::facade_support;
 mod retention;
 mod wake_delivery;
 
@@ -418,7 +418,7 @@ impl ProcessRegistry for PostgresProcessRegistry {
         process_id: &str,
         request: ProcessEventAppendRequest,
     ) -> Result<ProcessEventAppendResult, PluginError> {
-        lash_core::validate_generic_process_event_append(&request)?;
+        facade_support::validate_generic_process_event_append(&request)?;
         let mut tx = self.pool.begin().await.map_err(plugin_sqlx_error)?;
         let mut record = require_process_tx(&mut tx, process_id).await?;
         let occurred_at_ms = self.clock.timestamp_ms();
@@ -568,7 +568,7 @@ impl ProcessRegistry for PostgresProcessRegistry {
         }
         authority.validate(process_id, record.disposition, &await_output)?;
         let request =
-            lash_core::terminal_append_request(process_id, &await_output, Some(&authority));
+            facade_support::terminal_append_request(process_id, &await_output, Some(&authority));
         let replay_lookup =
             if let Some(replay_key) = request.replay.as_ref().map(|r| r.key.as_str()) {
                 load_event_by_key_tx(&mut tx, process_id, replay_key).await?
@@ -589,7 +589,7 @@ impl ProcessRegistry for PostgresProcessRegistry {
             wake_session_id.as_deref(),
         )?;
         match prepared {
-            lash_core::ProcessEventAppendPlan::Replay {
+            facade_support::ProcessEventAppendPlan::Replay {
                 repair_record,
                 wake_delivery,
                 ..
@@ -603,7 +603,7 @@ impl ProcessRegistry for PostgresProcessRegistry {
                 tx.commit().await.map_err(plugin_sqlx_error)?;
                 Ok(lash_core::ProcessCompletionOutcome::AlreadyApplied { stored: record })
             }
-            lash_core::ProcessEventAppendPlan::Insert {
+            facade_support::ProcessEventAppendPlan::Insert {
                 event,
                 payload_hash,
                 projected_record,
@@ -659,7 +659,7 @@ impl ProcessRegistry for PostgresProcessRegistry {
                 &await_output,
             ));
         }
-        let request = lash_core::terminal_append_request(process_id, &await_output, None);
+        let request = facade_support::terminal_append_request(process_id, &await_output, None);
         let replay_lookup =
             if let Some(replay_key) = request.replay.as_ref().map(|r| r.key.as_str()) {
                 load_event_by_key_tx(&mut tx, process_id, replay_key).await?
@@ -679,7 +679,7 @@ impl ProcessRegistry for PostgresProcessRegistry {
             now,
             wake_session_id.as_deref(),
         )?;
-        if let lash_core::ProcessEventAppendPlan::Replay {
+        if let facade_support::ProcessEventAppendPlan::Replay {
             repair_record,
             wake_delivery,
             ..
@@ -702,7 +702,7 @@ impl ProcessRegistry for PostgresProcessRegistry {
             return Err(process_lease_expired(process_id));
         }
 
-        let lash_core::ProcessEventAppendPlan::Insert {
+        let facade_support::ProcessEventAppendPlan::Insert {
             event,
             payload_hash,
             projected_record,
@@ -1443,7 +1443,7 @@ impl ProcessRegistry for PostgresProcessRegistry {
         let mut pruned_events = 0;
         let mut pruned_processes = 0;
         for process_id in prunable {
-            for session_id in lash_core::process_runtime_session_ids(&process_id) {
+            for session_id in facade_support::process_runtime_session_ids(&process_id) {
                 delete_session_tx(&mut tx, &session_id, false)
                     .await
                     .map_err(|err| PluginError::Session(err.to_string()))?;

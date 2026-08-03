@@ -405,7 +405,7 @@ finish "registered"
     }
 
     async fn await_success(registry: &Arc<dyn lash_core::ProcessRegistry>, process_id: &str) {
-        let awaiter = lash_core::ProcessAwaiter::polling(Arc::clone(registry));
+        let awaiter = lash_core::facade_support::ProcessAwaiter::polling(Arc::clone(registry));
         let outcome =
             tokio::time::timeout(Duration::from_secs(10), awaiter.await_terminal(process_id))
                 .await
@@ -422,7 +422,7 @@ finish "registered"
         scope_id: impl Into<String>,
     ) -> lash_core::ScopedEffectController<'static> {
         lash_core::ScopedEffectController::shared(
-            Arc::new(lash_core::InlineRuntimeEffectController::default()),
+            Arc::new(lash_core::facade_support::InlineRuntimeEffectController::default()),
             lash_core::ExecutionScope::runtime_operation(scope_id.into()),
         )
         .expect("inline trigger occurrence execution scope")
@@ -432,7 +432,7 @@ finish "registered"
         core: &LashCore,
         session: &crate::LashSession,
         payload: serde_json::Value,
-    ) -> lash_core::TriggerEmitReport {
+    ) -> lash_core::facade_support::TriggerEmitReport {
         let registrations = session
             .triggers()
             .by_source_type("clock.Alarm")

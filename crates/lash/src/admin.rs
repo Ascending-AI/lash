@@ -1,6 +1,9 @@
 use crate::support::*;
-pub(crate) use lash_core::SessionConfigPatch;
-pub use lash_core::{AcceptedInjectedTurnInput, PluginCommand, PluginQuery, PluginTask};
+pub(crate) use lash_core::facade_support::SessionConfigPatch;
+pub use lash_core::{
+    facade_support::AcceptedInjectedTurnInput, facade_support::PluginCommand,
+    facade_support::PluginQuery, facade_support::PluginTask,
+};
 
 #[derive(Clone)]
 pub struct Completions {
@@ -47,10 +50,10 @@ impl CoreTriggerAdmin {
         &self,
         request: lash_core::TriggerOccurrenceRequest,
         scoped_effect_controller: ScopedEffectController<'_>,
-    ) -> Result<lash_core::TriggerEmitReport> {
+    ) -> Result<lash_core::facade_support::TriggerEmitReport> {
         let store = self.store()?;
         let drivers = self.core.work_driver.drivers().await;
-        let router = lash_core::TriggerRouter::new(
+        let router = lash_core::facade_support::TriggerRouter::new(
             store,
             self.core.env.process_registry.clone(),
             drivers.process,
@@ -64,12 +67,12 @@ impl CoreTriggerAdmin {
     pub async fn subscriptions(
         &self,
         filter: lash_core::TriggerSubscriptionFilter,
-    ) -> Result<Vec<lash_core::TriggerRegistration>> {
+    ) -> Result<Vec<lash_core::facade_support::TriggerRegistration>> {
         let store = self.store()?;
         let records = store.list_subscriptions(filter).await?;
         Ok(records
             .iter()
-            .map(lash_core::TriggerRegistration::from)
+            .map(lash_core::facade_support::TriggerRegistration::from)
             .collect())
     }
 }
@@ -286,8 +289,8 @@ impl SessionAdmin {
             })
     }
 
-    fn process_observer(&self) -> Result<lash_core::ProcessWorkObserver> {
-        Ok(lash_core::ProcessWorkObserver::new(
+    fn process_observer(&self) -> Result<lash_core::facade_support::ProcessWorkObserver> {
+        Ok(lash_core::facade_support::ProcessWorkObserver::new(
             self.process_registry()?,
         ))
     }
@@ -296,12 +299,12 @@ impl SessionAdmin {
     /// runtime has no registry. Session-scoped reads use this so a registry-less
     /// runtime observes an empty process set rather than erroring, matching the
     /// pre-unification `list_process_handles` behavior.
-    fn process_observer_opt(&self) -> Option<lash_core::ProcessWorkObserver> {
+    fn process_observer_opt(&self) -> Option<lash_core::facade_support::ProcessWorkObserver> {
         self.runtime
             .observe()
             .process_registry
             .clone()
-            .map(lash_core::ProcessWorkObserver::new)
+            .map(lash_core::facade_support::ProcessWorkObserver::new)
     }
 
     /// Observer edges are session-scoped and deliberately frame-less.
@@ -356,7 +359,7 @@ impl SessionAdmin {
         &self,
         process_id: &str,
     ) -> Result<lash_core::ProcessAwaitOutput> {
-        lash_core::ProcessAwaiter::polling(self.process_registry()?)
+        lash_core::facade_support::ProcessAwaiter::polling(self.process_registry()?)
             .await_terminal(process_id)
             .await
             .map_err(Into::into)
@@ -366,7 +369,7 @@ impl SessionAdmin {
         &self,
         process_id: &str,
         reason: Option<String>,
-    ) -> Result<lash_core::ObservedProcess> {
+    ) -> Result<lash_core::facade_support::ObservedProcess> {
         let session_id = self.runtime.observe().session_id().to_string();
         let request = lash_core::AbandonRequest {
             requested_by: format!("session:{session_id}"),
@@ -399,9 +402,9 @@ impl SessionAdmin {
 
     async fn submit_session_command(
         &self,
-        command: lash_core::SessionCommand,
+        command: lash_core::facade_support::SessionCommand,
         idempotency_key: impl Into<String>,
-    ) -> Result<lash_core::SessionCommandReceipt> {
+    ) -> Result<lash_core::facade_support::SessionCommandReceipt> {
         let idempotency_key = idempotency_key.into();
         self.with_writer(async |runtime: &mut LashRuntime| {
             runtime
@@ -412,7 +415,9 @@ impl SessionAdmin {
         .await
     }
 
-    async fn list_trigger_registrations(&self) -> Result<Vec<lash_core::TriggerRegistration>> {
+    async fn list_trigger_registrations(
+        &self,
+    ) -> Result<Vec<lash_core::facade_support::TriggerRegistration>> {
         self.with_writer(async |runtime: &mut LashRuntime| {
             runtime
                 .list_trigger_registrations()
@@ -424,8 +429,8 @@ impl SessionAdmin {
 
     async fn trigger_registrations_by_source_type(
         &self,
-        source_type: impl Into<lash_core::TriggerEventType>,
-    ) -> Result<Vec<lash_core::TriggerRegistration>> {
+        source_type: impl Into<lash_core::facade_support::TriggerEventType>,
+    ) -> Result<Vec<lash_core::facade_support::TriggerRegistration>> {
         self.with_writer(async |runtime: &mut LashRuntime| {
             runtime
                 .trigger_registrations_by_source_type(source_type)
@@ -452,7 +457,7 @@ impl SessionAdmin {
         &self,
         name: &str,
         args: serde_json::Value,
-    ) -> Result<lash_core::PluginCommandReceipt<serde_json::Value>> {
+    ) -> Result<lash_core::facade_support::PluginCommandReceipt<serde_json::Value>> {
         let session_id = self.runtime.observe().session_id().to_string();
         let writer = self.runtime.writer();
         let mut runtime = writer.lock().await;
@@ -473,7 +478,7 @@ impl SessionAdmin {
         name: &str,
         args: serde_json::Value,
         cancellation_token: CancellationToken,
-    ) -> Result<lash_core::PluginTaskReceipt<serde_json::Value>> {
+    ) -> Result<lash_core::facade_support::PluginTaskReceipt<serde_json::Value>> {
         let session_id = self.runtime.observe().session_id().to_string();
         let writer = self.runtime.writer();
         let mut runtime = writer.lock().await;
@@ -506,7 +511,7 @@ impl SessionAdmin {
 
     fn record_plugin_operation_observations(
         &self,
-        events: &[lash_core::PluginOwned<lash_core::PluginRuntimeEvent>],
+        events: &[lash_core::facade_support::PluginOwned<lash_core::PluginRuntimeEvent>],
         pending_turn_inputs: &[lash_core::PendingTurnInput],
     ) {
         for owned in events {
@@ -742,7 +747,7 @@ impl SessionAdmin {
     ) -> Result<()> {
         self.inject_turn_inputs_for_turn(
             turn_id,
-            vec![lash_core::InjectedTurnInput { id, message }],
+            vec![lash_core::facade_support::InjectedTurnInput { id, message }],
         )
         .await
     }
@@ -750,7 +755,7 @@ impl SessionAdmin {
     async fn inject_turn_inputs_for_turn(
         &self,
         turn_id: &str,
-        messages: Vec<lash_core::InjectedTurnInput>,
+        messages: Vec<lash_core::facade_support::InjectedTurnInput>,
     ) -> Result<()> {
         for input in messages {
             let source_key = input.id.map(|id| format!("injection:{id}"));
@@ -931,10 +936,10 @@ impl SessionCommandAdmin {
         &self,
         reason: impl Into<String>,
         idempotency_key: impl Into<String>,
-    ) -> Result<lash_core::SessionCommandReceipt> {
+    ) -> Result<lash_core::facade_support::SessionCommandReceipt> {
         self.control
             .submit_session_command(
-                lash_core::SessionCommand::RefreshToolCatalog {
+                lash_core::facade_support::SessionCommand::RefreshToolCatalog {
                     reason: reason.into(),
                 },
                 idempotency_key,
@@ -955,7 +960,7 @@ impl SessionTriggerAdmin {
     /// This is an admin/introspection view. Source owners should prefer
     /// [`Self::by_source_type`] so they only inspect registrations for the
     /// concrete source type they own.
-    pub async fn list_all(&self) -> Result<Vec<lash_core::TriggerRegistration>> {
+    pub async fn list_all(&self) -> Result<Vec<lash_core::facade_support::TriggerRegistration>> {
         self.control.list_trigger_registrations().await
     }
 
@@ -965,8 +970,8 @@ impl SessionTriggerAdmin {
     /// source uses it to inspect registrations for keys it may schedule and emit.
     pub async fn by_source_type(
         &self,
-        source_type: impl Into<lash_core::TriggerEventType>,
-    ) -> Result<Vec<lash_core::TriggerRegistration>> {
+        source_type: impl Into<lash_core::facade_support::TriggerEventType>,
+    ) -> Result<Vec<lash_core::facade_support::TriggerRegistration>> {
         self.control
             .trigger_registrations_by_source_type(source_type)
             .await
@@ -985,7 +990,7 @@ pub struct SessionProcessAdmin {
 /// the global observer pre-filtered by this session's observer scope (what the
 /// session may address), and every mutation delegates to the same runtime
 /// process path the global surface uses. It speaks the same
-/// [`ObservedProcess`](lash_core::ObservedProcess) vocabulary as
+/// [`ObservedProcess`](lash_core::facade_support::ObservedProcess) vocabulary as
 /// [`Processes`](crate::process::Processes); [`start`](Self::start) returns the
 /// model-facing handle summary ([`lash_core::ProcessHandleSummary`]), the one row
 /// type retained for the model/handle contract.
@@ -1000,7 +1005,7 @@ impl SessionProcessAdmin {
     async fn list_observed(
         &self,
         filter: &lash_core::ProcessListFilter,
-    ) -> Result<Vec<lash_core::ObservedProcess>> {
+    ) -> Result<Vec<lash_core::facade_support::ObservedProcess>> {
         // A registry-less runtime has no processes to address; observe empty
         // rather than erroring, matching the pre-unification session read.
         let Some(observer) = self.control.process_observer_opt() else {
@@ -1023,7 +1028,7 @@ impl SessionProcessAdmin {
     }
 
     /// Running processes this session may address.
-    pub async fn list(&self) -> Result<Vec<lash_core::ObservedProcess>> {
+    pub async fn list(&self) -> Result<Vec<lash_core::facade_support::ObservedProcess>> {
         self.list_observed(&lash_core::ProcessListFilter {
             status: lash_core::ProcessStatusFilter::Running,
             ..lash_core::ProcessListFilter::default()
@@ -1032,7 +1037,7 @@ impl SessionProcessAdmin {
     }
 
     /// Every process (any status) this session may address.
-    pub async fn list_all(&self) -> Result<Vec<lash_core::ObservedProcess>> {
+    pub async fn list_all(&self) -> Result<Vec<lash_core::facade_support::ObservedProcess>> {
         self.list_observed(&lash_core::ProcessListFilter {
             status: lash_core::ProcessStatusFilter::Any,
             ..lash_core::ProcessListFilter::default()
@@ -1041,7 +1046,10 @@ impl SessionProcessAdmin {
     }
 
     /// One process this session may address, if present.
-    pub async fn get(&self, process_id: &str) -> Result<Option<lash_core::ObservedProcess>> {
+    pub async fn get(
+        &self,
+        process_id: &str,
+    ) -> Result<Option<lash_core::facade_support::ObservedProcess>> {
         Ok(self
             .list_all()
             .await?
@@ -1053,7 +1061,7 @@ impl SessionProcessAdmin {
         &self,
         process_id: &str,
         after_sequence: u64,
-    ) -> Result<Vec<lash_core::ObservedProcessEvent>> {
+    ) -> Result<Vec<lash_core::facade_support::ObservedProcessEvent>> {
         let Some(observer) = self.control.process_observer_opt() else {
             return Ok(Vec::new());
         };
@@ -1125,7 +1133,7 @@ impl SessionProcessAdmin {
         &self,
         process_id: &str,
         reason: Option<String>,
-    ) -> Result<lash_core::ObservedProcess> {
+    ) -> Result<lash_core::facade_support::ObservedProcess> {
         self.control
             .request_process_abandon(process_id, reason)
             .await
@@ -1191,7 +1199,10 @@ pub struct PluginOperations {
 }
 
 impl PluginOperations {
-    pub async fn query<Op: lash_core::PluginQuery>(&self, args: Op::Args) -> Result<Op::Output> {
+    pub async fn query<Op: lash_core::facade_support::PluginQuery>(
+        &self,
+        args: Op::Args,
+    ) -> Result<Op::Output> {
         let (_plugin_id, output) = self
             .control
             .query_plugin_raw(Op::NAME, encode_plugin_args::<Op>(args)?)
@@ -1207,15 +1218,15 @@ impl PluginOperations {
         self.control.query_plugin_raw(name, args).await
     }
 
-    pub async fn run_command<Op: lash_core::PluginCommand>(
+    pub async fn run_command<Op: lash_core::facade_support::PluginCommand>(
         &self,
         args: Op::Args,
-    ) -> Result<lash_core::PluginCommandReceipt<Op::Output>> {
+    ) -> Result<lash_core::facade_support::PluginCommandReceipt<Op::Output>> {
         let receipt = self
             .control
             .run_plugin_command_raw(Op::NAME, encode_plugin_args::<Op>(args)?)
             .await?;
-        Ok(lash_core::PluginCommandReceipt {
+        Ok(lash_core::facade_support::PluginCommandReceipt {
             output: decode_plugin_output::<Op>(receipt.output)?,
             events: receipt.events,
             pending_turn_inputs: receipt.pending_turn_inputs,
@@ -1226,23 +1237,23 @@ impl PluginOperations {
         &self,
         name: &str,
         args: serde_json::Value,
-    ) -> Result<lash_core::PluginCommandReceipt<serde_json::Value>> {
+    ) -> Result<lash_core::facade_support::PluginCommandReceipt<serde_json::Value>> {
         self.control.run_plugin_command_raw(name, args).await
     }
 
-    pub async fn run_task<Op: lash_core::PluginTask>(
+    pub async fn run_task<Op: lash_core::facade_support::PluginTask>(
         &self,
         args: Op::Args,
-    ) -> Result<lash_core::PluginTaskReceipt<Op::Output>> {
+    ) -> Result<lash_core::facade_support::PluginTaskReceipt<Op::Output>> {
         self.run_task_with_cancel::<Op>(args, CancellationToken::new())
             .await
     }
 
-    pub async fn run_task_with_cancel<Op: lash_core::PluginTask>(
+    pub async fn run_task_with_cancel<Op: lash_core::facade_support::PluginTask>(
         &self,
         args: Op::Args,
         cancellation_token: CancellationToken,
-    ) -> Result<lash_core::PluginTaskReceipt<Op::Output>> {
+    ) -> Result<lash_core::facade_support::PluginTaskReceipt<Op::Output>> {
         let receipt = self
             .control
             .run_plugin_task_raw_with_cancel(
@@ -1251,7 +1262,7 @@ impl PluginOperations {
                 cancellation_token,
             )
             .await?;
-        Ok(lash_core::PluginTaskReceipt {
+        Ok(lash_core::facade_support::PluginTaskReceipt {
             output: decode_plugin_output::<Op>(receipt.output)?,
             events: receipt.events,
             pending_turn_inputs: receipt.pending_turn_inputs,
@@ -1262,7 +1273,7 @@ impl PluginOperations {
         &self,
         name: &str,
         args: serde_json::Value,
-    ) -> Result<lash_core::PluginTaskReceipt<serde_json::Value>> {
+    ) -> Result<lash_core::facade_support::PluginTaskReceipt<serde_json::Value>> {
         self.run_task_raw_with_cancel(name, args, CancellationToken::new())
             .await
     }
@@ -1272,14 +1283,16 @@ impl PluginOperations {
         name: &str,
         args: serde_json::Value,
         cancellation_token: CancellationToken,
-    ) -> Result<lash_core::PluginTaskReceipt<serde_json::Value>> {
+    ) -> Result<lash_core::facade_support::PluginTaskReceipt<serde_json::Value>> {
         self.control
             .run_plugin_task_raw_with_cancel(name, args, cancellation_token)
             .await
     }
 }
 
-fn encode_plugin_args<Op: lash_core::PluginOperation>(args: Op::Args) -> Result<serde_json::Value> {
+fn encode_plugin_args<Op: lash_core::facade_support::PluginOperation>(
+    args: Op::Args,
+) -> Result<serde_json::Value> {
     serde_json::to_value(args).map_err(|err| {
         EmbedError::Plugin(lash_core::PluginError::Invoke(format!(
             "invalid {} args: {err}",
@@ -1288,7 +1301,7 @@ fn encode_plugin_args<Op: lash_core::PluginOperation>(args: Op::Args) -> Result<
     })
 }
 
-fn decode_plugin_output<Op: lash_core::PluginOperation>(
+fn decode_plugin_output<Op: lash_core::facade_support::PluginOperation>(
     output: serde_json::Value,
 ) -> Result<Op::Output> {
     serde_json::from_value(output).map_err(|err| {
@@ -1336,7 +1349,7 @@ impl InjectionAdmin {
     pub async fn inject_turn_inputs_for_turn(
         &self,
         turn_id: &str,
-        messages: Vec<lash_core::InjectedTurnInput>,
+        messages: Vec<lash_core::facade_support::InjectedTurnInput>,
     ) -> Result<()> {
         self.control
             .inject_turn_inputs_for_turn(turn_id, messages)

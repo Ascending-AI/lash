@@ -2,9 +2,11 @@ use anyhow::{Context, Result};
 use lash::triggers::{TriggerOccurrenceRequest, empty_trigger_source_key};
 use lash_core::AwaitEventResolver as _;
 use lash_core::{
-    AwaitEventKey, AwaitEventWaitIdentity, ExecutionScope, InlineRuntimeEffectController,
-    Resolution, ScopedEffectController, SessionCommitStore, TurnAddress, TurnCancelOutcome,
-    TurnCancelRequest, TurnOutcome, TurnStop, TurnTerminal, TurnWorkDriver,
+    AwaitEventKey, AwaitEventWaitIdentity, ExecutionScope, Resolution, ScopedEffectController,
+    SessionCommitStore, facade_support::InlineRuntimeEffectController, facade_support::TurnAddress,
+    facade_support::TurnCancelOutcome, facade_support::TurnCancelRequest,
+    facade_support::TurnOutcome, facade_support::TurnStop, facade_support::TurnTerminal,
+    facade_support::TurnWorkDriver,
 };
 use lash_postgres_store::PostgresStorage;
 use lash_restate::{

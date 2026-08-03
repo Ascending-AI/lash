@@ -2,7 +2,7 @@ use std::sync::{Arc, Mutex};
 
 use crate::AnthropicProvider;
 use async_trait::async_trait;
-use lash_core::LlmTransportError;
+use lash_core::facade_support::LlmTransportError;
 use lash_core::llm::types::{
     LlmMessage, LlmProviderTraceEvent, LlmProviderTraceSender, LlmRequest, LlmRequestScope,
     LlmRole, LlmToolChoice,

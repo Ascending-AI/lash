@@ -1,5 +1,5 @@
 use lash_core::plugin::{PluginError, ToolCatalogContext};
-use lash_core::{ToolCatalog, ToolCatalogContribution};
+use lash_core::{ToolCatalog, facade_support::ToolCatalogContribution};
 use lash_lashlang_runtime::required_tool_lashlang_executable;
 
 /// RLM catalog assembly. The catalog is a flat callable set: every member is
@@ -43,7 +43,10 @@ fn validate_rlm_lashlang_bindings(ctx: &ToolCatalogContext) -> Result<(), Plugin
 #[cfg(test)]
 mod tests {
     use super::*;
-    use lash_core::{ToolCatalogBuildInput, ToolContract, ToolDefinition, build_tool_catalog};
+    use lash_core::{
+        ToolContract, ToolDefinition, facade_support::ToolCatalogBuildInput,
+        facade_support::build_tool_catalog,
+    };
     use lash_lashlang_runtime::{LashlangSurface, LashlangToolBinding, ToolDefinitionLashlangExt};
     use serde_json::json;
     use std::sync::Arc;

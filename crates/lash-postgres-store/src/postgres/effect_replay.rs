@@ -16,7 +16,7 @@ pub struct PostgresEffectReplayOptions {
     /// Effect-replay lease timing capability. Hosts share the same
     /// [`LeaseTimings`] they configure on the runtime so effect leases expire
     /// on the same failover window as session and process leases.
-    pub lease_timings: lash_core::LeaseTimings,
+    pub lease_timings: lash_core::facade_support::LeaseTimings,
 }
 
 struct PostgresEffectReplayInner {
@@ -24,7 +24,7 @@ struct PostgresEffectReplayInner {
     owner_id: String,
     lease_counter: AtomicU64,
     replay_mode: AtomicBool,
-    lease_timings: lash_core::LeaseTimings,
+    lease_timings: lash_core::facade_support::LeaseTimings,
     await_events: PostgresAwaitEvents,
 }
 
@@ -587,7 +587,7 @@ impl PostgresRuntimeEffectController {
                 Ok(RuntimeEffectOutcome::PeekAwaitEvent { resolution })
             }
             RuntimeEffectCommand::AwaitEvent { key } => {
-                let lash_core::RuntimeAwaitEventOptions {
+                let lash_core::facade_support::RuntimeAwaitEventOptions {
                     cancellation,
                     deadline,
                     clock,

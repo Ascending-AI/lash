@@ -582,7 +582,7 @@ finish fanout.a?.value"#
 
 fn assert_restored_llm(
     machine: &mut TurnMachine,
-    expected_id: lash_core::EffectId,
+    expected_id: lash_core::facade_support::EffectId,
 ) -> anyhow::Result<()> {
     match next_checkpoint_effect(machine) {
         Some(Effect::LlmCall { id, .. }) if id == expected_id => Ok(()),
@@ -593,7 +593,7 @@ fn assert_restored_llm(
 
 fn assert_restored_tool_batch(
     machine: &mut TurnMachine,
-    expected_id: lash_core::EffectId,
+    expected_id: lash_core::facade_support::EffectId,
     expected_calls: usize,
 ) -> anyhow::Result<()> {
     match next_checkpoint_effect(machine) {
@@ -609,7 +609,7 @@ fn assert_restored_tool_batch(
 
 fn assert_restored_exec(
     machine: &mut TurnMachine,
-    expected_id: lash_core::EffectId,
+    expected_id: lash_core::facade_support::EffectId,
     expected_code: &str,
 ) -> anyhow::Result<()> {
     match next_checkpoint_effect(machine) {

@@ -12,7 +12,8 @@ use std::sync::Arc;
 
 use lash_core::{
     CausalRef, ModelSpec, PluginOptions, SessionCreateRequest, SessionPluginSource, SessionPolicy,
-    SessionSnapshot, SessionSpec, SessionStartPoint, SessionToolAccess, SubagentSessionContext,
+    SessionSnapshot, SessionStartPoint, SessionToolAccess, SubagentSessionContext,
+    facade_support::SessionSpec,
 };
 use lash_rlm_types::RlmTermination;
 use serde_json::Value;

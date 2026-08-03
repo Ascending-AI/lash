@@ -741,12 +741,17 @@ impl ModelStore {
                     .get("replay_key")
                     .and_then(Value::as_str)
                     .map_or_else(
-                        || lash_core::process_wake_source_key(&process_id, sequence),
+                        || {
+                            lash_core::facade_support::process_wake_source_key(
+                                &process_id,
+                                sequence,
+                            )
+                        },
                         ToString::to_string,
                     )
                     .to_string();
-                let wake =
-                    lash_core::process_wake_delivery(lash_core::ProcessWakeDeliveryRequest {
+                let wake = lash_core::facade_support::process_wake_delivery(
+                    lash_core::facade_support::ProcessWakeDeliveryRequest {
                         target_session_id: session.clone(),
                         process_id: process_id.clone(),
                         sequence,
@@ -762,20 +767,21 @@ impl ModelStore {
                             replay: Some(lash_core::runtime::RuntimeReplay { key: replay_key }),
                         },
                         process_caused_by: None,
-                        wake: lash_core::ProcessWake {
+                        wake: lash_core::facade_support::ProcessWake {
                             input: format!("wake for {session}"),
                         },
                         occurred_at: std::time::UNIX_EPOCH
                             + std::time::Duration::from_millis(event.at),
-                    })
-                    .expect("sim process wake delivery request is deterministic and valid");
+                    },
+                )
+                .expect("sim process wake delivery request is deterministic and valid");
                 let wake_id = wake.wake_id.clone();
-                let claimed_once =
-                    self.delivered_process_wake_ids
-                        .insert(lash_core::process_wake_source_key(
-                            &wake.process_id,
-                            wake.sequence,
-                        ));
+                let claimed_once = self.delivered_process_wake_ids.insert(
+                    lash_core::facade_support::process_wake_source_key(
+                        &wake.process_id,
+                        wake.sequence,
+                    ),
+                );
                 let mut observed = json!({
                     "process_wake": true,
                     "process_id": process_id,
@@ -868,8 +874,9 @@ impl ModelStore {
                     format!("sim-trigger:{}", event.boundary_id),
                 )
                 .with_source(json!({"sim": true}));
-                let occurrence_id = lash_core::deterministic_occurrence_id(&request)
-                    .unwrap_or_else(|_| format!("trigger:{}", event.boundary_id));
+                let occurrence_id =
+                    lash_core::facade_support::deterministic_occurrence_id(&request)
+                        .unwrap_or_else(|_| format!("trigger:{}", event.boundary_id));
                 let mut observed = json!({
                     "session": session,
                     "trigger_delivered": true,

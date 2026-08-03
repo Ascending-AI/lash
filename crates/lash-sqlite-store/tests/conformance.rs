@@ -497,7 +497,7 @@ async fn sqlite_attachment_owner_cold_replay_conformance() {
         lash_core::testing::conformance::AttachmentOwnerColdReplayBackend {
             session_store_factory: factory,
             process_registry: registry,
-            attachment_store: Arc::new(lash_core::InMemoryAttachmentStore::new()),
+            attachment_store: Arc::new(lash_core::facade_support::InMemoryAttachmentStore::new()),
             first_effect_controller: Some(first),
             reopen_effect_controller,
             clock,
@@ -599,7 +599,8 @@ async fn sqlite_trigger_ingress_skips_malformed_matching_subscription() {
     let dir = tempfile::tempdir().expect("tempdir");
     let path = dir.path().join("malformed-trigger.db");
     let source_type = "ui.button.pressed";
-    let source_key = lash_core::empty_trigger_source_key(source_type).expect("source key");
+    let source_key =
+        lash_core::facade_support::empty_trigger_source_key(source_type).expect("source key");
     let store = SqliteTriggerStore::open(&path)
         .await
         .expect("open trigger store");
@@ -1031,7 +1032,7 @@ async fn sqlite_effect_controller_satisfies_lease_fencing_conformance() {
                         &path,
                         durable_turn_scope("session", "turn"),
                         SqliteEffectReplayOptions {
-                            lease_timings: lash_core::LeaseTimings::from_ttl(ttl)
+                            lease_timings: lash_core::facade_support::LeaseTimings::from_ttl(ttl)
                                 .expect("conformance lease timings"),
                         },
                     )

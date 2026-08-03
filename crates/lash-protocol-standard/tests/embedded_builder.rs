@@ -1,8 +1,9 @@
 use std::sync::Arc;
 
 use lash_core::{
-    LashRuntime, Message, MessageRole, ModelSpec, Part, PartKind, PruneState, RuntimeCommit,
-    RuntimePersistence, RuntimeSessionState, SessionCommitStore, SessionPolicy, TokenUsage,
+    Message, MessageRole, ModelSpec, Part, PartKind, PruneState, RuntimeCommit, RuntimePersistence,
+    RuntimeSessionState, SessionCommitStore, SessionPolicy, TokenUsage,
+    facade_support::LashRuntime,
 };
 use lash_sqlite_store::Store;
 

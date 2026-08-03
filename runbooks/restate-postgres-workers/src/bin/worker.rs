@@ -7,7 +7,8 @@ use lash::observe::SessionResume;
 use lash::{TurnActivity, TurnActivitySink, TurnEvent, TurnInput};
 use lash_core::AwaitEventResolver as _;
 use lash_core::{
-    ExecutionScope, LeaseOwnerIdentity, ProcessEventAppendRequest, TurnOutcome, TurnStop,
+    ExecutionScope, LeaseOwnerIdentity, ProcessEventAppendRequest, facade_support::TurnOutcome,
+    facade_support::TurnStop,
 };
 use lash_postgres_store::PostgresStorage;
 use lash_restate::{
@@ -561,8 +562,8 @@ impl AppState {
             .signal
             .as_ref()
             .ok_or_else(|| terminal_error("signal_process scenario requires a signal payload"))?;
-        let event_type =
-            lash_core::process_signal_event_type(&signal.signal_name).map_err(terminal_error)?;
+        let event_type = lash_core::facade_support::process_signal_event_type(&signal.signal_name)
+            .map_err(terminal_error)?;
         let append = ProcessEventAppendRequest::new(event_type, signal.payload.clone())
             .with_replay_key(format!(
                 "process:{}:signal.{}:{}",

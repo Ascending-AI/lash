@@ -8,7 +8,7 @@ use std::time::{Duration, Instant};
 use async_trait::async_trait;
 use bytes::{Bytes, BytesMut};
 use chrono::{SecondsFormat, Utc};
-use lash_core::{LlmTransportError, ProviderFailureKind};
+use lash_core::{ProviderFailureKind, facade_support::LlmTransportError};
 use lash_llm_transport::{
     LlmByteStream, LlmHttpBody, LlmHttpRequest, LlmHttpResponse, LlmHttpTransport,
 };

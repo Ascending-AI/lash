@@ -151,7 +151,9 @@ fn process_wake_source_key(line: &TraceEventLine) -> Option<String> {
         .observed
         .pointer("/runtime_process_wake/sequence")
         .and_then(Value::as_u64)?;
-    Some(lash_core::process_wake_source_key(process_id, sequence))
+    Some(lash_core::facade_support::process_wake_source_key(
+        process_id, sequence,
+    ))
 }
 
 pub(super) fn trace_has_worker_stale_completion(lines: &[&TraceEventLine]) -> bool {

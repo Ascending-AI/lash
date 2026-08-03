@@ -1,4 +1,4 @@
-use lash_core::{LlmTransportError, ProviderFailureKind};
+use lash_core::{ProviderFailureKind, facade_support::LlmTransportError};
 use lash_sansio::llm::types::{LlmEventSender, LlmStreamEvent, LlmUsage};
 
 use std::time::Duration;

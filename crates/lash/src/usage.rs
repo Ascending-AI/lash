@@ -32,8 +32,9 @@
 //! [`TurnResult::total_usage`]: crate::TurnResult::total_usage
 
 pub use lash_core::{
-    SessionUsageReport, TokenLedgerEntry, TokenUsage, UsageReportRow, UsageTotals,
-    diff_token_ledger, diff_usage_reports,
+    TokenLedgerEntry, TokenUsage, facade_support::SessionUsageReport,
+    facade_support::UsageReportRow, facade_support::UsageTotals, facade_support::diff_token_ledger,
+    facade_support::diff_usage_reports,
 };
 
 /// Well-known source labels used by the runtime and first-party plugins.

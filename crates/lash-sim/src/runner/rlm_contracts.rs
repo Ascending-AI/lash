@@ -511,7 +511,7 @@ struct RlmContractObserved {
     llm_response_parts: Vec<Vec<Value>>,
     llm_response_text_streamed: Vec<bool>,
     llm_call_count: usize,
-    turn_outcomes: Vec<lash_core::TurnOutcome>,
+    turn_outcomes: Vec<lash_core::facade_support::TurnOutcome>,
     final_message_event: bool,
     tool_call_event: bool,
     assistant_conversation_progress: bool,
@@ -533,15 +533,19 @@ impl RlmContractObserved {
                 lash_core::Effect::Checkpoint { checkpoint, .. } => {
                     self.checkpoints.push(checkpoint_kind_name(*checkpoint));
                 }
-                lash_core::Effect::Emit(lash_core::SessionStreamEvent::TurnOutcome { outcome }) => {
+                lash_core::Effect::Emit(
+                    lash_core::facade_support::SessionStreamEvent::TurnOutcome { outcome },
+                ) => {
                     self.turn_outcomes.push(outcome.clone());
                 }
-                lash_core::Effect::Emit(lash_core::SessionStreamEvent::Message {
-                    kind, ..
-                }) if kind == "final" => {
+                lash_core::Effect::Emit(
+                    lash_core::facade_support::SessionStreamEvent::Message { kind, .. },
+                ) if kind == "final" => {
                     self.final_message_event = true;
                 }
-                lash_core::Effect::Emit(lash_core::SessionStreamEvent::ToolCall { .. }) => {
+                lash_core::Effect::Emit(
+                    lash_core::facade_support::SessionStreamEvent::ToolCall { .. },
+                ) => {
                     self.tool_call_event = true;
                 }
                 lash_core::Effect::Progress { event_delta, .. } => {

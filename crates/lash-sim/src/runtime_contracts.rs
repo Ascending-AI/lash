@@ -416,17 +416,19 @@ pub fn runtime_final_value_invariant_facts(
     activities: &[lash::TurnActivity],
 ) -> RuntimeFinalValueInvariantFacts {
     let (outcome_kind, semantic_value) = match &result.outcome {
-        lash_core::TurnOutcome::Finished(lash_core::TurnFinish::FinalValue { value }) => {
-            ("final_value".to_string(), Some(value.clone()))
+        lash_core::facade_support::TurnOutcome::Finished(
+            lash_core::facade_support::TurnFinish::FinalValue { value },
+        ) => ("final_value".to_string(), Some(value.clone())),
+        lash_core::facade_support::TurnOutcome::Finished(
+            lash_core::facade_support::TurnFinish::ToolValue { value, .. },
+        ) => ("tool_value".to_string(), Some(value.clone())),
+        lash_core::facade_support::TurnOutcome::Finished(
+            lash_core::facade_support::TurnFinish::AssistantMessage { .. },
+        ) => ("assistant_message".to_string(), None),
+        lash_core::facade_support::TurnOutcome::AgentFrameSwitch { .. } => {
+            ("agent_frame_switch".to_string(), None)
         }
-        lash_core::TurnOutcome::Finished(lash_core::TurnFinish::ToolValue { value, .. }) => {
-            ("tool_value".to_string(), Some(value.clone()))
-        }
-        lash_core::TurnOutcome::Finished(lash_core::TurnFinish::AssistantMessage { .. }) => {
-            ("assistant_message".to_string(), None)
-        }
-        lash_core::TurnOutcome::AgentFrameSwitch { .. } => ("agent_frame_switch".to_string(), None),
-        lash_core::TurnOutcome::Stopped(_) => ("stopped".to_string(), None),
+        lash_core::facade_support::TurnOutcome::Stopped(_) => ("stopped".to_string(), None),
     };
     let terminal_event_count = activities
         .iter()
@@ -605,15 +607,15 @@ mod tests {
 
     #[test]
     fn final_value_builder_derives_pass_and_fail_from_real_outcomes_and_events() {
-        fn result(outcome: lash_core::TurnOutcome) -> lash::TurnResult {
+        fn result(outcome: lash_core::facade_support::TurnOutcome) -> lash::TurnResult {
             lash::TurnResult {
                 state: Default::default(),
                 outcome,
                 cancellation: None,
-                assistant_output: lash_core::AssistantOutput {
+                assistant_output: lash_core::facade_support::AssistantOutput {
                     safe_text: "looks final".to_string(),
                     raw_text: "looks final".to_string(),
-                    state: lash_core::OutputState::Usable,
+                    state: lash_core::facade_support::OutputState::Usable,
                 },
                 usage: Default::default(),
                 children_usage: Vec::new(),
@@ -624,8 +626,8 @@ mod tests {
             }
         }
 
-        let prose_only = result(lash_core::TurnOutcome::Finished(
-            lash_core::TurnFinish::AssistantMessage {
+        let prose_only = result(lash_core::facade_support::TurnOutcome::Finished(
+            lash_core::facade_support::TurnFinish::AssistantMessage {
                 text: "looks final".to_string(),
             },
         ));
@@ -641,8 +643,8 @@ mod tests {
         assert!(failed.transcript_inference_required);
 
         let value = serde_json::json!({"answer": 42});
-        let semantic = result(lash_core::TurnOutcome::Finished(
-            lash_core::TurnFinish::FinalValue {
+        let semantic = result(lash_core::facade_support::TurnOutcome::Finished(
+            lash_core::facade_support::TurnFinish::FinalValue {
                 value: value.clone(),
             },
         ));

@@ -1,8 +1,8 @@
 use std::sync::Arc;
 
-use lash_core::PluginHost;
+use lash_core::facade_support::PluginHost;
 
-fn tool_names(session: &lash_core::PluginSession) -> Vec<String> {
+fn tool_names(session: &lash_core::facade_support::PluginSession) -> Vec<String> {
     session
         .resolved_tool_catalog("root")
         .expect("tool catalog")

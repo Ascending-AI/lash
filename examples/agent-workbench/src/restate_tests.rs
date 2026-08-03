@@ -73,7 +73,7 @@ impl lash::triggers::TriggerStore for OccurrenceFailureTriggerStore {
     async fn ingest_occurrence(
         &self,
         _request: lash::triggers::TriggerOccurrenceRequest,
-    ) -> Result<lash_core::TriggerIngressResult, lash::plugins::PluginError> {
+    ) -> Result<lash::triggers::TriggerIngressResult, lash::plugins::PluginError> {
         Err(self.failure.clone())
     }
 
@@ -121,13 +121,14 @@ impl lash::triggers::TriggerStore for OccurrenceFailureTriggerStore {
 
     async fn list_delivery_retention_candidates(
         &self,
-    ) -> Result<Vec<lash_core::TriggerDeliveryRetentionCandidate>, lash::plugins::PluginError> {
+    ) -> Result<Vec<lash::triggers::TriggerDeliveryRetentionCandidate>, lash::plugins::PluginError>
+    {
         self.inner.list_delivery_retention_candidates().await
     }
 
     async fn delete_delivery_retention_candidates(
         &self,
-        candidates: &[lash_core::TriggerDeliveryRetentionCandidate],
+        candidates: &[lash::triggers::TriggerDeliveryRetentionCandidate],
     ) -> Result<usize, lash::plugins::PluginError> {
         self.inner
             .delete_delivery_retention_candidates(candidates)

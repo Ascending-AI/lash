@@ -943,7 +943,7 @@ fn chat_tools_use_projected_openai_schema_and_preserve_override() {
                 "properties": {"raw": {"const": "x"}}
             }))
             .with_override(
-                lash_core::SchemaDialect::OPENAI_TOOL_PARAMETERS,
+                lash_core::facade_support::SchemaDialect::OPENAI_TOOL_PARAMETERS,
                 json!({
                     "type": "object",
                     "properties": { "raw": { "type": "string", "enum": ["x"] } }
@@ -1056,7 +1056,9 @@ fn openrouter_can_be_configured_for_bedrock_safe_schema_dialect() {
     }));
 
     let body = openrouter_provider()
-        .with_schema_capabilities(lash_core::ProviderSchemaCapabilities::bedrock_claude())
+        .with_schema_capabilities(
+            lash_core::facade_support::ProviderSchemaCapabilities::bedrock_claude(),
+        )
         .build_chat_request_body(&req, true)
         .unwrap();
     let ranked = &body["response_format"]["json_schema"]["schema"]["properties"]["ranked"];
@@ -1896,7 +1898,7 @@ fn responses_final_answer_phase_hides_commentary_from_visible_text() {
         response_metadata: Default::default(),
         ..LlmResponse::default()
     };
-    let visible = lash_core::normalized_response_parts(&response);
+    let visible = lash_core::facade_support::normalized_response_parts(&response);
     assert_eq!(
         visible
             .iter()

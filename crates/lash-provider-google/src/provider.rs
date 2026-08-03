@@ -107,7 +107,7 @@ impl GoogleOAuthProvider {
             })?;
             let origin_model = request.get("model").and_then(Value::as_str);
             let parts = Self::response_parts_from_value(&value, origin_model);
-            let full_text = lash_core::visible_response_text_from_parts(&parts);
+            let full_text = lash_core::facade_support::visible_response_text_from_parts(&parts);
             let provider_usage = value.get("usageMetadata").cloned();
             let usage = provider_usage
                 .as_ref()

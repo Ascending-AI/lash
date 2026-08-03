@@ -180,7 +180,7 @@ async fn cache_dialect_rlm_prompt_prefix_is_byte_stable_across_iterations() {
 #[tokio::test]
 async fn attachment_owner_sweep_is_deterministic_across_memory_and_sqlite() {
     lash_core::testing::conformance::attachment_ownership_isolation(std::sync::Arc::new(
-        lash_core::InMemorySessionStoreFactory::new(),
+        lash_core::facade_support::InMemorySessionStoreFactory::new(),
     ))
     .await;
 
@@ -189,7 +189,7 @@ async fn attachment_owner_sweep_is_deterministic_across_memory_and_sqlite() {
         std::sync::Arc::new(lash_sqlite_store::SqliteSessionStoreFactory::new(
             tmp.path().join("sessions"),
         )),
-        std::sync::Arc::new(lash_core::FileAttachmentStore::new(
+        std::sync::Arc::new(lash_core::facade_support::FileAttachmentStore::new(
             tmp.path().join("attachments"),
         )),
     )

@@ -861,16 +861,16 @@ mod tests {
         data.extend_from_slice(&1u32.to_be_bytes());
         std::fs::write(&path, &data).unwrap();
 
-        let store = Arc::new(lash_core::SessionAttachmentStore::in_memory());
+        let store = Arc::new(lash_core::facade_support::SessionAttachmentStore::in_memory());
         let host = Arc::new(lash_core::testing::MockSessionManager::default());
         let context = lash_core::ToolContext::__for_testing(
             "test-session".into(),
             host.clone(),
             host.clone(),
             host,
-            Arc::new(lash_core::UnavailableProcessService),
+            Arc::new(lash_core::facade_support::UnavailableProcessService),
             store.clone(),
-            lash_core::DirectCompletionClient::from_fn(|_, _| {
+            lash_core::facade_support::DirectCompletionClient::from_fn(|_, _| {
                 Err(lash_core::PluginError::Session(
                     "direct completions are unavailable in read_file tests".to_string(),
                 ))

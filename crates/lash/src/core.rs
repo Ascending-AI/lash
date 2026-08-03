@@ -1,4 +1,5 @@
 use crate::support::*;
+use lash_core::facade_support;
 use lash_core::runtime::{
     ProcessCommand, ProcessEffectOutcome, RuntimeEffectCommand, RuntimeEffectEnvelope,
     RuntimeEffectKind, RuntimeEffectLocalExecutor, RuntimeEffectOutcome, RuntimeInvocation,
@@ -52,7 +53,7 @@ pub(crate) enum ProcessWorkSource {
     None,
     Inline {
         registry: Arc<dyn ProcessRegistry>,
-        hub: Option<lash_core::ProcessChangeHub>,
+        hub: Option<facade_support::ProcessChangeHub>,
     },
     External(ProcessWorkDriver),
 }
@@ -80,13 +81,14 @@ impl ProcessWorkSource {
         !matches!(self, Self::None)
     }
 
-    fn watched(self, sink: Option<Arc<dyn lash_core::ProcessEventSink>>) -> Self {
+    fn watched(self, sink: Option<Arc<dyn facade_support::ProcessEventSink>>) -> Self {
         match self {
             Self::Inline {
                 registry,
                 hub: None,
             } => {
-                let (registry, hub) = lash_core::watch_process_registry_with_sink(registry, sink);
+                let (registry, hub) =
+                    facade_support::watch_process_registry_with_sink(registry, sink);
                 Self::Inline {
                     registry,
                     hub: Some(hub),
@@ -122,7 +124,7 @@ pub(crate) struct WakeDeliveryDriverSetup {
     registry: Arc<dyn ProcessRegistry>,
     factory: Arc<dyn SessionStoreFactory>,
     clock: Arc<dyn lash_core::Clock>,
-    wake_turn_policy: lash_core::WakeTurnPolicy,
+    wake_turn_policy: facade_support::WakeTurnPolicy,
 }
 
 pub(crate) struct InlineWorkDriverSetup {
@@ -135,7 +137,7 @@ pub(crate) struct InlineWorkDriverSetup {
 pub(crate) struct ResolvedWorkDrivers {
     pub(crate) process: Option<ProcessWorkDriver>,
     pub(crate) queued: Option<QueuedWorkDriver>,
-    pub(crate) _wake: Option<lash_core::WakeDeliveryDriver>,
+    pub(crate) _wake: Option<facade_support::WakeDeliveryDriver>,
     pub(crate) drive_process_on_open: bool,
 }
 
@@ -192,7 +194,7 @@ impl InlineWorkDriverSlot {
                             ProcessWorkDriver::from_watched(
                                 registry,
                                 hub,
-                                Arc::new(lash_core::InlineProcessRunHandle::new(worker)),
+                                Arc::new(facade_support::InlineProcessRunHandle::new(worker)),
                             )
                         } else {
                             ProcessWorkDriver::inline(registry, worker)
@@ -201,7 +203,7 @@ impl InlineWorkDriverSlot {
                     }
                 };
                 let wake = self.setup.wake.as_ref().map(|setup| {
-                    lash_core::WakeDeliveryDriver::new_with_policy(
+                    facade_support::WakeDeliveryDriver::new_with_policy(
                         Arc::clone(&setup.registry),
                         Arc::clone(&setup.factory),
                         queued.clone(),
@@ -296,7 +298,7 @@ impl QueuedWorkRunHandle for InlineQueuedWorkRunHandle {
     async fn run_queued_work(
         &self,
         request: QueuedWorkRunRequest,
-    ) -> std::result::Result<(), lash_core::QueuedWorkRunError> {
+    ) -> std::result::Result<(), facade_support::QueuedWorkRunError> {
         let Some(session_id) = request.session_id else {
             return Ok(());
         };
@@ -313,14 +315,14 @@ impl QueuedWorkRunHandle for InlineQueuedWorkRunHandle {
             })
             .await
             .map_err(|error| {
-                lash_core::QueuedWorkRunError::terminal(lash_core::PluginError::Session(
+                facade_support::QueuedWorkRunError::terminal(lash_core::PluginError::Session(
                     error.to_string(),
                 ))
             })?;
         let state = crate::session::load_state_from_store(&session_id, &policy, store.as_ref())
             .await
             .map_err(|error| {
-                lash_core::QueuedWorkRunError::terminal(lash_core::PluginError::Session(
+                facade_support::QueuedWorkRunError::terminal(lash_core::PluginError::Session(
                     error.to_string(),
                 ))
             })?;
@@ -330,7 +332,7 @@ impl QueuedWorkRunHandle for InlineQueuedWorkRunHandle {
             Vec::new(),
         )
         .map_err(|error| {
-            lash_core::QueuedWorkRunError::terminal(lash_core::PluginError::Session(
+            facade_support::QueuedWorkRunError::terminal(lash_core::PluginError::Session(
                 error.to_string(),
             ))
         })?;
@@ -341,7 +343,7 @@ impl QueuedWorkRunHandle for InlineQueuedWorkRunHandle {
                 self.config.process_lifecycle_available,
             )
             .map_err(|error| {
-                lash_core::QueuedWorkRunError::terminal(lash_core::PluginError::Session(
+                facade_support::QueuedWorkRunError::terminal(lash_core::PluginError::Session(
                     error.to_string(),
                 ))
             })?;
@@ -350,7 +352,7 @@ impl QueuedWorkRunHandle for InlineQueuedWorkRunHandle {
         let runtime = LashRuntime::from_environment(&env, policy, state, Some(store))
             .await
             .map_err(|error| {
-                lash_core::QueuedWorkRunError::terminal(lash_core::PluginError::Session(
+                facade_support::QueuedWorkRunError::terminal(lash_core::PluginError::Session(
                     error.to_string(),
                 ))
             })?;
@@ -360,7 +362,7 @@ impl QueuedWorkRunHandle for InlineQueuedWorkRunHandle {
         );
         let scope = handle.observe().persisted_state.queue_drain_scope(reason);
         let scoped = effect_host.scoped(scope).map_err(|error| {
-            lash_core::QueuedWorkRunError::terminal(lash_core::PluginError::Session(
+            facade_support::QueuedWorkRunError::terminal(lash_core::PluginError::Session(
                 error.to_string(),
             ))
         })?;
@@ -376,9 +378,9 @@ impl QueuedWorkRunHandle for InlineQueuedWorkRunHandle {
         .map_err(|error| {
             let plugin_error = lash_core::PluginError::Session(error.to_string());
             if error.is_retryable() {
-                lash_core::QueuedWorkRunError::transient(plugin_error)
+                facade_support::QueuedWorkRunError::transient(plugin_error)
             } else {
-                lash_core::QueuedWorkRunError::terminal(plugin_error)
+                facade_support::QueuedWorkRunError::terminal(plugin_error)
             }
         })?;
         Ok(())
@@ -555,8 +557,8 @@ impl LashCore {
     /// The returned driver is independently usable from any session handle.
     /// Session and turn ids are routing identity, not authorization; authorize
     /// requests in the host API before forwarding them to Lash.
-    pub fn turn_work_driver(&self) -> lash_core::TurnWorkDriver {
-        lash_core::TurnWorkDriver::new(self.effect_host())
+    pub fn turn_work_driver(&self) -> facade_support::TurnWorkDriver {
+        facade_support::TurnWorkDriver::new(self.effect_host())
     }
 
     /// Persist host input without opening a competing session writer.
@@ -573,8 +575,8 @@ impl LashCore {
         input: lash_core::TurnInput,
         ingress: lash_core::TurnInputIngress,
         id: Option<String>,
-    ) -> Result<lash_core::TurnInputAcceptanceReceipt> {
-        lash_core::ensure_durable_effect_input(&input).map_err(EmbedError::Runtime)?;
+    ) -> Result<facade_support::TurnInputAcceptanceReceipt> {
+        facade_support::ensure_durable_effect_input(&input).map_err(EmbedError::Runtime)?;
         let session_id = session_id.into();
         let Some(store_factory) = self.store_factory.as_ref() else {
             return Err(EmbedError::MissingSessionStoreFactory);
@@ -604,7 +606,7 @@ impl LashCore {
         if is_next_turn && let Some(driver) = self.work_driver.drivers().await.queued.as_ref() {
             drop(driver.wake_pending(Some(&enqueued.session_id), "queued_turn_input"));
         }
-        Ok(lash_core::TurnInputAcceptanceReceipt::from(&enqueued))
+        Ok(facade_support::TurnInputAcceptanceReceipt::from(&enqueued))
     }
 
     /// Retain the current continuation checkpoint for a turn-boundary node.
@@ -955,7 +957,7 @@ pub struct LashCoreBuilder {
     tool_providers: Vec<Arc<dyn ToolProvider>>,
     plugin_stack: PluginStack,
     plugin_host: Option<PluginHost>,
-    lease_timings: Option<lash_core::LeaseTimings>,
+    lease_timings: Option<facade_support::LeaseTimings>,
     clock: Option<Arc<dyn lash_core::Clock>>,
     // Single source of truth for process lifecycle support and process-work
     // consumption.
@@ -964,9 +966,9 @@ pub struct LashCoreBuilder {
     process_execution_concurrency: Option<usize>,
     // Optional host-facing best-effort feed of appended process events,
     // installed on the inline process-registry decorator at build time.
-    process_event_sink: Option<Arc<dyn lash_core::ProcessEventSink>>,
-    wake_turn_policy: Option<lash_core::WakeTurnPolicy>,
-    process_tool_visibility_filter: Option<Arc<dyn lash_core::ProcessToolVisibilityFilter>>,
+    process_event_sink: Option<Arc<dyn facade_support::ProcessEventSink>>,
+    wake_turn_policy: Option<facade_support::WakeTurnPolicy>,
+    process_tool_visibility_filter: Option<Arc<dyn facade_support::ProcessToolVisibilityFilter>>,
     queued_work_source: QueuedWorkSource,
     live_replay_store: Option<Arc<dyn LiveReplayStore>>,
 }
@@ -1056,7 +1058,7 @@ impl LashCoreBuilder {
     ///
     /// This is a per-worker bound: two workers sharing one process registry may
     /// execute up to twice this number. The default is
-    /// [`DEFAULT_PROCESS_EXECUTION_CONCURRENCY`](lash_core::DEFAULT_PROCESS_EXECUTION_CONCURRENCY).
+    /// [`DEFAULT_PROCESS_EXECUTION_CONCURRENCY`](facade_support::DEFAULT_PROCESS_EXECUTION_CONCURRENCY).
     /// Invalid values are reported by [`build`](Self::build).
     pub fn process_execution_concurrency(mut self, concurrency: usize) -> Self {
         self.process_execution_concurrency = Some(concurrency);
@@ -1067,7 +1069,7 @@ impl LashCoreBuilder {
     ///
     /// The default preserves the original behavior: earliest-safe-boundary
     /// delivery, an exclusive slot, and no merge.
-    pub fn wake_turn_policy(mut self, policy: lash_core::WakeTurnPolicy) -> Self {
+    pub fn wake_turn_policy(mut self, policy: facade_support::WakeTurnPolicy) -> Self {
         self.wake_turn_policy = Some(policy);
         self
     }
@@ -1076,7 +1078,7 @@ impl LashCoreBuilder {
     /// model-facing session process tools.
     pub fn process_tool_visibility_filter(
         mut self,
-        filter: Arc<dyn lash_core::ProcessToolVisibilityFilter>,
+        filter: Arc<dyn facade_support::ProcessToolVisibilityFilter>,
     ) -> Self {
         self.process_tool_visibility_filter = Some(filter);
         self
@@ -1145,11 +1147,11 @@ impl LashCoreBuilder {
     /// it is an operational deployment decision, so it lives on the main
     /// builder tier rather than behind
     /// [`advanced`](Self::advanced). Construct the value with
-    /// [`LeaseTimings::new`](lash_core::LeaseTimings::new), which enforces
+    /// [`LeaseTimings::new`](facade_support::LeaseTimings::new), which enforces
     /// `ttl >= 3 * renew_interval`. Effect hosts accept the same type at
     /// construction (e.g. SQLite/Postgres effect-replay options), so a host can
     /// share one timing decision across both boundaries.
-    pub fn lease_timings(mut self, lease_timings: lash_core::LeaseTimings) -> Self {
+    pub fn lease_timings(mut self, lease_timings: facade_support::LeaseTimings) -> Self {
         self.lease_timings = Some(lease_timings);
         self
     }
@@ -1197,7 +1199,7 @@ impl LashCoreBuilder {
         }
         if let Some(attachment_store) = self.attachment_store.take() {
             core.durability.attachment_store = Arc::new(
-                lash_core::SessionAttachmentStore::ephemeral(attachment_store),
+                facade_support::SessionAttachmentStore::ephemeral(attachment_store),
             );
         }
         if let Some(process_env_store) = self.process_env_store.take() {
@@ -1236,7 +1238,7 @@ impl LashCoreBuilder {
     pub fn build(mut self) -> Result<LashCore> {
         let process_execution_concurrency = self
             .process_execution_concurrency
-            .unwrap_or(lash_core::DEFAULT_PROCESS_EXECUTION_CONCURRENCY);
+            .unwrap_or(facade_support::DEFAULT_PROCESS_EXECUTION_CONCURRENCY);
         DurableProcessWorkerConfig::validate_process_execution_concurrency(
             process_execution_concurrency,
         )?;
@@ -1276,7 +1278,7 @@ impl LashCoreBuilder {
             .watched(self.process_event_sink.clone());
         if let Some(provider) = self.provider.clone() {
             core.providers.provider_resolver =
-                Arc::new(lash_core::SingleProviderResolver::new(provider));
+                Arc::new(facade_support::SingleProviderResolver::new(provider));
         }
         let plugin_factories = if let Some(plugin_host) = self.plugin_host {
             plugin_host.factories().to_vec()
@@ -1346,7 +1348,7 @@ impl LashCoreBuilder {
         }
         let live_replay_store = self.live_replay_store.take().unwrap_or_else(|| {
             Arc::new(InMemoryLiveReplayStore::with_clock(
-                lash_core::InMemoryLiveReplayStoreConfig::default(),
+                facade_support::InMemoryLiveReplayStoreConfig::default(),
                 live_replay_clock,
             ))
         });
@@ -1448,9 +1450,9 @@ impl LashCoreBuilder {
         )
         .with_session_policy(policy.clone())
         .with_trigger_store(trigger_store.cloned().unwrap_or_else(|| {
-            Arc::new(lash_core::InMemoryTriggerStore::with_clock(Arc::clone(
-                &core.clock,
-            )))
+            Arc::new(facade_support::InMemoryTriggerStore::with_clock(
+                Arc::clone(&core.clock),
+            ))
         }))
         .with_turn_phase_probe_slot(phase_probe_slot)
         .with_process_execution_concurrency(process_execution_concurrency)?;
@@ -1516,11 +1518,11 @@ impl LashCoreBuilder {
     /// append is also emitted. See [`ProcessEventSink`] for the full contract.
     ///
     /// Applies to the inline registry path ([`Self::process_registry`]); a host
-    /// that supplies its own [`ProcessWorkDriver`](lash_core::ProcessWorkDriver)
+    /// that supplies its own [`ProcessWorkDriver`](facade_support::ProcessWorkDriver)
     /// installs the sink through the driver's constructor instead.
     ///
-    /// [`ProcessEventSink`]: lash_core::ProcessEventSink
-    pub fn process_event_sink(mut self, sink: Arc<dyn lash_core::ProcessEventSink>) -> Self {
+    /// [`ProcessEventSink`]: facade_support::ProcessEventSink
+    pub fn process_event_sink(mut self, sink: Arc<dyn facade_support::ProcessEventSink>) -> Self {
         self.process_event_sink = Some(sink);
         self
     }
@@ -1580,7 +1582,7 @@ pub struct AdvancedLashCoreBuilder {
 }
 
 impl AdvancedLashCoreBuilder {
-    pub fn runtime_host_config(mut self, core: lash_core::RuntimeHostConfig) -> Self {
+    pub fn runtime_host_config(mut self, core: facade_support::RuntimeHostConfig) -> Self {
         self.builder.runtime_host_config = Some(core);
         self
     }

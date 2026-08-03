@@ -39,7 +39,8 @@ mod tests {
             &self,
             _request: lash_llm_transport::LlmHttpRequest,
             _timeout: Option<std::time::Duration>,
-        ) -> Result<lash_llm_transport::LlmHttpResponse, lash_core::LlmTransportError> {
+        ) -> Result<lash_llm_transport::LlmHttpResponse, lash_core::facade_support::LlmTransportError>
+        {
             Ok(lash_llm_transport::LlmHttpResponse {
                 status: 200,
                 headers: vec![("content-type".to_string(), "text/event-stream".to_string())],

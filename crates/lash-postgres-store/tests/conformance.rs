@@ -251,7 +251,7 @@ async fn postgres_wake_enqueue_serializes_with_consumption_when_configured() {
         ),
         process_caused_by: None,
         input: "wake".to_string(),
-        created_at_ms: lash_core::Clock::timestamp_ms(&lash_core::SystemClock),
+        created_at_ms: lash_core::Clock::timestamp_ms(&lash_core::facade_support::SystemClock),
     };
     let draft = lash_core::runtime::process_wake_batch_draft(wake.clone());
     let first = store
@@ -566,7 +566,8 @@ async fn postgres_attachment_owner_cold_replay_conformance_when_configured() {
     };
     let clock = Arc::new(
         lash_core::testing::conformance::AttachmentOwnerConformanceClock::new(
-            lash_core::Clock::timestamp_ms(&lash_core::SystemClock).saturating_sub(100_000),
+            lash_core::Clock::timestamp_ms(&lash_core::facade_support::SystemClock)
+                .saturating_sub(100_000),
         ),
     );
     let factory = Arc::new(
@@ -583,7 +584,7 @@ async fn postgres_attachment_owner_cold_replay_conformance_when_configured() {
         lash_core::testing::conformance::AttachmentOwnerColdReplayBackend {
             session_store_factory: factory,
             process_registry: registry,
-            attachment_store: Arc::new(lash_core::InMemoryAttachmentStore::new()),
+            attachment_store: Arc::new(lash_core::facade_support::InMemoryAttachmentStore::new()),
             first_effect_controller: Some(first),
             reopen_effect_controller,
             clock,
@@ -1009,7 +1010,7 @@ async fn postgres_effect_controller_satisfies_lease_fencing_conformance_when_con
                         &storage,
                         durable_turn_scope("session", "turn"),
                         PostgresEffectReplayOptions {
-                            lease_timings: lash_core::LeaseTimings::from_ttl(ttl)
+                            lease_timings: lash_core::facade_support::LeaseTimings::from_ttl(ttl)
                                 .expect("conformance lease timings"),
                         },
                     );

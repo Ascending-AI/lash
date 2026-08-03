@@ -309,7 +309,10 @@ impl SessionPlugin for UpdatePlanPlugin {
 mod tests {
     use super::*;
     use lash_core::testing::{MockSessionManager, test_standard_protocol_factories};
-    use lash_core::{PluginHost, PromptHookContext, PromptSlot, SessionReadView, SessionSnapshot};
+    use lash_core::{
+        PromptSlot, SessionReadView, SessionSnapshot, facade_support::PluginHost,
+        facade_support::PromptHookContext,
+    };
 
     #[tokio::test]
     async fn validates_shape() {

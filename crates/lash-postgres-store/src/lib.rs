@@ -22,20 +22,21 @@ use lash_core::store::{
 };
 use lash_core::{
     AbandonRequest, AttachmentId, AttachmentIntent, AttachmentManifest, AttachmentManifestEntry,
-    AttachmentOwnerKind, AwaitEventResolver, BlobRef, CanonicalRuntimeEffectEnvelope,
-    DeliveryPolicy, EffectHost, ExecutionScope, GcReport, LeaseOwnerIdentity, MergeKey,
-    PersistedSegmentHandover, ProcessAwaitOutput, ProcessChange, ProcessChangeCursor,
-    ProcessContinuationStore, ProcessEvent, ProcessEventAppendRequest, ProcessEventAppendResult,
-    ProcessExecutionWriteAuthority, ProcessExternalRef, ProcessLease, ProcessLeaseCompletion,
-    ProcessLiveReferenceSummary, ProcessObserverBy, ProcessPruneReport, ProcessRecord,
-    ProcessRegistration, ProcessRegistry, ProcessStartOutcome, ProcessStartPlan, ProcessStarted,
+    AttachmentOwnerKind, AwaitEventResolver, BlobRef, DeliveryPolicy, EffectHost, ExecutionScope,
+    GcReport, LeaseOwnerIdentity, PersistedSegmentHandover, ProcessAwaitOutput, ProcessChange,
+    ProcessChangeCursor, ProcessContinuationStore, ProcessEvent, ProcessEventAppendRequest,
+    ProcessEventAppendResult, ProcessExecutionWriteAuthority, ProcessExternalRef, ProcessLease,
+    ProcessLeaseCompletion, ProcessLiveReferenceSummary, ProcessObserverBy, ProcessPruneReport,
+    ProcessRecord, ProcessRegistration, ProcessRegistry, ProcessStartOutcome, ProcessStarted,
     QueuedWorkStore, RuntimeEffectCommand, RuntimeEffectController, RuntimeEffectControllerError,
     RuntimeEffectEnvelope, RuntimeEffectLocalExecutor, RuntimeEffectOutcome, RuntimeError,
     RuntimePersistence, ScopedEffectController, SessionCommitStore, SessionExecutionLease,
     SessionExecutionLeaseClaimOutcome, SessionExecutionLeaseCompletion, SessionExecutionLeaseFence,
     SessionExecutionLeaseStore, SessionMeta, SessionNodeRecord, SessionStoreCreateRequest,
     SessionStoreFactory, SlotPolicy, StoreError, StoreMaintenance, TokenLedgerEntry,
-    TurnInputStore, VacuumReport, validate_replayed_effect_envelope,
+    TurnInputStore, VacuumReport, facade_support::CanonicalRuntimeEffectEnvelope,
+    facade_support::MergeKey, facade_support::ProcessStartPlan,
+    facade_support::validate_replayed_effect_envelope,
 };
 use lash_core::{
     PluginError, TriggerDeliveryReservation, TriggerOccurrenceRecord, TriggerOccurrenceRequest,
@@ -118,7 +119,7 @@ const SCHEMA_COMPONENT: &str = "lash-postgres-store";
 // allocation fences and add durable sender allocation floors. Process-event
 // sequences remain small and monotone across pruned incarnations.
 const SCHEMA_VERSION: i32 = 35;
-const PROCESS_LEASE_SCHEMA_VERSION: u32 = lash_core::PROCESS_LEASE_SCHEMA_VERSION;
+const PROCESS_LEASE_SCHEMA_VERSION: u32 = lash_core::facade_support::PROCESS_LEASE_SCHEMA_VERSION;
 
 #[derive(Clone)]
 pub struct PostgresStorage {
@@ -290,7 +291,7 @@ impl PostgresStorage {
         PostgresSessionStoreFactory {
             pool: self.pool.clone(),
             process_registry_shared: false,
-            clock: Arc::new(lash_core::SystemClock),
+            clock: Arc::new(lash_core::facade_support::SystemClock),
         }
     }
 
@@ -302,14 +303,14 @@ impl PostgresStorage {
         PostgresSessionStoreFactory {
             pool: self.pool.clone(),
             process_registry_shared: true,
-            clock: Arc::new(lash_core::SystemClock),
+            clock: Arc::new(lash_core::facade_support::SystemClock),
         }
     }
 
     pub fn session_store(&self, session_id: impl Into<String>) -> PostgresSessionStore {
         PostgresSessionStore {
             pool: self.pool.clone(),
-            clock: Arc::new(lash_core::SystemClock),
+            clock: Arc::new(lash_core::facade_support::SystemClock),
             session_id: Some(session_id.into()),
             bound_session: Arc::new(OnceLock::new()),
             #[cfg(test)]
@@ -322,7 +323,7 @@ impl PostgresStorage {
     pub fn unbound_session_store(&self) -> PostgresSessionStore {
         PostgresSessionStore {
             pool: self.pool.clone(),
-            clock: Arc::new(lash_core::SystemClock),
+            clock: Arc::new(lash_core::facade_support::SystemClock),
             session_id: None,
             bound_session: Arc::new(OnceLock::new()),
             #[cfg(test)]
@@ -336,7 +337,7 @@ impl PostgresStorage {
         PostgresProcessRegistry {
             pool: self.pool.clone(),
             wake_delivery_config: lash_core::WakeDeliveryConfig::default(),
-            clock: Arc::new(lash_core::SystemClock),
+            clock: Arc::new(lash_core::facade_support::SystemClock),
         }
     }
 
@@ -347,7 +348,7 @@ impl PostgresStorage {
         PostgresProcessRegistry {
             pool: self.pool.clone(),
             wake_delivery_config,
-            clock: Arc::new(lash_core::SystemClock),
+            clock: Arc::new(lash_core::facade_support::SystemClock),
         }
     }
 
@@ -530,7 +531,7 @@ mod tests {
             .expect("lazy test pool");
         let store = PostgresSessionStore {
             pool,
-            clock: Arc::new(lash_core::SystemClock),
+            clock: Arc::new(lash_core::facade_support::SystemClock),
             session_id: None,
             bound_session: Arc::new(OnceLock::new()),
             checkpoint_probe_count: Arc::new(AtomicUsize::new(0)),

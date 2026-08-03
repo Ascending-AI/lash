@@ -4,7 +4,7 @@ use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
 use bytes::{Bytes, BytesMut};
-use lash_core::{LlmTransportError, ProviderFailureKind};
+use lash_core::{ProviderFailureKind, facade_support::LlmTransportError};
 use lash_llm_transport::{
     LlmByteStream, LlmHttpBody, LlmHttpRequest, LlmHttpResponse, LlmHttpTransport, run_with_timeout,
 };

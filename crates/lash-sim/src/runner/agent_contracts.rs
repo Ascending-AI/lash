@@ -1001,10 +1001,13 @@ fn agent_process_contract_core_with_options_and_effect_host(
     Ok((core, graph_store))
 }
 
-fn agent_contract_subagents_plugin() -> Arc<dyn lash_core::PluginFactory> {
+fn agent_contract_subagents_plugin() -> Arc<dyn lash_core::facade_support::PluginFactory> {
     Arc::new(lash_subagents::SubagentsPluginFactory::new(Arc::new(
         lash_subagents::CapabilityRegistry::new().with(Arc::new(
-            lash_subagents::StaticCapability::new("default", lash_core::SessionSpec::inherit()),
+            lash_subagents::StaticCapability::new(
+                "default",
+                lash_core::facade_support::SessionSpec::inherit(),
+            ),
         )),
     )))
 }
@@ -1146,7 +1149,7 @@ async fn agent_contract_process_observations(
     Ok(observed)
 }
 
-fn agent_contract_process_ref(process: &lash_core::ObservedProcess) -> String {
+fn agent_contract_process_ref(process: &lash_core::facade_support::ObservedProcess) -> String {
     let kind = process.kind.as_str();
     let label = process.label.as_str();
     let status = process.lifecycle.label();

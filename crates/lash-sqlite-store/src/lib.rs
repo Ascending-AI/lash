@@ -67,17 +67,18 @@ use lash_core::store::{
 };
 use lash_core::{
     AbandonRequest, AttachmentId, AttachmentIntent, AttachmentManifest, AttachmentManifestEntry,
-    AttachmentOwnerKind, BlobRef, DeliveryPolicy, GcReport, LeaseOwnerIdentity, MergeKey,
-    PROCESS_LEASE_SCHEMA_VERSION, PersistedSegmentHandover, ProcessAwaitOutput, ProcessChange,
-    ProcessChangeCursor, ProcessContinuationStore, ProcessEvent, ProcessEventAppendRequest,
-    ProcessEventAppendResult, ProcessExecutionWriteAuthority, ProcessExternalRef, ProcessLease,
-    ProcessLeaseClaimOutcome, ProcessLeaseCompletion, ProcessListFilter,
-    ProcessLiveReferenceSummary, ProcessObserverBy, ProcessPruneReport, ProcessRecord,
-    ProcessRegistration, ProcessRegistry, ProcessStartOutcome, ProcessStartPlan, ProcessStarted,
-    QueuedWorkStore, RuntimePersistence, SessionCommitStore, SessionExecutionLease,
+    AttachmentOwnerKind, BlobRef, DeliveryPolicy, GcReport, LeaseOwnerIdentity,
+    PersistedSegmentHandover, ProcessAwaitOutput, ProcessChange, ProcessChangeCursor,
+    ProcessContinuationStore, ProcessEvent, ProcessEventAppendRequest, ProcessEventAppendResult,
+    ProcessExecutionWriteAuthority, ProcessExternalRef, ProcessLease, ProcessLeaseClaimOutcome,
+    ProcessLeaseCompletion, ProcessListFilter, ProcessLiveReferenceSummary, ProcessObserverBy,
+    ProcessPruneReport, ProcessRecord, ProcessRegistration, ProcessRegistry, ProcessStartOutcome,
+    ProcessStarted, QueuedWorkStore, RuntimePersistence, SessionCommitStore, SessionExecutionLease,
     SessionExecutionLeaseClaimOutcome, SessionExecutionLeaseCompletion, SessionExecutionLeaseFence,
-    SessionExecutionLeaseStore, SessionMeta, SessionPickerInfo, SessionStoreCreateRequest,
-    SessionStoreFactory, SlotPolicy, StoreError, StoreMaintenance, TurnInputStore, VacuumReport,
+    SessionExecutionLeaseStore, SessionMeta, SessionStoreCreateRequest, SessionStoreFactory,
+    SlotPolicy, StoreError, StoreMaintenance, TurnInputStore, VacuumReport,
+    facade_support::MergeKey, facade_support::PROCESS_LEASE_SCHEMA_VERSION,
+    facade_support::ProcessStartPlan, facade_support::SessionPickerInfo,
 };
 use rusqlite::{Connection, OptionalExtension, Transaction, params};
 use sha2::{Digest, Sha256};
@@ -393,7 +394,7 @@ impl SqliteSessionStoreFactory {
             root,
             process_registry_path: None,
             options: StoreOptions::default(),
-            clock: Arc::new(lash_core::SystemClock),
+            clock: Arc::new(lash_core::facade_support::SystemClock),
             #[cfg(feature = "testing")]
             fault_injector: None,
         }
@@ -406,7 +407,7 @@ impl SqliteSessionStoreFactory {
             root,
             process_registry_path: None,
             options,
-            clock: Arc::new(lash_core::SystemClock),
+            clock: Arc::new(lash_core::facade_support::SystemClock),
             #[cfg(feature = "testing")]
             fault_injector: None,
         }
@@ -423,7 +424,7 @@ impl SqliteSessionStoreFactory {
             root: root.into(),
             process_registry_path: Some(process_registry_path.into()),
             options: StoreOptions::default(),
-            clock: Arc::new(lash_core::SystemClock),
+            clock: Arc::new(lash_core::facade_support::SystemClock),
             #[cfg(feature = "testing")]
             fault_injector: None,
         }
@@ -438,7 +439,7 @@ impl SqliteSessionStoreFactory {
             root: root.into(),
             process_registry_path: Some(process_registry_path.into()),
             options,
-            clock: Arc::new(lash_core::SystemClock),
+            clock: Arc::new(lash_core::facade_support::SystemClock),
             #[cfg(feature = "testing")]
             fault_injector: None,
         }
@@ -1359,7 +1360,7 @@ mod tests {
             lash_core::ProcessOriginator::session(session_scope.clone())
         );
         assert_eq!(
-            lash_core::ProcessAwaiter::polling(Arc::clone(&registry))
+            lash_core::facade_support::ProcessAwaiter::polling(Arc::clone(&registry))
                 .await_terminal("proc-persist")
                 .await
                 .expect("await persisted"),

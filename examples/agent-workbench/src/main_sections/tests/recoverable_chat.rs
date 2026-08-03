@@ -200,7 +200,7 @@ impl lash::triggers::TriggerStore for RetiringSubscriptionListTriggerStore {
     async fn ingest_occurrence(
         &self,
         request: lash::triggers::TriggerOccurrenceRequest,
-    ) -> std::result::Result<lash_core::TriggerIngressResult, lash::plugins::PluginError> {
+    ) -> std::result::Result<lash::triggers::TriggerIngressResult, lash::plugins::PluginError> {
         self.inner.ingest_occurrence(request).await
     }
 
@@ -266,7 +266,7 @@ impl lash::triggers::TriggerStore for RetiringSubscriptionListTriggerStore {
     async fn list_delivery_retention_candidates(
         &self,
     ) -> std::result::Result<
-        Vec<lash_core::TriggerDeliveryRetentionCandidate>,
+        Vec<lash::triggers::TriggerDeliveryRetentionCandidate>,
         lash::plugins::PluginError,
     > {
         self.inner.list_delivery_retention_candidates().await
@@ -274,7 +274,7 @@ impl lash::triggers::TriggerStore for RetiringSubscriptionListTriggerStore {
 
     async fn delete_delivery_retention_candidates(
         &self,
-        candidates: &[lash_core::TriggerDeliveryRetentionCandidate],
+        candidates: &[lash::triggers::TriggerDeliveryRetentionCandidate],
     ) -> std::result::Result<usize, lash::plugins::PluginError> {
         self.inner
             .delete_delivery_retention_candidates(candidates)

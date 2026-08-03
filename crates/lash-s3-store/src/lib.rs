@@ -6,8 +6,8 @@
 
 use futures_util::TryStreamExt;
 use lash_core::{
-    AttachmentCreateMeta, AttachmentId, AttachmentMeta, AttachmentRef, AttachmentStore,
-    AttachmentStoreError, AttachmentStorePersistence, StoredAttachment, StoredBlobRef,
+    AttachmentCreateMeta, AttachmentId, AttachmentRef, AttachmentStore, AttachmentStoreError,
+    AttachmentStorePersistence, StoredAttachment, StoredBlobRef, facade_support::AttachmentMeta,
 };
 use object_store::aws::AmazonS3Builder;
 use object_store::path::Path;
@@ -419,7 +419,7 @@ mod tests {
             unique_case_suffix()
         ));
         lash_core::testing::conformance::attachment_ownership_isolation_with_store(
-            Arc::new(lash_core::InMemorySessionStoreFactory::new()),
+            Arc::new(lash_core::facade_support::InMemorySessionStoreFactory::new()),
             Arc::new(S3AttachmentStore::from_config(config).expect("store"))
                 as Arc<dyn AttachmentStore>,
         )

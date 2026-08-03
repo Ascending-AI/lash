@@ -83,7 +83,7 @@ fn default_stream_termination() -> StreamTermination {
 }
 
 /// Factory that materializes [`AnthropicProvider`] from a host-owned
-/// [`ProviderSpec`](lash_core::ProviderSpec).
+/// [`ProviderSpec`](lash_core::facade_support::ProviderSpec).
 pub struct AnthropicProviderFactory;
 
 impl ProviderFactory for AnthropicProviderFactory {

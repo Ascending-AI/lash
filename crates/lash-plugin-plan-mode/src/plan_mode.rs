@@ -12,7 +12,8 @@ use lash_core::plugin::{
     ToolCatalogContribution,
 };
 use lash_core::{
-    JsonSchema, PluginMessage, ToolCall, ToolContext, ToolControl, ToolDefinition, ToolResult,
+    PluginMessage, ToolCall, ToolContext, ToolControl, ToolDefinition, ToolResult,
+    facade_support::JsonSchema,
 };
 use lash_tool_support::{
     LashlangToolBinding, StaticToolExecute, StaticToolProvider, ToolDefinitionLashlangExt,

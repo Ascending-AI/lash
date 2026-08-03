@@ -44,16 +44,20 @@ pub use crate::turn::{
 };
 pub use lash_core::runtime::ExternalCompletionError;
 pub use lash_core::{
-    AwaitEventKey, AwaitEventWaitIdentity, EffectReplayOwnership, ExecutionSummary,
-    GenerationOverlay, InputItem, LlmCallRecord, ModelLimits, ModelSpec, PendingTurnInput,
-    PendingTurnInputCancelOutcome, PendingTurnInputCancelResult, PendingTurnInputCancelTarget,
-    PendingTurnInputSuffixCancelOutcome, PluginStack, Resolution, ResolveOutcome, SessionCommand,
-    SessionCommandReceipt, SessionConfigPatch, SessionCreateRequest, SessionError, SessionSpec,
-    SessionStartPoint, TurnActivity, TurnActivityId, TurnActivitySink, TurnAddress, TurnAttach,
-    TurnCancelOriginHint, TurnCancelOutcome, TurnCancelReceipt, TurnCancelRequest,
-    TurnCancellationEvidence, TurnCause, TurnEvent, TurnFinish, TurnInput,
-    TurnInputAcceptanceReceipt, TurnInputApplication, TurnOutcome, TurnStop, TurnTerminal,
-    TurnWorkDriver,
+    AwaitEventKey, AwaitEventWaitIdentity, EffectReplayOwnership, InputItem, LlmCallRecord,
+    ModelLimits, ModelSpec, PendingTurnInput, PendingTurnInputCancelOutcome,
+    PendingTurnInputCancelResult, PendingTurnInputCancelTarget,
+    PendingTurnInputSuffixCancelOutcome, Resolution, ResolveOutcome, SessionCreateRequest,
+    SessionError, SessionStartPoint, TurnActivity, TurnActivityId, TurnCancelOriginHint, TurnCause,
+    TurnEvent, TurnInput, TurnInputApplication, facade_support::ExecutionSummary,
+    facade_support::GenerationOverlay, facade_support::PluginStack, facade_support::SessionCommand,
+    facade_support::SessionCommandReceipt, facade_support::SessionConfigPatch,
+    facade_support::SessionSpec, facade_support::TurnActivitySink, facade_support::TurnAddress,
+    facade_support::TurnAttach, facade_support::TurnCancelOutcome,
+    facade_support::TurnCancelReceipt, facade_support::TurnCancelRequest,
+    facade_support::TurnCancellationEvidence, facade_support::TurnFinish,
+    facade_support::TurnInputAcceptanceReceipt, facade_support::TurnOutcome,
+    facade_support::TurnStop, facade_support::TurnTerminal, facade_support::TurnWorkDriver,
 };
 /// Cooperative cancellation handle accepted by
 /// [`TurnBuilder::cancel`](crate::TurnBuilder::cancel); re-exported so
@@ -88,10 +92,12 @@ pub mod observe {
         SessionObservationStream, SessionObservationStreamItem,
     };
     pub use lash_core::{
-        InMemoryLiveReplayStore, InMemoryLiveReplayStoreConfig, LiveReplayGap, LiveReplayGapReason,
-        LiveReplayStore, SessionCursor, SessionObservation, SessionObservationEvent,
-        SessionObservationEventPayload, SessionObservationSubscription, SessionProcessEventKind,
-        SessionQueueEventKind, SessionResume, SessionRevision,
+        LiveReplayGapReason, LiveReplayStore, LiveReplayStoreError, LiveReplaySubscribeResult,
+        SessionCursor, SessionObservationEvent, SessionObservationEventPayload,
+        SessionProcessEventKind, SessionQueueEventKind, SessionRevision,
+        facade_support::InMemoryLiveReplayStore, facade_support::InMemoryLiveReplayStoreConfig,
+        facade_support::LiveReplayGap, facade_support::SessionObservation,
+        facade_support::SessionObservationSubscription, facade_support::SessionResume,
     };
 }
 
@@ -102,31 +108,36 @@ pub mod triggers {
     /// Process-free [`TriggerStore`] for tests and single-process hosts, matching
     /// the in-memory backends [`persistence`](crate::persistence) and
     /// [`observe`](crate::observe) offer for their own store contracts.
-    pub use lash_core::InMemoryTriggerStore;
+    pub use lash_core::facade_support::InMemoryTriggerStore;
     pub use lash_core::{
-        LashSchema, TriggerCommand, TriggerCommandOutcome, TriggerDeliveryEmitOutcome,
-        TriggerDeliveryEmitReport, TriggerDeliveryReservation, TriggerDeliveryReservationStatus,
-        TriggerEffectResult, TriggerEmitReport, TriggerEvent, TriggerEventType,
-        TriggerMutationDisposition, TriggerMutationReceipt, TriggerOccurrenceFilter,
-        TriggerOccurrenceRecord, TriggerOccurrenceRequest, TriggerOperationError,
-        TriggerOwnerScope, TriggerRegistration, TriggerStore, TriggerSubscriptionDraft,
-        TriggerSubscriptionFilter, TriggerSubscriptionRecord, TriggerTargetSummary,
-        empty_trigger_source_key,
+        LashSchema, TriggerCommand, TriggerCommandOutcome, TriggerDeliveryReservation,
+        TriggerDeliveryReservationStatus, TriggerDeliveryRetentionCandidate, TriggerEffectResult,
+        TriggerIngressResult, TriggerInputBinding, TriggerMutationDisposition,
+        TriggerMutationReceipt, TriggerOccurrenceFilter, TriggerOccurrenceRecord,
+        TriggerOccurrenceRequest, TriggerOperationError, TriggerOwnerScope, TriggerStore,
+        TriggerSubscriptionDraft, TriggerSubscriptionFilter, TriggerSubscriptionRecord,
+        facade_support::TriggerDeliveryEmitOutcome, facade_support::TriggerDeliveryEmitReport,
+        facade_support::TriggerEmitReport, facade_support::TriggerEvent,
+        facade_support::TriggerEventType, facade_support::TriggerRegistration,
+        facade_support::TriggerTargetSummary, facade_support::empty_trigger_source_key,
     };
 }
 
 pub mod tools {
+    pub use lash_core::ProgressSender;
     /// Per-tool retry policy carried by [`ToolDefinition::with_retry_policy`].
     pub use lash_core::ToolRetryPolicy;
     pub use lash_core::{
         CancelHint, PendingCompletion, PreparedToolCall, TimeoutBehavior, ToolActivation,
         ToolArgumentProjectionPolicy, ToolCall, ToolCallOutput, ToolCallRecord, ToolContext,
-        ToolContract, ToolDefinition, ToolExecutionGrant, ToolFailureClass, ToolManifest,
-        ToolOutputContract, ToolPrepareCall, ToolPrepareContext, ToolProvider, ToolResult,
-        ToolSourceHandle, ToolTriggerClient,
+        ToolContract, ToolDefinition, ToolExecutionGrant, ToolFailure, ToolFailureClass,
+        ToolFailureSource, ToolManifest, ToolOutputContract, ToolPrepareCall, ToolPrepareContext,
+        ToolProvider, ToolResult, ToolRetryDisposition, ToolValue,
+        facade_support::ToolSourceHandle, facade_support::ToolTriggerClient,
     };
     pub use lash_core::{
-        PLUGIN_TOOL_SOURCE_ID, ToolId, ToolRestoreReport, ToolState, ToolStateEntry,
+        ToolId, ToolState, facade_support::PLUGIN_TOOL_SOURCE_ID,
+        facade_support::ToolRestoreReport, facade_support::ToolStateEntry,
     };
     #[cfg(feature = "rlm")]
     pub use lash_lashlang_runtime::{
@@ -158,14 +169,17 @@ pub mod direct {
         NonNegativeFiniteF64, NonNegativeFiniteF64Error, ProviderFileScope,
     };
     pub use lash_core::{
-        DirectCompletion, DirectJsonSchema, DirectLlmClient, DirectLlmCompletion, DirectLlmError,
-        DirectLlmResult, DirectMessage, DirectOutputSpec, DirectPart, DirectRequest, DirectRole,
+        facade_support::DirectCompletion, facade_support::DirectJsonSchema,
+        facade_support::DirectLlmClient, facade_support::DirectLlmCompletion,
+        facade_support::DirectLlmError, facade_support::DirectLlmResult,
+        facade_support::DirectMessage, facade_support::DirectOutputSpec,
+        facade_support::DirectPart, facade_support::DirectRequest, facade_support::DirectRole,
     };
 }
 
 pub mod persistence {
     pub use lash_core::CheckpointKind;
-    pub use lash_core::FileAttachmentStore;
+    pub use lash_core::facade_support::FileAttachmentStore;
     pub use lash_core::runtime::{
         DeliveryPolicy, ForkPoint, ForkSessionRequest, ForkSessionResult, InMemorySessionStore,
         InMemorySessionStoreFactory, MergeKey, PendingTurnInputClaimDiagnostics,
@@ -183,10 +197,11 @@ pub mod persistence {
         commit_runtime_state_verified, load_persisted_session_state,
     };
     pub use lash_core::{
-        AttachmentReclamationReport, AttachmentRootSet, AttachmentStore, AttachmentStoreError,
-        AttachmentStorePersistence, InMemoryAttachmentStore, InMemoryProcessExecutionEnvStore,
-        ProcessExecutionEnvStore, SessionAttachmentStore, StoredAttachment, StoredBlobRef,
-        reclaim_unreferenced_attachments,
+        AttachmentRootSet, AttachmentStore, AttachmentStoreError, AttachmentStorePersistence,
+        ProcessExecutionEnvStore, StoredAttachment, StoredBlobRef,
+        facade_support::AttachmentReclamationReport, facade_support::InMemoryAttachmentStore,
+        facade_support::InMemoryProcessExecutionEnvStore, facade_support::SessionAttachmentStore,
+        facade_support::reclaim_unreferenced_attachments,
     };
     pub use lash_core::{
         BlobRef, GcReport, LeaseOwnerIdentity, PersistedSessionConfig, PersistedTurnState,
@@ -198,18 +213,21 @@ pub mod persistence {
     };
     /// Committed session history flattened into presentation order, as returned
     /// by [`SessionReadView::chronological_projection`].
-    pub use lash_core::{ChronologicalEntry, ChronologicalPayload, ChronologicalProjection};
+    pub use lash_core::{
+        facade_support::ChronologicalEntry, facade_support::ChronologicalPayload,
+        facade_support::ChronologicalProjection,
+    };
     #[cfg(feature = "rlm")]
     pub use lash_lashlang_runtime::{InMemoryLashlangArtifactStore, LashlangArtifactStore};
 }
 
 pub mod plugins {
-    pub use lash_core::PluginDirective;
     pub use lash_core::PluginOptions;
+    pub use lash_core::facade_support::PluginDirective;
     /// Durable session-lifecycle operations a hook context carries, alongside
     /// [`SessionStateService`] and [`SessionGraphService`]. Named by
     /// [`TurnTransformContext`] and [`CompactionContext`]; runtime-implemented.
-    pub use lash_core::SessionLifecycleService;
+    pub use lash_core::facade_support::SessionLifecycleService;
     pub use lash_core::plugin::{
         AfterToolCallHook, AfterTurnHook, AssistantResponseHook, AssistantResponseHookContext,
         AssistantResponseTransform, AssistantStreamHook, AssistantStreamHookContext,
@@ -227,9 +245,12 @@ pub mod plugins {
         SessionGraphService, SessionStateService,
     };
     pub use lash_core::{
-        PluginError, PluginFactory, PluginHost, PluginMessage, PluginRegistrar, PluginRuntimeEvent,
-        PluginSession, PluginSessionContext, PluginSpec, PluginSpecFactory, PromptHookContext,
-        SessionPlugin, ToolCatalogContribution, TurnHookContext, TurnResultHookContext,
+        PluginError, PluginMessage, PluginRuntimeEvent, ToolCatalog, facade_support::PluginFactory,
+        facade_support::PluginHost, facade_support::PluginRegistrar, facade_support::PluginSession,
+        facade_support::PluginSessionContext, facade_support::PluginSpec,
+        facade_support::PluginSpecFactory, facade_support::PromptHookContext,
+        facade_support::SessionPlugin, facade_support::ToolCatalogContribution,
+        facade_support::TurnHookContext, facade_support::TurnResultHookContext,
     };
     /// Lifecycle observation: what a `reg.session().on_event(..)` hook receives
     /// once durable session state has advanced, and the contexts each event
@@ -237,12 +258,16 @@ pub mod plugins {
     /// describes, so a hook observes a session whose head may already have moved
     /// on.
     pub use lash_core::{
-        PluginLifecycleEvent, SessionConfigChangedContext, SessionStateChangedContext,
+        facade_support::PluginLifecycleEvent, facade_support::SessionConfigChangedContext,
+        facade_support::SessionStateChangedContext,
     };
     /// Per-turn context assembly: the prepared messages, prompt contributions,
     /// and tool providers a [`TurnContextTransform`] may rewrite before the
     /// model call, and the read-only context the transform is handed.
-    pub use lash_core::{PreparedContext, TurnContextTransform, TurnTransformContext};
+    pub use lash_core::{
+        facade_support::PreparedContext, facade_support::TurnContextTransform,
+        facade_support::TurnTransformContext,
+    };
     pub use lash_plugin_tool_output_budget::{
         ToolOutputBudgetConfig, ToolOutputBudgetMode, ToolOutputBudgetPluginFactory,
         tool_output_budget_stack as runtime_plugin_stack,
@@ -250,7 +275,7 @@ pub mod plugins {
 }
 
 pub mod messages {
-    pub use lash_core::{Message, MessageRole, MessageSequence};
+    pub use lash_core::{Message, MessageRole, facade_support::MessageSequence};
 }
 
 /// Attachment values: identity, media type, and the metadata that travels with
@@ -264,8 +289,8 @@ pub mod messages {
 /// [`persistence`] carries the store trait, its errors, and reclamation.
 pub mod attachments {
     pub use lash_core::{
-        AttachmentCreateMeta, AttachmentId, AttachmentMeta, AttachmentRef, AttachmentTypeMetadata,
-        MediaType,
+        AttachmentCreateMeta, AttachmentId, AttachmentRef, AttachmentTypeMetadata, MediaType,
+        facade_support::AttachmentMeta,
     };
 }
 
@@ -408,23 +433,28 @@ pub mod process {
     pub use crate::admin::SessionProcessAdmin;
     pub use crate::process_admin::Processes;
     pub use lash_core::{
-        AbandonEvidence, AbandonRequest, AbandonWriter, ObservedProcess, ObservedProcessEvent,
-        ObservedWorkItem, ProcessAttach, ProcessAwaitOutput, ProcessAwaiter, ProcessCancelSummary,
-        ProcessChangeCursor, ProcessChangeHub, ProcessCompletionAuthority,
+        AbandonEvidence, AbandonRequest, AbandonWriter, CausalRef, ProcessAwaitOutput,
+        ProcessCancelSummary, ProcessChangeCursor, ProcessCompletionAuthority,
         ProcessContinuationStore, ProcessEvent, ProcessEventAppendRequest,
-        ProcessEventAppendResult, ProcessEventSink, ProcessEventType, ProcessExecutionContext,
+        ProcessEventAppendResult, ProcessEventType, ProcessExecutionContext,
         ProcessExecutionEnvRef, ProcessExecutionEnvSpec, ProcessExternalRef, ProcessHandleSummary,
         ProcessIdentity, ProcessInput, ProcessLease, ProcessLeaseClaimOutcome,
         ProcessLeaseCompletion, ProcessListFilter, ProcessListMode, ProcessLiveReferenceSummary,
         ProcessObserverBy, ProcessOpScope, ProcessOriginator, ProcessProvenance,
-        ProcessPruneReport, ProcessRecord, ProcessRegistration, ProcessRegistry, ProcessRunHandle,
-        ProcessRuntimeHost, ProcessService, ProcessSessionDeleteReport, ProcessStartOptions,
-        ProcessStartRequest, ProcessStarted, ProcessStatus, ProcessStatusFilter,
-        ProcessToolVisibilityFilter, ProcessWake, ProcessWakeDelivery, ProcessWakeSpec,
-        ProcessWorkDriver, ProcessWorkObserver, ProcessWorkSnapshot, ProjectionWatermark,
-        RecoveryDisposition, SessionScope, SessionScopeId, ToolSessionProcessAdmin,
-        WakeCoalescingKey, WakeTurnMode, WakeTurnPolicy, watch_process_registry,
-        watch_process_registry_with_sink,
+        ProcessPruneReport, ProcessRecord, ProcessRegistration, ProcessRegistry, ProcessService,
+        ProcessSessionDeleteReport, ProcessStartOptions, ProcessStartRequest, ProcessStarted,
+        ProcessStatus, ProcessStatusFilter, ProcessWakeDelivery, ProcessWakeSpec,
+        ProjectionWatermark, RecoveryDisposition, SessionScope, facade_support::ObservedProcess,
+        facade_support::ObservedProcessEvent, facade_support::ObservedWorkItem,
+        facade_support::ProcessAttach, facade_support::ProcessAwaiter,
+        facade_support::ProcessChangeHub, facade_support::ProcessEventSink,
+        facade_support::ProcessRunHandle, facade_support::ProcessRuntimeHost,
+        facade_support::ProcessToolVisibilityFilter, facade_support::ProcessWake,
+        facade_support::ProcessWorkDriver, facade_support::ProcessWorkObserver,
+        facade_support::ProcessWorkSnapshot, facade_support::SessionScopeId,
+        facade_support::ToolSessionProcessAdmin, facade_support::WakeCoalescingKey,
+        facade_support::WakeTurnMode, facade_support::WakeTurnPolicy,
+        facade_support::watch_process_registry, facade_support::watch_process_registry_with_sink,
     };
     /// Event semantics a registration declares for its extra event types: which
     /// occurrences wake the process ([`ProcessWakeSpec`]) and how a payload is
@@ -436,7 +466,8 @@ pub mod process {
     /// [`process_wake_source_key`] is the queued-work source key a delivered
     /// wake lands under, so a host can correlate the two.
     pub use lash_core::{
-        WakeDeliveryConfig, WakeDeliveryDriveReport, WakeDeliveryDriver, process_wake_source_key,
+        WakeDeliveryConfig, facade_support::WakeDeliveryDriveReport,
+        facade_support::WakeDeliveryDriver, facade_support::process_wake_source_key,
     };
     #[cfg(feature = "rlm")]
     pub use lash_lashlang_runtime::{
@@ -451,11 +482,13 @@ pub mod durability {
     /// inputs have no journalled form. The embedded enqueue path applies this
     /// itself; a host that accepts turn input at its own edge calls it there to
     /// fail the request instead of the turn.
-    pub use lash_core::ensure_durable_effect_input;
+    pub use lash_core::facade_support::ensure_durable_effect_input;
     pub use lash_core::{
-        DurableProcessWorker, DurableProcessWorkerConfig, EffectHost, InlineEffectHost,
-        LeaseTimings, LeaseTimingsError, ProcessDrainReport, RuntimeEnvironment, RuntimeHostConfig,
-        TerminationPolicy,
+        EffectHost, facade_support::DurableProcessWorker,
+        facade_support::DurableProcessWorkerConfig, facade_support::InlineEffectHost,
+        facade_support::LeaseTimings, facade_support::LeaseTimingsError,
+        facade_support::ProcessDrainReport, facade_support::RuntimeEnvironment,
+        facade_support::RuntimeHostConfig, facade_support::TerminationPolicy,
     };
 }
 
@@ -485,31 +518,35 @@ pub mod runtime {
     /// runtime sleeps and embedded
     /// store timestamps. [`SystemClock`] is the wall-clock default; tests supply
     /// their own to make expiry deterministic.
-    pub use lash_core::{Clock, SystemClock};
+    pub use lash_core::{Clock, facade_support::SystemClock};
     pub use lash_core::{
-        PersistentRuntimeServices, ProtocolSessionExtensionHandle, ProtocolTurnOptions,
-        SessionHandle, SessionPolicy, SessionSnapshot, render_turn_causes_prompt,
+        ProtocolSessionExtensionHandle, ProtocolTurnOptions, SessionPolicy, SessionSnapshot,
+        facade_support::PersistentRuntimeServices, facade_support::SessionHandle,
+        facade_support::render_turn_causes_prompt,
     };
 }
 
 pub mod prompt {
     pub use lash_core::{
         PromptBuiltin, PromptContribution, PromptContributionGate, PromptLayer, PromptSlot,
-        PromptTemplate, PromptTemplateEntry, PromptTemplateSection, default_prompt_template,
+        PromptTemplate, PromptTemplateEntry, PromptTemplateSection,
+        facade_support::default_prompt_template,
     };
 }
 
 pub mod tracing {
-    pub use lash_core::{
-        JsonlTraceSink, TraceAttachment, TraceBranchSelection, TraceContentBlock,
-        TraceEffectEnvelopeDiffEntry, TraceEffectEnvelopeDiffEvent, TraceEffectEnvelopeDiffValue,
-        TraceError, TraceEvent, TraceLabelMetadata, TraceLlmMessage, TraceLlmRequest,
-        TraceLlmResponse, TracePromptComponent, TraceProviderRequestEvent,
-        TraceProviderStreamEvent, TraceRecord, TraceRuntimeScope, TraceRuntimeStreamEvent,
-        TraceRuntimeSubject, TraceSinkError, TraceTokenUsage, TraceToolSpec,
-    };
     #[cfg(feature = "otel-trace")]
     pub use lash_core::{OtelTraceOptions, OtelTraceSink};
+    pub use lash_core::{
+        TraceAttachment, TraceContentBlock, TraceEffectEnvelopeDiffEntry,
+        TraceEffectEnvelopeDiffEvent, TraceEffectEnvelopeDiffValue, TraceError, TraceEvent,
+        TraceLlmMessage, TraceLlmRequest, TraceLlmResponse, TracePromptComponent,
+        TraceProviderRequestEvent, TraceProviderStreamEvent, TraceRuntimeStreamEvent,
+        TraceTokenUsage, TraceToolSpec, facade_support::JsonlTraceSink,
+        facade_support::TraceBranchSelection, facade_support::TraceLabelMetadata,
+        facade_support::TraceRecord, facade_support::TraceRuntimeScope,
+        facade_support::TraceRuntimeSubject, facade_support::TraceSinkError,
+    };
     #[cfg(feature = "rlm")]
     pub use lash_lashlang_runtime::{
         TraceLashlangChildExecution, TraceLashlangEdgeSelection, TraceLashlangExecutionEvent,
@@ -526,27 +563,31 @@ pub mod tracing {
 pub mod testing;
 
 pub mod provider {
-    /// Why a host-supplied [`ModelCapability`] rejected a reasoning-effort
-    /// selection. The snake_case [`ModelEffortValidationCategory`] codes are a
-    /// stable contract a capability catalog can branch on.
-    pub use lash_core::ModelEffortValidationCategory;
     /// Typed provider-failure classification surfaced on
     /// [`TurnIssue`](crate::turn::TurnIssue) and session error envelopes.
     pub use lash_core::ProviderFailureKind;
+    /// Why a host-supplied [`ModelCapability`] rejected a reasoning-effort
+    /// selection. The snake_case [`ModelEffortValidationCategory`] codes are a
+    /// stable contract a capability catalog can branch on.
+    pub use lash_core::facade_support::ModelEffortValidationCategory;
+    pub use lash_core::llm::types::LlmOutputSpec;
     pub use lash_core::provider::ModelEffortValidationError;
     pub use lash_core::provider::{
-        ProviderRateLimitPolicy, ProviderReliability, ProviderRetryPolicy, RequestTimeout,
+        DefaultProviderFailureClassifier, ProviderFailureClassifier, ProviderRateLimitPolicy,
+        ProviderReliability, ProviderRetryPolicy, RequestTimeout,
     };
     pub use lash_core::{
-        CacheControlDialect, LlmTimeouts, ModelCapability, Provider, ProviderComponents,
-        ProviderFactory, ProviderHandle, ProviderOptions, ProviderSpec, ReasoningCapability,
-        ReasoningDisableEncoding, ReasoningEncoding, ReasoningSelection, SamplingCapability,
-        StreamTermination,
+        CacheControlDialect, ModelCapability, ReasoningCapability, ReasoningDisableEncoding,
+        ReasoningEncoding, ReasoningSelection, SamplingCapability, StreamTermination,
+        facade_support::LlmTimeouts, facade_support::Provider, facade_support::ProviderComponents,
+        facade_support::ProviderFactory, facade_support::ProviderHandle,
+        facade_support::ProviderOptions, facade_support::ProviderSpec,
     };
     /// Request/response/error vocabulary of [`Provider::complete`],
     /// re-exported so hosts can implement provider decorators (admission
     /// gates, metrics taps) against the facade alone.
     pub use lash_core::{
-        ExecutionEvidence, LlmRequest, LlmRequestScope, LlmResponse, LlmTransportError,
+        ExecutionEvidence, LlmRequest, LlmRequestScope, LlmResponse,
+        facade_support::LlmTransportError,
     };
 }

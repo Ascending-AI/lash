@@ -42,14 +42,14 @@ impl TryFrom<RemoteSessionCursor> for lash_core::SessionCursor {
 }
 
 impl RemoteSessionObservation {
-    pub fn from_core(observation: lash_core::SessionObservation) -> Self {
+    pub fn from_core(observation: lash_core::facade_support::SessionObservation) -> Self {
         observation.into()
     }
 }
 
-impl From<lash_core::SessionObservation> for RemoteSessionObservation {
-    fn from(value: lash_core::SessionObservation) -> Self {
-        let lash_core::SessionObservation { read_view, cursor } = value;
+impl From<lash_core::facade_support::SessionObservation> for RemoteSessionObservation {
+    fn from(value: lash_core::facade_support::SessionObservation) -> Self {
+        let lash_core::facade_support::SessionObservation { read_view, cursor } = value;
         Self {
             protocol_version: REMOTE_PROTOCOL_VERSION,
             session_id: read_view.session_id().to_string(),
@@ -159,9 +159,9 @@ impl From<lash_core::LiveReplayGapReason> for RemoteLiveReplayGapReason {
     }
 }
 
-impl From<lash_core::LiveReplayGap> for RemoteLiveReplayGap {
-    fn from(value: lash_core::LiveReplayGap) -> Self {
-        let lash_core::LiveReplayGap {
+impl From<lash_core::facade_support::LiveReplayGap> for RemoteLiveReplayGap {
+    fn from(value: lash_core::facade_support::LiveReplayGap) -> Self {
+        let lash_core::facade_support::LiveReplayGap {
             session_id,
             requested_cursor,
             latest_cursor,
@@ -377,7 +377,7 @@ impl<W: Write + Send + 'static> RemoteTurnActivitySink<W> {
     }
 }
 
-impl<W: Write + Send + 'static> lash_core::TurnActivitySink for RemoteTurnActivitySink<W> {
+impl<W: Write + Send + 'static> lash_core::facade_support::TurnActivitySink for RemoteTurnActivitySink<W> {
     fn emit<'life0, 'async_trait>(
         &'life0 self,
         activity: lash_core::TurnActivity,

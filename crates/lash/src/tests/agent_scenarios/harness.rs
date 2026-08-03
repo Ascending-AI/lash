@@ -205,7 +205,7 @@ impl AgentScenarioSetup {
             .model(mock_model_spec())
             .store_factory(Arc::new(
                 lash_core::testing::checkpoint_observer::ObservedSessionStoreFactory::new(
-                    Arc::new(lash_core::InMemorySessionStoreFactory::new()),
+                    Arc::new(lash_core::facade_support::InMemorySessionStoreFactory::new()),
                     checkpoint_writes.clone(),
                 ),
             ))
@@ -361,7 +361,7 @@ async fn all_host_process_summaries(
 }
 
 fn observed_process_summary(
-    process: lash_core::ObservedProcess,
+    process: lash_core::facade_support::ObservedProcess,
 ) -> lash_core::ProcessHandleSummary {
     lash_core::ProcessHandleSummary::new(
         process.process_id,
@@ -393,7 +393,7 @@ async fn assert_remote_process_dto_surface(
     remote_list
         .validate()
         .expect("remote observed process list should validate");
-    let round_trip_observed: Vec<lash_core::ObservedProcess> = remote_list
+    let round_trip_observed: Vec<lash_core::facade_support::ObservedProcess> = remote_list
         .try_into()
         .expect("remote observed process list should convert back");
     let observed_ids = observed
@@ -416,7 +416,7 @@ async fn assert_remote_process_dto_surface(
     remote_snapshot
         .validate()
         .expect("remote process work snapshot should validate");
-    let round_trip_snapshot: lash_core::ProcessWorkSnapshot = remote_snapshot
+    let round_trip_snapshot: lash_core::facade_support::ProcessWorkSnapshot = remote_snapshot
         .try_into()
         .expect("remote process work snapshot should convert back");
     assert_eq!(round_trip_snapshot.session_id, session_id);
@@ -551,7 +551,7 @@ impl AgentSessionTurnProcessScenario {
 
     async fn assert_process_output(&self, runtime: &AgentScenarioRuntime) -> Result<()> {
         let registry: Arc<dyn lash_core::ProcessRegistry> = runtime.process_registry.clone();
-        let await_output = lash_core::ProcessAwaiter::polling(registry)
+        let await_output = lash_core::facade_support::ProcessAwaiter::polling(registry)
             .await_terminal(self.process_id)
             .await?;
         let lash_core::ProcessAwaitOutput::Success { value, .. } = await_output else {
@@ -561,7 +561,7 @@ impl AgentSessionTurnProcessScenario {
             value.get("child_session_id"),
             Some(&serde_json::json!(self.child_session_id))
         );
-        let turn: lash_core::AssembledTurn = value
+        let turn: lash_core::facade_support::AssembledTurn = value
             .get("turn")
             .cloned()
             .map(serde_json::from_value)
@@ -570,7 +570,7 @@ impl AgentSessionTurnProcessScenario {
             .expect("session-turn output should contain a turn");
         assert_eq!(
             turn.outcome,
-            TurnOutcome::Finished(lash_core::TurnFinish::FinalValue {
+            TurnOutcome::Finished(lash_core::facade_support::TurnFinish::FinalValue {
                 value: serde_json::json!({ "child": "done", "scoped": true })
             })
         );
@@ -731,7 +731,7 @@ finish result.answer"#,
     fn assert_turn_completed(&self, turn_output: &TurnResult, tools: &DurableInputTools) {
         assert!(matches!(
             turn_output.outcome,
-            TurnOutcome::Finished(lash_core::TurnFinish::FinalValue { .. })
+            TurnOutcome::Finished(lash_core::facade_support::TurnFinish::FinalValue { .. })
         ));
         assert_eq!(
             turn_output.final_value(),

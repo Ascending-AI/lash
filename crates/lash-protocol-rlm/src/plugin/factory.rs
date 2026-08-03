@@ -4,7 +4,9 @@ use lash_core::plugin::{
     PluginError, PluginFactory, PluginRegistrar, PluginSessionContext,
     ProcessEngineContributionContext, SessionAuthorityContext, SessionPlugin,
 };
-use lash_core::{PluginHost, ProcessEngine, TraceContext, TraceSink};
+use lash_core::{
+    ProcessEngine, TraceContext, facade_support::PluginHost, facade_support::TraceSink,
+};
 use lash_lashlang_runtime::{
     LashlangArtifactStore, LashlangHostEnvironment, LashlangProcessEngine, LashlangSurface,
     SharedDeferredToolResolver,
@@ -129,8 +131,9 @@ impl RlmProtocolPluginFactory {
         mut self,
         path: impl Into<std::path::PathBuf>,
     ) -> Self {
-        self.lashlang_execution_trace_config.sink =
-            Some(Arc::new(lash_core::JsonlTraceSink::new(path.into())));
+        self.lashlang_execution_trace_config.sink = Some(Arc::new(
+            lash_core::facade_support::JsonlTraceSink::new(path.into()),
+        ));
         self
     }
 

@@ -169,7 +169,12 @@ impl SqliteProcessRegistry {
         path: &Path,
         session_store_root: impl Into<PathBuf>,
     ) -> tokio_rusqlite::Result<Self> {
-        Self::open_with_clock(path, Arc::new(lash_core::SystemClock), session_store_root).await
+        Self::open_with_clock(
+            path,
+            Arc::new(lash_core::facade_support::SystemClock),
+            session_store_root,
+        )
+        .await
     }
 
     pub async fn open_with_clock(
@@ -197,7 +202,7 @@ impl SqliteProcessRegistry {
     }
 
     pub async fn memory() -> tokio_rusqlite::Result<Self> {
-        Self::memory_with_clock(Arc::new(lash_core::SystemClock)).await
+        Self::memory_with_clock(Arc::new(lash_core::facade_support::SystemClock)).await
     }
 
     pub async fn memory_with_clock(
@@ -337,7 +342,7 @@ impl SqliteProcessRegistry {
             wake_session_id.as_deref(),
         )?;
         match prepared {
-            lash_core::ProcessEventAppendPlan::Replay {
+            lash_core::facade_support::ProcessEventAppendPlan::Replay {
                 event,
                 repair_record,
                 wake_delivery,
@@ -363,7 +368,7 @@ impl SqliteProcessRegistry {
                     repaired,
                 ))
             }
-            lash_core::ProcessEventAppendPlan::Insert {
+            lash_core::facade_support::ProcessEventAppendPlan::Insert {
                 event,
                 payload_hash,
                 projected_record,

@@ -7,8 +7,8 @@ const EXAMPLE_BINDING_KEY: &str = "example.call_path";
 
 #[test]
 fn turn_cancel_core_conversions_round_trip_every_envelope() {
-    let core_request = lash_core::TurnCancelRequest::new(
-        lash_core::TurnAddress::new("session", "turn"),
+    let core_request = lash_core::facade_support::TurnCancelRequest::new(
+        lash_core::facade_support::TurnAddress::new("session", "turn"),
         "cancel-request",
         Some("queue-superseder".to_string()),
     )
@@ -20,35 +20,35 @@ fn turn_cancel_core_conversions_round_trip_every_envelope() {
     let round_trip = remote_request.try_into_core().expect("core cancel request");
     assert_eq!(round_trip, core_request);
 
-    let evidence = lash_core::TurnCancellationEvidence {
+    let evidence = lash_core::facade_support::TurnCancellationEvidence {
         request_id: "cancel-request".to_string(),
         origin: Some("workbench-user".to_string()),
         reason: Some("stop button".to_string()),
     };
     let remote_evidence = RemoteTurnCancellationEvidence::from(evidence.clone());
     assert_eq!(
-        lash_core::TurnCancellationEvidence::from(remote_evidence),
+        lash_core::facade_support::TurnCancellationEvidence::from(remote_evidence),
         evidence
     );
-    let evidence_without_origin = lash_core::TurnCancellationEvidence {
+    let evidence_without_origin = lash_core::facade_support::TurnCancellationEvidence {
         request_id: "cancel-without-origin".to_string(),
         origin: None,
         reason: None,
     };
     let remote_evidence = RemoteTurnCancellationEvidence::from(evidence_without_origin.clone());
     assert_eq!(
-        lash_core::TurnCancellationEvidence::from(remote_evidence),
+        lash_core::facade_support::TurnCancellationEvidence::from(remote_evidence),
         evidence_without_origin
     );
 
     for core_outcome in [
-        lash_core::TurnCancelOutcome::Requested(evidence.clone()),
-        lash_core::TurnCancelOutcome::AlreadyRequested(evidence.clone()),
-        lash_core::TurnCancelOutcome::CompletionWonRace,
-        lash_core::TurnCancelOutcome::UnknownOrRevoked,
+        lash_core::facade_support::TurnCancelOutcome::Requested(evidence.clone()),
+        lash_core::facade_support::TurnCancelOutcome::AlreadyRequested(evidence.clone()),
+        lash_core::facade_support::TurnCancelOutcome::CompletionWonRace,
+        lash_core::facade_support::TurnCancelOutcome::UnknownOrRevoked,
     ] {
         let remote = RemoteTurnCancelOutcome::from(core_outcome.clone());
-        let round_trip = lash_core::TurnCancelOutcome::from(remote);
+        let round_trip = lash_core::facade_support::TurnCancelOutcome::from(remote);
         assert_eq!(round_trip, core_outcome);
     }
 }
@@ -187,7 +187,7 @@ fn llm_request_and_response_round_trip_owned_dtos() {
                 "properties": { "raw": { "const": "x" } }
             }))
             .with_override(
-                lash_core::SchemaDialect::OPENAI_TOOL_PARAMETERS,
+                lash_core::facade_support::SchemaDialect::OPENAI_TOOL_PARAMETERS,
                 serde_json::json!({
                     "type": "object",
                     "properties": { "raw": { "type": "string", "enum": ["x"] } }
@@ -296,7 +296,7 @@ fn llm_request_and_response_round_trip_owned_dtos() {
     ));
     assert_eq!(
         core.tools[0].input_schema.projection.overrides[0].dialect,
-        lash_core::SchemaDialect::OPENAI_TOOL_PARAMETERS
+        lash_core::facade_support::SchemaDialect::OPENAI_TOOL_PARAMETERS
     );
 
     let response_metadata = BTreeMap::from([
@@ -415,18 +415,18 @@ fn trigger_dtos_round_trip_core_values() {
     let core = lash_core::TriggerOccurrenceRequest::try_from(remote).expect("core request");
     assert_eq!(core, request);
 
-    let report = lash_core::TriggerEmitReport {
+    let report = lash_core::facade_support::TriggerEmitReport {
         occurrence_id: "occurrence:1".to_string(),
-        deliveries: vec![lash_core::TriggerDeliveryEmitReport {
+        deliveries: vec![lash_core::facade_support::TriggerDeliveryEmitReport {
             occurrence_id: "occurrence:1".to_string(),
             subscription_id: "subscription:1".to_string(),
             process_id: "process:1".to_string(),
-            outcome: lash_core::TriggerDeliveryEmitOutcome::Started,
+            outcome: lash_core::facade_support::TriggerDeliveryEmitOutcome::Started,
         }],
     };
     let remote = RemoteTriggerEmitReport::from(report.clone());
     remote.validate().expect("valid remote report");
-    let core = lash_core::TriggerEmitReport::try_from(remote).expect("core report");
+    let core = lash_core::facade_support::TriggerEmitReport::try_from(remote).expect("core report");
     assert_eq!(core, report);
 
     let mut filter = lash_core::TriggerSubscriptionFilter::for_source_type("ui.button.pressed");
@@ -439,17 +439,18 @@ fn trigger_dtos_round_trip_core_values() {
 
     let mut inputs = BTreeMap::new();
     inputs.insert("event".to_string(), lash_core::TriggerInputBinding::Event);
-    let registration = lash_core::TriggerRegistration {
+    let registration = lash_core::facade_support::TriggerRegistration {
         subscription_key: "button-watcher".to_string(),
         incarnation: "incarnation-1".to_string(),
         revision: 7,
         registrant: lash_core::ProcessOriginator::host(),
-        manifest_membership: lash_core::TriggerManifestMembership::PresentInCurrentArtifact,
+        manifest_membership:
+            lash_core::facade_support::TriggerManifestMembership::PresentInCurrentArtifact,
         source_key: "source-key".to_string(),
         name: Some("button watcher".to_string()),
-        source_type: lash_core::TriggerEventType::new("ui.button.pressed"),
+        source_type: lash_core::facade_support::TriggerEventType::new("ui.button.pressed"),
         source: serde_json::json!({}),
-        target: lash_core::TriggerTargetSummary {
+        target: lash_core::facade_support::TriggerTargetSummary {
             label: Some("on_button".to_string()),
             identity: engine_process_identity("on_button"),
             input: engine_process_input("on_button", serde_json::json!({})),
@@ -458,7 +459,8 @@ fn trigger_dtos_round_trip_core_values() {
         enabled: true,
     };
     let remote = RemoteTriggerRegistration::from(registration.clone());
-    let core = lash_core::TriggerRegistration::try_from(remote).expect("core registration");
+    let core = lash_core::facade_support::TriggerRegistration::try_from(remote)
+        .expect("core registration");
     assert_eq!(
         serde_json::to_value(&core).expect("core registration json"),
         serde_json::to_value(&registration).expect("registration json")
@@ -658,16 +660,16 @@ fn process_records_events_snapshots_and_results_round_trip_core_values() {
     let response =
         RemoteProcessListResponse::try_from(vec![observed.clone()]).expect("list response");
     response.validate().expect("valid list response");
-    let core_observed =
-        Vec::<lash_core::ObservedProcess>::try_from(response).expect("core observed");
+    let core_observed = Vec::<lash_core::facade_support::ObservedProcess>::try_from(response)
+        .expect("core observed");
     assert_eq!(core_observed[0].process_id, observed.process_id);
 
-    let snapshot = lash_core::ProcessWorkSnapshot {
+    let snapshot = lash_core::facade_support::ProcessWorkSnapshot {
         session_id: "session-a".to_string(),
         visible_process_ids: vec!["process:observed".to_string()],
-        items: vec![lash_core::ObservedWorkItem {
+        items: vec![lash_core::facade_support::ObservedWorkItem {
             process: observed,
-            events: vec![lash_core::ObservedProcessEvent {
+            events: vec![lash_core::facade_support::ObservedProcessEvent {
                 sequence: 1,
                 event_type: "process.yield".to_string(),
                 occurred_at_ms: 12,
@@ -679,7 +681,8 @@ fn process_records_events_snapshots_and_results_round_trip_core_values() {
     };
     let remote = RemoteProcessWorkSnapshot::try_from(snapshot.clone()).expect("remote snapshot");
     remote.validate().expect("valid snapshot");
-    let core = lash_core::ProcessWorkSnapshot::try_from(remote).expect("core snapshot");
+    let core =
+        lash_core::facade_support::ProcessWorkSnapshot::try_from(remote).expect("core snapshot");
     assert_eq!(core.session_id, snapshot.session_id);
     assert_eq!(core.items[0].process.process_id, "process:observed");
 
@@ -819,18 +822,20 @@ fn observer_audit_and_fork_selector_types_round_trip() {
 
 #[test]
 fn remote_turn_result_maps_core_semantics() {
-    let turn = lash_core::AssembledTurn {
+    let turn = lash_core::facade_support::AssembledTurn {
         state: Default::default(),
-        outcome: lash_core::TurnOutcome::Finished(lash_core::TurnFinish::AssistantMessage {
-            text: "done".to_string(),
-        }),
+        outcome: lash_core::facade_support::TurnOutcome::Finished(
+            lash_core::facade_support::TurnFinish::AssistantMessage {
+                text: "done".to_string(),
+            },
+        ),
         cancellation: None,
-        assistant_output: lash_core::AssistantOutput {
+        assistant_output: lash_core::facade_support::AssistantOutput {
             safe_text: "done".to_string(),
             raw_text: "done".to_string(),
-            state: lash_core::OutputState::Usable,
+            state: lash_core::facade_support::OutputState::Usable,
         },
-        execution: lash_core::ExecutionSummary {
+        execution: lash_core::facade_support::ExecutionSummary {
             had_tool_calls: true,
             had_code_execution: false,
             started_at_ms: 1_700_000_000_000,
@@ -1038,7 +1043,7 @@ fn remote_activity_exposes_typed_turn_input_application_without_display_text() {
 
 #[test]
 fn remote_session_observation_from_core_maps_snapshot_metadata() {
-    let store = lash_core::InMemoryLiveReplayStore::default();
+    let store = lash_core::facade_support::InMemoryLiveReplayStore::default();
     let event = lash_core::LiveReplayStore::append(
         &store,
         "session",
@@ -1062,7 +1067,7 @@ fn remote_session_observation_from_core_maps_snapshot_metadata() {
         },
         ..lash_core::SessionSnapshot::default()
     };
-    let observation = lash_core::SessionObservation {
+    let observation = lash_core::facade_support::SessionObservation {
         read_view: lash_core::SessionReadView::from_snapshot(&snapshot),
         cursor: event.cursor.clone(),
     };
@@ -1086,7 +1091,7 @@ fn remote_session_observation_from_core_maps_all_payload_variants() {
         turn_id: Option<&str>,
         payload: lash_core::SessionObservationEventPayload,
     ) -> Arc<lash_core::SessionObservationEvent> {
-        let store = lash_core::InMemoryLiveReplayStore::default();
+        let store = lash_core::facade_support::InMemoryLiveReplayStore::default();
         lash_core::LiveReplayStore::append(
             &store,
             "session",
@@ -1395,23 +1400,23 @@ fn process_event(process_id: &str) -> lash_core::ProcessEvent {
             process_id: process_id.to_string(),
         })),
         semantics: lash_core::runtime::ProcessEventSemantics {
-            terminal: Some(lash_core::ProcessTerminalSemantics {
+            terminal: Some(lash_core::facade_support::ProcessTerminalSemantics {
                 status: lash_core::ProcessStatus::Completed,
                 outcome: lash_core::ProcessAwaitOutput::Success {
                     value: serde_json::json!(true),
                     control: None,
                 },
             }),
-            wake: Some(lash_core::ProcessWake {
+            wake: Some(lash_core::facade_support::ProcessWake {
                 input: "wake".to_string(),
             }),
         },
-        occurred_at: lash_core::system_time_from_epoch_ms(12),
+        occurred_at: lash_core::facade_support::system_time_from_epoch_ms(12),
     }
 }
 
-fn observed_process() -> lash_core::ObservedProcess {
-    lash_core::ObservedProcess {
+fn observed_process() -> lash_core::facade_support::ObservedProcess {
+    lash_core::facade_support::ObservedProcess {
         process_id: "process:observed".to_string(),
         graph_key: "process:process:observed".to_string(),
         kind: "external".to_string(),

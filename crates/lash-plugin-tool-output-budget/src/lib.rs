@@ -8,7 +8,10 @@ use lash_core::plugin::{
     PluginError, PluginFactory, PluginRegistrar, PluginSessionContext, SessionPlugin,
     ToolResultProjectionContext,
 };
-use lash_core::{ModelToolReturn, ModelToolReturnPart, PluginStack, ToolCallOutcome, ToolValue};
+use lash_core::{
+    ToolCallOutcome, ToolValue, facade_support::ModelToolReturn,
+    facade_support::ModelToolReturnPart, facade_support::PluginStack,
+};
 
 const APPROX_BYTES_PER_TOKEN: usize = 4;
 pub const DEFAULT_TOOL_OUTPUT_BUDGET_LIMIT_BYTES: usize = 16 * 1024;

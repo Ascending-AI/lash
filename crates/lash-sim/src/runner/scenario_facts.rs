@@ -431,7 +431,7 @@ fn process_wake_duplicate_fact(
                 .pointer("/runtime_queued_work/source_key")
                 .and_then(Value::as_str)
                 .map_or_else(
-                    || lash_core::process_wake_source_key(process_id, sequence),
+                    || lash_core::facade_support::process_wake_source_key(process_id, sequence),
                     ToString::to_string,
                 );
             by_source_key.entry(source_key).or_default().push(line);

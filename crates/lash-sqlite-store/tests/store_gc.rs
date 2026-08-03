@@ -3,7 +3,7 @@ use lash_core::{
     HydratedSessionCheckpoint, LeaseOwnerIdentity, Message, MessageRole, ModelSpec, Part, PartKind,
     PersistedTurnState, PluginSessionSnapshot, PruneState, RuntimeCommit, RuntimeSessionState,
     SessionCommitStore, SessionExecutionLeaseStore, SessionPolicy, SessionStoreCreateRequest,
-    SessionStoreFactory, TokenLedgerEntry, TokenUsage, ToolState, shared_parts,
+    SessionStoreFactory, TokenLedgerEntry, TokenUsage, ToolState, facade_support::shared_parts,
 };
 use lash_sqlite_store::{
     BlobArtifactDescriptor, BuiltinBlobProfile, SqliteSessionStoreFactory, Store, StoreGcPolicy,
@@ -447,7 +447,10 @@ async fn sqlite_catalog_partitions_derived_node_ids_by_session() {
     let second_state = factory_state(&second, "second", 0).await;
     let commit = |state: &RuntimeSessionState| {
         let node = lash_core::SessionNodeRecord {
-            node_id: lash_core::frame_node_id(&state.session_id, "shared-frame-key"),
+            node_id: lash_core::facade_support::frame_node_id(
+                &state.session_id,
+                "shared-frame-key",
+            ),
             parent_node_id: None,
             timestamp: "2026-07-26T00:00:00Z".to_string(),
             payload: lash_core::SessionNodePayload::FrameOpen {
@@ -483,8 +486,10 @@ async fn sqlite_catalog_partitions_derived_node_ids_by_session() {
         .await
         .expect("second session derives a distinct node id");
 
-    let first_node_id = lash_core::frame_node_id(&first_state.session_id, "shared-frame-key");
-    let second_node_id = lash_core::frame_node_id(&second_state.session_id, "shared-frame-key");
+    let first_node_id =
+        lash_core::facade_support::frame_node_id(&first_state.session_id, "shared-frame-key");
+    let second_node_id =
+        lash_core::facade_support::frame_node_id(&second_state.session_id, "shared-frame-key");
     assert_ne!(first_node_id, second_node_id);
     assert!(first.load_node(&first_node_id).await.unwrap().is_some());
     assert!(second.load_node(&second_node_id).await.unwrap().is_some());
@@ -511,7 +516,7 @@ async fn sqlite_catalog_leaf_validation_is_session_scoped() {
     let second_state = factory_state(&second, "leaf-b", 0).await;
     let frame_key = "leaf-a-node";
     let node = lash_core::SessionNodeRecord {
-        node_id: lash_core::frame_node_id(&first_state.session_id, frame_key),
+        node_id: lash_core::facade_support::frame_node_id(&first_state.session_id, frame_key),
         parent_node_id: None,
         timestamp: "2026-07-26T00:00:00Z".to_string(),
         payload: lash_core::SessionNodePayload::FrameOpen {

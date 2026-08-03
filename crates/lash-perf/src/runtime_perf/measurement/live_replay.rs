@@ -10,7 +10,7 @@ async fn run_once_live_replay_pressure(chat_turns: usize) -> anyhow::Result<Runt
 
     let build_before_alloc = allocator_stats();
     let build_started = Instant::now();
-    let store = lash_core::InMemoryLiveReplayStore::with_bounds(
+    let store = lash_core::facade_support::InMemoryLiveReplayStore::with_bounds(
         LIVE_REPLAY_MAIN_CAPACITY,
         Duration::from_secs(120),
     );
@@ -128,7 +128,7 @@ async fn run_once_live_replay_pressure(chat_turns: usize) -> anyhow::Result<Runt
 
         let (trim_gap_count, trim_phase) =
             measure_runtime_perf_phase("live_replay.trim_by_capacity", || {
-                let trim_store = lash_core::InMemoryLiveReplayStore::with_bounds(
+                let trim_store = lash_core::facade_support::InMemoryLiveReplayStore::with_bounds(
                     LIVE_REPLAY_TRIM_CAPACITY,
                     Duration::from_secs(120),
                 );
@@ -420,7 +420,7 @@ async fn run_once_trace_jsonl(
 
         let cumulative_usage = runtime.usage_report();
         let usage_delta_entries =
-            lash_core::diff_usage_reports(&before_turn_usage, &cumulative_usage)
+            lash_core::facade_support::diff_usage_reports(&before_turn_usage, &cumulative_usage)
                 .map_err(anyhow::Error::msg)?;
         turns.push(RuntimePerfTurnResult {
             turn_index,
