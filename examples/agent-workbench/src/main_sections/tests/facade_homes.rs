@@ -288,10 +288,12 @@
 
             // And its contribution is in the prompt the provider was handed —
             // the transform's output is not merely recorded, it is rendered.
-            let captured = requests.lock().expect("context transform request lock");
-            assert_eq!(captured.len(), 1, "one turn must make one provider call");
-            let rendered = serde_json::to_string(&*captured)
-                .expect("serialize the provider request the runtime issued");
+            let rendered = {
+                let captured = requests.lock().expect("context transform request lock");
+                assert_eq!(captured.len(), 1, "one turn must make one provider call");
+                serde_json::to_string(&*captured)
+                    .expect("serialize the provider request the runtime issued")
+            };
             assert!(
                 rendered.contains("prepared 1 message(s) from 0 committed; base tools on"),
                 "the transform's contribution must reach the prompt the provider received"
@@ -300,7 +302,6 @@
                 rendered.contains("Context budget"),
                 "the transform's contribution title must survive prompt rendering"
             );
-            drop(captured);
 
             session.close().await.expect("close context transform session");
             drop(core);
