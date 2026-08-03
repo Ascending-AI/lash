@@ -12,6 +12,8 @@ pub enum TurnInputIngress {
 }
 
 impl TurnInputIngress {
+    /// Routes an input to an active turn at or after the named checkpoint boundary for turn-input
+    /// store implementors.
     pub fn active_turn(
         turn_id: impl Into<String>,
         min_boundary: TurnInputCheckpointBoundary,
@@ -22,10 +24,14 @@ impl TurnInputIngress {
         }
     }
 
+    /// Routes an input to the next idle turn for turn-input store implementors; it is never
+    /// admitted at an active-turn checkpoint.
     pub fn next_turn() -> Self {
         Self::NextTurn
     }
 
+    /// Exposes the target turn ID to turn-input store implementors for active-turn ingress,
+    /// returning `None` for next-turn ingress.
     pub fn active_turn_id(&self) -> Option<&str> {
         match self {
             Self::ActiveTurn { turn_id, .. } => Some(turn_id),
@@ -71,6 +77,7 @@ pub enum TurnInputState {
 }
 
 impl TurnInputState {
+    /// Exposes the stable snake-case lifecycle value for turn-input store implementors.
     pub fn as_str(self) -> &'static str {
         match self {
             Self::PendingActive => "pending_active",
@@ -81,6 +88,8 @@ impl TurnInputState {
         }
     }
 
+    /// Parses the stable snake-case lifecycle value for store implementors, returning `None` for an
+    /// unknown value instead of inventing a state.
     pub fn from_wire_str(value: &str) -> Option<Self> {
         match value {
             "pending_active" => Some(Self::PendingActive),
@@ -92,6 +101,8 @@ impl TurnInputState {
         }
     }
 
+    /// Lets store, effect-host, and protocol implementors test whether this `TurnInputState` is
+    /// next turn pending while materializing, executing, or persisting a session turn.
     pub fn is_next_turn_pending(self) -> bool {
         matches!(self, Self::DeferredNextTurn)
     }
@@ -109,6 +120,8 @@ pub struct PendingTurnInputDraft {
 }
 
 impl PendingTurnInputDraft {
+    /// Constructs a `PendingTurnInputDraft` for store and durable-substrate implementors while
+    /// claiming and settling durable turn inputs.
     pub fn new(session_id: impl Into<String>, ingress: TurnInputIngress, input: TurnInput) -> Self {
         Self {
             session_id: session_id.into(),
@@ -119,16 +132,23 @@ impl PendingTurnInputDraft {
         }
     }
 
+    /// Sets the input id carried by a `PendingTurnInputDraft` for store and durable-substrate
+    /// implementors while claiming and settling durable turn inputs.
     pub fn with_input_id(mut self, input_id: impl Into<String>) -> Self {
         self.input_id = Some(input_id.into());
         self
     }
 
+    /// Sets the source key carried by a `PendingTurnInputDraft` for store and durable-substrate
+    /// implementors while claiming and settling durable turn inputs.
     pub fn with_source_key(mut self, source_key: impl Into<String>) -> Self {
         self.source_key = Some(source_key.into());
         self
     }
 
+    /// Compares ingress and canonical JSON input for turn-input store implementors enforcing
+    /// source-key idempotency; generated input IDs and mutable lifecycle fields are deliberately
+    /// ignored.
     pub fn submitted_content_matches(
         &self,
         existing: &PendingTurnInput,
@@ -196,10 +216,14 @@ impl From<&PendingTurnInput> for TurnInputAcceptanceReceipt {
 }
 
 impl PendingTurnInput {
+    /// Returns the source key when present and otherwise the durable input ID for store
+    /// implementors producing a stable reconciliation key.
     pub fn source_or_id(&self) -> &str {
         self.source_key.as_deref().unwrap_or(&self.input_id)
     }
 
+    /// Exposes accepted input to store and durable-substrate implementors while claiming and
+    /// settling durable turn inputs. Returns `None` when no accepted input is present.
     pub fn accepted_input(&self) -> Option<crate::AcceptedInjectedTurnInput> {
         plugin_message_from_turn_input(&self.input).map(|message| {
             crate::AcceptedInjectedTurnInput {
@@ -222,10 +246,13 @@ pub enum PendingTurnInputCancelTarget {
 }
 
 impl PendingTurnInputCancelTarget {
+    /// Targets one durable input ID for turn-input store implementors performing cancellation.
     pub fn input_id(input_id: impl Into<String>) -> Self {
         Self::InputId(input_id.into())
     }
 
+    /// Targets the input admitted under a source idempotency key for turn-input store implementors
+    /// performing cancellation.
     pub fn source_key(source_key: impl Into<String>) -> Self {
         Self::SourceKey(source_key.into())
     }
@@ -260,10 +287,14 @@ pub enum PendingTurnInputCancelOutcome {
 }
 
 impl PendingTurnInputCancelOutcome {
+    /// Reports success to turn-input store implementors only for the transition performed by this
+    /// cancellation attempt, not for an already-cancelled row.
     pub fn is_cancelled(&self) -> bool {
         matches!(self, Self::Cancelled(_))
     }
 
+    /// Returns the durable input for every found cancellation outcome and `None` only when the
+    /// target was absent.
     pub fn input(&self) -> Option<&PendingTurnInput> {
         match self {
             Self::Cancelled(input)
@@ -331,6 +362,8 @@ pub struct TurnInputClaim {
 }
 
 impl TurnInputClaim {
+    /// Exposes completion to store and durable-substrate implementors while claiming and settling
+    /// durable queued work.
     pub fn completion(&self) -> TurnInputCompletion {
         TurnInputCompletion {
             session_id: self.session_id.clone(),
@@ -345,6 +378,8 @@ impl TurnInputClaim {
         }
     }
 
+    /// Updates initial turn application state for store and durable-substrate implementors while
+    /// claiming and settling durable queued work.
     pub fn record_initial_turn_application(&mut self, turn_id: &str, committed_message_id: &str) {
         self.applications = self
             .inputs
@@ -393,6 +428,8 @@ impl TurnInputClaim {
             .collect();
     }
 
+    /// Exposes accepted turn inputs to store and durable-substrate implementors while claiming and
+    /// settling durable queued work.
     pub fn accepted_turn_inputs(&self) -> Vec<crate::AcceptedInjectedTurnInput> {
         self.inputs
             .iter()
@@ -423,6 +460,8 @@ impl TurnInputClaim {
         })
     }
 
+    /// Materializes for turn data for store and durable-substrate implementors while claiming and
+    /// settling durable queued work.
     pub fn materialize_for_turn(&self) -> TurnInput {
         let mut input_items = Vec::new();
         let mut protocol_turn_options = None;

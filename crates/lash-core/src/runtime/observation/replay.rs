@@ -24,10 +24,14 @@ const DEFAULT_LIVE_REPLAY_TTL: Duration = Duration::from_secs(120);
 pub struct SessionRevision(pub u64);
 
 impl SessionRevision {
+    /// Constructs a `SessionRevision` for store and durable-substrate implementors while resuming
+    /// live observation from a durable cursor.
     pub fn new(revision: u64) -> Self {
         Self(revision)
     }
 
+    /// Exposes the monotonic session revision to live-replay store implementors for cursor
+    /// comparison without changing its ordering semantics.
     pub fn as_u64(self) -> u64 {
         self.0
     }

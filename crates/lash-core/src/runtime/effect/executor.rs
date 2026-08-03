@@ -348,6 +348,8 @@ impl Drop for AbortEffectTaskOnDrop {
 }
 
 impl<'run> RuntimeEffectLocalExecutor<'run> {
+    /// Constructs a local path that rejects execution for effect-host implementors whose durable
+    /// controller must not fall back to inline nondeterministic work.
     pub fn unavailable() -> Self {
         Self {
             state: RuntimeEffectLocalExecutorState::Unavailable,
@@ -355,10 +357,14 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
         }
     }
 
+    /// Builds the inline sleep path for effect-host implementors; cancellation is observed through
+    /// the supplied token and the system clock sets the deadline behavior.
     pub fn sleep(cancellation: CancellationToken) -> Self {
         Self::sleep_with_clock(cancellation, Arc::new(crate::SystemClock))
     }
 
+    /// Builds the inline sleep path with an injected clock for effect-host and conformance
+    /// implementors testing deterministic deadline behavior.
     pub fn sleep_with_clock(cancellation: CancellationToken, clock: Arc<dyn crate::Clock>) -> Self {
         Self {
             state: RuntimeEffectLocalExecutorState::SleepOnly {
@@ -408,6 +414,8 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
         self
     }
 
+    /// Adds the turn execution scope that effect-host implementors use to distinguish turn
+    /// cancellation from an ordinary wait cancellation.
     pub fn with_turn_cancel_scope(mut self, scope: crate::ExecutionScope) -> Self {
         match &mut self.state {
             RuntimeEffectLocalExecutorState::SleepOnly {
@@ -458,6 +466,8 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
     }
 
     #[cfg(any(test, feature = "testing"))]
+    /// Injects a one-shot local effect runner for conformance-suite embedders testing controller
+    /// behavior without a production effect backend.
     pub fn testing<F, Fut>(run: F) -> Self
     where
         F: FnOnce(RuntimeEffectEnvelope) -> Fut + Send + 'run,
@@ -616,6 +626,8 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
         self.replay_trace.as_ref()
     }
 
+    /// Executes execute work for effect-host implementors while executing or replaying a runtime
+    /// effect.
     pub async fn execute(
         self,
         envelope: RuntimeEffectEnvelope,
@@ -885,6 +897,8 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
         }
     }
 
+    /// Consumes a local executor for effect-host implementors, returning sleep options only when
+    /// the effect was configured for sleep.
     pub fn into_sleep_options(self) -> RuntimeSleepOptions {
         match self.state {
             RuntimeEffectLocalExecutorState::SleepOnly {

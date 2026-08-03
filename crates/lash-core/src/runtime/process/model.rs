@@ -580,6 +580,8 @@ impl ProcessOriginator {
 }
 
 impl SessionScope {
+    /// Constructs a `SessionScope` for store, effect-host, and protocol implementors while
+    /// materializing, executing, or persisting a session turn.
     pub fn new(session_id: impl Into<String>) -> Self {
         Self {
             session_id: session_id.into(),
@@ -587,6 +589,8 @@ impl SessionScope {
         }
     }
 
+    /// Constructs a frame-scoped session identity for process-engine implementors binding work to
+    /// one durable agent frame.
     pub fn for_agent_frame(
         session_id: impl Into<String>,
         agent_frame_id: impl Into<crate::AgentFrameId>,
@@ -597,6 +601,8 @@ impl SessionScope {
         }
     }
 
+    /// Exposes id to store, effect-host, and protocol implementors while materializing, executing,
+    /// or persisting a session turn.
     pub fn id(&self) -> SessionScopeId {
         match self.agent_frame_id.as_deref() {
             Some(frame_id) if !frame_id.is_empty() => {
@@ -606,6 +612,8 @@ impl SessionScope {
         }
     }
 
+    /// Lets store, effect-host, and protocol implementors test whether this `SessionScope` is empty
+    /// while materializing, executing, or persisting a session turn.
     pub fn is_empty(&self) -> bool {
         self.session_id.is_empty()
     }
@@ -820,6 +828,8 @@ pub enum WaitKind {
 }
 
 impl WaitState {
+    /// Exposes key to store and durable-substrate implementors while persisting and coordinating
+    /// durable process execution.
     pub fn key(&self) -> &str {
         let WaitKind::Signal { key, .. } = &self.kind;
         key

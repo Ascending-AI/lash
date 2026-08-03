@@ -40,6 +40,8 @@ pub enum RuntimeErrorCode {
 }
 
 impl RuntimeErrorCode {
+    /// Provides the canonical str view to store, effect-host, and protocol implementors while
+    /// materializing, executing, or persisting a session turn.
     pub fn as_str(&self) -> &str {
         match self {
             Self::MissingExecutionScopeId => "missing_execution_scope_id",
@@ -144,6 +146,8 @@ pub struct RuntimeError {
 }
 
 impl RuntimeError {
+    /// Constructs a `RuntimeError` for effect-host implementors while creating, observing, or
+    /// resolving a durable wait.
     pub fn new(code: impl Into<RuntimeErrorCode>, message: impl Into<String>) -> Self {
         Self {
             code: code.into(),
@@ -152,17 +156,23 @@ impl RuntimeError {
         }
     }
 
+    /// Sets the cause carried by a `RuntimeError` for effect-host implementors while creating,
+    /// observing, or resolving a durable wait.
     pub fn with_cause(mut self, cause: RuntimeErrorCause) -> Self {
         self.cause = Some(cause);
         self
     }
 
+    /// Extracts the deleted session ID for effect-host implementors only from structured
+    /// session-deletion causes, returning `None` for all other errors.
     pub fn deleted_session_id(&self) -> Option<&str> {
         match self.cause.as_ref()? {
             RuntimeErrorCause::SessionDeleted { session_id } => Some(session_id),
         }
     }
 
+    /// Lets effect-host implementors test whether this `RuntimeError` is code while creating,
+    /// observing, or resolving a durable wait.
     pub fn is_code(&self, code: RuntimeErrorCode) -> bool {
         self.code == code
     }

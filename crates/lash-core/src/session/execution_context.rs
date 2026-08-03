@@ -218,6 +218,8 @@ impl<'run> RuntimeExecutionContext<'run> {
             .take()
     }
 
+    /// Exposes execution scope id to protocol and process-engine implementors while executing code
+    /// against the session runtime.
     pub fn execution_scope_id(&self) -> String {
         self.dispatch
             .effect_controller
@@ -226,6 +228,8 @@ impl<'run> RuntimeExecutionContext<'run> {
             .to_string()
     }
 
+    /// Exposes session scope to protocol and process-engine implementors while executing code
+    /// against the session runtime.
     pub fn session_scope(&self) -> crate::SessionScope {
         if self.dispatch.agent_frame_id.is_empty() {
             crate::SessionScope::new(self.session_id.clone())
@@ -775,6 +779,8 @@ impl<'run> RuntimeExecutionContext<'run> {
         }
     }
 
+    /// Exposes chronological projection to protocol and process-engine implementors while executing
+    /// code against the session runtime.
     pub fn chronological_projection(&self) -> Arc<crate::ChronologicalProjection> {
         Arc::clone(&self.chronological_projection)
     }
@@ -822,10 +828,14 @@ impl<'run> RuntimeExecutionContext<'run> {
             .into_trigger()
     }
 
+    /// Exposes parent invocation to protocol and process-engine implementors while executing code
+    /// against the session runtime. Returns `None` when no parent invocation is present.
     pub fn parent_invocation(&self) -> Option<&crate::RuntimeInvocation> {
         self.parent_invocation.as_ref()
     }
 
+    /// Exposes session id to protocol and process-engine implementors while executing code against
+    /// the session runtime.
     pub fn session_id(&self) -> &str {
         &self.session_id
     }
@@ -853,6 +863,8 @@ impl<'run> RuntimeExecutionContext<'run> {
             .or_else(|| Some(self.session_scope()))
     }
 
+    /// Exposes turn context to protocol and process-engine implementors while executing code
+    /// against the session runtime.
     pub fn turn_context(&self) -> &crate::TurnContext {
         &self.turn_context
     }

@@ -43,6 +43,8 @@ pub enum ExecutionScope {
 }
 
 impl ExecutionScope {
+    /// Constructs the stable session-and-turn scope effect-host implementors use to key one turn's
+    /// durable effects.
     pub fn turn(session_id: impl Into<String>, turn_id: impl Into<String>) -> Self {
         Self::Turn {
             session_id: session_id.into(),
@@ -56,6 +58,8 @@ impl ExecutionScope {
         }
     }
 
+    /// Constructs the stable session-and-drain scope effect-host implementors use to key
+    /// queued-work effects outside a turn.
     pub fn queue_drain(session_id: impl Into<String>, drain_id: impl Into<String>) -> Self {
         Self::QueueDrain {
             session_id: session_id.into(),
@@ -63,18 +67,24 @@ impl ExecutionScope {
         }
     }
 
+    /// Constructs the stable session-delete scope effect-host implementors use to journal deletion
+    /// work outside a turn.
     pub fn session_delete(session_id: impl Into<String>) -> Self {
         Self::SessionDelete {
             session_id: session_id.into(),
         }
     }
 
+    /// Constructs a runtime-operation scope effect-host implementors can journal when no session or
+    /// process owns the work.
     pub fn runtime_operation(operation_id: impl Into<String>) -> Self {
         Self::RuntimeOperation {
             operation_id: operation_id.into(),
         }
     }
 
+    /// Exposes id to store and durable-substrate implementors and effect-host implementors while
+    /// snapshotting or restoring durable session state.
     pub fn id(&self) -> &str {
         match self {
             Self::Turn { turn_id, .. } => turn_id,
@@ -91,6 +101,9 @@ impl ExecutionScope {
         Ok(EffectJournalIdentity::from_scope(self))
     }
 
+    /// Exposes session id to store and durable-substrate implementors and effect-host implementors
+    /// while snapshotting or restoring durable session state. Returns `None` when no session id is
+    /// present.
     pub fn session_id(&self) -> Option<&str> {
         match self {
             Self::Turn { session_id, .. }
@@ -100,6 +113,9 @@ impl ExecutionScope {
         }
     }
 
+    /// Exposes turn id to store and durable-substrate implementors and effect-host implementors
+    /// while snapshotting or restoring durable session state. Returns `None` when no turn id is
+    /// present.
     pub fn turn_id(&self) -> Option<&str> {
         match self {
             Self::Turn { turn_id, .. } => Some(turn_id),
@@ -111,6 +127,8 @@ impl ExecutionScope {
         matches!(self, Self::Turn { .. })
     }
 
+    /// Rejects empty stable identifiers before store or effect-host implementors persist a scope;
+    /// turn and queue-drain scopes require both component IDs.
     pub fn validate(&self) -> Result<(), RuntimeError> {
         let missing = match self {
             Self::Turn {
@@ -202,6 +220,8 @@ pub enum EffectJournalRetirement {
 }
 
 impl EffectJournalRetirement {
+    /// Constructs a session-wide retirement request for effect-host implementors removing every
+    /// durable effect journal entry owned by a deleted session.
     pub fn session(session_id: impl Into<String>) -> Self {
         Self::Session {
             session_id: session_id.into(),
@@ -277,6 +297,8 @@ impl AwaitEventWaitIdentity {
         Ok(())
     }
 
+    /// Lets effect-host implementors distinguish the reserved turn-control wait from ordinary tool
+    /// and application waits.
     pub fn is_turn_control(&self) -> bool {
         matches!(self, Self::TurnCancelGate | Self::TurnTerminal)
     }
@@ -291,6 +313,8 @@ pub struct AwaitEventKey {
 }
 
 impl AwaitEventKey {
+    /// Derives the deterministic promise key effect-host implementors use to rendezvous durable
+    /// wait resolution with its execution scope and wait identity.
     pub fn promise_key(&self) -> String {
         format!("lash-await-event:{}", self.key_id)
     }
@@ -353,6 +377,8 @@ pub struct ScopedEffectController<'run> {
 }
 
 impl<'run> ScopedEffectController<'run> {
+    /// Validates a scope and binds a borrowed controller for effect-host implementors; invalid or
+    /// empty scope identities are rejected before execution.
     pub fn borrowed(
         controller: &'run dyn RuntimeEffectController,
         scope: ExecutionScope,
@@ -364,6 +390,8 @@ impl<'run> ScopedEffectController<'run> {
         })
     }
 
+    /// Validates a scope and binds an owned controller for effect-host implementors that must move
+    /// the scoped host across an asynchronous boundary.
     pub fn shared(
         controller: Arc<dyn RuntimeEffectController>,
         scope: ExecutionScope,
@@ -375,6 +403,7 @@ impl<'run> ScopedEffectController<'run> {
         })
     }
 
+    /// Exposes controller to effect-host implementors while scoping and journaling durable effects.
     pub fn controller(&self) -> &dyn RuntimeEffectController {
         match &self.controller {
             ScopedEffectControllerInner::Borrowed(controller) => *controller,
@@ -382,10 +411,13 @@ impl<'run> ScopedEffectController<'run> {
         }
     }
 
+    /// Exposes scope id to effect-host implementors while scoping and journaling durable effects.
     pub fn scope_id(&self) -> &str {
         self.scope.id()
     }
 
+    /// Exposes turn id to effect-host implementors while scoping and journaling durable effects.
+    /// Returns `None` when no turn id is present.
     pub fn turn_id(&self) -> Option<&str> {
         self.scope.turn_id()
     }

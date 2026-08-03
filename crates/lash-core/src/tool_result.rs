@@ -47,15 +47,21 @@ impl Default for PendingCompletion {
 }
 
 impl PendingCompletion {
+    /// Constructs deferred-completion policy for tool implementors with no deadline,
+    /// error-as-result timeout handling, and external-work cancellation enabled.
     pub fn new() -> Self {
         Self::default()
     }
 
+    /// Sets the maximum durable wait for tool implementors; expiry follows the configured timeout
+    /// behavior rather than completing the tool successfully.
     pub fn with_deadline(mut self, deadline: std::time::Duration) -> Self {
         self.deadline = Some(deadline);
         self
     }
 
+    /// Selects turn failure on deadline expiry for tool implementors instead of returning a timeout
+    /// result to the model.
     pub fn fail_turn_on_timeout(mut self) -> Self {
         self.on_timeout = TimeoutBehavior::FailTurn;
         self

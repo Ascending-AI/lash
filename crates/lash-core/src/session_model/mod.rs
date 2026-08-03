@@ -152,6 +152,8 @@ impl SessionPolicy {
         &self.model.variant
     }
 
+    /// Exposes context window tokens to store, effect-host, and protocol implementors while
+    /// materializing, executing, or persisting a session turn.
     pub fn context_window_tokens(&self) -> usize {
         self.model.context_window_tokens()
     }

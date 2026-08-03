@@ -711,6 +711,8 @@ impl SessionNodeRecord {
         })
     }
 
+    /// Reassembles a node for store implementors from dedicated identity/parent columns and the
+    /// immutable JSON body; malformed body JSON is returned as an error.
     pub fn decode_storage_body(
         node_id: String,
         parent_node_id: Option<String>,
@@ -725,6 +727,8 @@ impl SessionNodeRecord {
         })
     }
 
+    /// Borrows frame-boundary state for store and protocol implementors, returning `None` for event
+    /// and plugin nodes.
     pub fn frame_open(
         &self,
     ) -> Option<(
@@ -764,6 +768,8 @@ impl SessionNodeRecord {
 }
 
 impl SessionGraph {
+    /// Appends non-transient messages after the active leaf in source order for protocol
+    /// implementors applying a read-model delta.
     pub fn append_active_read_delta(&mut self, messages: &[Message]) {
         let appendable_messages = messages
             .iter()
@@ -789,6 +795,8 @@ impl SessionGraph {
         self.append_message_batch_at(appendable_messages, timestamp);
     }
 
+    /// Builds a `SessionGraph` from nodes data for store, effect-host, and protocol implementors
+    /// while materializing, executing, or persisting a session turn.
     pub fn from_nodes(nodes: Vec<SessionNodeRecord>, leaf_node_id: Option<String>) -> Self {
         Self {
             inner: Arc::new(SessionGraphData {
@@ -968,6 +976,8 @@ impl SessionGraph {
         }
     }
 
+    /// Appends one message after the active leaf for protocol implementors and returns its
+    /// content-derived node ID.
     pub fn append_message(&mut self, message: Message) -> String {
         self.append_node_draft(SessionNodeDraft::message(message))
     }
@@ -1113,6 +1123,8 @@ impl SessionGraph {
         node_ids
     }
 
+    /// Exposes user message count to store, effect-host, and protocol implementors while
+    /// materializing, executing, or persisting a session turn.
     pub fn user_message_count(&self) -> usize {
         self.nodes
             .iter()
@@ -1121,6 +1133,8 @@ impl SessionGraph {
             .count()
     }
 
+    /// Returns normalized search text from the first user message in storage order for protocol
+    /// embedders, or an empty string when none exists.
     pub fn first_user_message(&self) -> String {
         self.nodes
             .iter()
@@ -1130,14 +1144,20 @@ impl SessionGraph {
             .unwrap_or_default()
     }
 
+    /// Updates leaf node id state for store, effect-host, and protocol implementors while
+    /// materializing, executing, or persisting a session turn.
     pub fn set_leaf_node_id(&mut self, node_id: Option<String>) {
         self.data_mut().leaf_node_id = node_id;
     }
 
+    /// Updates node record state for store, effect-host, and protocol implementors while
+    /// materializing, executing, or persisting a session turn.
     pub fn push_node_record(&mut self, node: SessionNodeRecord) {
         self.data_mut().nodes.push(node);
     }
 
+    /// Tests branch liveness for store and protocol implementors against the current leaf ancestry;
+    /// an invalid resident graph is a contract violation and panics.
     pub fn active_path_contains(&self, node_id: &str) -> bool {
         self.try_active_path_contains(node_id)
             .unwrap_or_else(|err| panic!("invalid resident session graph: {err}"))
@@ -1166,6 +1186,8 @@ impl SessionGraph {
         )
     }
 
+    /// Looks up any resident node by ID for store and protocol implementors, including nodes
+    /// outside the active path; an unknown ID returns `None`.
     pub fn find_node(&self, node_id: &str) -> Option<&SessionNodeRecord> {
         self.cache()
             .by_id
@@ -1173,6 +1195,8 @@ impl SessionGraph {
             .and_then(|idx| self.nodes.get(*idx))
     }
 
+    /// Replaces the active readable tail for protocol implementors while retaining historical
+    /// branches and excluding transient replacement messages.
     pub fn replace_active_read_state(&mut self, messages: &[Message]) {
         self.replace_active_read_state_from(None, messages);
     }
@@ -1220,12 +1244,16 @@ impl SessionGraph {
         data.nodes.extend(replacement.new_tail_nodes);
     }
 
+    /// Builds a `SessionGraph` from active read state data for store, effect-host, and protocol
+    /// implementors while materializing, executing, or persisting a session turn.
     pub fn from_active_read_state(messages: &[Message]) -> Self {
         let mut graph = Self::default();
         graph.replace_active_read_state(messages);
         graph
     }
 
+    /// Exposes message tree to store, effect-host, and protocol implementors while materializing,
+    /// executing, or persisting a session turn.
     pub fn message_tree(&self) -> Vec<SessionMessageTreeNode> {
         let active_node_ids = self
             .active_path_nodes()

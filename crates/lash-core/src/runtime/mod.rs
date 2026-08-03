@@ -380,6 +380,8 @@ pub enum InputItem {
 }
 
 impl InputItem {
+    /// Constructs a text turn item for protocol implementors while preserving its position among
+    /// mixed text and attachment input.
     pub fn text(text: impl Into<String>) -> Self {
         Self::Text { text: text.into() }
     }
@@ -407,14 +409,19 @@ pub struct TurnInput {
 }
 
 impl TurnInput {
+    /// Constructs an input with no items for protocol and process-engine implementors that will add
+    /// content or extensions before execution.
     pub fn empty() -> Self {
         Self::items(std::iter::empty())
     }
 
+    /// Constructs a one-item text input for protocol and process-engine implementors without adding
+    /// protocol extensions or metadata.
     pub fn text(text: impl Into<String>) -> Self {
         Self::items([InputItem::text(text)])
     }
 
+    /// Collects mixed input items in caller order for protocol implementors materializing a turn.
     pub fn items(items: impl IntoIterator<Item = InputItem>) -> Self {
         Self {
             items: items.into_iter().collect(),
@@ -515,6 +522,8 @@ impl Default for TurnContext {
 }
 
 impl TurnContext {
+    /// Constructs a `TurnContext` for store, effect-host, and protocol implementors while
+    /// materializing, executing, or persisting a session turn.
     pub fn new() -> Self {
         Self::default()
     }
@@ -896,6 +905,8 @@ impl EventSink for NoopEventSink {
 pub struct TurnActivityId(pub Arc<str>);
 
 impl TurnActivityId {
+    /// Constructs a `TurnActivityId` for store, effect-host, and protocol implementors while
+    /// materializing, executing, or persisting a session turn.
     pub fn new(id: impl Into<Arc<str>>) -> Self {
         Self(id.into())
     }
@@ -915,6 +926,8 @@ pub struct TurnActivity {
 }
 
 impl TurnActivity {
+    /// Constructs a `TurnActivity` for store, effect-host, and protocol implementors while
+    /// materializing, executing, or persisting a session turn.
     pub fn new(correlation_id: TurnActivityId, event: TurnEvent) -> Self {
         Self {
             id: TurnActivityId::new(uuid::Uuid::new_v4().to_string()),
@@ -923,6 +936,8 @@ impl TurnActivity {
         }
     }
 
+    /// Constructs an activity with a fresh stable ID for protocol implementors representing work
+    /// that has no parent activity.
     pub fn independent(event: TurnEvent) -> Self {
         let correlation_id = TurnActivityId::new(uuid::Uuid::new_v4().to_string());
         Self::new(correlation_id, event)

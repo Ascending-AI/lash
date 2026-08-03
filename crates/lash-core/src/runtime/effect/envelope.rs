@@ -36,6 +36,8 @@ pub enum RuntimeEffectKind {
 }
 
 impl RuntimeEffectKind {
+    /// Exposes the stable snake-case kind label effect-host implementors persist in replay
+    /// diagnostics.
     pub fn as_str(self) -> &'static str {
         match self {
             Self::LlmCall => "llm_call",
@@ -66,6 +68,8 @@ pub struct RuntimeInvocation {
 }
 
 impl RuntimeInvocation {
+    /// Constructs a replay-scoped effect invocation for effect-host implementors, binding the
+    /// effect ID, kind, and replay key before nondeterministic work begins.
     pub fn effect(
         scope: RuntimeScope,
         effect_id: impl Into<String>,
@@ -85,11 +89,15 @@ impl RuntimeInvocation {
         }
     }
 
+    /// Sets the caused by carried by a `RuntimeInvocation` for store, effect-host, and protocol
+    /// implementors while materializing, executing, or persisting a session turn.
     pub fn with_caused_by(mut self, caused_by: Option<CausalRef>) -> Self {
         self.caused_by = caused_by;
         self
     }
 
+    /// Exposes the effect ID to effect-host implementors only for effect subjects, returning `None`
+    /// for process, trigger, and session-node subjects.
     pub fn effect_id(&self) -> Option<&str> {
         match &self.subject {
             RuntimeSubject::Effect { effect_id, .. } => Some(effect_id),
@@ -97,6 +105,8 @@ impl RuntimeInvocation {
         }
     }
 
+    /// Exposes the declared kind to effect-host implementors only for effect subjects, returning
+    /// `None` for other invocation subjects.
     pub fn effect_kind(&self) -> Option<RuntimeEffectKind> {
         match &self.subject {
             RuntimeSubject::Effect { kind, .. } => Some(*kind),
@@ -104,10 +114,14 @@ impl RuntimeInvocation {
         }
     }
 
+    /// Exposes replay key to store, effect-host, and protocol implementors while materializing,
+    /// executing, or persisting a session turn. Returns `None` when no replay key is present.
     pub fn replay_key(&self) -> Option<&str> {
         self.replay.as_ref().map(|replay| replay.key.as_str())
     }
 
+    /// Projects stable causal identity for protocol and effect-host implementors; each invocation
+    /// subject maps to its corresponding causal-reference variant.
     pub fn causal_ref(&self) -> Option<CausalRef> {
         match &self.subject {
             RuntimeSubject::Effect { effect_id, .. } => Some(CausalRef::Effect {
@@ -154,6 +168,8 @@ pub struct RuntimeScope {
 }
 
 impl RuntimeScope {
+    /// Constructs a `RuntimeScope` for store, effect-host, and protocol implementors while
+    /// materializing, executing, or persisting a session turn.
     pub fn new(session_id: impl Into<String>) -> Self {
         Self {
             session_id: session_id.into(),
@@ -163,6 +179,8 @@ impl RuntimeScope {
         }
     }
 
+    /// Constructs the complete turn scope effect-host implementors persist with an effect,
+    /// including turn index and protocol iteration.
     pub fn for_turn(
         session_id: impl Into<String>,
         turn_id: impl Into<String>,
@@ -217,10 +235,15 @@ pub struct RuntimeEffectEnvelope {
 const _: () = assert!(std::mem::size_of::<RuntimeEffectEnvelope>() <= 576);
 
 impl RuntimeEffectEnvelope {
+    /// Constructs a validated effect envelope for effect-host implementors and panics if the
+    /// invocation and command violate the durable-effect contract.
     pub fn new(invocation: RuntimeInvocation, command: RuntimeEffectCommand) -> Self {
         Self::try_new(invocation, command).expect("valid runtime effect invocation")
     }
 
+    /// Validates and constructs an effect envelope for effect-host implementors: the subject must
+    /// be a non-empty effect with a replay key and matching command kind, and tool attempts and
+    /// batches must carry valid indices and IDs.
     pub fn try_new(
         invocation: RuntimeInvocation,
         command: RuntimeEffectCommand,
@@ -233,10 +256,14 @@ impl RuntimeEffectEnvelope {
         })
     }
 
+    /// Hashes the canonical envelope for effect-host implementors so replay comparison is stable
+    /// across equivalent serialized representations.
     pub fn stable_hash(&self) -> Result<String, RuntimeEffectControllerError> {
         Ok(self.canonical_form()?.hash().to_string())
     }
 
+    /// Captures the canonical replay-comparison form for effect-host implementors without depending
+    /// on ordinary serde field ordering.
     pub fn canonical_form(
         &self,
     ) -> Result<super::CanonicalRuntimeEffectEnvelope, RuntimeEffectControllerError> {
@@ -397,6 +424,8 @@ impl RuntimeEffectCommand {
         }
     }
 
+    /// Exposes kind to store, effect-host, and protocol implementors while materializing,
+    /// executing, or persisting a session turn.
     pub fn kind(&self) -> RuntimeEffectKind {
         match self {
             Self::LlmCall { .. } => RuntimeEffectKind::LlmCall,
@@ -908,6 +937,7 @@ impl RuntimeEffectOutcome {
         }
     }
 
+    /// Exposes kind to effect-host implementors while executing or replaying a runtime effect.
     pub fn kind(&self) -> RuntimeEffectKind {
         match self {
             Self::LlmCall { .. } => RuntimeEffectKind::LlmCall,
