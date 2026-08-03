@@ -499,9 +499,8 @@ pub mod runtime {
     /// Prompt-token accounting a [`TurnContextTransform`](crate::plugins::TurnContextTransform)
     /// is handed so a rolling strategy can budget against the last render.
     pub use lash_core::PromptUsage;
-    /// Structured cause attached to a [`RuntimeError`] via
-    /// [`RuntimeError::with_cause`], so a host distinguishes an expected
-    /// retirement (a deleted session) from a real fault.
+    /// Structured cause carried by a [`RuntimeError`], so a host distinguishes
+    /// an expected retirement (a deleted session) from a real fault.
     pub use lash_core::RuntimeErrorCause;
     pub use lash_core::runtime::{
         AssembledTurn, AwaitEventResolver, DirectCompletionClient, EmbeddedRuntimeHost, EventSink,
