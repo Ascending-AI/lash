@@ -212,6 +212,40 @@ struct BlockingAppTools {
     release_rx: TokioMutex<Option<oneshot::Receiver<()>>>,
 }
 
+#[derive(Clone, Default)]
+struct ContractRecordingTools {
+    resolved: Arc<StdMutex<Vec<serde_json::Value>>>,
+}
+
+impl ContractRecordingTools {
+    fn take_resolved(&self) -> Vec<serde_json::Value> {
+        std::mem::take(&mut *self.resolved.lock().expect("resolved contracts"))
+    }
+}
+
+#[async_trait]
+impl ToolProvider for ContractRecordingTools {
+    fn tool_manifests(&self) -> Vec<lash_core::ToolManifest> {
+        vec![app_tool_definition().manifest()]
+    }
+
+    fn resolve_contract(&self, name: &str) -> Option<Arc<lash_core::ToolContract>> {
+        if name != "app_lookup" {
+            return None;
+        }
+        let contract = Arc::new(app_tool_definition().contract());
+        self.resolved
+            .lock()
+            .expect("resolved contracts")
+            .push(serde_json::to_value(contract.as_ref()).expect("serialize tool contract"));
+        Some(contract)
+    }
+
+    async fn execute(&self, _call: lash_core::ToolCall<'_>) -> lash_core::ToolResult {
+        lash_core::ToolResult::ok(serde_json::json!({ "ok": true }))
+    }
+}
+
 impl BlockingAppTools {
     fn new(entered_tx: oneshot::Sender<()>, release_rx: oneshot::Receiver<()>) -> Self {
         Self {
@@ -2929,6 +2963,40 @@ async fn run_collects_ordered_assistant_prose_activity() -> Result<()> {
         TurnOutcome::Finished(lash_core::facade_support::TurnFinish::AssistantMessage { .. })
     ));
     assert_eq!(result.result.usage.output_tokens, 2);
+    Ok(())
+}
+
+#[tokio::test]
+async fn core_catalog_and_actual_turn_resolve_the_identical_contract() -> Result<()> {
+    let tools = ContractRecordingTools::default();
+    let core = explicit_ephemeral_facets(LashCore::standard_builder())
+        .provider(tool_roundtrip_provider())
+        .model(mock_model_spec())
+        .tools(Arc::new(tools.clone()))
+        .build()?;
+    let core_contract = core
+        .tool_catalog()
+        .resolve_contract("app_lookup")
+        .expect("core catalog contract");
+    let expected = serde_json::to_value(core_contract.as_ref()).expect("serialize core contract");
+    let session = core.session("catalog-agreement").open().await?;
+    tools.take_resolved();
+
+    let output = session
+        .turn(TurnInput::text("use the lookup tool"))
+        .run()
+        .await?;
+
+    assert!(output.is_success());
+    let turn_contracts = tools.take_resolved();
+    assert!(
+        !turn_contracts.is_empty(),
+        "the actual turn must resolve the tool contract"
+    );
+    assert!(
+        turn_contracts.iter().all(|contract| contract == &expected),
+        "the core projection and actual turn path must use identical contracts"
+    );
     Ok(())
 }
 

@@ -20,6 +20,12 @@ struct BuildPluginSessionRequest<'a> {
     authority: SessionAuthorityContext,
 }
 
+struct BuiltSessionContributions {
+    plugins: Vec<Arc<dyn SessionPlugin>>,
+    contributions: PluginContributions,
+    triggers: crate::TriggerEventCatalog,
+}
+
 #[derive(Clone, Debug, Default)]
 pub struct SessionAuthorityContext {
     pub tool_access: SessionToolAccess,
@@ -195,60 +201,12 @@ impl PluginHost {
             parent_session_id,
         };
         let session_id = ctx.session_id.clone();
-        let mut plugins = Vec::new();
-        let mut reg = PluginRegistrar::new();
-        for factory in self.factories() {
-            let plugin = factory.build(&ctx)?;
-            reg.registering_plugin_id = Some(plugin.id().to_string());
-            plugin.register(&mut reg)?;
-            reg.registering_plugin_id = None;
-            plugins.push(plugin);
-        }
-        let mut contributions = reg.contributions;
-        let protocol_session = contributions.protocol_session.take().ok_or_else(|| {
-            PluginError::Registration("missing protocol session capability".to_string())
-        })?;
-        let protocol_driver = contributions.protocol_driver.take().ok_or_else(|| {
-            PluginError::Registration("missing protocol driver capability".to_string())
-        })?;
-        contributions.protocol_session = Some(protocol_session);
-        contributions.protocol_driver = Some(protocol_driver);
-        contributions
-            .turn_context_transforms
-            .sort_by_key(|entry| std::cmp::Reverse(entry.0));
-        contributions
-            .context_compactors
-            .sort_by_key(|entry| std::cmp::Reverse(entry.0));
-        let triggers = crate::TriggerEventCatalog::from_events(contributions.triggers.clone())
-            .map_err(|message| {
-                PluginError::Registration(format!("invalid trigger event catalog: {message}"))
-            })?;
-        let registry = match tool_snapshot {
-            Some(snapshot) => Arc::new(
-                crate::ToolRegistry::from_tool_providers_with_hidden_tools(
-                    contributions.tool_providers.clone(),
-                    authority.tool_access.hidden_tools.clone(),
-                )
-                .map_err(|err| {
-                    PluginError::Registration(format!("failed to build tool registry: {err}"))
-                })?
-                .fork_with_state(snapshot)
-                .map_err(|err| {
-                    PluginError::Session(format!(
-                        "tool state cannot be applied to this plugin host session: {err}"
-                    ))
-                })?,
-            ),
-            None => Arc::new(
-                crate::ToolRegistry::from_tool_providers_with_hidden_tools(
-                    contributions.tool_providers.clone(),
-                    authority.tool_access.hidden_tools.clone(),
-                )
-                .map_err(|err| {
-                    PluginError::Registration(format!("failed to build tool registry: {err}"))
-                })?,
-            ),
-        };
+        let BuiltSessionContributions {
+            plugins,
+            contributions,
+            triggers,
+        } = self.build_session_contributions(&ctx)?;
+        let registry = build_tool_registry(&contributions, &authority.tool_access, tool_snapshot)?;
         let tools = Arc::clone(&registry) as Arc<dyn ToolProvider>;
 
         let session = Arc::new(PluginSession {
@@ -276,6 +234,58 @@ impl PluginHost {
             session.restore(snapshot)?;
         }
         Ok(session)
+    }
+
+    fn build_session_contributions(
+        &self,
+        ctx: &PluginSessionContext,
+    ) -> Result<BuiltSessionContributions, PluginError> {
+        let mut plugins = Vec::new();
+        let mut reg = PluginRegistrar::new();
+        for factory in self.factories() {
+            let plugin = factory.build(ctx)?;
+            reg.registering_plugin_id = Some(plugin.id().to_string());
+            plugin.register(&mut reg)?;
+            reg.registering_plugin_id = None;
+            plugins.push(plugin);
+        }
+        let mut contributions = reg.contributions;
+        let protocol_session = contributions.protocol_session.take().ok_or_else(|| {
+            PluginError::Registration("missing protocol session capability".to_string())
+        })?;
+        let protocol_driver = contributions.protocol_driver.take().ok_or_else(|| {
+            PluginError::Registration("missing protocol driver capability".to_string())
+        })?;
+        contributions.protocol_session = Some(protocol_session);
+        contributions.protocol_driver = Some(protocol_driver);
+        contributions
+            .turn_context_transforms
+            .sort_by_key(|entry| std::cmp::Reverse(entry.0));
+        contributions
+            .context_compactors
+            .sort_by_key(|entry| std::cmp::Reverse(entry.0));
+        let triggers = crate::TriggerEventCatalog::from_events(contributions.triggers.clone())
+            .map_err(|message| {
+                PluginError::Registration(format!("invalid trigger event catalog: {message}"))
+            })?;
+        Ok(BuiltSessionContributions {
+            plugins,
+            contributions,
+            triggers,
+        })
+    }
+
+    pub(crate) fn build_core_tool_registry(&self) -> Result<Arc<crate::ToolRegistry>, PluginError> {
+        let ctx = PluginSessionContext {
+            session_id: "lash-core-tool-catalog".to_string(),
+            tool_access: SessionToolAccess::default(),
+            subagent: None,
+            plugin_options: PluginOptions::default(),
+            extensions: self.extensions.clone(),
+            parent_session_id: None,
+        };
+        let built = self.build_session_contributions(&ctx)?;
+        build_tool_registry(&built.contributions, &ctx.tool_access, None)
     }
 
     fn register_session(
@@ -328,5 +338,28 @@ impl PluginHost {
                 ))
             }
         }
+    }
+}
+
+fn build_tool_registry(
+    contributions: &PluginContributions,
+    tool_access: &SessionToolAccess,
+    tool_snapshot: Option<crate::ToolState>,
+) -> Result<Arc<crate::ToolRegistry>, PluginError> {
+    let registry = crate::ToolRegistry::from_tool_providers_with_hidden_tools(
+        contributions.tool_providers.clone(),
+        tool_access.hidden_tools.clone(),
+    )
+    .map_err(|err| PluginError::Registration(format!("failed to build tool registry: {err}")))?;
+    match tool_snapshot {
+        Some(snapshot) => registry
+            .fork_with_state(snapshot)
+            .map(Arc::new)
+            .map_err(|err| {
+                PluginError::Session(format!(
+                    "tool state cannot be applied to this plugin host session: {err}"
+                ))
+            }),
+        None => Ok(Arc::new(registry)),
     }
 }

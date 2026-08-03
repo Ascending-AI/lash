@@ -10,15 +10,14 @@ use std::collections::HashSet;
 #[derive(Clone)]
 pub struct LashCore {
     pub(crate) env: RuntimeEnvironment,
+    pub(crate) tool_registry: Arc<lash_core::ToolRegistry>,
     pub(crate) policy: SessionPolicy,
     pub(crate) protocol_factory: Option<Arc<dyn PluginFactory>>,
     pub(crate) store_factory: Option<Arc<dyn SessionStoreFactory>>,
     pub(crate) plugin_factories: Arc<Vec<Arc<dyn PluginFactory>>>,
     pub(crate) provider: Option<ProviderHandle>,
     pub(crate) live_replay_store: Arc<dyn LiveReplayStore>,
-    /// Whether this deployment has process lifecycle available (a process
-    /// registry is wired). Threaded to every plugin host so core can install the
-    /// same plugin-contributed process engines when it rebuilds a runtime.
+    /// Whether process lifecycle is available; threaded into rebuilt session plugin hosts.
     pub(crate) process_lifecycle_available: bool,
     /// Per-worker bound used when this core constructs an inline process worker.
     pub(crate) process_execution_concurrency: usize,
@@ -1306,6 +1305,8 @@ impl LashCoreBuilder {
         // own clean registries.
         let _ = default_plugin_host
             .install_process_engine_contributions(core.clone(), process_lifecycle_available)?;
+        let tool_registry =
+            lash_core::facade_support::build_core_tool_registry(&default_plugin_host)?;
 
         let process_registry = process_work_source.process_registry();
 
@@ -1386,6 +1387,7 @@ impl LashCoreBuilder {
 
         Ok(LashCore {
             env,
+            tool_registry,
             policy,
             store_factory: self.store_factory,
             plugin_factories: Arc::new(plugin_factories),
