@@ -598,6 +598,8 @@ impl ProcessEventAppendRequest {
         ))
     }
 
+    /// Builds a replay-stable subscription-retarget event for process-store implementors, encoding
+    /// an absent target with the reserved `none` replay component.
     pub fn subscription_retargeted(process_id: &str, target: Option<&str>) -> Self {
         Self::new(
             "process.subscription_retargeted",

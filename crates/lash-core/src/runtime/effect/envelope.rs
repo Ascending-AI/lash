@@ -874,6 +874,8 @@ impl RuntimeEffectOutcome {
         }
     }
 
+    /// Extracts the trigger outcome for effect-host implementors while executing or replaying a
+    /// runtime effect.
     pub fn into_trigger(self) -> Result<crate::TriggerEffectResult, RuntimeEffectControllerError> {
         match self {
             Self::Trigger { result } => Ok(*result),

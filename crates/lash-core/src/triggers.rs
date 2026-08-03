@@ -212,6 +212,8 @@ pub struct TriggerOccurrenceRequest {
 }
 
 impl TriggerOccurrenceRequest {
+    /// Constructs an occurrence for trigger-store implementors with explicit source identity and
+    /// caller-supplied idempotency key; host routing remains unrestricted until scoped.
     pub fn new(
         source_type: impl Into<String>,
         source_key: impl Into<String>,
@@ -228,11 +230,15 @@ impl TriggerOccurrenceRequest {
         }
     }
 
+    /// Sets the source carried by a `TriggerOccurrenceRequest` for store and durable-substrate
+    /// implementors while persisting trigger subscriptions and occurrences.
     pub fn with_source(mut self, source: serde_json::Value) -> Self {
         self.source = Some(source);
         self
     }
 
+    /// Restricts occurrence delivery reservation to subscriptions registered by one session for
+    /// trigger-store implementors enforcing host routing scope.
     pub fn for_session(mut self, session_id: impl Into<String>) -> Self {
         self.session_id = Some(session_id.into());
         self
@@ -267,6 +273,8 @@ pub struct TriggerOccurrenceFilter {
 }
 
 impl TriggerOccurrenceFilter {
+    /// Constructs a `TriggerOccurrenceFilter` using for source semantics for store and
+    /// durable-substrate implementors while persisting trigger subscriptions and occurrences.
     pub fn for_source(source_type: impl Into<String>, source_key: impl Into<String>) -> Self {
         Self {
             source_type: Some(source_type.into()),
@@ -275,6 +283,8 @@ impl TriggerOccurrenceFilter {
         }
     }
 
+    /// Applies every populated occurrence filter conjunctively for trigger-store and conformance
+    /// implementors; occurrence time uses a half-open `[start, end)` range.
     pub fn matches(&self, record: &TriggerOccurrenceRecord) -> bool {
         self.source_type
             .as_deref()
@@ -395,6 +405,9 @@ pub struct TriggerSubscriptionDraft {
 }
 
 impl TriggerSubscriptionDraft {
+    /// Constructs process-targeted subscription state for trigger-store and process-engine
+    /// implementors with empty source metadata, schema, event types, and bindings, while inheriting
+    /// the identity label.
     pub fn for_process(
         subscription_key: impl Into<String>,
         env_ref: crate::ProcessExecutionEnvRef,
@@ -423,26 +436,36 @@ impl TriggerSubscriptionDraft {
         }
     }
 
+    /// Sets the name carried by a `TriggerSubscriptionDraft` for store and process-engine
+    /// implementors while persisting trigger subscriptions, occurrences, and deliveries.
     pub fn with_name(mut self, name: impl Into<String>) -> Self {
         self.name = Some(name.into());
         self
     }
 
+    /// Sets the source carried by a `TriggerSubscriptionDraft` for store and process-engine
+    /// implementors while persisting trigger subscriptions, occurrences, and deliveries.
     pub fn with_source(mut self, source: serde_json::Value) -> Self {
         self.source = source;
         self
     }
 
+    /// Sets the payload schema carried by a `TriggerSubscriptionDraft` for store and process-engine
+    /// implementors while persisting trigger subscriptions, occurrences, and deliveries.
     pub fn with_payload_schema(mut self, payload_schema: crate::LashSchema) -> Self {
         self.payload_schema = payload_schema;
         self
     }
 
+    /// Sets the wake target carried by a `TriggerSubscriptionDraft` for store and process-engine
+    /// implementors while persisting trigger subscriptions, occurrences, and deliveries.
     pub fn with_wake_target(mut self, wake_target: crate::SessionScope) -> Self {
         self.wake_target = Some(wake_target);
         self
     }
 
+    /// Sets the event types carried by a `TriggerSubscriptionDraft` for store and process-engine
+    /// implementors while persisting trigger subscriptions, occurrences, and deliveries.
     pub fn with_event_types(
         mut self,
         event_types: impl IntoIterator<Item = crate::ProcessEventType>,
@@ -451,6 +474,8 @@ impl TriggerSubscriptionDraft {
         self
     }
 
+    /// Sets the input template carried by a `TriggerSubscriptionDraft` for store and process-engine
+    /// implementors while persisting trigger subscriptions, occurrences, and deliveries.
     pub fn with_input_template(
         mut self,
         input_template: BTreeMap<String, TriggerInputBinding>,
@@ -459,11 +484,15 @@ impl TriggerSubscriptionDraft {
         self
     }
 
+    /// Sets the target label carried by a `TriggerSubscriptionDraft` for store and process-engine
+    /// implementors while persisting trigger subscriptions, occurrences, and deliveries.
     pub fn with_target_label(mut self, target_label: impl Into<String>) -> Self {
         self.target_label = Some(target_label.into());
         self
     }
 
+    /// Rejects an empty or reserved subscription key and any target label that disagrees with the
+    /// process identity label before trigger-store implementors persist the draft.
     pub fn validate(&self) -> Result<(), PluginError> {
         validate_subscription_key(&self.subscription_key, false)?;
         validate_trigger_subscription_target_label(
@@ -498,12 +527,16 @@ pub enum TriggerOwnerScope {
 }
 
 impl TriggerOwnerScope {
+    /// Constructs a `TriggerOwnerScope` using session semantics for store and process-engine
+    /// implementors while persisting trigger subscriptions, occurrences, and deliveries.
     pub fn session(session_id: impl Into<String>) -> Self {
         Self::Session {
             session_id: session_id.into(),
         }
     }
 
+    /// Constructs host-owned trigger scope for store implementors and rejects an empty binding ID
+    /// so its durable namespace cannot collapse.
     pub fn host(binding_id: impl Into<String>) -> Result<Self, PluginError> {
         let binding_id = binding_id.into();
         if binding_id.trim().is_empty() {
@@ -514,6 +547,8 @@ impl TriggerOwnerScope {
         Ok(Self::Host { binding_id })
     }
 
+    /// Derives the stable owner namespace trigger-store implementors use for isolation:
+    /// `session:<id>`, `host:<binding>`, or the reserved platform `host` namespace.
     pub fn namespace(&self) -> String {
         match self {
             Self::Session { session_id } => format!("session:{session_id}"),
@@ -522,6 +557,8 @@ impl TriggerOwnerScope {
         }
     }
 
+    /// Exposes the owning session to trigger-store implementors only for session scope, returning
+    /// `None` for host and platform ownership.
     pub fn session_id(&self) -> Option<&str> {
         match self {
             Self::Session { session_id } => Some(session_id),
@@ -567,10 +604,14 @@ pub struct TriggerSubscriptionRecord {
 }
 
 impl TriggerSubscriptionRecord {
+    /// Projects the canonical owner namespace for trigger-store implementors filtering records
+    /// across session, host, and platform registrants.
     pub fn registrant_scope_id(&self) -> String {
         self.owner_scope.namespace()
     }
 
+    /// Exposes the registrant session to trigger-store implementors only for session-owned records,
+    /// returning `None` for host and platform ownership.
     pub fn registrant_session_id(&self) -> Option<&str> {
         self.owner_scope.session_id()
     }
@@ -650,6 +691,8 @@ pub struct TriggerSubscriptionFilter {
 }
 
 impl TriggerSubscriptionFilter {
+    /// Constructs a `TriggerSubscriptionFilter` using for session semantics for store and
+    /// durable-substrate implementors while persisting trigger subscriptions and occurrences.
     pub fn for_session(session_id: impl Into<String>) -> Self {
         Self {
             session_id: Some(session_id.into()),
@@ -657,6 +700,8 @@ impl TriggerSubscriptionFilter {
         }
     }
 
+    /// Constructs a `TriggerSubscriptionFilter` using for registrant scope semantics for store and
+    /// durable-substrate implementors while persisting trigger subscriptions and occurrences.
     pub fn for_registrant_scope(scope_id: impl Into<String>) -> Self {
         Self {
             registrant_scope_id: Some(scope_id.into()),
@@ -664,6 +709,8 @@ impl TriggerSubscriptionFilter {
         }
     }
 
+    /// Constructs a `TriggerSubscriptionFilter` using for source type semantics for store and
+    /// durable-substrate implementors while persisting trigger subscriptions and occurrences.
     pub fn for_source_type(source_type: impl Into<String>) -> Self {
         Self {
             source_type: Some(source_type.into()),
@@ -671,10 +718,14 @@ impl TriggerSubscriptionFilter {
         }
     }
 
+    /// Returns only the explicit canonical registrant scope for trigger-store implementors; legacy
+    /// session filtering remains a separate predicate.
     pub fn effective_registrant_scope_id(&self) -> Option<String> {
         self.registrant_scope_id.clone()
     }
 
+    /// Applies every populated subscription filter conjunctively for trigger-store and conformance
+    /// implementors and always excludes tombstoned records.
     pub fn matches(&self, record: &TriggerSubscriptionRecord) -> bool {
         self.effective_registrant_scope_id()
             .is_none_or(|scope_id| record.registrant_scope_id() == scope_id)
@@ -803,6 +854,8 @@ pub enum TriggerCommand {
 }
 
 impl TriggerCommand {
+    /// Exposes owner scope to store and durable-substrate implementors while persisting trigger
+    /// subscriptions and occurrences.
     pub fn owner_scope(&self) -> &TriggerOwnerScope {
         match self {
             Self::Register { owner_scope, .. }
@@ -816,6 +869,8 @@ impl TriggerCommand {
         }
     }
 
+    /// Exposes the single targeted subscription key to trigger-store implementors for register and
+    /// point mutations, returning `None` for list and multi-key prune commands.
     pub fn subscription_key(&self) -> Option<&str> {
         match self {
             Self::Register { draft, .. } => Some(&draft.subscription_key),
@@ -839,6 +894,8 @@ impl TriggerCommand {
         }
     }
 
+    /// Lets trigger-store implementors distinguish the read-only list command from every command
+    /// that may change durable trigger state.
     pub fn is_mutation(&self) -> bool {
         !matches!(self, Self::List { .. })
     }

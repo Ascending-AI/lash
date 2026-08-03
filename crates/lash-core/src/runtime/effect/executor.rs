@@ -464,6 +464,8 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
         }
     }
 
+    /// Binds a trigger store for effect-host implementors executing trigger effects inline without
+    /// bypassing the runtime-effect envelope.
     pub fn triggers(store: Arc<dyn crate::TriggerStore>) -> Self {
         Self {
             state: RuntimeEffectLocalExecutorState::Trigger(TriggerLocalExecution { store }),
@@ -829,6 +831,8 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
         }
     }
 
+    /// Extracts the trigger outcome for effect-host implementors while executing or replaying a
+    /// runtime effect.
     pub fn into_trigger(self) -> Result<TriggerLocalExecution, RuntimeEffectControllerError> {
         match self.state {
             RuntimeEffectLocalExecutorState::Trigger(execution) => Ok(execution),
@@ -839,6 +843,8 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
         }
     }
 
+    /// Executes trigger work for effect-host implementors while executing or replaying a runtime
+    /// effect.
     pub async fn execute_trigger(
         self,
         invocation: crate::RuntimeInvocation,

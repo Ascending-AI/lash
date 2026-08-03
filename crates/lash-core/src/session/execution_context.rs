@@ -241,6 +241,8 @@ impl<'run> RuntimeExecutionContext<'run> {
         }
     }
 
+    /// Exposes trigger store to protocol and process-engine implementors while executing code
+    /// against the session runtime. Returns `None` when no trigger store is present.
     pub fn trigger_store(&self) -> Option<Arc<dyn crate::TriggerStore>> {
         self.dispatch
             .trigger_router
@@ -796,6 +798,8 @@ impl<'run> RuntimeExecutionContext<'run> {
         Arc::clone(&self.chronological_projection)
     }
 
+    /// Executes trigger effect work for protocol and process-engine implementors while executing
+    /// code against the session runtime.
     pub async fn execute_trigger_effect(
         &self,
         effect_id: String,
@@ -857,16 +861,23 @@ impl<'run> RuntimeExecutionContext<'run> {
         Arc::clone(&self.dispatch.tool_catalog)
     }
 
+    /// Exposes trigger actor to protocol and process-engine implementors while executing code
+    /// against the session runtime.
     pub fn trigger_actor(&self) -> crate::ProcessOriginator {
         self.process_originator
             .clone()
             .unwrap_or_else(|| crate::ProcessOriginator::session(self.session_scope()))
     }
 
+    /// Exposes trigger owner scope to protocol and process-engine implementors while executing code
+    /// against the session runtime.
     pub fn trigger_owner_scope(&self) -> Result<crate::TriggerOwnerScope, crate::PluginError> {
         resolve_trigger_owner_scope(&self.session_id, self.process_originator.as_ref())
     }
 
+    /// Exposes trigger registration wake target to protocol and process-engine implementors while
+    /// executing code against the session runtime. Returns `None` when no trigger registration wake
+    /// target is present.
     pub fn trigger_registration_wake_target(&self) -> Option<crate::SessionScope> {
         self.process_wake_session_id
             .as_ref()

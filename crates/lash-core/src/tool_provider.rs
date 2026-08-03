@@ -437,6 +437,8 @@ impl<'run> ToolContext<'run> {
         }
     }
 
+    /// Exposes triggers to protocol and process-engine implementors while preparing or executing an
+    /// authorized tool call.
     pub fn triggers(&self) -> ToolTriggerClient<'run> {
         ToolTriggerClient {
             context: self.clone(),
