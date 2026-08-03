@@ -1,4 +1,5 @@
 use crate::support::*;
+use lash_core::facade_support::RuntimeErrorFacadeOps;
 
 #[derive(Debug, thiserror::Error)]
 pub enum EmbedError {
@@ -199,6 +200,7 @@ pub type Result<T> = std::result::Result<T, EmbedError>;
 #[cfg(test)]
 mod tests {
     use super::EmbedError;
+    use lash_core::facade_support::RuntimeErrorFacadeOps;
     use lash_core::{
         PluginError, RuntimeEffectControllerError, RuntimeError, RuntimeErrorCause,
         RuntimeErrorCode, SessionError, StoreError,

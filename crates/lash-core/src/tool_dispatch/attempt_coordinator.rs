@@ -1,3 +1,4 @@
+use crate::facade_support::ScopedEffectControllerFacadeOps;
 use crate::{
     PreparedToolCall, RuntimeEffectKind, RuntimeEffectLocalExecutor, RuntimeInvocation,
     ToolCallOutput, ToolCallRecord, ToolFailure, ToolFailureClass, ToolResult, ToolRetryPolicy,

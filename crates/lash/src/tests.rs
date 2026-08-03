@@ -1,4 +1,11 @@
 use crate::support::*;
+use lash_core::facade_support::{
+    AgentFrameReasonFacadeOps, LiveReplaySubscriptionFacadeOps,
+    PendingTurnInputCancelTargetFacadeOps, ProcessExecutionEnvSpecFacadeOps,
+    ProcessLeaseCompletionFacadeOps, ProcessOriginatorFacadeOps, RuntimeSessionStateFacadeOps,
+    SessionCreateRequestFacadeOps, SessionGraphFacadeOps, SessionNodeRecordFacadeOps,
+    SessionReadViewFacadeOps, ToolStateFacadeOps, TurnActivityIdFacadeOps,
+};
 use std::collections::{HashMap, VecDeque};
 use std::sync::atomic::{AtomicUsize, Ordering};
 

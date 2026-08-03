@@ -4,6 +4,7 @@ use super::*;
 use bytes::Bytes;
 use http_body_util::{BodyExt, Empty};
 use lash_core::TestProcessRegistryWriteExt;
+use lash_core::facade_support::ProcessOriginatorFacadeOps;
 use lash_core::{ProcessInput, ProcessRegistration, RuntimeScope, TriggerStore};
 use lash_http_transport::{HttpResponse, HttpResponseBody, HttpTransport, HttpTransportError};
 use lash_lashlang_runtime::{LashlangToolBinding, ToolDefinitionLashlangExt};

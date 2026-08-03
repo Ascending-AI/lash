@@ -1,5 +1,6 @@
 use std::sync::{Arc, Mutex};
 
+use crate::facade_support::ScopedEffectControllerFacadeOps;
 use lash_sansio::llm::types::ProviderReplayMeta;
 use serde::{Deserialize, Serialize};
 

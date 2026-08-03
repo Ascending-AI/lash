@@ -229,12 +229,22 @@ impl ProcessExecutionEnvSpec {
             .map(|hash| ProcessExecutionEnvRef::new(format!("process-env:sha256:{hash}")))
     }
 
-    pub fn to_store_bytes(&self) -> Result<Vec<u8>, serde_json::Error> {
-        serde_json::to_vec(self)
-    }
-
     pub fn from_store_bytes(bytes: &[u8]) -> Result<Self, serde_json::Error> {
         serde_json::from_slice(bytes)
+    }
+}
+
+/// Facade-internal operations for [`ProcessExecutionEnvSpec`].
+///
+/// This is not integrator surface, carries no stability promise, and exists
+/// only for the `lash` facade. See [ADR 0051](https://github.com/Ascending-AI/lash/blob/main/docs/adr/0051-the-facade-is-the-host-api-core-is-integrator-seams.md).
+pub trait ProcessExecutionEnvSpecFacadeOps {
+    fn to_store_bytes(&self) -> Result<Vec<u8>, serde_json::Error>;
+}
+
+impl ProcessExecutionEnvSpecFacadeOps for ProcessExecutionEnvSpec {
+    fn to_store_bytes(&self) -> Result<Vec<u8>, serde_json::Error> {
+        serde_json::to_vec(self)
     }
 }
 
@@ -556,12 +566,6 @@ impl ProcessOriginator {
         Self::Host { scope: None }
     }
 
-    pub fn host_scoped(scope: impl Into<String>) -> Self {
-        Self::Host {
-            scope: Some(scope.into()),
-        }
-    }
-
     pub fn session(scope: SessionScope) -> Self {
         Self::Session {
             session_id: scope.session_id,
@@ -579,21 +583,27 @@ impl ProcessOriginator {
     }
 }
 
+/// Facade-internal operations for [`ProcessOriginator`].
+///
+/// This is not integrator surface, carries no stability promise, and exists
+/// only for the `lash` facade. See [ADR 0051](https://github.com/Ascending-AI/lash/blob/main/docs/adr/0051-the-facade-is-the-host-api-core-is-integrator-seams.md).
+pub trait ProcessOriginatorFacadeOps {
+    fn host_scoped(scope: impl Into<String>) -> Self;
+}
+
+impl ProcessOriginatorFacadeOps for ProcessOriginator {
+    fn host_scoped(scope: impl Into<String>) -> Self {
+        Self::Host {
+            scope: Some(scope.into()),
+        }
+    }
+}
+
 impl SessionScope {
     pub fn new(session_id: impl Into<String>) -> Self {
         Self {
             session_id: session_id.into(),
             agent_frame_id: None,
-        }
-    }
-
-    pub fn for_agent_frame(
-        session_id: impl Into<String>,
-        agent_frame_id: impl Into<crate::AgentFrameId>,
-    ) -> Self {
-        Self {
-            session_id: session_id.into(),
-            agent_frame_id: Some(agent_frame_id.into()),
         }
     }
 
@@ -608,6 +618,29 @@ impl SessionScope {
 
     pub fn is_empty(&self) -> bool {
         self.session_id.is_empty()
+    }
+}
+
+/// Facade-internal operations for [`SessionScope`].
+///
+/// This is not integrator surface, carries no stability promise, and exists
+/// only for the `lash` facade. See [ADR 0051](https://github.com/Ascending-AI/lash/blob/main/docs/adr/0051-the-facade-is-the-host-api-core-is-integrator-seams.md).
+pub trait SessionScopeFacadeOps {
+    fn for_agent_frame(
+        session_id: impl Into<String>,
+        agent_frame_id: impl Into<crate::AgentFrameId>,
+    ) -> Self;
+}
+
+impl SessionScopeFacadeOps for SessionScope {
+    fn for_agent_frame(
+        session_id: impl Into<String>,
+        agent_frame_id: impl Into<crate::AgentFrameId>,
+    ) -> Self {
+        Self {
+            session_id: session_id.into(),
+            agent_frame_id: Some(agent_frame_id.into()),
+        }
     }
 }
 
@@ -1022,8 +1055,16 @@ pub struct ProcessLeaseCompletion {
     pub lease_token: String,
 }
 
-impl ProcessLeaseCompletion {
-    pub fn from_lease(lease: &ProcessLease) -> Self {
+/// Facade-internal operations for [`ProcessLeaseCompletion`].
+///
+/// This is not integrator surface, carries no stability promise, and exists
+/// only for the `lash` facade. See [ADR 0051](https://github.com/Ascending-AI/lash/blob/main/docs/adr/0051-the-facade-is-the-host-api-core-is-integrator-seams.md).
+pub trait ProcessLeaseCompletionFacadeOps {
+    fn from_lease(lease: &ProcessLease) -> Self;
+}
+
+impl ProcessLeaseCompletionFacadeOps for ProcessLeaseCompletion {
+    fn from_lease(lease: &ProcessLease) -> Self {
         Self {
             process_id: lease.process_id.clone(),
             lease_token: lease.lease_token.clone(),
@@ -1076,10 +1117,6 @@ impl ProcessHandleSummary {
         self.definition = definition;
         self
     }
-
-    pub fn from_record(record: ProcessRecord) -> Self {
-        Self::new(record.id, record.identity, record.status)
-    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -1088,8 +1125,22 @@ pub struct ProcessCancelSummary {
     pub status: ProcessStatus,
 }
 
-impl ProcessCancelSummary {
-    pub fn from_record(record: ProcessRecord) -> Self {
+/// Facade-internal projection from a [`ProcessRecord`].
+///
+/// This is not integrator surface, carries no stability promise, and exists
+/// only for the `lash` facade. See [ADR 0051](https://github.com/Ascending-AI/lash/blob/main/docs/adr/0051-the-facade-is-the-host-api-core-is-integrator-seams.md).
+pub trait ProcessRecordProjection {
+    fn from_record(record: ProcessRecord) -> Self;
+}
+
+impl ProcessRecordProjection for ProcessHandleSummary {
+    fn from_record(record: ProcessRecord) -> Self {
+        Self::new(record.id, record.identity, record.status)
+    }
+}
+
+impl ProcessRecordProjection for ProcessCancelSummary {
+    fn from_record(record: ProcessRecord) -> Self {
         Self {
             process_id: record.id,
             status: record.status,

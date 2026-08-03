@@ -4,6 +4,7 @@
 //! backend executes the same cases. Backend tests provide only a fresh
 //! [`SessionStoreFactory`](crate::SessionStoreFactory) for each case.
 
+use crate::facade_support::SessionGraphFacadeOps;
 use std::collections::{BTreeMap, BTreeSet};
 use std::future::Future;
 use std::path::PathBuf;

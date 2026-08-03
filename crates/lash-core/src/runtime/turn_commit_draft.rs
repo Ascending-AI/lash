@@ -1,3 +1,5 @@
+#[cfg(test)]
+use crate::facade_support::SessionGraphFacadeOps;
 use lash_sansio::core_support::*;
 use std::sync::Arc;
 

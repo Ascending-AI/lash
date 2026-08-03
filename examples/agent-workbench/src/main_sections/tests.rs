@@ -1,6 +1,7 @@
 #[cfg(test)]
 mod tests {
     use super::*;
+    use lash_core::facade_support::ToolStateFacadeOps;
 
     pub(super) fn in_memory_trigger_store() -> Arc<dyn lash::triggers::TriggerStore> {
         Arc::new(lash::triggers::InMemoryTriggerStore::new())

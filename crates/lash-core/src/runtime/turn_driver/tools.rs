@@ -1,4 +1,5 @@
 use super::*;
+use crate::facade_support::ScopedEffectControllerFacadeOps;
 
 pub(in crate::runtime) struct ToolBatchRunOutcome {
     pub launches: Vec<crate::runtime::ToolCallLaunch>,

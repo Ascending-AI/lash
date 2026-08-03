@@ -2442,3 +2442,4 @@ async fn cross_backend_store_differential_agrees() {
          compared_backends=[in-memory,sqlite,postgres]"
     );
 }
+use lash_core::facade_support::{SessionBindingFacadeOps, ToolStateFacadeOps};

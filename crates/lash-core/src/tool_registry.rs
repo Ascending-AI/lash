@@ -8,6 +8,10 @@ use crate::{
     ToolId, ToolManifest, ToolPrepareCall, ToolProvider, ToolResult,
 };
 
+#[cfg(test)]
+use self::tool_registry_facade_ops::ToolRegistryFacadeOps;
+use self::tool_state_facade_ops::ToolStateFacadeOps;
+
 include!("tool_registry/state.rs");
 include!("tool_registry/sources.rs");
 include!("tool_registry/registry_types.rs");

@@ -3,6 +3,10 @@ use std::task::{Context, Poll};
 
 use crate::support::*;
 use futures_util::Stream;
+use lash_core::facade_support::{
+    RuntimeSessionStateFacadeOps, ScopedEffectControllerFacadeOps, TurnActivityIdFacadeOps,
+    TurnContextFacadeOps,
+};
 
 pub use lash_core::{facade_support::AssistantOutput, facade_support::TurnIssue};
 

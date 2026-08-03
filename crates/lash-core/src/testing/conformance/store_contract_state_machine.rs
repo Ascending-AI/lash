@@ -4,6 +4,7 @@
 //! language through the public trait-object contracts. Backend crates only
 //! provide fresh handles; they do not carry a `proptest` dependency.
 
+use crate::facade_support::ProcessLeaseCompletionFacadeOps;
 use std::collections::{BTreeMap, BTreeSet};
 use std::future::Future;
 use std::path::PathBuf;

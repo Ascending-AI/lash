@@ -6,6 +6,7 @@
 //! session from the store factory — so even an in-memory host needs a factory.
 //! This explicit opt-in has no silent in-memory default and holds the same `RuntimePersistence` contract as the
 //! durable backend (verified by the `runtime_persistence` conformance suite).
+use crate::facade_support::SessionGraphFacadeOps;
 
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};

@@ -10,6 +10,7 @@
 //! isolation assertion so all three keyspaces are held to one contract.
 
 use super::*;
+use crate::facade_support::ProcessExecutionEnvSpecFacadeOps;
 
 /// A pair of [`crate::ProcessExecutionEnvStore`] handles opened against the same
 /// durable backing store, used by the reopen-persistence case.

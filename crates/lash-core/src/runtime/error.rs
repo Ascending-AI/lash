@@ -152,17 +152,6 @@ impl RuntimeError {
         }
     }
 
-    pub fn with_cause(mut self, cause: RuntimeErrorCause) -> Self {
-        self.cause = Some(cause);
-        self
-    }
-
-    pub fn deleted_session_id(&self) -> Option<&str> {
-        match self.cause.as_ref()? {
-            RuntimeErrorCause::SessionDeleted { session_id } => Some(session_id),
-        }
-    }
-
     pub fn is_code(&self, code: RuntimeErrorCode) -> bool {
         self.code == code
     }
@@ -178,6 +167,29 @@ impl RuntimeError {
             RuntimeErrorCode::MissingProcessExecutionId,
             "process execution requires a non-empty persisted process id",
         )
+    }
+}
+
+/// Facade-internal operations for [`RuntimeError`].
+///
+/// This is not integrator surface, carries no stability promise, and exists
+/// only for the `lash` facade. See [ADR 0051](https://github.com/Ascending-AI/lash/blob/main/docs/adr/0051-the-facade-is-the-host-api-core-is-integrator-seams.md).
+pub trait RuntimeErrorFacadeOps {
+    fn with_cause(self, cause: RuntimeErrorCause) -> Self;
+
+    fn deleted_session_id(&self) -> Option<&str>;
+}
+
+impl RuntimeErrorFacadeOps for RuntimeError {
+    fn with_cause(mut self, cause: RuntimeErrorCause) -> Self {
+        self.cause = Some(cause);
+        self
+    }
+
+    fn deleted_session_id(&self) -> Option<&str> {
+        match self.cause.as_ref()? {
+            RuntimeErrorCause::SessionDeleted { session_id } => Some(session_id),
+        }
     }
 }
 

@@ -811,3 +811,4 @@ finish { baton: baton }
     assert!(claim_verdict.is_passed(), "{claim_verdict:?}");
     assert_eq!(call_index.load(Ordering::SeqCst), 2);
 }
+use lash_core::facade_support::SessionGraphFacadeOps;

@@ -84,28 +84,10 @@ impl ToolState {
         }
     }
 
-    pub fn generation(&self) -> u64 {
-        self.generation
-    }
-
     #[cfg(any(test, feature = "testing"))]
     pub(crate) fn with_generation(mut self, generation: u64) -> Self {
         self.generation = generation;
         self
-    }
-
-    /// Manifests for current Tool Catalog members. Orphaned and host-removed
-    /// entries are excluded (non-membership) but kept in state for rebind.
-    pub fn tool_manifests(&self) -> Vec<ToolManifest> {
-        self.tools
-            .values()
-            .filter(|entry| entry.is_member())
-            .map(ToolStateEntry::manifest)
-            .collect()
-    }
-
-    pub fn get(&self, id: &ToolId) -> Option<&ToolStateEntry> {
-        self.tools.get(id)
     }
 
     /// Edit a manifest in an explicit `ToolRegistry::apply_state` delta.
@@ -116,10 +98,6 @@ impl ToolState {
         Arc::make_mut(&mut self.tools)
             .get_mut(id)
             .map(|entry| &mut entry.manifest)
-    }
-
-    pub fn contains(&self, id: &ToolId) -> bool {
-        self.tools.contains_key(id)
     }
 
     pub fn is_empty(&self) -> bool {
@@ -134,19 +112,6 @@ impl ToolState {
         self.tools.iter()
     }
 
-    /// Toggle Tool Catalog membership for a tool. `present == false` removes
-    /// the tool from the catalog (non-membership) while keeping its state entry;
-    /// `present == true` restores membership.
-    pub fn set_membership(&mut self, id: &ToolId, present: bool) -> Result<(), ReconfigureError> {
-        let Some(entry) = Arc::make_mut(&mut self.tools).get_mut(id) else {
-            return Err(ReconfigureError::Validation(format!(
-                "unknown tool id `{id}`"
-            )));
-        };
-        entry.member = present;
-        Ok(())
-    }
-
     /// Delete a tool in an explicit `ToolRegistry::apply_state` delta.
     ///
     /// Deletion intentionally removes the entry for that delta only. Use
@@ -158,6 +123,60 @@ impl ToolState {
 
     pub(crate) fn entries(&self) -> &BTreeMap<ToolId, ToolStateEntry> {
         self.tools.as_ref()
+    }
+}
+
+pub(crate) mod tool_state_facade_ops {
+    use super::*;
+
+    /// Facade-internal operations for [`ToolState`].
+    ///
+    /// This is not integrator surface, carries no stability promise, and exists
+    /// only for the `lash` facade. See [ADR 0051](https://github.com/Ascending-AI/lash/blob/main/docs/adr/0051-the-facade-is-the-host-api-core-is-integrator-seams.md).
+    pub trait ToolStateFacadeOps {
+        fn generation(&self) -> u64;
+
+        fn tool_manifests(&self) -> Vec<ToolManifest>;
+
+        fn get(&self, id: &ToolId) -> Option<&ToolStateEntry>;
+
+        fn contains(&self, id: &ToolId) -> bool;
+
+        fn set_membership(&mut self, id: &ToolId, present: bool) -> Result<(), ReconfigureError>;
+    }
+
+    impl ToolStateFacadeOps for ToolState {
+        fn generation(&self) -> u64 {
+            self.generation
+        }
+
+        /// Manifests for current Tool Catalog members. Orphaned and host-removed
+        /// entries are excluded (non-membership) but kept in state for rebind.
+        fn tool_manifests(&self) -> Vec<ToolManifest> {
+            self.tools
+                .values()
+                .filter(|entry| entry.is_member())
+                .map(ToolStateEntry::manifest)
+                .collect()
+        }
+
+        fn get(&self, id: &ToolId) -> Option<&ToolStateEntry> {
+            self.tools.get(id)
+        }
+
+        fn contains(&self, id: &ToolId) -> bool {
+            self.tools.contains_key(id)
+        }
+
+        fn set_membership(&mut self, id: &ToolId, present: bool) -> Result<(), ReconfigureError> {
+            let Some(entry) = Arc::make_mut(&mut self.tools).get_mut(id) else {
+                return Err(ReconfigureError::Validation(format!(
+                    "unknown tool id `{id}`"
+                )));
+            };
+            entry.member = present;
+            Ok(())
+        }
     }
 }
 

@@ -1,5 +1,6 @@
 use super::*;
 use crate::PluginError;
+use crate::facade_support::RuntimeSessionStateFacadeOps;
 
 impl<'run> RuntimeTurnDriver<'run> {
     pub(super) fn effect_controller_handle(&self) -> RuntimeEffectControllerHandle<'run> {

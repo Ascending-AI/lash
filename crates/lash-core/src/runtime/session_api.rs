@@ -1,4 +1,5 @@
 use super::*;
+use crate::facade_support::{RuntimeSessionStateFacadeOps, ToolStateFacadeOps};
 
 impl LashRuntime {
     pub fn session_id(&self) -> &str {

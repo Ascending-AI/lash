@@ -2,6 +2,7 @@
 mod derived_notes_tests {
     use super::tests::{explicit_durable_test_facets, run_async_test_on_stack_budget, text_response};
     use super::*;
+    use lash_core::facade_support::{SessionGraphFacadeOps, SessionNodeRecordFacadeOps};
 
     /// Both halves of the derive-then-append fence the workbench annotator relies
     /// on, driven through real turns against a durable store.

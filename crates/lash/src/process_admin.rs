@@ -11,6 +11,7 @@
 //! wraps a [`SessionAdmin`](crate::admin::SessionAdmin).
 
 use crate::support::*;
+use lash_core::facade_support::ProcessRecordProjection;
 
 struct SurveyedTriggerStore<'a> {
     inner: &'a dyn lash_core::TriggerStore,

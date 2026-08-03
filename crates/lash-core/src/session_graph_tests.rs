@@ -1,4 +1,5 @@
 use super::*;
+use crate::facade_support::AgentFrameReasonFacadeOps;
 use crate::{Part, PartKind, PruneState, shared_parts};
 
 fn text_message(id: &str, role: MessageRole, content: &str) -> Message {

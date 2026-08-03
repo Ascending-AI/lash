@@ -2,6 +2,7 @@ use lash_sansio::core_support::*;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
+use crate::facade_support::{SessionGraphFacadeOps, SessionNodeRecordFacadeOps};
 use crate::session_graph::SessionReadModel;
 use crate::session_graph::build_active_read_replacement;
 use crate::session_model::SessionHistoryRecord;

@@ -14,6 +14,7 @@ pub mod checkpoint_observer;
 pub mod conformance;
 pub mod sansio_transcript;
 
+use crate::facade_support::ScopedEffectControllerFacadeOps;
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::{Arc, Mutex};

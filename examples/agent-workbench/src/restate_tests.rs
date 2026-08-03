@@ -3,6 +3,7 @@ use super::{
     emit_cron_occurrence_with_effect_controller,
 };
 use crate::AppError;
+use lash_core::facade_support::RuntimeErrorFacadeOps;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 

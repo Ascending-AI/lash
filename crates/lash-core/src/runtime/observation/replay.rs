@@ -283,10 +283,19 @@ impl LiveReplaySubscription {
             closed: false,
         }
     }
+}
 
-    pub async fn next_event(
-        &mut self,
-    ) -> Result<Arc<SessionObservationEvent>, LiveReplayStoreError> {
+/// Facade-internal operations for [`LiveReplaySubscription`].
+///
+/// This is not integrator surface, carries no stability promise, and exists
+/// only for the `lash` facade. See [ADR 0051](https://github.com/Ascending-AI/lash/blob/main/docs/adr/0051-the-facade-is-the-host-api-core-is-integrator-seams.md).
+#[allow(async_fn_in_trait)]
+pub trait LiveReplaySubscriptionFacadeOps {
+    async fn next_event(&mut self) -> Result<Arc<SessionObservationEvent>, LiveReplayStoreError>;
+}
+
+impl LiveReplaySubscriptionFacadeOps for LiveReplaySubscription {
+    async fn next_event(&mut self) -> Result<Arc<SessionObservationEvent>, LiveReplayStoreError> {
         futures_util::StreamExt::next(self)
             .await
             .unwrap_or(Err(LiveReplayStoreError::Closed))

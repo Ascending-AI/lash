@@ -1,6 +1,6 @@
 mod await_events;
 mod envelope;
-mod executor;
+pub(crate) mod executor;
 mod inline_host;
 mod outcome;
 pub mod promise_semantics;

@@ -3,6 +3,10 @@ use std::task::{Context, Poll};
 
 use crate::support::*;
 use futures_util::Stream;
+use lash_core::facade_support::{
+    PluginOptionsFacadeOps, RuntimeSessionStateFacadeOps, SessionBindingFacadeOps,
+    SessionScopeFacadeOps, ToolStateFacadeOps,
+};
 use lash_core::runtime::{
     PendingTurnInput, PendingTurnInputCancelOutcome, PendingTurnInputCancelResult,
     PendingTurnInputCancelTarget, PendingTurnInputSuffixCancelOutcome, QueuedWorkBatch,

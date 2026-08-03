@@ -1,5 +1,8 @@
 use crate::support::*;
 pub(crate) use lash_core::facade_support::SessionConfigPatch;
+use lash_core::facade_support::{
+    ProcessRecordProjection, ToolRegistryFacadeOps, ToolStateFacadeOps, TurnActivityIdFacadeOps,
+};
 pub use lash_core::{
     facade_support::AcceptedInjectedTurnInput, facade_support::PluginCommand,
     facade_support::PluginQuery, facade_support::PluginTask,

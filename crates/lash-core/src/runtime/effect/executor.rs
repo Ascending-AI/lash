@@ -1,3 +1,4 @@
+use crate::facade_support::RuntimeSessionStateFacadeOps;
 use std::collections::HashMap;
 #[cfg(any(test, feature = "testing"))]
 use std::pin::Pin;
@@ -8,7 +9,7 @@ use tokio::sync::mpsc;
 use tokio::sync::oneshot;
 use tokio_util::sync::CancellationToken;
 
-mod control;
+pub(crate) mod control;
 mod controller_error;
 mod scoped;
 mod trigger;
@@ -222,6 +223,7 @@ impl ProcessLocalExecution {
     }
 }
 
+#[allow(private_interfaces)]
 pub(crate) struct TurnEffectStateUpdate {
     pub(crate) policy: crate::RuntimeSessionPolicy,
     pub(crate) llm_stream_summaries: HashMap<usize, crate::runtime::LlmStreamSummary>,

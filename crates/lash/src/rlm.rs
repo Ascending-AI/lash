@@ -1,4 +1,5 @@
 use crate::support::*;
+use lash_core::facade_support::ProtocolTurnOptionsFacadeOps;
 
 #[cfg(feature = "rlm")]
 pub trait RlmTurnBuilderExt: Sized {

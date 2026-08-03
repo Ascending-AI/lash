@@ -17,7 +17,7 @@ use crate::{
     QueuedWorkBatchDraft, QueuedWorkClaim, QueuedWorkClaimBoundary, QueuedWorkPayload,
     RuntimeCommit, RuntimePersistence, RuntimeSessionState, SessionExecutionLease,
     SessionExecutionLeaseClaimOutcome, StoreError, ToolState, TurnInput, TurnInputClaim,
-    TurnInputIngress,
+    TurnInputIngress, facade_support::ToolStateFacadeOps,
 };
 
 mod claim_honesty;

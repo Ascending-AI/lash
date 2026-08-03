@@ -225,8 +225,18 @@ impl PendingTurnInputCancelTarget {
     pub fn input_id(input_id: impl Into<String>) -> Self {
         Self::InputId(input_id.into())
     }
+}
 
-    pub fn source_key(source_key: impl Into<String>) -> Self {
+/// Facade-internal operations for [`PendingTurnInputCancelTarget`].
+///
+/// This is not integrator surface, carries no stability promise, and exists
+/// only for the `lash` facade. See [ADR 0051](https://github.com/Ascending-AI/lash/blob/main/docs/adr/0051-the-facade-is-the-host-api-core-is-integrator-seams.md).
+pub trait PendingTurnInputCancelTargetFacadeOps {
+    fn source_key(source_key: impl Into<String>) -> Self;
+}
+
+impl PendingTurnInputCancelTargetFacadeOps for PendingTurnInputCancelTarget {
+    fn source_key(source_key: impl Into<String>) -> Self {
         Self::SourceKey(source_key.into())
     }
 }

@@ -271,7 +271,7 @@ async fn pending_input_reconciliation(session: &LashSession) -> anyhow::Result<(
     let anchor = second
         .source_key
         .clone()
-        .map(PendingTurnInputCancelTarget::source_key)
+        .map(PendingTurnInputCancelTarget::SourceKey)
         .unwrap_or_else(|| PendingTurnInputCancelTarget::input_id(second.input_id.clone()));
     match session.cancel_pending_turn_input_suffix(anchor).await? {
         PendingTurnInputSuffixCancelOutcome::AnchorNotFound { .. } => {

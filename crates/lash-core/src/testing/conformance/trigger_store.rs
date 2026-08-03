@@ -2,6 +2,7 @@
 //! subscriptions and atomic occurrence reservation.
 
 use super::*;
+use crate::facade_support::ProcessOriginatorFacadeOps;
 
 pub async fn trigger_store<F>(make: F)
 where

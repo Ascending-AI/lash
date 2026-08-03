@@ -1,5 +1,6 @@
 use super::turn_loop::{SessionExecutionLeaseReleasePolicy, TurnStopwatch};
 use super::*;
+use crate::facade_support::RuntimeSessionStateFacadeOps;
 
 pub(super) const MAX_AGENT_FRAME_SWITCHES: usize = 16;
 

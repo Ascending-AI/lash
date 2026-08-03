@@ -1,4 +1,5 @@
 use super::*;
+use crate::facade_support::ScopedEffectControllerFacadeOps;
 
 impl<'run> RuntimeTurnDriver<'run> {
     pub(super) fn turn_effect_invocation(

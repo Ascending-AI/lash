@@ -4,6 +4,7 @@ use std::sync::{Arc, OnceLock};
 
 use crate::session_model::{ConversationRecord, ProtocolEvent, SessionHistoryRecord};
 use crate::{BaseRenderCache, Clock, Message, MessageRole, PromptUsage, TokenUsage};
+use facade_ops::{SessionGraphFacadeOps, SessionNodeRecordFacadeOps};
 
 fn draft_node_id(namespace: &str, ordinal: u64) -> String {
     let preimage = format!("{}:{namespace}:{ordinal}", namespace.len());
@@ -636,29 +637,6 @@ impl SessionNodeRecord {
         })
     }
 
-    pub fn event(&self) -> Option<&SessionHistoryRecord> {
-        match &self.payload {
-            SessionNodePayload::Event { event } => Some(event),
-            SessionNodePayload::Plugin { .. } | SessionNodePayload::FrameOpen { .. } => None,
-        }
-    }
-
-    pub fn message(&self) -> Option<Message> {
-        match self.event()? {
-            SessionHistoryRecord::Conversation(record) => Some(record.to_message()),
-            _ => None,
-        }
-    }
-
-    pub fn plugin(&self) -> Option<(&str, &serde_json::Value)> {
-        match &self.payload {
-            SessionNodePayload::Event { .. } | SessionNodePayload::FrameOpen { .. } => None,
-            SessionNodePayload::Plugin { plugin_type, body } => {
-                Some((plugin_type.as_str(), body.as_ref()))
-            }
-        }
-    }
-
     pub fn frame_open(
         &self,
     ) -> Option<(
@@ -912,14 +890,6 @@ impl SessionGraph {
         self.append_node_draft(SessionNodeDraft::plugin(plugin_type, body))
     }
 
-    pub fn active_path_nodes(&self) -> Vec<&SessionNodeRecord> {
-        self.cache()
-            .active_path_indices
-            .iter()
-            .map(|idx| &self.nodes[*idx])
-            .collect()
-    }
-
     fn try_active_path_nodes(&self) -> Result<Vec<&SessionNodeRecord>, crate::StoreError> {
         Ok(self
             .try_cache()?
@@ -949,15 +919,6 @@ impl SessionGraph {
     ///
     /// The head caches this answer for bounded reads, but ancestry remains the
     /// truth and is used to validate every stored pointer.
-    pub fn nearest_frame_node_id(&self, leaf_node_id: Option<&str>) -> Option<&str> {
-        let idx = self
-            .nearest_ancestor_index(leaf_node_id, |node| {
-                matches!(node.payload, SessionNodePayload::FrameOpen { .. })
-            })
-            .ok()??;
-        Some(self.nodes[idx].node_id.as_str())
-    }
-
     pub fn append_protocol_event(&mut self, event: ProtocolEvent) -> String {
         self.append_node_draft(SessionNodeDraft::protocol_event(event))
     }
@@ -1000,11 +961,6 @@ impl SessionGraph {
             },
         }]);
         true
-    }
-
-    pub fn agent_frame_records(&self, session_id: &str) -> Vec<crate::AgentFrameRecord> {
-        self.try_agent_frame_records(session_id)
-            .unwrap_or_else(|err| panic!("invalid resident session graph: {err}"))
     }
 
     pub(crate) fn try_agent_frame_records(
@@ -1088,13 +1044,6 @@ impl SessionGraph {
 
     pub fn push_node_record(&mut self, node: SessionNodeRecord) {
         self.data_mut().nodes.push(node);
-    }
-
-    pub fn extend_node_records<I>(&mut self, nodes: I)
-    where
-        I: IntoIterator<Item = SessionNodeRecord>,
-    {
-        self.data_mut().nodes.extend(nodes);
     }
 
     pub fn active_path_contains(&self, node_id: &str) -> bool {
@@ -1413,3 +1362,91 @@ fn first_message_search_text(message: &Message) -> String {
 #[cfg(test)]
 #[path = "session_graph_tests.rs"]
 mod tests;
+
+pub(crate) mod facade_ops {
+    use super::*;
+
+    /// Facade-internal operations for [`SessionNodeRecord`].
+    ///
+    /// This is not integrator surface, carries no stability promise, and exists
+    /// only for the `lash` facade. See [ADR 0051](https://github.com/Ascending-AI/lash/blob/main/docs/adr/0051-the-facade-is-the-host-api-core-is-integrator-seams.md).
+    pub trait SessionNodeRecordFacadeOps {
+        fn event(&self) -> Option<&SessionHistoryRecord>;
+
+        fn message(&self) -> Option<Message>;
+
+        fn plugin(&self) -> Option<(&str, &serde_json::Value)>;
+    }
+
+    impl SessionNodeRecordFacadeOps for SessionNodeRecord {
+        fn event(&self) -> Option<&SessionHistoryRecord> {
+            match &self.payload {
+                SessionNodePayload::Event { event } => Some(event),
+                SessionNodePayload::Plugin { .. } | SessionNodePayload::FrameOpen { .. } => None,
+            }
+        }
+
+        fn message(&self) -> Option<Message> {
+            match self.event()? {
+                SessionHistoryRecord::Conversation(record) => Some(record.to_message()),
+                _ => None,
+            }
+        }
+
+        fn plugin(&self) -> Option<(&str, &serde_json::Value)> {
+            match &self.payload {
+                SessionNodePayload::Event { .. } | SessionNodePayload::FrameOpen { .. } => None,
+                SessionNodePayload::Plugin { plugin_type, body } => {
+                    Some((plugin_type.as_str(), body.as_ref()))
+                }
+            }
+        }
+    }
+
+    /// Facade-internal operations for [`SessionGraph`].
+    ///
+    /// This is not integrator surface, carries no stability promise, and exists
+    /// only for the `lash` facade. See [ADR 0051](https://github.com/Ascending-AI/lash/blob/main/docs/adr/0051-the-facade-is-the-host-api-core-is-integrator-seams.md).
+    pub trait SessionGraphFacadeOps {
+        fn active_path_nodes(&self) -> Vec<&SessionNodeRecord>;
+
+        fn nearest_frame_node_id(&self, leaf_node_id: Option<&str>) -> Option<&str>;
+
+        fn agent_frame_records(&self, session_id: &str) -> Vec<crate::AgentFrameRecord>;
+
+        fn extend_node_records<I>(&mut self, nodes: I)
+        where
+            I: IntoIterator<Item = SessionNodeRecord>;
+    }
+
+    impl SessionGraphFacadeOps for SessionGraph {
+        fn active_path_nodes(&self) -> Vec<&SessionNodeRecord> {
+            self.cache()
+                .active_path_indices
+                .iter()
+                .map(|idx| &self.nodes[*idx])
+                .collect()
+        }
+
+        fn nearest_frame_node_id(&self, leaf_node_id: Option<&str>) -> Option<&str> {
+            let idx = self
+                .nearest_ancestor_index(leaf_node_id, |node| {
+                    matches!(node.payload, SessionNodePayload::FrameOpen { .. })
+                })
+                .ok()??;
+            Some(self.nodes[idx].node_id.as_str())
+        }
+
+        fn agent_frame_records(&self, session_id: &str) -> Vec<crate::AgentFrameRecord> {
+            self.try_agent_frame_records(session_id)
+                .unwrap_or_else(|err| panic!("invalid resident session graph: {err}"))
+        }
+
+        fn extend_node_records<I>(&mut self, nodes: I)
+        where
+            I: IntoIterator<Item = SessionNodeRecord>,
+        {
+            self.data_mut().nodes.extend(nodes);
+        }
+    }
+}

@@ -1,4 +1,5 @@
 use super::*;
+use crate::facade_support::SessionGraphFacadeOps;
 
 pub(in crate::runtime::session_manager) struct SessionCreatePlan {
     pub(in crate::runtime::session_manager) session_id: String,

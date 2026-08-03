@@ -1,3 +1,4 @@
+use lash_core::facade_support::SessionGraphFacadeOps;
 use std::collections::{BTreeMap, BTreeSet};
 
 use serde::{Deserialize, Serialize};

@@ -13,16 +13,16 @@ pub use lash_sansio::{
 
 mod actions;
 mod error;
-mod history;
+pub(crate) mod history;
 mod hooks;
-mod protocol;
+pub(crate) mod protocol;
 mod registrar;
 mod registry;
 pub mod runtime_host;
 mod runtime_impl;
 mod services;
 mod session_obj;
-mod session_types;
+pub(crate) mod session_types;
 mod snapshot;
 mod tool_catalog;
 mod trigger_registry;

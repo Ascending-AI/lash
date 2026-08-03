@@ -1,3 +1,5 @@
+use lash_core::facade_support::LiveReplaySubscriptionFacadeOps;
+
 const LIVE_REPLAY_EVENTS_PER_TURN: usize = 96;
 const LIVE_REPLAY_MAIN_CAPACITY: usize = 256;
 const LIVE_REPLAY_TRIM_CAPACITY: usize = 8;

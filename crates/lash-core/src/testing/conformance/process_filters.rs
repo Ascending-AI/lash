@@ -1,5 +1,6 @@
 use super::process_registry::registration;
 use super::*;
+use crate::facade_support::SessionScopeFacadeOps;
 
 pub(super) async fn list_processes_filters_by_enriched_fields(registry: Arc<dyn ProcessRegistry>) {
     async fn filtered_ids(

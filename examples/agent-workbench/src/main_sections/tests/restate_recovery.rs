@@ -1,3 +1,5 @@
+use lash_core::facade_support::LiveReplaySubscriptionFacadeOps;
+
 #[test]
 #[ignore = "requires a running Restate server; use `just agent-workbench-restate-e2e`"]
 fn live_restate_process_llm_query_with_typed_output_succeeds() {
