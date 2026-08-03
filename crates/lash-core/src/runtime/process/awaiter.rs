@@ -54,7 +54,8 @@ const AWAIT_BACKOFF_MAX: Duration = Duration::from_secs(1);
 /// `events_after`, remains the reconcile source.
 ///
 /// ```
-/// use lash_core::{ProcessEvent, ProcessEventSink};
+/// use lash_core::ProcessEvent;
+/// use lash_core::runtime::ProcessEventSink;
 /// use tokio::sync::mpsc;
 ///
 /// struct ChannelSink {
