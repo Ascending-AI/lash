@@ -688,6 +688,15 @@ async fn sqlite_store_satisfies_runtime_persistence_conformance() {
     .await;
 }
 
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn sqlite_turn_crash_phase_recovery_matrix() {
+    let dir = tempfile::tempdir().expect("turn crash matrix tempdir");
+    lash_core::testing::conformance::turn_crash_phase_recovery_matrix(|scenario| {
+        open_store(&dir.path().join(format!("turn-crash-{scenario}.db")))
+    })
+    .await;
+}
+
 #[tokio::test]
 async fn sqlite_store_schema_excludes_embedded_turn_replay_tables() {
     let dir = tempfile::tempdir().expect("tempdir");

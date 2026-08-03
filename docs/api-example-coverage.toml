@@ -48279,6 +48279,14 @@ disposition = "unused-add"
 reason = "Add lash::testing::conformance::trigger_store_reopenable to the agent-service trigger flow example and assert its externally observable result."
 
 [[api]]
+symbol = "lash::testing::conformance::turn_crash_phase_recovery_matrix"
+kind = "function"
+availability = "all-features"
+area = "stores"
+disposition = "unused-add"
+reason = "Add lash::testing::conformance::turn_crash_phase_recovery_matrix to the agent-service persistence setup example and assert its externally observable result."
+
+[[api]]
 symbol = "lash::testing::conformance::turn_input_claims_supersede_across_session_lease_generations"
 kind = "function"
 availability = "all-features"

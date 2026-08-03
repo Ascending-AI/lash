@@ -32,6 +32,7 @@ mod session_store_factory;
 mod store_contract_state_machine;
 mod trigger_store;
 mod turn_control;
+mod turn_crash_recovery;
 mod wake_delivery;
 
 pub use artifact_store::*;
@@ -53,6 +54,7 @@ pub use session_store_factory::*;
 pub use store_contract_state_machine::*;
 pub use trigger_store::*;
 pub use turn_control::*;
+pub use turn_crash_recovery::*;
 pub use wake_delivery::*;
 
 use std::collections::BTreeMap;

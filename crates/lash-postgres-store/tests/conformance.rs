@@ -124,6 +124,19 @@ async fn postgres_runtime_persistence_satisfies_conformance_when_configured() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn postgres_turn_crash_phase_recovery_matrix_when_configured() {
+    let Some((_database_lock, storage)) = storage().await else {
+        eprintln!("skipping Postgres turn crash matrix: LASH_POSTGRES_DATABASE_URL is not set");
+        return;
+    };
+    reset(&storage).await;
+    lash_core::testing::conformance::turn_crash_phase_recovery_matrix(|_| {
+        Arc::new(storage.unbound_session_store()) as Arc<dyn RuntimePersistence>
+    })
+    .await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn postgres_artifact_store_satisfies_conformance_when_configured() {
     let Some((_database_lock, storage)) = storage().await else {
         eprintln!(
