@@ -684,7 +684,7 @@ pub struct LlmRequestSpec {
 }
 
 impl LlmRequestSpec {
-    pub async fn from_request(
+    pub(crate) async fn from_request(
         request: &CoreLlmRequest,
         attachment_store: &crate::SessionAttachmentStore,
     ) -> Result<Self, RuntimeEffectControllerError> {
@@ -703,7 +703,7 @@ impl LlmRequestSpec {
         })
     }
 
-    pub fn into_request(
+    pub(crate) fn into_request(
         self,
         stream_events: Option<LlmEventSender>,
         provider_trace: Option<LlmProviderTraceSender>,
@@ -769,7 +769,9 @@ async fn attachment_spec_from_attachment(
 }
 
 impl RuntimeEffectOutcome {
-    pub fn into_llm_call(self) -> Result<RuntimeLlmCallOutcome, RuntimeEffectControllerError> {
+    pub(crate) fn into_llm_call(
+        self,
+    ) -> Result<RuntimeLlmCallOutcome, RuntimeEffectControllerError> {
         match self {
             Self::LlmCall {
                 result,
@@ -783,7 +785,7 @@ impl RuntimeEffectOutcome {
         }
     }
 
-    pub fn into_direct_response(
+    pub(crate) fn into_direct_response(
         self,
     ) -> Result<RuntimeDirectLlmOutcome, RuntimeEffectControllerError> {
         match self {
@@ -798,7 +800,7 @@ impl RuntimeEffectOutcome {
         }
     }
 
-    pub fn into_tool_attempt_effect(
+    pub(crate) fn into_tool_attempt_effect(
         self,
     ) -> Result<ToolAttemptEffectOutcome, RuntimeEffectControllerError> {
         match self {
@@ -813,7 +815,7 @@ impl RuntimeEffectOutcome {
         }
     }
 
-    pub fn into_tool_batch_effect(
+    pub(crate) fn into_tool_batch_effect(
         self,
     ) -> Result<ToolBatchEffectOutcome, RuntimeEffectControllerError> {
         match self {
@@ -847,7 +849,7 @@ impl RuntimeEffectOutcome {
         }
     }
 
-    pub fn into_exec_code(
+    pub(crate) fn into_exec_code(
         self,
     ) -> Result<Result<ExecResponse, String>, RuntimeEffectControllerError> {
         match self {
@@ -869,7 +871,7 @@ impl RuntimeEffectOutcome {
         }
     }
 
-    pub fn into_sync_execution_environment(
+    pub(crate) fn into_sync_execution_environment(
         self,
     ) -> Result<Result<Option<ExecutionEnvironmentSync>, String>, RuntimeEffectControllerError>
     {
@@ -882,7 +884,9 @@ impl RuntimeEffectOutcome {
         }
     }
 
-    pub fn into_await_event(self) -> Result<crate::Resolution, RuntimeEffectControllerError> {
+    pub(crate) fn into_await_event(
+        self,
+    ) -> Result<crate::Resolution, RuntimeEffectControllerError> {
         match self {
             Self::AwaitEvent { resolution } => Ok(resolution),
             other => Err(RuntimeEffectControllerError::wrong_outcome(
