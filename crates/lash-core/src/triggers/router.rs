@@ -146,7 +146,7 @@ impl TriggerRouter {
         }
     }
 
-    pub fn store(&self) -> Arc<dyn TriggerStore> {
+    pub(crate) fn store(&self) -> Arc<dyn TriggerStore> {
         Arc::clone(&self.store)
     }
 

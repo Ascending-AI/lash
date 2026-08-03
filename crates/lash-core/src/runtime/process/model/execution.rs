@@ -43,25 +43,6 @@ pub enum ProcessExecutionWriteAuthority {
 }
 
 impl ProcessExecutionWriteAuthority {
-    pub fn lease(lease: ProcessLease) -> Self {
-        Self::Lease(lease)
-    }
-
-    pub fn invocation(process_id: impl Into<String>, execution_id: impl Into<String>) -> Self {
-        Self::Invocation {
-            process_id: process_id.into(),
-            execution_id: execution_id.into(),
-            attempt: None,
-            resume_from: None,
-        }
-    }
-
-    /// Bind a fresh invocation to a validated durable segment handover.
-    ///
-    /// The retained start fact is checked atomically when the new attempt is
-    /// recorded. This permits both recovery dispositions to continue from a
-    /// durable handover without treating the operation as a restart from
-    /// segment zero.
     pub fn invocation_resume(
         process_id: impl Into<String>,
         execution_id: impl Into<String>,
@@ -72,6 +53,19 @@ impl ProcessExecutionWriteAuthority {
             execution_id: execution_id.into(),
             attempt: None,
             resume_from: Some(resume_from),
+        }
+    }
+
+    pub fn lease(lease: ProcessLease) -> Self {
+        Self::Lease(lease)
+    }
+
+    pub fn invocation(process_id: impl Into<String>, execution_id: impl Into<String>) -> Self {
+        Self::Invocation {
+            process_id: process_id.into(),
+            execution_id: execution_id.into(),
+            attempt: None,
+            resume_from: None,
         }
     }
 
@@ -89,13 +83,6 @@ impl ProcessExecutionWriteAuthority {
                 attempt: Some(attempt),
                 resume_from: resume_from.clone(),
             },
-        }
-    }
-
-    pub fn lease_ref(&self) -> Option<&ProcessLease> {
-        match self {
-            Self::Lease(lease) => Some(lease),
-            Self::Invocation { .. } => None,
         }
     }
 
@@ -130,7 +117,7 @@ impl ProcessExecutionWriteAuthority {
         )
     }
 
-    pub fn validate_resume_predecessor(
+    pub(crate) fn validate_resume_predecessor(
         &self,
         process_id: &str,
         retained: Option<&ProcessStarted>,
@@ -294,7 +281,7 @@ impl ProcessCompletionOutcome {
         }
     }
 
-    pub fn stored(&self) -> &ProcessRecord {
+    pub(crate) fn stored(&self) -> &ProcessRecord {
         match self {
             Self::Committed(record)
             | Self::AlreadyApplied { stored: record }
@@ -302,7 +289,8 @@ impl ProcessCompletionOutcome {
         }
     }
 
-    pub fn into_record(self) -> ProcessRecord {
+    #[cfg(any(test, feature = "testing"))]
+    pub(crate) fn into_record(self) -> ProcessRecord {
         match self {
             Self::Committed(record)
             | Self::AlreadyApplied { stored: record }
@@ -320,7 +308,7 @@ impl std::ops::Deref for ProcessCompletionOutcome {
 }
 
 impl ProcessStartOutcome {
-    pub fn into_record(self) -> Result<ProcessRecord, crate::PluginError> {
+    pub(crate) fn into_record(self) -> Result<ProcessRecord, crate::PluginError> {
         match self {
             Self::Started(record) | Self::AlreadyApplied(record) => Ok(record),
             Self::AlreadyStarted { current, by } => {

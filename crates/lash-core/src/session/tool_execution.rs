@@ -8,6 +8,7 @@ use crate::{
     ModelToolReturn, SessionStreamEvent, ToolCallOutput, ToolCallRecord, ToolCancellation,
     ToolFailure, ToolFailureClass, ToolResult, TurnActivityId, TurnEvent,
 };
+use lash_sansio::core_support::*;
 use std::collections::HashMap;
 
 #[derive(Clone)]
@@ -30,11 +31,6 @@ impl ToolInvocation {
         }
     }
 
-    pub fn with_execution_grant(mut self, grant: crate::ToolExecutionGrant) -> Self {
-        self.execution_grant = Some(Box::new(grant));
-        self
-    }
-
     pub fn label(&self) -> String {
         self.tool_id.to_string()
     }
@@ -44,6 +40,11 @@ impl ToolInvocation {
         hook: crate::ToolChildExecutionTraceHook,
     ) -> Self {
         self.child_execution_trace_hook = Some(hook);
+        self
+    }
+
+    pub fn with_execution_grant(mut self, grant: crate::ToolExecutionGrant) -> Self {
+        self.execution_grant = Some(Box::new(grant));
         self
     }
 }
@@ -103,7 +104,10 @@ mod tests {
         assert_eq!(completed.call_id, "call");
         assert_eq!(completed.tool_name, "tool");
         assert_eq!(completed.model_return.call_id, "call");
-        assert_eq!(completed.output.status(), crate::ToolCallStatus::Cancelled);
+        assert_eq!(
+            completed.output.status(),
+            lash_sansio::ToolCallStatus::Cancelled
+        );
         assert_eq!(completed.duration_ms, 0);
     }
 }
@@ -451,252 +455,6 @@ impl RuntimeExecutionContext<'_> {
         .await;
     }
 
-    #[expect(
-        clippy::too_many_arguments,
-        reason = "tool execution carries explicit runtime call metadata"
-    )]
-    pub(crate) async fn execute_tool_call(
-        &self,
-        call_id: String,
-        name: String,
-        args: serde_json::Value,
-        index: usize,
-        replay: Option<crate::llm::types::ProviderReplayMeta>,
-        parent_invocation: Option<crate::RuntimeInvocation>,
-        child_execution_trace_hook: Option<crate::ToolChildExecutionTraceHook>,
-    ) -> CompletedProtocolToolCall {
-        let _ = self
-            .dispatch
-            .event_tx
-            .send(SessionStreamEvent::ToolCallStart {
-                call_id: Some(call_id.clone()),
-                name: name.clone(),
-                args: args.clone(),
-            })
-            .await;
-        let tool_correlation_id = TurnActivityId::new(format!("tool:{call_id}"));
-        self.emit_tool_call_started_trace(&call_id, &name, &args);
-        self.emit_turn_activity(
-            tool_correlation_id.clone(),
-            TurnEvent::ToolCallStarted {
-                call_id: Some(call_id.clone()),
-                name: name.clone(),
-                args: args.clone(),
-                graph_key: self.code_block_graph_key(),
-                parent_call_id: self.batch_parent_call_id(),
-            },
-        )
-        .await;
-
-        let parent_invocation = parent_invocation.or_else(|| self.parent_invocation.clone());
-        let mut dispatch = (*self.dispatch).clone();
-        dispatch.parent_invocation = parent_invocation.clone();
-        let pending = crate::sansio::PendingToolCall {
-            call_id: call_id.clone(),
-            tool_name: name,
-            args,
-            replay: replay.clone(),
-        };
-        let launch =
-            match prepare_tool_call_with_context(&dispatch, pending, Some(call_id.clone())).await {
-                ToolPreparationOutcome::Prepared(prepared) => {
-                    let retry_policy = crate::tool_dispatch::resolve_callable_manifest_by_id(
-                        &dispatch,
-                        &prepared.tool_id,
-                    )
-                    .map(|manifest| manifest.retry_policy)
-                    .unwrap_or(crate::ToolRetryPolicy::Never);
-                    let trace_hooks: HashMap<String, crate::ToolChildExecutionTraceHook> =
-                        child_execution_trace_hook
-                            .map(|hook| std::iter::once((call_id.clone(), hook)).collect())
-                            .unwrap_or_default();
-                    let coordinated = coordinate_tool_invocation(
-                        &dispatch,
-                        prepared,
-                        None,
-                        retry_policy,
-                        ToolAttemptEffectIdentity::Scalar {
-                            parent: parent_invocation.clone(),
-                        },
-                        self.cancellation_token.clone(),
-                        || {
-                            crate::RuntimeEffectLocalExecutor::tool_batch(
-                                self.clone(),
-                                trace_hooks.clone(),
-                            )
-                        },
-                    )
-                    .await;
-                    self.restore_tool_trigger_outcomes(coordinated.triggers);
-                    coordinated.launch
-                }
-                ToolPreparationOutcome::Completed(outcome) => ToolCallLaunch::Done(*outcome),
-            };
-        let mut outcome = match launch {
-            ToolCallLaunch::Done(outcome) => outcome,
-            ToolCallLaunch::Pending(pending) => {
-                self.await_pending_tool_dispatch_outcome(
-                    &call_id,
-                    parent_invocation.clone(),
-                    pending,
-                    self.cancellation_token.clone(),
-                )
-                .await
-            }
-        };
-        outcome.record.call_id = Some(call_id.clone());
-
-        self.complete_tool_call(index, call_id, replay, outcome, tool_correlation_id)
-            .await
-    }
-
-    #[expect(
-        clippy::too_many_arguments,
-        reason = "tool execution carries explicit runtime call metadata"
-    )]
-    pub(crate) async fn execute_tool_call_by_id(
-        &self,
-        call_id: String,
-        tool_id: crate::ToolId,
-        args: serde_json::Value,
-        index: usize,
-        replay: Option<crate::llm::types::ProviderReplayMeta>,
-        parent_invocation: Option<crate::RuntimeInvocation>,
-        child_execution_trace_hook: Option<crate::ToolChildExecutionTraceHook>,
-    ) -> CompletedProtocolToolCall {
-        let Some(manifest) =
-            crate::tool_dispatch::resolve_callable_manifest_by_id(self.dispatch.as_ref(), &tool_id)
-        else {
-            let outcome = ToolDispatchOutcome {
-                record: ToolCallRecord {
-                    call_id: Some(call_id.clone()),
-                    tool: tool_id.to_string(),
-                    args,
-                    output: ToolCallOutput::failure(ToolFailure::runtime(
-                        ToolFailureClass::Unavailable,
-                        "tool_unavailable",
-                        format!("Tool id `{tool_id}` is unavailable in this session"),
-                    )),
-                    duration_ms: 0,
-                },
-            };
-            let activity_id = TurnActivityId::new(format!("tool:{call_id}"));
-            return self
-                .complete_tool_call(index, call_id, replay, outcome, activity_id)
-                .await;
-        };
-        self.execute_tool_call(
-            call_id,
-            manifest.name,
-            args,
-            index,
-            replay,
-            parent_invocation,
-            child_execution_trace_hook,
-        )
-        .await
-    }
-
-    #[expect(
-        clippy::too_many_arguments,
-        reason = "tool execution carries explicit runtime call metadata"
-    )]
-    pub(crate) async fn execute_tool_call_by_grant(
-        &self,
-        call_id: String,
-        grant: crate::ToolExecutionGrant,
-        args: serde_json::Value,
-        index: usize,
-        replay: Option<crate::llm::types::ProviderReplayMeta>,
-        parent_invocation: Option<crate::RuntimeInvocation>,
-        child_execution_trace_hook: Option<crate::ToolChildExecutionTraceHook>,
-    ) -> CompletedProtocolToolCall {
-        let name = grant.manifest.name.clone();
-        let _ = self
-            .dispatch
-            .event_tx
-            .send(SessionStreamEvent::ToolCallStart {
-                call_id: Some(call_id.clone()),
-                name: name.clone(),
-                args: args.clone(),
-            })
-            .await;
-        let tool_correlation_id = TurnActivityId::new(format!("tool:{call_id}"));
-        self.emit_tool_call_started_trace(&call_id, &name, &args);
-        self.emit_turn_activity(
-            tool_correlation_id.clone(),
-            TurnEvent::ToolCallStarted {
-                call_id: Some(call_id.clone()),
-                name: name.clone(),
-                args: args.clone(),
-                graph_key: self.code_block_graph_key(),
-                parent_call_id: self.batch_parent_call_id(),
-            },
-        )
-        .await;
-
-        let parent_invocation = parent_invocation.or_else(|| self.parent_invocation.clone());
-        let mut dispatch = (*self.dispatch).clone();
-        dispatch.parent_invocation = parent_invocation.clone();
-        let pending = crate::sansio::PendingToolCall {
-            call_id: call_id.clone(),
-            tool_name: name,
-            args,
-            replay: replay.clone(),
-        };
-        let launch = match prepare_granted_tool_call_with_context(
-            &dispatch,
-            &grant,
-            pending,
-            Some(call_id.clone()),
-        )
-        .await
-        {
-            ToolPreparationOutcome::Prepared(prepared) => {
-                let trace_hooks: HashMap<String, crate::ToolChildExecutionTraceHook> =
-                    child_execution_trace_hook
-                        .map(|hook| std::iter::once((call_id.clone(), hook)).collect())
-                        .unwrap_or_default();
-                let coordinated = coordinate_tool_invocation(
-                    &dispatch,
-                    prepared,
-                    Some(Box::new(grant.clone())),
-                    grant.manifest.retry_policy,
-                    ToolAttemptEffectIdentity::Scalar {
-                        parent: parent_invocation.clone(),
-                    },
-                    self.cancellation_token.clone(),
-                    || {
-                        crate::RuntimeEffectLocalExecutor::tool_batch(
-                            self.clone(),
-                            trace_hooks.clone(),
-                        )
-                    },
-                )
-                .await;
-                self.restore_tool_trigger_outcomes(coordinated.triggers);
-                coordinated.launch
-            }
-            ToolPreparationOutcome::Completed(outcome) => ToolCallLaunch::Done(*outcome),
-        };
-        let mut outcome = match launch {
-            ToolCallLaunch::Done(outcome) => outcome,
-            ToolCallLaunch::Pending(pending) => {
-                self.await_pending_tool_dispatch_outcome(
-                    &call_id,
-                    parent_invocation.clone(),
-                    pending,
-                    self.cancellation_token.clone(),
-                )
-                .await
-            }
-        };
-        outcome.record.call_id = Some(call_id.clone());
-
-        self.complete_tool_call(index, call_id, replay, outcome, tool_correlation_id)
-            .await
-    }
-
     pub(crate) async fn prepare_tool_call(
         &self,
         pending: crate::sansio::PendingToolCall,
@@ -753,44 +511,6 @@ impl RuntimeExecutionContext<'_> {
             max_attempts,
             tool_context,
         ))
-        .await
-    }
-
-    fn restore_tool_trigger_outcomes(
-        &self,
-        outcomes: Vec<crate::tool_dispatch::ToolTriggerEffectOutcome>,
-    ) {
-        for outcome in outcomes {
-            let _ = self.dispatch.trigger_outcomes.enqueue(outcome);
-        }
-    }
-
-    pub(super) async fn await_process_with_cancellation(
-        &self,
-        process_id: &str,
-        parent_invocation: Option<crate::RuntimeInvocation>,
-        cancellation: Option<tokio_util::sync::CancellationToken>,
-    ) -> Result<crate::ProcessAwaitOutput, crate::PluginError> {
-        let _phase = self.named_phase("process.await_handle");
-        let cancellation = cancellation.unwrap_or_default();
-        let turn_cancel_scope = self
-            .dispatch
-            .effect_controller
-            .scoped()
-            .execution_scope()
-            .clone();
-        let mut process_scope = self.process_scope(parent_invocation);
-        if self.observe_turn_cancel {
-            process_scope = process_scope.with_turn_cancellation(cancellation, turn_cancel_scope);
-        }
-        // FIG-790: whether a journaled command is emitted must be
-        // replay-deterministic. Emit one Process::Await unconditionally and
-        // let the effect controller observe turn cancellation only afterward.
-        crate::runtime::release_process_execution_permit_while(
-            self.dispatch
-                .processes
-                .await_process(process_id, process_scope),
-        )
         .await
     }
 
@@ -995,62 +715,39 @@ impl RuntimeExecutionContext<'_> {
         .await
     }
 
-    pub async fn call_tool_by_id(
+    fn restore_tool_trigger_outcomes(
         &self,
-        call_id: String,
-        tool_id: crate::ToolId,
-        args: serde_json::Value,
-        index: usize,
-    ) -> ToolInvocationReply {
-        let executed = self
-            .execute_tool_call_by_id(call_id, tool_id, args, index, None, None, None)
-            .await;
-        let reply = ToolInvocationReply::from_output(executed.completed.output);
-        reply.with_record(executed.record)
+        outcomes: Vec<crate::tool_dispatch::ToolTriggerEffectOutcome>,
+    ) {
+        for outcome in outcomes {
+            let _ = self.dispatch.trigger_outcomes.enqueue(outcome);
+        }
     }
 
-    pub async fn call_tool_by_id_with_child_execution_trace_hook(
+    pub(super) async fn await_process_with_cancellation(
         &self,
-        call_id: String,
-        tool_id: crate::ToolId,
-        args: serde_json::Value,
-        index: usize,
-        trace_hook: crate::ToolChildExecutionTraceHook,
-    ) -> ToolInvocationReply {
-        let executed = self
-            .execute_tool_call_by_id(call_id, tool_id, args, index, None, None, Some(trace_hook))
-            .await;
-        let reply = ToolInvocationReply::from_output(executed.completed.output);
-        reply.with_record(executed.record)
-    }
-
-    pub async fn call_tool_with_execution_grant(
-        &self,
-        call_id: String,
-        grant: crate::ToolExecutionGrant,
-        args: serde_json::Value,
-        index: usize,
-    ) -> ToolInvocationReply {
-        let executed = self
-            .execute_tool_call_by_grant(call_id, grant, args, index, None, None, None)
-            .await;
-        let reply = ToolInvocationReply::from_output(executed.completed.output);
-        reply.with_record(executed.record)
-    }
-
-    pub async fn call_tool_with_execution_grant_and_child_execution_trace_hook(
-        &self,
-        call_id: String,
-        grant: crate::ToolExecutionGrant,
-        args: serde_json::Value,
-        index: usize,
-        trace_hook: crate::ToolChildExecutionTraceHook,
-    ) -> ToolInvocationReply {
-        let executed = self
-            .execute_tool_call_by_grant(call_id, grant, args, index, None, None, Some(trace_hook))
-            .await;
-        let reply = ToolInvocationReply::from_output(executed.completed.output);
-        reply.with_record(executed.record)
+        process_id: &str,
+        parent_invocation: Option<crate::RuntimeInvocation>,
+        cancellation: Option<tokio_util::sync::CancellationToken>,
+    ) -> Result<crate::ProcessAwaitOutput, crate::PluginError> {
+        let _phase = self.named_phase("process.await_handle");
+        let cancellation = cancellation.unwrap_or_default();
+        let turn_cancel_scope = self
+            .dispatch
+            .effect_controller
+            .scoped()
+            .execution_scope()
+            .clone();
+        let mut process_scope = self.process_scope(parent_invocation);
+        if self.observe_turn_cancel {
+            process_scope = process_scope.with_turn_cancellation(cancellation, turn_cancel_scope);
+        }
+        crate::runtime::release_process_execution_permit_while(
+            self.dispatch
+                .processes
+                .await_process(process_id, process_scope),
+        )
+        .await
     }
 
     pub async fn call_tool_batch(&self, calls: Vec<ToolInvocation>) -> Vec<ToolInvocationReply> {
@@ -1265,21 +962,18 @@ impl RuntimeExecutionContext<'_> {
             .collect()
     }
 
-    pub async fn start_tool_call(
+    pub async fn call_tool_by_id(
         &self,
         call_id: String,
-        name: String,
+        tool_id: crate::ToolId,
         args: serde_json::Value,
+        index: usize,
     ) -> ToolInvocationReply {
-        self.start_tool_process(call_id, name, args).await
-    }
-
-    pub async fn await_tool_handle(
-        &self,
-        call_id: String,
-        handle: serde_json::Value,
-    ) -> ToolInvocationReply {
-        self.await_process_handle(call_id, handle).await
+        let executed = self
+            .execute_tool_call_by_id(call_id, tool_id, args, index, None, None, None)
+            .await;
+        let reply = ToolInvocationReply::from_output(executed.completed.output);
+        reply.with_record(executed.record)
     }
 
     pub async fn cancel_tool_handle(
@@ -1290,6 +984,204 @@ impl RuntimeExecutionContext<'_> {
         self.cancel_process_handle(call_id, handle).await
     }
 
+    pub async fn await_tool_handle(
+        &self,
+        call_id: String,
+        handle: serde_json::Value,
+    ) -> ToolInvocationReply {
+        self.await_process_handle(call_id, handle).await
+    }
+
+    pub async fn call_tool_by_id_with_child_execution_trace_hook(
+        &self,
+        call_id: String,
+        tool_id: crate::ToolId,
+        args: serde_json::Value,
+        index: usize,
+        trace_hook: crate::ToolChildExecutionTraceHook,
+    ) -> ToolInvocationReply {
+        let executed = self
+            .execute_tool_call_by_id(call_id, tool_id, args, index, None, None, Some(trace_hook))
+            .await;
+        let reply = ToolInvocationReply::from_output(executed.completed.output);
+        reply.with_record(executed.record)
+    }
+
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "tool execution carries explicit runtime call metadata"
+    )]
+    pub(crate) async fn execute_tool_call(
+        &self,
+        call_id: String,
+        name: String,
+        args: serde_json::Value,
+        index: usize,
+        replay: Option<crate::llm::types::ProviderReplayMeta>,
+        parent_invocation: Option<crate::RuntimeInvocation>,
+        child_execution_trace_hook: Option<crate::ToolChildExecutionTraceHook>,
+    ) -> CompletedProtocolToolCall {
+        let _ = self
+            .dispatch
+            .event_tx
+            .send(SessionStreamEvent::ToolCallStart {
+                call_id: Some(call_id.clone()),
+                name: name.clone(),
+                args: args.clone(),
+            })
+            .await;
+        let tool_correlation_id = TurnActivityId::new(format!("tool:{call_id}"));
+        self.emit_tool_call_started_trace(&call_id, &name, &args);
+        self.emit_turn_activity(
+            tool_correlation_id.clone(),
+            TurnEvent::ToolCallStarted {
+                call_id: Some(call_id.clone()),
+                name: name.clone(),
+                args: args.clone(),
+                graph_key: self.code_block_graph_key(),
+                parent_call_id: self.batch_parent_call_id(),
+            },
+        )
+        .await;
+
+        let parent_invocation = parent_invocation.or_else(|| self.parent_invocation.clone());
+        let mut dispatch = (*self.dispatch).clone();
+        dispatch.parent_invocation = parent_invocation.clone();
+        let pending = crate::sansio::PendingToolCall {
+            call_id: call_id.clone(),
+            tool_name: name,
+            args,
+            replay: replay.clone(),
+        };
+        let launch =
+            match prepare_tool_call_with_context(&dispatch, pending, Some(call_id.clone())).await {
+                ToolPreparationOutcome::Prepared(prepared) => {
+                    let retry_policy = crate::tool_dispatch::resolve_callable_manifest_by_id(
+                        &dispatch,
+                        &prepared.tool_id,
+                    )
+                    .map(|manifest| manifest.retry_policy)
+                    .unwrap_or(crate::ToolRetryPolicy::Never);
+                    let trace_hooks: HashMap<String, crate::ToolChildExecutionTraceHook> =
+                        child_execution_trace_hook
+                            .map(|hook| std::iter::once((call_id.clone(), hook)).collect())
+                            .unwrap_or_default();
+                    let coordinated = coordinate_tool_invocation(
+                        &dispatch,
+                        prepared,
+                        None,
+                        retry_policy,
+                        ToolAttemptEffectIdentity::Scalar {
+                            parent: parent_invocation.clone(),
+                        },
+                        self.cancellation_token.clone(),
+                        || {
+                            crate::RuntimeEffectLocalExecutor::tool_batch(
+                                self.clone(),
+                                trace_hooks.clone(),
+                            )
+                        },
+                    )
+                    .await;
+                    self.restore_tool_trigger_outcomes(coordinated.triggers);
+                    coordinated.launch
+                }
+                ToolPreparationOutcome::Completed(outcome) => ToolCallLaunch::Done(*outcome),
+            };
+        let mut outcome = match launch {
+            ToolCallLaunch::Done(outcome) => outcome,
+            ToolCallLaunch::Pending(pending) => {
+                self.await_pending_tool_dispatch_outcome(
+                    &call_id,
+                    parent_invocation.clone(),
+                    pending,
+                    self.cancellation_token.clone(),
+                )
+                .await
+            }
+        };
+        outcome.record.call_id = Some(call_id.clone());
+
+        self.complete_tool_call(index, call_id, replay, outcome, tool_correlation_id)
+            .await
+    }
+
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "tool execution carries explicit runtime call metadata"
+    )]
+    pub(crate) async fn execute_tool_call_by_id(
+        &self,
+        call_id: String,
+        tool_id: crate::ToolId,
+        args: serde_json::Value,
+        index: usize,
+        replay: Option<crate::llm::types::ProviderReplayMeta>,
+        parent_invocation: Option<crate::RuntimeInvocation>,
+        child_execution_trace_hook: Option<crate::ToolChildExecutionTraceHook>,
+    ) -> CompletedProtocolToolCall {
+        let Some(manifest) =
+            crate::tool_dispatch::resolve_callable_manifest_by_id(self.dispatch.as_ref(), &tool_id)
+        else {
+            let outcome = ToolDispatchOutcome {
+                record: ToolCallRecord {
+                    call_id: Some(call_id.clone()),
+                    tool: tool_id.to_string(),
+                    args,
+                    output: ToolCallOutput::failure(ToolFailure::runtime(
+                        ToolFailureClass::Unavailable,
+                        "tool_unavailable",
+                        format!("Tool id `{tool_id}` is unavailable in this session"),
+                    )),
+                    duration_ms: 0,
+                },
+            };
+            let activity_id = TurnActivityId::new(format!("tool:{call_id}"));
+            return self
+                .complete_tool_call(index, call_id, replay, outcome, activity_id)
+                .await;
+        };
+        self.execute_tool_call(
+            call_id,
+            manifest.name,
+            args,
+            index,
+            replay,
+            parent_invocation,
+            child_execution_trace_hook,
+        )
+        .await
+    }
+
+    pub async fn call_tool_with_execution_grant(
+        &self,
+        call_id: String,
+        grant: crate::ToolExecutionGrant,
+        args: serde_json::Value,
+        index: usize,
+    ) -> ToolInvocationReply {
+        let executed = self
+            .execute_tool_call_by_grant(call_id, grant, args, index, None, None, None)
+            .await;
+        let reply = ToolInvocationReply::from_output(executed.completed.output);
+        reply.with_record(executed.record)
+    }
+
+    pub async fn call_tool_with_execution_grant_and_child_execution_trace_hook(
+        &self,
+        call_id: String,
+        grant: crate::ToolExecutionGrant,
+        args: serde_json::Value,
+        index: usize,
+        trace_hook: crate::ToolChildExecutionTraceHook,
+    ) -> ToolInvocationReply {
+        let executed = self
+            .execute_tool_call_by_grant(call_id, grant, args, index, None, None, Some(trace_hook))
+            .await;
+        let reply = ToolInvocationReply::from_output(executed.completed.output);
+        reply.with_record(executed.record)
+    }
+
     pub async fn signal_tool_handle(
         &self,
         call_id: String,
@@ -1298,6 +1190,106 @@ impl RuntimeExecutionContext<'_> {
         payload: serde_json::Value,
     ) -> ToolInvocationReply {
         self.signal_process_handle(call_id, handle, signal_name, payload)
+            .await
+    }
+
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "tool execution carries explicit runtime call metadata"
+    )]
+    pub(crate) async fn execute_tool_call_by_grant(
+        &self,
+        call_id: String,
+        grant: crate::ToolExecutionGrant,
+        args: serde_json::Value,
+        index: usize,
+        replay: Option<crate::llm::types::ProviderReplayMeta>,
+        parent_invocation: Option<crate::RuntimeInvocation>,
+        child_execution_trace_hook: Option<crate::ToolChildExecutionTraceHook>,
+    ) -> CompletedProtocolToolCall {
+        let name = grant.manifest.name.clone();
+        let _ = self
+            .dispatch
+            .event_tx
+            .send(SessionStreamEvent::ToolCallStart {
+                call_id: Some(call_id.clone()),
+                name: name.clone(),
+                args: args.clone(),
+            })
+            .await;
+        let tool_correlation_id = TurnActivityId::new(format!("tool:{call_id}"));
+        self.emit_tool_call_started_trace(&call_id, &name, &args);
+        self.emit_turn_activity(
+            tool_correlation_id.clone(),
+            TurnEvent::ToolCallStarted {
+                call_id: Some(call_id.clone()),
+                name: name.clone(),
+                args: args.clone(),
+                graph_key: self.code_block_graph_key(),
+                parent_call_id: self.batch_parent_call_id(),
+            },
+        )
+        .await;
+
+        let parent_invocation = parent_invocation.or_else(|| self.parent_invocation.clone());
+        let mut dispatch = (*self.dispatch).clone();
+        dispatch.parent_invocation = parent_invocation.clone();
+        let pending = crate::sansio::PendingToolCall {
+            call_id: call_id.clone(),
+            tool_name: name,
+            args,
+            replay: replay.clone(),
+        };
+        let launch = match prepare_granted_tool_call_with_context(
+            &dispatch,
+            &grant,
+            pending,
+            Some(call_id.clone()),
+        )
+        .await
+        {
+            ToolPreparationOutcome::Prepared(prepared) => {
+                let trace_hooks: HashMap<String, crate::ToolChildExecutionTraceHook> =
+                    child_execution_trace_hook
+                        .map(|hook| std::iter::once((call_id.clone(), hook)).collect())
+                        .unwrap_or_default();
+                let coordinated = coordinate_tool_invocation(
+                    &dispatch,
+                    prepared,
+                    Some(Box::new(grant.clone())),
+                    grant.manifest.retry_policy,
+                    ToolAttemptEffectIdentity::Scalar {
+                        parent: parent_invocation.clone(),
+                    },
+                    self.cancellation_token.clone(),
+                    || {
+                        crate::RuntimeEffectLocalExecutor::tool_batch(
+                            self.clone(),
+                            trace_hooks.clone(),
+                        )
+                    },
+                )
+                .await;
+                self.restore_tool_trigger_outcomes(coordinated.triggers);
+                coordinated.launch
+            }
+            ToolPreparationOutcome::Completed(outcome) => ToolCallLaunch::Done(*outcome),
+        };
+        let mut outcome = match launch {
+            ToolCallLaunch::Done(outcome) => outcome,
+            ToolCallLaunch::Pending(pending) => {
+                self.await_pending_tool_dispatch_outcome(
+                    &call_id,
+                    parent_invocation.clone(),
+                    pending,
+                    self.cancellation_token.clone(),
+                )
+                .await
+            }
+        };
+        outcome.record.call_id = Some(call_id.clone());
+
+        self.complete_tool_call(index, call_id, replay, outcome, tool_correlation_id)
             .await
     }
 }

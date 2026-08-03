@@ -21,7 +21,7 @@ pub use direct_completion::ToolDirectCompletionClient;
 pub use dispatch::ToolDispatchClient;
 pub use process::ToolSessionProcessAdmin;
 pub use process_events::ToolProcessEventClient;
-pub use session::{ToolSessionAdmin, ToolSessionModel};
+pub use session::ToolSessionAdmin;
 pub use triggers::ToolTriggerClient;
 
 /// A message sent from the sandbox to the host during execution.
@@ -779,7 +779,7 @@ impl PreparedToolBatch {
         Self { batch_id, calls }
     }
 
-    pub fn new_with_grants(
+    pub(crate) fn new_with_grants(
         batch_id: impl Into<String>,
         calls: Vec<(PreparedToolCall, Option<ToolExecutionGrant>)>,
     ) -> Self {
@@ -794,14 +794,6 @@ impl PreparedToolBatch {
             })
             .collect();
         Self { batch_id, calls }
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.calls.is_empty()
-    }
-
-    pub fn len(&self) -> usize {
-        self.calls.len()
     }
 }
 

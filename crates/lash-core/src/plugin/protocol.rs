@@ -85,7 +85,7 @@ pub trait ProtocolSessionPlugin: Send + Sync {
 
     async fn before_llm_call(
         &self,
-        _ctx: ProtocolBeforeLlmCallContext<'_>,
+        _ctx: ProtocolBeforeLlmCallContext,
         _request: &LlmRequest,
     ) -> Result<Option<ProtocolLlmCallAction>, crate::PluginError> {
         Ok(None)
@@ -116,33 +116,13 @@ impl<'a> ProtocolSessionContext<'a> {
     }
 }
 
-pub struct ProtocolBeforeLlmCallContext<'run> {
+pub struct ProtocolBeforeLlmCallContext {
     pub session_id: String,
     pub sessions: Arc<dyn crate::plugin::SessionStateService>,
     pub session_graph: Arc<dyn crate::plugin::SessionGraphService>,
     pub processes: Arc<dyn crate::ProcessService>,
     pub state: SessionReadView,
     pub latest_prompt_usage: Option<PromptUsage>,
-    pub(crate) direct_completions: crate::DirectCompletionClient<'run>,
-    pub(crate) process_parent_invocation: crate::RuntimeInvocation,
-    pub(crate) effect_controller: crate::runtime::RuntimeEffectControllerHandle<'run>,
-}
-
-impl ProtocolBeforeLlmCallContext<'_> {
-    pub async fn direct_llm_completion(
-        &self,
-        request: crate::LlmRequest,
-        usage_source: &str,
-    ) -> Result<crate::DirectLlmCompletion, crate::PluginError> {
-        self.direct_completions
-            .direct_llm_completion(request, usage_source)
-            .await
-    }
-
-    pub fn process_scope(&self) -> crate::ProcessOpScope<'_> {
-        crate::ProcessOpScope::new(self.effect_controller.scoped())
-            .with_parent_invocation(Some(self.process_parent_invocation.clone()))
-    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

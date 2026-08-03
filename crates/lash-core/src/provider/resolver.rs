@@ -96,13 +96,6 @@ impl SingleProviderResolver {
             provider,
         }
     }
-
-    pub fn with_provider_id(provider_id: impl Into<String>, provider: ProviderHandle) -> Self {
-        Self {
-            provider_id: provider_id.into(),
-            provider,
-        }
-    }
 }
 
 impl RuntimeProviderResolver for SingleProviderResolver {

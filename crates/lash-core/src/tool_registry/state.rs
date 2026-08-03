@@ -108,7 +108,7 @@ impl ToolState {
         self.tools.get(id)
     }
 
-    /// Edit a manifest in an explicit [`ToolRegistry::apply_state`] delta.
+    /// Edit a manifest in an explicit `ToolRegistry::apply_state` delta.
     ///
     /// Automatic rebuilds replace stored manifests with their live versions,
     /// so this is not a persistent source-curation mechanism.
@@ -147,7 +147,7 @@ impl ToolState {
         Ok(())
     }
 
-    /// Delete a tool in an explicit [`ToolRegistry::apply_state`] delta.
+    /// Delete a tool in an explicit `ToolRegistry::apply_state` delta.
     ///
     /// Deletion intentionally removes the entry for that delta only. Use
     /// [`Self::set_membership`] for curation that must survive a rebuild from

@@ -32,7 +32,7 @@ impl ToolRetryPolicy {
         }
     }
 
-    pub fn idempotent(max_attempts: u32, base_delay_ms: u64, max_delay_ms: u64) -> Self {
+    pub(crate) fn idempotent(max_attempts: u32, base_delay_ms: u64, max_delay_ms: u64) -> Self {
         Self::Idempotent {
             max_attempts,
             base_delay_ms,
@@ -40,7 +40,7 @@ impl ToolRetryPolicy {
         }
     }
 
-    pub fn max_attempts(self) -> u32 {
+    pub(crate) fn max_attempts(self) -> u32 {
         match self {
             Self::Never => 1,
             Self::Safe { max_attempts, .. } | Self::Idempotent { max_attempts, .. } => {
@@ -49,7 +49,11 @@ impl ToolRetryPolicy {
         }
     }
 
-    pub fn delay_ms_for_retry(self, retry_index: u32, requested_after_ms: Option<u64>) -> u64 {
+    pub(crate) fn delay_ms_for_retry(
+        self,
+        retry_index: u32,
+        requested_after_ms: Option<u64>,
+    ) -> u64 {
         let (base_delay_ms, max_delay_ms) = match self {
             Self::Never => return 0,
             Self::Safe {
@@ -71,10 +75,6 @@ impl ToolRetryPolicy {
         } else {
             delay.min(max_delay_ms)
         }
-    }
-
-    pub fn requires_replay_key(self) -> bool {
-        matches!(self, Self::Idempotent { .. })
     }
 }
 
@@ -456,7 +456,7 @@ pub struct CompactToolContract {
 }
 
 impl CompactToolContract {
-    pub fn render_signature_head(&self) -> String {
+    pub(crate) fn render_signature_head(&self) -> String {
         format!("{} -> {}", self.signature.trim(), self.returns.trim())
     }
 
@@ -481,7 +481,8 @@ impl CompactToolContract {
         sections.join("\n")
     }
 
-    pub fn render_returns(&self) -> String {
+    #[cfg(test)]
+    pub(crate) fn render_returns(&self) -> String {
         let mut sections = Vec::new();
         let return_field_lines = self
             .return_fields

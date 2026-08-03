@@ -113,7 +113,7 @@ pub enum CacheRetention {
 }
 
 impl CacheRetention {
-    pub fn is_default(&self) -> bool {
+    pub(crate) fn is_default(&self) -> bool {
         matches!(self, CacheRetention::Short)
     }
 }

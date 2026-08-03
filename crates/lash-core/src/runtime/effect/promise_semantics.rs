@@ -106,7 +106,10 @@ pub fn resolve(state: PromiseState, proposed: Resolution) -> PromiseTransition {
 /// Turn-control promises are never swept: cancelling their observation must
 /// not manufacture a turn cancellation or terminal publication. Existing
 /// terminals are equally immutable.
-pub fn cancel_sweep(wait: &AwaitEventWaitIdentity, state: PromiseState) -> PromiseTransition {
+pub(crate) fn cancel_sweep(
+    wait: &AwaitEventWaitIdentity,
+    state: PromiseState,
+) -> PromiseTransition {
     if wait.is_turn_control() {
         return PromiseTransition::Unchanged;
     }
@@ -120,12 +123,12 @@ pub fn cancel_sweep(wait: &AwaitEventWaitIdentity, state: PromiseState) -> Promi
 
 /// Pure session-tombstone decision shared by in-memory and durable stores.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum SessionRevocationTransition {
+pub(crate) enum SessionRevocationTransition {
     MarkRevoked,
     AlreadyRevoked,
 }
 
-pub fn revoke_session(already_revoked: bool) -> SessionRevocationTransition {
+pub(crate) fn revoke_session(already_revoked: bool) -> SessionRevocationTransition {
     if already_revoked {
         SessionRevocationTransition::AlreadyRevoked
     } else {
@@ -136,7 +139,7 @@ pub fn revoke_session(already_revoked: bool) -> SessionRevocationTransition {
 /// Whether mint and resolve may proceed for a session.
 ///
 /// Both operations must consult the tombstone before touching promise rows.
-pub fn session_allows_access(revoked: bool) -> bool {
+pub(crate) fn session_allows_access(revoked: bool) -> bool {
     !revoked
 }
 

@@ -1,5 +1,6 @@
 use super::*;
 use crate::ToolProvider as _;
+use lash_sansio::core_support::*;
 use std::sync::atomic::AtomicUsize;
 
 struct AttachmentPutTool;
@@ -4558,10 +4559,10 @@ async fn external_invoke_can_create_session_from_current_snapshot() {
                 runtime_event: None,
                 external_registrar: Some(Arc::new(|reg| {
                     reg.operations().command(
-                        crate::PluginOperationDef {
+                        crate::plugin::PluginOperationDef {
                             name: "test.spawn".to_string(),
                             description: "spawn".to_string(),
-                            kind: crate::PluginOperationKind::Command,
+                            kind: crate::plugin::PluginOperationKind::Command,
                             session_param: crate::SessionParam::Optional,
                             input_schema: json!({}),
                             output_schema: json!({}),
@@ -4681,10 +4682,10 @@ async fn plugin_command_reuses_caller_scope_on_lost_response_retry() {
                 runtime_event: None,
                 external_registrar: Some(Arc::new(|reg| {
                     reg.operations().command(
-                        crate::PluginOperationDef {
+                        crate::plugin::PluginOperationDef {
                             name: "test.emit".to_string(),
                             description: "emit one durable event".to_string(),
-                            kind: crate::PluginOperationKind::Command,
+                            kind: crate::plugin::PluginOperationKind::Command,
                             session_param: crate::SessionParam::Optional,
                             input_schema: json!({}),
                             output_schema: json!({}),

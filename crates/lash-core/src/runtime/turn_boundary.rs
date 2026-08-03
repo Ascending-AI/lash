@@ -496,6 +496,8 @@ impl TurnBoundary {
 
 #[cfg(test)]
 mod tests {
+    use lash_sansio::core_support::MessageSequenceCoreSupport;
+
     use super::*;
     use crate::runtime::tests::helpers::RecordingStore;
     use crate::session_model::{ConversationRecord, MessageRole, Part, PartKind, PruneState};

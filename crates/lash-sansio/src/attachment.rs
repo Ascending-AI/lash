@@ -60,6 +60,10 @@ impl std::error::Error for InvalidMediaType {}
 pub struct MediaType(String);
 
 impl MediaType {
+    pub fn is_image(&self) -> bool {
+        self.family() == "image"
+    }
+
     pub fn parse(value: impl AsRef<str>) -> Result<Self, InvalidMediaType> {
         let original = value.as_ref();
         let normalized = original.trim().to_ascii_lowercase();
@@ -80,10 +84,6 @@ impl MediaType {
 
     pub fn family(&self) -> &str {
         self.0.split_once('/').map_or("", |(family, _)| family)
-    }
-
-    pub fn is_image(&self) -> bool {
-        self.family() == "image"
     }
 }
 
@@ -243,16 +243,6 @@ pub struct AttachmentRef {
 }
 
 impl AttachmentRef {
-    pub fn meta(&self) -> AttachmentMeta {
-        AttachmentMeta {
-            id: self.id.clone(),
-            media_type: self.media_type.clone(),
-            byte_len: self.byte_len,
-            type_metadata: self.type_metadata.clone(),
-            label: self.label.clone(),
-        }
-    }
-
     pub fn media_type(&self) -> &MediaType {
         &self.media_type
     }

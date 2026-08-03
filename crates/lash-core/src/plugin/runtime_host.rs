@@ -209,10 +209,6 @@ impl<'run> SessionTurnRequest<'run> {
         &self.turn.input
     }
 
-    pub fn scoped_effect_controller(&self) -> &crate::ScopedEffectController<'run> {
-        &self.scoped_effect_controller
-    }
-
     pub fn into_parts(self) -> (SessionTurnInput, crate::ScopedEffectController<'run>) {
         (self.turn, self.scoped_effect_controller)
     }

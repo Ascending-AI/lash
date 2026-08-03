@@ -1,5 +1,7 @@
 pub mod attachment;
 pub mod causal;
+#[doc(hidden)]
+pub mod core_support;
 pub mod llm;
 pub mod plugin;
 pub mod prompt;

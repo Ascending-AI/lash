@@ -568,7 +568,7 @@ impl ProcessOriginator {
         }
     }
 
-    pub fn id(&self) -> String {
+    pub(crate) fn id(&self) -> String {
         match self {
             Self::Host { scope } => scope
                 .as_ref()
@@ -670,6 +670,7 @@ impl ProcessRegistration {
         }
     }
 
+    #[cfg(test)]
     pub(crate) fn session_start_draft(
         id: impl Into<ProcessId>,
         input: ProcessInput,

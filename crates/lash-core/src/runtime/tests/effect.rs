@@ -1206,7 +1206,7 @@ async fn tool_emitted_trigger_redrive_reemits_reserved_start_without_appending_s
         }
 
         async fn execute(&self, call: crate::ToolCall<'_>) -> crate::ToolResult {
-            let source_type = crate::trigger_event_type("ui.button", "pressed");
+            let source_type = crate::triggers::trigger_event_type("ui.button", "pressed");
             let source_key =
                 crate::empty_trigger_source_key(&source_type).expect("empty trigger source key");
             let idempotency_key = call
@@ -1231,7 +1231,7 @@ async fn tool_emitted_trigger_redrive_reemits_reserved_start_without_appending_s
                 .triggers()
                 .emit(
                     crate::TriggerOccurrenceRequest::new(
-                        crate::trigger_event_type("ui.button", "pressed"),
+                        crate::triggers::trigger_event_type("ui.button", "pressed"),
                         crate::empty_trigger_source_key("ui.button.pressed")
                             .expect("empty trigger source key"),
                         serde_json::json!({ "pressed": true }),
