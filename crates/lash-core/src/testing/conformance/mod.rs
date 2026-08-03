@@ -17,6 +17,7 @@ mod await_event_cold;
 mod effect_host;
 mod helpers;
 mod live_replay;
+mod observer_intent;
 mod process_change_feed;
 mod process_continuation_store;
 mod process_filters;
@@ -40,6 +41,7 @@ pub use await_event_cold::*;
 pub use effect_host::*;
 pub use helpers::*;
 pub use live_replay::*;
+pub use observer_intent::*;
 pub use process_continuation_store::*;
 pub use process_registry::*;
 pub use process_trigger_retention::*;
@@ -270,6 +272,12 @@ mod tests {
             },
         )
         .await;
+    }
+
+    #[tokio::test]
+    async fn in_memory_fork_observer_intent_transient_failure_conformance() {
+        fork_observer_intent_transient_failure(Arc::new(crate::InMemorySessionStoreFactory::new()))
+            .await;
     }
 
     #[tokio::test]

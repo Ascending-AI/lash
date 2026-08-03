@@ -505,6 +505,49 @@ async fn fork_observer_inheritance_is_recoverable_selective_and_wake_independent
         .expect("list inherited observations");
     assert_eq!(inherited.len(), 1);
     assert_eq!(inherited[0].id, "fork-visible-process");
+
+    registry
+        .set_process_read_error(Some(lash_core::PluginError::Session(
+            "transient fork observer registry failure".to_string(),
+        )))
+        .await;
+    core.fork_at(&fork_node_id, "fork-transient-branch")
+        .await
+        .expect("transient observer registry failure must not fail fork_at");
+    registry.set_process_read_error(None).await;
+    assert!(
+        registry
+            .list_observed_by("fork-transient-branch")
+            .await
+            .expect("list transient-failure branch observations")
+            .is_empty(),
+        "a transiently unavailable process must not gain a fork observer edge"
+    );
+    let transient_branch_store = factory
+        .open_existing_store(&lash_core::SessionStoreCreateRequest {
+            session_id: "fork-transient-branch".to_string(),
+            relation: lash_core::SessionRelation::Root,
+            policy: lash_core::SessionPolicy::default(),
+        })
+        .await
+        .expect("open transient-failure branch store")
+        .expect("transient-failure branch store exists");
+    let transient_meta = transient_branch_store
+        .load_session_meta()
+        .await
+        .expect("load transient-failure fork metadata")
+        .expect("transient-failure fork metadata exists");
+    assert!(
+        matches!(
+            transient_meta.relation,
+            lash_core::SessionRelation::Fork {
+                ref pending_observer_process_ids,
+                ..
+            } if pending_observer_process_ids.is_empty()
+        ),
+        "fork_at must consume transiently unavailable observer intents"
+    );
+
     let published_meta = branch_store
         .load_session_meta()
         .await

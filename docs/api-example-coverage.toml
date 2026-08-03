@@ -48097,6 +48097,14 @@ disposition = "unused-add"
 reason = "Add lash::testing::conformance::effect_host_retires_session_journal to the docs-snippets embedding/turns example and assert its externally observable result."
 
 [[api]]
+symbol = "lash::testing::conformance::fork_observer_intent_transient_failure"
+kind = "function"
+availability = "all-features"
+area = "processes"
+disposition = "unused-add"
+reason = "Add lash::testing::conformance::fork_observer_intent_transient_failure to the agent-workbench durable process flow example and assert its externally observable result."
+
+[[api]]
 symbol = "lash::testing::conformance::leased_completion_replay_repairs_projection"
 kind = "function"
 availability = "all-features"

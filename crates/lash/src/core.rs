@@ -724,15 +724,6 @@ impl LashCore {
             policy: fork_policy,
         };
         let fork = store_factory.fork_at(&request).await?;
-        let Some(process_registry) = self.process_registry() else {
-            return Ok(fork);
-        };
-        crate::session::apply_fork_observer_intent(
-            process_registry.as_ref(),
-            &fork.session_id,
-            &inherited,
-        )
-        .await?;
         let create_request = lash_core::SessionStoreCreateRequest {
             session_id: request.session_id,
             relation: request.relation,
@@ -753,21 +744,12 @@ impl LashCore {
                     create_request.session_id
                 ))
             })?;
-        let mut meta = branch_store.load_session_meta().await?.ok_or_else(|| {
-            lash_core::StoreError::Backend(format!(
-                "fork store `{}` has no session metadata",
-                create_request.session_id
-            ))
-        })?;
-        let lash_core::SessionRelation::Fork {
-            pending_observer_process_ids,
-            ..
-        } = &mut meta.relation
-        else {
-            unreachable!("fork factory must persist fork metadata");
-        };
-        pending_observer_process_ids.clear();
-        branch_store.save_session_meta(meta).await?;
+        lash_core::runtime::reconcile_session_process_observer_intents(
+            self.process_registry().as_deref(),
+            &fork.session_id,
+            lash_core::runtime::SessionObserverIntentSource::Persisted(branch_store.as_ref()),
+        )
+        .await?;
         Ok(fork)
     }
 
