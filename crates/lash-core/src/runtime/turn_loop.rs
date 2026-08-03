@@ -306,12 +306,10 @@ impl LashRuntime {
         }
     }
 
-    // Prompt handback on lease loss. This is no longer load-bearing for
-    // correctness: a claim is generation-fenced under the session lease, so once
-    // this owner has lost the lease its claims are already superseded and the
-    // next acquirer reclaims them by generation regardless (ADR 0029). Abandoning
-    // eagerly just lets a peer reclaim the rows without waiting to observe the
-    // generation bump.
+    // Prompt handback after an operation observes lease loss. Correctness rests
+    // on commit-time claim ownership: the old completion remains acceptable
+    // until a peer reclaims the batch, after which it is superseded (ADR 0029).
+    // Abandoning eagerly makes the rows immediately claimable without a reclaim.
     async fn abandon_queued_work_claims_after_lease_loss(
         &self,
         err: &RuntimeError,
@@ -433,9 +431,9 @@ impl LashRuntime {
         }
         // Interruption derives from sealed evidence, never the raw token: a
         // lease-loss wakeup cancels the token without evidence and must not
-        // become a Cancelled outcome. When a durable cancel races a lease
-        // loss, the fenced final commit is the arbiter — a turn that cannot
-        // commit surfaces lease loss even if the gate already resolved.
+        // become a Cancelled outcome. When a durable cancel races lease loss,
+        // the final commit's head CAS and any claim batch-ownership checks are
+        // the arbiters. Lease loss alone does not reject a current-head commit.
         let interrupted = cancellation.is_some();
 
         turn_pipeline.finalize_turn_read_state(new_messages, interrupted);

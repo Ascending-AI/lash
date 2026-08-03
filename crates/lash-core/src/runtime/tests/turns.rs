@@ -3936,20 +3936,43 @@ async fn advisory_lease_loss_does_not_stop_foreground_turn_before_final_commit()
     provider_started_rx
         .await
         .expect("provider should start after session lease acquisition");
-    let commits_before_lease_loss = *store.runtime_commit_count.lock().expect("commit count");
 
     clock.advance_ms(crate::LeaseTimings::default().ttl_ms() + 1);
-    let owner = lease_owner("stealing-runtime");
+    let successor_transport = mock_provider(vec![MockCall {
+        stream_events: Vec::new(),
+        response: Ok(LlmResponse {
+            full_text: "successor continued from landed tail".to_string(),
+            parts: vec![LlmOutputPart::Text {
+                text: "successor continued from landed tail".to_string(),
+                response_meta: None,
+            }],
+            response_metadata: Default::default(),
+            ..LlmResponse::default()
+        }),
+    }]);
+    let successor_store: Arc<dyn crate::store::RuntimePersistence> = store.clone();
+    let successor_host_clock: Arc<dyn crate::Clock> = clock.clone();
+    let successor_config = crate::RuntimeHostConfig::in_memory().with_clock(successor_host_clock);
+    let mut successor_runtime = runtime_with_plugins_and_tools_and_host_and_store(
+        Vec::new(),
+        Arc::new(EmptyTools),
+        successor_transport,
+        crate::EmbeddedRuntimeHost::new(successor_config),
+        successor_store,
+    )
+    .await;
+    let successor_owner = successor_runtime.runtime_lease_owner.clone();
     let stolen = crate::store::SessionExecutionLeaseStore::try_claim_session_execution_lease(
         store.as_ref(),
         "root",
-        &owner,
+        &successor_owner,
         60_000,
     )
     .await
     .expect("steal expired session execution lease")
     .acquired()
     .expect("expired session execution lease should be claimable");
+    let commits_before_lease_loss = *store.runtime_commit_count.lock().expect("commit count");
     provider_continue_tx
         .send(())
         .expect("provider should still be waiting");
@@ -3966,12 +3989,44 @@ async fn advisory_lease_loss_does_not_stop_foreground_turn_before_final_commit()
         *store.runtime_commit_count.lock().expect("commit count") > commits_before_lease_loss,
         "the current-head turn must checkpoint and commit despite advisory lease loss"
     );
-    crate::store::SessionExecutionLeaseStore::release_session_execution_lease(
+    let still_owned = crate::store::SessionExecutionLeaseStore::try_claim_session_execution_lease(
         store.as_ref(),
-        &stolen.completion(),
+        "root",
+        &successor_owner,
+        60_000,
     )
     .await
-    .expect("release stolen session execution lease");
+    .expect("reclaim successor lease with the same owner")
+    .acquired()
+    .expect("the predecessor commit must leave the successor lease live");
+    assert_eq!(
+        still_owned.fencing_token, stolen.fencing_token,
+        "the predecessor's final commit must not release the successor lease"
+    );
+
+    let successor_turn = successor_runtime
+        .run_turn_assembled(
+            TurnInput::text("continue after predecessor tail"),
+            CancellationToken::new(),
+            named_turn_scope("root", "successor-after-landed-tail"),
+        )
+        .await
+        .expect("the successor should continue from the newly committed head");
+    assert!(
+        active_conversation_messages(&successor_turn.state)
+            .iter()
+            .flat_map(|message| message.parts.iter())
+            .any(|part| part.content == "committed under head CAS"),
+        "the successor must reload and observe the predecessor tail that landed after takeover"
+    );
+    assert_eq!(
+        successor_turn.assistant_output.safe_text,
+        "successor continued from landed tail"
+    );
+    assert!(
+        successor_turn.state.turn_index > assembled.state.turn_index,
+        "the successor must advance from the predecessor's landed head"
+    );
 }
 
 #[tokio::test]
