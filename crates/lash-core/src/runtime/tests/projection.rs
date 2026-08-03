@@ -454,19 +454,19 @@ async fn failed_append_restores_runtime_and_protocol_session_state() {
 }
 
 #[test]
-fn append_session_nodes_retry_after_head_advance_is_typed_and_bounded() {
-    const CHILD_ENV: &str = "LASH_FIG843_APPEND_RETRY_CHILD";
+fn append_session_nodes_lost_response_retry_replays_and_refreshes_resident_state() {
+    const CHILD_ENV: &str = "LASH_FIG850_APPEND_RETRY_CHILD";
     if std::env::var_os(CHILD_ENV).is_some() {
         tokio::runtime::Builder::new_current_thread()
             .enable_all()
             .build()
-            .expect("FIG-843 child runtime")
+            .expect("FIG-850 child runtime")
             .block_on(append_session_nodes_retry_after_head_advance_is_typed_scenario());
         return;
     }
 
     crate::test_watchdog::assert_exact_test_completes(
-        "runtime::tests::projection::append_session_nodes_retry_after_head_advance_is_typed_and_bounded",
+        "runtime::tests::projection::append_session_nodes_lost_response_retry_replays_and_refreshes_resident_state",
         CHILD_ENV,
         "append retry",
     );
@@ -519,10 +519,16 @@ async fn append_session_nodes_retry_after_head_advance_is_typed_scenario() {
         .append_session_nodes(request.clone())
         .await
         .expect("first append");
-    let crate::AppendSessionNodesResult::Appended { node_ids, .. } = first else {
+    let crate::AppendSessionNodesResult::Appended {
+        node_ids: first_node_ids,
+        leaf_node_id: first_leaf_node_id,
+    } = first
+    else {
         panic!("first append must report its persisted node id");
     };
-    let expected_collision = node_ids.into_iter().next().expect("persisted node id");
+    let persisted_node_id = first_node_ids.first().cloned().expect("persisted node id");
+    // Model a response lost after the durable commit: the caller retains only
+    // its request and retries after unrelated work has advanced the head.
     runtime
         .append_session_nodes(crate::AppendSessionNodesRequest {
             operation_id: "advance-head".to_string(),
@@ -538,33 +544,46 @@ async fn append_session_nodes_retry_after_head_advance_is_typed_scenario() {
     protocol_dirty.store(false, Ordering::SeqCst);
     restore_called.store(false, Ordering::SeqCst);
 
-    let error = runtime
+    let replay = runtime
         .append_session_nodes(request)
         .await
-        .expect_err("the retry is not idempotent until durable receipts land");
-    assert!(matches!(
-        error,
-        crate::SessionError::Store {
-            source: crate::StoreError::NodeIdCollision { node_id },
-            ..
-        } if node_id == expected_collision
-    ));
+        .expect("the lost-response retry must replay its durable receipt");
+    let crate::AppendSessionNodesResult::Appended {
+        node_ids: replayed_node_ids,
+        leaf_node_id: replayed_leaf_node_id,
+    } = replay
+    else {
+        panic!("the lost-response retry must report the original append");
+    };
+    assert_eq!(replayed_node_ids, first_node_ids);
+    assert_eq!(replayed_leaf_node_id, first_leaf_node_id);
     assert!(
         restore_called.load(Ordering::SeqCst),
-        "fallible identity derivation must restore the protocol session"
+        "receipt replay must restore the protocol session from durable history"
     );
     assert!(
         !protocol_dirty.load(Ordering::SeqCst),
-        "the protocol session must match the rolled-back runtime state"
+        "the protocol session must match the refreshed durable runtime state"
     );
     assert_eq!(
         runtime.state.head_revision, state_after_advance.head_revision,
-        "the rejected retry must not commit"
+        "receipt replay must not advance the durable head"
     );
     assert_eq!(
         serde_json::to_value(&runtime.state.session_graph).expect("encode rolled-back graph"),
         serde_json::to_value(&state_after_advance.session_graph).expect("encode expected graph"),
-        "fallible identity derivation must roll back the resident graph"
+        "resident graph must converge with durable history after receipt replay"
+    );
+    assert_eq!(
+        runtime
+            .state
+            .session_graph
+            .nodes
+            .iter()
+            .filter(|node| node.node_id == persisted_node_id)
+            .count(),
+        1,
+        "the replayed node must exist exactly once in resident history"
     );
 }
 

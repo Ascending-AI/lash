@@ -241,8 +241,8 @@ impl<'run> SessionTurnRequest<'run> {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct AppendSessionNodesRequest {
     /// Caller-stable identity for this logical append. Reusing it after the
-    /// session head advances currently returns a typed conflict or collision;
-    /// durable-receipt-based idempotent replay is tracked as FIG-850.
+    /// session head advances returns the first append result from the durable
+    /// receipt. Reusing it with different semantic request content is rejected.
     pub operation_id: String,
     pub nodes: Vec<SessionAppendNode>,
     /// Branch-liveness precondition: refuse the append unless this node is
@@ -282,6 +282,9 @@ pub struct AppendSessionNodesRequest {
     /// [`AppendSessionNodesResult::StaleBranch`], with nothing written, when the
     /// named node has left the active path: the session forked or was rewound
     /// onto another line of history, or the id was never durable here at all.
+    /// This applies only to a fresh operation id. A retry whose durable receipt
+    /// proves the append already committed returns that first result even when
+    /// the ancestor has since left the active path.
     ///
     /// # What this does *not* guarantee
     ///

@@ -65,21 +65,17 @@ impl LashRuntime {
             ));
         }
         self.refresh_session_graph_from_store().await?;
-        // Branch liveness, not a head compare-and-swap: a head that merely
-        // advanced is accepted and the nodes re-parent onto the current leaf.
-        // See `AppendSessionNodesRequest::requires_ancestor_node_id`.
-        if let Some(required) = request.requires_ancestor_node_id.as_deref()
-            && !self.state.session_graph.active_path_contains(required)
-        {
-            return Ok(crate::AppendSessionNodesResult::StaleBranch {
-                required_node_id: required.to_string(),
-            });
-        }
         let operation = boundary_operation(
             &self.state.session_id,
             &request.operation_id,
             "append-session-nodes",
         );
+        let append_stamp = crate::RuntimeTurnCommitStamp::append_session_nodes(
+            operation.clone(),
+            request.requires_ancestor_node_id.as_deref(),
+            &request.nodes,
+        )
+        .map_err(|err| SessionError::Protocol(err.to_string()))?;
         let state_before_append = self.state.clone();
         let draft_namespace = operation
             .storage_key()
@@ -108,28 +104,31 @@ impl LashRuntime {
         {
             let requested_node_count = node_ids.len();
             let mut graph = self.state.pending_graph_commit();
-            let persisted_node_ids =
-                match derive_graph_commit_node_ids(&mut self.state, &mut graph, &operation) {
-                    Ok(node_ids) => node_ids,
-                    Err(source) => {
-                        let mut context =
-                            "failed to derive persisted session graph node identities".to_string();
-                        if let Err(rollback_err) = self
-                            .restore_protocol_session_after_failed_append(state_before_append)
-                            .await
-                        {
-                            context.push_str(&format!(
-                                "; failed to restore protocol session: {rollback_err}"
-                            ));
-                        }
-                        return Err(SessionError::Store { context, source });
+            let node_id_mapping = match graph.derive_node_ids(&self.state.session_id, &operation) {
+                Ok(mapping) => mapping,
+                Err(source) => {
+                    let mut context =
+                        "failed to derive persisted session graph node identities".to_string();
+                    if let Err(rollback_err) = self
+                        .restore_protocol_session_after_failed_append(state_before_append)
+                        .await
+                    {
+                        context.push_str(&format!(
+                            "; failed to restore protocol session: {rollback_err}"
+                        ));
                     }
-                };
+                    return Err(SessionError::Store { context, source });
+                }
+            };
+            let persisted_node_ids = node_id_mapping
+                .iter()
+                .map(|(_, derived)| derived.clone())
+                .collect::<Vec<_>>();
             let node_ids = persisted_node_ids[persisted_node_ids
                 .len()
                 .saturating_sub(requested_node_count)..]
                 .to_vec();
-            let commit =
+            let mut commit =
                 crate::store::RuntimeCommit::persisted_state_with_graph_commit_and_operation(
                     &self.state,
                     graph,
@@ -137,8 +136,9 @@ impl LashRuntime {
                     operation,
                 )
                 .map_err(|err| SessionError::Protocol(err.to_string()))?;
+            commit.turn_commit = append_stamp;
             let result = match super::commit_runtime_state_with_fresh_session_execution_lease(
-                store,
+                Arc::clone(&store),
                 commit,
                 &self.runtime_lease_owner,
                 self.host.core.control.lease_timings,
@@ -147,6 +147,11 @@ impl LashRuntime {
             .await
             {
                 Ok(result) => result,
+                Err(crate::StoreError::AppendAncestorNotActive { required_node_id }) => {
+                    self.restore_protocol_session_after_failed_append(state_before_append)
+                        .await?;
+                    return Ok(crate::AppendSessionNodesResult::StaleBranch { required_node_id });
+                }
                 Err(err) => {
                     if let Err(rollback_err) = self
                         .restore_protocol_session_after_failed_append(state_before_append)
@@ -164,16 +169,32 @@ impl LashRuntime {
                     ));
                 }
             };
-            self.state.apply_persisted_commit_result(result);
-            self.state.mark_node_ids_persisted(persisted_node_ids);
+            let receipt_replayed = result.receipt_replayed;
+            let committed_leaf_node_id = result.committed_leaf_node_id.clone();
+            if receipt_replayed {
+                let mut durable_state = state_before_append;
+                crate::store::refresh_persisted_session_state(store.as_ref(), &mut durable_state)
+                    .await
+                    .map_err(|source| SessionError::Store {
+                        context: "failed to refresh resident state after append receipt replay"
+                            .to_string(),
+                        source,
+                    })?;
+                self.restore_protocol_session_after_failed_append(durable_state)
+                    .await?;
+            } else {
+                super::state::apply_graph_commit_node_id_mapping(&mut self.state, &node_id_mapping)
+                    .map_err(|source| SessionError::Store {
+                        context: "failed to apply persisted session graph node identities"
+                            .to_string(),
+                        source,
+                    })?;
+                self.state.apply_persisted_commit_result(result);
+                self.state.mark_node_ids_persisted(persisted_node_ids);
+            }
             return Ok(crate::AppendSessionNodesResult::Appended {
                 node_ids,
-                leaf_node_id: self
-                    .state
-                    .session_graph
-                    .leaf_node_id
-                    .clone()
-                    .unwrap_or_default(),
+                leaf_node_id: committed_leaf_node_id.unwrap_or_default(),
             });
         }
         Ok(crate::AppendSessionNodesResult::Appended {
