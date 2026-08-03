@@ -1,6 +1,5 @@
 use crate::facade_support::RuntimeSessionStateFacadeOps;
 use std::collections::HashMap;
-#[cfg(any(test, feature = "testing"))]
 use std::pin::Pin;
 use std::sync::Arc;
 use std::time::Instant;
@@ -273,7 +272,6 @@ trait RuntimeEffectLocalRunner: Send {
     ) -> Result<RuntimeEffectOutcome, RuntimeEffectControllerError>;
 }
 
-#[cfg(any(test, feature = "testing"))]
 type TestingRuntimeEffectLocalRunnerFn<'run> = dyn FnOnce(
         RuntimeEffectEnvelope,
     ) -> Pin<
@@ -285,7 +283,6 @@ type TestingRuntimeEffectLocalRunnerFn<'run> = dyn FnOnce(
     > + Send
     + 'run;
 
-#[cfg(any(test, feature = "testing"))]
 struct TestingRuntimeEffectLocalRunner<'run> {
     run: Box<TestingRuntimeEffectLocalRunnerFn<'run>>,
 }
@@ -473,9 +470,8 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
         }
     }
 
-    #[cfg(any(test, feature = "testing"))]
-    /// Injects a one-shot local effect runner for conformance-suite embedders testing controller
-    /// behavior without a production effect backend.
+    /// Injects a one-shot local effect runner for conformance helpers.
+    #[doc(hidden)]
     pub fn testing<F, Fut>(run: F) -> Self
     where
         F: FnOnce(RuntimeEffectEnvelope) -> Fut + Send + 'run,
@@ -938,7 +934,6 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
     }
 }
 
-#[cfg(any(test, feature = "testing"))]
 #[async_trait::async_trait]
 impl RuntimeEffectLocalRunner for TestingRuntimeEffectLocalRunner<'_> {
     async fn execute(

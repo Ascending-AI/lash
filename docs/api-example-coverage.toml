@@ -43633,7 +43633,7 @@ reason = "Add lash::runtime::RuntimeEffectLocalExecutor::sleep_with_clock to the
 [[api]]
 symbol = "lash::runtime::RuntimeEffectLocalExecutor::testing"
 kind = "function"
-availability = "all-features"
+availability = "default+all-features"
 area = "sessions-turns"
 disposition = "unused-add"
 reason = "Add lash::runtime::RuntimeEffectLocalExecutor::testing to the docs-snippets embedding/turns example and assert its externally observable result."
@@ -70944,7 +70944,7 @@ reason = "No example or concrete unrepresented host class establishes a need for
 [[api]]
 symbol = "lash_core::RuntimeEffectLocalExecutor::testing"
 kind = "function"
-availability = "all-features"
+availability = "default+all-features"
 area = "sessions-turns"
 disposition = "unused-remove"
 reason = "No example or concrete unrepresented host class establishes a need for lash_core::RuntimeEffectLocalExecutor::testing. Breaking: remove this export; downstream callers must own an equivalent local type or stop depending on the unexercised contract."
