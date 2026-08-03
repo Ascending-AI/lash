@@ -21,7 +21,10 @@ pub enum SessionObserverIntentSource<'a> {
 /// `ObserverIntent` layers (the ids explicitly requested at session creation);
 /// fork-inheritance outcomes are consumed without changing session creation's
 /// public result shape. Unknown, pruned, or temporarily unavailable processes
-/// never prevent the relation from reaching its fully settled base form.
+/// never prevent the relation from reaching its fully settled base form. This
+/// is deliberate: hosts can add an observer again after a transient failure,
+/// while retaining an intent would make settlement behavior depend on which
+/// session-creation path happened to publish it.
 pub async fn reconcile_session_process_observer_intents(
     process_registry: Option<&dyn ProcessRegistry>,
     session_id: &str,
