@@ -142,7 +142,9 @@ const SCHEMA_COMPONENT: &str = "lash-postgres-store";
 // Bumped to 35 to replace the consumed-watermark vocabulary with receiver
 // allocation fences and add durable sender allocation floors. Process-event
 // sequences remain small and monotone across pruned incarnations.
-const SCHEMA_VERSION: i32 = 35;
+// Bumped to 36 for FIG-850 append-request identity receipts. Nullable identity
+// columns preserve exact-commit-hash behavior for copied pre-upgrade rows.
+const SCHEMA_VERSION: i32 = 36;
 const PROCESS_LEASE_SCHEMA_VERSION: u32 = lash_core::facade_support::PROCESS_LEASE_SCHEMA_VERSION;
 
 #[derive(Clone)]

@@ -2048,6 +2048,10 @@ fn normalized_store_error(backend: &str, error: &StoreError) -> String {
         StoreError::UnsupportedStoreOperation { .. } => "UnsupportedStoreOperation".to_string(),
         StoreError::HeadRevisionConflict { .. } => "HeadRevisionConflict".to_string(),
         StoreError::RuntimeTurnCommitConflict { .. } => "RuntimeTurnCommitConflict".to_string(),
+        StoreError::AppendOperationIdentityConflict { .. } => {
+            "AppendOperationIdentityConflict".to_string()
+        }
+        StoreError::AppendAncestorNotActive { .. } => "AppendAncestorNotActive".to_string(),
         StoreError::QueuedWorkClaimSuperseded { .. } => "QueuedWorkClaimSuperseded".to_string(),
         StoreError::TurnInputClaimSuperseded { .. } => "TurnInputClaimSuperseded".to_string(),
         StoreError::UnsettledQueuedWorkClaim { .. } => "UnsettledQueuedWorkClaim".to_string(),

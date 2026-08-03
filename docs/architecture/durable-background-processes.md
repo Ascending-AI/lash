@@ -231,10 +231,12 @@ PostgreSQL tables. The operations runbook reset consequently clears
 `lash_process_wake_deliveries`, `lash_wake_allocation_floors`, and
 `lash_wake_redelivery_fences`.
 
-Figments coordination is one Lash revision: SQLite durable-core schema 24
-carries the receiver-fence cutover, SQLite process-registry schema 19 includes
-the sender-floor table through additive DDL, and PostgreSQL schema 35 includes
-the sender-floor table. Development/test stores must be recreated.
+Figments coordination is one Lash revision: SQLite durable-core schema 25
+carries the receiver-fence cutover plus nullable FIG-850 append-receipt identity
+columns, SQLite process-registry schema 19 includes the sender-floor table
+through additive DDL, and PostgreSQL schema 36 includes both the sender-floor
+table and those append-receipt columns. Development/test stores must be
+recreated.
 Process-event sequences remain small ordered values; downstream prompts,
 origins, and workflow projections do not receive timestamp-scale identifiers.
 

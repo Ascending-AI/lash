@@ -774,7 +774,7 @@ impl SessionCommitStore for RuntimePerfStore {
             },
             head_revision,
             Some(checkpoint_ref.clone()),
-            leaf_node_id,
+            leaf_node_id.clone(),
         ));
         let turn_input_applications = completed_turn_input_claims
             .iter()
@@ -784,12 +784,14 @@ impl SessionCommitStore for RuntimePerfStore {
             head_revision,
             checkpoint_ref,
             manifest,
+            committed_leaf_node_id: leaf_node_id,
             realized_node_timestamps,
             enqueued_queue_batches: enqueued_queue_batches
                 .into_iter()
                 .map(|batch| self.enqueue_queued_work_in_memory(batch))
                 .collect(),
             turn_input_applications,
+            receipt_replayed: false,
         };
         self.runtime_turn_commits
             .lock()

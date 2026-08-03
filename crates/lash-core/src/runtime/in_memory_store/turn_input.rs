@@ -122,11 +122,11 @@ impl crate::store::TurnInputStore for InMemorySessionStore {
             .expect("lock runtime turn commits")
             .iter()
             .filter(|((stored_session_id, _), _)| stored_session_id == session_id)
-            .map(|((_, turn_id), (_, result, _committed_at_ms))| {
+            .map(|((_, turn_id), record)| {
                 (
-                    result.head_revision,
+                    record.result.head_revision,
                     turn_id.clone(),
-                    result.turn_input_applications.clone(),
+                    record.result.turn_input_applications.clone(),
                 )
             })
             .collect::<Vec<_>>();

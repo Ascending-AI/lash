@@ -17,7 +17,7 @@
 # in this file records how the DDL declares it and is documentation, not a
 # requirement. Every object is read from the one namespace where lash_schema_versions
 # resolves.
-version 35
+version 36
 table lash_attachment_manifest
   column attachment_id text not-null
   column canonical_uri text not-null
@@ -206,6 +206,10 @@ table lash_runtime_effect_replay
   primary-key (scope_id, replay_key)
 table lash_runtime_turn_commits
   column committed_at_ms bigint not-null
+  column identity_encoding_version integer nullable
+  column request_identity_hash text nullable
+  column requested_ancestor_node_id text nullable
+  column requested_node_count bigint nullable
   column result_json text not-null
   column session_id text not-null
   column turn_commit_hash text not-null

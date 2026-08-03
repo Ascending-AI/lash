@@ -11,6 +11,101 @@ pub struct OperationId {
     pub key: String,
 }
 
+pub(super) const APPEND_REQUEST_IDENTITY_ENCODING_VERSION: u32 = 1;
+
+/// Version 1 canonical bytes, in order:
+///
+/// 1. operation storage key: `u64` big-endian UTF-8 byte length, then bytes;
+/// 2. requested ancestor: one byte (`0` for absent, `1` for present), followed
+///    when present by its `u64` big-endian UTF-8 byte length and bytes;
+/// 3. ordered semantic nodes: `u64` big-endian node count, then for each node
+///    its stable-JSON `u64` big-endian byte length and UTF-8 bytes.
+///
+/// No domain string, encoding version, node id, timestamp, head, or other
+/// environmental value is included. The version lives beside the digest in
+/// the receipt so a future encoder can fall back to exact commit hashes.
+pub(super) fn append_request_identity_hash(
+    operation: &OperationId,
+    requested_ancestor_node_id: Option<&str>,
+    nodes: &[crate::SessionAppendNode],
+) -> Result<String, StoreError> {
+    use sha2::Digest;
+
+    fn push_len_prefixed(encoded: &mut Vec<u8>, bytes: &[u8]) {
+        encoded.extend_from_slice(&(bytes.len() as u64).to_be_bytes());
+        encoded.extend_from_slice(bytes);
+    }
+
+    let operation_key = operation.storage_key()?;
+    let mut encoded = Vec::new();
+    push_len_prefixed(&mut encoded, operation_key.as_bytes());
+    match requested_ancestor_node_id {
+        Some(ancestor) => {
+            encoded.push(1);
+            push_len_prefixed(&mut encoded, ancestor.as_bytes());
+        }
+        None => encoded.push(0),
+    }
+    encoded.extend_from_slice(&(nodes.len() as u64).to_be_bytes());
+    for node in nodes {
+        let value = serde_json::to_value(node).map_err(|err| {
+            StoreError::Backend(format!(
+                "failed to serialize append request node identity: {err}"
+            ))
+        })?;
+        let semantic_node = crate::stable_hash::stable_json_string(&value).map_err(|err| {
+            StoreError::Backend(format!(
+                "failed to encode append request node identity: {err}"
+            ))
+        })?;
+        push_len_prefixed(&mut encoded, semantic_node.as_bytes());
+    }
+    Ok(format!("{:x}", sha2::Sha256::digest(encoded)))
+}
+
+#[cfg(test)]
+mod append_request_identity_tests {
+    use super::*;
+
+    fn operation(id: &str) -> OperationId {
+        OperationId::new(
+            crate::ExecutionScope::runtime_operation(format!("session:root:boundary:{id}")),
+            "append-session-nodes",
+        )
+    }
+
+    #[test]
+    fn append_request_identity_covers_only_ordered_semantic_request_fields() {
+        let nodes = vec![
+            crate::SessionAppendNode::plugin("receipt", serde_json::json!({"b": 2, "a": 1})),
+            crate::SessionAppendNode::plugin("receipt", serde_json::json!({"value": 2})),
+        ];
+        let first = append_request_identity_hash(&operation("op-1"), Some("ancestor"), &nodes)
+            .expect("first identity");
+        let same = append_request_identity_hash(&operation("op-1"), Some("ancestor"), &nodes)
+            .expect("same identity");
+        assert_eq!(first, same);
+
+        let mut reversed = nodes.clone();
+        reversed.reverse();
+        assert_ne!(
+            first,
+            append_request_identity_hash(&operation("op-1"), Some("ancestor"), &reversed)
+                .expect("reordered identity")
+        );
+        assert_ne!(
+            first,
+            append_request_identity_hash(&operation("op-2"), Some("ancestor"), &nodes)
+                .expect("changed operation identity")
+        );
+        assert_ne!(
+            first,
+            append_request_identity_hash(&operation("op-1"), None, &nodes)
+                .expect("changed ancestor identity")
+        );
+    }
+}
+
 impl OperationId {
     /// Constructs a `OperationId` for store, effect-host, and protocol implementors while
     /// materializing, executing, or persisting a session turn.

@@ -77,9 +77,11 @@ mod tests {
                 head_revision: commit.expected_head_revision + 1,
                 checkpoint_ref: "empty-frame-facade".to_string().into(),
                 manifest,
+                committed_leaf_node_id: commit.graph.leaf_node_id.clone(),
                 realized_node_timestamps,
                 enqueued_queue_batches: Vec::new(),
                 turn_input_applications: Vec::new(),
+                receipt_replayed: false,
             })
         }
 

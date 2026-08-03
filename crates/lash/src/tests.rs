@@ -247,9 +247,11 @@ impl lash_core::SessionCommitStore for SnapshotStore {
             head_revision: 8,
             checkpoint_ref: lash_core::BlobRef("checkpoint".to_string()),
             manifest: lash_core::store::SessionCheckpoint::default(),
+            committed_leaf_node_id: commit.graph.leaf_node_id.clone(),
             realized_node_timestamps,
             enqueued_queue_batches: Vec::new(),
             turn_input_applications: Vec::new(),
+            receipt_replayed: false,
         };
         self.runtime_turn_commits
             .lock()

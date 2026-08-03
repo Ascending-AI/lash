@@ -22,12 +22,15 @@ mod maintenance;
 mod queued_work;
 mod reachability;
 mod reads;
+mod receipts;
 mod session_binding;
 #[cfg(test)]
 pub(crate) mod test_support;
 #[cfg(any(test, feature = "testing"))]
 mod testing_access;
 mod turn_input;
+
+use receipts::{RuntimeTurnCommitMap, RuntimeTurnCommitRecord};
 
 #[derive(Clone)]
 struct InMemoryQueuedBatch {
@@ -221,9 +224,6 @@ pub struct InMemorySessionStore {
     #[cfg(test)]
     pub(crate) session_admission_count: std::sync::atomic::AtomicUsize,
 }
-
-type RuntimeTurnCommitRecord = (String, crate::store::RuntimeCommitResult, u64);
-type RuntimeTurnCommitMap = HashMap<(String, String), RuntimeTurnCommitRecord>;
 
 impl InMemorySessionStore {
     pub fn new() -> Self {
@@ -902,22 +902,61 @@ impl crate::store::SessionCommitStore for InMemorySessionStore {
         let completed = &commit.turn_commit;
         let operation_key = completed.operation.storage_key()?;
         let key = (session_id.clone(), operation_key.clone());
-        if let Some((stored_hash, result, _committed_at_ms)) = self
+        if let Some(stored) = self
             .runtime_turn_commits
             .lock()
             .expect("lock runtime turn commits")
             .get(&key)
             .cloned()
         {
-            if stored_hash == turn_commit_hash {
+            if stored.turn_commit_hash == turn_commit_hash {
                 if let Some(completion) = commit.release_session_execution_lease.as_ref() {
                     self.release_session_execution_lease_in_memory(completion);
                 }
+                let mut result = stored.result;
+                result.receipt_replayed = true;
                 return Ok(result);
+            }
+            if let (
+                Some(stored_version),
+                Some(attempted_version),
+                Some(stored_identity),
+                Some(attempted_identity),
+            ) = (
+                stored.identity_encoding_version,
+                completed.identity_encoding_version,
+                stored.request_identity_hash.as_deref(),
+                completed.request_identity_hash.as_deref(),
+            ) && stored_version == attempted_version
+            {
+                if stored_identity == attempted_identity {
+                    if let Some(completion) = commit.release_session_execution_lease.as_ref() {
+                        self.release_session_execution_lease_in_memory(completion);
+                    }
+                    let mut result = stored.result;
+                    result.receipt_replayed = true;
+                    return Ok(result);
+                }
+                return Err(crate::store::StoreError::AppendOperationIdentityConflict {
+                    session_id,
+                    operation_key,
+                });
             }
             return Err(crate::store::StoreError::RuntimeTurnCommitConflict {
                 session_id,
                 turn_id: operation_key,
+            });
+        }
+        if completed.request_identity_hash.is_some()
+            && let Some(required) = completed.requested_ancestor_node_id.as_deref()
+            && !self
+                .session_graph
+                .lock()
+                .expect("lock graph")
+                .active_path_contains(required)
+        {
+            return Err(crate::store::StoreError::AppendAncestorNotActive {
+                required_node_id: required.to_string(),
             });
         }
         let expected = commit.expected_head_revision;
@@ -1354,7 +1393,7 @@ impl crate::store::SessionCommitStore for InMemorySessionStore {
             },
             head_revision,
             Some(checkpoint_ref.clone()),
-            leaf_node_id,
+            leaf_node_id.clone(),
         ));
         *self
             .runtime_commit_count
@@ -1364,16 +1403,29 @@ impl crate::store::SessionCommitStore for InMemorySessionStore {
             head_revision,
             checkpoint_ref,
             manifest,
+            committed_leaf_node_id: leaf_node_id,
             realized_node_timestamps,
             enqueued_queue_batches: staged_enqueued_queue_batches,
             turn_input_applications,
+            receipt_replayed: false,
         };
         self.runtime_turn_commits
             .lock()
             .expect("lock runtime turn commits")
             .insert(
                 (session_id, operation_key),
-                (turn_commit_hash, result.clone(), self.clock.timestamp_ms()),
+                RuntimeTurnCommitRecord {
+                    turn_commit_hash,
+                    result: result.clone(),
+                    committed_at_ms: self.clock.timestamp_ms(),
+                    request_identity_hash: commit.turn_commit.request_identity_hash.clone(),
+                    _requested_node_count: commit.turn_commit.requested_node_count,
+                    _requested_ancestor_node_id: commit
+                        .turn_commit
+                        .requested_ancestor_node_id
+                        .clone(),
+                    identity_encoding_version: commit.turn_commit.identity_encoding_version,
+                },
             );
         if let Some(completion) = commit.release_session_execution_lease.as_ref() {
             self.release_session_execution_lease_in_memory(completion);

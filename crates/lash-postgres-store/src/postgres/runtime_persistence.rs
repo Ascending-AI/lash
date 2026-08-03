@@ -459,7 +459,8 @@ impl SessionCommitStore for PostgresSessionStore {
             let completed = &commit.turn_commit;
             let operation_key = completed.operation.storage_key()?;
             let prior = sqlx::query(
-                "SELECT turn_commit_hash, result_json
+                "SELECT turn_commit_hash, result_json,
+                        request_identity_hash, identity_encoding_version
                  FROM lash_runtime_turn_commits
                  WHERE session_id = $1 AND turn_id = $2",
             )
@@ -471,17 +472,66 @@ impl SessionCommitStore for PostgresSessionStore {
             if let Some(row) = prior {
                 let hash: String = row.get(0);
                 let result_json: String = row.get(1);
+                let stored_identity: Option<String> = row.get(2);
+                let stored_version: Option<i32> = row.get(3);
                 if hash == turn_commit_hash {
-                    let result = store_decode_json(&result_json, "runtime turn commit result")?;
+                    let mut result: RuntimeCommitResult =
+                        store_decode_json(&result_json, "runtime turn commit result")?;
+                    result.receipt_replayed = true;
                     if let Some(completion) = commit.release_session_execution_lease.as_ref() {
                         release_session_execution_lease_tx(&mut tx, completion).await?;
                     }
                     tx.commit().await.map_err(store_sqlx_error)?;
                     return Ok(result);
                 }
+                if let (
+                    Some(stored_version),
+                    Some(attempted_version),
+                    Some(stored_identity),
+                    Some(attempted_identity),
+                ) = (
+                    stored_version,
+                    completed
+                        .identity_encoding_version
+                        .and_then(|version| i32::try_from(version).ok()),
+                    stored_identity.as_deref(),
+                    completed.request_identity_hash.as_deref(),
+                ) && stored_version == attempted_version
+                {
+                    if stored_identity == attempted_identity {
+                        let mut result: RuntimeCommitResult =
+                            store_decode_json(&result_json, "runtime turn commit result")?;
+                        result.receipt_replayed = true;
+                        if let Some(completion) = commit.release_session_execution_lease.as_ref() {
+                            release_session_execution_lease_tx(&mut tx, completion).await?;
+                        }
+                        tx.commit().await.map_err(store_sqlx_error)?;
+                        return Ok(result);
+                    }
+                    return Err(StoreError::AppendOperationIdentityConflict {
+                        session_id: commit.session_id.clone(),
+                        operation_key,
+                    });
+                }
                 return Err(StoreError::RuntimeTurnCommitConflict {
                     session_id: commit.session_id.clone(),
                     turn_id: operation_key,
+                });
+            }
+        }
+        if commit.turn_commit.request_identity_hash.is_some()
+            && let Some(required) = commit.turn_commit.requested_ancestor_node_id.as_deref()
+        {
+            let active_graph = load_graph_tx(
+                &mut tx,
+                &commit.session_id,
+                existing.as_ref().and_then(|meta| meta.leaf_node_id.clone()),
+                true,
+            )
+            .await?;
+            if !active_graph.active_path_contains(required) {
+                return Err(StoreError::AppendAncestorNotActive {
+                    required_node_id: required.to_string(),
                 });
             }
         }
@@ -829,24 +879,36 @@ impl SessionCommitStore for PostgresSessionStore {
             head_revision: next_revision,
             checkpoint_ref,
             manifest,
+            committed_leaf_node_id: commit.graph.leaf_node_id.clone(),
             realized_node_timestamps,
             enqueued_queue_batches,
             turn_input_applications: commit.turn_input_applications(),
+            receipt_replayed: false,
         };
         {
             let completed = &commit.turn_commit;
             let operation_key = completed.operation.storage_key()?;
             sqlx::query(
                 "INSERT INTO lash_runtime_turn_commits (
-                    session_id, turn_id, turn_commit_hash, result_json, committed_at_ms
+                    session_id, turn_id, turn_commit_hash, result_json, committed_at_ms,
+                    request_identity_hash, requested_node_count,
+                    requested_ancestor_node_id, identity_encoding_version
                  )
-                 VALUES ($1, $2, $3, $4, $5)",
+                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)",
             )
             .bind(&commit.session_id)
             .bind(operation_key)
             .bind(&turn_commit_hash)
             .bind(encode_json(&result))
             .bind(now as i64)
+            .bind(completed.request_identity_hash.as_deref())
+            .bind(completed.requested_node_count.map(|count| count as i64))
+            .bind(completed.requested_ancestor_node_id.as_deref())
+            .bind(
+                completed
+                    .identity_encoding_version
+                    .and_then(|version| i32::try_from(version).ok()),
+            )
             .execute(&mut *tx)
             .await
             .map_err(store_sqlx_error)?;

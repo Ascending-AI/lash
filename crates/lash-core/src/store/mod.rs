@@ -460,6 +460,12 @@ pub struct RuntimeCommitResult {
     pub head_revision: u64,
     pub checkpoint_ref: BlobRef,
     pub manifest: SessionCheckpoint,
+    /// Leaf selected by the committed operation. Receipt replay returns the
+    /// first attempt's value even when later commits have advanced the session.
+    ///
+    /// Integrator class (ADR 0051): **store and durable-substrate implementors**.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub committed_leaf_node_id: Option<String>,
     /// Store-realized timestamps for nodes appended by this operation.
     ///
     /// Node timestamps are clock-derived and excluded from commit intent, so a
@@ -474,6 +480,13 @@ pub struct RuntimeCommitResult {
     /// reconcile after the bounded live observation window has been lost.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub turn_input_applications: Vec<crate::TurnInputApplication>,
+    /// Whether the store answered this attempt from an existing durable receipt.
+    ///
+    /// Integrator class (ADR 0051): **store and durable-substrate implementors**
+    /// set this transient decision bit when returning an earlier commit result;
+    /// it is stored as `false` in the receipt itself.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub receipt_replayed: bool,
 }
 
 /// Stable identity for a lease holder.
@@ -650,13 +663,62 @@ where
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct RuntimeTurnCommitStamp {
     pub operation: OperationId,
+    /// Version of the append-request canonical encoding, or `None` for a
+    /// non-append operation or a legacy receipt.
+    ///
+    /// Integrator class (ADR 0051): **store and durable-substrate implementors**.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub identity_encoding_version: Option<u32>,
+    /// SHA-256 identity of the semantic append request, or `None` when exact
+    /// commit-hash replay semantics apply.
+    ///
+    /// Integrator class (ADR 0051): **store and durable-substrate implementors**.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub request_identity_hash: Option<String>,
+    /// Number of semantic nodes supplied by the append caller.
+    ///
+    /// Integrator class (ADR 0051): **store and durable-substrate implementors**.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub requested_node_count: Option<usize>,
+    /// Branch ancestor named by the append caller, when one was required.
+    ///
+    /// Integrator class (ADR 0051): **store and durable-substrate implementors**.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub requested_ancestor_node_id: Option<String>,
 }
 
 impl RuntimeTurnCommitStamp {
     /// Binds one operation identity to a runtime commit for store implementors enforcing replay and
     /// idempotency at the atomic commit boundary.
     pub fn new(operation: OperationId) -> Self {
-        Self { operation }
+        Self {
+            operation,
+            identity_encoding_version: None,
+            request_identity_hash: None,
+            requested_node_count: None,
+            requested_ancestor_node_id: None,
+        }
+    }
+
+    pub(crate) fn append_session_nodes(
+        operation: OperationId,
+        requested_ancestor_node_id: Option<&str>,
+        nodes: &[crate::SessionAppendNode],
+    ) -> Result<Self, StoreError> {
+        let request_identity_hash = commit_identity::append_request_identity_hash(
+            &operation,
+            requested_ancestor_node_id,
+            nodes,
+        )?;
+        Ok(Self {
+            operation,
+            identity_encoding_version: Some(
+                commit_identity::APPEND_REQUEST_IDENTITY_ENCODING_VERSION,
+            ),
+            request_identity_hash: Some(request_identity_hash),
+            requested_node_count: Some(nodes.len()),
+            requested_ancestor_node_id: requested_ancestor_node_id.map(str::to_string),
+        })
     }
 }
 
