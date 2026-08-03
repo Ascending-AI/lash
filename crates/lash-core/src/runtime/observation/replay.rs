@@ -76,6 +76,8 @@ impl SessionCursor {
         Self(raw.into())
     }
 
+    /// Exposes the opaque durable cursor to live-replay store implementors for persistence and
+    /// round-tripping, without promising lexical ordering.
     pub fn as_str(&self) -> &str {
         &self.0
     }

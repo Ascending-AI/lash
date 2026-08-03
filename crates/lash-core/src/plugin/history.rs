@@ -268,6 +268,8 @@ impl SessionReadView {
         self.0.meta.turn_index
     }
 
+    /// Borrows the session's accumulated prompt and completion usage for protocol and observation
+    /// embedders without recomputing it from message history.
     pub fn token_usage(&self) -> &crate::TokenUsage {
         &self.0.meta.token_usage
     }

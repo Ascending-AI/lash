@@ -125,6 +125,8 @@ impl ExecutionScope {
         }
     }
 
+    /// Reports whether effect-host implementors may validate a trace turn ID against this scope;
+    /// only a turn scope carries that identity.
     pub fn validates_turn_trace_id(&self) -> bool {
         matches!(self, Self::Turn { .. })
     }

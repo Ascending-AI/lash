@@ -152,6 +152,8 @@ impl RuntimeSessionState {
         self.checkpoint_ref = snapshot.checkpoint_ref.clone();
     }
 
+    /// Folds durable token-ledger entries into a per-source report for protocol and administration
+    /// embedders without mutating the ledger.
     pub fn usage_report(&self) -> super::usage::SessionUsageReport {
         super::usage::SessionUsageReport::from_entries(&self.token_ledger)
     }

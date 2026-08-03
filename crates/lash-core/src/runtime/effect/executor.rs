@@ -630,6 +630,8 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
         }
     }
 
+    /// Exposes structured replay-comparison evidence to effect-host and conformance implementors,
+    /// returning `None` when validation tracing was not requested.
     pub fn replay_validation_trace(&self) -> Option<&super::RuntimeEffectReplayTrace> {
         self.replay_trace.as_ref()
     }

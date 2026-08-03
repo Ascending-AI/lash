@@ -624,6 +624,8 @@ impl SessionCreateRequest {
         self
     }
 
+    /// Labels child-session token cost for protocol and administration embedders so committed usage
+    /// is attributed to the correct parent-ledger source.
     pub fn with_usage_source(mut self, usage_source: impl Into<String>) -> Self {
         self.usage_source = Some(usage_source.into());
         self

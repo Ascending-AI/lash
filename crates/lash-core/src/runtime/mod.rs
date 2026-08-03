@@ -444,6 +444,8 @@ impl TurnInput {
         self
     }
 
+    /// Attaches host trace correlation to a turn for protocol and observation embedders without
+    /// changing durable turn identity.
     pub fn with_trace_turn_id(mut self, trace_turn_id: impl Into<String>) -> Self {
         self.trace_turn_id = Some(trace_turn_id.into());
         self
