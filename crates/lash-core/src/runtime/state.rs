@@ -353,6 +353,8 @@ impl RuntimeSessionState {
         &self.policy
     }
 
+    /// Exposes the protocol options captured for the current agent frame so protocol implementors
+    /// restore the frame's durable turn configuration.
     pub fn effective_protocol_turn_options(&self) -> &crate::ProtocolTurnOptions {
         &self.protocol_turn_options
     }

@@ -144,10 +144,14 @@ impl SessionPolicy {
         self.provider_id.trim()
     }
 
+    /// Exposes model id to protocol and process-engine implementors while materializing
+    /// protocol-specific session and turn state.
     pub fn model_id(&self) -> &str {
         &self.model.id
     }
 
+    /// Exposes model variant to protocol and process-engine implementors while materializing
+    /// protocol-specific session and turn state.
     pub fn model_variant(&self) -> &crate::ReasoningSelection {
         &self.model.variant
     }

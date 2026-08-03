@@ -274,6 +274,8 @@ impl SessionReadView {
         self.0.meta.last_prompt_usage.as_ref()
     }
 
+    /// Exposes protocol turn options to protocol and process-engine implementors while
+    /// materializing protocol-specific session and turn state.
     pub fn protocol_turn_options(&self) -> &crate::ProtocolTurnOptions {
         &self.0.meta.protocol_turn_options
     }

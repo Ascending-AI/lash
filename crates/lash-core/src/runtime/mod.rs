@@ -437,6 +437,8 @@ impl TurnInput {
         self
     }
 
+    /// Sets the protocol turn options carried by a `TurnInput` for protocol and process-engine
+    /// implementors while materializing protocol-specific session and turn state.
     pub fn with_protocol_turn_options(mut self, options: crate::ProtocolTurnOptions) -> Self {
         self.protocol_turn_options = Some(options);
         self
@@ -675,10 +677,14 @@ impl fmt::Debug for TurnContext {
 pub struct ProtocolTurnExtensionHandle(Arc<dyn ProtocolTurnExtension>);
 
 impl ProtocolTurnExtensionHandle {
+    /// Type-erases and shares a turn extension for protocol implementors while retaining its
+    /// downcast and prompt-contribution behavior.
     pub fn new(extension: impl ProtocolTurnExtension + 'static) -> Self {
         Self(Arc::new(extension))
     }
 
+    /// Exposes the erased extension for protocol implementors that must downcast back to their
+    /// concrete turn-extension type.
     pub fn as_any(&self) -> &dyn Any {
         self.0.as_any()
     }
@@ -708,10 +714,14 @@ pub trait ProtocolTurnExtension: Send + Sync {
 pub struct ProtocolSessionExtensionHandle(Arc<dyn ProtocolSessionExtension>);
 
 impl ProtocolSessionExtensionHandle {
+    /// Type-erases and shares a session extension for protocol implementors restoring plugin-owned
+    /// session state.
     pub fn new(extension: impl ProtocolSessionExtension + 'static) -> Self {
         Self(Arc::new(extension))
     }
 
+    /// Exposes the erased extension for protocol implementors that must downcast back to their
+    /// concrete session-extension type.
     pub fn as_any(&self) -> &dyn Any {
         self.0.as_any()
     }
