@@ -190,7 +190,7 @@ async fn run_attachment_usage_gate(
         assert_eq!(requests.len(), 1, "gate must make exactly one LLM call");
         assert_eq!(requests[0].attachments.len(), 1);
         let source = &requests[0].attachments[0];
-        assert_eq!(source.media_type().map(lash_core::MediaType::as_str), Some("image/png"));
+        assert_eq!(source.media_type().map(lash::attachments::MediaType::as_str), Some("image/png"));
         assert_eq!(requests[0].attachment_bytes(source), Some(png_bytes.as_slice()));
         assert_eq!(
             source.stored_ref().map(|reference| &reference.id),
@@ -330,7 +330,7 @@ fn usage_gate_response() -> lash::provider::LlmResponse {
 
 async fn assert_retrieved_attachment(
     state: &AppState,
-    attachment_id: &lash_core::AttachmentId,
+    attachment_id: &lash::attachments::AttachmentId,
     expected: &[u8],
 ) {
     let response = retrieve_attachment(

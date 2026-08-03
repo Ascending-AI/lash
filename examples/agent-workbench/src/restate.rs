@@ -10,7 +10,7 @@ use croner::parser::{CronParser, Seconds};
 use futures_util::FutureExt as _;
 use lash::TurnInput;
 use lash::rlm::RlmTurnBuilderExt as _;
-use lash_core::AwaitEventResolver as _;
+use lash::runtime::AwaitEventResolver as _;
 use lash_restate::{
     LashDurableWaitIndex, LashDurableWaitIndexImpl, LashDurableWaitWorkflow,
     LashDurableWaitWorkflowImpl, LashProcessWorkflow,
@@ -82,7 +82,7 @@ pub(crate) struct WorkbenchButtonTriggerWorkflowRequest {
 pub(crate) struct WorkbenchSessionDeleteWorkflowRequest {
     pub operation_id: String,
     pub session_id: String,
-    pub execution_scope: lash_core::ExecutionScope,
+    pub execution_scope: lash::runtime::ExecutionScope,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -741,12 +741,12 @@ pub(crate) async fn workbench_turn_input(
     if let Some(attachment_id) = request.attachment_id.as_deref() {
         let stored = state
             .attachment_store
-            .get(&lash_core::AttachmentId::new(attachment_id))
+            .get(&lash::attachments::AttachmentId::new(attachment_id))
             .await
             // Audited: the content-addressed attachment store has no session identity or tombstone error variant.
             .map_err(AppError::internal)?;
-        input = input.with_attachment(lash_core::AttachmentSource::inline(
-            lash_core::MediaType::parse("image/png").expect("workbench uploads only PNG"),
+        input = input.with_attachment(lash::direct::AttachmentSource::inline(
+            lash::attachments::MediaType::parse("image/png").expect("workbench uploads only PNG"),
             stored.bytes,
         ));
     }

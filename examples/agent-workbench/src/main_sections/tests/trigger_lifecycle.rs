@@ -1,4 +1,5 @@
-    use lash_core::{SessionStoreFactory, TriggerStore};
+    use lash::persistence::SessionStoreFactory;
+    use lash::triggers::TriggerStore;
 
     #[test]
     fn button_trigger_lifecycle_stays_visible_and_queues_wakes_during_active_turn() {
@@ -89,7 +90,7 @@
                 "workbench-test-disable",
                 lash::triggers::TriggerCommand::Disable {
                     owner_scope: trigger_record.owner_scope.clone(),
-                    actor: lash_core::ProcessOriginator::session(lash_core::SessionScope::new(&session_id)),
+                    actor: lash::process::ProcessOriginator::session(lash::process::SessionScope::new(&session_id)),
                     subscription_key: trigger_record.subscription_key.clone(),
                     expected_revision: trigger_record.revision,
                 },
@@ -104,7 +105,7 @@
                 "workbench-test-enable",
                 lash::triggers::TriggerCommand::Enable {
                     owner_scope: trigger_record.owner_scope.clone(),
-                    actor: lash_core::ProcessOriginator::session(lash_core::SessionScope::new(&session_id)),
+                    actor: lash::process::ProcessOriginator::session(lash::process::SessionScope::new(&session_id)),
                     subscription_key: trigger_record.subscription_key.clone(),
                     expected_revision: trigger_record.revision + 1,
                 },
@@ -126,7 +127,7 @@
                 "workbench-test-delete",
                 lash::triggers::TriggerCommand::Delete {
                     owner_scope: trigger_record.owner_scope.clone(),
-                    actor: lash_core::ProcessOriginator::session(lash_core::SessionScope::new(&session_id)),
+                    actor: lash::process::ProcessOriginator::session(lash::process::SessionScope::new(&session_id)),
                     subscription_key: trigger_record.subscription_key.clone(),
                     expected_revision: trigger_record.revision + 2,
                 },
@@ -312,7 +313,7 @@
     #[tokio::test]
     async fn pruning_a_mutation_receipt_turns_a_safe_redrive_into_a_terminal_conflict() {
         let data_dir = tempfile::tempdir().expect("receipt prune tempdir");
-        let trigger_store = Arc::new(lash_core::InMemoryTriggerStore::default());
+        let trigger_store = Arc::new(lash::triggers::InMemoryTriggerStore::default());
         let state = recoverable_chat_test_state_with_trigger_store(
             data_dir.path(),
             Arc::clone(&trigger_store) as Arc<dyn lash::triggers::TriggerStore>,
@@ -339,7 +340,7 @@
             "workbench-receipt-delete",
             lash::triggers::TriggerCommand::Delete {
                 owner_scope: lash::triggers::TriggerOwnerScope::session(&session_id),
-                actor: lash_core::ProcessOriginator::session(lash_core::SessionScope::new(
+                actor: lash::process::ProcessOriginator::session(lash::process::SessionScope::new(
                     &session_id,
                 )),
                 subscription_key: created.subscription_key.clone(),
@@ -431,13 +432,13 @@
     fn workbench_receipt_register_command(session_id: &str) -> lash::triggers::TriggerCommand {
         lash::triggers::TriggerCommand::Register {
             owner_scope: lash::triggers::TriggerOwnerScope::session(session_id),
-            actor: lash_core::ProcessOriginator::session(lash_core::SessionScope::new(session_id)),
+            actor: lash::process::ProcessOriginator::session(lash::process::SessionScope::new(session_id)),
             draft: lash::triggers::TriggerSubscriptionDraft {
                 subscription_key: "workbench-receipt-prune".to_string(),
-                env_ref: lash_core::ProcessExecutionEnvRef::new(format!(
+                env_ref: lash::process::ProcessExecutionEnvRef::new(format!(
                     "process-env:{session_id}"
                 )),
-                wake_target: Some(lash_core::SessionScope::new(session_id)),
+                wake_target: Some(lash::process::SessionScope::new(session_id)),
                 name: Some("receipt prune demo".to_string()),
                 source_type: BUTTON_TRIGGER_EVENT.to_string(),
                 source_key: "workbench-receipt-prune-source".to_string(),
@@ -447,7 +448,7 @@
                     kind: "test".to_string(),
                     payload: json!({ "process": "receipt_prune_demo" }),
                 },
-                target_identity: lash_core::ProcessIdentity::new("test")
+                target_identity: lash::process::ProcessIdentity::new("test")
                     .with_label(Some("receipt prune demo".to_string()))
                     .with_definition(Some(json!({ "process_name": "receipt_prune_demo" }))),
                 event_types: Vec::new(),

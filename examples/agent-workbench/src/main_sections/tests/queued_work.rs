@@ -18,7 +18,7 @@ fn queued_work_test_draft(
 fn workbench_process_wake_draft(
     wake: lash::process::ProcessWakeDelivery,
 ) -> lash::persistence::QueuedWorkBatchDraft {
-    let source_key = lash_core::process_wake_source_key(&wake.process_id, wake.sequence);
+    let source_key = lash::process::process_wake_source_key(&wake.process_id, wake.sequence);
     let process_id = wake.process_id.clone();
     let sequence = wake.sequence;
     lash::persistence::QueuedWorkBatchDraft::new(
@@ -152,8 +152,8 @@ fn workbench_lists_and_controls_individual_queued_batches() {
         };
         assert!(events.iter().any(|event| matches!(
             &event.payload,
-            lash_core::SessionObservationEventPayload::QueueChanged { kind, batch_ids }
-                if *kind == lash_core::SessionQueueEventKind::Cancelled
+            lash::observe::SessionObservationEventPayload::QueueChanged { kind, batch_ids }
+                if *kind == lash::observe::SessionQueueEventKind::Cancelled
                     && batch_ids.as_slice() == std::slice::from_ref(&first.batch_id)
         )));
 
@@ -209,15 +209,15 @@ fn targeted_workbench_drain_preserves_earlier_wake_and_absorbs_live_redelivery()
             .expect("open targeted wake receiver");
 
         let clock = Arc::new(
-            lash_core::testing::conformance::WakeDeliveryConformanceClock::new(
+            lash::testing::conformance::WakeDeliveryConformanceClock::new(
                 1_800_000_000_000,
             ),
         );
         let registry = Arc::new(
-            lash_core::TestLocalProcessRegistry::default()
-                .with_clock(Arc::clone(&clock) as Arc<dyn lash_core::Clock>)
+            lash::testing::TestLocalProcessRegistry::default()
+                .with_clock(Arc::clone(&clock) as Arc<dyn lash::runtime::Clock>)
                 .with_wake_delivery_config(
-                    lash_core::WakeDeliveryConfig::new(10_000)
+                    lash::process::WakeDeliveryConfig::new(10_000)
                         .expect("valid wake expiry")
                         .with_enqueuing_stale_after_ms(25)
                         .expect("valid stale claim age"),
@@ -236,17 +236,17 @@ fn targeted_workbench_drain_preserves_earlier_wake_and_absorbs_live_redelivery()
                 )
                 .with_extra_event_types([lash::process::ProcessEventType {
                     name: "producer.wake".to_string(),
-                    payload_schema: lash_core::LashSchema::any(),
-                    semantics: lash_core::ProcessEventSemanticsSpec {
+                    payload_schema: lash::triggers::LashSchema::any(),
+                    semantics: lash::process::ProcessEventSemanticsSpec {
                         wake: Some(lash::process::ProcessWakeSpec {
-                            when: Some(lash_core::ProcessValueSelector::Present(
+                            when: Some(lash::process::ProcessValueSelector::Present(
                                 "/wake_input".to_string(),
                             )),
-                            input: lash_core::ProcessValueSelector::Pointer(
+                            input: lash::process::ProcessValueSelector::Pointer(
                                 "/wake_input".to_string(),
                             ),
                         }),
-                        ..lash_core::ProcessEventSemanticsSpec::default()
+                        ..lash::process::ProcessEventSemanticsSpec::default()
                     },
                 }])
                 .with_wake_session_id(Some(session_id.clone())),
@@ -336,11 +336,11 @@ fn targeted_workbench_drain_preserves_earlier_wake_and_absorbs_live_redelivery()
         );
 
         clock.advance(26);
-        let redelivery = lash_core::WakeDeliveryDriver::drive_pending_once(
+        let redelivery = lash::process::WakeDeliveryDriver::drive_pending_once(
             Arc::clone(&registry),
             Arc::clone(&store_factory),
             None,
-            Arc::clone(&clock) as Arc<dyn lash_core::Clock>,
+            Arc::clone(&clock) as Arc<dyn lash::runtime::Clock>,
             32,
         )
         .await

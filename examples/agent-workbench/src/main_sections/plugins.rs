@@ -106,7 +106,7 @@ impl SessionPlugin for WorkbenchSessionPlugin {
         reg.session().on_event(Arc::new(move |event| {
             let derived_notes = derived_notes.clone();
             Box::pin(async move {
-                if let lash_core::PluginLifecycleEvent::TurnPersisted(ctx) = event {
+                if let lash::plugins::PluginLifecycleEvent::TurnPersisted(ctx) = event {
                     derived_notes.on_turn_persisted(&ctx).await;
                 }
                 Ok(())
@@ -123,7 +123,7 @@ impl SessionPlugin for WorkbenchSessionPlugin {
 /// Deriving a summary is slow — in a real deployment it is a model call — so a
 /// note is always written back *after* the commit it describes, into a session
 /// whose head has already moved on. That is the whole reason each note carries
-/// [`lash_core::AppendSessionNodesRequest::requires_ancestor_node_id`]: the
+/// [`lash::plugins::AppendSessionNodesRequest::requires_ancestor_node_id`]: the
 /// worker keeps no session bookkeeping at all (session ids change when an
 /// operator rewinds a branch, and the queue would be wrong the moment they
 /// did), and instead lets the append itself decide. A head that merely moved
@@ -164,7 +164,7 @@ enum WorkbenchSettledNote {
 }
 
 impl WorkbenchDerivedNotes {
-    async fn on_turn_persisted(&self, ctx: &lash_core::SessionStateChangedContext<'_>) {
+    async fn on_turn_persisted(&self, ctx: &lash::plugins::SessionStateChangedContext<'_>) {
         for note in self.take_pending() {
             self.write_back(ctx, note).await;
         }
@@ -184,12 +184,12 @@ impl WorkbenchDerivedNotes {
 
     async fn write_back(
         &self,
-        ctx: &lash_core::SessionStateChangedContext<'_>,
+        ctx: &lash::plugins::SessionStateChangedContext<'_>,
         note: WorkbenchPendingNote,
     ) {
-        let request = lash_core::AppendSessionNodesRequest {
+        let request = lash::plugins::AppendSessionNodesRequest {
             operation_id: format!("workbench-derived-note:{}", note.base_node_id),
-            nodes: vec![lash_core::SessionAppendNode::plugin(
+            nodes: vec![lash::plugins::SessionAppendNode::plugin(
                 WORKBENCH_DERIVED_NOTE_PLUGIN_TYPE,
                 json!({
                     // The base rides in the payload: the note's position in the
@@ -205,7 +205,7 @@ impl WorkbenchDerivedNotes {
             .append_session_nodes(&ctx.session_id, request)
             .await
         {
-            Ok(lash_core::AppendSessionNodesResult::Appended {
+            Ok(lash::plugins::AppendSessionNodesResult::Appended {
                 node_ids,
                 leaf_node_id,
             }) => WorkbenchSettledNote::Written {
@@ -216,7 +216,7 @@ impl WorkbenchDerivedNotes {
                     .unwrap_or_else(|| leaf_node_id.clone()),
                 leaf_node_id,
             },
-            Ok(lash_core::AppendSessionNodesResult::StaleBranch { required_node_id }) => {
+            Ok(lash::plugins::AppendSessionNodesResult::StaleBranch { required_node_id }) => {
                 WorkbenchSettledNote::AbandonedBranch {
                     base_node_id: required_node_id,
                 }
@@ -277,7 +277,7 @@ const WORKBENCH_DERIVED_NOTE_LOG_LIMIT: usize = 64;
 
 /// Stand-in for the expensive derivation: in a deployment this is a model call
 /// over the transcript, which is exactly why the write-back lands a commit late.
-fn workbench_note_summary(state: &lash_core::SessionReadView) -> String {
+fn workbench_note_summary(state: &lash::persistence::SessionReadView) -> String {
     format!("{} messages after turn {}", state.messages().len(), state.turn_index())
 }
 

@@ -3,7 +3,7 @@ mod tests {
     use super::*;
 
     pub(super) fn in_memory_trigger_store() -> Arc<dyn lash::triggers::TriggerStore> {
-        Arc::new(lash_core::InMemoryTriggerStore::new())
+        Arc::new(lash::triggers::InMemoryTriggerStore::new())
     }
     use lash::rlm::RlmTurnBuilderExt;
     use lash::tracing::{

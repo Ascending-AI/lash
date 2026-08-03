@@ -716,7 +716,7 @@ fn deleted_session_details(error: &lash::EmbedError) -> Option<(&str, Option<&st
         }
         lash::EmbedError::Plugin(lash::plugins::PluginError::RuntimeEffectController(error)) => {
             return match error.cause.as_ref() {
-                Some(lash_core::RuntimeErrorCause::SessionDeleted { session_id }) => {
+                Some(lash::runtime::RuntimeErrorCause::SessionDeleted { session_id }) => {
                     Some((session_id.as_str(), Some(error.code.as_str())))
                 }
                 None => None,
@@ -785,7 +785,7 @@ mod app_error_tests {
     async fn wrapped_session_deletion_is_a_comprehensible_conflict_response() {
         let session_id = "retired-during-runtime-binding";
         let error = AppError::session_open(lash::EmbedError::Session(
-            lash_core::SessionError::Store {
+            lash::SessionError::Store {
                 context: format!("failed to bind session `{session_id}` to its store"),
                 source: lash::persistence::StoreError::SessionDeleted {
                     session_id: session_id.to_string(),
