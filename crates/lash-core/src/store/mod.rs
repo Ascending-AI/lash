@@ -324,6 +324,8 @@ pub struct SessionHead {
 ///
 /// Revision and graph/checkpoint references live in dedicated columns and are
 /// deliberately absent from this serializable payload.
+///
+/// Integrator class (ADR 0051): **store and durable-substrate implementors**.
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct SessionHeadPayload {
     pub schema_version: u32,
@@ -339,7 +341,10 @@ pub struct SessionHeadPayload {
 /// This type is intentionally not serializable. Store implementations decode a
 /// [`SessionHeadPayload`] and must supply the three column-owned values through
 /// [`Self::assemble`].
+///
+/// Integrator class (ADR 0051): **store and durable-substrate implementors**.
 #[derive(Clone, Debug)]
+#[non_exhaustive]
 pub struct SessionHeadMeta {
     pub schema_version: u32,
     pub session_id: String,
