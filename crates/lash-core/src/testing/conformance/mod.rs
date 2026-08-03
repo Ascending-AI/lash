@@ -233,6 +233,30 @@ mod tests {
         .await;
     }
 
+    #[tokio::test]
+    async fn in_memory_checkpoint_component_refs_survive_cold_reopens() {
+        let substrate = crate::InMemorySessionStore::default();
+        checkpoint_component_refs_preserve_clean_state(ReopenableRuntimePersistence {
+            open: Arc::new(substrate.clone()) as Arc<dyn RuntimePersistence>,
+            reopen: Arc::new(substrate.clone()) as Arc<dyn RuntimePersistence>,
+            cold_reopen: Arc::new(substrate) as Arc<dyn RuntimePersistence>,
+        })
+        .await;
+    }
+
+    #[tokio::test]
+    async fn in_memory_turn_crash_phase_recovery_matrix() {
+        let substrates = Arc::new(Mutex::new(
+            BTreeMap::<String, crate::InMemorySessionStore>::new(),
+        ));
+        turn_crash_phase_recovery_matrix(move |scenario| {
+            let mut substrates = substrates.lock().expect("matrix substrates");
+            let substrate = substrates.entry(scenario.to_string()).or_default();
+            Arc::new(substrate.clone()) as Arc<dyn RuntimePersistence>
+        })
+        .await;
+    }
+
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
     async fn in_memory_session_graph_state_machine_properties() {
         session_graph_state_machine("in-memory", |_| async {

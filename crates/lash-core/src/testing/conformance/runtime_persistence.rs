@@ -28,6 +28,10 @@ pub async fn runtime_persistence<F>(make: F)
 where
     F: Fn() -> Arc<dyn RuntimePersistence>,
 {
+    let first = make();
+    let second = make();
+    assert_fresh_instances(&first, &second, "runtime_persistence");
+    drop((first, second));
     runtime_persistence_suite(make).await;
 }
 
@@ -36,8 +40,16 @@ pub async fn runtime_persistence_reopenable<F>(make: F)
 where
     F: Fn() -> ReopenableRuntimePersistence,
 {
+    let probe = make();
+    assert_fresh_instances(&probe.open, &probe.reopen, "runtime_persistence_reopenable");
+    assert_fresh_instances(
+        &probe.reopen,
+        &probe.cold_reopen,
+        "runtime_persistence_reopenable",
+    );
     runtime_persistence_suite(|| make().open).await;
     gc_reclaims_unreachable_checkpoint_blobs_and_preserves_live(make().open).await;
+    checkpoint_component_refs_preserve_clean_state(make()).await;
     runtime_persistence_survives_reopen(make()).await;
 }
 
@@ -160,7 +172,6 @@ where
     concurrent_head_revision_cas_applies_exactly_once(make()).await;
     commit_rejects_a_different_session_id(make()).await;
     load_hydrates_checkpoint_and_usage(make()).await;
-    checkpoint_component_refs_preserve_clean_state(make()).await;
     checkpoint_rejects_unknown_component_ref(make()).await;
     session_read_loads_persisted_history(make()).await;
     session_metadata_round_trips(make()).await;
@@ -208,9 +219,19 @@ where
     pending_active_turn_inputs_defer_unaccepted_once_on_interrupt(make()).await;
 }
 
-/// A backend must mint refs for checkpoint bodies and resolve those refs when
-/// the next clean commit carries no replacement bodies.
-pub async fn checkpoint_component_refs_preserve_clean_state(store: Arc<dyn RuntimePersistence>) {
+/// A backend must mint refs for checkpoint bodies and resolve those refs after
+/// both the ref-only successor write and the final read reopen the substrate.
+///
+/// This is the standing regression for the checkpoint-component failure
+/// shape: write bodies, drop the writer, write only their refs through an
+/// independent handle, drop that writer, then hydrate through a third handle.
+pub async fn checkpoint_component_refs_preserve_clean_state(stores: ReopenableRuntimePersistence) {
+    assert!(
+        !Arc::ptr_eq(&stores.open, &stores.reopen)
+            && !Arc::ptr_eq(&stores.open, &stores.cold_reopen)
+            && !Arc::ptr_eq(&stores.reopen, &stores.cold_reopen),
+        "checkpoint-component roles must use independent backend instances"
+    );
     let mut state = RuntimeSessionState {
         session_id: "checkpoint-component-refs".to_string(),
         tool_state_snapshot: Some(ToolState::default().with_generation(91)),
@@ -221,7 +242,7 @@ pub async fn checkpoint_component_refs_preserve_clean_state(store: Arc<dyn Runti
     };
 
     let first = commit_runtime_state_for_test(
-        &store,
+        &stores.open,
         RuntimeCommit::persisted_state_for_test(&state, &[]),
         "checkpoint-component-refs-first",
     )
@@ -244,17 +265,20 @@ pub async fn checkpoint_component_refs_preserve_clean_state(store: Arc<dyn Runti
     assert!(state.tool_state_snapshot.is_none());
     assert!(state.plugin_snapshot.is_none());
     assert!(state.execution_state_snapshot.is_none());
+    drop(stores.open);
 
     let second = commit_runtime_state_for_test(
-        &store,
+        &stores.reopen,
         RuntimeCommit::persisted_state_for_test(&state, &[]),
         "checkpoint-component-refs-second",
     )
     .await
     .expect("commit unchanged checkpoint component refs");
     state.apply_persisted_commit_result(second);
+    drop(stores.reopen);
 
-    let read = store
+    let read = stores
+        .cold_reopen
         .load_session()
         .await
         .expect("cold-load refs-only checkpoint")
