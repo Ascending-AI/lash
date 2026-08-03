@@ -1827,22 +1827,6 @@ disposition = "unused-add"
 reason = "Add lash::ModelSpec::capability to the docs-snippets remote/direct protocol flow example and assert its externally observable result."
 
 [[api]]
-symbol = "lash::ModelSpec::clamp_generation_options"
-kind = "function"
-availability = "default+all-features"
-area = "protocol"
-disposition = "unused-add"
-reason = "Add lash::ModelSpec::clamp_generation_options to the docs-snippets remote/direct protocol flow example and assert its externally observable result."
-
-[[api]]
-symbol = "lash::ModelSpec::clamped_generation"
-kind = "function"
-availability = "default+all-features"
-area = "protocol"
-disposition = "unused-add"
-reason = "Add lash::ModelSpec::clamped_generation to the docs-snippets remote/direct protocol flow example and assert its externally observable result."
-
-[[api]]
 symbol = "lash::ModelSpec::context_window_tokens"
 kind = "function"
 availability = "default+all-features"
@@ -19943,22 +19927,6 @@ availability = "default+all-features"
 area = "protocol"
 disposition = "unused-add"
 reason = "Add lash::prelude::ModelSpec::capability to the docs-snippets remote/direct protocol flow example and assert its externally observable result."
-
-[[api]]
-symbol = "lash::prelude::ModelSpec::clamp_generation_options"
-kind = "function"
-availability = "default+all-features"
-area = "protocol"
-disposition = "unused-add"
-reason = "Add lash::prelude::ModelSpec::clamp_generation_options to the docs-snippets remote/direct protocol flow example and assert its externally observable result."
-
-[[api]]
-symbol = "lash::prelude::ModelSpec::clamped_generation"
-kind = "function"
-availability = "default+all-features"
-area = "protocol"
-disposition = "unused-add"
-reason = "Add lash::prelude::ModelSpec::clamped_generation to the docs-snippets remote/direct protocol flow example and assert its externally observable result."
 
 [[api]]
 symbol = "lash::prelude::ModelSpec::context_window_tokens"
@@ -42125,28 +42093,12 @@ disposition = "unused-add"
 reason = "Add lash::runtime::LlmRequestSpec::attachments to the agent-workbench attachment upload example and assert its externally observable result."
 
 [[api]]
-symbol = "lash::runtime::LlmRequestSpec::from_request"
-kind = "function"
-availability = "default+all-features"
-area = "protocol"
-disposition = "unused-add"
-reason = "Add lash::runtime::LlmRequestSpec::from_request to the docs-snippets remote/direct protocol flow example and assert its externally observable result."
-
-[[api]]
 symbol = "lash::runtime::LlmRequestSpec::generation"
 kind = "field"
 availability = "default+all-features"
 area = "protocol"
 disposition = "unused-add"
 reason = "Add lash::runtime::LlmRequestSpec::generation to the docs-snippets remote/direct protocol flow example and assert its externally observable result."
-
-[[api]]
-symbol = "lash::runtime::LlmRequestSpec::into_request"
-kind = "function"
-availability = "default+all-features"
-area = "protocol"
-disposition = "unused-add"
-reason = "Add lash::runtime::LlmRequestSpec::into_request to the docs-snippets remote/direct protocol flow example and assert its externally observable result."
 
 [[api]]
 symbol = "lash::runtime::LlmRequestSpec::messages"
@@ -43840,38 +43792,6 @@ disposition = "unused-add"
 reason = "Add lash::runtime::RuntimeEffectOutcome::Trigger::result to the agent-service trigger flow example and assert its externally observable result."
 
 [[api]]
-symbol = "lash::runtime::RuntimeEffectOutcome::into_await_event"
-kind = "function"
-availability = "default+all-features"
-area = "processes"
-disposition = "unused-add"
-reason = "Add lash::runtime::RuntimeEffectOutcome::into_await_event to the agent-workbench durable process flow example and assert its externally observable result."
-
-[[api]]
-symbol = "lash::runtime::RuntimeEffectOutcome::into_direct_response"
-kind = "function"
-availability = "default+all-features"
-area = "protocol"
-disposition = "unused-add"
-reason = "Add lash::runtime::RuntimeEffectOutcome::into_direct_response to the docs-snippets remote/direct protocol flow example and assert its externally observable result."
-
-[[api]]
-symbol = "lash::runtime::RuntimeEffectOutcome::into_exec_code"
-kind = "function"
-availability = "default+all-features"
-area = "sessions-turns"
-disposition = "unused-add"
-reason = "Add lash::runtime::RuntimeEffectOutcome::into_exec_code to the docs-snippets embedding/turns example and assert its externally observable result."
-
-[[api]]
-symbol = "lash::runtime::RuntimeEffectOutcome::into_llm_call"
-kind = "function"
-availability = "default+all-features"
-area = "protocol"
-disposition = "unused-add"
-reason = "Add lash::runtime::RuntimeEffectOutcome::into_llm_call to the docs-snippets remote/direct protocol flow example and assert its externally observable result."
-
-[[api]]
 symbol = "lash::runtime::RuntimeEffectOutcome::into_peek_await_event"
 kind = "function"
 availability = "default+all-features"
@@ -43886,30 +43806,6 @@ availability = "default+all-features"
 area = "processes"
 disposition = "unused-add"
 reason = "Add lash::runtime::RuntimeEffectOutcome::into_process to the agent-workbench durable process flow example and assert its externally observable result."
-
-[[api]]
-symbol = "lash::runtime::RuntimeEffectOutcome::into_sync_execution_environment"
-kind = "function"
-availability = "default+all-features"
-area = "sessions-turns"
-disposition = "unused-add"
-reason = "Add lash::runtime::RuntimeEffectOutcome::into_sync_execution_environment to the docs-snippets embedding/turns example and assert its externally observable result."
-
-[[api]]
-symbol = "lash::runtime::RuntimeEffectOutcome::into_tool_attempt_effect"
-kind = "function"
-availability = "default+all-features"
-area = "plugins"
-disposition = "unused-add"
-reason = "Add lash::runtime::RuntimeEffectOutcome::into_tool_attempt_effect to the agent-workbench plugin/tool setup example and assert its externally observable result."
-
-[[api]]
-symbol = "lash::runtime::RuntimeEffectOutcome::into_tool_batch_effect"
-kind = "function"
-availability = "default+all-features"
-area = "plugins"
-disposition = "unused-add"
-reason = "Add lash::runtime::RuntimeEffectOutcome::into_tool_batch_effect to the agent-workbench plugin/tool setup example and assert its externally observable result."
 
 [[api]]
 symbol = "lash::runtime::RuntimeEffectOutcome::into_trigger"
@@ -61303,24 +61199,8 @@ disposition = "unused-justify"
 reason = "Concrete host class: custom durable store or attachment backend implementers; bundled examples use repository backends and do not implement this backend-facing contract."
 
 [[api]]
-symbol = "lash_core::LlmRequestSpec::from_request"
-kind = "function"
-availability = "default+all-features"
-area = "protocol"
-disposition = "unused-justify"
-reason = "Concrete host class: remote transport and alternative protocol-driver implementers; examples cover shipped transports rather than third-party wire boundaries."
-
-[[api]]
 symbol = "lash_core::LlmRequestSpec::generation"
 kind = "field"
-availability = "default+all-features"
-area = "protocol"
-disposition = "unused-justify"
-reason = "Concrete host class: remote transport and alternative protocol-driver implementers; examples cover shipped transports rather than third-party wire boundaries."
-
-[[api]]
-symbol = "lash_core::LlmRequestSpec::into_request"
-kind = "function"
 availability = "default+all-features"
 area = "protocol"
 disposition = "unused-justify"
@@ -61894,22 +61774,6 @@ usage = "examples/agent-service/src/state.rs:7#use lash::{LashCore, LashSession,
 [[api]]
 symbol = "lash_core::ModelSpec::capability"
 kind = "field"
-availability = "default+all-features"
-area = "protocol"
-disposition = "unused-justify"
-reason = "Concrete host class: remote transport and alternative protocol-driver implementers; examples cover shipped transports rather than third-party wire boundaries."
-
-[[api]]
-symbol = "lash_core::ModelSpec::clamp_generation_options"
-kind = "function"
-availability = "default+all-features"
-area = "protocol"
-disposition = "unused-justify"
-reason = "Concrete host class: remote transport and alternative protocol-driver implementers; examples cover shipped transports rather than third-party wire boundaries."
-
-[[api]]
-symbol = "lash_core::ModelSpec::clamped_generation"
-kind = "function"
 availability = "default+all-features"
 area = "protocol"
 disposition = "unused-justify"
@@ -70870,38 +70734,6 @@ disposition = "unused-remove"
 reason = "No example or concrete unrepresented host class establishes a need for lash_core::RuntimeEffectOutcome::Trigger::result. Breaking: remove this export; downstream callers must own an equivalent local type or stop depending on the unexercised contract."
 
 [[api]]
-symbol = "lash_core::RuntimeEffectOutcome::into_await_event"
-kind = "function"
-availability = "default+all-features"
-area = "processes"
-disposition = "unused-justify"
-reason = "Concrete host class: alternative durable effect hosts and process substrates (for example a non-Restate controller) implementing the runtime handoff contract."
-
-[[api]]
-symbol = "lash_core::RuntimeEffectOutcome::into_direct_response"
-kind = "function"
-availability = "default+all-features"
-area = "protocol"
-disposition = "unused-justify"
-reason = "Concrete host class: remote transport and alternative protocol-driver implementers; examples cover shipped transports rather than third-party wire boundaries."
-
-[[api]]
-symbol = "lash_core::RuntimeEffectOutcome::into_exec_code"
-kind = "function"
-availability = "default+all-features"
-area = "sessions-turns"
-disposition = "unused-remove"
-reason = "No example or concrete unrepresented host class establishes a need for lash_core::RuntimeEffectOutcome::into_exec_code. Breaking: remove this export; downstream callers must own an equivalent local type or stop depending on the unexercised contract."
-
-[[api]]
-symbol = "lash_core::RuntimeEffectOutcome::into_llm_call"
-kind = "function"
-availability = "default+all-features"
-area = "protocol"
-disposition = "unused-justify"
-reason = "Concrete host class: remote transport and alternative protocol-driver implementers; examples cover shipped transports rather than third-party wire boundaries."
-
-[[api]]
 symbol = "lash_core::RuntimeEffectOutcome::into_peek_await_event"
 kind = "function"
 availability = "default+all-features"
@@ -70916,30 +70748,6 @@ availability = "default+all-features"
 area = "processes"
 disposition = "unused-justify"
 reason = "Concrete host class: alternative durable effect hosts and process substrates (for example a non-Restate controller) implementing the runtime handoff contract."
-
-[[api]]
-symbol = "lash_core::RuntimeEffectOutcome::into_sync_execution_environment"
-kind = "function"
-availability = "default+all-features"
-area = "sessions-turns"
-disposition = "unused-remove"
-reason = "No example or concrete unrepresented host class establishes a need for lash_core::RuntimeEffectOutcome::into_sync_execution_environment. Breaking: remove this export; downstream callers must own an equivalent local type or stop depending on the unexercised contract."
-
-[[api]]
-symbol = "lash_core::RuntimeEffectOutcome::into_tool_attempt_effect"
-kind = "function"
-availability = "default+all-features"
-area = "plugins"
-disposition = "unused-justify"
-reason = "Concrete host class: third-party plugin, provider, or tool-source implementers implementing the extension contract."
-
-[[api]]
-symbol = "lash_core::RuntimeEffectOutcome::into_tool_batch_effect"
-kind = "function"
-availability = "default+all-features"
-area = "plugins"
-disposition = "unused-justify"
-reason = "Concrete host class: third-party plugin, provider, or tool-source implementers implementing the extension contract."
 
 [[api]]
 symbol = "lash_core::RuntimeEffectOutcome::into_trigger"

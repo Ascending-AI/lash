@@ -85,7 +85,10 @@ impl ModelSpec {
     ///
     /// A model that declares no `output_token_capacity` clamps nothing: an
     /// unknown ceiling is not a ceiling of zero.
-    pub fn clamp_generation_options(&self, generation: &mut crate::GenerationOptions) -> bool {
+    pub(crate) fn clamp_generation_options(
+        &self,
+        generation: &mut crate::GenerationOptions,
+    ) -> bool {
         let (Some(requested), Some(capacity)) = (
             generation.output_token_cap,
             self.limits.output_token_capacity,
@@ -109,7 +112,7 @@ impl ModelSpec {
     /// model. Callers that hand a whole session policy to a path with no
     /// capacity of its own — a plugin's direct request — take the options from
     /// here rather than from the policy directly.
-    pub fn clamped_generation(
+    pub(crate) fn clamped_generation(
         &self,
         generation: &crate::GenerationOptions,
     ) -> crate::GenerationOptions {
