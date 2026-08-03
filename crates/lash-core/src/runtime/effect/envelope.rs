@@ -418,6 +418,8 @@ pub enum RuntimeEffectCommand {
 const _: () = assert!(std::mem::size_of::<RuntimeEffectCommand>() <= 256);
 
 impl RuntimeEffectCommand {
+    /// Boxes one process command at the effect boundary for effect-host and process-engine
+    /// implementors so the durable envelope remains size-bounded.
     pub fn process(command: ProcessCommand) -> Self {
         Self::Process {
             command: Box::new(command),
@@ -495,6 +497,8 @@ fn boxed_process_execution_context_is_empty(context: &ProcessExecutionContext) -
 type CheckpointOutcome = Result<CheckpointDelivery, RuntimeEffectControllerError>;
 
 impl ProcessCommand {
+    /// Derives the stable effect ID process-engine and effect-host implementors use to journal this
+    /// process command without conflating command kinds.
     pub fn effect_id(&self) -> String {
         match self {
             Self::Start { registration, .. } => format!("process:start:{}", registration.id),
@@ -858,6 +862,8 @@ impl RuntimeEffectOutcome {
         }
     }
 
+    /// Extracts the process outcome for effect-host implementors while executing or replaying a
+    /// runtime effect.
     pub fn into_process(self) -> Result<ProcessEffectOutcome, RuntimeEffectControllerError> {
         match self {
             Self::Process { result } => Ok(result),
@@ -925,6 +931,8 @@ impl RuntimeEffectOutcome {
         }
     }
 
+    /// Extracts the peek await event outcome for effect-host implementors while executing or
+    /// replaying a runtime effect.
     pub fn into_peek_await_event(
         self,
     ) -> Result<Option<crate::Resolution>, RuntimeEffectControllerError> {

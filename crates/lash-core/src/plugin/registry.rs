@@ -545,6 +545,9 @@ pub struct ProcessEngineContributionContext<'a> {
 }
 
 impl<'a> ProcessEngineContributionContext<'a> {
+    /// Constructs a `ProcessEngineContributionContext` for protocol and process-engine implementors
+    /// while implementing `PluginFactory::process_engine_contributions` (process engine
+    /// contributions).
     pub fn new(
         extensions: &'a PluginExtensions,
         trace_context: &'a crate::TraceContext,
@@ -557,14 +560,20 @@ impl<'a> ProcessEngineContributionContext<'a> {
         }
     }
 
+    /// Exposes extensions to protocol and process-engine implementors while implementing
+    /// `PluginFactory::process_engine_contributions` (process engine contributions).
     pub fn extensions(&self) -> &PluginExtensions {
         self.extensions
     }
 
+    /// Exposes trace context to protocol and process-engine implementors while implementing
+    /// `PluginFactory::process_engine_contributions` (process engine contributions).
     pub fn trace_context(&self) -> &crate::TraceContext {
         self.trace_context
     }
 
+    /// Tells plugin factories whether the host supplied the lifecycle services required to
+    /// contribute a runnable process engine.
     pub fn process_lifecycle_available(&self) -> bool {
         self.process_lifecycle_available
     }

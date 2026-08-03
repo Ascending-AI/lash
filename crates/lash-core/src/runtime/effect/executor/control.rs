@@ -52,6 +52,8 @@ impl ExecutionScope {
         }
     }
 
+    /// Constructs the stable process scope effect-host implementors use to key effects that outlive
+    /// any one session turn.
     pub fn process(process_id: impl Into<String>) -> Self {
         Self::Process {
             process_id: process_id.into(),
@@ -228,6 +230,8 @@ impl EffectJournalRetirement {
         }
     }
 
+    /// Constructs a process-wide retirement request for effect-host implementors removing every
+    /// durable effect journal entry owned by a terminal process.
     pub fn process(process_id: impl Into<String>) -> Self {
         Self::Process {
             process_id: process_id.into(),
@@ -265,6 +269,8 @@ impl AwaitEventWaitIdentity {
         }
     }
 
+    /// Constructs the stable wait identity effect-host implementors use to resolve one named
+    /// process signal without colliding with other signals or attempts.
     pub fn process_signal(
         process_id: impl Into<String>,
         signal_name: impl Into<String>,

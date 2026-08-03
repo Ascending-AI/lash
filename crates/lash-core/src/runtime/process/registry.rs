@@ -67,6 +67,8 @@ impl Default for WakeDeliveryConfig {
 }
 
 impl WakeDeliveryConfig {
+    /// Constructs wake-retention policy for process-store implementors and rejects a zero expiry so
+    /// pending delivery cannot expire at creation.
     pub fn new(delivery_expiry_ms: u64) -> Result<Self, PluginError> {
         if delivery_expiry_ms == 0 {
             return Err(PluginError::Session(
@@ -79,6 +81,8 @@ impl WakeDeliveryConfig {
         })
     }
 
+    /// Sets the reclaim age for process-store implementors and rejects zero so an active enqueuing
+    /// claim is not immediately stale.
     pub fn with_enqueuing_stale_after_ms(
         mut self,
         enqueuing_stale_after_ms: u64,
@@ -103,6 +107,7 @@ pub enum WakeDeliveryState {
 }
 
 impl WakeDeliveryState {
+    /// Exposes the stable snake-case wake-delivery state for process-store implementors.
     pub fn as_str(self) -> &'static str {
         match self {
             Self::Pending => "pending",
@@ -127,6 +132,8 @@ pub enum WakeDiscardReason {
 }
 
 impl WakeDiscardReason {
+    /// Exposes the stable snake-case discard reason for process-store implementors and durable
+    /// diagnostics.
     pub fn as_str(self) -> &'static str {
         match self {
             Self::Expired => "expired",
@@ -155,6 +162,8 @@ pub struct WakeDelivery {
 }
 
 impl WakeDelivery {
+    /// Creates a pending wake for process-store implementors with a content-derived ID, zero
+    /// attempts, immediate eligibility, and saturating expiry from creation time.
     pub fn pending(
         wake: ProcessWakeDelivery,
         config: WakeDeliveryConfig,
@@ -184,6 +193,8 @@ impl WakeDelivery {
         })
     }
 
+    /// Returns the exact enqueuing ownership fence process-store implementors must present for
+    /// settlement, or an error when the claimed row carries no token.
     pub fn claim_token(&self) -> Result<&str, PluginError> {
         self.claim_token.as_deref().ok_or_else(|| {
             PluginError::Session(format!(
@@ -226,6 +237,8 @@ pub struct WakeDeliveryReport {
 }
 
 impl WakeDeliveryReport {
+    /// Counts delivery states and discard reasons for process-store embedders, then identifies each
+    /// target/process ordering group blocked behind a discarded head with later work.
     pub fn from_deliveries<'a>(deliveries: impl IntoIterator<Item = &'a WakeDelivery>) -> Self {
         let deliveries = deliveries.into_iter().collect::<Vec<_>>();
         let mut report = Self::default();

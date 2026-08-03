@@ -466,6 +466,8 @@ impl<'run> RuntimeExecutionContext<'run> {
         }
     }
 
+    /// Exposes captured process execution env ref to protocol and process-engine implementors while
+    /// executing code against the session runtime.
     pub async fn captured_process_execution_env_ref(
         &self,
     ) -> Result<crate::ProcessExecutionEnvRef, crate::PluginError> {
@@ -479,6 +481,8 @@ impl<'run> RuntimeExecutionContext<'run> {
         .await
     }
 
+    /// Starts a child process for code-executor implementors with the current execution context as
+    /// causal provenance.
     pub async fn start_child_process(
         &self,
         registration: crate::ProcessRegistration,
@@ -520,6 +524,8 @@ impl<'run> RuntimeExecutionContext<'run> {
         }
     }
 
+    /// Appends one replay-scoped process event for code-executor implementors and returns the
+    /// store-assigned sequence and any coordinated wake delivery.
     pub async fn append_process_event(
         &self,
         request: crate::ProcessEventAppendRequest,
@@ -552,6 +558,8 @@ impl<'run> RuntimeExecutionContext<'run> {
         Ok(result.event)
     }
 
+    /// Waits for one named process signal for code-executor implementors through the durable
+    /// await-event seam rather than polling the registry.
     pub async fn await_process_signal_event(
         &self,
         process_id: &str,
@@ -627,6 +635,7 @@ impl<'run> RuntimeExecutionContext<'run> {
         crate::tool_dispatch::resolve_callable_manifest_by_id(&self.dispatch, id)
     }
 
+    /// Appends one named, replay-scoped signal to a process for code-executor implementors.
     pub async fn signal_process_by_id(
         &self,
         process_id: &str,
@@ -734,6 +743,8 @@ impl<'run> RuntimeExecutionContext<'run> {
         }
     }
 
+    /// Sleeps process execution through the effect-host seam for code-executor implementors so
+    /// cancellation and replay semantics remain durable.
     pub async fn sleep_process(
         &self,
         scope: &str,

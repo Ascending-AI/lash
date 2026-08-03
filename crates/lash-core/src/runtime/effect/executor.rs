@@ -377,10 +377,14 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
         }
     }
 
+    /// Builds the inline durable-wait path for effect-host implementors using the system clock and
+    /// the supplied optional deadline.
     pub fn await_event(cancellation: CancellationToken, deadline: Option<Instant>) -> Self {
         Self::await_event_with_clock(cancellation, deadline, Arc::new(crate::SystemClock))
     }
 
+    /// Builds the inline durable-wait path with an injected clock for effect-host and conformance
+    /// implementors testing deterministic deadline behavior.
     pub fn await_event_with_clock(
         cancellation: CancellationToken,
         deadline: Option<Instant>,
@@ -444,6 +448,8 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
         self
     }
 
+    /// Binds process registry and optional work-driver services for effect-host implementors
+    /// executing process effects inline.
     pub fn processes(
         registry: Arc<dyn ProcessRegistry>,
         process_work_driver: Option<crate::ProcessWorkDriver>,
@@ -691,6 +697,8 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
         }
     }
 
+    /// Extracts the process outcome for effect-host implementors while executing or replaying a
+    /// runtime effect.
     pub fn into_process(self) -> Result<ProcessLocalExecution, RuntimeEffectControllerError> {
         match self.state {
             RuntimeEffectLocalExecutorState::Process(execution) => Ok(execution),
@@ -870,6 +878,8 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
         }
     }
 
+    /// Extracts the await event options outcome for effect-host implementors while executing or
+    /// replaying a runtime effect.
     pub fn into_await_event_options(
         self,
     ) -> Result<RuntimeAwaitEventOptions, RuntimeEffectControllerError> {

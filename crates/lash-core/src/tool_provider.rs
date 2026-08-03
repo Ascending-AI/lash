@@ -443,6 +443,8 @@ impl<'run> ToolContext<'run> {
         }
     }
 
+    /// Provides process lifecycle operations to tool implementors under the call's session and
+    /// execution scopes.
     pub fn processes(&self) -> ToolSessionProcessAdmin<'run> {
         ToolSessionProcessAdmin {
             session_id: self.session_id.clone(),
@@ -455,6 +457,8 @@ impl<'run> ToolContext<'run> {
         }
     }
 
+    /// Exposes emit child process started to protocol and process-engine implementors while
+    /// preparing or executing an authorized tool call.
     pub fn emit_child_process_started(
         &self,
         process_id: impl Into<String>,
@@ -486,6 +490,8 @@ impl<'run> ToolContext<'run> {
         }
     }
 
+    /// Exposes process events to protocol and process-engine implementors while preparing or
+    /// executing an authorized tool call.
     pub fn process_events(&self) -> ToolProcessEventClient {
         ToolProcessEventClient {
             context: self.process_events.clone(),
@@ -506,10 +512,14 @@ impl<'run> ToolContext<'run> {
         }
     }
 
+    /// Exposes async process id to protocol and process-engine implementors while preparing or
+    /// executing an authorized tool call. Returns `None` when no async process id is present.
     pub fn async_process_id(&self) -> Option<&str> {
         self.async_process_id.as_deref()
     }
 
+    /// Exposes runtime process id to protocol and process-engine implementors while preparing or
+    /// executing an authorized tool call. Returns `None` when no runtime process id is present.
     pub fn runtime_process_id(&self) -> Option<&str> {
         self.async_process_id
             .as_deref()
@@ -611,6 +621,8 @@ impl<'run> ToolContext<'run> {
         self.completion.take()
     }
 
+    /// Sets the async process carried by a `ToolContext` for protocol and process-engine
+    /// implementors while preparing or executing an authorized tool call.
     pub fn with_async_process(
         mut self,
         process_id: impl Into<String>,

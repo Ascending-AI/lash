@@ -581,6 +581,8 @@ impl SessionCreateRequest {
         self
     }
 
+    /// Sets the observed processes carried by a `SessionCreateRequest` for store and process-engine
+    /// implementors while persisting and coordinating durable process execution.
     pub fn with_observed_processes(
         mut self,
         process_ids: impl IntoIterator<Item = impl Into<crate::ProcessId>>,

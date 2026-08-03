@@ -10,6 +10,8 @@ pub struct ProcessLiveReferenceSummary {
 }
 
 impl ProcessLiveReferenceSummary {
+    /// Builds a `ProcessLiveReferenceSummary` from records data for store and durable-substrate
+    /// implementors while persisting and coordinating durable process execution.
     pub fn from_records<'record>(
         records: impl IntoIterator<Item = &'record ProcessRecord>,
     ) -> Vec<Self> {

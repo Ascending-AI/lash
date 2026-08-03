@@ -84,6 +84,8 @@ struct ManagedProcessRecord {
 }
 
 impl TestLocalProcessRegistry {
+    /// Updates process read error state for store and process-engine implementors while persisting
+    /// and coordinating durable process execution.
     pub async fn set_process_read_error(&self, error: Option<PluginError>) {
         *self.process_read_error.lock().await = error;
     }

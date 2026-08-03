@@ -7,6 +7,8 @@ pub struct ProcessOpScope<'scope> {
 }
 
 impl<'scope> ProcessOpScope<'scope> {
+    /// Constructs a `ProcessOpScope` for store and durable-substrate implementors while persisting
+    /// and coordinating durable process execution.
     pub fn new(scoped_effect_controller: crate::ScopedEffectController<'scope>) -> Self {
         Self {
             parent_invocation: None,
@@ -18,6 +20,8 @@ impl<'scope> ProcessOpScope<'scope> {
         }
     }
 
+    /// Sets the parent invocation carried by a `ProcessOpScope` for store and durable-substrate
+    /// implementors while persisting and coordinating durable process execution.
     pub fn with_parent_invocation(
         mut self,
         parent_invocation: Option<crate::RuntimeInvocation>,
@@ -26,6 +30,8 @@ impl<'scope> ProcessOpScope<'scope> {
         self
     }
 
+    /// Sets the agent frame id carried by a `ProcessOpScope` for store and durable-substrate
+    /// implementors while persisting and coordinating durable process execution.
     pub fn with_agent_frame_id(mut self, agent_frame_id: Option<crate::AgentFrameId>) -> Self {
         self.agent_frame_id = agent_frame_id;
         self
@@ -40,6 +46,8 @@ impl<'scope> ProcessOpScope<'scope> {
         self
     }
 
+    /// Exposes agent frame id to store and durable-substrate implementors while persisting and
+    /// coordinating durable process execution. Returns `None` when no agent frame id is present.
     pub fn agent_frame_id(&self) -> Option<&str> {
         self.agent_frame_id.as_deref()
     }
