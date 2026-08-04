@@ -16,6 +16,9 @@ use lash_postgres_store::{
 
 mod support;
 
+#[path = "../../lash-core/tests/support/cold_process_turn_parent.rs"]
+mod cold_process_turn_parent;
+
 use support::{SharedDatabaseLock, database_url};
 
 fn sync_await<T: Send + 'static>(
@@ -143,6 +146,31 @@ async fn postgres_runtime_persistence_recovery_laws_when_configured() {
         });
         Arc::new(storage.unbound_session_store()) as Arc<dyn RuntimePersistence>
     })
+    .await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn postgres_real_turn_crash_matrix_when_configured() {
+    let Some((_database_lock, storage)) = storage().await else {
+        eprintln!(
+            "skipping Postgres real-turn crash matrix: LASH_POSTGRES_DATABASE_URL is not set"
+        );
+        return;
+    };
+    reset(&storage).await;
+    let database_url = database_url().expect("configured Postgres database URL");
+    Box::pin(lash_core::testing::conformance::turn_crash_matrix_level_1(
+        |scenario| {
+            let database_url = database_url.clone();
+            let storage = sync_await(async move {
+                PostgresStorage::connect(&database_url)
+                    .await
+                    .expect("construct fresh Postgres real-turn crash-matrix pool")
+            });
+            Arc::new(storage.session_store(format!("trace-derived-real-turn:{scenario}")))
+                as Arc<dyn RuntimePersistence>
+        },
+    ))
     .await;
 }
 
@@ -1116,6 +1144,33 @@ async fn postgres_effect_replay_satisfies_cold_process_crash_conformance_when_co
         2,
         "recorded effect outcome replays without re-execution"
     );
+}
+
+#[tokio::test]
+async fn postgres_real_turn_satisfies_cold_process_crash_matrix_when_configured() {
+    let Some((_database_lock, storage)) = storage().await else {
+        eprintln!(
+            "skipping PostgreSQL cold-process real-turn matrix: LASH_POSTGRES_DATABASE_URL is not set"
+        );
+        return;
+    };
+    reset(&storage).await;
+    let url = database_url().expect("configured PostgreSQL database URL");
+    let dir = tempfile::tempdir().expect("PostgreSQL cold-process real-turn tempdir");
+    cold_process_turn_parent::assert_real_turn_kill_recovery(
+        dir.path(),
+        |action, nonce, marker| {
+            let mut command =
+                tokio::process::Command::new(env!("CARGO_BIN_EXE_postgres-await-event-helper"));
+            command
+                .env("LASH_POSTGRES_DATABASE_URL", &url)
+                .arg(action)
+                .arg(nonce)
+                .arg(marker);
+            command
+        },
+    )
+    .await;
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]

@@ -48295,6 +48295,38 @@ disposition = "unused-add"
 reason = "Add lash::testing::conformance::wake_delivery_crash_matrix to the agent-workbench durable process flow example and assert its externally observable result."
 
 [[api]]
+symbol = "lash::testing::conformance::cold_process_real_turn_driver"
+kind = "function"
+availability = "all-features"
+area = "sessions-turns"
+disposition = "unused-justify"
+reason = "Conformance-only class 4 helper for durable backend test binaries that prove full-turn recovery across a real process kill."
+
+[[api]]
+symbol = "lash::testing::conformance::cold_process_turn_expectations"
+kind = "function"
+availability = "all-features"
+area = "sessions-turns"
+disposition = "unused-justify"
+reason = "Conformance-only class 4 oracle consumed by bundled backend tests so level-2 helper assertions share the committed real-turn outcome table."
+
+[[api]]
+symbol = "lash::testing::conformance::cold_process_turn_scope"
+kind = "function"
+availability = "all-features"
+area = "sessions-turns"
+disposition = "unused-justify"
+reason = "Conformance-only class 4 helper that gives durable backend test binaries the stable scope required by the cold-process turn driver."
+
+[[api]]
+symbol = "lash::testing::conformance::turn_crash_matrix_level_1"
+kind = "function"
+availability = "all-features"
+area = "sessions-turns"
+disposition = "unused-justify"
+reason = "Conformance-only class 4 suite invoked directly by each bundled runtime persistence backend's tests."
+
+[[api]]
 symbol = "lash::tools::CancelHint"
 kind = "enum"
 availability = "default+all-features"

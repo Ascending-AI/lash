@@ -1,0 +1,135 @@
+[
+  {
+    "point": { "operation": { "seam": "store", "operation": { "kind": "claim_session_execution_lease" } }, "placement": "boundary" },
+    "outcome": "No lease was acquired; a successor claims immediately and completes the durable turn once.",
+    "effect_executions_l1": 1
+  },
+  {
+    "point": { "operation": { "seam": "store", "operation": { "kind": "claim_session_execution_lease" } }, "placement": "inside_call" },
+    "outcome": "The lost lease result expires; a successor polls, reclaims a higher generation, and completes once.",
+    "effect_executions_l1": 1
+  },
+  {
+    "point": { "operation": { "seam": "store", "operation": { "kind": "claim_next_turn_inputs" } }, "placement": "boundary" },
+    "outcome": "Next-turn input remains unclaimed and is adopted by the successor.",
+    "effect_executions_l1": 1
+  },
+  {
+    "point": { "operation": { "seam": "store", "operation": { "kind": "claim_next_turn_inputs" } }, "placement": "inside_call" },
+    "outcome": "The input claim is pinned to the expired lease generation and is reclaimable by the successor.",
+    "effect_executions_l1": 1
+  },
+  {
+    "point": { "operation": { "seam": "store", "operation": { "kind": "load_session" } }, "placement": "boundary" },
+    "outcome": "No runtime progress was durable; the successor reloads the same head and reclaims ingress.",
+    "effect_executions_l1": 1
+  },
+  {
+    "point": { "operation": { "seam": "provider", "operation": { "kind": "initial_request" } }, "placement": "boundary" },
+    "outcome": "The provider request is replayed from durable input with no committed model progress.",
+    "effect_executions_l1": 1
+  },
+  {
+    "point": { "operation": { "seam": "provider", "operation": { "kind": "initial_mid_stream" } }, "placement": "provider_mid_stream" },
+    "outcome": "Partial provider stream state is process-local and discarded; the request is replayed.",
+    "effect_executions_l1": 1,
+    "level_2": {
+      "effect_executions": { "at_crash": 0, "after_recovery": 1 },
+      "exact": { "terminal": 1, "pending_inputs": 0, "queued_work": 0 }
+    }
+  },
+  {
+    "point": { "operation": { "seam": "store", "operation": { "kind": "renew_session_execution_lease" } }, "placement": "boundary" },
+    "outcome": "The current lease remains valid but unrenewed; after expiry a successor reclaims it and executes the effect once.",
+    "effect_executions_l1": 1
+  },
+  {
+    "point": { "operation": { "seam": "store", "operation": { "kind": "renew_session_execution_lease" } }, "placement": "inside_call" },
+    "outcome": "The renewed lease result was lost; the renewed deadline eventually expires and a successor reclaims the turn without duplicating pre-effect work.",
+    "effect_executions_l1": 1
+  },
+  {
+    "point": { "operation": { "seam": "effect", "operation": { "kind": "tool_batch", "name": "trace_effect" } }, "placement": "boundary" },
+    "outcome": "The batch has not executed; the successor executes its external tool effect once.",
+    "effect_executions_l1": 1
+  },
+  {
+    "point": { "operation": { "seam": "effect", "operation": { "kind": "tool_batch", "name": "trace_effect" } }, "placement": "inside_call" },
+    "outcome": "The completed batch result was lost before runtime progress; the receipt-less level-1 controller re-executes the external effect.",
+    "effect_executions_l1": 2
+  },
+  {
+    "point": { "operation": { "seam": "effect", "operation": { "kind": "tool_attempt", "name": "trace_effect" } }, "placement": "boundary" },
+    "outcome": "The tool attempt has not crossed the external boundary; recovery executes it once.",
+    "effect_executions_l1": 1
+  },
+  {
+    "point": { "operation": { "seam": "effect", "operation": { "kind": "tool_attempt", "name": "trace_effect" } }, "placement": "after_external_effect_before_outcome" },
+    "outcome": "The external effect completed inside the tool but no durable outcome was recorded; recovery MUST re-execute it under at-least-once semantics.",
+    "effect_executions_l1": 2,
+    "level_2": {
+      "effect_executions": { "at_crash": 1, "after_recovery": 2 },
+      "exact": { "terminal": 1, "pending_inputs": 0, "queued_work": 0 }
+    }
+  },
+  {
+    "point": { "operation": { "seam": "effect", "operation": { "kind": "tool_attempt", "name": "trace_effect" } }, "placement": "inside_call" },
+    "outcome": "The controller call returned but runtime progress was not durable; the receipt-less level-1 controller re-executes the external effect.",
+    "effect_executions_l1": 2
+  },
+  {
+    "point": { "operation": { "seam": "store", "operation": { "kind": "claim_checkpoint_work", "checkpoint": "afterwork" } }, "placement": "boundary" },
+    "outcome": "Tool progress is not durable; active input and queued work remain reclaimable and the effect re-executes.",
+    "effect_executions_l1": 2
+  },
+  {
+    "point": { "operation": { "seam": "store", "operation": { "kind": "claim_checkpoint_work", "checkpoint": "afterwork" } }, "placement": "inside_call" },
+    "outcome": "Checkpoint claims are pinned to the expired generation; the successor reclaims them and replays the uncommitted effect.",
+    "effect_executions_l1": 2
+  },
+  {
+    "point": { "operation": { "seam": "provider", "operation": { "kind": "after_tool_request" } }, "placement": "boundary" },
+    "outcome": "No tool outcome or model continuation is durable; the whole model-tool prefix is replayed.",
+    "effect_executions_l1": 2
+  },
+  {
+    "point": { "operation": { "seam": "provider", "operation": { "kind": "after_tool_mid_stream" } }, "placement": "provider_mid_stream" },
+    "outcome": "Partial post-tool provider output is discarded. Level 1 replays the receipt-less effect; level 2 reuses the durable outcome before replaying the request.",
+    "effect_executions_l1": 2,
+    "level_2": {
+      "effect_executions": { "at_crash": 1, "after_recovery": 1 },
+      "exact": { "terminal": 1, "pending_inputs": 0, "queued_work": 0 }
+    }
+  },
+  {
+    "point": { "operation": { "seam": "store", "operation": { "kind": "claim_checkpoint_work", "checkpoint": "beforecompletion" } }, "placement": "boundary" },
+    "outcome": "The final checkpoint probe has not changed durable state; recovery replays the turn prefix.",
+    "effect_executions_l1": 2
+  },
+  {
+    "point": { "operation": { "seam": "store", "operation": { "kind": "claim_checkpoint_work", "checkpoint": "beforecompletion" } }, "placement": "inside_call" },
+    "outcome": "Any final checkpoint claims remain generation-reclaimable; no model or effect outcome was committed.",
+    "effect_executions_l1": 2
+  },
+  {
+    "point": { "operation": { "seam": "store", "operation": { "kind": "commit_final_head", "settles_queue": true, "settles_turn_input": true, "releases_lease": true } }, "placement": "boundary" },
+    "outcome": "KNOWN-DEFECT FIG-905: the final current-head CAS has not landed; level 2 currently commits the recovered terminal turn without settling stale queued work. Fixing FIG-905 must produce the correct durable end state terminal=1, pending_inputs=0, queued_work=0.",
+    "effect_executions_l1": 2,
+    "level_2": {
+      "effect_executions": { "at_crash": 1, "after_recovery": 1 },
+      "known_defect": {
+        "ticket": "FIG-905",
+        "expected_defective": { "terminal": 1, "pending_inputs": 0, "queued_work": 1 }
+      }
+    }
+  },
+  {
+    "point": { "operation": { "seam": "store", "operation": { "kind": "commit_final_head", "settles_queue": true, "settles_turn_input": true, "releases_lease": true } }, "placement": "inside_call" },
+    "outcome": "The final CAS landed but its response was lost; the successor observes settled ingress and does not repeat the committed turn.",
+    "effect_executions_l1": 1,
+    "level_2": {
+      "effect_executions": { "at_crash": 1, "after_recovery": 1 },
+      "exact": { "terminal": 1, "pending_inputs": 0, "queued_work": 0 }
+    }
+  }
+]

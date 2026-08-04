@@ -8,9 +8,13 @@
 //!
 //! Reopen and recovery laws use distinct outer handles over one substrate.
 //! [`runtime_persistence_recovery_laws`] certifies store behavior only across
-//! claim, checkpoint, commit, and settlement boundaries. Backend-owned helper
-//! processes separately cover process-local wait ownership and effect replay;
-//! neither instrument is a substitute for crash injection through a real turn.
+//! claim, checkpoint, commit, and settlement boundaries. The distinct
+//! [`turn_crash_matrix_level_1`] suite executes a real scripted turn through
+//! conformance-owned store, provider, and effect-controller decorators; its
+//! golden trace generates the crash points and its outcome table supplies the
+//! recovery oracle. Backend helper processes run the selected level-2 points
+//! under `SIGKILL`, including provider streaming, external-effect outcome loss,
+//! and final turn control.
 //!
 //! Suites panic on the first violated invariant — call them from a
 //! `#[tokio::test]`. Embedders with custom backends can run them via
@@ -39,6 +43,7 @@ mod store_contract_state_machine;
 mod store_recovery;
 mod trigger_store;
 mod turn_control;
+mod turn_crash_matrix;
 mod wake_delivery;
 
 pub use artifact_store::*;
@@ -61,6 +66,7 @@ pub use store_contract_state_machine::*;
 pub use store_recovery::*;
 pub use trigger_store::*;
 pub use turn_control::*;
+pub use turn_crash_matrix::*;
 pub use wake_delivery::*;
 
 use std::collections::BTreeMap;
@@ -265,6 +271,40 @@ mod tests {
             );
             crate::testing::checkpoint_observer::fresh_runtime_persistence_handle(substrate)
         })
+        .await;
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn in_memory_real_turn_crash_trace_is_current() {
+        let substrates = Arc::new(Mutex::new(
+            BTreeMap::<String, Arc<dyn RuntimePersistence>>::new(),
+        ));
+        Box::pin(turn_crash_trace_drift_check(move |scenario| {
+            let mut substrates = substrates.lock().expect("turn trace substrates");
+            let substrate = Arc::clone(
+                substrates
+                    .entry(scenario.to_string())
+                    .or_insert_with(|| Arc::new(crate::InMemorySessionStore::default())),
+            );
+            crate::testing::checkpoint_observer::fresh_runtime_persistence_handle(substrate)
+        }))
+        .await;
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn in_memory_real_turn_crash_matrix() {
+        let substrates = Arc::new(Mutex::new(
+            BTreeMap::<String, Arc<dyn RuntimePersistence>>::new(),
+        ));
+        Box::pin(turn_crash_matrix_level_1(move |scenario| {
+            let mut substrates = substrates.lock().expect("turn matrix substrates");
+            let substrate = Arc::clone(
+                substrates
+                    .entry(scenario.to_string())
+                    .or_insert_with(|| Arc::new(crate::InMemorySessionStore::default())),
+            );
+            crate::testing::checkpoint_observer::fresh_runtime_persistence_handle(substrate)
+        }))
         .await;
     }
 
