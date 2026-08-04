@@ -175,7 +175,10 @@ impl<'run> SessionTurnRequest<'run> {
     /// already-unique handles are the intended sources. Reusing an id that is
     /// still running is rejected by
     /// [`SessionLifecycleService::start_turn`], not here, because uniqueness is
-    /// only observable against the live registry.
+    /// only observable against the live registry; the rejection reads
+    /// `` turn `<id>` is already running on session `<other>` ``. The turn's
+    /// registration and its live-usage entry are both released when the turn
+    /// completes or when the running turn future is dropped.
     pub fn new(
         session_id: impl Into<String>,
         turn_id: impl Into<String>,
