@@ -8,51 +8,6 @@ pub type ReopenEffectControllerFuture =
     std::pin::Pin<Box<dyn Future<Output = Arc<dyn crate::RuntimeEffectController>> + Send>>;
 pub type ReopenEffectController = Arc<dyn Fn() -> ReopenEffectControllerFuture + Send + Sync>;
 
-/// Controllable wall clock for backends whose transactional commit timestamp
-/// comes from another authoritative clock (notably PostgreSQL). Starting it in
-/// the past makes the owner-death ordering assertion deterministic.
-#[derive(Debug)]
-pub struct AttachmentOwnerConformanceClock(std::sync::atomic::AtomicU64);
-
-impl AttachmentOwnerConformanceClock {
-    pub fn new(timestamp_ms: u64) -> Self {
-        Self(std::sync::atomic::AtomicU64::new(timestamp_ms))
-    }
-
-    pub fn advance(&self, duration_ms: u64) {
-        self.0.fetch_add(duration_ms, Ordering::SeqCst);
-    }
-}
-
-#[async_trait::async_trait]
-impl crate::Clock for AttachmentOwnerConformanceClock {
-    fn now(&self) -> std::time::Instant {
-        std::time::Instant::now()
-    }
-
-    fn timestamp_ms(&self) -> u64 {
-        self.0.load(Ordering::SeqCst)
-    }
-
-    fn timestamp_rfc3339(&self) -> String {
-        self.timestamp_datetime().to_rfc3339()
-    }
-
-    fn timestamp_datetime(&self) -> chrono::DateTime<chrono::Utc> {
-        chrono::DateTime::from(
-            std::time::UNIX_EPOCH + std::time::Duration::from_millis(self.timestamp_ms()),
-        )
-    }
-
-    async fn sleep(&self, duration: std::time::Duration) {
-        tokio::time::sleep(duration).await;
-    }
-
-    async fn sleep_until(&self, deadline: std::time::Instant) {
-        tokio::time::sleep_until(deadline.into()).await;
-    }
-}
-
 /// Durable handles needed by [`attachment_owner_cold_replay`]. The two effect
 /// controllers must be independently opened over the same journal; the vector
 /// deliberately never calls `start_replay` on the first controller.

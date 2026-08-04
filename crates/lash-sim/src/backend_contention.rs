@@ -419,16 +419,16 @@ async fn stale_owner_ttl_preserves_live_successor(
                 break;
             }
             SessionExecutionLeaseClaimOutcome::Acquired(successor)
-                if successor.claimed_at_epoch_ms < stale_lease.expires_at_epoch_ms =>
+                if successor.lease.claimed_at_epoch_ms < stale_lease.expires_at_epoch_ms =>
             {
                 return Err(format!(
                     "stale owner was replaced at {} before its lease expiry {}",
-                    successor.claimed_at_epoch_ms, stale_lease.expires_at_epoch_ms
+                    successor.lease.claimed_at_epoch_ms, stale_lease.expires_at_epoch_ms
                 ));
             }
             SessionExecutionLeaseClaimOutcome::Acquired(lapsed_successor) => {
                 store
-                    .release_session_execution_lease(&lapsed_successor.completion())
+                    .release_session_execution_lease(&lapsed_successor.lease.completion())
                     .await
                     .map_err(|err| format!("release successor from lapsed observation: {err}"))?;
             }
@@ -447,7 +447,7 @@ async fn stale_owner_ttl_preserves_live_successor(
             .await
             .map_err(|err| format!("claim stale-owner lease after TTL: {err}"))?
         {
-            SessionExecutionLeaseClaimOutcome::Acquired(lease) => break lease,
+            SessionExecutionLeaseClaimOutcome::Acquired(acquisition) => break acquisition.lease,
             SessionExecutionLeaseClaimOutcome::Busy { .. }
                 if std::time::Instant::now() < expiry_deadline =>
             {

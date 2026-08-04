@@ -338,9 +338,7 @@ async fn sqlite_process_continuation_store_satisfies_conformance() {
 async fn sqlite_wake_delivery_crash_matrix() {
     let dir = tempfile::tempdir().expect("tempdir");
     let process_registry_path = dir.path().join("processes.db");
-    let clock = Arc::new(
-        lash_core::testing::conformance::WakeDeliveryConformanceClock::new(1_800_000_000_000),
-    );
+    let clock = Arc::new(lash_core::testing::TestClock::new(1_800_000_000_000));
     let registry = Arc::new(
         SqliteProcessRegistry::open_with_clock(
             &process_registry_path,

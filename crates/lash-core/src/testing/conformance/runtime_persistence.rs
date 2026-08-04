@@ -10,6 +10,7 @@ use super::*;
 use crate::facade_support::{SessionGraphFacadeOps, ToolStateFacadeOps};
 
 const CONTROLLED_LEASE_TTL_MS: u64 = 50;
+const REALTIME_SCAFFOLDING_LEASE_TTL_MS: u64 = 50;
 // Real database operations can be descheduled between claiming a lease and
 // observing it. This is a harness stall allowance, not the semantic expiry
 // boundary: controlled-clock backends still prove the 50 ms contract exactly.
@@ -33,7 +34,7 @@ impl RuntimePersistenceLeaseTiming {
 
     fn scaffolding_lease_ttl_ms(&self) -> u64 {
         match self {
-            Self::Realtime => REALTIME_LEASE_STALL_ALLOWANCE.as_millis() as u64,
+            Self::Realtime => REALTIME_SCAFFOLDING_LEASE_TTL_MS,
             Self::Controlled(_) => CONTROLLED_LEASE_TTL_MS,
         }
     }
@@ -52,7 +53,12 @@ impl RuntimePersistenceLeaseTiming {
 
     async fn wait_until_expired(&self) {
         match self {
-            Self::Realtime => tokio::time::sleep(REALTIME_LEASE_STALL_ALLOWANCE).await,
+            Self::Realtime => {
+                tokio::time::sleep(std::time::Duration::from_millis(
+                    REALTIME_SCAFFOLDING_LEASE_TTL_MS,
+                ))
+                .await;
+            }
             Self::Controlled(advance) => advance(CONTROLLED_LEASE_TTL_MS),
         }
     }
@@ -2022,6 +2028,10 @@ async fn session_execution_lease_expires_by_ttl_contract<F>(
 ) where
     F: Fn() -> Arc<dyn RuntimePersistence>,
 {
+    // Realtime deliberately cannot pin the exact `>` versus `>=` database-millisecond edge;
+    // the Controlled vectors own that boundary.
+    // Its verdict trusts backend-reported claim and expiry timestamps, gated by the Postgres
+    // clock-contract vector and the injected-clock vectors for embedded stores.
     for attempt in 0..REALTIME_LEASE_OBSERVATION_ATTEMPTS {
         let store = make();
         let session_id = format!("ttl-expiry-{attempt}");
@@ -2049,16 +2059,16 @@ async fn session_execution_lease_expires_by_ttl_contract<F>(
                 );
             }
             crate::SessionExecutionLeaseClaimOutcome::Acquired(acquired)
-                if acquired.claimed_at_epoch_ms < holder.expires_at_epoch_ms =>
+                if acquired.lease.claimed_at_epoch_ms < holder.expires_at_epoch_ms =>
             {
                 panic!(
                     "an unexpired stale lease must remain busy rather than being reclaimed: \
                      successor claimed at {} before holder expiry {}",
-                    acquired.claimed_at_epoch_ms, holder.expires_at_epoch_ms
+                    acquired.lease.claimed_at_epoch_ms, holder.expires_at_epoch_ms
                 );
             }
             crate::SessionExecutionLeaseClaimOutcome::Acquired(lapsed_successor) => {
-                release_session_execution_lease_for_test(&store, &lapsed_successor).await;
+                release_session_execution_lease_for_test(&store, &lapsed_successor.lease).await;
                 continue;
             }
         }
@@ -2080,8 +2090,8 @@ async fn session_execution_lease_expires_by_ttl_contract<F>(
         return;
     }
     panic!(
-        "could not observe the stale-holder lease within the {:?} backend stall allowance after {} attempts",
-        REALTIME_LEASE_STALL_ALLOWANCE, REALTIME_LEASE_OBSERVATION_ATTEMPTS
+        "could not observe the stale-holder lease within its {} ms semantic TTL after {} attempts",
+        CONTROLLED_LEASE_TTL_MS, REALTIME_LEASE_OBSERVATION_ATTEMPTS
     );
 }
 
@@ -2111,7 +2121,9 @@ async fn claim_session_execution_lease_until_acquired(
             .await
             .unwrap_or_else(|error| panic!("claim after {context}: {error}"))
         {
-            crate::SessionExecutionLeaseClaimOutcome::Acquired(lease) => return lease,
+            crate::SessionExecutionLeaseClaimOutcome::Acquired(acquisition) => {
+                return acquisition.lease;
+            }
             crate::SessionExecutionLeaseClaimOutcome::Busy { holder: _ }
                 if matches!(lease_timing, RuntimePersistenceLeaseTiming::Realtime)
                     && std::time::Instant::now() < deadline =>

@@ -48284,30 +48284,6 @@ disposition = "unused-add"
 reason = "Add lash::testing::conformance::AttachmentOwnerColdReplayBackend::session_store_factory to the agent-workbench attachment upload example and assert its externally observable result."
 
 [[api]]
-symbol = "lash::testing::conformance::AttachmentOwnerConformanceClock"
-kind = "struct"
-availability = "all-features"
-area = "attachments"
-disposition = "unused-add"
-reason = "Add lash::testing::conformance::AttachmentOwnerConformanceClock to the agent-workbench attachment upload example and assert its externally observable result."
-
-[[api]]
-symbol = "lash::testing::conformance::AttachmentOwnerConformanceClock::advance"
-kind = "function"
-availability = "all-features"
-area = "attachments"
-disposition = "unused-add"
-reason = "Add lash::testing::conformance::AttachmentOwnerConformanceClock::advance to the agent-workbench attachment upload example and assert its externally observable result."
-
-[[api]]
-symbol = "lash::testing::conformance::AttachmentOwnerConformanceClock::new"
-kind = "function"
-availability = "all-features"
-area = "attachments"
-disposition = "unused-add"
-reason = "Add lash::testing::conformance::AttachmentOwnerConformanceClock::new to the agent-workbench attachment upload example and assert its externally observable result."
-
-[[api]]
 symbol = "lash::testing::conformance::COLD_INSTANCE_AWAIT_EVENT_VECTOR_COUNT"
 kind = "constant"
 availability = "all-features"
@@ -48634,6 +48610,46 @@ availability = "all-features"
 area = "triggers"
 disposition = "unused-add"
 reason = "Add lash::testing::conformance::ReopenableTriggerStore::reopen to the agent-service trigger flow example and assert its externally observable result."
+
+[[api]]
+symbol = "lash::testing::conformance::RuntimePersistenceLeaseTiming"
+kind = "enum"
+availability = "all-features"
+area = "stores"
+disposition = "unused-add"
+reason = "Document explicit runtime-persistence lease timing when adding a custom backend conformance example."
+
+[[api]]
+symbol = "lash::testing::conformance::RuntimePersistenceLeaseTiming::Controlled"
+kind = "variant"
+availability = "all-features"
+area = "stores"
+disposition = "unused-add"
+reason = "Use controlled timing in a custom embedded-backend conformance example with an injected clock."
+
+[[api]]
+symbol = "lash::testing::conformance::RuntimePersistenceLeaseTiming::Controlled::0"
+kind = "field"
+availability = "all-features"
+area = "stores"
+disposition = "unused-add"
+reason = "Show how the controlled timing callback advances a custom backend clock in a conformance example."
+
+[[api]]
+symbol = "lash::testing::conformance::RuntimePersistenceLeaseTiming::Realtime"
+kind = "variant"
+availability = "all-features"
+area = "stores"
+disposition = "unused-add"
+reason = "Use realtime timing in a custom database-clock backend conformance example."
+
+[[api]]
+symbol = "lash::testing::conformance::RuntimePersistenceLeaseTiming::controlled"
+kind = "function"
+availability = "all-features"
+area = "stores"
+disposition = "unused-add"
+reason = "Show construction of controlled lease timing for an injected-clock backend conformance example."
 
 [[api]]
 symbol = "lash::testing::conformance::RuntimePersistenceOp"
@@ -49786,38 +49802,6 @@ availability = "all-features"
 area = "stores"
 disposition = "unused-add"
 reason = "Add lash::testing::conformance::StoreContractScenario::new to the agent-service persistence setup example and assert its externally observable result."
-
-[[api]]
-symbol = "lash::testing::conformance::WakeDeliveryConformanceClock"
-kind = "struct"
-availability = "all-features"
-area = "processes"
-disposition = "unused-add"
-reason = "Add lash::testing::conformance::WakeDeliveryConformanceClock to the agent-workbench durable process flow example and assert its externally observable result."
-
-[[api]]
-symbol = "lash::testing::conformance::WakeDeliveryConformanceClock::advance"
-kind = "function"
-availability = "all-features"
-area = "processes"
-disposition = "unused-add"
-reason = "Add lash::testing::conformance::WakeDeliveryConformanceClock::advance to the agent-workbench durable process flow example and assert its externally observable result."
-
-[[api]]
-symbol = "lash::testing::conformance::WakeDeliveryConformanceClock::new"
-kind = "function"
-availability = "all-features"
-area = "processes"
-disposition = "unused-add"
-reason = "Add lash::testing::conformance::WakeDeliveryConformanceClock::new to the agent-workbench durable process flow example and assert its externally observable result."
-
-[[api]]
-symbol = "lash::testing::conformance::WakeDeliveryConformanceClock::set"
-kind = "function"
-availability = "all-features"
-area = "processes"
-disposition = "unused-add"
-reason = "Add lash::testing::conformance::WakeDeliveryConformanceClock::set to the agent-workbench durable process flow example and assert its externally observable result."
 
 [[api]]
 symbol = "lash::testing::conformance::append_receipt_mixed_usage_envelope"

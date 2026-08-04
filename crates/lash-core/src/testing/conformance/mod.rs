@@ -276,7 +276,7 @@ mod tests {
 
     #[tokio::test]
     async fn in_memory_wake_delivery_crash_matrix() {
-        let clock = Arc::new(WakeDeliveryConformanceClock::new(1_800_000_000_000));
+        let clock = Arc::new(crate::testing::TestClock::new(1_800_000_000_000));
         let registry = Arc::new(
             crate::TestLocalProcessRegistry::default()
                 .with_clock(Arc::clone(&clock) as Arc<dyn crate::Clock>)

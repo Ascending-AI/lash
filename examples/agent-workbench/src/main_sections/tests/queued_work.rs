@@ -209,7 +209,7 @@ fn targeted_workbench_drain_preserves_earlier_wake_and_absorbs_live_redelivery()
             .expect("open targeted wake receiver");
 
         let clock = Arc::new(
-            lash::testing::conformance::WakeDeliveryConformanceClock::new(
+            lash_core::testing::TestClock::new(
                 1_800_000_000_000,
             ),
         );
@@ -379,7 +379,7 @@ fn targeted_workbench_drain_preserves_earlier_wake_and_absorbs_live_redelivery()
         );
 
         let expiry_clock = Arc::new(
-            lash::testing::conformance::WakeDeliveryConformanceClock::new(
+            lash_core::testing::TestClock::new(
                 1_900_000_000_000,
             ),
         );

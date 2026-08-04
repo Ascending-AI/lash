@@ -43,6 +43,11 @@ impl TestClock {
         self.0
             .fetch_add(duration_ms, std::sync::atomic::Ordering::SeqCst);
     }
+
+    pub fn set(&self, timestamp_ms: u64) {
+        self.0
+            .store(timestamp_ms, std::sync::atomic::Ordering::SeqCst);
+    }
 }
 
 #[async_trait::async_trait]
