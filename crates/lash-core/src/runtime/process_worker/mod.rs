@@ -1430,3 +1430,64 @@ impl DurableProcessWorker {
 
 #[cfg(test)]
 mod recovery_tests;
+
+#[cfg(test)]
+mod permit_tests {
+    use super::*;
+
+    /// Dropping a future that parked the run's execution permit leaves the slot
+    /// released: the reacquisition sits after the `release_while` await and a
+    /// cancelled await never reaches it. Any resumption path that continues the
+    /// same process run afterwards — the tool-batch cancel grace timeout and
+    /// the cancelled background-session turn — must therefore reacquire the
+    /// slot explicitly before it resumes.
+    #[tokio::test]
+    async fn resuming_after_a_dropped_permit_release_reacquires_the_slot() {
+        let semaphore = Arc::new(Semaphore::new(1));
+        let permit = Arc::clone(&semaphore)
+            .acquire_owned()
+            .await
+            .expect("initial process execution permit");
+        let execution_permit = Arc::new(ProcessExecutionPermit::new(
+            Arc::clone(&semaphore),
+            permit,
+            Arc::new(tokio::sync::Notify::new()),
+        ));
+
+        PROCESS_EXECUTION_PERMIT
+            .scope(execution_permit, async move {
+                assert_eq!(semaphore.available_permits(), 0, "the run holds its slot");
+
+                let (parked_tx, mut parked_rx) = tokio::sync::mpsc::channel::<()>(1);
+                let mut parked = Box::pin(release_process_execution_permit_while(async move {
+                    let _ = parked_tx.send(()).await;
+                    std::future::pending::<()>().await
+                }));
+                tokio::select! {
+                    _ = parked_rx.recv() => {}
+                    () = parked.as_mut() => panic!("the parked future must not complete"),
+                }
+                assert_eq!(
+                    semaphore.available_permits(),
+                    1,
+                    "parking the run releases its slot"
+                );
+
+                // The cancellation: the parked future is dropped.
+                drop(parked);
+                assert_eq!(
+                    semaphore.available_permits(),
+                    1,
+                    "a dropped release never reaches its own reacquisition"
+                );
+
+                ensure_process_execution_permit().await;
+                assert_eq!(
+                    semaphore.available_permits(),
+                    0,
+                    "a resumed run must hold its slot again"
+                );
+            })
+            .await;
+    }
+}

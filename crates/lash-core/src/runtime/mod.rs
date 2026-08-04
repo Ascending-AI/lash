@@ -18,7 +18,9 @@ mod observation;
 mod process;
 mod process_work_driver;
 mod process_worker;
-pub(crate) use process_worker::release_process_execution_permit_while;
+pub(crate) use process_worker::{
+    ensure_process_execution_permit, release_process_execution_permit_while,
+};
 mod queued_work_driver;
 pub mod scenario_contracts;
 mod session_api;
