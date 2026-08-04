@@ -127,6 +127,12 @@ pub mod triggers {
 
 pub mod tools {
     pub use lash_core::ProgressSender;
+    /// Typed cancellation evidence constructed by tool implementors; pass it to
+    /// [`ToolCallOutput::cancelled`] when a tool stops without completing.
+    pub use lash_core::ToolCancellation;
+    /// Turn flow control constructed by tool implementors; attach it with
+    /// [`ToolCallOutput::with_control`] or [`ToolResult::with_control`].
+    pub use lash_core::ToolControl;
     /// Per-tool retry policy carried by [`ToolDefinition::with_retry_policy`].
     pub use lash_core::ToolRetryPolicy;
     pub use lash_core::{
