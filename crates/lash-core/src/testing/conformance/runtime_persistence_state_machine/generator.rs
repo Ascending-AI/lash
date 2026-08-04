@@ -14,10 +14,13 @@ pub(super) fn generated_case() -> impl Strategy<Value = GeneratedCase> {
 
 fn generated_prefix() -> Vec<RuntimePersistenceOp> {
     use RuntimePersistenceOp::*;
-    vec![
+    let operations = vec![
         ClaimLease { owner: 0 },
-        RecordUsage { slot: 0, value: 1 },
-        RecordUsage { slot: 1, value: 2 },
+        RecordUsage { slot: 0, value: 0 },
+        RecordUsage {
+            slot: 1,
+            value: u8::MAX,
+        },
         StageUsage {
             replay_last_commit: false,
         },
@@ -28,11 +31,11 @@ fn generated_prefix() -> Vec<RuntimePersistenceOp> {
             settle_inputs: false,
             stale_head: false,
         },
-        ConfirmUsage { selection: 0 },
-        RecordUsage { slot: 2, value: 3 },
         StageUsage {
             replay_last_commit: true,
         },
+        RecordUsage { slot: 2, value: 3 },
+        ConfirmUsage { selection: 0 },
         ReplayUsageReceipt,
         ConfirmUsage { selection: 0 },
         EnqueueWork {
@@ -165,7 +168,9 @@ fn generated_prefix() -> Vec<RuntimePersistenceOp> {
         CancelWork { selection: 0 },
         EnqueueTurnInput { slot: 2, value: 2 },
         CancelTurnInput { selection: 0 },
-    ]
+    ];
+    debug_assert_eq!(operations.len(), GENERATED_PREFIX_OPS);
+    operations
 }
 
 fn operation() -> impl Strategy<Value = RuntimePersistenceOp> {

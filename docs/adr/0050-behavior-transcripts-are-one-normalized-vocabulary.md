@@ -24,7 +24,7 @@ root         provider  model.request           iteration=0
 root         exec      cell.ok                 calls=2
 root         outcome   turn.final_value        value={"joined":["left","right"]}
 root         commit    checkpoint.commit       rev=0->1
-root                     usage                entries=0 input=0 output=0 cache_read=0 cache_write=0 reasoning=0 total=0
+root                     usage                 entries=0 input=0 output=0 cache_read=0 cache_write=0 reasoning=0 total=0
 root                     turn_state            stored logical=284B
 root                     tool_state            ref (unchanged)
 process-001  outcome   process.completed       label="child" kind="lashlang" terminal=true

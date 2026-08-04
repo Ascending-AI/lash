@@ -1,6 +1,7 @@
 use super::*;
 
-#[derive(Clone, Debug, serde::Serialize)]
+#[derive(Clone, Debug)]
+#[cfg_attr(any(test, feature = "testing"), derive(serde::Serialize))]
 pub(crate) struct PendingTokenLedgerEntry {
     pub(crate) entry: TokenLedgerEntry,
     pub(crate) identity: Option<crate::store::RuntimeUsageDeltaIdentity>,

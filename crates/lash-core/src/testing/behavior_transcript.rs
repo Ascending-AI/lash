@@ -32,7 +32,7 @@
 //! root         spawn     process.start           process=process-001 label="child"
 //! process-001  outcome   process.success         value="left"
 //! root         commit    checkpoint.commit       rev=0->1
-//! root                     usage                entries=0 input=0 output=0 cache_read=0 cache_write=0 reasoning=0 total=0
+//! root                     usage                 entries=0 input=0 output=0 cache_read=0 cache_write=0 reasoning=0 total=0
 //! root                     turn_state            stored logical=412B
 //! root                     tool_state            ref (unchanged)
 //! root         outcome   turn.final_value        value={"joined":["left","right"]}

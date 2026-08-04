@@ -150,10 +150,14 @@ fn activity_entry(event: &lash_core::TurnEvent, session_id: &str) -> Option<Entr
         lash_core::TurnEvent::QueuedMessagesCommitted {
             messages,
             checkpoint,
-        } => Entry::new(Kind::Commit, actor(), "queued_messages.committed")
-            .attr(Attr::int("messages", messages.len() as u64))
-            .attr(Attr::debug_token("checkpoint", checkpoint))
-            .usage(Usage::none()),
+        } => {
+            // Queued-message ingress persists host-authored messages before a
+            // provider turn runs, so there is no recorded usage at this seam.
+            Entry::new(Kind::Commit, actor(), "queued_messages.committed")
+                .attr(Attr::int("messages", messages.len() as u64))
+                .attr(Attr::debug_token("checkpoint", checkpoint))
+                .usage(Usage::none())
+        }
         lash_core::TurnEvent::FinalValue { value } => {
             Entry::new(Kind::Outcome, actor(), "turn.final_value").attr(Attr::json("value", value))
         }

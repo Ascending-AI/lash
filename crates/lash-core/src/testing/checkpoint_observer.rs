@@ -800,6 +800,75 @@ mod tests {
 
     use super::*;
 
+    #[tokio::test]
+    async fn committed_transcript_golden_carries_recorded_usage() {
+        use crate::testing::behavior_transcript::{Actor, Entry, Transcript, Usage};
+
+        let collector = CheckpointWriteCollector::default();
+        let factory = ObservedSessionStoreFactory::new(
+            Arc::new(crate::facade_support::InMemorySessionStoreFactory::new()),
+            collector.clone(),
+        );
+        let store = factory
+            .create_store(&SessionStoreCreateRequest {
+                session_id: "observed-usage".to_string(),
+                relation: crate::SessionRelation::Root,
+                policy: Default::default(),
+            })
+            .await
+            .expect("create observed store");
+        let pending = Arc::new(Mutex::new(Vec::new()));
+        let recorded = crate::TokenUsage {
+            input_tokens: 11,
+            output_tokens: 7,
+            cache_read_input_tokens: 3,
+            cache_write_input_tokens: 2,
+            reasoning_output_tokens: 4,
+        };
+        crate::runtime::record_token_usage_shared(&pending, "turn", "model-a", &recorded);
+        let operation = crate::OperationId::new(
+            crate::ExecutionScope::runtime_operation("observed-usage-turn"),
+            "append-session-nodes",
+        );
+        let staged = crate::runtime::stage_token_ledger_shared(&pending, &operation)
+            .expect("stage recorded usage");
+        let mut state = crate::RuntimeSessionState {
+            session_id: "observed-usage".to_string(),
+            ..crate::RuntimeSessionState::default()
+        };
+        let (commit, _) = RuntimeCommit::persisted_state_with_operation_and_staged_usage(
+            &mut state,
+            staged.deltas(),
+            operation,
+        )
+        .expect("bind staged usage to commit envelope");
+        let result = store
+            .commit_runtime_state(commit)
+            .await
+            .expect("commit recorded usage");
+        staged.confirm_identities(&result.committed_usage_delta_identities);
+
+        let write = collector.events().pop().expect("observed accepted commit");
+        let mut transcript = Transcript::new();
+        transcript.record(Entry::commit(
+            Actor::session(write.session_id),
+            write.revision_before,
+            write.revision_after,
+            Usage::new(
+                write.usage.entries,
+                write.usage.input_tokens,
+                write.usage.output_tokens,
+                write.usage.cache_read_input_tokens,
+                write.usage.cache_write_input_tokens,
+                write.usage.reasoning_output_tokens,
+            ),
+        ));
+        insta::assert_snapshot!(transcript.render(), @r#"
+        session-001  commit    checkpoint.commit       rev=0->1
+        session-001              usage                 entries=1 input=11 output=7 cache_read=3 cache_write=2 reasoning=4 total=23
+        "#);
+    }
+
     #[test]
     fn commit_observer_projects_typed_usage_buckets() {
         let state = crate::RuntimeSessionState {

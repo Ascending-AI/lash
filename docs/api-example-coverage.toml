@@ -47500,6 +47500,14 @@ disposition = "unused-add"
 reason = "Add lash::testing::behavior_transcript::Entry::new to the docs-snippets embedding/turns example and assert its externally observable result."
 
 [[api]]
+symbol = "lash::testing::behavior_transcript::Entry::usage"
+kind = "function"
+availability = "all-features"
+area = "stores"
+disposition = "unused-add"
+reason = "Add lash::testing::behavior_transcript::Entry::usage to the agent-service persistence setup example and assert its externally observable result."
+
+[[api]]
 symbol = "lash::testing::behavior_transcript::Family"
 kind = "enum"
 availability = "all-features"
@@ -47868,6 +47876,30 @@ disposition = "unused-add"
 reason = "Add lash::testing::behavior_transcript::Transcript::with_review_budget to the docs-snippets embedding/turns example and assert its externally observable result."
 
 [[api]]
+symbol = "lash::testing::behavior_transcript::Usage"
+kind = "struct"
+availability = "all-features"
+area = "stores"
+disposition = "unused-add"
+reason = "Add lash::testing::behavior_transcript::Usage to the agent-service persistence setup example and assert its externally observable result."
+
+[[api]]
+symbol = "lash::testing::behavior_transcript::Usage::new"
+kind = "function"
+availability = "all-features"
+area = "stores"
+disposition = "unused-add"
+reason = "Add lash::testing::behavior_transcript::Usage::new to the agent-service persistence setup example and assert its externally observable result."
+
+[[api]]
+symbol = "lash::testing::behavior_transcript::Usage::none"
+kind = "function"
+availability = "all-features"
+area = "stores"
+disposition = "unused-add"
+reason = "Add lash::testing::behavior_transcript::Usage::none to the agent-service persistence setup example and assert its externally observable result."
+
+[[api]]
 symbol = "lash::testing::checkpoint_observer::CHECKPOINT_WRITE_EVENT_SCHEMA"
 kind = "constant"
 availability = "all-features"
@@ -47978,6 +48010,62 @@ availability = "all-features"
 area = "observation-admin"
 disposition = "unused-add"
 reason = "Add lash::testing::checkpoint_observer::CheckpointComponentWriteKind::UnchangedRef to the agent-service recovery/operations flow example and assert its externally observable result."
+
+[[api]]
+symbol = "lash::testing::checkpoint_observer::CheckpointUsageWrite"
+kind = "struct"
+availability = "all-features"
+area = "observation-admin"
+disposition = "unused-add"
+reason = "Add lash::testing::checkpoint_observer::CheckpointUsageWrite to the agent-service recovery/operations flow example and assert its externally observable result."
+
+[[api]]
+symbol = "lash::testing::checkpoint_observer::CheckpointUsageWrite::cache_read_input_tokens"
+kind = "field"
+availability = "all-features"
+area = "observation-admin"
+disposition = "unused-add"
+reason = "Add lash::testing::checkpoint_observer::CheckpointUsageWrite::cache_read_input_tokens to the agent-service recovery/operations flow example and assert its externally observable result."
+
+[[api]]
+symbol = "lash::testing::checkpoint_observer::CheckpointUsageWrite::cache_write_input_tokens"
+kind = "field"
+availability = "all-features"
+area = "observation-admin"
+disposition = "unused-add"
+reason = "Add lash::testing::checkpoint_observer::CheckpointUsageWrite::cache_write_input_tokens to the agent-service recovery/operations flow example and assert its externally observable result."
+
+[[api]]
+symbol = "lash::testing::checkpoint_observer::CheckpointUsageWrite::entries"
+kind = "field"
+availability = "all-features"
+area = "observation-admin"
+disposition = "unused-add"
+reason = "Add lash::testing::checkpoint_observer::CheckpointUsageWrite::entries to the agent-service recovery/operations flow example and assert its externally observable result."
+
+[[api]]
+symbol = "lash::testing::checkpoint_observer::CheckpointUsageWrite::input_tokens"
+kind = "field"
+availability = "all-features"
+area = "observation-admin"
+disposition = "unused-add"
+reason = "Add lash::testing::checkpoint_observer::CheckpointUsageWrite::input_tokens to the agent-service recovery/operations flow example and assert its externally observable result."
+
+[[api]]
+symbol = "lash::testing::checkpoint_observer::CheckpointUsageWrite::output_tokens"
+kind = "field"
+availability = "all-features"
+area = "observation-admin"
+disposition = "unused-add"
+reason = "Add lash::testing::checkpoint_observer::CheckpointUsageWrite::output_tokens to the agent-service recovery/operations flow example and assert its externally observable result."
+
+[[api]]
+symbol = "lash::testing::checkpoint_observer::CheckpointUsageWrite::reasoning_output_tokens"
+kind = "field"
+availability = "all-features"
+area = "observation-admin"
+disposition = "unused-add"
+reason = "Add lash::testing::checkpoint_observer::CheckpointUsageWrite::reasoning_output_tokens to the agent-service recovery/operations flow example and assert its externally observable result."
 
 [[api]]
 symbol = "lash::testing::checkpoint_observer::CheckpointWriteCollector"
@@ -48106,6 +48194,14 @@ availability = "all-features"
 area = "observation-admin"
 disposition = "unused-add"
 reason = "Add lash::testing::checkpoint_observer::CheckpointWriteEvent::turn_index to the agent-service recovery/operations flow example and assert its externally observable result."
+
+[[api]]
+symbol = "lash::testing::checkpoint_observer::CheckpointWriteEvent::usage"
+kind = "field"
+availability = "all-features"
+area = "observation-admin"
+disposition = "unused-add"
+reason = "Add lash::testing::checkpoint_observer::CheckpointWriteEvent::usage to the agent-service recovery/operations flow example and assert its externally observable result."
 
 [[api]]
 symbol = "lash::testing::checkpoint_observer::ObservedSessionStoreFactory"
@@ -48700,6 +48796,22 @@ disposition = "unused-add"
 reason = "Add lash::testing::conformance::RuntimePersistenceOp::Commit::value to the agent-service persistence setup example and assert its externally observable result."
 
 [[api]]
+symbol = "lash::testing::conformance::RuntimePersistenceOp::ConfirmUsage"
+kind = "variant"
+availability = "all-features"
+area = "stores"
+disposition = "unused-add"
+reason = "Add lash::testing::conformance::RuntimePersistenceOp::ConfirmUsage to the agent-service persistence setup example and assert its externally observable result."
+
+[[api]]
+symbol = "lash::testing::conformance::RuntimePersistenceOp::ConfirmUsage::selection"
+kind = "field"
+availability = "all-features"
+area = "stores"
+disposition = "unused-add"
+reason = "Add lash::testing::conformance::RuntimePersistenceOp::ConfirmUsage::selection to the agent-service persistence setup example and assert its externally observable result."
+
+[[api]]
 symbol = "lash::testing::conformance::RuntimePersistenceOp::Crash"
 kind = "variant"
 availability = "all-features"
@@ -48764,6 +48876,30 @@ disposition = "unused-add"
 reason = "Add lash::testing::conformance::RuntimePersistenceOp::EnqueueWork::value to the agent-service persistence setup example and assert its externally observable result."
 
 [[api]]
+symbol = "lash::testing::conformance::RuntimePersistenceOp::RecordUsage"
+kind = "variant"
+availability = "all-features"
+area = "stores"
+disposition = "unused-add"
+reason = "Add lash::testing::conformance::RuntimePersistenceOp::RecordUsage to the agent-service persistence setup example and assert its externally observable result."
+
+[[api]]
+symbol = "lash::testing::conformance::RuntimePersistenceOp::RecordUsage::slot"
+kind = "field"
+availability = "all-features"
+area = "stores"
+disposition = "unused-add"
+reason = "Add lash::testing::conformance::RuntimePersistenceOp::RecordUsage::slot to the agent-service persistence setup example and assert its externally observable result."
+
+[[api]]
+symbol = "lash::testing::conformance::RuntimePersistenceOp::RecordUsage::value"
+kind = "field"
+availability = "all-features"
+area = "stores"
+disposition = "unused-add"
+reason = "Add lash::testing::conformance::RuntimePersistenceOp::RecordUsage::value to the agent-service persistence setup example and assert its externally observable result."
+
+[[api]]
 symbol = "lash::testing::conformance::RuntimePersistenceOp::RenewLease"
 kind = "variant"
 availability = "all-features"
@@ -48780,6 +48916,14 @@ disposition = "unused-add"
 reason = "Add lash::testing::conformance::RuntimePersistenceOp::RenewLease::stale to the agent-service persistence setup example and assert its externally observable result."
 
 [[api]]
+symbol = "lash::testing::conformance::RuntimePersistenceOp::ReplayUsageReceipt"
+kind = "variant"
+availability = "all-features"
+area = "stores"
+disposition = "unused-add"
+reason = "Add lash::testing::conformance::RuntimePersistenceOp::ReplayUsageReceipt to the agent-service persistence setup example and assert its externally observable result."
+
+[[api]]
 symbol = "lash::testing::conformance::RuntimePersistenceOp::SettleStaleTurnInputs"
 kind = "variant"
 availability = "all-features"
@@ -48794,6 +48938,22 @@ availability = "all-features"
 area = "stores"
 disposition = "unused-add"
 reason = "Add lash::testing::conformance::RuntimePersistenceOp::SettleStaleWork to the agent-service persistence setup example and assert its externally observable result."
+
+[[api]]
+symbol = "lash::testing::conformance::RuntimePersistenceOp::StageUsage"
+kind = "variant"
+availability = "all-features"
+area = "stores"
+disposition = "unused-add"
+reason = "Add lash::testing::conformance::RuntimePersistenceOp::StageUsage to the agent-service persistence setup example and assert its externally observable result."
+
+[[api]]
+symbol = "lash::testing::conformance::RuntimePersistenceOp::StageUsage::replay_last_commit"
+kind = "field"
+availability = "all-features"
+area = "stores"
+disposition = "unused-add"
+reason = "Add lash::testing::conformance::RuntimePersistenceOp::StageUsage::replay_last_commit to the agent-service persistence setup example and assert its externally observable result."
 
 [[api]]
 symbol = "lash::testing::conformance::RuntimeRebuildBackend"

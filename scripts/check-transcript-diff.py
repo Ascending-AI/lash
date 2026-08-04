@@ -15,15 +15,16 @@ from typing import NamedTuple
 DEFAULT_RANGE = "origin/main...HEAD"
 SNAPSHOT_OPEN = re.compile(r'@r(?P<hashes>#+)?"')
 REV_TRANSITION = re.compile(r"\brev=\S+->\S+")
+USAGE_COMPONENT = re.compile(r"\busage\s+entries=")
 # The behavior-transcript vocabulary's durable-write event names plus its
-# component renderings, and the two legacy class tokens the pre-vocabulary
-# renderer emitted. Keep in sync with
+# fixed component renderings, and the two legacy class tokens the pre-vocabulary
+# renderer emitted. USAGE_COMPONENT intentionally accepts any renderer padding.
+# Keep these in sync with
 # `lash_core::testing::behavior_transcript::DURABLE_WRITE_EVENTS`.
 DURABLE_MARKERS = (
     "checkpoint.commit",
     "checkpoint.request",
     "durable.effect",
-    "usage                 entries=",
     "stored logical=",
     "ref (unchanged)",
     "Checkpoint",
@@ -68,8 +69,10 @@ def snapshot_body(line: str, delimiter: str | None) -> tuple[str | None, str | N
 
 
 def is_durable(body: str) -> bool:
-    return any(marker in body for marker in DURABLE_MARKERS) or bool(
-        REV_TRANSITION.search(body)
+    return (
+        any(marker in body for marker in DURABLE_MARKERS)
+        or bool(USAGE_COMPONENT.search(body))
+        or bool(REV_TRANSITION.search(body))
     )
 
 

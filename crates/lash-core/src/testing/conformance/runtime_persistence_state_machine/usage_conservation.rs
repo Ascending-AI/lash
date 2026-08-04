@@ -1,18 +1,39 @@
+//! Conservation checks for pending and durable runtime usage.
+//!
+//! The durable comparison is intentionally aggregate-by-source/model because
+//! `RuntimePersistence::load_session` exposes the merged token ledger, not its
+//! row identities. Store conformance separately pins identity persistence.
+//! Confirmation is a differential mutation oracle: its expected snapshot states
+//! which returned identities may disappear, then checks the production retain.
+
 use super::*;
 use std::collections::HashSet;
 
 use crate::RuntimeUsageDelta;
 
-pub(super) fn record_usage(model: &mut ReferenceModel, shape: &mut RunShape, slot: u8, value: u8) {
+pub(super) fn record_usage(
+    model: &mut ReferenceModel,
+    shape: &mut RunShape,
+    slot: u8,
+    value: u8,
+) -> Result<(), String> {
     let entry = usage_entry(slot, value);
+    let before =
+        (entry.usage == crate::TokenUsage::default()).then(|| pending_usage_snapshot(model));
     crate::runtime::record_token_usage_shared(
         &model.pending_usage,
         &entry.source,
         &entry.model,
         &entry.usage,
     );
+    if let Some(before) = before
+        && json(&pending_usage_snapshot(model))? != json(&before)?
+    {
+        return Err("zero usage recording changed the pending ledger".to_string());
+    }
     model.recorded_usage.add(&entry.usage);
     shape.usage_records += 1;
+    Ok(())
 }
 
 pub(super) fn stage_usage(
@@ -22,19 +43,10 @@ pub(super) fn stage_usage(
     replay_last_commit: bool,
 ) -> Result<(), String> {
     let operation = if replay_last_commit {
-        let Some(commit) = model.last_usage_commit.as_ref() else {
-            return Ok(());
-        };
-        commit.turn_commit.operation.clone()
+        replayable_unconfirmed_operation(model)?
+            .unwrap_or_else(|| fresh_usage_operation(model, seed))
     } else {
-        model.operation_sequence += 1;
-        crate::OperationId::new(
-            crate::ExecutionScope::runtime_operation(format!(
-                "runtime-persistence-property:{seed}:usage:{}",
-                model.operation_sequence
-            )),
-            "append-session-nodes",
-        )
+        fresh_usage_operation(model, seed)
     };
     let staged = crate::runtime::stage_token_ledger_shared(&model.pending_usage, &operation)
         .map_err(|error| error.to_string())?;
@@ -42,6 +54,53 @@ pub(super) fn stage_usage(
     model.staged_usage_operation = Some(operation);
     shape.usage_stages += 1;
     Ok(())
+}
+
+fn replayable_unconfirmed_operation(
+    model: &ReferenceModel,
+) -> Result<Option<crate::OperationId>, String> {
+    let Some(commit) = model.last_usage_commit.as_ref() else {
+        return Ok(None);
+    };
+    let operation_storage_key = commit
+        .turn_commit
+        .operation
+        .storage_key()
+        .map_err(|error| error.to_string())?;
+    let pending = pending_usage_snapshot(model);
+    let pending_deltas = pending
+        .iter()
+        .map(|row| {
+            row.identity.clone().map(|identity| RuntimeUsageDelta {
+                identity,
+                entry: row.entry.clone(),
+            })
+        })
+        .collect::<Option<Vec<_>>>();
+    for confirmation in &model.pending_usage_confirmations {
+        let deltas = confirmation.staged.deltas();
+        let belongs_to_last_commit = deltas
+            .iter()
+            .any(|delta| delta.identity.operation_storage_key == operation_storage_key);
+        if belongs_to_last_commit
+            && let Some(pending_deltas) = &pending_deltas
+            && json(pending_deltas)? == json(&deltas)?
+        {
+            return Ok(Some(commit.turn_commit.operation.clone()));
+        }
+    }
+    Ok(None)
+}
+
+fn fresh_usage_operation(model: &mut ReferenceModel, seed: u64) -> crate::OperationId {
+    model.operation_sequence += 1;
+    crate::OperationId::new(
+        crate::ExecutionScope::runtime_operation(format!(
+            "runtime-persistence-property:{seed}:usage:{}",
+            model.operation_sequence
+        )),
+        "append-session-nodes",
+    )
 }
 
 pub(super) fn confirm_usage(
@@ -127,17 +186,37 @@ pub(super) async fn replay_usage_receipt(
 }
 
 fn usage_entry(slot: u8, value: u8) -> crate::TokenLedgerEntry {
-    let base = i64::from(value) + 1;
+    let usage = match value {
+        0 => crate::TokenUsage::default(),
+        u8::MAX => {
+            // Leave enough headroom for the largest generated case even if
+            // every operation records this payload. Five counters across
+            // MAX_OPS rows then remain immediately below the checked total's
+            // i64 boundary instead of making the generated case invalid.
+            let edge = i64::MAX / ((MAX_OPS as i64 + 1) * 5);
+            crate::TokenUsage {
+                input_tokens: edge,
+                output_tokens: edge + 1,
+                cache_read_input_tokens: edge + 2,
+                cache_write_input_tokens: edge + 3,
+                reasoning_output_tokens: edge + 4,
+            }
+        }
+        _ => {
+            let base = i64::from(value);
+            crate::TokenUsage {
+                input_tokens: base,
+                output_tokens: base + 1,
+                cache_read_input_tokens: base + 2,
+                cache_write_input_tokens: base + 3,
+                reasoning_output_tokens: base.min(base + 1),
+            }
+        }
+    };
     crate::TokenLedgerEntry {
         source: format!("property-usage-source-{}", slot % 3),
         model: format!("property-usage-model-{}", slot % 2),
-        usage: crate::TokenUsage {
-            input_tokens: base,
-            output_tokens: base + 1,
-            cache_read_input_tokens: base + 2,
-            cache_write_input_tokens: base + 3,
-            reasoning_output_tokens: base.min(base + 1),
-        },
+        usage,
     }
 }
 

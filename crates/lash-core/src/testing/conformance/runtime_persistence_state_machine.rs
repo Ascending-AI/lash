@@ -35,7 +35,7 @@ const DEFAULT_CASES: u32 = 32;
 const DEFAULT_RUNNER_SEED: u64 = 857;
 const DEDICATED_LAW_SEED: u64 = 0x0ded_1ca7_e857;
 const MAX_OPS: usize = 80;
-const GENERATED_PREFIX_OPS: usize = 52;
+const GENERATED_PREFIX_OPS: usize = 51;
 
 /// The generated operation alphabet shared by every runtime-persistence backend.
 #[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
@@ -653,7 +653,7 @@ async fn apply_operation(
                 }
             }
         }
-        RecordUsage { slot, value } => record_usage(model, shape, *slot, *value),
+        RecordUsage { slot, value } => record_usage(model, shape, *slot, *value)?,
         StageUsage { replay_last_commit } => stage_usage(model, shape, seed, *replay_last_commit)?,
         ConfirmUsage { selection } => confirm_usage(model, shape, *selection)?,
         ReplayUsageReceipt => replay_usage_receipt(store, model, shape).await?,
@@ -928,19 +928,12 @@ async fn commit_operation(
             "commit",
         )
     };
-    let usage_commit_stamp = staged_usage.as_ref().map(|_| {
-        crate::RuntimeTurnCommitStamp::append_session_nodes(operation.clone(), None, &[])
-            .map_err(|error| error.to_string())
-    });
-    let mut commit = RuntimeCommit::persisted_state_for_test(&state, &[]);
-    commit = commit
-        .with_operation(operation)
-        .map_err(|error| error.to_string())?
-        .0;
-    if let Some(stamp) = usage_commit_stamp {
-        commit.turn_commit = stamp?;
-    }
-    commit.usage_deltas = submitted_usage.clone();
+    let (mut commit, _) = RuntimeCommit::persisted_state_with_operation_and_staged_usage(
+        &mut state,
+        &submitted_usage,
+        operation,
+    )
+    .map_err(|error| error.to_string())?;
     if stale_head {
         commit.expected_head_revision = model.head_revision.saturating_add(1);
     }
