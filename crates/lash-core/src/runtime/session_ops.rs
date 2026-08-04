@@ -246,13 +246,43 @@ impl LashRuntime {
         // retryable instead of ghosting the child until a cold reopen.
         let child = {
             let mut registry = self.managed_sessions.lock().await;
-            let handle = registry.remove(session_id).ok_or_else(|| {
-                SessionError::Protocol(format!("unknown managed session `{session_id}`"))
-            })?;
+            let registered = registry.len();
+            let Some(handle) = registry.remove(session_id) else {
+                tracing::debug!(
+                    session_id,
+                    managed_sessions = registered,
+                    consulted = "managed_session_registry",
+                    outcome = "unknown_session",
+                    event = "managed_session.activation",
+                    "managed session activation denied: not registered"
+                );
+                return Err(SessionError::Protocol(format!(
+                    "unknown managed session `{session_id}`"
+                )));
+            };
             match handle.try_into_runtime() {
-                Ok(child) => child,
+                Ok(child) => {
+                    tracing::debug!(
+                        session_id,
+                        managed_sessions = registered,
+                        consulted = "managed_session_handle_references",
+                        outcome = "activated",
+                        event = "managed_session.activation",
+                        "managed session activated"
+                    );
+                    child
+                }
                 Err(handle) => {
                     registry.insert(session_id.to_string(), handle);
+                    tracing::debug!(
+                        session_id,
+                        managed_sessions = registered,
+                        consulted = "managed_session_handle_references",
+                        outcome = "in_use_handle_restored",
+                        event = "managed_session.activation",
+                        "managed session activation denied: the handle is still in use; \
+                         its registration was restored and activation stays retryable"
+                    );
                     return Err(SessionError::Protocol(format!(
                         "managed session `{session_id}` is still in use"
                     )));
