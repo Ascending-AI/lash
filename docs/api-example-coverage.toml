@@ -26354,14 +26354,14 @@ assertion = "examples/agent-workbench/src/main_sections/tests/process_work.rs:46
 reason = "Add lash::process::ProcessRecord::provenance to the agent-workbench durable process flow example and assert its externally observable result."
 
 [[api]]
-symbol = "lash::process::ProcessRecord::registration_hash"
+symbol = "lash::process::ProcessRecord::registration_fingerprint"
 kind = "field"
 availability = "default+all-features"
 area = "processes"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests/process_work.rs:483#assert_eq!(record.registration_hash.len(), 64);"
-assertion = "examples/agent-workbench/src/main_sections/tests/process_work.rs:483#assert_eq!(record.registration_hash.len(), 64);"
-reason = "Add lash::process::ProcessRecord::registration_hash to the agent-workbench durable process flow example and assert its externally observable result."
+usage = "examples/agent-workbench/src/main_sections/tests/process_work.rs:483#assert_eq!(record.registration_fingerprint.len(), 64);"
+assertion = "examples/agent-workbench/src/main_sections/tests/process_work.rs:484#assert!(record.registration_fingerprint.bytes().all(|byte| byte.is_ascii_hexdigit()));"
+reason = "Add lash::process::ProcessRecord::registration_fingerprint to the agent-workbench durable process flow example and assert its externally observable result."
 
 [[api]]
 symbol = "lash::process::ProcessRecord::status"
@@ -39112,12 +39112,12 @@ disposition = "unused-add"
 reason = "Add lash::remote::triggers::RemoteTriggerSubscriptionRecord::created_at_ms to the agent-service trigger flow example and assert its externally observable result."
 
 [[api]]
-symbol = "lash::remote::triggers::RemoteTriggerSubscriptionRecord::definition_hash"
+symbol = "lash::remote::triggers::RemoteTriggerSubscriptionRecord::definition_fingerprint"
 kind = "field"
 availability = "default+all-features"
 area = "triggers"
 disposition = "unused-add"
-reason = "Add lash::remote::triggers::RemoteTriggerSubscriptionRecord::definition_hash to the agent-service trigger flow example and assert its externally observable result."
+reason = "Add lash::remote::triggers::RemoteTriggerSubscriptionRecord::definition_fingerprint to the agent-service trigger flow example and assert its externally observable result."
 
 [[api]]
 symbol = "lash::remote::triggers::RemoteTriggerSubscriptionRecord::deleted_at_ms"
@@ -57432,12 +57432,12 @@ disposition = "unused-add"
 reason = "Add lash::triggers::TriggerMutationReceipt to the agent-service trigger flow example and assert its externally observable result."
 
 [[api]]
-symbol = "lash::triggers::TriggerMutationReceipt::definition_hash"
+symbol = "lash::triggers::TriggerMutationReceipt::definition_fingerprint"
 kind = "field"
 availability = "default+all-features"
 area = "triggers"
 disposition = "unused-add"
-reason = "Add lash::triggers::TriggerMutationReceipt::definition_hash to the agent-service trigger flow example and assert its externally observable result."
+reason = "Add lash::triggers::TriggerMutationReceipt::definition_fingerprint to the agent-service trigger flow example and assert its externally observable result."
 
 [[api]]
 symbol = "lash::triggers::TriggerMutationReceipt::disposition"
@@ -57729,12 +57729,12 @@ disposition = "unused-add"
 reason = "Add lash::triggers::TriggerOperationError::Conflict to the agent-service trigger flow example and assert its externally observable result."
 
 [[api]]
-symbol = "lash::triggers::TriggerOperationError::Conflict::existing_definition_hash"
+symbol = "lash::triggers::TriggerOperationError::Conflict::existing_definition_fingerprint"
 kind = "field"
 availability = "default+all-features"
 area = "triggers"
 disposition = "unused-add"
-reason = "Add lash::triggers::TriggerOperationError::Conflict::existing_definition_hash to the agent-service trigger flow example and assert its externally observable result."
+reason = "Add lash::triggers::TriggerOperationError::Conflict::existing_definition_fingerprint to the agent-service trigger flow example and assert its externally observable result."
 
 [[api]]
 symbol = "lash::triggers::TriggerOperationError::Conflict::existing_revision"
@@ -57753,12 +57753,12 @@ disposition = "unused-add"
 reason = "Add lash::triggers::TriggerOperationError::Conflict::reason to the agent-service trigger flow example and assert its externally observable result."
 
 [[api]]
-symbol = "lash::triggers::TriggerOperationError::Conflict::requested_definition_hash"
+symbol = "lash::triggers::TriggerOperationError::Conflict::requested_definition_fingerprint"
 kind = "field"
 availability = "default+all-features"
 area = "triggers"
 disposition = "unused-add"
-reason = "Add lash::triggers::TriggerOperationError::Conflict::requested_definition_hash to the agent-service trigger flow example and assert its externally observable result."
+reason = "Add lash::triggers::TriggerOperationError::Conflict::requested_definition_fingerprint to the agent-service trigger flow example and assert its externally observable result."
 
 [[api]]
 symbol = "lash::triggers::TriggerOperationError::Conflict::subscription_key"
@@ -58421,12 +58421,12 @@ disposition = "unused-add"
 reason = "Add lash::triggers::TriggerSubscriptionRecord::created_at_ms to the agent-service trigger flow example and assert its externally observable result."
 
 [[api]]
-symbol = "lash::triggers::TriggerSubscriptionRecord::definition_hash"
+symbol = "lash::triggers::TriggerSubscriptionRecord::definition_fingerprint"
 kind = "field"
 availability = "default+all-features"
 area = "triggers"
 disposition = "unused-add"
-reason = "Add lash::triggers::TriggerSubscriptionRecord::definition_hash to the agent-service trigger flow example and assert its externally observable result."
+reason = "Add lash::triggers::TriggerSubscriptionRecord::definition_fingerprint to the agent-service trigger flow example and assert its externally observable result."
 
 [[api]]
 symbol = "lash::triggers::TriggerSubscriptionRecord::deleted_at_ms"
@@ -68557,7 +68557,7 @@ disposition = "unused-justify"
 reason = "Concrete host class: alternative durable effect hosts and process substrates (for example a non-Restate controller) implementing the runtime handoff contract."
 
 [[api]]
-symbol = "lash_core::ProcessRecord::registration_hash"
+symbol = "lash_core::ProcessRecord::registration_fingerprint"
 kind = "field"
 availability = "default+all-features"
 area = "processes"
@@ -82668,12 +82668,12 @@ disposition = "unused-remove"
 reason = "No example or concrete unrepresented host class establishes a need for lash_core::TriggerMutationReceipt. Breaking: remove this export; downstream callers must own an equivalent local type or stop depending on the unexercised contract."
 
 [[api]]
-symbol = "lash_core::TriggerMutationReceipt::definition_hash"
+symbol = "lash_core::TriggerMutationReceipt::definition_fingerprint"
 kind = "field"
 availability = "default+all-features"
 area = "triggers"
 disposition = "unused-remove"
-reason = "No example or concrete unrepresented host class establishes a need for lash_core::TriggerMutationReceipt::definition_hash. Breaking: remove this export; downstream callers must own an equivalent local type or stop depending on the unexercised contract."
+reason = "No example or concrete unrepresented host class establishes a need for lash_core::TriggerMutationReceipt::definition_fingerprint. Breaking: remove this export; downstream callers must own an equivalent local type or stop depending on the unexercised contract."
 
 [[api]]
 symbol = "lash_core::TriggerMutationReceipt::disposition"
@@ -82964,12 +82964,12 @@ disposition = "unused-remove"
 reason = "No example or concrete unrepresented host class establishes a need for lash_core::TriggerOperationError::Conflict. Breaking: remove this export; downstream callers must own an equivalent local type or stop depending on the unexercised contract."
 
 [[api]]
-symbol = "lash_core::TriggerOperationError::Conflict::existing_definition_hash"
+symbol = "lash_core::TriggerOperationError::Conflict::existing_definition_fingerprint"
 kind = "field"
 availability = "default+all-features"
 area = "triggers"
 disposition = "unused-remove"
-reason = "No example or concrete unrepresented host class establishes a need for lash_core::TriggerOperationError::Conflict::existing_definition_hash. Breaking: remove this export; downstream callers must own an equivalent local type or stop depending on the unexercised contract."
+reason = "No example or concrete unrepresented host class establishes a need for lash_core::TriggerOperationError::Conflict::existing_definition_fingerprint. Breaking: remove this export; downstream callers must own an equivalent local type or stop depending on the unexercised contract."
 
 [[api]]
 symbol = "lash_core::TriggerOperationError::Conflict::existing_revision"
@@ -82988,12 +82988,12 @@ disposition = "unused-remove"
 reason = "No example or concrete unrepresented host class establishes a need for lash_core::TriggerOperationError::Conflict::reason. Breaking: remove this export; downstream callers must own an equivalent local type or stop depending on the unexercised contract."
 
 [[api]]
-symbol = "lash_core::TriggerOperationError::Conflict::requested_definition_hash"
+symbol = "lash_core::TriggerOperationError::Conflict::requested_definition_fingerprint"
 kind = "field"
 availability = "default+all-features"
 area = "triggers"
 disposition = "unused-remove"
-reason = "No example or concrete unrepresented host class establishes a need for lash_core::TriggerOperationError::Conflict::requested_definition_hash. Breaking: remove this export; downstream callers must own an equivalent local type or stop depending on the unexercised contract."
+reason = "No example or concrete unrepresented host class establishes a need for lash_core::TriggerOperationError::Conflict::requested_definition_fingerprint. Breaking: remove this export; downstream callers must own an equivalent local type or stop depending on the unexercised contract."
 
 [[api]]
 symbol = "lash_core::TriggerOperationError::Conflict::subscription_key"
@@ -83546,12 +83546,12 @@ disposition = "unused-remove"
 reason = "No example or concrete unrepresented host class establishes a need for lash_core::TriggerSubscriptionRecord::created_at_ms. Breaking: remove this export; downstream callers must own an equivalent local type or stop depending on the unexercised contract."
 
 [[api]]
-symbol = "lash_core::TriggerSubscriptionRecord::definition_hash"
+symbol = "lash_core::TriggerSubscriptionRecord::definition_fingerprint"
 kind = "field"
 availability = "default+all-features"
 area = "triggers"
 disposition = "unused-remove"
-reason = "No example or concrete unrepresented host class establishes a need for lash_core::TriggerSubscriptionRecord::definition_hash. Breaking: remove this export; downstream callers must own an equivalent local type or stop depending on the unexercised contract."
+reason = "No example or concrete unrepresented host class establishes a need for lash_core::TriggerSubscriptionRecord::definition_fingerprint. Breaking: remove this export; downstream callers must own an equivalent local type or stop depending on the unexercised contract."
 
 [[api]]
 symbol = "lash_core::TriggerSubscriptionRecord::deleted_at_ms"

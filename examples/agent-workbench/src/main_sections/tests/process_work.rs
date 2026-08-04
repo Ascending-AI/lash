@@ -480,8 +480,8 @@ mod process_work_tests {
         assert!(record.abandon_request.is_none());
         assert!(record.wait.is_none());
         assert!(record.outcome.is_none());
-        assert_eq!(record.registration_hash.len(), 64);
-        assert!(record.registration_hash.bytes().all(|byte| byte.is_ascii_hexdigit()));
+        assert_eq!(record.registration_fingerprint.len(), 64);
+        assert!(record.registration_fingerprint.bytes().all(|byte| byte.is_ascii_hexdigit()));
 
         let observers = registry
             .observers_for_process(process_id)
