@@ -15,6 +15,9 @@ proof_root="${LASH_GATE_PROOF_OUT_DIR:-$repo/target/gate-concurrency-proof/$LASH
 mkdir -p "$proof_root"
 leftover_container=""
 compose_leftover_container=""
+worktree_a_job=""
+worktree_b_job=""
+first_job=""
 
 read_gate_identity() {
   local root="$1"
@@ -36,6 +39,13 @@ if [ "$primary_slot" -eq "$peer_slot" ]; then
 fi
 
 cleanup() {
+  local job
+  for job in "$worktree_a_job" "$worktree_b_job" "$first_job"; do
+    if [ -n "$job" ] && kill -0 "$job" >/dev/null 2>&1; then
+      kill "$job" >/dev/null 2>&1 || true
+      wait "$job" 2>/dev/null || true
+    fi
+  done
   if [ -n "$leftover_container" ]; then
     docker rm -f "$leftover_container" >/dev/null 2>&1 || true
   fi
@@ -69,7 +79,9 @@ run_smoke "$peer" "$proof_root/worktree-b.log" "$peer_slug" "$peer_slot" &
 worktree_b_job=$!
 parallel_status=0
 wait "$worktree_a_job" || parallel_status=1
+worktree_a_job=""
 wait "$worktree_b_job" || parallel_status=1
+worktree_b_job=""
 if [ "$parallel_status" -ne 0 ]; then
   echo "Concurrent worktree proof failed; logs: $proof_root" >&2
   exit 1
@@ -103,6 +115,7 @@ grep -q "already holds the worktree gate for '${LASH_GATE_WORKTREE_SLUG}'" \
 grep -Eq 'PID [0-9]+' "$proof_root/same-worktree-second.log"
 grep -Fq "$LASH_GATE_WORKTREE_LOCK_PATH" "$proof_root/same-worktree-second.log"
 wait "$first_job"
+first_job=""
 
 leftover_container="lash-gate-proof-leftover-${LASH_GATE_WORKTREE_SLUG}"
 docker create --name "$leftover_container" --label "$LASH_GATE_LABEL" \
