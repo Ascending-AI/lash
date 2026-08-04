@@ -353,4 +353,482 @@ mod process_work_tests {
         );
         let _ = std::fs::remove_dir_all(data_dir);
     }
+
+    #[test]
+    fn durable_process_registry_preserves_identity_lifecycle_and_fencing() {
+        run_async_test_on_stack_budget("workbench-process-registry-lifecycle-test", || {
+            durable_process_registry_preserves_identity_lifecycle_and_fencing_inner()
+        });
+    }
+
+    async fn durable_process_registry_preserves_identity_lifecycle_and_fencing_inner() {
+        use lash::process::{
+            CausalRef, ProcessAwaitOutput, ProcessChangeCursor, ProcessCompletionAuthority,
+            ProcessEventAppendRequest, ProcessEventType, ProcessExecutionEnvRef,
+            ProcessExternalRef, ProcessHandleSummary, ProcessIdentity, ProcessInput,
+            ProcessLeaseClaimOutcome, ProcessListFilter, ProcessListMode, ProcessObserverBy,
+            ProcessOriginator, ProcessProvenance, ProcessRegistration, ProcessRegistry,
+            ProcessStarted, ProcessStatus, ProcessStatusFilter, ProjectionWatermark,
+            RecoveryDisposition, SessionScope,
+        };
+        let registry = lash::testing::TestLocalProcessRegistry::default();
+        let process_id = "invoice-export";
+        let scope = SessionScope::for_agent_frame("session-finance", "frame-review");
+        assert_eq!(scope.id().as_str(), "session:session-finance/frame:frame-review");
+        assert!(!scope.is_empty());
+        assert_eq!(scope.session_id, "session-finance");
+        assert_eq!(scope.agent_frame_id.as_deref(), Some("frame-review"));
+
+        let cause = CausalRef::TriggerOccurrence {
+            occurrence_id: "occurrence-42".to_string(),
+            subscription_id: Some("subscription-nightly".to_string()),
+            subscription_revision: Some(7),
+            subscription_incarnation: Some("incarnation-blue".to_string()),
+        };
+        let provenance = ProcessProvenance::session(scope.clone()).with_caused_by(Some(cause));
+        let ProcessOriginator::Session { session_id } = &provenance.originator else {
+            panic!("session work must retain a session originator");
+        };
+        assert_eq!(session_id, "session-finance");
+        let Some(CausalRef::TriggerOccurrence {
+            occurrence_id,
+            subscription_id,
+            subscription_revision,
+            subscription_incarnation,
+        }) = &provenance.caused_by
+        else {
+            panic!("trigger-started work must retain its occurrence provenance");
+        };
+        assert_eq!(occurrence_id, "occurrence-42");
+        assert_eq!(subscription_id.as_deref(), Some("subscription-nightly"));
+        assert_eq!(*subscription_revision, Some(7));
+        assert_eq!(subscription_incarnation.as_deref(), Some("incarnation-blue"));
+
+        let input = ProcessInput::Engine {
+            kind: "report-export".to_string(),
+            payload: json!({ "format": "csv", "rows": 12 }),
+        };
+        assert_eq!(input.engine_kind(), "engine");
+        assert_eq!(input.engine_specific_kind(), Some("report-export"));
+        let identity = ProcessIdentity::from_process_input(&input)
+            .with_label(Some("Nightly invoice export"))
+            .with_definition(Some(json!({ "workflow": "invoice-export", "revision": 7 })));
+        assert_eq!(identity.kind, "report-export");
+        assert_eq!(identity.label.as_deref(), Some("Nightly invoice export"));
+        assert_eq!(identity.definition.as_ref().unwrap()["revision"], 7);
+
+        let registration = ProcessRegistration::new(
+            process_id,
+            input,
+            RecoveryDisposition::Rerunnable,
+            ProcessProvenance::host(),
+        )
+        .with_process_provenance(provenance)
+        .with_identity(identity)
+        .with_max_attempts(Some(3))
+        .with_execution_env_ref(Some(ProcessExecutionEnvRef::new(
+            "process-env:sha256:invoice-export-v7",
+        )))
+        .with_extra_event_types([ProcessEventType {
+            name: "progress".to_string(),
+            payload_schema: lash::triggers::LashSchema::any(),
+            semantics: Default::default(),
+        }])
+        .with_wake_session_id(Some("session-finance".to_string()));
+        assert_eq!(registration.id, process_id);
+        assert_eq!(registration.disposition, RecoveryDisposition::Rerunnable);
+        assert_eq!(registration.max_attempts, Some(3));
+        assert_eq!(
+            registration.env_ref.as_ref().map(ProcessExecutionEnvRef::as_str),
+            Some("process-env:sha256:invoice-export-v7")
+        );
+        assert_eq!(registration.wake_session_id.as_deref(), Some("session-finance"));
+        assert_eq!(registration.input.engine_specific_kind(), Some("report-export"));
+        assert!(registration.event_types.iter().any(|event| {
+            event.name == "process.completed" && event.semantics.terminal.is_some()
+        }));
+
+        let initial_cursor = ProcessChangeCursor::initial();
+        assert_eq!(initial_cursor.store_sequence(), 0);
+        assert_eq!(ProcessChangeCursor::from_store_sequence(9).store_sequence(), 9);
+        let record = registry
+            .register_process_with_observers(
+                registration,
+                &["session-finance".to_string(), "session-ops".to_string()],
+            )
+            .await
+            .expect("register process and initial observers");
+        assert_eq!(record.id, process_id);
+        assert_eq!(record.status, ProcessStatus::Running);
+        assert!(!record.is_terminal());
+        assert_eq!(record.originator_id(), "session-finance");
+        assert_eq!(record.identity.label.as_deref(), Some("Nightly invoice export"));
+        assert_eq!(record.max_attempts, Some(3));
+        assert_eq!(record.disposition, RecoveryDisposition::Rerunnable);
+        assert_eq!(record.input.engine_specific_kind(), Some("report-export"));
+        assert_eq!(record.provenance.originator, ProcessOriginator::Session {
+            session_id: "session-finance".to_string(),
+        });
+        assert_eq!(
+            record.env_ref.as_ref().map(ProcessExecutionEnvRef::as_str),
+            Some("process-env:sha256:invoice-export-v7")
+        );
+        assert!(record.event_types.iter().any(|event| event.name == "progress"));
+        assert!(record.updated_at_ms >= record.created_at_ms);
+        assert!(record.external_ref.is_none());
+        assert!(record.first_started.is_none());
+        assert!(record.abandon_request.is_none());
+        assert!(record.wait.is_none());
+        assert!(record.outcome.is_none());
+        assert_eq!(record.registration_hash.len(), 64);
+        assert!(record.registration_hash.bytes().all(|byte| byte.is_ascii_hexdigit()));
+
+        let observers = registry
+            .observers_for_process(process_id)
+            .await
+            .expect("list initial observers");
+        assert_eq!(observers, ["session-finance", "session-ops"]);
+        assert!(registry
+            .is_observer("session-finance", process_id)
+            .await
+            .expect("read observer edge"));
+        registry
+            .transfer_observers(
+                "session-ops",
+                "session-audit",
+                &[process_id.to_string()],
+                ProcessObserverBy::host("audit-handoff"),
+            )
+            .await
+            .expect("transfer observer");
+        assert_eq!(
+            registry
+                .observers_for_process(process_id)
+                .await
+                .expect("list transferred observers"),
+            ["session-audit", "session-finance"]
+        );
+        registry
+            .remove_observer(
+                "session-audit",
+                process_id,
+                ProcessObserverBy::ForkInheritance,
+            )
+            .await
+            .expect("remove inherited observer");
+        assert_eq!(ProcessObserverBy::ForkInheritance.replay_component(), "fork_inheritance");
+
+        let external_ref = ProcessExternalRef {
+            backend: "restate".to_string(),
+            id: "invocation-778".to_string(),
+            metadata: Some(json!({ "region": "eu-central-1" })),
+        };
+        let record = registry
+            .set_external_ref(process_id, external_ref)
+            .await
+            .expect("bind backend work");
+        assert_eq!(record.external_ref.as_ref().unwrap().backend, "restate");
+        assert_eq!(record.external_ref.as_ref().unwrap().id, "invocation-778");
+        assert_eq!(
+            record.external_ref.as_ref().unwrap().metadata.as_ref().unwrap()["region"],
+            "eu-central-1"
+        );
+
+        let progress = ProcessEventAppendRequest::new(
+            "progress",
+            json!({ "completed_rows": 8, "total_rows": 12 }),
+        )
+        .with_replay_key("invoice-export:progress:8");
+        assert_eq!(progress.event_type, "progress");
+        assert_eq!(progress.payload["completed_rows"], 8);
+        assert_eq!(progress.replay.as_ref().unwrap().key, "invoice-export:progress:8");
+        let first_progress = registry
+            .append_event(process_id, progress.clone())
+            .await
+            .expect("append progress");
+        let replayed_progress = registry
+            .append_event(
+                process_id,
+                progress.with_optional_replay(first_progress.event.invocation.replay.clone()),
+            )
+            .await
+            .expect("replay progress append");
+        assert_eq!(replayed_progress.event.sequence, first_progress.event.sequence);
+        assert_eq!(replayed_progress.event.process_id, process_id);
+        assert_eq!(replayed_progress.event.event_type, "progress");
+        assert_eq!(replayed_progress.event.payload["total_rows"], 12);
+        assert!(replayed_progress.wake_delivery.is_none());
+        assert_eq!(
+            registry
+                .count_events_through(process_id, "progress", first_progress.event.sequence)
+                .await
+                .expect("count progress events"),
+            1
+        );
+        assert_eq!(
+            registry
+                .recent_events(process_id, 1)
+                .await
+                .expect("read event tail")[0]
+                .event_type,
+            "progress"
+        );
+
+        let owner = lash::persistence::LeaseOwnerIdentity::opaque("worker-berlin", "boot-9");
+        let lease = match registry
+            .claim_process_lease(process_id, &owner, 60_000)
+            .await
+            .expect("claim process lease")
+        {
+            ProcessLeaseClaimOutcome::Acquired(lease) => lease,
+            ProcessLeaseClaimOutcome::Busy { holder } => {
+                panic!("fresh process unexpectedly held by {}", holder.owner.owner_id)
+            }
+        };
+        assert_eq!(lease.process_id, process_id);
+        assert!(lease.schema_version > 0);
+        assert_eq!(lease.owner.owner_id, "worker-berlin");
+        assert_eq!(lease.owner.incarnation_id, "boot-9");
+        assert_eq!(lease.fencing_token, 1);
+        assert!(lease.expires_at_epoch_ms > lease.claimed_at_epoch_ms);
+        assert_eq!(
+            registry
+                .get_process_lease(process_id)
+                .await
+                .expect("read lease")
+                .as_ref()
+                .map(|held| held.lease_token.as_str()),
+            Some(lease.lease_token.as_str())
+        );
+        let renewed = registry
+            .renew_process_lease(&lease, 120_000)
+            .await
+            .expect("renew lease");
+        assert!(renewed.expires_at_epoch_ms >= lease.expires_at_epoch_ms);
+        let started = ProcessStarted {
+            owner: renewed.owner.clone(),
+            fencing_token: renewed.fencing_token,
+            attempt: 1,
+            started_at_ms: renewed.claimed_at_epoch_ms,
+        };
+        assert!(started.same_execution(&ProcessStarted {
+            owner: renewed.owner.clone(),
+            ..started.clone()
+        }));
+        assert!(!started.same_execution(&ProcessStarted {
+            fencing_token: renewed.fencing_token + 1,
+            ..started.clone()
+        }));
+
+        let running = registry
+            .get_process(process_id)
+            .await
+            .expect("read running process")
+            .expect("registered process remains visible");
+        assert_eq!(running.status, ProcessStatus::Running);
+
+        let filter = ProcessListFilter::decode(&json!({
+            "status": "running",
+            "originator_id": "session-finance",
+            "identity_kind": "report-export",
+            "identity_label": "Nightly invoice export",
+            "caused_by_occurrence_id": "occurrence-42",
+            "caused_by_subscription_id": "subscription-nightly",
+            "created_at_start_ms": record.created_at_ms,
+            "created_at_end_ms": record.created_at_ms.saturating_add(1),
+        }))
+        .expect("decode process filters");
+        assert_eq!(filter.status, ProcessStatusFilter::Running);
+        assert_eq!(filter.status.label(), Some("running"));
+        assert_eq!(ProcessStatus::Failed.label(), "failed");
+        assert!(ProcessStatus::Failed.is_terminal());
+        assert_eq!(filter.list_mode(), ProcessListMode::Live);
+        assert_eq!(filter.list_mode().as_str(), "live");
+        assert!(filter.matches_record(&running));
+        assert_eq!(
+            registry
+                .list_processes(&filter)
+                .await
+                .expect("filter live process")
+                .len(),
+            1
+        );
+        assert!(ProcessStatusFilter::Any.matches(ProcessStatus::Running));
+        assert_eq!(ProcessStatusFilter::Any.list_mode(), ProcessListMode::All);
+        assert_eq!(ProcessStatusFilter::decode(Some("completed")), Ok(ProcessStatusFilter::Completed));
+
+        let live_refs = registry
+            .live_reference_summary()
+            .await
+            .expect("summarize live references");
+        assert_eq!(live_refs.len(), 1);
+        assert_eq!(live_refs[0].process_count, 1);
+        assert_eq!(live_refs[0].definition.as_ref().unwrap()["revision"], 7);
+        assert_eq!(
+            live_refs[0]
+                .env_ref
+                .as_ref()
+                .map(ProcessExecutionEnvRef::as_str),
+            Some("process-env:sha256:invoice-export-v7")
+        );
+        assert_eq!(
+            registry
+                .filter_unregistered_process_ids(&[
+                    process_id.to_string(),
+                    "never-registered".to_string(),
+                ])
+                .await
+                .expect("filter recovery candidates"),
+            ["never-registered"]
+        );
+
+        let success = ProcessAwaitOutput::from_tool_output(lash::tools::ToolCallOutput::success(
+            json!({ "artifact": "invoices.csv", "rows": 12 }),
+        ));
+        assert_eq!(success.terminal_status(), Some(ProcessStatus::Completed));
+        assert_eq!(
+            success.clone().into_tool_output().value_for_projection()["artifact"],
+            "invoices.csv"
+        );
+        let completion = registry
+            .complete_process_with_lease(&renewed, success.clone())
+            .await
+            .expect("complete process under lease");
+        assert_eq!(completion.status, ProcessStatus::Completed);
+        assert!(completion.is_terminal());
+        assert_eq!(completion.outcome.as_ref(), Some(&success));
+        let completed = (*completion).clone();
+        assert!(registry
+            .get_process_lease(process_id)
+            .await
+            .expect("read released lease")
+            .is_none());
+
+        let replay = registry
+            .complete_process_with_lease(&renewed, success.clone())
+            .await
+            .expect("replay terminal completion");
+        assert_eq!(replay.status, ProcessStatus::Completed);
+        assert_eq!(replay.outcome.as_ref(), Some(&success));
+        let cancellation = ProcessAwaitOutput::Cancelled {
+            message: "operator cancelled".to_string(),
+            raw: None,
+            control: None,
+        };
+        assert_eq!(cancellation.terminal_status(), Some(ProcessStatus::Cancelled));
+        assert_eq!(
+            cancellation.into_tool_output().value_for_projection()["message"],
+            "operator cancelled"
+        );
+
+        let handle = ProcessHandleSummary::from_record(completed.clone())
+            .with_definition(Some(json!({ "workflow": "invoice-export", "revision": 7 })));
+        assert_eq!(handle.handle_type, "process");
+        assert_eq!(handle.id, process_id);
+        assert_eq!(handle.process_id, process_id);
+        assert_eq!(handle.kind, "report-export");
+        assert_eq!(handle.label.as_deref(), Some("Nightly invoice export"));
+        assert_eq!(handle.definition.as_ref().unwrap()["revision"], 7);
+        assert_eq!(handle.status, ProcessStatus::Completed);
+        let cancel_summary = lash::process::ProcessCancelSummary::from_record(completed.clone());
+        assert_eq!(cancel_summary.process_id, process_id);
+        assert_eq!(cancel_summary.status, ProcessStatus::Completed);
+
+        assert!(registry
+            .list_non_terminal()
+            .await
+            .expect("list recovery work")
+            .is_empty());
+        assert_eq!(
+            registry
+                .list_processes(&ProcessListFilter {
+                    status: ProcessStatusFilter::Completed,
+                    ..Default::default()
+                })
+                .await
+                .expect("list completed process")
+                .len(),
+            1
+        );
+
+        let external_id = "externally-owned-export";
+        registry
+            .register_process(ProcessRegistration::new(
+                external_id,
+                ProcessInput::External {
+                    metadata: json!({ "backend": "batch-service" }),
+                },
+                RecoveryDisposition::ExternallyOwned,
+                ProcessProvenance::new(ProcessOriginator::host_scoped("batch-service")),
+            ))
+            .await
+            .expect("register externally-owned work");
+        let external_completion = registry
+            .complete_process(
+                external_id,
+                ProcessAwaitOutput::Failure {
+                    class: lash::tools::ToolFailureClass::External,
+                    code: "batch_rejected".to_string(),
+                    message: "batch service rejected the export".to_string(),
+                    raw: Some(json!({ "retryable": false })),
+                    control: None,
+                },
+                ProcessCompletionAuthority::external_owner(),
+            )
+            .await
+            .expect("external owner closes its work");
+        assert_eq!(external_completion.status, ProcessStatus::Failed);
+        assert!(matches!(
+            external_completion.outcome.as_ref(),
+            Some(ProcessAwaitOutput::Failure {
+                class: lash::tools::ToolFailureClass::External,
+                code,
+                message,
+                raw: Some(raw),
+                control: None,
+            }) if code == "batch_rejected"
+                && message == "batch service rejected the export"
+                && raw["retryable"] == false
+        ));
+        assert_eq!(ProcessCompletionAuthority::workflow_key("wf-1").label(), "workflow-key");
+
+        let report = registry
+            .prune_terminal_processes(u64::MAX, None, ProjectionWatermark::NoProjector)
+            .await
+            .expect("prune projected terminal processes");
+        assert_eq!(report.pruned_processes, 2);
+        assert!(report.pruned_events >= 2);
+        assert_eq!(report.pruned_trigger_deliveries, 0);
+        assert_eq!(
+            registry
+                .filter_tombstoned_process_ids(&[
+                    process_id.to_string(),
+                    external_id.to_string(),
+                    "never-registered".to_string(),
+                ])
+                .await
+                .expect("filter pruned process ids"),
+            [process_id, external_id]
+        );
+        let compacted = registry
+            .compact_process_tombstones(
+                u64::MAX,
+                ProjectionWatermark::UpTo(initial_cursor),
+                None,
+            )
+            .await
+            .expect("compact projected tombstones");
+        assert_eq!(compacted, 0, "unprojected deletions must retain their tombstones");
+        assert_eq!(
+            registry
+                .compact_process_tombstones(
+                    u64::MAX,
+                    ProjectionWatermark::NoProjector,
+                    None,
+                )
+                .await
+                .expect("compact tombstones without a projector"),
+            2
+        );
+    }
 }
