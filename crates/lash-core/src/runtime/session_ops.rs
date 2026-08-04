@@ -239,15 +239,26 @@ impl LashRuntime {
     /// runtimes, not serialized placeholders. Foreground activation must therefore
     /// claim that runtime instead of reconstructing a new empty state in the UI.
     pub async fn activate_managed_session(&mut self, session_id: &str) -> Result<(), SessionError> {
+        // Extraction is transactional: the registry entry is only surrendered
+        // once the handle has actually yielded its runtime. `try_into_runtime`
+        // hands the intact handle back in `Err`, so the still-in-use case
+        // restores it under the same lock — a failed activation must stay
+        // retryable instead of ghosting the child until a cold reopen.
         let child = {
             let mut registry = self.managed_sessions.lock().await;
-            registry.remove(session_id).ok_or_else(|| {
+            let handle = registry.remove(session_id).ok_or_else(|| {
                 SessionError::Protocol(format!("unknown managed session `{session_id}`"))
-            })?
+            })?;
+            match handle.try_into_runtime() {
+                Ok(child) => child,
+                Err(handle) => {
+                    registry.insert(session_id.to_string(), handle);
+                    return Err(SessionError::Protocol(format!(
+                        "managed session `{session_id}` is still in use"
+                    )));
+                }
+            }
         };
-        let child = child.try_into_runtime().map_err(|_| {
-            SessionError::Protocol(format!("managed session `{session_id}` is still in use"))
-        })?;
         *self = child;
         Ok(())
     }

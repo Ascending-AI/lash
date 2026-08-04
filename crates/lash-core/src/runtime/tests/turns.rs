@@ -5103,6 +5103,58 @@ async fn runtime_can_activate_managed_child_session() {
     );
 }
 
+/// A failed activation must not consume the managed-session handle.
+/// `try_into_runtime` returns the intact handle in `Err`; discarding it removed
+/// the child from the registry for good, so it could never be activated again
+/// without a cold reopen.
+#[tokio::test]
+async fn failed_managed_session_activation_leaves_the_child_activatable() {
+    let mut runtime = runtime_with_plugins(Vec::new(), mock_provider(Vec::new())).await;
+    let lifecycle = runtime
+        .session_lifecycle_service()
+        .expect("session lifecycle");
+    lifecycle
+        .create_session(
+            crate::SessionCreateRequest::child(
+                runtime.session_id(),
+                crate::SessionStartPoint::Empty,
+                runtime.policy.clone(),
+                crate::PluginOptions::default(),
+                "test",
+            )
+            .with_session_id("child")
+            .with_plugin_source(crate::SessionPluginSource::CurrentSessionFork),
+        )
+        .await
+        .expect("child session");
+
+    // A second reference to the child runtime — what an in-flight observation or
+    // child turn holds — makes the extraction fail.
+    let in_use = runtime
+        .managed_sessions
+        .lock()
+        .await
+        .get("child")
+        .cloned()
+        .expect("managed child handle");
+    let err = runtime
+        .activate_managed_session("child")
+        .await
+        .expect_err("activation of an in-use child must fail");
+    assert!(err.to_string().contains("still in use"));
+    assert!(
+        runtime.managed_sessions.lock().await.contains_key("child"),
+        "a failed activation must leave the child in the registry"
+    );
+
+    drop(in_use);
+    runtime
+        .activate_managed_session("child")
+        .await
+        .expect("activation is retryable once the child is no longer in use");
+    assert_eq!(runtime.session_id(), "child");
+}
+
 #[test]
 fn queued_work_payload_cannot_encode_persisted_turn_input() {
     // This exhaustive match is the type-level ingress proof: generic queued
