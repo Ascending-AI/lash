@@ -18,7 +18,10 @@
 //! a durable tool-catalog refresh so the next opened turn sees the updated
 //! `inbox.<slug>` authority set.
 
-use std::sync::{Arc, RwLock};
+use std::{
+    collections::BTreeMap,
+    sync::{Arc, Mutex, RwLock},
+};
 
 use crate::MAIL_RECEIVED_SOURCE_TYPE;
 use async_trait::async_trait;
@@ -105,6 +108,7 @@ pub(crate) struct AccountSummary {
 #[derive(Clone, Default)]
 pub(crate) struct MailWorld {
     inner: Arc<RwLock<Vec<Account>>>,
+    sent_by_replay_key: Arc<Mutex<BTreeMap<String, DeliveredMail>>>,
 }
 
 impl MailWorld {
@@ -150,6 +154,10 @@ impl MailWorld {
     /// world along with the chat session.
     pub(crate) fn clear(&self) {
         self.inner.write().expect("mail world lock").clear();
+        self.sent_by_replay_key
+            .lock()
+            .expect("sent replay key lock")
+            .clear();
     }
 
     pub(crate) fn remove_account(&self, slug: &str) -> Result<(), String> {
@@ -213,6 +221,30 @@ impl MailWorld {
             .unwrap_or_default();
         let text = args.get("text").and_then(Value::as_str).unwrap_or_default();
         self.deliver(slug, title, text)
+    }
+
+    /// Deliver at most once for one stable tool-call replay identity.
+    ///
+    /// This in-memory map is intentionally only a workbench mock. A production
+    /// host must record the replay key and receipt atomically in the same
+    /// durable store as the external side effect, and prune completed entries
+    /// according to that store's retention policy.
+    fn op_send_once(
+        &self,
+        replay_key: &str,
+        slug: &str,
+        args: &Value,
+    ) -> Result<DeliveredMail, String> {
+        let mut sent = self
+            .sent_by_replay_key
+            .lock()
+            .expect("sent replay key lock");
+        if let Some(delivered) = sent.get(replay_key) {
+            return Ok(delivered.clone());
+        }
+        let delivered = self.op_send(slug, args)?;
+        sent.insert(replay_key.to_string(), delivered.clone());
+        Ok(delivered)
     }
 
     fn op_list(&self, slug: &str, _args: &Value) -> Result<Value, String> {
@@ -415,43 +447,46 @@ impl ToolProvider for MockMailProvider {
             return ToolResult::err_fmt(format_args!("unknown inbox tool `{}`", call.name));
         };
         let result = match operation {
-            "send" => match self.world.op_send(&slug, call.args) {
-                Ok(delivered) => {
-                    let payload = match serde_json::to_value(&delivered.delivery) {
-                        Ok(payload) => payload,
-                        Err(err) => return ToolResult::err_fmt(err.to_string()),
-                    };
-                    let source_key = match empty_trigger_source_key(MAIL_RECEIVED_SOURCE_TYPE) {
-                        Ok(source_key) => source_key,
-                        Err(err) => return ToolResult::err_fmt(err.to_string()),
-                    };
-                    let Some(replay_key) = call.context.replay_key() else {
-                        return ToolResult::err_fmt(
-                            "mail send trigger emission requires a replay key",
-                        );
-                    };
-                    let idempotency_key =
-                        format!("{replay_key}:mail.received:{}", delivered.message.id);
-                    if let Err(err) = call
-                        .context
-                        .triggers()
-                        .emit(
-                            TriggerOccurrenceRequest::new(
-                                MAIL_RECEIVED_SOURCE_TYPE,
-                                source_key,
-                                payload,
-                                idempotency_key,
+            "send" => {
+                let Some(replay_key) = call.context.replay_key() else {
+                    return ToolResult::err_fmt("mail send requires a replay key");
+                };
+                match self.world.op_send_once(replay_key, &slug, call.args) {
+                    Ok(delivered) => {
+                        let payload = match serde_json::to_value(&delivered.delivery) {
+                            Ok(payload) => payload,
+                            Err(err) => return ToolResult::err_fmt(err.to_string()),
+                        };
+                        let source_key = match empty_trigger_source_key(MAIL_RECEIVED_SOURCE_TYPE) {
+                            Ok(source_key) => source_key,
+                            Err(err) => return ToolResult::err_fmt(err.to_string()),
+                        };
+                        let idempotency_key =
+                            format!("{replay_key}:mail.received:{}", delivered.message.id);
+                        // A retry must re-attempt trigger emission in case the
+                        // delivery committed before the prior emit failed. The
+                        // memoized message id keeps this occurrence key stable.
+                        if let Err(err) = call
+                            .context
+                            .triggers()
+                            .emit(
+                                TriggerOccurrenceRequest::new(
+                                    MAIL_RECEIVED_SOURCE_TYPE,
+                                    source_key,
+                                    payload,
+                                    idempotency_key,
+                                )
+                                .with_source(json!({})),
                             )
-                            .with_source(json!({})),
-                        )
-                        .await
-                    {
-                        return ToolResult::err_fmt(err.to_string());
+                            .await
+                        {
+                            return ToolResult::err_fmt(err.to_string());
+                        }
+                        Ok(json!({ "account": slug, "id": delivered.message.id }))
                     }
-                    Ok(json!({ "account": slug, "id": delivered.message.id }))
+                    Err(err) => Err(err),
                 }
-                Err(err) => Err(err),
-            },
+            }
             "list" => self.world.op_list(&slug, call.args),
             "delete" => self.world.op_delete(&slug, call.args),
             other => Err(format!("unsupported inbox operation `{other}`")),
@@ -510,6 +545,24 @@ mod tests {
             .op_delete("work", &json!({ "id": id }))
             .expect("delete");
         assert_eq!(world.account_summaries()[0].total, 0);
+    }
+
+    #[test]
+    fn send_replay_returns_the_stable_receipt_without_redelivery() {
+        let world = MailWorld::new();
+        world.add_account("Work").expect("add work");
+        let args = json!({ "title": "Contract", "text": "Please review." });
+
+        let first = world
+            .op_send_once("turn-1:call-1", "work", &args)
+            .expect("first send");
+        let replay = world
+            .op_send_once("turn-1:call-1", "work", &args)
+            .expect("replayed send");
+
+        assert_eq!(first.message.id, "work-1");
+        assert_eq!(replay.message.id, first.message.id);
+        assert_eq!(world.inbox("work").expect("work inbox").len(), 1);
     }
 
     #[test]

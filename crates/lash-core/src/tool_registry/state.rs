@@ -1,5 +1,11 @@
 pub const PLUGIN_TOOL_SOURCE_ID: &str = "plugins";
 
+/// Ephemeral identity for a live tool-provider source.
+///
+/// Session hosts use this handle to correlate provider bookkeeping and later
+/// remove the source from the same open session. The identity is scoped to the
+/// registry that issued it: it is not a durable cross-session identifier, and
+/// another session may issue the same string for a different provider.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(transparent)]
 pub struct ToolSourceHandle {
@@ -11,7 +17,13 @@ impl ToolSourceHandle {
         Self { id: id.into() }
     }
 
-    pub(crate) fn as_str(&self) -> &str {
+    /// Return the source identity used by session hosts to correlate this
+    /// provider with host-owned routing or lifecycle state.
+    ///
+    /// The value is stable for this handle but is valid only for the registry
+    /// that issued it. Do not persist it across session rebuilds or use it with
+    /// another session.
+    pub fn id(&self) -> &str {
         &self.id
     }
 }
