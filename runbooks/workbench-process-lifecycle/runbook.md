@@ -118,6 +118,57 @@ Press **cancel** on `FIG425_cancellable_<runid>` and capture the response as
 require that the forbidden finish marker is absent. Screenshot
 `03-orphan-cancelled.png`.
 
+## Phase 3b — Cancel a background session turn and keep working (FIG-884)
+
+Cancelling a *background session turn* — a subagent process, whose input is a session turn
+rather than a Lashlang definition — used to wedge the session that started it: the child
+turn's registration was only removed after the child await, so a cancelled process left a
+permanent "running turn" behind. The session then refused to close the child and rejected
+every later turn on it. This phase proves the registration is released by cancellation.
+
+Do:
+
+1. **Record the disk baseline first.** Save a sorted listing of
+   `<data-dir>/lash-sessions/` as `03b-sessions-before.txt` (`ls -1` output, one entry per
+   line). The delta against this file is what the disk gate scores.
+2. In the current session, ask the agent to start a **subagent** that keeps working for
+   several minutes (a long-running research/loop prompt), and let it reach a non-terminal
+   card in the work rail. Capture its process id **and its child session id** as
+   `03b-subagent-running.json` — the child session id is the subagent's
+   `child_session_id` in `/api/work` (equivalently the `session_id` on the subagent's
+   process row in `processes.db`); record it verbatim, the disk gate names it. Screenshot
+   `03b-subagent-running.png`.
+3. Press **cancel** on that subagent card. Require `accepted: true` for that exact
+   process id and poll until the card is terminal/cancelled with `process.cancel_requested`
+   in its event tail (`03b-subagent-cancel-receipt.json`).
+4. Without resetting the session, send a normal follow-up turn in the same session and
+   start a **second** subagent.
+5. **Record the disk delta.** Save the sorted listing again as `03b-sessions-after.txt`
+   and the `diff 03b-sessions-before.txt 03b-sessions-after.txt` output as
+   `03b-sessions-delta.txt`.
+
+Expect:
+
+- the follow-up turn completes and renders its answer — a wedged parent manager would
+  fail or hang instead;
+- the second subagent reaches a non-terminal card and then a terminal state, proving the
+  parent's managed-turn registry admitted new child work after the cancellation;
+- **disk gate (objective):** `03b-sessions-delta.txt` contains **no** entry for the
+  cancelled subagent's recorded child session id. Added entries for the *second*
+  subagent's child session are expected and pass; an entry naming the cancelled child id
+  is a fail, because the parent could not close it. Quote the recorded child session id
+  and the matching delta lines when scoring — an unquoted "looked clean" does not pass;
+- the trace contains `managed_turn.admission` with `outcome=admitted` for the second
+  subagent and `managed_turn.release` with `outcome=released, reason=dropped` for the
+  cancelled one. A `managed_turn.admission` with `outcome=denied` and reason
+  "already has a running turn" after the cancellation is the exact FIG-884 regression.
+
+Known residual (FIG-872, out of scope here): the cancelled subagent's **own child
+session** cannot run further turns — the dropped turn future also loses that child
+runtime's session loan. The gate above therefore uses a *new* subagent, not a second turn
+on the cancelled child. Screenshot the follow-up answer and the second subagent's terminal
+card as `03b-session-still-usable.png`.
+
 ## Phase 4 — Let the survivor complete
 
 Without opening or recreating the deleted session, poll until `FIG425_survivor_<runid>`
@@ -138,6 +189,8 @@ container are gone.
 | Owner deleted | new rendered/API session id; old store/observer rows gone | | `02-owner-gone-processes-live.png`, `02-after-delete-*.json` |
 | Runtime independence | both original ids remain live in rail and `/api/work` after delete | | `02-owner-gone-processes-live.png`, API/trace report |
 | Global cancel | exact id accepted; `cancel_requested` then cancelled | | `03-orphan-cancelled.png`, `03-cancel-receipt.json`, store events |
+| Session survives a cancelled background session turn (FIG-884) | after cancelling a subagent, a follow-up turn answers and a second subagent runs; `managed_turn.release` released, no `already has a running turn` denial | | `03b-subagent-running.png`, `03b-subagent-cancel-receipt.json`, `03b-session-still-usable.png`, trace |
+| Cancelled child session left no orphan on disk (FIG-884) | `03b-sessions-delta.txt` names no entry for the recorded cancelled child session id (quote both) | | `03b-subagent-running.json` (child session id), `03b-sessions-before.txt`, `03b-sessions-after.txt`, `03b-sessions-delta.txt` |
 | Survivor completion | completed terminal and finish marker persist after owner deletion | | `04-survivor-completed.png`, `04-terminal-*.json` |
 | No break-glass substitution | no Restate Admin cancel/kill used | | command log |
 

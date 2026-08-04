@@ -348,6 +348,13 @@ impl RuntimeExecutionContext<'_> {
             }
         })
         .await;
+        // A cancel-grace timeout above drops a child tool future that may have
+        // parked this process run's execution permit
+        // (`release_process_execution_permit_while`), and the run continues
+        // afterwards. Reacquire the slot here — every child is finished, so
+        // this cannot starve a sibling that is still parked on it — exactly as
+        // the cancelled background-session-turn path does before it resumes.
+        crate::runtime::ensure_process_execution_permit().await;
 
         let mut launches = Vec::with_capacity(child_outcomes.len());
         let mut triggers = Vec::new();

@@ -17,6 +17,11 @@ pub(in crate::runtime::session_manager) struct LiveChildUsageForwarder {
     pub(in crate::runtime::session_manager) child_turn_live_usage:
         Arc<std::sync::Mutex<HashMap<String, TokenUsage>>>,
     pub(in crate::runtime::session_manager) relay: Option<ChildUsageEventRelay>,
+    /// Set by the turn's `ManagedTurnLease` when it releases the live-usage
+    /// entry. An emit still in flight at that moment must not report, because
+    /// `entry(..).or_default()` would resurrect the released entry with a zero
+    /// baseline and re-record the full cumulative usage.
+    pub(in crate::runtime::session_manager) turn_released: Arc<AtomicBool>,
 }
 
 #[derive(Clone, Default)]
@@ -200,6 +205,17 @@ pub(in crate::runtime::session_manager) fn subtract_usage(
 }
 
 impl LiveChildUsageForwarder {
+    #[cfg(test)]
+    pub(in crate::runtime::session_manager) async fn relay_token_usage_for_test(
+        &self,
+        protocol_iteration: usize,
+        usage: &TokenUsage,
+        cumulative_usage: &TokenUsage,
+    ) {
+        self.relay_token_usage(protocol_iteration, usage, cumulative_usage)
+            .await;
+    }
+
     async fn relay_token_usage(
         &self,
         protocol_iteration: usize,
@@ -210,7 +226,15 @@ impl LiveChildUsageForwarder {
             let mut live_usage = self
                 .child_turn_live_usage
                 .lock()
-                .expect("child turn live usage lock");
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            // Ordering: the lease sets `turn_released` before it removes the
+            // entry, and this check happens under the same lock the removal
+            // takes, so an emit either observes a live entry (and is counted) or
+            // observes the release (and is dropped). Reporting after release
+            // would both leak a resurrected entry and double-count.
+            if self.turn_released.load(Ordering::Acquire) {
+                return;
+            }
             let reported = live_usage.entry(self.turn_id.clone()).or_default();
             let Some(delta) = subtract_usage(reported, cumulative_usage) else {
                 return;

@@ -98,6 +98,17 @@ pub trait SessionLifecycleService: Send + Sync {
         ))
     }
 
+    /// Run one turn on a managed session.
+    ///
+    /// A managed turn id must be unique across every managed turn running in
+    /// this process, not merely within its session: registering an id that is
+    /// already running is rejected with
+    /// `` turn `<id>` is already running on session `<other>` ``. Live child
+    /// usage is keyed by turn id alone, so two concurrent turns sharing an id
+    /// would cross their usage accounting. A session also runs at most one turn
+    /// at a time (`` session `<id>` already has a running turn ``). Both
+    /// registrations are released when this future completes *or is dropped*, so
+    /// a cancelled turn frees its session immediately.
     async fn start_turn(
         &self,
         _request: SessionTurnRequest<'_>,
@@ -157,6 +168,17 @@ pub struct SessionTurnRequest<'run> {
 }
 
 impl<'run> SessionTurnRequest<'run> {
+    /// Build a managed-turn request.
+    ///
+    /// `turn_id` is the turn's stable durable identity and must be unique across
+    /// every managed turn running in this process — process ids and other
+    /// already-unique handles are the intended sources. Reusing an id that is
+    /// still running is rejected by
+    /// [`SessionLifecycleService::start_turn`], not here, because uniqueness is
+    /// only observable against the live registry; the rejection reads
+    /// `` turn `<id>` is already running on session `<other>` ``. The turn's
+    /// registration and its live-usage entry are both released when the turn
+    /// completes or when the running turn future is dropped.
     pub fn new(
         session_id: impl Into<String>,
         turn_id: impl Into<String>,

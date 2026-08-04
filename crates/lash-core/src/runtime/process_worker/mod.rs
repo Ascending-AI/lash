@@ -324,6 +324,13 @@ impl ProcessExecutionPermit {
             .expect("process execution permit lock")
             .is_some()
         {
+            tracing::debug!(
+                consulted = "held_permit",
+                gate = "fast_path",
+                outcome = "already_held",
+                event = "process_execution_permit.reacquire",
+                "process execution permit is already held; the run resumes without waiting"
+            );
             return;
         }
         let _reacquire = self.reacquire.lock().await;
@@ -333,13 +340,51 @@ impl ProcessExecutionPermit {
             .expect("process execution permit lock")
             .is_some()
         {
+            tracing::debug!(
+                consulted = "held_permit",
+                gate = "reacquire_serialization",
+                outcome = "already_held",
+                event = "process_execution_permit.reacquire",
+                "another branch of this run reacquired the permit while this one waited"
+            );
             return;
         }
-        let permit = Arc::clone(&self.semaphore)
-            .acquire_owned()
-            .await
-            .expect("process execution semaphore remains open");
+        // This is a park: the run cannot continue until the scheduler hands the
+        // slot back, so whether it actually waited is decision evidence. The
+        // label comes from the try-acquire result rather than from a permit
+        // count read before the acquire, which could race either way.
+        let permit = match Arc::clone(&self.semaphore).try_acquire_owned() {
+            Ok(permit) => {
+                tracing::debug!(
+                    available_permits = self.semaphore.available_permits(),
+                    consulted = "process_execution_semaphore",
+                    outcome = "immediate",
+                    event = "process_execution_permit.reacquire",
+                    "reacquired the process execution permit without waiting"
+                );
+                permit
+            }
+            Err(_) => {
+                tracing::debug!(
+                    available_permits = 0,
+                    consulted = "process_execution_semaphore",
+                    outcome = "waiting",
+                    event = "process_execution_permit.reacquire",
+                    "waiting for a process execution permit before resuming the run"
+                );
+                Arc::clone(&self.semaphore)
+                    .acquire_owned()
+                    .await
+                    .expect("process execution semaphore remains open")
+            }
+        };
         *self.held.lock().expect("process execution permit lock") = Some(permit);
+        tracing::debug!(
+            consulted = "process_execution_semaphore",
+            outcome = "held",
+            event = "process_execution_permit.reacquire",
+            "reacquired the process execution permit"
+        );
     }
 
     async fn release_while<F: Future>(&self, future: F) -> F::Output {
@@ -1428,5 +1473,7 @@ impl DurableProcessWorker {
     }
 }
 
+#[cfg(test)]
+mod permit_tests;
 #[cfg(test)]
 mod recovery_tests;

@@ -666,6 +666,13 @@ impl RuntimeHandle {
             })
     }
 
+    /// How many live references share this handle's runtime, including this
+    /// one. `try_into_runtime` can only succeed at `1`; activation traces this
+    /// count so a refused promotion is explainable from the trace.
+    pub(in crate::runtime) fn runtime_reference_count(&self) -> usize {
+        Arc::strong_count(&self.runtime)
+    }
+
     pub fn try_into_runtime(self) -> Result<LashRuntime, Self> {
         match Arc::try_unwrap(self.runtime) {
             Ok(mutex) => Ok(mutex.into_inner()),

@@ -986,3 +986,203 @@ async fn parent_turn_keeps_cached_only_child_usage_live() {
     assert_eq!(usage.by_source["subagent"].usage.cache_read_input_tokens, 9);
     assert_eq!(usage.by_source["subagent"].usage.reasoning_output_tokens, 0);
 }
+
+/// Tool that parks the turn that calls it: it reports that it started, then
+/// never returns. It is the controlled await a cancelled managed child turn is
+/// dropped at.
+struct ParkedTool {
+    started: tokio::sync::mpsc::Sender<()>,
+}
+
+#[async_trait::async_trait]
+impl crate::ToolProvider for ParkedTool {
+    fn tool_manifests(&self) -> Vec<crate::ToolManifest> {
+        vec![parked_tool_definition().manifest()]
+    }
+
+    fn resolve_contract(&self, name: &str) -> Option<Arc<crate::ToolContract>> {
+        (name == "park_forever").then(|| Arc::new(parked_tool_definition().contract()))
+    }
+
+    async fn execute(&self, _call: crate::ToolCall<'_>) -> crate::ToolResult {
+        let _ = self.started.send(()).await;
+        std::future::pending::<()>().await;
+        unreachable!("the parked tool never completes")
+    }
+}
+
+fn parked_tool_definition() -> crate::ToolDefinition {
+    crate::ToolDefinition::raw(
+        "tool:park_forever",
+        "park_forever",
+        "park the calling turn forever",
+        crate::ToolDefinition::default_input_schema(),
+        serde_json::json!({ "type": "object", "additionalProperties": false }),
+    )
+}
+
+fn child_turn_usage_event() -> LlmStreamEvent {
+    LlmStreamEvent::Usage(LlmUsage {
+        input_tokens: 5,
+        output_tokens: 1,
+        cache_read_input_tokens: 0,
+        cache_write_input_tokens: 0,
+        reasoning_output_tokens: 0,
+    })
+}
+
+fn child_source_input_tokens(runtime: &LashRuntime) -> i64 {
+    runtime
+        .shared_token_ledger
+        .lock()
+        .expect("shared token ledger")
+        .iter()
+        .map(|entry| entry.usage.input_tokens)
+        .sum()
+}
+
+/// Cancelling the process that drives a managed child turn drops the
+/// `start_turn` future at whichever await it is parked on. That must release the
+/// turn's registration and its live-usage entry: a ghost registration would
+/// refuse `close_session` for the session's whole lifetime and reject every
+/// later turn on it as "already has a running turn".
+#[tokio::test]
+async fn cancelled_managed_child_turn_releases_its_registration_and_live_usage() {
+    let transport = mock_provider(vec![
+        // Gated child turn: one provider round-trip reports usage, then the
+        // tool call parks the turn.
+        MockCall {
+            stream_events: vec![
+                LlmStreamEvent::Part(LlmOutputPart::ToolCall {
+                    call_id: "park-1".to_string(),
+                    tool_name: "park_forever".to_string(),
+                    input_json: "{}".to_string(),
+                    replay: None,
+                }),
+                child_turn_usage_event(),
+            ],
+            response: Ok(LlmResponse::default()),
+        },
+        // Retried child turn after the cancellation.
+        MockCall {
+            stream_events: vec![child_turn_usage_event()],
+            response: Ok(LlmResponse {
+                full_text: "retried child turn".to_string(),
+                parts: vec![LlmOutputPart::Text {
+                    text: "retried child turn".to_string(),
+                    response_meta: None,
+                }],
+                response_metadata: Default::default(),
+                ..LlmResponse::default()
+            }),
+        },
+    ]);
+    let (started_tx, mut started_rx) = tokio::sync::mpsc::channel::<()>(1);
+    let tools: Arc<dyn crate::ToolProvider> = Arc::new(ParkedTool {
+        started: started_tx,
+    });
+    let runtime = runtime_with_plugins_and_tools(Vec::new(), tools, transport).await;
+    let lifecycle = runtime
+        .session_lifecycle_service()
+        .expect("session lifecycle");
+    lifecycle
+        .create_session(
+            crate::SessionCreateRequest::child_session(
+                runtime.session_id(),
+                crate::SessionStartPoint::Empty,
+                crate::PluginOptions::default(),
+            )
+            .with_session_id("cancelled-child")
+            .with_plugin_source(crate::SessionPluginSource::CurrentSessionFork),
+        )
+        .await
+        .expect("child session");
+
+    let turn_id = "cancelled-child-turn";
+    let request = |session_id: &'static str, turn_id: &str| {
+        crate::SessionTurnRequest::new(
+            session_id,
+            turn_id,
+            TurnInput::text("park the child turn"),
+            named_turn_scope(session_id, turn_id),
+        )
+        .expect("child turn request")
+    };
+    let mut turn = Box::pin(lifecycle.start_turn(request("cancelled-child", turn_id)));
+    tokio::select! {
+        _ = started_rx.recv() => {}
+        outcome = turn.as_mut() => panic!("parked child turn must not complete: {outcome:?}"),
+    }
+    assert!(
+        runtime
+            .managed_turns
+            .lock()
+            .expect("managed turns")
+            .contains_key(turn_id),
+        "the parked child turn must be registered while it runs"
+    );
+    assert_eq!(
+        child_source_input_tokens(&runtime),
+        5,
+        "the parked child turn must have reported live usage before cancellation"
+    );
+
+    // The cancellation: the owning process drops the child-turn future.
+    drop(turn);
+
+    assert!(
+        runtime
+            .managed_turns
+            .lock()
+            .expect("managed turns")
+            .is_empty(),
+        "a cancelled child turn must not leave a ghost registration behind"
+    );
+    // The live-usage entry is keyed by turn id, so a stranded entry would
+    // swallow this turn's usage as already reported.
+    lifecycle
+        .create_session(
+            crate::SessionCreateRequest::child_session(
+                runtime.session_id(),
+                crate::SessionStartPoint::Empty,
+                crate::PluginOptions::default(),
+            )
+            .with_session_id("retry-child")
+            .with_plugin_source(crate::SessionPluginSource::CurrentSessionFork),
+        )
+        .await
+        .expect("retry child session");
+    let retried = lifecycle
+        .start_turn(request("retry-child", turn_id))
+        .await
+        .expect("retried child turn");
+    assert!(matches!(
+        retried.outcome,
+        TurnOutcome::Finished(_) | TurnOutcome::AgentFrameSwitch { .. }
+    ));
+    assert_eq!(
+        child_source_input_tokens(&runtime),
+        10,
+        "the retried turn's live usage must be reported against a reclaimed entry"
+    );
+
+    // Registration no longer rejects further work on the cancelled session. The
+    // turn itself still fails, because the dropped turn future also loses the
+    // child runtime's `Session` loan (`turn_loop`'s `self.session =
+    // Some(session)` restore sites sit after the run await) — that hazard
+    // belongs to the turn-lifecycle restructuring tracked as FIG-872, not to
+    // this registration guard.
+    let residual = lifecycle
+        .start_turn(request("cancelled-child", "cancelled-child-turn-2"))
+        .await
+        .expect_err("the child runtime's session loan is lost with the dropped future");
+    assert!(
+        !residual.to_string().contains("already has a running turn"),
+        "a cancelled child turn must not reject later turns on its session: {residual}"
+    );
+
+    lifecycle
+        .close_session("cancelled-child")
+        .await
+        .expect("a cancelled child turn must not keep its session open forever");
+}

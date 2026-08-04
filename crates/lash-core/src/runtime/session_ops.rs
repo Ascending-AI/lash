@@ -239,15 +239,64 @@ impl LashRuntime {
     /// runtimes, not serialized placeholders. Foreground activation must therefore
     /// claim that runtime instead of reconstructing a new empty state in the UI.
     pub async fn activate_managed_session(&mut self, session_id: &str) -> Result<(), SessionError> {
+        // Extraction is transactional: the registry entry is only surrendered
+        // once the handle has actually yielded its runtime. `try_into_runtime`
+        // hands the intact handle back in `Err`, so the still-in-use case
+        // restores it under the same lock — a failed activation must stay
+        // retryable instead of ghosting the child until a cold reopen.
         let child = {
             let mut registry = self.managed_sessions.lock().await;
-            registry.remove(session_id).ok_or_else(|| {
-                SessionError::Protocol(format!("unknown managed session `{session_id}`"))
-            })?
+            let registered = registry.len();
+            let Some(handle) = registry.remove(session_id) else {
+                tracing::debug!(
+                    session_id,
+                    managed_sessions = registered,
+                    consulted = "managed_session_registry",
+                    outcome = "unknown_session",
+                    event = "managed_session.activation",
+                    "managed session activation denied: not registered"
+                );
+                return Err(SessionError::Protocol(format!(
+                    "unknown managed session `{session_id}`"
+                )));
+            };
+            // Reference count observed while the registry lock is held: the
+            // extraction below can only succeed at 1, so this is the input that
+            // decides the outcome.
+            let runtime_references = handle.runtime_reference_count();
+            match handle.try_into_runtime() {
+                Ok(child) => {
+                    tracing::debug!(
+                        session_id,
+                        managed_sessions = registered,
+                        runtime_references,
+                        consulted = "managed_session_handle_references",
+                        outcome = "activated",
+                        event = "managed_session.activation",
+                        "managed session activated"
+                    );
+                    child
+                }
+                Err(handle) => {
+                    let runtime_references_on_refusal = handle.runtime_reference_count();
+                    registry.insert(session_id.to_string(), handle);
+                    tracing::debug!(
+                        session_id,
+                        managed_sessions = registered,
+                        runtime_references,
+                        runtime_references_on_refusal,
+                        consulted = "managed_session_handle_references",
+                        outcome = "in_use_handle_restored",
+                        event = "managed_session.activation",
+                        "managed session activation denied: the runtime is still referenced \
+                         elsewhere; its registration was restored and activation stays retryable"
+                    );
+                    return Err(SessionError::Protocol(format!(
+                        "managed session `{session_id}` is still in use"
+                    )));
+                }
+            }
         };
-        let child = child.try_into_runtime().map_err(|_| {
-            SessionError::Protocol(format!("managed session `{session_id}` is still in use"))
-        })?;
         *self = child;
         Ok(())
     }

@@ -94,13 +94,24 @@ impl ManagedSessionCapability {
                 "cannot close the current session".to_string(),
             ));
         }
-        if self
-            .turns
-            .lock()
-            .await
-            .values()
-            .any(|turn| turn.session_id == session_id)
-        {
+        let running_turn = {
+            let turns = super::turns::lock_turns(&self.turns);
+            turns
+                .iter()
+                .find(|(_, turn)| turn.session_id == session_id)
+                .map(|(turn_id, turn)| (turn_id.clone(), turn.registration, turns.len()))
+        };
+        if let Some((turn_id, registration, registered_turns)) = running_turn {
+            tracing::debug!(
+                session_id,
+                registered_turns,
+                holder_turn_id = %turn_id,
+                holder_registration = registration,
+                consulted = "managed_turn_registry",
+                outcome = "denied",
+                event = "managed_session.close",
+                "managed session close denied: a turn is still running"
+            );
             return Err(crate::PluginError::Session(format!(
                 "cannot close session `{session_id}` while a turn is running"
             )));

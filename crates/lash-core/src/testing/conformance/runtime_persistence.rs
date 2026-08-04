@@ -1137,7 +1137,45 @@ async fn session_execution_lease_contract(store: Arc<dyn RuntimePersistence>) {
         ),
         "stale release must not clear the live lease"
     );
-    release_session_execution_lease_for_test(&store, &renewed).await;
+    // A completion identifies the lease *slot*, not one grant: the
+    // same-incarnation re-entry above returned the identical owner, token and
+    // fence, so releasing a completion retained from before that re-entry
+    // clears the *successor's* live lease and no backend predicate can tell the
+    // two apart. lash-core relies on this: a `SessionExecutionLeaseGuard` never
+    // releases out of band (a dropped guard leaves the lease to TTL), because
+    // only a guard that still tracks the lease knows the release is its own.
+    // Rotating the lease token on every claim would make stale completions
+    // distinguishable and is the change to make here if that behavior is ever
+    // wanted — it must be a deliberate, suite-wide decision.
+    //
+    // Paired enforcement: this law pins the backend *fact* (a retained
+    // completion frees the refreshed lease). The *prohibition* it implies —
+    // that a `SessionExecutionLeaseGuard` must never release out of band — is
+    // enforced by
+    // `runtime::session_execution_lease::tests::guard_dropped_mid_release_never_releases_a_successors_lease`,
+    // which fails if a dropped guard performs any release. Changing either side
+    // requires revisiting the other.
+    let retained_stale_completion = first.completion();
+    store
+        .release_session_execution_lease(&retained_stale_completion)
+        .await
+        .expect("release with a completion retained across a same-incarnation re-claim");
+    let stolen = store
+        .try_claim_session_execution_lease("root", &owner_b, 60_000)
+        .await
+        .expect("claim after releasing a retained completion")
+        .acquired()
+        .expect(
+            "releasing a completion retained across a same-incarnation re-claim frees the \
+             successor's live lease; owners must never release a completion they stopped tracking",
+        );
+    assert!(stolen.fencing_token > first.fencing_token);
+    release_session_execution_lease_for_test(&store, &stolen).await;
+    // Restore the pre-law state for the assertions below: `owner-a` holds a
+    // live lease again, as it did before this block ran.
+    let owner_a_relaid = claim_session_execution_lease_for_test(&store, "root", "owner-a").await;
+
+    release_session_execution_lease_for_test(&store, &owner_a_relaid).await;
     let second = claim_session_execution_lease_for_test(&store, "root", "owner-b").await;
     assert!(
         second.fencing_token > first.fencing_token,
