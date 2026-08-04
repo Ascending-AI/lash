@@ -14836,12 +14836,36 @@ disposition = "unused-add"
 reason = "Add lash::persistence::StoreError::QueuedWorkClaimSuperseded::claim_id to the agent-service persistence setup example and assert its externally observable result."
 
 [[api]]
+symbol = "lash::persistence::StoreError::QueuedWorkClaimSuperseded::row_id"
+kind = "field"
+availability = "default+all-features"
+area = "stores"
+disposition = "unused-justify"
+reason = "Concrete integrator class under ADR 0051: structured supersession diagnostics are consumed by recovery settlement and pinned by the runtime-persistence conformance law; custom durable substrates populate them."
+
+[[api]]
 symbol = "lash::persistence::StoreError::QueuedWorkClaimSuperseded::session_id"
 kind = "field"
 availability = "default+all-features"
 area = "stores"
 disposition = "unused-add"
 reason = "Add lash::persistence::StoreError::QueuedWorkClaimSuperseded::session_id to the agent-service persistence setup example and assert its externally observable result."
+
+[[api]]
+symbol = "lash::persistence::StoreError::QueuedWorkClaimSuperseded::superseding_claim_id"
+kind = "field"
+availability = "default+all-features"
+area = "stores"
+disposition = "unused-justify"
+reason = "Concrete integrator class under ADR 0051: structured supersession diagnostics are consumed by recovery settlement and pinned by the runtime-persistence conformance law; custom durable substrates populate them."
+
+[[api]]
+symbol = "lash::persistence::StoreError::QueuedWorkClaimSuperseded::superseding_session_lease_generation"
+kind = "field"
+availability = "default+all-features"
+area = "stores"
+disposition = "unused-justify"
+reason = "Concrete integrator class under ADR 0051: structured supersession diagnostics are consumed by recovery settlement and pinned by the runtime-persistence conformance law; custom durable substrates populate them."
 
 [[api]]
 symbol = "lash::persistence::StoreError::RuntimeTurnCommitConflict"
@@ -14990,12 +15014,36 @@ disposition = "unused-add"
 reason = "Add lash::persistence::StoreError::TurnInputClaimSuperseded::claim_id to the agent-service persistence setup example and assert its externally observable result."
 
 [[api]]
+symbol = "lash::persistence::StoreError::TurnInputClaimSuperseded::row_id"
+kind = "field"
+availability = "default+all-features"
+area = "stores"
+disposition = "unused-justify"
+reason = "Concrete integrator class under ADR 0051: structured supersession diagnostics are consumed by recovery settlement and pinned by the runtime-persistence conformance law; custom durable substrates populate them."
+
+[[api]]
 symbol = "lash::persistence::StoreError::TurnInputClaimSuperseded::session_id"
 kind = "field"
 availability = "default+all-features"
 area = "stores"
 disposition = "unused-add"
 reason = "Add lash::persistence::StoreError::TurnInputClaimSuperseded::session_id to the agent-service persistence setup example and assert its externally observable result."
+
+[[api]]
+symbol = "lash::persistence::StoreError::TurnInputClaimSuperseded::superseding_claim_id"
+kind = "field"
+availability = "default+all-features"
+area = "stores"
+disposition = "unused-justify"
+reason = "Concrete integrator class under ADR 0051: structured supersession diagnostics are consumed by recovery settlement and pinned by the runtime-persistence conformance law; custom durable substrates populate them."
+
+[[api]]
+symbol = "lash::persistence::StoreError::TurnInputClaimSuperseded::superseding_session_lease_generation"
+kind = "field"
+availability = "default+all-features"
+area = "stores"
+disposition = "unused-justify"
+reason = "Concrete integrator class under ADR 0051: structured supersession diagnostics are consumed by recovery settlement and pinned by the runtime-persistence conformance law; custom durable substrates populate them."
 
 [[api]]
 symbol = "lash::persistence::StoreError::UnsettledQueuedWorkClaim"
@@ -15771,14 +15819,6 @@ availability = "default+all-features"
 area = "stores"
 disposition = "unused-add"
 reason = "Add lash::persistence::queued_work::derive_batch_id to the agent-service persistence setup example and assert its externally observable result."
-
-[[api]]
-symbol = "lash::persistence::queued_work::ensure_completion_owns_all_batches"
-kind = "function"
-availability = "default+all-features"
-area = "stores"
-disposition = "unused-add"
-reason = "Add lash::persistence::queued_work::ensure_completion_owns_all_batches to the agent-service persistence setup example and assert its externally observable result."
 
 [[api]]
 symbol = "lash::persistence::queued_work::select_leading_session_command"
@@ -45370,6 +45410,14 @@ disposition = "unused-add"
 reason = "Add lash::runtime::RuntimeEffectOutcome::Checkpoint to the agent-service persistence setup example and assert its externally observable result."
 
 [[api]]
+symbol = "lash::runtime::RuntimeEffectOutcome::Checkpoint::claims"
+kind = "field"
+availability = "default+all-features"
+area = "stores"
+disposition = "unused-add"
+reason = "Add lash::runtime::RuntimeEffectOutcome::Checkpoint::claims to the agent-service persistence setup example and assert its externally observable recovery authority snapshot."
+
+[[api]]
 symbol = "lash::runtime::RuntimeEffectOutcome::Checkpoint::result"
 kind = "field"
 availability = "default+all-features"
@@ -49686,6 +49734,14 @@ disposition = "unused-justify"
 reason = "Conformance-only class 4 helper for durable backend test binaries that prove full-turn recovery across a real process kill."
 
 [[api]]
+symbol = "lash::testing::conformance::cold_process_durable_recovery_expectation"
+kind = "function"
+availability = "all-features"
+area = "sessions-turns"
+disposition = "unused-justify"
+reason = "Conformance-only class 4 oracle consumed by bundled backend test binaries so cold-process recovery assertions share the committed durable end-state table."
+
+[[api]]
 symbol = "lash::testing::conformance::cold_process_turn_expectations"
 kind = "function"
 availability = "all-features"
@@ -49932,6 +49988,14 @@ availability = "all-features"
 area = "stores"
 disposition = "unused-add"
 reason = "Add lash::testing::conformance::runtime_persistence_recovery_laws to the agent-service persistence setup example and assert its externally observable result."
+
+[[api]]
+symbol = "lash::testing::conformance::active_turn_input_claim_reacquires_after_unrecorded_checkpoint"
+kind = "function"
+availability = "all-features"
+area = "stores"
+disposition = "unused-justify"
+reason = "Concrete integrator class under ADR 0051: durable store conformance embedders verify accepted checkpoint inputs can be reacquired after an unrecorded outcome."
 
 [[api]]
 symbol = "lash::testing::conformance::runtime_persistence_reopenable"
@@ -72813,6 +72877,14 @@ disposition = "unused-justify"
 reason = "Concrete host class: custom durable store or attachment backend implementers; bundled examples use repository backends and do not implement this backend-facing contract."
 
 [[api]]
+symbol = "lash_core::RuntimeEffectOutcome::Checkpoint::claims"
+kind = "field"
+availability = "default+all-features"
+area = "stores"
+disposition = "unused-justify"
+reason = "Concrete integrator class under ADR 0051: custom runtime and durable-substrate implementors preserve the checkpoint recovery authority snapshot."
+
+[[api]]
 symbol = "lash_core::RuntimeEffectOutcome::Checkpoint::result"
 kind = "field"
 availability = "default+all-features"
@@ -77572,12 +77644,36 @@ disposition = "unused-justify"
 reason = "Concrete host class: custom durable store or attachment backend implementers; bundled examples use repository backends and do not implement this backend-facing contract."
 
 [[api]]
+symbol = "lash_core::StoreError::QueuedWorkClaimSuperseded::row_id"
+kind = "field"
+availability = "default+all-features"
+area = "stores"
+disposition = "unused-justify"
+reason = "Concrete integrator class under ADR 0051: structured supersession diagnostics are consumed by recovery settlement and pinned by the runtime-persistence conformance law; custom durable substrates populate them."
+
+[[api]]
 symbol = "lash_core::StoreError::QueuedWorkClaimSuperseded::session_id"
 kind = "field"
 availability = "default+all-features"
 area = "stores"
 disposition = "unused-justify"
 reason = "Concrete host class: custom durable store or attachment backend implementers; bundled examples use repository backends and do not implement this backend-facing contract."
+
+[[api]]
+symbol = "lash_core::StoreError::QueuedWorkClaimSuperseded::superseding_claim_id"
+kind = "field"
+availability = "default+all-features"
+area = "stores"
+disposition = "unused-justify"
+reason = "Concrete integrator class under ADR 0051: structured supersession diagnostics are consumed by recovery settlement and pinned by the runtime-persistence conformance law; custom durable substrates populate them."
+
+[[api]]
+symbol = "lash_core::StoreError::QueuedWorkClaimSuperseded::superseding_session_lease_generation"
+kind = "field"
+availability = "default+all-features"
+area = "stores"
+disposition = "unused-justify"
+reason = "Concrete integrator class under ADR 0051: structured supersession diagnostics are consumed by recovery settlement and pinned by the runtime-persistence conformance law; custom durable substrates populate them."
 
 [[api]]
 symbol = "lash_core::StoreError::RuntimeTurnCommitConflict"
@@ -77726,12 +77822,36 @@ disposition = "unused-justify"
 reason = "Concrete host class: custom durable store or attachment backend implementers; bundled examples use repository backends and do not implement this backend-facing contract."
 
 [[api]]
+symbol = "lash_core::StoreError::TurnInputClaimSuperseded::row_id"
+kind = "field"
+availability = "default+all-features"
+area = "stores"
+disposition = "unused-justify"
+reason = "Concrete integrator class under ADR 0051: structured supersession diagnostics are consumed by recovery settlement and pinned by the runtime-persistence conformance law; custom durable substrates populate them."
+
+[[api]]
 symbol = "lash_core::StoreError::TurnInputClaimSuperseded::session_id"
 kind = "field"
 availability = "default+all-features"
 area = "stores"
 disposition = "unused-justify"
 reason = "Concrete host class: custom durable store or attachment backend implementers; bundled examples use repository backends and do not implement this backend-facing contract."
+
+[[api]]
+symbol = "lash_core::StoreError::TurnInputClaimSuperseded::superseding_claim_id"
+kind = "field"
+availability = "default+all-features"
+area = "stores"
+disposition = "unused-justify"
+reason = "Concrete integrator class under ADR 0051: structured supersession diagnostics are consumed by recovery settlement and pinned by the runtime-persistence conformance law; custom durable substrates populate them."
+
+[[api]]
+symbol = "lash_core::StoreError::TurnInputClaimSuperseded::superseding_session_lease_generation"
+kind = "field"
+availability = "default+all-features"
+area = "stores"
+disposition = "unused-justify"
+reason = "Concrete integrator class under ADR 0051: structured supersession diagnostics are consumed by recovery settlement and pinned by the runtime-persistence conformance law; custom durable substrates populate them."
 
 [[api]]
 symbol = "lash_core::StoreError::UnsettledQueuedWorkClaim"
