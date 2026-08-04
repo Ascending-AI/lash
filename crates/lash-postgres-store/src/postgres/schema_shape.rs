@@ -43,11 +43,15 @@ use crate::{SCHEMA_COMPONENT, SCHEMA_VERSION, StoreError, store_sqlx_error};
 /// [`crate::PostgresStorage::schema_ddl`] by the `schema_shape` test suite.
 const SHAPE_ARTIFACT: &str = include_str!("../../schema-shape.txt");
 
-/// Tables whose seed rows are a data precondition no structural check can see.
-const SEED_ROW_TABLES: [&str; 3] = [
-    "lash_schema_versions",
-    "lash_process_change_clock",
-    "lash_await_event_meta",
+/// Seed rows `schema.sql` inserts, paired with what each one is for. They are a
+/// data precondition no structural comparison can see. The component version
+/// stamp is seeded the same way but reported as a version mismatch instead.
+const SEED_ROWS: [(&str, &str); 2] = [
+    (
+        "lash_process_change_clock",
+        "transactional process-change clock",
+    ),
+    ("lash_await_event_meta", "await-event signing secret"),
 ];
 
 /// What a [`crate::PostgresStorage`] does when the live schema does not match
@@ -1190,12 +1194,9 @@ async fn read_seed_row_findings(
     resolved: &BTreeMap<String, ResolvedTable>,
 ) -> Result<Vec<SchemaFinding>, StoreError> {
     let mut findings = Vec::new();
-    for table in SEED_ROW_TABLES {
-        if table == "lash_schema_versions" {
-            // Already covered by the component version stamp.
-            continue;
-        }
+    for (table, detail) in SEED_ROWS {
         if !resolved.contains_key(table) {
+            // Already reported as a missing table.
             continue;
         }
         let present: Option<i64> =
@@ -1206,10 +1207,7 @@ async fn read_seed_row_findings(
         if present.is_none() {
             findings.push(SchemaFinding::MissingSeedRow {
                 table: table.to_string(),
-                detail: match table {
-                    "lash_process_change_clock" => "transactional process-change clock".to_string(),
-                    _ => "await-event signing secret".to_string(),
-                },
+                detail: detail.to_string(),
             });
         }
     }
