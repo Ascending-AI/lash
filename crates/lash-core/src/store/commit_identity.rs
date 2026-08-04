@@ -623,16 +623,69 @@ mod append_request_identity_tests {
         serde_json::from_value(value).expect("valid append-node fixture")
     }
 
-    fn whole_request_variant_row(node: &crate::SessionAppendNode) -> &'static str {
-        match node {
-            crate::SessionAppendNode::Message { message: _ } => {
-                "whole_request_message_ancestor_absent"
+    macro_rules! define_whole_request_variant_corpus {
+        ($(
+            $pattern:pat => {
+                row: $row:literal,
+                ancestor: $ancestor:expr,
+                node: $node:expr,
+                trailing_nodes: [$($trailing_node:expr),* $(,)?] $(,)?
             }
-            crate::SessionAppendNode::ProtocolEvent { event: _ } => {
-                "whole_request_protocol_event_ancestor_present"
+        ),+ $(,)?) => {
+            fn whole_request_variant_row(node: &crate::SessionAppendNode) -> &'static str {
+                match node {
+                    $($pattern => $row),+
+                }
             }
-            crate::SessionAppendNode::Plugin { .. } => "whole_request_plugin_multi_node",
-        }
+
+            fn whole_request_variant_corpus(
+            ) -> Vec<(&'static str, Option<&'static str>, Vec<crate::SessionAppendNode>)> {
+                vec![$({
+                    let nodes = vec![$node, $($trailing_node),*];
+                    ($row, $ancestor, nodes)
+                }),+]
+            }
+        };
+    }
+
+    // This single declaration generates both the exhaustive variant-to-row
+    // match and the fixture list. Adding a top-level SessionAppendNode variant
+    // makes the match fail to compile; adding its required arm also creates a
+    // whole-envelope corpus fixture whose returned key must exist in the
+    // golden file.
+    define_whole_request_variant_corpus! {
+        crate::SessionAppendNode::Message { .. } => {
+            row: "whole_request_message_ancestor_absent",
+            ancestor: None,
+            node: crate::SessionAppendNode::message(crate::PluginMessage::text(
+                crate::MessageRole::User,
+                "whole message",
+            )),
+            trailing_nodes: [],
+        },
+        crate::SessionAppendNode::ProtocolEvent { .. } => {
+            row: "whole_request_protocol_event_ancestor_present",
+            ancestor: Some("whole-ancestor"),
+            node: crate::SessionAppendNode::protocol_event(crate::ProtocolEvent {
+                plugin_id: "whole-protocol".to_string(),
+                payload: serde_json::json!({"event": true}),
+            }),
+            trailing_nodes: [],
+        },
+        crate::SessionAppendNode::Plugin { .. } => {
+            row: "whole_request_plugin_multi_node",
+            ancestor: Some("multi-ancestor"),
+            node: crate::SessionAppendNode::plugin(
+                "whole-plugin",
+                serde_json::json!({"plugin": "λ"}),
+            ),
+            trailing_nodes: [
+                crate::SessionAppendNode::message(crate::PluginMessage::text(
+                    crate::MessageRole::Assistant,
+                    "second node",
+                )),
+            ],
+        },
     }
 
     #[test]
@@ -931,43 +984,31 @@ mod append_request_identity_tests {
             "causal_variant_5",
             "causal_variant_6",
         ];
-        let whole_request_variants = [
-            crate::SessionAppendNode::message(crate::PluginMessage::text(
-                crate::MessageRole::User,
-                "whole message",
-            )),
-            crate::SessionAppendNode::protocol_event(crate::ProtocolEvent {
-                plugin_id: "whole-protocol".to_string(),
-                payload: serde_json::json!({"event": true}),
-            }),
-            crate::SessionAppendNode::plugin("whole-plugin", serde_json::json!({"plugin": "λ"})),
-        ];
-        let whole_requests = whole_request_variants.iter().map(|node| {
-            let name = whole_request_variant_row(node);
-            let (ancestor, nodes) = match node {
-                crate::SessionAppendNode::Message { message: _ } => (None, vec![node.clone()]),
-                crate::SessionAppendNode::ProtocolEvent { event: _ } => {
-                    (Some("whole-ancestor"), vec![node.clone()])
-                }
-                crate::SessionAppendNode::Plugin { .. } => (
-                    Some("multi-ancestor"),
-                    vec![
-                        node.clone(),
-                        crate::SessionAppendNode::message(crate::PluginMessage::text(
-                            crate::MessageRole::Assistant,
-                            "second node",
-                        )),
-                    ],
-                ),
-            };
+        let whole_requests =
+            whole_request_variant_corpus()
+                .into_iter()
+                .map(|(name, ancestor, nodes)| {
+                    assert_eq!(
+                        whole_request_variant_row(&nodes[0]),
+                        name,
+                        "variant fixture must return its declared golden row key"
+                    );
+                    (
+                        name,
+                        hex(
+                            &append_request_identity_bytes(&operation(name), ancestor, &nodes)
+                                .expect("encode whole request"),
+                        ),
+                    )
+                });
+        let empty_request = {
+            let name = "whole_request_empty_node_envelope";
             (
                 name,
-                hex(
-                    &append_request_identity_bytes(&operation(name), ancestor, &nodes)
-                        .expect("encode whole request"),
-                ),
+                hex(&append_request_identity_bytes(&operation(name), None, &[])
+                    .expect("encode whole request")),
             )
-        });
+        };
         let rendered = cases
             .iter()
             .map(|(name, node)| {
@@ -982,6 +1023,7 @@ mod append_request_identity_tests {
                 (causal_names[index], hex(&encoded))
             }))
             .chain(whole_requests)
+            .chain(std::iter::once(empty_request))
             .collect::<Vec<_>>();
         let expected = include_str!("testdata/append_request_identity_v1.hex")
             .lines()

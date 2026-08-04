@@ -324,12 +324,14 @@ fn persistence_types_are_nameable(
         usage_deltas: ledger
             .into_iter()
             .enumerate()
-            .map(|(entry_ordinal, entry)| RuntimeUsageDelta {
-                identity: RuntimeUsageDeltaIdentity {
-                    operation_storage_key: operation_storage_key.clone(),
-                    entry_ordinal: entry_ordinal as u64,
-                },
-                entry,
+            .map(|(entry_ordinal, entry)| {
+                let identity = RuntimeUsageDeltaIdentity::for_entry(
+                    operation_storage_key.clone(),
+                    entry_ordinal as u64,
+                    &entry,
+                )
+                .expect("usage identity");
+                RuntimeUsageDelta { identity, entry }
             })
             .collect(),
         turn_commit: RuntimeTurnCommitStamp::new(operation),

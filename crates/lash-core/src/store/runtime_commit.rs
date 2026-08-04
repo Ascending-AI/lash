@@ -36,9 +36,17 @@ pub struct RuntimeCommit {
 
 /// Durable identity for one usage row submitted through a runtime commit.
 ///
-/// The operation key and ordinal are assigned before the first commit attempt
-/// and must be reused byte-for-byte until a commit containing the row has a
-/// confirmed outcome. Stores enforce uniqueness per session.
+/// The operation key, ordinal, and payload hash are assigned before the first
+/// commit attempt and must be reused byte-for-byte until a commit containing
+/// the row has a confirmed outcome. Stores enforce uniqueness per session over
+/// all three fields.
+///
+/// `payload_hash` is lowercase hexadecimal SHA-256 of the UTF-8 JSON bytes
+/// emitted for [`crate::TokenLedgerEntry`] by Lash's stable serialization
+/// helper (`serde_json::to_writer`, compact encoding, struct fields in declared
+/// order, and JSON object keys in canonical map order). Binding the content
+/// makes reuse of an operation ordinal for a different row a distinct durable
+/// identity while preserving exact retry deduplication.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub struct RuntimeUsageDeltaIdentity {
     /// Canonical [`OperationId::storage_key`] of the operation that first
@@ -46,6 +54,30 @@ pub struct RuntimeUsageDeltaIdentity {
     pub operation_storage_key: String,
     /// Zero-based row position within that operation's staged usage batch.
     pub entry_ordinal: u64,
+    /// SHA-256 of the entry's canonical serialized content, encoded as 64
+    /// lowercase hexadecimal characters.
+    pub payload_hash: String,
+}
+
+impl RuntimeUsageDeltaIdentity {
+    /// Construct the full identity for `entry` using Lash's canonical payload
+    /// encoding.
+    pub fn for_entry(
+        operation_storage_key: String,
+        entry_ordinal: u64,
+        entry: &crate::TokenLedgerEntry,
+    ) -> Result<Self, StoreError> {
+        let payload_hash = crate::stable_hash::stable_json_sha256_hex(entry).map_err(|err| {
+            StoreError::Backend(format!(
+                "failed to canonically serialize runtime usage delta: {err}"
+            ))
+        })?;
+        Ok(Self {
+            operation_storage_key,
+            entry_ordinal,
+            payload_hash,
+        })
+    }
 }
 
 /// One identity-bearing usage row in a [`RuntimeCommit`].
@@ -77,13 +109,12 @@ impl RuntimeUsageDelta {
                         "usage delta ordinal does not fit durable u64 identity".to_string(),
                     )
                 })?;
-                Ok(Self {
-                    identity: RuntimeUsageDeltaIdentity {
-                        operation_storage_key: operation_storage_key.clone(),
-                        entry_ordinal,
-                    },
-                    entry,
-                })
+                let identity = RuntimeUsageDeltaIdentity::for_entry(
+                    operation_storage_key.clone(),
+                    entry_ordinal,
+                    &entry,
+                )?;
+                Ok(Self { identity, entry })
             })
             .collect()
     }

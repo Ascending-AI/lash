@@ -69,6 +69,7 @@ CREATE TABLE IF NOT EXISTS usage_deltas (
     session_id            TEXT NOT NULL,
     operation_storage_key TEXT NOT NULL,
     entry_ordinal         INTEGER NOT NULL,
+    payload_hash          TEXT NOT NULL,
     source               TEXT NOT NULL,
     model                TEXT NOT NULL,
     input_tokens         INTEGER NOT NULL,
@@ -76,7 +77,7 @@ CREATE TABLE IF NOT EXISTS usage_deltas (
     cache_read_input_tokens  INTEGER NOT NULL,
     cache_write_input_tokens INTEGER NOT NULL,
     reasoning_output_tokens     INTEGER NOT NULL,
-    UNIQUE (session_id, operation_storage_key, entry_ordinal)
+    UNIQUE (session_id, operation_storage_key, entry_ordinal, payload_hash)
 );
 CREATE INDEX IF NOT EXISTS idx_usage_deltas_session_seq
     ON usage_deltas(session_id, seq);
@@ -275,7 +276,8 @@ CREATE INDEX IF NOT EXISTS idx_attachment_manifest_owner
 /// Bumped to 25 for FIG-850 append-request identity receipts and idempotent
 /// usage publication. Receipt identity columns are nullable so a pre-upgrade
 /// row copied into the new schema retains exact-commit-hash semantics; usage
-/// rows carry a required operation key and ordinal unique within a session.
+/// rows carry a required operation key, ordinal, and canonical payload hash
+/// unique within a session.
 pub(crate) const SCHEMA_VERSION: i32 = 25;
 
 pub(crate) const PROCESS_SCHEMA: &str = "

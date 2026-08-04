@@ -521,6 +521,128 @@ pub(crate) async fn append_receipt_mixed_usage_envelope_conformance(
     assert_eq!(read.token_ledger[0].source, "mixed-envelope-source");
     assert_eq!(read.token_ledger[0].model, "mixed-envelope-model");
     assert_eq!(read.token_ledger[0].usage, interleaved_usage);
+
+    // Pin ordinal reuse after successful confirmation. U1 is committed and
+    // removed from the pending ledger under operation A at ordinal zero. U2
+    // then reuses A/0 with different content; replaying A must confirm only
+    // U1's full content-bound identity, leaving U2 staged for natural commit B.
+    runtime
+        .await_background_work()
+        .await
+        .expect("refresh before ordinal-reuse sequence");
+    let ordinal_services = Arc::new(
+        RuntimeSessionServices::new(&runtime, true, None).expect("ordinal-reuse session services"),
+    );
+    let first_usage = crate::TokenUsage {
+        input_tokens: 13,
+        output_tokens: 0,
+        cache_read_input_tokens: 0,
+        cache_write_input_tokens: 0,
+        reasoning_output_tokens: 0,
+    };
+    ordinal_services.usage.record_token_usage(
+        "ordinal-reuse-source",
+        "ordinal-reuse-model",
+        &first_usage,
+    );
+    let ordinal_request = crate::AppendSessionNodesRequest {
+        operation_id: "mixed-envelope-ordinal-reuse-a".to_string(),
+        nodes: vec![crate::SessionAppendNode::plugin(
+            "mixed-envelope-ordinal-reuse",
+            serde_json::json!({"append": "A"}),
+        )],
+        requires_ancestor_node_id: None,
+    };
+    ordinal_services
+        .graph_service()
+        .append_session_nodes("root", ordinal_request.clone())
+        .await
+        .expect("operation A commits U1");
+    assert!(
+        ordinal_services
+            .usage
+            .token_ledger
+            .lock()
+            .expect("ledger after U1 confirmation")
+            .is_empty(),
+        "U1 must be removed after its full identity is confirmed"
+    );
+
+    let later_usage = crate::TokenUsage {
+        input_tokens: 31,
+        output_tokens: 0,
+        cache_read_input_tokens: 0,
+        cache_write_input_tokens: 0,
+        reasoning_output_tokens: 0,
+    };
+    ordinal_services.usage.record_token_usage(
+        "ordinal-reuse-source",
+        "ordinal-reuse-model",
+        &later_usage,
+    );
+    ordinal_services
+        .graph_service()
+        .append_session_nodes("root", ordinal_request)
+        .await
+        .expect("operation A replay leaves U2 staged");
+    {
+        let ledger = ordinal_services
+            .usage
+            .token_ledger
+            .lock()
+            .expect("ledger after ordinal-reuse replay");
+        assert_eq!(ledger.len(), 1);
+        assert_eq!(ledger[0].usage, later_usage);
+        let identity = ledger[0]
+            .identity
+            .as_ref()
+            .expect("U2 remains staged under its full identity");
+        assert_eq!(identity.entry_ordinal, 0);
+        assert!(
+            identity
+                .operation_storage_key
+                .contains("mixed-envelope-ordinal-reuse-a")
+        );
+    }
+
+    ordinal_services
+        .graph_service()
+        .append_session_nodes(
+            "root",
+            crate::AppendSessionNodesRequest {
+                operation_id: "mixed-envelope-ordinal-reuse-b".to_string(),
+                nodes: vec![crate::SessionAppendNode::plugin(
+                    "mixed-envelope-ordinal-reuse",
+                    serde_json::json!({"append": "B"}),
+                )],
+                requires_ancestor_node_id: None,
+            },
+        )
+        .await
+        .expect("natural commit B persists U2");
+    assert!(
+        ordinal_services
+            .usage
+            .token_ledger
+            .lock()
+            .expect("ledger after U2 confirmation")
+            .is_empty(),
+        "U2 must clear only after natural commit B confirms its full identity"
+    );
+
+    let read = store
+        .load_session()
+        .await
+        .expect("load ordinal-reuse session")
+        .expect("ordinal-reuse session exists");
+    let durable = read
+        .token_ledger
+        .iter()
+        .find(|entry| {
+            entry.source == "ordinal-reuse-source" && entry.model == "ordinal-reuse-model"
+        })
+        .expect("U1 and U2 both remain durable");
+    assert_eq!(durable.usage.input_tokens, 44);
 }
 
 #[cfg(any(test, feature = "testing"))]

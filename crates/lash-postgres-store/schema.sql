@@ -61,8 +61,9 @@ CREATE TABLE IF NOT EXISTS lash_usage_deltas (
     session_id TEXT NOT NULL,
     operation_storage_key TEXT NOT NULL,
     entry_ordinal BIGINT NOT NULL,
+    payload_hash TEXT NOT NULL,
     entry_json TEXT NOT NULL,
-    UNIQUE (session_id, operation_storage_key, entry_ordinal)
+    UNIQUE (session_id, operation_storage_key, entry_ordinal, payload_hash)
 );
 
 CREATE TABLE IF NOT EXISTS lash_session_meta (

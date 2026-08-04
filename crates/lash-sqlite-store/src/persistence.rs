@@ -543,8 +543,8 @@ impl SessionCommitStore for Store {
                         let mut stmt = tx
                             .prepare(
                                 "INSERT OR IGNORE INTO usage_deltas (
-                                    session_id, operation_storage_key, entry_ordinal, source, model, input_tokens, output_tokens, cache_read_input_tokens, cache_write_input_tokens, reasoning_output_tokens
-                                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+                                    session_id, operation_storage_key, entry_ordinal, payload_hash, source, model, input_tokens, output_tokens, cache_read_input_tokens, cache_write_input_tokens, reasoning_output_tokens
+                                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
                             )
                             .map_err(sqlite_error)?;
                         for entry in &commit.usage_deltas {
@@ -559,6 +559,7 @@ impl SessionCommitStore for Store {
                                 commit.session_id,
                                 entry.identity.operation_storage_key,
                                 entry_ordinal,
+                                entry.identity.payload_hash,
                                 entry.entry.source,
                                 entry.entry.model,
                                 entry.entry.usage.input_tokens,

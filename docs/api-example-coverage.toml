@@ -68,6 +68,22 @@ disposition = "unused-justify"
 reason = "Concrete integrator class under ADR 0051: durable store implementors persist the canonical operation key that originated the usage row."
 
 [[api]]
+symbol = "lash::persistence::RuntimeUsageDeltaIdentity::for_entry"
+kind = "function"
+availability = "default+all-features"
+area = "stores"
+disposition = "unused-justify"
+reason = "Concrete integrator class under ADR 0051: conformance embedders construct content-bound usage identities with the canonical payload encoding."
+
+[[api]]
+symbol = "lash::persistence::RuntimeUsageDeltaIdentity::payload_hash"
+kind = "field"
+availability = "default+all-features"
+area = "stores"
+disposition = "unused-justify"
+reason = "Concrete integrator class under ADR 0051: durable store implementors persist the canonical content hash in the full uniqueness key."
+
+[[api]]
 symbol = "lash_core::RuntimeUsageDelta"
 kind = "struct"
 availability = "default+all-features"
@@ -114,6 +130,22 @@ availability = "default+all-features"
 area = "stores"
 disposition = "unused-justify"
 reason = "Concrete integrator class under ADR 0051: custom durable substrates persist the canonical operation key that originated the usage row."
+
+[[api]]
+symbol = "lash_core::RuntimeUsageDeltaIdentity::for_entry"
+kind = "function"
+availability = "default+all-features"
+area = "stores"
+disposition = "unused-justify"
+reason = "Concrete integrator class under ADR 0051: conformance embedders construct content-bound usage identities with the canonical payload encoding."
+
+[[api]]
+symbol = "lash_core::RuntimeUsageDeltaIdentity::payload_hash"
+kind = "field"
+availability = "default+all-features"
+area = "stores"
+disposition = "unused-justify"
+reason = "Concrete integrator class under ADR 0051: custom durable substrates persist the canonical content hash in the full uniqueness key."
 
 [[api]]
 symbol = "lash::persistence::StoreError::TokenUsageAccountingOverflow"

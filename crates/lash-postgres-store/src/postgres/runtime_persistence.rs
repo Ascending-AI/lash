@@ -677,13 +677,15 @@ impl SessionCommitStore for PostgresSessionStore {
             })?;
             sqlx::query(
                 "INSERT INTO lash_usage_deltas (
-                    session_id, operation_storage_key, entry_ordinal, entry_json
-                 ) VALUES ($1, $2, $3, $4)
-                 ON CONFLICT (session_id, operation_storage_key, entry_ordinal) DO NOTHING",
+                    session_id, operation_storage_key, entry_ordinal, payload_hash, entry_json
+                 ) VALUES ($1, $2, $3, $4, $5)
+                 ON CONFLICT (session_id, operation_storage_key, entry_ordinal, payload_hash)
+                 DO NOTHING",
             )
             .bind(&commit.session_id)
             .bind(&entry.identity.operation_storage_key)
             .bind(entry_ordinal)
+            .bind(&entry.identity.payload_hash)
             .bind(encode_json(&entry.entry))
             .execute(&mut *tx)
             .await

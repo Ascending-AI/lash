@@ -446,6 +446,28 @@ fn concurrent_first_open_never_observes_version_zero_schema() {
         .query_row("PRAGMA user_version", [], |row| row.get(0))
         .expect("read user_version");
     assert_eq!(user_version, 25);
+    let payload_hash_not_null: i32 = conn
+        .query_row(
+            "SELECT \"notnull\" FROM pragma_table_info('usage_deltas')
+             WHERE name = 'payload_hash'",
+            [],
+            |row| row.get(0),
+        )
+        .expect("payload_hash column exists");
+    assert_eq!(payload_hash_not_null, 1);
+    let usage_schema: String = conn
+        .query_row(
+            "SELECT sql FROM sqlite_master
+             WHERE type = 'table' AND name = 'usage_deltas'",
+            [],
+            |row| row.get(0),
+        )
+        .expect("read usage_deltas schema");
+    assert!(
+        usage_schema
+            .contains("UNIQUE (session_id, operation_storage_key, entry_ordinal, payload_hash)"),
+        "usage identity uniqueness must include the canonical payload hash: {usage_schema}"
+    );
 }
 
 #[tokio::test]

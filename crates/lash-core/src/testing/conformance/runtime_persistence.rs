@@ -169,6 +169,7 @@ where
     commit_rejects_a_different_session_id(make()).await;
     load_hydrates_checkpoint_and_usage(make()).await;
     usage_delta_identity_is_idempotent_across_commits(make()).await;
+    usage_ordinal_reuse_with_different_payload_survives_receipt_replay(make()).await;
     checkpoint_rejects_unknown_component_ref(make()).await;
     session_read_loads_persisted_history(make()).await;
     session_metadata_round_trips(make()).await;
@@ -274,6 +275,111 @@ async fn usage_delta_identity_is_idempotent_across_commits(store: Arc<dyn Runtim
         .collect::<Vec<_>>();
     assert_eq!(matching.len(), 1);
     assert_eq!(matching[0].usage, usage.usage);
+}
+
+async fn usage_ordinal_reuse_with_different_payload_survives_receipt_replay(
+    store: Arc<dyn RuntimePersistence>,
+) {
+    let usage = |input_tokens| TokenLedgerEntry {
+        source: "ordinal-reuse".to_string(),
+        model: "usage-model".to_string(),
+        usage: crate::TokenUsage {
+            input_tokens,
+            output_tokens: 0,
+            cache_read_input_tokens: 0,
+            cache_write_input_tokens: 0,
+            reasoning_output_tokens: 0,
+        },
+    };
+    let first_usage = usage(11);
+    let later_usage = usage(29);
+    let nodes = vec![crate::SessionAppendNode::plugin(
+        "usage-ordinal-reuse",
+        serde_json::json!({"append": "A"}),
+    )];
+    let mut initial_state = RuntimeSessionState {
+        session_id: "root".to_string(),
+        ..RuntimeSessionState::default()
+    };
+
+    // U1 is confirmed under append operation A at ordinal zero.
+    let (mut first_append, _) =
+        append_request_commit(&mut initial_state, "usage-ordinal-reuse-a", &nodes, None);
+    first_append.usage_deltas = crate::store::RuntimeUsageDelta::for_operation(
+        &first_append.turn_commit.operation,
+        std::slice::from_ref(&first_usage),
+    )
+    .expect("identify first usage row");
+    let first_identity = first_append.usage_deltas[0].identity.clone();
+    let first_result =
+        commit_runtime_state_for_test(&store, first_append, "usage-ordinal-reuse-first")
+            .await
+            .expect("commit append A with U1");
+    assert_eq!(
+        first_result.committed_usage_delta_identities,
+        vec![first_identity.clone()]
+    );
+
+    // U2 is recorded after U1 confirmation. Replaying A reuses ordinal zero,
+    // but its content-bound full identity is distinct.
+    let mut retry_state = loaded_conformance_state(&store).await;
+    let (mut replay_append, _) =
+        append_request_commit(&mut retry_state, "usage-ordinal-reuse-a", &nodes, None);
+    replay_append.usage_deltas = crate::store::RuntimeUsageDelta::for_operation(
+        &replay_append.turn_commit.operation,
+        std::slice::from_ref(&later_usage),
+    )
+    .expect("identify later usage row");
+    let later_delta = replay_append.usage_deltas[0].clone();
+    assert_eq!(
+        later_delta.identity.operation_storage_key,
+        first_identity.operation_storage_key
+    );
+    assert_eq!(
+        later_delta.identity.entry_ordinal,
+        first_identity.entry_ordinal
+    );
+    assert_ne!(
+        later_delta.identity.payload_hash,
+        first_identity.payload_hash
+    );
+
+    let replay = commit_runtime_state_for_test(&store, replay_append, "usage-ordinal-reuse-replay")
+        .await
+        .expect("replay append A with U2 staged");
+    assert!(replay.receipt_replayed);
+    assert_eq!(
+        replay.committed_usage_delta_identities,
+        vec![first_identity]
+    );
+    assert!(
+        !replay
+            .committed_usage_delta_identities
+            .contains(&later_delta.identity),
+        "receipt replay must not confirm a different payload at the reused ordinal"
+    );
+
+    // The caller therefore retains U2 and publishes it on the next natural
+    // commit. Both full identities must be durable exactly once.
+    let mut natural_state = loaded_conformance_state(&store).await;
+    let mut natural_commit = RuntimeCommit::persisted_state_for_test(&natural_state, &[]);
+    natural_commit.usage_deltas = vec![later_delta.clone()];
+    let natural =
+        commit_runtime_state_for_test(&store, natural_commit, "usage-ordinal-reuse-natural")
+            .await
+            .expect("publish U2 on next natural commit");
+    assert_eq!(
+        natural.committed_usage_delta_identities,
+        vec![later_delta.identity]
+    );
+
+    natural_state = loaded_conformance_state(&store).await;
+    let durable = natural_state
+        .token_ledger
+        .iter()
+        .find(|entry| entry.source == "ordinal-reuse" && entry.model == "usage-model")
+        .expect("merged U1 and U2 are durable");
+    assert_eq!(durable.usage.input_tokens, 40);
 }
 
 fn append_request_commit(

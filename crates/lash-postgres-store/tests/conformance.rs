@@ -917,6 +917,30 @@ async fn postgres_from_pool_enforces_schema_version_gate_when_configured() {
     .await
     .expect("read current schema version");
     assert_eq!(current_version, 36, "Postgres component schema pin");
+    let payload_hash_nullable: String = sqlx::query_scalar(
+        "SELECT is_nullable FROM information_schema.columns
+         WHERE table_schema = 'public'
+           AND table_name = 'lash_usage_deltas'
+           AND column_name = 'payload_hash'",
+    )
+    .fetch_one(&pool)
+    .await
+    .expect("payload_hash column exists");
+    assert_eq!(payload_hash_nullable, "NO");
+    let usage_identity_constraint: String = sqlx::query_scalar(
+        "SELECT pg_get_constraintdef(oid)
+         FROM pg_constraint
+         WHERE conrelid = 'lash_usage_deltas'::regclass
+           AND contype = 'u'",
+    )
+    .fetch_one(&pool)
+    .await
+    .expect("read usage identity uniqueness constraint");
+    assert!(
+        usage_identity_constraint
+            .contains("session_id, operation_storage_key, entry_ordinal, payload_hash"),
+        "usage identity uniqueness must include the canonical payload hash: {usage_identity_constraint}"
+    );
     let stale_version = current_version - 1;
     // Force the recorded component version to a stale value.
     sqlx::query(

@@ -224,10 +224,11 @@ pub(in crate::runtime) fn stage_token_ledger_shared(
         .iter_mut()
         .filter(|pending| pending.identity.is_none())
     {
-        pending.identity = Some(crate::store::RuntimeUsageDeltaIdentity {
-            operation_storage_key: operation_storage_key.clone(),
-            entry_ordinal: next_ordinal,
-        });
+        pending.identity = Some(crate::store::RuntimeUsageDeltaIdentity::for_entry(
+            operation_storage_key.clone(),
+            next_ordinal,
+            &pending.entry,
+        )?);
         next_ordinal = next_ordinal.checked_add(1).ok_or_else(|| {
             crate::StoreError::Backend(
                 "usage delta ordinal overflowed durable u64 identity".to_string(),
