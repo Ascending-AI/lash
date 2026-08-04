@@ -245,6 +245,17 @@ where
     F: Fn(u64) -> Fut + Send + Sync + Clone + 'static,
     Fut: Future<Output = StoreContractHandles> + Send + 'static,
 {
+    let first = make(u64::MAX - 2).await;
+    let second = make(u64::MAX - 2).await;
+    assert!(
+        !Arc::ptr_eq(&first.registry, &second.registry),
+        "store_contract_state_machine reused one process-registry Arc"
+    );
+    assert!(
+        !Arc::ptr_eq(&first.runtime, &second.runtime),
+        "store_contract_state_machine reused one runtime-persistence Arc"
+    );
+    drop((first, second));
     let cases = std::env::var("LASH_STORE_CONTRACT_PROPTEST_CASES")
         .ok()
         .and_then(|value| value.parse().ok())

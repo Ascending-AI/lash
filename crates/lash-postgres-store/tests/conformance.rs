@@ -105,14 +105,65 @@ async fn postgres_runtime_persistence_satisfies_conformance_when_configured() {
         return;
     };
     let storage = Arc::new(storage);
+    let database_url = database_url().expect("configured Postgres database URL");
     lash_core::testing::conformance::runtime_persistence_reopenable(|| {
         let storage = Arc::clone(&storage);
+        let database_url = database_url.clone();
         sync_await(async move {
             reset(&storage).await;
-            let open = Arc::new(storage.unbound_session_store()) as Arc<dyn RuntimePersistence>;
-            let reopen = Arc::new(storage.unbound_session_store()) as Arc<dyn RuntimePersistence>;
-            ReopenableRuntimePersistence { open, reopen }
+            let open_storage = PostgresStorage::connect(&database_url)
+                .await
+                .expect("open first Postgres conformance pool");
+            let reopen_storage = PostgresStorage::connect(&database_url)
+                .await
+                .expect("open independent Postgres conformance pool");
+            ReopenableRuntimePersistence {
+                open: Arc::new(open_storage.unbound_session_store()),
+                reopen: Arc::new(reopen_storage.unbound_session_store()),
+            }
         })
+    })
+    .await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn postgres_runtime_persistence_recovery_laws_when_configured() {
+    let Some((_database_lock, storage)) = storage().await else {
+        eprintln!("skipping Postgres store-recovery laws: LASH_POSTGRES_DATABASE_URL is not set");
+        return;
+    };
+    reset(&storage).await;
+    let database_url = database_url().expect("configured Postgres database URL");
+    lash_core::testing::conformance::runtime_persistence_recovery_laws(|_| {
+        let database_url = database_url.clone();
+        let storage = sync_await(async move {
+            PostgresStorage::connect(&database_url)
+                .await
+                .expect("construct fresh Postgres store-recovery pool")
+        });
+        Arc::new(storage.unbound_session_store()) as Arc<dyn RuntimePersistence>
+    })
+    .await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn postgres_checkpoint_component_refs_survive_cold_reopens_when_configured() {
+    let Some((_database_lock, storage)) = storage().await else {
+        eprintln!(
+            "skipping Postgres checkpoint-component recovery: LASH_POSTGRES_DATABASE_URL is not set"
+        );
+        return;
+    };
+    reset(&storage).await;
+    let database_url = database_url().expect("configured Postgres database URL");
+    lash_core::testing::conformance::checkpoint_component_refs_survive_cold_reopens(|| {
+        let database_url = database_url.clone();
+        let storage = sync_await(async move {
+            PostgresStorage::connect(&database_url)
+                .await
+                .expect("construct post-write Postgres checkpoint pool")
+        });
+        Arc::new(storage.unbound_session_store()) as Arc<dyn RuntimePersistence>
     })
     .await;
 }
@@ -126,19 +177,38 @@ async fn postgres_artifact_store_satisfies_conformance_when_configured() {
         return;
     };
     let storage = Arc::new(storage);
+    let database_url = database_url().expect("configured Postgres database URL");
     lash_lashlang_runtime::testing::conformance::artifact_store_reopenable(|| {
         let storage = Arc::clone(&storage);
+        let database_url = database_url.clone();
         sync_await(async move {
             reset(&storage).await;
-            let handles = || lash_lashlang_runtime::testing::conformance::ArtifactStoreHandles {
-                artifacts: Arc::new(storage.lashlang_artifact_store())
+            let open_storage = PostgresStorage::connect(&database_url)
+                .await
+                .expect("open first Postgres artifact pool");
+            let open = lash_lashlang_runtime::testing::conformance::ArtifactStoreHandles {
+                artifacts: Arc::new(open_storage.lashlang_artifact_store())
                     as Arc<dyn lashlang::LashlangArtifactStore>,
-                process_env: Arc::new(storage.process_env_store())
+                process_env: Arc::new(open_storage.process_env_store())
                     as Arc<dyn ProcessExecutionEnvStore>,
             };
+            let reopen_url = database_url.clone();
             lash_lashlang_runtime::testing::conformance::ReopenableArtifactStore {
-                open: handles(),
-                reopen: handles(),
+                open,
+                reopen: Arc::new(move || {
+                    let reopen_url = reopen_url.clone();
+                    let reopened = sync_await(async move {
+                        PostgresStorage::connect(&reopen_url)
+                            .await
+                            .expect("construct post-write Postgres artifact pool")
+                    });
+                    lash_lashlang_runtime::testing::conformance::ArtifactStoreHandles {
+                        artifacts: Arc::new(reopened.lashlang_artifact_store())
+                            as Arc<dyn lashlang::LashlangArtifactStore>,
+                        process_env: Arc::new(reopened.process_env_store())
+                            as Arc<dyn ProcessExecutionEnvStore>,
+                    }
+                }),
             }
         })
     })
@@ -904,23 +974,53 @@ async fn postgres_effect_host_satisfies_cold_process_await_event_conformance_whe
             "killed {identity} helper exited successfully"
         );
 
-        let terminal = Resolution::Ok(serde_json::json!({
-            "cold_process": true,
-            "identity": identity,
-            "nonce": nonce,
-        }));
-        let resolver =
+        let resolver = Arc::new(
             PostgresStorage::connect(&database_url().expect("configured Postgres database URL"))
                 .await
                 .expect("cold-process resolver")
-                .effect_host();
-        assert_eq!(
-            resolver
-                .resolve_await_event(&key, terminal.clone())
-                .await
-                .unwrap_or_else(|error| panic!("resolve killed-helper {identity} key: {error}")),
-            ResolveOutcome::Accepted
+                .effect_host(),
         );
+        let terminal = if identity == "turn_cancel_gate" {
+            let address = lash_core::runtime::TurnAddress::new(
+                format!("cold-process-{nonce}-session"),
+                format!("cold-process-{nonce}-turn"),
+            );
+            let receipt = lash_core::runtime::TurnWorkDriver::new(
+                Arc::clone(&resolver) as Arc<dyn EffectHost>
+            )
+            .request_cancel(lash_core::runtime::TurnCancelRequest::new(
+                address,
+                format!("cold-process-{nonce}-cancel"),
+                None,
+            ))
+            .await
+            .expect("request cancellation through a successor owner");
+            assert!(matches!(
+                receipt.outcome,
+                lash_core::runtime::TurnCancelOutcome::Requested(_)
+            ));
+            resolver
+                .peek_await_event(&key)
+                .await
+                .expect("peek successor cancellation")
+                .expect("successor cancellation resolves the killed owner's gate")
+        } else {
+            let terminal = Resolution::Ok(serde_json::json!({
+                "cold_process": true,
+                "identity": identity,
+                "nonce": nonce,
+            }));
+            assert_eq!(
+                resolver
+                    .resolve_await_event(&key, terminal.clone())
+                    .await
+                    .unwrap_or_else(|error| panic!(
+                        "resolve killed-helper {identity} key: {error}"
+                    )),
+                ResolveOutcome::Accepted
+            );
+            terminal
+        };
         drop(resolver);
 
         let observer =
@@ -943,6 +1043,79 @@ async fn postgres_effect_host_satisfies_cold_process_await_event_conformance_whe
             terminal
         );
     }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn postgres_effect_replay_satisfies_cold_process_crash_conformance_when_configured() {
+    use tokio::process::Command;
+
+    let Some((_database_lock, storage)) = storage().await else {
+        eprintln!(
+            "skipping Postgres cold-process effect replay conformance: LASH_POSTGRES_DATABASE_URL is not set"
+        );
+        return;
+    };
+    reset(&storage).await;
+    let dir = tempfile::tempdir().expect("cold-process effect replay tempdir");
+    let marker = dir.path().join("external-effect.log");
+    let nonce = uuid::Uuid::new_v4().to_string();
+    let run = |action: &'static str| {
+        let marker = marker.clone();
+        let nonce = nonce.clone();
+        async move {
+            tokio::time::timeout(
+                std::time::Duration::from_secs(30),
+                Command::new(env!("CARGO_BIN_EXE_postgres-await-event-helper"))
+                    .arg(action)
+                    .arg(nonce)
+                    .arg(marker)
+                    .output(),
+            )
+            .await
+            .unwrap_or_else(|_| panic!("{action} helper timed out"))
+            .unwrap_or_else(|error| panic!("spawn {action} helper: {error}"))
+        }
+    };
+
+    let crashed = run("effect_crash").await;
+    assert_eq!(crashed.status.code(), Some(86));
+    assert_eq!(
+        std::fs::read_to_string(&marker)
+            .expect("read crashed effect marker")
+            .lines()
+            .count(),
+        1
+    );
+
+    let completed = run("effect_complete").await;
+    assert!(
+        completed.status.success(),
+        "successor helper failed: {}",
+        String::from_utf8_lossy(&completed.stderr)
+    );
+    assert_eq!(
+        std::fs::read_to_string(&marker)
+            .expect("read re-executed effect marker")
+            .lines()
+            .count(),
+        2,
+        "at-least-once means re-execution before outcome recording"
+    );
+
+    let replayed = run("effect_replay").await;
+    assert!(
+        replayed.status.success(),
+        "replay helper failed: {}",
+        String::from_utf8_lossy(&replayed.stderr)
+    );
+    assert_eq!(
+        std::fs::read_to_string(&marker)
+            .expect("read replay effect marker")
+            .lines()
+            .count(),
+        2,
+        "recorded effect outcome replays without re-execution"
+    );
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]

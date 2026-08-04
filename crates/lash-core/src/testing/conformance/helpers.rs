@@ -4,6 +4,13 @@
 
 use super::*;
 
+pub(crate) fn assert_fresh_instances<T: ?Sized>(left: &Arc<T>, right: &Arc<T>, suite: &str) {
+    assert!(
+        !Arc::ptr_eq(left, right),
+        "{suite} factory reused one Arc across conformance roles"
+    );
+}
+
 pub(crate) fn durable_turn_scope(
     session_id: impl Into<String>,
     turn_id: impl Into<String>,
@@ -30,6 +37,24 @@ pub struct ReopenableProcessRegistry {
 pub struct ReopenableRuntimePersistence {
     pub open: Arc<dyn RuntimePersistence>,
     pub reopen: Arc<dyn RuntimePersistence>,
+}
+
+/// Bind every conformance read to the session it intends to inspect.
+///
+/// This makes SQLite's exactly-one unbound lookup and PostgreSQL's ASC-first
+/// unbound lookup unreachable from conformance laws.
+pub(crate) async fn bind_conformance_session(
+    store: &Arc<dyn RuntimePersistence>,
+    session_id: &str,
+) {
+    let state = RuntimeSessionState {
+        session_id: session_id.to_string(),
+        ..RuntimeSessionState::default()
+    };
+    store
+        .admit_and_bind_session(&crate::SessionBinding::root(session_id, &state.policy))
+        .await
+        .expect("bind conformance store to its explicit session");
 }
 
 /// A pair of [`AttachmentStore`](crate::AttachmentStore) handles opened against

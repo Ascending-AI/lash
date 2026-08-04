@@ -19,6 +19,10 @@ pub async fn effect_host_await_events_cold_instance<F>(make: F)
 where
     F: Fn() -> Arc<dyn EffectHost>,
 {
+    let first = make();
+    let second = make();
+    assert_fresh_instances(&first, &second, "effect_host_await_events_cold_instance");
+    drop((first, second));
     let prefix = format!("cold-await-{}", uuid::Uuid::new_v4());
     cold_mint_resolve_observe_all_identities(&make, &prefix).await;
     cold_first_writer_wins(&make, &prefix).await;

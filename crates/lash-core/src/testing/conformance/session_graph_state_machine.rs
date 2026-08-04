@@ -184,6 +184,13 @@ where
     F: Fn(u64) -> Fut + Send + Sync + Clone + 'static,
     Fut: Future<Output = Arc<dyn crate::SessionStoreFactory>> + Send + 'static,
 {
+    let first = make(u64::MAX - 1).await;
+    let second = make(u64::MAX - 1).await;
+    assert!(
+        !Arc::ptr_eq(&first, &second),
+        "session_graph_state_machine factory reused one Arc"
+    );
+    drop((first, second));
     let cases = std::env::var("LASH_SESSION_GRAPH_PROPTEST_CASES")
         .ok()
         .and_then(|value| value.parse().ok())

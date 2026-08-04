@@ -6,6 +6,12 @@
 //! double) so the contract has one executable source of truth and the doubles
 //! can't drift from production behavior.
 //!
+//! Reopen and recovery laws use distinct outer handles over one substrate.
+//! [`runtime_persistence_recovery_laws`] certifies store behavior only across
+//! claim, checkpoint, commit, and settlement boundaries. Backend-owned helper
+//! processes separately cover process-local wait ownership and effect replay;
+//! neither instrument is a substitute for crash injection through a real turn.
+//!
 //! Suites panic on the first violated invariant — call them from a
 //! `#[tokio::test]`. Embedders with custom backends can run them via
 //! `lash::testing::conformance`.
@@ -30,6 +36,7 @@ mod session_graph_append;
 mod session_graph_state_machine;
 mod session_store_factory;
 mod store_contract_state_machine;
+mod store_recovery;
 mod trigger_store;
 mod turn_control;
 mod wake_delivery;
@@ -51,6 +58,7 @@ pub use session_graph_append::*;
 pub use session_graph_state_machine::*;
 pub use session_store_factory::*;
 pub use store_contract_state_machine::*;
+pub use store_recovery::*;
 pub use trigger_store::*;
 pub use turn_control::*;
 pub use wake_delivery::*;
@@ -227,6 +235,35 @@ mod tests {
     async fn in_memory_runtime_persistence_state_machine_properties() {
         runtime_persistence_state_machine("in-memory", |_| async {
             Arc::new(crate::InMemorySessionStore::default()) as Arc<dyn RuntimePersistence>
+        })
+        .await;
+    }
+
+    #[tokio::test]
+    async fn in_memory_checkpoint_component_refs_survive_cold_reopens() {
+        let substrate =
+            Arc::new(crate::InMemorySessionStore::default()) as Arc<dyn RuntimePersistence>;
+        checkpoint_component_refs_survive_cold_reopens(move || {
+            crate::testing::checkpoint_observer::fresh_runtime_persistence_handle(Arc::clone(
+                &substrate,
+            ))
+        })
+        .await;
+    }
+
+    #[tokio::test]
+    async fn in_memory_runtime_persistence_recovery_laws() {
+        let substrates = Arc::new(Mutex::new(
+            BTreeMap::<String, Arc<dyn RuntimePersistence>>::new(),
+        ));
+        runtime_persistence_recovery_laws(move |scenario| {
+            let mut substrates = substrates.lock().expect("matrix substrates");
+            let substrate = Arc::clone(
+                substrates
+                    .entry(scenario.to_string())
+                    .or_insert_with(|| Arc::new(crate::InMemorySessionStore::default())),
+            );
+            crate::testing::checkpoint_observer::fresh_runtime_persistence_handle(substrate)
         })
         .await;
     }
