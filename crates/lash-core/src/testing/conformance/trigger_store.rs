@@ -239,13 +239,16 @@ async fn changed_register_conflicts_and_update_is_cas(store: Arc<dyn crate::Trig
     match conflict {
         crate::TriggerOperationError::Conflict {
             existing_revision,
-            existing_definition_hash,
-            requested_definition_hash,
+            existing_definition_fingerprint,
+            requested_definition_fingerprint,
             ..
         } => {
             assert_eq!(existing_revision, Some(1));
-            assert_eq!(existing_definition_hash, Some(created.definition_hash));
-            assert!(requested_definition_hash.is_some());
+            assert_eq!(
+                existing_definition_fingerprint,
+                Some(created.definition_fingerprint)
+            );
+            assert!(requested_definition_fingerprint.is_some());
         }
         error => panic!("unexpected error: {error}"),
     }

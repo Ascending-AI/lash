@@ -147,7 +147,9 @@ const SCHEMA_COMPONENT: &str = "lash-postgres-store";
 // behavior for copied pre-upgrade rows; usage identities include the required
 // payload-encoding version and canonical payload hash. This unreleased schema
 // was completed in place under the existing reject-and-recreate operator flow.
-const SCHEMA_VERSION: i32 = 36;
+// Version 37 is the coordinated FIG-886 reject-and-recreate identity cutover
+// layered over the complete version-36 append-receipt and usage schema.
+const SCHEMA_VERSION: i32 = 37;
 const PROCESS_LEASE_SCHEMA_VERSION: u32 = lash_core::facade_support::PROCESS_LEASE_SCHEMA_VERSION;
 
 #[derive(Clone)]

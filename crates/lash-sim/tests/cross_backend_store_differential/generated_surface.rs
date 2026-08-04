@@ -415,11 +415,11 @@ fn trigger_rows_from_memory(store: &InMemoryTriggerStore) -> TriggerRows {
         mutation_receipts: raw
             .mutation_receipts
             .into_iter()
-            .map(|(operation_id, request_hash, result, _created_at_ms)| {
+            .map(|(operation_id, request_fingerprint, result, _created_at_ms)| {
                 normalized_trigger_json(
                     serde_json::json!({
                         "operation_id": operation_id,
-                        "request_hash": request_hash,
+                        "request_fingerprint": request_fingerprint,
                         "result": result,
                     }),
                     &mut incarnations,
@@ -429,9 +429,9 @@ fn trigger_rows_from_memory(store: &InMemoryTriggerStore) -> TriggerRows {
         occurrences: raw
             .occurrences
             .into_iter()
-            .map(|(record, request_hash)| {
+            .map(|(record, request_fingerprint)| {
                 normalized_trigger_json(
-                    serde_json::json!({"request_hash": request_hash, "record": record}),
+                    serde_json::json!({"request_fingerprint": request_fingerprint, "record": record}),
                     &mut incarnations,
                 )
             })
@@ -800,13 +800,13 @@ fn read_sqlite_triggers(connection: &rusqlite::Connection) -> TriggerRows {
     .into_iter()
     .map(|row| normalized_trigger_json(row, &mut incarnations))
     .collect();
-    let mutation_receipts = sqlite_simple_json_rows(connection, "SELECT operation_id, request_hash, result_json FROM trigger_mutation_receipts ORDER BY operation_id", |row| {
+    let mutation_receipts = sqlite_simple_json_rows(connection, "SELECT operation_id, request_fingerprint, result_json FROM trigger_mutation_receipts ORDER BY operation_id", |row| {
         let result: String = row.get(2)?;
-        Ok(serde_json::json!({"operation_id": row.get::<_, String>(0)?, "request_hash": row.get::<_, String>(1)?, "result": serde_json::from_str::<serde_json::Value>(&result).unwrap()}))
+        Ok(serde_json::json!({"operation_id": row.get::<_, String>(0)?, "request_fingerprint": row.get::<_, String>(1)?, "result": serde_json::from_str::<serde_json::Value>(&result).unwrap()}))
     }).into_iter().map(|row| normalized_trigger_json(row, &mut incarnations)).collect();
-    let occurrences = sqlite_simple_json_rows(connection, "SELECT request_hash, record_json FROM trigger_occurrences ORDER BY occurrence_id", |row| {
+    let occurrences = sqlite_simple_json_rows(connection, "SELECT request_fingerprint, record_json FROM trigger_occurrences ORDER BY occurrence_id", |row| {
         let record: String = row.get(1)?;
-        Ok(serde_json::json!({"request_hash": row.get::<_, String>(0)?, "record": serde_json::from_str::<serde_json::Value>(&record).unwrap()}))
+        Ok(serde_json::json!({"request_fingerprint": row.get::<_, String>(0)?, "record": serde_json::from_str::<serde_json::Value>(&record).unwrap()}))
     }).into_iter().map(|row| normalized_trigger_json(row, &mut incarnations)).collect();
     let deliveries = sqlite_simple_json_rows(connection, "SELECT occurrence_id, subscription_id, process_id, subscription_snapshot_json FROM trigger_deliveries ORDER BY occurrence_id, subscription_id", |row| {
         let snapshot: String = row.get(3)?;
@@ -996,15 +996,15 @@ async fn read_postgres_triggers(pool: &PgPool) -> TriggerRows {
         .into_iter()
         .map(|row| normalized_trigger_json(serde_json::from_str(&row).unwrap(), &mut incarnations))
         .collect();
-    let receipts: Vec<(String, String, String)> = sqlx::query_as("SELECT operation_id, request_hash, result_json FROM lash_trigger_mutation_receipts ORDER BY operation_id").fetch_all(pool).await.unwrap();
-    let mutation_receipts = receipts.into_iter().map(|(operation_id, request_hash, result)| normalized_trigger_json(serde_json::json!({"operation_id": operation_id, "request_hash": request_hash, "result": serde_json::from_str::<serde_json::Value>(&result).unwrap()}), &mut incarnations)).collect();
+    let receipts: Vec<(String, String, String)> = sqlx::query_as("SELECT operation_id, request_fingerprint, result_json FROM lash_trigger_mutation_receipts ORDER BY operation_id").fetch_all(pool).await.unwrap();
+    let mutation_receipts = receipts.into_iter().map(|(operation_id, request_fingerprint, result)| normalized_trigger_json(serde_json::json!({"operation_id": operation_id, "request_fingerprint": request_fingerprint, "result": serde_json::from_str::<serde_json::Value>(&result).unwrap()}), &mut incarnations)).collect();
     let occurrence_rows: Vec<(String, String)> = sqlx::query_as(
-        "SELECT request_hash, record_json FROM lash_trigger_occurrences ORDER BY occurrence_id",
+        "SELECT request_fingerprint, record_json FROM lash_trigger_occurrences ORDER BY occurrence_id",
     )
     .fetch_all(pool)
     .await
     .unwrap();
-    let occurrences = occurrence_rows.into_iter().map(|(request_hash, record)| normalized_trigger_json(serde_json::json!({"request_hash": request_hash, "record": serde_json::from_str::<serde_json::Value>(&record).unwrap()}), &mut incarnations)).collect();
+    let occurrences = occurrence_rows.into_iter().map(|(request_fingerprint, record)| normalized_trigger_json(serde_json::json!({"request_fingerprint": request_fingerprint, "record": serde_json::from_str::<serde_json::Value>(&record).unwrap()}), &mut incarnations)).collect();
     let delivery_rows: Vec<(String, String, String, String)> = sqlx::query_as("SELECT occurrence_id, subscription_id, process_id, subscription_snapshot_json FROM lash_trigger_deliveries ORDER BY occurrence_id, subscription_id").fetch_all(pool).await.unwrap();
     let deliveries = delivery_rows.into_iter().map(|(occurrence_id, subscription_id, process_id, snapshot)| normalized_trigger_delivery_json(serde_json::json!({"occurrence_id": occurrence_id, "subscription_id": subscription_id, "process_id": process_id, "subscription_snapshot": serde_json::from_str::<serde_json::Value>(&snapshot).unwrap()}), &mut incarnations)).collect();
     TriggerRows {

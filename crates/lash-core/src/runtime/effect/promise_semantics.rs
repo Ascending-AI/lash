@@ -3,36 +3,96 @@
 //! Backends own persistence, authentication, and compare-and-swap mechanics.
 //! This module owns the semantic decisions that must remain identical across
 //! the inline, SQLite, Postgres, and engine-backed implementations.
+//!
+//! Promise-key family v3 is a reject-and-recreate cutover from the live-serde
+//! v2 preimage. SQLite/Postgres effect schemas are bumped with this change;
+//! durable adapters without a Lash schema gate must recreate their promise
+//! state before deploying it. Any future projection correction requires a new
+//! family version and an explicit old-row policy.
 
 use super::{AwaitEventWaitIdentity, ExecutionScope, Resolution, ResolveOutcome};
 use crate::RuntimeError;
+
+const AWAIT_EVENT_FAMILY_VERSION: u8 = 3;
+
+/// Permanent tag registry for await-event promise identities.
+///
+/// Execution scopes: 1 turn, 2 process, 3 queue drain, 4 session delete,
+/// 5 runtime operation. Wait identities: 1 tool completion, 2 process signal,
+/// 3 turn cancel gate, 4 turn terminal, 5 custom. Retired tags remain burned.
+fn promise_key_preimage(scope: &ExecutionScope, wait: &AwaitEventWaitIdentity) -> Vec<u8> {
+    let mut identity = crate::stable_identity::IdentityEncoder::new(
+        "lash.await-event",
+        AWAIT_EVENT_FAMILY_VERSION,
+    );
+    match scope {
+        ExecutionScope::Turn {
+            session_id,
+            turn_id,
+        } => {
+            identity.tag(1);
+            identity.string(session_id);
+            identity.string(turn_id);
+        }
+        ExecutionScope::Process { process_id } => {
+            identity.tag(2);
+            identity.string(process_id);
+        }
+        ExecutionScope::QueueDrain {
+            session_id,
+            drain_id,
+        } => {
+            identity.tag(3);
+            identity.string(session_id);
+            identity.string(drain_id);
+        }
+        ExecutionScope::SessionDelete { session_id } => {
+            identity.tag(4);
+            identity.string(session_id);
+        }
+        ExecutionScope::RuntimeOperation { operation_id } => {
+            identity.tag(5);
+            identity.string(operation_id);
+        }
+    }
+    match wait {
+        AwaitEventWaitIdentity::ToolCompletion { tool_call_id } => {
+            identity.tag(1);
+            identity.string(tool_call_id);
+        }
+        AwaitEventWaitIdentity::ProcessSignal {
+            process_id,
+            signal_name,
+            ordinal,
+        } => {
+            identity.tag(2);
+            identity.string(process_id);
+            identity.string(signal_name);
+            identity.u64(*ordinal);
+        }
+        AwaitEventWaitIdentity::TurnCancelGate => identity.tag(3),
+        AwaitEventWaitIdentity::TurnTerminal => identity.tag(4),
+        AwaitEventWaitIdentity::Custom { key } => {
+            identity.tag(5);
+            identity.string(key);
+        }
+    }
+    identity.finish()
+}
 
 /// Derive the stable promise identity shared by every substrate.
 pub fn derive_key_id(
     scope: &ExecutionScope,
     wait: &AwaitEventWaitIdentity,
 ) -> Result<String, RuntimeError> {
-    #[derive(serde::Serialize)]
-    struct PromiseKeyWire<'a> {
-        version: u8,
-        scope: &'a ExecutionScope,
-        wait: &'a AwaitEventWaitIdentity,
-    }
-
     scope.validate()?;
     wait.validate()?;
-    crate::stable_hash::stable_json_sha256_hex(&PromiseKeyWire {
-        version: 2,
-        scope,
-        wait,
-    })
-    .map(|digest| format!("v2:{digest}"))
-    .map_err(|err| {
-        RuntimeError::new(
-            "await_event_key_hash",
-            format!("failed to hash await-event identity: {err}"),
-        )
-    })
+    let preimage = promise_key_preimage(scope, wait);
+    Ok(crate::stable_identity::rendered_hash(
+        "await-event",
+        AWAIT_EVENT_FAMILY_VERSION,
+        &preimage,
+    ))
 }
 
 /// Canonical bytes authenticated by HMAC-backed durable AwaitEvent adapters.
@@ -161,6 +221,82 @@ pub fn constant_time_eq(left: &[u8], right: &[u8]) -> bool {
 mod tests {
     use super::*;
 
+    fn hex(bytes: &[u8]) -> String {
+        bytes.iter().map(|byte| format!("{byte:02x}")).collect()
+    }
+
+    #[test]
+    fn await_event_identity_golden_corpus() {
+        let vectors = [
+            (
+                ExecutionScope::turn("ab", "c"),
+                AwaitEventWaitIdentity::tool_completion("x:y"),
+            ),
+            (
+                ExecutionScope::turn("a", "bc"),
+                AwaitEventWaitIdentity::tool_completion("x:y"),
+            ),
+            (
+                ExecutionScope::process("zero"),
+                AwaitEventWaitIdentity::process_signal("zero", "ready", 1),
+            ),
+            (
+                ExecutionScope::queue_drain("same", "same"),
+                AwaitEventWaitIdentity::TurnCancelGate,
+            ),
+            (
+                ExecutionScope::session_delete("same"),
+                AwaitEventWaitIdentity::TurnTerminal,
+            ),
+            (
+                ExecutionScope::runtime_operation("op:0"),
+                AwaitEventWaitIdentity::Custom {
+                    key: "0".to_string(),
+                },
+            ),
+        ];
+        let actual = vectors
+            .iter()
+            .map(|(scope, wait)| {
+                (
+                    hex(&promise_key_preimage(scope, wait)),
+                    derive_key_id(scope, wait).expect("derive golden key"),
+                )
+            })
+            .collect::<Vec<_>>();
+        let expected = [
+            (
+                "6c6173682d737461626c652d6964656e74697479010300000000000000106c6173682e61776169742d6576656e740100000000000000026162000000000000000163010000000000000003783a79",
+                "await-event:v3:sha256:0b4e88d662ffcfab2d4dab8cdcbbc4eefce3e03e7b6f1f02a8c2c44f128ef26a",
+            ),
+            (
+                "6c6173682d737461626c652d6964656e74697479010300000000000000106c6173682e61776169742d6576656e740100000000000000016100000000000000026263010000000000000003783a79",
+                "await-event:v3:sha256:80a7e9660c1eb5120ff4041d5c07c0c1fdbd9d25ee6973730b34851752ed470d",
+            ),
+            (
+                "6c6173682d737461626c652d6964656e74697479010300000000000000106c6173682e61776169742d6576656e740200000000000000047a65726f0200000000000000047a65726f000000000000000572656164790000000000000001",
+                "await-event:v3:sha256:d5f3cca470277324bc667bbc1bde5b1c4956280c098c7cfbbd64561c53fdcce0",
+            ),
+            (
+                "6c6173682d737461626c652d6964656e74697479010300000000000000106c6173682e61776169742d6576656e7403000000000000000473616d65000000000000000473616d6503",
+                "await-event:v3:sha256:3c6f999b4ea0442f4bcff923b277e7859b1e1b17a96afc5a1be102cd3f9cc43f",
+            ),
+            (
+                "6c6173682d737461626c652d6964656e74697479010300000000000000106c6173682e61776169742d6576656e7404000000000000000473616d6504",
+                "await-event:v3:sha256:f81ce5cfee31d7bbedf9eb7668f2e6675a4356cf26b02e4ab8c8249c99ce431f",
+            ),
+            (
+                "6c6173682d737461626c652d6964656e74697479010300000000000000106c6173682e61776169742d6576656e740500000000000000046f703a3005000000000000000130",
+                "await-event:v3:sha256:32eeecf35973d577700d021ab92e5950ad380453f8843b0629e654598db0165c",
+            ),
+        ];
+        assert_eq!(actual.len(), expected.len());
+        for ((preimage, key), (expected_preimage, expected_key)) in actual.iter().zip(expected) {
+            assert_eq!(preimage, expected_preimage);
+            assert_eq!(key, expected_key);
+        }
+    }
+
     #[test]
     fn resolve_buffers_before_wait_and_preserves_the_first_terminal() {
         let first = Resolution::Ok(serde_json::json!("first"));
@@ -240,13 +376,13 @@ mod tests {
     }
 
     #[test]
-    fn promise_key_wire_epoch_is_explicit_and_stable() {
+    fn promise_key_family_version_is_explicit_and_stable() {
         let scope = ExecutionScope::turn("session", "turn");
         let wait = AwaitEventWaitIdentity::tool_completion("call");
 
         assert_eq!(
             derive_key_id(&scope, &wait).expect("derive versioned key"),
-            "v2:bec06c764e9e73f476e273330ac61b9510cba5b51555db23f7b142b3aeeac586"
+            "await-event:v3:sha256:72946661623a736ad7dddfeace2182eb51d5e25f18d4aef189f79eac48bbcfeb"
         );
     }
 }

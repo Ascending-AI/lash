@@ -1,9 +1,6 @@
-use serde::Serialize;
-
 use crate::sansio::EffectId;
 use crate::{
-    CausalRef, RuntimeEffectControllerError, RuntimeEffectKind, RuntimeInvocation, RuntimeReplay,
-    RuntimeScope, RuntimeSubject,
+    CausalRef, RuntimeEffectKind, RuntimeInvocation, RuntimeReplay, RuntimeScope, RuntimeSubject,
 };
 
 pub(crate) fn turn_effect_invocation(
@@ -230,71 +227,161 @@ pub(crate) fn direct_effect_invocation(
     .with_caused_by(caused_by)
 }
 
-pub(crate) fn direct_request_discriminator<T>(
-    request: &T,
+pub(crate) fn direct_request_discriminator(
     explicit_replay: Option<&RuntimeReplay>,
     caused_by: Option<&CausalRef>,
-) -> Result<String, RuntimeEffectControllerError>
-where
-    T: Serialize,
-{
+    ordinal: u64,
+) -> String {
+    // Family v2 removes request content from replay identity entirely. Store
+    // schemas are bumped as a reject-and-recreate cutover; durable workflow
+    // adapters must likewise begin a fresh state namespace before deployment.
     let cause_discriminator = caused_by
         .map(causal_replay_discriminator)
         .unwrap_or_default();
     if let Some(replay) = explicit_replay.filter(|replay| !replay.key.is_empty()) {
-        return Ok(format!("{cause_discriminator}request:{}", replay.key));
+        return format!(
+            "direct:v2:{cause_discriminator}caller:{}:{}",
+            replay.key.len(),
+            replay.key
+        );
     }
-    let digest = crate::stable_hash::stable_json_sha256_hex(request).map_err(|err| {
-        RuntimeEffectControllerError::new(
-            "runtime_effect_discriminator",
-            format!("failed to serialize runtime effect discriminator: {err}"),
-        )
-    })?;
-    Ok(format!("{cause_discriminator}sha256:{digest}"))
+    format!("direct:v2:{cause_discriminator}ordinal:{ordinal}")
 }
 
-fn causal_replay_discriminator(caused_by: &CausalRef) -> String {
+pub(super) fn causal_replay_discriminator(caused_by: &CausalRef) -> String {
+    fn field(value: &str) -> String {
+        format!("{}:{value}", value.len())
+    }
+    fn optional_field(value: Option<&str>) -> String {
+        value.map_or_else(|| "0".to_string(), |value| format!("1:{}", field(value)))
+    }
+
     match caused_by {
         CausalRef::Turn {
             session_id,
             turn_id,
-        } => format!("cause:turn:{session_id}:{turn_id}:"),
+        } => format!("cause:1:{}:{}:", field(session_id), field(turn_id)),
         CausalRef::Effect {
             session_id,
             turn_id,
             effect_id,
         } => {
-            let turn = turn_id.as_deref().unwrap_or("");
-            format!("cause:effect:{session_id}:{turn}:{effect_id}:")
+            format!(
+                "cause:2:{}:{}:{}:",
+                field(session_id),
+                optional_field(turn_id.as_deref()),
+                field(effect_id)
+            )
         }
         CausalRef::ToolCall {
             session_id,
             call_id,
-        } => format!("cause:tool_call:{session_id}:{call_id}:"),
-        CausalRef::Process { process_id } => format!("cause:process:{process_id}:"),
+        } => format!("cause:3:{}:{}:", field(session_id), field(call_id)),
+        CausalRef::Process { process_id } => format!("cause:4:{}:", field(process_id)),
         CausalRef::ProcessEvent {
             process_id,
             sequence,
-        } => format!("cause:process_event:{process_id}:{sequence}:"),
+        } => format!("cause:5:{}:{sequence}:", field(process_id)),
         CausalRef::TriggerOccurrence {
             occurrence_id,
             subscription_id,
             subscription_incarnation,
             subscription_revision,
         } => {
-            if let Some(subscription_id) = subscription_id {
-                format!(
-                    "cause:trigger:{occurrence_id}:{subscription_id}:{}:{}:",
-                    subscription_incarnation.as_deref().unwrap_or_default(),
-                    subscription_revision.map_or_else(String::new, |value| value.to_string())
-                )
-            } else {
-                format!("cause:trigger:{occurrence_id}:")
-            }
+            let revision =
+                subscription_revision.map_or_else(|| "0".to_string(), |value| format!("1:{value}"));
+            format!(
+                "cause:6:{}:{}:{}:{revision}:",
+                field(occurrence_id),
+                optional_field(subscription_id.as_deref()),
+                optional_field(subscription_incarnation.as_deref()),
+            )
         }
         CausalRef::SessionNode {
             session_id,
             node_id,
-        } => format!("cause:session_node:{session_id}:{node_id}:"),
+        } => format!("cause:7:{}:{}:", field(session_id), field(node_id)),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn direct_effect_identity_golden_corpus() {
+        let causes = [
+            (
+                CausalRef::Turn {
+                    session_id: "ab".to_string(),
+                    turn_id: "c".to_string(),
+                },
+                "direct:v2:cause:1:2:ab:1:c:ordinal:1",
+            ),
+            (
+                CausalRef::Effect {
+                    session_id: "s".to_string(),
+                    turn_id: None,
+                    effect_id: "e".to_string(),
+                },
+                "direct:v2:cause:2:1:s:0:1:e:ordinal:1",
+            ),
+            (
+                CausalRef::ToolCall {
+                    session_id: "s".to_string(),
+                    call_id: "c".to_string(),
+                },
+                "direct:v2:cause:3:1:s:1:c:ordinal:1",
+            ),
+            (
+                CausalRef::Process {
+                    process_id: "p".to_string(),
+                },
+                "direct:v2:cause:4:1:p:ordinal:1",
+            ),
+            (
+                CausalRef::ProcessEvent {
+                    process_id: "p".to_string(),
+                    sequence: 0,
+                },
+                "direct:v2:cause:5:1:p:0:ordinal:1",
+            ),
+            (
+                CausalRef::TriggerOccurrence {
+                    occurrence_id: "o".to_string(),
+                    subscription_id: Some("s".to_string()),
+                    subscription_incarnation: None,
+                    subscription_revision: Some(0),
+                },
+                "direct:v2:cause:6:1:o:1:1:s:0:1:0:ordinal:1",
+            ),
+            (
+                CausalRef::SessionNode {
+                    session_id: "s".to_string(),
+                    node_id: "n".to_string(),
+                },
+                "direct:v2:cause:7:1:s:1:n:ordinal:1",
+            ),
+        ];
+        for (cause, expected) in causes {
+            assert_eq!(
+                direct_request_discriminator(None, Some(&cause), 1),
+                expected
+            );
+        }
+        assert_eq!(
+            direct_request_discriminator(
+                Some(&RuntimeReplay {
+                    key: "a:b".to_string(),
+                }),
+                None,
+                99,
+            ),
+            "direct:v2:caller:3:a:b"
+        );
+        assert_eq!(
+            direct_request_discriminator(Some(&RuntimeReplay { key: String::new() }), None, 0,),
+            "direct:v2:ordinal:0"
+        );
     }
 }

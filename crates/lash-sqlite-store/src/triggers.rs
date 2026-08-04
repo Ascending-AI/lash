@@ -160,7 +160,7 @@ impl lash_core::TriggerStore for SqliteTriggerStore {
             command.owner_scope(),
             operation_id,
         )?;
-        let request_hash = lash_core::facade_support::trigger_command_hash(&command)?;
+        let request_fingerprint = lash_core::facade_support::trigger_command_fingerprint(&command);
         let owner_scope = command.owner_scope().clone();
         let subscription_key = command.subscription_key().unwrap_or_default().to_string();
         let subscription_id = lash_core::facade_support::deterministic_subscription_id(
@@ -173,7 +173,7 @@ impl lash_core::TriggerStore for SqliteTriggerStore {
                 Ok(trigger_tx_outcome((|| {
                     let receipt: Option<(String, String)> = tx
                         .query_row(
-                            "SELECT request_hash, result_json
+                            "SELECT request_fingerprint, result_json
                              FROM trigger_mutation_receipts WHERE operation_id = ?1",
                             params![operation_id.as_str()],
                             |row| Ok((row.get(0)?, row.get(1)?)),
@@ -181,12 +181,12 @@ impl lash_core::TriggerStore for SqliteTriggerStore {
                         .optional()
                         .map_err(process_sqlite_error)?;
                     if let Some((stored_hash, json)) = receipt {
-                        if stored_hash != request_hash {
+                        if stored_hash != request_fingerprint {
                             return Ok(Err(lash_core::TriggerOperationError::Conflict {
                                 subscription_key,
                                 existing_revision: None,
-                                existing_definition_hash: Some(stored_hash),
-                                requested_definition_hash: Some(request_hash),
+                                existing_definition_fingerprint: Some(stored_hash),
+                                requested_definition_fingerprint: Some(request_fingerprint),
                                 reason: format!(
                                     "operation id `{public_operation_id}` was reused with different content"
                                 ),
@@ -257,7 +257,7 @@ impl lash_core::TriggerStore for SqliteTriggerStore {
                         tx.execute(
                             "INSERT INTO trigger_subscriptions (
                             subscription_id, owner_scope, subscription_key, incarnation, revision,
-                            definition_hash, source_type, source_key, enabled, tombstoned,
+                            definition_fingerprint, source_type, source_key, enabled, tombstoned,
                             created_at_ms, updated_at_ms, record_json
                          )
                          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)
@@ -266,7 +266,7 @@ impl lash_core::TriggerStore for SqliteTriggerStore {
                             subscription_key = excluded.subscription_key,
                             incarnation = excluded.incarnation,
                             revision = excluded.revision,
-                            definition_hash = excluded.definition_hash,
+                            definition_fingerprint = excluded.definition_fingerprint,
                             source_type = excluded.source_type,
                             source_key = excluded.source_key,
                             enabled = excluded.enabled,
@@ -279,7 +279,7 @@ impl lash_core::TriggerStore for SqliteTriggerStore {
                                 record.subscription_key.as_str(),
                                 record.incarnation.as_str(),
                                 record.revision as i64,
-                                record.definition_hash.as_str(),
+                                record.definition_fingerprint.as_str(),
                                 record.source_type.as_str(),
                                 record.source_key.as_str(),
                                 i64::from(record.enabled),
@@ -293,11 +293,11 @@ impl lash_core::TriggerStore for SqliteTriggerStore {
                     }
                     tx.execute(
                         "INSERT INTO trigger_mutation_receipts (
-                            operation_id, request_hash, result_json, created_at_ms
+                            operation_id, request_fingerprint, result_json, created_at_ms
                          ) VALUES (?1, ?2, ?3, ?4)",
                         params![
                             operation_id.as_str(),
-                            request_hash.as_str(),
+                            request_fingerprint.as_str(),
                             Self::encode_json(&result)?,
                             now as i64,
                         ],

@@ -1220,7 +1220,7 @@ impl TryFrom<lash_core::ProcessRecord> for RemoteProcessRecord {
     fn try_from(value: lash_core::ProcessRecord) -> Result<Self, Self::Error> {
         let lash_core::ProcessRecord {
             id,
-            registration_hash: _,
+            registration_fingerprint: _,
             input,
             disposition,
             max_attempts,

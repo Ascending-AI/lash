@@ -1,30 +1,282 @@
 use super::*;
 
+const TRIGGER_DEFINITION_FAMILY_VERSION: u8 = 2;
+
+pub(super) fn append_owner_address(output: &mut String, owner_scope: &TriggerOwnerScope) {
+    match owner_scope {
+        TriggerOwnerScope::Session { session_id } => {
+            output.push_str("1:");
+            output.push_str(&session_id.len().to_string());
+            output.push(':');
+            output.push_str(session_id);
+        }
+        TriggerOwnerScope::Host { binding_id } => {
+            output.push_str("2:");
+            output.push_str(&binding_id.len().to_string());
+            output.push(':');
+            output.push_str(binding_id);
+        }
+        TriggerOwnerScope::Platform => output.push_str("3:0:"),
+    }
+}
+
 pub fn deterministic_subscription_id(
     owner_scope: &TriggerOwnerScope,
     subscription_key: &str,
 ) -> Result<String, PluginError> {
-    let digest = crate::stable_hash::stable_json_sha256_hex(&(
-        "lash.trigger-subscription",
-        1_u8,
-        owner_scope,
-        subscription_key,
-    ))
-    .map_err(|err| PluginError::Session(format!("failed to hash trigger identity: {err}")))?;
-    Ok(format!("trigger-subscription:v1:sha256:{digest}"))
+    // Version 2 is a stored, unhashed lookup address. Lash's trigger schemas
+    // reject version-1 stores; external stores must recreate before cutover.
+    let mut address = String::from("trigger-subscription:v2:");
+    append_owner_address(&mut address, owner_scope);
+    address.push(':');
+    address.push_str(&subscription_key.len().to_string());
+    address.push(':');
+    address.push_str(subscription_key);
+    Ok(address)
 }
 
-pub fn trigger_subscription_definition_hash(
+/// Permanent trigger-definition tag registry.
+///
+/// Owners: 1 session, 2 host, 3 platform. Process inputs: 1 tool call,
+/// 2 engine, 3 session turn, 4 external. Input bindings: 1 event, 2 fixed.
+/// JSON: 1 null, 2 false, 3 true, 4 i64, 5 u64, 6 f64, 7 string, 8 array,
+/// 9 object. Retired tags remain burned.
+fn trigger_subscription_definition_preimage(
     owner_scope: &TriggerOwnerScope,
     draft: &TriggerSubscriptionDraft,
-) -> Result<String, PluginError> {
-    crate::stable_hash::stable_json_sha256_hex(&(
+) -> Vec<u8> {
+    let mut fingerprint = crate::stable_identity::IdentityEncoder::new(
         "lash.trigger-subscription-definition",
-        1_u8,
-        owner_scope,
-        draft,
-    ))
-    .map_err(|err| PluginError::Session(format!("failed to hash trigger definition: {err}")))
+        TRIGGER_DEFINITION_FAMILY_VERSION,
+    );
+    project_trigger_owner(&mut fingerprint, owner_scope);
+    project_trigger_draft(&mut fingerprint, draft);
+    fingerprint.finish()
+}
+
+pub fn trigger_subscription_definition_fingerprint(
+    owner_scope: &TriggerOwnerScope,
+    draft: &TriggerSubscriptionDraft,
+) -> String {
+    // The fingerprint is compared only after the independent subscription-id
+    // lookup. Its v2 grammar shares the trigger store's reject-and-recreate
+    // lifecycle; projection corrections require a new family version.
+    let preimage = trigger_subscription_definition_preimage(owner_scope, draft);
+    crate::stable_identity::rendered_hash(
+        "trigger-definition",
+        TRIGGER_DEFINITION_FAMILY_VERSION,
+        &preimage,
+    )
+}
+
+pub(super) fn project_trigger_owner(
+    identity: &mut crate::stable_identity::IdentityEncoder,
+    owner_scope: &TriggerOwnerScope,
+) {
+    match owner_scope {
+        TriggerOwnerScope::Session { session_id } => {
+            identity.tag(1);
+            identity.string(session_id);
+        }
+        TriggerOwnerScope::Host { binding_id } => {
+            identity.tag(2);
+            identity.string(binding_id);
+        }
+        TriggerOwnerScope::Platform => identity.tag(3),
+    }
+}
+
+pub(super) fn project_trigger_actor(
+    identity: &mut crate::stable_identity::IdentityEncoder,
+    actor: &crate::ProcessOriginator,
+) {
+    match actor {
+        crate::ProcessOriginator::Host { scope } => {
+            identity.tag(1);
+            identity.optional(scope.as_deref(), |identity, scope| identity.string(scope));
+        }
+        crate::ProcessOriginator::Session { session_id } => {
+            identity.tag(2);
+            identity.string(session_id);
+        }
+    }
+}
+
+pub(super) fn project_trigger_draft(
+    identity: &mut crate::stable_identity::IdentityEncoder,
+    draft: &TriggerSubscriptionDraft,
+) {
+    let TriggerSubscriptionDraft {
+        subscription_key,
+        env_ref,
+        wake_target,
+        name,
+        source_type,
+        source_key,
+        source,
+        payload_schema,
+        target,
+        target_identity,
+        event_types,
+        input_template,
+        target_label,
+    } = draft;
+    identity.string(subscription_key);
+    identity.string(env_ref.as_str());
+    identity.optional(wake_target.as_ref(), |identity, wake_target| {
+        let crate::SessionScope {
+            session_id,
+            agent_frame_id,
+        } = wake_target;
+        identity.string(session_id);
+        identity.optional(agent_frame_id.as_deref(), |identity, frame_id| {
+            identity.string(frame_id);
+        });
+    });
+    identity.optional(name.as_deref(), |identity, name| identity.string(name));
+    identity.string(source_type);
+    identity.string(source_key);
+    project_trigger_json_value(identity, source);
+    project_trigger_json_value(identity, &payload_schema.schema);
+    project_trigger_process_input(identity, target);
+    let crate::ProcessIdentity {
+        kind,
+        label,
+        definition,
+    } = target_identity;
+    identity.string(kind);
+    identity.optional(label.as_deref(), |identity, label| identity.string(label));
+    identity.optional(definition.as_ref(), project_trigger_json_value);
+    identity.sequence(
+        event_types.iter(),
+        event_types.len(),
+        |identity, event_type| {
+            let crate::ProcessEventType {
+                name,
+                payload_schema: _,
+                semantics: _,
+            } = event_type;
+            identity.string(name);
+        },
+    );
+    identity.sequence(
+        input_template.iter(),
+        input_template.len(),
+        |identity, (name, binding)| {
+            identity.string(name);
+            match binding {
+                TriggerInputBinding::Event => identity.tag(1),
+                TriggerInputBinding::Fixed { value } => {
+                    identity.tag(2);
+                    project_trigger_json_value(identity, value);
+                }
+            }
+        },
+    );
+    identity.optional(target_label.as_deref(), |identity, label| {
+        identity.string(label)
+    });
+}
+
+fn project_trigger_process_input(
+    identity: &mut crate::stable_identity::IdentityEncoder,
+    input: &crate::ProcessInput,
+) {
+    match input {
+        crate::ProcessInput::ToolCall { call } => {
+            let crate::PreparedToolCall {
+                call_id,
+                tool_id,
+                tool_name,
+                args,
+                replay,
+                prepared_payload,
+            } = call;
+            identity.tag(1);
+            identity.string(call_id);
+            identity.string(tool_id.as_str());
+            identity.string(tool_name);
+            project_trigger_json_value(identity, args);
+            identity.optional(replay.as_ref(), |identity, replay| {
+                let lash_sansio::llm::types::ProviderReplayMeta { item_id, opaque } = replay;
+                identity.optional(item_id.as_deref(), |identity, value| identity.string(value));
+                identity.optional(opaque.as_deref(), |identity, value| identity.string(value));
+            });
+            project_trigger_json_value(identity, prepared_payload);
+        }
+        crate::ProcessInput::Engine { kind, payload } => {
+            identity.tag(2);
+            identity.string(kind);
+            project_trigger_json_value(identity, payload);
+        }
+        crate::ProcessInput::SessionTurn {
+            create_request: _,
+            turn_input: _,
+            output_contract,
+        } => {
+            identity.tag(3);
+            match output_contract {
+                crate::ToolOutputContract::Static => identity.tag(1),
+                crate::ToolOutputContract::FromInputSchema {
+                    input_field,
+                    default_schema,
+                } => {
+                    identity.tag(2);
+                    identity.string(input_field);
+                    identity.optional(default_schema.as_ref(), project_trigger_json_value);
+                }
+            }
+        }
+        crate::ProcessInput::External { metadata } => {
+            identity.tag(4);
+            project_trigger_json_value(identity, metadata);
+        }
+    }
+}
+
+pub(super) fn project_trigger_json_value(
+    identity: &mut crate::stable_identity::IdentityEncoder,
+    value: &serde_json::Value,
+) {
+    match value {
+        serde_json::Value::Null => identity.tag(1),
+        serde_json::Value::Bool(false) => identity.tag(2),
+        serde_json::Value::Bool(true) => identity.tag(3),
+        serde_json::Value::Number(number) => {
+            if let Some(value) = number.as_i64() {
+                identity.tag(4);
+                identity.u64(value as u64);
+            } else if let Some(value) = number.as_u64() {
+                identity.tag(5);
+                identity.u64(value);
+            } else {
+                identity.tag(6);
+                identity.u64(
+                    number
+                        .as_f64()
+                        .expect("serde_json numbers are i64, u64, or finite f64")
+                        .to_bits(),
+                );
+            }
+        }
+        serde_json::Value::String(value) => {
+            identity.tag(7);
+            identity.string(value);
+        }
+        serde_json::Value::Array(values) => {
+            identity.tag(8);
+            identity.sequence(values, values.len(), project_trigger_json_value);
+        }
+        serde_json::Value::Object(values) => {
+            identity.tag(9);
+            let mut entries = values.iter().collect::<Vec<_>>();
+            entries.sort_by_key(|(key, _)| *key);
+            identity.sequence(entries, values.len(), |identity, (key, value)| {
+                identity.string(key);
+                project_trigger_json_value(identity, value);
+            });
+        }
+    }
 }
 
 pub(super) fn reserve_in_memory_for_occurrence(
@@ -384,6 +636,263 @@ pub fn trigger_occurrence_request_hash(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn hex(bytes: &[u8]) -> String {
+        bytes.iter().map(|byte| format!("{byte:02x}")).collect()
+    }
+
+    fn minimal_identity_corpus_draft(input: crate::ProcessInput) -> TriggerSubscriptionDraft {
+        TriggerSubscriptionDraft::for_process(
+            "sub",
+            crate::ProcessExecutionEnvRef::new("env"),
+            "source",
+            "key",
+            input,
+            crate::ProcessIdentity::new("kind"),
+        )
+    }
+
+    fn enriched_identity_corpus_draft(input: crate::ProcessInput) -> TriggerSubscriptionDraft {
+        let mut bindings = BTreeMap::new();
+        bindings.insert("event".to_string(), TriggerInputBinding::Event);
+        bindings.insert(
+            "fixed".to_string(),
+            TriggerInputBinding::Fixed {
+                value: serde_json::json!([null, false, true, -1, 0, u64::MAX, 1.5, "a:b", [], {"x": 0}]),
+            },
+        );
+        let mut draft = minimal_identity_corpus_draft(input)
+            .with_source(serde_json::json!({"source": [0, "0"]}))
+            .with_payload_schema(crate::LashSchema::new(
+                serde_json::json!({"type": "object"}),
+            ))
+            .with_wake_target(crate::SessionScope::for_agent_frame("session", "frame"))
+            .with_event_types([crate::ProcessEventType {
+                name: "app.event".to_string(),
+                payload_schema: crate::LashSchema::any(),
+                semantics: crate::ProcessEventSemanticsSpec::default(),
+            }])
+            .with_input_template(bindings)
+            .with_name("name")
+            .with_target_label("label");
+        draft.target_identity = crate::ProcessIdentity::new("kind")
+            .with_label(Some("label"))
+            .with_definition(Some(serde_json::json!({"definition": 0})));
+        draft
+    }
+
+    #[test]
+    fn trigger_definition_identity_golden_corpus() {
+        let tool = crate::ProcessInput::ToolCall {
+            call: crate::PreparedToolCall::from_parts(
+                "call",
+                crate::ToolId::new("tool-id"),
+                "tool",
+                serde_json::json!({"arg": 0}),
+                Some(lash_sansio::llm::types::ProviderReplayMeta {
+                    item_id: Some("item".to_string()),
+                    opaque: None,
+                }),
+                serde_json::json!({"prepared": true}),
+            ),
+        };
+        let inputs = [
+            tool,
+            crate::ProcessInput::Engine {
+                kind: "engine".to_string(),
+                payload: serde_json::json!({"payload": 0}),
+            },
+            crate::ProcessInput::SessionTurn {
+                create_request: Box::new(crate::SessionCreateRequest::root(
+                    crate::SessionStartPoint::Empty,
+                    crate::PluginOptions::default(),
+                )),
+                turn_input: Box::new(crate::TurnInput::empty()),
+                output_contract: crate::ToolOutputContract::FromInputSchema {
+                    input_field: "field".to_string(),
+                    default_schema: Some(serde_json::json!({})),
+                },
+            },
+            crate::ProcessInput::External {
+                metadata: serde_json::json!({"metadata": 0}),
+            },
+        ];
+        let owners = [
+            TriggerOwnerScope::session("owner"),
+            TriggerOwnerScope::host("owner").expect("host owner"),
+            TriggerOwnerScope::Platform,
+            TriggerOwnerScope::session("owner"),
+        ];
+        let actual = owners
+            .iter()
+            .zip(inputs)
+            .enumerate()
+            .map(|(index, (owner, input))| {
+                let draft = if index == 0 {
+                    enriched_identity_corpus_draft(input)
+                } else {
+                    minimal_identity_corpus_draft(input)
+                };
+                (
+                    hex(&trigger_subscription_definition_preimage(owner, &draft)),
+                    trigger_subscription_definition_fingerprint(owner, &draft),
+                )
+            })
+            .collect::<Vec<_>>();
+        let expected = [
+            (
+                "6c6173682d737461626c652d6964656e74697479010200000000000000246c6173682e747269676765722d737562736372697074696f6e2d646566696e6974696f6e0100000000000000056f776e657200000000000000037375620000000000000003656e7601000000000000000773657373696f6e0100000000000000056672616d650100000000000000046e616d650000000000000006736f7572636500000000000000036b65790900000000000000010000000000000006736f75726365080000000000000002040000000000000000070000000000000001300900000000000000010000000000000004747970650700000000000000066f626a65637401000000000000000463616c6c0000000000000007746f6f6c2d69640000000000000004746f6f6c0900000000000000010000000000000003617267040000000000000000010100000000000000046974656d00090000000000000001000000000000000870726570617265640300000000000000046b696e640100000000000000056c6162656c01090000000000000001000000000000000a646566696e6974696f6e040000000000000000000000000000000100000000000000096170702e6576656e74000000000000000200000000000000056576656e7401000000000000000566697865640208000000000000000a01020304ffffffffffffffff04000000000000000005ffffffffffffffff063ff8000000000000070000000000000003613a620800000000000000000900000000000000010000000000000001780400000000000000000100000000000000056c6162656c",
+                "trigger-definition:v2:sha256:024ed49289a7259516ea4f5ed83ba59f36b9ac71c310d348e59c2756f2725864",
+            ),
+            (
+                "6c6173682d737461626c652d6964656e74697479010200000000000000246c6173682e747269676765722d737562736372697074696f6e2d646566696e6974696f6e0200000000000000056f776e657200000000000000037375620000000000000003656e7600000000000000000006736f7572636500000000000000036b6579090000000000000000090000000000000000020000000000000006656e67696e6509000000000000000100000000000000077061796c6f616404000000000000000000000000000000046b696e6400000000000000000000000000000000000000",
+                "trigger-definition:v2:sha256:0898034809dab747c286c75bbdf9f894dc73a364163e842585c6e5966209b0b9",
+            ),
+            (
+                "6c6173682d737461626c652d6964656e74697479010200000000000000246c6173682e747269676765722d737562736372697074696f6e2d646566696e6974696f6e0300000000000000037375620000000000000003656e7600000000000000000006736f7572636500000000000000036b6579090000000000000000090000000000000000030200000000000000056669656c640109000000000000000000000000000000046b696e6400000000000000000000000000000000000000",
+                "trigger-definition:v2:sha256:cf9432f2a2c69f1e97177b83d28015031528436caf2677d4a4bc248e1bd3fee6",
+            ),
+            (
+                "6c6173682d737461626c652d6964656e74697479010200000000000000246c6173682e747269676765722d737562736372697074696f6e2d646566696e6974696f6e0100000000000000056f776e657200000000000000037375620000000000000003656e7600000000000000000006736f7572636500000000000000036b65790900000000000000000900000000000000000409000000000000000100000000000000086d6574616461746104000000000000000000000000000000046b696e6400000000000000000000000000000000000000",
+                "trigger-definition:v2:sha256:32bec49772d95340b2704dafde69ba79463ddcc7efbdb67cec8284943b92c03c",
+            ),
+        ];
+        assert_eq!(actual.len(), expected.len());
+        for ((preimage, key), (expected_preimage, expected_key)) in actual.iter().zip(expected) {
+            assert_eq!(preimage, expected_preimage);
+            assert_eq!(key, expected_key);
+        }
+    }
+
+    #[test]
+    fn trigger_operation_identity_golden_corpus() {
+        let owner = TriggerOwnerScope::session("owner");
+        let actor = crate::ProcessOriginator::host_scoped("actor");
+        let draft = minimal_identity_corpus_draft(crate::ProcessInput::External {
+            metadata: serde_json::json!({"metadata": 0}),
+        });
+        let commands = [
+            TriggerCommand::Register {
+                owner_scope: owner.clone(),
+                actor: actor.clone(),
+                draft: draft.clone(),
+            },
+            TriggerCommand::List {
+                owner_scope: owner.clone(),
+                filter: TriggerSubscriptionFilter {
+                    registrant_scope_id: Some("r".to_string()),
+                    session_id: None,
+                    subscription_key: Some("s".to_string()),
+                    name: None,
+                    source_type: Some("t".to_string()),
+                    source_key: None,
+                    target: Some(serde_json::json!({"target": 0})),
+                    enabled: Some(false),
+                },
+            },
+            TriggerCommand::Update {
+                owner_scope: owner.clone(),
+                actor: actor.clone(),
+                subscription_key: "sub".to_string(),
+                draft: draft.clone(),
+                expected_revision: 0,
+            },
+            TriggerCommand::Enable {
+                owner_scope: owner.clone(),
+                actor: actor.clone(),
+                subscription_key: "sub".to_string(),
+                expected_revision: 0,
+            },
+            TriggerCommand::Disable {
+                owner_scope: owner.clone(),
+                actor: actor.clone(),
+                subscription_key: "sub".to_string(),
+                expected_revision: 0,
+            },
+            TriggerCommand::Delete {
+                owner_scope: owner.clone(),
+                actor: actor.clone(),
+                subscription_key: "sub".to_string(),
+                expected_revision: 0,
+            },
+            TriggerCommand::Revive {
+                owner_scope: owner.clone(),
+                actor: actor.clone(),
+                subscription_key: "sub".to_string(),
+                draft,
+                expected_revision: 0,
+            },
+            TriggerCommand::Prune {
+                owner_scope: owner.clone(),
+                actor,
+                subscription_keys: vec!["ab".to_string(), "a".to_string()],
+            },
+        ];
+        let actual = commands
+            .iter()
+            .map(|command| {
+                (
+                    hex(&super::super::trigger_command_preimage(command)),
+                    super::super::trigger_command_fingerprint(command),
+                )
+            })
+            .collect::<Vec<_>>();
+        let expected = [
+            (
+                "6c6173682d737461626c652d6964656e74697479010200000000000000146c6173682e747269676765722d636f6d6d616e64010100000000000000056f776e6572010100000000000000056163746f7200000000000000037375620000000000000003656e7600000000000000000006736f7572636500000000000000036b65790900000000000000000900000000000000000409000000000000000100000000000000086d6574616461746104000000000000000000000000000000046b696e6400000000000000000000000000000000000000",
+                "trigger-command:v2:sha256:7fcc5830c2dadefbf47847eec34276fa7dfe7c07f41314d806e3ecdd793e31e4",
+            ),
+            (
+                "6c6173682d737461626c652d6964656e74697479010200000000000000146c6173682e747269676765722d636f6d6d616e64020100000000000000056f776e65720100000000000000017200010000000000000001730001000000000000000174000109000000000000000100000000000000067461726765740400000000000000000100",
+                "trigger-command:v2:sha256:520b5a79a196529017bba0701679f4fbd282defce94093d49919d6a40d6a02fc",
+            ),
+            (
+                "6c6173682d737461626c652d6964656e74697479010200000000000000146c6173682e747269676765722d636f6d6d616e64030100000000000000056f776e6572010100000000000000056163746f72000000000000000373756200000000000000037375620000000000000003656e7600000000000000000006736f7572636500000000000000036b65790900000000000000000900000000000000000409000000000000000100000000000000086d6574616461746104000000000000000000000000000000046b696e64000000000000000000000000000000000000000000000000000000",
+                "trigger-command:v2:sha256:38198669a782c5a838c5f54d1f612d60dce38898ecab7577cd4b86427f8631f6",
+            ),
+            (
+                "6c6173682d737461626c652d6964656e74697479010200000000000000146c6173682e747269676765722d636f6d6d616e64040100000000000000056f776e6572010100000000000000056163746f7200000000000000037375620000000000000000",
+                "trigger-command:v2:sha256:cd75a81bb26d131341d356d9ae82bcda0a94267396b795293316742d9ed3962f",
+            ),
+            (
+                "6c6173682d737461626c652d6964656e74697479010200000000000000146c6173682e747269676765722d636f6d6d616e64050100000000000000056f776e6572010100000000000000056163746f7200000000000000037375620000000000000000",
+                "trigger-command:v2:sha256:eaceddc6103bb67443aeeee06e3486ad41608b8e937fbbec84c50337644bd825",
+            ),
+            (
+                "6c6173682d737461626c652d6964656e74697479010200000000000000146c6173682e747269676765722d636f6d6d616e64060100000000000000056f776e6572010100000000000000056163746f7200000000000000037375620000000000000000",
+                "trigger-command:v2:sha256:f766211db04eeb3f1362683531c1b4e608a0f7c319c5a3a4d0944c1ac9ac6fdc",
+            ),
+            (
+                "6c6173682d737461626c652d6964656e74697479010200000000000000146c6173682e747269676765722d636f6d6d616e64070100000000000000056f776e6572010100000000000000056163746f72000000000000000373756200000000000000037375620000000000000003656e7600000000000000000006736f7572636500000000000000036b65790900000000000000000900000000000000000409000000000000000100000000000000086d6574616461746104000000000000000000000000000000046b696e64000000000000000000000000000000000000000000000000000000",
+                "trigger-command:v2:sha256:f7aa7c0b8c7fd0d2f4bd688aa77ce8b59805213b20c7915d16968d9f2be6a62a",
+            ),
+            (
+                "6c6173682d737461626c652d6964656e74697479010200000000000000146c6173682e747269676765722d636f6d6d616e64080100000000000000056f776e6572010100000000000000056163746f72000000000000000200000000000000026162000000000000000161",
+                "trigger-command:v2:sha256:781f147a927c2a8aaeec2f487fff7a4bf017983efef488f491a587783579cde7",
+            ),
+        ];
+        assert_eq!(actual.len(), expected.len());
+        for ((preimage, key), (expected_preimage, expected_key)) in actual.iter().zip(expected) {
+            assert_eq!(preimage, expected_preimage);
+            assert_eq!(key, expected_key);
+        }
+
+        assert_eq!(
+            deterministic_subscription_id(&TriggerOwnerScope::session("ab"), "c")
+                .expect("subscription address"),
+            "trigger-subscription:v2:1:2:ab:1:c"
+        );
+        assert_eq!(
+            deterministic_subscription_id(&TriggerOwnerScope::session("a"), "bc")
+                .expect("subscription address"),
+            "trigger-subscription:v2:1:1:a:2:bc"
+        );
+        assert_eq!(
+            super::super::trigger_operation_receipt_id(&TriggerOwnerScope::Platform, "op:0")
+                .expect("operation address"),
+            "trigger-operation:v2:3:0::4:op:0"
+        );
+    }
 
     fn button_payload_schema() -> crate::LashSchema {
         crate::LashSchema::any()

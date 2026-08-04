@@ -520,50 +520,284 @@ fn prepare_wake_delivery(
 
 pub fn prepare_process_registration(
     mut registration: ProcessRegistration,
-) -> Result<(ProcessRegistration, String), PluginError> {
+) -> Result<ProcessRegistration, PluginError> {
     validate_process_registration(&registration)?;
     ensure_core_event_types(&mut registration);
-    let registration_hash = process_registration_hash(&registration)?;
     registration
         .event_types
         .retain(|event_type| !is_runtime_lifecycle_event_type(&event_type.name));
-    Ok((registration, registration_hash))
+    Ok(registration)
 }
 
-pub fn process_registration_hash(
-    registration: &ProcessRegistration,
-) -> Result<String, PluginError> {
-    let mut hash_view = registration.clone();
-    // These three runtime facts were added after durable registration hashes
-    // already existed. Waiting/resumed remain in the hash view because they
-    // were part of the base-commit vocabulary.
-    hash_view.event_types.retain(|event_type| {
-        !matches!(
-            event_type.name.as_str(),
-            "process.first_started" | "process.external_ref_set" | "process.abandon_requested"
-        )
-    });
-    crate::stable_hash::stable_json_sha256_hex(&hash_view).map_err(|err| {
-        PluginError::Session(format!(
-            "failed to hash process `{}` registration: {err}",
-            registration.id
-        ))
-    })
-}
+const PROCESS_REGISTRATION_FAMILY_VERSION: u8 = 2;
 
-/// Extend a normalized registration hash with its atomic initial observer set.
+/// Permanent tag registry for the process-registration definition fingerprint.
 ///
-/// Initial observers participate in start idempotency: replaying a process id
-/// with a different visibility set is a conflicting registration.
-pub fn process_registration_with_observers_hash(
-    registration_hash: String,
+/// Input kinds: 1 tool call, 2 engine, 3 session turn, 4 external. Recovery:
+/// 1 rerunnable, 2 owner bound, 3 externally owned. Originators: 1 host,
+/// 2 session. Causal refs: 1 turn, 2 effect, 3 tool call, 4 process,
+/// 5 process event, 6 trigger occurrence, 7 session node. JSON values used by
+/// explicit `ProcessIdentity::definition`: 1 null, 2 false, 3 true, 4 i64,
+/// 5 u64, 6 f64, 7 string, 8 array, 9 object. Retired tags remain burned.
+fn process_registration_fingerprint_preimage(
+    registration: &ProcessRegistration,
     observers: &[SessionId],
-) -> Result<String, PluginError> {
+) -> Vec<u8> {
+    let ProcessRegistration {
+        id: _,
+        input,
+        disposition,
+        max_attempts,
+        identity,
+        event_types,
+        provenance,
+        env_ref,
+        wake_session_id,
+    } = registration;
+    let mut fingerprint = crate::stable_identity::IdentityEncoder::new(
+        "lash.process-registration-definition",
+        PROCESS_REGISTRATION_FAMILY_VERSION,
+    );
+
+    match input.as_ref() {
+        super::model::ProcessInput::ToolCall { call } => {
+            let crate::PreparedToolCall {
+                call_id,
+                tool_id,
+                tool_name,
+                args: _,
+                replay: _,
+                prepared_payload: _,
+            } = call;
+            fingerprint.tag(1);
+            fingerprint.string(call_id);
+            fingerprint.string(tool_id.as_str());
+            fingerprint.string(tool_name);
+        }
+        super::model::ProcessInput::Engine { kind, payload: _ } => {
+            fingerprint.tag(2);
+            fingerprint.string(kind);
+        }
+        super::model::ProcessInput::SessionTurn {
+            create_request: _,
+            turn_input: _,
+            output_contract: _,
+        } => fingerprint.tag(3),
+        super::model::ProcessInput::External { metadata: _ } => fingerprint.tag(4),
+    }
+    fingerprint.tag(match disposition {
+        super::model::RecoveryDisposition::Rerunnable => 1,
+        super::model::RecoveryDisposition::OwnerBound => 2,
+        super::model::RecoveryDisposition::ExternallyOwned => 3,
+    });
+    fingerprint.optional(*max_attempts, crate::stable_identity::IdentityEncoder::u32);
+
+    let super::model::ProcessIdentity {
+        kind,
+        label,
+        definition,
+    } = identity;
+    fingerprint.string(kind);
+    fingerprint.optional(label.as_deref(), |identity, label| identity.string(label));
+    fingerprint.optional(definition.as_ref(), project_registration_json_value);
+
+    let super::model::ProcessProvenance {
+        originator,
+        caused_by,
+    } = provenance;
+    match originator {
+        super::model::ProcessOriginator::Host { scope } => {
+            fingerprint.tag(1);
+            fingerprint.optional(scope.as_deref(), |identity, scope| identity.string(scope));
+        }
+        super::model::ProcessOriginator::Session { session_id } => {
+            fingerprint.tag(2);
+            fingerprint.string(session_id);
+        }
+    }
+    fingerprint.optional(caused_by.as_ref(), project_registration_causal_ref);
+    fingerprint.optional(env_ref.as_ref(), |identity, env_ref| {
+        identity.string(env_ref.as_str());
+    });
+    fingerprint.optional(wake_session_id.as_deref(), |identity, session_id| {
+        identity.string(session_id);
+    });
+
+    // Runtime lifecycle declarations never participate. They are core-owned
+    // vocabulary, not caller definition, so adding one cannot rotate a stored
+    // process fingerprint again. Prepared registrations retain only the
+    // explicit application declarations; their stable names form the
+    // reductive allowlist while growable schemas/semantics remain persisted
+    // content outside identity.
+    let core_event_names = default_process_event_types()
+        .into_iter()
+        .map(|event_type| event_type.name)
+        .collect::<HashSet<_>>();
+    let application_event_types = event_types
+        .iter()
+        .filter(|event_type| !core_event_names.contains(&event_type.name))
+        .collect::<Vec<_>>();
+    fingerprint.sequence(
+        application_event_types.iter().copied(),
+        application_event_types.len(),
+        |identity, event_type| {
+            let super::events::ProcessEventType {
+                name,
+                payload_schema: _,
+                semantics: _,
+            } = event_type;
+            identity.string(name);
+        },
+    );
+
     let mut observers = observers.to_vec();
     observers.sort();
     observers.dedup();
-    crate::stable_hash::stable_json_sha256_hex(&(registration_hash, observers))
-        .map_err(|error| PluginError::Session(error.to_string()))
+    fingerprint.sequence(observers.iter(), observers.len(), |identity, observer| {
+        identity.string(observer);
+    });
+    fingerprint.finish()
+}
+
+fn project_registration_causal_ref(
+    identity: &mut crate::stable_identity::IdentityEncoder,
+    caused_by: &crate::CausalRef,
+) {
+    match caused_by {
+        crate::CausalRef::Turn {
+            session_id,
+            turn_id,
+        } => {
+            identity.tag(1);
+            identity.string(session_id);
+            identity.string(turn_id);
+        }
+        crate::CausalRef::Effect {
+            session_id,
+            turn_id,
+            effect_id,
+        } => {
+            identity.tag(2);
+            identity.string(session_id);
+            identity.optional(turn_id.as_deref(), |identity, turn_id| {
+                identity.string(turn_id)
+            });
+            identity.string(effect_id);
+        }
+        crate::CausalRef::ToolCall {
+            session_id,
+            call_id,
+        } => {
+            identity.tag(3);
+            identity.string(session_id);
+            identity.string(call_id);
+        }
+        crate::CausalRef::Process { process_id } => {
+            identity.tag(4);
+            identity.string(process_id);
+        }
+        crate::CausalRef::ProcessEvent {
+            process_id,
+            sequence,
+        } => {
+            identity.tag(5);
+            identity.string(process_id);
+            identity.u64(*sequence);
+        }
+        crate::CausalRef::TriggerOccurrence {
+            occurrence_id,
+            subscription_id,
+            subscription_incarnation,
+            subscription_revision,
+        } => {
+            identity.tag(6);
+            identity.string(occurrence_id);
+            identity.optional(subscription_id.as_deref(), |identity, value| {
+                identity.string(value)
+            });
+            identity.optional(subscription_incarnation.as_deref(), |identity, value| {
+                identity.string(value);
+            });
+            identity.optional(
+                *subscription_revision,
+                crate::stable_identity::IdentityEncoder::u64,
+            );
+        }
+        crate::CausalRef::SessionNode {
+            session_id,
+            node_id,
+        } => {
+            identity.tag(7);
+            identity.string(session_id);
+            identity.string(node_id);
+        }
+    }
+}
+
+fn project_registration_json_value(
+    identity: &mut crate::stable_identity::IdentityEncoder,
+    value: &serde_json::Value,
+) {
+    match value {
+        serde_json::Value::Null => identity.tag(1),
+        serde_json::Value::Bool(false) => identity.tag(2),
+        serde_json::Value::Bool(true) => identity.tag(3),
+        serde_json::Value::Number(number) => {
+            if let Some(value) = number.as_i64() {
+                identity.tag(4);
+                identity.u64(value as u64);
+            } else if let Some(value) = number.as_u64() {
+                identity.tag(5);
+                identity.u64(value);
+            } else {
+                identity.tag(6);
+                identity.u64(
+                    number
+                        .as_f64()
+                        .expect("serde_json numbers are i64, u64, or finite f64")
+                        .to_bits(),
+                );
+            }
+        }
+        serde_json::Value::String(value) => {
+            identity.tag(7);
+            identity.string(value);
+        }
+        serde_json::Value::Array(values) => {
+            identity.tag(8);
+            identity.sequence(values, values.len(), project_registration_json_value);
+        }
+        serde_json::Value::Object(values) => {
+            identity.tag(9);
+            let mut entries = values.iter().collect::<Vec<_>>();
+            entries.sort_by_key(|(key, _)| *key);
+            identity.sequence(entries, values.len(), |identity, (key, value)| {
+                identity.string(key);
+                project_registration_json_value(identity, value);
+            });
+        }
+    }
+}
+
+/// Fingerprint the normalized registration definition plus its atomic initial
+/// observer set. The process id remains the independent lookup address; this
+/// separately versioned value is compared only after that lookup succeeds.
+/// Version 2 is a reject-and-recreate cutover coordinated by the Lash store
+/// schema versions. External process registries must apply the same lifecycle
+/// policy before accepting v2 fingerprints.
+///
+/// Initial observers participate in start idempotency: replaying a process id
+/// with a different visibility set is a conflicting registration.
+pub fn process_registration_fingerprint(
+    registration: &ProcessRegistration,
+    observers: &[SessionId],
+) -> String {
+    let preimage = process_registration_fingerprint_preimage(registration, observers);
+    crate::stable_identity::rendered_hash(
+        "process-registration-definition",
+        PROCESS_REGISTRATION_FAMILY_VERSION,
+        &preimage,
+    )
 }
 
 pub fn process_event_payload_hash(
@@ -707,6 +941,7 @@ pub(super) fn validate_process_registration(
 mod tests {
     use super::{
         ProcessEventAppendPlan, prepare_process_event_append, prepare_process_registration,
+        process_registration_fingerprint,
     };
     use crate::{
         AbandonRequest, ProcessEventAppendRequest, ProcessExternalRef, ProcessInput,
@@ -723,6 +958,194 @@ mod tests {
             RecoveryDisposition::ExternallyOwned,
             ProcessProvenance::host(),
         )
+    }
+
+    fn hex(bytes: &[u8]) -> String {
+        bytes.iter().map(|byte| format!("{byte:02x}")).collect()
+    }
+
+    fn registration_for_input(input: ProcessInput) -> ProcessRegistration {
+        ProcessRegistration::new(
+            "lookup-id-is-not-in-the-fingerprint",
+            input,
+            RecoveryDisposition::Rerunnable,
+            ProcessProvenance::host(),
+        )
+    }
+
+    #[test]
+    fn process_registration_identity_golden_corpus() {
+        let inputs = [
+            ProcessInput::ToolCall {
+                call: crate::PreparedToolCall::from_parts(
+                    "call",
+                    crate::ToolId::new("tool-id"),
+                    "tool",
+                    serde_json::json!({"ignored": true}),
+                    None,
+                    serde_json::Value::Null,
+                ),
+            },
+            ProcessInput::Engine {
+                kind: "engine".to_string(),
+                payload: serde_json::json!({"ignored": true}),
+            },
+            ProcessInput::SessionTurn {
+                create_request: Box::new(
+                    crate::SessionCreateRequest::root(
+                        crate::SessionStartPoint::Empty,
+                        crate::PluginOptions::default(),
+                    )
+                    .with_session_id("child"),
+                ),
+                turn_input: Box::new(crate::TurnInput::empty()),
+                output_contract: crate::ToolOutputContract::Static,
+            },
+            ProcessInput::External {
+                metadata: serde_json::json!({"ignored": true}),
+            },
+        ];
+        let causes = [
+            crate::CausalRef::Turn {
+                session_id: "s".to_string(),
+                turn_id: "t".to_string(),
+            },
+            crate::CausalRef::Effect {
+                session_id: "s".to_string(),
+                turn_id: None,
+                effect_id: "e".to_string(),
+            },
+            crate::CausalRef::ToolCall {
+                session_id: "s".to_string(),
+                call_id: "c".to_string(),
+            },
+            crate::CausalRef::Process {
+                process_id: "p".to_string(),
+            },
+            crate::CausalRef::ProcessEvent {
+                process_id: "p".to_string(),
+                sequence: 0,
+            },
+            crate::CausalRef::TriggerOccurrence {
+                occurrence_id: "o".to_string(),
+                subscription_id: Some("s".to_string()),
+                subscription_incarnation: None,
+                subscription_revision: Some(0),
+            },
+            crate::CausalRef::SessionNode {
+                session_id: "s".to_string(),
+                node_id: "n".to_string(),
+            },
+        ];
+        let mut registrations = inputs
+            .into_iter()
+            .enumerate()
+            .map(|(index, input)| {
+                let mut registration = registration_for_input(input);
+                registration.disposition = match index {
+                    0 => RecoveryDisposition::Rerunnable,
+                    1 => RecoveryDisposition::OwnerBound,
+                    _ => RecoveryDisposition::ExternallyOwned,
+                };
+                registration
+            })
+            .collect::<Vec<_>>();
+        registrations.extend(causes.into_iter().map(|cause| {
+            let mut registration = registration_for_input(ProcessInput::External {
+                metadata: serde_json::Value::Null,
+            });
+            registration.provenance.caused_by = Some(cause);
+            registration
+        }));
+        let mut enriched = registration_for_input(ProcessInput::External {
+            metadata: serde_json::Value::Null,
+        });
+        enriched.max_attempts = Some(0);
+        enriched.identity = crate::ProcessIdentity::new("kind")
+            .with_label(Some("a:b"))
+            .with_definition(Some(serde_json::json!([
+                null, false, true, -1, 0, u64::MAX, 1.5, "a:b", [], {"x": 0}
+            ])));
+        enriched.provenance.originator = crate::ProcessOriginator::session(
+            crate::SessionScope::for_agent_frame("session", "frame"),
+        );
+        enriched.env_ref = Some(crate::ProcessExecutionEnvRef::new("env"));
+        enriched.wake_session_id = Some("wake".to_string());
+        enriched.event_types = vec![crate::ProcessEventType {
+            name: "app.event".to_string(),
+            payload_schema: crate::LashSchema::any(),
+            semantics: crate::ProcessEventSemanticsSpec::default(),
+        }];
+        registrations.push(enriched);
+
+        let actual = registrations
+            .iter()
+            .map(|registration| {
+                let observers = ["ab".to_string(), "a".to_string(), "ab".to_string()];
+                (
+                    hex(&super::process_registration_fingerprint_preimage(
+                        registration,
+                        &observers,
+                    )),
+                    process_registration_fingerprint(registration, &observers),
+                )
+            })
+            .collect::<Vec<_>>();
+        let expected = [
+            (
+                "6c6173682d737461626c652d6964656e74697479010200000000000000246c6173682e70726f636573732d726567697374726174696f6e2d646566696e6974696f6e01000000000000000463616c6c0000000000000007746f6f6c2d69640000000000000004746f6f6c01000000000000000004746f6f6c010000000000000004746f6f6c0001000000000000000000000000000000000000000200000000000000016100000000000000026162",
+                "process-registration-definition:v2:sha256:6bfbff587abbddcb4388ccee70e1790b5ede7312d3afd8ce8bde504f8c215c82",
+            ),
+            (
+                "6c6173682d737461626c652d6964656e74697479010200000000000000246c6173682e70726f636573732d726567697374726174696f6e2d646566696e6974696f6e020000000000000006656e67696e6502000000000000000006656e67696e65000001000000000000000000000000000000000000000200000000000000016100000000000000026162",
+                "process-registration-definition:v2:sha256:0058fcdeb9f16e42ab5d13bb753f437584dfcd90848e568e24038d630952cff3",
+            ),
+            (
+                "6c6173682d737461626c652d6964656e74697479010200000000000000246c6173682e70726f636573732d726567697374726174696f6e2d646566696e6974696f6e030300000000000000000c73657373696f6e5f7475726e0100000000000000056368696c640001000000000000000000000000000000000000000200000000000000016100000000000000026162",
+                "process-registration-definition:v2:sha256:4f851d4fbdd01b1cfc21650e1c8fae64b2b87bb1e0fa9f121b3599a6ba8d8af3",
+            ),
+            (
+                "6c6173682d737461626c652d6964656e74697479010200000000000000246c6173682e70726f636573732d726567697374726174696f6e2d646566696e6974696f6e040300000000000000000865787465726e616c000001000000000000000000000000000000000000000200000000000000016100000000000000026162",
+                "process-registration-definition:v2:sha256:507b81461bb218093001d018e8c40da424c02e19bb1d9093f3f720a7422322d8",
+            ),
+            (
+                "6c6173682d737461626c652d6964656e74697479010200000000000000246c6173682e70726f636573732d726567697374726174696f6e2d646566696e6974696f6e040100000000000000000865787465726e616c00000100010100000000000000017300000000000000017400000000000000000000000000000000000200000000000000016100000000000000026162",
+                "process-registration-definition:v2:sha256:62887483e4cc7e733432879c2c7fda44830c5bb7aacfb04f7f5686b45abc91f0",
+            ),
+            (
+                "6c6173682d737461626c652d6964656e74697479010200000000000000246c6173682e70726f636573732d726567697374726174696f6e2d646566696e6974696f6e040100000000000000000865787465726e616c0000010001020000000000000001730000000000000000016500000000000000000000000000000000000200000000000000016100000000000000026162",
+                "process-registration-definition:v2:sha256:6d65b4cbaa86dbbc8009a943d7c0277d4ea1e61f14e7b9dd4ac3f6030143f175",
+            ),
+            (
+                "6c6173682d737461626c652d6964656e74697479010200000000000000246c6173682e70726f636573732d726567697374726174696f6e2d646566696e6974696f6e040100000000000000000865787465726e616c00000100010300000000000000017300000000000000016300000000000000000000000000000000000200000000000000016100000000000000026162",
+                "process-registration-definition:v2:sha256:6c690358615243b1415bac7f94768c7cceb11314eb8b8aabd8ff08ab35751d09",
+            ),
+            (
+                "6c6173682d737461626c652d6964656e74697479010200000000000000246c6173682e70726f636573732d726567697374726174696f6e2d646566696e6974696f6e040100000000000000000865787465726e616c00000100010400000000000000017000000000000000000000000000000000000200000000000000016100000000000000026162",
+                "process-registration-definition:v2:sha256:155ea758aef0b5a5e52b3fad007143ea243fb69df7569d527926748014c6827b",
+            ),
+            (
+                "6c6173682d737461626c652d6964656e74697479010200000000000000246c6173682e70726f636573732d726567697374726174696f6e2d646566696e6974696f6e040100000000000000000865787465726e616c000001000105000000000000000170000000000000000000000000000000000000000000000000000200000000000000016100000000000000026162",
+                "process-registration-definition:v2:sha256:47c72e46aec4fdca73d3d8f1c76612a7f7ea967f6c1ee3354a8b7898041317ae",
+            ),
+            (
+                "6c6173682d737461626c652d6964656e74697479010200000000000000246c6173682e70726f636573732d726567697374726174696f6e2d646566696e6974696f6e040100000000000000000865787465726e616c00000100010600000000000000016f010000000000000001730001000000000000000000000000000000000000000000000000000200000000000000016100000000000000026162",
+                "process-registration-definition:v2:sha256:f86b98fa11d37a7aec8621c064c89f728cc9af16928e6b9afced9b1bcd7060eb",
+            ),
+            (
+                "6c6173682d737461626c652d6964656e74697479010200000000000000246c6173682e70726f636573732d726567697374726174696f6e2d646566696e6974696f6e040100000000000000000865787465726e616c00000100010700000000000000017300000000000000016e00000000000000000000000000000000000200000000000000016100000000000000026162",
+                "process-registration-definition:v2:sha256:4d610a19025212ddf2d821e968e2db4ebc4594c4fe2178eac13d840623b664f9",
+            ),
+            (
+                "6c6173682d737461626c652d6964656e74697479010200000000000000246c6173682e70726f636573732d726567697374726174696f6e2d646566696e6974696f6e0401010000000000000000000000046b696e64010000000000000003613a620108000000000000000a01020304ffffffffffffffff04000000000000000005ffffffffffffffff063ff8000000000000070000000000000003613a6208000000000000000009000000000000000100000000000000017804000000000000000002000000000000000773657373696f6e00010000000000000003656e7601000000000000000477616b65000000000000000100000000000000096170702e6576656e74000000000000000200000000000000016100000000000000026162",
+                "process-registration-definition:v2:sha256:d06123fed71f64003836390d84bd836e6b5333121989c40db7c17cf98864655d",
+            ),
+        ];
+        assert_eq!(actual.len(), expected.len());
+        for ((preimage, key), (expected_preimage, expected_key)) in actual.iter().zip(expected) {
+            assert_eq!(preimage, expected_preimage);
+            assert_eq!(key, expected_key);
+        }
     }
 
     #[test]
@@ -777,21 +1200,21 @@ mod tests {
     }
 
     #[test]
-    fn registration_hash_matches_pre_lifecycle_base_commit() {
-        let (_, hash) =
-            prepare_process_registration(fixture_registration("registration-hash-fixture"))
-                .expect("prepare fixture registration");
+    fn lookup_id_and_core_event_vocabulary_are_outside_registration_fingerprint() {
+        let with_core_events = fixture_registration("first-lookup-id");
+        let mut without_core_events = fixture_registration("second-lookup-id");
+        without_core_events.event_types.clear();
         assert_eq!(
-            hash,
-            "57ac2c81468fdcfeb96e9cfed091fa61ad8670560a428469fd667cc808500563"
+            process_registration_fingerprint(&with_core_events, &[]),
+            process_registration_fingerprint(&without_core_events, &[])
         );
     }
 
     #[test]
     fn persisted_record_without_lifecycle_declarations_accepts_runtime_events() {
-        let (registration, registration_hash) =
-            prepare_process_registration(fixture_registration("pre-upgrade-record"))
-                .expect("prepare pre-upgrade fixture");
+        let registration = prepare_process_registration(fixture_registration("pre-upgrade-record"))
+            .expect("prepare pre-upgrade fixture");
+        let registration_fingerprint = process_registration_fingerprint(&registration, &[]);
         assert!(
             registration
                 .event_types
@@ -801,7 +1224,7 @@ mod tests {
         );
         let encoded = serde_json::to_vec(&ProcessRecord::from_prepared_registration(
             registration,
-            registration_hash,
+            registration_fingerprint,
             1,
         ))
         .expect("encode pre-upgrade row");

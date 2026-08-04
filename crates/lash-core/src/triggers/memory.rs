@@ -35,26 +35,28 @@ impl InMemoryTriggerStore {
         let mutation_receipts = state
             .mutation_receipts
             .iter()
-            .map(|(operation_id, (request_hash, result, created_at_ms))| {
-                (
-                    operation_id.clone(),
-                    request_hash.clone(),
-                    result.clone(),
-                    *created_at_ms,
-                )
-            })
+            .map(
+                |(operation_id, (request_fingerprint, result, created_at_ms))| {
+                    (
+                        operation_id.clone(),
+                        request_fingerprint.clone(),
+                        result.clone(),
+                        *created_at_ms,
+                    )
+                },
+            )
             .collect();
         let occurrences = state
             .occurrences
             .values()
             .cloned()
             .map(|occurrence| {
-                let request_hash = state
+                let request_fingerprint = state
                     .occurrence_hashes
                     .get(&occurrence.occurrence_id)
                     .cloned()
                     .unwrap_or_default();
-                (occurrence, request_hash)
+                (occurrence, request_fingerprint)
             })
             .collect();
         let deliveries = state
@@ -439,19 +441,19 @@ fn execute_in_memory_trigger_command(
     now: u64,
 ) -> Result<TriggerEffectResult, PluginError> {
     let is_mutation = command.is_mutation();
-    let request_hash = trigger_command_hash(&command)?;
+    let request_fingerprint = trigger_command_fingerprint(&command);
     let receipt_id = trigger_operation_receipt_id(command.owner_scope(), operation_id)?;
     if is_mutation
         && let Some((existing_hash, existing_result, _)) = state.mutation_receipts.get(&receipt_id)
     {
-        if existing_hash == &request_hash {
+        if existing_hash == &request_fingerprint {
             return Ok(existing_result.clone());
         }
         return Ok(Err(TriggerOperationError::Conflict {
             subscription_key: command.subscription_key().unwrap_or_default().to_string(),
             existing_revision: None,
-            existing_definition_hash: Some(existing_hash.clone()),
-            requested_definition_hash: Some(request_hash),
+            existing_definition_fingerprint: Some(existing_hash.clone()),
+            requested_definition_fingerprint: Some(request_fingerprint),
             reason: format!("operation id `{operation_id}` was reused with different content"),
         }));
     }
@@ -460,7 +462,7 @@ fn execute_in_memory_trigger_command(
     if is_mutation {
         state
             .mutation_receipts
-            .insert(receipt_id, (request_hash, result.clone(), now));
+            .insert(receipt_id, (request_fingerprint, result.clone(), now));
     }
     Ok(result)
 }
@@ -512,10 +514,11 @@ pub(super) fn apply_in_memory_trigger_command(
             let subscription_id =
                 deterministic_subscription_id(&owner_scope, &draft.subscription_key)
                     .map_err(TriggerOperationError::from)?;
-            let definition_hash = trigger_subscription_definition_hash(&owner_scope, &draft)
-                .map_err(TriggerOperationError::from)?;
+            let definition_fingerprint =
+                trigger_subscription_definition_fingerprint(&owner_scope, &draft);
             if let Some(existing) = state.subscriptions.get(&subscription_id).cloned() {
-                if !existing.tombstoned && existing.definition_hash == definition_hash {
+                if !existing.tombstoned && existing.definition_fingerprint == definition_fingerprint
+                {
                     return Ok(TriggerCommandOutcome::Mutation {
                         receipt: Box::new(TriggerMutationReceipt::from_record(
                             existing,
@@ -526,7 +529,7 @@ pub(super) fn apply_in_memory_trigger_command(
                 return Err(subscription_conflict(
                     &draft.subscription_key,
                     Some(&existing),
-                    Some(definition_hash),
+                    Some(definition_fingerprint),
                     if existing.tombstoned {
                         "subscription is tombstoned; use revive"
                     } else {
@@ -541,7 +544,7 @@ pub(super) fn apply_in_memory_trigger_command(
                 subscription_id.clone(),
                 uuid::Uuid::new_v4().to_string(),
                 1,
-                definition_hash,
+                definition_fingerprint,
                 true,
                 now,
                 now,
@@ -565,8 +568,7 @@ pub(super) fn apply_in_memory_trigger_command(
             draft.validate().map_err(TriggerOperationError::from)?;
             let subscription_id = deterministic_subscription_id(&owner_scope, &subscription_key)
                 .map_err(TriggerOperationError::from)?;
-            let requested_hash = trigger_subscription_definition_hash(&owner_scope, &draft)
-                .map_err(TriggerOperationError::from)?;
+            let requested_hash = trigger_subscription_definition_fingerprint(&owner_scope, &draft);
             let Some(existing) = state.subscriptions.get(&subscription_id).cloned() else {
                 return Err(subscription_conflict(
                     &subscription_key,
@@ -665,8 +667,7 @@ pub(super) fn apply_in_memory_trigger_command(
             draft.validate().map_err(TriggerOperationError::from)?;
             let subscription_id = deterministic_subscription_id(&owner_scope, &subscription_key)
                 .map_err(TriggerOperationError::from)?;
-            let requested_hash = trigger_subscription_definition_hash(&owner_scope, &draft)
-                .map_err(TriggerOperationError::from)?;
+            let requested_hash = trigger_subscription_definition_fingerprint(&owner_scope, &draft);
             let Some(existing) = state.subscriptions.get(&subscription_id).cloned() else {
                 return Err(subscription_conflict(
                     &subscription_key,

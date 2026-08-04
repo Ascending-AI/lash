@@ -827,7 +827,10 @@ async fn registration_and_observers_are_atomic(registry: Arc<dyn ProcessRegistry
         )
         .await
         .expect("replay registration");
-    assert_eq!(record.registration_hash, replay.registration_hash);
+    assert_eq!(
+        record.registration_fingerprint,
+        replay.registration_fingerprint
+    );
     assert!(
         registry
             .register_process_with_observers(

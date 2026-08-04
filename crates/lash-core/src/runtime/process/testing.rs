@@ -26,6 +26,7 @@ use super::validation::{
 };
 
 mod continuation;
+mod identity;
 mod raw_state;
 mod support;
 pub use support::TestProcessRegistryWriteExt;
@@ -111,29 +112,27 @@ impl TestLocalProcessRegistry {
         registration: ProcessRegistration,
         observers: &[SessionId],
     ) -> Result<ProcessRecord, PluginError> {
-        let (registration, base_registration_hash) = prepare_process_registration(registration)?;
-        let registration_hash = crate::runtime::process_registration_with_observers_hash(
-            base_registration_hash,
-            observers,
-        )?;
+        let registration = prepare_process_registration(registration)?;
+        let registration_fingerprint =
+            crate::runtime::process_registration_fingerprint(&registration, observers);
         let mut observer_set = observers.to_vec();
         observer_set.sort();
         observer_set.dedup();
         let mut managed = self.managed.lock().await;
         if let Some(existing) = managed.get(&registration.id) {
-            if existing.record.registration_hash == registration_hash {
+            if existing.record.registration_fingerprint == registration_fingerprint {
                 return Ok(existing.record.clone());
             }
             return Err(PluginError::Session(format!(
-                "process `{}` registration hash conflict: existing {}, new {}",
-                registration.id, existing.record.registration_hash, registration_hash
+                "process `{}` registration fingerprint conflict: existing {}, new {}",
+                registration.id, existing.record.registration_fingerprint, registration_fingerprint
             )));
         }
         let id = registration.id.clone();
         let wake_session_id = registration.wake_session_id.clone();
         let record = ProcessRecord::from_prepared_registration(
             registration,
-            registration_hash,
+            registration_fingerprint,
             self.clock.timestamp_ms(),
         );
         let change_seq = self.next_change_seq().await;

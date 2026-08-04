@@ -1,4 +1,5 @@
 use super::*;
+use std::collections::BTreeMap;
 
 /// Runtime-backed direct completion source.
 ///
@@ -9,6 +10,7 @@ struct RuntimeDirectSource<'run> {
     manager: Arc<RuntimeSessionServices>,
     effect_controller: crate::runtime::RuntimeEffectControllerHandle<'run>,
     turn_id: Option<String>,
+    replay_ordinals: Arc<std::sync::Mutex<BTreeMap<String, u64>>>,
 }
 
 #[cfg(any(test, feature = "testing"))]
@@ -48,6 +50,7 @@ impl<'run> DirectCompletionClient<'run> {
                 manager,
                 effect_controller,
                 turn_id,
+                replay_ordinals: Arc::new(std::sync::Mutex::new(BTreeMap::new())),
             }),
         }
     }
@@ -59,6 +62,7 @@ impl<'run> DirectCompletionClient<'run> {
                     manager: Arc::clone(&source.manager),
                     effect_controller: source.effect_controller.to_static()?,
                     turn_id: source.turn_id.clone(),
+                    replay_ordinals: Arc::clone(&source.replay_ordinals),
                 })
             }
             #[cfg(any(test, feature = "testing"))]
@@ -183,6 +187,7 @@ impl<'run> RuntimeDirectSource<'run> {
             effect_controller: self.effect_controller.controller(),
             turn_id: self.turn_id.as_deref(),
             position,
+            replay_ordinals: self.replay_ordinals.as_ref(),
         }
     }
 }
@@ -193,6 +198,26 @@ pub(in crate::runtime::session_manager) struct DirectInvocationContext<'a> {
     effect_controller: &'a dyn crate::RuntimeEffectController,
     turn_id: Option<&'a str>,
     position: DirectExecutionPosition,
+    replay_ordinals: &'a std::sync::Mutex<BTreeMap<String, u64>>,
+}
+
+impl DirectInvocationContext<'_> {
+    fn next_replay_ordinal(
+        &self,
+        caused_by: Option<&crate::CausalRef>,
+    ) -> Result<u64, crate::PluginError> {
+        let lane = caused_by
+            .map(crate::runtime::causal::causal_replay_discriminator)
+            .unwrap_or_else(|| "independent".to_string());
+        let mut ordinals = self.replay_ordinals.lock().map_err(|_| {
+            crate::PluginError::Session("direct replay ordinal lock poisoned".to_string())
+        })?;
+        let ordinal = ordinals.entry(lane).or_default();
+        *ordinal = ordinal.checked_add(1).ok_or_else(|| {
+            crate::PluginError::Session("direct replay ordinal exhausted".to_string())
+        })?;
+        Ok(*ordinal)
+    }
 }
 
 struct DirectEffectPlan {
@@ -239,8 +264,13 @@ impl DirectCompletionCapability {
             current.host.core.durability.attachment_store.as_ref(),
         )
         .await?;
+        let ordinal = if replay.is_some_and(|replay| !replay.key.is_empty()) {
+            0
+        } else {
+            context.next_replay_ordinal(caused_by)?
+        };
         let discriminator =
-            crate::runtime::causal::direct_request_discriminator(&request_spec, replay, caused_by)?;
+            crate::runtime::causal::direct_request_discriminator(replay, caused_by, ordinal);
         let invocation = crate::runtime::causal::direct_effect_invocation(
             &current.session_id,
             &usage_source,

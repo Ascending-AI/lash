@@ -401,7 +401,7 @@ pub struct RemoteTriggerSubscriptionRecord {
     pub subscription_key: String,
     pub incarnation: String,
     pub revision: u64,
-    pub definition_hash: String,
+    pub definition_fingerprint: String,
     pub registrant: RemoteProcessOriginator,
     pub env_ref: RemoteProcessExecutionEnvRef,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -437,7 +437,11 @@ impl RemoteTriggerSubscriptionRecord {
         require_non_empty(type_name, "subscription_id", &self.subscription_id)?;
         require_non_empty(type_name, "subscription_key", &self.subscription_key)?;
         require_non_empty(type_name, "incarnation", &self.incarnation)?;
-        require_non_empty(type_name, "definition_hash", &self.definition_hash)?;
+        require_non_empty(
+            type_name,
+            "definition_fingerprint",
+            &self.definition_fingerprint,
+        )?;
         self.registrant.validate(type_name)?;
         self.env_ref.validate(type_name)?;
         if let Some(wake_target) = &self.wake_target {

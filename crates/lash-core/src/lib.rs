@@ -24,6 +24,7 @@ pub mod session;
 pub mod session_graph;
 pub mod session_model;
 mod stable_hash;
+mod stable_identity;
 pub mod store;
 pub mod task;
 #[cfg(test)]
@@ -302,7 +303,7 @@ pub mod facade_support {
     pub use crate::triggers::evaluate_trigger_mutation;
     pub use crate::triggers::evaluate_trigger_prune;
     pub use crate::triggers::sort_trigger_delivery_reservations;
-    pub use crate::triggers::trigger_command_hash;
+    pub use crate::triggers::trigger_command_fingerprint;
     pub use crate::triggers::trigger_occurrence_request_hash;
     pub use crate::triggers::trigger_operation_receipt_id;
     pub use crate::triggers::validate_trigger_occurrence_request;
@@ -795,7 +796,7 @@ pub(crate) use runtime::{
     RuntimeReplay, RuntimeSubject, load_process_execution_env, materialize_process_event_semantics,
     persist_process_execution_env, prepare_process_event_append, prepare_process_registration,
     prepare_process_start, process_event_invocation, process_event_payload_hash,
-    process_registration_with_observers_hash, process_wake_batch_draft,
+    process_registration_fingerprint, process_wake_batch_draft,
     process_wake_batch_draft_with_policy, process_wake_input_from_event_payload,
     process_wake_turn_cause, process_wake_turn_text, require_event_replay,
 };

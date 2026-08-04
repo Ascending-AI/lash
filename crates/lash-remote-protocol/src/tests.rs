@@ -808,7 +808,7 @@ fn remote_trigger_subscription_dtos_json_round_trip() {
         subscription_key: draft.subscription_key.clone(),
         incarnation: "incarnation-a".to_string(),
         revision: 1,
-        definition_hash: "definition-hash-a".to_string(),
+        definition_fingerprint: "definition-hash-a".to_string(),
         registrant: RemoteProcessOriginator::Session {
             session_id: "session".to_string(),
         },

@@ -1297,7 +1297,7 @@ fn trigger_subscription_record() -> lash_core::TriggerSubscriptionRecord {
         subscription_key: draft.subscription_key,
         incarnation: "incarnation-a".to_string(),
         revision: 1,
-        definition_hash: "definition-hash-a".to_string(),
+        definition_fingerprint: "definition-hash-a".to_string(),
         registrant: lash_core::ProcessOriginator::session(lash_core::SessionScope::new(
             "session-a",
         )),

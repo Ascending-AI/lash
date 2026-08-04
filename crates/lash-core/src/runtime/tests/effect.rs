@@ -1816,7 +1816,7 @@ async fn direct_completion_crosses_controller_and_records_usage_and_trace() {
         record.kind == RuntimeEffectKind::Direct
             && record
                 .replay_key
-                .contains("cause:tool_call:root:originating-tool-call")
+                .contains("cause:3:4:root:21:originating-tool-call:ordinal:1")
     }));
     let ledger = runtime.shared_token_ledger.lock().expect("token ledger");
     assert_eq!(ledger.len(), 1);
