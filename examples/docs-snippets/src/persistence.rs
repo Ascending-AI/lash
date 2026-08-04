@@ -197,6 +197,65 @@ async fn shared_factory(
     Ok(())
 }
 
+fn retry_reenable_later(_conflict: lash::triggers::TriggerOperationError) -> anyhow::Result<()> {
+    Ok(())
+}
+
+async fn trigger_reenable(
+    store: &dyn lash::triggers::TriggerStore,
+    owner_scope: lash::triggers::TriggerOwnerScope,
+    actor: lash::process::ProcessOriginator,
+    subscription_key: &str,
+) -> anyhow::Result<()> {
+    // docs:start:trigger-reenable
+    use lash::triggers::{TriggerCommand, TriggerCommandOutcome, TriggerSubscriptionFilter};
+
+    // Read the live revision through the command surface, not with SQL.
+    let TriggerCommandOutcome::List { records } = store
+        .execute_command(
+            "reenable-read",
+            TriggerCommand::List {
+                owner_scope: owner_scope.clone(),
+                filter: TriggerSubscriptionFilter {
+                    subscription_key: Some(subscription_key.to_string()),
+                    ..TriggerSubscriptionFilter::default()
+                },
+            },
+        )
+        .await??
+    else {
+        unreachable!("List returns list records")
+    };
+    let Some(record) = records.first() else {
+        anyhow::bail!("no live subscription for `{subscription_key}`");
+    };
+
+    // Enable is fenced on the revision just read, and the operation id makes the
+    // retry idempotent.
+    let outcome = store
+        .execute_command(
+            &format!("reenable:{subscription_key}:{}", record.revision),
+            TriggerCommand::Enable {
+                owner_scope,
+                actor,
+                subscription_key: subscription_key.to_string(),
+                expected_revision: record.revision,
+            },
+        )
+        .await?;
+    match outcome {
+        Ok(TriggerCommandOutcome::Mutation { receipt }) => {
+            assert!(receipt.enabled);
+        }
+        Ok(_) => unreachable!("Enable returns one mutation receipt"),
+        // A concurrent writer moved the row first: re-read and retry. Never
+        // patch the row by hand.
+        Err(conflict) => retry_reenable_later(conflict)?,
+    }
+    // docs:end:trigger-reenable
+    Ok(())
+}
+
 fn adaptive_reasoning_capability() -> lash::provider::ModelCapability {
     lash::provider::ModelCapability {
         reasoning: Some(lash::provider::ReasoningCapability {

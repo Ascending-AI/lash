@@ -106,23 +106,36 @@ pub mod observe {
 /// Triggers and subscriptions: declaring event sources, emitting occurrences,
 /// and inspecting trigger subscriptions. Entry points:
 /// [`LashCore::triggers`] and [`LashSession::triggers`].
+///
+/// Reads have a facade: [`CoreTriggerAdmin::subscriptions`](crate::admin::CoreTriggerAdmin::subscriptions)
+/// and [`SessionTriggerAdmin`] project registrations for host and session
+/// scopes. Mutations go through the store contract below:
+/// [`TriggerCommand`](crate::triggers::TriggerCommand) executed by
+/// [`TriggerStore::execute_command`](crate::triggers::TriggerStore::execute_command),
+/// the only supported way to change a subscription. The tables a durable store
+/// keeps (`lash_*` in the first-party SQL backends) are private to lash; raw SQL
+/// against them is unsupported for reads and writes alike.
 pub mod triggers {
     /// Process-free [`TriggerStore`] for tests and single-process hosts, matching
     /// the in-memory backends [`persistence`](crate::persistence) and
     /// [`observe`](crate::observe) offer for their own store contracts.
     pub use lash_core::facade_support::InMemoryTriggerStore;
     pub use lash_core::{
-        LashSchema, TriggerCommand, TriggerCommandOutcome, TriggerDeliveryReservation,
+        LashSchema, TriggerCommandOutcome, TriggerDeliveryReservation,
         TriggerDeliveryReservationStatus, TriggerDeliveryRetentionCandidate, TriggerEffectResult,
         TriggerIngressResult, TriggerInputBinding, TriggerMutationDisposition,
         TriggerMutationReceipt, TriggerOccurrenceFilter, TriggerOccurrenceRecord,
-        TriggerOccurrenceRequest, TriggerOperationError, TriggerOwnerScope, TriggerStore,
+        TriggerOccurrenceRequest, TriggerOperationError, TriggerOwnerScope,
         TriggerSubscriptionDraft, TriggerSubscriptionFilter, TriggerSubscriptionRecord,
         facade_support::TriggerDeliveryEmitOutcome, facade_support::TriggerDeliveryEmitReport,
         facade_support::TriggerEmitReport, facade_support::TriggerEvent,
         facade_support::TriggerEventType, facade_support::TriggerRegistration,
         facade_support::TriggerTargetSummary, facade_support::empty_trigger_source_key,
     };
+    /// The fenced, receipted verb vocabulary for subscription mutation,
+    /// including [`TriggerCommand::Enable`] for re-enable, executed by
+    /// [`TriggerStore::execute_command`] on the host's trigger store.
+    pub use lash_core::{TriggerCommand, TriggerStore};
 }
 
 pub mod tools {

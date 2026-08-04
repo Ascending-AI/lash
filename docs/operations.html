@@ -138,6 +138,35 @@ let session = core
       <p><strong>Backups.</strong> lash ships no backup or restore tooling, and the procedure above never needs one. If your own prudence says snapshot before a destructive step, snapshot the consistency unit as a unit: the Postgres store, the effect journal, and the S3-compatible blob store holding attachment bytes are one unit, not three. Restoring any one of them alone yields mixed-vintage state: a journal referencing sessions that no longer exist, or effects replaying against recreated rows. Restoring is host territory and untested by lash, so treat a snapshot as forensic material and a fix-forward aid, never as a rollback plan.</p>
     </div>
 
+    <div class="section" id="host-sql-cutover">
+      <div class="section-header">
+        <h2>Retiring Host SQL</h2>
+        <p>A host that reached into <code>lash_*</code> tables to work around a missing API must move to the typed command surface at this bump. Those queries are broken by design.</p>
+      </div>
+      <aside class="gotcha">
+        <strong>Fix it, do not re-point it</strong>
+        <p>The trigger subscription table changed shape, so old queries fail loudly on a lookup column that no longer exists, or on record JSON that no longer deserializes. Patching them to the new columns is worse, not better: a raw <code>UPDATE</code> writes outside the revision fence and the operation receipt, corrupting the subscription state machine silently instead. Replace the query with the command.</p>
+      </aside>
+      <p>Every trigger operation a host previously hand-wrote has a fenced, receipted replacement. All of them run through <code>TriggerStore::execute_command(operation_id, command)</code> on the trigger store the host installed, and every point mutation takes an <code>expected_revision</code> read from a <code>List</code> record or an earlier receipt.</p>
+      <div class="table">
+        <table>
+          <thead><tr><th>Hand-written operation</th><th>Replacement</th></tr></thead>
+          <tbody>
+            <tr><td>Look up a subscription by a lookup column (a handle, name, or source)</td><td><code>TriggerCommand::List</code> with a <code>TriggerSubscriptionFilter</code>: <code>subscription_key</code>, <code>name</code>, <code>source_type</code>, <code>source_key</code>, <code>enabled</code>. Owner-scoped, tombstone-free, never receipted.</td></tr>
+            <tr><td><code>SET enabled = true</code>, including re-enable after a disable</td><td><code>TriggerCommand::Enable</code> with <code>expected_revision</code>.</td></tr>
+            <tr><td><code>SET enabled = false</code></td><td><code>TriggerCommand::Disable</code> with <code>expected_revision</code>. Already-reserved deliveries are preserved.</td></tr>
+            <tr><td>Rewrite the stored definition JSON</td><td><code>TriggerCommand::Update</code> with the full replacement draft and <code>expected_revision</code>.</td></tr>
+            <tr><td><code>INSERT</code> a subscription row</td><td><code>TriggerCommand::Register</code>. An identical definition is idempotent; a changed one conflicts rather than upserting.</td></tr>
+            <tr><td><code>DELETE</code> a subscription row</td><td><code>TriggerCommand::Delete</code> with <code>expected_revision</code> (tombstone, delivery history preserved), then <code>TriggerCommand::Revive</code> to bring the key back.</td></tr>
+            <tr><td><code>DELETE</code> a batch of the caller's own rows</td><td><code>TriggerCommand::Prune</code> with the key list, in one journaled operation.</td></tr>
+            <tr><td><code>SELECT</code> for a dashboard or reconciliation pass</td><td><code>TriggerStore::list_subscriptions</code>, or <code>core.triggers().subscriptions(filter)</code> for the projected registration view.</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p>Two migration notes carry over from the fence. Bulk enable or disable is a loop of per-key fenced commands, not one blanket statement, and each command's <code>operation_id</code> should be derived from the intent so a retried pass replays its receipts instead of re-evaluating against moved rows. A conflict is an ordinary outcome, not a backend failure: re-read the record and retry.</p>
+      <p>The standing policy behind the cutover, and the supported read alternative for every other <code>lash_*</code> table, is under <a href="./persistence.html#private-tables">private tables</a>.</p>
+    </div>
+
     <div class="section" id="lease-timings">
       <div class="section-header">
         <h2>Lease Timings</h2>
