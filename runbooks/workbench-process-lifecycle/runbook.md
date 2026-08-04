@@ -118,6 +118,45 @@ Press **cancel** on `FIG425_cancellable_<runid>` and capture the response as
 require that the forbidden finish marker is absent. Screenshot
 `03-orphan-cancelled.png`.
 
+## Phase 3b — Cancel a background session turn and keep working (FIG-884)
+
+Cancelling a *background session turn* — a subagent process, whose input is a session turn
+rather than a Lashlang definition — used to wedge the session that started it: the child
+turn's registration was only removed after the child await, so a cancelled process left a
+permanent "running turn" behind. The session then refused to close the child and rejected
+every later turn on it. This phase proves the registration is released by cancellation.
+
+Do:
+
+1. In the current session, ask the agent to start a **subagent** that keeps working for
+   several minutes (a long-running research/loop prompt), and let it reach a non-terminal
+   card in the work rail. Capture its process id as `03b-subagent-running.json` and
+   screenshot `03b-subagent-running.png`.
+2. Press **cancel** on that subagent card. Require `accepted: true` for that exact
+   process id and poll until the card is terminal/cancelled with `process.cancel_requested`
+   in its event tail (`03b-subagent-cancel-receipt.json`).
+3. Without resetting the session, send a normal follow-up turn in the same session and
+   start a **second** subagent.
+
+Expect:
+
+- the follow-up turn completes and renders its answer — a wedged parent manager would
+  fail or hang instead;
+- the second subagent reaches a non-terminal card and then a terminal state, proving the
+  parent's managed-turn registry admitted new child work after the cancellation;
+- no orphaned child-session rows accumulate in `<data-dir>/lash-sessions/` for the
+  cancelled subagent's child session (the parent must have been able to close it);
+- the trace contains `managed_turn.admission` with `outcome=admitted` for the second
+  subagent and `managed_turn.release` with `outcome=released, reason=dropped` for the
+  cancelled one. A `managed_turn.admission` with `outcome=denied` and reason
+  "already has a running turn" after the cancellation is the exact FIG-884 regression.
+
+Known residual (FIG-872, out of scope here): the cancelled subagent's **own child
+session** cannot run further turns — the dropped turn future also loses that child
+runtime's session loan. The gate above therefore uses a *new* subagent, not a second turn
+on the cancelled child. Screenshot the follow-up answer and the second subagent's terminal
+card as `03b-session-still-usable.png`.
+
 ## Phase 4 — Let the survivor complete
 
 Without opening or recreating the deleted session, poll until `FIG425_survivor_<runid>`
@@ -138,6 +177,7 @@ container are gone.
 | Owner deleted | new rendered/API session id; old store/observer rows gone | | `02-owner-gone-processes-live.png`, `02-after-delete-*.json` |
 | Runtime independence | both original ids remain live in rail and `/api/work` after delete | | `02-owner-gone-processes-live.png`, API/trace report |
 | Global cancel | exact id accepted; `cancel_requested` then cancelled | | `03-orphan-cancelled.png`, `03-cancel-receipt.json`, store events |
+| Session survives a cancelled background session turn (FIG-884) | after cancelling a subagent, a follow-up turn answers and a second subagent runs; `managed_turn.release` released, no `already has a running turn` denial | | `03b-subagent-running.png`, `03b-subagent-cancel-receipt.json`, `03b-session-still-usable.png`, trace |
 | Survivor completion | completed terminal and finish marker persist after owner deletion | | `04-survivor-completed.png`, `04-terminal-*.json` |
 | No break-glass substitution | no Restate Admin cancel/kill used | | command log |
 
