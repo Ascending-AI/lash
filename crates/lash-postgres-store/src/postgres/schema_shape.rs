@@ -8,29 +8,44 @@
 //! per-object diff instead of failing at the first query — or, worse, silently
 //! dropping a guard the durability semantics depend on.
 //!
+//! # One installation, not an assembly
+//!
+//! Every object is looked up in a single namespace — the one where
+//! `lash_schema_versions` resolves through the connection's `search_path` — and
+//! every expected object must be present *there*. Resolving each table
+//! independently would let two partial installations on one `search_path` verify
+//! as conformant while runtime writes split across them, so a lash-named relation
+//! that `search_path` resolves outside the anchored namespace is a reported
+//! finding rather than something silently used.
+//!
 //! # Scope
 //!
 //! Per lash-owned table, keyed by name and insensitive to declaration order:
 //!
-//! - the table's presence;
-//! - every column as (name, type, nullability, has-auto-generated-value);
+//! - the table's presence in the anchored namespace;
+//! - every column as (name, type, nullability, value source) — where the value
+//!   source classifies whether the column supplies its own value and whether it
+//!   accepts an explicit one, which is what lash's inserts actually depend on;
 //! - primary keys, unique constraints, and bare unique indexes — all read from
-//!   `pg_index.indisunique`, including normalized partial predicates, because
-//!   the exactly-once dedup guard `idx_lash_process_events_key` is a partial
-//!   unique *index* with no `pg_constraint` row;
+//!   `pg_index.indisunique`, including normalized partial predicates and
+//!   `NULLS NOT DISTINCT`, because the exactly-once dedup guard
+//!   `idx_lash_process_events_key` is a partial unique *index* with no
+//!   `pg_constraint` row;
 //! - foreign keys with their on-delete action.
 //!
-//! Deliberately out of scope: `CHECK` constraints, non-unique indexes,
-//! constraint and index names, column ordinal positions, default expression
-//! text, and `NULLS NOT DISTINCT` (absent from `pg_index` before PostgreSQL 15).
-//! Every attribute that remains renders identically on PostgreSQL 14 through
-//! 18, which the version matrix in CI asserts.
+//! Deliberately out of scope: `CHECK` constraints, non-unique indexes, triggers,
+//! row-level security, constraint and index names, column ordinal positions, and
+//! default expression text. Every attribute that remains renders identically on
+//! PostgreSQL 14 through 18, which the version matrix in CI asserts —
+//! `indnullsnotdistinct` is read through `to_jsonb`, which yields `NULL` on 14
+//! where the catalog column does not yet exist and is normalized to `false`.
 //!
 //! Host additions outside lash's tables are invisible to the check: only the
 //! tables named by the artifact are introspected. Additions *on* a lash table —
 //! an extra column, an extra unique guard, an extra foreign key — are reported,
-//! because lash owns those tables by contract and each of them can break its
-//! writes.
+//! because lash owns those tables by contract and each of them can reject writes
+//! lash considers valid. Host-added triggers, `CHECK` constraints, and row-level
+//! security are *not* read and are the host's own risk; see ADR 0052.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
@@ -46,6 +61,12 @@ const SHAPE_ARTIFACT: &str = include_str!("../../schema-shape.txt");
 /// Seed rows `schema.sql` inserts, paired with what each one is for. They are a
 /// data precondition no structural comparison can see. The component version
 /// stamp is seeded the same way but reported as a version mismatch instead.
+///
+/// Each is a singleton row keyed `singleton = TRUE`, and the check queries that
+/// key rather than table non-emptiness: `CHECK (singleton)` is deliberately
+/// outside the verified scope, so a host port that omits it can hold a
+/// `singleton = FALSE` row that satisfies "the table has rows" and then fails
+/// every runtime read.
 const SEED_ROWS: [(&str, &str); 2] = [
     (
         "lash_process_change_clock",
@@ -53,6 +74,13 @@ const SEED_ROWS: [(&str, &str); 2] = [
     ),
     ("lash_await_event_meta", "await-event signing secret"),
 ];
+
+/// Required width of the store-resident await-event signing secret.
+pub(crate) const AWAIT_EVENT_SIGNING_SECRET_BYTES: usize = 32;
+
+/// The namespace-anchoring table. Its resolution through `search_path` decides
+/// which installation every other object is read from.
+const ANCHOR_TABLE: &str = "lash_schema_versions";
 
 /// What a [`crate::PostgresStorage`] does when the live schema does not match
 /// the shape this build expects.
@@ -149,6 +177,88 @@ impl fmt::Display for ForeignKeyAction {
     }
 }
 
+/// Where a column's value comes from, classified by what it means for a write.
+///
+/// lash omits some columns from its inserts and names others explicitly, so the
+/// two properties that matter are whether the column supplies its own value and
+/// whether it accepts one. A single "has an auto-generated value" bit conflates
+/// states that differ on the second property: `GENERATED ALWAYS AS IDENTITY` and
+/// a stored generated column both supply a value and both *reject* an explicit
+/// one, which breaks every insert that names the column.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[non_exhaustive]
+pub enum ColumnValueSource {
+    /// No default and no generation: a write must supply the value.
+    Supplied,
+    /// An ordinary column default, including the `nextval` default `BIGSERIAL`
+    /// installs. Omitting or naming the column both work. No default
+    /// *expression* is ever compared.
+    Default,
+    /// `GENERATED BY DEFAULT AS IDENTITY`. Write-equivalent to
+    /// [`ColumnValueSource::Default`] for lash: omitting or naming the column
+    /// both work.
+    IdentityByDefault,
+    /// `GENERATED ALWAYS AS IDENTITY`. Supplies a value but rejects an explicit
+    /// one without `OVERRIDING SYSTEM VALUE`.
+    IdentityAlways,
+    /// A generated column — stored (`attgenerated = 's'`) or, from PostgreSQL 18,
+    /// virtual. Supplies a value and rejects any explicit one outright.
+    Generated,
+}
+
+impl ColumnValueSource {
+    /// Whether an insert may omit the column and still get a value.
+    fn supplies_own_value(self) -> bool {
+        !matches!(self, Self::Supplied)
+    }
+
+    /// Whether an insert may name the column and supply a value for it.
+    fn accepts_explicit_value(self) -> bool {
+        matches!(
+            self,
+            Self::Supplied | Self::Default | Self::IdentityByDefault
+        )
+    }
+
+    /// Classifies from the catalog. `attgenerated` is tested before
+    /// `attidentity` and `atthasdef` because a generated column carries a
+    /// `pg_attrdef` row too, so the coarser signals would mask it.
+    fn from_catalog(identity: &str, generated: &str, has_default: bool) -> Self {
+        if !generated.is_empty() {
+            return Self::Generated;
+        }
+        match identity {
+            "a" => Self::IdentityAlways,
+            "d" => Self::IdentityByDefault,
+            _ if has_default => Self::Default,
+            _ => Self::Supplied,
+        }
+    }
+
+    /// Token used in the artifact and in diffs. [`ColumnValueSource::Supplied`]
+    /// renders as nothing, since it is the common case.
+    fn as_token(self) -> Option<&'static str> {
+        Some(match self {
+            Self::Supplied => return None,
+            Self::Default => "default",
+            Self::IdentityByDefault => "identity-by-default",
+            Self::IdentityAlways => "identity-always",
+            Self::Generated => "generated",
+        })
+    }
+
+    /// Parses the token produced by [`ColumnValueSource::as_token`].
+    fn parse(token: &str) -> Option<Self> {
+        Some(match token {
+            "default" => Self::Default,
+            "identity-by-default" => Self::IdentityByDefault,
+            "identity-always" => Self::IdentityAlways,
+            "generated" => Self::Generated,
+            _ => return None,
+        })
+    }
+}
+
 /// One column of a lash-owned table, restricted to the attributes that render
 /// identically on every supported PostgreSQL major.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -159,11 +269,27 @@ pub struct ColumnShape {
     pub sql_type: String,
     /// Whether the column accepts `NULL`.
     pub nullable: bool,
-    /// Whether the column supplies its own value when an insert omits it —
-    /// either an identity column or any column default. `BIGSERIAL` and
-    /// `GENERATED ... AS IDENTITY` are deliberately equivalent here, and no
-    /// default *expression* is ever compared.
-    pub auto_generated: bool,
+    /// Where the column's value comes from.
+    pub value_source: ColumnValueSource,
+}
+
+impl ColumnShape {
+    /// Whether a column can stand in for one this build expects.
+    ///
+    /// Type and nullability must match exactly. The value source only has to be
+    /// *write-compatible*: it must keep every capability the expected column has,
+    /// so a host may modernize `BIGSERIAL` into `GENERATED BY DEFAULT AS IDENTITY`
+    /// (same capabilities) but not into `GENERATED ALWAYS AS IDENTITY`, which
+    /// rejects the explicit values lash supplies for `enqueue_seq`.
+    fn satisfies(&self, expected: &Self) -> bool {
+        self.name == expected.name
+            && self.sql_type == expected.sql_type
+            && self.nullable == expected.nullable
+            && (!expected.value_source.supplies_own_value()
+                || self.value_source.supplies_own_value())
+            && (!expected.value_source.accepts_explicit_value()
+                || self.value_source.accepts_explicit_value())
+    }
 }
 
 impl fmt::Display for ColumnShape {
@@ -178,8 +304,8 @@ impl fmt::Display for ColumnShape {
                 "not-null"
             }
         )?;
-        if self.auto_generated {
-            formatter.write_str(" auto-generated")?;
+        if let Some(token) = self.value_source.as_token() {
+            write!(formatter, " {token}")?;
         }
         Ok(())
     }
@@ -200,6 +326,17 @@ pub struct UniqueGuard {
     /// only free-text element in the whole comparison; it is lower-cased with
     /// collapsed whitespace and outer parentheses stripped.
     pub predicate: Option<String>,
+    /// Whether the guard treats `NULL`s as equal (`UNIQUE NULLS NOT DISTINCT`,
+    /// PostgreSQL 15+).
+    ///
+    /// lash's own guards never set it, and two of them —
+    /// `UNIQUE (session_id, source_key)` on `lash_queued_work_batches` and on
+    /// `lash_pending_turn_inputs` — depend on the default: `source_key` is
+    /// nullable and lash writes `NULL` for every batch or input without a source
+    /// key, so under `NULLS NOT DISTINCT` only one such row per session would be
+    /// permitted. Read as `false` on PostgreSQL 14, where the catalog column does
+    /// not exist and the feature does not either.
+    pub nulls_not_distinct: bool,
 }
 
 impl fmt::Display for UniqueGuard {
@@ -214,6 +351,9 @@ impl fmt::Display for UniqueGuard {
             },
             self.columns.join(", ")
         )?;
+        if self.nulls_not_distinct {
+            formatter.write_str(" nulls not distinct")?;
+        }
         if let Some(predicate) = &self.predicate {
             write!(formatter, " where {predicate}")?;
         }
@@ -222,10 +362,20 @@ impl fmt::Display for UniqueGuard {
 }
 
 impl UniqueGuard {
-    /// Identity used to pair a missing guard with a found one so a predicate
-    /// difference reports as a mismatch rather than as an unrelated pair.
-    fn pairing_key(&self) -> (bool, &[String]) {
-        (self.primary_key, self.columns.as_slice())
+    /// Identity used to pair a missing guard with a found one, so a difference in
+    /// key order, predicate, or null-distinctness reports as one mismatch line
+    /// instead of an unrelated missing/unexpected pair.
+    ///
+    /// Pairing is by column *set* and kind — never by constraint or index name,
+    /// which PostgreSQL auto-generates and a host may legitimately choose. Note
+    /// that pairing is not equality: a guard whose key columns are in a different
+    /// order is still a mismatch, it is just diagnosed as one rather than as two
+    /// unrelated findings.
+    fn pairing_key(&self) -> (bool, BTreeSet<&str>) {
+        (
+            self.primary_key,
+            self.columns.iter().map(String::as_str).collect(),
+        )
     }
 }
 
@@ -387,8 +537,8 @@ impl SchemaShape {
                         "not-null"
                     }
                 ));
-                if column.auto_generated {
-                    out.push_str(" auto-generated");
+                if let Some(token) = column.value_source.as_token() {
+                    out.push_str(&format!(" {token}"));
                 }
                 out.push('\n');
             }
@@ -402,6 +552,9 @@ impl SchemaShape {
                     },
                     guard.columns.join(", ")
                 ));
+                if guard.nulls_not_distinct {
+                    out.push_str(" nulls not distinct");
+                }
                 if let Some(predicate) = &guard.predicate {
                     out.push_str(&format!(" where {predicate}"));
                 }
@@ -448,10 +601,13 @@ const ARTIFACT_HEADER: &str = "\
 
 fn parse_column_line(rest: &str) -> Option<ColumnShape> {
     let mut tokens: Vec<&str> = rest.split_whitespace().collect();
-    let auto_generated = tokens.last() == Some(&"auto-generated");
-    if auto_generated {
-        tokens.pop();
-    }
+    let value_source = match tokens.last().copied().and_then(ColumnValueSource::parse) {
+        Some(source) => {
+            tokens.pop();
+            source
+        }
+        None => ColumnValueSource::Supplied,
+    };
     let nullable = match tokens.pop()? {
         "nullable" => true,
         "not-null" => false,
@@ -466,13 +622,20 @@ fn parse_column_line(rest: &str) -> Option<ColumnShape> {
         name,
         sql_type,
         nullable,
-        auto_generated,
+        value_source,
     })
 }
 
 fn parse_guard_line(rest: &str, primary_key: bool) -> Option<UniqueGuard> {
     let (columns, tail) = parse_column_list(rest)?;
-    let tail = tail.trim();
+    let mut tail = tail.trim();
+    let nulls_not_distinct = match tail.strip_prefix("nulls not distinct") {
+        Some(remainder) => {
+            tail = remainder.trim();
+            true
+        }
+        None => false,
+    };
     let predicate = if tail.is_empty() {
         None
     } else {
@@ -482,6 +645,7 @@ fn parse_guard_line(rest: &str, primary_key: bool) -> Option<UniqueGuard> {
         primary_key,
         columns,
         predicate,
+        nulls_not_distinct,
     })
 }
 
@@ -532,7 +696,7 @@ fn diff_columns(
                 table: table.to_string(),
                 expected: expected_column.clone(),
             }),
-            Some(found_column) if found_column != expected_column => {
+            Some(found_column) if !found_column.satisfies(expected_column) => {
                 findings.push(SchemaFinding::ColumnMismatch {
                     table: table.to_string(),
                     expected: expected_column.clone(),
@@ -646,18 +810,33 @@ fn diff_foreign_keys(
 /// than a hash comparison, so a host that mis-ported one column learns which
 /// one.
 #[derive(Clone, Debug, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum SchemaFinding {
-    /// The component version stamp is absent or names another version.
+    /// The component version stamp is absent or names another version. Always
+    /// fatal at open, in every provisioning mode and regardless of
+    /// [`SchemaCheck`].
     VersionMismatch {
         /// Version this build implements.
         expected: i32,
         /// Version the database is stamped with, `None` when unstamped.
         found: Option<i32>,
     },
-    /// A lash-owned table does not exist.
+    /// A lash-owned table does not exist in the anchored namespace.
     MissingTable {
         /// Unqualified table name.
         table: String,
+    },
+    /// A lash-named relation exists in a namespace earlier on the `search_path`
+    /// than the anchored installation, so lash's own unqualified statements would
+    /// resolve to it instead. Two partial installations must never be assembled
+    /// into one apparently-conformant database.
+    ShadowedTable {
+        /// Unqualified table name.
+        table: String,
+        /// Namespace the installation is anchored in.
+        expected_schema: String,
+        /// Namespace `search_path` actually resolves the name to.
+        found_schema: String,
     },
     /// A lash-owned column does not exist.
     MissingColumn {
@@ -666,8 +845,10 @@ pub enum SchemaFinding {
         /// Column this build expects.
         expected: ColumnShape,
     },
-    /// A lash-owned column exists with a different type, nullability, or
-    /// auto-generated-value flag.
+    /// A lash-owned column exists with a different type or nullability, or with a
+    /// value source that does not keep every write capability lash needs — a
+    /// column lash names explicitly rebuilt as `GENERATED ALWAYS`, or one lash
+    /// omits rebuilt without any value source.
     ColumnMismatch {
         /// Table carrying the column.
         table: String,
@@ -690,8 +871,9 @@ pub enum SchemaFinding {
         /// Guard this build expects.
         expected: UniqueGuard,
     },
-    /// A uniqueness guarantee exists over the expected columns but with a
-    /// different partial predicate, so it guards a different row set.
+    /// A uniqueness guarantee exists over the expected column set but guards a
+    /// different row set — a different key order, a different partial predicate,
+    /// or `NULLS NOT DISTINCT`.
     UniqueGuardMismatch {
         /// Table carrying the guard.
         table: String,
@@ -740,6 +922,13 @@ pub enum SchemaFinding {
         /// What the row is for.
         detail: String,
     },
+    /// A seed row exists but carries a value lash cannot use.
+    InvalidSeedRow {
+        /// Table carrying the row.
+        table: String,
+        /// What is wrong with it.
+        detail: String,
+    },
 }
 
 impl SchemaFinding {
@@ -747,6 +936,7 @@ impl SchemaFinding {
         match self {
             Self::VersionMismatch { .. } => "COMPONENT VERSION",
             Self::MissingTable { .. } => "MISSING TABLES",
+            Self::ShadowedTable { .. } => "SHADOWED TABLES",
             Self::MissingColumn { .. }
             | Self::ColumnMismatch { .. }
             | Self::UnexpectedColumn { .. } => "COLUMN DRIFT",
@@ -756,7 +946,7 @@ impl SchemaFinding {
             Self::MissingForeignKey { .. }
             | Self::ForeignKeyMismatch { .. }
             | Self::UnexpectedForeignKey { .. } => "FOREIGN KEY DRIFT",
-            Self::MissingSeedRow { .. } => "SEED ROWS",
+            Self::MissingSeedRow { .. } | Self::InvalidSeedRow { .. } => "SEED ROWS",
         }
     }
 }
@@ -775,6 +965,15 @@ impl fmt::Display for SchemaFinding {
                 ),
             },
             Self::MissingTable { table } => write!(formatter, "{table}: table is missing"),
+            Self::ShadowedTable {
+                table,
+                expected_schema,
+                found_schema,
+            } => write!(
+                formatter,
+                "{table}: shadowed — this installation is anchored in `{expected_schema}` but \
+                 search_path resolves the name to `{found_schema}`"
+            ),
             Self::MissingColumn { table, expected } => write!(
                 formatter,
                 "{table}.{}: column is missing, expected {expected}",
@@ -821,6 +1020,9 @@ impl fmt::Display for SchemaFinding {
             }
             Self::MissingSeedRow { table, detail } => {
                 write!(formatter, "{table}: seed row is missing ({detail})")
+            }
+            Self::InvalidSeedRow { table, detail } => {
+                write!(formatter, "{table}: seed row is unusable ({detail})")
             }
         }
     }
@@ -872,6 +1074,7 @@ impl fmt::Display for SchemaReport {
         let sections = [
             "COMPONENT VERSION",
             "MISSING TABLES",
+            "SHADOWED TABLES",
             "COLUMN DRIFT",
             "UNIQUE GUARD DRIFT",
             "FOREIGN KEY DRIFT",
@@ -902,6 +1105,84 @@ impl fmt::Display for SchemaReport {
     }
 }
 
+/// The single lash installation a verification reads.
+///
+/// Anchoring on one namespace is what makes the check a statement about a
+/// database rather than about a set of objects: `search_path` can front a partial
+/// installation with another, and resolving each table on its own would accept
+/// the union of two halves that runtime writes then split across.
+pub(crate) struct Installation {
+    namespace_oid: i64,
+    /// Namespace name, already quoted for interpolation into a statement.
+    quoted_namespace: String,
+    /// Namespace name as the catalog reports it.
+    namespace: String,
+}
+
+/// Resolves the namespace holding this database's lash installation.
+///
+/// Returns `None` when `lash_schema_versions` does not resolve at all, which is
+/// the unprovisioned database.
+pub(crate) async fn resolve_installation(
+    connection: &mut PgConnection,
+) -> Result<Option<Installation>, StoreError> {
+    let row = sqlx::query(
+        "SELECT namespace.oid::bigint AS namespace_oid,
+                namespace.nspname::text AS namespace,
+                pg_catalog.quote_ident(namespace.nspname) AS quoted_namespace
+         FROM pg_catalog.pg_class AS relation
+         JOIN pg_catalog.pg_namespace AS namespace ON namespace.oid = relation.relnamespace
+         WHERE relation.oid = pg_catalog.to_regclass(pg_catalog.quote_ident($1))::oid
+           AND relation.relkind IN ('r', 'p')",
+    )
+    .bind(ANCHOR_TABLE)
+    .fetch_optional(&mut *connection)
+    .await
+    .map_err(store_sqlx_error)?;
+    Ok(row.map(|row| Installation {
+        namespace_oid: row.get("namespace_oid"),
+        namespace: row.get("namespace"),
+        quoted_namespace: row.get("quoted_namespace"),
+    }))
+}
+
+/// Reads the component version stamp from the anchored installation.
+///
+/// Qualified by namespace rather than resolved through `search_path`, so the
+/// version this reports is the version of the installation the rest of the check
+/// reads. Tolerates a `lash_schema_versions` whose own columns are mis-ported:
+/// that surfaces as an unstamped database plus the column diff, never as a raw
+/// Postgres error.
+pub(crate) async fn read_component_version(
+    connection: &mut PgConnection,
+    installation: &Installation,
+) -> Result<Option<i32>, StoreError> {
+    let readable: bool = sqlx::query_scalar(
+        "SELECT count(*) = 2
+         FROM pg_catalog.pg_attribute
+         WHERE attrelid = ($1 || '.' || pg_catalog.quote_ident($2))::regclass
+           AND attname IN ('component', 'version')
+           AND attnum > 0
+           AND NOT attisdropped",
+    )
+    .bind(&installation.quoted_namespace)
+    .bind(ANCHOR_TABLE)
+    .fetch_one(&mut *connection)
+    .await
+    .map_err(store_sqlx_error)?;
+    if !readable {
+        return Ok(None);
+    }
+    sqlx::query_scalar(&format!(
+        "SELECT version FROM {}.{ANCHOR_TABLE} WHERE component = $1",
+        installation.quoted_namespace
+    ))
+    .bind(SCHEMA_COMPONENT)
+    .fetch_optional(&mut *connection)
+    .await
+    .map_err(store_sqlx_error)
+}
+
 /// Reads the live shape of lash's tables and diffs it against this build's
 /// expectation, then checks the seed rows the structural diff cannot see.
 ///
@@ -913,11 +1194,20 @@ pub(crate) async fn verify_schema_shape(
 ) -> Result<SchemaReport, StoreError> {
     let expected = SchemaShape::expected();
     let table_names: Vec<String> = expected.tables.keys().cloned().collect();
-    let resolved = resolve_tables(connection, &table_names).await?;
-    let schema = resolved.values().next().map(|table| table.schema.clone());
-    let found_version = read_component_version(connection, &resolved).await?;
+    let Some(installation) = resolve_installation(connection).await? else {
+        return Ok(SchemaReport {
+            schema: None,
+            expected_version: SCHEMA_VERSION,
+            found_version: None,
+            findings: vec![SchemaFinding::VersionMismatch {
+                expected: SCHEMA_VERSION,
+                found: None,
+            }],
+        });
+    };
+    let found_version = read_component_version(connection, &installation).await?;
     let mut report = SchemaReport {
-        schema,
+        schema: Some(installation.namespace.clone()),
         expected_version: SCHEMA_VERSION,
         found_version,
         findings: Vec::new(),
@@ -929,35 +1219,75 @@ pub(crate) async fn verify_schema_shape(
         });
         return Ok(report);
     }
+    report.findings = read_shadow_findings(connection, &installation, &table_names).await?;
+    let resolved = resolve_tables(connection, &installation, &table_names).await?;
     let found = read_live_shape(connection, &resolved).await?;
-    report.findings = expected.diff(&found);
+    report.findings.extend(expected.diff(&found));
     report
         .findings
-        .extend(read_seed_row_findings(connection, &resolved).await?);
+        .extend(read_seed_row_findings(connection, &installation, &found).await?);
     Ok(report)
 }
 
-/// A lash table resolved through the connection's `search_path`.
+/// A lash table in the anchored installation.
 struct ResolvedTable {
     oid: i64,
-    schema: String,
 }
 
-async fn resolve_tables(
+/// Reports every lash-named relation that `search_path` resolves outside the
+/// anchored namespace.
+///
+/// These are the relations lash's own unqualified statements would hit, so a
+/// database that has them is not the installation the rest of the check just
+/// verified — regardless of whether the anchored copy is itself perfect.
+async fn read_shadow_findings(
     connection: &mut PgConnection,
+    installation: &Installation,
     table_names: &[String],
-) -> Result<BTreeMap<String, ResolvedTable>, StoreError> {
+) -> Result<Vec<SchemaFinding>, StoreError> {
     let rows = sqlx::query(
         "SELECT expected.name AS name,
-                relation.oid::bigint AS oid,
-                namespace.nspname::text AS schema_name
+                namespace.nspname::text AS found_schema
          FROM unnest($1::text[]) AS expected(name)
          JOIN pg_catalog.pg_class AS relation
              ON relation.oid = pg_catalog.to_regclass(pg_catalog.quote_ident(expected.name))::oid
-            AND relation.relkind IN ('r', 'p')
-         JOIN pg_catalog.pg_namespace AS namespace ON namespace.oid = relation.relnamespace",
+         JOIN pg_catalog.pg_namespace AS namespace ON namespace.oid = relation.relnamespace
+         WHERE relation.relnamespace <> $2::oid",
     )
     .bind(table_names)
+    .bind(installation.namespace_oid)
+    .fetch_all(&mut *connection)
+    .await
+    .map_err(store_sqlx_error)?;
+    Ok(rows
+        .into_iter()
+        .map(|row| SchemaFinding::ShadowedTable {
+            table: row.get("name"),
+            expected_schema: installation.namespace.clone(),
+            found_schema: row.get("found_schema"),
+        })
+        .collect())
+}
+
+/// Looks every expected table up by `(namespace, name)` inside the anchored
+/// installation. A table absent from it is missing even if a same-named relation
+/// exists elsewhere on the `search_path`.
+async fn resolve_tables(
+    connection: &mut PgConnection,
+    installation: &Installation,
+    table_names: &[String],
+) -> Result<BTreeMap<String, ResolvedTable>, StoreError> {
+    let rows = sqlx::query(
+        "SELECT relation.relname::text AS name,
+                relation.oid::bigint AS oid
+         FROM unnest($1::text[]) AS expected(name)
+         JOIN pg_catalog.pg_class AS relation
+             ON relation.relnamespace = $2::oid
+            AND relation.relname = expected.name
+            AND relation.relkind IN ('r', 'p')",
+    )
+    .bind(table_names)
+    .bind(installation.namespace_oid)
     .fetch_all(&mut *connection)
     .await
     .map_err(store_sqlx_error)?;
@@ -967,25 +1297,10 @@ async fn resolve_tables(
             row.get::<String, _>("name"),
             ResolvedTable {
                 oid: row.get("oid"),
-                schema: row.get("schema_name"),
             },
         );
     }
     Ok(resolved)
-}
-
-async fn read_component_version(
-    connection: &mut PgConnection,
-    resolved: &BTreeMap<String, ResolvedTable>,
-) -> Result<Option<i32>, StoreError> {
-    if !resolved.contains_key("lash_schema_versions") {
-        return Ok(None);
-    }
-    sqlx::query_scalar("SELECT version FROM lash_schema_versions WHERE component = $1")
-        .bind(SCHEMA_COMPONENT)
-        .fetch_optional(&mut *connection)
-        .await
-        .map_err(store_sqlx_error)
 }
 
 async fn read_live_shape(
@@ -1012,7 +1327,9 @@ async fn read_live_shape(
                 attribute.attname::text AS column_name,
                 pg_catalog.format_type(attribute.atttypid, attribute.atttypmod) AS sql_type,
                 attribute.attnotnull AS not_null,
-                (attribute.atthasdef OR attribute.attidentity <> '') AS auto_generated
+                attribute.attidentity::text AS identity,
+                attribute.attgenerated::text AS generated,
+                attribute.atthasdef AS has_default
          FROM pg_catalog.pg_attribute AS attribute
          WHERE attribute.attrelid::bigint = ANY($1::bigint[])
            AND attribute.attnum > 0
@@ -1030,7 +1347,11 @@ async fn read_live_shape(
             name: row.get("column_name"),
             sql_type: row.get("sql_type"),
             nullable: !row.get::<bool, _>("not_null"),
-            auto_generated: row.get("auto_generated"),
+            value_source: ColumnValueSource::from_catalog(
+                &row.get::<String, _>("identity"),
+                &row.get::<String, _>("generated"),
+                row.get("has_default"),
+            ),
         };
         shape
             .tables
@@ -1046,6 +1367,10 @@ async fn read_live_shape(
     // The `indnkeyatts` bound trims trailing INCLUDE columns, which carry no
     // uniqueness. `indkey` is an `int2vector` with a zero lower bound, so the
     // ordinality of `unnest` — always one-based — is what the bound applies to.
+    // `indnullsnotdistinct` is read through `to_jsonb` rather than named directly:
+    // the column does not exist before PostgreSQL 15, where naming it is a parse
+    // error, and `->>` on an absent key yields NULL, which normalizes to the
+    // pre-15 behaviour of NULLs always being distinct.
     let index_rows = sqlx::query(
         "SELECT index_catalog.indrelid::bigint AS table_oid,
                 index_catalog.indisprimary AS is_primary,
@@ -1059,7 +1384,11 @@ async fn read_live_shape(
                     WHERE key.ordinality <= index_catalog.indnkeyatts
                     ORDER BY key.ordinality
                 ) AS columns,
-                pg_catalog.pg_get_expr(index_catalog.indpred, index_catalog.indrelid) AS predicate
+                pg_catalog.pg_get_expr(index_catalog.indpred, index_catalog.indrelid) AS predicate,
+                COALESCE(
+                    (pg_catalog.to_jsonb(index_catalog) ->> 'indnullsnotdistinct')::boolean,
+                    false
+                ) AS nulls_not_distinct
          FROM pg_catalog.pg_index AS index_catalog
          WHERE index_catalog.indrelid::bigint = ANY($1::bigint[])
            AND index_catalog.indisunique
@@ -1080,6 +1409,7 @@ async fn read_live_shape(
             predicate: row
                 .get::<Option<String>, _>("predicate")
                 .map(|predicate| normalize_predicate(&predicate)),
+            nulls_not_distinct: row.get("nulls_not_distinct"),
         };
         shape
             .tables
@@ -1186,28 +1516,72 @@ fn normalize_predicate(predicate: &str) -> String {
         .to_lowercase()
 }
 
-/// Checks the seed rows `schema.sql` inserts. These are invisible to any
-/// structural comparison and lash cannot run without them: a missing
-/// `lash_process_change_clock` row breaks every process-registry write.
+/// Checks the seed rows `schema.sql` inserts.
+///
+/// These are invisible to any structural comparison and lash cannot run without
+/// them: a missing `lash_process_change_clock` row breaks every process-registry
+/// write, and the await-event signing secret authenticates every durable promise.
+///
+/// Each row is looked up by its `singleton = TRUE` key rather than by table
+/// non-emptiness. `CHECK (singleton)` is deliberately outside the verified scope,
+/// so nothing else would stop a host port from holding a `singleton = FALSE` row
+/// that satisfies "the table has rows" and fails every runtime read.
 async fn read_seed_row_findings(
     connection: &mut PgConnection,
-    resolved: &BTreeMap<String, ResolvedTable>,
+    installation: &Installation,
+    found: &SchemaShape,
 ) -> Result<Vec<SchemaFinding>, StoreError> {
     let mut findings = Vec::new();
     for (table, detail) in SEED_ROWS {
-        if !resolved.contains_key(table) {
-            // Already reported as a missing table.
+        // A mis-shaped table has already been reported column by column; probing
+        // it for a row it cannot hold would raise a raw Postgres error instead.
+        if !found
+            .tables
+            .get(table)
+            .is_some_and(|shape| shape.columns.contains_key("singleton"))
+        {
             continue;
         }
-        let present: Option<i64> =
-            sqlx::query_scalar(&format!("SELECT 1::BIGINT FROM {table} LIMIT 1"))
-                .fetch_optional(&mut *connection)
-                .await
-                .map_err(store_sqlx_error)?;
+        let present: Option<i64> = sqlx::query_scalar(&format!(
+            "SELECT 1::BIGINT FROM {}.{table} WHERE singleton = TRUE",
+            installation.quoted_namespace
+        ))
+        .fetch_optional(&mut *connection)
+        .await
+        .map_err(store_sqlx_error)?;
         if present.is_none() {
             findings.push(SchemaFinding::MissingSeedRow {
                 table: table.to_string(),
                 detail: detail.to_string(),
+            });
+        }
+    }
+
+    // The secret's width is a precondition open enforces, so the report has to
+    // carry it too: a host gating its migration CI on `verify_schema` would
+    // otherwise pass a database whose secret it seeded at the wrong width and
+    // fail at the production open instead.
+    if found
+        .tables
+        .get("lash_await_event_meta")
+        .is_some_and(|shape| shape.columns.contains_key("signing_secret"))
+    {
+        let secret: Option<Vec<u8>> = sqlx::query_scalar(&format!(
+            "SELECT signing_secret FROM {}.lash_await_event_meta WHERE singleton = TRUE",
+            installation.quoted_namespace
+        ))
+        .fetch_optional(&mut *connection)
+        .await
+        .map_err(store_sqlx_error)?;
+        if let Some(secret) = secret
+            && secret.len() != AWAIT_EVENT_SIGNING_SECRET_BYTES
+        {
+            findings.push(SchemaFinding::InvalidSeedRow {
+                table: "lash_await_event_meta".to_string(),
+                detail: format!(
+                    "await-event signing secret has {} bytes, expected {AWAIT_EVENT_SIGNING_SECRET_BYTES}",
+                    secret.len()
+                ),
             });
         }
     }

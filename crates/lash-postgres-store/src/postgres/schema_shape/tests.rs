@@ -136,7 +136,11 @@ async fn read_scratch_shape(connection: &mut sqlx::PgConnection, scratch: &str) 
         table_names.len() > 20,
         "the DDL artifact must create lash's whole table set, found {table_names:?}"
     );
-    let resolved = resolve_tables(connection, &table_names)
+    let installation = resolve_installation(connection)
+        .await
+        .expect("resolve scratch installation")
+        .expect("the scratch schema is provisioned");
+    let resolved = resolve_tables(connection, &installation, &table_names)
         .await
         .expect("resolve scratch tables");
     read_live_shape(connection, &resolved)
@@ -188,6 +192,7 @@ fn expected_artifact_carries_the_exactly_once_dedup_guard_and_cascades() {
             primary_key: false,
             columns: vec!["process_id".to_string(), "idempotency_key".to_string()],
             predicate: Some("idempotency_key is not null".to_string()),
+            nulls_not_distinct: false,
         }),
         "the partial unique index guarding exactly-once dedup must be in scope: {:?}",
         events.unique_guards
@@ -225,10 +230,10 @@ fn column_lines_round_trip_through_the_artifact_format() {
         name: "seq".to_string(),
         sql_type: "bigint".to_string(),
         nullable: false,
-        auto_generated: true,
+        value_source: ColumnValueSource::Default,
     };
     assert_eq!(
-        parse_column_line("seq bigint not-null auto-generated"),
+        parse_column_line("seq bigint not-null default"),
         Some(column)
     );
     // Multi-word types survive, so a host's `character varying(64)` renders in a
@@ -239,7 +244,7 @@ fn column_lines_round_trip_through_the_artifact_format() {
             name: "status".to_string(),
             sql_type: "character varying(64)".to_string(),
             nullable: true,
-            auto_generated: false,
+            value_source: ColumnValueSource::Supplied,
         })
     );
     assert_eq!(parse_column_line("status text"), None);
@@ -272,13 +277,13 @@ fn drift_renders_a_sectioned_named_diff_not_a_hash() {
                     name: "status".to_string(),
                     sql_type: "text".to_string(),
                     nullable: false,
-                    auto_generated: false,
+                    value_source: ColumnValueSource::Supplied,
                 },
                 found: ColumnShape {
                     name: "status".to_string(),
                     sql_type: "character varying(64)".to_string(),
                     nullable: true,
-                    auto_generated: false,
+                    value_source: ColumnValueSource::Supplied,
                 },
             },
             SchemaFinding::MissingUniqueGuard {
@@ -287,6 +292,7 @@ fn drift_renders_a_sectioned_named_diff_not_a_hash() {
                     primary_key: false,
                     columns: vec!["process_id".to_string(), "idempotency_key".to_string()],
                     predicate: Some("idempotency_key is not null".to_string()),
+                    nulls_not_distinct: false,
                 },
             },
             SchemaFinding::MissingSeedRow {

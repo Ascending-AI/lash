@@ -18,9 +18,15 @@
 //! shape this build requires, so a database whose version stamp is right but whose
 //! tables are not is rejected at open with a per-object diff rather than failing at
 //! the first query — or silently losing a guard, which is what a dropped unique
-//! index or a dropped cascade does. [`SchemaCheck`] controls whether a mismatch is
-//! fatal, and [`PostgresStorage::verify_schema`] exposes the same check as a
-//! structured report so a host can gate its own migration CI on it. See ADR 0052.
+//! index or a dropped cascade does. [`SchemaCheck`] controls whether a structural
+//! mismatch is fatal; the component version stamp is unconditional and no
+//! [`SchemaCheck`] relaxes it. [`PostgresStorage::verify_schema_for`] exposes the
+//! same check against a bare pool so a host can gate its own migration CI on it.
+//! See ADR 0052.
+//!
+//! Do not run schema migrations concurrently with an open: lash's advisory lock
+//! serializes its own openers only. [`PostgresStorage::schema_advisory_lock_key`]
+//! publishes the key for hosts that need to coordinate.
 
 use std::sync::{Arc, OnceLock};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -357,9 +363,51 @@ impl PostgresStorage {
     /// Unlike open, this never fails on drift: inspect
     /// [`SchemaReport::is_conformant`] and [`SchemaReport::findings`], or render
     /// the report for a sectioned expected-versus-found diff.
+    ///
+    /// Use [`PostgresStorage::verify_schema_for`] to inspect a database that is
+    /// too broken to open, which is most of the ones worth inspecting.
     pub async fn verify_schema(&self) -> Result<SchemaReport, StoreError> {
-        let mut connection = self.pool.acquire().await.map_err(store_sqlx_error)?;
+        Self::verify_schema_for(&self.pool).await
+    }
+
+    /// Runs the same check against a pool, without opening storage over it.
+    ///
+    /// Constructing a [`PostgresStorage`] is strictly harder than verifying one:
+    /// open additionally insists on a matching component version stamp and a
+    /// usable await-event signing secret, and either of those can be exactly what
+    /// a host's migration produced wrongly. A check reachable only through a
+    /// successful open could therefore not describe the databases it exists to
+    /// describe, so this form needs no receiver and no successful open — it
+    /// reports every version, structural, and seed-row finding, including a
+    /// signing secret seeded at the wrong width, and returns them rather than
+    /// failing.
+    ///
+    /// This is the entry point for a host's migration CI:
+    ///
+    /// ```no_run
+    /// # async fn gate(pool: sqlx::PgPool) -> Result<(), Box<dyn std::error::Error>> {
+    /// let report = lash_postgres_store::PostgresStorage::verify_schema_for(&pool).await?;
+    /// assert!(report.is_conformant(), "{report}");
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub async fn verify_schema_for(pool: &PgPool) -> Result<SchemaReport, StoreError> {
+        let mut connection = pool.acquire().await.map_err(store_sqlx_error)?;
         verify_schema_shape(&mut connection).await
+    }
+
+    /// The advisory-lock key lash holds while provisioning or verifying the
+    /// schema, as `(namespace, key)` arguments to `pg_advisory_xact_lock`.
+    ///
+    /// lash takes this key so its own concurrent opens serialize. It cannot make
+    /// a host's migrations serialize with them: a migration that commits between
+    /// two of the check's catalog reads can make an open succeed against a schema
+    /// that has already drifted, or refuse one that is mid-migration and fine.
+    /// The supported remedy is not to migrate concurrently with an open — and if a
+    /// deployment cannot guarantee that, taking this key in the migration itself
+    /// is the coordination point lash publishes for the purpose.
+    pub fn schema_advisory_lock_key() -> (i32, i32) {
+        SCHEMA_ADVISORY_LOCK_KEY
     }
 
     pub fn pool(&self) -> &PgPool {
@@ -564,10 +612,13 @@ mod trigger_store;
 pub use effect_replay::{
     PostgresEffectHost, PostgresEffectReplayOptions, PostgresRuntimeEffectController,
 };
-use schema_shape::verify_schema_shape;
+use schema_shape::{
+    AWAIT_EVENT_SIGNING_SECRET_BYTES, read_component_version, resolve_installation,
+    verify_schema_shape,
+};
 pub use schema_shape::{
-    ColumnShape, ForeignKeyAction, ForeignKeyShape, SchemaCheck, SchemaFinding, SchemaProvisioning,
-    SchemaReport, UniqueGuard,
+    ColumnShape, ColumnValueSource, ForeignKeyAction, ForeignKeyShape, SchemaCheck, SchemaFinding,
+    SchemaProvisioning, SchemaReport, UniqueGuard,
 };
 use {process_helpers::*, runtime_persistence::*, schema::*, session_factory::*, support::*};
 

@@ -4,6 +4,11 @@ use crate::*;
 /// `schema.sql` artifact so a host can vendor the exact bytes lash executes.
 pub(crate) const SCHEMA_DDL: &str = include_str!("../../schema.sql");
 
+/// Advisory-lock key lash takes for the duration of a schema-provisioning or
+/// schema-verifying transaction. See
+/// [`crate::PostgresStorage::schema_advisory_lock_key`].
+pub(crate) const SCHEMA_ADVISORY_LOCK_KEY: (i32, i32) = (715421, 907001);
+
 /// How one open should treat the database's schema.
 #[derive(Clone, Copy, Debug, Default)]
 pub(crate) struct SchemaOpenOptions {
@@ -22,25 +27,40 @@ pub(crate) async fn ensure_schema(
     options: SchemaOpenOptions,
 ) -> Result<Vec<u8>, StoreError> {
     let mut tx = pool.begin().await.map_err(store_sqlx_error)?;
-    // Serializes concurrent openers so a reader cannot introspect a half-applied
-    // DDL batch. The lock needs no privileges, so it is taken in both modes.
-    tx.execute("SELECT pg_advisory_xact_lock(715421, 907001)")
+    // Serializes lash's own openers, so two concurrent first opens cannot race
+    // each other's DDL and a verifying open cannot read a half-applied batch from
+    // a provisioning one. It does *not* coordinate with host migrations: nothing
+    // outside lash takes this key unless a host chooses to, which
+    // `PostgresStorage::schema_advisory_lock_key` exists to let it do. The lock
+    // needs no privileges, so it is taken in both modes.
+    let (lock_namespace, lock_key) = SCHEMA_ADVISORY_LOCK_KEY;
+    sqlx::query("SELECT pg_advisory_xact_lock($1, $2)")
+        .bind(lock_namespace)
+        .bind(lock_key)
+        .execute(&mut *tx)
         .await
         .map_err(store_sqlx_error)?;
     if options.provisioning == SchemaProvisioning::LashManaged {
         // Preflight before the DDL: a stale baseline must be rejected rather than
         // have this build's creation statements layered over it.
-        if let Some(version) = read_component_version(&mut tx).await?
+        if let Some(installation) = resolve_installation(&mut tx).await?
+            && let Some(version) = read_component_version(&mut tx, &installation).await?
             && version != SCHEMA_VERSION
         {
-            return Err(StoreError::Backend(format!(
-                "Postgres schema component `{SCHEMA_COMPONENT}` has version {version}, expected {SCHEMA_VERSION}"
-            )));
+            return Err(version_mismatch_error(Some(version)));
         }
         tx.execute(SCHEMA_DDL).await.map_err(store_sqlx_error)?;
     }
 
     let report = verify_schema_shape(&mut tx).await?;
+    // The component version is the reject-and-recreate boundary, and it is
+    // unconditional: `SchemaCheck` governs the catalog comparison only. Letting
+    // `WarnOnly` downgrade this would turn lash's own recommended escape hatch
+    // into a path that silently runs one build against another schema generation,
+    // which is exactly the cross-version corruption the boundary exists to stop.
+    if report.found_version != Some(SCHEMA_VERSION) {
+        return Err(version_mismatch_error(report.found_version));
+    }
     if !report.is_conformant() {
         match options.check {
             SchemaCheck::Enforce => return Err(StoreError::Backend(report.to_string())),
@@ -59,8 +79,9 @@ pub(crate) async fn ensure_schema(
     .map_err(store_sqlx_error)?;
     // The secret is a data precondition, not a shape: `SchemaCheck::WarnOnly`
     // relaxes structural enforcement, never the store's ability to construct
-    // itself. A host-provisioned database missing this row must apply the seed
-    // statements from `schema.sql`.
+    // itself. Without this row there is no key to authenticate durable await-event
+    // promises with, so there is nothing to hand back. A host-provisioned database
+    // missing it must apply the seed statements from `schema.sql`.
     let signing_secret = signing_secret.ok_or_else(|| {
         StoreError::Backend(
             "Postgres await-event signing secret row is missing from lash_await_event_meta; \
@@ -68,9 +89,10 @@ pub(crate) async fn ensure_schema(
                 .to_string(),
         )
     })?;
-    if signing_secret.len() != 32 {
+    if signing_secret.len() != AWAIT_EVENT_SIGNING_SECRET_BYTES {
         return Err(StoreError::Backend(format!(
-            "Postgres await-event signing secret has {} bytes, expected 32",
+            "Postgres await-event signing secret has {} bytes, expected \
+             {AWAIT_EVENT_SIGNING_SECRET_BYTES}",
             signing_secret.len()
         )));
     }
@@ -78,22 +100,17 @@ pub(crate) async fn ensure_schema(
     Ok(signing_secret)
 }
 
-/// Reads the component version stamp, tolerating a database that has no
-/// `lash_schema_versions` table at all.
-async fn read_component_version(
-    connection: &mut sqlx::PgConnection,
-) -> Result<Option<i32>, StoreError> {
-    let stamped: bool =
-        sqlx::query_scalar("SELECT pg_catalog.to_regclass('lash_schema_versions') IS NOT NULL")
-            .fetch_one(&mut *connection)
-            .await
-            .map_err(store_sqlx_error)?;
-    if !stamped {
-        return Ok(None);
-    }
-    sqlx::query_scalar("SELECT version FROM lash_schema_versions WHERE component = $1")
-        .bind(SCHEMA_COMPONENT)
-        .fetch_optional(connection)
-        .await
-        .map_err(store_sqlx_error)
+/// Renders the reject-and-recreate boundary error, naming the remedy rather than
+/// only the numbers.
+fn version_mismatch_error(found: Option<i32>) -> StoreError {
+    let found = match found {
+        Some(version) => format!("has version {version}"),
+        None => "has no version stamp".to_string(),
+    };
+    StoreError::Backend(format!(
+        "Postgres schema component `{SCHEMA_COMPONENT}` {found}, expected {SCHEMA_VERSION}. \
+         The component schema is a reject-and-recreate boundary with no migration chain: \
+         provision a fresh database from this build's schema.sql artifact. This gate is \
+         unconditional; SchemaCheck::WarnOnly does not relax it."
+    ))
 }

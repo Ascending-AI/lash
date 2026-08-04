@@ -9,8 +9,8 @@
 //! clean.
 
 use lash_postgres_store::{
-    ForeignKeyAction, PostgresStorage, PostgresStoreConfig, SchemaCheck, SchemaFinding,
-    SchemaProvisioning,
+    ColumnValueSource, ForeignKeyAction, PostgresStorage, PostgresStoreConfig, SchemaCheck,
+    SchemaFinding, SchemaProvisioning,
 };
 use sqlx::postgres::{PgPool, PgPoolOptions};
 use sqlx::{Connection, Executor, PgConnection};
@@ -108,6 +108,40 @@ impl ScratchSchema {
             .await
             .expect("drop scratch schema");
     }
+}
+
+/// Reads `server_version_num`, for the one assertion that needs a PostgreSQL
+/// feature not present on every major in the support matrix.
+async fn postgres_server_version_num() -> i32 {
+    let database_url = database_url().expect("configured Postgres URL");
+    let mut connection = PgConnection::connect(&database_url)
+        .await
+        .expect("connect server-version probe");
+    sqlx::query_scalar::<_, String>("SELECT current_setting('server_version_num')")
+        .fetch_one(&mut connection)
+        .await
+        .expect("read server_version_num")
+        .parse()
+        .expect("server_version_num is numeric")
+}
+
+/// Builds a pool whose connections use an explicit `search_path`.
+async fn pool_with_search_path(database_url: &str, search_path: &str) -> PgPool {
+    let search_path = search_path.to_string();
+    PgPoolOptions::new()
+        .max_connections(2)
+        .after_connect(move |connection, _meta| {
+            let search_path = search_path.clone();
+            Box::pin(async move {
+                connection
+                    .execute(format!("SET search_path TO {search_path}").as_str())
+                    .await?;
+                Ok(())
+            })
+        })
+        .connect(database_url)
+        .await
+        .expect("build search-path pool")
 }
 
 /// Applies one mutation to a freshly provisioned schema and asserts the check
@@ -230,15 +264,15 @@ async fn a_widened_nullability_is_rejected() {
 }
 
 /// A `BIGSERIAL` ported as a bare `BIGINT`. Inserts omit the column and rely on
-/// the sequence default, so without the auto-generated-value flag in scope this
-/// drift would pass the check and fail at the first append.
+/// the sequence default, so without the column's value source in scope this drift
+/// would pass the check and fail at the first append.
 #[tokio::test]
 async fn a_lost_sequence_default_is_rejected() {
     assert_mutation_is_rejected(
         "ALTER TABLE lash_usage_deltas ALTER COLUMN seq DROP DEFAULT",
         &[
             "COLUMN DRIFT",
-            "lash_usage_deltas.seq: expected bigint not-null auto-generated, found bigint not-null",
+            "lash_usage_deltas.seq: expected bigint not-null default, found bigint not-null",
         ],
         |finding| {
             matches!(
@@ -246,8 +280,126 @@ async fn a_lost_sequence_default_is_rejected() {
                 SchemaFinding::ColumnMismatch { table, expected, found }
                     if table == "lash_usage_deltas"
                         && expected.name == "seq"
-                        && expected.auto_generated
-                        && !found.auto_generated
+                        && expected.value_source == ColumnValueSource::Default
+                        && found.value_source == ColumnValueSource::Supplied
+            )
+        },
+    )
+    .await;
+}
+
+/// `BIGSERIAL` "modernized" to `GENERATED ALWAYS AS IDENTITY` — the variant
+/// PostgreSQL's own docs steer a host toward, and the one that looks stricter.
+/// It supplies a value, so a single has-auto-generated-value bit accepts it, but
+/// it *rejects* the explicit value `enqueue_queued_work` supplies: lash takes
+/// `nextval` itself and names `enqueue_seq` in the insert because it needs the
+/// value to derive `batch_id`. Every enqueue — so every process wake and every
+/// background session command — would fail after a clean open.
+#[tokio::test]
+async fn an_identity_always_column_lash_writes_explicitly_is_rejected() {
+    assert_mutation_is_rejected(
+        "ALTER TABLE lash_queued_work_batches ALTER COLUMN enqueue_seq DROP DEFAULT;
+         ALTER TABLE lash_queued_work_batches
+             ALTER COLUMN enqueue_seq ADD GENERATED ALWAYS AS IDENTITY",
+        &[
+            "COLUMN DRIFT",
+            "lash_queued_work_batches.enqueue_seq: expected bigint not-null default, found \
+             bigint not-null identity-always",
+        ],
+        |finding| {
+            matches!(
+                finding,
+                SchemaFinding::ColumnMismatch { table, found, .. }
+                    if table == "lash_queued_work_batches"
+                        && found.value_source == ColumnValueSource::IdentityAlways
+            )
+        },
+    )
+    .await;
+}
+
+/// A defaulted column rebuilt as a stored generated column. Same root cause as
+/// the identity-always case from the other direction: it supplies a value and
+/// rejects every explicit one, and lash writes `head_revision` explicitly on every
+/// session-head commit.
+#[tokio::test]
+async fn a_stored_generated_column_lash_writes_explicitly_is_rejected() {
+    assert_mutation_is_rejected(
+        "ALTER TABLE lash_sessions DROP COLUMN head_revision;
+         ALTER TABLE lash_sessions
+             ADD COLUMN head_revision BIGINT NOT NULL
+             GENERATED ALWAYS AS (length(head_json)::bigint) STORED",
+        &[
+            "COLUMN DRIFT",
+            "lash_sessions.head_revision: expected bigint not-null default, found bigint \
+             not-null generated",
+        ],
+        |finding| {
+            matches!(
+                finding,
+                SchemaFinding::ColumnMismatch { table, found, .. }
+                    if table == "lash_sessions"
+                        && found.value_source == ColumnValueSource::Generated
+            )
+        },
+    )
+    .await;
+}
+
+/// `UNIQUE NULLS NOT DISTINCT` over the same columns guards a different row set.
+/// `source_key` is nullable and lash writes `NULL` for every batch without a
+/// source key, so under this rebuild the second such batch in a session is
+/// rejected as a duplicate. Same columns, same kind, same predicate — only the
+/// null-distinctness differs, which is why it has to be in the fingerprint.
+#[tokio::test]
+async fn a_nulls_not_distinct_rebuild_of_a_nullable_guard_is_rejected() {
+    if postgres_server_version_num().await < 150_000 {
+        eprintln!("skipping NULLS NOT DISTINCT drift: needs PostgreSQL 15 or newer");
+        return;
+    }
+    assert_mutation_is_rejected(
+        "ALTER TABLE lash_queued_work_batches
+             DROP CONSTRAINT lash_queued_work_batches_session_id_source_key_key;
+         CREATE UNIQUE INDEX host_source_key_guard
+             ON lash_queued_work_batches (session_id, source_key) NULLS NOT DISTINCT",
+        &[
+            "UNIQUE GUARD DRIFT",
+            "lash_queued_work_batches: expected unique (session_id, source_key), found unique \
+             (session_id, source_key) nulls not distinct",
+        ],
+        |finding| {
+            matches!(
+                finding,
+                SchemaFinding::UniqueGuardMismatch { table, found, .. }
+                    if table == "lash_queued_work_batches" && found.nulls_not_distinct
+            )
+        },
+    )
+    .await;
+}
+
+/// A semantically identical guard whose key columns are in another order is still
+/// a mismatch — index column order is operationally load-bearing — but it must be
+/// diagnosed as one paired mismatch rather than as an unrelated
+/// missing-plus-unexpected pair, which is what column-set pairing buys.
+#[tokio::test]
+async fn a_reordered_unique_guard_is_reported_as_one_paired_mismatch() {
+    assert_mutation_is_rejected(
+        "DROP INDEX idx_lash_process_events_key;
+         CREATE UNIQUE INDEX host_reordered_dedup
+             ON lash_process_events(idempotency_key, process_id)
+             WHERE idempotency_key IS NOT NULL",
+        &[
+            "UNIQUE GUARD DRIFT",
+            "lash_process_events: expected unique (process_id, idempotency_key) where \
+             idempotency_key is not null, found unique (idempotency_key, process_id) where \
+             idempotency_key is not null",
+        ],
+        |finding| {
+            matches!(
+                finding,
+                SchemaFinding::UniqueGuardMismatch { table, .. }
+                    if table == "lash_process_events"
             )
         },
     )
@@ -384,10 +536,10 @@ async fn a_missing_signing_secret_is_fatal_in_every_mode() {
 }
 
 /// A version stamp naming another generation short-circuits the structural diff:
-/// the database is a different schema generation, so a per-column diff of it
-/// would be noise rather than a diagnosis.
+/// the database is a different schema generation, so a per-column diff of it would
+/// be noise rather than a diagnosis. The report carries the version finding alone.
 #[tokio::test]
-async fn a_mismatched_version_stamp_is_rejected_without_a_column_diff() {
+async fn a_mismatched_version_stamp_is_reported_without_a_column_diff() {
     let Some(database_url) = database_url() else {
         eprintln!("skipping version stamp check: database URL is not set");
         return;
@@ -395,24 +547,29 @@ async fn a_mismatched_version_stamp_is_rejected_without_a_column_diff() {
     let scratch = ScratchSchema::provision(&database_url).await;
     scratch
         .apply(
-            "UPDATE lash_schema_versions SET version = 1 WHERE component = 'lash-postgres-store'",
+            "UPDATE lash_schema_versions SET version = 1 WHERE component = 'lash-postgres-store';
+             ALTER TABLE lash_processes ALTER COLUMN status TYPE VARCHAR(64)",
         )
         .await;
-    let error = scratch
-        .open_host_provisioned(SchemaCheck::Enforce)
+    let report = PostgresStorage::verify_schema_for(&scratch.pool)
         .await
-        .err()
-        .expect("a mismatched version stamp must not open");
-    let rendered = error.to_string();
+        .expect("verify the stale-version database");
+    assert_eq!(
+        report.findings,
+        vec![SchemaFinding::VersionMismatch {
+            expected: PostgresStorage::schema_version(),
+            found: Some(1),
+        }],
+        "a version mismatch must suppress the structural diff entirely"
+    );
+    let rendered = report.to_string();
     assert!(
-        rendered.contains("COMPONENT VERSION")
-            && rendered.contains("is stamped version 1")
-            && rendered.contains(&format!("expected {}", PostgresStorage::schema_version())),
-        "the error must name the version mismatch: {rendered}"
+        rendered.contains("COMPONENT VERSION") && rendered.contains("is stamped version 1"),
+        "the report must name the version mismatch: {rendered}"
     );
     assert!(
         !rendered.contains("COLUMN DRIFT"),
-        "a version mismatch must not emit a column diff: {rendered}"
+        "a version mismatch must not emit a column diff even when one exists: {rendered}"
     );
     scratch.cleanup().await;
 }
@@ -458,8 +615,14 @@ async fn an_alter_built_equivalent_schema_opens_clean() {
                  ON lash_process_events(process_id, idempotency_key)
                  WHERE (idempotency_key IS NOT NULL);
 
-             -- BIGSERIAL modernized to an identity column: identical insert
-             -- semantics for lash, which never supplies the value.
+             -- BIGSERIAL modernized to GENERATED BY DEFAULT AS IDENTITY. That
+             -- variant keeps both capabilities the original had: it supplies a
+             -- value when an insert omits the column and accepts one when an
+             -- insert names it. GENERATED ALWAYS would drop the second, which
+             -- `an_identity_always_column_lash_writes_explicitly_is_rejected`
+             -- pins as a mismatch — lash does name some of these columns
+             -- explicitly (`enqueue_seq`), so the tolerance is about capability,
+             -- not about lash never supplying a value.
              ALTER TABLE lash_usage_deltas ALTER COLUMN seq DROP DEFAULT;
              ALTER TABLE lash_usage_deltas
                  ALTER COLUMN seq ADD GENERATED BY DEFAULT AS IDENTITY;
@@ -628,4 +791,314 @@ async fn host_provisioned_mode_rejects_an_unprovisioned_database() {
         .execute(format!("DROP SCHEMA {name} CASCADE").as_str())
         .await
         .expect("drop empty schema");
+}
+
+/// The verifier must describe one installation, not assemble a conformant-looking
+/// one out of two partial ones. With `search_path = front, back` and a table
+/// missing from `front`, resolving each table independently would take the rest
+/// from `front` and the missing one from `back`: every object individually has the
+/// expected shape, the foreign key still renders unqualified, and the check would
+/// pass — while runtime's unqualified process insert lands in `front` and its event
+/// insert lands in `back`, whose foreign key targets `back`. Anchoring on the
+/// namespace that holds `lash_schema_versions` makes the absent table simply
+/// missing.
+#[tokio::test]
+async fn a_partial_installation_fronting_a_complete_one_is_rejected() {
+    let Some(database_url) = database_url() else {
+        eprintln!("skipping mixed-schema rejection: database URL is not set");
+        return;
+    };
+    let suffix = uuid::Uuid::new_v4().simple().to_string();
+    let front = format!("lash_front_{suffix}");
+    let back = format!("lash_back_{suffix}");
+    let mut admin = PgConnection::connect(&database_url)
+        .await
+        .expect("connect mixed-schema admin");
+    for schema in [&front, &back] {
+        admin
+            .execute(format!("CREATE SCHEMA {schema}").as_str())
+            .await
+            .expect("create schema");
+        admin
+            .execute(format!("SET search_path TO {schema}").as_str())
+            .await
+            .expect("point admin search_path");
+        sqlx::raw_sql(PostgresStorage::schema_ddl())
+            .execute(&mut admin)
+            .await
+            .expect("provision schema");
+    }
+    // `front` is the interrupted migration: everything but the event table.
+    admin
+        .execute(format!("DROP TABLE {front}.lash_process_events CASCADE").as_str())
+        .await
+        .expect("remove the event table from the fronting installation");
+
+    let pool = pool_with_search_path(&database_url, &format!("{front}, {back}")).await;
+    let report = PostgresStorage::verify_schema_for(&pool)
+        .await
+        .expect("verify the mixed installation");
+    assert!(
+        !report.is_conformant(),
+        "two partial installations on one search_path must never verify clean: {report}"
+    );
+    assert_eq!(
+        report.schema.as_deref(),
+        Some(front.as_str()),
+        "verification must anchor on the namespace holding lash_schema_versions"
+    );
+    assert!(
+        report.findings.iter().any(|finding| matches!(
+            finding,
+            SchemaFinding::MissingTable { table } if table == "lash_process_events"
+        )),
+        "the table absent from the anchored namespace must be missing, not borrowed from the \
+         next schema on the search_path: {:?}",
+        report.findings
+    );
+    let error = PostgresStorage::from_pool_with(
+        pool.clone(),
+        PostgresStoreConfig {
+            schema_provisioning: SchemaProvisioning::HostProvisioned,
+            ..PostgresStoreConfig::default()
+        },
+    )
+    .await
+    .err()
+    .expect("a mixed installation must not open");
+    assert!(error.to_string().contains("lash_process_events"));
+    pool.close().await;
+    for schema in [&front, &back] {
+        admin
+            .execute(format!("DROP SCHEMA {schema} CASCADE").as_str())
+            .await
+            .expect("drop schema");
+    }
+}
+
+/// The mirror image: the anchored installation is complete, but a lash-named table
+/// earlier on the `search_path` shadows it, so lash's own unqualified statements
+/// would write somewhere the check never looked.
+#[tokio::test]
+async fn a_lash_table_shadowing_the_anchored_installation_is_reported() {
+    let Some(database_url) = database_url() else {
+        eprintln!("skipping shadowed-table rejection: database URL is not set");
+        return;
+    };
+    let suffix = uuid::Uuid::new_v4().simple().to_string();
+    let front = format!("lash_shadow_{suffix}");
+    let back = format!("lash_anchor_{suffix}");
+    let mut admin = PgConnection::connect(&database_url)
+        .await
+        .expect("connect shadow admin");
+    admin
+        .execute(format!("CREATE SCHEMA {back}; CREATE SCHEMA {front}").as_str())
+        .await
+        .expect("create schemas");
+    admin
+        .execute(format!("SET search_path TO {back}").as_str())
+        .await
+        .expect("point admin search_path");
+    sqlx::raw_sql(PostgresStorage::schema_ddl())
+        .execute(&mut admin)
+        .await
+        .expect("provision the anchored installation");
+    // A lone leftover table in a schema that comes first. The anchor stays `back`
+    // because only it holds `lash_schema_versions`.
+    admin
+        .execute(
+            format!("CREATE TABLE {front}.lash_processes (LIKE {back}.lash_processes)").as_str(),
+        )
+        .await
+        .expect("create the shadowing table");
+
+    let pool = pool_with_search_path(&database_url, &format!("{front}, {back}")).await;
+    let report = PostgresStorage::verify_schema_for(&pool)
+        .await
+        .expect("verify the shadowed installation");
+    assert_eq!(report.schema.as_deref(), Some(back.as_str()));
+    assert!(
+        report.findings.iter().any(|finding| matches!(
+            finding,
+            SchemaFinding::ShadowedTable { table, found_schema, .. }
+                if table == "lash_processes" && found_schema == &front
+        )),
+        "a lash table resolving outside the anchored namespace must be reported: {:?}",
+        report.findings
+    );
+    let error = PostgresStorage::from_pool_with(
+        pool.clone(),
+        PostgresStoreConfig {
+            schema_provisioning: SchemaProvisioning::HostProvisioned,
+            ..PostgresStoreConfig::default()
+        },
+    )
+    .await
+    .err()
+    .expect("a shadowed installation must not open");
+    assert!(error.to_string().contains("SHADOWED TABLES"), "{error}");
+    pool.close().await;
+    for schema in [&front, &back] {
+        admin
+            .execute(format!("DROP SCHEMA {schema} CASCADE").as_str())
+            .await
+            .expect("drop schema");
+    }
+}
+
+/// The component version is the reject-and-recreate boundary and no `SchemaCheck`
+/// relaxes it. If `WarnOnly` could downgrade it, a host that adopted the valve for
+/// a structural false positive would later open silently against a pre-cutover
+/// database — process events with no completion-authority payload, manifest rows
+/// naming a blob layout that cannot be read — which is the corruption the boundary
+/// exists to prevent.
+#[tokio::test]
+async fn a_stale_version_stamp_is_fatal_in_every_mode() {
+    let Some(database_url) = database_url() else {
+        eprintln!("skipping version-gate universality: database URL is not set");
+        return;
+    };
+    let scratch = ScratchSchema::provision(&database_url).await;
+    scratch
+        .apply(
+            "UPDATE lash_schema_versions SET version = 1 WHERE component = 'lash-postgres-store'",
+        )
+        .await;
+    for provisioning in [
+        SchemaProvisioning::HostProvisioned,
+        SchemaProvisioning::LashManaged,
+    ] {
+        for check in [SchemaCheck::Enforce, SchemaCheck::WarnOnly] {
+            let error = PostgresStorage::from_pool_with(
+                scratch.pool.clone(),
+                PostgresStoreConfig {
+                    schema_provisioning: provisioning,
+                    schema_check: check,
+                    ..PostgresStoreConfig::default()
+                },
+            )
+            .await
+            .err()
+            .unwrap_or_else(|| {
+                panic!("{provisioning:?} + {check:?} must reject a stale version stamp")
+            });
+            let rendered = error.to_string();
+            assert!(
+                rendered.contains("has version 1")
+                    && rendered.contains("reject-and-recreate")
+                    && rendered.contains("does not relax it"),
+                "{provisioning:?} + {check:?} must name the boundary and say the valve does not \
+                 relax it: {rendered}"
+            );
+        }
+    }
+    scratch.cleanup().await;
+}
+
+/// The seed check must query the row lash actually reads. `CHECK (singleton)` is
+/// deliberately unverified, so a host port that omits it can hold a
+/// `singleton = FALSE` row — which satisfies "the table has rows" but leaves
+/// `next_process_change_seq`'s `UPDATE ... WHERE singleton = TRUE RETURNING`
+/// matching nothing on the first process mutation.
+#[tokio::test]
+async fn a_seed_row_under_the_wrong_key_is_rejected() {
+    assert_mutation_is_rejected(
+        // Drop the CHECK by discovery rather than by name: its name is
+        // auto-generated, and a host port that omits it would not reproduce it
+        // anyway. CHECK constraints are deliberately outside the verified scope,
+        // which is precisely why the seed check cannot lean on this one.
+        "DO $$
+         DECLARE constraint_name text;
+         BEGIN
+             FOR constraint_name IN
+                 SELECT conname FROM pg_catalog.pg_constraint
+                 WHERE conrelid = 'lash_process_change_clock'::regclass AND contype = 'c'
+             LOOP
+                 EXECUTE format(
+                     'ALTER TABLE lash_process_change_clock DROP CONSTRAINT %I',
+                     constraint_name
+                 );
+             END LOOP;
+         END $$;
+         DELETE FROM lash_process_change_clock;
+         INSERT INTO lash_process_change_clock (singleton, current_seq) VALUES (FALSE, 0)",
+        &[
+            "SEED ROWS",
+            "lash_process_change_clock: seed row is missing (transactional process-change clock)",
+        ],
+        |finding| {
+            matches!(
+                finding,
+                SchemaFinding::MissingSeedRow { table, .. }
+                    if table == "lash_process_change_clock"
+            )
+        },
+    )
+    .await;
+}
+
+/// A signing secret seeded at the wrong width used to be an open-time backend
+/// error only, so a host gating its migration CI on the report got a green run and
+/// a red production open. It is a report finding now, while open keeps rejecting
+/// it — and `verify_schema_for` reaches it without needing the open that fails.
+#[tokio::test]
+async fn a_wrong_width_signing_secret_is_a_finding_and_still_fatal_at_open() {
+    let Some(database_url) = database_url() else {
+        eprintln!("skipping signing-secret width check: database URL is not set");
+        return;
+    };
+    let scratch = ScratchSchema::provision(&database_url).await;
+    scratch
+        .apply("UPDATE lash_await_event_meta SET signing_secret = '\\x0102'::bytea")
+        .await;
+    let report = PostgresStorage::verify_schema_for(&scratch.pool)
+        .await
+        .expect("verify the short-secret database");
+    assert!(
+        report.findings.iter().any(|finding| matches!(
+            finding,
+            SchemaFinding::InvalidSeedRow { table, detail }
+                if table == "lash_await_event_meta" && detail.contains("2 bytes")
+        )),
+        "the report must carry the secret width: {:?}",
+        report.findings
+    );
+    let error = scratch
+        .open_host_provisioned(SchemaCheck::Enforce)
+        .await
+        .err()
+        .expect("a short signing secret must not open");
+    assert!(error.to_string().contains("expected 32"), "{error}");
+    scratch.cleanup().await;
+}
+
+/// `verify_schema_for` has to work on the databases it exists for: ones too broken
+/// to open at all. Removing the signing-secret table makes every open fail, in
+/// every mode, and the structured report is the only diagnosis available.
+#[tokio::test]
+async fn verify_schema_for_describes_a_database_that_cannot_be_opened() {
+    let Some(database_url) = database_url() else {
+        eprintln!("skipping unopenable-database verification: database URL is not set");
+        return;
+    };
+    let scratch = ScratchSchema::provision(&database_url).await;
+    scratch.apply("DROP TABLE lash_await_event_meta").await;
+    for check in [SchemaCheck::Enforce, SchemaCheck::WarnOnly] {
+        assert!(
+            scratch.open_host_provisioned(check).await.is_err(),
+            "{check:?} must not open a database with no signing-secret table"
+        );
+    }
+    let report = PostgresStorage::verify_schema_for(&scratch.pool)
+        .await
+        .expect("verify_schema_for must not need a successful open");
+    assert!(report.findings.iter().any(|finding| matches!(
+        finding,
+        SchemaFinding::MissingTable { table } if table == "lash_await_event_meta"
+    )));
+    assert!(
+        report.to_string().contains("MISSING TABLES"),
+        "the report must render the diff a host's CI reads: {report}"
+    );
+    scratch.cleanup().await;
 }
